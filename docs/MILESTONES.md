@@ -275,7 +275,7 @@ Goal: Start, stop, restart, and delete controls work against fake state.
 - Integration test for UI status updates.
 - Event assertion for each action.
 
-## Milestone 3: Event Log and Activity Feed [Completed]
+## Milestone 3: Event Log and Activity Feed
 
 Goal: Every agent has a visible timeline of important actions and system events.
 

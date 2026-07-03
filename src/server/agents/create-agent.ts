@@ -73,9 +73,10 @@ export type CreateAgentDependencies = {
 };
 
 export class AgentPersistenceError extends Error {
-  constructor() {
+  constructor(cause?: unknown) {
     super("Agent creation failed.");
     this.name = "AgentPersistenceError";
+    this.cause = cause;
   }
 }
 
@@ -161,8 +162,8 @@ export async function createAgentForDevelopmentUser(
     });
 
     return result;
-  } catch {
-    throw new AgentPersistenceError();
+  } catch (error) {
+    throw new AgentPersistenceError(error);
   } finally {
     if (ownsConnection) {
       await connection.close();

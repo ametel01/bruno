@@ -63,7 +63,7 @@ describe("product shell routes", () => {
     expect(html).not.toContain("No persisted agent table or records are queried");
   });
 
-  it("renders persisted agents on the dashboard with stopped status", async () => {
+  it("renders persisted agents on the dashboard with lifecycle controls", async () => {
     mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([
       {
         id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
@@ -81,6 +81,8 @@ describe("product shell routes", () => {
     expect(html).toContain("Persisted agents");
     expect(html).toContain("Research Agent");
     expect(html).toContain("stopped");
+    expect(html).toContain("Start");
+    expect(html).toContain("Delete");
     expect(html).toContain('href="/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774"');
   });
 
@@ -94,7 +96,6 @@ describe("product shell routes", () => {
     expect(html).toContain("Research Agent");
     expect(html).toContain("inbox_triage_agent");
     expect(html).not.toContain("Create agent in Milestone 1");
-    expect(html).not.toContain("disabled");
   });
 
   it("renders persisted agents with stable identity and links", async () => {

@@ -132,4 +132,53 @@ describe("POST /api/agents route", () => {
     });
     expect(JSON.stringify(body)).not.toContain("postgres://");
   });
+
+  it("returns a safe database unavailable response when Postgres cannot be reached", async () => {
+    mocks.createAgentForDevelopmentUser.mockRejectedValueOnce(
+      new AgentPersistenceError({ code: "ECONNREFUSED" }),
+    );
+    const { POST } = await import("@/app/api/agents/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/agents", {
+        method: "POST",
+        body: JSON.stringify({ name: "Research Agent", templateKey: "research_agent" }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toEqual({
+      error: {
+        code: "database_unavailable",
+        message:
+          "Database is unavailable. Start Postgres and run migrations before creating agents.",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("postgres://");
+  });
+
+  it("returns a safe schema missing response when migrations have not run", async () => {
+    mocks.createAgentForDevelopmentUser.mockRejectedValueOnce(
+      new AgentPersistenceError({ code: "42P01" }),
+    );
+    const { POST } = await import("@/app/api/agents/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/agents", {
+        method: "POST",
+        body: JSON.stringify({ name: "Research Agent", templateKey: "research_agent" }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toEqual({
+      error: {
+        code: "database_schema_missing",
+        message: "Database schema is missing. Run migrations before creating agents.",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("postgres://");
+  });
 });

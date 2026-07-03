@@ -20,3 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `POST /api/agents/:agentId/actions/stop` and Stop UI controls for running agents, including transactional stop events and visible status refresh back to stopped.
 - `POST /api/agents/:agentId/actions/restart` and Restart UI controls for running agents, including deterministic fake-runner settling back to running and matching lifecycle events.
 - `DELETE /api/agents/:agentId` and Delete UI controls for soft-deleting non-transitioning active agents from active views while preserving audit events.
+- Dashboard lifecycle controls for starting, stopping, restarting, and deleting active persisted agents without opening the detail page.
+
+### Fixed
+
+- Create-agent failures now return safe actionable database setup errors when Postgres is unavailable or migrations are missing, and the create form prevents pre-hydration no-op submissions.

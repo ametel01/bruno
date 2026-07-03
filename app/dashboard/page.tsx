@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { EmptyState, PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
+import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import {
   AgentListPersistenceError,
   listActiveAgentsForDevelopmentUser,
@@ -28,7 +29,7 @@ export function DashboardContent({
       active="dashboard"
       eyebrow={routeLabel}
       title="Operational dashboard"
-      description="A read surface for persisted agent records with deterministic fake lifecycle status and without real runner processes, logs, or approvals."
+      description="A control surface for persisted agent records with deterministic fake lifecycle status and without real runner processes, logs, or approvals."
     >
       <div className="content-grid">
         <section className="agent-list-panel" aria-labelledby="dashboard-agents-title">
@@ -45,6 +46,7 @@ export function DashboardContent({
                       <th scope="col">Name</th>
                       <th scope="col">Template</th>
                       <th scope="col">Status</th>
+                      <th scope="col">Action</th>
                       <th scope="col">Created</th>
                     </tr>
                   </thead>
@@ -57,6 +59,9 @@ export function DashboardContent({
                         <td>{agent.templateLabel}</td>
                         <td>
                           <span className="status-pill">{agent.status}</span>
+                        </td>
+                        <td>
+                          <AgentLifecycleControls agentId={agent.id} status={agent.status} />
                         </td>
                         <td>
                           <time dateTime={agent.createdAt}>{agent.createdAt}</time>

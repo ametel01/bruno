@@ -81,9 +81,34 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   await page.reload();
 
   await expect(page.getByRole("link", { name })).toBeVisible();
-  await expect(
-    page.getByRole("row", { name: new RegExp(`${name}.*Research Agent.*stopped`) }),
-  ).toBeVisible();
+  const dashboardAgentRow = page
+    .getByRole("row", { name: new RegExp(`${name}.*Research Agent`) })
+    .first();
+  await expect(dashboardAgentRow).toContainText("stopped");
+  await dashboardAgentRow.getByRole("button", { name: "Start" }).click();
+  await expect(page.getByRole("status")).toContainText("Start requested.");
+  await expect(dashboardAgentRow.locator(".status-pill", { hasText: "running" })).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(dashboardAgentRow.getByRole("button", { name: "Running" })).toBeDisabled();
+  await expect(dashboardAgentRow.getByRole("button", { name: "Stop" })).toBeVisible();
+  await expect(dashboardAgentRow.getByRole("button", { name: "Restart" })).toBeVisible();
+  await dashboardAgentRow.getByRole("button", { name: "Restart" }).click();
+  await expect(page.getByRole("status")).toContainText("Restart requested.");
+  await expect(dashboardAgentRow.locator(".status-pill", { hasText: "restarting" })).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(dashboardAgentRow.locator(".status-pill", { hasText: "running" })).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(dashboardAgentRow.getByRole("button", { name: "Restart" })).toBeVisible();
+  await dashboardAgentRow.getByRole("button", { name: "Stop" }).click();
+  await expect(dashboardAgentRow.locator(".status-pill", { hasText: "stopped" })).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(dashboardAgentRow.getByRole("button", { name: "Stop" })).toHaveCount(0);
+  await expect(dashboardAgentRow.getByRole("button", { name: "Restart" })).toHaveCount(0);
+  await expect(dashboardAgentRow.getByRole("button", { name: "Start" })).toBeVisible();
 
   expect(agentHref).not.toBeNull();
   await page.goto(agentHref ?? "/agents/missing");
@@ -92,29 +117,6 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   await expect(page.getByText("research_agent")).toBeVisible();
   await expect(page.getByText("Created")).toBeVisible();
   await expect(page.getByText("Updated")).toBeVisible();
-  await page.getByRole("button", { name: "Start" }).click();
-  await expect(page.getByRole("status")).toContainText("Start requested.");
-  await expect(page.locator(".status-pill", { hasText: "running" })).toBeVisible({
-    timeout: 5_000,
-  });
-  await expect(page.getByRole("button", { name: "Running" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Restart" })).toBeVisible();
-  await page.getByRole("button", { name: "Restart" }).click();
-  await expect(page.getByRole("status")).toContainText("Restart requested.");
-  await expect(page.locator(".status-pill", { hasText: "restarting" })).toBeVisible({
-    timeout: 5_000,
-  });
-  await expect(page.locator(".status-pill", { hasText: "running" })).toBeVisible({
-    timeout: 5_000,
-  });
-  await expect(page.getByRole("button", { name: "Restart" })).toBeVisible();
-  await page.getByRole("button", { name: "Stop" }).click();
-  await expect(page.locator(".status-pill", { hasText: "stopped" })).toBeVisible({
-    timeout: 5_000,
-  });
-  await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Restart" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Start" })).toBeVisible();
 
   await page.reload();

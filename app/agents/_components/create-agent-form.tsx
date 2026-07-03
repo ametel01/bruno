@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 
 const TEMPLATE_LABELS = {
   research_agent: "Research Agent",
@@ -24,6 +24,11 @@ type CreateAgentFormProps = {
 export function CreateAgentForm({ maxNameLength, templateKeys }: CreateAgentFormProps) {
   const router = useRouter();
   const [state, setState] = useState<SubmitState>({ status: "idle" });
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -62,7 +67,8 @@ export function CreateAgentForm({ maxNameLength, templateKeys }: CreateAgentForm
     }
   }
 
-  const disabled = state.status === "submitting";
+  const submitting = state.status === "submitting";
+  const disabled = !hydrated || submitting;
 
   return (
     <form className="agent-form" onSubmit={handleSubmit}>
@@ -89,7 +95,7 @@ export function CreateAgentForm({ maxNameLength, templateKeys }: CreateAgentForm
         </select>
       </div>
       <button className="primary-button" type="submit" disabled={disabled}>
-        {disabled ? "Creating" : "Create agent"}
+        {submitting ? "Creating" : "Create agent"}
       </button>
       {state.status === "error" || state.status === "success" ? (
         <p className={`form-message ${state.status}`} role="status">
@@ -120,6 +126,14 @@ async function safeFailureMessage(response: Response): Promise<string> {
       }
 
       return "Check the agent name and template.";
+    }
+
+    if (body.error?.code === "database_unavailable") {
+      return "Database is unavailable. Start Postgres and run migrations, then try again.";
+    }
+
+    if (body.error?.code === "database_schema_missing") {
+      return "Database schema is missing. Run migrations, then try again.";
     }
   } catch {
     // Keep user-facing failures generic when the response is not safe validation JSON.
