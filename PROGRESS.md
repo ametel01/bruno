@@ -96,6 +96,7 @@ Step 3 / issue #18 validation:
 - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54335/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: passed.
 - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54335/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 PORT=3018 bun run test:e2e`: passed, 18 tests.
 - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54335/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 PORT=3018 bun run verify`: passed.
+- `git diff --check`: passed.
 
 ## Next Step
 
