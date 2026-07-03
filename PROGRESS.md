@@ -23,7 +23,7 @@ Milestone 0 delivers a deployable AgentBay product skeleton only: an empty dashb
 - [x] Step 1 / issue #2: Project scaffold and quality gates setup.
 - [x] Deployment slice / issue #6: Initial Vercel preview deployment for the empty app.
 - [x] Step 2 / issue #3: Database foundation and health check.
-- [ ] Step 3: Dashboard shell and Milestone 0 routes.
+- [x] Step 3 / issue #4: Dashboard shell and Milestone 0 routes.
 - [ ] Step 4: Deployment readiness and Milestone 0 acceptance.
 
 ## Current Status
@@ -33,8 +33,9 @@ Milestone 0 delivers a deployable AgentBay product skeleton only: an empty dashb
 - Step 1 / issue #2 is complete after scaffold, build, unit, and E2E validation.
 - Deployment slice / issue #6 is complete after linking the empty scaffold to Vercel and creating an initial preview deployment.
 - Step 2 / issue #3 is complete after local Postgres, migration, database health, unit, build, and E2E validation.
+- Step 3 / issue #4 is complete after adding the AgentBay product shell, skeleton dashboard/agents/settings routes, desktop and mobile route smoke coverage, and preserving database-backed `/health`.
 - Commit reference: not available yet; builder handoff is uncommitted.
-- Next step: issue #4, dashboard shell and Milestone 0 routes.
+- Next step: issue #5, deployment readiness and Milestone 0 acceptance documentation.
 
 ## Vercel Preview Deployment
 
@@ -105,9 +106,28 @@ Step 2 / issue #3 validation:
 - `bun run test:e2e`: passed, 2 Chromium route tests covering the root scaffold and reachable database-backed `/health`.
 - `bun run verify`: passed after the final progress update; format check, lint, typecheck, unit tests, production build, and Playwright E2E all passed.
 
+Step 3 / issue #4 validation:
+
+- `bun install --frozen-lockfile`: passed after the first format attempt found dependencies missing in this worktree; `bun.lock` did not change.
+- First `docker compose up -d postgres`: failed because stale container `agentbay-issue-3-postgres-1` already owned host port `54329`.
+- `docker stop agentbay-issue-3-postgres-1`: passed to release the fixed local AgentBay Postgres port from the completed issue #3 worktree.
+- Second `docker compose up -d postgres`: passed and started `agentbay-issue-4-postgres-1`.
+- Postgres container health polling: passed after correcting the local shell polling variable name from zsh-reserved `status` to `health_status`; container status was `healthy`.
+- `docker compose up -d --force-recreate postgres`: passed after the initial failed create left the issue #4 container without the host port binding; the recreated container published `0.0.0.0:54329->5432/tcp`.
+- `bun run db:migrate`: passed against the issue #4 Postgres container.
+- `bun run db:health`: passed and returned JSON with `status: "ok"`, `database: "reachable"`, and an ISO timestamp.
+- `bun run format:check`: passed.
+- `bun run lint`: passed.
+- `bun run typecheck`: passed.
+- `bun run test`: passed, 4 unit test files and 11 tests covering root, dashboard, agents list, placeholder agent detail, settings placeholders, env validation, database health failure mapping, and `/health` invalid-env JSON.
+- `bun run build`: passed with `/`, `/dashboard`, `/agents`, `/agents/[agentId]`, `/settings`, and dynamic `/health` listed in the app route output.
+- `bun run test:e2e`: passed, 14 Playwright tests across `chromium-desktop` and `chromium-mobile`, covering `/`, `/dashboard`, `/agents`, `/agents/test-agent`, `/settings`, and `/health`.
+- `bun run verify`: passed with format check, lint, typecheck, unit tests, production build, and desktop/mobile Playwright route smoke coverage.
+
 ## Update Log
 
 - 2026-07-03: Created the Milestone 0 progress tracker and Keep a Changelog baseline for issue #1. Step 0 validation passed and issue #2 is the next implementation slice.
 - 2026-07-03: Completed issue #2 by adding a Bun-managed Next.js App Router scaffold with TypeScript, Biome, Vitest, Playwright, unit/E2E smoke coverage, and a minimal root route pointing to `/dashboard`.
 - 2026-07-03: Completed issue #6 by linking the empty scaffold to Vercel project `ametel01s-projects/agentbay` and creating the initial preview deployment at `https://agentbay-9wi2xvhbh-ametel01s-projects.vercel.app`.
 - 2026-07-03: Completed issue #3 by adding local Postgres support, infrastructure-only Drizzle migration tooling, required environment validation, and an operator-visible database-backed `/health` endpoint.
+- 2026-07-03: Completed issue #4 by adding the Milestone 0 AgentBay product shell, empty dashboard and agents states, placeholder agent detail/settings routes, and desktop/mobile route smoke coverage.
