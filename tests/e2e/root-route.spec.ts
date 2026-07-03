@@ -1,6 +1,17 @@
 import { expect, test } from "@playwright/test";
 import postgres from "postgres";
 
+const createdAgentIds = new Set<string>();
+
+test.afterEach(async () => {
+  const agentIds = [...createdAgentIds];
+  createdAgentIds.clear();
+
+  if (agentIds.length > 0) {
+    await deleteCreatedAgents(agentIds);
+  }
+});
+
 const shellRoutes = [
   { path: "/", heading: "Operational dashboard" },
   { path: "/dashboard", heading: "Operational dashboard" },
@@ -31,8 +42,13 @@ test("/health returns reachable database JSON in the browser", async ({ page }) 
   await expect(page.locator("body")).toContainText('"database":"reachable"');
 });
 
-test("/agents creates and refreshes a persisted stopped agent", async ({ page }, testInfo) => {
-  const name = `Research Agent ${testInfo.project.name}`;
+test("/agents creates Research Agent and persists it across read surfaces", async ({
+  isMobile,
+  page,
+}) => {
+  test.skip(isMobile, "final exact-name Milestone 1 smoke path runs once on desktop");
+
+  const name = "Research Agent";
 
   await page.goto("/agents");
   await page.getByLabel("Name").fill(name);
@@ -47,6 +63,7 @@ test("/agents creates and refreshes a persisted stopped agent", async ({ page },
   ).toBeVisible();
   const agentHref = await agentLink.getAttribute("href");
   expect(agentHref).toMatch(/^\/agents\/[0-9a-f-]+$/);
+  trackAgentHref(agentHref);
 
   await page.reload();
 
@@ -113,6 +130,7 @@ test("/agents detail returns not found for missing, malformed, and soft-deleted 
   });
   expect(createResponse.status()).toBe(201);
   const created = (await createResponse.json()) as { agent: { id: string } };
+  createdAgentIds.add(created.agent.id);
 
   await markAgentDeleted(created.agent.id);
 
@@ -123,7 +141,28 @@ test("/agents detail returns not found for missing, malformed, and soft-deleted 
   await expect(page.locator("body")).not.toContainText("No record lookup is performed");
 });
 
+function trackAgentHref(agentHref: string | null): void {
+  const agentId = agentHref?.match(/^\/agents\/([0-9a-f-]+)$/)?.[1];
+
+  if (agentId) {
+    createdAgentIds.add(agentId);
+  }
+}
+
 async function markAgentDeleted(agentId: string): Promise<void> {
+  await withDatabase(async (sql) => {
+    await sql`update agents set deleted_at = now() where id = ${agentId}`;
+  });
+}
+
+async function deleteCreatedAgents(agentIds: string[]): Promise<void> {
+  await withDatabase(async (sql) => {
+    await sql`delete from agent_events where agent_id in ${sql(agentIds)}`;
+    await sql`delete from agents where id in ${sql(agentIds)}`;
+  });
+}
+
+async function withDatabase(run: (sql: postgres.Sql) => Promise<void>): Promise<void> {
   const databaseUrl =
     process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/agentbay";
   const sql = postgres(databaseUrl, {
@@ -133,7 +172,7 @@ async function markAgentDeleted(agentId: string): Promise<void> {
   });
 
   try {
-    await sql`update agents set deleted_at = now() where id = ${agentId}`;
+    await run(sql);
   } finally {
     await sql.end({ timeout: 5 });
   }

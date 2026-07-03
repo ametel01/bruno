@@ -82,7 +82,7 @@ export function DashboardContent({
           <dl className="definition-list">
             <div>
               <dt>Product routes</dt>
-              <dd>Dashboard, agents, settings, and health skeletons are present.</dd>
+              <dd>Dashboard, agents, settings, and health routes are present.</dd>
             </div>
             <div>
               <dt>Database check</dt>
