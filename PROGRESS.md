@@ -50,7 +50,7 @@ Step 0 / issue #15 validation:
 Step 1 / issue #16 validation:
 
 - Completion summary: added the Drizzle `users`, `agents`, `agent_events`, and `agent_status` schema definitions plus generated migration `drizzle/0001_optimal_texas_twister.sql`; preserved `app_metadata` and existing health/migration behavior.
-- Commit reference: pending until this issue #16 branch is committed; avoid recording the current head hash inside the same commit.
+- Implementation commit: `77d68e8e2a1a9560d6869147dab542c4f9c8b0a1`.
 - `bun test tests/unit/agent-schema.test.ts`: passed, 4 tests.
 - `bun run format:check`: passed after applying `bun run format` to new/edited files.
 - `bun run lint`: passed.
