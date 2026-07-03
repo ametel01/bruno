@@ -19,7 +19,7 @@ Milestone 1 establishes durable agent model work only. The target outcome is tha
 - [x] Step 2 / issue #17: Create agents transactionally through the API.
 - [x] Step 3 / issue #18: Add database-backed agent create and list page.
 - [x] Step 4 / issue #19: Show persisted agents on dashboard and detail pages.
-- [ ] Step 5 / issue #20: Cover the Milestone 1 agent flow with E2E tests and docs.
+- [x] Step 5 / issue #20: Cover the Milestone 1 agent flow with E2E tests and docs.
 
 ## Current Status
 
@@ -27,11 +27,12 @@ Milestone 1 establishes durable agent model work only. The target outcome is tha
 - Step 1 / issue #16 was completed by PR #28 and merged as `eff2c4fd880d6bca9dd1a61eb834b152639bf90f`.
 - Step 2 / issue #17 was completed by PR #29 and merged as `11949b76c2aac7d5f1f31afb4a4deff1f37218b8`.
 - Step 3 / issue #18 was completed by PR #30 and merged as `77c0d04d23ec19f42f25378dfcdbe2f7cb949d17`.
-- Step 4 / issue #19 is implemented on branch `fix/issue-19-agent-read-surfaces` and builder-validated.
-- Step 5 remains blocked until issue #19 is reviewed and merged.
+- Step 4 / issue #19 was completed by PR #31 and merged as `c0a60fa41ddd4e1d5c3453433022d26cd23149bf`.
+- Step 5 / issue #20 is implemented on branch `fix/issue-20-m1-e2e-docs` and builder-validated.
 - Issue #17 adds transactional create-agent API behavior only. It does not add `/agents` UI behavior, dashboard database reads, detail reads, `GET /api/agents`, lifecycle controls, runtime behavior, seed data, auth, billing, Hermes, Telegram, logs, approvals, or runner behavior.
 - Issue #18 adds `/agents` create/list UI behavior only. It does not add dashboard database reads, detail reads, lifecycle controls, runtime behavior, seed data, auth, billing, Hermes, Telegram, logs, approvals, runner behavior, or soft-delete controls.
 - Issue #19 adds dashboard and detail read surfaces only. It does not add lifecycle controls, delete controls, logs, approvals, config editor, activity feeds, auth, billing, runner behavior, Hermes, Telegram, seed data, or fake runtime behavior.
+- Issue #20 strengthens final Milestone 1 browser coverage, scoped E2E cleanup, README documentation, and stale copy cleanup only. It does not add product behavior, schema changes, lifecycle controls, delete controls, logs, approvals, config editor, activity feeds, auth, billing, runner behavior, Hermes, Telegram, seed data, or fake runtime behavior.
 
 ## Update Rules
 
@@ -120,9 +121,28 @@ Step 4 / issue #19 validation:
 - Tracking-doc freshness check: `PROGRESS.md` and `CHANGELOG.md` were updated after validation with issue #19 status, validation evidence, current next step, and changelog behavior summary.
 - `git diff --check`: passed after tracking-doc updates.
 
+Step 5 / issue #20 validation:
+
+- Completion summary: strengthened the final Milestone 1 Playwright smoke path to create exactly named `Research Agent`, select `research_agent`, verify stopped persisted visibility on `/agents`, `/dashboard`, and the generated detail link after refresh, preserve missing/malformed/soft-deleted not-found coverage, add ID-scoped E2E cleanup for test-created agent rows/events, refresh README Milestone 1 local DB/API/UI docs, and remove stale Milestone 0-only copy.
+- Implementation commit: pending until branch commit; final handoff records the branch head.
+- Default Postgres port `54329` was occupied by unrelated stale container `agentbay-issue-5-postgres-1`; validation used isolated Postgres container `agentbay-issue-20-postgres` (`e1a621e2a29588c2dab89408382a5110541d17078427ce8a5a5d3ff07ac31fee`) on port `54338`.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54338/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run format:check`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54338/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run lint`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54338/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run typecheck`: passed.
+- Initial clean-DB `bun run test` before migration failed because `agent_events` did not exist; reran after migration as required.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54338/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:migrate`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54338/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test`: passed, 8 files / 31 tests.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54338/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:health`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54338/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54338/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 PORT=3021 bun run test:e2e`: passed, 17 passed / 1 skipped. The skipped case is the duplicate mobile run of the exact-name `Research Agent` smoke path; desktop covers the exact-name create/refresh/detail flow and both projects keep not-found coverage.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54338/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 PORT=3022 bun run verify`: passed, including 8 files / 31 unit tests and 17 passed / 1 skipped E2E tests.
+- E2E cleanup inspection for `Research Agent`, `Soft Deleted Agent chromium-desktop`, and `Soft Deleted Agent chromium-mobile`: passed with zero remaining matching rows in `agents`.
+- Tracking-doc freshness check: `PROGRESS.md` records issue #19 merged, issue #20 current status, validation evidence, next checker handoff, changelog freshness, and `git diff --check` evidence.
+- `git diff --check origin/main..HEAD`: passed.
+
 ## Next Step
 
-Issue #19 is implemented and builder-validated. Hand off to checker-agent for independent gate rerun and review-readiness checks; begin Step 5 / issue #20 only after issue #19 is reviewed and merged.
+Issue #20 is implemented and builder-validated. Hand off to checker-agent for independent gate rerun and review-readiness checks.
 
 ## Update Log
 
@@ -132,3 +152,4 @@ Issue #19 is implemented and builder-validated. Hand off to checker-agent for in
 - 2026-07-03: Implemented issue #17 transactional create-agent API and validated it against isolated local Postgres on port `54333`.
 - 2026-07-03: Implemented issue #18 database-backed `/agents` create/list workflow and validated it against isolated local Postgres on port `54335`.
 - 2026-07-03: Implemented issue #19 database-backed dashboard/detail read surfaces and validated them against isolated local Postgres on port `54336`.
+- 2026-07-03: Implemented issue #20 final Milestone 1 E2E/docs validation and validated it against isolated local Postgres on port `54338`.
