@@ -8,8 +8,11 @@ import {
   FAKE_RUNNER_START_DELAY_MS,
   START_COMPLETED_EVENT_TYPE,
   START_REQUESTED_EVENT_TYPE,
+  STOP_COMPLETED_EVENT_TYPE,
+  STOP_REQUESTED_EVENT_TYPE,
   settleDueStartingAgents,
   startAgentForDevelopmentUser,
+  stopAgentForDevelopmentUser,
   type AgentLifecycleStatus,
 } from "@/src/server/agents/lifecycle";
 import {
@@ -661,6 +664,395 @@ describe("create agent persistence", () => {
     const eventCount = await countRows(connection, "agent_events");
 
     expect(eventCount).toBe(1);
+  });
+
+  it("stops running agents by persisting stopped status and requested/completed events", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const now = new Date("2026-07-03T06:00:00.000Z");
+    const [runningAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Running Stop Agent",
+        templateKey: "research_agent",
+        status: "running",
+        statusReason: "Fake runner is running.",
+        createdAt: new Date("2026-07-03T05:00:00.000Z"),
+        updatedAt: new Date("2026-07-03T05:30:00.000Z"),
+      })
+      .returning();
+
+    expect(runningAgent).toBeDefined();
+
+    const result = await stopAgentForDevelopmentUser(runningAgent?.id ?? "", {
+      createConnection: () => connection,
+      now: () => now,
+    });
+
+    const [persistedAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, runningAgent?.id ?? ""))
+      .limit(1);
+    const persistedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, runningAgent?.id ?? ""));
+
+    expect(result).toMatchObject({
+      ok: true,
+      agent: {
+        id: runningAgent?.id,
+        status: "stopped",
+        statusReason: null,
+        updatedAt: "2026-07-03T06:00:00.000Z",
+      },
+      events: [{ type: STOP_REQUESTED_EVENT_TYPE }, { type: STOP_COMPLETED_EVENT_TYPE }],
+    });
+    expect(persistedAgent).toMatchObject({
+      status: "stopped",
+      statusReason: null,
+      updatedAt: now,
+    });
+    expect(persistedEvents).toHaveLength(2);
+    expect(persistedEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actorUserId: userId,
+          type: STOP_REQUESTED_EVENT_TYPE,
+          metadata: {
+            fromStatus: "running",
+            toStatus: "stopped",
+          },
+        }),
+        expect.objectContaining({
+          actorUserId: userId,
+          type: STOP_COMPLETED_EVENT_TYPE,
+          metadata: {
+            fromStatus: "running",
+            toStatus: "stopped",
+          },
+        }),
+      ]),
+    );
+  });
+
+  it("settles due start transitions before evaluating stop", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const now = new Date("2026-07-03T06:00:00.000Z");
+    const dueStartingAt = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS - 1);
+    const [startingAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Due Stop Agent",
+        templateKey: "research_agent",
+        status: "starting",
+        statusReason: "Start requested.",
+        updatedAt: dueStartingAt,
+      })
+      .returning();
+
+    expect(startingAgent).toBeDefined();
+
+    const result = await stopAgentForDevelopmentUser(startingAgent?.id ?? "", {
+      createConnection: () => connection,
+      now: () => now,
+    });
+
+    const [persistedAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, startingAgent?.id ?? ""))
+      .limit(1);
+    const persistedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, startingAgent?.id ?? ""));
+
+    expect(result).toMatchObject({
+      ok: true,
+      agent: {
+        id: startingAgent?.id,
+        status: "stopped",
+        statusReason: null,
+      },
+    });
+    expect(persistedAgent).toMatchObject({
+      status: "stopped",
+      statusReason: null,
+      updatedAt: now,
+    });
+    expect(persistedEvents.map((event) => event.type).sort()).toEqual([
+      START_COMPLETED_EVENT_TYPE,
+      STOP_COMPLETED_EVENT_TYPE,
+      STOP_REQUESTED_EVENT_TYPE,
+    ]);
+    expect(persistedEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actorUserId: userId,
+          type: START_COMPLETED_EVENT_TYPE,
+          metadata: {
+            fromStatus: "starting",
+            toStatus: "running",
+          },
+        }),
+        expect.objectContaining({
+          actorUserId: userId,
+          type: STOP_REQUESTED_EVENT_TYPE,
+          metadata: {
+            fromStatus: "running",
+            toStatus: "stopped",
+          },
+        }),
+        expect.objectContaining({
+          actorUserId: userId,
+          type: STOP_COMPLETED_EVENT_TYPE,
+          metadata: {
+            fromStatus: "running",
+            toStatus: "stopped",
+          },
+        }),
+      ]),
+    );
+  });
+
+  it("rejects malformed, missing, absent, soft-deleted, and non-running stops without mutation or events", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const now = new Date("2026-07-03T06:00:00.000Z");
+    const pendingStartingAt = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS + 1);
+    const invalidStatuses: AgentLifecycleStatus[] = [
+      "idle",
+      "stopped",
+      "starting",
+      "restarting",
+      "error",
+      "deleting",
+    ];
+    const invalidAgents: { id: string; status: AgentLifecycleStatus }[] = [];
+
+    for (const status of invalidStatuses) {
+      const [agent] = await connection.db
+        .insert(agents)
+        .values({
+          userId,
+          name: `${status} Stop Agent`,
+          templateKey: "research_agent",
+          status,
+          statusReason: `${status} preserved reason.`,
+          createdAt: new Date("2026-07-03T05:00:00.000Z"),
+          updatedAt: status === "starting" ? pendingStartingAt : now,
+        })
+        .returning({ id: agents.id, status: agents.status });
+
+      expect(agent).toBeDefined();
+
+      if (agent) {
+        invalidAgents.push(agent);
+      }
+    }
+
+    const [deletedAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Deleted Stop Agent",
+        templateKey: "research_agent",
+        status: "running",
+        statusReason: "Deleted preserved reason.",
+        updatedAt: now,
+        deletedAt: now,
+      })
+      .returning();
+
+    expect(deletedAgent).toBeDefined();
+
+    const beforeAgents = await connection.db.select().from(agents).orderBy(agents.name);
+
+    await expect(
+      stopAgentForDevelopmentUser("", { createConnection: () => connection, now: () => now }),
+    ).resolves.toEqual({ ok: false, reason: "missing_agent_id" });
+    await expect(
+      stopAgentForDevelopmentUser("not-a-uuid", {
+        createConnection: () => connection,
+        now: () => now,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "malformed_agent_id" });
+    await expect(
+      stopAgentForDevelopmentUser("00000000-0000-4000-8000-000000000000", {
+        createConnection: () => connection,
+        now: () => now,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "agent_not_found" });
+    await expect(
+      stopAgentForDevelopmentUser(deletedAgent?.id ?? "", {
+        createConnection: () => connection,
+        now: () => now,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "agent_not_found" });
+
+    for (const agent of invalidAgents) {
+      await expect(
+        stopAgentForDevelopmentUser(agent.id, {
+          createConnection: () => connection,
+          now: () => now,
+        }),
+      ).resolves.toEqual({ ok: false, reason: "invalid_status", status: agent.status });
+    }
+
+    const afterAgents = await connection.db.select().from(agents).orderBy(agents.name);
+    const persistedEvents = await connection.db.select().from(agentEvents);
+
+    expect(afterAgents).toEqual(beforeAgents);
+    expect(persistedEvents).toHaveLength(0);
+  });
+
+  it("exposes the stop route success, validation, not-found, deleted, invalid status, and event behavior", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const [runningAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Route Stop Agent",
+        templateKey: "research_agent",
+        status: "running",
+        statusReason: "Fake runner is running.",
+      })
+      .returning();
+    const [stoppedAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Stopped Route Agent",
+        templateKey: "research_agent",
+        status: "stopped",
+      })
+      .returning();
+    const [deletedAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Deleted Stop Route Agent",
+        templateKey: "research_agent",
+        status: "running",
+        deletedAt: new Date("2026-07-03T06:00:00.000Z"),
+      })
+      .returning();
+
+    expect(runningAgent).toBeDefined();
+    expect(stoppedAgent).toBeDefined();
+    expect(deletedAgent).toBeDefined();
+    const runningAgentId = runningAgent?.id ?? "";
+    const stoppedAgentId = stoppedAgent?.id ?? "";
+    const deletedAgentId = deletedAgent?.id ?? "";
+
+    const { POST } = await import("@/app/api/agents/[agentId]/actions/stop/route");
+    const successResponse = await POST(new Request("http://localhost/api/agents/stop"), {
+      params: Promise.resolve({ agentId: runningAgentId }),
+    });
+    const successBody = await successResponse.json();
+
+    expect(successResponse.status).toBe(200);
+    expect(successBody).toMatchObject({
+      ok: true,
+      agent: {
+        id: runningAgent?.id,
+        status: "stopped",
+        statusReason: null,
+      },
+      events: [{ type: STOP_REQUESTED_EVENT_TYPE }, { type: STOP_COMPLETED_EVENT_TYPE }],
+    });
+
+    const persistedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, runningAgentId));
+
+    expect(persistedEvents).toHaveLength(2);
+    expect(persistedEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: STOP_REQUESTED_EVENT_TYPE,
+          metadata: {
+            fromStatus: "running",
+            toStatus: "stopped",
+          },
+        }),
+        expect.objectContaining({
+          type: STOP_COMPLETED_EVENT_TYPE,
+          metadata: {
+            fromStatus: "running",
+            toStatus: "stopped",
+          },
+        }),
+      ]),
+    );
+
+    const missingIdResponse = await POST(new Request("http://localhost/api/agents/stop"), {
+      params: Promise.resolve({}),
+    });
+    const malformedResponse = await POST(new Request("http://localhost/api/agents/stop"), {
+      params: Promise.resolve({ agentId: "not-a-uuid" }),
+    });
+    const missingAgentResponse = await POST(new Request("http://localhost/api/agents/stop"), {
+      params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000000" }),
+    });
+    const deletedResponse = await POST(new Request("http://localhost/api/agents/stop"), {
+      params: Promise.resolve({ agentId: deletedAgentId }),
+    });
+    const invalidStatusResponse = await POST(new Request("http://localhost/api/agents/stop"), {
+      params: Promise.resolve({ agentId: stoppedAgentId }),
+    });
+
+    expect(missingIdResponse.status).toBe(400);
+    expect(await missingIdResponse.json()).toMatchObject({
+      error: { code: "validation_failed" },
+    });
+    expect(malformedResponse.status).toBe(400);
+    expect(await malformedResponse.json()).toMatchObject({
+      error: { code: "validation_failed" },
+    });
+    expect(missingAgentResponse.status).toBe(404);
+    expect(await missingAgentResponse.json()).toMatchObject({
+      error: { code: "agent_not_found" },
+    });
+    expect(deletedResponse.status).toBe(404);
+    expect(await deletedResponse.json()).toMatchObject({
+      error: { code: "agent_not_found" },
+    });
+    expect(invalidStatusResponse.status).toBe(409);
+    expect(await invalidStatusResponse.json()).toMatchObject({
+      error: { code: "invalid_agent_status", status: "stopped" },
+    });
+
+    const eventCount = await countRows(connection, "agent_events");
+
+    expect(eventCount).toBe(2);
   });
 });
 
