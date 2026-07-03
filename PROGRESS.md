@@ -23,8 +23,8 @@ Milestone 1 establishes durable agent model work only. The target outcome is tha
 
 ## Current Status
 
-- Step 0 / issue #15 is complete after local tracking-file validation.
-- Step 1 / issue #16 is blocked until issue #15 is checked, reviewed, and merged.
+- Step 0 / issue #15 is checked and review-fix-ready for PR #27.
+- Step 1 / issue #16 is blocked until issue #15 is merged.
 - Steps 2 through 5 are blocked by the preceding Milestone 1 slices.
 - No Milestone 1 product behavior, schema, API, UI implementation, forms, dashboard database reads, lifecycle controls, or tests have been added by issue #15.
 
@@ -39,6 +39,7 @@ Milestone 1 establishes durable agent model work only. The target outcome is tha
 
 Step 0 / issue #15 validation:
 
+- PR #27 head commit: `f526b0f518f41ddd5a55d5a6d2d493832a16b99c`.
 - `test -f PROGRESS.md`: passed.
 - `test -f CHANGELOG.md`: passed.
 - `rg -n "Milestone 1|Step 0|Step 1" PROGRESS.md`: passed.
@@ -47,8 +48,9 @@ Step 0 / issue #15 validation:
 
 ## Next Step
 
-Hand off issue #15 to checker-agent for independent validation. After issue #15 merges, begin Step 1 / issue #16 by adding the Milestone 1 persistence schema only.
+Issue #15 is checked and review-fix-ready in PR #27. Begin Step 1 / issue #16 only after issue #15 merges.
 
 ## Update Log
 
+- 2026-07-03: Recorded PR #27 head commit `f526b0f518f41ddd5a55d5a6d2d493832a16b99c` and updated the next step after checker validation.
 - 2026-07-03: Restored the progress tracker as a Milestone 1-only baseline for issue #15 and kept changelog updates reserved for future functional changes.
