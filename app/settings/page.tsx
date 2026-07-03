@@ -25,7 +25,7 @@ export default function SettingsPage() {
           <p>Provisioning, capacity, and execution policies wait for future runner work.</p>
         </PlaceholderPanel>
         <PlaceholderPanel title="Secrets">
-          <p>Secret values and credential storage are not accepted by the Milestone 1 app.</p>
+          <p>Secret values and credential storage are not accepted by the current app.</p>
         </PlaceholderPanel>
       </div>
     </ProductShell>

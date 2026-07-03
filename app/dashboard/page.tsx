@@ -96,8 +96,8 @@ export function DashboardContent({
         </PlaceholderPanel>
         <PlaceholderPanel title="Upcoming surfaces">
           <ul className="plain-list">
-            <li>End-to-end lifecycle verification waits for the final Milestone 2 issue.</li>
-            <li>Approvals, logs, and activity feeds wait for later milestones.</li>
+            <li>Start, Stop, Restart, and Delete use deterministic fake lifecycle controls.</li>
+            <li>Approvals, logs, event-log UI, and activity feeds wait for later milestones.</li>
             <li>Runner provisioning and external integrations are placeholders only.</li>
           </ul>
         </PlaceholderPanel>

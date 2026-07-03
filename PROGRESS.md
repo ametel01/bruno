@@ -5,7 +5,7 @@ This tracker is scoped to Milestone 2: fake lifecycle controls on top of the com
 Source documents:
 
 - `MILESTONES.md`: Milestone 2 product and technical expectations.
-- `README.md`: current local database, Milestone 1 agent flow, and quality gate instructions.
+- `README.md`: current local database, Milestone 2 lifecycle flow, API behavior, and quality gate instructions.
 - GitHub issues #21 through #26: implementation sequence for Milestone 2.
 - GitHub PR #32: final Milestone 1 baseline, merged as `0576813be2272abcc919859f11f3710edd8dfd74`.
 
@@ -25,8 +25,8 @@ Out of scope for this tracker and its implementation issues:
 - [x] Step 1 / issue #22: Start agents through fake lifecycle controls.
 - [x] Step 2 / issue #23: Stop running agents through fake lifecycle controls.
 - [x] Step 3 / issue #24: Restart running agents through fake lifecycle controls.
-- [ ] Step 4 / issue #25: Soft-delete agents from active lifecycle views.
-- [ ] Step 5 / issue #26: Verify Milestone 2 lifecycle controls end to end.
+- [x] Step 4 / issue #25: Soft-delete agents from active lifecycle views.
+- [x] Step 5 / issue #26: Verify Milestone 2 lifecycle controls end to end.
 
 ## Current Status
 
@@ -36,8 +36,10 @@ Out of scope for this tracker and its implementation issues:
 - Issue #22 was completed by PR #34 and merged as `63ce4eec6ad464bf8101b5ad2b9890877af8a17a`.
 - Issue #23 was completed by PR #35 and merged as `c0a3443875871f316f6c4094090c3fdc43010255`.
 - Issue #24 was completed by PR #36 and merged as `72299c9543b4b10f2d35e65fc0d3128e7b5c75d7`.
-- Issue #25 Soft-delete lifecycle implementation is complete on branch `fix/issue-25-soft-delete-lifecycle`, passed builder and checker validation, and is in maintainer review.
-- `CHANGELOG.md` records observable Start, Stop, Restart, and soft-delete lifecycle behavior under `## [Unreleased]`.
+- Issue #25 was completed by PR #37 and merged as `ee53d938c6faef9e335dbbf49a3c3c24c050f34c`.
+- Issue #26 final lifecycle verification has passed builder and checker validation on branch `fix/issue-26-lifecycle-verification` at base head `ee53d938c6faef9e335dbbf49a3c3c24c050f34c` with uncommitted issue #26 changes and no PR opened yet.
+- Milestone 2 has no downstream Milestone 2 implementation issue remaining after #26; next work should move to maintainer-reviewer before PR creation or a new milestone decision.
+- `CHANGELOG.md` records observable Start, Stop, Restart, and soft-delete lifecycle behavior under `## [Unreleased]`. Issue #26 is a verification/docs freshness sweep and adds no new changelog entry.
 
 ## Baseline Guard
 
@@ -59,7 +61,7 @@ Milestone 1 database-backed create/list/dashboard/detail behavior exists in:
 - `app/agents/[agentId]/page.tsx`: loads active persisted detail records and returns not found for missing, malformed, or soft-deleted IDs.
 - `tests/unit/create-agent-db.test.ts`: covers transactional create, rollback, list, detail, and soft-delete filtering behavior.
 - `tests/e2e/root-route.spec.ts`: covers the browser create/refresh/dashboard/detail flow plus not-found cases.
-- `README.md`: documents the Milestone 1 local database, API, UI flow, and quality gates.
+- `README.md`: documents the current local database, Milestone 2 lifecycle APIs, UI flow, event behavior, and quality gates.
 
 If a future agent cannot verify this baseline, stop that issue, record the exact missing surface here, and do not rebuild Milestone 1 inside a Milestone 2 issue.
 
@@ -174,10 +176,32 @@ Issue #25 Soft-delete lifecycle builder validation:
 - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54347/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3040 PORT=3040 bun run verify`: passed, including 12 files / 57 tests and 17 passed / 1 skipped E2E tests.
 - `git diff --check`: passed.
 - Freshness/staging scan: `PROGRESS.md` now records #24 merged and #25 in maintainer review after checker validation, `CHANGELOG.md` records soft-delete lifecycle behavior, dashboard Upcoming copy no longer says Delete waits for a later issue, and new Delete route/button/test files are staged for reviewer recheck.
+- Final merge evidence: PR #37 `https://github.com/ametel01/agentbay/pull/37` merged on 2026-07-03T10:19:14Z with merge commit `ee53d938c6faef9e335dbbf49a3c3c24c050f34c`. `gh pr view 37 --json number,state,mergedAt,mergeCommit,url,title,headRefName,baseRefName` reports state `MERGED`, base `main`, head `fix/issue-25-soft-delete-lifecycle`, and the same merge commit. `git cat-file -t ee53d938c6faef9e335dbbf49a3c3c24c050f34c` reports `commit`.
+
+Issue #26 Final lifecycle verification builder validation:
+
+- Isolated Postgres: passed with container `agentbay-issue-26-postgres` (`6cdb17eaff3387ee5159ea7d26f153b32e8a19ffe003afc53459411070dbfd8b`) on port `54349`.
+- Validation database: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54349/agentbay`.
+- `bun install --frozen-lockfile`: passed; installed dependencies from `bun.lock` without source or lockfile changes after the fresh worktree lacked local binaries.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54349/agentbay bun run db:migrate`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54349/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:health`: passed with reachable database JSON.
+- Focused lifecycle route/root tests passed: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54349/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test tests/unit/create-agent-db.test.ts tests/unit/start-agent-route.test.ts tests/unit/stop-agent-route.test.ts tests/unit/restart-agent-route.test.ts tests/unit/delete-agent-route.test.ts tests/unit/root-page.test.tsx` (6 files / 42 tests).
+- Focused E2E passed: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54349/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3043 PORT=3043 bun run test:e2e -- tests/e2e/root-route.spec.ts` (15 passed / 1 skipped).
+- `bun run format:check`: passed.
+- `bun run lint`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54349/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run typecheck`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54349/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test`: passed, 12 files / 58 tests.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54349/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54349/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3044 PORT=3044 bun run test:e2e`: passed, 17 passed / 1 skipped.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54349/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3045 PORT=3045 bun run verify`: passed, including 12 files / 58 tests and 17 passed / 1 skipped E2E tests.
+- `git diff --check`: passed after the final tracker update.
+- Builder freshness/staging scan before checker handoff: README documented completed Milestone 2 lifecycle flow, APIs, event inventory, and validation commands; `PROGRESS.md` recorded #25 merge evidence, #26 validation evidence, current branch/head/PR state, no downstream Milestone 2 issue remaining, and the checker next step; `CHANGELOG.md` remained hygienic with no pure-verification entry; dashboard and shell copy no longer said Milestone 2 lifecycle verification was future work; `git status --short --branch --untracked-files=all` showed only tracked issue #26 files changed and no untracked files; `git diff --name-status` listed the eight intended files and `git diff --cached --name-status` was empty because builder had not staged changes.
+- Checker validation: passed with status ALL GREEN. Checker semantic inspection found the diff scoped to final coverage/docs/copy freshness only, with no lifecycle source, schema, migration, dependency, CI, Vercel, package-manager, event-log UI/API, or Delete event semantic changes. Checker gates passed on Postgres port `54350`, including migrations, DB health, focused unit route/root tests, focused E2E, format, lint, typecheck, full test, build, full E2E, verify, `git diff --check`, and final freshness/staging/security-scope audits.
+- Post-checker freshness/staging state: `PROGRESS.md` now records #25 merge evidence, #26 builder and checker validation evidence, current branch/head/PR state, no downstream Milestone 2 issue remaining, and maintainer-reviewer as the next owner before PR creation; `CHANGELOG.md` remains hygienic with no pure-verification entry; dashboard and shell copy no longer say Milestone 2 lifecycle verification is future work.
 
 ## Current Next Step
 
-Hand issue #25 back to maintainer-reviewer for a docs-only freshness recheck before PR creation.
+Hand issue #26 to maintainer-reviewer for review of final lifecycle verification coverage, docs freshness, and checker-passed evidence before PR creation.
 
 ## Update Log
 
@@ -187,4 +211,6 @@ Hand issue #25 back to maintainer-reviewer for a docs-only freshness recheck bef
 - 2026-07-03: Rolled issue #22 forward again after checker revalidation and maintainer re-review found only stale tracker next-step wording.
 - 2026-07-03: Rolled issue #22 to merged, recorded issue #23 Stop lifecycle implementation and checker validation, and set the next step to maintainer review.
 - 2026-07-03: Rolled issue #23 to merged, recorded issue #24 Restart lifecycle implementation plus checker validation, and set the next step to maintainer review.
-- 2026-07-03: Rolled issue #24 to merged, recorded issue #25 Soft-delete lifecycle implementation plus builder validation, refreshed dashboard Upcoming copy, and set the next step to checker validation.
+- 2026-07-03: Rolled issue #24 to merged, recorded issue #25 Soft-delete lifecycle implementation plus builder validation, refreshed dashboard Upcoming copy, and handed issue #25 to checker validation.
+- 2026-07-03: Recorded issue #25 / PR #37 merge evidence, implemented issue #26 final lifecycle event-inventory coverage and docs freshness cleanup, ran required builder gates, and handed issue #26 to checker validation.
+- 2026-07-03: Recorded issue #26 checker ALL GREEN evidence after the post-checker docs freshness fix and set the next step to maintainer-reviewer before PR creation.
