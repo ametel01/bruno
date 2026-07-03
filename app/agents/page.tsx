@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { EmptyState, PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
+import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { CreateAgentForm } from "@/app/agents/_components/create-agent-form";
-import { StartAgentButton } from "@/app/agents/_components/start-agent-button";
 import {
   AGENT_NAME_MAX_LENGTH,
   SUPPORTED_AGENT_TEMPLATE_KEYS,
@@ -53,7 +53,7 @@ export default async function AgentsPage() {
                           <span className="status-pill">{agent.status}</span>
                         </td>
                         <td>
-                          <StartAgentButton agentId={agent.id} status={agent.status} />
+                          <AgentLifecycleControls agentId={agent.id} status={agent.status} />
                         </td>
                         <td>
                           <code>{agent.id}</code>

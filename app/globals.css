@@ -435,6 +435,12 @@ h2 {
   gap: 8px;
 }
 
+.agent-lifecycle-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .action-message {
   color: var(--muted);
   font-size: 0.82rem;

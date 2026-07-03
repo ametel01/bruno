@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
-import { StartAgentButton } from "@/app/agents/_components/start-agent-button";
+import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import {
   AgentDetailPersistenceError,
   getActiveAgentForDevelopmentUser,
@@ -59,7 +59,7 @@ export default async function AgentDetailPage({ params }: AgentDetailPageProps) 
             <div>
               <dt>Actions</dt>
               <dd>
-                <StartAgentButton agentId={agent.id} status={agent.status} />
+                <AgentLifecycleControls agentId={agent.id} status={agent.status} />
               </dd>
             </div>
             <div>

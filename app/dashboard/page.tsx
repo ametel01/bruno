@@ -96,7 +96,7 @@ export function DashboardContent({
         </PlaceholderPanel>
         <PlaceholderPanel title="Upcoming surfaces">
           <ul className="plain-list">
-            <li>Stop, restart, and delete controls wait for later Milestone 2 issues.</li>
+            <li>Restart and delete controls wait for later Milestone 2 issues.</li>
             <li>Approvals, logs, and activity feeds wait for later milestones.</li>
             <li>Runner provisioning and external integrations are placeholders only.</li>
           </ul>
