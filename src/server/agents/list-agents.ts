@@ -2,7 +2,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import {
   type AgentLifecycleStatus,
   isValidAgentId,
-  settleDueStartingAgents,
+  settleDueFakeRunnerTransitions,
 } from "@/src/server/agents/lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agents } from "@/src/server/db/schema";
@@ -54,7 +54,7 @@ export async function listActiveAgentsForDevelopmentUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
-    await settleDueStartingAgents({ createConnection: () => connection });
+    await settleDueFakeRunnerTransitions({ createConnection: () => connection });
 
     const rows = await connection.db
       .select({
@@ -98,7 +98,7 @@ export async function getActiveAgentForDevelopmentUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
-    await settleDueStartingAgents({ createConnection: () => connection });
+    await settleDueFakeRunnerTransitions({ createConnection: () => connection });
 
     const [row] = await connection.db
       .select({

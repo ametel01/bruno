@@ -34,8 +34,9 @@ Out of scope for this tracker and its implementation issues:
 - Issue #20 was completed by PR #32. GitHub records implementation commit `52f08a801db9bf005e74087ea9ef1f22ef37b970`, validation commit `c10f5f01ee43111bd3a243f846528b54d1e27727`, and merge commit `0576813be2272abcc919859f11f3710edd8dfd74`.
 - Issue #21 was completed by PR #33 and merged as `4839504064af730cdf30ca68509a16be6c7ff712`.
 - Issue #22 was completed by PR #34 and merged as `63ce4eec6ad464bf8101b5ad2b9890877af8a17a`.
-- Issue #23 Stop lifecycle implementation is complete on branch `fix/issue-23-stop-lifecycle`, passed independent checker validation, and is ready for maintainer review.
-- `CHANGELOG.md` records observable Start and Stop lifecycle behavior under `## [Unreleased]`.
+- Issue #23 was completed by PR #35 and merged as `c0a3443875871f316f6c4094090c3fdc43010255`.
+- Issue #24 Restart lifecycle implementation is complete on branch `fix/issue-24-restart-lifecycle`, passed builder and checker validation, and is ready for maintainer review.
+- `CHANGELOG.md` records observable Start, Stop, and Restart lifecycle behavior under `## [Unreleased]`.
 
 ## Baseline Guard
 
@@ -138,9 +139,25 @@ Issue #23 Stop lifecycle validation:
 - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54343/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 PORT=3032 bun run verify`: passed, including 10 files / 44 tests and 17 passed / 1 skipped E2E tests.
 - `git diff --check`: passed after the final docs freshness pass.
 
+Issue #24 Restart lifecycle builder validation:
+
+- Isolated Postgres: passed with container `agentbay-issue-24-postgres` (`4bdc1df5a449683bdf7ed80f95d71bfd3c021405d9993e32e6c9cdc399373873`) on port `54345`.
+- Validation database: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54345/agentbay`.
+- `bun install --frozen-lockfile`: passed; installed dependencies from `bun.lock` without source or lockfile changes after the fresh worktree lacked local binaries.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54345/agentbay bun run db:migrate`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54345/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:health`: passed with reachable database JSON.
+- `bun run format:check`: passed.
+- `bun run lint`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54345/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run typecheck`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54345/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test`: passed, 11 files / 51 tests.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54345/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54345/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3035 PORT=3035 bun run test:e2e`: passed, 17 passed / 1 skipped.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54345/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3036 PORT=3036 bun run verify`: passed, including 11 files / 51 tests and 17 passed / 1 skipped E2E tests.
+- `git diff --check`: passed after final tracker updates.
+
 ## Current Next Step
 
-Hand issue #23 to maintainer-reviewer for review against the Stop lifecycle contract on branch `fix/issue-23-stop-lifecycle`.
+Hand issue #24 to maintainer-reviewer for review against the Restart lifecycle contract on branch `fix/issue-24-restart-lifecycle`.
 
 ## Update Log
 
@@ -149,3 +166,4 @@ Hand issue #23 to maintainer-reviewer for review against the Stop lifecycle cont
 - 2026-07-03: Rolled issue #22 forward from pre-review checker handoff to PR #34 post-review remediation and recheck for malformed percent-encoded Start route IDs.
 - 2026-07-03: Rolled issue #22 forward again after checker revalidation and maintainer re-review found only stale tracker next-step wording.
 - 2026-07-03: Rolled issue #22 to merged, recorded issue #23 Stop lifecycle implementation and checker validation, and set the next step to maintainer review.
+- 2026-07-03: Rolled issue #23 to merged, recorded issue #24 Restart lifecycle implementation plus checker validation, and set the next step to maintainer review.

@@ -18,3 +18,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Database-backed dashboard and agent detail read surfaces for active persisted agents, including refreshed stopped status visibility and not-found handling for missing or inactive detail records.
 - `POST /api/agents/:agentId/actions/start` and Start UI controls for fake lifecycle start requests, deterministic settling to running, and matching lifecycle events.
 - `POST /api/agents/:agentId/actions/stop` and Stop UI controls for running agents, including transactional stop events and visible status refresh back to stopped.
+- `POST /api/agents/:agentId/actions/restart` and Restart UI controls for running agents, including deterministic fake-runner settling back to running and matching lifecycle events.

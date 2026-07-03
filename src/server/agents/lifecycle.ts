@@ -8,14 +8,18 @@ export type AgentLifecycleStatus = (typeof agentStatusEnum.enumValues)[number];
 
 export const STARTABLE_AGENT_STATUSES = ["idle", "stopped", "error"] as const;
 export const STOPPABLE_AGENT_STATUSES = ["running"] as const;
+export const RESTARTABLE_AGENT_STATUSES = ["running"] as const;
 export const START_REQUESTED_EVENT_TYPE = "agent.start_requested";
 export const START_COMPLETED_EVENT_TYPE = "agent.start_completed";
 export const STOP_REQUESTED_EVENT_TYPE = "agent.stop_requested";
 export const STOP_COMPLETED_EVENT_TYPE = "agent.stop_completed";
+export const RESTART_REQUESTED_EVENT_TYPE = "agent.restart_requested";
+export const RESTART_COMPLETED_EVENT_TYPE = "agent.restart_completed";
 export const FAKE_RUNNER_START_DELAY_MS = 400;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const STARTING_STATUS_REASON = "Start requested.";
+const RESTARTING_STATUS_REASON = "Restart requested.";
 const RUNNING_STATUS_REASON = "Fake runner is running.";
 
 type AgentTransaction = Parameters<
@@ -86,6 +90,32 @@ export type StoppedAgent = {
   deletedAt: null;
 };
 
+export type RestartAgentResult =
+  | {
+      ok: true;
+      agent: RestartedAgent;
+      event: {
+        type: typeof RESTART_REQUESTED_EVENT_TYPE;
+      };
+    }
+  | {
+      ok: false;
+      reason: "missing_agent_id" | "malformed_agent_id" | "agent_not_found" | "invalid_status";
+      status?: AgentLifecycleStatus;
+    };
+
+export type RestartedAgent = {
+  id: string;
+  userId: string;
+  name: string;
+  templateKey: string;
+  status: "restarting";
+  statusReason: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: null;
+};
+
 export class AgentLifecyclePersistenceError extends Error {
   constructor() {
     super("Agent lifecycle update failed.");
@@ -103,6 +133,10 @@ export function canStartAgentStatus(status: AgentLifecycleStatus): boolean {
 
 export function canStopAgentStatus(status: AgentLifecycleStatus): boolean {
   return STOPPABLE_AGENT_STATUSES.includes(status as (typeof STOPPABLE_AGENT_STATUSES)[number]);
+}
+
+export function canRestartAgentStatus(status: AgentLifecycleStatus): boolean {
+  return RESTARTABLE_AGENT_STATUSES.includes(status as (typeof RESTARTABLE_AGENT_STATUSES)[number]);
 }
 
 export async function startAgentForDevelopmentUser(
@@ -208,7 +242,7 @@ export async function stopAgentForDevelopmentUser(
 
   try {
     return await connection.db.transaction(async (tx) => {
-      await settleDueStartingAgentsInTransaction(tx, now, dueBefore);
+      await settleDueFakeRunnerTransitionsInTransaction(tx, now, dueBefore);
 
       const [currentAgent] = await tx
         .select()
@@ -289,7 +323,98 @@ export async function stopAgentForDevelopmentUser(
   }
 }
 
+export async function restartAgentForDevelopmentUser(
+  agentId: string,
+  dependencies: AgentLifecycleDependencies = {},
+): Promise<RestartAgentResult> {
+  const normalizedAgentId = agentId.trim();
+
+  if (normalizedAgentId.length === 0) {
+    return { ok: false, reason: "missing_agent_id" };
+  }
+
+  if (!isValidAgentId(normalizedAgentId)) {
+    return { ok: false, reason: "malformed_agent_id" };
+  }
+
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
+  const dueBefore = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS);
+
+  try {
+    return await connection.db.transaction(async (tx) => {
+      await settleDueFakeRunnerTransitionsInTransaction(tx, now, dueBefore);
+
+      const [currentAgent] = await tx
+        .select()
+        .from(agents)
+        .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
+        .limit(1);
+
+      if (!currentAgent) {
+        return { ok: false, reason: "agent_not_found" };
+      }
+
+      if (!canRestartAgentStatus(currentAgent.status)) {
+        return { ok: false, reason: "invalid_status", status: currentAgent.status };
+      }
+
+      const [restartedAgent] = await tx
+        .update(agents)
+        .set({
+          status: "restarting",
+          statusReason: RESTARTING_STATUS_REASON,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(agents.id, normalizedAgentId),
+            isNull(agents.deletedAt),
+            inArray(agents.status, [...RESTARTABLE_AGENT_STATUSES]),
+          ),
+        )
+        .returning();
+
+      if (!restartedAgent) {
+        throw new Error("Agent restart update returned no rows.");
+      }
+
+      await tx.insert(agentEvents).values({
+        agentId: restartedAgent.id,
+        actorUserId: restartedAgent.userId,
+        type: RESTART_REQUESTED_EVENT_TYPE,
+        message: `Restart requested for agent "${restartedAgent.name}".`,
+        metadata: {
+          fromStatus: currentAgent.status,
+          toStatus: "restarting",
+        },
+      });
+
+      return {
+        ok: true,
+        agent: toRestartedAgent(restartedAgent),
+        event: {
+          type: RESTART_REQUESTED_EVENT_TYPE,
+        },
+      };
+    });
+  } catch {
+    throw new AgentLifecyclePersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
 export async function settleDueStartingAgents(
+  dependencies: AgentLifecycleDependencies = {},
+): Promise<number> {
+  return settleDueFakeRunnerTransitions(dependencies);
+}
+
+export async function settleDueFakeRunnerTransitions(
   dependencies: AgentLifecycleDependencies = {},
 ): Promise<number> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
@@ -299,7 +424,7 @@ export async function settleDueStartingAgents(
 
   try {
     return await connection.db.transaction(async (tx) =>
-      settleDueStartingAgentsInTransaction(tx, now, dueBefore),
+      settleDueFakeRunnerTransitionsInTransaction(tx, now, dueBefore),
     );
   } catch {
     throw new AgentLifecyclePersistenceError();
@@ -310,11 +435,40 @@ export async function settleDueStartingAgents(
   }
 }
 
-async function settleDueStartingAgentsInTransaction(
+async function settleDueFakeRunnerTransitionsInTransaction(
   tx: AgentTransaction,
   now: Date,
   dueBefore: Date,
 ): Promise<number> {
+  const settledStartingAgents = await settleDueStatusInTransaction({
+    tx,
+    now,
+    dueBefore,
+    fromStatus: "starting",
+    eventType: START_COMPLETED_EVENT_TYPE,
+    messageAction: "Start",
+  });
+  const settledRestartingAgents = await settleDueStatusInTransaction({
+    tx,
+    now,
+    dueBefore,
+    fromStatus: "restarting",
+    eventType: RESTART_COMPLETED_EVENT_TYPE,
+    messageAction: "Restart",
+  });
+
+  return settledStartingAgents + settledRestartingAgents;
+}
+
+async function settleDueStatusInTransaction(input: {
+  tx: AgentTransaction;
+  now: Date;
+  dueBefore: Date;
+  fromStatus: "starting" | "restarting";
+  eventType: typeof START_COMPLETED_EVENT_TYPE | typeof RESTART_COMPLETED_EVENT_TYPE;
+  messageAction: "Start" | "Restart";
+}): Promise<number> {
+  const { tx, now, dueBefore, fromStatus, eventType, messageAction } = input;
   const settledAgents = await tx
     .update(agents)
     .set({
@@ -324,7 +478,7 @@ async function settleDueStartingAgentsInTransaction(
     })
     .where(
       and(
-        eq(agents.status, "starting"),
+        eq(agents.status, fromStatus),
         isNull(agents.deletedAt),
         lte(agents.updatedAt, dueBefore),
       ),
@@ -343,10 +497,10 @@ async function settleDueStartingAgentsInTransaction(
     settledAgents.map((agent) => ({
       agentId: agent.id,
       actorUserId: agent.userId,
-      type: START_COMPLETED_EVENT_TYPE,
-      message: `Start completed for agent "${agent.name}".`,
+      type: eventType,
+      message: `${messageAction} completed for agent "${agent.name}".`,
       metadata: {
-        fromStatus: "starting",
+        fromStatus,
         toStatus: "running",
       },
     })),
@@ -377,6 +531,20 @@ function toStoppedAgent(agent: typeof agents.$inferSelect): StoppedAgent {
     templateKey: agent.templateKey,
     status: "stopped",
     statusReason: null,
+    createdAt: agent.createdAt.toISOString(),
+    updatedAt: agent.updatedAt.toISOString(),
+    deletedAt: null,
+  };
+}
+
+function toRestartedAgent(agent: typeof agents.$inferSelect): RestartedAgent {
+  return {
+    id: agent.id,
+    userId: agent.userId,
+    name: agent.name,
+    templateKey: agent.templateKey,
+    status: "restarting",
+    statusReason: RESTARTING_STATUS_REASON,
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
     deletedAt: null,
