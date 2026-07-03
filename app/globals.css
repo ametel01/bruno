@@ -421,6 +421,16 @@ h2 {
   background: var(--accent-soft);
 }
 
+.danger-button {
+  border-color: #b54433;
+  color: #8e3025;
+}
+
+.danger-button:hover {
+  border-color: #8e3025;
+  background: #fff2ef;
+}
+
 .primary-button:disabled,
 .secondary-button:disabled {
   opacity: 0.68;
