@@ -33,7 +33,7 @@ Out of scope for this tracker and its implementation issues:
 - Milestone 1 is complete and available as the baseline for Milestone 2.
 - Issue #20 was completed by PR #32. GitHub records implementation commit `52f08a801db9bf005e74087ea9ef1f22ef37b970`, validation commit `c10f5f01ee43111bd3a243f846528b54d1e27727`, and merge commit `0576813be2272abcc919859f11f3710edd8dfd74`.
 - Issue #21 was completed by PR #33 and merged as `4839504064af730cdf30ca68509a16be6c7ff712`.
-- Issue #22 is builder-validated on branch `fix/issue-22-start-lifecycle` and ready for checker-agent review.
+- Issue #22 PR #34 post-review remediation passed builder recheck on branch `fix/issue-22-start-lifecycle` after fixing malformed percent-encoding route handling and stale tracker wording.
 - `CHANGELOG.md` remains unchanged for #21 because this issue only updates tracking and baseline evidence; it ships no observable product behavior.
 
 ## Baseline Guard
@@ -123,9 +123,10 @@ Issue #22 Start lifecycle validation:
 
 ## Current Next Step
 
-Hand off to checker-agent for independent validation of issue #22 Start lifecycle behavior, route/API coverage, UI polling, tracking-doc freshness, and required gates.
+Hand the PR #34 review-fix follow-up commit to checker-agent to validate the malformed percent-encoding route regression, tracker freshness, and required gates before maintainer-reviewer re-review.
 
 ## Update Log
 
 - 2026-07-03: Converted `PROGRESS.md` from a Milestone 1 tracker into the Milestone 2 execution tracker, verified the Milestone 1 baseline guard, and corrected the issue #20 implementation commit reference.
 - 2026-07-03: Rolled current status forward from issue #21 merged to issue #22 Start lifecycle implementation and recorded the issue #22 fallback database environment.
+- 2026-07-03: Rolled issue #22 forward from pre-review checker handoff to PR #34 post-review remediation and recheck for malformed percent-encoded Start route IDs.

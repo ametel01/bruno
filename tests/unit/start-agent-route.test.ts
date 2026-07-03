@@ -24,6 +24,24 @@ describe("POST /api/agents/[agentId]/actions/start route", () => {
     mocks.startAgentForDevelopmentUser.mockReset();
   });
 
+  it("returns validation JSON for malformed percent-encoded agent IDs", async () => {
+    const { POST } = await import("@/app/api/agents/[agentId]/actions/start/route");
+
+    const response = await POST(new Request("http://localhost/api/agents/start"), {
+      params: Promise.resolve({ agentId: "%E0%A4%A" }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({
+      error: {
+        code: "validation_failed",
+        message: "Agent ID must be a valid UUID.",
+      },
+    });
+    expect(mocks.startAgentForDevelopmentUser).not.toHaveBeenCalled();
+  });
+
   it("returns a safe persistence error response", async () => {
     mocks.startAgentForDevelopmentUser.mockRejectedValueOnce(
       new mocks.AgentLifecyclePersistenceError(),

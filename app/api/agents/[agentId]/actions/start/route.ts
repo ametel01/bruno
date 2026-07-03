@@ -14,9 +14,20 @@ export const dynamic = "force-dynamic";
 export async function POST(_request: Request, context: StartAgentRouteContext) {
   const params = await context.params;
   const agentId = params.agentId ?? "";
+  let decodedAgentId: string;
 
   try {
-    const result = await startAgentForDevelopmentUser(decodeURIComponent(agentId));
+    decodedAgentId = decodeURIComponent(agentId);
+  } catch (error) {
+    if (error instanceof URIError) {
+      return validationResponse();
+    }
+
+    throw error;
+  }
+
+  try {
+    const result = await startAgentForDevelopmentUser(decodedAgentId);
 
     if (result.ok) {
       return Response.json(result, {
@@ -25,17 +36,7 @@ export async function POST(_request: Request, context: StartAgentRouteContext) {
     }
 
     if (result.reason === "missing_agent_id" || result.reason === "malformed_agent_id") {
-      return Response.json(
-        {
-          error: {
-            code: "validation_failed",
-            message: "Agent ID must be a valid UUID.",
-          },
-        },
-        {
-          status: 400,
-        },
-      );
+      return validationResponse();
     }
 
     if (result.reason === "agent_not_found") {
@@ -81,4 +82,18 @@ export async function POST(_request: Request, context: StartAgentRouteContext) {
 
     throw error;
   }
+}
+
+function validationResponse() {
+  return Response.json(
+    {
+      error: {
+        code: "validation_failed",
+        message: "Agent ID must be a valid UUID.",
+      },
+    },
+    {
+      status: 400,
+    },
+  );
 }
