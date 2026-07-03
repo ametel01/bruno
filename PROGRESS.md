@@ -38,7 +38,7 @@ Milestone 0 delivers a deployable AgentBay product skeleton only: an empty dashb
 - Step 4 / issue #5 is complete after expanding developer setup/deploy documentation, reviewing `.env.example`, rerunning the required local database and quality gates, and creating a final completed-app Vercel preview deployment.
 - Final completed-app preview URL: `https://agentbay-9cfqxsv2w-ametel01s-projects.vercel.app`.
 - Exact external blockers for hosted runtime/public smoke: Vercel project `ametel01s-projects/agentbay` has no configured environment variables, so hosted runtime database health still needs `DATABASE_URL` and `NEXT_PUBLIC_APP_URL`; public route probes currently receive Vercel SSO deployment-protection redirects.
-- Commit reference: not available yet; builder handoff is uncommitted.
+- Commit reference: issue #5 implementation commit `cbe292eb03332ada0aab0c88200e346b2d43386a`; follow-up commit records this progress-note correction.
 - Next recommended milestone: Milestone 1 agent model work after the operator configures Vercel preview runtime env vars and deployment-protection policy as desired.
 
 ## Vercel Preview Deployment
