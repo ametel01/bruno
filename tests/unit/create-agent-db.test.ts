@@ -1534,6 +1534,174 @@ describe("create agent persistence", () => {
     expect(eventCount).toBe(1);
   });
 
+  it("persists the complete Milestone 2 lifecycle event inventory through active-view deletion", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const startRequestedAt = new Date("2026-07-03T06:00:00.000Z");
+    const startCompletedAt = new Date(startRequestedAt.getTime() + FAKE_RUNNER_START_DELAY_MS + 1);
+    const restartRequestedAt = new Date("2026-07-03T06:01:00.000Z");
+    const restartCompletedAt = new Date(
+      restartRequestedAt.getTime() + FAKE_RUNNER_START_DELAY_MS + 1,
+    );
+    const stopAt = new Date("2026-07-03T06:02:00.000Z");
+    const deleteAt = new Date("2026-07-03T06:03:00.000Z");
+    const [agent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Milestone 2 Lifecycle Agent",
+        templateKey: "research_agent",
+        status: "stopped",
+        statusReason: null,
+        createdAt: new Date("2026-07-03T05:00:00.000Z"),
+        updatedAt: new Date("2026-07-03T05:00:00.000Z"),
+      })
+      .returning();
+
+    expect(agent).toBeDefined();
+    const agentId = agent?.id ?? "";
+
+    await expect(
+      startAgentForDevelopmentUser(agentId, {
+        createConnection: () => connection,
+        now: () => startRequestedAt,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      agent: { status: "starting" },
+      event: { type: START_REQUESTED_EVENT_TYPE },
+    });
+    await expect(
+      settleDueFakeRunnerTransitions({
+        createConnection: () => connection,
+        now: () => startCompletedAt,
+      }),
+    ).resolves.toBe(1);
+    await expect(
+      restartAgentForDevelopmentUser(agentId, {
+        createConnection: () => connection,
+        now: () => restartRequestedAt,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      agent: { status: "restarting" },
+      event: { type: RESTART_REQUESTED_EVENT_TYPE },
+    });
+    await expect(
+      settleDueFakeRunnerTransitions({
+        createConnection: () => connection,
+        now: () => restartCompletedAt,
+      }),
+    ).resolves.toBe(1);
+    await expect(
+      stopAgentForDevelopmentUser(agentId, {
+        createConnection: () => connection,
+        now: () => stopAt,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      agent: { status: "stopped" },
+      events: [{ type: STOP_REQUESTED_EVENT_TYPE }, { type: STOP_COMPLETED_EVENT_TYPE }],
+    });
+    await expect(
+      deleteAgentForDevelopmentUser(agentId, {
+        createConnection: () => connection,
+        now: () => deleteAt,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      agent: {
+        status: "stopped",
+        deletedAt: "2026-07-03T06:03:00.000Z",
+      },
+      event: { type: DELETE_EVENT_TYPE },
+    });
+
+    const [persistedAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, agentId))
+      .limit(1);
+    const activeAgents = await listActiveAgentsForDevelopmentUser({
+      createConnection: () => connection,
+    });
+    const activeDetail = await getActiveAgentForDevelopmentUser(agentId, {
+      createConnection: () => connection,
+    });
+    const persistedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, agentId));
+    const eventTypes = persistedEvents.map((event) => event.type).sort();
+
+    expect(persistedAgent).toMatchObject({
+      id: agentId,
+      status: "stopped",
+      statusReason: null,
+      deletedAt: deleteAt,
+    });
+    expect(activeAgents.some((activeAgent) => activeAgent.id === agentId)).toBe(false);
+    expect(activeDetail).toBeNull();
+    expect(eventTypes).toEqual([
+      DELETE_EVENT_TYPE,
+      RESTART_COMPLETED_EVENT_TYPE,
+      RESTART_REQUESTED_EVENT_TYPE,
+      START_COMPLETED_EVENT_TYPE,
+      START_REQUESTED_EVENT_TYPE,
+      STOP_COMPLETED_EVENT_TYPE,
+      STOP_REQUESTED_EVENT_TYPE,
+    ]);
+    expect(persistedEvents.filter((event) => event.type === DELETE_EVENT_TYPE)).toHaveLength(1);
+    expect(persistedEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actorUserId: userId,
+          type: START_REQUESTED_EVENT_TYPE,
+          metadata: { fromStatus: "stopped", toStatus: "starting" },
+        }),
+        expect.objectContaining({
+          actorUserId: userId,
+          type: START_COMPLETED_EVENT_TYPE,
+          metadata: { fromStatus: "starting", toStatus: "running" },
+        }),
+        expect.objectContaining({
+          actorUserId: userId,
+          type: RESTART_REQUESTED_EVENT_TYPE,
+          metadata: { fromStatus: "running", toStatus: "restarting" },
+        }),
+        expect.objectContaining({
+          actorUserId: userId,
+          type: RESTART_COMPLETED_EVENT_TYPE,
+          metadata: { fromStatus: "restarting", toStatus: "running" },
+        }),
+        expect.objectContaining({
+          actorUserId: userId,
+          type: STOP_REQUESTED_EVENT_TYPE,
+          metadata: { fromStatus: "running", toStatus: "stopped" },
+        }),
+        expect.objectContaining({
+          actorUserId: userId,
+          type: STOP_COMPLETED_EVENT_TYPE,
+          metadata: { fromStatus: "running", toStatus: "stopped" },
+        }),
+        expect.objectContaining({
+          actorUserId: userId,
+          type: DELETE_EVENT_TYPE,
+          metadata: {
+            fromStatus: "stopped",
+            toStatus: "deleted",
+            deletedAt: "2026-07-03T06:03:00.000Z",
+          },
+        }),
+      ]),
+    );
+  });
+
   it("stops running agents by persisting stopped status and requested/completed events", async () => {
     const [createdUser] = await connection.db
       .insert(users)

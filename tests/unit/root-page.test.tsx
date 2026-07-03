@@ -56,8 +56,9 @@ describe("product shell routes", () => {
     expect(html).toContain("No agent records");
     expect(html).toContain("Active persisted records are read from the database.");
     expect(html).toContain(
-      "End-to-end lifecycle verification waits for the final Milestone 2 issue.",
+      "Start, Stop, Restart, and Delete use deterministic fake lifecycle controls.",
     );
+    expect(html).not.toContain("lifecycle verification waits");
     expect(html).not.toContain("Delete controls wait");
     expect(html).not.toContain("No persisted agent table or records are queried");
   });
@@ -183,6 +184,8 @@ describe("product shell routes", () => {
 
     expect(html).toContain("Workspace settings");
     expect(html).toContain("Billing");
-    expect(html).toContain("Secret values and credential storage are not accepted");
+    expect(html).toContain(
+      "Secret values and credential storage are not accepted by the current app.",
+    );
   });
 });
