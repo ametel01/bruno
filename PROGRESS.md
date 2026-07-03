@@ -39,7 +39,7 @@ Milestone 1 establishes durable agent model work only. The target outcome is tha
 
 Step 0 / issue #15 validation:
 
-- PR #27 head commit: `f526b0f518f41ddd5a55d5a6d2d493832a16b99c`.
+- Initial issue #15 implementation commit: `f526b0f518f41ddd5a55d5a6d2d493832a16b99c`.
 - `test -f PROGRESS.md`: passed.
 - `test -f CHANGELOG.md`: passed.
 - `rg -n "Milestone 1|Step 0|Step 1" PROGRESS.md`: passed.
@@ -52,5 +52,5 @@ Issue #15 is checked and review-fix-ready in PR #27. Begin Step 1 / issue #16 on
 
 ## Update Log
 
-- 2026-07-03: Recorded PR #27 head commit `f526b0f518f41ddd5a55d5a6d2d493832a16b99c` and updated the next step after checker validation.
+- 2026-07-03: Recorded initial issue #15 implementation commit `f526b0f518f41ddd5a55d5a6d2d493832a16b99c`; prior review-fix commit `e120753cc20bc2b7dcfe71a4183eee4751e216e9` updated the next step after checker validation.
 - 2026-07-03: Restored the progress tracker as a Milestone 1-only baseline for issue #15 and kept changelog updates reserved for future functional changes.
