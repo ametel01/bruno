@@ -55,6 +55,10 @@ describe("product shell routes", () => {
 
     expect(html).toContain("No agent records");
     expect(html).toContain("Active persisted records are read from the database.");
+    expect(html).toContain(
+      "End-to-end lifecycle verification waits for the final Milestone 2 issue.",
+    );
+    expect(html).not.toContain("Delete controls wait");
     expect(html).not.toContain("No persisted agent table or records are queried");
   });
 

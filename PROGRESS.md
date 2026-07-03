@@ -24,7 +24,7 @@ Out of scope for this tracker and its implementation issues:
 - [x] Step 0 / issue #21: Set up Milestone 2 tracking and verify the Milestone 1 baseline guard.
 - [x] Step 1 / issue #22: Start agents through fake lifecycle controls.
 - [x] Step 2 / issue #23: Stop running agents through fake lifecycle controls.
-- [ ] Step 3 / issue #24: Restart running agents through fake lifecycle controls.
+- [x] Step 3 / issue #24: Restart running agents through fake lifecycle controls.
 - [ ] Step 4 / issue #25: Soft-delete agents from active lifecycle views.
 - [ ] Step 5 / issue #26: Verify Milestone 2 lifecycle controls end to end.
 
@@ -35,8 +35,9 @@ Out of scope for this tracker and its implementation issues:
 - Issue #21 was completed by PR #33 and merged as `4839504064af730cdf30ca68509a16be6c7ff712`.
 - Issue #22 was completed by PR #34 and merged as `63ce4eec6ad464bf8101b5ad2b9890877af8a17a`.
 - Issue #23 was completed by PR #35 and merged as `c0a3443875871f316f6c4094090c3fdc43010255`.
-- Issue #24 Restart lifecycle implementation is complete on branch `fix/issue-24-restart-lifecycle`, passed builder and checker validation, and is ready for maintainer review.
-- `CHANGELOG.md` records observable Start, Stop, and Restart lifecycle behavior under `## [Unreleased]`.
+- Issue #24 was completed by PR #36 and merged as `72299c9543b4b10f2d35e65fc0d3128e7b5c75d7`.
+- Issue #25 Soft-delete lifecycle implementation is complete on branch `fix/issue-25-soft-delete-lifecycle`, passed builder and checker validation, and is in maintainer review.
+- `CHANGELOG.md` records observable Start, Stop, Restart, and soft-delete lifecycle behavior under `## [Unreleased]`.
 
 ## Baseline Guard
 
@@ -155,9 +156,28 @@ Issue #24 Restart lifecycle builder validation:
 - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54345/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3036 PORT=3036 bun run verify`: passed, including 11 files / 51 tests and 17 passed / 1 skipped E2E tests.
 - `git diff --check`: passed after final tracker updates.
 
+Issue #25 Soft-delete lifecycle builder validation:
+
+- Isolated Postgres: passed with container `agentbay-issue-25-postgres` (`7476f58fa468`) on port `54347`.
+- Validation database: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54347/agentbay`.
+- `bun install --frozen-lockfile`: passed; installed dependencies from `bun.lock` without source or lockfile changes after the fresh worktree lacked local binaries.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54347/agentbay bun run db:migrate`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54347/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:health`: passed with reachable database JSON.
+- Focused Delete route/root page tests passed: `bun run test tests/unit/delete-agent-route.test.ts tests/unit/root-page.test.tsx` (2 files / 12 tests).
+- Focused DB-backed Delete tests passed: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54347/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test tests/unit/create-agent-db.test.ts tests/unit/delete-agent-route.test.ts` (2 files / 25 tests).
+- `bun run format:check`: passed.
+- `bun run lint`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54347/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run typecheck`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54347/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test`: passed, 12 files / 57 tests.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54347/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54347/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3039 PORT=3039 bun run test:e2e`: passed, 17 passed / 1 skipped.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54347/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3040 PORT=3040 bun run verify`: passed, including 12 files / 57 tests and 17 passed / 1 skipped E2E tests.
+- `git diff --check`: passed.
+- Freshness/staging scan: `PROGRESS.md` now records #24 merged and #25 in maintainer review after checker validation, `CHANGELOG.md` records soft-delete lifecycle behavior, dashboard Upcoming copy no longer says Delete waits for a later issue, and new Delete route/button/test files are staged for reviewer recheck.
+
 ## Current Next Step
 
-Hand issue #24 to maintainer-reviewer for review against the Restart lifecycle contract on branch `fix/issue-24-restart-lifecycle`.
+Hand issue #25 back to maintainer-reviewer for a docs-only freshness recheck before PR creation.
 
 ## Update Log
 
@@ -167,3 +187,4 @@ Hand issue #24 to maintainer-reviewer for review against the Restart lifecycle c
 - 2026-07-03: Rolled issue #22 forward again after checker revalidation and maintainer re-review found only stale tracker next-step wording.
 - 2026-07-03: Rolled issue #22 to merged, recorded issue #23 Stop lifecycle implementation and checker validation, and set the next step to maintainer review.
 - 2026-07-03: Rolled issue #23 to merged, recorded issue #24 Restart lifecycle implementation plus checker validation, and set the next step to maintainer review.
+- 2026-07-03: Rolled issue #24 to merged, recorded issue #25 Soft-delete lifecycle implementation plus builder validation, refreshed dashboard Upcoming copy, and set the next step to checker validation.

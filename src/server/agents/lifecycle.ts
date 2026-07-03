@@ -9,12 +9,14 @@ export type AgentLifecycleStatus = (typeof agentStatusEnum.enumValues)[number];
 export const STARTABLE_AGENT_STATUSES = ["idle", "stopped", "error"] as const;
 export const STOPPABLE_AGENT_STATUSES = ["running"] as const;
 export const RESTARTABLE_AGENT_STATUSES = ["running"] as const;
+export const DELETABLE_AGENT_STATUSES = ["idle", "running", "stopped", "error"] as const;
 export const START_REQUESTED_EVENT_TYPE = "agent.start_requested";
 export const START_COMPLETED_EVENT_TYPE = "agent.start_completed";
 export const STOP_REQUESTED_EVENT_TYPE = "agent.stop_requested";
 export const STOP_COMPLETED_EVENT_TYPE = "agent.stop_completed";
 export const RESTART_REQUESTED_EVENT_TYPE = "agent.restart_requested";
 export const RESTART_COMPLETED_EVENT_TYPE = "agent.restart_completed";
+export const DELETE_EVENT_TYPE = "agent.deleted";
 export const FAKE_RUNNER_START_DELAY_MS = 400;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -116,6 +118,32 @@ export type RestartedAgent = {
   deletedAt: null;
 };
 
+export type DeleteAgentResult =
+  | {
+      ok: true;
+      agent: DeletedAgent;
+      event: {
+        type: typeof DELETE_EVENT_TYPE;
+      };
+    }
+  | {
+      ok: false;
+      reason: "missing_agent_id" | "malformed_agent_id" | "agent_not_found" | "invalid_status";
+      status?: AgentLifecycleStatus;
+    };
+
+export type DeletedAgent = {
+  id: string;
+  userId: string;
+  name: string;
+  templateKey: string;
+  status: AgentLifecycleStatus;
+  statusReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string;
+};
+
 export class AgentLifecyclePersistenceError extends Error {
   constructor() {
     super("Agent lifecycle update failed.");
@@ -137,6 +165,10 @@ export function canStopAgentStatus(status: AgentLifecycleStatus): boolean {
 
 export function canRestartAgentStatus(status: AgentLifecycleStatus): boolean {
   return RESTARTABLE_AGENT_STATUSES.includes(status as (typeof RESTARTABLE_AGENT_STATUSES)[number]);
+}
+
+export function canDeleteAgentStatus(status: AgentLifecycleStatus): boolean {
+  return DELETABLE_AGENT_STATUSES.includes(status as (typeof DELETABLE_AGENT_STATUSES)[number]);
 }
 
 export async function startAgentForDevelopmentUser(
@@ -408,6 +440,91 @@ export async function restartAgentForDevelopmentUser(
   }
 }
 
+export async function deleteAgentForDevelopmentUser(
+  agentId: string,
+  dependencies: AgentLifecycleDependencies = {},
+): Promise<DeleteAgentResult> {
+  const normalizedAgentId = agentId.trim();
+
+  if (normalizedAgentId.length === 0) {
+    return { ok: false, reason: "missing_agent_id" };
+  }
+
+  if (!isValidAgentId(normalizedAgentId)) {
+    return { ok: false, reason: "malformed_agent_id" };
+  }
+
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
+  const dueBefore = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS);
+
+  try {
+    return await connection.db.transaction(async (tx) => {
+      await settleDueFakeRunnerTransitionsInTransaction(tx, now, dueBefore);
+
+      const [currentAgent] = await tx
+        .select()
+        .from(agents)
+        .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
+        .limit(1);
+
+      if (!currentAgent) {
+        return { ok: false, reason: "agent_not_found" };
+      }
+
+      if (!canDeleteAgentStatus(currentAgent.status)) {
+        return { ok: false, reason: "invalid_status", status: currentAgent.status };
+      }
+
+      const [deletedAgent] = await tx
+        .update(agents)
+        .set({
+          updatedAt: now,
+          deletedAt: now,
+        })
+        .where(
+          and(
+            eq(agents.id, normalizedAgentId),
+            isNull(agents.deletedAt),
+            inArray(agents.status, [...DELETABLE_AGENT_STATUSES]),
+          ),
+        )
+        .returning();
+
+      if (!deletedAgent) {
+        throw new Error("Agent delete update returned no rows.");
+      }
+
+      await tx.insert(agentEvents).values({
+        agentId: deletedAgent.id,
+        actorUserId: deletedAgent.userId,
+        type: DELETE_EVENT_TYPE,
+        message: `Agent "${deletedAgent.name}" deleted from active views.`,
+        metadata: {
+          fromStatus: currentAgent.status,
+          toStatus: "deleted",
+          deletedAt: now.toISOString(),
+        },
+      });
+
+      return {
+        ok: true,
+        agent: toDeletedAgent(deletedAgent),
+        event: {
+          type: DELETE_EVENT_TYPE,
+        },
+      };
+    });
+  } catch {
+    throw new AgentLifecyclePersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
 export async function settleDueStartingAgents(
   dependencies: AgentLifecycleDependencies = {},
 ): Promise<number> {
@@ -548,5 +665,23 @@ function toRestartedAgent(agent: typeof agents.$inferSelect): RestartedAgent {
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
     deletedAt: null,
+  };
+}
+
+function toDeletedAgent(agent: typeof agents.$inferSelect): DeletedAgent {
+  if (!agent.deletedAt) {
+    throw new Error("Deleted agent row is missing deletedAt.");
+  }
+
+  return {
+    id: agent.id,
+    userId: agent.userId,
+    name: agent.name,
+    templateKey: agent.templateKey,
+    status: agent.status,
+    statusReason: agent.statusReason,
+    createdAt: agent.createdAt.toISOString(),
+    updatedAt: agent.updatedAt.toISOString(),
+    deletedAt: agent.deletedAt.toISOString(),
   };
 }

@@ -5,6 +5,7 @@ import {
   createAgentForDevelopmentUser,
 } from "@/src/server/agents/create-agent";
 import {
+  DELETE_EVENT_TYPE,
   FAKE_RUNNER_START_DELAY_MS,
   RESTART_COMPLETED_EVENT_TYPE,
   RESTART_REQUESTED_EVENT_TYPE,
@@ -12,6 +13,7 @@ import {
   START_REQUESTED_EVENT_TYPE,
   STOP_COMPLETED_EVENT_TYPE,
   STOP_REQUESTED_EVENT_TYPE,
+  deleteAgentForDevelopmentUser,
   restartAgentForDevelopmentUser,
   settleDueFakeRunnerTransitions,
   settleDueStartingAgents,
@@ -1138,6 +1140,393 @@ describe("create agent persistence", () => {
     expect(invalidStatusResponse.status).toBe(409);
     expect(await invalidStatusResponse.json()).toMatchObject({
       error: { code: "invalid_agent_status", status: "stopped" },
+    });
+
+    const eventCount = await countRows(connection, "agent_events");
+
+    expect(eventCount).toBe(1);
+  });
+
+  it("soft-deletes active non-transitioning agents while preserving existing events", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const now = new Date("2026-07-03T06:00:00.000Z");
+    const deletableStatuses: AgentLifecycleStatus[] = ["idle", "running", "stopped", "error"];
+
+    for (const status of deletableStatuses) {
+      const [agent] = await connection.db
+        .insert(agents)
+        .values({
+          userId,
+          name: `${status} Delete Agent`,
+          templateKey: "research_agent",
+          status,
+          statusReason: `${status} preserved reason.`,
+          createdAt: new Date("2026-07-03T05:00:00.000Z"),
+          updatedAt: new Date("2026-07-03T05:30:00.000Z"),
+        })
+        .returning();
+
+      expect(agent).toBeDefined();
+
+      await connection.db.insert(agentEvents).values({
+        agentId: agent?.id ?? "",
+        actorUserId: userId,
+        type: "agent.created",
+        message: "Existing event.",
+        metadata: {
+          status,
+        },
+      });
+
+      const result = await deleteAgentForDevelopmentUser(agent?.id ?? "", {
+        createConnection: () => connection,
+        now: () => now,
+      });
+
+      const [persistedAgent] = await connection.db
+        .select()
+        .from(agents)
+        .where(eq(agents.id, agent?.id ?? ""))
+        .limit(1);
+      const persistedEvents = await connection.db
+        .select()
+        .from(agentEvents)
+        .where(eq(agentEvents.agentId, agent?.id ?? ""));
+      const listed = await listActiveAgentsForDevelopmentUser({
+        createConnection: () => connection,
+      });
+      const detail = await getActiveAgentForDevelopmentUser(agent?.id ?? "", {
+        createConnection: () => connection,
+      });
+
+      expect(result).toMatchObject({
+        ok: true,
+        agent: {
+          id: agent?.id,
+          status,
+          statusReason: `${status} preserved reason.`,
+          updatedAt: "2026-07-03T06:00:00.000Z",
+          deletedAt: "2026-07-03T06:00:00.000Z",
+        },
+        event: {
+          type: DELETE_EVENT_TYPE,
+        },
+      });
+      expect(persistedAgent).toMatchObject({
+        status,
+        statusReason: `${status} preserved reason.`,
+        updatedAt: now,
+        deletedAt: now,
+      });
+      expect(persistedEvents).toHaveLength(2);
+      expect(persistedEvents).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "agent.created",
+            metadata: { status },
+          }),
+          expect.objectContaining({
+            actorUserId: userId,
+            type: DELETE_EVENT_TYPE,
+            metadata: {
+              fromStatus: status,
+              toStatus: "deleted",
+              deletedAt: "2026-07-03T06:00:00.000Z",
+            },
+          }),
+        ]),
+      );
+      expect(listed.some((listedAgent) => listedAgent.id === agent?.id)).toBe(false);
+      expect(detail).toBeNull();
+    }
+  });
+
+  it("settles due start and restart transitions before evaluating delete", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const now = new Date("2026-07-03T06:00:00.000Z");
+    const dueAt = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS - 1);
+    const [startingAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Due Start Before Delete Agent",
+        templateKey: "research_agent",
+        status: "starting",
+        statusReason: "Start requested.",
+        updatedAt: dueAt,
+      })
+      .returning();
+    const [restartingAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Due Restart Before Delete Agent",
+        templateKey: "research_agent",
+        status: "restarting",
+        statusReason: "Restart requested.",
+        updatedAt: dueAt,
+      })
+      .returning();
+
+    expect(startingAgent).toBeDefined();
+    expect(restartingAgent).toBeDefined();
+
+    const result = await deleteAgentForDevelopmentUser(startingAgent?.id ?? "", {
+      createConnection: () => connection,
+      now: () => now,
+    });
+
+    const [persistedStartingAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, startingAgent?.id ?? ""))
+      .limit(1);
+    const [persistedRestartingAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, restartingAgent?.id ?? ""))
+      .limit(1);
+    const persistedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .orderBy(agentEvents.type);
+
+    expect(result).toMatchObject({
+      ok: true,
+      agent: {
+        id: startingAgent?.id,
+        status: "running",
+        deletedAt: "2026-07-03T06:00:00.000Z",
+      },
+    });
+    expect(persistedStartingAgent).toMatchObject({
+      status: "running",
+      statusReason: "Fake runner is running.",
+      deletedAt: now,
+    });
+    expect(persistedRestartingAgent).toMatchObject({
+      status: "running",
+      statusReason: "Fake runner is running.",
+      deletedAt: null,
+    });
+    expect(persistedEvents.map((event) => event.type).sort()).toEqual([
+      DELETE_EVENT_TYPE,
+      RESTART_COMPLETED_EVENT_TYPE,
+      START_COMPLETED_EVENT_TYPE,
+    ]);
+  });
+
+  it("rejects malformed, missing, absent, soft-deleted, transitioning, and deleting deletes without mutation or delete events", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const now = new Date("2026-07-03T06:00:00.000Z");
+    const pendingTransitionAt = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS + 1);
+    const invalidStatuses: AgentLifecycleStatus[] = ["starting", "restarting", "deleting"];
+    const invalidAgents: { id: string; status: AgentLifecycleStatus }[] = [];
+
+    for (const status of invalidStatuses) {
+      const [agent] = await connection.db
+        .insert(agents)
+        .values({
+          userId,
+          name: `${status} Delete Agent`,
+          templateKey: "research_agent",
+          status,
+          statusReason: `${status} preserved reason.`,
+          createdAt: new Date("2026-07-03T05:00:00.000Z"),
+          updatedAt: status === "deleting" ? now : pendingTransitionAt,
+        })
+        .returning({ id: agents.id, status: agents.status });
+
+      expect(agent).toBeDefined();
+
+      if (agent) {
+        invalidAgents.push(agent);
+      }
+    }
+
+    const [deletedAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Already Deleted Agent",
+        templateKey: "research_agent",
+        status: "stopped",
+        statusReason: "Deleted preserved reason.",
+        updatedAt: now,
+        deletedAt: now,
+      })
+      .returning();
+
+    expect(deletedAgent).toBeDefined();
+
+    const beforeAgents = await connection.db.select().from(agents).orderBy(agents.name);
+
+    await expect(
+      deleteAgentForDevelopmentUser("", { createConnection: () => connection, now: () => now }),
+    ).resolves.toEqual({ ok: false, reason: "missing_agent_id" });
+    await expect(
+      deleteAgentForDevelopmentUser("not-a-uuid", {
+        createConnection: () => connection,
+        now: () => now,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "malformed_agent_id" });
+    await expect(
+      deleteAgentForDevelopmentUser("00000000-0000-4000-8000-000000000000", {
+        createConnection: () => connection,
+        now: () => now,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "agent_not_found" });
+    await expect(
+      deleteAgentForDevelopmentUser(deletedAgent?.id ?? "", {
+        createConnection: () => connection,
+        now: () => now,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "agent_not_found" });
+
+    for (const agent of invalidAgents) {
+      await expect(
+        deleteAgentForDevelopmentUser(agent.id, {
+          createConnection: () => connection,
+          now: () => now,
+        }),
+      ).resolves.toEqual({ ok: false, reason: "invalid_status", status: agent.status });
+    }
+
+    const afterAgents = await connection.db.select().from(agents).orderBy(agents.name);
+    const persistedEvents = await connection.db.select().from(agentEvents);
+
+    expect(afterAgents).toEqual(beforeAgents);
+    expect(persistedEvents).toHaveLength(0);
+  });
+
+  it("exposes the delete route success, validation, not-found, deleted, invalid status, and event behavior", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const [stoppedAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Route Delete Agent",
+        templateKey: "research_agent",
+        status: "stopped",
+      })
+      .returning();
+    const [transitioningAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Transitioning Delete Agent",
+        templateKey: "research_agent",
+        status: "starting",
+        updatedAt: new Date("2099-07-03T06:00:00.000Z"),
+      })
+      .returning();
+    const [deletedAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Deleted Delete Route Agent",
+        templateKey: "research_agent",
+        status: "stopped",
+        deletedAt: new Date("2026-07-03T06:00:00.000Z"),
+      })
+      .returning();
+
+    expect(stoppedAgent).toBeDefined();
+    expect(transitioningAgent).toBeDefined();
+    expect(deletedAgent).toBeDefined();
+    const stoppedAgentId = stoppedAgent?.id ?? "";
+    const transitioningAgentId = transitioningAgent?.id ?? "";
+    const deletedAgentId = deletedAgent?.id ?? "";
+
+    const { DELETE } = await import("@/app/api/agents/[agentId]/route");
+    const successResponse = await DELETE(new Request("http://localhost/api/agents/delete"), {
+      params: Promise.resolve({ agentId: stoppedAgentId }),
+    });
+    const successBody = await successResponse.json();
+
+    expect(successResponse.status).toBe(200);
+    expect(successBody).toMatchObject({
+      ok: true,
+      agent: {
+        id: stoppedAgent?.id,
+        status: "stopped",
+      },
+      event: { type: DELETE_EVENT_TYPE },
+    });
+
+    const persistedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, stoppedAgentId));
+
+    expect(persistedEvents).toHaveLength(1);
+    expect(persistedEvents[0]).toMatchObject({
+      type: DELETE_EVENT_TYPE,
+      metadata: {
+        fromStatus: "stopped",
+        toStatus: "deleted",
+      },
+    });
+
+    const missingIdResponse = await DELETE(new Request("http://localhost/api/agents/delete"), {
+      params: Promise.resolve({}),
+    });
+    const malformedResponse = await DELETE(new Request("http://localhost/api/agents/delete"), {
+      params: Promise.resolve({ agentId: "not-a-uuid" }),
+    });
+    const missingAgentResponse = await DELETE(new Request("http://localhost/api/agents/delete"), {
+      params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000000" }),
+    });
+    const deletedResponse = await DELETE(new Request("http://localhost/api/agents/delete"), {
+      params: Promise.resolve({ agentId: deletedAgentId }),
+    });
+    const invalidStatusResponse = await DELETE(new Request("http://localhost/api/agents/delete"), {
+      params: Promise.resolve({ agentId: transitioningAgentId }),
+    });
+
+    expect(missingIdResponse.status).toBe(400);
+    expect(await missingIdResponse.json()).toMatchObject({
+      error: { code: "validation_failed" },
+    });
+    expect(malformedResponse.status).toBe(400);
+    expect(await malformedResponse.json()).toMatchObject({
+      error: { code: "validation_failed" },
+    });
+    expect(missingAgentResponse.status).toBe(404);
+    expect(await missingAgentResponse.json()).toMatchObject({
+      error: { code: "agent_not_found" },
+    });
+    expect(deletedResponse.status).toBe(404);
+    expect(await deletedResponse.json()).toMatchObject({
+      error: { code: "agent_not_found" },
+    });
+    expect(invalidStatusResponse.status).toBe(409);
+    expect(await invalidStatusResponse.json()).toMatchObject({
+      error: { code: "invalid_agent_status", status: "starting" },
     });
 
     const eventCount = await countRows(connection, "agent_events");

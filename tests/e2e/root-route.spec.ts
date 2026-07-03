@@ -121,6 +121,21 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
 
   await expect(page.getByRole("heading", { name })).toBeVisible();
   await expect(page.locator(".status-pill", { hasText: "stopped" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Delete" })).toBeVisible();
+  await page.getByRole("button", { name: "Delete" }).click();
+
+  await expect(page).toHaveURL(/\/agents$/);
+  await expect(page.getByRole("link", { name })).toHaveCount(0);
+
+  await page.goto("/dashboard");
+  await expect(page.getByRole("heading", { name: "Persisted agents" })).toBeVisible();
+  await expect(page.getByRole("link", { name })).toHaveCount(0);
+
+  expect(agentHref).not.toBeNull();
+  const deletedDetailResponse = await page.goto(agentHref ?? "/agents/missing");
+
+  expect(deletedDetailResponse?.status()).toBe(404);
+  await expect(page.locator("body")).not.toContainText(name);
 });
 
 test("/agents shows safe client validation for invalid create input", async ({ page }) => {
