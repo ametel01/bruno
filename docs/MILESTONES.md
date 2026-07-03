@@ -168,7 +168,7 @@ Until a real repo toolchain exists, every milestone should define the nearest eq
 - Mobile viewport checks for mobile-specific milestones.
 - One smoke test that exercises the milestone from the UI or public API.
 
-## Milestone 0: Product Skeleton
+## Milestone 0: Product Skeleton [Completed]
 
 Goal: The empty app exists, has deployable routes, and can connect to a database.
 
@@ -201,7 +201,7 @@ Goal: The empty app exists, has deployable routes, and can connect to a database
 - Health check test with database reachable and unreachable cases.
 - Migration command included in local and deploy setup documentation.
 
-## Milestone 1: Agent Model, No Execution
+## Milestone 1: Agent Model, No Execution [Completed]
 
 Goal: Users can create persistent agent records without real runtime behavior.
 
@@ -238,7 +238,7 @@ Goal: Users can create persistent agent records without real runtime behavior.
 - API test for `POST /api/agents`.
 - UI or integration test for create, refresh, and detail navigation.
 
-## Milestone 2: Fake Lifecycle Controls
+## Milestone 2: Fake Lifecycle Controls [Completed]
 
 Goal: Start, stop, restart, and delete controls work against fake state.
 
@@ -275,7 +275,7 @@ Goal: Start, stop, restart, and delete controls work against fake state.
 - Integration test for UI status updates.
 - Event assertion for each action.
 
-## Milestone 3: Event Log and Activity Feed
+## Milestone 3: Event Log and Activity Feed [Completed]
 
 Goal: Every agent has a visible timeline of important actions and system events.
 
