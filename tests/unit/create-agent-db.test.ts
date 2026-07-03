@@ -4,7 +4,10 @@ import {
   AgentPersistenceError,
   createAgentForDevelopmentUser,
 } from "@/src/server/agents/create-agent";
-import { listActiveAgentsForDevelopmentUser } from "@/src/server/agents/list-agents";
+import {
+  getActiveAgentForDevelopmentUser,
+  listActiveAgentsForDevelopmentUser,
+} from "@/src/server/agents/list-agents";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentEvents, agents, appMetadata, users } from "@/src/server/db/schema";
 
@@ -131,6 +134,7 @@ describe("create agent persistence", () => {
         id: newAgent?.id,
         name: "Research Agent",
         templateKey: "research_agent",
+        templateLabel: "Research Agent",
         status: "stopped",
         href: `/agents/${newAgent?.id}`,
         createdAt: "2026-07-03T05:00:00.000Z",
@@ -139,11 +143,89 @@ describe("create agent persistence", () => {
         id: oldAgent?.id,
         name: "Inbox Agent",
         templateKey: "inbox_triage_agent",
+        templateLabel: "Inbox Triage Agent",
         status: "stopped",
         href: `/agents/${oldAgent?.id}`,
         createdAt: "2026-07-03T04:00:00.000Z",
       },
     ]);
+  });
+
+  it("loads active agent detail records with timestamps and status reason", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+
+    const [createdAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "GitHub Agent",
+        templateKey: "github_issue_agent",
+        status: "stopped",
+        statusReason: "Waiting for issue selection.",
+        createdAt: new Date("2026-07-03T04:00:00.000Z"),
+        updatedAt: new Date("2026-07-03T05:00:00.000Z"),
+      })
+      .returning();
+
+    expect(createdAgent).toBeDefined();
+    const detail = await getActiveAgentForDevelopmentUser(createdAgent?.id ?? "", {
+      createConnection: () => connection,
+    });
+
+    expect(detail).toEqual({
+      id: createdAgent?.id,
+      name: "GitHub Agent",
+      templateKey: "github_issue_agent",
+      templateLabel: "GitHub Issue Agent",
+      status: "stopped",
+      statusReason: "Waiting for issue selection.",
+      href: `/agents/${createdAgent?.id}`,
+      createdAt: "2026-07-03T04:00:00.000Z",
+      updatedAt: "2026-07-03T05:00:00.000Z",
+    });
+  });
+
+  it("returns no detail for missing, malformed, or soft-deleted agent IDs", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+
+    const [deletedAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Deleted Agent",
+        templateKey: "research_agent",
+        status: "stopped",
+        deletedAt: new Date("2026-07-03T06:00:00.000Z"),
+      })
+      .returning();
+
+    expect(deletedAgent).toBeDefined();
+
+    await expect(
+      getActiveAgentForDevelopmentUser("not-a-uuid", { createConnection: () => connection }),
+    ).resolves.toBeNull();
+    await expect(
+      getActiveAgentForDevelopmentUser("00000000-0000-4000-8000-000000000000", {
+        createConnection: () => connection,
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      getActiveAgentForDevelopmentUser(deletedAgent?.id ?? "", {
+        createConnection: () => connection,
+      }),
+    ).resolves.toBeNull();
   });
 });
 

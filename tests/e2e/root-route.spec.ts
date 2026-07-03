@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
+import postgres from "postgres";
 
 const shellRoutes = [
   { path: "/", heading: "Operational dashboard" },
   { path: "/dashboard", heading: "Operational dashboard" },
   { path: "/agents", heading: "Agent inventory" },
-  { path: "/agents/test-agent", heading: "test-agent" },
   { path: "/settings", heading: "Workspace settings" },
 ] as const;
 
@@ -40,17 +40,46 @@ test("/agents creates and refreshes a persisted stopped agent", async ({ page },
   await page.getByRole("button", { name: "Create agent" }).click();
 
   await expect(page.getByRole("status")).toContainText("Agent created.");
+  const agentLink = page.getByRole("link", { name });
+  await expect(agentLink).toBeVisible();
+  await expect(
+    page.getByRole("row", { name: new RegExp(`${name}.*Research Agent.*stopped`) }),
+  ).toBeVisible();
+  const agentHref = await agentLink.getAttribute("href");
+  expect(agentHref).toMatch(/^\/agents\/[0-9a-f-]+$/);
+
+  await page.reload();
+
   await expect(page.getByRole("link", { name })).toBeVisible();
   await expect(
-    page.getByRole("row", { name: new RegExp(`${name}.*research_agent.*stopped`) }),
+    page.getByRole("row", { name: new RegExp(`${name}.*Research Agent.*stopped`) }),
+  ).toBeVisible();
+
+  await page.goto("/dashboard");
+  await expect(page.getByRole("heading", { name: "Persisted agents" })).toBeVisible();
+  await expect(
+    page.getByRole("row", { name: new RegExp(`${name}.*Research Agent.*stopped`) }),
   ).toBeVisible();
 
   await page.reload();
 
   await expect(page.getByRole("link", { name })).toBeVisible();
   await expect(
-    page.getByRole("row", { name: new RegExp(`${name}.*research_agent.*stopped`) }),
+    page.getByRole("row", { name: new RegExp(`${name}.*Research Agent.*stopped`) }),
   ).toBeVisible();
+
+  expect(agentHref).not.toBeNull();
+  await page.goto(agentHref ?? "/agents/missing");
+  await expect(page.getByRole("heading", { name })).toBeVisible();
+  await expect(page.getByText("stopped")).toBeVisible();
+  await expect(page.getByText("research_agent")).toBeVisible();
+  await expect(page.getByText("Created")).toBeVisible();
+  await expect(page.getByText("Updated")).toBeVisible();
+
+  await page.reload();
+
+  await expect(page.getByRole("heading", { name })).toBeVisible();
+  await expect(page.getByText("stopped")).toBeVisible();
 });
 
 test("/agents shows safe client validation for invalid create input", async ({ page }) => {
@@ -61,3 +90,51 @@ test("/agents shows safe client validation for invalid create input", async ({ p
   await expect(page.getByRole("status")).toContainText("Name is required.");
   await expect(page.getByRole("status")).not.toContainText("postgres://");
 });
+
+test("/agents detail returns not found for missing, malformed, and soft-deleted IDs", async ({
+  page,
+  request,
+}, testInfo) => {
+  const missingResponse = await page.goto("/agents/00000000-0000-4000-8000-000000000000");
+
+  expect(missingResponse?.status()).toBe(404);
+  await expect(page.locator("body")).not.toContainText("No record lookup is performed");
+
+  const malformedResponse = await page.goto("/agents/not-a-uuid");
+
+  expect(malformedResponse?.status()).toBe(404);
+  await expect(page.locator("body")).not.toContainText("No record lookup is performed");
+
+  const createResponse = await request.post("/api/agents", {
+    data: {
+      name: `Soft Deleted Agent ${testInfo.project.name}`,
+      templateKey: "research_agent",
+    },
+  });
+  expect(createResponse.status()).toBe(201);
+  const created = (await createResponse.json()) as { agent: { id: string } };
+
+  await markAgentDeleted(created.agent.id);
+
+  const deletedResponse = await page.goto(`/agents/${created.agent.id}`);
+
+  expect(deletedResponse?.status()).toBe(404);
+  await expect(page.locator("body")).not.toContainText("Soft Deleted Agent");
+  await expect(page.locator("body")).not.toContainText("No record lookup is performed");
+});
+
+async function markAgentDeleted(agentId: string): Promise<void> {
+  const databaseUrl =
+    process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/agentbay";
+  const sql = postgres(databaseUrl, {
+    connect_timeout: 5,
+    idle_timeout: 5,
+    max: 1,
+  });
+
+  try {
+    await sql`update agents set deleted_at = now() where id = ${agentId}`;
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}

@@ -18,7 +18,7 @@ Milestone 1 establishes durable agent model work only. The target outcome is tha
 - [x] Step 1 / issue #16: Add Milestone 1 agent persistence schema.
 - [x] Step 2 / issue #17: Create agents transactionally through the API.
 - [x] Step 3 / issue #18: Add database-backed agent create and list page.
-- [ ] Step 4 / issue #19: Show persisted agents on dashboard and detail pages.
+- [x] Step 4 / issue #19: Show persisted agents on dashboard and detail pages.
 - [ ] Step 5 / issue #20: Cover the Milestone 1 agent flow with E2E tests and docs.
 
 ## Current Status
@@ -26,10 +26,12 @@ Milestone 1 establishes durable agent model work only. The target outcome is tha
 - Step 0 / issue #15 was completed by PR #27 and merged as `5550b152275ad0c8986fae57add5992e4f49e632`.
 - Step 1 / issue #16 was completed by PR #28 and merged as `eff2c4fd880d6bca9dd1a61eb834b152639bf90f`.
 - Step 2 / issue #17 was completed by PR #29 and merged as `11949b76c2aac7d5f1f31afb4a4deff1f37218b8`.
-- Step 3 / issue #18 is implemented on branch `fix/issue-18-agent-create-list-page` and builder-validated.
-- Steps 4 and 5 remain blocked by the preceding Milestone 1 slices.
+- Step 3 / issue #18 was completed by PR #30 and merged as `77c0d04d23ec19f42f25378dfcdbe2f7cb949d17`.
+- Step 4 / issue #19 is implemented on branch `fix/issue-19-agent-read-surfaces` and builder-validated.
+- Step 5 remains blocked until issue #19 is reviewed and merged.
 - Issue #17 adds transactional create-agent API behavior only. It does not add `/agents` UI behavior, dashboard database reads, detail reads, `GET /api/agents`, lifecycle controls, runtime behavior, seed data, auth, billing, Hermes, Telegram, logs, approvals, or runner behavior.
 - Issue #18 adds `/agents` create/list UI behavior only. It does not add dashboard database reads, detail reads, lifecycle controls, runtime behavior, seed data, auth, billing, Hermes, Telegram, logs, approvals, runner behavior, or soft-delete controls.
+- Issue #19 adds dashboard and detail read surfaces only. It does not add lifecycle controls, delete controls, logs, approvals, config editor, activity feeds, auth, billing, runner behavior, Hermes, Telegram, seed data, or fake runtime behavior.
 
 ## Update Rules
 
@@ -98,9 +100,28 @@ Step 3 / issue #18 validation:
 - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54335/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 PORT=3018 bun run verify`: passed.
 - `git diff --check`: passed.
 
+Step 4 / issue #19 validation:
+
+- Completion summary: added database-backed dashboard reads for active persisted agents, preserved the empty state, replaced arbitrary detail placeholders with active persisted record lookups, rendered name/status/template/timestamps/status reason when present, and routed missing, malformed, or soft-deleted detail IDs to the Next not-found state.
+- Implementation commit: pending until branch commit is created.
+- Default Postgres port `54329` was occupied by unrelated stale container `agentbay-issue-5-postgres-1`; validation used isolated Postgres container `agentbay-issue-19-postgres` (`d081c0435689ff918f8a85bc204e7fc7db3950d516b8b6cb0077035b7f0d32e1`) on port `54336`.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54336/agentbay bun run db:migrate`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54336/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/root-page.test.tsx`: passed, 10 tests.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54336/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/create-agent-db.test.ts`: passed, 5 tests.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54336/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run format:check`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54336/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run lint`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54336/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run typecheck`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54336/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test`: passed, 8 files / 31 tests.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54336/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:migrate`: passed; rerun only emitted existing Drizzle schema/table notices.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54336/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:health`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54336/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54336/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 PORT=3019 bun run test:e2e`: passed, 18 tests. Browser coverage included creating an agent, refreshing `/agents`, visiting and refreshing `/dashboard`, opening and refreshing the persisted detail route, and missing/malformed/soft-deleted detail not-found assertions.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54336/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 PORT=3020 bun run verify`: passed.
+- Tracking-doc freshness check: `PROGRESS.md` and `CHANGELOG.md` were updated after validation with issue #19 status, validation evidence, current next step, and changelog behavior summary.
+
 ## Next Step
 
-Issue #18 is implemented and builder-validated. Begin Step 4 / issue #19 only after issue #18 is reviewed and merged.
+Issue #19 is implemented and builder-validated. Hand off to checker-agent for independent gate rerun and review-readiness checks; begin Step 5 / issue #20 only after issue #19 is reviewed and merged.
 
 ## Update Log
 
@@ -109,3 +130,4 @@ Issue #18 is implemented and builder-validated. Begin Step 4 / issue #19 only af
 - 2026-07-03: Implemented issue #16 schema-only persistence foundation and validated the generated migration against isolated local Postgres on port `54330`.
 - 2026-07-03: Implemented issue #17 transactional create-agent API and validated it against isolated local Postgres on port `54333`.
 - 2026-07-03: Implemented issue #18 database-backed `/agents` create/list workflow and validated it against isolated local Postgres on port `54335`.
+- 2026-07-03: Implemented issue #19 database-backed dashboard/detail read surfaces and validated them against isolated local Postgres on port `54336`.
