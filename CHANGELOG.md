@@ -16,3 +16,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `POST /api/agents` for validated transactional creation of stopped persistent agents and matching `agent.created` events.
 - Database-backed `/agents` create/list workflow for creating stopped persistent agents and showing refreshed active records with stable links.
 - Database-backed dashboard and agent detail read surfaces for active persisted agents, including refreshed stopped status visibility and not-found handling for missing or inactive detail records.
+- `POST /api/agents/:agentId/actions/start` and Start UI controls for fake lifecycle start requests, deterministic settling to running, and matching lifecycle events.

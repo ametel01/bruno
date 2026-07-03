@@ -28,7 +28,7 @@ export function DashboardContent({
       active="dashboard"
       eyebrow={routeLabel}
       title="Operational dashboard"
-      description="A Milestone 1 read surface for persisted agent records without lifecycle actions, runner state, logs, or approvals."
+      description="A read surface for persisted agent records with deterministic fake lifecycle status and without real runner processes, logs, or approvals."
     >
       <div className="content-grid">
         <section className="agent-list-panel" aria-labelledby="dashboard-agents-title">
@@ -96,7 +96,7 @@ export function DashboardContent({
         </PlaceholderPanel>
         <PlaceholderPanel title="Upcoming surfaces">
           <ul className="plain-list">
-            <li>Lifecycle controls wait for the next milestone.</li>
+            <li>Stop, restart, and delete controls wait for later Milestone 2 issues.</li>
             <li>Approvals, logs, and activity feeds wait for later milestones.</li>
             <li>Runner provisioning and external integrations are placeholders only.</li>
           </ul>

@@ -92,11 +92,16 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   await expect(page.getByText("research_agent")).toBeVisible();
   await expect(page.getByText("Created")).toBeVisible();
   await expect(page.getByText("Updated")).toBeVisible();
+  await page.getByRole("button", { name: "Start" }).click();
+  await expect(page.getByRole("status")).toContainText("Start requested.");
+  await expect(page.locator(".status-pill", { hasText: "running" })).toBeVisible({
+    timeout: 5_000,
+  });
 
   await page.reload();
 
   await expect(page.getByRole("heading", { name })).toBeVisible();
-  await expect(page.getByText("stopped")).toBeVisible();
+  await expect(page.locator(".status-pill", { hasText: "running" })).toBeVisible();
 });
 
 test("/agents shows safe client validation for invalid create input", async ({ page }) => {
