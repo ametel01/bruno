@@ -20,7 +20,7 @@ Milestone 0 delivers a deployable AgentBay product skeleton only: an empty dashb
 ## Step Checklist
 
 - [x] Step 0 / issue #1: Progress and changelog tracking setup.
-- [ ] Step 1 / issue #2: Project scaffold and quality gates setup.
+- [x] Step 1 / issue #2: Project scaffold and quality gates setup.
 - [ ] Step 2: Database foundation and health check.
 - [ ] Step 3: Dashboard shell and Milestone 0 routes.
 - [ ] Step 4: Deployment readiness and Milestone 0 acceptance.
@@ -29,7 +29,9 @@ Milestone 0 delivers a deployable AgentBay product skeleton only: an empty dashb
 
 - Milestone 0 is in progress.
 - Step 0 / issue #1 is complete after local file-content validation.
-- Next step: issue #2, project scaffold and quality gates setup.
+- Step 1 / issue #2 is complete after scaffold, build, unit, and E2E validation.
+- Commit reference: not available yet; builder handoff is uncommitted.
+- Next step: issue #6, initial Vercel preview deployment for the empty app, before database foundation work resumes.
 
 ## Validation Results
 
@@ -42,6 +44,19 @@ Step 0 / issue #1 validation:
 - `rg -n "# Changelog|## \\[Unreleased\\]" CHANGELOG.md`: passed.
 - `git diff --check`: passed.
 
+Step 1 / issue #2 validation:
+
+- `bun install`: passed after one retry; the first attempt was interrupted after stalling during dependency resolution, and the retry completed with `bun.lock`.
+- `bun run format:check`: passed.
+- `bun run lint`: passed.
+- `bun run typecheck`: passed.
+- `bun run test`: passed, 1 unit test.
+- `bun run build`: passed with Next.js 16.2.10.
+- `bun run test:e2e`: passed, 1 Chromium route smoke test.
+- `bun run verify`: passed.
+- Source/tracking document existence check: passed for `PRD.md`, `MILESTONES.md`, `PLAN.md`, `conversation_dump.md`, `PROGRESS.md`, `CHANGELOG.md`, and the shared coordinator `STATUS.md`.
+
 ## Update Log
 
 - 2026-07-03: Created the Milestone 0 progress tracker and Keep a Changelog baseline for issue #1. Step 0 validation passed and issue #2 is the next implementation slice.
+- 2026-07-03: Completed issue #2 by adding a Bun-managed Next.js App Router scaffold with TypeScript, Biome, Vitest, Playwright, unit/E2E smoke coverage, and a minimal root route pointing to `/dashboard`.

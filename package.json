@@ -1,0 +1,32 @@
+{
+  "name": "agentbay",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "format": "biome format --write app tests app/globals.css *.ts *.json",
+    "format:check": "biome ci --linter-enabled=false --assist-enabled=false app tests app/globals.css *.ts *.json",
+    "lint": "biome lint app tests *.ts *.json",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit",
+    "verify": "bun run format:check && bun run lint && bun run typecheck && bun run test && bun run build && bun run test:e2e"
+  },
+  "dependencies": {
+    "next": "16.2.10",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.2",
+    "@playwright/test": "1.61.1",
+    "@types/node": "26.1.0",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.3",
+    "typescript": "6.0.3",
+    "vitest": "4.1.9"
+  }
+}

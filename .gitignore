@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Tests and coverage
+coverage/
+playwright-report/
+test-results/
+tsconfig.tsbuildinfo
+
+# Local environment
+.env
+.env*.local
+
+# Logs
+*.log
