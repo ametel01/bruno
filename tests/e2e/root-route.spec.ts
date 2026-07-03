@@ -30,3 +30,34 @@ test("/health returns reachable database JSON in the browser", async ({ page }) 
   await expect(page.locator("body")).toContainText('"status":"ok"');
   await expect(page.locator("body")).toContainText('"database":"reachable"');
 });
+
+test("/agents creates and refreshes a persisted stopped agent", async ({ page }, testInfo) => {
+  const name = `Research Agent ${testInfo.project.name}`;
+
+  await page.goto("/agents");
+  await page.getByLabel("Name").fill(name);
+  await page.getByLabel("Template").selectOption("research_agent");
+  await page.getByRole("button", { name: "Create agent" }).click();
+
+  await expect(page.getByRole("status")).toContainText("Agent created.");
+  await expect(page.getByRole("link", { name })).toBeVisible();
+  await expect(
+    page.getByRole("row", { name: new RegExp(`${name}.*research_agent.*stopped`) }),
+  ).toBeVisible();
+
+  await page.reload();
+
+  await expect(page.getByRole("link", { name })).toBeVisible();
+  await expect(
+    page.getByRole("row", { name: new RegExp(`${name}.*research_agent.*stopped`) }),
+  ).toBeVisible();
+});
+
+test("/agents shows safe client validation for invalid create input", async ({ page }) => {
+  await page.goto("/agents");
+  await page.getByLabel("Name").fill("   ");
+  await page.getByRole("button", { name: "Create agent" }).click();
+
+  await expect(page.getByRole("status")).toContainText("Name is required.");
+  await expect(page.getByRole("status")).not.toContainText("postgres://");
+});
