@@ -34,7 +34,7 @@ Milestone 0 delivers a deployable AgentBay product skeleton only: an empty dashb
 - Deployment slice / issue #6 is complete after linking the empty scaffold to Vercel and creating an initial preview deployment.
 - Step 2 / issue #3 is complete after local Postgres, migration, database health, unit, build, and E2E validation.
 - Step 3 / issue #4 is complete after adding the AgentBay product shell, skeleton dashboard/agents/settings routes, desktop and mobile route smoke coverage, and preserving database-backed `/health`.
-- Commit reference: not available yet; builder handoff is uncommitted.
+- Commit reference: PR #11 head commit `0be50b8aec9285cb51f0b0658d239a86becf6c18` for issue #4 dashboard shell; review-fix follow-up commit records this progress note correction.
 - Next step: issue #5, deployment readiness and Milestone 0 acceptance documentation.
 
 ## Vercel Preview Deployment
