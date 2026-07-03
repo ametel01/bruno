@@ -17,7 +17,7 @@ Milestone 1 establishes durable agent model work only. The target outcome is tha
 - [x] Step 0 / issue #15: Create or restore this Milestone 1 progress tracker and preserve the Keep a Changelog baseline.
 - [x] Step 1 / issue #16: Add Milestone 1 agent persistence schema.
 - [x] Step 2 / issue #17: Create agents transactionally through the API.
-- [ ] Step 3 / issue #18: Add database-backed agent create and list page.
+- [x] Step 3 / issue #18: Add database-backed agent create and list page.
 - [ ] Step 4 / issue #19: Show persisted agents on dashboard and detail pages.
 - [ ] Step 5 / issue #20: Cover the Milestone 1 agent flow with E2E tests and docs.
 
@@ -25,9 +25,11 @@ Milestone 1 establishes durable agent model work only. The target outcome is tha
 
 - Step 0 / issue #15 was completed by PR #27 and merged as `5550b152275ad0c8986fae57add5992e4f49e632`.
 - Step 1 / issue #16 was completed by PR #28 and merged as `eff2c4fd880d6bca9dd1a61eb834b152639bf90f`.
-- Step 2 / issue #17 is implemented on branch `fix/issue-17-create-agent-api` and checker-validated.
-- Steps 3 through 5 remain blocked by the preceding Milestone 1 slices.
+- Step 2 / issue #17 was completed by PR #29 and merged as `11949b76c2aac7d5f1f31afb4a4deff1f37218b8`.
+- Step 3 / issue #18 is implemented on branch `fix/issue-18-agent-create-list-page` and builder-validated.
+- Steps 4 and 5 remain blocked by the preceding Milestone 1 slices.
 - Issue #17 adds transactional create-agent API behavior only. It does not add `/agents` UI behavior, dashboard database reads, detail reads, `GET /api/agents`, lifecycle controls, runtime behavior, seed data, auth, billing, Hermes, Telegram, logs, approvals, or runner behavior.
+- Issue #18 adds `/agents` create/list UI behavior only. It does not add dashboard database reads, detail reads, lifecycle controls, runtime behavior, seed data, auth, billing, Hermes, Telegram, logs, approvals, runner behavior, or soft-delete controls.
 
 ## Update Rules
 
@@ -80,9 +82,24 @@ Step 2 / issue #17 validation:
 - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54333/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 PORT=3017 bun run test:e2e`: passed, 14 tests.
 - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54333/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 PORT=3017 bun run verify`: passed.
 
+Step 3 / issue #18 validation:
+
+- Completion summary: replaced the `/agents` placeholder with a database-backed create/list workflow using the existing `POST /api/agents` create contract, supported template keys, stopped persisted rows, stable `/agents/:agentId` links, active-row filtering, and safe user-facing validation/persistence feedback.
+- Implementation commit: pending until final builder commit; final handoff records the pushed branch head.
+- Default Postgres port `54329` was occupied by unrelated stale container `agentbay-issue-5-postgres-1`; validation used isolated Postgres container `agentbay-issue-18-postgres` (`c088c3d6a4caa6f4f6bd56bfa339bae49b53e0d0d5e5d55e57af06459d5c7856`) on port `54335`.
+- `bun run format:check`: passed.
+- `bun run lint`: passed.
+- `bun run typecheck`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54335/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test`: passed, 8 files / 26 tests.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54335/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:migrate`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54335/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:health`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54335/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: passed.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54335/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 PORT=3018 bun run test:e2e`: passed, 18 tests.
+- `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54335/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 PORT=3018 bun run verify`: passed.
+
 ## Next Step
 
-Issue #17 is implemented and checker-validated. Begin Step 3 / issue #18 only after issue #17 is reviewed and merged.
+Issue #18 is implemented and builder-validated. Begin Step 4 / issue #19 only after issue #18 is reviewed and merged.
 
 ## Update Log
 
@@ -90,3 +107,4 @@ Issue #17 is implemented and checker-validated. Begin Step 3 / issue #18 only af
 - 2026-07-03: Restored the progress tracker as a Milestone 1-only baseline for issue #15 and kept changelog updates reserved for future functional changes.
 - 2026-07-03: Implemented issue #16 schema-only persistence foundation and validated the generated migration against isolated local Postgres on port `54330`.
 - 2026-07-03: Implemented issue #17 transactional create-agent API and validated it against isolated local Postgres on port `54333`.
+- 2026-07-03: Implemented issue #18 database-backed `/agents` create/list workflow and validated it against isolated local Postgres on port `54335`.

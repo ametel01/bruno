@@ -4,6 +4,7 @@ import {
   AgentPersistenceError,
   createAgentForDevelopmentUser,
 } from "@/src/server/agents/create-agent";
+import { listActiveAgentsForDevelopmentUser } from "@/src/server/agents/list-agents";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentEvents, agents, appMetadata, users } from "@/src/server/db/schema";
 
@@ -82,6 +83,67 @@ describe("create agent persistence", () => {
     await expectTableCount(connection, "agents", 0);
     await expectTableCount(connection, "agent_events", 0);
     await expectTableCount(connection, "app_metadata", 0);
+  });
+
+  it("lists active persisted agents with stopped status and stable links", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+
+    const [oldAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Inbox Agent",
+        templateKey: "inbox_triage_agent",
+        status: "stopped",
+        createdAt: new Date("2026-07-03T04:00:00.000Z"),
+      })
+      .returning();
+    const [newAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Research Agent",
+        templateKey: "research_agent",
+        status: "stopped",
+        createdAt: new Date("2026-07-03T05:00:00.000Z"),
+      })
+      .returning();
+    await connection.db.insert(agents).values({
+      userId,
+      name: "Deleted Agent",
+      templateKey: "github_issue_agent",
+      status: "stopped",
+      deletedAt: new Date("2026-07-03T06:00:00.000Z"),
+    });
+
+    const listed = await listActiveAgentsForDevelopmentUser({ createConnection: () => connection });
+
+    expect(oldAgent).toBeDefined();
+    expect(newAgent).toBeDefined();
+    expect(listed).toEqual([
+      {
+        id: newAgent?.id,
+        name: "Research Agent",
+        templateKey: "research_agent",
+        status: "stopped",
+        href: `/agents/${newAgent?.id}`,
+        createdAt: "2026-07-03T05:00:00.000Z",
+      },
+      {
+        id: oldAgent?.id,
+        name: "Inbox Agent",
+        templateKey: "inbox_triage_agent",
+        status: "stopped",
+        href: `/agents/${oldAgent?.id}`,
+        createdAt: "2026-07-03T04:00:00.000Z",
+      },
+    ]);
   });
 });
 
