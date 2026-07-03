@@ -8,7 +8,11 @@ import Home from "@/app/page";
 import SettingsPage from "@/app/settings/page";
 
 const mocks = vi.hoisted(() => ({
+  getActiveAgentForDevelopmentUser: vi.fn(),
   listActiveAgentsForDevelopmentUser: vi.fn(),
+  notFound: vi.fn(() => {
+    throw new Error("NEXT_NOT_FOUND");
+  }),
 }));
 
 vi.mock("@/src/server/agents/list-agents", async (importOriginal) => {
@@ -16,11 +20,13 @@ vi.mock("@/src/server/agents/list-agents", async (importOriginal) => {
 
   return {
     ...actual,
+    getActiveAgentForDevelopmentUser: mocks.getActiveAgentForDevelopmentUser,
     listActiveAgentsForDevelopmentUser: mocks.listActiveAgentsForDevelopmentUser,
   };
 });
 
 vi.mock("next/navigation", () => ({
+  notFound: mocks.notFound,
   useRouter: () => ({
     refresh: vi.fn(),
   }),
@@ -28,7 +34,9 @@ vi.mock("next/navigation", () => ({
 
 describe("product shell routes", () => {
   afterEach(() => {
+    mocks.getActiveAgentForDevelopmentUser.mockReset();
     mocks.listActiveAgentsForDevelopmentUser.mockReset();
+    mocks.notFound.mockClear();
   });
 
   it("renders the root product dashboard shell", () => {
@@ -37,14 +45,38 @@ describe("product shell routes", () => {
     expect(html).toContain("AgentBay");
     expect(html).toContain('href="/dashboard"');
     expect(html).toContain("Operational dashboard");
-    expect(html).toContain("No agents configured");
+    expect(html).toContain("No agent records");
   });
 
-  it("renders the dashboard empty operational state without fake records", () => {
-    const html = renderToStaticMarkup(createElement(DashboardPage));
+  it("renders the dashboard empty persisted-agent state without fake records", async () => {
+    mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([]);
+    const element = await DashboardPage();
+    const html = renderToStaticMarkup(element);
 
-    expect(html).toContain("No agents configured");
-    expect(html).toContain("No persisted agent table or records are queried");
+    expect(html).toContain("No agent records");
+    expect(html).toContain("Active persisted records are read from the database.");
+    expect(html).not.toContain("No persisted agent table or records are queried");
+  });
+
+  it("renders persisted agents on the dashboard with stopped status", async () => {
+    mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([
+      {
+        id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+        name: "Research Agent",
+        templateKey: "research_agent",
+        templateLabel: "Research Agent",
+        status: "stopped",
+        href: "/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774",
+        createdAt: "2026-07-03T05:00:00.000Z",
+      },
+    ]);
+    const element = await DashboardPage();
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Persisted agents");
+    expect(html).toContain("Research Agent");
+    expect(html).toContain("stopped");
+    expect(html).toContain('href="/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774"');
   });
 
   it("renders the agents empty database-backed list state and create form", async () => {
@@ -66,6 +98,7 @@ describe("product shell routes", () => {
         id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
         name: "Research Agent",
         templateKey: "research_agent",
+        templateLabel: "Research Agent",
         status: "stopped",
         href: "/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774",
         createdAt: "2026-07-03T05:00:00.000Z",
@@ -75,7 +108,6 @@ describe("product shell routes", () => {
     const html = renderToStaticMarkup(element);
 
     expect(html).toContain("Research Agent");
-    expect(html).toContain("research_agent");
     expect(html).toContain("stopped");
     expect(html).toContain("3e47bed7-b58f-4394-93c0-01e3d1e51774");
     expect(html).toContain('href="/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774"');
@@ -92,15 +124,54 @@ describe("product shell routes", () => {
     expect(html).not.toContain("Agent list failed.");
   });
 
-  it("renders placeholder detail for arbitrary agent IDs without a record lookup", async () => {
+  it("renders persisted agent detail records", async () => {
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce({
+      id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+      name: "Research Agent",
+      templateKey: "research_agent",
+      templateLabel: "Research Agent",
+      status: "stopped",
+      statusReason: "Waiting for setup.",
+      href: "/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774",
+      createdAt: "2026-07-03T05:00:00.000Z",
+      updatedAt: "2026-07-03T05:30:00.000Z",
+    });
     const element = await AgentDetailPage({
-      params: Promise.resolve({ agentId: "test-agent" }),
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
     });
     const html = renderToStaticMarkup(element);
 
-    expect(html).toContain("test-agent");
-    expect(html).toContain("No record lookup is performed");
-    expect(html).toContain("None in Milestone 0");
+    expect(html).toContain("Research Agent");
+    expect(html).toContain("stopped");
+    expect(html).toContain("research_agent");
+    expect(html).toContain("2026-07-03T05:00:00.000Z");
+    expect(html).toContain("2026-07-03T05:30:00.000Z");
+    expect(html).toContain("Waiting for setup.");
+    expect(html).not.toContain("No record lookup is performed");
+  });
+
+  it("renders not found when agent detail lookup has no active record", async () => {
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(null);
+
+    await expect(
+      AgentDetailPage({
+        params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+      }),
+    ).rejects.toThrow("NEXT_NOT_FOUND");
+    expect(mocks.notFound).toHaveBeenCalledOnce();
+  });
+
+  it("renders safe detail feedback when persisted agent detail cannot be loaded", async () => {
+    const { AgentDetailPersistenceError } = await import("@/src/server/agents/list-agents");
+    mocks.getActiveAgentForDevelopmentUser.mockRejectedValueOnce(new AgentDetailPersistenceError());
+    const element = await AgentDetailPage({
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+    });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Agent record could not be loaded.");
+    expect(html).not.toContain("postgres://");
+    expect(html).not.toContain("Agent detail failed.");
   });
 
   it("renders future-facing settings placeholders only", () => {

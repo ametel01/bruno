@@ -15,3 +15,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Milestone 1 Postgres schema migration for `users`, `agents`, `agent_events`, and the `agent_status` enum without enabling agent creation or lifecycle behavior.
 - `POST /api/agents` for validated transactional creation of stopped persistent agents and matching `agent.created` events.
 - Database-backed `/agents` create/list workflow for creating stopped persistent agents and showing refreshed active records with stable links.
+- Database-backed dashboard and agent detail read surfaces for active persisted agents, including refreshed stopped status visibility and not-found handling for missing or inactive detail records.

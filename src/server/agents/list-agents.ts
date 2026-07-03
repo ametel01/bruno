@@ -1,14 +1,29 @@
-import { desc, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agents } from "@/src/server/db/schema";
+
+const AGENT_TEMPLATE_LABELS = {
+  github_issue_agent: "GitHub Issue Agent",
+  inbox_triage_agent: "Inbox Triage Agent",
+  research_agent: "Research Agent",
+  social_content_agent: "Social Content Agent",
+} as const;
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type ListedAgent = {
   id: string;
   name: string;
   templateKey: string;
+  templateLabel: string;
   status: "stopped";
   href: string;
   createdAt: string;
+};
+
+export type AgentDetail = ListedAgent & {
+  statusReason: string | null;
+  updatedAt: string;
 };
 
 export type ListAgentsDependencies = {
@@ -19,6 +34,13 @@ export class AgentListPersistenceError extends Error {
   constructor() {
     super("Agent list failed.");
     this.name = "AgentListPersistenceError";
+  }
+}
+
+export class AgentDetailPersistenceError extends Error {
+  constructor() {
+    super("Agent detail failed.");
+    this.name = "AgentDetailPersistenceError";
   }
 }
 
@@ -45,6 +67,7 @@ export async function listActiveAgentsForDevelopmentUser(
       id: row.id,
       name: row.name,
       templateKey: row.templateKey,
+      templateLabel: getAgentTemplateLabel(row.templateKey),
       status: "stopped",
       href: `/agents/${row.id}`,
       createdAt: row.createdAt.toISOString(),
@@ -56,4 +79,62 @@ export async function listActiveAgentsForDevelopmentUser(
       await connection.close();
     }
   }
+}
+
+export async function getActiveAgentForDevelopmentUser(
+  agentId: string,
+  dependencies: ListAgentsDependencies = {},
+): Promise<AgentDetail | null> {
+  if (!isValidAgentId(agentId)) {
+    return null;
+  }
+
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    const [row] = await connection.db
+      .select({
+        id: agents.id,
+        name: agents.name,
+        templateKey: agents.templateKey,
+        status: agents.status,
+        statusReason: agents.statusReason,
+        createdAt: agents.createdAt,
+        updatedAt: agents.updatedAt,
+      })
+      .from(agents)
+      .where(and(eq(agents.id, agentId), isNull(agents.deletedAt)))
+      .limit(1);
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      id: row.id,
+      name: row.name,
+      templateKey: row.templateKey,
+      templateLabel: getAgentTemplateLabel(row.templateKey),
+      status: "stopped",
+      statusReason: row.statusReason,
+      href: `/agents/${row.id}`,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  } catch {
+    throw new AgentDetailPersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+function isValidAgentId(agentId: string): boolean {
+  return UUID_PATTERN.test(agentId);
+}
+
+function getAgentTemplateLabel(templateKey: string): string {
+  return AGENT_TEMPLATE_LABELS[templateKey as keyof typeof AGENT_TEMPLATE_LABELS] ?? templateKey;
 }

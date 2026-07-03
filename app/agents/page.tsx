@@ -46,7 +46,7 @@ export default async function AgentsPage() {
                         <td>
                           <Link href={agent.href}>{agent.name}</Link>
                         </td>
-                        <td>{agent.templateKey}</td>
+                        <td>{agent.templateLabel}</td>
                         <td>
                           <span className="status-pill">{agent.status}</span>
                         </td>
