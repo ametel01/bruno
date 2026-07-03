@@ -6,10 +6,14 @@ import {
 } from "@/src/server/agents/create-agent";
 import {
   FAKE_RUNNER_START_DELAY_MS,
+  RESTART_COMPLETED_EVENT_TYPE,
+  RESTART_REQUESTED_EVENT_TYPE,
   START_COMPLETED_EVENT_TYPE,
   START_REQUESTED_EVENT_TYPE,
   STOP_COMPLETED_EVENT_TYPE,
   STOP_REQUESTED_EVENT_TYPE,
+  restartAgentForDevelopmentUser,
+  settleDueFakeRunnerTransitions,
   settleDueStartingAgents,
   startAgentForDevelopmentUser,
   stopAgentForDevelopmentUser,
@@ -162,7 +166,7 @@ describe("create agent persistence", () => {
     ]);
   });
 
-  it("lists and loads settled persisted agent lifecycle statuses without hard-coded stopped values", async () => {
+  it("lists and loads settled start and restart lifecycle statuses without hard-coded stopped values", async () => {
     const [createdUser] = await connection.db
       .insert(users)
       .values({})
@@ -172,6 +176,7 @@ describe("create agent persistence", () => {
     const userId = createdUser?.userId ?? "";
     const now = new Date("2026-07-03T06:00:00.000Z");
     const dueStartingAt = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS - 1);
+    const dueRestartingAt = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS - 2);
 
     const [runningAgent] = await connection.db
       .insert(agents)
@@ -195,31 +200,66 @@ describe("create agent persistence", () => {
         updatedAt: dueStartingAt,
       })
       .returning();
+    const [restartingAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Due Restarting Agent",
+        templateKey: "social_content_agent",
+        status: "restarting",
+        statusReason: "Restart requested.",
+        createdAt: new Date("2026-07-03T05:30:00.000Z"),
+        updatedAt: dueRestartingAt,
+      })
+      .returning();
 
     expect(runningAgent).toBeDefined();
     expect(startingAgent).toBeDefined();
+    expect(restartingAgent).toBeDefined();
 
     const listed = await listActiveAgentsForDevelopmentUser({ createConnection: () => connection });
-    const detail = await getActiveAgentForDevelopmentUser(startingAgent?.id ?? "", {
+    const startingDetail = await getActiveAgentForDevelopmentUser(startingAgent?.id ?? "", {
       createConnection: () => connection,
     });
-    const completedEvents = await connection.db
+    const restartingDetail = await getActiveAgentForDevelopmentUser(restartingAgent?.id ?? "", {
+      createConnection: () => connection,
+    });
+    const startCompletedEvents = await connection.db
       .select()
       .from(agentEvents)
       .where(eq(agentEvents.type, START_COMPLETED_EVENT_TYPE));
+    const restartCompletedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.type, RESTART_COMPLETED_EVENT_TYPE));
 
     expect(listed.map((agent) => [agent.name, agent.status])).toEqual([
+      ["Due Restarting Agent", "running"],
       ["Due Starting Agent", "running"],
       ["Already Running Agent", "running"],
     ]);
-    expect(detail?.status).toBe("running");
-    expect(completedEvents).toHaveLength(1);
-    expect(completedEvents[0]).toMatchObject({
+    expect(startingDetail?.status).toBe("running");
+    expect(restartingDetail).toMatchObject({
+      status: "running",
+      statusReason: "Fake runner is running.",
+    });
+    expect(startCompletedEvents).toHaveLength(1);
+    expect(startCompletedEvents[0]).toMatchObject({
       agentId: startingAgent?.id,
       actorUserId: userId,
       type: START_COMPLETED_EVENT_TYPE,
       metadata: {
         fromStatus: "starting",
+        toStatus: "running",
+      },
+    });
+    expect(restartCompletedEvents).toHaveLength(1);
+    expect(restartCompletedEvents[0]).toMatchObject({
+      agentId: restartingAgent?.id,
+      actorUserId: userId,
+      type: RESTART_COMPLETED_EVENT_TYPE,
+      metadata: {
+        fromStatus: "restarting",
         toStatus: "running",
       },
     });
@@ -659,6 +699,445 @@ describe("create agent persistence", () => {
     expect(invalidStatusResponse.status).toBe(409);
     expect(await invalidStatusResponse.json()).toMatchObject({
       error: { code: "invalid_agent_status", status: "running" },
+    });
+
+    const eventCount = await countRows(connection, "agent_events");
+
+    expect(eventCount).toBe(1);
+  });
+
+  it("restarts running agents by persisting restarting status and one requested event", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const now = new Date("2026-07-03T06:00:00.000Z");
+    const [runningAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Running Restart Agent",
+        templateKey: "research_agent",
+        status: "running",
+        statusReason: "Fake runner is running.",
+        createdAt: new Date("2026-07-03T05:00:00.000Z"),
+        updatedAt: new Date("2026-07-03T05:30:00.000Z"),
+      })
+      .returning();
+
+    expect(runningAgent).toBeDefined();
+
+    const result = await restartAgentForDevelopmentUser(runningAgent?.id ?? "", {
+      createConnection: () => connection,
+      now: () => now,
+    });
+
+    const [persistedAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, runningAgent?.id ?? ""))
+      .limit(1);
+    const persistedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, runningAgent?.id ?? ""));
+
+    expect(result).toMatchObject({
+      ok: true,
+      agent: {
+        id: runningAgent?.id,
+        status: "restarting",
+        statusReason: "Restart requested.",
+        updatedAt: "2026-07-03T06:00:00.000Z",
+      },
+      event: {
+        type: RESTART_REQUESTED_EVENT_TYPE,
+      },
+    });
+    expect(persistedAgent).toMatchObject({
+      status: "restarting",
+      statusReason: "Restart requested.",
+      updatedAt: now,
+    });
+    expect(persistedEvents).toHaveLength(1);
+    expect(persistedEvents[0]).toMatchObject({
+      actorUserId: userId,
+      type: RESTART_REQUESTED_EVENT_TYPE,
+      metadata: {
+        fromStatus: "running",
+        toStatus: "restarting",
+      },
+    });
+  });
+
+  it("settles due restarts to running once without duplicate completed events", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const now = new Date("2026-07-03T06:00:00.000Z");
+    const dueRestartingAt = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS - 1);
+    const pendingRestartingAt = new Date("2099-07-03T06:00:00.000Z");
+    const [dueAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Due Restart Agent",
+        templateKey: "research_agent",
+        status: "restarting",
+        statusReason: "Restart requested.",
+        updatedAt: dueRestartingAt,
+      })
+      .returning();
+    const [pendingAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Pending Restart Agent",
+        templateKey: "research_agent",
+        status: "restarting",
+        statusReason: "Restart requested.",
+        updatedAt: pendingRestartingAt,
+      })
+      .returning();
+
+    expect(dueAgent).toBeDefined();
+    expect(pendingAgent).toBeDefined();
+
+    await expect(
+      settleDueFakeRunnerTransitions({ createConnection: () => connection, now: () => now }),
+    ).resolves.toBe(1);
+    await expect(
+      settleDueFakeRunnerTransitions({ createConnection: () => connection, now: () => now }),
+    ).resolves.toBe(0);
+    await getActiveAgentForDevelopmentUser(dueAgent?.id ?? "", {
+      createConnection: () => connection,
+    });
+    await listActiveAgentsForDevelopmentUser({ createConnection: () => connection });
+
+    const persistedAgents = await connection.db.select().from(agents).orderBy(agents.name);
+    const persistedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.type, RESTART_COMPLETED_EVENT_TYPE));
+
+    expect(persistedAgents).toEqual([
+      expect.objectContaining({
+        id: dueAgent?.id,
+        status: "running",
+        statusReason: "Fake runner is running.",
+        updatedAt: now,
+      }),
+      expect.objectContaining({
+        id: pendingAgent?.id,
+        status: "restarting",
+        statusReason: "Restart requested.",
+        updatedAt: pendingRestartingAt,
+      }),
+    ]);
+    expect(persistedEvents).toHaveLength(1);
+    expect(persistedEvents[0]).toMatchObject({
+      agentId: dueAgent?.id,
+      actorUserId: userId,
+      type: RESTART_COMPLETED_EVENT_TYPE,
+      metadata: {
+        fromStatus: "restarting",
+        toStatus: "running",
+      },
+    });
+  });
+
+  it("settles due start and restart transitions before evaluating restart", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const now = new Date("2026-07-03T06:00:00.000Z");
+    const dueAt = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS - 1);
+    const [startingAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Due Start Before Restart Agent",
+        templateKey: "research_agent",
+        status: "starting",
+        statusReason: "Start requested.",
+        updatedAt: dueAt,
+      })
+      .returning();
+    const [restartingAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Due Restart Before Restart Agent",
+        templateKey: "research_agent",
+        status: "restarting",
+        statusReason: "Restart requested.",
+        updatedAt: dueAt,
+      })
+      .returning();
+
+    expect(startingAgent).toBeDefined();
+    expect(restartingAgent).toBeDefined();
+
+    const result = await restartAgentForDevelopmentUser(restartingAgent?.id ?? "", {
+      createConnection: () => connection,
+      now: () => now,
+    });
+
+    const persistedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, restartingAgent?.id ?? ""));
+    const [persistedStartingAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, startingAgent?.id ?? ""))
+      .limit(1);
+    const [persistedRestartingAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, restartingAgent?.id ?? ""))
+      .limit(1);
+
+    expect(result).toMatchObject({
+      ok: true,
+      agent: {
+        id: restartingAgent?.id,
+        status: "restarting",
+      },
+    });
+    expect(persistedStartingAgent).toMatchObject({
+      status: "running",
+      statusReason: "Fake runner is running.",
+    });
+    expect(persistedRestartingAgent).toMatchObject({
+      status: "restarting",
+      statusReason: "Restart requested.",
+      updatedAt: now,
+    });
+    expect(persistedEvents.map((event) => event.type).sort()).toEqual([
+      RESTART_COMPLETED_EVENT_TYPE,
+      RESTART_REQUESTED_EVENT_TYPE,
+    ]);
+  });
+
+  it("rejects malformed, missing, absent, soft-deleted, and non-running restarts without mutation or events", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const now = new Date("2026-07-03T06:00:00.000Z");
+    const pendingTransitionAt = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS + 1);
+    const invalidStatuses: AgentLifecycleStatus[] = [
+      "idle",
+      "stopped",
+      "starting",
+      "restarting",
+      "error",
+      "deleting",
+    ];
+    const invalidAgents: { id: string; status: AgentLifecycleStatus }[] = [];
+
+    for (const status of invalidStatuses) {
+      const [agent] = await connection.db
+        .insert(agents)
+        .values({
+          userId,
+          name: `${status} Restart Agent`,
+          templateKey: "research_agent",
+          status,
+          statusReason: `${status} preserved reason.`,
+          createdAt: new Date("2026-07-03T05:00:00.000Z"),
+          updatedAt: status === "starting" || status === "restarting" ? pendingTransitionAt : now,
+        })
+        .returning({ id: agents.id, status: agents.status });
+
+      expect(agent).toBeDefined();
+
+      if (agent) {
+        invalidAgents.push(agent);
+      }
+    }
+
+    const [deletedAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Deleted Restart Agent",
+        templateKey: "research_agent",
+        status: "running",
+        statusReason: "Deleted preserved reason.",
+        updatedAt: now,
+        deletedAt: now,
+      })
+      .returning();
+
+    expect(deletedAgent).toBeDefined();
+
+    const beforeAgents = await connection.db.select().from(agents).orderBy(agents.name);
+
+    await expect(
+      restartAgentForDevelopmentUser("", { createConnection: () => connection, now: () => now }),
+    ).resolves.toEqual({ ok: false, reason: "missing_agent_id" });
+    await expect(
+      restartAgentForDevelopmentUser("not-a-uuid", {
+        createConnection: () => connection,
+        now: () => now,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "malformed_agent_id" });
+    await expect(
+      restartAgentForDevelopmentUser("00000000-0000-4000-8000-000000000000", {
+        createConnection: () => connection,
+        now: () => now,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "agent_not_found" });
+    await expect(
+      restartAgentForDevelopmentUser(deletedAgent?.id ?? "", {
+        createConnection: () => connection,
+        now: () => now,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "agent_not_found" });
+
+    for (const agent of invalidAgents) {
+      await expect(
+        restartAgentForDevelopmentUser(agent.id, {
+          createConnection: () => connection,
+          now: () => now,
+        }),
+      ).resolves.toEqual({ ok: false, reason: "invalid_status", status: agent.status });
+    }
+
+    const afterAgents = await connection.db.select().from(agents).orderBy(agents.name);
+    const persistedEvents = await connection.db.select().from(agentEvents);
+
+    expect(afterAgents).toEqual(beforeAgents);
+    expect(persistedEvents).toHaveLength(0);
+  });
+
+  it("exposes the restart route success, validation, not-found, deleted, invalid status, and event behavior", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const [runningAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Route Restart Agent",
+        templateKey: "research_agent",
+        status: "running",
+        statusReason: "Fake runner is running.",
+      })
+      .returning();
+    const [stoppedAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Stopped Restart Route Agent",
+        templateKey: "research_agent",
+        status: "stopped",
+      })
+      .returning();
+    const [deletedAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Deleted Restart Route Agent",
+        templateKey: "research_agent",
+        status: "running",
+        deletedAt: new Date("2026-07-03T06:00:00.000Z"),
+      })
+      .returning();
+
+    expect(runningAgent).toBeDefined();
+    expect(stoppedAgent).toBeDefined();
+    expect(deletedAgent).toBeDefined();
+    const runningAgentId = runningAgent?.id ?? "";
+    const stoppedAgentId = stoppedAgent?.id ?? "";
+    const deletedAgentId = deletedAgent?.id ?? "";
+
+    const { POST } = await import("@/app/api/agents/[agentId]/actions/restart/route");
+    const successResponse = await POST(new Request("http://localhost/api/agents/restart"), {
+      params: Promise.resolve({ agentId: runningAgentId }),
+    });
+    const successBody = await successResponse.json();
+
+    expect(successResponse.status).toBe(202);
+    expect(successBody).toMatchObject({
+      ok: true,
+      agent: {
+        id: runningAgent?.id,
+        status: "restarting",
+        statusReason: "Restart requested.",
+      },
+      event: { type: RESTART_REQUESTED_EVENT_TYPE },
+    });
+
+    const persistedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, runningAgentId));
+
+    expect(persistedEvents).toHaveLength(1);
+    expect(persistedEvents[0]).toMatchObject({
+      type: RESTART_REQUESTED_EVENT_TYPE,
+      metadata: {
+        fromStatus: "running",
+        toStatus: "restarting",
+      },
+    });
+
+    const missingIdResponse = await POST(new Request("http://localhost/api/agents/restart"), {
+      params: Promise.resolve({}),
+    });
+    const malformedResponse = await POST(new Request("http://localhost/api/agents/restart"), {
+      params: Promise.resolve({ agentId: "not-a-uuid" }),
+    });
+    const missingAgentResponse = await POST(new Request("http://localhost/api/agents/restart"), {
+      params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000000" }),
+    });
+    const deletedResponse = await POST(new Request("http://localhost/api/agents/restart"), {
+      params: Promise.resolve({ agentId: deletedAgentId }),
+    });
+    const invalidStatusResponse = await POST(new Request("http://localhost/api/agents/restart"), {
+      params: Promise.resolve({ agentId: stoppedAgentId }),
+    });
+
+    expect(missingIdResponse.status).toBe(400);
+    expect(await missingIdResponse.json()).toMatchObject({
+      error: { code: "validation_failed" },
+    });
+    expect(malformedResponse.status).toBe(400);
+    expect(await malformedResponse.json()).toMatchObject({
+      error: { code: "validation_failed" },
+    });
+    expect(missingAgentResponse.status).toBe(404);
+    expect(await missingAgentResponse.json()).toMatchObject({
+      error: { code: "agent_not_found" },
+    });
+    expect(deletedResponse.status).toBe(404);
+    expect(await deletedResponse.json()).toMatchObject({
+      error: { code: "agent_not_found" },
+    });
+    expect(invalidStatusResponse.status).toBe(409);
+    expect(await invalidStatusResponse.json()).toMatchObject({
+      error: { code: "invalid_agent_status", status: "stopped" },
     });
 
     const eventCount = await countRows(connection, "agent_events");
