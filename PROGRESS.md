@@ -124,7 +124,7 @@ Step 4 / issue #19 validation:
 Step 5 / issue #20 validation:
 
 - Completion summary: strengthened the final Milestone 1 Playwright smoke path to create exactly named `Research Agent`, select `research_agent`, verify stopped persisted visibility on `/agents`, `/dashboard`, and the generated detail link after refresh, preserve missing/malformed/soft-deleted not-found coverage, add ID-scoped E2E cleanup for test-created agent rows/events, refresh README Milestone 1 local DB/API/UI docs, and remove stale Milestone 0-only copy.
-- Implementation commit: pending until branch commit; final handoff records the branch head.
+- Implementation commit: `52f08a87ac092e36d0ad9fe18be66132907c016e`.
 - Default Postgres port `54329` was occupied by unrelated stale container `agentbay-issue-5-postgres-1`; validation used isolated Postgres container `agentbay-issue-20-postgres` (`e1a621e2a29588c2dab89408382a5110541d17078427ce8a5a5d3ff07ac31fee`) on port `54338`.
 - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54338/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run format:check`: passed.
 - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54338/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run lint`: passed.
