@@ -22,6 +22,36 @@ Run the current quality gate:
 bun run verify
 ```
 
+## Local Database
+
+Start the local Postgres service:
+
+```bash
+docker compose up -d postgres
+```
+
+Apply infrastructure migrations:
+
+```bash
+bun run db:migrate
+```
+
+Check database-backed health from the command line:
+
+```bash
+bun run db:health
+```
+
+The local default database URL is:
+
+```text
+postgres://agentbay:agentbay@127.0.0.1:54329/agentbay
+```
+
+Set `DATABASE_URL` and `NEXT_PUBLIC_APP_URL` in local or deployment environments. The
+application validates both at runtime and returns a non-2xx `/health` response when the database
+configuration is missing, malformed, or unreachable.
+
 ## Vercel Preview Deployment
 
 The initial empty-app preview was deployed from the authenticated local Vercel CLI account `ametel01` to scope `ametel01s-projects` and project `agentbay`.

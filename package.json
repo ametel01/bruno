@@ -5,17 +5,22 @@
   "type": "module",
   "scripts": {
     "build": "next build",
+    "db:generate": "drizzle-kit generate",
+    "db:health": "DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} bun scripts/db-health.ts",
+    "db:migrate": "DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} drizzle-kit migrate",
     "dev": "next dev",
-    "format": "biome format --write app tests app/globals.css *.ts *.json",
-    "format:check": "biome ci --linter-enabled=false --assist-enabled=false app tests app/globals.css *.ts *.json",
-    "lint": "biome lint app tests *.ts *.json",
+    "format": "biome format --write app src scripts tests app/globals.css *.ts *.json",
+    "format:check": "biome ci --linter-enabled=false --assist-enabled=false app src scripts tests app/globals.css *.ts *.json",
+    "lint": "biome lint app src scripts tests *.ts *.json",
     "test": "vitest run",
-    "test:e2e": "playwright test",
+    "test:e2e": "DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} playwright test",
     "typecheck": "tsc --noEmit",
     "verify": "bun run format:check && bun run lint && bun run typecheck && bun run test && bun run build && bun run test:e2e"
   },
   "dependencies": {
+    "drizzle-orm": "^0.45.2",
     "next": "16.2.10",
+    "postgres": "^3.4.9",
     "react": "19.2.7",
     "react-dom": "19.2.7"
   },
@@ -26,6 +31,7 @@
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.3",
+    "drizzle-kit": "^0.31.10",
     "typescript": "6.0.3",
     "vitest": "4.1.9"
   }

@@ -22,7 +22,7 @@ Milestone 0 delivers a deployable AgentBay product skeleton only: an empty dashb
 - [x] Step 0 / issue #1: Progress and changelog tracking setup.
 - [x] Step 1 / issue #2: Project scaffold and quality gates setup.
 - [x] Deployment slice / issue #6: Initial Vercel preview deployment for the empty app.
-- [ ] Step 2: Database foundation and health check.
+- [x] Step 2 / issue #3: Database foundation and health check.
 - [ ] Step 3: Dashboard shell and Milestone 0 routes.
 - [ ] Step 4: Deployment readiness and Milestone 0 acceptance.
 
@@ -32,8 +32,9 @@ Milestone 0 delivers a deployable AgentBay product skeleton only: an empty dashb
 - Step 0 / issue #1 is complete after local file-content validation.
 - Step 1 / issue #2 is complete after scaffold, build, unit, and E2E validation.
 - Deployment slice / issue #6 is complete after linking the empty scaffold to Vercel and creating an initial preview deployment.
+- Step 2 / issue #3 is complete after local Postgres, migration, database health, unit, build, and E2E validation.
 - Commit reference: not available yet; builder handoff is uncommitted.
-- Next step: issue #3, database foundation and health check.
+- Next step: issue #4, dashboard shell and Milestone 0 routes.
 
 ## Vercel Preview Deployment
 
@@ -90,8 +91,23 @@ Deployment slice / issue #6 validation:
 - Second `bun run verify`: passed, including format check, lint, typecheck, unit test, Next.js production build, and Playwright E2E smoke test.
 - Final `bun run verify` after the last progress-note edit: passed with the same gate coverage.
 
+Step 2 / issue #3 validation:
+
+- `docker compose up -d postgres`: passed; the first run pulled `postgres:17-alpine`, created the `agentbay-issue-3-postgres-1` container, and started it.
+- Postgres container health polling: passed after correcting the local shell polling variable name; container status was `healthy`.
+- `bun run db:migrate`: passed and applied the infrastructure-only Drizzle migration for `app_metadata`.
+- `bun run db:health`: passed and returned JSON with `status: "ok"`, `database: "reachable"`, and an ISO timestamp.
+- `bun run format:check`: passed.
+- `bun run lint`: passed.
+- `bun run typecheck`: passed after tightening env validator and health-check parameter types.
+- `bun run test`: passed, 4 unit test files and 7 tests covering root page, env validation, database health failure mapping, and `/health` invalid-env JSON.
+- `bun run build`: passed with `/health` listed as a dynamic server route.
+- `bun run test:e2e`: passed, 2 Chromium route tests covering the root scaffold and reachable database-backed `/health`.
+- `bun run verify`: passed after the final progress update; format check, lint, typecheck, unit tests, production build, and Playwright E2E all passed.
+
 ## Update Log
 
 - 2026-07-03: Created the Milestone 0 progress tracker and Keep a Changelog baseline for issue #1. Step 0 validation passed and issue #2 is the next implementation slice.
 - 2026-07-03: Completed issue #2 by adding a Bun-managed Next.js App Router scaffold with TypeScript, Biome, Vitest, Playwright, unit/E2E smoke coverage, and a minimal root route pointing to `/dashboard`.
 - 2026-07-03: Completed issue #6 by linking the empty scaffold to Vercel project `ametel01s-projects/agentbay` and creating the initial preview deployment at `https://agentbay-9wi2xvhbh-ametel01s-projects.vercel.app`.
+- 2026-07-03: Completed issue #3 by adding local Postgres support, infrastructure-only Drizzle migration tooling, required environment validation, and an operator-visible database-backed `/health` endpoint.

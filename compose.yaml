@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: agentbay
+      POSTGRES_PASSWORD: agentbay
+      POSTGRES_USER: agentbay
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentbay -d agentbay"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "54329:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:

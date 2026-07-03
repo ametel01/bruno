@@ -10,3 +10,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Initial AgentBay root app page that points users toward the future `/dashboard` route.
+- Database-backed `/health` endpoint and local Postgres migration tooling for operator checks.
