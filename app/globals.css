@@ -393,22 +393,56 @@ h2 {
   outline: 3px solid var(--accent-soft);
 }
 
-.primary-button {
+.primary-button,
+.secondary-button {
   min-height: 42px;
   border: 1px solid var(--accent);
   border-radius: 6px;
-  background: var(--accent);
-  color: #ffffff;
   font-weight: 800;
   padding: 0 14px;
+}
+
+.primary-button {
+  background: var(--accent);
+  color: #ffffff;
 }
 
 .primary-button:hover {
   background: var(--accent-strong);
 }
 
-.primary-button:disabled {
+.secondary-button {
+  background: var(--panel);
+  color: var(--accent-strong);
+}
+
+.secondary-button:hover {
+  border-color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
   opacity: 0.68;
+  cursor: not-allowed;
+}
+
+.start-agent-action {
+  display: flex;
+  min-width: 128px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-message {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.action-message.error {
+  color: #7d291e;
 }
 
 .form-message,

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
+import { StartAgentButton } from "@/app/agents/_components/start-agent-button";
 import {
   AgentDetailPersistenceError,
   getActiveAgentForDevelopmentUser,
@@ -44,7 +45,7 @@ export default async function AgentDetailPage({ params }: AgentDetailPageProps) 
       active="agents"
       eyebrow="Agent detail"
       title={agent.name}
-      description="This Milestone 1 detail view reads a persisted active agent record without lifecycle controls, logs, approvals, or runner state."
+      description="This detail view reads the current persisted lifecycle status for an active agent record without real runner processes, logs, approvals, or config editing."
     >
       <div className="content-grid">
         <PlaceholderPanel title="Agent record">
@@ -53,6 +54,12 @@ export default async function AgentDetailPage({ params }: AgentDetailPageProps) 
               <dt>Status</dt>
               <dd>
                 <span className="status-pill">{agent.status}</span>
+              </dd>
+            </div>
+            <div>
+              <dt>Actions</dt>
+              <dd>
+                <StartAgentButton agentId={agent.id} status={agent.status} />
               </dd>
             </div>
             <div>

@@ -1,4 +1,9 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
+import {
+  type AgentLifecycleStatus,
+  isValidAgentId,
+  settleDueStartingAgents,
+} from "@/src/server/agents/lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agents } from "@/src/server/db/schema";
 
@@ -9,14 +14,12 @@ const AGENT_TEMPLATE_LABELS = {
   social_content_agent: "Social Content Agent",
 } as const;
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 export type ListedAgent = {
   id: string;
   name: string;
   templateKey: string;
   templateLabel: string;
-  status: "stopped";
+  status: AgentLifecycleStatus;
   href: string;
   createdAt: string;
 };
@@ -51,6 +54,8 @@ export async function listActiveAgentsForDevelopmentUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
+    await settleDueStartingAgents({ createConnection: () => connection });
+
     const rows = await connection.db
       .select({
         id: agents.id,
@@ -68,7 +73,7 @@ export async function listActiveAgentsForDevelopmentUser(
       name: row.name,
       templateKey: row.templateKey,
       templateLabel: getAgentTemplateLabel(row.templateKey),
-      status: "stopped",
+      status: row.status,
       href: `/agents/${row.id}`,
       createdAt: row.createdAt.toISOString(),
     }));
@@ -93,6 +98,8 @@ export async function getActiveAgentForDevelopmentUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
+    await settleDueStartingAgents({ createConnection: () => connection });
+
     const [row] = await connection.db
       .select({
         id: agents.id,
@@ -116,7 +123,7 @@ export async function getActiveAgentForDevelopmentUser(
       name: row.name,
       templateKey: row.templateKey,
       templateLabel: getAgentTemplateLabel(row.templateKey),
-      status: "stopped",
+      status: row.status,
       statusReason: row.statusReason,
       href: `/agents/${row.id}`,
       createdAt: row.createdAt.toISOString(),
@@ -129,10 +136,6 @@ export async function getActiveAgentForDevelopmentUser(
       await connection.close();
     }
   }
-}
-
-function isValidAgentId(agentId: string): boolean {
-  return UUID_PATTERN.test(agentId);
 }
 
 function getAgentTemplateLabel(templateKey: string): string {
