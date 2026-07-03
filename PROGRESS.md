@@ -103,7 +103,7 @@ Step 3 / issue #18 validation:
 Step 4 / issue #19 validation:
 
 - Completion summary: added database-backed dashboard reads for active persisted agents, preserved the empty state, replaced arbitrary detail placeholders with active persisted record lookups, rendered name/status/template/timestamps/status reason when present, and routed missing, malformed, or soft-deleted detail IDs to the Next not-found state.
-- Implementation commit: pending until branch commit is created.
+- Implementation commit: `d0259648b27c29a63483d7e49ffdefc17c770efc`.
 - Default Postgres port `54329` was occupied by unrelated stale container `agentbay-issue-5-postgres-1`; validation used isolated Postgres container `agentbay-issue-19-postgres` (`d081c0435689ff918f8a85bc204e7fc7db3950d516b8b6cb0077035b7f0d32e1`) on port `54336`.
 - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54336/agentbay bun run db:migrate`: passed.
 - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54336/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/root-page.test.tsx`: passed, 10 tests.
@@ -118,6 +118,7 @@ Step 4 / issue #19 validation:
 - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54336/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 PORT=3019 bun run test:e2e`: passed, 18 tests. Browser coverage included creating an agent, refreshing `/agents`, visiting and refreshing `/dashboard`, opening and refreshing the persisted detail route, and missing/malformed/soft-deleted detail not-found assertions.
 - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54336/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 PORT=3020 bun run verify`: passed.
 - Tracking-doc freshness check: `PROGRESS.md` and `CHANGELOG.md` were updated after validation with issue #19 status, validation evidence, current next step, and changelog behavior summary.
+- `git diff --check`: passed after tracking-doc updates.
 
 ## Next Step
 
