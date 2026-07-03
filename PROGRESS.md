@@ -85,7 +85,7 @@ Step 2 / issue #17 validation:
 Step 3 / issue #18 validation:
 
 - Completion summary: replaced the `/agents` placeholder with a database-backed create/list workflow using the existing `POST /api/agents` create contract, supported template keys, stopped persisted rows, stable `/agents/:agentId` links, active-row filtering, and safe user-facing validation/persistence feedback.
-- Implementation commit: pending until final builder commit; final handoff records the pushed branch head.
+- Implementation commit: `da9eb299c98d308c998954bd2b6b0bb0ebaf4b2e`.
 - Default Postgres port `54329` was occupied by unrelated stale container `agentbay-issue-5-postgres-1`; validation used isolated Postgres container `agentbay-issue-18-postgres` (`c088c3d6a4caa6f4f6bd56bfa339bae49b53e0d0d5e5d55e57af06459d5c7856`) on port `54335`.
 - `bun run format:check`: passed.
 - `bun run lint`: passed.
