@@ -25,7 +25,7 @@ Milestone 1 establishes durable agent model work only. The target outcome is tha
 
 - Step 0 / issue #15 was completed by PR #27 and merged as `5550b152275ad0c8986fae57add5992e4f49e632`.
 - Step 1 / issue #16 was completed by PR #28 and merged as `eff2c4fd880d6bca9dd1a61eb834b152639bf90f`.
-- Step 2 / issue #17 is implemented on branch `fix/issue-17-create-agent-api` and ready for independent checker validation.
+- Step 2 / issue #17 is implemented on branch `fix/issue-17-create-agent-api` and checker-validated.
 - Steps 3 through 5 remain blocked by the preceding Milestone 1 slices.
 - Issue #17 adds transactional create-agent API behavior only. It does not add `/agents` UI behavior, dashboard database reads, detail reads, `GET /api/agents`, lifecycle controls, runtime behavior, seed data, auth, billing, Hermes, Telegram, logs, approvals, or runner behavior.
 
@@ -68,7 +68,7 @@ Step 1 / issue #16 validation:
 Step 2 / issue #17 validation:
 
 - Completion summary: added `POST /api/agents` with safe validation responses, stable template keys, deterministic local development user reuse through `app_metadata`, transactional `agents` and `agent_events` inserts, and rollback coverage for event-write failure.
-- Implementation commit: pending before final builder commit.
+- Implementation commit: `1aefe6d3ee11d935dc5a1e24f60352467258ff24`.
 - Default Postgres port `54329` was occupied by unrelated stale container `agentbay-issue-5-postgres-1`; validation used isolated Postgres container `agentbay-issue-17-postgres` on port `54333`.
 - `bun run format:check`: passed.
 - `bun run lint`: passed.
@@ -82,7 +82,7 @@ Step 2 / issue #17 validation:
 
 ## Next Step
 
-Commit and push `fix/issue-17-create-agent-api`, then hand issue #17 to checker-agent for independent validation. After issue #17 is checked, reviewed, and merged, begin Step 3 / issue #18 to add the database-backed agent create and list page.
+Issue #17 is implemented and checker-validated. Begin Step 3 / issue #18 only after issue #17 is reviewed and merged.
 
 ## Update Log
 
