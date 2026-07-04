@@ -432,9 +432,9 @@ Milestone 4 is complete when:
 - `GET /api/agents/:agentId/events` returns safe per-agent event pages with opaque cursor pagination.
 - The dashboard shows a compact latest activity feed across agents.
 - The detail page shows per-agent activity with event time, type, message, actor, metadata summary, empty state, error state, and pagination.
-- `GET /api/agents/:agentId/logs` returns safe active-agent scoped runtime logs with numeric `after` pagination and pull-driven deterministic simulator generation for running agents.
+- `GET /api/agents/:agentId/logs` returns safe active-agent scoped runtime logs with numeric `after` pagination, including persisted local-runner stdout/stderr process logs.
 - The detail page shows runtime log loading, empty, loaded, and safe error states without exposing internal row names, database URLs, stack traces, credentials, or raw SQL/driver errors.
-- Browser coverage proves detail Start eventually shows `Checking task queue...`, `No pending tasks.`, `Heartbeat OK.`, and `Memory loaded.`
+- Browser coverage proves local-runner stdout/stderr process logs are visible in dashboard and detail views while staying scoped to active agents.
 - Browser coverage proves runtime logs stay scoped to the selected agent, visible rows remain readable after Stop, polling/generation does not append after Stop or Simulate error, and `agent.error` appears in the detail activity feed.
 - Browser coverage proves create and lifecycle activity appears in both the dashboard latest activity feed and the agent detail activity feed.
 - Soft delete removes agents from `/agents`, `/dashboard`, and active detail reads while preserving the database row and prior events.
