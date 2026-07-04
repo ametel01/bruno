@@ -2,15 +2,15 @@
 
 ## Milestone 6 Agent Config Editor
 
-- Status: complete for #54; #56/#57 remain open
+- Status: complete for #54/#56; #57 remains open
 - Source plan: `docs/MILESTONES.md` Milestone 6
-- Tracking issue: #54
-- Current branch: `codex/issue-54-agent-config-defaults`
+- Tracking issue: #56
+- Current branch: `codex/issue-56-config-update-api`
 
 ### Issue Checklist
 
 - [x] #54 Add persistent agent config defaults
-- [ ] #56 Add validated config update API
+- [x] #56 Add validated config update API
 - [ ] #57 Add agent detail config editor
 - Later Milestone 6 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 6 work.
 
@@ -23,8 +23,39 @@
 - [x] #54 keeps defaults generic and non-secret: provider/model are `not_configured`, spend is `0` cents, schedule is manual, cron is `null`, timezone is `UTC`, and no API key, token, password, or secret storage is added.
 - [x] #54 updates E2E cleanup to delete `agent_configs` before hard-deleting test `agents`, which is necessary because the new config table has a one-to-one foreign key to agents.
 - [x] #54 does not add a config editor UI, config update API, `config.updated` events, template metadata/snapshots, real model/provider/Hermes/runner integrations, or secret handling.
+- [x] #56 adds `PATCH /api/agents/:agentId` for active, non-deleted agents with validated partial updates for `name`, `systemPrompt`, `modelProvider`, `modelName`, `maxDailySpend`, `scheduleMode`, `scheduleCron`, and `timezone`.
+- [x] #56 normalizes accepted max daily spend dollar input to integer cents, rejects zero, negative, malformed, non-finite, non-cent, and values above the local `$1000.00` cap before mutation.
+- [x] #56 preserves the persisted schedule contract: manual schedules store `scheduleCron: null`, cron schedules require a valid five-field cron expression, and timezones must be valid IANA timezone names.
+- [x] #56 rejects secret-like keys recursively before mutation and keeps config update event metadata to safe changed-field display values.
+- [x] #56 updates `agents.name` and `agent_configs` atomically, writes exactly one `config.updated` event for effective changes, returns deterministic HTTP 200 no-op responses with `event: null`, and does not write runtime logs.
+- [x] #56 does not add a config editor UI, optimistic UI, template metadata/snapshots, secret storage, real provider/model validation, Hermes config generation, runner/provisioning behavior, billing, auth, or external integrations.
 
 ### Validation
+
+#### #56
+
+- Date: 2026-07-04
+- Environment:
+  - Default Postgres port `54329` was occupied by existing Docker container `agentbay-postgres-1`.
+  - Isolated database: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54356/agentbay`.
+  - Isolated app/test server: `PORT=3056`, `PLAYWRIGHT_BASE_URL=http://localhost:3056`, `NEXT_PUBLIC_APP_URL=http://localhost:3056`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree had no local `node_modules`.
+  - `docker run --name agentbay_issue_56-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54356:5432 -d postgres:17-alpine`: pass; started an isolated Postgres service after a Compose override attempt still tried to bind the occupied default port.
+- Focused checks:
+  - `bun run test -- tests/unit/update-agent-config-validation.test.ts tests/unit/update-agent-config-route.test.ts tests/unit/agent-events.test.ts`: pass; 3 files and 13 tests passed.
+  - `bun run test -- tests/unit/create-agent-db.test.ts tests/unit/update-agent-config-validation.test.ts tests/unit/update-agent-config-route.test.ts tests/unit/agent-events.test.ts`: pass with isolated DB env; 4 files and 60 tests passed.
+- Required gates:
+  - `bun run db:migrate`: pass; migrations applied successfully against the isolated database.
+  - `bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+  - `bun run format:check`: pass; Biome checked 67 files.
+  - `bun run lint`: pass; Biome checked 67 files.
+  - `bun run typecheck`: pass.
+  - `bun run test`: pass; 18 files and 137 tests passed.
+  - `bun run build`: pass; Next.js build completed and included `/api/agents/:agentId`.
+  - `bun run verify`: pass; aggregate format, lint, typecheck, unit test, build, and E2E gates passed with 137 unit tests and 22 E2E passed / 2 expected skips.
+
+#### #54
 
 - Date: 2026-07-04
 - Environment:

@@ -1,6 +1,6 @@
 # AgentBay
 
-AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice plus the first Milestone 6 config-persistence foundation. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records and config defaults, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, and scoped runtime logs for local development agents.
+AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice plus the Milestone 6 config-persistence and update API foundation. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, and scoped runtime logs for local development agents.
 
 ## Requirements
 
@@ -58,7 +58,7 @@ The migration set creates the local application metadata table plus the persiste
 - `users`: local development user records used until production auth exists.
 - `agents`: persistent agent identity, template, lifecycle status, timestamps, and soft-delete marker.
 - `agent_configs`: one typed config row per active agent with system prompt, model provider, model name, integer-cent daily spend cap, schedule mode, optional cron, timezone, and timestamps.
-- `agent_events`: transactional audit events for agent creation, fake lifecycle transitions, dashboard activity, and per-agent activity.
+- `agent_events`: transactional audit events for agent creation, config updates, fake lifecycle transitions, dashboard activity, and per-agent activity.
 - `agent_logs`: runtime log rows with nullable runner identity, static stream/level/message fields, and per-agent positive sequence values.
 - `agent_status`: Postgres enum used by `agents.status`.
 - `agent_schedule_mode`: Postgres enum used by `agent_configs.schedule_mode`.
@@ -102,7 +102,7 @@ The `/agents` page contains the current create/list and fake lifecycle workflow:
 
 The dashboard reads active persisted agents from the database. The detail page loads active persisted agent records by ID and returns not found for missing, malformed, or soft-deleted IDs. Delete preserves the `agents` row and existing `agent_events`, but removes the agent from `/agents`, `/dashboard`, and active detail reads.
 
-Milestone 4 records are local-development records only. Lifecycle controls and runtime logs use deterministic database state, not real runner processes. Approvals, config editing, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
+Milestone 4 records are local-development records only. Lifecycle controls and runtime logs use deterministic database state, not real runner processes. Config editor UI, approvals, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
 
 ## Create Agent API
 
@@ -121,7 +121,38 @@ Supported `templateKey` values are `research_agent`, `inbox_triage_agent`, `gith
 
 Successful responses return HTTP 201 with the created agent identity, `stopped` status, timestamps, and the `agent.created` event type. Validation failures return safe JSON without database URLs, SQL errors, stack traces, or driver messages. Persistence failures return generic safe errors.
 
-The initial persisted config defaults are intentionally non-secret and non-integrated: model provider and model name are `not_configured`, max daily spend is `0` cents, schedule mode is `manual`, schedule cron is `null`, timezone is `UTC`, and the generic system prompt is stored with the config row. Config editing, config update APIs, `config.updated` events, real provider/model integration, Hermes config generation, BYOK keys, and secret storage remain future scope.
+The initial persisted config defaults are intentionally non-secret and non-integrated: model provider and model name are `not_configured`, max daily spend is `0` cents, schedule mode is `manual`, schedule cron is `null`, timezone is `UTC`, and the generic system prompt is stored with the config row. Config editor UI, real provider/model integration, Hermes config generation, BYOK keys, and secret storage remain future scope.
+
+## Agent Config Update API
+
+`PATCH /api/agents/:agentId` updates the display name and persisted config row for an active, non-deleted local development agent in one transaction.
+
+Editable request fields are all optional:
+
+```json
+{
+  "name": "Research Agent",
+  "systemPrompt": "Keep answers concise.",
+  "modelProvider": "openai",
+  "modelName": "gpt-4.1-mini",
+  "maxDailySpend": "12.34",
+  "scheduleMode": "manual",
+  "scheduleCron": null,
+  "timezone": "Asia/Manila"
+}
+```
+
+String fields are trimmed. Blank `name`, `systemPrompt`, `modelProvider`, `modelName`, and `timezone` values are rejected. `maxDailySpend` is a positive dollar amount that must convert exactly to integer cents, must be greater than zero when supplied, and is capped at `$1000.00` for local development. The persisted and returned value is `maxDailySpendCents`.
+
+`scheduleMode` is either `manual` or `cron`. Manual schedules persist `scheduleCron: null`; cron schedules require a nonblank five-field cron expression. `timezone` must be a valid IANA timezone.
+
+Secret-like keys are rejected anywhere in the request object before mutation, including nested keys such as API key, token, password, secret, credential, private key, bearer, or authorization-style fields. Config updates do not store secret fields.
+
+Effective changes return HTTP 200 with `ok: true`, `noOp: false`, the persisted agent identity, the persisted config DTO, `changedFields`, and `event: { "type": "config.updated" }`. Exactly one `config.updated` event is written with safe before/after display values.
+
+Accepted no-op requests return HTTP 200 with `ok: true`, `noOp: true`, the persisted agent and config DTOs, `changedFields: []`, and `event: null`. No-op requests do not update rows and do not write events.
+
+Validation failures, missing or soft-deleted agents, and persistence failures return safe JSON without database URLs, SQL errors, stack traces, driver messages, or secret values.
 
 ## Lifecycle APIs
 
@@ -164,8 +195,9 @@ Current audit event inventory:
 - `agent.restart_completed`
 - `agent.error`
 - `agent.deleted`
+- `config.updated`
 
-Future milestones may add config, approval, runner, backup, restore, billing, and Hermes-related audit event types. Those future audit events should continue to describe control-plane facts, while high-volume runtime output remains separate log data.
+Future milestones may add approval, runner, backup, restore, billing, and Hermes-related audit event types. Those future audit events should continue to describe control-plane facts, while high-volume runtime output remains separate log data.
 
 ## Runtime Logs
 
@@ -284,6 +316,6 @@ Milestone 4 is complete when:
 - Browser coverage proves runtime logs stay scoped to the selected agent, visible rows remain readable after Stop, polling/generation does not append after Stop or Simulate error, and `agent.error` appears in the detail activity feed.
 - Browser coverage proves create and lifecycle activity appears in both the dashboard latest activity feed and the agent detail activity feed.
 - Soft delete removes agents from `/agents`, `/dashboard`, and active detail reads while preserving the database row and prior events.
-- Approvals, config editing, runner APIs, real runner/provisioning behavior, Hermes, Telegram, billing, production auth, secret storage, backups, restore, and cloud provisioning remain out of scope.
+- Config editor UI, approvals, runner APIs, real runner/provisioning behavior, Hermes, Telegram, billing, production auth, secret storage, backups, restore, and cloud provisioning remain out of scope.
 - `.env.example` documents every required local/deploy variable without secrets.
 - `bun run format:check`, `bun run lint`, `bun run typecheck`, `bun run test`, `bun run db:migrate`, `bun run db:health`, `bun run build`, `bun run test:e2e`, and `bun run verify` pass against a migrated local database.
