@@ -8,6 +8,7 @@ import {
 import {
   AgentApprovalPersistenceError,
   createPendingApprovalForDevelopmentUser,
+  listPendingApprovalsForDevelopmentUserAgent,
   listPendingApprovalsForDevelopmentUser,
 } from "@/src/server/approvals/agent-approvals";
 import {
@@ -305,6 +306,94 @@ describe("create agent persistence", () => {
       title: "Visible approval",
       status: "pending",
     });
+  });
+
+  it("lists pending approvals only for the selected active development-user agent", async () => {
+    const selected = await createAgentForDevelopmentUser(
+      { name: "Selected Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const sibling = await createAgentForDevelopmentUser(
+      { name: "Sibling Agent", templateKey: "github_issue_agent" },
+      { createConnection: () => connection },
+    );
+    const deleted = await createAgentForDevelopmentUser(
+      { name: "Deleted Agent", templateKey: "inbox_triage_agent" },
+      { createConnection: () => connection },
+    );
+    const [otherUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+    const [otherUserAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId: otherUser?.id ?? "",
+        name: "Other User Agent",
+        templateKey: "research_agent",
+        status: "stopped",
+      })
+      .returning({ id: agents.id });
+
+    await connection.db
+      .update(agents)
+      .set({ deletedAt: new Date("2026-07-04T09:00:00.000Z") })
+      .where(eq(agents.id, deleted.agent.id));
+    await createTestApproval(
+      connection,
+      selected.agent.id,
+      "Selected pending approval",
+      "2026-07-04T08:10:00.000Z",
+    );
+    await createTestApproval(
+      connection,
+      selected.agent.id,
+      "Selected resolved approval",
+      "2026-07-04T08:20:00.000Z",
+    );
+    await createTestApproval(
+      connection,
+      sibling.agent.id,
+      "Sibling pending approval",
+      "2026-07-04T08:30:00.000Z",
+    );
+    await createTestApproval(
+      connection,
+      deleted.agent.id,
+      "Deleted-agent approval",
+      "2026-07-04T08:40:00.000Z",
+    );
+    await createTestApproval(
+      connection,
+      otherUserAgent?.id ?? "",
+      "Other-user approval",
+      "2026-07-04T08:50:00.000Z",
+    );
+    await connection.db
+      .update(agentApprovals)
+      .set({
+        status: "denied",
+        resolvedBy: "local-user",
+        resolvedAt: new Date("2026-07-04T08:45:00.000Z"),
+      })
+      .where(eq(agentApprovals.title, "Selected resolved approval"));
+
+    const listed = await listPendingApprovalsForDevelopmentUserAgent(selected.agent.id, {
+      createConnection: () => connection,
+    });
+
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({
+      agentId: selected.agent.id,
+      agentName: "Selected Agent",
+      agentHref: `/agents/${selected.agent.id}`,
+      title: "Selected pending approval",
+      status: "pending",
+      requestedBy: "test-runner",
+      createdAt: "2026-07-04T08:10:00.000Z",
+    });
+    expect(JSON.stringify(listed)).not.toContain("Sibling pending approval");
+    expect(JSON.stringify(listed)).not.toContain("Selected resolved approval");
+    expect(JSON.stringify(listed)).not.toContain("Deleted-agent approval");
+    expect(JSON.stringify(listed)).not.toContain("Other-user approval");
+    expect(JSON.stringify(listed)).not.toContain("payload_json");
   });
 
   it("does not create approvals for malformed, missing, soft-deleted, or other-user agents", async () => {

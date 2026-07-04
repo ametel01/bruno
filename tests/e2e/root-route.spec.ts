@@ -43,47 +43,106 @@ test("/health returns reachable database JSON in the browser", async ({ page }) 
   await expect(page.locator("body")).toContainText('"database":"reachable"');
 });
 
-test("/dashboard shows persisted pending approvals for active agents", async ({
-  isMobile,
-  page,
-  request,
-}, testInfo) => {
-  test.skip(isMobile, "dashboard approval persistence proof runs once on desktop");
+test.describe
+  .serial("approval persistence surfaces", () => {
+    test("/dashboard shows persisted pending approvals for active agents", async ({
+      isMobile,
+      page,
+      request,
+    }, testInfo) => {
+      test.skip(isMobile, "dashboard approval persistence proof runs once on desktop");
 
-  const name = `Approval Queue Agent ${testInfo.project.name}`;
-  const created = await createAgent(request, name);
-  createdAgentIds.add(created.id);
-  const createdAt = "2026-07-04T08:15:00.000Z";
-  const expiresAt = "2026-07-04T09:15:00.000Z";
+      const name = `Approval Queue Agent ${testInfo.project.name}`;
+      const created = await createAgent(request, name);
+      createdAgentIds.add(created.id);
+      const createdAt = "2026-07-04T08:15:00.000Z";
+      const expiresAt = "2026-07-04T09:15:00.000Z";
 
-  await pinDevelopmentUserToAgent(created.id);
-  await insertPendingApproval(created.id, {
-    title: "Review outbound message",
-    description: "Approve the drafted Telegram summary before it is sent.",
-    createdAt,
-    expiresAt,
+      await pinDevelopmentUserToAgent(created.id);
+      await insertPendingApproval(created.id, {
+        title: "Review outbound message",
+        description: "Approve the drafted Telegram summary before it is sent.",
+        createdAt,
+        expiresAt,
+      });
+
+      await page.goto("/dashboard");
+
+      const approvalPanel = page.locator(".approval-panel");
+      await expect(approvalPanel).toContainText("Pending approvals");
+      await expect(approvalPanel).toContainText("1 pending");
+      await expect(approvalPanel.getByRole("link", { name })).toHaveAttribute(
+        "href",
+        `/agents/${created.id}`,
+      );
+      await expect(approvalPanel).toContainText("Review outbound message");
+      await expect(approvalPanel).toContainText(
+        "Approve the drafted Telegram summary before it is sent.",
+      );
+      await expect(approvalPanel.locator(".status-pill", { hasText: "pending" })).toBeVisible();
+      await expect(approvalPanel).toContainText(createdAt);
+      await expect(approvalPanel).toContainText(expiresAt);
+      await expect(approvalPanel).not.toContainText("payload_json");
+      await expect(approvalPanel).not.toContainText("stored-for-downstream-not-rendered");
+      await expect(approvalPanel).not.toContainText("postgres://");
+    });
+
+    test("/agents/:agentId shows persisted pending approvals only for that agent", async ({
+      isMobile,
+      page,
+      request,
+    }, testInfo) => {
+      test.skip(isMobile, "agent detail approval persistence proof runs once on desktop");
+
+      const selectedName = `Detail Approval Agent ${testInfo.project.name}`;
+      const otherName = `Other Detail Approval Agent ${testInfo.project.name}`;
+      const selected = await createAgent(request, selectedName);
+      const other = await createAgent(request, otherName);
+      createdAgentIds.add(selected.id);
+      createdAgentIds.add(other.id);
+      const createdAt = "2026-07-04T08:25:00.000Z";
+      const expiresAt = "2026-07-04T09:25:00.000Z";
+
+      await pinDevelopmentUserToAgent(selected.id);
+      await insertPendingApproval(selected.id, {
+        title: "Review selected outbound message",
+        description: "Approve this agent's drafted Telegram summary before it is sent.",
+        createdAt,
+        expiresAt,
+      });
+      await insertPendingApproval(other.id, {
+        title: "Other agent approval should not render",
+        description: "This pending approval belongs to a different agent.",
+        createdAt: "2026-07-04T08:30:00.000Z",
+        expiresAt: "2026-07-04T09:30:00.000Z",
+      });
+
+      await page.goto(`/agents/${selected.id}`);
+
+      await expect(page.getByRole("heading", { name: selectedName })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Configuration" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Runtime logs" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
+      const approvalPanel = page.locator(".approval-panel");
+      await expect(approvalPanel).toContainText("Pending approvals");
+      await expect(approvalPanel).toContainText("1 pending");
+      await expect(approvalPanel).toContainText("Review selected outbound message");
+      await expect(approvalPanel).toContainText(
+        "Approve this agent's drafted Telegram summary before it is sent.",
+      );
+      await expect(approvalPanel.locator(".status-pill", { hasText: "pending" })).toBeVisible();
+      await expect(approvalPanel).toContainText("fake-runner");
+      await expect(approvalPanel).toContainText(createdAt);
+      await expect(approvalPanel).toContainText(expiresAt);
+      await expect(approvalPanel).not.toContainText("Other agent approval should not render");
+      await expect(approvalPanel).not.toContainText(
+        "This pending approval belongs to a different agent.",
+      );
+      await expect(approvalPanel).not.toContainText("payload_json");
+      await expect(approvalPanel).not.toContainText("stored-for-downstream-not-rendered");
+      await expect(approvalPanel).not.toContainText("postgres://");
+    });
   });
-
-  await page.goto("/dashboard");
-
-  const approvalPanel = page.locator(".approval-panel");
-  await expect(approvalPanel).toContainText("Pending approvals");
-  await expect(approvalPanel).toContainText("1 pending");
-  await expect(approvalPanel.getByRole("link", { name })).toHaveAttribute(
-    "href",
-    `/agents/${created.id}`,
-  );
-  await expect(approvalPanel).toContainText("Review outbound message");
-  await expect(approvalPanel).toContainText(
-    "Approve the drafted Telegram summary before it is sent.",
-  );
-  await expect(approvalPanel.locator(".status-pill", { hasText: "pending" })).toBeVisible();
-  await expect(approvalPanel).toContainText(createdAt);
-  await expect(approvalPanel).toContainText(expiresAt);
-  await expect(approvalPanel).not.toContainText("payload_json");
-  await expect(approvalPanel).not.toContainText("stored-for-downstream-not-rendered");
-  await expect(approvalPanel).not.toContainText("postgres://");
-});
 
 test("/agents creates Research Agent and persists it across read surfaces", async ({
   isMobile,

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   listAgentEventFeed: vi.fn(),
   listLatestAgentActivity: vi.fn(),
   listActiveAgentsForDevelopmentUser: vi.fn(),
+  listPendingApprovalsForDevelopmentUserAgent: vi.fn(),
   listPendingApprovalsForDevelopmentUser: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
@@ -40,6 +41,7 @@ vi.mock("@/src/server/approvals/agent-approvals", async (importOriginal) => {
 
   return {
     ...actual,
+    listPendingApprovalsForDevelopmentUserAgent: mocks.listPendingApprovalsForDevelopmentUserAgent,
     listPendingApprovalsForDevelopmentUser: mocks.listPendingApprovalsForDevelopmentUser,
   };
 });
@@ -76,6 +78,7 @@ describe("product shell routes", () => {
       },
     });
     mocks.listPendingApprovalsForDevelopmentUser.mockResolvedValue([]);
+    mocks.listPendingApprovalsForDevelopmentUserAgent.mockResolvedValue([]);
     mocks.listAgentEventFeed.mockResolvedValue({
       ok: true,
       page: {
@@ -92,6 +95,7 @@ describe("product shell routes", () => {
     mocks.listAgentEventFeed.mockReset();
     mocks.listLatestAgentActivity.mockReset();
     mocks.listActiveAgentsForDevelopmentUser.mockReset();
+    mocks.listPendingApprovalsForDevelopmentUserAgent.mockReset();
     mocks.listPendingApprovalsForDevelopmentUser.mockReset();
     mocks.notFound.mockClear();
   });
@@ -396,6 +400,9 @@ describe("product shell routes", () => {
     expect(html).toContain("Save config");
     expect(html).toContain("Runtime logs");
     expect(html).toContain("Loading runtime logs.");
+    expect(html).toContain("Pending approvals");
+    expect(html).toContain("No pending approvals");
+    expect(html).toContain("Persisted approval requests for this agent will appear here.");
     expect(html).toContain("Activity");
     expect(html).toContain("No activity yet");
     expect(html).toContain("0 shown");
@@ -403,6 +410,9 @@ describe("product shell routes", () => {
     expect(html).not.toContain("config editing");
     expect(html).not.toContain("runnerId");
     expect(html).not.toContain("agent_id");
+    expect(mocks.listPendingApprovalsForDevelopmentUserAgent).toHaveBeenCalledWith(
+      "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+    );
     expect(mocks.listAgentEventFeed).toHaveBeenCalledWith({
       db: {},
       agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
@@ -410,6 +420,41 @@ describe("product shell routes", () => {
       limit: 10,
     });
     expect(mocks.closeDashboardConnection).toHaveBeenCalledOnce();
+  });
+
+  it("renders persisted pending approvals on the agent detail page without raw payload details", async () => {
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
+    mocks.listPendingApprovalsForDevelopmentUserAgent.mockResolvedValueOnce([
+      {
+        id: "00000000-0000-4000-8000-000000000511",
+        agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+        agentName: "Research Agent",
+        agentHref: "/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774",
+        title: "Review outbound message",
+        description: "Approve the drafted Telegram summary before it is sent.",
+        status: "pending",
+        requestedBy: "fake-runner",
+        createdAt: "2026-07-04T08:15:00.000Z",
+        expiresAt: "2026-07-04T09:15:00.000Z",
+      },
+    ]);
+    const element = await AgentDetailPage({
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+    });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Research Agent");
+    expect(html).toContain("Pending approvals");
+    expect(html).toContain("1 pending");
+    expect(html).toContain("Review outbound message");
+    expect(html).toContain("Approve the drafted Telegram summary before it is sent.");
+    expect(html).toContain("pending");
+    expect(html).toContain("fake-runner");
+    expect(html).toContain("2026-07-04T08:15:00.000Z");
+    expect(html).toContain("2026-07-04T09:15:00.000Z");
+    expect(html).not.toContain("payload_json");
+    expect(html).not.toContain("token");
+    expect(html).not.toContain("postgres://");
   });
 
   it("renders agent detail activity newest-first with safe event fields and pagination", async () => {
@@ -502,6 +547,29 @@ describe("product shell routes", () => {
 
     expect(html).toContain("Research Agent");
     expect(html).toContain("Agent activity could not be loaded.");
+    expect(html).not.toContain("postgres://");
+  });
+
+  it("keeps detail record, config, logs, and activity visible when agent approvals cannot be loaded", async () => {
+    const { AgentApprovalPersistenceError } = await import(
+      "@/src/server/approvals/agent-approvals"
+    );
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
+    mocks.listPendingApprovalsForDevelopmentUserAgent.mockRejectedValueOnce(
+      new AgentApprovalPersistenceError(),
+    );
+    const element = await AgentDetailPage({
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+    });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Research Agent");
+    expect(html).toContain("Configuration");
+    expect(html).toContain("Runtime logs");
+    expect(html).toContain("Activity");
+    expect(html).toContain("No activity yet");
+    expect(html).toContain("Pending approvals could not be loaded.");
+    expect(html).not.toContain("Approval request failed.");
     expect(html).not.toContain("postgres://");
   });
 
