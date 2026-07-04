@@ -52,6 +52,8 @@
 - 2026-07-05: #122 rebased onto current `origin/main` after #127 restored this tracker, removed generated `next-env.d.ts` build churn from the diff, and recorded validation evidence below.
 - 2026-07-05: #123 rebased onto latest `origin/main` after #122 merged, preserved the manual VPS runner service implementation, discarded generated `next-env.d.ts` churn, and appended validation evidence here.
 - 2026-07-05: #128 rebased onto current `origin/main` after #123 merged, generated additive runner auth persistence migration `drizzle/0009_worried_switch.sql`, added hash-only runner registration token, credential, and heartbeat schema state, and added reusable runner token/hash helpers.
+- 2026-07-05: #124 added assignment-aware dashboard lifecycle forwarding for active agents assigned to `manual_vps` runners, including safe remote start/stop/restart/status/log calls, `manual_runner` log persistence, temporary bearer-token request auth, bounded timeouts, and Docker fallback for unassigned agents.
+- 2026-07-05: #124 fast-forwarded onto merged #128 `origin/main` commit `6e5ebfd`, resolved only `PROGRESS.md` and `CHANGELOG.md` append conflicts, preserved the manual-runner lifecycle implementation, and reran focused packaging checks.
 
 ### Validation Evidence
 
@@ -91,6 +93,30 @@
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bunx playwright test tests/e2e/root-route.spec.ts --project=chromium-desktop --grep '/dashboard shows Docker logs captured by observing a running agent|/agents creates Research Agent and persists it across read surfaces'`: pass; both previously failed desktop E2E flows passed on targeted rerun.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test:e2e -- --workers=1`: pass; 39 passed and 19 skipped, confirming the aggregate E2E failure was parallel-runner sensitive rather than #128 persistence behavior.
   - `rg -n "raw[_-]?(token|credential|secret)|\"token\"\\s+text|\"credential\"\\s+text|console\\.(log|error|warn|info)|AGB_|agb_reg_[A-Za-z0-9_-]{8,}|agb_run_[A-Za-z0-9_-]{8,}" src/server/db/schema.ts src/server/runners/runner-auth-secrets.ts tests/unit/agent-schema.test.ts tests/unit/runner-auth-secrets.test.ts drizzle/0009_worried_switch.sql`: pass; matches were only negative assertions in the schema test, with no raw secret columns, generated raw token literals, or helper logging calls.
+
+- 2026-07-05 #124:
+  - `git merge --ff-only origin/main`: pass; branch advanced from #123 base `af36ae5` to merged #128 commit `6e5ebfd` before reapplying the #124 implementation.
+  - `git stash pop`: pass with expected append-only conflicts in `CHANGELOG.md` and `PROGRESS.md`; no code, migration, schema, or public lifecycle response-shape conflicts occurred.
+  - `git status --short --branch --untracked-files=all`: pass after sync; branch is current with `origin/main`, intended dirty files are #124 lifecycle/log/test/progress/changelog files plus untracked `src/server/runners/manual-runner-adapter.ts` and `tests/unit/manual-runner-adapter.test.ts`, and no `next-env.d.ts` churn is present.
+  - `git diff --name-status origin/main...HEAD`: pass; empty because #124 remains uncommitted after the fast-forward and dirty worktree reapply.
+  - `rg -n "#124|manual_vps|manual_runner|Dashboard lifecycle forwarding|assignment-aware dashboard lifecycle forwarding|manual runner agent|assigned manual|falls back to the Docker lifecycle|manual-runner-adapter" PROGRESS.md CHANGELOG.md src/server/agents/lifecycle.ts src/server/runners/manual-runner-adapter.ts tests/unit/manual-runner-adapter.test.ts tests/unit/create-agent-db.test.ts tests/unit/agent-logs-route.test.ts 'app/api/agents/[agentId]/logs/route.ts'`: pass; matched the progress/changelog #124 evidence, manual-runner adapter import, `manual_runner` persisted log source, assigned manual lifecycle tests, log-route tests, and Docker fallback coverage.
+  - `bun run format:check`: pass after the #128 sync; Biome checked 100 files with no fixes applied.
+  - `bun run typecheck`: pass after the #128 sync; `tsc --noEmit` completed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/manual-runner-adapter.test.ts`: pass after the #128 sync; 3 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/agent-logs-route.test.ts`: pass after the #128 sync; 19 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/create-agent-db.test.ts -t "assigned manual|manual runner agent|falls back to the Docker lifecycle"`: pass after the #128 sync; 4 tests passed and 102 skipped by the focused filter.
+  - `bun run lint` and `bun run build`: not rerun after sync because the only merge conflicts were append-only `PROGRESS.md` and `CHANGELOG.md` conflicts; no code/schema conflicts were resolved.
+  - `bun install`: pass; restored local worktree dependencies for validation.
+  - `bun run format:check`: pass; Biome checked 98 files with no fixes applied after formatting the #124 implementation files.
+  - `bun run lint`: pass; Biome checked 98 files with no fixes applied.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/manual-runner-adapter.test.ts`: pass; 3 tests covered local loopback HTTP, HTTPS enforcement for non-loopback endpoints, missing-token safe failure, Authorization header injection, start/logs/stop/restart contract calls, bounded timeout configuration, and persisted `manual_runner` logs without token exposure.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/agent-logs-route.test.ts`: pass; 19 tests covered assignment-aware remote log streaming, safe public DTO fields, and existing stopped/running log route behavior.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/create-agent-db.test.ts -t "assigned manual|manual runner agent|falls back to the Docker lifecycle"`: pass; 4 focused lifecycle DB tests covered assigned manual start success with persisted logs, remote start failure without marking running, selected-agent stop/restart targeting, and Docker fallback for unassigned agents.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism`: pass; 27 files and 250 tests passed with DB-backed files serialized.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: pass; Next.js compiled, type-checked, generated static pages, and listed the expected dynamic API/dashboard routes.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun test`: failed as a baseline native Bun runner mismatch: Vitest-only `vi.hoisted` route/component tests and Playwright specs are not compatible with native `bun test`; DB-backed suites also deadlocked when native/parallel resets shared the same Postgres. The configured aggregate `bun run test -- --no-file-parallelism` passed.
+  - Initial parallel `bun run test` also deadlocked DB-backed reset/truncate suites on shared Postgres; rerun with `--no-file-parallelism` passed and is the usable aggregate signal for this worktree.
 
 ## Milestone 9 Local Runner Persistence
 
