@@ -234,11 +234,11 @@
 
 ## Milestone 10 Dockerized Agent Runner Gate Classification
 
-- Status: #80 Docker crash reconciliation and selected-container cleanup is implementation-complete and ready for checker review.
+- Status: complete for #76/#77/#78/#79/#80/#81; Milestone 10 is ready for checker review.
 - Source plan: `docs/MILESTONES.md` Milestone 10
 - Tracking issues: #76-#81
-- Current branch: `codex/issue-80-docker-crash-cleanup`
-- Next step: checker should review the post-#79 rebase composition of Docker lifecycle wiring with crash reconciliation, fail-closed cleanup, bounded read-path hooks, and cross-agent regression coverage.
+- Current branch: `codex/issue-81-docker-acceptance`
+- Next step: checker should review the final real-Docker acceptance smoke, Milestone 10 completion marker, cleanup behavior, and gate evidence below.
 
 ### Issue Checklist
 
@@ -247,7 +247,7 @@
 - [x] #78 Add the Docker runner adapter
 - [x] #79 Run lifecycle controls through Docker containers
 - [x] #80 Detect Docker crashes and clean up selected-agent containers
-- [ ] #81 Verify Docker runner milestone acceptance
+- [x] #81 Verify Docker runner milestone acceptance
 - Later Milestone 10 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 10 work.
 
 ### Current Status
@@ -284,6 +284,24 @@
 - #80 wires delete through selected-agent Docker cleanup before soft deletion, while preserving #79 product start/stop/restart Docker lifecycle wiring.
 - #80 treats selected-agent containers that already exited with code `0` as clean stop targets, so intentional Docker stops do not become false crash reconciliation or stop-failure states.
 - #80 regression coverage proves one agent's Docker crash or cleanup does not change another agent's container, status, events, or logs.
+- #81 adds a final real-Docker Playwright acceptance smoke that drives product APIs, verifies exact Docker labels/statuses, proves selected-agent start/restart/stop/log/crash/delete cleanup isolation with a sibling agent still running, and exercises delete fail-closed behavior with a mismatched stored container target.
+- #81 updates shared E2E teardown to remove labeled AgentBay Docker containers for tracked test agents, and final validation cleaned all remaining labeled AgentBay Docker containers after full E2E/verify.
+- #81 marks Milestone 10 completed in `docs/MILESTONES.md`.
+- #81 keeps `CHANGELOG.md` and README unchanged because it adds final validation/tracking coverage only; the shipped Docker behavior already has qualifying changelog entries and Docker/E2E prerequisites are already discoverable.
+
+### Final Acceptance Checklist
+
+- [x] Start creates one selected-agent Docker container: the #81 real-Docker smoke starts primary and sibling agents through product APIs, checks exactly one labeled container for each selected agent after start, and validates the Docker `agentbay.agent_id` label plus `running` status.
+- [x] Stop targets only the selected container: the #81 smoke stops the primary agent, verifies the primary replacement container is `exited`, and verifies the sibling container remains the same `running` container.
+- [x] Restart targets only the selected container: the #81 smoke restarts the primary agent, verifies the primary container ID changes to a new `running` selected-agent container, and verifies the sibling container remains unchanged and `running`.
+- [x] Logs remain isolated by agent: the #81 smoke reads `GET /api/agents/:agentId/logs?limit=100` for primary and sibling agents, checks each Docker dummy-runner line contains only its own agent ID, and rejects the other agent ID in each response.
+- [x] Crash changes status to `error`: the #81 smoke kills the selected primary container with Docker, reads the product agent detail route to trigger reconciliation, and polls persisted status until it becomes `error` with a Docker crash log.
+- [x] Cleanup removes only the selected exact container: the #81 smoke deletes the errored primary through `DELETE /api/agents/:agentId`, verifies the primary crash container is removed, and verifies the sibling container still exists and is `running`.
+- [x] Cleanup fails closed: the #81 smoke creates a tampered stored-container target pointing at the sibling's real container, calls `DELETE /api/agents/:agentId`, verifies the safe `agent_delete_failed` response, confirms the tampered agent is not soft-deleted, and confirms both real containers still exist.
+- [x] Real Docker was available: `docker info --format '{{.ServerVersion}}'` returned `29.3.1`, and the final smoke used the real `busybox:1.36` Docker runner fixture rather than skipping.
+- [x] Final quality gates passed against the isolated #81 database/app ports, and `bun run verify` passed after the new coverage was added.
+- [x] `CHANGELOG.md` has no #81 validation-only noise; existing Milestone 10 Docker behavior entries remain under `[Unreleased]`.
+- [x] README/focused docs required no change because Docker prerequisites and E2E/local validation commands are already documented.
 
 ### Update Log Requirements
 
@@ -300,6 +318,45 @@
 - When a future slice adds real Docker tests, group them behind this availability check and record whether they ran or skipped in this Milestone 10 progress section.
 
 ### Validation
+
+#### #81
+
+- Date: 2026-07-05
+- Environment:
+  - Docker daemon: reachable; `docker info --format '{{.ServerVersion}}'` returned `29.3.1`.
+  - Isolated database: container `agentbay_issue_81-postgres`, host port `54381`, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay`.
+  - Isolated app/test server: `PORT=3081`, `PLAYWRIGHT_BASE_URL=http://localhost:3081`, `NEXT_PUBLIC_APP_URL=http://localhost:3081`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed committed dependencies in the #81 worktree.
+  - `docker ps -a --filter name=agentbay_issue_81-postgres --format '{{.Names}} {{.Status}} {{.Ports}}'`: pass; no existing #81 Postgres container was present before setup.
+  - `docker ps -a --filter label=agentbay.agent_id --format '{{.ID}} {{.Names}} {{.Labels}}'`: pass; no labeled AgentBay containers were present before setup.
+  - `docker run --name agentbay_issue_81-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54381:5432 -d postgres:17-alpine`: pass; started isolated Postgres for #81.
+  - `docker exec agentbay_issue_81-postgres pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run db:migrate`: pass; migrations applied successfully. Postgres emitted the expected notice that Drizzle's long Docker FK identifier was truncated.
+- Focused acceptance smoke:
+  - First run of `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay PORT=3081 PLAYWRIGHT_BASE_URL=http://localhost:3081 NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run test:e2e -- tests/e2e/root-route.spec.ts --project=chromium-desktop --grep "Docker runner final acceptance" --workers=1`: failed in the test tamper helper because deleting a Docker metadata row violated the expected `agent_logs` FK. Product behavior was not implicated; the helper now detaches the sibling DB row to a synthetic ID before pointing the tampered agent at the sibling's real container.
+  - After resetting the #81 DB and cleaning labeled containers, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay PORT=3081 PLAYWRIGHT_BASE_URL=http://localhost:3081 NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run test:e2e -- tests/e2e/root-route.spec.ts --project=chromium-desktop --grep "Docker runner final acceptance" --workers=1`: pass; 1 Chromium desktop test passed and covered selected-agent start, restart, stop, logs, real Docker crash reconciliation, delete cleanup, sibling-container isolation, and fail-closed cleanup.
+- Required gates:
+  - `bun run format:check`: pass; Biome checked 89 files.
+  - `bun run lint`: pass; Biome checked 89 files.
+  - `bun run typecheck`: pass; `tsc --noEmit` passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run test`: pass; 24 files and 223 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay PORT=3081 PLAYWRIGHT_BASE_URL=http://localhost:3081 NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run build`: pass; Next.js production build completed and included dashboard, agent detail, lifecycle actions, logs, approvals, health, and settings routes.
+  - After resetting the #81 DB and cleaning labeled containers, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay PORT=3081 PLAYWRIGHT_BASE_URL=http://localhost:3081 NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run test:e2e`: pass; full browser suite passed with 39 tests and 19 expected skips.
+  - After resetting the #81 DB and cleaning labeled containers, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay PORT=3081 PLAYWRIGHT_BASE_URL=http://localhost:3081 NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run verify`: pass; aggregate format, lint, typecheck, unit test, production build, and Playwright gates passed with 223 unit tests and 39 E2E passed / 19 expected skips.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+  - Final cleanup: `docker rm --force $(docker ps -a --quiet --filter label=agentbay.agent_id)` removed the remaining labeled AgentBay containers left by full E2E/verify runs, and a follow-up `docker ps -a --filter label=agentbay.agent_id --format '{{.ID}} {{.Names}} {{.Labels}}'` returned no rows.
+- Acceptance evidence map:
+  - Start creates one selected-agent Docker container: `tests/e2e/root-route.spec.ts` final acceptance smoke starts primary/sibling agents through product APIs, counts one labeled container per agent, and inspects exact Docker labels/statuses.
+  - Stop targets only that container: the smoke stops the primary, checks the selected primary container is `exited`, and verifies the sibling container remains running.
+  - Restart targets only that container: the smoke restarts the primary, verifies a new primary container ID, and verifies the sibling container remains unchanged.
+  - Logs remain isolated by agent: the smoke reads product log APIs for each agent and asserts each log body contains only that agent's Docker dummy-runner ID line.
+  - Crash changes status to `error`: the smoke kills the selected primary container, triggers product detail reconciliation, polls status to `error`, and verifies the Docker crash log.
+  - Cleanup removes only the selected exact container and fails closed: the smoke deletes the crashed primary and proves the sibling remains running; then it tampers a stored container target, verifies delete returns safe `agent_delete_failed`, the tampered agent remains active, and both involved real containers remain.
+  - Cleanup hygiene: E2E teardown now removes labeled Docker containers for tracked test agents, and the final builder cleanup removed all remaining labeled AgentBay containers after validation.
+- Changelog/docs scope:
+  - `CHANGELOG.md` intentionally unchanged for #81 because this issue adds final validation coverage/tracking only; Docker runner behavior entries already exist from #77-#80.
+  - README intentionally unchanged because Docker is already listed as a prerequisite and E2E/local validation commands are documented.
 
 #### #79
 
