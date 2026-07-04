@@ -1,6 +1,6 @@
 # AgentBay
 
-AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, and the Milestone 7 pending-approval queue foundation. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, scoped runtime logs, dashboard plus agent-detail pending approvals for local development agents, dashboard approval controls, and fake approval generation for running local-development agents.
+AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, and the Milestone 7 pending-approval queue foundation. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, scoped runtime logs, dashboard plus agent-detail pending approvals for local development agents, dashboard approval decision controls, and fake approval generation for running local-development agents.
 
 ## Requirements
 
@@ -104,7 +104,7 @@ The `/agents` page contains the current create/list and fake lifecycle workflow:
 
 The dashboard reads active persisted agents from the database. The detail page loads active persisted agent records by ID and returns not found for missing, malformed, or soft-deleted IDs. Delete preserves the `agents` row and existing `agent_events`, but removes the agent from `/agents`, `/dashboard`, and active detail reads.
 
-Agent records are local-development records only. Lifecycle controls, runtime logs, the detail config editor, dashboard plus agent-detail pending approvals panels, dashboard approval controls, and fake approval generation use deterministic database state and local read/write paths, not real runner processes or provider integrations. Deny decisions, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
+Agent records are local-development records only. Lifecycle controls, runtime logs, the detail config editor, dashboard plus agent-detail pending approvals panels, dashboard approval decision controls, and fake approval generation use deterministic database state and local read/write paths, not real runner processes or provider integrations. Approval payload execution, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
 
 ## Agent Detail Config Editor
 
@@ -175,6 +175,8 @@ Validation failures, missing or soft-deleted agents, and persistence failures re
 
 The dashboard shows pending approval requests persisted in `agent_approvals` for active local-development agents. Each dashboard item displays the agent link, approval title, description, `pending` status, created time, expiry time when present, and an Approve control.
 
+Dashboard pending approval items include a Deny control. Denying posts to `POST /api/approvals/:approvalId/deny`, resolves one pending approval to `denied`, sets `resolved_by` and `resolved_at`, writes one matching `approval.denied` event in the same transaction, and refreshes the pending queue so the resolved row disappears.
+
 The agent detail page shows pending approval requests for the selected active local-development agent only. Each detail item displays the approval title, description, `pending` status, requester/source, created time, and expiry time when present.
 
 When `GET /api/agents/:agentId/logs` observes an active, non-deleted local-development agent that has settled to `running`, the fake runner can create one deterministic pending approval for that running segment. The generated request uses a representative fake sensitive action such as Telegram message sending, public research execution, or Gmail inbox access; stores only a fake `actionType`, safe preview fields, the fake-runner source, and the running-segment timestamp; and writes one matching `approval.requested` audit event with safe metadata.
@@ -183,9 +185,11 @@ Approval rows store `payload_json` for downstream decision slices, but the dashb
 
 `POST /api/approvals/:approvalId/approve` approves one pending approval for an active, non-deleted local-development agent. Success updates only that approval from `pending` to `approved`, records `resolved_by` and `resolved_at`, and writes exactly one `approval.approved` event in the same transaction. Malformed approval IDs return validation JSON, missing or inaccessible approvals return not found JSON, already resolved approvals return a shared `approval_already_resolved` conflict with safe status, and persistence failures return generic safe errors.
 
-Only `pending` approvals for active, non-deleted agents owned by the local development user appear in approval queues. Resolved approvals with `approved`, `denied`, `expired`, or `cancelled` status, approvals for other agents on a selected detail page, soft-deleted-agent approvals, stopped/non-running-agent approvals, and other-user approvals are excluded from the pending queues or fake generation path. Repeated observations of the same running segment/action do not create duplicate approval rows or duplicate `approval.requested` events. Repeated approval attempts against an already resolved approval do not create duplicate `approval.approved` events.
+Repeated deny requests against a denied or otherwise resolved approval return HTTP 409 with the reusable `approval_already_resolved` error code and a safe current status. Malformed approval IDs return HTTP 400 validation JSON, inaccessible approvals return HTTP 404, and persistence failures return generic safe errors. A forced decision-event write failure rolls back the denial update so no partial decision is visible.
 
-Deny routes, Deny controls, and `approval.denied` event writes are future Milestone 7 slices.
+Only `pending` approvals for active, non-deleted agents owned by the local development user appear in approval queues. Resolved approvals with `approved`, `denied`, `expired`, or `cancelled` status, approvals for other agents on a selected detail page, soft-deleted-agent approvals, stopped/non-running-agent approvals, and other-user approvals are excluded from the pending queues or fake generation path. Repeated observations of the same running segment/action do not create duplicate approval rows or duplicate `approval.requested` events. Repeated approval or deny attempts against an already resolved approval do not create duplicate decision events.
+
+Approval payload execution and real provider action dispatch remain future Milestone 7 scope.
 
 ## Lifecycle APIs
 
@@ -230,8 +234,10 @@ Current audit event inventory:
 - `agent.deleted`
 - `config.updated`
 - `approval.requested`
+- `approval.approved`
+- `approval.denied`
 
-Future milestones may add approval decision, runner, backup, restore, billing, and Hermes-related audit event types. Those future audit events should continue to describe control-plane facts, while high-volume runtime output remains separate log data.
+Future milestones may add runner, backup, restore, billing, and Hermes-related audit event types. Those future audit events should continue to describe control-plane facts, while high-volume runtime output remains separate log data.
 
 ## Runtime Logs
 
@@ -416,6 +422,6 @@ Milestone 4 is complete when:
 - Browser coverage proves runtime logs stay scoped to the selected agent, visible rows remain readable after Stop, polling/generation does not append after Stop or Simulate error, and `agent.error` appears in the detail activity feed.
 - Browser coverage proves create and lifecycle activity appears in both the dashboard latest activity feed and the agent detail activity feed.
 - Soft delete removes agents from `/agents`, `/dashboard`, and active detail reads while preserving the database row and prior events.
-- The agent detail config editor updates local-development config fields and the dashboard plus agent detail page render persisted pending approvals; approval decisions, runner APIs, real runner/provisioning behavior, Hermes, Telegram, billing, production auth, secret storage, backups, restore, and cloud provisioning remain out of scope.
+- The agent detail config editor updates local-development config fields, the dashboard plus agent detail page render persisted pending approvals, and dashboard Approve/Deny controls resolve pending approvals with `approval.approved` and `approval.denied` activity; approval payload execution, runner APIs, real runner/provisioning behavior, Hermes, Telegram, billing, production auth, secret storage, backups, restore, and cloud provisioning remain out of scope.
 - `.env.example` documents every required local/deploy variable without secrets.
 - `bun run format:check`, `bun run lint`, `bun run typecheck`, `bun run test`, `bun run db:migrate`, `bun run db:health`, `bun run build`, `bun run test:e2e`, and `bun run verify` pass against a migrated local database.

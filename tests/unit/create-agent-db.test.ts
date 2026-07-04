@@ -7,9 +7,11 @@ import {
 } from "@/src/server/agents/create-agent";
 import {
   APPROVAL_APPROVED_EVENT_TYPE,
+  APPROVAL_DENIED_EVENT_TYPE,
   AgentApprovalPersistenceError,
   approvePendingApprovalForDevelopmentUser,
   createPendingApprovalForDevelopmentUser,
+  denyApprovalForDevelopmentUser,
   listPendingApprovalsForDevelopmentUserAgent,
   listPendingApprovalsForDevelopmentUser,
 } from "@/src/server/approvals/agent-approvals";
@@ -311,6 +313,261 @@ describe("create agent persistence", () => {
       title: "Visible approval",
       status: "pending",
     });
+  });
+
+  it("denies one pending approval with resolution fields and exactly one safe event", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Decision Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const now = new Date("2026-07-04T08:45:00.000Z");
+    const approval = await createTestApproval(
+      connection,
+      created.agent.id,
+      "Deny outbound message",
+      "2026-07-04T08:10:00.000Z",
+    );
+
+    expect(approval).not.toBeNull();
+    const result = await denyApprovalForDevelopmentUser(approval?.id ?? "", {
+      createConnection: () => connection,
+      now: () => now,
+    });
+
+    const [persistedApproval] = await connection.db
+      .select()
+      .from(agentApprovals)
+      .where(eq(agentApprovals.id, approval?.id ?? ""))
+      .limit(1);
+    const deniedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.type, APPROVAL_DENIED_EVENT_TYPE));
+
+    expect(result).toMatchObject({
+      ok: true,
+      approval: {
+        id: approval?.id,
+        agentId: created.agent.id,
+        status: "denied",
+        resolvedBy: created.agent.userId,
+        resolvedAt: "2026-07-04T08:45:00.000Z",
+      },
+      event: {
+        type: APPROVAL_DENIED_EVENT_TYPE,
+      },
+    });
+    expect(persistedApproval).toMatchObject({
+      status: "denied",
+      resolvedBy: created.agent.userId,
+      resolvedAt: now,
+    });
+    expect(deniedEvents).toHaveLength(1);
+    expect(deniedEvents[0]).toMatchObject({
+      agentId: created.agent.id,
+      actorUserId: created.agent.userId,
+      type: APPROVAL_DENIED_EVENT_TYPE,
+      message: 'Denied approval "Deny outbound message" for agent "Decision Agent".',
+      metadata: {
+        approvalId: approval?.id,
+        agentId: created.agent.id,
+        fromStatus: "pending",
+        toStatus: "denied",
+        previousStatus: "pending",
+        newStatus: "denied",
+        approvalTitle: "Deny outbound message",
+      },
+    });
+    expect(JSON.stringify(deniedEvents[0]?.metadata)).not.toContain("payload_json");
+    expect(JSON.stringify(deniedEvents[0]?.metadata)).not.toContain("stored-for-downstream");
+  });
+
+  it("returns safe no-op failures for malformed, missing, other-user, and soft-deleted-agent approvals", async () => {
+    const active = await createAgentForDevelopmentUser(
+      { name: "Active Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const deleted = await createAgentForDevelopmentUser(
+      { name: "Deleted Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const [otherUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+    const [otherUserAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId: otherUser?.id ?? "",
+        name: "Other User Agent",
+        templateKey: "research_agent",
+        status: "stopped",
+      })
+      .returning({ id: agents.id });
+
+    const activeApproval = await createTestApproval(
+      connection,
+      active.agent.id,
+      "Active approval",
+      "2026-07-04T08:10:00.000Z",
+    );
+    const deletedApproval = await createTestApproval(
+      connection,
+      deleted.agent.id,
+      "Deleted-agent approval",
+      "2026-07-04T08:20:00.000Z",
+    );
+    await connection.db
+      .update(agents)
+      .set({ deletedAt: new Date("2026-07-04T09:00:00.000Z") })
+      .where(eq(agents.id, deleted.agent.id));
+    const [otherUserApproval] = await connection.db
+      .insert(agentApprovals)
+      .values({
+        agentId: otherUserAgent?.id ?? "",
+        title: "Other-user approval",
+        description: "Other-user approval description",
+        status: "pending",
+        payloadJson: { action: "other-user" },
+        requestedBy: "test-runner",
+        createdAt: new Date("2026-07-04T08:30:00.000Z"),
+      })
+      .returning();
+
+    await expect(
+      denyApprovalForDevelopmentUser("not-a-uuid", { createConnection: () => connection }),
+    ).resolves.toEqual({ ok: false, reason: "malformed_approval_id" });
+    await expect(
+      denyApprovalForDevelopmentUser("00000000-0000-4000-8000-000000000000", {
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "approval_not_found" });
+    await expect(
+      denyApprovalForDevelopmentUser(deletedApproval?.id ?? "", {
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "approval_not_found" });
+    await expect(
+      denyApprovalForDevelopmentUser(otherUserApproval?.id ?? "", {
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "approval_not_found" });
+
+    const approvals = await connection.db.select().from(agentApprovals);
+    const deniedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.type, APPROVAL_DENIED_EVENT_TYPE));
+
+    expect(approvals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: activeApproval?.id, status: "pending", resolvedBy: null }),
+        expect.objectContaining({ id: deletedApproval?.id, status: "pending", resolvedBy: null }),
+        expect.objectContaining({
+          id: otherUserApproval?.id,
+          status: "pending",
+          resolvedBy: null,
+        }),
+      ]),
+    );
+    expect(deniedEvents).toHaveLength(0);
+  });
+
+  it("returns reusable conflicts for resolved approvals and writes no duplicate decision events", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Conflict Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const deniedApproval = await createTestApproval(
+      connection,
+      created.agent.id,
+      "Already denied approval",
+      "2026-07-04T08:10:00.000Z",
+    );
+    const approvedApproval = await createTestApproval(
+      connection,
+      created.agent.id,
+      "Already approved approval",
+      "2026-07-04T08:20:00.000Z",
+    );
+
+    await expect(
+      denyApprovalForDevelopmentUser(deniedApproval?.id ?? "", {
+        createConnection: () => connection,
+        now: () => new Date("2026-07-04T08:45:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await connection.db
+      .update(agentApprovals)
+      .set({
+        status: "approved",
+        resolvedBy: created.agent.userId,
+        resolvedAt: new Date("2026-07-04T08:50:00.000Z"),
+      })
+      .where(eq(agentApprovals.id, approvedApproval?.id ?? ""));
+
+    await expect(
+      denyApprovalForDevelopmentUser(deniedApproval?.id ?? "", {
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "approval_already_resolved",
+      status: "denied",
+    });
+    await expect(
+      denyApprovalForDevelopmentUser(approvedApproval?.id ?? "", {
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "approval_already_resolved",
+      status: "approved",
+    });
+
+    const deniedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.type, APPROVAL_DENIED_EVENT_TYPE));
+
+    expect(deniedEvents).toHaveLength(1);
+  });
+
+  it("rolls back the denied approval update when decision event creation fails", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Rollback Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const approval = await createTestApproval(
+      connection,
+      created.agent.id,
+      "Rollback approval",
+      "2026-07-04T08:10:00.000Z",
+    );
+
+    await expect(
+      denyApprovalForDevelopmentUser(approval?.id ?? "", {
+        createConnection: () => connection,
+        now: () => new Date("2026-07-04T08:45:00.000Z"),
+        insertDecisionEvent: async () => {
+          throw new Error("synthetic event failure");
+        },
+      }),
+    ).rejects.toBeInstanceOf(AgentApprovalPersistenceError);
+
+    const [persistedApproval] = await connection.db
+      .select()
+      .from(agentApprovals)
+      .where(eq(agentApprovals.id, approval?.id ?? ""))
+      .limit(1);
+    const deniedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.type, APPROVAL_DENIED_EVENT_TYPE));
+
+    expect(persistedApproval).toMatchObject({
+      status: "pending",
+      resolvedBy: null,
+      resolvedAt: null,
+    });
+    expect(deniedEvents).toHaveLength(0);
   });
 
   it("lists pending approvals only for the selected active development-user agent", async () => {

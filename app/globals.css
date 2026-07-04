@@ -589,6 +589,12 @@ h2 {
 .approval-actions {
   display: flex;
   flex-wrap: wrap;
+  gap: 8px;
+}
+
+.approval-decision-action {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }

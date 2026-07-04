@@ -128,8 +128,10 @@ describe("product shell routes", () => {
     expect(html).not.toContain("Delete controls wait");
     expect(html).not.toContain("config editing, and runner work wait");
     expect(html).not.toContain("approvals are absent");
+    expect(html).toContain("Approval decisions are available from the queue");
+    expect(html).toContain("production runners, billing, and secret storage wait");
     expect(html).not.toContain("Approval decisions, production runners");
-    expect(html).toContain("Deny decisions, production runners");
+    expect(html).not.toContain("Deny decisions, production runners");
     expect(html).not.toContain("Approvals, production runners");
     expect(html).not.toContain("No persisted agent table or records are queried");
   });
@@ -272,6 +274,7 @@ describe("product shell routes", () => {
     expect(html).toContain("Approve the drafted Telegram summary before it is sent.");
     expect(html).toContain("pending");
     expect(html).toContain("Approve");
+    expect(html).toContain("Deny");
     expect(html).toContain("2026-07-04T08:15:00.000Z");
     expect(html).toContain("2026-07-04T09:15:00.000Z");
     expect(html).not.toContain("payload_json");
