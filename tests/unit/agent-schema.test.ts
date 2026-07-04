@@ -11,6 +11,8 @@ import {
   agents,
   agentStatusEnum,
   appMetadata,
+  localRunnerProcesses,
+  localRunnerProcessStatusEnum,
   users,
 } from "@/src/server/db/schema";
 
@@ -22,6 +24,7 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(getTableName(agentConfigs)).toBe("agent_configs");
     expect(getTableName(agentApprovals)).toBe("agent_approvals");
     expect(getTableName(agentEvents)).toBe("agent_events");
+    expect(getTableName(localRunnerProcesses)).toBe("local_runner_processes");
     expect(getTableName(agentLogs)).toBe("agent_logs");
     expect(agentStatusEnum.enumValues).toEqual([
       "idle",
@@ -39,6 +42,13 @@ describe("Milestone 1 agent persistence schema", () => {
       "denied",
       "expired",
       "cancelled",
+    ]);
+    expect(localRunnerProcessStatusEnum.enumValues).toEqual([
+      "starting",
+      "running",
+      "stopped",
+      "exited",
+      "failed",
     ]);
   });
 
@@ -128,6 +138,7 @@ describe("Milestone 1 agent persistence schema", () => {
       "id",
       "agentId",
       "runnerId",
+      "localRunnerProcessId",
       "stream",
       "level",
       "message",
@@ -137,12 +148,47 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.id.notNull).toBe(true);
     expect(columns.agentId.notNull).toBe(true);
     expect(columns.runnerId.notNull).toBe(false);
+    expect(columns.localRunnerProcessId.notNull).toBe(false);
     expect(columns.stream.notNull).toBe(true);
     expect(columns.level.notNull).toBe(true);
     expect(columns.message.notNull).toBe(true);
     expect(columns.sequence.notNull).toBe(true);
     expect(columns.sequence.dataType).toBe("number");
     expect(columns.createdAt.notNull).toBe(true);
+  });
+
+  it("defines local runner process metadata rows scoped to agents", () => {
+    const columns = getTableColumns(localRunnerProcesses);
+
+    expect(Object.keys(columns)).toEqual([
+      "id",
+      "agentId",
+      "pid",
+      "commandMetadata",
+      "status",
+      "startedAt",
+      "stoppedAt",
+      "exitCode",
+      "signal",
+      "lastError",
+      "createdAt",
+      "updatedAt",
+    ]);
+    expect(columns.id.notNull).toBe(true);
+    expect(columns.agentId.notNull).toBe(true);
+    expect(columns.pid.notNull).toBe(true);
+    expect(columns.pid.dataType).toBe("number");
+    expect(columns.commandMetadata.notNull).toBe(true);
+    expect(columns.commandMetadata.dataType).toBe("json");
+    expect(columns.status.notNull).toBe(true);
+    expect(columns.status.default).toBe("running");
+    expect(columns.startedAt.notNull).toBe(true);
+    expect(columns.stoppedAt.notNull).toBe(false);
+    expect(columns.exitCode.notNull).toBe(false);
+    expect(columns.signal.notNull).toBe(false);
+    expect(columns.lastError.notNull).toBe(false);
+    expect(columns.createdAt.notNull).toBe(true);
+    expect(columns.updatedAt.notNull).toBe(true);
   });
 
   it("defines pending approval rows without exposing raw payload through display contracts", () => {
@@ -272,5 +318,46 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(migration).not.toContain('ALTER TABLE "agent_configs"');
     expect(migration).not.toContain('ALTER TABLE "users"');
     expect(migration).not.toContain('ALTER TABLE "app_metadata"');
+  });
+
+  it("generates an additive local runner state migration without merging logs into audit events", async () => {
+    const migration = await readFile("drizzle/0005_local_runner_state.sql", "utf8");
+
+    expect(migration).toContain('CREATE TYPE "public"."local_runner_process_status"');
+    expect(migration).toContain("'starting'");
+    expect(migration).toContain("'running'");
+    expect(migration).toContain("'stopped'");
+    expect(migration).toContain("'exited'");
+    expect(migration).toContain("'failed'");
+    expect(migration).toContain('CREATE TABLE "local_runner_processes"');
+    expect(migration).toContain('"agent_id" uuid NOT NULL');
+    expect(migration).toContain('"pid" integer NOT NULL');
+    expect(migration).toContain('"command_metadata" jsonb NOT NULL');
+    expect(migration).toContain(
+      '"status" "local_runner_process_status" DEFAULT \'running\' NOT NULL',
+    );
+    expect(migration).toContain('"started_at" timestamp with time zone NOT NULL');
+    expect(migration).toContain('"stopped_at" timestamp with time zone');
+    expect(migration).toContain('"exit_code" integer');
+    expect(migration).toContain('"signal" text');
+    expect(migration).toContain('"last_error" text');
+    expect(migration).toContain('CONSTRAINT "local_runner_processes_pid_positive_check"');
+    expect(migration).toContain('CONSTRAINT "local_runner_processes_exit_code_nonnegative_check"');
+    expect(migration).toContain('CONSTRAINT "local_runner_processes_stopped_after_started_check"');
+    expect(migration).toContain('ALTER TABLE "agent_logs" ADD COLUMN "local_runner_process_id"');
+    expect(migration).toContain('CONSTRAINT "agent_logs_stream_check"');
+    expect(migration).toContain('FOREIGN KEY ("agent_id") REFERENCES "public"."agents"("id")');
+    expect(migration).toContain(
+      'FOREIGN KEY ("local_runner_process_id") REFERENCES "public"."local_runner_processes"("id")',
+    );
+    expect(migration).not.toContain('DROP TABLE "agents"');
+    expect(migration).not.toContain('DROP TABLE "agent_events"');
+    expect(migration).not.toContain('DROP TABLE "agent_logs"');
+    expect(migration).not.toContain('DROP TABLE "agent_approvals"');
+    expect(migration).not.toContain('DROP TABLE "agent_configs"');
+    expect(migration).not.toContain('DROP TABLE "users"');
+    expect(migration).not.toContain('DROP TABLE "app_metadata"');
+    expect(migration).not.toContain('ALTER TABLE "agent_events"');
+    expect(migration).not.toMatch(/api[_ ]?key|token|password|secret|credential/i);
   });
 });

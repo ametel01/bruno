@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  index,
   integer,
   jsonb,
   pgEnum,
@@ -35,6 +36,14 @@ export const agentApprovalStatusEnum = pgEnum("agent_approval_status", [
   "denied",
   "expired",
   "cancelled",
+]);
+
+export const localRunnerProcessStatusEnum = pgEnum("local_runner_process_status", [
+  "starting",
+  "running",
+  "stopped",
+  "exited",
+  "failed",
 ]);
 
 export const users = pgTable("users", {
@@ -96,6 +105,38 @@ export const agentEvents = pgTable("agent_events", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const localRunnerProcesses = pgTable(
+  "local_runner_processes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agents.id),
+    pid: integer("pid").notNull(),
+    commandMetadata: jsonb("command_metadata").$type<Record<string, unknown>>().notNull(),
+    status: localRunnerProcessStatusEnum("status").notNull().default("running"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    stoppedAt: timestamp("stopped_at", { withTimezone: true }),
+    exitCode: integer("exit_code"),
+    signal: text("signal"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("local_runner_processes_pid_positive_check", sql`${table.pid} > 0`),
+    check(
+      "local_runner_processes_exit_code_nonnegative_check",
+      sql`${table.exitCode} IS NULL OR ${table.exitCode} >= 0`,
+    ),
+    check(
+      "local_runner_processes_stopped_after_started_check",
+      sql`${table.stoppedAt} IS NULL OR ${table.stoppedAt} >= ${table.startedAt}`,
+    ),
+    index("local_runner_processes_agent_started_idx").on(table.agentId, table.startedAt),
+  ],
+);
+
 export const agentLogs = pgTable(
   "agent_logs",
   {
@@ -104,6 +145,7 @@ export const agentLogs = pgTable(
       .notNull()
       .references(() => agents.id),
     runnerId: uuid("runner_id"),
+    localRunnerProcessId: uuid("local_runner_process_id").references(() => localRunnerProcesses.id),
     stream: text("stream").notNull(),
     level: text("level").notNull(),
     message: text("message").notNull(),
@@ -112,6 +154,7 @@ export const agentLogs = pgTable(
   },
   (table) => [
     check("agent_logs_sequence_positive_check", sql`${table.sequence} > 0`),
+    check("agent_logs_stream_check", sql`${table.stream} IN ('stdout', 'stderr')`),
     uniqueIndex("agent_logs_agent_sequence_idx").on(table.agentId, table.sequence),
   ],
 );

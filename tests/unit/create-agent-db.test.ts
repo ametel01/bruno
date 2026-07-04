@@ -52,6 +52,7 @@ import {
   agentLogs,
   agents,
   appMetadata,
+  localRunnerProcesses,
   users,
 } from "@/src/server/db/schema";
 import {
@@ -70,6 +71,16 @@ import {
   listAgentLogs,
   mapAgentLogToDto,
 } from "@/src/server/logs/agent-logs";
+import {
+  appendLocalRunnerLogLines,
+  createLocalRunnerProcessForDevelopmentUser,
+  listLocalRunnerProcessLogs,
+  LOCAL_RUNNER_COMMAND_METADATA_REDACTION,
+  LOCAL_RUNNER_LAST_ERROR_FALLBACK,
+  normalizeCommandMetadata,
+  recordLocalRunnerProcessExit,
+  sanitizeLocalRunnerLastError,
+} from "@/src/server/runners/local-runner-state";
 
 describe("create agent persistence", () => {
   let connection: DatabaseConnection;
@@ -4232,12 +4243,411 @@ describe("create agent persistence", () => {
     ]);
   });
 
+  it("persists local runner process metadata with safe terminal state details", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Local Runner Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const startedAt = new Date("2026-07-04T06:00:00.000Z");
+    const stoppedAt = new Date("2026-07-04T06:05:00.000Z");
+
+    const processRow = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      pid: 43210,
+      commandMetadata: {
+        command: "bun",
+        args: ["run", "agent"],
+        cwd: "/Users/alexmetelli/source/agentbay",
+        envKeys: ["NODE_ENV", "DATABASE_URL"],
+      },
+      startedAt,
+    });
+
+    expect(processRow).toMatchObject({
+      agentId: created.agent.id,
+      pid: 43210,
+      commandMetadata: {
+        command: "bun",
+        args: ["run", "agent"],
+        cwd: "/Users/alexmetelli/source/agentbay",
+        envKeys: ["NODE_ENV", "DATABASE_URL"],
+      },
+      status: "running",
+      startedAt: "2026-07-04T06:00:00.000Z",
+      stoppedAt: null,
+      exitCode: null,
+      signal: null,
+      lastError: null,
+    });
+
+    const exited = await recordLocalRunnerProcessExit({
+      db: connection.db,
+      processId: processRow?.id ?? "",
+      stoppedAt,
+      exitCode: 1,
+      lastError: new Error("DATABASE_URL=postgres://agentbay:secret@127.0.0.1/agentbay failed"),
+    });
+    const persistedProcesses = await connection.db.select().from(localRunnerProcesses);
+
+    expect(exited).toMatchObject({
+      id: processRow?.id,
+      agentId: created.agent.id,
+      status: "failed",
+      stoppedAt: "2026-07-04T06:05:00.000Z",
+      exitCode: 1,
+      signal: null,
+      lastError: LOCAL_RUNNER_LAST_ERROR_FALLBACK,
+    });
+    expect(persistedProcesses).toHaveLength(1);
+    expect(JSON.stringify(persistedProcesses)).not.toContain("postgres://");
+    expect(JSON.stringify(persistedProcesses)).not.toContain("secret");
+  });
+
+  it("redacts unsafe command metadata before persisting local runner process rows", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Sensitive Command Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+
+    const processRow = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      pid: 43217,
+      commandMetadata: {
+        command: "DATABASE_URL=postgres://agentbay:pg-password@127.0.0.1/agentbay bun run local",
+        args: [
+          "run",
+          "local",
+          "--database-url=postgres://agentbay:another-password@127.0.0.1/agentbay",
+          "--token",
+          "raw-token-value",
+          "--api-key=raw-api-key-value",
+          "--safe-name",
+          "research-agent",
+        ],
+        cwd: "/tmp/postgres://agentbay:cwd-password@127.0.0.1/agentbay",
+      },
+      startedAt: new Date("2026-07-04T06:00:00.000Z"),
+    });
+    const [persistedProcess] = await connection.db.select().from(localRunnerProcesses).limit(1);
+    const persistedMetadata = persistedProcess?.commandMetadata ?? {};
+    const serializedMetadata = JSON.stringify(persistedMetadata);
+
+    expect(processRow?.commandMetadata).toEqual(persistedMetadata);
+    expect(persistedMetadata).toMatchObject({
+      command: `DATABASE_URL=${LOCAL_RUNNER_COMMAND_METADATA_REDACTION} bun run local`,
+      args: [
+        "run",
+        "local",
+        `--database-url=${LOCAL_RUNNER_COMMAND_METADATA_REDACTION}`,
+        "--token",
+        LOCAL_RUNNER_COMMAND_METADATA_REDACTION,
+        `--api-key=${LOCAL_RUNNER_COMMAND_METADATA_REDACTION}`,
+        "--safe-name",
+        "research-agent",
+      ],
+      cwd: `/tmp/${LOCAL_RUNNER_COMMAND_METADATA_REDACTION}`,
+    });
+    expect(serializedMetadata).not.toContain("postgres://");
+    expect(serializedMetadata).not.toContain("pg-password");
+    expect(serializedMetadata).not.toContain("another-password");
+    expect(serializedMetadata).not.toContain("cwd-password");
+    expect(serializedMetadata).not.toContain("raw-token-value");
+    expect(serializedMetadata).not.toContain("raw-api-key-value");
+    expect(serializedMetadata).toContain("research-agent");
+  });
+
+  it("appends stdout and stderr local runner logs in stable per-agent order without audit events", async () => {
+    const agentA = await createAgentForDevelopmentUser(
+      { name: "Log Agent A", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const agentB = await createAgentForDevelopmentUser(
+      { name: "Log Agent B", templateKey: "github_issue_agent" },
+      { createConnection: () => connection },
+    );
+    const processA = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: agentA.agent.id,
+      pid: 43211,
+      commandMetadata: { command: "bun", args: ["runner", "a"] },
+      startedAt: new Date("2026-07-04T06:00:00.000Z"),
+    });
+    const processB = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: agentB.agent.id,
+      pid: 43212,
+      commandMetadata: { command: "bun", args: ["runner", "b"] },
+      startedAt: new Date("2026-07-04T06:00:00.000Z"),
+    });
+
+    await connection.db
+      .insert(agentLogs)
+      .values(logValue(agentA.agent.id, 4, "stdout", "info", "prior local output"));
+
+    const appendedA = await appendLocalRunnerLogLines({
+      db: connection.db,
+      processId: processA?.id ?? "",
+      lines: [
+        {
+          stream: "stdout",
+          message: "runner booted",
+          createdAt: new Date("2026-07-04T06:00:01.000Z"),
+        },
+        {
+          stream: "stderr",
+          message: "warning from child process",
+          createdAt: new Date("2026-07-04T06:00:02.000Z"),
+        },
+      ],
+    });
+    await appendLocalRunnerLogLines({
+      db: connection.db,
+      processId: processB?.id ?? "",
+      lines: [
+        {
+          stream: "stdout",
+          message: "other agent output",
+          createdAt: new Date("2026-07-04T06:00:01.000Z"),
+        },
+      ],
+    });
+
+    const agentAPage = await listAgentLogs({ db: connection.db, agentId: agentA.agent.id });
+    const agentBPage = await listAgentLogs({ db: connection.db, agentId: agentB.agent.id });
+    const processALogs = await listLocalRunnerProcessLogs({
+      db: connection.db,
+      processId: processA?.id ?? "",
+    });
+    const persistedEvents = await connection.db.select().from(agentEvents);
+
+    expect(appendedA.inserted).toBe(2);
+    expect(appendedA.logs.map((log) => [log.sequence, log.stream, log.level, log.message])).toEqual(
+      [
+        [5, "stdout", "info", "runner booted"],
+        [6, "stderr", "error", "warning from child process"],
+      ],
+    );
+    expect(agentAPage.logs.map((log) => [log.sequence, log.stream, log.message])).toEqual([
+      [4, "stdout", "prior local output"],
+      [5, "stdout", "runner booted"],
+      [6, "stderr", "warning from child process"],
+    ]);
+    expect(agentAPage.logs.map((log) => log.agentId)).toEqual([
+      agentA.agent.id,
+      agentA.agent.id,
+      agentA.agent.id,
+    ]);
+    expect(agentAPage.logs.slice(1).map((log) => log.localRunnerProcessId)).toEqual([
+      processA?.id,
+      processA?.id,
+    ]);
+    expect(agentBPage.logs.map((log) => [log.sequence, log.message])).toEqual([
+      [1, "other agent output"],
+    ]);
+    expect(processALogs.map((log) => [log.sequence, log.stream, log.message])).toEqual([
+      [5, "stdout", "runner booted"],
+      [6, "stderr", "warning from child process"],
+    ]);
+    expect(persistedEvents).toHaveLength(2);
+    expect(persistedEvents.every((event) => event.type === "agent.created")).toBe(true);
+  });
+
+  it("allocates stable log sequences across multiple local runner processes for one agent", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Multi Process Log Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const firstProcess = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      pid: 43218,
+      commandMetadata: { command: "bun", args: ["runner", "first"] },
+      startedAt: new Date("2026-07-04T06:00:00.000Z"),
+    });
+    const secondProcess = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      pid: 43219,
+      commandMetadata: { command: "bun", args: ["runner", "second"] },
+      startedAt: new Date("2026-07-04T06:01:00.000Z"),
+    });
+
+    await appendLocalRunnerLogLines({
+      db: connection.db,
+      processId: firstProcess?.id ?? "",
+      lines: [{ stream: "stdout", message: "first process line" }],
+      now: new Date("2026-07-04T06:01:01.000Z"),
+    });
+    await appendLocalRunnerLogLines({
+      db: connection.db,
+      processId: secondProcess?.id ?? "",
+      lines: [
+        { stream: "stdout", message: "second process line 1" },
+        { stream: "stderr", message: "second process line 2" },
+      ],
+      now: new Date("2026-07-04T06:01:02.000Z"),
+    });
+
+    const page = await listAgentLogs({ db: connection.db, agentId: created.agent.id });
+
+    expect(page.logs.map((log) => [log.sequence, log.localRunnerProcessId, log.message])).toEqual([
+      [1, firstProcess?.id, "first process line"],
+      [2, secondProcess?.id, "second process line 1"],
+      [3, secondProcess?.id, "second process line 2"],
+    ]);
+  });
+
+  it("normalizes inconsistent local runner terminal statuses from exit details", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Terminal Status Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const failedProcess = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      pid: 43220,
+      commandMetadata: { command: "bun" },
+    });
+    const stoppedProcess = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      pid: 43221,
+      commandMetadata: { command: "bun" },
+    });
+    const exitedProcess = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      pid: 43222,
+      commandMetadata: { command: "bun" },
+    });
+
+    await expect(
+      recordLocalRunnerProcessExit({
+        db: connection.db,
+        processId: failedProcess?.id ?? "",
+        status: "exited",
+        exitCode: 1,
+      }),
+    ).resolves.toMatchObject({
+      status: "failed",
+      exitCode: 1,
+    });
+    await expect(
+      recordLocalRunnerProcessExit({
+        db: connection.db,
+        processId: stoppedProcess?.id ?? "",
+        status: "stopped",
+        signal: "SIGTERM",
+      }),
+    ).resolves.toMatchObject({
+      status: "failed",
+      signal: "SIGTERM",
+    });
+    await expect(
+      recordLocalRunnerProcessExit({
+        db: connection.db,
+        processId: exitedProcess?.id ?? "",
+        status: "failed",
+        exitCode: 0,
+      }),
+    ).resolves.toMatchObject({
+      status: "exited",
+      exitCode: 0,
+    });
+  });
+
+  it("does not create local runner state for missing, soft-deleted, or other-user agents", async () => {
+    const active = await createAgentForDevelopmentUser(
+      { name: "Active Runner Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const deleted = await createAgentForDevelopmentUser(
+      { name: "Deleted Runner Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const [otherUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+    const [otherUserAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId: otherUser?.id ?? "",
+        name: "Other User Runner Agent",
+        templateKey: "research_agent",
+        status: "running",
+      })
+      .returning({ id: agents.id });
+
+    await connection.db
+      .update(agents)
+      .set({ deletedAt: new Date("2026-07-04T09:00:00.000Z") })
+      .where(eq(agents.id, deleted.agent.id));
+
+    await expect(
+      createLocalRunnerProcessForDevelopmentUser({
+        db: connection.db,
+        agentId: "00000000-0000-4000-8000-000000000999",
+        pid: 43213,
+        commandMetadata: { command: "bun" },
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      createLocalRunnerProcessForDevelopmentUser({
+        db: connection.db,
+        agentId: deleted.agent.id,
+        pid: 43214,
+        commandMetadata: { command: "bun" },
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      createLocalRunnerProcessForDevelopmentUser({
+        db: connection.db,
+        agentId: otherUserAgent?.id ?? "",
+        pid: 43215,
+        commandMetadata: { command: "bun" },
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      createLocalRunnerProcessForDevelopmentUser({
+        db: connection.db,
+        agentId: active.agent.id,
+        pid: 43216,
+        commandMetadata: { command: "bun" },
+      }),
+    ).resolves.toMatchObject({ agentId: active.agent.id });
+
+    await expect(countRows(connection, "local_runner_processes")).resolves.toBe(1);
+  });
+
+  it("normalizes local runner last-error text without preserving secret-looking details", () => {
+    expect(sanitizeLocalRunnerLastError(null)).toBeNull();
+    expect(sanitizeLocalRunnerLastError("  child process exited  ")).toBe("child process exited");
+    expect(sanitizeLocalRunnerLastError("API_KEY=secret-value failed")).toBe(
+      LOCAL_RUNNER_LAST_ERROR_FALLBACK,
+    );
+    expect(sanitizeLocalRunnerLastError(new Error("postgres://user:pass@localhost/db"))).toBe(
+      LOCAL_RUNNER_LAST_ERROR_FALLBACK,
+    );
+    expect(
+      normalizeCommandMetadata({
+        command: "ACCESS_TOKEN=raw-token bun",
+        args: ["--password", "raw-password", "--safe", "value"],
+        cwd: "postgres://user:pass@localhost/db",
+      }),
+    ).toEqual({
+      command: `ACCESS_TOKEN=${LOCAL_RUNNER_COMMAND_METADATA_REDACTION} bun`,
+      args: ["--password", LOCAL_RUNNER_COMMAND_METADATA_REDACTION, "--safe", "value"],
+      cwd: LOCAL_RUNNER_COMMAND_METADATA_REDACTION,
+    });
+  });
+
   it("maps persisted log rows to the public DTO shape", () => {
     expect(
       mapAgentLogToDto({
         id: "00000000-0000-4000-8000-000000000301",
         agentId: "00000000-0000-4000-8000-000000000201",
         runnerId: null,
+        localRunnerProcessId: null,
         stream: "stdout",
         level: "info",
         message: "Agent booted.",
@@ -4248,6 +4658,7 @@ describe("create agent persistence", () => {
       id: "00000000-0000-4000-8000-000000000301",
       agentId: "00000000-0000-4000-8000-000000000201",
       runnerId: null,
+      localRunnerProcessId: null,
       stream: "stdout",
       level: "info",
       message: "Agent booted.",
@@ -4978,7 +5389,7 @@ describe("create agent persistence", () => {
 });
 
 async function resetCreateAgentTables(connection: DatabaseConnection): Promise<void> {
-  await connection.client`truncate table agent_approvals, agent_configs, agent_logs, agent_events, agents, app_metadata, users restart identity cascade`;
+  await connection.client`truncate table agent_approvals, agent_configs, agent_logs, local_runner_processes, agent_events, agents, app_metadata, users restart identity cascade`;
 }
 
 async function createTestApproval(
@@ -5002,7 +5413,13 @@ async function createTestApproval(
 
 async function expectTableCount(
   connection: DatabaseConnection,
-  tableName: "users" | "agents" | "agent_configs" | "agent_events" | "app_metadata",
+  tableName:
+    | "users"
+    | "agents"
+    | "agent_configs"
+    | "agent_events"
+    | "local_runner_processes"
+    | "app_metadata",
   expected: number,
 ): Promise<void> {
   await expect(countRows(connection, tableName)).resolves.toBe(expected);
@@ -5010,7 +5427,14 @@ async function expectTableCount(
 
 async function countRows(
   connection: DatabaseConnection,
-  tableName: "users" | "agents" | "agent_configs" | "agent_events" | "agent_logs" | "app_metadata",
+  tableName:
+    | "users"
+    | "agents"
+    | "agent_configs"
+    | "agent_events"
+    | "agent_logs"
+    | "local_runner_processes"
+    | "app_metadata",
 ): Promise<number> {
   const [row] = await connection.db.execute<{ count: string }>(
     sql.raw(`select count(*)::text as count from ${tableName}`),
