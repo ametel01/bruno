@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ActivityFeedPanel } from "@/app/_components/activity-feed";
+import { ApprovalDecisionControls } from "@/app/_components/approval-decision-controls";
 import { PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
 import { AgentConfigEditor } from "@/app/agents/_components/agent-config-editor";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
@@ -204,9 +206,10 @@ function AgentApprovalItem({ approval }: { approval: PendingApprovalDto }) {
     <li className="approval-item">
       <div className="approval-item-header">
         <div>
+          <Link href={approval.agentHref}>{approval.agentName}</Link>
           <h3>{approval.title}</h3>
         </div>
-        <span className="status-pill">{approval.status}</span>
+        <ApprovalDecisionControls approvalId={approval.id} initialStatus={approval.status} />
       </div>
       <p>{approval.description}</p>
       <dl className="approval-metadata">
@@ -229,6 +232,10 @@ function AgentApprovalItem({ approval }: { approval: PendingApprovalDto }) {
           </div>
         ) : null}
       </dl>
+      <div className="approval-payload-summary">
+        <h4>Payload summary</h4>
+        <p>{approval.payloadSummary}</p>
+      </div>
     </li>
   );
 }

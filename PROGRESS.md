@@ -2,17 +2,17 @@
 
 ## Milestone 8 Mobile Control Panel Readiness
 
-- Status: #66 implemented and ready for checker review; #67-#70 remain open.
+- Status: #67 implemented and ready for checker review; #68-#70 remain open.
 - Source plan: `docs/MILESTONES.md` Milestone 8
 - Tracking issues: #65-#70
-- Current branch: `codex/issue-66-mobile-status-controls`
-- Next step: checker should review #66 mobile `/agents` status controls, confirmation behavior, and gate evidence.
+- Current branch: `codex/issue-67-mobile-approvals`
+- Next step: checker should review #67 mobile approval cards, approval/deny decisions, mobile Deny confirmation, and gate evidence.
 
 ### Issue Checklist
 
 - [x] #65 Audit Milestone 8 readiness and tracking
 - [x] #66 Make agent status and pause/resume mobile-ready
-- [ ] #67 Add mobile approval review and decisions
+- [x] #67 Add mobile approval review and decisions
 - [ ] #68 Surface mobile latest logs and alerts
 - [ ] #69 Harden mobile control layouts
 - [ ] #70 Verify Milestone 8 mobile acceptance
@@ -24,9 +24,13 @@
 - #66 mobile cards expose current status plus only quick lifecycle controls in scope for the status: `Resume` for `idle`, `stopped`, or `error` agents through the existing start action, and `Stop` for `running` agents through the existing stop action.
 - #66 mobile Stop requires a second explicit `Confirm stop` click before mutation and includes a cancel path; Delete is not rendered as a mobile card action.
 - #66 adds mobile Playwright coverage proving a long-name stopped agent can resume to running, require confirmation before stopping, stop to `stopped`, and resume again without horizontal page overflow.
-- Milestone 8 predecessor readiness is documented without adding mobile UI, pause/resume, mobile approval review, alerts, new APIs, schema/migrations, dependencies, lockfile changes, provider/runner/auth/billing/secret behavior, or Milestone 9/10 behavior.
-- `CHANGELOG.md` was inspected and already has Keep a Changelog framing plus `## [Unreleased]`; no functional changelog entry was added for this audit-only work.
-- No required Milestone 3-7 predecessor contract is missing. The implementation slices still need Milestone 8-owned product decisions and UI work for pause/resume naming, alert derivation, dedicated mobile routes, and responsive/mobile acceptance tests.
+- #67 adds shared dashboard/detail approval cards with title, description, agent link, status, requester, created/expiry timestamps, and an allowlisted fake-runner payload summary while keeping unknown payloads generic.
+- #67 adds coordinated approval decision controls so mobile users can Approve or Deny from dashboard or detail, see resolved `approved`/`denied` card state, and cannot act on the same resolved card twice.
+- #67 treats mobile Deny as irreversible enough to require native confirmation on phone/coarse-pointer viewports while preserving the existing desktop no-confirm refresh behavior.
+- #67 adds mobile Playwright coverage for approving from `/dashboard`, denying from `/agents/:agentId`, safe stale already-resolved feedback, no raw payload/driver details, and no horizontal overflow.
+- Milestone 8 predecessor readiness is documented from #65, and #66/#67 have since added the first mobile UI slices without adding alerts, new APIs, schema/migrations, dependencies, lockfile changes, provider/runner/auth/billing/secret behavior, or Milestone 9/10 behavior.
+- `CHANGELOG.md` has Keep a Changelog framing plus `## [Unreleased]` and now includes the #66 and #67 mobile behavior entries.
+- No required Milestone 3-7 predecessor contract is missing. The remaining implementation slices still need Milestone 8-owned product decisions and UI work for alert derivation, dedicated mobile routes, and responsive/mobile acceptance tests.
 
 ### Predecessor Contract Audit
 
@@ -39,6 +43,34 @@
 - Existing coverage evidence: Milestone 7 validation already covered dashboard/detail approval visibility, approve, deny, decision event counts, duplicate-decision conflicts, pending queue removal, safe UI/API output, runtime-log-triggered fake approval generation, and full aggregate gates against an isolated migrated database.
 
 ### Validation
+
+#### #67
+
+- Date: 2026-07-04
+- Environment:
+  - Isolated database: container `agentbay_issue_67-postgres` on host port `54367`, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54367/agentbay`.
+  - Isolated app/test server: `PORT=3067`, `PLAYWRIGHT_BASE_URL=http://localhost:3067`, `NEXT_PUBLIC_APP_URL=http://localhost:3067`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree had no local `node_modules`.
+  - `docker info --format '{{.ServerVersion}}'`: pass; Docker daemon reachable with server version `29.3.1`.
+  - `docker run --name agentbay_issue_67-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54367:5432 -d postgres:17-alpine`: pass; started isolated Postgres for #67.
+  - `docker exec agentbay_issue_67-postgres pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54367/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3067 bun run db:migrate`: pass; migrations applied successfully against the isolated #67 database.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54367/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3067 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+- Focused checks:
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54367/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3067 bun run test -- tests/unit/root-page.test.tsx tests/unit/create-agent-db.test.ts`: pass; 2 files and 85 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54367/agentbay PORT=3067 PLAYWRIGHT_BASE_URL=http://localhost:3067 NEXT_PUBLIC_APP_URL=http://localhost:3067 bun run test:e2e -- --project=chromium-mobile -g "mobile approval"`: pass; 2 Chromium mobile tests passed. Covers dashboard approve resolved state, detail deny confirmation and resolved state, already-resolved safe feedback, disabled stale actions, safe payload summary, and no horizontal overflow.
+- Required gates:
+  - `bun run format:check`: pass; Biome checked 76 files.
+  - `bun run lint`: pass; Biome checked 76 files.
+  - `bun run typecheck`: pass.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54367/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3067 bun run test`: pass; 20 files and 173 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54367/agentbay PORT=3067 PLAYWRIGHT_BASE_URL=http://localhost:3067 NEXT_PUBLIC_APP_URL=http://localhost:3067 bun run build`: pass; Next.js build completed and included dashboard, agent detail, approval decision routes, health, logs, and lifecycle routes.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54367/agentbay PORT=3067 PLAYWRIGHT_BASE_URL=http://localhost:3067 NEXT_PUBLIC_APP_URL=http://localhost:3067 bun run test:e2e`: pass; 33 browser tests passed with 13 expected skips.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54367/agentbay PORT=3067 PLAYWRIGHT_BASE_URL=http://localhost:3067 NEXT_PUBLIC_APP_URL=http://localhost:3067 bun run verify`: pass; aggregate format, lint, typecheck, unit test, build, and E2E gates passed with 173 unit tests and 33 E2E passed / 13 expected skips.
+- Reconciliation:
+  - An initial focused DB unit command without `DATABASE_URL`/`NEXT_PUBLIC_APP_URL` failed environment validation before tests ran; rerunning with the isolated #67 environment passed.
+  - `bun run format:check` initially reported formatting drift in the new E2E assertions; `bun run format` fixed the single file before final checks.
 
 #### #66
 

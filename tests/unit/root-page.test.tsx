@@ -258,6 +258,8 @@ describe("product shell routes", () => {
         description: "Approve the drafted Telegram summary before it is sent.",
         status: "pending",
         requestedBy: "fake-runner",
+        payloadSummary:
+          "Source: fake_runner; Action: telegram.send_message; Destination: Demo Telegram channel; Summary: Daily operations summary is ready for review.",
         createdAt: "2026-07-04T08:15:00.000Z",
         expiresAt: "2026-07-04T09:15:00.000Z",
       },
@@ -273,6 +275,10 @@ describe("product shell routes", () => {
     expect(html).toContain("Review outbound message");
     expect(html).toContain("Approve the drafted Telegram summary before it is sent.");
     expect(html).toContain("pending");
+    expect(html).toContain("fake-runner");
+    expect(html).toContain("Payload summary");
+    expect(html).toContain("Action: telegram.send_message");
+    expect(html).toContain("Daily operations summary is ready for review.");
     expect(html).toContain("Approve");
     expect(html).toContain("Deny");
     expect(html).toContain("2026-07-04T08:15:00.000Z");
@@ -440,6 +446,8 @@ describe("product shell routes", () => {
         description: "Approve the drafted Telegram summary before it is sent.",
         status: "pending",
         requestedBy: "fake-runner",
+        payloadSummary:
+          "Source: fake_runner; Action: telegram.send_message; Destination: Demo Telegram channel; Summary: Daily operations summary is ready for review.",
         createdAt: "2026-07-04T08:15:00.000Z",
         expiresAt: "2026-07-04T09:15:00.000Z",
       },
@@ -456,6 +464,11 @@ describe("product shell routes", () => {
     expect(html).toContain("Approve the drafted Telegram summary before it is sent.");
     expect(html).toContain("pending");
     expect(html).toContain("fake-runner");
+    expect(html).toContain("Payload summary");
+    expect(html).toContain("Action: telegram.send_message");
+    expect(html).toContain("Daily operations summary is ready for review.");
+    expect(html).toContain("Approve");
+    expect(html).toContain("Deny");
     expect(html).toContain("2026-07-04T08:15:00.000Z");
     expect(html).toContain("2026-07-04T09:15:00.000Z");
     expect(html).not.toContain("payload_json");

@@ -638,6 +638,11 @@ h2 {
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
+  min-width: 0;
+}
+
+.approval-item-header > div {
+  min-width: 0;
 }
 
 .approval-item-header a {
@@ -699,11 +704,54 @@ h2 {
   gap: 8px;
 }
 
-.approval-decision-action {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+.approval-decision-controls {
+  display: grid;
   gap: 8px;
+  justify-items: end;
+  min-width: min(100%, 190px);
+}
+
+.approval-decision-controls .status-pill {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.approval-decision-controls .approval-actions {
+  justify-content: flex-end;
+}
+
+.approval-resolved-state {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.approval-payload-summary {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-subtle);
+  padding: 10px 12px;
+}
+
+.approval-payload-summary h4 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.approval-payload-summary p {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 0.86rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .activity-pagination {
@@ -1110,6 +1158,35 @@ h2 {
   .mobile-agent-actions .action-message {
     width: 100%;
     overflow-wrap: anywhere;
+  }
+
+  .approval-item {
+    gap: 12px;
+  }
+
+  .approval-item-header {
+    display: grid;
+    gap: 10px;
+  }
+
+  .approval-decision-controls {
+    justify-items: stretch;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .approval-decision-controls .approval-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .approval-decision-controls .approval-actions button {
+    width: 100%;
+  }
+
+  .approval-decision-controls .action-message,
+  .approval-resolved-state {
+    text-align: left;
   }
 }
 

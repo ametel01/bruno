@@ -200,7 +200,12 @@ describe("create agent persistence", () => {
         title: "Review outbound message",
         description: "Approve the drafted Telegram summary before it is sent.",
         payloadJson: {
-          action: "telegram.send",
+          source: "fake_runner",
+          actionType: "telegram.send_message",
+          preview: {
+            destination: "Demo Telegram channel",
+            summary: "Daily operations summary is ready for review.",
+          },
           token: "stored-for-downstream-not-rendered",
         },
         requestedBy: "fake-runner",
@@ -222,6 +227,8 @@ describe("create agent persistence", () => {
       description: "Approve the drafted Telegram summary before it is sent.",
       status: "pending",
       requestedBy: "fake-runner",
+      payloadSummary:
+        "Source: fake_runner; Action: telegram.send_message; Destination: Demo Telegram channel; Summary: Daily operations summary is ready for review.",
       createdAt: "2026-07-04T08:15:00.000Z",
       expiresAt: "2026-07-04T09:15:00.000Z",
     });
@@ -231,7 +238,12 @@ describe("create agent persistence", () => {
       agentId: created.agent.id,
       status: "pending",
       payloadJson: {
-        action: "telegram.send",
+        source: "fake_runner",
+        actionType: "telegram.send_message",
+        preview: {
+          destination: "Demo Telegram channel",
+          summary: "Daily operations summary is ready for review.",
+        },
         token: "stored-for-downstream-not-rendered",
       },
       resolvedBy: null,
