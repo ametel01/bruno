@@ -4,6 +4,7 @@ import { ApprovalDecisionControls } from "@/app/_components/approval-decision-co
 import { EmptyState, PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { MobileAgentList } from "@/app/agents/_components/mobile-agent-list";
+import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import {
   AgentListPersistenceError,
   listActiveAgentsForDevelopmentUser,
@@ -15,6 +16,10 @@ import {
 } from "@/src/server/approvals/agent-approvals";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { listLatestAgentActivity } from "@/src/server/events/agent-events";
+import {
+  listLatestActiveAgentProcessLogs,
+  type LatestAgentProcessLogDto,
+} from "@/src/server/logs/agent-logs";
 
 type DashboardContentProps = {
   routeLabel?: string;
@@ -23,6 +28,7 @@ type DashboardContentProps = {
 type DashboardAgentResult = Awaited<ReturnType<typeof loadDashboardAgents>>;
 type DashboardActivityResult = Awaited<ReturnType<typeof loadDashboardActivity>>;
 type DashboardApprovalsResult = Awaited<ReturnType<typeof loadDashboardApprovals>>;
+type DashboardProcessLogsResult = Awaited<ReturnType<typeof loadDashboardProcessLogs>>;
 
 export const dynamic = "force-dynamic";
 
@@ -30,12 +36,14 @@ export default async function DashboardPage() {
   const listResult = await loadDashboardAgents();
   const activityResult = await loadDashboardActivity();
   const approvalsResult = await loadDashboardApprovals();
+  const processLogsResult = await loadDashboardProcessLogs();
 
   return (
     <DashboardContent
       activityResult={activityResult}
       approvalsResult={approvalsResult}
       listResult={listResult}
+      processLogsResult={processLogsResult}
     />
   );
 }
@@ -43,11 +51,13 @@ export default async function DashboardPage() {
 export function DashboardContent({
   activityResult = { ok: true, events: [] },
   approvalsResult = { ok: true, approvals: [] },
+  processLogsResult = { ok: true, logs: [] },
   routeLabel = "Dashboard",
   listResult = { ok: true, agents: [] },
 }: DashboardContentProps & {
   activityResult?: DashboardActivityResult;
   approvalsResult?: DashboardApprovalsResult;
+  processLogsResult?: DashboardProcessLogsResult;
   listResult?: DashboardAgentResult;
 }) {
   return (
@@ -123,6 +133,7 @@ export function DashboardContent({
           titleId="dashboard-activity-title"
         />
         <PendingApprovalsPanel result={approvalsResult} />
+        <DashboardProcessLogsPanel result={processLogsResult} />
         <PlaceholderPanel title="Readiness">
           <dl className="definition-list">
             <div>
@@ -143,7 +154,8 @@ export function DashboardContent({
           <ul className="plain-list">
             <li>Start, Stop, Restart, and Delete use deterministic fake lifecycle controls.</li>
             <li>
-              Runtime logs and local-development config editing are present on agent detail pages.
+              Full per-agent log streams and local-development config editing are present on agent
+              detail pages.
             </li>
             <li>Runner provisioning and external integrations are placeholders only.</li>
             <li>
@@ -154,6 +166,66 @@ export function DashboardContent({
         </PlaceholderPanel>
       </div>
     </ProductShell>
+  );
+}
+
+function DashboardProcessLogsPanel({ result }: { result: DashboardProcessLogsResult }) {
+  return (
+    <section
+      className="runtime-log-panel dashboard-process-log-panel"
+      aria-labelledby="dashboard-process-logs-title"
+    >
+      <div className="section-heading">
+        <h2 id="dashboard-process-logs-title">Latest process logs</h2>
+        {result.ok ? <span>{result.logs.length} shown</span> : null}
+      </div>
+      {result.ok ? (
+        result.logs.length > 0 ? (
+          <ol className="runtime-log-list" aria-label="Latest captured process logs">
+            {result.logs.map((log) => (
+              <DashboardProcessLogItem key={log.id} log={log} />
+            ))}
+          </ol>
+        ) : (
+          <div className="activity-empty-state">
+            <h3>No process logs yet</h3>
+            <p>Captured stdout and stderr lines for active agents will appear here.</p>
+          </div>
+        )
+      ) : (
+        <div className="safe-error" role="alert">
+          Process logs could not be loaded.
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DashboardProcessLogItem({ log }: { log: LatestAgentProcessLogDto }) {
+  return (
+    <li className="runtime-log-item">
+      <div className="runtime-log-header">
+        <time dateTime={log.createdAt}>{log.createdAt}</time>
+        <span>#{log.sequence}</span>
+      </div>
+      <p>{summarizeOperationalText(log.message, "Log details omitted.")}</p>
+      <dl className="runtime-log-metadata">
+        <div>
+          <dt>Agent</dt>
+          <dd>
+            <Link href={log.agentHref}>{log.agentName}</Link>
+          </dd>
+        </div>
+        <div>
+          <dt>Stream</dt>
+          <dd>{log.stream}</dd>
+        </div>
+        <div>
+          <dt>Level</dt>
+          <dd>{log.level}</dd>
+        </div>
+      </dl>
+    </li>
   );
 }
 
@@ -289,5 +361,30 @@ async function loadDashboardApprovals() {
     }
 
     throw error;
+  }
+}
+
+async function loadDashboardProcessLogs(
+  dependencies: { createConnection?: () => DatabaseConnection } = {},
+) {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    return {
+      ok: true as const,
+      logs: await listLatestActiveAgentProcessLogs({
+        db: connection.db,
+        limit: 8,
+      }),
+    };
+  } catch {
+    return {
+      ok: false as const,
+    };
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
   }
 }
