@@ -275,7 +275,9 @@ test.describe
 
       await expect(page.getByRole("heading", { name: selectedName })).toBeVisible();
       await expect(page.getByRole("heading", { name: "Configuration" })).toBeVisible();
-      await expect(page.getByRole("heading", { name: "Runtime logs", exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Latest log summaries", exact: true }),
+      ).toBeVisible();
       await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
       const approvalPanel = page.locator(".approval-panel");
       await expect(approvalPanel).toContainText("Pending approvals");
@@ -978,7 +980,7 @@ test("/agents detail shows scoped runtime logs and stops polling after settled s
   await page.goto(`/agents/${primaryAgent.id}`);
   await expect(page.getByRole("heading", { name: primaryName })).toBeVisible();
   const primaryRuntimeLogs = page.locator(".runtime-log-panel");
-  await expect(primaryRuntimeLogs).toContainText("Runtime logs");
+  await expect(primaryRuntimeLogs).toContainText("Latest log summaries");
   await expect(primaryRuntimeLogs).toContainText("No runtime logs yet");
   await expect(primaryRuntimeLogs).not.toContainText(`Scoped log for ${otherName}`);
 
@@ -1034,6 +1036,94 @@ test("/agents detail shows scoped runtime logs and stops polling after settled s
   await expect(otherRuntimeLogs).toContainText(`Scoped log for ${otherName}`);
   await expect(otherRuntimeLogs).not.toContainText("Checking task queue...");
   await expectPageNotHorizontallyOverflowing(page);
+});
+
+test.describe("mobile latest logs and operational alerts", () => {
+  test("iPhone-sized detail view renders safe latest logs and active alerts", async ({
+    isMobile,
+    page,
+    request,
+  }, testInfo) => {
+    test.skip(!isMobile, "mobile log and alert proof runs on the mobile project");
+
+    await page.setViewportSize({ width: 375, height: 667 });
+
+    const name = `Mobile Alert Agent ${testInfo.project.name}`;
+    const created = await createAgent(request, name);
+    createdAgentIds.add(created.id);
+
+    await pinDevelopmentUserToAgent(created.id);
+    await markAgentErrored(
+      created.id,
+      "Runtime failed before retry\n    at run (/app/worker.ts:10:2)\npostgres://user:pass@localhost/db",
+    );
+    await insertPendingApproval(created.id, {
+      title: "Review mobile approval blocker",
+      description: "This approval should be readable from a phone.",
+      createdAt: "2026-07-04T08:15:00.000Z",
+      expiresAt: "2026-07-04T09:15:00.000Z",
+    });
+    await insertAgentEvent(created.id, {
+      type: "agent.error",
+      message: "Agent failed with token=stored-for-downstream and raw stack details.",
+    });
+    await insertRuntimeLog(
+      created.id,
+      "Worker recovered after postgres://user:pass@localhost/db failed\n    at poll (/app/runner.ts:9:1)",
+    );
+
+    await page.goto(`/agents/${created.id}`);
+
+    const alertPanel = page.locator(".operational-alert-panel");
+    await expect(alertPanel).toContainText("Operational alerts");
+    await expect(alertPanel).toContainText("Agent is in error");
+    await expect(alertPanel).toContainText("Approval expired");
+    await expect(alertPanel).toContainText("Agent error");
+    await expect(alertPanel).toContainText("Runner offline and degraded alerts are deferred");
+    await expect(alertPanel).toContainText("Sensitive details omitted.");
+    await expect(alertPanel).not.toContainText("token=stored-for-downstream");
+    await expect(alertPanel).not.toContainText("postgres://");
+    await expect(alertPanel).not.toContainText("/app/worker.ts");
+
+    const runtimeLogs = page.locator(".runtime-log-panel");
+    await expect(runtimeLogs).toContainText("Latest log summaries");
+    await expect(runtimeLogs).toContainText("[redacted database URL]");
+    await expect(runtimeLogs).not.toContainText("postgres://");
+    await expect(runtimeLogs).not.toContainText("/app/runner.ts");
+    await expectPageNotHorizontallyOverflowing(page);
+  });
+
+  test("small Android detail view keeps latest logs scoped to the selected agent", async ({
+    isMobile,
+    page,
+    request,
+  }, testInfo) => {
+    test.skip(!isMobile, "mobile log and alert proof runs on the mobile project");
+
+    await page.setViewportSize({ width: 360, height: 740 });
+
+    const selectedName = `Small Android Logs Agent ${testInfo.project.name}`;
+    const otherName = `Other Small Android Logs Agent ${testInfo.project.name}`;
+    const selected = await createAgent(request, selectedName);
+    const other = await createAgent(request, otherName);
+    createdAgentIds.add(selected.id);
+    createdAgentIds.add(other.id);
+
+    await insertRuntimeLog(
+      selected.id,
+      `Selected mobile log ${"wrap-".repeat(24)} remains readable for ${selectedName}.`,
+    );
+    await insertRuntimeLog(other.id, `Other agent log should not render for ${otherName}.`);
+
+    await page.goto(`/agents/${selected.id}`);
+
+    const runtimeLogs = page.locator(".runtime-log-panel");
+    await expect(runtimeLogs).toContainText("Latest log summaries");
+    await expect(runtimeLogs).toContainText("Selected mobile log");
+    await expect(runtimeLogs).not.toContainText("Other agent log should not render");
+    await expect(page.locator(".operational-alert-panel")).toContainText("No active alerts");
+    await expectPageNotHorizontallyOverflowing(page);
+  });
 });
 
 test("/agents detail keeps the record readable when runtime logs fail safely", async ({
@@ -1141,11 +1231,40 @@ async function markAgentDeleted(agentId: string): Promise<void> {
   });
 }
 
-async function insertRuntimeLog(agentId: string, message: string): Promise<void> {
+async function insertRuntimeLog(agentId: string, message: string, sequence = 1): Promise<void> {
   await withDatabase(async (sql) => {
     await sql`
       insert into agent_logs (agent_id, stream, level, message, sequence)
-      values (${agentId}, 'stdout', 'info', ${message}, 1)
+      values (${agentId}, 'stdout', 'info', ${message}, ${sequence})
+    `;
+  });
+}
+
+async function markAgentErrored(agentId: string, statusReason: string): Promise<void> {
+  await withDatabase(async (sql) => {
+    await sql`
+      update agents
+      set status = 'error',
+          status_reason = ${statusReason},
+          updated_at = now()
+      where id = ${agentId}
+    `;
+  });
+}
+
+async function insertAgentEvent(
+  agentId: string,
+  event: {
+    type: string;
+    message: string;
+  },
+): Promise<void> {
+  await withDatabase(async (sql) => {
+    await sql`
+      insert into agent_events (agent_id, actor_user_id, type, message, metadata)
+      select id, user_id, ${event.type}, ${event.message}, '{}'::jsonb
+      from agents
+      where id = ${agentId}
     `;
   });
 }

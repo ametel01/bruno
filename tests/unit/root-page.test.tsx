@@ -410,7 +410,10 @@ describe("product shell routes", () => {
     expect(html).toContain("$2.00");
     expect(html).toContain("System prompt");
     expect(html).toContain("Save config");
-    expect(html).toContain("Runtime logs");
+    expect(html).toContain("Operational alerts");
+    expect(html).toContain("No active alerts");
+    expect(html).toContain("Runner offline and degraded alerts are deferred");
+    expect(html).toContain("Latest log summaries");
     expect(html).toContain("Loading runtime logs.");
     expect(html).toContain("Pending approvals");
     expect(html).toContain("No pending approvals");
@@ -432,6 +435,68 @@ describe("product shell routes", () => {
       limit: 10,
     });
     expect(mocks.closeDashboardConnection).toHaveBeenCalledOnce();
+  });
+
+  it("renders safe operational alerts on the agent detail page", async () => {
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(
+      detailAgent({
+        status: "error",
+        statusReason:
+          "Unhandled failure before retry\n    at run (/app/worker.ts:10:2)\npostgres://user:pass@localhost/db",
+      }),
+    );
+    mocks.listPendingApprovalsForDevelopmentUserAgent.mockResolvedValueOnce([
+      {
+        id: "00000000-0000-4000-8000-000000000511",
+        agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+        agentName: "Research Agent",
+        agentHref: "/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774",
+        title: "Review outbound message",
+        description: "Approve the drafted Telegram summary before it is sent.",
+        status: "pending",
+        requestedBy: "fake-runner",
+        payloadSummary: "Payload details unavailable.",
+        createdAt: "2026-07-04T08:15:00.000Z",
+        expiresAt: "2026-07-04T09:15:00.000Z",
+      },
+    ]);
+    mocks.listAgentEventFeed.mockResolvedValueOnce({
+      ok: true,
+      page: {
+        events: [
+          activityEvent({
+            id: "00000000-0000-4000-8000-000000000611",
+            type: "agent.error",
+            message:
+              'Agent "Research Agent" failed with token=stored-for-downstream and stack details.',
+            createdAt: "2026-07-04T08:30:00.000Z",
+          }),
+        ],
+        nextCursor: null,
+      },
+    });
+
+    const element = await AgentDetailPage({
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+    });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Operational alerts");
+    expect(html).toContain("3 active");
+    expect(html).toContain("Agent is in error");
+    expect(html).toContain("Approval expired");
+    expect(html).toContain("Agent error");
+    expect(html).toContain("Sensitive details omitted.");
+    expect(html).toContain("Runner offline and degraded alerts are deferred");
+    const alertPanelHtml = html.slice(
+      html.indexOf('class="operational-alert-panel"'),
+      html.indexOf('class="runtime-log-panel"'),
+    );
+
+    expect(alertPanelHtml).not.toContain("postgres://");
+    expect(alertPanelHtml).not.toContain("token=stored-for-downstream");
+    expect(alertPanelHtml).not.toContain("/app/worker.ts");
+    expect(alertPanelHtml).not.toContain("payload_json");
   });
 
   it("renders persisted pending approvals on the agent detail page without raw payload details", async () => {
@@ -584,7 +649,7 @@ describe("product shell routes", () => {
 
     expect(html).toContain("Research Agent");
     expect(html).toContain("Configuration");
-    expect(html).toContain("Runtime logs");
+    expect(html).toContain("Latest log summaries");
     expect(html).toContain("Activity");
     expect(html).toContain("No activity yet");
     expect(html).toContain("Pending approvals could not be loaded.");

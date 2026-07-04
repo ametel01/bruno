@@ -228,6 +228,7 @@ h2 {
 .placeholder-panel,
 .activity-feed-panel,
 .approval-panel,
+.operational-alert-panel,
 .runtime-log-panel,
 .agent-list-panel {
   border: 1px solid var(--line);
@@ -292,6 +293,11 @@ h2 {
 }
 
 .approval-panel {
+  min-width: 0;
+  padding: 22px;
+}
+
+.operational-alert-panel {
   min-width: 0;
   padding: 22px;
 }
@@ -989,6 +995,92 @@ h2 {
   align-items: center;
   display: inline-flex;
   text-decoration: none;
+}
+
+.operational-alert-list {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.operational-alert-item {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px 0 2px;
+}
+
+.operational-alert-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.operational-alert-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.operational-alert-severity {
+  border: 1px solid #d8b376;
+  border-radius: 999px;
+  background: #fff8e8;
+  color: #76521b;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.2;
+  padding: 4px 8px;
+  text-transform: uppercase;
+}
+
+.operational-alert-item[data-severity="critical"] .operational-alert-severity {
+  border-color: #e4b5ad;
+  background: #fff2ef;
+  color: #7d291e;
+}
+
+.operational-alert-header time {
+  color: var(--muted);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.operational-alert-item h3 {
+  font-size: 1rem;
+  line-height: 1.35;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.operational-alert-item p,
+.operational-alert-note {
+  color: var(--foreground);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.operational-alert-source {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+}
+
+.operational-alert-note {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  margin-top: 14px;
+  padding-top: 12px;
 }
 
 .start-agent-action {
