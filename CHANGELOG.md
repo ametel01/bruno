@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GET /api/agents/:agentId/events` for safe per-agent activity pages with active-agent validation, bounded limits, and opaque cursor pagination.
 - Dashboard latest activity feed showing newest persisted agent audit events with deleted-agent context.
 - Agent detail activity feed showing event time, type, message, actor, metadata summaries, and older-page navigation.
+- Durable `agent_logs` storage and `GET /api/agents/:agentId/logs` for active-agent scoped runtime log reads with numeric `after` sequence pagination.
 
 ### Fixed
 
