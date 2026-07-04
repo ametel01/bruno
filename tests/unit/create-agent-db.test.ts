@@ -26,13 +26,14 @@ import {
   listActiveAgentsForDevelopmentUser,
 } from "@/src/server/agents/list-agents";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agentEvents, agents, appMetadata, users } from "@/src/server/db/schema";
+import { agentEvents, agentLogs, agents, appMetadata, users } from "@/src/server/db/schema";
 import {
   listAgentEventFeed,
   listLatestAgentActivity,
   recordAgentEventInTransaction,
   recordAgentEventsInTransaction,
 } from "@/src/server/events/agent-events";
+import { listAgentLogs, mapAgentLogToDto } from "@/src/server/logs/agent-logs";
 
 describe("create agent persistence", () => {
   let connection: DatabaseConnection;
@@ -2598,10 +2599,141 @@ describe("create agent persistence", () => {
       "00000000-0000-4000-8000-000000000211",
     ]);
   });
+
+  it("maps persisted log rows to the public DTO shape", () => {
+    expect(
+      mapAgentLogToDto({
+        id: "00000000-0000-4000-8000-000000000301",
+        agentId: "00000000-0000-4000-8000-000000000201",
+        runnerId: null,
+        stream: "stdout",
+        level: "info",
+        message: "Agent booted.",
+        sequence: 1,
+        createdAt: new Date("2026-07-04T06:00:00.000Z"),
+      }),
+    ).toEqual({
+      id: "00000000-0000-4000-8000-000000000301",
+      agentId: "00000000-0000-4000-8000-000000000201",
+      runnerId: null,
+      stream: "stdout",
+      level: "info",
+      message: "Agent booted.",
+      sequence: 1,
+      createdAt: "2026-07-04T06:00:00.000Z",
+    });
+  });
+
+  it("queries durable agent logs oldest-first after the accepted per-agent sequence cursor", async () => {
+    const [createdUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.id ?? "";
+    await connection.db.insert(agents).values({
+      id: "00000000-0000-4000-8000-000000000201",
+      userId,
+      name: "Active Log Agent",
+      templateKey: "research_agent",
+      status: "running",
+    });
+    await connection.db
+      .insert(agentLogs)
+      .values([
+        logValue("00000000-0000-4000-8000-000000000201", 1, "stdout", "info", "line 1"),
+        logValue("00000000-0000-4000-8000-000000000201", 2, "stderr", "warn", "line 2"),
+        logValue("00000000-0000-4000-8000-000000000201", 3, "stdout", "info", "line 3"),
+        logValue("00000000-0000-4000-8000-000000000201", 4, "stdout", "info", "line 4"),
+      ]);
+
+    const firstPage = await listAgentLogs({
+      db: connection.db,
+      agentId: "00000000-0000-4000-8000-000000000201",
+      limit: 2,
+    });
+    const secondPage = await listAgentLogs({
+      db: connection.db,
+      agentId: "00000000-0000-4000-8000-000000000201",
+      after: firstPage.nextAfter,
+      limit: 2,
+    });
+
+    expect(firstPage.logs.map((log) => [log.sequence, log.message])).toEqual([
+      [1, "line 1"],
+      [2, "line 2"],
+    ]);
+    expect(firstPage.nextAfter).toBe(2);
+    expect(secondPage.logs.map((log) => [log.sequence, log.message])).toEqual([
+      [3, "line 3"],
+      [4, "line 4"],
+    ]);
+    expect(secondPage.nextAfter).toBe(4);
+  });
+
+  it("filters durable logs strictly by agent and returns accepted after for empty pages", async () => {
+    const [createdUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.id ?? "";
+    await connection.db.insert(agents).values([
+      {
+        id: "00000000-0000-4000-8000-000000000201",
+        userId,
+        name: "Active Log Agent",
+        templateKey: "research_agent",
+        status: "running",
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000202",
+        userId,
+        name: "Other Log Agent",
+        templateKey: "research_agent",
+        status: "running",
+      },
+    ]);
+    await connection.db
+      .insert(agentLogs)
+      .values([
+        logValue("00000000-0000-4000-8000-000000000201", 1, "stdout", "info", "active line 1"),
+        logValue("00000000-0000-4000-8000-000000000202", 2, "stdout", "info", "other line 2"),
+        logValue("00000000-0000-4000-8000-000000000201", 3, "stdout", "info", "active line 3"),
+        logValue("00000000-0000-4000-8000-000000000202", 4, "stdout", "info", "other line 4"),
+      ]);
+
+    const activePage = await listAgentLogs({
+      db: connection.db,
+      agentId: "00000000-0000-4000-8000-000000000201",
+      limit: 100,
+    });
+    const emptyPageAfterCursor = await listAgentLogs({
+      db: connection.db,
+      agentId: "00000000-0000-4000-8000-000000000201",
+      after: 3,
+      limit: 100,
+    });
+    const emptyPageWithoutCursor = await listAgentLogs({
+      db: connection.db,
+      agentId: "00000000-0000-4000-8000-000000000999",
+      limit: 100,
+    });
+
+    expect(activePage.logs.map((log) => log.message)).toEqual(["active line 1", "active line 3"]);
+    expect(
+      activePage.logs.every((log) => log.agentId === "00000000-0000-4000-8000-000000000201"),
+    ).toBe(true);
+    expect(activePage.nextAfter).toBe(3);
+    expect(emptyPageAfterCursor).toEqual({
+      logs: [],
+      nextAfter: 3,
+    });
+    expect(emptyPageWithoutCursor).toEqual({
+      logs: [],
+      nextAfter: null,
+    });
+  });
 });
 
 async function resetCreateAgentTables(connection: DatabaseConnection): Promise<void> {
-  await connection.client`truncate table agent_events, agents, app_metadata, users restart identity cascade`;
+  await connection.client`truncate table agent_logs, agent_events, agents, app_metadata, users restart identity cascade`;
 }
 
 async function expectTableCount(
@@ -2621,4 +2753,22 @@ async function countRows(
   );
 
   return Number(row?.count);
+}
+
+function logValue(
+  agentId: string,
+  sequence: number,
+  stream: string,
+  level: string,
+  message: string,
+): typeof agentLogs.$inferInsert {
+  return {
+    agentId,
+    runnerId: null,
+    stream,
+    level,
+    message,
+    sequence,
+    createdAt: new Date(`2026-07-04T06:00:0${sequence}.000Z`),
+  };
 }

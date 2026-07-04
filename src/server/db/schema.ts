@@ -1,5 +1,15 @@
 import { sql } from "drizzle-orm";
-import { jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  check,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 
 export const appMetadata = pgTable("app_metadata", {
   key: text("key").primaryKey(),
@@ -50,3 +60,23 @@ export const agentEvents = pgTable("agent_events", {
   metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const agentLogs = pgTable(
+  "agent_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agents.id),
+    runnerId: uuid("runner_id"),
+    stream: text("stream").notNull(),
+    level: text("level").notNull(),
+    message: text("message").notNull(),
+    sequence: integer("sequence").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("agent_logs_sequence_positive_check", sql`${table.sequence} > 0`),
+    uniqueIndex("agent_logs_agent_sequence_idx").on(table.agentId, table.sequence),
+  ],
+);
