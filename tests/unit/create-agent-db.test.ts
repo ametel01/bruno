@@ -2317,6 +2317,202 @@ describe("create agent persistence", () => {
     });
   });
 
+  it("exposes the per-agent event route with active-agent validation and stable pagination", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    await connection.db.insert(agents).values([
+      {
+        id: "00000000-0000-4000-8000-000000000221",
+        userId,
+        name: "Route Feed Agent",
+        templateKey: "research_agent",
+        status: "running",
+        createdAt: new Date("2026-07-04T05:00:00.000Z"),
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000222",
+        userId,
+        name: "Empty Route Feed Agent",
+        templateKey: "github_issue_agent",
+        status: "stopped",
+        createdAt: new Date("2026-07-04T05:05:00.000Z"),
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000223",
+        userId,
+        name: "Other Route Feed Agent",
+        templateKey: "social_content_agent",
+        status: "running",
+        createdAt: new Date("2026-07-04T05:10:00.000Z"),
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000224",
+        userId,
+        name: "Deleted Route Feed Agent",
+        templateKey: "inbox_triage_agent",
+        status: "stopped",
+        createdAt: new Date("2026-07-04T05:15:00.000Z"),
+        deletedAt: new Date("2026-07-04T06:40:00.000Z"),
+      },
+    ]);
+    await connection.db.insert(agentEvents).values([
+      {
+        id: "00000000-0000-4000-8000-000000000321",
+        agentId: "00000000-0000-4000-8000-000000000221",
+        actorUserId: userId,
+        type: START_REQUESTED_EVENT_TYPE,
+        message: 'Start requested for agent "Route Feed Agent".',
+        metadata: {
+          fromStatus: "stopped",
+          toStatus: "starting",
+        },
+        createdAt: new Date("2026-07-04T05:30:00.000Z"),
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000322",
+        agentId: "00000000-0000-4000-8000-000000000221",
+        actorUserId: userId,
+        type: START_REQUESTED_EVENT_TYPE,
+        message: 'Start requested again for agent "Route Feed Agent".',
+        metadata: {
+          fromStatus: "stopped",
+          toStatus: "starting",
+        },
+        createdAt: new Date("2026-07-04T06:00:00.000Z"),
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000323",
+        agentId: "00000000-0000-4000-8000-000000000221",
+        actorUserId: userId,
+        type: START_COMPLETED_EVENT_TYPE,
+        message: 'Start completed for agent "Route Feed Agent".',
+        metadata: {
+          fromStatus: "starting",
+          toStatus: "running",
+        },
+        createdAt: new Date("2026-07-04T06:00:00.000Z"),
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000421",
+        agentId: "00000000-0000-4000-8000-000000000223",
+        actorUserId: userId,
+        type: STOP_COMPLETED_EVENT_TYPE,
+        message: 'Stop completed for agent "Other Route Feed Agent".',
+        metadata: {
+          fromStatus: "running",
+          toStatus: "stopped",
+        },
+        createdAt: new Date("2026-07-04T06:30:00.000Z"),
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000521",
+        agentId: "00000000-0000-4000-8000-000000000224",
+        actorUserId: userId,
+        type: DELETE_EVENT_TYPE,
+        message: 'Agent "Deleted Route Feed Agent" deleted from active views.',
+        metadata: {
+          fromStatus: "stopped",
+          toStatus: "deleted",
+        },
+        createdAt: new Date("2026-07-04T06:40:00.000Z"),
+      },
+    ]);
+
+    const { GET } = await import("@/app/api/agents/[agentId]/events/route");
+    const firstPageResponse = await GET(
+      new Request("http://localhost/api/agents/route-feed/events?limit=2"),
+      {
+        params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000221" }),
+      },
+    );
+    const firstPage = (await firstPageResponse.json()) as {
+      events: Array<{ id: string; agentId: string; actorUserId?: string }>;
+      nextCursor: string | null;
+    };
+
+    expect(firstPageResponse.status).toBe(200);
+    expect(firstPage.events.map((event) => event.id)).toEqual([
+      "00000000-0000-4000-8000-000000000323",
+      "00000000-0000-4000-8000-000000000322",
+    ]);
+    expect(
+      firstPage.events.every((event) => event.agentId === "00000000-0000-4000-8000-000000000221"),
+    ).toBe(true);
+    expect(firstPage.events[0]).not.toHaveProperty("actorUserId");
+    expect(firstPage.nextCursor).toEqual(expect.any(String));
+
+    const secondPageResponse = await GET(
+      new Request(
+        `http://localhost/api/agents/route-feed/events?cursor=${encodeURIComponent(
+          firstPage.nextCursor ?? "",
+        )}&limit=2`,
+      ),
+      {
+        params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000221" }),
+      },
+    );
+    const secondPage = (await secondPageResponse.json()) as {
+      events: Array<{ id: string }>;
+      nextCursor: string | null;
+    };
+
+    expect(secondPageResponse.status).toBe(200);
+    expect(secondPage.events.map((event) => event.id)).toEqual([
+      "00000000-0000-4000-8000-000000000321",
+    ]);
+    expect(secondPage.nextCursor).toBeNull();
+
+    const emptyPageResponse = await GET(
+      new Request("http://localhost/api/agents/route-feed/events"),
+      {
+        params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000222" }),
+      },
+    );
+
+    expect(emptyPageResponse.status).toBe(200);
+    await expect(emptyPageResponse.json()).resolves.toEqual({
+      events: [],
+      nextCursor: null,
+    });
+
+    const deletedAgentResponse = await GET(
+      new Request("http://localhost/api/agents/route-feed/events"),
+      {
+        params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000224" }),
+      },
+    );
+    const missingAgentResponse = await GET(
+      new Request("http://localhost/api/agents/route-feed/events"),
+      {
+        params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000000" }),
+      },
+    );
+    const malformedCursorResponse = await GET(
+      new Request("http://localhost/api/agents/route-feed/events?cursor=not%20a%20cursor"),
+      {
+        params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000221" }),
+      },
+    );
+
+    expect(deletedAgentResponse.status).toBe(404);
+    await expect(deletedAgentResponse.json()).resolves.toMatchObject({
+      error: { code: "agent_not_found" },
+    });
+    expect(missingAgentResponse.status).toBe(404);
+    await expect(missingAgentResponse.json()).resolves.toMatchObject({
+      error: { code: "agent_not_found" },
+    });
+    expect(malformedCursorResponse.status).toBe(400);
+    await expect(malformedCursorResponse.json()).resolves.toMatchObject({
+      error: { code: "validation_failed" },
+    });
+  });
+
   it("queries latest dashboard activity with deleted-agent audit context", async () => {
     const [createdUser] = await connection.db
       .insert(users)
