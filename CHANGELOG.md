@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Initial AgentBay root app page that points users toward the future `/dashboard` route.
+- Initial AgentBay root app page that points users to the dashboard route.
 - Database-backed `/health` endpoint and local Postgres migration tooling for operator checks.
 - AgentBay product shell and initial routes for `/`, `/dashboard`, `/agents`, `/agents/:agentId`, and `/settings`, with empty states and placeholder-only settings surfaces.
 - Milestone 1 Postgres schema migration for `users`, `agents`, `agent_events`, and the `agent_status` enum without enabling agent creation or lifecycle behavior.
@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `DELETE /api/agents/:agentId` and Delete UI controls for soft-deleting non-transitioning active agents from active views while preserving audit events.
 - Dashboard lifecycle controls for starting, stopping, restarting, and deleting active persisted agents without opening the detail page.
 - Milestone 3 event timeline foundation with shared transactional event writers, event DTO mapping, opaque cursor helpers, and newest-first query helpers for per-agent and latest dashboard activity feeds.
+- `GET /api/agents/:agentId/events` for safe per-agent activity pages with active-agent validation, bounded limits, and opaque cursor pagination.
+- Dashboard latest activity feed showing newest persisted agent audit events with deleted-agent context.
+- Agent detail activity feed showing event time, type, message, actor, metadata summaries, and older-page navigation.
 
 ### Fixed
 

@@ -1,6 +1,6 @@
 # AgentBay
 
-AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 2 fake lifecycle slice. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, and deterministic Start, Stop, Restart, and Delete controls for local development agents.
+AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 3 activity feed slice. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, deterministic Start, Stop, Restart, and Delete controls, and persisted activity feeds for local development agents.
 
 ## Requirements
 
@@ -57,7 +57,7 @@ The migration set creates the local application metadata table plus the persiste
 
 - `users`: local development user records used until production auth exists.
 - `agents`: persistent agent identity, template, lifecycle status, timestamps, and soft-delete marker.
-- `agent_events`: transactional audit events for agent creation and fake lifecycle transitions.
+- `agent_events`: transactional audit events for agent creation, fake lifecycle transitions, dashboard activity, and per-agent activity.
 - `agent_status`: Postgres enum used by `agents.status`.
 
 The migrations do not create log, approval, runner, billing, auth, Hermes, Telegram, secrets, provisioning, or provider integration tables.
@@ -97,7 +97,7 @@ The `/agents` page contains the current create/list and fake lifecycle workflow:
 
 The dashboard reads active persisted agents from the database. The detail page loads active persisted agent records by ID and returns not found for missing, malformed, or soft-deleted IDs. Delete preserves the `agents` row and existing `agent_events`, but removes the agent from `/agents`, `/dashboard`, and active detail reads.
 
-Milestone 2 records are local-development records only. Lifecycle controls use deterministic database state, not real runner processes. Logs, approvals, event-log UI, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, and external provisioning remain future scope.
+Milestone 3 records are local-development records only. Lifecycle controls use deterministic database state, not real runner processes. Runtime logs, approvals, config editing, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
 
 ## Create Agent API
 
@@ -127,6 +127,37 @@ The current fake lifecycle APIs are:
 
 Missing, malformed, absent, already soft-deleted, and invalid-status targets return safe JSON errors and do not write mutation events. Delete is blocked while an agent is still `starting` or `restarting`.
 
+## Activity Feeds
+
+Activity feeds are the operator audit timeline for important persisted control-plane actions. They explain who changed an agent, what changed, and when it happened without requiring raw database access. They are intentionally low-volume audit events, not runtime logs. Chatty stdout, stderr, Hermes output, runner output, and generated task logs belong to future `agent_logs` work.
+
+The dashboard shows the newest persisted activity across all agents. The agent detail page shows the selected agent's activity with pagination.
+
+`GET /api/agents/:agentId/events` returns the selected active agent's event page:
+
+- `agentId` must be a valid UUID for an active, non-deleted local development agent.
+- Missing or soft-deleted agents return 404 JSON.
+- `limit` is optional, must be a positive integer, and is capped at 100.
+- `cursor` is optional and must be an opaque event feed cursor returned by a previous page.
+- Responses are newest first by `created_at` and `id`.
+- Successful responses have `{ "events": [...], "nextCursor": string | null }`.
+- Malformed IDs, repeated cursor parameters, malformed cursors, invalid limits, and persistence failures return safe JSON without database URLs, SQL errors, stack traces, or driver messages.
+
+Cursor values are opaque base64url strings. Clients should store or pass them back exactly as received and must not parse them. A non-null `nextCursor` points to the next older page. The detail UI renders that as Older activity and links back to the newest page when viewing older results.
+
+Current Milestone 3 event inventory:
+
+- `agent.created`
+- `agent.start_requested`
+- `agent.start_completed`
+- `agent.stop_requested`
+- `agent.stop_completed`
+- `agent.restart_requested`
+- `agent.restart_completed`
+- `agent.deleted`
+
+Future milestones may add config, approval, error, runner, backup, restore, billing, and Hermes-related audit event types. Those future audit events should continue to describe control-plane facts, while high-volume runtime output remains separate log data.
+
 ## Quality Gates
 
 Run individual gates when isolating failures:
@@ -146,7 +177,7 @@ Run the aggregate gate before handoff or deployment:
 bun run verify
 ```
 
-The Playwright E2E suite starts the Next.js dev server and smoke-tests the browser create, lifecycle, soft-delete, active-view removal, and not-found flows on desktop and mobile Chromium profiles. It expects a reachable migrated database for `/health` and agent records, so run:
+The Playwright E2E suite starts the Next.js dev server and smoke-tests the browser create, lifecycle, dashboard activity, detail activity, soft-delete, active-view removal, and not-found flows on desktop and mobile Chromium profiles. It expects a reachable migrated database for `/health`, agent records, and activity feeds, so run:
 
 ```bash
 docker compose up -d postgres
@@ -164,7 +195,7 @@ Initial preview URL:
 https://agentbay-9wi2xvhbh-ametel01s-projects.vercel.app
 ```
 
-For the completed Milestone 2 app, validate local gates first:
+For the completed Milestone 3 app, validate local gates first:
 
 ```bash
 docker compose up -d postgres
@@ -196,9 +227,9 @@ NEXT_PUBLIC_APP_URL
 
 The Vercel CLI creates local `.vercel/` metadata and may create `.env.local` for local credentials. Both are ignored and should remain local-only.
 
-## Milestone 2 Acceptance
+## Milestone 3 Acceptance
 
-Milestone 2 is complete when:
+Milestone 3 is complete when:
 
 - The app scaffold, TypeScript, formatter, linting, tests, build, and deployment path are present.
 - `PROGRESS.md` and `CHANGELOG.md` exist and follow the tracking rules.
@@ -210,7 +241,11 @@ Milestone 2 is complete when:
 - Missing, malformed, or soft-deleted detail IDs render not found.
 - Start, Stop, Restart, and Delete controls work through deterministic fake lifecycle state and reject invalid actions without corrupting state.
 - Lifecycle event persistence is covered for `agent.start_requested`, `agent.start_completed`, `agent.stop_requested`, `agent.stop_completed`, `agent.restart_requested`, `agent.restart_completed`, and exactly one `agent.deleted` event per accepted Delete.
+- `GET /api/agents/:agentId/events` returns safe per-agent event pages with opaque cursor pagination.
+- The dashboard shows a compact latest activity feed across agents.
+- The detail page shows per-agent activity with event time, type, message, actor, metadata summary, empty state, error state, and pagination.
+- Browser coverage proves create and lifecycle activity appears in both the dashboard latest activity feed and the agent detail activity feed.
 - Soft delete removes agents from `/agents`, `/dashboard`, and active detail reads while preserving the database row and prior events.
-- Logs, approvals, event-log UI, real runner/provisioning behavior, Hermes, Telegram, billing, production auth, and secret storage remain out of scope.
+- Runtime logs, approvals, config editing, runner APIs, real runner/provisioning behavior, Hermes, Telegram, billing, production auth, secret storage, backups, restore, and cloud provisioning remain out of scope.
 - `.env.example` documents every required local/deploy variable without secrets.
 - `bun run format:check`, `bun run lint`, `bun run typecheck`, `bun run test`, `bun run db:migrate`, `bun run db:health`, `bun run build`, `bun run test:e2e`, and `bun run verify` pass against a migrated local database.
