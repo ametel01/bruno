@@ -36,7 +36,13 @@ import {
   recordAgentEventInTransaction,
   recordAgentEventsInTransaction,
 } from "@/src/server/events/agent-events";
-import { listAgentLogs, mapAgentLogToDto } from "@/src/server/logs/agent-logs";
+import {
+  SIMULATED_RUNTIME_LOG_CYCLE_INTERVAL_MS,
+  SIMULATED_RUNTIME_LOG_MESSAGES,
+  generateSimulatedRuntimeLogsForRunningAgent,
+  listAgentLogs,
+  mapAgentLogToDto,
+} from "@/src/server/logs/agent-logs";
 
 describe("create agent persistence", () => {
   let connection: DatabaseConnection;
@@ -3093,6 +3099,433 @@ describe("create agent persistence", () => {
       nextAfter: null,
     });
   });
+
+  it("generates one deterministic four-line cycle immediately for active running agents", async () => {
+    const [createdUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.id ?? "";
+    const runningStartedAt = new Date("2026-07-04T06:00:00.000Z");
+    const firstReadAt = new Date("2026-07-04T06:00:01.000Z");
+    await connection.db.insert(agents).values({
+      id: "00000000-0000-4000-8000-000000000201",
+      userId,
+      name: "Running Generator Agent",
+      templateKey: "research_agent",
+      status: "running",
+      updatedAt: runningStartedAt,
+    });
+
+    await expect(
+      generateSimulatedRuntimeLogsForRunningAgent({
+        db: connection.db,
+        agentId: "00000000-0000-4000-8000-000000000201",
+        now: firstReadAt,
+      }),
+    ).resolves.toEqual({ inserted: SIMULATED_RUNTIME_LOG_MESSAGES.length });
+
+    const page = await listAgentLogs({
+      db: connection.db,
+      agentId: "00000000-0000-4000-8000-000000000201",
+    });
+    const persistedEvents = await connection.db.select().from(agentEvents);
+
+    expect(page.logs.map((log) => [log.sequence, log.runnerId, log.message])).toEqual([
+      [1, null, "Checking task queue..."],
+      [2, null, "No pending tasks."],
+      [3, null, "Heartbeat OK."],
+      [4, null, "Memory loaded."],
+    ]);
+    expect(page.logs.every((log) => log.stream === "stdout" && log.level === "info")).toBe(true);
+    expect(page.logs.every((log) => log.createdAt === firstReadAt.toISOString())).toBe(true);
+    expect(persistedEvents).toHaveLength(0);
+  });
+
+  it("keeps repeated reads at the same logical time idempotent and adds the next cycle only after the interval", async () => {
+    const [createdUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.id ?? "";
+    const runningStartedAt = new Date("2026-07-04T06:00:00.000Z");
+    const firstReadAt = new Date("2026-07-04T06:00:01.000Z");
+    const beforeIntervalAt = new Date(
+      firstReadAt.getTime() + SIMULATED_RUNTIME_LOG_CYCLE_INTERVAL_MS - 1,
+    );
+    const nextCycleAt = new Date(firstReadAt.getTime() + SIMULATED_RUNTIME_LOG_CYCLE_INTERVAL_MS);
+    await connection.db.insert(agents).values({
+      id: "00000000-0000-4000-8000-000000000201",
+      userId,
+      name: "Idempotent Generator Agent",
+      templateKey: "research_agent",
+      status: "running",
+      updatedAt: runningStartedAt,
+    });
+
+    await generateSimulatedRuntimeLogsForRunningAgent({
+      db: connection.db,
+      agentId: "00000000-0000-4000-8000-000000000201",
+      now: firstReadAt,
+    });
+    await expect(
+      generateSimulatedRuntimeLogsForRunningAgent({
+        db: connection.db,
+        agentId: "00000000-0000-4000-8000-000000000201",
+        now: firstReadAt,
+      }),
+    ).resolves.toEqual({ inserted: 0 });
+    await expect(
+      generateSimulatedRuntimeLogsForRunningAgent({
+        db: connection.db,
+        agentId: "00000000-0000-4000-8000-000000000201",
+        now: beforeIntervalAt,
+      }),
+    ).resolves.toEqual({ inserted: 0 });
+    await expect(
+      generateSimulatedRuntimeLogsForRunningAgent({
+        db: connection.db,
+        agentId: "00000000-0000-4000-8000-000000000201",
+        now: nextCycleAt,
+      }),
+    ).resolves.toEqual({ inserted: SIMULATED_RUNTIME_LOG_MESSAGES.length });
+
+    const page = await listAgentLogs({
+      db: connection.db,
+      agentId: "00000000-0000-4000-8000-000000000201",
+    });
+
+    expect(page.logs.map((log) => log.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(page.logs.map((log) => log.message)).toEqual([
+      ...SIMULATED_RUNTIME_LOG_MESSAGES,
+      ...SIMULATED_RUNTIME_LOG_MESSAGES,
+    ]);
+    expect(page.logs.slice(0, 4).every((log) => log.createdAt === firstReadAt.toISOString())).toBe(
+      true,
+    );
+    expect(page.logs.slice(4).every((log) => log.createdAt === nextCycleAt.toISOString())).toBe(
+      true,
+    );
+  });
+
+  it("does not generate for non-running, missing, or soft-deleted agents", async () => {
+    const [createdUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.id ?? "";
+    const now = new Date("2026-07-04T06:00:00.000Z");
+    const pendingTransitionAt = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS + 1);
+    const inactiveAgents: { id: string; expectedLogs: number }[] = [];
+    const statuses: AgentLifecycleStatus[] = [
+      "idle",
+      "stopped",
+      "starting",
+      "restarting",
+      "error",
+      "deleting",
+    ];
+
+    for (const [index, status] of statuses.entries()) {
+      const [agent] = await connection.db
+        .insert(agents)
+        .values({
+          userId,
+          name: `${status} Generator Agent`,
+          templateKey: "research_agent",
+          status,
+          updatedAt: status === "starting" || status === "restarting" ? pendingTransitionAt : now,
+        })
+        .returning({ id: agents.id });
+
+      expect(agent).toBeDefined();
+      inactiveAgents.push({ id: agent?.id ?? "", expectedLogs: status === "stopped" ? 1 : 0 });
+
+      if (status === "stopped") {
+        await connection.db
+          .insert(agentLogs)
+          .values(logValue(agent?.id ?? "", index + 1, "stdout", "info", "existing stopped log"));
+      }
+    }
+
+    const [softDeletedAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Soft Deleted Generator Agent",
+        templateKey: "research_agent",
+        status: "running",
+        updatedAt: now,
+        deletedAt: now,
+      })
+      .returning({ id: agents.id });
+
+    expect(softDeletedAgent).toBeDefined();
+
+    for (const agent of inactiveAgents) {
+      await expect(
+        generateSimulatedRuntimeLogsForRunningAgent({
+          db: connection.db,
+          agentId: agent.id,
+          now,
+        }),
+      ).resolves.toEqual({ inserted: 0 });
+      await expect(countAgentLogs(connection, agent.id)).resolves.toBe(agent.expectedLogs);
+    }
+
+    await expect(
+      generateSimulatedRuntimeLogsForRunningAgent({
+        db: connection.db,
+        agentId: softDeletedAgent?.id ?? "",
+        now,
+      }),
+    ).resolves.toEqual({ inserted: 0 });
+    await expect(
+      generateSimulatedRuntimeLogsForRunningAgent({
+        db: connection.db,
+        agentId: "00000000-0000-4000-8000-000000000999",
+        now,
+      }),
+    ).resolves.toEqual({ inserted: 0 });
+    await expect(countAgentLogs(connection, softDeletedAgent?.id ?? "")).resolves.toBe(0);
+  });
+
+  it("allocates monotonic per-agent sequences independently across running agents", async () => {
+    const [createdUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.id ?? "";
+    const now = new Date("2026-07-04T06:00:01.000Z");
+    await connection.db.insert(agents).values([
+      {
+        id: "00000000-0000-4000-8000-000000000201",
+        userId,
+        name: "Sequence Agent A",
+        templateKey: "research_agent",
+        status: "running",
+        updatedAt: new Date("2026-07-04T06:00:00.000Z"),
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000202",
+        userId,
+        name: "Sequence Agent B",
+        templateKey: "research_agent",
+        status: "running",
+        updatedAt: new Date("2026-07-04T06:00:00.000Z"),
+      },
+    ]);
+    await connection.db
+      .insert(agentLogs)
+      .values(logValue("00000000-0000-4000-8000-000000000201", 7, "stdout", "info", "prior a"));
+
+    await generateSimulatedRuntimeLogsForRunningAgent({
+      db: connection.db,
+      agentId: "00000000-0000-4000-8000-000000000201",
+      now,
+    });
+    await generateSimulatedRuntimeLogsForRunningAgent({
+      db: connection.db,
+      agentId: "00000000-0000-4000-8000-000000000202",
+      now,
+    });
+
+    const agentAPage = await listAgentLogs({
+      db: connection.db,
+      agentId: "00000000-0000-4000-8000-000000000201",
+    });
+    const agentBPage = await listAgentLogs({
+      db: connection.db,
+      agentId: "00000000-0000-4000-8000-000000000202",
+    });
+
+    expect(agentAPage.logs.map((log) => [log.agentId, log.sequence, log.message])).toEqual([
+      ["00000000-0000-4000-8000-000000000201", 7, "prior a"],
+      ["00000000-0000-4000-8000-000000000201", 8, "Checking task queue..."],
+      ["00000000-0000-4000-8000-000000000201", 9, "No pending tasks."],
+      ["00000000-0000-4000-8000-000000000201", 10, "Heartbeat OK."],
+      ["00000000-0000-4000-8000-000000000201", 11, "Memory loaded."],
+    ]);
+    expect(agentBPage.logs.map((log) => [log.agentId, log.sequence, log.message])).toEqual([
+      ["00000000-0000-4000-8000-000000000202", 1, "Checking task queue..."],
+      ["00000000-0000-4000-8000-000000000202", 2, "No pending tasks."],
+      ["00000000-0000-4000-8000-000000000202", 3, "Heartbeat OK."],
+      ["00000000-0000-4000-8000-000000000202", 4, "Memory loaded."],
+    ]);
+  });
+
+  it("uses the settled running segment so earlier generated logs do not block restart generation", async () => {
+    const [createdUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.id ?? "";
+    const firstRunningAt = new Date("2026-07-04T06:00:00.000Z");
+    const firstReadAt = new Date("2026-07-04T06:00:01.000Z");
+    const restartRequestedAt = new Date("2026-07-04T06:00:05.000Z");
+    const restartSettledAt = new Date(
+      restartRequestedAt.getTime() + FAKE_RUNNER_START_DELAY_MS + 1,
+    );
+    const [agent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Restart Segment Generator Agent",
+        templateKey: "research_agent",
+        status: "running",
+        updatedAt: firstRunningAt,
+      })
+      .returning({ id: agents.id });
+
+    expect(agent).toBeDefined();
+    const agentId = agent?.id ?? "";
+    await generateSimulatedRuntimeLogsForRunningAgent({
+      db: connection.db,
+      agentId,
+      now: firstReadAt,
+    });
+    await restartAgentForDevelopmentUser(agentId, {
+      createConnection: () => connection,
+      now: () => restartRequestedAt,
+    });
+    await settleDueFakeRunnerTransitions({
+      createConnection: () => connection,
+      now: () => restartSettledAt,
+    });
+    await expect(
+      generateSimulatedRuntimeLogsForRunningAgent({
+        db: connection.db,
+        agentId,
+        now: restartSettledAt,
+      }),
+    ).resolves.toEqual({ inserted: SIMULATED_RUNTIME_LOG_MESSAGES.length });
+
+    const page = await listAgentLogs({ db: connection.db, agentId });
+    const [persistedAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, agentId))
+      .limit(1);
+
+    expect(persistedAgent).toMatchObject({
+      status: "running",
+      updatedAt: restartSettledAt,
+    });
+    expect(page.logs.map((log) => [log.sequence, log.message])).toEqual([
+      [1, "Checking task queue..."],
+      [2, "No pending tasks."],
+      [3, "Heartbeat OK."],
+      [4, "Memory loaded."],
+      [5, "Checking task queue..."],
+      [6, "No pending tasks."],
+      [7, "Heartbeat OK."],
+      [8, "Memory loaded."],
+    ]);
+    expect(
+      page.logs.slice(4).every((log) => log.createdAt === restartSettledAt.toISOString()),
+    ).toBe(true);
+  });
+
+  it("settles due start and restart transitions in the logs route before generating", async () => {
+    const [createdUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.id ?? "";
+    const dueAt = new Date("2000-01-01T00:00:00.000Z");
+    await connection.db.insert(agents).values([
+      {
+        id: "00000000-0000-4000-8000-000000000201",
+        userId,
+        name: "Due Starting Route Log Agent",
+        templateKey: "research_agent",
+        status: "starting",
+        statusReason: "Start requested.",
+        updatedAt: dueAt,
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000202",
+        userId,
+        name: "Due Restarting Route Log Agent",
+        templateKey: "research_agent",
+        status: "restarting",
+        statusReason: "Restart requested.",
+        updatedAt: dueAt,
+      },
+    ]);
+
+    const { GET } = await import("@/app/api/agents/[agentId]/logs/route");
+    const startResponse = await GET(new Request("http://localhost/api/agents/id/logs"), {
+      params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000201" }),
+    });
+    const restartResponse = await GET(new Request("http://localhost/api/agents/id/logs"), {
+      params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000202" }),
+    });
+    const startBody = await startResponse.json();
+    const restartBody = await restartResponse.json();
+    const completedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .orderBy(agentEvents.agentId);
+
+    expect(startResponse.status).toBe(200);
+    expect(restartResponse.status).toBe(200);
+    expect(startBody.logs.map((log: { message: string }) => log.message)).toEqual([
+      ...SIMULATED_RUNTIME_LOG_MESSAGES,
+    ]);
+    expect(restartBody.logs.map((log: { message: string }) => log.message)).toEqual([
+      ...SIMULATED_RUNTIME_LOG_MESSAGES,
+    ]);
+    expect(completedEvents.map((event) => [event.agentId, event.type])).toEqual([
+      ["00000000-0000-4000-8000-000000000201", START_COMPLETED_EVENT_TYPE],
+      ["00000000-0000-4000-8000-000000000202", RESTART_COMPLETED_EVENT_TYPE],
+    ]);
+  });
+
+  it("does not write logs from simulate-error and stops generating after error", async () => {
+    const [createdUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.id ?? "";
+    const runningAt = new Date("2026-07-04T06:00:00.000Z");
+    const firstReadAt = new Date("2026-07-04T06:00:01.000Z");
+    const errorAt = new Date("2026-07-04T06:00:02.000Z");
+    const afterIntervalAt = new Date(
+      firstReadAt.getTime() + SIMULATED_RUNTIME_LOG_CYCLE_INTERVAL_MS,
+    );
+    const [agent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Error Halt Generator Agent",
+        templateKey: "research_agent",
+        status: "running",
+        updatedAt: runningAt,
+      })
+      .returning({ id: agents.id });
+
+    expect(agent).toBeDefined();
+    const agentId = agent?.id ?? "";
+    await generateSimulatedRuntimeLogsForRunningAgent({
+      db: connection.db,
+      agentId,
+      now: firstReadAt,
+    });
+    await simulateErrorAgentForDevelopmentUser(agentId, {
+      createConnection: () => connection,
+      now: () => errorAt,
+    });
+    await expect(
+      generateSimulatedRuntimeLogsForRunningAgent({
+        db: connection.db,
+        agentId,
+        now: afterIntervalAt,
+      }),
+    ).resolves.toEqual({ inserted: 0 });
+
+    const page = await listAgentLogs({ db: connection.db, agentId });
+    const errorEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.type, SIMULATED_ERROR_EVENT_TYPE));
+
+    expect(page.logs).toHaveLength(4);
+    expect(errorEvents).toHaveLength(1);
+  });
 });
 
 async function resetCreateAgentTables(connection: DatabaseConnection): Promise<void> {
@@ -3116,6 +3549,12 @@ async function countRows(
   );
 
   return Number(row?.count);
+}
+
+async function countAgentLogs(connection: DatabaseConnection, agentId: string): Promise<number> {
+  const rows = await connection.db.select().from(agentLogs).where(eq(agentLogs.agentId, agentId));
+
+  return rows.length;
 }
 
 function logValue(

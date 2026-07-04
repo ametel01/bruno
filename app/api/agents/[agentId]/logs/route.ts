@@ -4,7 +4,10 @@ import {
 } from "@/src/server/agents/list-agents";
 import { isValidAgentId } from "@/src/server/agents/lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { listAgentLogs } from "@/src/server/logs/agent-logs";
+import {
+  generateSimulatedRuntimeLogsForRunningAgent,
+  listAgentLogs,
+} from "@/src/server/logs/agent-logs";
 
 type AgentLogsRouteContext = {
   params: Promise<{
@@ -68,6 +71,11 @@ export async function GET(request: Request, context: AgentLogsRouteContext) {
         },
       );
     }
+
+    await generateSimulatedRuntimeLogsForRunningAgent({
+      db: routeConnection.db,
+      agentId: decodedAgentId.value,
+    });
 
     const page = await listAgentLogs({
       db: routeConnection.db,
