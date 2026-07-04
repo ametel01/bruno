@@ -2,20 +2,20 @@
 
 ## Milestone 12 Secure Runner Auth
 
-- Status: initialized for #127; Milestone 12 implementation is not complete.
+- Status: #128 implementation in progress; Milestone 12 implementation is not complete.
 - Source plan:
   - `docs/MILESTONES.md` Milestone 12: Secure Runner Auth.
   - `docs/PRD.md` runner-auth product/testing decisions.
   - `docs/conversation_dump.md` Milestone 12 secure runner auth outline.
   - GitHub issues #127-#134 and GitHub milestone "Milestone 12: Secure Runner Auth".
-- Current branch: `codex/issue-127-milestone-12-tracking`.
+- Current branch: `codex/issue-128-runner-auth-persistence`.
 - Next step: implementation agents should append validation evidence to this section after their issue gates pass, then update `CHANGELOG.md` only when the issue ships functional user/operator-visible behavior.
 
 ### Issue Checklist
 
 - [ ] #122 Persist manual VPS runner identity and assignment. Status: ready for checker review on `codex/issue-122-manual-runner-persistence`; Wave 0 prerequisite for #128 runner auth persistence.
 - [x] #127 Initialize Milestone 12 execution tracking. Status: ready for checker review on `codex/issue-127-milestone-12-tracking`; tracking section restored/initialized.
-- [ ] #128 Add the runner auth persistence contract. Status: open; Wave 0 in issue body, repo-local serialized behind #122 per `STATUS.md` because both touch runner schema/migrations.
+- [ ] #128 Add the runner auth persistence contract. Status: ready for checker review on `codex/issue-128-runner-auth-persistence`.
 - [ ] #129 Implement one-time runner registration. Status: open; blocked by #128.
 - [ ] #130 Authenticate runner heartbeat and offline status. Status: open; blocked by #128.
 - [ ] #131 Add runner credential rotation and revocation. Status: open; blocked by #130.
@@ -51,6 +51,7 @@
 - 2026-07-05: #127 confirmed `CHANGELOG.md` has Keep a Changelog framing and `## [Unreleased]`; `CHANGELOG.md` is intentionally unchanged for #127 because this issue creates tracking only and ships no functional product behavior.
 - 2026-07-05: #122 rebased onto current `origin/main` after #127 restored this tracker, removed generated `next-env.d.ts` build churn from the diff, and recorded validation evidence below.
 - 2026-07-05: #123 rebased onto latest `origin/main` after #122 merged, preserved the manual VPS runner service implementation, discarded generated `next-env.d.ts` churn, and appended validation evidence here.
+- 2026-07-05: #128 rebased onto current `origin/main` after #123 merged, generated additive runner auth persistence migration `drizzle/0009_worried_switch.sql`, added hash-only runner registration token, credential, and heartbeat schema state, and added reusable runner token/hash helpers.
 
 ### Validation Evidence
 
@@ -75,6 +76,21 @@
   - `git diff --name-status`: pass; no `next-env.d.ts` diff remains.
   - `bun run format:check`: pass; Biome checked 95 files with no fixes applied.
   - `bun run typecheck`: pass; `tsc --noEmit` completed after the rebase and generated-file cleanup.
+
+- 2026-07-05 #128:
+  - `git rebase origin/main`: pass; branch rebased onto `af36ae5 feat: add manual runner service` before final validation.
+  - `bun run db:generate`: pass; generated additive `drizzle/0009_worried_switch.sql`, and the post-rebase rerun reported no schema changes.
+  - `bun run format`: pass; Biome formatted 98 files.
+  - `bun run lint`: pass; Biome checked 98 files with no fixes applied.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed successfully.
+  - `bun test tests/unit/agent-schema.test.ts`: pass; 19 tests passed, covering new runner auth tables, expanded runner statuses, migration shape, hash-only storage, and important indexes.
+  - `bun test tests/unit/runner-auth-secrets.test.ts`: pass; 4 tests passed, covering registration token creation, credential creation, hashing, verification, and empty-secret errors without echoing input.
+  - `bun run db:migrate`: pass; migrations applied successfully on `postgres://agentbay:agentbay@127.0.0.1:54329/agentbay`.
+  - `bun run db:health`: pass; database reported `status: ok` and `database: reachable`.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run verify`: partial pass; format, lint, typecheck, all 250 unit tests, and production build passed, then parallel E2E failed in two Docker lifecycle waits for `running`.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bunx playwright test tests/e2e/root-route.spec.ts --project=chromium-desktop --grep '/dashboard shows Docker logs captured by observing a running agent|/agents creates Research Agent and persists it across read surfaces'`: pass; both previously failed desktop E2E flows passed on targeted rerun.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test:e2e -- --workers=1`: pass; 39 passed and 19 skipped, confirming the aggregate E2E failure was parallel-runner sensitive rather than #128 persistence behavior.
+  - `rg -n "raw[_-]?(token|credential|secret)|\"token\"\\s+text|\"credential\"\\s+text|console\\.(log|error|warn|info)|AGB_|agb_reg_[A-Za-z0-9_-]{8,}|agb_run_[A-Za-z0-9_-]{8,}" src/server/db/schema.ts src/server/runners/runner-auth-secrets.ts tests/unit/agent-schema.test.ts tests/unit/runner-auth-secrets.test.ts drizzle/0009_worried_switch.sql`: pass; matches were only negative assertions in the schema test, with no raw secret columns, generated raw token literals, or helper logging calls.
 
 ## Milestone 9 Local Runner Persistence
 

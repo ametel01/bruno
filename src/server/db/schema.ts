@@ -72,7 +72,10 @@ export const runners = pgTable(
     check("runners_name_not_empty_check", sql`length(trim(${table.name})) > 0`),
     check("runners_kind_manual_vps_check", sql`${table.kind} = 'manual_vps'`),
     check("runners_endpoint_url_not_empty_check", sql`length(trim(${table.endpointUrl})) > 0`),
-    check("runners_status_check", sql`${table.status} IN ('active', 'inactive')`),
+    check(
+      "runners_status_check",
+      sql`${table.status} IN ('active', 'inactive', 'registering', 'online', 'offline', 'degraded', 'provisioning', 'provision_failed', 'deleting', 'deleted')`,
+    ),
     index("runners_user_status_idx").on(table.userId, table.status),
     uniqueIndex("runners_active_user_endpoint_idx")
       .on(table.userId, table.endpointUrl)
@@ -80,27 +83,138 @@ export const runners = pgTable(
   ],
 );
 
-export const agents = pgTable("agents", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id),
-  runnerId: uuid("runner_id").references(() => runners.id),
-  name: text("name").notNull(),
-  templateKey: text("template_key").notNull(),
-  templateVersion: text("template_version").notNull().default("1.0.0"),
-  templateSnapshotJson: jsonb("template_snapshot_json")
-    .$type<AgentTemplateSnapshot>()
-    .notNull()
-    .default(
-      sql`'{"key":"research_agent","version":"1.0.0","name":"Research Agent","description":"Tracks a research question, gathers source notes, and produces concise summaries for later review.","defaultTools":["Web search","Notes","Summaries"],"defaultSchedule":"Manual","defaultSystemPrompt":"You are a Research Agent. Gather relevant information, keep source notes, and produce concise summaries. Do not take external actions or contact third parties. Ask for approval before using any integration or publishing output.","requiredIntegrations":[]}'::jsonb`,
+export const runnerRegistrationTokens = pgTable(
+  "runner_registration_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    runnerId: uuid("runner_id").references(() => runners.id),
+    tokenHash: text("token_hash").notNull(),
+    tokenPrefix: text("token_prefix").notNull(),
+    status: text("status").notNull().default("pending"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "runner_registration_tokens_hash_not_empty_check",
+      sql`length(trim(${table.tokenHash})) > 0`,
     ),
-  status: agentStatusEnum("status").notNull().default("stopped"),
-  statusReason: text("status_reason"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
-});
+    check(
+      "runner_registration_tokens_prefix_not_empty_check",
+      sql`length(trim(${table.tokenPrefix})) > 0`,
+    ),
+    check(
+      "runner_registration_tokens_status_check",
+      sql`${table.status} IN ('pending', 'used', 'revoked', 'expired')`,
+    ),
+    check(
+      "runner_registration_tokens_used_status_check",
+      sql`(${table.status} = 'used' AND ${table.usedAt} IS NOT NULL AND ${table.runnerId} IS NOT NULL) OR (${table.status} <> 'used' AND ${table.usedAt} IS NULL)`,
+    ),
+    check(
+      "runner_registration_tokens_revoked_status_check",
+      sql`(${table.status} = 'revoked' AND ${table.revokedAt} IS NOT NULL) OR (${table.status} <> 'revoked' AND ${table.revokedAt} IS NULL)`,
+    ),
+    uniqueIndex("runner_registration_tokens_hash_idx").on(table.tokenHash),
+    index("runner_registration_tokens_user_status_expires_idx").on(
+      table.userId,
+      table.status,
+      table.expiresAt,
+    ),
+    index("runner_registration_tokens_runner_idx").on(table.runnerId),
+  ],
+);
+
+export const runnerCredentials = pgTable(
+  "runner_credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runnerId: uuid("runner_id")
+      .notNull()
+      .references(() => runners.id),
+    credentialHash: text("credential_hash").notNull(),
+    credentialPrefix: text("credential_prefix").notNull(),
+    status: text("status").notNull().default("active"),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "runner_credentials_hash_not_empty_check",
+      sql`length(trim(${table.credentialHash})) > 0`,
+    ),
+    check(
+      "runner_credentials_prefix_not_empty_check",
+      sql`length(trim(${table.credentialPrefix})) > 0`,
+    ),
+    check("runner_credentials_status_check", sql`${table.status} IN ('active', 'revoked')`),
+    check(
+      "runner_credentials_revoked_status_check",
+      sql`(${table.status} = 'revoked' AND ${table.revokedAt} IS NOT NULL) OR (${table.status} <> 'revoked' AND ${table.revokedAt} IS NULL)`,
+    ),
+    uniqueIndex("runner_credentials_hash_idx").on(table.credentialHash),
+    index("runner_credentials_runner_status_idx").on(table.runnerId, table.status),
+  ],
+);
+
+export const runnerHeartbeats = pgTable(
+  "runner_heartbeats",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runnerId: uuid("runner_id")
+      .notNull()
+      .references(() => runners.id),
+    status: text("status").notNull(),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "runner_heartbeats_status_check",
+      sql`${table.status} IN ('online', 'offline', 'degraded')`,
+    ),
+    index("runner_heartbeats_runner_observed_idx").on(table.runnerId, table.observedAt),
+  ],
+);
+
+export const agents = pgTable(
+  "agents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    runnerId: uuid("runner_id").references(() => runners.id),
+    name: text("name").notNull(),
+    templateKey: text("template_key").notNull(),
+    templateVersion: text("template_version").notNull().default("1.0.0"),
+    templateSnapshotJson: jsonb("template_snapshot_json")
+      .$type<AgentTemplateSnapshot>()
+      .notNull()
+      .default(
+        sql`'{"key":"research_agent","version":"1.0.0","name":"Research Agent","description":"Tracks a research question, gathers source notes, and produces concise summaries for later review.","defaultTools":["Web search","Notes","Summaries"],"defaultSchedule":"Manual","defaultSystemPrompt":"You are a Research Agent. Gather relevant information, keep source notes, and produce concise summaries. Do not take external actions or contact third parties. Ask for approval before using any integration or publishing output.","requiredIntegrations":[]}'::jsonb`,
+      ),
+    status: agentStatusEnum("status").notNull().default("stopped"),
+    statusReason: text("status_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [index("agents_runner_id_idx").on(table.runnerId)],
+);
 
 export const agentConfigs = pgTable(
   "agent_configs",
