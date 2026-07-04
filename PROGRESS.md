@@ -1,5 +1,54 @@
 # Progress
 
+## Milestone 6 Agent Config Editor
+
+- Status: complete for #54; #56/#57 remain open
+- Source plan: `docs/MILESTONES.md` Milestone 6
+- Tracking issue: #54
+- Current branch: `codex/issue-54-agent-config-defaults`
+
+### Issue Checklist
+
+- [x] #54 Add persistent agent config defaults
+- [ ] #56 Add validated config update API
+- [ ] #57 Add agent detail config editor
+- Later Milestone 6 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 6 work.
+
+### Completion Evidence
+
+- [x] #54 adds a typed `agent_configs` table with one row per agent, system prompt, model provider, model name, integer-cent max daily spend, schedule mode, optional cron, timezone, and timestamps.
+- [x] #54 creates the `agent_schedule_mode` enum with `manual` and `cron` values and database checks for non-negative spend plus schedule-mode/cron consistency.
+- [x] #54 adds an additive migration that creates `agent_configs` and backfills default config rows only for active existing agents where `agents.deleted_at IS NULL`.
+- [x] #54 writes the default config in the same transaction as the agent row and `agent.created` event for new agent creation.
+- [x] #54 keeps defaults generic and non-secret: provider/model are `not_configured`, spend is `0` cents, schedule is manual, cron is `null`, timezone is `UTC`, and no API key, token, password, or secret storage is added.
+- [x] #54 updates E2E cleanup to delete `agent_configs` before hard-deleting test `agents`, which is necessary because the new config table has a one-to-one foreign key to agents.
+- [x] #54 does not add a config editor UI, config update API, `config.updated` events, template metadata/snapshots, real model/provider/Hermes/runner integrations, or secret handling.
+
+### Validation
+
+- Date: 2026-07-04
+- Environment:
+  - Default Postgres port `54329` was occupied by existing Docker container `agentbay-postgres-1`.
+  - Isolated database: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54354/agentbay`.
+  - Isolated app/test server: `PORT=3024`, `PLAYWRIGHT_BASE_URL=http://localhost:3024`, `NEXT_PUBLIC_APP_URL=http://localhost:3024`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree had no local `node_modules`.
+  - `bun run db:generate`: pass; generated `drizzle/0003_mature_sandman.sql` and `drizzle/meta/0003_snapshot.json`, then the migration SQL was patched with the required active-agent backfill.
+  - `docker compose -p agentbay_issue_54 -f compose.yaml -f <port override> up -d --force-recreate postgres`: pass; started `agentbay_issue_54-postgres-1` on host port `54354`.
+- Focused checks:
+  - `bun run test -- tests/unit/agent-schema.test.ts`: pass; 1 file and 8 tests passed.
+  - `bun run test -- tests/unit/agent-schema.test.ts tests/unit/create-agent-db.test.ts tests/unit/create-agent-route.test.ts`: pass with isolated DB env; 3 files and 56 tests passed after rerunning with `NEXT_PUBLIC_APP_URL` set.
+- Required gates:
+  - `bun run db:migrate`: pass; migrations applied successfully against the isolated database.
+  - `bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+  - `bun run format:check`: pass; Biome checked 64 files.
+  - `bun run lint`: pass; Biome checked 64 files.
+  - `bun run typecheck`: pass.
+  - `bun run test`: pass; 16 files and 121 tests passed.
+  - `bun run build`: pass; Next.js build completed and included `/api/agents`.
+  - `bun run test:e2e`: pass after E2E cleanup fix; 22 passed and 2 expected project skips.
+  - `bun run verify`: pass; aggregate format, lint, typecheck, test, build, and E2E gates passed with 121 unit tests and 22 E2E passed / 2 expected skips.
+
 ## Milestone 5 Agent Templates
 
 - Status: initialized

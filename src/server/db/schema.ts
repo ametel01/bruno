@@ -27,6 +27,8 @@ export const agentStatusEnum = pgEnum("agent_status", [
   "deleting",
 ]);
 
+export const agentScheduleModeEnum = pgEnum("agent_schedule_mode", ["manual", "cron"]);
+
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -46,6 +48,31 @@ export const agents = pgTable("agents", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
+
+export const agentConfigs = pgTable(
+  "agent_configs",
+  {
+    agentId: uuid("agent_id")
+      .primaryKey()
+      .references(() => agents.id),
+    systemPrompt: text("system_prompt").notNull(),
+    modelProvider: text("model_provider").notNull().default("not_configured"),
+    modelName: text("model_name").notNull().default("not_configured"),
+    maxDailySpendCents: integer("max_daily_spend_cents").notNull().default(0),
+    scheduleMode: agentScheduleModeEnum("schedule_mode").notNull().default("manual"),
+    scheduleCron: text("schedule_cron"),
+    timezone: text("timezone").notNull().default("UTC"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("agent_configs_max_daily_spend_nonnegative_check", sql`${table.maxDailySpendCents} >= 0`),
+    check(
+      "agent_configs_schedule_cron_mode_check",
+      sql`(${table.scheduleMode} = 'manual' AND ${table.scheduleCron} IS NULL) OR (${table.scheduleMode} = 'cron' AND ${table.scheduleCron} IS NOT NULL)`,
+    ),
+  ],
+);
 
 export const agentEvents = pgTable("agent_events", {
   id: uuid("id").primaryKey().defaultRandom(),

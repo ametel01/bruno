@@ -2,8 +2,10 @@ import { readFile } from "node:fs/promises";
 import { getTableColumns, getTableName } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import {
+  agentConfigs,
   agentEvents,
   agentLogs,
+  agentScheduleModeEnum,
   agents,
   agentStatusEnum,
   appMetadata,
@@ -15,6 +17,7 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(getTableName(appMetadata)).toBe("app_metadata");
     expect(getTableName(users)).toBe("users");
     expect(getTableName(agents)).toBe("agents");
+    expect(getTableName(agentConfigs)).toBe("agent_configs");
     expect(getTableName(agentEvents)).toBe("agent_events");
     expect(getTableName(agentLogs)).toBe("agent_logs");
     expect(agentStatusEnum.enumValues).toEqual([
@@ -26,6 +29,7 @@ describe("Milestone 1 agent persistence schema", () => {
       "error",
       "deleting",
     ]);
+    expect(agentScheduleModeEnum.enumValues).toEqual(["manual", "cron"]);
   });
 
   it("keeps agent records owned, stopped by default, timestamped, and soft deletable", () => {
@@ -51,6 +55,39 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.createdAt.notNull).toBe(true);
     expect(columns.updatedAt.notNull).toBe(true);
     expect(columns.deletedAt.notNull).toBe(false);
+  });
+
+  it("defines one typed config row per agent with safe non-secret defaults", () => {
+    const columns = getTableColumns(agentConfigs);
+
+    expect(Object.keys(columns)).toEqual([
+      "agentId",
+      "systemPrompt",
+      "modelProvider",
+      "modelName",
+      "maxDailySpendCents",
+      "scheduleMode",
+      "scheduleCron",
+      "timezone",
+      "createdAt",
+      "updatedAt",
+    ]);
+    expect(columns.agentId.notNull).toBe(true);
+    expect(columns.systemPrompt.notNull).toBe(true);
+    expect(columns.modelProvider.notNull).toBe(true);
+    expect(columns.modelProvider.default).toBe("not_configured");
+    expect(columns.modelName.notNull).toBe(true);
+    expect(columns.modelName.default).toBe("not_configured");
+    expect(columns.maxDailySpendCents.notNull).toBe(true);
+    expect(columns.maxDailySpendCents.default).toBe(0);
+    expect(columns.maxDailySpendCents.dataType).toBe("number");
+    expect(columns.scheduleMode.notNull).toBe(true);
+    expect(columns.scheduleMode.default).toBe("manual");
+    expect(columns.scheduleCron.notNull).toBe(false);
+    expect(columns.timezone.notNull).toBe(true);
+    expect(columns.timezone.default).toBe("UTC");
+    expect(columns.createdAt.notNull).toBe(true);
+    expect(columns.updatedAt.notNull).toBe(true);
   });
 
   it("supports agent.created audit event rows with JSON metadata", () => {
@@ -130,5 +167,34 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(migration).not.toContain('ALTER TABLE "agent_events"');
     expect(migration).not.toContain('ALTER TABLE "users"');
     expect(migration).not.toContain('ALTER TABLE "app_metadata"');
+  });
+
+  it("generates an additive agent_configs migration with active-agent backfill and no secret columns", async () => {
+    const migration = await readFile("drizzle/0003_mature_sandman.sql", "utf8");
+
+    expect(migration).toContain('CREATE TYPE "public"."agent_schedule_mode"');
+    expect(migration).toContain('CREATE TABLE "agent_configs"');
+    expect(migration).toContain('"agent_id" uuid PRIMARY KEY NOT NULL');
+    expect(migration).toContain('"system_prompt" text NOT NULL');
+    expect(migration).toContain("\"model_provider\" text DEFAULT 'not_configured' NOT NULL");
+    expect(migration).toContain("\"model_name\" text DEFAULT 'not_configured' NOT NULL");
+    expect(migration).toContain('"max_daily_spend_cents" integer DEFAULT 0 NOT NULL');
+    expect(migration).toContain(
+      '"schedule_mode" "agent_schedule_mode" DEFAULT \'manual\' NOT NULL',
+    );
+    expect(migration).toContain('"schedule_cron" text');
+    expect(migration).toContain("\"timezone\" text DEFAULT 'UTC' NOT NULL");
+    expect(migration).toContain('CONSTRAINT "agent_configs_max_daily_spend_nonnegative_check"');
+    expect(migration).toContain('CONSTRAINT "agent_configs_schedule_cron_mode_check"');
+    expect(migration).toContain('FOREIGN KEY ("agent_id") REFERENCES "public"."agents"("id")');
+    expect(migration).toContain('INSERT INTO "agent_configs"');
+    expect(migration).toContain('FROM "agents"');
+    expect(migration).toContain('WHERE "agents"."deleted_at" IS NULL');
+    expect(migration).not.toMatch(/api[_ ]?key|token|password|secret/i);
+    expect(migration).not.toContain('DROP TABLE "agents"');
+    expect(migration).not.toContain('DROP TABLE "agent_events"');
+    expect(migration).not.toContain('DROP TABLE "agent_logs"');
+    expect(migration).not.toContain('DROP TABLE "users"');
+    expect(migration).not.toContain('DROP TABLE "app_metadata"');
   });
 });
