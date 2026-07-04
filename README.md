@@ -58,9 +58,10 @@ The migration set creates the local application metadata table plus the persiste
 - `users`: local development user records used until production auth exists.
 - `agents`: persistent agent identity, template, lifecycle status, timestamps, and soft-delete marker.
 - `agent_events`: transactional audit events for agent creation, fake lifecycle transitions, dashboard activity, and per-agent activity.
+- `agent_logs`: runtime log rows with nullable runner identity, static stream/level/message fields, and per-agent positive sequence values.
 - `agent_status`: Postgres enum used by `agents.status`.
 
-The migrations do not create log, approval, runner, billing, auth, Hermes, Telegram, secrets, provisioning, or provider integration tables.
+The migrations do not create approval, runner, billing, auth, Hermes, Telegram, secrets, provisioning, or provider integration tables.
 
 ## Development Server
 
