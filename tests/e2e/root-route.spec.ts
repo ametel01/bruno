@@ -49,6 +49,131 @@ test("/health returns reachable database JSON in the browser", async ({ page }) 
   await expect(page.locator("body")).toContainText('"database":"reachable"');
 });
 
+test("/dashboard shows latest persisted process logs scoped to active agents", async ({
+  isMobile,
+  page,
+  request,
+}, testInfo) => {
+  test.skip(isMobile, "dashboard process log proof runs once on desktop");
+
+  const primaryName = `Dashboard Process Agent ${testInfo.project.name}`;
+  const otherName = `Dashboard Other Process Agent ${testInfo.project.name}`;
+  const deletedName = `Dashboard Deleted Process Agent ${testInfo.project.name}`;
+  const primaryAgent = await createAgent(request, primaryName);
+  const otherAgent = await createAgent(request, otherName);
+  const deletedAgent = await createAgent(request, deletedName);
+  createdAgentIds.add(primaryAgent.id);
+  createdAgentIds.add(otherAgent.id);
+  createdAgentIds.add(deletedAgent.id);
+
+  await insertProcessRuntimeLogs(primaryAgent.id, [
+    {
+      stream: "stdout",
+      level: "info",
+      message: "primary stdout line",
+      sequence: 1,
+      createdAt: "2026-07-04T06:00:01.000Z",
+    },
+    {
+      stream: "stderr",
+      level: "error",
+      message: "TOKEN=stored-for-downstream should not render",
+      sequence: 2,
+      createdAt: "2026-07-04T06:00:02.000Z",
+    },
+    {
+      stream: "stderr",
+      level: "error",
+      message: "Error: failed\n    at run (/app/worker.ts:10:2)\npostgres://user:pass@localhost/db",
+      sequence: 4,
+      createdAt: "2026-07-04T06:00:05.000Z",
+    },
+  ]);
+  await insertProcessRuntimeLogs(otherAgent.id, [
+    {
+      stream: "stdout",
+      level: "info",
+      message: "other active process line",
+      sequence: 1,
+      createdAt: "2026-07-04T06:00:03.000Z",
+    },
+  ]);
+  await insertProcessRuntimeLogs(deletedAgent.id, [
+    {
+      stream: "stdout",
+      level: "info",
+      message: "deleted process line should not render",
+      sequence: 1,
+      createdAt: "2026-07-04T06:00:04.000Z",
+    },
+  ]);
+  await insertRuntimeLog(primaryAgent.id, "simulator row should not render", 3);
+  await markAgentDeleted(deletedAgent.id);
+
+  const logsResponse = await request.get(`/api/agents/${primaryAgent.id}/logs?limit=100`);
+  expect(logsResponse.status()).toBe(200);
+  const logsBody = (await logsResponse.json()) as {
+    logs: Array<{
+      agentId: string;
+      stream: string;
+      message: string;
+      sequence: number;
+      runnerId?: string;
+      localRunnerProcessId?: string;
+    }>;
+    nextAfter: number | null;
+  };
+  expect(logsBody.logs.map((log) => [log.sequence, log.stream, log.message])).toEqual([
+    [1, "stdout", "primary stdout line"],
+    [2, "stderr", "Sensitive details omitted."],
+    [3, "stdout", "simulator row should not render"],
+    [4, "stderr", "Error: failed [redacted database URL]"],
+  ]);
+  expect(logsBody.logs.every((log) => log.agentId === primaryAgent.id)).toBe(true);
+  expect(logsBody.nextAfter).toBe(4);
+  expect(JSON.stringify(logsBody)).not.toContain("runnerId");
+  expect(JSON.stringify(logsBody)).not.toContain("localRunnerProcessId");
+  expect(JSON.stringify(logsBody)).not.toContain("stored-for-downstream");
+  expect(JSON.stringify(logsBody)).not.toContain("postgres://");
+  expect(JSON.stringify(logsBody)).not.toContain("/app/worker.ts");
+  expect(JSON.stringify(logsBody)).not.toContain("other active process line");
+  expect(JSON.stringify(logsBody)).not.toContain("deleted process line should not render");
+
+  await page.goto("/dashboard");
+
+  const processLogsPanel = page.locator(".dashboard-process-log-panel");
+  const primaryLogItem = processLogsPanel.locator(".runtime-log-item", {
+    hasText: "primary stdout line",
+  });
+  const otherLogItem = processLogsPanel.locator(".runtime-log-item", {
+    hasText: "other active process line",
+  });
+  await expect(processLogsPanel).toContainText("Latest process logs");
+  await expect(processLogsPanel).toContainText("4 shown");
+  await expect(primaryLogItem.getByRole("link", { name: primaryName })).toHaveAttribute(
+    "href",
+    `/agents/${primaryAgent.id}`,
+  );
+  await expect(otherLogItem.getByRole("link", { name: otherName })).toHaveAttribute(
+    "href",
+    `/agents/${otherAgent.id}`,
+  );
+  await expect(processLogsPanel).toContainText("primary stdout line");
+  await expect(processLogsPanel).toContainText("other active process line");
+  await expect(processLogsPanel).toContainText("stdout");
+  await expect(processLogsPanel).toContainText("stderr");
+  await expect(processLogsPanel).toContainText("Sensitive details omitted.");
+  await expect(processLogsPanel).toContainText("Error: failed [redacted database URL]");
+  await expect(processLogsPanel).not.toContainText("stored-for-downstream");
+  await expect(processLogsPanel).not.toContainText("postgres://");
+  await expect(processLogsPanel).not.toContainText("/app/worker.ts");
+  await expect(processLogsPanel).not.toContainText("simulator row should not render");
+  await expect(processLogsPanel).not.toContainText("deleted process line should not render");
+  await expect(processLogsPanel).not.toContainText(deletedName);
+  await expect(processLogsPanel).not.toContainText("agent_id");
+  await expect(processLogsPanel).not.toContainText("runner_id");
+});
+
 test.describe
   .serial("approval persistence surfaces", () => {
     test("/dashboard shows persisted pending approvals for active agents", async ({
@@ -1452,6 +1577,67 @@ async function insertRuntimeLog(agentId: string, message: string, sequence = 1):
   });
 }
 
+async function insertProcessRuntimeLogs(
+  agentId: string,
+  logs: Array<{
+    stream: "stdout" | "stderr";
+    level: string;
+    message: string;
+    sequence: number;
+    createdAt: string;
+  }>,
+): Promise<void> {
+  await withDatabase(async (sql) => {
+    const [processRow] = await sql<{ id: string }[]>`
+      insert into local_runner_processes (
+        agent_id,
+        pid,
+        command_metadata,
+        status,
+        started_at,
+        created_at,
+        updated_at
+      )
+      values (
+        ${agentId},
+        43273,
+        ${sql.json({ command: "seeded-test-runner" })},
+        'running',
+        '2026-07-04T06:00:00.000Z',
+        '2026-07-04T06:00:00.000Z',
+        '2026-07-04T06:00:00.000Z'
+      )
+      returning id
+    `;
+    const processId = processRow?.id ?? "";
+
+    for (const log of logs) {
+      await sql`
+        insert into agent_logs (
+          agent_id,
+          runner_id,
+          local_runner_process_id,
+          stream,
+          level,
+          message,
+          sequence,
+          created_at
+        )
+        values (
+          ${agentId},
+          ${processId},
+          ${processId},
+          ${log.stream},
+          ${log.level},
+          ${log.message},
+          ${log.sequence},
+          ${log.createdAt}
+        )
+      `;
+    }
+  });
+}
+
 async function markAgentErrored(agentId: string, statusReason: string): Promise<void> {
   await withDatabase(async (sql) => {
     await sql`
@@ -1553,6 +1739,7 @@ async function deleteCreatedAgents(agentIds: string[]): Promise<void> {
   await withDatabase(async (sql) => {
     await sql`delete from agent_approvals where agent_id in ${sql(agentIds)}`;
     await sql`delete from agent_logs where agent_id in ${sql(agentIds)}`;
+    await sql`delete from local_runner_processes where agent_id in ${sql(agentIds)}`;
     await sql`delete from agent_events where agent_id in ${sql(agentIds)}`;
     await sql`delete from agent_configs where agent_id in ${sql(agentIds)}`;
     await sql`delete from agents where id in ${sql(agentIds)}`;

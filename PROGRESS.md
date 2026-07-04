@@ -2,17 +2,17 @@
 
 ## Milestone 9 Local Runner Persistence
 
-- Status: #71 is implementation-complete and ready for checker review.
+- Status: #73 is implementation-complete and ready for checker review.
 - Source plan: `docs/MILESTONES.md` Milestone 9
 - Tracking issues: #71-#75
-- Current branch: `codex/issue-71-local-runner-state`
-- Next step: checker should review the local runner process metadata schema, log persistence helpers, docs, and migrated database gate evidence.
+- Current branch: `codex/issue-73-persisted-log-ui`
+- Next step: checker should review the active-agent process log read helper, dashboard process-log panel, seeded log UI coverage, and migrated database gate evidence.
 
 ### Issue Checklist
 
 - [x] #71 Persist local runner state and agent logs
 - [ ] #72 Implement the local runner adapter with a dummy process
-- [ ] #73 Expose persisted process logs in the dashboard
+- [x] #73 Expose persisted process logs in the dashboard
 - [ ] #74 Run lifecycle controls through the local runner
 - [ ] #75 Document and verify the Milestone 9 local runner
 - Later Milestone 9 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 9 work.
@@ -23,8 +23,66 @@
 - #71 adds an additive `local_runner_processes` table with process id, sanitized command metadata, status, start/stop timestamps, exit code, signal, and sanitized last-error storage scoped to active local-development agents.
 - #71 links `agent_logs` rows to an optional local runner process id, constrains persisted streams to `stdout` or `stderr`, preserves per-agent sequence ordering, and keeps process output separate from `agent_events`.
 - #71 adds local runner state helpers for creating process rows, recording terminal state, appending stdout/stderr log lines, and reading process-scoped logs without spawning or controlling processes.
+- #73 adds a latest active-agent process log read helper that returns public DTOs with agent names/links, filters out soft-deleted agents, ignores non-process simulator rows, and preserves stable newest-first ordering by timestamp and sequence.
+- #73 adds a dashboard Latest process logs panel with stdout/stderr, timestamp, level, sequence, redacted summaries, empty state, safe failure state, and direct links to each agent detail log stream.
+- #73 keeps internal runner/process identifiers available to server helpers but strips `runnerId` and `localRunnerProcessId` from the product `GET /api/agents/:agentId/logs` response.
+- #73 returns sanitized public log messages from the product `GET /api/agents/:agentId/logs` response, reusing the operational summarizer to omit token-like values, redact Postgres URLs, and drop stack-frame paths.
+- #73 keeps lifecycle controls/status pills unchanged and does not implement process spawning, local runner adapter behavior, lifecycle endpoint replacement, Docker/cloud runners, Hermes, Telegram, auth, billing, provider integrations, or secrets.
 
 ### Validation
+
+#### #73
+
+- Date: 2026-07-04
+- Environment:
+  - Isolated database target: container `agentbay_issue_73-postgres` on host port `54373`, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay`.
+  - Isolated app/test server target: `PORT=3073`, `PLAYWRIGHT_BASE_URL=http://localhost:3073`, `NEXT_PUBLIC_APP_URL=http://localhost:3073`.
+- Setup:
+  - `test -d node_modules && echo node_modules-present || echo node_modules-missing`: pass; reported `node_modules-missing` before setup.
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile.
+  - `docker info --format '{{.ServerVersion}}'`: pass; Docker daemon reachable with server version `29.3.1`.
+  - `docker ps -a --filter name=agentbay_issue_73-postgres --format '{{.Names}} {{.Status}} {{.Ports}}'`: pass; no existing #73 container was present before setup.
+  - `docker run --name agentbay_issue_73-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54373:5432 -d postgres:17-alpine`: pass; started isolated Postgres for #73.
+  - `docker exec agentbay_issue_73-postgres pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run db:migrate`: pass; migrations applied successfully.
+- Implementation checks:
+  - `bun run format`: pass; Biome formatted 81 files after edits.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test -- tests/unit/agent-logs-route.test.ts tests/unit/root-page.test.tsx tests/unit/create-agent-db.test.ts`: pass after one expectation-only retry; final focused route/dashboard/DB suite passed with 3 files and 113 tests.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay PORT=3073 PLAYWRIGHT_BASE_URL=http://localhost:3073 NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test:e2e -- --project=chromium-desktop --grep "dashboard shows latest persisted process logs"`: pass after scoping duplicate-agent-link assertions to individual log rows; 1 browser test passed.
+- Checker fix:
+  - Finding: checker probe confirmed `GET /api/agents/:agentId/logs` returned `runnerId` and `localRunnerProcessId` for persisted local-runner log rows.
+  - Fix: `app/api/agents/[agentId]/logs/route.ts` now maps internal `AgentLogPage` values to a public response that keeps `id`, `agentId`, `stream`, `level`, `message`, `sequence`, and `createdAt`, and omits runner/process identifiers.
+  - Regression: `tests/unit/agent-logs-route.test.ts` now seeds internal runner/process ids and asserts the route response omits them while preserving stdout/stderr order and agent scoping; `tests/e2e/root-route.spec.ts` now calls the product route against seeded process logs and asserts those fields are absent.
+  - `bun run format`: pass; Biome formatted 81 files after the checker fix.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test -- tests/unit/agent-logs-route.test.ts tests/unit/root-page.test.tsx tests/unit/create-agent-db.test.ts`: pass; 3 files and 114 tests passed.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed successfully.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay PORT=3073 PLAYWRIGHT_BASE_URL=http://localhost:3073 NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test:e2e -- --project=chromium-desktop --grep "dashboard shows latest persisted process logs"`: pass; 1 chromium-desktop browser test passed.
+  - `bun run format:check`: pass; Biome checked 81 files.
+  - `bun run lint`: pass; Biome checked 81 files.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test`: pass; 22 files and 194 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay PORT=3073 PLAYWRIGHT_BASE_URL=http://localhost:3073 NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run build`: pass; Next.js production build completed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay PORT=3073 PLAYWRIGHT_BASE_URL=http://localhost:3073 NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test:e2e`: pass; full browser suite passed with 38 tests and 18 expected skips.
+- Maintainer-review fix:
+  - Finding: maintainer review on PR #112 found that `GET /api/agents/:agentId/logs` stripped process ids but still returned raw persisted `message` content, including token-like text.
+  - Fix: `app/api/agents/[agentId]/logs/route.ts` now sanitizes public `message` values with `summarizeOperationalText` before returning JSON.
+  - Regression: `tests/unit/agent-logs-route.test.ts` now asserts token-like messages become `Sensitive details omitted.`, Postgres URLs are redacted, stack-frame paths are omitted, and raw token/URL/path content is absent. `tests/e2e/root-route.spec.ts` applies the same assertions to the seeded product route plus dashboard rendering while preserving ordering and per-agent scoping.
+  - `bun run format`: pass; Biome formatted 81 files and fixed 1 test file.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test -- tests/unit/agent-logs-route.test.ts tests/unit/root-page.test.tsx tests/unit/create-agent-db.test.ts tests/unit/operational-summaries.test.ts`: pass; 4 files and 117 tests passed.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed successfully.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay PORT=3073 PLAYWRIGHT_BASE_URL=http://localhost:3073 NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test:e2e -- --project=chromium-desktop --grep "dashboard shows latest persisted process logs"`: pass; 1 chromium-desktop browser test passed.
+  - `bun run format:check`: pass; Biome checked 81 files.
+  - `bun run lint`: pass; Biome checked 81 files.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test`: pass; 22 files and 194 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay PORT=3073 PLAYWRIGHT_BASE_URL=http://localhost:3073 NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run build`: pass; Next.js production build completed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay PORT=3073 PLAYWRIGHT_BASE_URL=http://localhost:3073 NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test:e2e`: pass; full browser suite passed with 38 tests and 18 expected skips.
+- Required gates:
+  - `bun run format:check`: pass; Biome checked 81 files.
+  - `bun run lint`: pass; Biome checked 81 files.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed successfully.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test`: pass; 22 files and 193 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay PORT=3073 PLAYWRIGHT_BASE_URL=http://localhost:3073 NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run build`: pass; Next.js production build completed and included dashboard, agent detail, lifecycle, approval, log, health, and settings routes.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay PORT=3073 PLAYWRIGHT_BASE_URL=http://localhost:3073 NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test:e2e`: pass; full browser suite passed with 38 tests and 18 expected skips.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
 
 #### #71
 

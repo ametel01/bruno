@@ -3,8 +3,11 @@ import {
   getActiveAgentForDevelopmentUser,
 } from "@/src/server/agents/list-agents";
 import { isValidAgentId } from "@/src/server/agents/lifecycle";
+import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  type AgentLogDto,
+  type AgentLogPage,
   generateSimulatedRuntimeLogsForRunningAgent,
   listAgentLogs,
 } from "@/src/server/logs/agent-logs";
@@ -25,6 +28,13 @@ type ParsedIntegerQuery =
     };
 
 const MAX_ROUTE_AGENT_LOG_LIMIT = 100;
+
+type PublicAgentLogDto = Omit<AgentLogDto, "runnerId" | "localRunnerProcessId">;
+
+type PublicAgentLogPage = {
+  logs: PublicAgentLogDto[];
+  nextAfter: number | null;
+};
 
 export const dynamic = "force-dynamic";
 
@@ -84,7 +94,7 @@ export async function GET(request: Request, context: AgentLogsRouteContext) {
       ...(parsedLimit.value === undefined ? {} : { limit: parsedLimit.value }),
     });
 
-    return Response.json(page);
+    return Response.json(toPublicAgentLogPage(page));
   } catch (error) {
     if (error instanceof AgentDetailPersistenceError || error instanceof Error) {
       return Response.json(
@@ -104,6 +114,25 @@ export async function GET(request: Request, context: AgentLogsRouteContext) {
   } finally {
     await connection?.close();
   }
+}
+
+function toPublicAgentLogPage(page: AgentLogPage): PublicAgentLogPage {
+  return {
+    logs: page.logs.map(toPublicAgentLog),
+    nextAfter: page.nextAfter,
+  };
+}
+
+function toPublicAgentLog(log: AgentLogDto): PublicAgentLogDto {
+  return {
+    id: log.id,
+    agentId: log.agentId,
+    stream: log.stream,
+    level: log.level,
+    message: summarizeOperationalText(log.message, "Log details omitted."),
+    sequence: log.sequence,
+    createdAt: log.createdAt,
+  };
 }
 
 function decodeAgentId(agentId: string):

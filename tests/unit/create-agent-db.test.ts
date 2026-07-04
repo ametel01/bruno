@@ -69,6 +69,7 @@ import {
   SIMULATED_RUNTIME_LOG_MESSAGES,
   generateSimulatedRuntimeLogsForRunningAgent,
   listAgentLogs,
+  listLatestActiveAgentProcessLogs,
   mapAgentLogToDto,
 } from "@/src/server/logs/agent-logs";
 import {
@@ -4452,6 +4453,81 @@ describe("create agent persistence", () => {
     ]);
     expect(persistedEvents).toHaveLength(2);
     expect(persistedEvents.every((event) => event.type === "agent.created")).toBe(true);
+  });
+
+  it("lists latest active-agent process logs without mixing deleted agents or simulator rows", async () => {
+    const agentA = await createAgentForDevelopmentUser(
+      { name: "Dashboard Process Agent A", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const agentB = await createAgentForDevelopmentUser(
+      { name: "Dashboard Process Agent B", templateKey: "github_issue_agent" },
+      { createConnection: () => connection },
+    );
+    const deletedAgent = await createAgentForDevelopmentUser(
+      { name: "Deleted Process Agent", templateKey: "inbox_triage_agent" },
+      { createConnection: () => connection },
+    );
+    const processA = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: agentA.agent.id,
+      pid: 43231,
+      commandMetadata: { command: "bun", args: ["runner", "a"] },
+    });
+    const processB = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: agentB.agent.id,
+      pid: 43232,
+      commandMetadata: { command: "bun", args: ["runner", "b"] },
+    });
+    const deletedProcess = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: deletedAgent.agent.id,
+      pid: 43233,
+      commandMetadata: { command: "bun", args: ["runner", "deleted"] },
+    });
+
+    await appendLocalRunnerLogLines({
+      db: connection.db,
+      processId: processA?.id ?? "",
+      lines: [{ stream: "stdout", message: "agent a process line" }],
+      now: new Date("2026-07-04T06:00:01.000Z"),
+    });
+    await appendLocalRunnerLogLines({
+      db: connection.db,
+      processId: processB?.id ?? "",
+      lines: [{ stream: "stderr", message: "agent b process line" }],
+      now: new Date("2026-07-04T06:00:03.000Z"),
+    });
+    await appendLocalRunnerLogLines({
+      db: connection.db,
+      processId: deletedProcess?.id ?? "",
+      lines: [{ stream: "stdout", message: "deleted process line" }],
+      now: new Date("2026-07-04T06:00:04.000Z"),
+    });
+    await connection.db
+      .insert(agentLogs)
+      .values(logValue(agentA.agent.id, 2, "stdout", "info", "simulator line"));
+    await deleteAgentForDevelopmentUser(deletedAgent.agent.id, {
+      createConnection: () => connection,
+    });
+
+    const latestLogs = await listLatestActiveAgentProcessLogs({
+      db: connection.db,
+      limit: 10,
+    });
+
+    expect(latestLogs.map((log) => [log.agentName, log.stream, log.message])).toEqual([
+      ["Dashboard Process Agent B", "stderr", "agent b process line"],
+      ["Dashboard Process Agent A", "stdout", "agent a process line"],
+    ]);
+    expect(latestLogs.map((log) => log.agentHref)).toEqual([
+      `/agents/${agentB.agent.id}`,
+      `/agents/${agentA.agent.id}`,
+    ]);
+    expect(latestLogs.every((log) => log.localRunnerProcessId !== null)).toBe(true);
+    expect(latestLogs.map((log) => log.message)).not.toContain("deleted process line");
+    expect(latestLogs.map((log) => log.message)).not.toContain("simulator line");
   });
 
   it("allocates stable log sequences across multiple local runner processes for one agent", async () => {

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   getActiveAgentForDevelopmentUser: vi.fn(),
   listAgentEventFeed: vi.fn(),
   listLatestAgentActivity: vi.fn(),
+  listLatestActiveAgentProcessLogs: vi.fn(),
   listActiveAgentsForDevelopmentUser: vi.fn(),
   listPendingApprovalsForDevelopmentUserAgent: vi.fn(),
   listPendingApprovalsForDevelopmentUser: vi.fn(),
@@ -56,6 +57,15 @@ vi.mock("@/src/server/events/agent-events", async (importOriginal) => {
   };
 });
 
+vi.mock("@/src/server/logs/agent-logs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/server/logs/agent-logs")>();
+
+  return {
+    ...actual,
+    listLatestActiveAgentProcessLogs: mocks.listLatestActiveAgentProcessLogs,
+  };
+});
+
 vi.mock("next/navigation", () => ({
   notFound: mocks.notFound,
   useRouter: () => ({
@@ -77,6 +87,7 @@ describe("product shell routes", () => {
         nextCursor: null,
       },
     });
+    mocks.listLatestActiveAgentProcessLogs.mockResolvedValue([]);
     mocks.listPendingApprovalsForDevelopmentUser.mockResolvedValue([]);
     mocks.listPendingApprovalsForDevelopmentUserAgent.mockResolvedValue([]);
     mocks.listAgentEventFeed.mockResolvedValue({
@@ -94,6 +105,7 @@ describe("product shell routes", () => {
     mocks.getActiveAgentForDevelopmentUser.mockReset();
     mocks.listAgentEventFeed.mockReset();
     mocks.listLatestAgentActivity.mockReset();
+    mocks.listLatestActiveAgentProcessLogs.mockReset();
     mocks.listActiveAgentsForDevelopmentUser.mockReset();
     mocks.listPendingApprovalsForDevelopmentUserAgent.mockReset();
     mocks.listPendingApprovalsForDevelopmentUser.mockReset();
@@ -122,7 +134,7 @@ describe("product shell routes", () => {
       "Start, Stop, Restart, and Delete use deterministic fake lifecycle controls.",
     );
     expect(html).toContain(
-      "Runtime logs and local-development config editing are present on agent detail pages.",
+      "Full per-agent log streams and local-development config editing are present on agent detail pages.",
     );
     expect(html).not.toContain("lifecycle verification waits");
     expect(html).not.toContain("Delete controls wait");
@@ -157,6 +169,91 @@ describe("product shell routes", () => {
     expect(html).toContain("Start");
     expect(html).toContain("Delete");
     expect(html).toContain('href="/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774"');
+  });
+
+  it("renders latest dashboard process logs with agent links and safe summaries", async () => {
+    mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([
+      {
+        id: "00000000-0000-4000-8000-000000000201",
+        name: "Process Log Agent",
+        templateKey: "research_agent",
+        templateLabel: "Research Agent",
+        status: "running",
+        href: "/agents/00000000-0000-4000-8000-000000000201",
+        createdAt: "2026-07-04T05:00:00.000Z",
+      },
+    ]);
+    mocks.listLatestActiveAgentProcessLogs.mockResolvedValueOnce([
+      {
+        id: "00000000-0000-4000-8000-000000000701",
+        agentId: "00000000-0000-4000-8000-000000000201",
+        agentName: "Process Log Agent",
+        agentHref: "/agents/00000000-0000-4000-8000-000000000201",
+        runnerId: "00000000-0000-4000-8000-000000000901",
+        localRunnerProcessId: "00000000-0000-4000-8000-000000000901",
+        stream: "stdout",
+        level: "info",
+        message: "runner booted",
+        sequence: 1,
+        createdAt: "2026-07-04T06:00:00.000Z",
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000702",
+        agentId: "00000000-0000-4000-8000-000000000201",
+        agentName: "Process Log Agent",
+        agentHref: "/agents/00000000-0000-4000-8000-000000000201",
+        runnerId: "00000000-0000-4000-8000-000000000901",
+        localRunnerProcessId: "00000000-0000-4000-8000-000000000901",
+        stream: "stderr",
+        level: "error",
+        message: "TOKEN=stored-for-downstream failed",
+        sequence: 2,
+        createdAt: "2026-07-04T06:00:01.000Z",
+      },
+    ]);
+    const element = await DashboardPage();
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Latest process logs");
+    expect(html).toContain("2 shown");
+    expect(html).toContain("runner booted");
+    expect(html).toContain("stdout");
+    expect(html).toContain("stderr");
+    expect(html).toContain("Process Log Agent");
+    expect(html).toContain('href="/agents/00000000-0000-4000-8000-000000000201"');
+    expect(html).toContain("Sensitive details omitted.");
+    expect(html).not.toContain("postgres://");
+    expect(html).not.toContain("stored-for-downstream");
+    expect(html).not.toContain("runnerId");
+    expect(mocks.listLatestActiveAgentProcessLogs).toHaveBeenCalledWith({
+      db: {},
+      limit: 8,
+    });
+  });
+
+  it("renders dashboard process log empty and safe error states", () => {
+    const emptyHtml = renderToStaticMarkup(
+      createElement(DashboardContent, {
+        processLogsResult: {
+          ok: true,
+          logs: [],
+        },
+      }),
+    );
+    const errorHtml = renderToStaticMarkup(
+      createElement(DashboardContent, {
+        processLogsResult: {
+          ok: false,
+        },
+      }),
+    );
+
+    expect(emptyHtml).toContain("No process logs yet");
+    expect(emptyHtml).toContain(
+      "Captured stdout and stderr lines for active agents will appear here.",
+    );
+    expect(errorHtml).toContain("Process logs could not be loaded.");
+    expect(errorHtml).not.toContain("postgres://");
   });
 
   it("renders latest dashboard activity newest-first with agent context and deleted labels", () => {

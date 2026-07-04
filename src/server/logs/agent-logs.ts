@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "@/src/server/db/schema";
 import { agentApprovals, agentLogs, agents } from "@/src/server/db/schema";
@@ -68,6 +68,11 @@ export type AgentLogPage = {
   nextAfter: number | null;
 };
 
+export type LatestAgentProcessLogDto = AgentLogDto & {
+  agentName: string;
+  agentHref: string;
+};
+
 export type AgentLogQueryExecutor = Pick<PostgresJsDatabase<typeof schema>, "select">;
 export type AgentLogGenerationExecutor = Pick<PostgresJsDatabase<typeof schema>, "transaction">;
 type AgentLogRow = typeof agentLogs.$inferSelect;
@@ -124,6 +129,29 @@ export async function listAgentLogs(input: {
     .limit(limit);
 
   return toAgentLogPage(rows, after);
+}
+
+export async function listLatestActiveAgentProcessLogs(input: {
+  db: AgentLogQueryExecutor;
+  limit?: number;
+}): Promise<LatestAgentProcessLogDto[]> {
+  const limit = normalizeAgentLogLimit(input.limit);
+  const rows = await input.db
+    .select({
+      ...logSelection,
+      agentName: agents.name,
+    })
+    .from(agentLogs)
+    .innerJoin(agents, eq(agentLogs.agentId, agents.id))
+    .where(and(isNull(agents.deletedAt), isNotNull(agentLogs.localRunnerProcessId)))
+    .orderBy(desc(agentLogs.createdAt), desc(agentLogs.sequence), desc(agentLogs.id))
+    .limit(limit);
+
+  return rows.map((row) => ({
+    ...mapAgentLogToDto(row),
+    agentName: row.agentName,
+    agentHref: `/agents/${row.agentId}`,
+  }));
 }
 
 export async function generateSimulatedRuntimeLogsForRunningAgent(input: {
