@@ -67,9 +67,17 @@ export type LocalRunnerSpawn = (
   options: SpawnOptionsWithoutStdio,
 ) => ChildProcessWithoutNullStreams;
 
+export type LocalRunnerUnexpectedExitEvent = {
+  agentId: string;
+  process: LocalRunnerProcessDto;
+  exitCode: number | null;
+  signal: string | null;
+};
+
 export type LocalRunnerAdapterDependencies = {
   command?: LocalRunnerCommand;
   createConnection?: () => DatabaseConnection;
+  onUnexpectedExit?: (event: LocalRunnerUnexpectedExitEvent) => Promise<void>;
   spawnProcess?: LocalRunnerSpawn;
   stopTimeoutMs?: number;
 };
@@ -101,6 +109,9 @@ export interface RunnerAdapter {
 export class LocalRunnerAdapter implements RunnerAdapter {
   private readonly command: LocalRunnerCommand;
   private readonly createConnection: () => DatabaseConnection;
+  private readonly onUnexpectedExit:
+    | ((event: LocalRunnerUnexpectedExitEvent) => Promise<void>)
+    | undefined;
   private readonly ownsConnections: boolean;
   private readonly spawnProcess: LocalRunnerSpawn;
   private readonly stopTimeoutMs: number;
@@ -109,6 +120,7 @@ export class LocalRunnerAdapter implements RunnerAdapter {
   constructor(dependencies: LocalRunnerAdapterDependencies = {}) {
     this.command = dependencies.command ?? resolveLocalRunnerCommand();
     this.createConnection = dependencies.createConnection ?? createDatabaseConnection;
+    this.onUnexpectedExit = dependencies.onUnexpectedExit;
     this.ownsConnections = !dependencies.createConnection;
     this.spawnProcess = dependencies.spawnProcess ?? spawnConfiguredChildProcess;
     this.stopTimeoutMs = dependencies.stopTimeoutMs ?? DEFAULT_STOP_TIMEOUT_MS;
@@ -168,10 +180,15 @@ export class LocalRunnerAdapter implements RunnerAdapter {
 
       this.managedByProcessId.set(processRow.id, managed);
       attachProcessLogCapture(managed, connection);
-      attachProcessCloseRecording(managed, connection, () => {
-        this.managedByProcessId.delete(processRow.id);
-        void this.closeOwnedConnection(connection);
-      });
+      attachProcessCloseRecording(
+        managed,
+        connection,
+        () => {
+          this.managedByProcessId.delete(processRow.id);
+          void this.closeOwnedConnection(connection);
+        },
+        this.onUnexpectedExit,
+      );
 
       return { ok: true, process: processRow };
     } catch {
@@ -363,13 +380,14 @@ function attachProcessCloseRecording(
   managed: ManagedChildProcess,
   connection: DatabaseConnection,
   onRecorded: () => void,
+  onUnexpectedExit?: (event: LocalRunnerUnexpectedExitEvent) => Promise<void>,
 ): void {
   managed.child.once("close", (exitCode, signal) => {
     flushLogRemainder(managed, connection, "stdout");
     flushLogRemainder(managed, connection, "stderr");
 
     managed.terminalUpdate = managed.logQueue
-      .then(() => {
+      .then(async () => {
         const exitInput = {
           db: connection.db,
           processId: managed.process.id,
@@ -383,7 +401,18 @@ function attachProcessCloseRecording(
             : {}),
         };
 
-        return recordLocalRunnerProcessExit(exitInput);
+        const terminalProcess = await recordLocalRunnerProcessExit(exitInput);
+
+        if (!managed.stopRequested && terminalProcess && onUnexpectedExit) {
+          await onUnexpectedExit({
+            agentId: managed.agentId,
+            process: terminalProcess,
+            exitCode,
+            signal,
+          });
+        }
+
+        return terminalProcess;
       })
       .finally(onRecorded);
   });

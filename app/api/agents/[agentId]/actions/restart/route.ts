@@ -53,6 +53,20 @@ export async function POST(_request: Request, context: RestartAgentRouteContext)
       );
     }
 
+    if (result.reason === "runner_restart_failed") {
+      return Response.json(
+        {
+          error: {
+            code: "agent_restart_failed",
+            message: "Agent could not be restarted.",
+          },
+        },
+        {
+          status: 500,
+        },
+      );
+    }
+
     return Response.json(
       {
         error: {

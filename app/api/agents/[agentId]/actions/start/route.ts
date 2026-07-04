@@ -53,6 +53,20 @@ export async function POST(_request: Request, context: StartAgentRouteContext) {
       );
     }
 
+    if (result.reason === "runner_start_failed") {
+      return Response.json(
+        {
+          error: {
+            code: "agent_start_failed",
+            message: "Agent could not be started.",
+          },
+        },
+        {
+          status: 500,
+        },
+      );
+    }
+
     return Response.json(
       {
         error: {

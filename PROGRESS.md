@@ -2,18 +2,18 @@
 
 ## Milestone 9 Local Runner Persistence
 
-- Status: #72 maintainer fix is implementation-complete and ready for maintainer re-review.
+- Status: #74 local runner lifecycle wiring is implementation-complete and ready for checker review.
 - Source plan: `docs/MILESTONES.md` Milestone 9
 - Tracking issues: #71-#75
-- Current branch: `codex/issue-72-local-runner-adapter`
-- Next step: maintainer should re-review the start/persistence-failure cleanup path and focused adapter regression evidence.
+- Current branch: `codex/issue-74-local-runner-lifecycle`
+- Next step: checker should review lifecycle route/service wiring, crash-to-error handling, and local runner process cleanup evidence.
 
 ### Issue Checklist
 
 - [x] #71 Persist local runner state and agent logs
 - [x] #72 Implement the local runner adapter with a dummy process
 - [x] #73 Expose persisted process logs in the dashboard
-- [ ] #74 Run lifecycle controls through the local runner
+- [x] #74 Run lifecycle controls through the local runner
 - [ ] #75 Document and verify the Milestone 9 local runner
 - Later Milestone 9 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 9 work.
 
@@ -34,8 +34,42 @@
 - #73 keeps lifecycle controls/status pills unchanged and does not implement process spawning, local runner adapter behavior, lifecycle endpoint replacement, Docker/cloud runners, Hermes, Telegram, auth, billing, provider integrations, or secrets.
 - #72 scopes process-id log streaming to the requested active local-development agent at the state helper boundary, so a known process UUID for another agent returns no logs through both the helper and adapter.
 - #72 terminates spawned-but-untracked child processes when start-time durable state persistence fails, including defensive handling for already-exited children and cleanup kill failures.
+- #74 wires the existing Start/Stop/Restart API and dashboard/detail/mobile controls to the #72 local runner adapter without changing the public control model.
+- #74 start validates the current agent state, starts a real local child process, then persists `running` with start requested/completed events only after spawn and durable process state succeed.
+- #74 stop requires a tracked managed local runner process, terminates it through the adapter, then persists `stopped` with stop requested/completed events.
+- #74 restart terminates the old tracked process, starts a replacement, stays in `running`, and records restart requested/completed events with the replacement local runner process id.
+- #74 records unexpected lifecycle-launched process exits as `error` with safe status reason, persisted process exit details, captured stdout/stderr logs, and one `agent.error` audit event.
+- #74 leaves invalid lifecycle actions as safe validation/conflict responses without runner calls, state mutation, or mutation events.
+- #74 keeps Docker/cloud/Hermes/provider/auth/billing/secrets and Docker runtime metadata out of scope.
 
 ### Validation
+
+#### #74
+
+- Date: 2026-07-04
+- Environment:
+  - Isolated database target: container `agentbay_issue_74-postgres` on host port `54374`, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54374/agentbay`.
+  - Isolated app/test server target: `PORT=3074`, `PLAYWRIGHT_BASE_URL=http://localhost:3074`, `NEXT_PUBLIC_APP_URL=http://localhost:3074`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree initially had no `node_modules`.
+  - `docker info --format '{{.ServerVersion}}'`: pass; Docker daemon reachable with server version `29.3.1`.
+  - `docker ps -a --filter name=agentbay_issue_74 --format '{{.Names}} {{.Status}} {{.Ports}}'`: pass; no existing #74 container was present before setup.
+  - `docker run --name agentbay_issue_74-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54374:5432 -d postgres:17-alpine`: pass; started isolated Postgres for #74.
+  - `docker exec agentbay_issue_74-postgres pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54374/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3074 bun run db:migrate`: pass; migrations applied successfully.
+- Focused checks:
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54374/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3074 bun run test -- tests/unit/create-agent-db.test.ts`: pass; 82 tests passed, including local runner lifecycle start/stop/restart, invalid action no-mutation behavior, persisted logs, and lifecycle-launched crash-to-error audit coverage.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54374/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3074 bun run test -- tests/unit/start-agent-route.test.ts tests/unit/stop-agent-route.test.ts tests/unit/restart-agent-route.test.ts tests/unit/local-runner-adapter.test.ts`: pass; 4 files and 7 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54374/agentbay PORT=3074 PLAYWRIGHT_BASE_URL=http://localhost:3074 NEXT_PUBLIC_APP_URL=http://localhost:3074 bun run test:e2e -- --project=chromium-desktop --grep "creates Research Agent"`: pass; dashboard/detail start, restart, stop, activity, and delete flow passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54374/agentbay PORT=3074 PLAYWRIGHT_BASE_URL=http://localhost:3074 NEXT_PUBLIC_APP_URL=http://localhost:3074 bun run test:e2e -- --project=chromium-desktop --grep "scoped runtime logs"`: pass; agent detail showed lifecycle-launched dummy stdout/stderr logs and stopped polling after stop.
+- Required gates:
+  - `bun run format:check`: pass; Biome checked 83 files.
+  - `bun run lint`: pass; Biome checked 83 files.
+  - `bun run typecheck`: pass; `tsc --noEmit` passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54374/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3074 bun run test`: pass; 23 files and 204 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54374/agentbay PORT=3074 PLAYWRIGHT_BASE_URL=http://localhost:3074 NEXT_PUBLIC_APP_URL=http://localhost:3074 bun run build`: pass; Next.js production build completed and included lifecycle action routes, dashboard, agent detail, logs, approvals, health, and settings routes.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54374/agentbay PORT=3074 PLAYWRIGHT_BASE_URL=http://localhost:3074 NEXT_PUBLIC_APP_URL=http://localhost:3074 bun run test:e2e`: pass; full browser suite passed with 38 tests and 18 expected skips.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54374/agentbay PORT=3074 PLAYWRIGHT_BASE_URL=http://localhost:3074 NEXT_PUBLIC_APP_URL=http://localhost:3074 bun run verify`: pass; aggregate format, lint, typecheck, unit test, production build, and Playwright gates passed with 204 unit tests and 38 E2E passed / 18 expected skips.
 
 #### #72
 
