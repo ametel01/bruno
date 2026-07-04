@@ -251,6 +251,72 @@ bun run db:migrate
 bun run test:e2e
 ```
 
+## Post-Merge Cleanup
+
+After a PR is merged, keep the builder/checker/reviewer separation intact: do not use cleanup as a substitute for required checks, checker evidence, maintainer-reviewer review, or GitHub merge-readiness. The coordinator or merger records cleanup evidence in `STATUS.md` so the next agent can verify the repo state without rediscovery.
+
+Use this checklist for every merged agent worktree:
+
+- Verify the PR merged remotely and record the merge commit:
+
+  ```bash
+  gh pr view <pr-number> --json number,state,mergedAt,mergeCommit,headRefName,url
+  ```
+
+- Verify the linked issue closed, or close/update it with evidence when auto-close did not happen:
+
+  ```bash
+  gh issue view <issue-number> --json number,state,closedAt,url
+  ```
+
+- Delete the remote branch explicitly when GitHub or local merge cleanup did not remove it:
+
+  ```bash
+  git push origin --delete <branch-name>
+  ```
+
+- Confirm the implementation worktree is clean before removal:
+
+  ```bash
+  git -C /path/to/issue-worktree status --short --branch --untracked-files=all
+  ```
+
+- Remove the implementation worktree, then delete the local branch:
+
+  ```bash
+  git worktree remove /path/to/issue-worktree
+  git branch -D <branch-name>
+  ```
+
+- Fast-forward the root checkout `main` to `origin/main`:
+
+  ```bash
+  git -C /path/to/root-checkout switch main
+  git -C /path/to/root-checkout pull --ff-only
+  ```
+
+- Record the remaining worktrees and root checkout cleanliness:
+
+  ```bash
+  git worktree list --porcelain
+  git status --short --branch --untracked-files=all
+  ```
+
+- Clean isolated validation infrastructure by compose labels when they exist:
+
+  ```bash
+  docker compose -p <compose-project> down -v --remove-orphans
+  ```
+
+- If compose labels are absent, verify and remove the exact known validation containers by name and port, including anonymous volumes when they are disposable:
+
+  ```bash
+  docker ps -a --filter "name=<exact-container-name>" --format "{{.Names}}\t{{.Ports}}\t{{.Status}}"
+  docker rm -f -v <exact-container-name>
+  ```
+
+`STATUS.md` must include the cleanup commands run, pass/fail result, merge commit, linked issue state or manual issue evidence, expected remaining worktrees, root status output summary, and any preserved worktree, branch, container, volume, or port with the reason it was preserved.
+
 ## Vercel Preview Deployment
 
 The initial empty-app preview from issue #6 was deployed from the authenticated local Vercel CLI account `ametel01` to scope `ametel01s-projects` and project `agentbay`.
