@@ -14,6 +14,10 @@ import {
   recordLocalRunnerProcessExit,
 } from "@/src/server/runners/local-runner-state";
 import { listAgentLogs, type AgentLogPage } from "@/src/server/logs/agent-logs";
+import type {
+  RunnerAdapter as RunnerAdapterContract,
+  RunnerLogStreamInput,
+} from "@/src/server/runners/runner-adapter";
 
 const DEFAULT_STOP_TIMEOUT_MS = 2_000;
 const RUNNING_PROCESS_STATUSES = ["starting", "running"] as const;
@@ -93,18 +97,12 @@ type ManagedChildProcess = {
   terminalUpdate: Promise<LocalRunnerProcessDto | null> | null;
 };
 
-export interface RunnerAdapter {
-  start(agentId: string): Promise<LocalRunnerStartResult>;
-  stop(agentId: string): Promise<LocalRunnerStopResult>;
-  restart(agentId: string): Promise<LocalRunnerRestartResult>;
-  status(agentId: string): Promise<LocalRunnerStatusResult>;
-  streamLogs(input: {
-    agentId: string;
-    processId?: string;
-    after?: number;
-    limit?: number;
-  }): Promise<AgentLogPage>;
-}
+export type RunnerAdapter = RunnerAdapterContract<
+  LocalRunnerStartResult,
+  LocalRunnerStopResult,
+  LocalRunnerRestartResult,
+  LocalRunnerStatusResult
+>;
 
 export class LocalRunnerAdapter implements RunnerAdapter {
   private readonly command: LocalRunnerCommand;
@@ -268,12 +266,7 @@ export class LocalRunnerAdapter implements RunnerAdapter {
     }
   }
 
-  async streamLogs(input: {
-    agentId: string;
-    processId?: string;
-    after?: number;
-    limit?: number;
-  }): Promise<AgentLogPage> {
+  async streamLogs(input: RunnerLogStreamInput): Promise<AgentLogPage> {
     const connection = this.createConnection();
 
     try {
