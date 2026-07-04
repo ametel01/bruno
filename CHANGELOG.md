@@ -51,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Docker lifecycle start/restart now reject fast-exiting containers after inspect, remove failed replacement containers, and avoid marking agents running unless Docker reports the selected container is actually running.
+- Docker lifecycle start/restart now reject fast-exiting containers after inspect, handle replacement start failures safely, and avoid marking agents running unless Docker reports the selected replacement container is actually running.
 - Local runner adapter start failures now terminate spawned child processes when durable runner-state persistence fails, preventing orphaned dummy/local processes.
 - Local runner process log streaming now scopes process-id reads to the requested active development-user agent so a known process UUID for another agent cannot return that agent's stdout/stderr.
 - Restart controls now clear their local busy state when the local runner restart returns directly to `running`.

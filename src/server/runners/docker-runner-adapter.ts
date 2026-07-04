@@ -95,12 +95,12 @@ export type DockerRunnerStopResult =
 
 export type DockerRunnerRestartResult =
   | { ok: true; container: DockerRunnerContainerDto }
-  | {
+  | ({
       ok: false;
       reason:
         | Extract<DockerRunnerStopResult, { ok: false }>["reason"]
         | Extract<DockerRunnerStartResult, { ok: false }>["reason"];
-    };
+    } & { replacementStartFailed?: boolean });
 
 export type DockerRunnerStatusResult =
   | { ok: true; container: DockerRunnerContainerDto | null }
@@ -312,7 +312,9 @@ export class DockerRunnerAdapter
       return stopResult;
     }
 
-    return this.start(agentId);
+    const startResult = await this.start(agentId);
+
+    return startResult.ok ? startResult : { ...startResult, replacementStartFailed: true };
   }
 
   async status(agentId: string): Promise<DockerRunnerStatusResult> {

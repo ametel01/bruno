@@ -571,7 +571,7 @@ export async function restartAgentForDevelopmentUser(
     const runnerRestart = await runnerAdapter.restart(normalizedAgentId);
 
     if (!runnerRestart.ok) {
-      if (runnerRestart.reason === "container_not_running") {
+      if (isDockerReplacementStartFailure(runnerRestart)) {
         await connection.db
           .update(agents)
           .set({
@@ -907,6 +907,15 @@ export async function settleDueFakeRunnerTransitions(
   _dependencies: AgentLifecycleDependencies = {},
 ): Promise<number> {
   return 0;
+}
+
+function isDockerReplacementStartFailure(result: LifecycleRunnerRestartResult): result is Extract<
+  DockerRunnerRestartResult,
+  { ok: false }
+> & {
+  replacementStartFailed: true;
+} {
+  return !result.ok && "replacementStartFailed" in result && result.replacementStartFailed === true;
 }
 
 function toStartedAgent(agent: typeof agents.$inferSelect): StartedAgent {
