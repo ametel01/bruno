@@ -1,5 +1,75 @@
 # Progress
 
+## Milestone 10 Dockerized Agent Runner Gate Classification
+
+- Status: #76 gate/tracking setup is implementation-complete and ready for checker review.
+- Source plan: `docs/MILESTONES.md` Milestone 10
+- Tracking issues: #76-#81
+- Current branch: `codex/issue-76-docker-gate-classification`
+- Next step: checker should review the Docker availability helper, Milestone 10 tracking setup, and baseline gate evidence.
+
+### Issue Checklist
+
+- [x] #76 Classify Docker runner quality gates
+- [ ] #77 Persist Docker runtime metadata and agent logs
+- [ ] #78 Add the Docker runner adapter
+- [ ] #79 Run lifecycle controls through Docker containers
+- [ ] #80 Detect Docker crashes and clean up selected-agent containers
+- [ ] #81 Verify Docker runner milestone acceptance
+- Later Milestone 10 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 10 work.
+
+### Current Status
+
+- #76 initializes Milestone 10 tracking and records the baseline quality gates against an isolated Postgres service on host port `54376` and app port `3076`.
+- #76 adds `tests/helpers/docker-availability.ts` so future real-Docker tests can distinguish missing Docker tooling or daemon availability from product failures.
+- #76 adds deterministic unit coverage for Docker availability classification by injecting fake Docker info runners; the normal unit suite does not require Docker.
+- #76 does not add a dedicated Docker test package script. Future real-Docker test slices should add one only when there are real Docker tests to run, then record the command here.
+- #76 leaves `CHANGELOG.md` unchanged because this is tracking and quality-gate setup only, with no user/operator-visible product behavior shipped.
+- #76 does not change schema, migrations, runtime metadata tables, log persistence, dependencies, lockfiles, Docker runner behavior, lifecycle controls, container crash detection, selected-agent containers, provider integrations, auth, billing, or secrets.
+
+### Update Log Requirements
+
+- Each Milestone 10 issue agent must update this section with issue status, branch, implementation evidence, validation commands, skipped checks, blockers, and handoff notes.
+- Docker-dependent test evidence must record Docker availability separately from product assertions. Docker-unavailable runs may skip real Docker tests only through the helper or a documented pattern with the exact skip reason.
+- Non-Docker gates must still run when Docker is unavailable unless the failing command itself requires Docker or a reachable database.
+- `CHANGELOG.md` should receive Milestone 10 entries only for shipped user/operator-visible commands or behavior, not for tracking-only or gate-classification updates.
+
+### Docker Availability Test Pattern
+
+- Use `detectDockerAvailability` from `tests/helpers/docker-availability.ts` before real Docker tests that start containers or inspect Docker state.
+- Use `dockerUnavailableSkipReason` to report a clear skip reason such as `Skipping real Docker tests: Docker daemon is not reachable.` when Docker is unavailable.
+- Keep helper tests deterministic by injecting a `DockerInfoRunner`; do not make normal unit tests depend on the local Docker daemon.
+- When a future slice adds real Docker tests, group them behind this availability check and record whether they ran or skipped in this Milestone 10 progress section.
+
+### Validation
+
+#### #76
+
+- Date: 2026-07-04
+- Environment:
+  - Docker daemon: reachable; `docker info --format '{{.ServerVersion}}'` returned `29.3.1`.
+  - Isolated database: Compose project `agentbay_issue_76`, container `agentbay_issue_76-postgres-1`, host port `54376`, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54376/agentbay`.
+  - Isolated app/test server: `PORT=3076`, `PLAYWRIGHT_BASE_URL=http://localhost:3076`, `NEXT_PUBLIC_APP_URL=http://localhost:3076`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree had no local `node_modules`.
+  - `COMPOSE_PROJECT_NAME=agentbay_issue_76 COMPOSE_FILE=compose.yaml:/tmp/agentbay-issue-76-compose.override.yaml docker compose up -d postgres`: pass; started isolated Postgres with the requested compose path and an issue-specific port override to avoid collisions with default `54329`.
+  - `docker exec agentbay_issue_76-postgres-1 pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54376/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3076 bun run db:migrate`: pass; migrations applied successfully against the isolated #76 database.
+- Changelog scope:
+  - `rg -n "^# Changelog|Keep a Changelog|^## \[Unreleased\]|^### (Added|Changed|Deprecated|Removed|Fixed|Security)$" CHANGELOG.md`: pass; `CHANGELOG.md` has top-level `# Changelog`, Keep a Changelog framing, `## [Unreleased]`, and non-empty qualifying `### Added` and `### Fixed` sections.
+  - `CHANGELOG.md` was intentionally left unchanged because #76 adds gate classification/tracking and no user/operator-visible behavior.
+- Focused checks:
+  - `bun test tests/unit/docker-availability.test.ts`: pass; 1 file and 4 tests passed for available Docker, missing CLI, unreachable daemon, and empty server-version classification.
+- Required gates:
+  - `bun run format:check`: pass; Biome checked 80 files.
+  - `bun run lint`: pass; Biome checked 80 files.
+  - `bun run typecheck`: pass; `tsc --noEmit` passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54376/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3076 bun run test`: pass; 22 files and 181 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54376/agentbay PORT=3076 PLAYWRIGHT_BASE_URL=http://localhost:3076 NEXT_PUBLIC_APP_URL=http://localhost:3076 bun run build`: pass; Next.js build completed and included dashboard, agent detail, lifecycle, approval decision, log, health, and settings routes.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54376/agentbay PORT=3076 PLAYWRIGHT_BASE_URL=http://localhost:3076 NEXT_PUBLIC_APP_URL=http://localhost:3076 bun run test:e2e`: pass; 37 browser tests passed with 17 expected skips.
+- Reconciliation:
+  - Initial `bun run format:check` failed because this worktree had no local `node_modules` and `biome` was unavailable; `bun install --frozen-lockfile` installed committed dependencies and the rerun passed.
+
 ## Milestone 8 Mobile Control Panel Readiness
 
 - Status: Milestone 8 is implementation-complete through #70 and ready for checker review.
