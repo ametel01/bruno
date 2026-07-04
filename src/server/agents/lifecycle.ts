@@ -571,6 +571,23 @@ export async function restartAgentForDevelopmentUser(
     const runnerRestart = await runnerAdapter.restart(normalizedAgentId);
 
     if (!runnerRestart.ok) {
+      if (runnerRestart.reason === "container_not_running") {
+        await connection.db
+          .update(agents)
+          .set({
+            status: "stopped",
+            statusReason: null,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(agents.id, normalizedAgentId),
+              isNull(agents.deletedAt),
+              inArray(agents.status, [...RESTARTABLE_AGENT_STATUSES]),
+            ),
+          );
+      }
+
       return { ok: false, reason: "runner_restart_failed" } as const;
     }
 

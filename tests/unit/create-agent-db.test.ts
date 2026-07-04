@@ -1731,6 +1731,78 @@ describe("create agent persistence", () => {
     }
   });
 
+  it("does not mark an agent running when Docker start inspects a non-running container", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Fast Exit Docker Start Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const containerId = "mock-fast-exit-start";
+    const dockerCalls: string[][] = [];
+    const dockerCli: DockerCliRunner = async (args) => {
+      dockerCalls.push([...args]);
+
+      if (args[0] === "run") {
+        return { stdout: `${containerId}\n`, stderr: "" };
+      }
+
+      if (args[0] === "inspect") {
+        return dockerInspectResult({
+          agentId: created.agent.id,
+          containerId,
+          image: "agentbay/dummy-runner:test",
+          status: "exited",
+        });
+      }
+
+      if (args[0] === "rm") {
+        return { stdout: "", stderr: "" };
+      }
+
+      throw new Error(`unexpected docker call: ${args.join(" ")}`);
+    };
+    const runnerAdapter = new DockerRunnerAdapter({
+      command: {
+        image: "agentbay/dummy-runner:test",
+        args: ["sh", "-c", "printf fast-exit; exit 0"],
+      },
+      createConnection: () => connection,
+      dockerCli,
+      nameSuffix: () => "fastexit",
+      now: () => new Date("2026-07-04T08:00:00.000Z"),
+    });
+
+    const result = await startAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+      now: () => new Date("2026-07-04T08:00:01.000Z"),
+      runnerAdapter,
+    });
+
+    const [persistedAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+    const persistedContainers = await connection.db.select().from(dockerRunnerContainers);
+    const transitionEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(inArray(agentEvents.type, [START_REQUESTED_EVENT_TYPE, START_COMPLETED_EVENT_TYPE]));
+
+    expect(result).toEqual({ ok: false, reason: "runner_start_failed" });
+    expect(persistedAgent).toMatchObject({
+      status: "stopped",
+      statusReason: null,
+    });
+    expect(persistedContainers).toHaveLength(0);
+    expect(transitionEvents).toHaveLength(0);
+    expect(dockerCalls).toEqual([
+      expect.arrayContaining(["run", "--detach"]),
+      ["inspect", "--format", "{{json .}}", containerId],
+      ["inspect", "--format", "{{json .}}", containerId],
+      ["rm", "--force", containerId],
+    ]);
+  });
+
   it("rejects malformed, missing, soft-deleted, starting, and running starts without mutation or events", async () => {
     const [createdUser] = await connection.db
       .insert(users)
@@ -2130,6 +2202,124 @@ describe("create agent persistence", () => {
         }),
       ]),
     );
+  });
+
+  it("does not leave an agent running when Docker restart replacement is non-running", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Fast Exit Docker Restart Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    await connection.db
+      .update(agents)
+      .set({
+        status: "running",
+        statusReason: "Docker runner container is running.",
+      })
+      .where(eq(agents.id, created.agent.id));
+    await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      containerId: "mock-existing-restart",
+      containerName: "agentbay-existing-restart",
+      image: "agentbay/dummy-runner:test",
+      observedStatus: "running",
+      observedAt: new Date("2026-07-04T07:59:00.000Z"),
+    });
+
+    const replacementContainerId = "mock-fast-exit-restart";
+    const dockerCalls: string[][] = [];
+    let existingInspectCount = 0;
+    const dockerCli: DockerCliRunner = async (args) => {
+      dockerCalls.push([...args]);
+
+      if (args[0] === "inspect" && args[3] === "mock-existing-restart") {
+        existingInspectCount += 1;
+        return dockerInspectResult({
+          agentId: created.agent.id,
+          containerId: "mock-existing-restart",
+          image: "agentbay/dummy-runner:test",
+          status: existingInspectCount === 1 ? "running" : "exited",
+        });
+      }
+
+      if (args[0] === "stop" && args[1] === "mock-existing-restart") {
+        return { stdout: "mock-existing-restart\n", stderr: "" };
+      }
+
+      if (args[0] === "run") {
+        return { stdout: `${replacementContainerId}\n`, stderr: "" };
+      }
+
+      if (args[0] === "inspect" && args[3] === replacementContainerId) {
+        return dockerInspectResult({
+          agentId: created.agent.id,
+          containerId: replacementContainerId,
+          image: "agentbay/dummy-runner:test",
+          status: "exited",
+        });
+      }
+
+      if (args[0] === "rm" && args[2] === replacementContainerId) {
+        return { stdout: "", stderr: "" };
+      }
+
+      throw new Error(`unexpected docker call: ${args.join(" ")}`);
+    };
+    const runnerAdapter = new DockerRunnerAdapter({
+      command: {
+        image: "agentbay/dummy-runner:test",
+        args: ["sh", "-c", "printf fast-exit; exit 0"],
+      },
+      createConnection: () => connection,
+      dockerCli,
+      nameSuffix: () => "restartx",
+      now: () => new Date("2026-07-04T08:00:00.000Z"),
+    });
+
+    const result = await restartAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+      now: () => new Date("2026-07-04T08:00:01.000Z"),
+      runnerAdapter,
+    });
+
+    const [persistedAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+    const persistedContainers = await connection.db
+      .select()
+      .from(dockerRunnerContainers)
+      .orderBy(dockerRunnerContainers.containerId);
+    const transitionEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(
+        inArray(agentEvents.type, [RESTART_REQUESTED_EVENT_TYPE, RESTART_COMPLETED_EVENT_TYPE]),
+      );
+
+    expect(result).toEqual({ ok: false, reason: "runner_restart_failed" });
+    expect(persistedAgent).toMatchObject({
+      status: "stopped",
+      statusReason: null,
+      updatedAt: new Date("2026-07-04T08:00:01.000Z"),
+    });
+    expect(persistedContainers).toHaveLength(1);
+    expect(persistedContainers[0]).toMatchObject({
+      agentId: created.agent.id,
+      containerId: "mock-existing-restart",
+      observedStatus: "exited",
+    });
+    expect(transitionEvents).toHaveLength(0);
+    expect(dockerCalls).toEqual([
+      ["inspect", "--format", "{{json .}}", "mock-existing-restart"],
+      ["stop", "mock-existing-restart"],
+      ["inspect", "--format", "{{json .}}", "mock-existing-restart"],
+      expect.arrayContaining(["run", "--detach"]),
+      ["inspect", "--format", "{{json .}}", replacementContainerId],
+      ["inspect", "--format", "{{json .}}", replacementContainerId],
+      ["rm", "--force", replacementContainerId],
+    ]);
   });
 
   it("does not fake-settle due restarts without a replacement runner process", async () => {
@@ -4842,6 +5032,60 @@ describe("create agent persistence", () => {
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("docker runner adapter rejects and removes a started container that is not running", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Docker Non-Running Start Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const containerId = "mock-adapter-fast-exit";
+    const dockerCalls: string[][] = [];
+    const dockerCli: DockerCliRunner = async (args) => {
+      dockerCalls.push([...args]);
+
+      if (args[0] === "run") {
+        return { stdout: `${containerId}\n`, stderr: "" };
+      }
+
+      if (args[0] === "inspect") {
+        return dockerInspectResult({
+          agentId: created.agent.id,
+          containerId,
+          image: "agentbay/dummy-runner:test",
+          status: "exited",
+        });
+      }
+
+      if (args[0] === "rm" && args[2] === containerId) {
+        return { stdout: "", stderr: "" };
+      }
+
+      throw new Error(`unexpected docker call: ${args.join(" ")}`);
+    };
+    const adapter = new DockerRunnerAdapter({
+      command: {
+        image: "agentbay/dummy-runner:test",
+        args: ["sh", "-c", "printf fast-exit; exit 0"],
+      },
+      createConnection: () => connection,
+      dockerCli,
+      nameSuffix: () => "directx",
+    });
+
+    await expect(adapter.start(created.agent.id)).resolves.toEqual({
+      ok: false,
+      reason: "container_not_running",
+    });
+
+    const persistedContainers = await connection.db.select().from(dockerRunnerContainers);
+    expect(persistedContainers).toHaveLength(0);
+    expect(dockerCalls).toEqual([
+      expect.arrayContaining(["run", "--detach"]),
+      ["inspect", "--format", "{{json .}}", containerId],
+      ["inspect", "--format", "{{json .}}", containerId],
+      ["rm", "--force", containerId],
+    ]);
   });
 
   it("docker runner adapter refuses stop when the stored container label mismatches", async () => {

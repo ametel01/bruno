@@ -76,6 +76,7 @@ export type DockerRunnerStartResult =
         | "agent_not_found"
         | "docker_run_failed"
         | "docker_inspect_failed"
+        | "container_not_running"
         | "label_mismatch"
         | "state_persistence_failed";
     };
@@ -214,6 +215,13 @@ export class DockerRunnerAdapter
         return { ok: false, reason: inspected.reason };
       }
 
+      const observedStatus = observedStatusFromInspect(inspected.inspect);
+      if (observedStatus !== "running") {
+        await this.cleanupStartedContainer(containerId, agentId);
+        await this.closeOwnedConnection(connection);
+        return { ok: false, reason: "container_not_running" };
+      }
+
       try {
         const container = await recordDockerRunnerContainerForDevelopmentUser({
           db: connection.db,
@@ -221,7 +229,7 @@ export class DockerRunnerAdapter
           containerId,
           containerName: plan.containerName,
           image: this.command.image,
-          observedStatus: observedStatusFromInspect(inspected.inspect),
+          observedStatus,
           metadata: dockerRunnerMetadata({
             agentId,
             command: this.command,
