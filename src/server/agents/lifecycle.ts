@@ -2,7 +2,11 @@ import { and, eq, inArray, isNull, lte } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
-import { agentEvents, agents, type agentStatusEnum } from "@/src/server/db/schema";
+import { agents, type agentStatusEnum } from "@/src/server/db/schema";
+import {
+  recordAgentEventInTransaction,
+  recordAgentEventsInTransaction,
+} from "@/src/server/events/agent-events";
 
 export type AgentLifecycleStatus = (typeof agentStatusEnum.enumValues)[number];
 
@@ -225,7 +229,7 @@ export async function startAgentForDevelopmentUser(
         throw new Error("Agent start update returned no rows.");
       }
 
-      await tx.insert(agentEvents).values({
+      await recordAgentEventInTransaction(tx, {
         agentId: startedAgent.id,
         actorUserId: startedAgent.userId,
         type: START_REQUESTED_EVENT_TYPE,
@@ -310,7 +314,7 @@ export async function stopAgentForDevelopmentUser(
         throw new Error("Agent stop update returned no rows.");
       }
 
-      await tx.insert(agentEvents).values([
+      await recordAgentEventsInTransaction(tx, [
         {
           agentId: stoppedAgent.id,
           actorUserId: stoppedAgent.userId,
@@ -412,7 +416,7 @@ export async function restartAgentForDevelopmentUser(
         throw new Error("Agent restart update returned no rows.");
       }
 
-      await tx.insert(agentEvents).values({
+      await recordAgentEventInTransaction(tx, {
         agentId: restartedAgent.id,
         actorUserId: restartedAgent.userId,
         type: RESTART_REQUESTED_EVENT_TYPE,
@@ -496,7 +500,7 @@ export async function deleteAgentForDevelopmentUser(
         throw new Error("Agent delete update returned no rows.");
       }
 
-      await tx.insert(agentEvents).values({
+      await recordAgentEventInTransaction(tx, {
         agentId: deletedAgent.id,
         actorUserId: deletedAgent.userId,
         type: DELETE_EVENT_TYPE,
@@ -610,7 +614,8 @@ async function settleDueStatusInTransaction(input: {
     return 0;
   }
 
-  await tx.insert(agentEvents).values(
+  await recordAgentEventsInTransaction(
+    tx,
     settledAgents.map((agent) => ({
       agentId: agent.id,
       actorUserId: agent.userId,

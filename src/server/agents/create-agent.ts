@@ -2,7 +2,8 @@ import { asc, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
-import { agentEvents, agents, appMetadata, users } from "@/src/server/db/schema";
+import { agents, appMetadata, users } from "@/src/server/db/schema";
+import { recordAgentEventInTransaction } from "@/src/server/events/agent-events";
 
 const DEVELOPMENT_USER_METADATA_KEY = "local_development_user_id";
 export const AGENT_NAME_MAX_LENGTH = 120;
@@ -245,7 +246,7 @@ async function insertDefaultCreatedEvent(
     actorUserId: string;
   },
 ): Promise<void> {
-  await tx.insert(agentEvents).values({
+  await recordAgentEventInTransaction(tx, {
     agentId: input.agent.id,
     actorUserId: input.actorUserId,
     type: "agent.created",
