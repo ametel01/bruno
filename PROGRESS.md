@@ -1,5 +1,65 @@
 # Progress
 
+## Milestone 9 Local Runner Persistence
+
+- Status: #71 is implementation-complete and ready for checker review.
+- Source plan: `docs/MILESTONES.md` Milestone 9
+- Tracking issues: #71-#75
+- Current branch: `codex/issue-71-local-runner-state`
+- Next step: checker should review the local runner process metadata schema, log persistence helpers, docs, and migrated database gate evidence.
+
+### Issue Checklist
+
+- [x] #71 Persist local runner state and agent logs
+- [ ] #72 Implement the local runner adapter with a dummy process
+- [ ] #73 Expose persisted process logs in the dashboard
+- [ ] #74 Run lifecycle controls through the local runner
+- [ ] #75 Document and verify the Milestone 9 local runner
+- Later Milestone 9 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 9 work.
+
+### Current Status
+
+- #71 owns the Milestone 9 persistence foundation for local runner process metadata and agent stdout/stderr log storage/read helpers only. It does not implement process spawning, dashboard log surfaces, lifecycle controls, Docker/cloud runners, runner auth, Hermes, Telegram, BYOK, billing, or production supervision.
+- #71 adds an additive `local_runner_processes` table with process id, sanitized command metadata, status, start/stop timestamps, exit code, signal, and sanitized last-error storage scoped to active local-development agents.
+- #71 links `agent_logs` rows to an optional local runner process id, constrains persisted streams to `stdout` or `stderr`, preserves per-agent sequence ordering, and keeps process output separate from `agent_events`.
+- #71 adds local runner state helpers for creating process rows, recording terminal state, appending stdout/stderr log lines, and reading process-scoped logs without spawning or controlling processes.
+
+### Validation
+
+#### #71
+
+- Date: 2026-07-04
+- Environment:
+  - Isolated database target: container `agentbay_issue_71-postgres` on host port `54371`, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54371/agentbay`.
+  - Isolated app/test server target: `PORT=3071`, `PLAYWRIGHT_BASE_URL=http://localhost:3071`, `NEXT_PUBLIC_APP_URL=http://localhost:3071`.
+- Setup:
+  - `test -d node_modules && echo node_modules-present || echo node_modules-missing`: pass; reported `node_modules-missing` before baseline setup.
+  - `bun install --frozen-lockfile`: pass; installed the committed lockfile dependencies.
+  - `docker info --format '{{.ServerVersion}}'`: pass; Docker daemon reachable with server version `29.3.1`.
+  - `docker ps -a --filter name=agentbay_issue_71-postgres --format '{{.Names}} {{.Status}} {{.Ports}}'`: pass; no existing #71 container was present before setup.
+  - `docker run --name agentbay_issue_71-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54371:5432 -d postgres:17-alpine`: pass; started isolated Postgres for #71.
+  - `docker exec agentbay_issue_71-postgres pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54371/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3071 bun run db:migrate`: pass; migrations applied successfully against the isolated #71 database.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54371/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3071 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+- Baseline checks:
+  - `bun run format:check`: pass; Biome checked 78 files.
+  - `bun run lint`: pass; Biome checked 78 files.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed successfully.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54371/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3071 bun run test`: pass; 21 files and 177 tests passed.
+- Changelog structure:
+  - `rg -n "^# Changelog|Keep a Changelog|Semantic Versioning|^## \\[Unreleased\\]|^### (Added|Changed|Deprecated|Removed|Fixed|Security)$" CHANGELOG.md`: pass; `CHANGELOG.md` has top-level `# Changelog`, Keep a Changelog/Semantic Versioning framing, `## [Unreleased]`, and current `### Added` and `### Fixed` sections. Existing entries were preserved.
+- Implementation checks:
+  - `bun run db:generate`: pass; generated the additive local runner state migration, then the SQL file was renamed to `drizzle/0005_local_runner_state.sql` and Drizzle journal tag updated to match.
+  - `bun run format`: pass; Biome formatted 79 files and fixed edited files.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54371/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3071 bun run db:migrate`: pass; applied the new additive migration to the isolated #71 database after expected existing-schema/table notices.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54371/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3071 bun run test -- tests/unit/agent-schema.test.ts tests/unit/create-agent-db.test.ts tests/unit/agent-logs-route.test.ts`: pass; final focused #71 suite passed with 3 files and 101 tests after command metadata redaction, same-agent multi-process sequence, and terminal-status consistency coverage.
+  - `bun run format:check`: pass; Biome checked 79 files.
+  - `bun run lint`: pass; Biome checked 79 files.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed successfully.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54371/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3071 bun run test`: pass; 21 files and 186 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54371/agentbay PORT=3071 PLAYWRIGHT_BASE_URL=http://localhost:3071 NEXT_PUBLIC_APP_URL=http://localhost:3071 bun run verify`: pass; aggregate format, lint, typecheck, unit test, production build, and Playwright gates passed with 186 unit tests and 37 E2E passed / 17 expected skips.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54371/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3071 bun run db:health`: pass; returned `status: ok` and `database: reachable` after the new migration.
+
 ## Milestone 10 Dockerized Agent Runner Gate Classification
 
 - Status: #76 gate/tracking setup is implementation-complete and ready for checker review.

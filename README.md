@@ -1,6 +1,6 @@
 # AgentBay
 
-AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, and the completed Milestone 7 pending-approval queue workflow. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, scoped runtime logs, dashboard plus agent-detail pending approvals for local development agents, dashboard approval decision controls, and fake approval generation for running local-development agents.
+AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, the completed Milestone 7 pending-approval queue workflow, and the Milestone 9 local-runner persistence foundation. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, scoped runtime logs, local runner process metadata storage, dashboard plus agent-detail pending approvals for local development agents, dashboard approval decision controls, and fake approval generation for running local-development agents.
 
 ## Requirements
 
@@ -59,13 +59,14 @@ The migration set creates the local application metadata table plus the persiste
 - `agents`: persistent agent identity, template, lifecycle status, timestamps, and soft-delete marker.
 - `agent_configs`: one typed config row per active agent with system prompt, model provider, model name, integer-cent daily spend cap, schedule mode, optional cron, timezone, and timestamps.
 - `agent_events`: transactional audit events for agent creation, config updates, fake lifecycle transitions, dashboard activity, and per-agent activity.
-- `agent_logs`: runtime log rows with nullable runner identity, static stream/level/message fields, and per-agent positive sequence values.
+- `local_runner_processes`: local runner process metadata scoped to an agent, including OS process id, safe command metadata, runner status, start/stop timestamps, exit code or signal, and a safe last-error string.
+- `agent_logs`: runtime log rows with nullable runner identity, nullable local runner process link, stdout/stderr stream, level/message fields, timestamps, and per-agent positive sequence values.
 - `agent_approvals`: pending and resolved approval request rows scoped to an agent, with title, description, lifecycle status, downstream payload JSON, requester, nullable resolver, creation, resolution, and expiry timestamps.
 - `agent_status`: Postgres enum used by `agents.status`.
 - `agent_schedule_mode`: Postgres enum used by `agent_configs.schedule_mode`.
 - `agent_approval_status`: Postgres enum with `pending`, `approved`, `denied`, `expired`, and `cancelled`.
 
-The migrations do not create runner, billing, auth, Hermes, Telegram, secrets, provisioning, or provider integration tables.
+The migrations do not create Docker, cloud runner, billing, auth, Hermes, Telegram, secrets, provisioning, or provider integration tables.
 
 ## Development Server
 
@@ -104,7 +105,7 @@ The `/agents` page contains the current create/list and fake lifecycle workflow:
 
 The dashboard reads active persisted agents from the database. The detail page loads active persisted agent records by ID and returns not found for missing, malformed, or soft-deleted IDs. Delete preserves the `agents` row and existing `agent_events`, but removes the agent from `/agents`, `/dashboard`, and active detail reads.
 
-Agent records are local-development records only. Lifecycle controls, runtime logs, the detail config editor, dashboard plus agent-detail pending approvals panels, dashboard approval decision controls, and fake approval generation use deterministic database state and local read/write paths, not real runner processes or provider integrations. Approval payload execution, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
+Agent records are local-development records only. Lifecycle controls, runtime logs, the detail config editor, dashboard plus agent-detail pending approvals panels, dashboard approval decision controls, and fake approval generation use deterministic database state and local read/write paths. Milestone 9 adds local runner process/log persistence helpers but does not spawn or supervise real processes yet. Approval payload execution, runner control APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
 
 ## Agent Detail Config Editor
 
@@ -261,6 +262,8 @@ Log reads are pull-driven for the local fake runner. When the selected active ag
 The first eligible read in a running segment creates the cycle immediately. Repeated reads at the same logical time are idempotent, and later reads create the next cycle only after the fixed simulator interval elapses while the agent remains in the same running segment. The running segment is based on the persisted `agents.updated_at` value after `starting` or `restarting` settles to `running`, so a later restart can generate a new cycle without being blocked by prior segment logs.
 
 Generated rows use `runner_id = null`, safe static `stdout`/`info` content only, and per-agent monotonic `sequence` values. Runtime log generation does not mirror log lines into `agent_events`; it only writes the bounded `approval.requested` audit event when a running fake agent receives a generated approval request. Lifecycle actions, including `simulate-error`, do not directly write runtime logs. Stopped, idle, pending transition, error, deleting, missing, and soft-deleted agents do not receive newly generated log rows or fake approval requests, though active stopped or error agents can still return existing readable rows.
+
+Local runner persistence helpers can also write `agent_logs` rows for a persisted `local_runner_processes` row. Those rows keep `stdout` and `stderr` stream identity, allocate stable per-agent sequence values after any existing rows, store timestamps, and keep a nullable `local_runner_process_id` link for process-scoped reads. Log persistence remains separate from audit events: stdout/stderr process output is not copied into `agent_events`.
 
 The agent detail page renders those logs in a runtime log panel. The panel shows loading, empty, loaded, and safe error states; displays only the log timestamp, stream, level, sequence, and message; and keeps the rest of the detail page readable if log loading fails. It polls only while the current detail status is `running`, so stopping or simulating an error leaves existing visible rows readable without appending new generated rows after the settled state.
 

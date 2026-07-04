@@ -55,6 +55,7 @@ export type AgentLogDto = {
   id: string;
   agentId: string;
   runnerId: string | null;
+  localRunnerProcessId: string | null;
   stream: string;
   level: string;
   message: string;
@@ -93,6 +94,7 @@ const logSelection = {
   id: agentLogs.id,
   agentId: agentLogs.agentId,
   runnerId: agentLogs.runnerId,
+  localRunnerProcessId: agentLogs.localRunnerProcessId,
   stream: agentLogs.stream,
   level: agentLogs.level,
   message: agentLogs.message,
@@ -201,6 +203,7 @@ export async function generateSimulatedRuntimeLogsForRunningAgent(input: {
       SIMULATED_RUNTIME_LOG_MESSAGES.map((message, index) => ({
         agentId: input.agentId,
         runnerId: null,
+        localRunnerProcessId: null,
         stream: "stdout",
         level: "info",
         message,
@@ -218,6 +221,7 @@ export function mapAgentLogToDto(log: AgentLogRow): AgentLogDto {
     id: log.id,
     agentId: log.agentId,
     runnerId: log.runnerId,
+    localRunnerProcessId: log.localRunnerProcessId,
     stream: log.stream,
     level: log.level,
     message: log.message,

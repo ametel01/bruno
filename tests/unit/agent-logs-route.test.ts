@@ -274,6 +274,7 @@ function logDto(sequence: number) {
     id: `00000000-0000-4000-8000-00000000030${sequence}`,
     agentId: ACTIVE_AGENT_ID,
     runnerId: null,
+    localRunnerProcessId: null,
     stream: "stdout",
     level: "info",
     message: `line ${sequence}`,
