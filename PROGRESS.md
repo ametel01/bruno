@@ -1,5 +1,40 @@
 # Progress
 
+## Milestone 5 Agent Templates
+
+- Status: initialized
+- Source plan: `docs/MILESTONES.md` Milestone 5
+- Tracking issue: #48
+- Current branch: `codex/issue-48-m5-tracking`
+
+### Issue Checklist
+
+- [x] #48 Initialize Milestone 5 progress and changelog tracking
+- [ ] #49 Add the typed agent template registry
+- [ ] #50 Persist template versions and snapshots on agents
+- [ ] #51 Show template metadata in the create-agent flow
+- [ ] #52 Show persisted template settings on agent detail
+- [ ] #53 Prove Milestone 5 template acceptance end to end
+- Later Milestone 5 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 5 work.
+
+### Current Status
+
+Milestone 5 execution is ready for template implementation work, but no template registry, schema, API, UI, runner, auth, billing, provider, secret, migration, lifecycle, event, or runtime log behavior has been added by #48.
+
+The source scope remains `docs/MILESTONES.md` Milestone 5: a typed template registry, initial template keys, template fields, durable template key/version/snapshot persistence, create-flow and detail-page metadata display, and metadata-only templates without tool or model API integration.
+
+The stale issue context was checked against current `main` at the start of #48. The earlier concern that `PROGRESS.md` was deleted or `CHANGELOG.md` might be missing is not current after #47/#90 because both root tracking files exist in this branch.
+
+### Tracking Rules
+
+- Update `PROGRESS.md` for each Milestone 5 issue with status, branch, implementation evidence, validation commands, and any skipped checks or blockers.
+- Update `CHANGELOG.md` only for user-visible functional changes. Do not add changelog entries for chores, tests, validation-only work, tracking-only edits, or empty headings.
+- Keep Milestone 5 implementation evidence separate from older Milestone 4 history below this section.
+
+### Update Log
+
+- 2026-07-04: #48 initialized Milestone 5 tracking from `docs/MILESTONES.md`, recorded the #48-#53 checklist, documented the stale-context check for existing root tracking files, and recorded the `CHANGELOG.md` update rule. `CHANGELOG.md` was left unchanged because it already has the required Keep a Changelog preamble and `## [Unreleased]` section.
+
 ## Milestone 4 Agent Detail Runtime Logs
 
 - Status: complete
