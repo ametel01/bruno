@@ -2,10 +2,10 @@
 
 ## Milestone 7 Approval Queue
 
-- Status: complete for #59/#62; #60/#61/#63/#64 remain pending
+- Status: complete for #59/#62/#63; #60/#61/#64 remain pending
 - Source plan: `docs/MILESTONES.md` Milestone 7
-- Tracking issue: #62
-- Current branch: `codex/issue-62-agent-detail-approvals`
+- Tracking issues: #59-#64
+- Current branch: `codex/issue-63-fake-running-approvals`
 
 ### Issue Checklist
 
@@ -13,7 +13,7 @@
 - [ ] #60 Approve pending approvals end to end
 - [ ] #61 Deny pending approvals end to end
 - [x] #62 Show pending approvals on agent detail
-- [ ] #63 Generate fake approvals for running agents
+- [x] #63 Generate fake approvals for running agents
 - [ ] #64 Verify Milestone 7 approval queue acceptance
 - Later Milestone 7 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 7 work.
 
@@ -31,8 +31,44 @@
 - [x] #62 keeps resolved approvals, other-agent approvals, soft-deleted-agent approvals, and other-user approvals out of the selected detail page.
 - [x] #62 keeps the agent record, config editor, runtime logs, and activity visible when approval loading fails.
 - [x] #62 updates README and CHANGELOG to describe agent-detail approval visibility as present behavior while leaving approve/deny decisions and fake approval generation to sibling Milestone 7 slices.
+- [x] #63 extends the pull-driven fake runner observation path so active, non-deleted, running local-development agents can generate one deterministic pending approval for a representative fake sensitive action.
+- [x] #63 prevents duplicate generated approvals and duplicate `approval.requested` events for the same running segment/action, while still allowing later running segments to generate their own bounded request.
+- [x] #63 excludes stopped, idle, pending-transition, error, deleting, missing, soft-deleted, and other-user agents from fake approval generation.
+- [x] #63 persists only safe fake payload preview fields: source, action type, preview summary fields, and running-segment timestamp; no credentials, tokens, provider payloads, raw prompts, database URLs, SQL, or environment values are stored or rendered.
+- [x] #63 writes exactly one low-volume `approval.requested` audit event transactionally with the generated approval insert and does not mirror runtime log lines into `agent_events`.
+- [x] #63 keeps approve/deny routes, decision controls/events, and agent-detail approval sections out of scope for #60/#61/#62.
 
 ### Validation
+
+#### #63
+
+- Date: 2026-07-04
+- Environment:
+  - Default Postgres port `54329` was occupied by local Docker listener `com.docke` PID `53372`.
+  - Default app port `3000` was occupied by local `node` process `60238`.
+  - Isolated database: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54363/agentbay`.
+  - Isolated app/test server: `PORT=3063`, `PLAYWRIGHT_BASE_URL=http://localhost:3063`, `NEXT_PUBLIC_APP_URL=http://localhost:3063`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree had no local `node_modules`.
+  - `docker info --format '{{.ServerVersion}}'`: pass; Docker daemon reachable with server version `29.3.1`.
+  - `docker run --name agentbay_issue_63-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54363:5432 -d postgres:17-alpine`: pass; started isolated Postgres because default port was occupied.
+  - `docker exec agentbay_issue_63-postgres pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54363/agentbay bun run db:migrate`: pass; migrations applied successfully against the isolated database.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54363/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3063 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+- Focused checks:
+  - `bun run test -- tests/unit/create-agent-db.test.ts tests/unit/agent-logs-route.test.ts tests/unit/root-page.test.tsx`: pass with isolated DB/app env; 3 files and 89 tests passed. Covers running-agent generation, non-running/missing/soft-deleted/other-user exclusion, duplicate prevention, safe payload shape, `approval.requested` metadata, approval/event rollback, logs-route generation, and dashboard safe rendering.
+  - `bun run test:e2e -- --project=chromium-desktop -g "fake approvals"`: pass with isolated DB/app env; proves observing a running agent through `GET /api/agents/:agentId/logs` creates a generated pending approval visible on `/dashboard` without raw payload internals and with `approval.requested` activity.
+  - `bun run test:e2e -- --project=chromium-desktop -g "scoped runtime logs"`: pass with isolated DB/app env after making the existing runtime-log proof explicitly pin the local-development user before route observation; this avoids parallel E2E races over the shared local-development-user pointer.
+- Required gates:
+  - `bun run format:check`: pass; Biome checked 70 files.
+  - `bun run lint`: pass; Biome checked 70 files.
+  - `bun run typecheck`: pass.
+  - `bun run test`: pass with isolated DB/app env; 18 files and 148 tests passed.
+  - `bun run build`: pass; Next.js build completed and included `/api/agents/:agentId/logs` and `/dashboard`.
+  - `bun run test:e2e`: pass with isolated DB/app env; 25 browser tests passed with 5 expected skips.
+  - `bun run verify`: pass with isolated DB/app env; aggregate format, lint, typecheck, unit test, build, and E2E gates passed with 148 unit tests and 25 E2E passed / 5 expected skips.
+- Reconciliation:
+  - Full E2E initially exposed shared local-development-user pointer races once fake generation became user-scoped. The final tests pin the selected agent immediately before logs-route observation and scope dashboard assertions to the specific generated approval item, while leaving product behavior unchanged.
 
 #### #59
 
