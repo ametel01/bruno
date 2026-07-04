@@ -1,5 +1,66 @@
 # Progress
 
+## Milestone 8 Mobile Control Panel Readiness
+
+- Status: #65 ready for checker; implementation issues #66-#70 remain blocked until this audit is checked.
+- Source plan: `docs/MILESTONES.md` Milestone 8
+- Tracking issues: #65-#70
+- Current branch: `codex/issue-65-m8-readiness`
+- Next step: checker should verify this audit and gate evidence, then coordinator can assign #66 as the first implementation slice if accepted.
+
+### Issue Checklist
+
+- [x] #65 Audit Milestone 8 readiness and tracking
+- [ ] #66 Make agent status and pause/resume mobile-ready
+- [ ] #67 Add mobile approval review and decisions
+- [ ] #68 Surface mobile latest logs and alerts
+- [ ] #69 Harden mobile control layouts
+- [ ] #70 Verify Milestone 8 mobile acceptance
+- Later Milestone 8 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 8 work.
+
+### Current Status
+
+- Milestone 8 predecessor readiness is documented without adding mobile UI, pause/resume, mobile approval review, alerts, new APIs, schema/migrations, dependencies, lockfile changes, provider/runner/auth/billing/secret behavior, or Milestone 9/10 behavior.
+- `CHANGELOG.md` was inspected and already has Keep a Changelog framing plus `## [Unreleased]`; no functional changelog entry was added for this audit-only work.
+- No required Milestone 3-7 predecessor contract is missing. The implementation slices still need Milestone 8-owned product decisions and UI work for pause/resume naming, alert derivation, dedicated mobile routes, and responsive/mobile acceptance tests.
+
+### Predecessor Contract Audit
+
+- Agent lifecycle actions: available through `POST /api/agents/:agentId/actions/start`, `POST /api/agents/:agentId/actions/stop`, `POST /api/agents/:agentId/actions/restart`, development-only `POST /api/agents/:agentId/actions/simulate-error`, and `DELETE /api/agents/:agentId`; services in `src/server/agents/lifecycle.ts` validate UUIDs, block invalid status transitions, mutate active non-deleted agents, and write lifecycle audit events.
+- Agent status reads: available on the dashboard and agent detail through `listActiveAgentsForDevelopmentUser` and `getActiveAgentForDevelopmentUser` in `src/server/agents/list-agents.ts`; both settle due fake-runner transitions before returning active non-deleted records and expose persisted status plus detail status reason.
+- Pending approvals: available through `listPendingApprovalsForDevelopmentUser` for the dashboard and `listPendingApprovalsForDevelopmentUserAgent` for detail pages in `src/server/approvals/agent-approvals.ts`; both return only `pending` approvals for active non-deleted local-development agents and omit raw `payload_json`.
+- Approve/deny actions: available through `POST /api/approvals/:approvalId/approve` and `POST /api/approvals/:approvalId/deny`; both validate approval UUIDs, scope decisions to the active local-development user's agent, return safe not-found/conflict/persistence errors, resolve only pending rows, and write exactly one matching `approval.approved` or `approval.denied` event transactionally.
+- Latest logs: available through `GET /api/agents/:agentId/logs` and `listAgentLogs` in `src/server/logs/agent-logs.ts`; reads validate active agent scope, cap limits at 100, use per-agent `after` sequence pagination, return oldest-first log DTOs, and generate deterministic fake runtime logs only while the selected active local-development agent is running.
+- Event/activity or alert-relevant reads: available through dashboard latest activity via `listLatestAgentActivity`, detail activity via `GET /api/agents/:agentId/events`, and event helpers in `src/server/events/agent-events.ts`; feeds are newest-first, cursor-paginated, safe DTOs over `agent_events`, including lifecycle, config, approval, and error event types that Milestone 8 can use for alert derivation if no dedicated alert model is justified.
+- Existing coverage evidence: Milestone 7 validation already covered dashboard/detail approval visibility, approve, deny, decision event counts, duplicate-decision conflicts, pending queue removal, safe UI/API output, runtime-log-triggered fake approval generation, and full aggregate gates against an isolated migrated database.
+
+### Validation
+
+#### #65
+
+- Date: 2026-07-04
+- Environment:
+  - Isolated database: container `agentbay_issue_65-postgres` on host port `54365`, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54365/agentbay`.
+  - Isolated app/test server: `PORT=3065`, `PLAYWRIGHT_BASE_URL=http://localhost:3065`, `NEXT_PUBLIC_APP_URL=http://localhost:3065`.
+  - Isolated environment was used instead of `docker compose up -d postgres` so the checker can reuse a named issue-specific container without conflicting with the default `54329` development database.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree had no local `node_modules`.
+  - `docker info --format '{{.ServerVersion}}'`: pass; Docker daemon reachable with server version `29.3.1`.
+  - `docker run --name agentbay_issue_65-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54365:5432 -d postgres:17-alpine`: pass; started isolated Postgres for #65.
+  - `docker exec agentbay_issue_65-postgres pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+- Changelog structure:
+  - `rg -n "^# Changelog|Keep a Changelog|^## \[Unreleased\]|^### (Added|Changed|Deprecated|Removed|Fixed|Security)$" CHANGELOG.md`: pass; `CHANGELOG.md` has top-level `# Changelog`, Keep a Changelog/Semantic Versioning framing, `## [Unreleased]`, and non-empty `### Added` and `### Fixed` sections.
+- Required gates:
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54365/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3065 bun run db:migrate`: pass; migrations applied successfully against the isolated #65 database.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54365/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3065 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+  - `bun run format:check`: pass; Biome checked 76 files.
+  - `bun run lint`: pass; Biome checked 76 files.
+  - `bun run typecheck`: pass.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54365/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3065 bun run test`: pass; 20 files and 173 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54365/agentbay PORT=3065 PLAYWRIGHT_BASE_URL=http://localhost:3065 NEXT_PUBLIC_APP_URL=http://localhost:3065 bun run build`: pass; Next.js build completed and included lifecycle, approvals, events, logs, dashboard, health, and agent detail routes.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54365/agentbay PORT=3065 PLAYWRIGHT_BASE_URL=http://localhost:3065 NEXT_PUBLIC_APP_URL=http://localhost:3065 bun run test:e2e`: pass; 30 browser tests passed with 10 expected skips.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54365/agentbay PORT=3065 PLAYWRIGHT_BASE_URL=http://localhost:3065 NEXT_PUBLIC_APP_URL=http://localhost:3065 bun run verify`: pass; aggregate format, lint, typecheck, unit test, build, and E2E gates passed with 173 unit tests and 30 E2E passed / 10 expected skips.
+
 ## Milestone 7 Approval Queue
 
 - Status: complete for #59/#60/#61/#62/#63/#64
