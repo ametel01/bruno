@@ -14,6 +14,9 @@ import {
   dockerRunnerContainers,
   localRunnerProcesses,
   localRunnerProcessStatusEnum,
+  runnerCredentials,
+  runnerHeartbeats,
+  runnerRegistrationTokens,
   runners,
   users,
 } from "@/src/server/db/schema";
@@ -27,6 +30,9 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(getTableName(agentApprovals)).toBe("agent_approvals");
     expect(getTableName(agentEvents)).toBe("agent_events");
     expect(getTableName(runners)).toBe("runners");
+    expect(getTableName(runnerRegistrationTokens)).toBe("runner_registration_tokens");
+    expect(getTableName(runnerCredentials)).toBe("runner_credentials");
+    expect(getTableName(runnerHeartbeats)).toBe("runner_heartbeats");
     expect(getTableName(localRunnerProcesses)).toBe("local_runner_processes");
     expect(getTableName(dockerRunnerContainers)).toBe("docker_runner_containers");
     expect(getTableName(agentLogs)).toBe("agent_logs");
@@ -114,6 +120,88 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.createdAt.notNull).toBe(true);
     expect(columns.updatedAt.notNull).toBe(true);
     expect(columns.deletedAt.notNull).toBe(false);
+  });
+
+  it("defines one-time runner registration token rows with hashes only", () => {
+    const columns = getTableColumns(runnerRegistrationTokens);
+
+    expect(Object.keys(columns)).toEqual([
+      "id",
+      "userId",
+      "runnerId",
+      "tokenHash",
+      "tokenPrefix",
+      "status",
+      "expiresAt",
+      "usedAt",
+      "revokedAt",
+      "createdAt",
+      "updatedAt",
+    ]);
+    expect(columns.id.notNull).toBe(true);
+    expect(columns.userId.notNull).toBe(true);
+    expect(columns.runnerId.notNull).toBe(false);
+    expect(columns.tokenHash.notNull).toBe(true);
+    expect(columns.tokenPrefix.notNull).toBe(true);
+    expect(columns.status.notNull).toBe(true);
+    expect(columns.status.default).toBe("pending");
+    expect(columns.expiresAt.notNull).toBe(true);
+    expect(columns.usedAt.notNull).toBe(false);
+    expect(columns.revokedAt.notNull).toBe(false);
+    expect(columns.createdAt.notNull).toBe(true);
+    expect(columns.updatedAt.notNull).toBe(true);
+    expect(Object.keys(columns)).not.toContain("token");
+    expect(Object.keys(columns)).not.toContain("rawToken");
+  });
+
+  it("defines runner credential rows with credential hashes only", () => {
+    const columns = getTableColumns(runnerCredentials);
+
+    expect(Object.keys(columns)).toEqual([
+      "id",
+      "runnerId",
+      "credentialHash",
+      "credentialPrefix",
+      "status",
+      "lastUsedAt",
+      "expiresAt",
+      "revokedAt",
+      "createdAt",
+      "updatedAt",
+    ]);
+    expect(columns.id.notNull).toBe(true);
+    expect(columns.runnerId.notNull).toBe(true);
+    expect(columns.credentialHash.notNull).toBe(true);
+    expect(columns.credentialPrefix.notNull).toBe(true);
+    expect(columns.status.notNull).toBe(true);
+    expect(columns.status.default).toBe("active");
+    expect(columns.lastUsedAt.notNull).toBe(false);
+    expect(columns.expiresAt.notNull).toBe(false);
+    expect(columns.revokedAt.notNull).toBe(false);
+    expect(columns.createdAt.notNull).toBe(true);
+    expect(columns.updatedAt.notNull).toBe(true);
+    expect(Object.keys(columns)).not.toContain("credential");
+    expect(Object.keys(columns)).not.toContain("rawCredential");
+  });
+
+  it("defines runner heartbeat history rows scoped to a runner", () => {
+    const columns = getTableColumns(runnerHeartbeats);
+
+    expect(Object.keys(columns)).toEqual([
+      "id",
+      "runnerId",
+      "status",
+      "metadata",
+      "observedAt",
+      "createdAt",
+    ]);
+    expect(columns.id.notNull).toBe(true);
+    expect(columns.runnerId.notNull).toBe(true);
+    expect(columns.status.notNull).toBe(true);
+    expect(columns.metadata.notNull).toBe(true);
+    expect(columns.metadata.dataType).toBe("json");
+    expect(columns.observedAt.notNull).toBe(true);
+    expect(columns.createdAt.notNull).toBe(true);
   });
 
   it("defines one typed config row per agent with safe non-secret defaults", () => {
@@ -458,5 +546,45 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(migration).not.toContain("DROP COLUMN");
     expect(migration).not.toContain("ALTER COLUMN");
     expect(migration).not.toMatch(/api[_ ]?key|token|password|secret|credential/i);
+  });
+
+  it("generates an additive runner auth persistence migration with hashed storage only", async () => {
+    const migration = await readFile("drizzle/0009_worried_switch.sql", "utf8");
+
+    expect(migration).toContain('CREATE TABLE "runner_registration_tokens"');
+    expect(migration).toContain('CREATE TABLE "runner_credentials"');
+    expect(migration).toContain('CREATE TABLE "runner_heartbeats"');
+    expect(migration).toContain('"token_hash" text NOT NULL');
+    expect(migration).toContain('"token_prefix" text NOT NULL');
+    expect(migration).toContain('"credential_hash" text NOT NULL');
+    expect(migration).toContain('"credential_prefix" text NOT NULL');
+    expect(migration).toContain('"expires_at" timestamp with time zone NOT NULL');
+    expect(migration).toContain('"used_at" timestamp with time zone');
+    expect(migration).toContain('"revoked_at" timestamp with time zone');
+    expect(migration).toContain('"observed_at" timestamp with time zone NOT NULL');
+    expect(migration).toContain("'registering'");
+    expect(migration).toContain("'online'");
+    expect(migration).toContain("'offline'");
+    expect(migration).toContain("'degraded'");
+    expect(migration).toContain("'provisioning'");
+    expect(migration).toContain("'provision_failed'");
+    expect(migration).toContain("'deleting'");
+    expect(migration).toContain("'deleted'");
+    expect(migration).toContain('CREATE UNIQUE INDEX "runner_registration_tokens_hash_idx"');
+    expect(migration).toContain(
+      'CREATE INDEX "runner_registration_tokens_user_status_expires_idx"',
+    );
+    expect(migration).toContain('CREATE UNIQUE INDEX "runner_credentials_hash_idx"');
+    expect(migration).toContain('CREATE INDEX "runner_credentials_runner_status_idx"');
+    expect(migration).toContain('CREATE INDEX "runner_heartbeats_runner_observed_idx"');
+    expect(migration).toContain('CREATE INDEX "agents_runner_id_idx"');
+    expect(migration).toContain('FOREIGN KEY ("runner_id") REFERENCES "public"."runners"("id")');
+    expect(migration).not.toContain("DROP TABLE");
+    expect(migration).not.toContain("DROP COLUMN");
+    expect(migration).not.toContain("ALTER COLUMN");
+    expect(migration).not.toContain('"token" text');
+    expect(migration).not.toContain('"credential" text');
+    expect(migration).not.toContain("raw_token");
+    expect(migration).not.toContain("raw_credential");
   });
 });

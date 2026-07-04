@@ -53,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Standalone manual VPS runner service for selected-agent Docker start, stop, restart, status, and log APIs with temporary bearer-token auth, argv-only Docker calls, and `agentbay.agent_id` label scoping.
 - Milestone 5 agent templates with a typed metadata registry, durable template version/snapshot persistence, create-flow template metadata, and persisted template settings on agent detail pages.
 - Manual VPS runner persistence with durable runner identity rows, nullable agent assignment, optional non-secret development bootstrap, endpoint validation, and active-agent assigned-runner helpers without changing no-runner lifecycle behavior.
+- Runner auth persistence foundation with hash-only one-time registration token state, hash-only runner credential rows, heartbeat history, expanded runner status coverage, important lookup indexes, and reusable token/hash helpers.
 
 ### Fixed
 
