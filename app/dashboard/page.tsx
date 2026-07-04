@@ -121,8 +121,13 @@ export function DashboardContent({
         <PlaceholderPanel title="Upcoming surfaces">
           <ul className="plain-list">
             <li>Start, Stop, Restart, and Delete use deterministic fake lifecycle controls.</li>
-            <li>Approvals, logs, config editing, and runner work wait for later milestones.</li>
+            <li>
+              Runtime logs and local-development config editing are present on agent detail pages.
+            </li>
             <li>Runner provisioning and external integrations are placeholders only.</li>
+            <li>
+              Approvals, production runners, billing, and secret storage wait for later milestones.
+            </li>
           </ul>
         </PlaceholderPanel>
       </div>

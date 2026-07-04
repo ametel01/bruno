@@ -102,7 +102,7 @@ The `/agents` page contains the current create/list and fake lifecycle workflow:
 
 The dashboard reads active persisted agents from the database. The detail page loads active persisted agent records by ID and returns not found for missing, malformed, or soft-deleted IDs. Delete preserves the `agents` row and existing `agent_events`, but removes the agent from `/agents`, `/dashboard`, and active detail reads.
 
-Milestone 4 records are local-development records only. Lifecycle controls and runtime logs use deterministic database state, not real runner processes. Config editor UI, approvals, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
+Agent records are local-development records only. Lifecycle controls, runtime logs, and the detail config editor use deterministic database state and the validated local update API, not real runner processes or provider integrations. Approvals, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
 
 ## Create Agent API
 
@@ -121,7 +121,7 @@ Supported `templateKey` values are `research_agent`, `inbox_triage_agent`, `gith
 
 Successful responses return HTTP 201 with the created agent identity, `stopped` status, timestamps, and the `agent.created` event type. Validation failures return safe JSON without database URLs, SQL errors, stack traces, or driver messages. Persistence failures return generic safe errors.
 
-The initial persisted config defaults are intentionally non-secret and non-integrated: model provider and model name are `not_configured`, max daily spend is `0` cents, schedule mode is `manual`, schedule cron is `null`, timezone is `UTC`, and the generic system prompt is stored with the config row. Config editor UI, real provider/model integration, Hermes config generation, BYOK keys, and secret storage remain future scope.
+The initial persisted config defaults are intentionally non-secret and non-integrated: model provider and model name are `not_configured`, max daily spend is `0` cents, schedule mode is `manual`, schedule cron is `null`, timezone is `UTC`, and the generic system prompt is stored with the config row. The agent detail config editor updates these local-development fields through the validated `PATCH /api/agents/:agentId` API. Real provider/model integration, Hermes config generation, BYOK keys, and secret storage remain future scope.
 
 ## Agent Config Update API
 
@@ -382,6 +382,6 @@ Milestone 4 is complete when:
 - Browser coverage proves runtime logs stay scoped to the selected agent, visible rows remain readable after Stop, polling/generation does not append after Stop or Simulate error, and `agent.error` appears in the detail activity feed.
 - Browser coverage proves create and lifecycle activity appears in both the dashboard latest activity feed and the agent detail activity feed.
 - Soft delete removes agents from `/agents`, `/dashboard`, and active detail reads while preserving the database row and prior events.
-- Config editor UI, approvals, runner APIs, real runner/provisioning behavior, Hermes, Telegram, billing, production auth, secret storage, backups, restore, and cloud provisioning remain out of scope.
+- The agent detail config editor updates local-development config fields; approvals, runner APIs, real runner/provisioning behavior, Hermes, Telegram, billing, production auth, secret storage, backups, restore, and cloud provisioning remain out of scope.
 - `.env.example` documents every required local/deploy variable without secrets.
 - `bun run format:check`, `bun run lint`, `bun run typecheck`, `bun run test`, `bun run db:migrate`, `bun run db:health`, `bun run build`, `bun run test:e2e`, and `bun run verify` pass against a migrated local database.

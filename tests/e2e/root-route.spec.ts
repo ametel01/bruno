@@ -229,6 +229,111 @@ test("/agents detail activity feed wraps on mobile without horizontal overflow",
   await expectPageNotHorizontallyOverflowing(page);
 });
 
+test("/agents detail edits config through persisted save and safe validation", async ({
+  isMobile,
+  page,
+  request,
+}, testInfo) => {
+  test.skip(isMobile, "desktop is the primary configuration editing surface");
+
+  const name = `Config Editor Agent ${testInfo.project.name}`;
+  const created = await createAgent(request, name);
+  createdAgentIds.add(created.id);
+
+  await page.goto(`/agents/${created.id}`);
+
+  const configPanel = page.locator(".placeholder-panel").filter({ hasText: "Configuration" });
+  const savedConfig = configPanel.getByRole("group", { name: "Saved config" });
+  const configStatus = configPanel.getByRole("status");
+  const detailActivity = page.locator(".activity-feed-panel");
+  await expect(page.getByRole("heading", { name })).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("config editing is future");
+  await expect(page.locator("body")).not.toContainText("config editing is unavailable");
+  await expect(savedConfig).toContainText("not_configured / not_configured");
+  await expect(savedConfig).toContainText("$0.00");
+  await expect(detailActivity).not.toContainText("config.updated");
+
+  await configPanel.getByRole("button", { name: "Save config" }).click();
+  await expect(configStatus).toContainText("No config changes to save.");
+  await expect(detailActivity).not.toContainText("config.updated");
+
+  await configPanel.locator("#config-model-name").fill("gpt-failed-save");
+  await page.route(`**/api/agents/${created.id}`, async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      status: 500,
+      body: JSON.stringify({
+        error: {
+          code: "agent_config_update_failed",
+          message: "postgres://user:password@127.0.0.1/db sql stack trace",
+        },
+      }),
+    });
+  });
+  await configPanel.getByRole("button", { name: "Save config" }).click();
+  await expect(configStatus).toContainText("Agent config could not be saved.");
+  await expect(configStatus).not.toContainText("postgres://");
+  await expect(savedConfig).not.toContainText("gpt-failed-save");
+  await expect(detailActivity).not.toContainText("config.updated");
+  await page.unroute(`**/api/agents/${created.id}`);
+  await configPanel.getByRole("button", { name: "Reset edits" }).click();
+
+  await configPanel.locator("#config-max-daily-spend").fill("bad spend");
+  await configPanel.getByRole("button", { name: "Save config" }).click();
+  await expect(configStatus).toContainText(
+    "Max daily spend must be a positive dollar amount with whole cents.",
+  );
+  await expect(savedConfig).toContainText("$0.00");
+  await expect(detailActivity).not.toContainText("config.updated");
+
+  await configPanel.locator("#config-max-daily-spend").fill("0.00");
+  await configPanel.locator("#config-model-name").fill("   ");
+  await configPanel.getByRole("button", { name: "Save config" }).click();
+  await expect(configStatus).toContainText("Model name is required.");
+  await expect(savedConfig).toContainText("not_configured / not_configured");
+  await expect(detailActivity).not.toContainText("config.updated");
+
+  await configPanel.locator("#config-model-name").fill("not_configured");
+  await configPanel.locator("#config-schedule-mode").selectOption("cron");
+  await configPanel.locator("#config-schedule-cron").fill("not cron");
+  await configPanel.getByRole("button", { name: "Save config" }).click();
+  await expect(configStatus).toContainText(
+    "Schedule cron must be a valid 5-field cron expression.",
+  );
+  await expect(detailActivity).not.toContainText("config.updated");
+
+  await configPanel.locator("#config-schedule-mode").selectOption("manual");
+  await configPanel.locator("#config-timezone").fill("Mars/Base");
+  await configPanel.getByRole("button", { name: "Save config" }).click();
+  await expect(configStatus).toContainText("Timezone must be a valid IANA timezone.");
+  await expect(detailActivity).not.toContainText("config.updated");
+
+  await configPanel.locator("#config-timezone").fill("UTC");
+  await configPanel.locator("#config-model-name").fill("gpt-5.5-mini");
+  await configPanel.locator("#config-max-daily-spend").fill("2.00");
+  await configPanel.getByRole("button", { name: "Save config" }).click();
+
+  await expect(savedConfig).toContainText("not_configured / gpt-5.5-mini");
+  await expect(savedConfig).toContainText("$2.00");
+  await expect(
+    detailActivity.locator(".activity-feed-item", { hasText: "config.updated" }),
+  ).toHaveCount(1);
+  await expect(detailActivity).toContainText("Configuration updated.");
+  await expect(detailActivity).toContainText("Model Name: not_configured -> gpt-5.5-mini");
+  await expect(detailActivity).toContainText("Max Daily Spend: $0.00 -> $2.00");
+
+  await page.reload();
+
+  await expect(configPanel.locator("#config-model-name")).toHaveValue("gpt-5.5-mini");
+  await expect(configPanel.locator("#config-max-daily-spend")).toHaveValue("2.00");
+  await expect(configPanel.getByRole("group", { name: "Saved config" })).toContainText(
+    "not_configured / gpt-5.5-mini",
+  );
+  await expect(configPanel.getByRole("group", { name: "Saved config" })).toContainText("$2.00");
+  await expect(page.locator(".activity-feed-item", { hasText: "config.updated" })).toHaveCount(1);
+  await expectPageNotHorizontallyOverflowing(page);
+});
+
 test("/agents detail shows scoped runtime logs and stops polling after settled states", async ({
   page,
   request,

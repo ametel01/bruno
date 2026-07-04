@@ -531,20 +531,81 @@ h2 {
 }
 
 .field-group input,
-.field-group select {
+.field-group select,
+.field-group textarea {
   width: 100%;
-  min-height: 42px;
   border: 1px solid var(--line-strong);
   border-radius: 6px;
   background: #ffffff;
   color: var(--foreground);
+}
+
+.field-group input,
+.field-group select {
+  min-height: 42px;
   padding: 0 12px;
 }
 
+.field-group textarea {
+  min-height: 124px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
 .field-group input:focus,
-.field-group select:focus {
+.field-group select:focus,
+.field-group textarea:focus {
   border-color: var(--accent);
   outline: 3px solid var(--accent-soft);
+}
+
+.field-group input:disabled {
+  background: #f4f7f8;
+  color: var(--muted);
+}
+
+.field-hint {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.config-editor {
+  display: grid;
+  gap: 18px;
+}
+
+.config-saved-summary {
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  margin: 0;
+  padding-bottom: 18px;
+}
+
+.config-saved-summary legend {
+  color: var(--foreground);
+  font-size: 0.84rem;
+  font-weight: 800;
+  margin-bottom: 14px;
+  padding: 0;
+}
+
+.config-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.config-system-prompt-field {
+  grid-column: 1 / -1;
+}
+
+.config-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .primary-button,
@@ -803,6 +864,12 @@ h2 {
 
   .content-grid,
   .settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .config-form-grid {
     grid-template-columns: 1fr;
   }
 }

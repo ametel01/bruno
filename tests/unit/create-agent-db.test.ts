@@ -530,6 +530,11 @@ describe("create agent persistence", () => {
     expect(runningAgent).toBeDefined();
     expect(startingAgent).toBeDefined();
     expect(restartingAgent).toBeDefined();
+    await insertDefaultConfigsForAgentIds(connection, [
+      runningAgent?.id ?? "",
+      startingAgent?.id ?? "",
+      restartingAgent?.id ?? "",
+    ]);
 
     const listed = await listActiveAgentsForDevelopmentUser({ createConnection: () => connection });
     const startingDetail = await getActiveAgentForDevelopmentUser(startingAgent?.id ?? "", {
@@ -602,6 +607,18 @@ describe("create agent persistence", () => {
       .returning();
 
     expect(createdAgent).toBeDefined();
+    await connection.db.insert(agentConfigs).values({
+      agentId: createdAgent?.id ?? "",
+      systemPrompt: "Use GitHub issue context only.",
+      modelProvider: "openai",
+      modelName: "gpt-5.5-mini",
+      maxDailySpendCents: 200,
+      scheduleMode: "cron",
+      scheduleCron: "0 9 * * 1",
+      timezone: "Asia/Manila",
+      createdAt: new Date("2026-07-03T04:01:00.000Z"),
+      updatedAt: new Date("2026-07-03T05:01:00.000Z"),
+    });
     const detail = await getActiveAgentForDevelopmentUser(createdAgent?.id ?? "", {
       createConnection: () => connection,
     });
@@ -616,6 +633,16 @@ describe("create agent persistence", () => {
       href: `/agents/${createdAgent?.id}`,
       createdAt: "2026-07-03T04:00:00.000Z",
       updatedAt: "2026-07-03T05:00:00.000Z",
+      config: {
+        systemPrompt: "Use GitHub issue context only.",
+        modelProvider: "openai",
+        modelName: "gpt-5.5-mini",
+        maxDailySpendCents: 200,
+        scheduleMode: "cron",
+        scheduleCron: "0 9 * * 1",
+        timezone: "Asia/Manila",
+        updatedAt: "2026-07-03T05:01:00.000Z",
+      },
     });
   });
 
@@ -3026,6 +3053,12 @@ describe("create agent persistence", () => {
         deletedAt: new Date("2026-07-04T06:40:00.000Z"),
       },
     ]);
+    await insertDefaultConfigsForAgentIds(connection, [
+      "00000000-0000-4000-8000-000000000221",
+      "00000000-0000-4000-8000-000000000222",
+      "00000000-0000-4000-8000-000000000223",
+      "00000000-0000-4000-8000-000000000224",
+    ]);
     await connection.db.insert(agentEvents).values([
       {
         id: "00000000-0000-4000-8000-000000000321",
@@ -3743,6 +3776,10 @@ describe("create agent persistence", () => {
         updatedAt: dueAt,
       },
     ]);
+    await insertDefaultConfigsForAgentIds(connection, [
+      "00000000-0000-4000-8000-000000000201",
+      "00000000-0000-4000-8000-000000000202",
+    ]);
 
     const { GET } = await import("@/app/api/agents/[agentId]/logs/route");
     const startResponse = await GET(new Request("http://localhost/api/agents/id/logs"), {
@@ -3845,6 +3882,18 @@ async function countRows(
   );
 
   return Number(row?.count);
+}
+
+async function insertDefaultConfigsForAgentIds(
+  connection: DatabaseConnection,
+  agentIds: string[],
+): Promise<void> {
+  const values = agentIds.map((agentId) => ({
+    agentId,
+    ...DEFAULT_AGENT_CONFIG,
+  }));
+
+  await connection.db.insert(agentConfigs).values(values);
 }
 
 async function countAgentLogs(connection: DatabaseConnection, agentId: string): Promise<number> {

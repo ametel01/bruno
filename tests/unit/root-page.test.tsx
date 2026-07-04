@@ -104,8 +104,12 @@ describe("product shell routes", () => {
     expect(html).toContain(
       "Start, Stop, Restart, and Delete use deterministic fake lifecycle controls.",
     );
+    expect(html).toContain(
+      "Runtime logs and local-development config editing are present on agent detail pages.",
+    );
     expect(html).not.toContain("lifecycle verification waits");
     expect(html).not.toContain("Delete controls wait");
+    expect(html).not.toContain("config editing, and runner work wait");
     expect(html).not.toContain("No persisted agent table or records are queried");
   });
 
@@ -306,12 +310,19 @@ describe("product shell routes", () => {
     expect(html).toContain("2026-07-03T05:00:00.000Z");
     expect(html).toContain("2026-07-03T05:30:00.000Z");
     expect(html).toContain("Waiting for setup.");
+    expect(html).toContain("Configuration");
+    expect(html).toContain("Saved config");
+    expect(html).toContain("gpt-4.1-mini");
+    expect(html).toContain("$2.00");
+    expect(html).toContain("System prompt");
+    expect(html).toContain("Save config");
     expect(html).toContain("Runtime logs");
     expect(html).toContain("Loading runtime logs.");
     expect(html).toContain("Activity");
     expect(html).toContain("No activity yet");
     expect(html).toContain("0 shown");
     expect(html).not.toContain("No record lookup is performed");
+    expect(html).not.toContain("config editing");
     expect(html).not.toContain("runnerId");
     expect(html).not.toContain("agent_id");
     expect(mocks.listAgentEventFeed).toHaveBeenCalledWith({
@@ -474,6 +485,16 @@ type DetailAgent = {
   href: string;
   createdAt: string;
   updatedAt: string;
+  config: {
+    systemPrompt: string;
+    modelProvider: string;
+    modelName: string;
+    maxDailySpendCents: number;
+    scheduleMode: "manual" | "cron";
+    scheduleCron: string | null;
+    timezone: string;
+    updatedAt: string;
+  };
 };
 
 function detailAgent(overrides: Partial<DetailAgent> = {}): DetailAgent {
@@ -487,6 +508,16 @@ function detailAgent(overrides: Partial<DetailAgent> = {}): DetailAgent {
     href: "/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774",
     createdAt: "2026-07-03T05:00:00.000Z",
     updatedAt: "2026-07-03T05:30:00.000Z",
+    config: {
+      systemPrompt: "Keep research concise.",
+      modelProvider: "openai",
+      modelName: "gpt-4.1-mini",
+      maxDailySpendCents: 200,
+      scheduleMode: "manual",
+      scheduleCron: null,
+      timezone: "UTC",
+      updatedAt: "2026-07-03T05:31:00.000Z",
+    },
     ...overrides,
   };
 }

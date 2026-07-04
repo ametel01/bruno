@@ -5,7 +5,7 @@ import {
   settleDueFakeRunnerTransitions,
 } from "@/src/server/agents/lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agents } from "@/src/server/db/schema";
+import { agentConfigs, agents } from "@/src/server/db/schema";
 
 const AGENT_TEMPLATE_LABELS = {
   github_issue_agent: "GitHub Issue Agent",
@@ -26,6 +26,18 @@ export type ListedAgent = {
 
 export type AgentDetail = ListedAgent & {
   statusReason: string | null;
+  updatedAt: string;
+  config: AgentDetailConfig;
+};
+
+export type AgentDetailConfig = {
+  systemPrompt: string;
+  modelProvider: string;
+  modelName: string;
+  maxDailySpendCents: number;
+  scheduleMode: "manual" | "cron";
+  scheduleCron: string | null;
+  timezone: string;
   updatedAt: string;
 };
 
@@ -109,8 +121,17 @@ export async function getActiveAgentForDevelopmentUser(
         statusReason: agents.statusReason,
         createdAt: agents.createdAt,
         updatedAt: agents.updatedAt,
+        configSystemPrompt: agentConfigs.systemPrompt,
+        configModelProvider: agentConfigs.modelProvider,
+        configModelName: agentConfigs.modelName,
+        configMaxDailySpendCents: agentConfigs.maxDailySpendCents,
+        configScheduleMode: agentConfigs.scheduleMode,
+        configScheduleCron: agentConfigs.scheduleCron,
+        configTimezone: agentConfigs.timezone,
+        configUpdatedAt: agentConfigs.updatedAt,
       })
       .from(agents)
+      .innerJoin(agentConfigs, eq(agentConfigs.agentId, agents.id))
       .where(and(eq(agents.id, agentId), isNull(agents.deletedAt)))
       .limit(1);
 
@@ -128,6 +149,16 @@ export async function getActiveAgentForDevelopmentUser(
       href: `/agents/${row.id}`,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
+      config: {
+        systemPrompt: row.configSystemPrompt,
+        modelProvider: row.configModelProvider,
+        modelName: row.configModelName,
+        maxDailySpendCents: row.configMaxDailySpendCents,
+        scheduleMode: row.configScheduleMode,
+        scheduleCron: row.configScheduleCron,
+        timezone: row.configTimezone,
+        updatedAt: row.configUpdatedAt.toISOString(),
+      },
     };
   } catch {
     throw new AgentDetailPersistenceError();
