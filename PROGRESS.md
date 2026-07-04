@@ -2,11 +2,11 @@
 
 ## Milestone 8 Mobile Control Panel Readiness
 
-- Status: #65 ready for checker; implementation issues #66-#70 remain blocked until this audit is checked.
+- Status: #65 checked and ready to merge; implementation issues #66-#70 remain blocked until this audit lands.
 - Source plan: `docs/MILESTONES.md` Milestone 8
 - Tracking issues: #65-#70
 - Current branch: `codex/issue-65-m8-readiness`
-- Next step: checker should verify this audit and gate evidence, then coordinator can assign #66 as the first implementation slice if accepted.
+- Next step: coordinator should merge this audit, then assign #66 as the first implementation slice.
 
 ### Issue Checklist
 
