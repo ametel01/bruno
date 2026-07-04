@@ -11,6 +11,7 @@ import {
   DEFAULT_AGENT_CONFIG,
   createAgentForDevelopmentUser,
 } from "@/src/server/agents/create-agent";
+import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
 import {
   APPROVAL_APPROVED_EVENT_TYPE,
   APPROVAL_DENIED_EVENT_TYPE,
@@ -157,12 +158,33 @@ describe("create agent persistence", () => {
       userId: second.agent.userId,
       name: "Research Agent",
       templateKey: "research_agent",
+      templateVersion: "1.0.0",
+      templateSnapshotJson: getAgentTemplateSnapshot("research_agent"),
       status: "stopped",
       statusReason: null,
       deletedAt: null,
     });
+    expect(second.agent).toMatchObject({
+      templateKey: "inbox_triage_agent",
+      templateVersion: "1.0.0",
+      templateSnapshotJson: getAgentTemplateSnapshot("inbox_triage_agent"),
+    });
     expect(persistedUsers).toHaveLength(1);
     expect(persistedAgents).toHaveLength(2);
+    expect(persistedAgents).toContainEqual(
+      expect.objectContaining({
+        id: created.agent.id,
+        templateVersion: "1.0.0",
+        templateSnapshotJson: getAgentTemplateSnapshot("research_agent"),
+      }),
+    );
+    expect(persistedAgents).toContainEqual(
+      expect.objectContaining({
+        id: second.agent.id,
+        templateVersion: "1.0.0",
+        templateSnapshotJson: getAgentTemplateSnapshot("inbox_triage_agent"),
+      }),
+    );
     expect(persistedConfigs).toHaveLength(2);
     expect(persistedConfigs).toContainEqual(
       expect.objectContaining({
@@ -173,7 +195,13 @@ describe("create agent persistence", () => {
     expect(persistedConfigs).toContainEqual(
       expect.objectContaining({
         agentId: second.agent.id,
-        ...DEFAULT_AGENT_CONFIG,
+        systemPrompt: getAgentTemplateSnapshot("inbox_triage_agent").defaultSystemPrompt,
+        modelProvider: DEFAULT_AGENT_CONFIG.modelProvider,
+        modelName: DEFAULT_AGENT_CONFIG.modelName,
+        maxDailySpendCents: DEFAULT_AGENT_CONFIG.maxDailySpendCents,
+        scheduleMode: DEFAULT_AGENT_CONFIG.scheduleMode,
+        scheduleCron: DEFAULT_AGENT_CONFIG.scheduleCron,
+        timezone: DEFAULT_AGENT_CONFIG.timezone,
       }),
     );
     expect(persistedEvents).toHaveLength(2);
@@ -183,6 +211,7 @@ describe("create agent persistence", () => {
       type: "agent.created",
       metadata: {
         templateKey: "research_agent",
+        templateVersion: "1.0.0",
         status: "stopped",
       },
     });
@@ -1414,6 +1443,8 @@ describe("create agent persistence", () => {
         userId,
         name: "Inbox Agent",
         templateKey: "inbox_triage_agent",
+        templateVersion: "1.0.0",
+        templateSnapshotJson: getAgentTemplateSnapshot("inbox_triage_agent"),
         status: "stopped",
         createdAt: new Date("2026-07-03T04:00:00.000Z"),
       })
@@ -1424,6 +1455,8 @@ describe("create agent persistence", () => {
         userId,
         name: "Research Agent",
         templateKey: "research_agent",
+        templateVersion: "1.0.0",
+        templateSnapshotJson: getAgentTemplateSnapshot("research_agent"),
         status: "stopped",
         createdAt: new Date("2026-07-03T05:00:00.000Z"),
       })
@@ -1432,6 +1465,8 @@ describe("create agent persistence", () => {
       userId,
       name: "Deleted Agent",
       templateKey: "github_issue_agent",
+      templateVersion: "1.0.0",
+      templateSnapshotJson: getAgentTemplateSnapshot("github_issue_agent"),
       status: "stopped",
       deletedAt: new Date("2026-07-03T06:00:00.000Z"),
     });
@@ -1445,6 +1480,7 @@ describe("create agent persistence", () => {
         id: newAgent?.id,
         name: "Research Agent",
         templateKey: "research_agent",
+        templateVersion: "1.0.0",
         templateLabel: "Research Agent",
         status: "stopped",
         href: `/agents/${newAgent?.id}`,
@@ -1454,6 +1490,7 @@ describe("create agent persistence", () => {
         id: oldAgent?.id,
         name: "Inbox Agent",
         templateKey: "inbox_triage_agent",
+        templateVersion: "1.0.0",
         templateLabel: "Inbox Triage Agent",
         status: "stopped",
         href: `/agents/${oldAgent?.id}`,
@@ -1563,6 +1600,8 @@ describe("create agent persistence", () => {
         userId,
         name: "GitHub Agent",
         templateKey: "github_issue_agent",
+        templateVersion: "1.0.0",
+        templateSnapshotJson: getAgentTemplateSnapshot("github_issue_agent"),
         status: "stopped",
         statusReason: "Waiting for issue selection.",
         createdAt: new Date("2026-07-03T04:00:00.000Z"),
@@ -1591,7 +1630,9 @@ describe("create agent persistence", () => {
       id: createdAgent?.id,
       name: "GitHub Agent",
       templateKey: "github_issue_agent",
+      templateVersion: "1.0.0",
       templateLabel: "GitHub Issue Agent",
+      templateSnapshot: getAgentTemplateSnapshot("github_issue_agent"),
       status: "stopped",
       statusReason: "Waiting for issue selection.",
       href: `/agents/${createdAgent?.id}`,

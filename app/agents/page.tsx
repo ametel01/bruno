@@ -3,10 +3,8 @@ import { EmptyState, PlaceholderPanel, ProductShell } from "@/app/_components/pr
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { CreateAgentForm } from "@/app/agents/_components/create-agent-form";
 import { MobileAgentList } from "@/app/agents/_components/mobile-agent-list";
-import {
-  AGENT_NAME_MAX_LENGTH,
-  SUPPORTED_AGENT_TEMPLATE_KEYS,
-} from "@/src/server/agents/create-agent";
+import { AGENT_NAME_MAX_LENGTH } from "@/src/server/agents/create-agent";
+import { AGENT_TEMPLATE_OPTIONS } from "@/src/server/agents/templates";
 import {
   AgentListPersistenceError,
   listActiveAgentsForDevelopmentUser,
@@ -82,7 +80,7 @@ export default async function AgentsPage() {
         <PlaceholderPanel title="Create agent">
           <CreateAgentForm
             maxNameLength={AGENT_NAME_MAX_LENGTH}
-            templateKeys={[...SUPPORTED_AGENT_TEMPLATE_KEYS]}
+            templates={AGENT_TEMPLATE_OPTIONS}
           />
         </PlaceholderPanel>
       </div>

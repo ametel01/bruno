@@ -266,6 +266,7 @@ describe("product shell routes", () => {
               id: "00000000-0000-4000-8000-000000000201",
               name: "Active Feed Agent",
               templateKey: "research_agent",
+              templateVersion: "1.0.0",
               templateLabel: "Research Agent",
               status: "running",
               href: "/agents/00000000-0000-4000-8000-000000000201",
@@ -395,6 +396,7 @@ describe("product shell routes", () => {
               id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
               name: "Research Agent",
               templateKey: "research_agent",
+              templateVersion: "1.0.0",
               templateLabel: "Research Agent",
               status: "stopped",
               href: "/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774",
@@ -450,6 +452,12 @@ describe("product shell routes", () => {
     expect(html).toContain("No agent records");
     expect(html).toContain("Create agent");
     expect(html).toContain("Research Agent");
+    expect(html).toContain("Inbox Triage Agent");
+    expect(html).toContain("GitHub Issue Agent");
+    expect(html).toContain("Social Content Agent");
+    expect(html).toContain("Web search, Notes, Summaries");
+    expect(html).toContain("Schedule");
+    expect(html).toContain("Manual");
     expect(html).toContain("inbox_triage_agent");
     expect(html).not.toContain("Create agent in Milestone 1");
   });
@@ -460,6 +468,7 @@ describe("product shell routes", () => {
         id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
         name: "Research Agent",
         templateKey: "research_agent",
+        templateVersion: "1.0.0",
         templateLabel: "Research Agent",
         status: "stopped",
         href: "/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774",
@@ -498,6 +507,11 @@ describe("product shell routes", () => {
     expect(html).toContain("Research Agent");
     expect(html).toContain("stopped");
     expect(html).toContain("research_agent");
+    expect(html).toContain("Template version");
+    expect(html).toContain("Template settings");
+    expect(html).toContain("Default tools");
+    expect(html).toContain("Web search, Notes, Summaries");
+    expect(html).toContain("Default prompt");
     expect(html).toContain("2026-07-03T05:00:00.000Z");
     expect(html).toContain("2026-07-03T05:30:00.000Z");
     expect(html).toContain("Waiting for setup.");
@@ -806,7 +820,18 @@ type DetailAgent = {
   id: string;
   name: string;
   templateKey: string;
+  templateVersion: string;
   templateLabel: string;
+  templateSnapshot: {
+    key: "research_agent";
+    version: string;
+    name: string;
+    description: string;
+    defaultTools: string[];
+    defaultSchedule: "Manual";
+    defaultSystemPrompt: string;
+    requiredIntegrations: string[];
+  };
   status: string;
   statusReason: string | null;
   href: string;
@@ -829,7 +854,20 @@ function detailAgent(overrides: Partial<DetailAgent> = {}): DetailAgent {
     id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
     name: "Research Agent",
     templateKey: "research_agent",
+    templateVersion: "1.0.0",
     templateLabel: "Research Agent",
+    templateSnapshot: {
+      key: "research_agent",
+      version: "1.0.0",
+      name: "Research Agent",
+      description:
+        "Tracks a research question, gathers source notes, and produces concise summaries for later review.",
+      defaultTools: ["Web search", "Notes", "Summaries"],
+      defaultSchedule: "Manual",
+      defaultSystemPrompt:
+        "You are a Research Agent. Gather relevant information, keep source notes, and produce concise summaries. Do not take external actions or contact third parties. Ask for approval before using any integration or publishing output.",
+      requiredIntegrations: [],
+    },
     status: "stopped",
     statusReason: null,
     href: "/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774",

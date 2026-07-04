@@ -342,7 +342,7 @@ Goal: Running agents produce fake logs before real execution exists.
 - API test for log pagination.
 - UI test for start, wait, see logs, stop, and see log generation halt.
 
-## Milestone 5: Agent Templates
+## Milestone 5: Agent Templates [Completed]
 
 Goal: Users can choose useful predefined agent types.
 
