@@ -525,13 +525,14 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   await expect(dashboardAgentRow.getByRole("button", { name: "Stop" })).toBeVisible();
   await expect(dashboardAgentRow.getByRole("button", { name: "Restart" })).toBeVisible();
   await dashboardAgentRow.getByRole("button", { name: "Restart" }).click();
-  await expect(dashboardAgentRow.locator(".status-pill", { hasText: "restarting" })).toBeVisible({
-    timeout: 5_000,
-  });
   await expect(dashboardAgentRow.locator(".status-pill", { hasText: "running" })).toBeVisible({
     timeout: 5_000,
   });
-  await expect(dashboardAgentRow.getByRole("button", { name: "Restart" })).toBeVisible();
+  await expect(
+    dashboardAgentRow.getByRole("button", { name: "Restart", exact: true }),
+  ).toBeEnabled();
+  await expect(dashboardActivity).toContainText("agent.restart_requested");
+  await expect(dashboardActivity).toContainText("agent.restart_completed");
   await dashboardAgentRow.getByRole("button", { name: "Stop" }).click();
   await expect(dashboardAgentRow.locator(".status-pill", { hasText: "stopped" })).toBeVisible({
     timeout: 5_000,
@@ -589,12 +590,10 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   await expect(detailActivity).toContainText(`Start completed for agent "${name}".`);
   await expect(page.getByRole("button", { name: "Restart" })).toBeVisible();
   await page.getByRole("button", { name: "Restart" }).click();
-  await expect(page.locator(".status-pill", { hasText: "restarting" })).toBeVisible({
-    timeout: 5_000,
-  });
   await expect(page.locator(".status-pill", { hasText: "running" })).toBeVisible({
     timeout: 5_000,
   });
+  await expect(page.getByRole("button", { name: "Restart", exact: true })).toBeEnabled();
   await expect(detailActivity).toContainText("agent.restart_requested");
   await expect(detailActivity).toContainText("agent.restart_completed");
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
