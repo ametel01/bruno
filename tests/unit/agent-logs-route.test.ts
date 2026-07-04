@@ -15,8 +15,11 @@ const mocks = vi.hoisted(() => {
     close: vi.fn(),
     createDatabaseConnection: vi.fn(),
     getActiveAgentForDevelopmentUser: vi.fn(),
+    getAssignedRunnerForActiveAgentDevelopmentUser: vi.fn(),
+    getLifecycleManualRunnerAdapter: vi.fn(),
     getLifecycleRunnerAdapter: vi.fn(),
     listAgentLogs: vi.fn(),
+    manualStreamLogs: vi.fn(),
     streamLogs: vi.fn(),
   };
 });
@@ -35,6 +38,7 @@ vi.mock("@/src/server/agents/lifecycle", async (importOriginal) => {
 
   return {
     ...original,
+    getLifecycleManualRunnerAdapter: mocks.getLifecycleManualRunnerAdapter,
     getLifecycleRunnerAdapter: mocks.getLifecycleRunnerAdapter,
   };
 });
@@ -43,13 +47,21 @@ vi.mock("@/src/server/logs/agent-logs", () => ({
   listAgentLogs: mocks.listAgentLogs,
 }));
 
+vi.mock("@/src/server/runners/manual-runner-persistence", () => ({
+  getAssignedRunnerForActiveAgentDevelopmentUser:
+    mocks.getAssignedRunnerForActiveAgentDevelopmentUser,
+}));
+
 describe("GET /api/agents/[agentId]/logs route", () => {
   afterEach(() => {
     mocks.close.mockReset();
     mocks.createDatabaseConnection.mockReset();
     mocks.getActiveAgentForDevelopmentUser.mockReset();
+    mocks.getAssignedRunnerForActiveAgentDevelopmentUser.mockReset();
+    mocks.getLifecycleManualRunnerAdapter.mockReset();
     mocks.getLifecycleRunnerAdapter.mockReset();
     mocks.listAgentLogs.mockReset();
+    mocks.manualStreamLogs.mockReset();
     mocks.streamLogs.mockReset();
   });
 
@@ -59,6 +71,7 @@ describe("GET /api/agents/[agentId]/logs route", () => {
       id: ACTIVE_AGENT_ID,
       status: "running",
     });
+    mocks.getAssignedRunnerForActiveAgentDevelopmentUser.mockResolvedValue(null);
     mocks.getLifecycleRunnerAdapter.mockReturnValue({
       streamLogs: mocks.streamLogs,
     });
@@ -85,6 +98,7 @@ describe("GET /api/agents/[agentId]/logs route", () => {
       createConnection: expect.any(Function),
     });
     expect(mocks.getLifecycleRunnerAdapter).toHaveBeenCalledOnce();
+    expect(mocks.getLifecycleManualRunnerAdapter).not.toHaveBeenCalled();
     expect(mocks.streamLogs).toHaveBeenCalledWith({
       agentId: ACTIVE_AGENT_ID,
       after: 0,
@@ -104,6 +118,79 @@ describe("GET /api/agents/[agentId]/logs route", () => {
     expect(JSON.stringify(body)).not.toContain("dockerRunnerContainerId");
     expect(JSON.stringify(body)).not.toContain("metadata");
     expect(JSON.stringify(body)).not.toContain("00000000-0000-4000-8000-00000000090");
+    expect(mocks.close).toHaveBeenCalledOnce();
+  });
+
+  it("pulls running assigned manual runner logs and returns the same safe public DTO", async () => {
+    mocks.createDatabaseConnection.mockReturnValue({ db: "db", close: mocks.close });
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValue({
+      id: ACTIVE_AGENT_ID,
+      status: "running",
+    });
+    mocks.getAssignedRunnerForActiveAgentDevelopmentUser.mockResolvedValue({
+      id: "00000000-0000-4000-8000-000000000777",
+      kind: "manual_vps",
+      endpointUrl: "https://runner.example.com",
+    });
+    mocks.getLifecycleManualRunnerAdapter.mockReturnValue({
+      streamLogs: mocks.manualStreamLogs,
+    });
+    mocks.manualStreamLogs.mockResolvedValue({
+      logs: [
+        logDto(1, {
+          stream: "stdout",
+          message: "manual runner ready",
+          source: "manual_runner",
+        }),
+        logDto(2, {
+          stream: "stderr",
+          level: "error",
+          message: "TOKEN=runner-secret",
+          source: "manual_runner",
+        }),
+      ],
+      nextAfter: 2,
+    });
+    const { GET } = await import("@/app/api/agents/[agentId]/logs/route");
+
+    const response = await GET(new Request("http://localhost/api/agents/id/logs?limit=2"), {
+      params: Promise.resolve({ agentId: ACTIVE_AGENT_ID }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      logs: [
+        publicLogDto(1, {
+          source: "manual_runner",
+          stream: "stdout",
+          message: "manual runner ready",
+        }),
+        publicLogDto(2, {
+          source: "manual_runner",
+          stream: "stderr",
+          level: "error",
+          message: "Sensitive details omitted.",
+        }),
+      ],
+      nextAfter: 2,
+    });
+    expect(mocks.getAssignedRunnerForActiveAgentDevelopmentUser).toHaveBeenCalledWith(
+      ACTIVE_AGENT_ID,
+      { createConnection: expect.any(Function) },
+    );
+    expect(mocks.getLifecycleManualRunnerAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({ endpointUrl: "https://runner.example.com" }),
+      { createConnection: expect.any(Function) },
+    );
+    expect(mocks.getLifecycleRunnerAdapter).not.toHaveBeenCalled();
+    expect(mocks.manualStreamLogs).toHaveBeenCalledWith({
+      agentId: ACTIVE_AGENT_ID,
+      limit: 2,
+    });
+    expect(JSON.stringify(body)).not.toContain("runnerId");
+    expect(JSON.stringify(body)).not.toContain("00000000-0000-4000-8000-000000000777");
+    expect(JSON.stringify(body)).not.toContain("runner-secret");
     expect(mocks.close).toHaveBeenCalledOnce();
   });
 
@@ -170,6 +257,7 @@ describe("GET /api/agents/[agentId]/logs route", () => {
     expect(JSON.stringify(body)).not.toContain("postgres://");
     expect(JSON.stringify(body)).not.toContain("/app/worker.ts");
     expect(mocks.getLifecycleRunnerAdapter).not.toHaveBeenCalled();
+    expect(mocks.getAssignedRunnerForActiveAgentDevelopmentUser).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -303,6 +391,7 @@ describe("GET /api/agents/[agentId]/logs route", () => {
       id: ACTIVE_AGENT_ID,
       status: "running",
     });
+    mocks.getAssignedRunnerForActiveAgentDevelopmentUser.mockResolvedValue(null);
     mocks.getLifecycleRunnerAdapter.mockReturnValue({
       streamLogs: mocks.streamLogs,
     });
@@ -358,6 +447,7 @@ function logDto(
     stream: string;
     level: string;
     message: string;
+    source: string;
   }> = {},
 ) {
   return {
@@ -366,7 +456,7 @@ function logDto(
     runnerId: "00000000-0000-4000-8000-000000000901",
     localRunnerProcessId: "00000000-0000-4000-8000-000000000901",
     dockerRunnerContainerId: "00000000-0000-4000-8000-000000000902",
-    source: "docker",
+    source: overrides.source ?? "docker",
     stream: overrides.stream ?? "stdout",
     level: overrides.level ?? "info",
     message: overrides.message ?? `line ${sequence}`,
@@ -381,13 +471,14 @@ function logDto(
 function publicLogDto(
   sequence: number,
   overrides: Partial<{
+    source: string;
     stream: string;
     level: string;
     message: string;
   }> = {},
 ) {
   return {
-    source: "docker",
+    source: overrides.source ?? "docker",
     stream: overrides.stream ?? "stdout",
     level: overrides.level ?? "info",
     message: overrides.message ?? `line ${sequence}`,

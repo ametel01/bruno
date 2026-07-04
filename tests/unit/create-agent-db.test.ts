@@ -103,6 +103,7 @@ import {
   DockerRunnerAdapter,
   type DockerCliRunner,
 } from "@/src/server/runners/docker-runner-adapter";
+import { appendManualRunnerLogLines } from "@/src/server/runners/manual-runner-adapter";
 import {
   appendLocalRunnerLogLines,
   createLocalRunnerProcessForDevelopmentUser,
@@ -357,6 +358,220 @@ describe("create agent persistence", () => {
       status: "active",
       deletedAt: null,
     });
+  });
+
+  it("starts an assigned manual runner agent only after remote start succeeds and persists remote logs", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Assigned Manual Start Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const runner = await bootstrapManualRunnerForDevelopmentUser({
+      createConnection: () => connection,
+      env: {
+        AGENTBAY_MANUAL_RUNNER_NAME: "Manual Lifecycle Runner",
+        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "http://127.0.0.1:8787",
+      },
+    });
+    const calls: string[] = [];
+    const manualRunnerAdapter = createManualLifecycleRunnerStub(calls, {
+      connection,
+      runnerId: runner?.id ?? "",
+    });
+
+    await assignRunnerToActiveAgentForDevelopmentUser(
+      {
+        agentId: created.agent.id,
+        runnerId: runner?.id ?? "",
+      },
+      { createConnection: () => connection },
+    );
+
+    const result = await startAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: () => manualRunnerAdapter,
+      now: () => new Date("2026-07-05T03:00:00.000Z"),
+      runnerAdapter: createFailingLifecycleRunnerStub("docker fallback should not run"),
+    });
+    const logs = await listAgentLogs({ db: connection.db, agentId: created.agent.id });
+    const [persistedAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+
+    expect(result).toMatchObject({
+      ok: true,
+      agent: {
+        id: created.agent.id,
+        status: "running",
+        updatedAt: "2026-07-05T03:00:00.000Z",
+      },
+    });
+    expect(persistedAgent).toMatchObject({
+      status: "running",
+      runnerId: runner?.id,
+    });
+    expect(calls).toEqual([`start:${created.agent.id}`, `logs:${created.agent.id}`]);
+    expect(logs.logs).toEqual([
+      expect.objectContaining({
+        agentId: created.agent.id,
+        runnerId: runner?.id,
+        source: "manual_runner",
+        stream: "stdout",
+        message: "manual started",
+        sequence: 1,
+      }),
+      expect.objectContaining({
+        agentId: created.agent.id,
+        runnerId: runner?.id,
+        source: "manual_runner",
+        stream: "stderr",
+        level: "error",
+        message: "manual warning",
+        sequence: 2,
+      }),
+    ]);
+  });
+
+  it("keeps an assigned manual runner agent stopped when remote start fails", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Assigned Manual Failure Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const runner = await bootstrapManualRunnerForDevelopmentUser({
+      createConnection: () => connection,
+      env: {
+        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "http://127.0.0.1:8788",
+      },
+    });
+    const calls: string[] = [];
+
+    await assignRunnerToActiveAgentForDevelopmentUser(
+      {
+        agentId: created.agent.id,
+        runnerId: runner?.id ?? "",
+      },
+      { createConnection: () => connection },
+    );
+
+    const result = await startAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: () =>
+        createManualLifecycleRunnerStub(calls, {
+          startOk: false,
+        }),
+      now: () => new Date("2026-07-05T03:10:00.000Z"),
+    });
+    const [persistedAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+    const transitionEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(inArray(agentEvents.type, [START_REQUESTED_EVENT_TYPE, START_COMPLETED_EVENT_TYPE]));
+
+    expect(result).toEqual({ ok: false, reason: "runner_start_failed" });
+    expect(persistedAgent).toMatchObject({
+      status: "stopped",
+      runnerId: runner?.id,
+    });
+    expect(calls).toEqual([`start:${created.agent.id}`]);
+    expect(transitionEvents).toHaveLength(0);
+    await expect(countAgentLogs(connection, created.agent.id)).resolves.toBe(0);
+  });
+
+  it("stops and restarts only the selected assigned manual runner agent", async () => {
+    const selected = await createAgentForDevelopmentUser(
+      { name: "Selected Manual Lifecycle Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const sibling = await createAgentForDevelopmentUser(
+      { name: "Sibling Manual Lifecycle Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const runner = await bootstrapManualRunnerForDevelopmentUser({
+      createConnection: () => connection,
+      env: {
+        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "http://127.0.0.1:8789",
+      },
+    });
+    const calls: string[] = [];
+    const manualRunnerAdapter = createManualLifecycleRunnerStub(calls);
+
+    await assignRunnerToActiveAgentForDevelopmentUser(
+      {
+        agentId: selected.agent.id,
+        runnerId: runner?.id ?? "",
+      },
+      { createConnection: () => connection },
+    );
+    await connection.db
+      .update(agents)
+      .set({ status: "running", statusReason: "Manual runner is running." })
+      .where(inArray(agents.id, [selected.agent.id, sibling.agent.id]));
+
+    const stopResult = await stopAgentForDevelopmentUser(selected.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: () => manualRunnerAdapter,
+      now: () => new Date("2026-07-05T03:20:00.000Z"),
+    });
+    await connection.db
+      .update(agents)
+      .set({ status: "running", statusReason: "Manual runner is running." })
+      .where(eq(agents.id, selected.agent.id));
+    const restartResult = await restartAgentForDevelopmentUser(selected.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: () => manualRunnerAdapter,
+      now: () => new Date("2026-07-05T03:25:00.000Z"),
+    });
+    const persistedAgents = await connection.db
+      .select({ id: agents.id, status: agents.status })
+      .from(agents)
+      .where(inArray(agents.id, [selected.agent.id, sibling.agent.id]))
+      .orderBy(agents.name);
+
+    expect(stopResult).toMatchObject({ ok: true, agent: { id: selected.agent.id } });
+    expect(restartResult).toMatchObject({
+      ok: true,
+      agent: { id: selected.agent.id, status: "running" },
+    });
+    expect(calls).toEqual([
+      `stop:${selected.agent.id}`,
+      `logs:${selected.agent.id}`,
+      `restart:${selected.agent.id}`,
+      `logs:${selected.agent.id}`,
+    ]);
+    expect(calls).not.toContain(`stop:${sibling.agent.id}`);
+    expect(calls).not.toContain(`restart:${sibling.agent.id}`);
+    expect(persistedAgents).toEqual([
+      { id: selected.agent.id, status: "running" },
+      { id: sibling.agent.id, status: "running" },
+    ]);
+  });
+
+  it("falls back to the Docker lifecycle adapter when no manual runner is assigned", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Unassigned Fallback Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const calls: string[] = [];
+
+    const result = await startAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: () => createFailingLifecycleRunnerStub("manual should not run"),
+      runnerAdapter: createLifecycleRunnerStub(calls),
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      agent: {
+        id: created.agent.id,
+        status: "running",
+      },
+    });
+    expect(calls).toEqual([`start:${created.agent.id}`, `logs:${created.agent.id}`]);
   });
 
   it("excludes soft-deleted runners, soft-deleted agents, and other-user runners from assignment reads", async () => {
@@ -7771,7 +7986,7 @@ function createTestLocalRunnerAdapter(
   });
 }
 
-function createLifecycleRunnerStub(): RunnerAdapter {
+function createLifecycleRunnerStub(calls?: string[]): RunnerAdapter {
   let processSequence = 0;
 
   function processFor(agentId: string, status: LocalRunnerProcessDto["status"]) {
@@ -7795,21 +8010,188 @@ function createLifecycleRunnerStub(): RunnerAdapter {
   }
 
   return {
-    async start(agentId) {
+    async start(agentId: string) {
+      calls?.push(`start:${agentId}`);
       return { ok: true, process: processFor(agentId, "running") };
     },
-    async stop(agentId) {
+    async stop(agentId: string) {
+      calls?.push(`stop:${agentId}`);
       return { ok: true, process: processFor(agentId, "stopped") };
     },
-    async restart(agentId) {
+    async restart(agentId: string) {
+      calls?.push(`restart:${agentId}`);
       return { ok: true, process: processFor(agentId, "running") };
     },
-    async status(agentId) {
+    async status(agentId: string) {
+      calls?.push(`status:${agentId}`);
       return { ok: true, process: processFor(agentId, "running") };
     },
-    async streamLogs() {
+    async streamLogs(input: { agentId: string }) {
+      calls?.push(`logs:${input.agentId}`);
       return { logs: [], nextAfter: null };
     },
+  };
+}
+
+function createManualLifecycleRunnerStub(
+  calls: string[],
+  options: {
+    connection?: DatabaseConnection;
+    runnerId?: string;
+    startOk?: boolean;
+  } = {},
+): RunnerAdapter {
+  const startedAt = new Date("2026-07-05T03:00:00.000Z");
+
+  return {
+    async start(agentId: string) {
+      calls.push(`start:${agentId}`);
+
+      if (options.startOk === false) {
+        return { ok: false, reason: "runner_request_failed" };
+      }
+
+      return {
+        ok: true,
+        runner: manualRunnerResult(),
+        container: {
+          id: `manual-container-${agentId}`,
+          status: "running",
+        },
+      };
+    },
+    async stop(agentId: string) {
+      calls.push(`stop:${agentId}`);
+
+      return {
+        ok: true,
+        runner: manualRunnerResult(),
+        containers: [
+          {
+            id: `manual-container-${agentId}`,
+            status: "exited",
+          },
+        ],
+      };
+    },
+    async restart(agentId: string) {
+      calls.push(`restart:${agentId}`);
+
+      return {
+        ok: true,
+        runner: manualRunnerResult(),
+        container: {
+          id: `manual-container-${agentId}`,
+          status: "running",
+        },
+      };
+    },
+    async status(agentId: string) {
+      calls.push(`status:${agentId}`);
+
+      return {
+        ok: true,
+        runner: manualRunnerResult(),
+        containers: [
+          {
+            id: `manual-container-${agentId}`,
+            status: "running",
+          },
+        ],
+      };
+    },
+    async streamLogs(input: { agentId: string }) {
+      calls.push(`logs:${input.agentId}`);
+      const logs = [
+        {
+          id: "00000000-0000-4000-8000-000000000801",
+          agentId: input.agentId,
+          runnerId: manualRunnerResult().id,
+          localRunnerProcessId: null,
+          dockerRunnerContainerId: null,
+          source: "manual_runner",
+          stream: "stdout",
+          level: "info",
+          message: "manual started",
+          metadata: {},
+          sequence: 1,
+          createdAt: startedAt.toISOString(),
+        },
+        {
+          id: "00000000-0000-4000-8000-000000000802",
+          agentId: input.agentId,
+          runnerId: manualRunnerResult().id,
+          localRunnerProcessId: null,
+          dockerRunnerContainerId: null,
+          source: "manual_runner",
+          stream: "stderr",
+          level: "error",
+          message: "manual warning",
+          metadata: {},
+          sequence: 2,
+          createdAt: startedAt.toISOString(),
+        },
+      ];
+
+      if (options.connection && options.runnerId) {
+        const appended = await appendManualRunnerLogLines({
+          db: options.connection.db,
+          agentId: input.agentId,
+          runnerId: options.runnerId,
+          lines: [
+            {
+              stream: "stdout",
+              message: "manual started",
+              createdAt: startedAt,
+            },
+            {
+              stream: "stderr",
+              message: "manual warning",
+              createdAt: startedAt,
+            },
+          ],
+          now: startedAt,
+        });
+
+        return { logs: appended.logs, nextAfter: appended.logs.at(-1)?.sequence ?? null };
+      }
+
+      return { logs, nextAfter: 2 };
+    },
+  } as unknown as RunnerAdapter;
+}
+
+function createFailingLifecycleRunnerStub(message: string): RunnerAdapter {
+  return {
+    async start() {
+      throw new Error(message);
+    },
+    async stop() {
+      throw new Error(message);
+    },
+    async restart() {
+      throw new Error(message);
+    },
+    async status() {
+      throw new Error(message);
+    },
+    async streamLogs() {
+      throw new Error(message);
+    },
+  };
+}
+
+function manualRunnerResult() {
+  return {
+    id: "00000000-0000-4000-8000-000000000777",
+    userId: "00000000-0000-4000-8000-000000000778",
+    name: "Manual Lifecycle Runner",
+    kind: "manual_vps",
+    endpointUrl: "http://127.0.0.1:8787",
+    status: "active",
+    createdAt: "2026-07-05T03:00:00.000Z",
+    updatedAt: "2026-07-05T03:00:00.000Z",
+    deletedAt: null,
   };
 }
 

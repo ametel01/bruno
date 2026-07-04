@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Milestone 5 agent templates with a typed metadata registry, durable template version/snapshot persistence, create-flow template metadata, and persisted template settings on agent detail pages.
 - Manual VPS runner persistence with durable runner identity rows, nullable agent assignment, optional non-secret development bootstrap, endpoint validation, and active-agent assigned-runner helpers without changing no-runner lifecycle behavior.
 - Runner auth persistence foundation with hash-only one-time registration token state, hash-only runner credential rows, heartbeat history, expanded runner status coverage, important lookup indexes, and reusable token/hash helpers.
+- Dashboard lifecycle forwarding for active agents assigned to `manual_vps` runners, including dashboard-side start, stop, restart, status, and log pulls with temporary bearer auth, bounded timeouts, safe remote failures, persisted `manual_runner` log rows, and Docker fallback for unassigned agents.
 
 ### Fixed
 

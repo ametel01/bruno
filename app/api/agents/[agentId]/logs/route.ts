@@ -3,10 +3,14 @@ import {
   getActiveAgentForDevelopmentUser,
 } from "@/src/server/agents/list-agents";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
-import { getLifecycleRunnerAdapter } from "@/src/server/agents/lifecycle";
+import {
+  getLifecycleManualRunnerAdapter,
+  getLifecycleRunnerAdapter,
+} from "@/src/server/agents/lifecycle";
 import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { type AgentLogDto, type AgentLogPage, listAgentLogs } from "@/src/server/logs/agent-logs";
+import { getAssignedRunnerForActiveAgentDevelopmentUser } from "@/src/server/runners/manual-runner-persistence";
 
 type AgentLogsRouteContext = {
   params: Promise<{
@@ -81,19 +85,34 @@ export async function GET(request: Request, context: AgentLogsRouteContext) {
       );
     }
 
-    const page =
-      activeAgent.status === "running"
-        ? await getLifecycleRunnerAdapter().streamLogs({
-            agentId: decodedAgentId.value,
-            ...(parsedAfter.value === undefined ? {} : { after: parsedAfter.value }),
-            ...(parsedLimit.value === undefined ? {} : { limit: parsedLimit.value }),
+    let page: AgentLogPage;
+
+    if (activeAgent.status === "running") {
+      const assignedRunner = await getAssignedRunnerForActiveAgentDevelopmentUser(
+        decodedAgentId.value,
+        {
+          createConnection: () => routeConnection,
+        },
+      );
+      const runnerAdapter = assignedRunner
+        ? getLifecycleManualRunnerAdapter(assignedRunner, {
+            createConnection: () => routeConnection,
           })
-        : await listAgentLogs({
-            db: routeConnection.db,
-            agentId: decodedAgentId.value,
-            ...(parsedAfter.value === undefined ? {} : { after: parsedAfter.value }),
-            ...(parsedLimit.value === undefined ? {} : { limit: parsedLimit.value }),
-          });
+        : getLifecycleRunnerAdapter();
+
+      page = await runnerAdapter.streamLogs({
+        agentId: decodedAgentId.value,
+        ...(parsedAfter.value === undefined ? {} : { after: parsedAfter.value }),
+        ...(parsedLimit.value === undefined ? {} : { limit: parsedLimit.value }),
+      });
+    } else {
+      page = await listAgentLogs({
+        db: routeConnection.db,
+        agentId: decodedAgentId.value,
+        ...(parsedAfter.value === undefined ? {} : { after: parsedAfter.value }),
+        ...(parsedLimit.value === undefined ? {} : { limit: parsedLimit.value }),
+      });
+    }
 
     return Response.json(toPublicAgentLogPage(page));
   } catch (error) {

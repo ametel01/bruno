@@ -5,6 +5,7 @@ import {
   agentLogs,
   agents,
   dockerRunnerContainers,
+  runners,
   type agentStatusEnum,
 } from "@/src/server/db/schema";
 import {
@@ -35,6 +36,18 @@ import {
   type DockerRunnerStatusResult as DockerRunnerLifecycleStatusResult,
   type DockerRunnerStopResult,
 } from "@/src/server/runners/docker-runner-adapter";
+import {
+  ManualRunnerAdapter,
+  type ManualRunnerRestartResult,
+  type ManualRunnerStartResult,
+  type ManualRunnerStatusResult,
+  type ManualRunnerStopResult,
+} from "@/src/server/runners/manual-runner-adapter";
+import {
+  ACTIVE_RUNNER_STATUS,
+  MANUAL_RUNNER_KIND,
+  type ManualRunnerRecord,
+} from "@/src/server/runners/manual-runner-persistence";
 import type { RunnerAdapter as RunnerAdapterContract } from "@/src/server/runners/runner-adapter";
 
 export type AgentLifecycleStatus = (typeof agentStatusEnum.enumValues)[number];
@@ -70,10 +83,22 @@ export const DOCKER_RUNNER_UNEXPECTED_EXIT_STATUS_REASON =
 export const SIMULATED_ERROR_STATUS_REASON = "Simulated error requested for development testing.";
 
 type LifecycleClock = () => Date;
-type LifecycleRunnerStartResult = LocalRunnerStartResult | DockerRunnerStartResult;
-type LifecycleRunnerStopResult = LocalRunnerStopResult | DockerRunnerStopResult;
-type LifecycleRunnerRestartResult = LocalRunnerRestartResult | DockerRunnerRestartResult;
-type LifecycleRunnerStatusResult = LocalRunnerStatusResult | DockerRunnerLifecycleStatusResult;
+type LifecycleRunnerStartResult =
+  | LocalRunnerStartResult
+  | DockerRunnerStartResult
+  | ManualRunnerStartResult;
+type LifecycleRunnerStopResult =
+  | LocalRunnerStopResult
+  | DockerRunnerStopResult
+  | ManualRunnerStopResult;
+type LifecycleRunnerRestartResult =
+  | LocalRunnerRestartResult
+  | DockerRunnerRestartResult
+  | ManualRunnerRestartResult;
+type LifecycleRunnerStatusResult =
+  | LocalRunnerStatusResult
+  | DockerRunnerLifecycleStatusResult
+  | ManualRunnerStatusResult;
 type LifecycleRunnerAdapter = RunnerAdapterContract<
   LifecycleRunnerStartResult,
   LifecycleRunnerStopResult,
@@ -91,6 +116,7 @@ type DockerRunnerCleanupAdapter = {
 export type AgentLifecycleDependencies = {
   createConnection?: () => DatabaseConnection;
   dockerRunnerAdapter?: DockerRunnerCleanupAdapter;
+  manualRunnerAdapter?: (runner: ManualRunnerRecord) => LifecycleRunnerAdapter;
   now?: LifecycleClock;
   runnerAdapter?: LifecycleRunnerAdapter;
 };
@@ -283,6 +309,18 @@ export class AgentLifecyclePersistenceError extends Error {
 let lifecycleRunnerAdapter: LifecycleRunnerAdapter | null = null;
 let lifecycleLocalRunnerAdapter: LifecycleRunnerAdapter | null = null;
 
+const assignedRunnerSelection = {
+  id: runners.id,
+  userId: runners.userId,
+  name: runners.name,
+  kind: runners.kind,
+  endpointUrl: runners.endpointUrl,
+  status: runners.status,
+  createdAt: runners.createdAt,
+  updatedAt: runners.updatedAt,
+  deletedAt: runners.deletedAt,
+};
+
 export function getLifecycleRunnerAdapter(): LifecycleRunnerAdapter {
   lifecycleRunnerAdapter ??= new DockerRunnerAdapter();
 
@@ -297,6 +335,13 @@ export function getLifecycleLocalRunnerAdapter(): LifecycleRunnerAdapter {
   });
 
   return lifecycleLocalRunnerAdapter;
+}
+
+export function getLifecycleManualRunnerAdapter(
+  runner: ManualRunnerRecord,
+  dependencies: Pick<AgentLifecycleDependencies, "createConnection"> = {},
+): LifecycleRunnerAdapter {
+  return new ManualRunnerAdapter(runner, dependencies);
 }
 
 export { isValidAgentId };
@@ -340,13 +385,25 @@ export async function startAgentForDevelopmentUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
-  const runnerAdapter = dependencies.runnerAdapter ?? getLifecycleRunnerAdapter();
 
   try {
     const validation = await connection.db.transaction(async (tx) => {
       const [currentAgent] = await tx
-        .select()
+        .select({
+          agent: agents,
+          runner: assignedRunnerSelection,
+        })
         .from(agents)
+        .leftJoin(
+          runners,
+          and(
+            eq(runners.id, agents.runnerId),
+            eq(runners.userId, agents.userId),
+            eq(runners.kind, MANUAL_RUNNER_KIND),
+            eq(runners.status, ACTIVE_RUNNER_STATUS),
+            isNull(runners.deletedAt),
+          ),
+        )
         .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
         .limit(1);
 
@@ -354,17 +411,28 @@ export async function startAgentForDevelopmentUser(
         return { ok: false, reason: "agent_not_found" } as const;
       }
 
-      if (!canStartAgentStatus(currentAgent.status)) {
-        return { ok: false, reason: "invalid_status", status: currentAgent.status } as const;
+      if (!canStartAgentStatus(currentAgent.agent.status)) {
+        return { ok: false, reason: "invalid_status", status: currentAgent.agent.status } as const;
       }
 
-      return { ok: true, agent: currentAgent } as const;
+      return {
+        ok: true,
+        agent: currentAgent.agent,
+        assignedRunner: toManualRunnerRecordOrNull(currentAgent.runner),
+      } as const;
     });
 
     if (!validation.ok) {
       return validation;
     }
 
+    const runnerAdapter = selectLifecycleRunnerAdapter(validation.assignedRunner, {
+      createConnection: () => connection,
+      ...(dependencies.manualRunnerAdapter
+        ? { manualRunnerAdapter: dependencies.manualRunnerAdapter }
+        : {}),
+      ...(dependencies.runnerAdapter ? { runnerAdapter: dependencies.runnerAdapter } : {}),
+    });
     const runnerStart = await runnerAdapter.start(normalizedAgentId);
 
     if (!runnerStart.ok) {
@@ -462,13 +530,25 @@ export async function stopAgentForDevelopmentUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
-  const runnerAdapter = dependencies.runnerAdapter ?? getLifecycleRunnerAdapter();
 
   try {
     const validation = await connection.db.transaction(async (tx) => {
       const [currentAgent] = await tx
-        .select()
+        .select({
+          agent: agents,
+          runner: assignedRunnerSelection,
+        })
         .from(agents)
+        .leftJoin(
+          runners,
+          and(
+            eq(runners.id, agents.runnerId),
+            eq(runners.userId, agents.userId),
+            eq(runners.kind, MANUAL_RUNNER_KIND),
+            eq(runners.status, ACTIVE_RUNNER_STATUS),
+            isNull(runners.deletedAt),
+          ),
+        )
         .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
         .limit(1);
 
@@ -476,17 +556,28 @@ export async function stopAgentForDevelopmentUser(
         return { ok: false, reason: "agent_not_found" } as const;
       }
 
-      if (!canStopAgentStatus(currentAgent.status)) {
-        return { ok: false, reason: "invalid_status", status: currentAgent.status } as const;
+      if (!canStopAgentStatus(currentAgent.agent.status)) {
+        return { ok: false, reason: "invalid_status", status: currentAgent.agent.status } as const;
       }
 
-      return { ok: true, agent: currentAgent } as const;
+      return {
+        ok: true,
+        agent: currentAgent.agent,
+        assignedRunner: toManualRunnerRecordOrNull(currentAgent.runner),
+      } as const;
     });
 
     if (!validation.ok) {
       return validation;
     }
 
+    const runnerAdapter = selectLifecycleRunnerAdapter(validation.assignedRunner, {
+      createConnection: () => connection,
+      ...(dependencies.manualRunnerAdapter
+        ? { manualRunnerAdapter: dependencies.manualRunnerAdapter }
+        : {}),
+      ...(dependencies.runnerAdapter ? { runnerAdapter: dependencies.runnerAdapter } : {}),
+    });
     const runnerStop = await runnerAdapter.stop(normalizedAgentId);
 
     if (!runnerStop.ok) {
@@ -580,13 +671,25 @@ export async function restartAgentForDevelopmentUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
-  const runnerAdapter = dependencies.runnerAdapter ?? getLifecycleRunnerAdapter();
 
   try {
     const validation = await connection.db.transaction(async (tx) => {
       const [currentAgent] = await tx
-        .select()
+        .select({
+          agent: agents,
+          runner: assignedRunnerSelection,
+        })
         .from(agents)
+        .leftJoin(
+          runners,
+          and(
+            eq(runners.id, agents.runnerId),
+            eq(runners.userId, agents.userId),
+            eq(runners.kind, MANUAL_RUNNER_KIND),
+            eq(runners.status, ACTIVE_RUNNER_STATUS),
+            isNull(runners.deletedAt),
+          ),
+        )
         .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
         .limit(1);
 
@@ -594,17 +697,32 @@ export async function restartAgentForDevelopmentUser(
         return { ok: false, reason: "agent_not_found" } as const;
       }
 
-      if (!canRestartAgentStatus(currentAgent.status)) {
-        return { ok: false, reason: "invalid_status", status: currentAgent.status } as const;
+      if (!canRestartAgentStatus(currentAgent.agent.status)) {
+        return {
+          ok: false,
+          reason: "invalid_status",
+          status: currentAgent.agent.status,
+        } as const;
       }
 
-      return { ok: true, agent: currentAgent } as const;
+      return {
+        ok: true,
+        agent: currentAgent.agent,
+        assignedRunner: toManualRunnerRecordOrNull(currentAgent.runner),
+      } as const;
     });
 
     if (!validation.ok) {
       return validation;
     }
 
+    const runnerAdapter = selectLifecycleRunnerAdapter(validation.assignedRunner, {
+      createConnection: () => connection,
+      ...(dependencies.manualRunnerAdapter
+        ? { manualRunnerAdapter: dependencies.manualRunnerAdapter }
+        : {}),
+      ...(dependencies.runnerAdapter ? { runnerAdapter: dependencies.runnerAdapter } : {}),
+    });
     const runnerRestart = await runnerAdapter.restart(normalizedAgentId);
 
     if (!runnerRestart.ok) {
@@ -1149,6 +1267,65 @@ function isDockerReplacementStartFailure(result: LifecycleRunnerRestartResult): 
   return !result.ok && "replacementStartFailed" in result && result.replacementStartFailed === true;
 }
 
+function selectLifecycleRunnerAdapter(
+  assignedRunner: ManualRunnerRecord | null,
+  dependencies: {
+    createConnection: () => DatabaseConnection;
+    manualRunnerAdapter?: (runner: ManualRunnerRecord) => LifecycleRunnerAdapter;
+    runnerAdapter?: LifecycleRunnerAdapter;
+  },
+): LifecycleRunnerAdapter {
+  if (assignedRunner) {
+    return (
+      dependencies.manualRunnerAdapter?.(assignedRunner) ??
+      getLifecycleManualRunnerAdapter(assignedRunner, {
+        createConnection: dependencies.createConnection,
+      })
+    );
+  }
+
+  return dependencies.runnerAdapter ?? getLifecycleRunnerAdapter();
+}
+
+function toManualRunnerRecordOrNull(
+  row: {
+    id: string | null;
+    userId: string | null;
+    name: string | null;
+    kind: string | null;
+    endpointUrl: string | null;
+    status: string | null;
+    createdAt: Date | null;
+    updatedAt: Date | null;
+    deletedAt: Date | null;
+  } | null,
+): ManualRunnerRecord | null {
+  if (
+    !row?.id ||
+    !row.userId ||
+    !row.name ||
+    row.kind !== MANUAL_RUNNER_KIND ||
+    !row.endpointUrl ||
+    row.status !== ACTIVE_RUNNER_STATUS ||
+    !row.createdAt ||
+    !row.updatedAt
+  ) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    userId: row.userId,
+    name: row.name,
+    kind: MANUAL_RUNNER_KIND,
+    endpointUrl: row.endpointUrl,
+    status: ACTIVE_RUNNER_STATUS,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    deletedAt: row.deletedAt?.toISOString() ?? null,
+  };
+}
+
 function toStartedAgent(agent: typeof agents.$inferSelect): StartedAgent {
   return {
     id: agent.id,
@@ -1239,6 +1416,14 @@ function runnerLifecycleEventMetadata(
 ): Record<string, unknown> {
   if (!result.ok) {
     return {};
+  }
+
+  if ("runner" in result) {
+    return {
+      runnerId: result.runner.id,
+      runnerKind: result.runner.kind,
+      runnerSource: "manual_runner",
+    };
   }
 
   if ("container" in result) {
