@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation";
 import { ActivityFeedPanel } from "@/app/_components/activity-feed";
 import { PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
+import { AgentConfigEditor } from "@/app/agents/_components/agent-config-editor";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { AgentRuntimeLogPanel } from "@/app/agents/_components/agent-runtime-log-panel";
+import { AGENT_NAME_MAX_LENGTH } from "@/src/server/agents/create-agent";
 import {
   AgentDetailPersistenceError,
   getActiveAgentForDevelopmentUser,
@@ -73,7 +75,7 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
       active="agents"
       eyebrow="Agent detail"
       title={agent.name}
-      description="This detail view reads the current persisted lifecycle status, scoped runtime logs, and audit activity for an active local development agent without real runner processes, approvals, or config editing."
+      description="This detail view reads the current persisted lifecycle status, editable local-development config, scoped runtime logs, and audit activity for an active agent."
     >
       <div className="content-grid">
         <PlaceholderPanel title="Agent record">
@@ -125,6 +127,16 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
               </dd>
             </div>
           </dl>
+        </PlaceholderPanel>
+        <PlaceholderPanel title="Configuration">
+          <AgentConfigEditor
+            agentId={agent.id}
+            maxNameLength={AGENT_NAME_MAX_LENGTH}
+            persisted={{
+              name: agent.name,
+              config: agent.config,
+            }}
+          />
         </PlaceholderPanel>
         <AgentRuntimeLogPanel agentId={agent.id} status={agent.status} />
         <ActivityFeedPanel

@@ -2,16 +2,16 @@
 
 ## Milestone 6 Agent Config Editor
 
-- Status: complete for #54/#56; #57 remains open
+- Status: complete for #54/#56; #57 implemented and in validation
 - Source plan: `docs/MILESTONES.md` Milestone 6
-- Tracking issue: #56
-- Current branch: `codex/issue-56-config-update-api`
+- Tracking issue: #57
+- Current branch: `codex/issue-57-config-editor`
 
 ### Issue Checklist
 
 - [x] #54 Add persistent agent config defaults
 - [x] #56 Add validated config update API
-- [ ] #57 Add agent detail config editor
+- [x] #57 Add agent detail config editor
 - Later Milestone 6 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 6 work.
 
 ### Completion Evidence
@@ -29,8 +29,41 @@
 - [x] #56 rejects secret-like keys recursively before mutation and keeps config update event metadata to safe changed-field display values.
 - [x] #56 updates `agents.name` and `agent_configs` atomically, writes exactly one `config.updated` event for effective changes, returns deterministic HTTP 200 no-op responses with `event: null`, and does not write runtime logs.
 - [x] #56 does not add a config editor UI, optimistic UI, template metadata/snapshots, secret storage, real provider/model validation, Hermes config generation, runner/provisioning behavior, billing, auth, or external integrations.
+- [x] #57 extends the active agent detail DTO with the persisted `agent_configs` row so the detail page can render current name, system prompt, model provider, model name, max daily spend, schedule mode, schedule cron, and timezone.
+- [x] #57 adds a user-facing detail configuration editor that saves only through `PATCH /api/agents/:agentId`, sends `maxDailySpend` as a dollar amount, refreshes persisted detail data after accepted saves, and keeps draft edits separate from the saved summary.
+- [x] #57 proves changing model name to `gpt-5.5-mini` and max daily spend to `$2.00` persists across refresh and creates exactly one readable `config.updated` Activity event with model and spend metadata.
+- [x] #57 shows safe client feedback for invalid spend, blank required fields, invalid cron/timezone, malformed or failed save responses, and persistence failures without leaking database URLs, SQL, stack traces, driver details, or secrets.
+- [x] #57 keeps rejected saves and no-op saves from updating the saved config summary or Activity timeline, and no-op saves do not create `config.updated` events.
+- [x] #57 removes detail-page copy that described config editing as future or unavailable, without adding template metadata/snapshots, provider integrations, auth/billing, runner behavior, external services, or #58 final docs acceptance.
 
 ### Validation
+
+#### #57
+
+- Date: 2026-07-04
+- Environment:
+  - Default Postgres port `54329` was occupied by existing Docker container `agentbay-postgres-1`.
+  - Isolated database: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54357/agentbay`.
+  - Isolated app/test server: `PORT=3057`, `PLAYWRIGHT_BASE_URL=http://localhost:3057`, `NEXT_PUBLIC_APP_URL=http://localhost:3057`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree had no local `node_modules`.
+  - `docker run --name agentbay_issue_57-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54357:5432 -d postgres:17-alpine`: pass; started an isolated Postgres service because the default port was occupied.
+- Focused checks:
+  - `bun run test -- tests/unit/root-page.test.tsx tests/unit/update-agent-config-validation.test.ts tests/unit/update-agent-config-route.test.ts`: pass; 3 files and 27 tests passed.
+  - `bun run typecheck`: pass.
+  - `bun run lint`: pass; Biome checked 68 files after the saved config summary was changed to semantic `fieldset` markup.
+  - `bun run test -- tests/unit/create-agent-db.test.ts tests/unit/root-page.test.tsx tests/unit/update-agent-config-validation.test.ts tests/unit/update-agent-config-route.test.ts tests/unit/agent-events.test.ts`: pass with isolated DB env; 5 files and 76 tests passed.
+  - `bun run test:e2e -- --project=chromium-desktop -g "edits config"`: pass with isolated DB/app env; proves no-op, validation rejection, safe failed persistence, persisted `gpt-5.5-mini` and `$2.00` after refresh, exactly one readable `config.updated` event, and no horizontal overflow.
+- Required gates:
+  - `bun run db:migrate`: pass; migrations applied successfully against the isolated database.
+  - `bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+  - `bun run format:check`: pass; Biome checked 68 files.
+  - `bun run lint`: pass; Biome checked 68 files.
+  - `bun run typecheck`: pass.
+  - `bun run test`: pass; 18 files and 137 tests passed.
+  - `bun run build`: pass; Next.js build completed and included `/agents/:agentId` and `/api/agents/:agentId`.
+  - `bun run test:e2e`: pass; 23 browser tests passed with 3 expected skips.
+  - `bun run verify`: pass; aggregate format, lint, typecheck, unit test, build, and E2E gates passed with 137 unit tests and 23 E2E passed / 3 expected skips.
 
 #### #56
 

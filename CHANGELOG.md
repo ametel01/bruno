@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent detail runtime log panel with loading, empty, loaded, and safe error states; scoped polling while running; readable retained logs after stop/error; and Milestone 4 desktop/mobile E2E verification.
 - Persistent `agent_configs` defaults for active agents, including migration backfill and transactional default config creation during `POST /api/agents`.
 - `PATCH /api/agents/:agentId` for validated agent config updates, deterministic no-op responses, integer-cent spend persistence, and one safe `config.updated` event for effective changes.
+- Agent detail config editor for persisted local-development agent configs, including model/spend edits through the validated PATCH API, safe validation failures, refresh-backed saved state, and readable `config.updated` Activity entries.
 
 ### Fixed
 
