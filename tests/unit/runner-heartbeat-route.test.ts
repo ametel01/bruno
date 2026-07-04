@@ -1,0 +1,132 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => {
+  class RunnerHeartbeatPersistenceError extends Error {
+    constructor() {
+      super("Runner heartbeat failed.");
+      this.name = "RunnerHeartbeatPersistenceError";
+    }
+  }
+
+  return {
+    recordRunnerHeartbeat: vi.fn(),
+    RunnerHeartbeatPersistenceError,
+  };
+});
+
+vi.mock("@/src/server/runners/runner-heartbeat", () => ({
+  recordRunnerHeartbeat: mocks.recordRunnerHeartbeat,
+  RunnerHeartbeatPersistenceError: mocks.RunnerHeartbeatPersistenceError,
+}));
+
+describe("POST /runner/v1/heartbeat route", () => {
+  afterEach(() => {
+    mocks.recordRunnerHeartbeat.mockReset();
+  });
+
+  it("returns safe JSON for accepted authenticated heartbeats", async () => {
+    mocks.recordRunnerHeartbeat.mockResolvedValueOnce({
+      ok: true,
+      runner: {
+        id: "00000000-0000-4000-8000-000000000130",
+        status: "online",
+        observedAt: "2026-07-05T08:00:00.000Z",
+      },
+    });
+    const { POST } = await import("@/app/runner/v1/heartbeat/route");
+
+    const response = await POST(
+      new Request("http://localhost/runner/v1/heartbeat", {
+        method: "POST",
+        headers: { authorization: "Bearer agb_run_secret" },
+        body: JSON.stringify({ runnerId: "00000000-0000-4000-8000-000000000130" }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      ok: true,
+      runner: {
+        id: "00000000-0000-4000-8000-000000000130",
+        status: "online",
+        observedAt: "2026-07-05T08:00:00.000Z",
+      },
+    });
+    expect(mocks.recordRunnerHeartbeat).toHaveBeenCalledWith({
+      authorizationHeader: "Bearer agb_run_secret",
+      payload: { runnerId: "00000000-0000-4000-8000-000000000130" },
+    });
+    expect(JSON.stringify(body)).not.toContain("agb_run_secret");
+  });
+
+  it.each([
+    ["missing_credential", 401, "runner_unauthorized"],
+    ["malformed_credential", 401, "runner_unauthorized"],
+    ["invalid_credential", 401, "runner_unauthorized"],
+    ["wrong_runner", 403, "runner_forbidden"],
+  ])("maps %s failures to safe responses", async (reason, status, code) => {
+    mocks.recordRunnerHeartbeat.mockResolvedValueOnce({ ok: false, reason });
+    const { POST } = await import("@/app/runner/v1/heartbeat/route");
+
+    const response = await POST(
+      new Request("http://localhost/runner/v1/heartbeat", {
+        method: "POST",
+        headers: { authorization: "Bearer agb_run_secret" },
+        body: JSON.stringify({ runnerId: "00000000-0000-4000-8000-000000000130" }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(status);
+    expect(body.error.code).toBe(code);
+    expect(JSON.stringify(body)).not.toContain("agb_run_secret");
+  });
+
+  it("returns validation JSON for malformed request bodies", async () => {
+    const { POST } = await import("@/app/runner/v1/heartbeat/route");
+
+    const response = await POST(
+      new Request("http://localhost/runner/v1/heartbeat", {
+        method: "POST",
+        headers: { authorization: "Bearer agb_run_secret" },
+        body: "{",
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({
+      error: {
+        code: "validation_failed",
+        message: "Request validation failed.",
+        issues: [{ field: "body", message: "Request body must be valid JSON." }],
+      },
+    });
+    expect(mocks.recordRunnerHeartbeat).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe persistence error response", async () => {
+    mocks.recordRunnerHeartbeat.mockRejectedValueOnce(new mocks.RunnerHeartbeatPersistenceError());
+    const { POST } = await import("@/app/runner/v1/heartbeat/route");
+
+    const response = await POST(
+      new Request("http://localhost/runner/v1/heartbeat", {
+        method: "POST",
+        headers: { authorization: "Bearer agb_run_secret" },
+        body: JSON.stringify({ runnerId: "00000000-0000-4000-8000-000000000130" }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body).toEqual({
+      error: {
+        code: "runner_heartbeat_failed",
+        message: "Runner heartbeat could not be recorded.",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("postgres://");
+    expect(JSON.stringify(body)).not.toContain("agb_run_secret");
+  });
+});
