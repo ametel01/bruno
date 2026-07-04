@@ -1,6 +1,6 @@
 # AgentBay
 
-AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, and the Milestone 7 pending-approval queue foundation. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, scoped runtime logs, dashboard plus agent-detail pending approvals for local development agents, dashboard approval decision controls, and fake approval generation for running local-development agents.
+AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, and the completed Milestone 7 pending-approval queue workflow. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, scoped runtime logs, dashboard plus agent-detail pending approvals for local development agents, dashboard approval decision controls, and fake approval generation for running local-development agents.
 
 ## Requirements
 
@@ -173,7 +173,7 @@ Validation failures, missing or soft-deleted agents, and persistence failures re
 
 ## Pending Approvals
 
-The dashboard shows pending approval requests persisted in `agent_approvals` for active local-development agents. Each dashboard item displays the agent link, approval title, description, `pending` status, created time, expiry time when present, and an Approve control.
+The dashboard shows pending approval requests persisted in `agent_approvals` for active local-development agents. Each dashboard item displays the agent link, approval title, description, `pending` status, created time, expiry time when present, and Approve/Deny controls.
 
 Dashboard pending approval items include a Deny control. Denying posts to `POST /api/approvals/:approvalId/deny`, resolves one pending approval to `denied`, sets `resolved_by` and `resolved_at`, writes one matching `approval.denied` event in the same transaction, and refreshes the pending queue so the resolved row disappears.
 
@@ -189,7 +189,7 @@ Repeated deny requests against a denied or otherwise resolved approval return HT
 
 Only `pending` approvals for active, non-deleted agents owned by the local development user appear in approval queues. Resolved approvals with `approved`, `denied`, `expired`, or `cancelled` status, approvals for other agents on a selected detail page, soft-deleted-agent approvals, stopped/non-running-agent approvals, and other-user approvals are excluded from the pending queues or fake generation path. Repeated observations of the same running segment/action do not create duplicate approval rows or duplicate `approval.requested` events. Repeated approval or deny attempts against an already resolved approval do not create duplicate decision events.
 
-Approval payload execution and real provider action dispatch remain future Milestone 7 scope.
+Approval payload execution and real provider action dispatch remain future milestone scope.
 
 ## Lifecycle APIs
 

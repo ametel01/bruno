@@ -2,10 +2,10 @@
 
 ## Milestone 7 Approval Queue
 
-- Status: complete for #59/#60/#61/#62/#63; #64 remains pending
+- Status: complete for #59/#60/#61/#62/#63/#64
 - Source plan: `docs/MILESTONES.md` Milestone 7
 - Tracking issues: #59-#64
-- Current branch: `codex/issue-61-deny-approvals`
+- Current branch: `codex/issue-64-m7-acceptance`
 
 ### Issue Checklist
 
@@ -14,7 +14,7 @@
 - [x] #61 Deny pending approvals end to end
 - [x] #62 Show pending approvals on agent detail
 - [x] #63 Generate fake approvals for running agents
-- [ ] #64 Verify Milestone 7 approval queue acceptance
+- [x] #64 Verify Milestone 7 approval queue acceptance
 - Later Milestone 7 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 7 work.
 
 ### Completion Evidence
@@ -48,8 +48,30 @@
 - [x] #61 returns the reusable `approval_already_resolved` conflict shape with a safe current status for denied or otherwise resolved approvals and writes no duplicate decision events.
 - [x] #61 adds dashboard Deny controls for pending approvals with safe requesting/error/success states; successful denial refreshes the dashboard pending queue and removes the resolved row.
 - [x] #61 keeps approve behavior, payload execution, raw `payload_json`, SQL/driver details, stacks, credentials, provider internals, and new schema/migration changes out of scope.
+- [x] #64 adds final Milestone 7 acceptance coverage proving the same active non-deleted local-development agent's pending approvals are visible on `/dashboard` and `/agents/:agentId` without raw payloads, SQL/driver details, database URLs, stacks, credentials, or provider internals.
+- [x] #64 proves approving a pending approval resolves it to `approved`, removes it from pending approval queues, and leaves exactly one `approval.approved` event.
+- [x] #64 proves denying a pending approval resolves it to `denied`, removes it from pending approval queues, and leaves exactly one `approval.denied` event.
+- [x] #64 proves repeated approve and deny requests against already resolved approved or denied approvals return the shared `approval_already_resolved` conflict shape and do not create duplicate decision events.
+- [x] #64 closes Milestone 7 acceptance without adding schema, migrations, dependencies, lockfile changes, provider execution, runner behavior, auth, billing, secrets, or mobile-specific approval flows.
 
 ### Validation
+
+#### #64
+
+- Date: 2026-07-04
+- Environment:
+  - Isolated database: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54364/agentbay`.
+  - Isolated app/test server: `PORT=3064`, `PLAYWRIGHT_BASE_URL=http://localhost:3064`, `NEXT_PUBLIC_APP_URL=http://localhost:3064`.
+- Focused checks:
+  - `bun run test:e2e -- --project=chromium-desktop -g "Milestone 7 acceptance"`: pass with isolated DB/app env; 1 Chromium desktop test passed. Covers dashboard and agent-detail visibility for the same active local-development agent, approve resolution to `approved`, deny resolution to `denied`, pending queue removal for both seeded approval rows, exactly one `approval.approved` event, exactly one `approval.denied` event, shared `approval_already_resolved` responses for repeated approve/deny against resolved approvals, no duplicate decision events, and safe UI/API output without raw payloads, SQL/driver details, database URLs, stacks, credentials, or provider internals.
+- Required gates:
+  - `bun run format:check`: pass; Biome checked 76 files.
+  - `bun run lint`: pass; Biome checked 76 files.
+  - `bun run typecheck`: pass.
+  - `bun run test`: pass with isolated DB/app env; 20 files and 173 tests passed.
+  - `bun run build`: pass; Next.js build completed and included `/api/approvals/[approvalId]/approve`, `/api/approvals/[approvalId]/deny`, `/dashboard`, and `/agents/[agentId]`.
+  - `bun run test:e2e`: pass with isolated DB/app env; 30 browser tests passed with 10 expected skips.
+  - `bun run verify`: pass with isolated DB/app env; aggregate format, lint, typecheck, unit test, build, and E2E gates passed with 173 unit tests and 30 E2E passed / 10 expected skips.
 
 #### #60
 
