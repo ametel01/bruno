@@ -285,7 +285,8 @@
 - #80 treats selected-agent containers that already exited with code `0` as clean stop targets, so intentional Docker stops do not become false crash reconciliation or stop-failure states.
 - #80 regression coverage proves one agent's Docker crash or cleanup does not change another agent's container, status, events, or logs.
 - #81 adds a final real-Docker Playwright acceptance smoke that drives product APIs, verifies exact Docker labels/statuses, proves selected-agent start/restart/stop/log/crash/delete cleanup isolation with a sibling agent still running, and exercises delete fail-closed behavior with a mismatched stored container target.
-- #81 updates shared E2E teardown to remove labeled AgentBay Docker containers for tracked test agents, and final validation cleaned all remaining labeled AgentBay Docker containers after full E2E/verify.
+- #81 fixes a Docker target-selection bug found by the final smoke: unqualified lifecycle/maintenance operations now prefer a selected-agent `running` Docker row before falling back to the latest observed row, so stop/restart/cleanup do not target an older cleanly exited container while a replacement is still running.
+- #81 updates shared E2E teardown to remove labeled AgentBay Docker containers for tracked test agents with verified cleanup, and final validation confirmed no labeled AgentBay Docker containers remained after full verify.
 - #81 marks Milestone 10 completed in `docs/MILESTONES.md`.
 - #81 keeps `CHANGELOG.md` and README unchanged because it adds final validation/tracking coverage only; the shipped Docker behavior already has qualifying changelog entries and Docker/E2E prerequisites are already discoverable.
 
@@ -336,16 +337,18 @@
 - Focused acceptance smoke:
   - First run of `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay PORT=3081 PLAYWRIGHT_BASE_URL=http://localhost:3081 NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run test:e2e -- tests/e2e/root-route.spec.ts --project=chromium-desktop --grep "Docker runner final acceptance" --workers=1`: failed in the test tamper helper because deleting a Docker metadata row violated the expected `agent_logs` FK. Product behavior was not implicated; the helper now detaches the sibling DB row to a synthetic ID before pointing the tampered agent at the sibling's real container.
   - After resetting the #81 DB and cleaning labeled containers, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay PORT=3081 PLAYWRIGHT_BASE_URL=http://localhost:3081 NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run test:e2e -- tests/e2e/root-route.spec.ts --project=chromium-desktop --grep "Docker runner final acceptance" --workers=1`: pass; 1 Chromium desktop test passed and covered selected-agent start, restart, stop, logs, real Docker crash reconciliation, delete cleanup, sibling-container isolation, and fail-closed cleanup.
+- Checker-fix product regression:
+  - Focused `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run test -- tests/unit/create-agent-db.test.ts -t "docker runner adapter stops the running replacement"`: pass; proves `DockerRunnerAdapter.stop()` targets an older `running` replacement row even when an exited row has a newer `observedAt`.
 - Required gates:
   - `bun run format:check`: pass; Biome checked 89 files.
   - `bun run lint`: pass; Biome checked 89 files.
   - `bun run typecheck`: pass; `tsc --noEmit` passed.
-  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run test`: pass; 24 files and 223 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run test`: pass; 24 files and 224 tests passed.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay PORT=3081 PLAYWRIGHT_BASE_URL=http://localhost:3081 NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run build`: pass; Next.js production build completed and included dashboard, agent detail, lifecycle actions, logs, approvals, health, and settings routes.
   - After resetting the #81 DB and cleaning labeled containers, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay PORT=3081 PLAYWRIGHT_BASE_URL=http://localhost:3081 NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run test:e2e`: pass; full browser suite passed with 39 tests and 19 expected skips.
-  - After resetting the #81 DB and cleaning labeled containers, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay PORT=3081 PLAYWRIGHT_BASE_URL=http://localhost:3081 NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run verify`: pass; aggregate format, lint, typecheck, unit test, production build, and Playwright gates passed with 223 unit tests and 39 E2E passed / 19 expected skips.
+  - After resetting the #81 DB and cleaning labeled containers, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay PORT=3081 PLAYWRIGHT_BASE_URL=http://localhost:3081 NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run verify`: pass; aggregate format, lint, typecheck, unit test, production build, and Playwright gates passed with 224 unit tests and 39 E2E passed / 19 expected skips.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54381/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3081 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
-  - Final cleanup: `docker rm --force $(docker ps -a --quiet --filter label=agentbay.agent_id)` removed the remaining labeled AgentBay containers left by full E2E/verify runs, and a follow-up `docker ps -a --filter label=agentbay.agent_id --format '{{.ID}} {{.Names}} {{.Labels}}'` returned no rows.
+  - Final cleanup: `docker ps -a --filter label=agentbay.agent_id --format '{{.ID}} {{.Names}} {{.Labels}}'`: pass; returned no rows after full verify and Docker teardown settled.
 - Acceptance evidence map:
   - Start creates one selected-agent Docker container: `tests/e2e/root-route.spec.ts` final acceptance smoke starts primary/sibling agents through product APIs, counts one labeled container per agent, and inspects exact Docker labels/statuses.
   - Stop targets only that container: the smoke stops the primary, checks the selected primary container is `exited`, and verifies the sibling container remains running.
@@ -353,7 +356,7 @@
   - Logs remain isolated by agent: the smoke reads product log APIs for each agent and asserts each log body contains only that agent's Docker dummy-runner ID line.
   - Crash changes status to `error`: the smoke kills the selected primary container, triggers product detail reconciliation, polls status to `error`, and verifies the Docker crash log.
   - Cleanup removes only the selected exact container and fails closed: the smoke deletes the crashed primary and proves the sibling remains running; then it tampers a stored container target, verifies delete returns safe `agent_delete_failed`, the tampered agent remains active, and both involved real containers remain.
-  - Cleanup hygiene: E2E teardown now removes labeled Docker containers for tracked test agents, and the final builder cleanup removed all remaining labeled AgentBay containers after validation.
+  - Cleanup hygiene: E2E teardown now removes labeled Docker containers for tracked test agents, verifies exact-ID/label cleanup, and the final post-verify Docker label check returned no rows.
 - Changelog/docs scope:
   - `CHANGELOG.md` intentionally unchanged for #81 because this issue adds final validation coverage/tracking only; Docker runner behavior entries already exist from #77-#80.
   - README intentionally unchanged because Docker is already listed as a prerequisite and E2E/local validation commands are documented.

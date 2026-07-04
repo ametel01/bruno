@@ -256,12 +256,23 @@ export async function getDockerRunnerContainerForDevelopmentUser(input: {
       predicates.push(eq(dockerRunnerContainers.containerId, input.containerId));
     }
 
+    const targetOrder =
+      input.containerId === undefined
+        ? [
+            desc(
+              sql<number>`case when ${dockerRunnerContainers.observedStatus} = 'running' then 1 else 0 end`,
+            ),
+            desc(dockerRunnerContainers.observedAt),
+            desc(dockerRunnerContainers.createdAt),
+          ]
+        : [desc(dockerRunnerContainers.observedAt), desc(dockerRunnerContainers.createdAt)];
+
     const [containerRow] = await tx
       .select(dockerContainerSelection)
       .from(dockerRunnerContainers)
       .innerJoin(agents, eq(agents.id, dockerRunnerContainers.agentId))
       .where(and(...predicates))
-      .orderBy(desc(dockerRunnerContainers.observedAt), desc(dockerRunnerContainers.createdAt))
+      .orderBy(...targetOrder)
       .limit(1);
 
     return containerRow ? mapDockerRunnerContainerToDto(containerRow) : null;
