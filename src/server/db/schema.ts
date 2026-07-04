@@ -29,6 +29,14 @@ export const agentStatusEnum = pgEnum("agent_status", [
 
 export const agentScheduleModeEnum = pgEnum("agent_schedule_mode", ["manual", "cron"]);
 
+export const agentApprovalStatusEnum = pgEnum("agent_approval_status", [
+  "pending",
+  "approved",
+  "denied",
+  "expired",
+  "cancelled",
+]);
+
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -107,3 +115,19 @@ export const agentLogs = pgTable(
     uniqueIndex("agent_logs_agent_sequence_idx").on(table.agentId, table.sequence),
   ],
 );
+
+export const agentApprovals = pgTable("agent_approvals", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  agentId: uuid("agent_id")
+    .notNull()
+    .references(() => agents.id),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  status: agentApprovalStatusEnum("status").notNull().default("pending"),
+  payloadJson: jsonb("payload_json").$type<Record<string, unknown>>().notNull(),
+  requestedBy: text("requested_by").notNull(),
+  resolvedBy: text("resolved_by"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+});

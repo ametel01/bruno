@@ -1,6 +1,6 @@
 # AgentBay
 
-AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice plus the completed Milestone 6 local-development config editor workflow. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, and scoped runtime logs for local development agents.
+AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, and the first Milestone 7 pending-approval queue foundation. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, scoped runtime logs, and dashboard pending approvals for local development agents.
 
 ## Requirements
 
@@ -60,10 +60,12 @@ The migration set creates the local application metadata table plus the persiste
 - `agent_configs`: one typed config row per active agent with system prompt, model provider, model name, integer-cent daily spend cap, schedule mode, optional cron, timezone, and timestamps.
 - `agent_events`: transactional audit events for agent creation, config updates, fake lifecycle transitions, dashboard activity, and per-agent activity.
 - `agent_logs`: runtime log rows with nullable runner identity, static stream/level/message fields, and per-agent positive sequence values.
+- `agent_approvals`: pending and resolved approval request rows scoped to an agent, with title, description, lifecycle status, downstream payload JSON, requester, nullable resolver, creation, resolution, and expiry timestamps.
 - `agent_status`: Postgres enum used by `agents.status`.
 - `agent_schedule_mode`: Postgres enum used by `agent_configs.schedule_mode`.
+- `agent_approval_status`: Postgres enum with `pending`, `approved`, `denied`, `expired`, and `cancelled`.
 
-The migrations do not create approval, runner, billing, auth, Hermes, Telegram, secrets, provisioning, or provider integration tables.
+The migrations do not create runner, billing, auth, Hermes, Telegram, secrets, provisioning, or provider integration tables.
 
 ## Development Server
 
@@ -102,7 +104,7 @@ The `/agents` page contains the current create/list and fake lifecycle workflow:
 
 The dashboard reads active persisted agents from the database. The detail page loads active persisted agent records by ID and returns not found for missing, malformed, or soft-deleted IDs. Delete preserves the `agents` row and existing `agent_events`, but removes the agent from `/agents`, `/dashboard`, and active detail reads.
 
-Agent records are local-development records only. Lifecycle controls, runtime logs, and the detail config editor use deterministic database state and the validated local update API, not real runner processes or provider integrations. Approvals, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
+Agent records are local-development records only. Lifecycle controls, runtime logs, the detail config editor, and the dashboard pending approvals panel use deterministic database state and local read/write paths, not real runner processes or provider integrations. Approval decisions, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
 
 ## Agent Detail Config Editor
 
@@ -169,6 +171,16 @@ Accepted no-op requests return HTTP 200 with `ok: true`, `noOp: true`, the persi
 
 Validation failures, missing or soft-deleted agents, and persistence failures return safe JSON without database URLs, SQL errors, stack traces, driver messages, or secret values.
 
+## Pending Approvals
+
+The dashboard shows pending approval requests persisted in `agent_approvals` for active local-development agents. Each item displays the agent link, approval title, description, `pending` status, created time, and expiry time when present.
+
+Approval rows store `payload_json` for downstream decision slices, but the dashboard does not render raw payload JSON, database internals, SQL, driver messages, stack traces, credentials, or environment values.
+
+Only `pending` approvals for active, non-deleted agents owned by the local development user appear in the dashboard queue. Resolved approvals with `approved`, `denied`, `expired`, or `cancelled` status, soft-deleted-agent approvals, and other-user approvals are excluded from the pending queue.
+
+Approve and deny routes, decision controls, decision event writes, agent-detail approval sections, and fake runner approval generation are future Milestone 7 slices.
+
 ## Lifecycle APIs
 
 The current fake lifecycle APIs are:
@@ -212,7 +224,7 @@ Current audit event inventory:
 - `agent.deleted`
 - `config.updated`
 
-Future milestones may add approval, runner, backup, restore, billing, and Hermes-related audit event types. Those future audit events should continue to describe control-plane facts, while high-volume runtime output remains separate log data.
+Future milestones may add approval decision, runner, backup, restore, billing, and Hermes-related audit event types. Those future audit events should continue to describe control-plane facts, while high-volume runtime output remains separate log data.
 
 ## Runtime Logs
 
@@ -397,6 +409,6 @@ Milestone 4 is complete when:
 - Browser coverage proves runtime logs stay scoped to the selected agent, visible rows remain readable after Stop, polling/generation does not append after Stop or Simulate error, and `agent.error` appears in the detail activity feed.
 - Browser coverage proves create and lifecycle activity appears in both the dashboard latest activity feed and the agent detail activity feed.
 - Soft delete removes agents from `/agents`, `/dashboard`, and active detail reads while preserving the database row and prior events.
-- The agent detail config editor updates local-development config fields; approvals, runner APIs, real runner/provisioning behavior, Hermes, Telegram, billing, production auth, secret storage, backups, restore, and cloud provisioning remain out of scope.
+- The agent detail config editor updates local-development config fields and the dashboard renders persisted pending approvals; approval decisions, runner APIs, real runner/provisioning behavior, Hermes, Telegram, billing, production auth, secret storage, backups, restore, and cloud provisioning remain out of scope.
 - `.env.example` documents every required local/deploy variable without secrets.
 - `bun run format:check`, `bun run lint`, `bun run typecheck`, `bun run test`, `bun run db:migrate`, `bun run db:health`, `bun run build`, `bun run test:e2e`, and `bun run verify` pass against a migrated local database.

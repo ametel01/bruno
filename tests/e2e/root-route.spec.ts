@@ -43,6 +43,48 @@ test("/health returns reachable database JSON in the browser", async ({ page }) 
   await expect(page.locator("body")).toContainText('"database":"reachable"');
 });
 
+test("/dashboard shows persisted pending approvals for active agents", async ({
+  isMobile,
+  page,
+  request,
+}, testInfo) => {
+  test.skip(isMobile, "dashboard approval persistence proof runs once on desktop");
+
+  const name = `Approval Queue Agent ${testInfo.project.name}`;
+  const created = await createAgent(request, name);
+  createdAgentIds.add(created.id);
+  const createdAt = "2026-07-04T08:15:00.000Z";
+  const expiresAt = "2026-07-04T09:15:00.000Z";
+
+  await pinDevelopmentUserToAgent(created.id);
+  await insertPendingApproval(created.id, {
+    title: "Review outbound message",
+    description: "Approve the drafted Telegram summary before it is sent.",
+    createdAt,
+    expiresAt,
+  });
+
+  await page.goto("/dashboard");
+
+  const approvalPanel = page.locator(".approval-panel");
+  await expect(approvalPanel).toContainText("Pending approvals");
+  await expect(approvalPanel).toContainText("1 pending");
+  await expect(approvalPanel.getByRole("link", { name })).toHaveAttribute(
+    "href",
+    `/agents/${created.id}`,
+  );
+  await expect(approvalPanel).toContainText("Review outbound message");
+  await expect(approvalPanel).toContainText(
+    "Approve the drafted Telegram summary before it is sent.",
+  );
+  await expect(approvalPanel.locator(".status-pill", { hasText: "pending" })).toBeVisible();
+  await expect(approvalPanel).toContainText(createdAt);
+  await expect(approvalPanel).toContainText(expiresAt);
+  await expect(approvalPanel).not.toContainText("payload_json");
+  await expect(approvalPanel).not.toContainText("stored-for-downstream-not-rendered");
+  await expect(approvalPanel).not.toContainText("postgres://");
+});
+
 test("/agents creates Research Agent and persists it across read surfaces", async ({
   isMobile,
   page,
@@ -513,8 +555,61 @@ async function insertRuntimeLog(agentId: string, message: string): Promise<void>
   });
 }
 
+async function insertPendingApproval(
+  agentId: string,
+  approval: {
+    title: string;
+    description: string;
+    createdAt: string;
+    expiresAt: string;
+  },
+): Promise<void> {
+  await withDatabase(async (sql) => {
+    await sql`
+      insert into agent_approvals (
+        agent_id,
+        title,
+        description,
+        status,
+        payload_json,
+        requested_by,
+        created_at,
+        expires_at
+      )
+      values (
+        ${agentId},
+        ${approval.title},
+        ${approval.description},
+        'pending',
+        ${sql.json({ token: "stored-for-downstream-not-rendered" })},
+        'fake-runner',
+        ${approval.createdAt},
+        ${approval.expiresAt}
+      )
+    `;
+  });
+}
+
+async function pinDevelopmentUserToAgent(agentId: string): Promise<void> {
+  await withDatabase(async (sql) => {
+    const [agent] = await sql<{ user_id: string }[]>`
+      select user_id from agents where id = ${agentId} limit 1
+    `;
+
+    expect(agent).toBeDefined();
+    await sql`
+      insert into app_metadata (key, value)
+      values ('local_development_user_id', ${agent?.user_id ?? ""})
+      on conflict (key) do update
+      set value = excluded.value,
+          updated_at = now()
+    `;
+  });
+}
+
 async function deleteCreatedAgents(agentIds: string[]): Promise<void> {
   await withDatabase(async (sql) => {
+    await sql`delete from agent_approvals where agent_id in ${sql(agentIds)}`;
     await sql`delete from agent_logs where agent_id in ${sql(agentIds)}`;
     await sql`delete from agent_events where agent_id in ${sql(agentIds)}`;
     await sql`delete from agent_configs where agent_id in ${sql(agentIds)}`;

@@ -1,11 +1,10 @@
-import { asc, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
-import { agentConfigs, agents, appMetadata, users } from "@/src/server/db/schema";
+import { agentConfigs, agents } from "@/src/server/db/schema";
 import { recordAgentEventInTransaction } from "@/src/server/events/agent-events";
+import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
 
-const DEVELOPMENT_USER_METADATA_KEY = "local_development_user_id";
 export const AGENT_NAME_MAX_LENGTH = 120;
 export const DEFAULT_AGENT_CONFIG = {
   systemPrompt:
@@ -202,62 +201,6 @@ function isSupportedTemplateKey(value: unknown): value is SupportedAgentTemplate
     typeof value === "string" &&
     SUPPORTED_AGENT_TEMPLATE_KEYS.includes(value as SupportedAgentTemplateKey)
   );
-}
-
-async function getOrCreateDevelopmentUserId(tx: AgentTransaction): Promise<string> {
-  const [developmentUserPointer] = await tx
-    .select({ value: appMetadata.value })
-    .from(appMetadata)
-    .where(eq(appMetadata.key, DEVELOPMENT_USER_METADATA_KEY))
-    .limit(1);
-
-  if (developmentUserPointer) {
-    const [metadataUser] = await tx
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.id, developmentUserPointer.value))
-      .limit(1);
-
-    if (metadataUser) {
-      return metadataUser.id;
-    }
-  }
-
-  const [existingUser] = await tx
-    .select({ id: users.id })
-    .from(users)
-    .orderBy(asc(users.createdAt))
-    .limit(1);
-
-  if (existingUser) {
-    await rememberDevelopmentUserId(tx, existingUser.id);
-    return existingUser.id;
-  }
-
-  const [createdUser] = await tx.insert(users).values({}).returning({ id: users.id });
-
-  if (!createdUser) {
-    throw new Error("Development user insert returned no rows.");
-  }
-
-  await rememberDevelopmentUserId(tx, createdUser.id);
-  return createdUser.id;
-}
-
-async function rememberDevelopmentUserId(tx: AgentTransaction, userId: string): Promise<void> {
-  await tx
-    .insert(appMetadata)
-    .values({
-      key: DEVELOPMENT_USER_METADATA_KEY,
-      value: userId,
-    })
-    .onConflictDoUpdate({
-      target: appMetadata.key,
-      set: {
-        value: userId,
-        updatedAt: new Date(),
-      },
-    });
 }
 
 async function insertDefaultConfigForCreatedAgent(

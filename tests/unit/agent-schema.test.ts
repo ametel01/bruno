@@ -3,6 +3,8 @@ import { getTableColumns, getTableName } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import {
   agentConfigs,
+  agentApprovals,
+  agentApprovalStatusEnum,
   agentEvents,
   agentLogs,
   agentScheduleModeEnum,
@@ -18,6 +20,7 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(getTableName(users)).toBe("users");
     expect(getTableName(agents)).toBe("agents");
     expect(getTableName(agentConfigs)).toBe("agent_configs");
+    expect(getTableName(agentApprovals)).toBe("agent_approvals");
     expect(getTableName(agentEvents)).toBe("agent_events");
     expect(getTableName(agentLogs)).toBe("agent_logs");
     expect(agentStatusEnum.enumValues).toEqual([
@@ -30,6 +33,13 @@ describe("Milestone 1 agent persistence schema", () => {
       "deleting",
     ]);
     expect(agentScheduleModeEnum.enumValues).toEqual(["manual", "cron"]);
+    expect(agentApprovalStatusEnum.enumValues).toEqual([
+      "pending",
+      "approved",
+      "denied",
+      "expired",
+      "cancelled",
+    ]);
   });
 
   it("keeps agent records owned, stopped by default, timestamped, and soft deletable", () => {
@@ -135,6 +145,37 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.createdAt.notNull).toBe(true);
   });
 
+  it("defines pending approval rows without exposing raw payload through display contracts", () => {
+    const columns = getTableColumns(agentApprovals);
+
+    expect(Object.keys(columns)).toEqual([
+      "id",
+      "agentId",
+      "title",
+      "description",
+      "status",
+      "payloadJson",
+      "requestedBy",
+      "resolvedBy",
+      "createdAt",
+      "resolvedAt",
+      "expiresAt",
+    ]);
+    expect(columns.id.notNull).toBe(true);
+    expect(columns.agentId.notNull).toBe(true);
+    expect(columns.title.notNull).toBe(true);
+    expect(columns.description.notNull).toBe(true);
+    expect(columns.status.notNull).toBe(true);
+    expect(columns.status.default).toBe("pending");
+    expect(columns.payloadJson.notNull).toBe(true);
+    expect(columns.payloadJson.dataType).toBe("json");
+    expect(columns.requestedBy.notNull).toBe(true);
+    expect(columns.resolvedBy.notNull).toBe(false);
+    expect(columns.createdAt.notNull).toBe(true);
+    expect(columns.resolvedAt.notNull).toBe(false);
+    expect(columns.expiresAt.notNull).toBe(false);
+  });
+
   it("generates a migration for the enum and Milestone 1 tables without changing app_metadata", async () => {
     const migration = await readFile("drizzle/0001_optimal_texas_twister.sql", "utf8");
 
@@ -196,5 +237,40 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(migration).not.toContain('DROP TABLE "agent_logs"');
     expect(migration).not.toContain('DROP TABLE "users"');
     expect(migration).not.toContain('DROP TABLE "app_metadata"');
+  });
+
+  it("generates an additive agent_approvals migration with exact lifecycle statuses", async () => {
+    const migration = await readFile("drizzle/0004_careless_santa_claus.sql", "utf8");
+
+    expect(migration).toContain('CREATE TYPE "public"."agent_approval_status"');
+    expect(migration).toContain("'pending'");
+    expect(migration).toContain("'approved'");
+    expect(migration).toContain("'denied'");
+    expect(migration).toContain("'expired'");
+    expect(migration).toContain("'cancelled'");
+    expect(migration).toContain('CREATE TABLE "agent_approvals"');
+    expect(migration).toContain('"agent_id" uuid NOT NULL');
+    expect(migration).toContain('"title" text NOT NULL');
+    expect(migration).toContain('"description" text NOT NULL');
+    expect(migration).toContain('"status" "agent_approval_status" DEFAULT \'pending\' NOT NULL');
+    expect(migration).toContain('"payload_json" jsonb NOT NULL');
+    expect(migration).toContain('"requested_by" text NOT NULL');
+    expect(migration).toContain('"resolved_by" text');
+    expect(migration).toContain('"created_at" timestamp with time zone DEFAULT now() NOT NULL');
+    expect(migration).toContain('"resolved_at" timestamp with time zone');
+    expect(migration).toContain('"expires_at" timestamp with time zone');
+    expect(migration).toContain('FOREIGN KEY ("agent_id") REFERENCES "public"."agents"("id")');
+    expect(migration).not.toContain('DROP TABLE "agents"');
+    expect(migration).not.toContain('DROP TABLE "agent_events"');
+    expect(migration).not.toContain('DROP TABLE "agent_logs"');
+    expect(migration).not.toContain('DROP TABLE "agent_configs"');
+    expect(migration).not.toContain('DROP TABLE "users"');
+    expect(migration).not.toContain('DROP TABLE "app_metadata"');
+    expect(migration).not.toContain('ALTER TABLE "agents"');
+    expect(migration).not.toContain('ALTER TABLE "agent_events"');
+    expect(migration).not.toContain('ALTER TABLE "agent_logs"');
+    expect(migration).not.toContain('ALTER TABLE "agent_configs"');
+    expect(migration).not.toContain('ALTER TABLE "users"');
+    expect(migration).not.toContain('ALTER TABLE "app_metadata"');
   });
 });

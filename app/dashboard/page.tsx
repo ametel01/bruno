@@ -6,6 +6,11 @@ import {
   AgentListPersistenceError,
   listActiveAgentsForDevelopmentUser,
 } from "@/src/server/agents/list-agents";
+import {
+  AgentApprovalPersistenceError,
+  listPendingApprovalsForDevelopmentUser,
+  type PendingApprovalDto,
+} from "@/src/server/approvals/agent-approvals";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { listLatestAgentActivity } from "@/src/server/events/agent-events";
 
@@ -15,22 +20,32 @@ type DashboardContentProps = {
 
 type DashboardAgentResult = Awaited<ReturnType<typeof loadDashboardAgents>>;
 type DashboardActivityResult = Awaited<ReturnType<typeof loadDashboardActivity>>;
+type DashboardApprovalsResult = Awaited<ReturnType<typeof loadDashboardApprovals>>;
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const listResult = await loadDashboardAgents();
   const activityResult = await loadDashboardActivity();
+  const approvalsResult = await loadDashboardApprovals();
 
-  return <DashboardContent activityResult={activityResult} listResult={listResult} />;
+  return (
+    <DashboardContent
+      activityResult={activityResult}
+      approvalsResult={approvalsResult}
+      listResult={listResult}
+    />
+  );
 }
 
 export function DashboardContent({
   activityResult = { ok: true, events: [] },
+  approvalsResult = { ok: true, approvals: [] },
   routeLabel = "Dashboard",
   listResult = { ok: true, agents: [] },
 }: DashboardContentProps & {
   activityResult?: DashboardActivityResult;
+  approvalsResult?: DashboardApprovalsResult;
   listResult?: DashboardAgentResult;
 }) {
   return (
@@ -38,7 +53,7 @@ export function DashboardContent({
       active="dashboard"
       eyebrow={routeLabel}
       title="Operational dashboard"
-      description="A control surface for persisted agent records with deterministic fake lifecycle status and without real runner processes or approvals."
+      description="A control surface for persisted agent records, pending approval requests, deterministic fake lifecycle status, and local development activity."
     >
       <div className="content-grid">
         <section className="agent-list-panel" aria-labelledby="dashboard-agents-title">
@@ -102,6 +117,7 @@ export function DashboardContent({
           title="Latest activity"
           titleId="dashboard-activity-title"
         />
+        <PendingApprovalsPanel result={approvalsResult} />
         <PlaceholderPanel title="Readiness">
           <dl className="definition-list">
             <div>
@@ -126,12 +142,73 @@ export function DashboardContent({
             </li>
             <li>Runner provisioning and external integrations are placeholders only.</li>
             <li>
-              Approvals, production runners, billing, and secret storage wait for later milestones.
+              Approval decisions, production runners, billing, and secret storage wait for later
+              milestones.
             </li>
           </ul>
         </PlaceholderPanel>
       </div>
     </ProductShell>
+  );
+}
+
+function PendingApprovalsPanel({ result }: { result: DashboardApprovalsResult }) {
+  return (
+    <section className="approval-panel" aria-labelledby="dashboard-approvals-title">
+      <div className="section-heading">
+        <h2 id="dashboard-approvals-title">Pending approvals</h2>
+        {result.ok ? <span>{result.approvals.length} pending</span> : null}
+      </div>
+      {result.ok ? (
+        result.approvals.length > 0 ? (
+          <ol className="approval-list">
+            {result.approvals.map((approval) => (
+              <PendingApprovalItem approval={approval} key={approval.id} />
+            ))}
+          </ol>
+        ) : (
+          <div className="activity-empty-state">
+            <h3>No pending approvals</h3>
+            <p>Persisted approval requests for active agents will appear here.</p>
+          </div>
+        )
+      ) : (
+        <div className="safe-error" role="alert">
+          Pending approvals could not be loaded.
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PendingApprovalItem({ approval }: { approval: PendingApprovalDto }) {
+  return (
+    <li className="approval-item">
+      <div className="approval-item-header">
+        <div>
+          <Link href={approval.agentHref}>{approval.agentName}</Link>
+          <h3>{approval.title}</h3>
+        </div>
+        <span className="status-pill">{approval.status}</span>
+      </div>
+      <p>{approval.description}</p>
+      <dl className="approval-metadata">
+        <div>
+          <dt>Created</dt>
+          <dd>
+            <time dateTime={approval.createdAt}>{approval.createdAt}</time>
+          </dd>
+        </div>
+        {approval.expiresAt ? (
+          <div>
+            <dt>Expires</dt>
+            <dd>
+              <time dateTime={approval.expiresAt}>{approval.expiresAt}</time>
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+    </li>
   );
 }
 
@@ -182,5 +259,22 @@ async function loadDashboardActivity(
     if (ownsConnection) {
       await connection.close();
     }
+  }
+}
+
+async function loadDashboardApprovals() {
+  try {
+    return {
+      ok: true as const,
+      approvals: await listPendingApprovalsForDevelopmentUser(),
+    };
+  } catch (error) {
+    if (error instanceof AgentApprovalPersistenceError) {
+      return {
+        ok: false as const,
+      };
+    }
+
+    throw error;
   }
 }
