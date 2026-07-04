@@ -1,4 +1,10 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type APIResponse,
+  type Page,
+} from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 
@@ -289,6 +295,123 @@ test.describe
       await expect(approvalPanel).not.toContainText("payload_json");
       await expect(approvalPanel).not.toContainText("stored-for-downstream-not-rendered");
       await expect(approvalPanel).not.toContainText("postgres://");
+    });
+
+    test("Milestone 7 acceptance covers visibility, decisions, events, and duplicate conflicts", async ({
+      isMobile,
+      page,
+      request,
+    }, testInfo) => {
+      test.skip(isMobile, "final Milestone 7 approval acceptance proof runs once on desktop");
+
+      const name = `Milestone 7 Acceptance Agent ${testInfo.project.name}`;
+      const created = await createAgent(request, name);
+      createdAgentIds.add(created.id);
+
+      await pinDevelopmentUserToAgent(created.id);
+      const approvalToApproveId = await insertPendingApproval(created.id, {
+        title: "Approve final acceptance action",
+        description: "Approve this final Milestone 7 queued action.",
+        createdAt: "2026-07-04T10:00:00.000Z",
+        expiresAt: "2026-07-04T11:00:00.000Z",
+      });
+      const approvalToDenyId = await insertPendingApproval(created.id, {
+        title: "Deny final acceptance action",
+        description: "Deny this final Milestone 7 queued action.",
+        createdAt: "2026-07-04T10:05:00.000Z",
+        expiresAt: "2026-07-04T11:05:00.000Z",
+      });
+
+      await pinDevelopmentUserToAgent(created.id);
+      await page.goto("/dashboard");
+      const dashboardApprovalPanel = page.locator(".approval-panel");
+      await expect(dashboardApprovalPanel).toContainText("Pending approvals");
+      await expect(dashboardApprovalPanel.getByRole("link", { name }).first()).toHaveAttribute(
+        "href",
+        `/agents/${created.id}`,
+      );
+      await expect(dashboardApprovalPanel).toContainText("Approve final acceptance action");
+      await expect(dashboardApprovalPanel).toContainText("Deny final acceptance action");
+      await expect(dashboardApprovalPanel).not.toContainText("payload_json");
+      await expect(dashboardApprovalPanel).not.toContainText("stored-for-downstream-not-rendered");
+      await expect(dashboardApprovalPanel).not.toContainText("postgres://");
+
+      await pinDevelopmentUserToAgent(created.id);
+      await page.goto(`/agents/${created.id}`);
+      const detailApprovalPanel = page.locator(".approval-panel");
+      await expect(page.getByRole("heading", { name })).toBeVisible();
+      await expect(detailApprovalPanel).toContainText("Pending approvals");
+      await expect(detailApprovalPanel).toContainText("Approve final acceptance action");
+      await expect(detailApprovalPanel).toContainText("Deny final acceptance action");
+      await expect(detailApprovalPanel).not.toContainText("payload_json");
+      await expect(detailApprovalPanel).not.toContainText("stored-for-downstream-not-rendered");
+      await expect(detailApprovalPanel).not.toContainText("postgres://");
+
+      await pinDevelopmentUserToAgent(created.id);
+      await page.goto("/dashboard");
+      await expectApprovalDecisionSuccess(
+        request.post(`/api/approvals/${approvalToApproveId}/approve`),
+        "approved",
+        "approval.approved",
+      );
+      await pinDevelopmentUserToAgent(created.id);
+      await page.reload();
+      await expect(dashboardApprovalPanel).not.toContainText("Approve final acceptance action");
+      await expectApprovalStatus(approvalToApproveId, "approved");
+      await expectApprovalEventCounts(approvalToApproveId, { approved: 1, denied: 0 });
+
+      await pinDevelopmentUserToAgent(created.id);
+      await expectAlreadyResolvedConflict(
+        request.post(`/api/approvals/${approvalToApproveId}/approve`),
+        "approved",
+      );
+      await pinDevelopmentUserToAgent(created.id);
+      await expectAlreadyResolvedConflict(
+        request.post(`/api/approvals/${approvalToApproveId}/deny`),
+        "approved",
+      );
+      await expectApprovalEventCounts(approvalToApproveId, { approved: 1, denied: 0 });
+
+      await pinDevelopmentUserToAgent(created.id);
+      await expectApprovalDecisionSuccess(
+        request.post(`/api/approvals/${approvalToDenyId}/deny`),
+        "denied",
+        "approval.denied",
+      );
+      await pinDevelopmentUserToAgent(created.id);
+      await page.reload();
+      await expect(dashboardApprovalPanel).not.toContainText("Deny final acceptance action");
+      await expectApprovalStatus(approvalToDenyId, "denied");
+      await expectApprovalEventCounts(approvalToDenyId, { approved: 0, denied: 1 });
+
+      await pinDevelopmentUserToAgent(created.id);
+      await expectAlreadyResolvedConflict(
+        request.post(`/api/approvals/${approvalToDenyId}/deny`),
+        "denied",
+      );
+      await pinDevelopmentUserToAgent(created.id);
+      await expectAlreadyResolvedConflict(
+        request.post(`/api/approvals/${approvalToDenyId}/approve`),
+        "denied",
+      );
+      await expectApprovalEventCounts(approvalToDenyId, { approved: 0, denied: 1 });
+
+      const dashboardActivity = page.locator(".activity-feed-panel");
+      await expect(dashboardActivity).toContainText("approval.approved");
+      await expect(dashboardActivity).toContainText("approval.denied");
+      await expect(dashboardActivity).not.toContainText("payload_json");
+      await expect(dashboardActivity).not.toContainText("stored-for-downstream-not-rendered");
+      await expect(dashboardActivity).not.toContainText("postgres://");
+
+      await pinDevelopmentUserToAgent(created.id);
+      await page.goto(`/agents/${created.id}`);
+      await expect(page.locator(".approval-panel")).toContainText("No pending approvals");
+      const detailActivity = page.locator(".activity-feed-panel:not(.activity-loading-state)");
+      await expect(detailActivity).toContainText("approval.approved");
+      await expect(detailActivity).toContainText("approval.denied");
+      await expect(detailActivity).not.toContainText("payload_json");
+      await expect(detailActivity).not.toContainText("stored-for-downstream-not-rendered");
+      await expect(detailActivity).not.toContainText("postgres://");
     });
   });
 
@@ -885,6 +1008,84 @@ async function deleteCreatedAgents(agentIds: string[]): Promise<void> {
   });
 }
 
+async function expectApprovalStatus(
+  approvalId: string,
+  expectedStatus: "approved" | "denied",
+): Promise<void> {
+  const status = await withDatabase(async (sql) => {
+    const [approval] = await sql<{ status: string }[]>`
+      select status from agent_approvals where id = ${approvalId} limit 1
+    `;
+
+    return approval?.status;
+  });
+
+  expect(status).toBe(expectedStatus);
+}
+
+async function expectApprovalEventCounts(
+  approvalId: string,
+  expected: { approved: number; denied: number },
+): Promise<void> {
+  const counts = await withDatabase(async (sql) => {
+    const rows = await sql<{ type: string; count: string }[]>`
+      select type, count(*)::text as count
+      from agent_events
+      where metadata->>'approvalId' = ${approvalId}
+        and type in ('approval.approved', 'approval.denied')
+      group by type
+    `;
+
+    return {
+      approved: Number(rows.find((row) => row.type === "approval.approved")?.count ?? 0),
+      denied: Number(rows.find((row) => row.type === "approval.denied")?.count ?? 0),
+    };
+  });
+
+  expect(counts).toEqual(expected);
+}
+
+async function expectApprovalDecisionSuccess(
+  responsePromise: Promise<APIResponse>,
+  status: "approved" | "denied",
+  eventType: "approval.approved" | "approval.denied",
+): Promise<void> {
+  const response = await responsePromise;
+  const body = await response.json();
+
+  expect(response.status()).toBe(200);
+  expect(body).toMatchObject({
+    ok: true,
+    approval: {
+      status,
+    },
+    event: {
+      type: eventType,
+    },
+  });
+  expect(JSON.stringify(body)).not.toContain("payload_json");
+  expect(JSON.stringify(body)).not.toContain("postgres://");
+}
+
+async function expectAlreadyResolvedConflict(
+  responsePromise: Promise<APIResponse>,
+  status: "approved" | "denied",
+): Promise<void> {
+  const response = await responsePromise;
+  const body = await response.json();
+
+  expect(response.status()).toBe(409);
+  expect(body).toEqual({
+    error: {
+      code: "approval_already_resolved",
+      message: "Approval has already been resolved.",
+      status,
+    },
+  });
+  expect(JSON.stringify(body)).not.toContain("payload_json");
+  expect(JSON.stringify(body)).not.toContain("postgres://");
+}
+
 async function expectNotFoundPage(page: Page): Promise<void> {
   await expect(page.getByRole("heading", { name: "404" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "This page could not be found." })).toBeVisible();
@@ -899,7 +1100,7 @@ async function expectPageNotHorizontallyOverflowing(page: Page): Promise<void> {
   expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
 }
 
-async function withDatabase(run: (sql: postgres.Sql) => Promise<void>): Promise<void> {
+async function withDatabase<T>(run: (sql: postgres.Sql) => Promise<T>): Promise<T> {
   const databaseUrl =
     process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/agentbay";
   const sql = postgres(databaseUrl, {
@@ -909,7 +1110,7 @@ async function withDatabase(run: (sql: postgres.Sql) => Promise<void>): Promise<
   });
 
   try {
-    await run(sql);
+    return await run(sql);
   } finally {
     await sql.end({ timeout: 5 });
   }
