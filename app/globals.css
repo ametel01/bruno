@@ -363,6 +363,7 @@ h2 {
   color: var(--muted);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 0.78rem;
+  overflow-wrap: anywhere;
 }
 
 .status-pill {
@@ -376,6 +377,112 @@ h2 {
   font-size: 0.8rem;
   font-weight: 800;
   padding: 0 10px;
+}
+
+.mobile-agent-list {
+  display: none;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mobile-agent-card {
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 14px;
+  padding: 16px 0 2px;
+}
+
+.mobile-agent-card:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.mobile-agent-card-header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mobile-agent-title-group {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.mobile-agent-title-group a {
+  color: var(--accent-strong);
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.mobile-agent-title-group a:hover {
+  text-decoration: underline;
+}
+
+.mobile-agent-template {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.mobile-agent-metadata {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.mobile-agent-metadata div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.mobile-agent-metadata dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.mobile-agent-metadata dd {
+  color: var(--foreground);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mobile-agent-metadata code {
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.mobile-agent-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mobile-agent-muted-action {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .activity-feed {
@@ -970,6 +1077,39 @@ h2 {
 @media (max-width: 720px) {
   .config-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .agent-table-wrap {
+    display: none;
+  }
+
+  .mobile-agent-list {
+    display: grid;
+  }
+
+  .mobile-agent-card-header {
+    align-items: flex-start;
+  }
+
+  .mobile-agent-card-header .status-pill {
+    max-width: 42%;
+    flex: 0 1 auto;
+    overflow-wrap: anywhere;
+    text-align: center;
+  }
+
+  .mobile-agent-actions .start-agent-action {
+    min-width: min(100%, 146px);
+    flex: 1 1 146px;
+  }
+
+  .mobile-agent-actions .secondary-button {
+    width: 100%;
+  }
+
+  .mobile-agent-actions .action-message {
+    width: 100%;
+    overflow-wrap: anywhere;
   }
 }
 
