@@ -6,6 +6,11 @@ import {
   createAgentForDevelopmentUser,
 } from "@/src/server/agents/create-agent";
 import {
+  AgentApprovalPersistenceError,
+  createPendingApprovalForDevelopmentUser,
+  listPendingApprovalsForDevelopmentUser,
+} from "@/src/server/approvals/agent-approvals";
+import {
   DELETE_EVENT_TYPE,
   FAKE_RUNNER_START_DELAY_MS,
   RESTART_COMPLETED_EVENT_TYPE,
@@ -36,6 +41,7 @@ import {
 } from "@/src/server/agents/list-agents";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  agentApprovals,
   agentConfigs,
   agentEvents,
   agentLogs,
@@ -170,6 +176,215 @@ describe("create agent persistence", () => {
     await expectTableCount(connection, "agent_configs", 0);
     await expectTableCount(connection, "agent_events", 0);
     await expectTableCount(connection, "app_metadata", 0);
+  });
+
+  it("creates a persisted pending approval for an active development-user agent and lists safe DTO fields", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Approval Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const createdAt = new Date("2026-07-04T08:15:00.000Z");
+    const expiresAt = new Date("2026-07-04T09:15:00.000Z");
+
+    const approval = await createPendingApprovalForDevelopmentUser(
+      {
+        agentId: created.agent.id,
+        title: "Review outbound message",
+        description: "Approve the drafted Telegram summary before it is sent.",
+        payloadJson: {
+          action: "telegram.send",
+          token: "stored-for-downstream-not-rendered",
+        },
+        requestedBy: "fake-runner",
+        createdAt,
+        expiresAt,
+      },
+      { createConnection: () => connection },
+    );
+    const listed = await listPendingApprovalsForDevelopmentUser({
+      createConnection: () => connection,
+    });
+    const persistedRows = await connection.db.select().from(agentApprovals);
+
+    expect(approval).toMatchObject({
+      agentId: created.agent.id,
+      agentName: "Approval Agent",
+      agentHref: `/agents/${created.agent.id}`,
+      title: "Review outbound message",
+      description: "Approve the drafted Telegram summary before it is sent.",
+      status: "pending",
+      requestedBy: "fake-runner",
+      createdAt: "2026-07-04T08:15:00.000Z",
+      expiresAt: "2026-07-04T09:15:00.000Z",
+    });
+    expect(listed).toEqual([approval]);
+    expect(persistedRows).toHaveLength(1);
+    expect(persistedRows[0]).toMatchObject({
+      agentId: created.agent.id,
+      status: "pending",
+      payloadJson: {
+        action: "telegram.send",
+        token: "stored-for-downstream-not-rendered",
+      },
+      resolvedBy: null,
+      resolvedAt: null,
+    });
+    expect(JSON.stringify(listed)).not.toContain("payload_json");
+    expect(JSON.stringify(listed)).not.toContain("stored-for-downstream-not-rendered");
+  });
+
+  it("lists only pending approvals for active agents owned by the local development user", async () => {
+    const first = await createAgentForDevelopmentUser(
+      { name: "First Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const second = await createAgentForDevelopmentUser(
+      { name: "Second Agent", templateKey: "github_issue_agent" },
+      { createConnection: () => connection },
+    );
+    const deleted = await createAgentForDevelopmentUser(
+      { name: "Deleted Agent", templateKey: "inbox_triage_agent" },
+      { createConnection: () => connection },
+    );
+    const [otherUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+    const [otherUserAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId: otherUser?.id ?? "",
+        name: "Other User Agent",
+        templateKey: "research_agent",
+        status: "stopped",
+      })
+      .returning({ id: agents.id });
+
+    await connection.db
+      .update(agents)
+      .set({ deletedAt: new Date("2026-07-04T09:00:00.000Z") })
+      .where(eq(agents.id, deleted.agent.id));
+    await createTestApproval(
+      connection,
+      first.agent.id,
+      "Visible approval",
+      "2026-07-04T08:10:00.000Z",
+    );
+    await createTestApproval(
+      connection,
+      second.agent.id,
+      "Resolved approval",
+      "2026-07-04T08:20:00.000Z",
+    );
+    await createTestApproval(
+      connection,
+      deleted.agent.id,
+      "Deleted-agent approval",
+      "2026-07-04T08:30:00.000Z",
+    );
+    await createTestApproval(
+      connection,
+      otherUserAgent?.id ?? "",
+      "Other-user approval",
+      "2026-07-04T08:40:00.000Z",
+    );
+    await connection.db
+      .update(agentApprovals)
+      .set({
+        status: "approved",
+        resolvedBy: "local-user",
+        resolvedAt: new Date("2026-07-04T08:45:00.000Z"),
+      })
+      .where(eq(agentApprovals.title, "Resolved approval"));
+
+    const listed = await listPendingApprovalsForDevelopmentUser({
+      createConnection: () => connection,
+    });
+
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({
+      agentId: first.agent.id,
+      agentName: "First Agent",
+      title: "Visible approval",
+      status: "pending",
+    });
+  });
+
+  it("does not create approvals for malformed, missing, soft-deleted, or other-user agents", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Development Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const deleted = await createAgentForDevelopmentUser(
+      { name: "Deleted Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const [otherUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+    const [otherUserAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId: otherUser?.id ?? "",
+        name: "Other User Agent",
+        templateKey: "research_agent",
+        status: "stopped",
+      })
+      .returning({ id: agents.id });
+
+    await connection.db
+      .update(agents)
+      .set({ deletedAt: new Date("2026-07-04T09:00:00.000Z") })
+      .where(eq(agents.id, deleted.agent.id));
+
+    await expect(
+      createTestApproval(connection, "not-a-uuid", "Malformed", "2026-07-04T08:00:00.000Z"),
+    ).resolves.toBeNull();
+    await expect(
+      createTestApproval(
+        connection,
+        "00000000-0000-4000-8000-000000000000",
+        "Missing",
+        "2026-07-04T08:00:00.000Z",
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      createTestApproval(connection, deleted.agent.id, "Deleted", "2026-07-04T08:00:00.000Z"),
+    ).resolves.toBeNull();
+    await expect(
+      createTestApproval(
+        connection,
+        otherUserAgent?.id ?? "",
+        "Other user",
+        "2026-07-04T08:00:00.000Z",
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      createTestApproval(connection, created.agent.id, "Valid", "2026-07-04T08:00:00.000Z"),
+    ).resolves.toMatchObject({ title: "Valid" });
+    const persistedRows = await connection.db.select().from(agentApprovals);
+
+    expect(persistedRows).toHaveLength(1);
+  });
+
+  it("returns safe generic approval persistence errors without driver details or payload internals", async () => {
+    const brokenConnection = {
+      db: {
+        transaction: async () => {
+          throw new Error("postgres://user:password@127.0.0.1/db select * from agent_approvals");
+        },
+      },
+      close: async () => {},
+    } as unknown as DatabaseConnection;
+
+    await expect(
+      listPendingApprovalsForDevelopmentUser({ createConnection: () => brokenConnection }),
+    ).rejects.toBeInstanceOf(AgentApprovalPersistenceError);
+
+    try {
+      await listPendingApprovalsForDevelopmentUser({ createConnection: () => brokenConnection });
+    } catch (error) {
+      expect(error).toBeInstanceOf(AgentApprovalPersistenceError);
+      expect(String(error)).toContain("Approval request failed.");
+      expect(String(error)).not.toContain("postgres://");
+      expect(String(error)).not.toContain("agent_approvals");
+      expect(String(error)).not.toContain("select *");
+    }
   });
 
   it("updates agent identity and config values atomically with one safe config event", async () => {
@@ -3862,7 +4077,26 @@ describe("create agent persistence", () => {
 });
 
 async function resetCreateAgentTables(connection: DatabaseConnection): Promise<void> {
-  await connection.client`truncate table agent_configs, agent_logs, agent_events, agents, app_metadata, users restart identity cascade`;
+  await connection.client`truncate table agent_approvals, agent_configs, agent_logs, agent_events, agents, app_metadata, users restart identity cascade`;
+}
+
+async function createTestApproval(
+  connection: DatabaseConnection,
+  agentId: string,
+  title: string,
+  createdAt: string,
+) {
+  return createPendingApprovalForDevelopmentUser(
+    {
+      agentId,
+      title,
+      description: `${title} description`,
+      payloadJson: { action: title },
+      requestedBy: "test-runner",
+      createdAt: new Date(createdAt),
+    },
+    { createConnection: () => connection },
+  );
 }
 
 async function expectTableCount(
