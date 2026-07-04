@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { ActivityFeedPanel } from "@/app/_components/activity-feed";
+import { ApprovalDecisionControls } from "@/app/_components/approval-decision-controls";
 import { EmptyState, PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
-import { ApprovalActionButton } from "@/app/dashboard/_components/approval-action-button";
-import { DenyApprovalButton } from "@/app/dashboard/_components/deny-approval-button";
 import {
   AgentListPersistenceError,
   listActiveAgentsForDevelopmentUser,
@@ -191,10 +190,14 @@ function PendingApprovalItem({ approval }: { approval: PendingApprovalDto }) {
           <Link href={approval.agentHref}>{approval.agentName}</Link>
           <h3>{approval.title}</h3>
         </div>
-        <span className="status-pill">{approval.status}</span>
+        <ApprovalDecisionControls approvalId={approval.id} initialStatus={approval.status} />
       </div>
       <p>{approval.description}</p>
       <dl className="approval-metadata">
+        <div>
+          <dt>Requested</dt>
+          <dd>{approval.requestedBy}</dd>
+        </div>
         <div>
           <dt>Created</dt>
           <dd>
@@ -210,9 +213,9 @@ function PendingApprovalItem({ approval }: { approval: PendingApprovalDto }) {
           </div>
         ) : null}
       </dl>
-      <div className="approval-actions">
-        <ApprovalActionButton approvalId={approval.id} />
-        <DenyApprovalButton approvalId={approval.id} />
+      <div className="approval-payload-summary">
+        <h4>Payload summary</h4>
+        <p>{approval.payloadSummary}</p>
       </div>
     </li>
   );

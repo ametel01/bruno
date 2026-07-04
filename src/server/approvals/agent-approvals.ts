@@ -28,6 +28,7 @@ export type PendingApprovalDto = {
   description: string;
   status: "pending";
   requestedBy: string;
+  payloadSummary: string;
   createdAt: string;
   expiresAt: string | null;
 };
@@ -342,6 +343,7 @@ export async function listPendingApprovalsForDevelopmentUser(
         title: agentApprovals.title,
         description: agentApprovals.description,
         status: agentApprovals.status,
+        payloadJson: agentApprovals.payloadJson,
         requestedBy: agentApprovals.requestedBy,
         createdAt: agentApprovals.createdAt,
         expiresAt: agentApprovals.expiresAt,
@@ -367,6 +369,7 @@ export async function listPendingApprovalsForDevelopmentUser(
       description: row.description,
       status: "pending",
       requestedBy: row.requestedBy,
+      payloadSummary: summarizeApprovalPayload(row.payloadJson),
       createdAt: row.createdAt.toISOString(),
       expiresAt: row.expiresAt?.toISOString() ?? null,
     }));
@@ -404,6 +407,7 @@ export async function listPendingApprovalsForDevelopmentUserAgent(
         title: agentApprovals.title,
         description: agentApprovals.description,
         status: agentApprovals.status,
+        payloadJson: agentApprovals.payloadJson,
         requestedBy: agentApprovals.requestedBy,
         createdAt: agentApprovals.createdAt,
         expiresAt: agentApprovals.expiresAt,
@@ -430,6 +434,7 @@ export async function listPendingApprovalsForDevelopmentUserAgent(
       description: row.description,
       status: "pending",
       requestedBy: row.requestedBy,
+      payloadSummary: summarizeApprovalPayload(row.payloadJson),
       createdAt: row.createdAt.toISOString(),
       expiresAt: row.expiresAt?.toISOString() ?? null,
     }));
@@ -582,9 +587,55 @@ function toPendingApprovalDto(
     description: approval.description,
     status: "pending",
     requestedBy: approval.requestedBy,
+    payloadSummary: summarizeApprovalPayload(approval.payloadJson),
     createdAt: approval.createdAt.toISOString(),
     expiresAt: approval.expiresAt?.toISOString() ?? null,
   };
+}
+
+function summarizeApprovalPayload(payload: Record<string, unknown>): string {
+  if (payload.source !== "fake_runner") {
+    return "Payload details unavailable.";
+  }
+
+  const parts: string[] = [];
+  appendSafeField(parts, "Source", payload.source);
+  appendSafeField(parts, "Action", payload.actionType);
+
+  if (isRecord(payload.preview)) {
+    appendSafeField(parts, "Destination", payload.preview.destination);
+    appendSafeField(parts, "Topic", payload.preview.topic);
+    appendSafeField(parts, "Mailbox", payload.preview.mailbox);
+    appendSafeField(parts, "Summary", payload.preview.summary);
+  }
+
+  return parts.length > 0 ? parts.join("; ") : "Payload details unavailable.";
+}
+
+function appendSafeField(parts: string[], label: string, value: unknown): void {
+  const normalized = normalizeSafePayloadText(value);
+
+  if (normalized) {
+    parts.push(`${label}: ${normalized}`);
+  }
+}
+
+function normalizeSafePayloadText(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim().replace(/\s+/g, " ");
+
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  return trimmed.length > 120 ? `${trimmed.slice(0, 117)}...` : trimmed;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isValidApprovalId(approvalId: string): boolean {
