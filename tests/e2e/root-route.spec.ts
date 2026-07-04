@@ -103,6 +103,31 @@ test("/dashboard shows latest persisted process logs scoped to active agents", a
   await insertRuntimeLog(primaryAgent.id, "simulator row should not render", 3);
   await markAgentDeleted(deletedAgent.id);
 
+  const logsResponse = await request.get(`/api/agents/${primaryAgent.id}/logs?limit=100`);
+  expect(logsResponse.status()).toBe(200);
+  const logsBody = (await logsResponse.json()) as {
+    logs: Array<{
+      agentId: string;
+      stream: string;
+      message: string;
+      sequence: number;
+      runnerId?: string;
+      localRunnerProcessId?: string;
+    }>;
+    nextAfter: number | null;
+  };
+  expect(logsBody.logs.map((log) => [log.sequence, log.stream, log.message])).toEqual([
+    [1, "stdout", "primary stdout line"],
+    [2, "stderr", "TOKEN=stored-for-downstream should not render"],
+    [3, "stdout", "simulator row should not render"],
+  ]);
+  expect(logsBody.logs.every((log) => log.agentId === primaryAgent.id)).toBe(true);
+  expect(logsBody.nextAfter).toBe(3);
+  expect(JSON.stringify(logsBody)).not.toContain("runnerId");
+  expect(JSON.stringify(logsBody)).not.toContain("localRunnerProcessId");
+  expect(JSON.stringify(logsBody)).not.toContain("other active process line");
+  expect(JSON.stringify(logsBody)).not.toContain("deleted process line should not render");
+
   await page.goto("/dashboard");
 
   const processLogsPanel = page.locator(".dashboard-process-log-panel");

@@ -65,7 +65,7 @@ describe("GET /api/agents/[agentId]/logs route", () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
-      logs: [logDto(1), logDto(2)],
+      logs: [publicLogDto(1), publicLogDto(2)],
       nextAfter: 2,
     });
     expect(mocks.getActiveAgentForDevelopmentUser).toHaveBeenCalledWith(ACTIVE_AGENT_ID, {
@@ -88,7 +88,47 @@ describe("GET /api/agents/[agentId]/logs route", () => {
       firstInvocationOrder(mocks.listAgentLogs),
     );
     expect(JSON.stringify(body)).not.toContain("agent_id");
+    expect(JSON.stringify(body)).not.toContain("runnerId");
+    expect(JSON.stringify(body)).not.toContain("localRunnerProcessId");
+    expect(JSON.stringify(body)).not.toContain("00000000-0000-4000-8000-00000000090");
     expect(mocks.close).toHaveBeenCalledOnce();
+  });
+
+  it("returns safe public stdout and stderr log fields in helper order", async () => {
+    mocks.createDatabaseConnection.mockReturnValue({ db: "db", close: mocks.close });
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValue({
+      id: ACTIVE_AGENT_ID,
+    });
+    mocks.generateSimulatedRuntimeLogsForRunningAgent.mockResolvedValue({ inserted: 0 });
+    mocks.listAgentLogs.mockResolvedValue({
+      logs: [
+        logDto(1, { stream: "stdout", message: "runner stdout line" }),
+        logDto(2, { stream: "stderr", level: "error", message: "runner stderr line" }),
+      ],
+      nextAfter: 2,
+    });
+    const { GET } = await import("@/app/api/agents/[agentId]/logs/route");
+
+    const response = await GET(new Request("http://localhost/api/agents/id/logs"), {
+      params: Promise.resolve({ agentId: ACTIVE_AGENT_ID }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      logs: [
+        publicLogDto(1, { stream: "stdout", message: "runner stdout line" }),
+        publicLogDto(2, { stream: "stderr", level: "error", message: "runner stderr line" }),
+      ],
+      nextAfter: 2,
+    });
+    expect(body.logs.map((log: { agentId: string }) => log.agentId)).toEqual([
+      ACTIVE_AGENT_ID,
+      ACTIVE_AGENT_ID,
+    ]);
+    expect(JSON.stringify(body)).not.toContain("runnerId");
+    expect(JSON.stringify(body)).not.toContain("localRunnerProcessId");
+    expect(JSON.stringify(body)).not.toContain("00000000-0000-4000-8000-000000000901");
   });
 
   it.each([
@@ -269,15 +309,41 @@ describe("GET /api/agents/[agentId]/logs route", () => {
   });
 });
 
-function logDto(sequence: number) {
+function logDto(
+  sequence: number,
+  overrides: Partial<{
+    stream: string;
+    level: string;
+    message: string;
+  }> = {},
+) {
   return {
     id: `00000000-0000-4000-8000-00000000030${sequence}`,
     agentId: ACTIVE_AGENT_ID,
-    runnerId: null,
-    localRunnerProcessId: null,
-    stream: "stdout",
-    level: "info",
-    message: `line ${sequence}`,
+    runnerId: "00000000-0000-4000-8000-000000000901",
+    localRunnerProcessId: "00000000-0000-4000-8000-000000000901",
+    stream: overrides.stream ?? "stdout",
+    level: overrides.level ?? "info",
+    message: overrides.message ?? `line ${sequence}`,
+    sequence,
+    createdAt: "2026-07-04T06:00:00.000Z",
+  };
+}
+
+function publicLogDto(
+  sequence: number,
+  overrides: Partial<{
+    stream: string;
+    level: string;
+    message: string;
+  }> = {},
+) {
+  return {
+    id: `00000000-0000-4000-8000-00000000030${sequence}`,
+    agentId: ACTIVE_AGENT_ID,
+    stream: overrides.stream ?? "stdout",
+    level: overrides.level ?? "info",
+    message: overrides.message ?? `line ${sequence}`,
     sequence,
     createdAt: "2026-07-04T06:00:00.000Z",
   };

@@ -25,6 +25,7 @@
 - #71 adds local runner state helpers for creating process rows, recording terminal state, appending stdout/stderr log lines, and reading process-scoped logs without spawning or controlling processes.
 - #73 adds a latest active-agent process log read helper that returns public DTOs with agent names/links, filters out soft-deleted agents, ignores non-process simulator rows, and preserves stable newest-first ordering by timestamp and sequence.
 - #73 adds a dashboard Latest process logs panel with stdout/stderr, timestamp, level, sequence, redacted summaries, empty state, safe failure state, and direct links to each agent detail log stream.
+- #73 keeps internal runner/process identifiers available to server helpers but strips `runnerId` and `localRunnerProcessId` from the product `GET /api/agents/:agentId/logs` response.
 - #73 keeps lifecycle controls/status pills unchanged and does not implement process spawning, local runner adapter behavior, lifecycle endpoint replacement, Docker/cloud runners, Hermes, Telegram, auth, billing, provider integrations, or secrets.
 
 ### Validation
@@ -47,6 +48,19 @@
   - `bun run format`: pass; Biome formatted 81 files after edits.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test -- tests/unit/agent-logs-route.test.ts tests/unit/root-page.test.tsx tests/unit/create-agent-db.test.ts`: pass after one expectation-only retry; final focused route/dashboard/DB suite passed with 3 files and 113 tests.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay PORT=3073 PLAYWRIGHT_BASE_URL=http://localhost:3073 NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test:e2e -- --project=chromium-desktop --grep "dashboard shows latest persisted process logs"`: pass after scoping duplicate-agent-link assertions to individual log rows; 1 browser test passed.
+- Checker fix:
+  - Finding: checker probe confirmed `GET /api/agents/:agentId/logs` returned `runnerId` and `localRunnerProcessId` for persisted local-runner log rows.
+  - Fix: `app/api/agents/[agentId]/logs/route.ts` now maps internal `AgentLogPage` values to a public response that keeps `id`, `agentId`, `stream`, `level`, `message`, `sequence`, and `createdAt`, and omits runner/process identifiers.
+  - Regression: `tests/unit/agent-logs-route.test.ts` now seeds internal runner/process ids and asserts the route response omits them while preserving stdout/stderr order and agent scoping; `tests/e2e/root-route.spec.ts` now calls the product route against seeded process logs and asserts those fields are absent.
+  - `bun run format`: pass; Biome formatted 81 files after the checker fix.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test -- tests/unit/agent-logs-route.test.ts tests/unit/root-page.test.tsx tests/unit/create-agent-db.test.ts`: pass; 3 files and 114 tests passed.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed successfully.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay PORT=3073 PLAYWRIGHT_BASE_URL=http://localhost:3073 NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test:e2e -- --project=chromium-desktop --grep "dashboard shows latest persisted process logs"`: pass; 1 chromium-desktop browser test passed.
+  - `bun run format:check`: pass; Biome checked 81 files.
+  - `bun run lint`: pass; Biome checked 81 files.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test`: pass; 22 files and 194 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay PORT=3073 PLAYWRIGHT_BASE_URL=http://localhost:3073 NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run build`: pass; Next.js production build completed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay PORT=3073 PLAYWRIGHT_BASE_URL=http://localhost:3073 NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test:e2e`: pass; full browser suite passed with 38 tests and 18 expected skips.
 - Required gates:
   - `bun run format:check`: pass; Biome checked 81 files.
   - `bun run lint`: pass; Biome checked 81 files.
