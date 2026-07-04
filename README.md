@@ -1,6 +1,6 @@
 # AgentBay
 
-AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, the completed Milestone 7 pending-approval queue workflow, and the Milestone 9 local-runner persistence foundation. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, scoped runtime logs, local runner process metadata storage, dashboard plus agent-detail pending approvals for local development agents, dashboard approval decision controls, and fake approval generation for running local-development agents.
+AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, the completed Milestone 7 pending-approval queue workflow, and the completed Milestone 9 local runner workflow. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, Start, Stop, Restart, and Delete controls wired through a local runner adapter, persisted activity feeds, scoped runtime logs, local runner process metadata storage, dashboard plus agent-detail pending approvals for local development agents, dashboard approval decision controls, and fake approval generation for running local-development agents.
 
 ## Requirements
 
@@ -58,7 +58,7 @@ The migration set creates the local application metadata table plus the persiste
 - `users`: local development user records used until production auth exists.
 - `agents`: persistent agent identity, template, lifecycle status, timestamps, and soft-delete marker.
 - `agent_configs`: one typed config row per active agent with system prompt, model provider, model name, integer-cent daily spend cap, schedule mode, optional cron, timezone, and timestamps.
-- `agent_events`: transactional audit events for agent creation, config updates, fake lifecycle transitions, dashboard activity, and per-agent activity.
+- `agent_events`: transactional audit events for agent creation, config updates, local runner lifecycle transitions, dashboard activity, and per-agent activity.
 - `local_runner_processes`: local runner process metadata scoped to an agent, including OS process id, safe command metadata, runner status, start/stop timestamps, exit code or signal, and a safe last-error string.
 - `agent_logs`: runtime log rows with nullable runner identity, nullable local runner process link, stdout/stderr stream, level/message fields, timestamps, and per-agent positive sequence values.
 - `agent_approvals`: pending and resolved approval request rows scoped to an agent, with title, description, lifecycle status, downstream payload JSON, requester, nullable resolver, creation, resolution, and expiry timestamps.
@@ -88,16 +88,16 @@ Open these route smoke targets locally:
 
 ## Agent Lifecycle Flow
 
-The `/agents` page contains the current create/list and fake lifecycle workflow:
+The `/agents` page contains the current create/list and local runner lifecycle workflow:
 
 1. Open `/agents`.
 2. Enter an agent name such as `Research Agent`.
 3. Select a supported template, such as `research_agent`.
 4. Submit the form.
 5. Confirm the stopped agent appears in the `/agents` table with a generated `/agents/:agentId` link.
-6. Open the detail page and use Start to move the agent from `stopped` to `starting`, then to `running` after deterministic fake-runner settling.
-7. Confirm the detail runtime log panel shows the deterministic simulator output for the selected running agent and can create one pending fake approval for the current running segment.
-8. Use Restart while the agent is `running` to move it through `restarting` and back to `running`.
+6. Open the detail page and use Start to launch the configured local runner child process and move the agent from `stopped` to `running`.
+7. Confirm the detail runtime log panel shows captured stdout and stderr from the selected running agent's local runner process.
+8. Use Restart while the agent is `running` to terminate the tracked child process, launch a replacement process, and keep the agent `running`.
 9. Use Stop while the agent is `running` to move it back to `stopped` while already visible runtime logs remain readable.
 10. Use Simulate error outside production to move an active agent to `error` and record one `agent.error` audit event.
 11. Use Delete while the agent is not transitioning to soft-delete it from active views.
@@ -105,7 +105,31 @@ The `/agents` page contains the current create/list and fake lifecycle workflow:
 
 The dashboard reads active persisted agents from the database. The detail page loads active persisted agent records by ID and returns not found for missing, malformed, or soft-deleted IDs. Delete preserves the `agents` row and existing `agent_events`, but removes the agent from `/agents`, `/dashboard`, and active detail reads.
 
-Agent records are local-development records only. Lifecycle controls, runtime logs, the detail config editor, dashboard plus agent-detail pending approvals panels, dashboard approval decision controls, and fake approval generation use deterministic database state and local read/write paths. Milestone 9 adds local runner process/log persistence helpers but does not spawn or supervise real processes yet. Approval payload execution, runner control APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
+Agent records are local-development records only. Lifecycle controls use the local runner adapter, runtime logs persist captured process stdout/stderr, and the detail config editor, dashboard plus agent-detail pending approvals panels, dashboard approval decision controls, and fake approval generation use local database read/write paths. Approval payload execution, remote runner control APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
+
+## Local Runner Adapter
+
+Milestone 9 runs lifecycle actions through a local process adapter before Docker, cloud runners, or Hermes integration exist. The adapter exposes start, stop, restart, status, and log-read operations behind the product lifecycle APIs, so the dashboard and detail pages keep the same buttons and status pills while the execution backend changes.
+
+By default, the adapter launches a real long-running Node child process with `process.execPath` and an inline dummy runner script. The dummy runner writes a startup line to stdout, a readiness line to stderr, periodic heartbeat stdout lines, and a shutdown stdout line on `SIGTERM`. The default exists so local acceptance and tests do not require Hermes to be installed.
+
+The command can be replaced explicitly with environment variables:
+
+```bash
+AGENTBAY_LOCAL_RUNNER_EXECUTABLE=/opt/hermes/bin/hermes
+AGENTBAY_LOCAL_RUNNER_ARGS_JSON='["run","--agent-id","demo-agent"]'
+```
+
+`AGENTBAY_LOCAL_RUNNER_ARGS_JSON` must be a JSON string array. The adapter spawns the executable with an argument array and `shell: false`; it does not shell-interpolate command strings. At runtime the adapter also passes `AGENTBAY_AGENT_ID` to the child process environment.
+
+Lifecycle behavior:
+
+- Start validates the active local-development agent, launches the child process, persists a `local_runner_processes` row with the OS pid and sanitized command metadata, then records `agent.start_requested` and `agent.start_completed` while returning the agent as `running`.
+- Stop requires a tracked managed local runner process, sends `SIGTERM`, waits for terminal process state, records the process as stopped, and records `agent.stop_requested` plus `agent.stop_completed` while returning the agent as `stopped`.
+- Restart stops the tracked process, starts a replacement process, records restart requested/completed events, and returns the agent as `running`.
+- Unexpected child exit records terminal process details, moves the agent to `error`, stores a safe status reason, and writes one `agent.error` audit event with local runner metadata.
+
+Process stdout and stderr lines are persisted in `agent_logs` with stable per-agent sequence values and a private local runner process link. The product log API and UI expose only safe public fields such as timestamp, stream, level, sequence, source, and sanitized message. The dashboard's Latest process logs panel shows captured stdout/stderr lines for active agents; the agent detail runtime log panel shows the selected agent's scoped log stream.
 
 ## Agent Detail Config Editor
 
@@ -194,15 +218,15 @@ Approval payload execution and real provider action dispatch remain future miles
 
 ## Lifecycle APIs
 
-The current fake lifecycle APIs are:
+The current lifecycle APIs are:
 
-- `POST /api/agents/:agentId/actions/start`: accepts active `idle`, `stopped`, or `error` agents, persists `starting`, records `agent.start_requested`, and deterministic settling records `agent.start_completed` when the fake runner reaches `running`.
-- `POST /api/agents/:agentId/actions/stop`: accepts active `running` agents, persists `stopped`, and records `agent.stop_requested` plus `agent.stop_completed` transactionally.
-- `POST /api/agents/:agentId/actions/restart`: accepts active `running` agents, persists `restarting`, records `agent.restart_requested`, and deterministic settling records `agent.restart_completed` when the fake runner returns to `running`.
+- `POST /api/agents/:agentId/actions/start`: accepts active `idle`, `stopped`, or `error` agents, launches the configured local runner child process, persists `running`, and records `agent.start_requested` plus `agent.start_completed`.
+- `POST /api/agents/:agentId/actions/stop`: accepts active `running` agents, terminates the tracked local runner child process, persists `stopped`, and records `agent.stop_requested` plus `agent.stop_completed`.
+- `POST /api/agents/:agentId/actions/restart`: accepts active `running` agents, terminates the tracked local runner child process, launches a replacement process, persists `running`, and records `agent.restart_requested` plus `agent.restart_completed`.
 - `POST /api/agents/:agentId/actions/simulate-error`: development/test-only and rejected in production. Outside production, accepts active non-deleted `idle`, `stopped`, `starting`, `running`, or `restarting` agents, persists `error`, and records exactly one `agent.error` audit event.
 - `DELETE /api/agents/:agentId`: accepts active non-transitioning `idle`, `running`, `stopped`, or `error` agents, soft-deletes the row, and records exactly one `agent.deleted` event.
 
-Missing, malformed, absent, already soft-deleted, and invalid-status targets return safe JSON errors and do not write mutation events. Delete is blocked while an agent is still `starting` or `restarting`.
+Missing, malformed, absent, already soft-deleted, invalid-status, and failed-runner targets return safe JSON errors and do not write mutation events. Delete is blocked while an agent is still `starting` or `restarting`.
 
 ## Activity Feeds
 
@@ -252,20 +276,9 @@ Future milestones may add runner, backup, restore, billing, and Hermes-related a
 - Successful responses have `{ "logs": [...], "nextAfter": number | null }`.
 - Malformed IDs, repeated `after` or `limit` parameters, invalid limits, and persistence failures return safe JSON without database URLs, SQL errors, stack traces, credentials, or driver messages.
 
-Log reads are pull-driven for the local fake runner. When the selected active agent has already settled to `running`, the read transactionally generates one deterministic four-line cycle before listing logs:
+Local runner stdout and stderr capture writes `agent_logs` rows for a persisted `local_runner_processes` row. Those rows keep `stdout` and `stderr` stream identity, allocate stable per-agent sequence values after any existing rows, store timestamps, identify their source as `local_runner`, and keep private runner/process identifiers server-side. Log persistence remains separate from audit events: stdout/stderr process output is not copied into `agent_events`.
 
-1. `Checking task queue...`
-2. `No pending tasks.`
-3. `Heartbeat OK.`
-4. `Memory loaded.`
-
-The first eligible read in a running segment creates the cycle immediately. Repeated reads at the same logical time are idempotent, and later reads create the next cycle only after the fixed simulator interval elapses while the agent remains in the same running segment. The running segment is based on the persisted `agents.updated_at` value after `starting` or `restarting` settles to `running`, so a later restart can generate a new cycle without being blocked by prior segment logs.
-
-Generated rows use `runner_id = null`, safe static `stdout`/`info` content only, and per-agent monotonic `sequence` values. Runtime log generation does not mirror log lines into `agent_events`; it only writes the bounded `approval.requested` audit event when a running fake agent receives a generated approval request. Lifecycle actions, including `simulate-error`, do not directly write runtime logs. Stopped, idle, pending transition, error, deleting, missing, and soft-deleted agents do not receive newly generated log rows or fake approval requests, though active stopped or error agents can still return existing readable rows.
-
-Local runner persistence helpers can also write `agent_logs` rows for a persisted `local_runner_processes` row. Those rows keep `stdout` and `stderr` stream identity, allocate stable per-agent sequence values after any existing rows, store timestamps, and keep a nullable `local_runner_process_id` link for process-scoped reads. Log persistence remains separate from audit events: stdout/stderr process output is not copied into `agent_events`.
-
-The agent detail page renders those logs in a runtime log panel. The panel shows loading, empty, loaded, and safe error states; displays only the log timestamp, stream, level, sequence, and message; and keeps the rest of the detail page readable if log loading fails. It polls only while the current detail status is `running`, so stopping or simulating an error leaves existing visible rows readable without appending new generated rows after the settled state.
+The agent detail page renders those logs in a runtime log panel. The panel shows loading, empty, loaded, and safe error states; displays only the log timestamp, stream, level, source, sequence, and sanitized message; and keeps the rest of the detail page readable if log loading fails. It polls only while the current detail status is `running`, so stopping or simulating an error leaves existing visible rows readable without appending new local runner rows after the settled state.
 
 ## Quality Gates
 
@@ -286,7 +299,7 @@ Run the aggregate gate before handoff or deployment:
 bun run verify
 ```
 
-The Playwright E2E suite starts the Next.js dev server and smoke-tests the browser create, lifecycle, dashboard activity, detail activity, scoped detail runtime logs, soft-delete, active-view removal, and not-found flows on desktop and mobile Chromium profiles. It expects a reachable migrated database for `/health`, agent records, activity feeds, and runtime logs, so run:
+The Playwright E2E suite starts the Next.js dev server and smoke-tests the browser create, local runner lifecycle, dashboard activity, detail activity, scoped detail runtime logs, dashboard process logs, soft-delete, active-view removal, and not-found flows on desktop and mobile Chromium profiles. It expects a reachable migrated database for `/health`, agent records, activity feeds, and runtime logs, so run:
 
 ```bash
 docker compose up -d postgres
@@ -414,14 +427,14 @@ Milestone 4 is complete when:
 - `/agents` creates and lists active stopped agent records with stable detail links.
 - `/dashboard` and `/agents/:agentId` read active persisted agent records from the database after refresh.
 - Missing, malformed, or soft-deleted detail IDs render not found.
-- Start, Stop, Restart, and Delete controls work through deterministic fake lifecycle state and reject invalid actions without corrupting state.
+- Start, Stop, Restart, and Delete controls reject invalid actions without corrupting state; Milestone 9 now runs Start, Stop, and Restart through the local runner adapter.
 - Lifecycle event persistence is covered for `agent.start_requested`, `agent.start_completed`, `agent.stop_requested`, `agent.stop_completed`, `agent.restart_requested`, `agent.restart_completed`, and exactly one `agent.deleted` event per accepted Delete.
 - `GET /api/agents/:agentId/events` returns safe per-agent event pages with opaque cursor pagination.
 - The dashboard shows a compact latest activity feed across agents.
 - The detail page shows per-agent activity with event time, type, message, actor, metadata summary, empty state, error state, and pagination.
-- `GET /api/agents/:agentId/logs` returns safe active-agent scoped runtime logs with numeric `after` pagination and pull-driven deterministic simulator generation for running agents.
+- `GET /api/agents/:agentId/logs` returns safe active-agent scoped runtime logs with numeric `after` pagination, including persisted local-runner stdout/stderr process logs.
 - The detail page shows runtime log loading, empty, loaded, and safe error states without exposing internal row names, database URLs, stack traces, credentials, or raw SQL/driver errors.
-- Browser coverage proves detail Start eventually shows `Checking task queue...`, `No pending tasks.`, `Heartbeat OK.`, and `Memory loaded.`
+- Browser coverage proves local-runner stdout/stderr process logs are visible in dashboard and detail views while staying scoped to active agents.
 - Browser coverage proves runtime logs stay scoped to the selected agent, visible rows remain readable after Stop, polling/generation does not append after Stop or Simulate error, and `agent.error` appears in the detail activity feed.
 - Browser coverage proves create and lifecycle activity appears in both the dashboard latest activity feed and the agent detail activity feed.
 - Soft delete removes agents from `/agents`, `/dashboard`, and active detail reads while preserving the database row and prior events.

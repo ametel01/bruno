@@ -131,7 +131,7 @@ describe("product shell routes", () => {
     expect(html).toContain("No pending approvals");
     expect(html).toContain("Active persisted records are read from the database.");
     expect(html).toContain(
-      "Start, Stop, Restart, and Delete use deterministic fake lifecycle controls.",
+      "Start, Stop, and Restart use the local runner adapter and existing controls.",
     );
     expect(html).toContain(
       "Full per-agent log streams and local-development config editing are present on agent detail pages.",
