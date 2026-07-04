@@ -27,6 +27,15 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 
 Use `.env.example` as the local template. `DATABASE_URL` must use `postgres://` or `postgresql://`; `NEXT_PUBLIC_APP_URL` must use `http://` or `https://`. Secret values, production database URLs, Vercel tokens, and generated `.env.local` files must stay out of commits.
 
+Optional manual VPS runner persistence can be bootstrapped locally with non-secret values:
+
+```bash
+AGENTBAY_MANUAL_RUNNER_NAME=Manual VPS Runner
+AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL=https://runner.example.com
+```
+
+`AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL` must use `https://` for remote hosts. Loopback `http://` endpoints such as `http://127.0.0.1:8787` are allowed for local tests. These values only create or update durable runner identity; lifecycle forwarding, runner tokens, heartbeats, and provisioning remain future scope.
+
 ## Local Database
 
 Start the local Postgres service:
@@ -56,6 +65,7 @@ postgres://agentbay:agentbay@127.0.0.1:54329/agentbay
 The migration set creates the local application metadata table plus the persistent agent schema:
 
 - `users`: local development user records used until production auth exists.
+- `runners`: manually configured runner identity rows for local-development users, including kind, endpoint URL, status, timestamps, and soft-delete marker.
 - `agents`: persistent agent identity, template, lifecycle status, timestamps, and soft-delete marker.
 - `agent_configs`: one typed config row per active agent with system prompt, model provider, model name, integer-cent daily spend cap, schedule mode, optional cron, timezone, and timestamps.
 - `agent_events`: transactional audit events for agent creation, config updates, local runner lifecycle transitions, dashboard activity, and per-agent activity.
@@ -66,7 +76,7 @@ The migration set creates the local application metadata table plus the persiste
 - `agent_schedule_mode`: Postgres enum used by `agent_configs.schedule_mode`.
 - `agent_approval_status`: Postgres enum with `pending`, `approved`, `denied`, `expired`, and `cancelled`.
 
-The migrations do not create Docker, cloud runner, billing, auth, Hermes, Telegram, secrets, provisioning, or provider integration tables.
+The migrations do not create runner credentials, heartbeats, remote lifecycle forwarding, billing, auth, Hermes, Telegram, secrets, provisioning, or provider integration tables.
 
 ## Development Server
 

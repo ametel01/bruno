@@ -14,6 +14,7 @@ import {
   dockerRunnerContainers,
   localRunnerProcesses,
   localRunnerProcessStatusEnum,
+  runners,
   users,
 } from "@/src/server/db/schema";
 
@@ -25,6 +26,7 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(getTableName(agentConfigs)).toBe("agent_configs");
     expect(getTableName(agentApprovals)).toBe("agent_approvals");
     expect(getTableName(agentEvents)).toBe("agent_events");
+    expect(getTableName(runners)).toBe("runners");
     expect(getTableName(localRunnerProcesses)).toBe("local_runner_processes");
     expect(getTableName(dockerRunnerContainers)).toBe("docker_runner_containers");
     expect(getTableName(agentLogs)).toBe("agent_logs");
@@ -60,6 +62,7 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(Object.keys(columns)).toEqual([
       "id",
       "userId",
+      "runnerId",
       "name",
       "templateKey",
       "templateVersion",
@@ -71,6 +74,7 @@ describe("Milestone 1 agent persistence schema", () => {
       "deletedAt",
     ]);
     expect(columns.userId.notNull).toBe(true);
+    expect(columns.runnerId.notNull).toBe(false);
     expect(columns.name.notNull).toBe(true);
     expect(columns.templateKey.notNull).toBe(true);
     expect(columns.templateVersion.notNull).toBe(true);
@@ -80,6 +84,33 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.status.notNull).toBe(true);
     expect(columns.status.default).toBe("stopped");
     expect(columns.statusReason.notNull).toBe(false);
+    expect(columns.createdAt.notNull).toBe(true);
+    expect(columns.updatedAt.notNull).toBe(true);
+    expect(columns.deletedAt.notNull).toBe(false);
+  });
+
+  it("defines durable manual runner identity rows with soft-delete support", () => {
+    const columns = getTableColumns(runners);
+
+    expect(Object.keys(columns)).toEqual([
+      "id",
+      "userId",
+      "name",
+      "kind",
+      "endpointUrl",
+      "status",
+      "createdAt",
+      "updatedAt",
+      "deletedAt",
+    ]);
+    expect(columns.id.notNull).toBe(true);
+    expect(columns.userId.notNull).toBe(true);
+    expect(columns.name.notNull).toBe(true);
+    expect(columns.kind.notNull).toBe(true);
+    expect(columns.kind.default).toBe("manual_vps");
+    expect(columns.endpointUrl.notNull).toBe(true);
+    expect(columns.status.notNull).toBe(true);
+    expect(columns.status.default).toBe("active");
     expect(columns.createdAt.notNull).toBe(true);
     expect(columns.updatedAt.notNull).toBe(true);
     expect(columns.deletedAt.notNull).toBe(false);
@@ -406,6 +437,26 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(migration).not.toContain('DROP TABLE "users"');
     expect(migration).not.toContain('DROP TABLE "app_metadata"');
     expect(migration).not.toContain('ALTER TABLE "agent_events"');
+    expect(migration).not.toMatch(/api[_ ]?key|token|password|secret|credential/i);
+  });
+
+  it("generates an additive manual runner persistence migration", async () => {
+    const migration = await readFile("drizzle/0008_equal_zarek.sql", "utf8");
+
+    expect(migration).toContain('CREATE TABLE "runners"');
+    expect(migration).toContain("\"kind\" text DEFAULT 'manual_vps' NOT NULL");
+    expect(migration).toContain("\"status\" text DEFAULT 'active' NOT NULL");
+    expect(migration).toContain('ALTER TABLE "agents" ADD COLUMN "runner_id" uuid');
+    expect(migration).toContain(
+      'CREATE UNIQUE INDEX "runners_active_user_endpoint_idx" ON "runners"',
+    );
+    expect(migration).toContain('WHERE "runners"."deleted_at" IS NULL');
+    expect(migration).toContain(
+      'ALTER TABLE "agents" ADD CONSTRAINT "agents_runner_id_runners_id_fk"',
+    );
+    expect(migration).not.toContain("DROP TABLE");
+    expect(migration).not.toContain("DROP COLUMN");
+    expect(migration).not.toContain("ALTER COLUMN");
     expect(migration).not.toMatch(/api[_ ]?key|token|password|secret|credential/i);
   });
 });

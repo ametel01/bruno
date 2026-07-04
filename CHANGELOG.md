@@ -51,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker runner crash reconciliation that moves unexpectedly exited selected-agent containers to `error`, writes a safe `agent.error` audit event, and records a visible Docker-sourced stderr system log with exit metadata.
 - Selected-agent Docker cleanup that validates the exact stored container ID and `agentbay.agent_id` label before removing containers during delete cleanup.
 - Milestone 5 agent templates with a typed metadata registry, durable template version/snapshot persistence, create-flow template metadata, and persisted template settings on agent detail pages.
+- Manual VPS runner persistence with durable runner identity rows, nullable agent assignment, optional non-secret development bootstrap, endpoint validation, and active-agent assigned-runner helpers without changing no-runner lifecycle behavior.
 
 ### Fixed
 

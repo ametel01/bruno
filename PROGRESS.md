@@ -13,6 +13,7 @@
 
 ### Issue Checklist
 
+- [ ] #122 Persist manual VPS runner identity and assignment. Status: ready for checker review on `codex/issue-122-manual-runner-persistence`; Wave 0 prerequisite for #128 runner auth persistence.
 - [x] #127 Initialize Milestone 12 execution tracking. Status: ready for checker review on `codex/issue-127-milestone-12-tracking`; tracking section restored/initialized.
 - [ ] #128 Add the runner auth persistence contract. Status: open; Wave 0 in issue body, repo-local serialized behind #122 per `STATUS.md` because both touch runner schema/migrations.
 - [ ] #129 Implement one-time runner registration. Status: open; blocked by #128.
@@ -28,6 +29,7 @@
 - Milestone 12 goal: dashboard and runner communicate safely with registration, identity, authenticated runner requests, heartbeat, health visibility, and credential rotation/revocation.
 - Milestone 12 acceptance criteria from `docs/MILESTONES.md`: unauthorized runner API requests fail; registered runner heartbeat changes status to `online`; missing heartbeat changes status to `offline`; agent pages show runner health; credential revocation prevents further runner communication.
 - #127 is tracking-only. It restores the progress record, records the Milestone 12 source plan and issue map, verifies changelog structure, and intentionally leaves `CHANGELOG.md` unchanged because no functional behavior ships in this issue.
+- #122 adds durable manual VPS runner identity rows, nullable agent assignment, non-secret development bootstrap/upsert, endpoint validation, and active-agent assigned-runner lookup while preserving no-runner lifecycle behavior.
 - #128 owns the shared persistence/auth foundation: durable runner identity, one-time registration token state, hashed credential material, heartbeat history, runner status values, optional agent-runner assignment, and reusable token/hash helpers.
 - #129 owns one-time runner registration: dashboard token creation, runner exchange for durable identity plus visible-once scoped credential, safe rejection of bad token states, and no hash exposure.
 - #130 owns authenticated heartbeat and offline detection: bearer credential enforcement, safe unauthorized failures, heartbeat row writes, last-seen updates, `online` status, and stale-heartbeat `offline` reconciliation.
@@ -47,8 +49,16 @@
 
 - 2026-07-05: #127 restored `PROGRESS.md` from the latest tracked progress history after it had been removed by docs cleanup, initialized this Milestone 12 section from `docs/MILESTONES.md`, `docs/PRD.md`, `docs/conversation_dump.md`, GitHub issues #127-#134, and the coordinator decisions in `STATUS.md`.
 - 2026-07-05: #127 confirmed `CHANGELOG.md` has Keep a Changelog framing and `## [Unreleased]`; `CHANGELOG.md` is intentionally unchanged for #127 because this issue creates tracking only and ships no functional product behavior.
+- 2026-07-05: #122 rebased onto current `origin/main` after #127 restored this tracker, removed generated `next-env.d.ts` build churn from the diff, and recorded validation evidence below.
 
 ### Validation Evidence
+
+- 2026-07-05 #122:
+  - `git status --short --branch --untracked-files=all`: pass; branch is rebased onto `origin/main`, #122 implementation files remain dirty/untracked as intended, and `next-env.d.ts` is not modified.
+  - `git diff --name-status`: pass; tracked diff is limited to `.env.example`, `CHANGELOG.md`, `README.md`, Drizzle metadata, env/schema helpers, and focused unit tests.
+  - `bun run format:check`: pass; Biome checked 92 files with no fixes applied.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun test tests/unit/agent-schema.test.ts tests/unit/env-validation.test.ts tests/unit/create-agent-db.test.ts`: pass; 122 tests passed, including manual runner schema/migration shape, endpoint validation, idempotent non-secret bootstrap, assigned-runner lookup, soft-delete/other-user exclusions, and no-runner lifecycle preservation.
+  - Full DB migrate/health, lint, typecheck, aggregate unit test, and production build evidence remains from the pre-rebase #122 checker pass in `STATUS.md`; not rerun because the rebase was clean and only `PROGRESS.md` changed after focused validation.
 
 - 2026-07-05 #127:
   - `test -f PROGRESS.md`: pass.
