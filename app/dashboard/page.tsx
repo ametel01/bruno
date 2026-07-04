@@ -3,6 +3,7 @@ import { ActivityFeedPanel } from "@/app/_components/activity-feed";
 import { EmptyState, PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { ApprovalActionButton } from "@/app/dashboard/_components/approval-action-button";
+import { DenyApprovalButton } from "@/app/dashboard/_components/deny-approval-button";
 import {
   AgentListPersistenceError,
   listActiveAgentsForDevelopmentUser,
@@ -143,8 +144,8 @@ export function DashboardContent({
             </li>
             <li>Runner provisioning and external integrations are placeholders only.</li>
             <li>
-              Deny decisions, production runners, billing, and secret storage wait for later
-              milestones.
+              Approval decisions are available from the queue; production runners, billing, and
+              secret storage wait for later milestones.
             </li>
           </ul>
         </PlaceholderPanel>
@@ -209,7 +210,10 @@ function PendingApprovalItem({ approval }: { approval: PendingApprovalDto }) {
           </div>
         ) : null}
       </dl>
-      <ApprovalActionButton approvalId={approval.id} />
+      <div className="approval-actions">
+        <ApprovalActionButton approvalId={approval.id} />
+        <DenyApprovalButton approvalId={approval.id} />
+      </div>
     </li>
   );
 }

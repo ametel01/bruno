@@ -174,6 +174,67 @@ test.describe
       await expect(approvalItem).not.toContainText("payload_json");
     });
 
+    test("/dashboard denies a pending approval and shows decision activity", async ({
+      isMobile,
+      page,
+      request,
+    }, testInfo) => {
+      test.skip(isMobile, "dashboard approval denial proof runs once on desktop");
+
+      const name = `Deny Approval Agent ${testInfo.project.name}`;
+      const created = await createAgent(request, name);
+      createdAgentIds.add(created.id);
+      const createdAt = "2026-07-04T08:35:00.000Z";
+      const expiresAt = "2026-07-04T09:35:00.000Z";
+
+      await pinDevelopmentUserToAgent(created.id);
+      const approvalId = await insertPendingApproval(created.id, {
+        title: "Deny outbound message",
+        description: "Deny the drafted Telegram summary before it is sent.",
+        createdAt,
+        expiresAt,
+      });
+
+      await page.goto("/dashboard");
+
+      const approvalPanel = page.locator(".approval-panel");
+      const approvalItem = approvalPanel.locator(".approval-item", {
+        hasText: "Deny outbound message",
+      });
+      await expect(approvalItem).toContainText("pending");
+      await page.route(`**/api/approvals/${approvalId}/deny`, async (route) => {
+        await route.fulfill({
+          contentType: "application/json",
+          status: 500,
+          body: JSON.stringify({
+            error: {
+              code: "approval_deny_failed",
+              message: "postgres://user:password@127.0.0.1/db raw payload_json stack",
+            },
+          }),
+        });
+      });
+      await approvalItem.getByRole("button", { name: "Deny" }).click();
+      await expect(approvalItem.getByRole("status")).toContainText("Approval could not be denied.");
+      await expect(approvalItem.getByRole("status")).not.toContainText("postgres://");
+      await expect(approvalItem.getByRole("status")).not.toContainText("payload_json");
+      await page.unroute(`**/api/approvals/${approvalId}/deny`);
+
+      await approvalItem.getByRole("button", { name: "Deny" }).click();
+
+      await expect(
+        approvalPanel.locator(".approval-item", { hasText: "Deny outbound message" }),
+      ).toHaveCount(0);
+      const dashboardActivity = page.locator(".activity-feed-panel");
+      await expect(dashboardActivity).toContainText("approval.denied");
+      await expect(dashboardActivity).toContainText(
+        'Denied approval "Deny outbound message" for agent',
+      );
+      await expect(dashboardActivity).toContainText("pending -> denied");
+      await expect(dashboardActivity).not.toContainText("payload_json");
+      await expect(dashboardActivity).not.toContainText("stored-for-downstream-not-rendered");
+    });
+
     test("/agents/:agentId shows persisted pending approvals only for that agent", async ({
       isMobile,
       page,
@@ -766,7 +827,7 @@ async function insertPendingApproval(
   let approvalId = "";
 
   await withDatabase(async (sql) => {
-    const [approvalRow] = await sql<{ id: string }[]>`
+    const [inserted] = await sql<{ id: string }[]>`
       insert into agent_approvals (
         agent_id,
         title,
@@ -789,9 +850,11 @@ async function insertPendingApproval(
       )
       returning id
     `;
-    approvalId = approvalRow?.id ?? "";
+
+    approvalId = inserted?.id ?? "";
   });
 
+  expect(approvalId).toMatch(/^[0-9a-f-]+$/);
   return approvalId;
 }
 

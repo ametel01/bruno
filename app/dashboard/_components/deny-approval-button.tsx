@@ -3,26 +3,25 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-type ApprovalActionButtonProps = {
+type DenyApprovalButtonProps = {
   approvalId: string;
 };
 
-type ApprovalActionState =
+type DenyState =
   | { status: "idle" }
   | { status: "requesting" }
-  | { status: "success"; message: string }
+  | { status: "completed"; message: string }
   | { status: "error"; message: string };
 
-export function ApprovalActionButton({ approvalId }: ApprovalActionButtonProps) {
+export function DenyApprovalButton({ approvalId }: DenyApprovalButtonProps) {
   const router = useRouter();
-  const [state, setState] = useState<ApprovalActionState>({ status: "idle" });
-  const requesting = state.status === "requesting";
+  const [state, setState] = useState<DenyState>({ status: "idle" });
 
-  async function handleApprove() {
+  async function handleDeny() {
     setState({ status: "requesting" });
 
     try {
-      const response = await fetch(`/api/approvals/${approvalId}/approve`, {
+      const response = await fetch(`/api/approvals/${approvalId}/deny`, {
         method: "POST",
       });
 
@@ -31,28 +30,25 @@ export function ApprovalActionButton({ approvalId }: ApprovalActionButtonProps) 
         return;
       }
 
-      setState({ status: "success", message: "Approval approved." });
+      setState({ status: "completed", message: "Approval denied." });
       router.refresh();
     } catch {
-      setState({ status: "error", message: "Approval could not be approved." });
+      setState({ status: "error", message: "Approval could not be denied." });
     }
   }
 
   return (
     <div className="approval-decision-action">
       <button
-        className="primary-button"
+        className="secondary-button danger-button"
         type="button"
-        disabled={requesting}
-        onClick={handleApprove}
+        disabled={state.status === "requesting" || state.status === "completed"}
+        onClick={handleDeny}
       >
-        {requesting ? "Approving" : "Approve"}
+        {state.status === "requesting" ? "Denying" : "Deny"}
       </button>
-      {state.status === "success" || state.status === "error" ? (
-        <span
-          className={state.status === "error" ? "action-message error" : "action-message"}
-          role="status"
-        >
+      {state.status === "completed" || state.status === "error" ? (
+        <span className={`action-message ${state.status}`} role="status">
           {state.message}
         </span>
       ) : null}
@@ -68,16 +64,16 @@ async function safeFailureMessage(response: Response): Promise<string> {
       };
     };
 
-    if (body.error?.code === "approval_not_found") {
-      return "Approval could not be found.";
-    }
-
     if (body.error?.code === "approval_already_resolved") {
       return "Approval has already been resolved.";
+    }
+
+    if (body.error?.code === "approval_not_found") {
+      return "Approval could not be found.";
     }
   } catch {
     // Keep user-facing failures generic when the response is not safe JSON.
   }
 
-  return "Approval could not be approved.";
+  return "Approval could not be denied.";
 }

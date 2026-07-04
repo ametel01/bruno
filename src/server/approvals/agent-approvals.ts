@@ -1,14 +1,23 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { isValidAgentId } from "@/src/server/agents/lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agentApprovals, agents } from "@/src/server/db/schema";
+import { type agentApprovalStatusEnum, agentApprovals, agents } from "@/src/server/db/schema";
 import {
   recordAgentEventInTransaction,
   type AgentEventTransaction,
+  type AgentEventWrite,
 } from "@/src/server/events/agent-events";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
 export const APPROVAL_APPROVED_EVENT_TYPE = "approval.approved";
+export const APPROVAL_DENIED_EVENT_TYPE = "approval.denied";
+
+type AgentApprovalStatus = (typeof agentApprovalStatusEnum.enumValues)[number];
+type ApprovalDecisionClock = () => Date;
+type InsertApprovalDecisionEvent = (
+  tx: AgentEventTransaction,
+  event: AgentEventWrite,
+) => Promise<void>;
 
 export type PendingApprovalDto = {
   id: string;
@@ -37,7 +46,7 @@ export type AgentApprovalDependencies = {
   createConnection?: () => DatabaseConnection;
 };
 
-export type ApprovalDecisionStatus = "approved" | "denied" | "expired" | "cancelled";
+export type ApprovalDecisionStatus = Exclude<AgentApprovalStatus, "pending">;
 
 export type ApprovedApprovalDto = {
   id: string;
@@ -67,11 +76,9 @@ export type ApprovePendingApprovalResult =
       status?: ApprovalDecisionStatus;
     };
 
-type ApprovalDecisionEventWriter = typeof recordAgentEventInTransaction;
-
 export type ApprovePendingApprovalDependencies = AgentApprovalDependencies & {
-  now?: () => Date;
-  recordApprovedEvent?: ApprovalDecisionEventWriter;
+  now?: ApprovalDecisionClock;
+  recordApprovedEvent?: InsertApprovalDecisionEvent;
 };
 
 export class AgentApprovalPersistenceError extends Error {
@@ -214,6 +221,37 @@ export async function approvePendingApprovalForDevelopmentUser(
     }
   }
 }
+
+export type DenyApprovalResult =
+  | {
+      ok: true;
+      approval: DeniedApprovalDto;
+      event: {
+        type: typeof APPROVAL_DENIED_EVENT_TYPE;
+      };
+    }
+  | {
+      ok: false;
+      reason:
+        | "missing_approval_id"
+        | "malformed_approval_id"
+        | "approval_not_found"
+        | "approval_already_resolved";
+      status?: ApprovalDecisionStatus;
+    };
+
+export type DeniedApprovalDto = {
+  id: string;
+  agentId: string;
+  status: "denied";
+  resolvedBy: string;
+  resolvedAt: string;
+};
+
+export type DenyApprovalDependencies = AgentApprovalDependencies & {
+  now?: ApprovalDecisionClock;
+  insertDecisionEvent?: InsertApprovalDecisionEvent;
+};
 
 export async function createPendingApprovalForDevelopmentUser(
   input: CreatePendingApprovalInput,
@@ -395,6 +433,133 @@ export async function listPendingApprovalsForDevelopmentUserAgent(
       createdAt: row.createdAt.toISOString(),
       expiresAt: row.expiresAt?.toISOString() ?? null,
     }));
+  } catch {
+    throw new AgentApprovalPersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function denyApprovalForDevelopmentUser(
+  approvalId: string,
+  dependencies: DenyApprovalDependencies = {},
+): Promise<DenyApprovalResult> {
+  const normalizedApprovalId = approvalId.trim();
+
+  if (normalizedApprovalId.length === 0) {
+    return { ok: false, reason: "missing_approval_id" };
+  }
+
+  if (!isValidAgentId(normalizedApprovalId)) {
+    return { ok: false, reason: "malformed_approval_id" };
+  }
+
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now ?? (() => new Date());
+  const insertDecisionEvent = dependencies.insertDecisionEvent ?? recordAgentEventInTransaction;
+
+  try {
+    return await connection.db.transaction(async (tx) => {
+      const developmentUserId = await getDevelopmentUserId(tx);
+
+      if (!developmentUserId) {
+        return { ok: false, reason: "approval_not_found" };
+      }
+
+      const current = await selectScopedApproval(tx, normalizedApprovalId, developmentUserId);
+
+      if (!current) {
+        return { ok: false, reason: "approval_not_found" };
+      }
+
+      if (current.status !== "pending") {
+        return {
+          ok: false,
+          reason: "approval_already_resolved",
+          status: current.status,
+        };
+      }
+
+      const [denied] = await tx
+        .update(agentApprovals)
+        .set({
+          status: "denied",
+          resolvedBy: developmentUserId,
+          resolvedAt: now(),
+        })
+        .where(
+          and(eq(agentApprovals.id, normalizedApprovalId), eq(agentApprovals.status, "pending")),
+        )
+        .returning({
+          id: agentApprovals.id,
+          agentId: agentApprovals.agentId,
+          status: agentApprovals.status,
+          resolvedBy: agentApprovals.resolvedBy,
+          resolvedAt: agentApprovals.resolvedAt,
+        });
+
+      if (!denied) {
+        const currentApproval = await selectScopedApproval(
+          tx,
+          normalizedApprovalId,
+          developmentUserId,
+        );
+
+        if (!currentApproval) {
+          return {
+            ok: false,
+            reason: "approval_not_found",
+          };
+        }
+
+        if (currentApproval.status !== "pending") {
+          return {
+            ok: false,
+            reason: "approval_already_resolved",
+            status: currentApproval.status,
+          };
+        }
+
+        throw new Error("Approval deny update returned no rows.");
+      }
+
+      await insertDecisionEvent(tx, {
+        agentId: denied.agentId,
+        actorUserId: developmentUserId,
+        type: APPROVAL_DENIED_EVENT_TYPE,
+        message: `Denied approval "${current.title}" for agent "${current.agentName}".`,
+        metadata: {
+          approvalId: denied.id,
+          agentId: denied.agentId,
+          fromStatus: "pending",
+          toStatus: "denied",
+          previousStatus: "pending",
+          newStatus: "denied",
+          approvalTitle: current.title,
+        },
+      });
+
+      if (denied.status !== "denied" || !denied.resolvedBy || !denied.resolvedAt) {
+        throw new Error("Approval deny update returned invalid resolution data.");
+      }
+
+      return {
+        ok: true,
+        approval: {
+          id: denied.id,
+          agentId: denied.agentId,
+          status: "denied",
+          resolvedBy: denied.resolvedBy,
+          resolvedAt: denied.resolvedAt.toISOString(),
+        },
+        event: {
+          type: APPROVAL_DENIED_EVENT_TYPE,
+        },
+      };
+    });
   } catch {
     throw new AgentApprovalPersistenceError();
   } finally {
