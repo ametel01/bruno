@@ -570,6 +570,8 @@ Goal: Each agent runs in its own container.
 
 Goal: Control agents on one manually provisioned remote VPS before automating cloud provisioning.
 
+Status: local contract implementation and operator documentation are present, but Milestone 11 is not marked complete until an authorized hosted dashboard plus manual VPS smoke test verifies the acceptance criteria below, or the user explicitly accepts deferring that external smoke blocker.
+
 ### Technical implementation
 
 - Manually create one VPS and install Docker plus the runner service.

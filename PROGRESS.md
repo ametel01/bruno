@@ -1,5 +1,55 @@
 # Progress
 
+## Milestone 11 Manual VPS Deployment
+
+- Status: #126 local documentation and validation evidence complete; Milestone 11 is not complete because an authorized hosted dashboard plus manual VPS smoke target is not available in this worktree.
+- Source plan:
+  - `docs/MILESTONES.md` Milestone 11: Single Cloud VM Deployment.
+  - GitHub issue #126.
+- Current branch: `codex/issue-126-manual-vps-docs-smoke`.
+- External blocker: real hosted-dashboard/manual-VPS smoke requires authorized dashboard URL, runner endpoint, temporary bearer token, hosted database/Vercel env access, and permission to mutate staging runner containers. These were not provided, and this work must not perform production deploys, DNS/VPS mutation, secret changes, or real credential use without explicit authorization.
+
+### Issue Checklist
+
+- [x] #122 Persist manual VPS runner identity and assignment.
+- [x] #123 Add standalone manual VPS runner service.
+- [x] #124 Forward dashboard lifecycle actions to assigned manual runners.
+- [x] #125 Show manual runner status and failures.
+- [x] #126 Document and smoke-test manual VPS deployment. Status: local docs/evidence complete; external hosted/manual-VPS smoke blocked by missing authorized environment.
+
+### Current Status
+
+- README now documents manual VPS prerequisites, Docker and Bun setup, runner service startup/supervision, firewall/HTTPS expectations, dashboard configuration, troubleshooting, and an operator smoke procedure.
+- `.env.example` lists dashboard and runner env vars with placeholders only.
+- Stale README language was reconciled so manual runner persistence, lifecycle forwarding, remote logs, and runner status UI are described as shipped behavior, while provisioning, production auth, Hermes/provider integrations, backups, billing, and automated cloud APIs remain future scope.
+- `docs/MILESTONES.md` intentionally does not mark Milestone 11 completed because the real hosted/manual-VPS smoke acceptance gate is externally blocked.
+- `CHANGELOG.md` is intentionally unchanged for #126 because this issue adds docs and a manual smoke procedure, not new observable app behavior or a new smoke command.
+
+### Validation Evidence
+
+- 2026-07-05 #126:
+  - `bun install`: pass; restored local package binaries after initial `bun run format:check` and `bun run lint` failed with `biome: command not found`.
+  - Initial `bun run format:check`: environment failure before install; `biome` binary was unavailable in the worktree.
+  - Initial `bun run lint`: environment failure before install; `biome` binary was unavailable in the worktree.
+  - `bun run format:check`: pass; Biome checked 102 files with no fixes applied.
+  - `bun run lint`: pass; Biome checked 102 files with no fixes applied.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/manual-runner-adapter.test.ts tests/unit/runner-service.test.ts tests/unit/manual-runner-status.test.ts tests/unit/agent-logs-route.test.ts`: pass; 31 focused manual runner adapter/service/status/log tests passed.
+  - `docker compose up -d postgres`: failed; the issue-local compose project could not bind host port `54329` because the shared AgentBay Postgres was already using it. Follow-up `docker compose down -v --remove-orphans` removed the failed issue-local container, network, and volume.
+  - First `bun run test -- --no-file-parallelism`: environment failure; command was run without `DATABASE_URL`/`NEXT_PUBLIC_APP_URL`, causing env validation failures before DB-backed suites initialized.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:migrate`: pass; migrations applied successfully against the shared local database.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism`: pass; 29 files and 262 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: pass; Next.js production build completed and listed the expected app/API routes.
+  - `PORT=3126 DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3126 bun run test:e2e -- --project=chromium-desktop --project=chromium-mobile -g "manual runner status"`: pass; 2 tests passed covering dashboard runner status, assigned-runner detail, unreachable/offline alerts, remote/manual runner logs, safe omission of raw endpoint credentials, and mobile layout.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run verify`: failed during the default parallel Vitest step after format, lint, and typecheck passed. Failures were shared-DB parallelism symptoms already known in this repo: one manual-runner adapter log assertion received no rows after a parallel deadlock, and one create-agent lifecycle test hit `AgentLifecyclePersistenceError`.
+  - `PORT=3126 DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3126 bun run test:e2e -- --workers=1`: pass; 41 tests passed and 19 expected project skips.
+  - `rg -n "lifecycle forwarding.*future scope|remote runner control APIs.*future scope|runner tokens.*future scope|heartbeats.*future scope|remote logs.*future scope|manual runner.*future scope|runner status.*future scope" README.md docs/MILESTONES.md PROGRESS.md -S`: pass; no stale shipped-manual-runner feature wording remains. Matches were only current future-scope statements for unimplemented production/provisioning areas and the #126 reconciliation note.
+  - Secret scan over README, `.env.example`, `PROGRESS.md`, `CHANGELOG.md`, `docs/MILESTONES.md`, and tests: pass; no committed real tokens, private keys, provider keys, production DB URLs, or non-placeholder runner bearer values found.
+  - `git diff --check`: pass; no whitespace errors.
+  - Final `bun run format:check`: pass; Biome checked 102 files with no fixes applied after the final README edit.
+  - External smoke: blocked; no authorized hosted dashboard URL, manual VPS endpoint, temporary bearer token, hosted database/Vercel env access, or permission to mutate staging runner containers was provided.
+
 ## Milestone 12 Secure Runner Auth
 
 - Status: #128 implementation in progress; Milestone 12 implementation is not complete.

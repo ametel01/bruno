@@ -1,6 +1,6 @@
 # AgentBay
 
-AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, the completed Milestone 7 pending-approval queue workflow, and the completed Milestone 9 local runner workflow. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, Start, Stop, Restart, and Delete controls wired through a local runner adapter, persisted activity feeds, scoped runtime logs, local runner process metadata storage, dashboard plus agent-detail pending approvals for local development agents, dashboard approval decision controls, and fake approval generation for running local-development agents.
+AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, the completed Milestone 7 pending-approval queue workflow, the completed Milestone 9 local runner workflow, and the Milestone 11 manual VPS runner control path. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, Start, Stop, Restart, and Delete controls wired through local, Docker, or assigned manual runner adapters, persisted activity feeds, scoped runtime logs, local and Docker runner state storage, manual runner identity and assignment storage, dashboard plus agent-detail pending approvals for local development agents, dashboard approval decision controls, and fake approval generation for running local-development agents.
 
 ## Requirements
 
@@ -34,7 +34,15 @@ AGENTBAY_MANUAL_RUNNER_NAME=Manual VPS Runner
 AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL=https://runner.example.com
 ```
 
-`AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL` must use `https://` for remote hosts. Loopback `http://` endpoints such as `http://127.0.0.1:8787` are allowed for local tests. These values only create or update durable runner identity; lifecycle forwarding, runner tokens, heartbeats, and provisioning remain future scope.
+`AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL` must use `https://` for remote hosts. Loopback `http://` endpoints such as `http://127.0.0.1:8787` are allowed for local tests. These values create or update durable runner identity for dashboard assignment; they do not provision a VPS, rotate credentials, expose token-management UI, or implement the Milestone 12 registration and heartbeat flows.
+
+The dashboard and manual runner service must also share a temporary Milestone 11 bearer token for dashboard-to-runner requests:
+
+```bash
+AGENTBAY_RUNNER_BEARER_TOKEN=replace-with-manual-runner-token
+```
+
+Set the real value only in local uncommitted env files or hosting provider secret settings. Do not commit real bearer tokens, production database URLs, Vercel tokens, private hostnames, SSH keys, or provider credentials.
 
 ## Local Database
 
@@ -76,7 +84,7 @@ The migration set creates the local application metadata table plus the persiste
 - `agent_schedule_mode`: Postgres enum used by `agent_configs.schedule_mode`.
 - `agent_approval_status`: Postgres enum with `pending`, `approved`, `denied`, `expired`, and `cancelled`.
 
-The migrations do not create runner credentials, heartbeats, remote lifecycle forwarding, billing, auth, Hermes, Telegram, secrets, provisioning, or provider integration tables.
+The migrations create manual runner identity, assignment, credential/hash, heartbeat, Docker runner state, local runner process, agent log, approval, config, event, and agent tables needed by the current milestones. They do not create billing, production auth, Hermes, Telegram, secret storage, automated cloud provisioning, backup/restore, or external provider integration tables.
 
 ## Development Server
 
@@ -115,7 +123,7 @@ The `/agents` page contains the current create/list and local runner lifecycle w
 
 The dashboard reads active persisted agents from the database. The detail page loads active persisted agent records by ID and returns not found for missing, malformed, or soft-deleted IDs. Delete preserves the `agents` row and existing `agent_events`, but removes the agent from `/agents`, `/dashboard`, and active detail reads.
 
-Agent records are local-development records only. Lifecycle controls use the local runner adapter, runtime logs persist captured process stdout/stderr, and the detail config editor, dashboard plus agent-detail pending approvals panels, dashboard approval decision controls, and fake approval generation use local database read/write paths. Approval payload execution, remote runner control APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
+Agent records are local-development records until production auth ships. Lifecycle controls use the assigned manual VPS runner when an active agent has a manual runner assignment; otherwise they use the local/Docker runner path. Runtime logs persist captured local, Docker, and manual runner stdout/stderr lines, and the detail config editor, dashboard plus agent-detail pending approvals panels, dashboard approval decision controls, and fake approval generation use local database read/write paths. Approval payload execution, automated runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning APIs, and external provider integrations remain future scope.
 
 ## Local Runner Adapter
 
@@ -143,13 +151,41 @@ Process stdout and stderr lines are persisted in `agent_logs` with stable per-ag
 
 ## Manual VPS Runner Service
 
-Milestone 11 adds a standalone runner-facing Bun service that can run on a manually provisioned VPS without connecting to the dashboard database. Start it locally with a temporary bearer token:
+Milestone 11 adds a standalone runner-facing Bun service that can run on a manually provisioned VPS without connecting to the dashboard database. The dashboard stores the runner name and endpoint in Postgres, assigns agents by `runner_id`, forwards start/stop/restart/status/log requests to assigned manual runners, persists returned `manual_runner` logs, and shows safe runner status on the dashboard and agent detail page.
+
+### Runner Host Prerequisites
+
+Prepare the VPS before starting the service:
+
+- A Linux host reachable from the hosted dashboard over HTTPS.
+- Docker installed and usable by the service account.
+- Bun installed for the repository runner service.
+- The AgentBay repository checked out at the deployed application revision, or the runner-service files deployed by an equivalent artifact.
+- A process supervisor such as `systemd`, `supervisord`, or the platform's native service manager.
+- Firewall rules that allow only SSH from operator-controlled networks and HTTPS traffic to the runner endpoint. Do not expose the raw Bun port directly to the internet unless a trusted reverse proxy terminates HTTPS in front of it.
+
+The runner service itself listens on `127.0.0.1:3045` by default. Override the bind address only when a local reverse proxy or private network requires it:
 
 ```bash
-AGENTBAY_RUNNER_BEARER_TOKEN=replace-with-local-token bun run runner:service
+AGENTBAY_RUNNER_HOST=127.0.0.1
+AGENTBAY_RUNNER_PORT=3045
 ```
 
-The service listens on `127.0.0.1:3045` by default. Override the bind address with `AGENTBAY_RUNNER_HOST` and `AGENTBAY_RUNNER_PORT`.
+Run it locally or under a supervisor with a temporary bearer token:
+
+```bash
+AGENTBAY_RUNNER_BEARER_TOKEN=replace-with-manual-runner-token bun run runner:service
+```
+
+Optional runner-side Docker command configuration:
+
+```bash
+AGENTBAY_RUNNER_DOCKER_EXECUTABLE=docker
+AGENTBAY_DOCKER_RUNNER_IMAGE=busybox:1.36
+AGENTBAY_DOCKER_RUNNER_ARGS_JSON='["sh","-c","while true; do sleep 1; done"]'
+```
+
+`AGENTBAY_DOCKER_RUNNER_ARGS_JSON` must be a JSON string array. The runner uses executable-plus-argv Docker calls and labels selected-agent containers with `agentbay.agent_id=<agentId>`.
 
 Runner API:
 
@@ -160,6 +196,76 @@ Runner API:
 - `GET /runner/v1/agents/:agentId/logs`
 
 Requests must send `Authorization: Bearer <AGENTBAY_RUNNER_BEARER_TOKEN>`. Unauthorized requests return safe JSON errors. Docker operations use executable-plus-argv calls, label containers with `agentbay.agent_id=<agentId>`, and scope start, stop, restart, status, and logs to that selected-agent label. The token is a temporary Milestone 11 mechanism and is intentionally replaced by Milestone 12 secure runner auth.
+
+### Dashboard Configuration
+
+Configure the hosted dashboard with the same temporary bearer token and a non-secret runner endpoint:
+
+```bash
+AGENTBAY_RUNNER_BEARER_TOKEN=replace-with-manual-runner-token
+AGENTBAY_MANUAL_RUNNER_NAME=Manual VPS Runner
+AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL=https://runner.example.com
+```
+
+`AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL` creates or updates one active manual runner record for the development user during database-backed app startup paths. The endpoint must be HTTPS for remote hosts. Loopback HTTP is accepted only for local tests. Operators can confirm the runner is known by opening `/dashboard` and checking the Manual runner status panel. Assigned-agent detail pages show the runner name, kind, endpoint host, persisted status, updated time, and offline/degraded warnings without exposing runner IDs, credentials, raw endpoint paths, userinfo, query strings, or metadata.
+
+Assigning an agent to a manual runner is currently a database/operator setup step; automated runner creation and management UI are later milestones. Once assigned, the existing dashboard and detail Start, Stop, and Restart controls call the manual runner service instead of the fallback local/Docker runner path.
+
+### Supervision
+
+Use a supervisor so runner service restarts survive SSH session exits and host reboots. A minimal `systemd` unit shape is:
+
+```ini
+[Unit]
+Description=AgentBay manual runner service
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/agentbay
+Environment=AGENTBAY_RUNNER_HOST=127.0.0.1
+Environment=AGENTBAY_RUNNER_PORT=3045
+Environment=AGENTBAY_RUNNER_BEARER_TOKEN=replace-with-manual-runner-token
+ExecStart=/usr/local/bin/bun run runner:service
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Keep real env values in host-local supervisor overrides or the service manager's secret store. Do not commit a filled unit file.
+
+### Manual VPS Smoke Procedure
+
+Run this smoke only when you have explicit authorization for a hosted dashboard URL, runner endpoint, and temporary token. Do not mutate production DNS, VPS state, firewall rules, or secrets as part of routine validation.
+
+1. Confirm the runner host is supervised and reachable through HTTPS:
+
+   ```bash
+   curl -fsS -H "Authorization: Bearer <token>" https://runner.example.com/runner/v1/agents/00000000-0000-4000-8000-000000000001/status
+   ```
+
+2. Configure the hosted dashboard with `DATABASE_URL`, `NEXT_PUBLIC_APP_URL`, `AGENTBAY_RUNNER_BEARER_TOKEN`, `AGENTBAY_MANUAL_RUNNER_NAME`, and `AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL`.
+3. Run migrations against the hosted database and verify `/health`.
+4. Create or select a test agent and assign it to the known manual runner record.
+5. From the hosted dashboard or agent detail page, click Start. Confirm the UI reaches `running`, the runner host has exactly one Docker container labeled `agentbay.agent_id=<agentId>`, and the dashboard process log panel shows `manual_runner` output.
+6. Click Stop. Confirm the selected remote container is stopped or removed according to runner behavior, the agent returns to `stopped`, and existing remote logs remain readable.
+7. Click Restart. Confirm only the selected agent's remote container is replaced and the dashboard still shows fresh remote logs.
+8. Redeploy or restart the hosted dashboard without changing the database. Confirm the Manual runner status panel still lists the same runner name and endpoint host.
+9. Temporarily point a staging dashboard env var to an unreachable HTTPS endpoint or stop the staging runner service. Confirm the dashboard and assigned-agent detail page show the unreachable/offline runner warning and safe error state without exposing token, endpoint userinfo, raw query string, stack trace, database URL, or runner IDs.
+10. Restore the staging runner endpoint/service and record the exact result in `PROGRESS.md`.
+
+If hosted dashboard or manual VPS credentials are unavailable, record the exact blocker in `PROGRESS.md` and do not mark Milestone 11 complete.
+
+### Troubleshooting
+
+- `runner_token_not_configured`: set `AGENTBAY_RUNNER_BEARER_TOKEN` on the runner service and the dashboard.
+- `unauthorized`: the dashboard and runner token values differ, or the request omitted `Authorization: Bearer <token>`.
+- `runner_endpoint_invalid`: use HTTPS for remote endpoints; only loopback hosts may use HTTP.
+- `runner_request_failed`: check firewall, reverse proxy, TLS certificate, runner service health, and supervisor logs.
+- `docker_command_failed`: verify Docker is installed, the service account can run Docker, the configured image exists or can be pulled, and no stale selected-agent container has an invalid label.
+- Runner appears after local startup but not after hosted redeploy: confirm the hosted deployment uses the same database and has `AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL` configured.
 
 ## Agent Detail Config Editor
 
@@ -250,9 +356,9 @@ Approval payload execution and real provider action dispatch remain future miles
 
 The current lifecycle APIs are:
 
-- `POST /api/agents/:agentId/actions/start`: accepts active `idle`, `stopped`, or `error` agents, launches the configured local runner child process, persists `running`, and records `agent.start_requested` plus `agent.start_completed`.
-- `POST /api/agents/:agentId/actions/stop`: accepts active `running` agents, terminates the tracked local runner child process, persists `stopped`, and records `agent.stop_requested` plus `agent.stop_completed`.
-- `POST /api/agents/:agentId/actions/restart`: accepts active `running` agents, terminates the tracked local runner child process, launches a replacement process, persists `running`, and records `agent.restart_requested` plus `agent.restart_completed`.
+- `POST /api/agents/:agentId/actions/start`: accepts active `idle`, `stopped`, or `error` agents, starts the assigned manual runner or fallback local/Docker runner, persists `running` only after the runner reports success, and records `agent.start_requested` plus `agent.start_completed`.
+- `POST /api/agents/:agentId/actions/stop`: accepts active `running` agents, stops the selected assigned manual runner or fallback local/Docker runner, persists `stopped`, and records `agent.stop_requested` plus `agent.stop_completed`.
+- `POST /api/agents/:agentId/actions/restart`: accepts active `running` agents, restarts the selected assigned manual runner or fallback local/Docker runner, persists `running` only after the replacement reports success, and records `agent.restart_requested` plus `agent.restart_completed`.
 - `POST /api/agents/:agentId/actions/simulate-error`: development/test-only and rejected in production. Outside production, accepts active non-deleted `idle`, `stopped`, `starting`, `running`, or `restarting` agents, persists `error`, and records exactly one `agent.error` audit event.
 - `DELETE /api/agents/:agentId`: accepts active non-transitioning `idle`, `running`, `stopped`, or `error` agents, soft-deletes the row, and records exactly one `agent.deleted` event.
 
@@ -439,9 +545,12 @@ The Vercel deployment environment must provide:
 ```text
 DATABASE_URL
 NEXT_PUBLIC_APP_URL
+AGENTBAY_RUNNER_BEARER_TOKEN
+AGENTBAY_MANUAL_RUNNER_NAME
+AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL
 ```
 
-`DATABASE_URL` should be a Vercel-accessible Postgres connection string, not the local Docker URL. `NEXT_PUBLIC_APP_URL` should be the preview or production app URL used by that deployment. If the CLI has no credentials or Vercel lacks required env vars, record the exact blocker in `PROGRESS.md`.
+`DATABASE_URL` should be a Vercel-accessible Postgres connection string, not the local Docker URL. `NEXT_PUBLIC_APP_URL` should be the preview or production app URL used by that deployment. `AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL` should be the HTTPS runner endpoint, not a private local URL. `AGENTBAY_RUNNER_BEARER_TOKEN` must be stored only in Vercel environment variables or an equivalent secret store. If the CLI has no credentials or Vercel lacks required env vars, record the exact blocker in `PROGRESS.md`.
 
 The Vercel CLI creates local `.vercel/` metadata and may create `.env.local` for local credentials. Both are ignored and should remain local-only.
 
