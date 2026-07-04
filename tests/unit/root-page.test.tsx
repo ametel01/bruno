@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   listLatestAgentActivity: vi.fn(),
   listLatestActiveAgentProcessLogs: vi.fn(),
   listActiveAgentsForDevelopmentUser: vi.fn(),
+  listManualRunnerStatusSummariesForDevelopmentUser: vi.fn(),
+  getAssignedManualRunnerStatusForDevelopmentUserAgent: vi.fn(),
   listPendingApprovalsForDevelopmentUserAgent: vi.fn(),
   listPendingApprovalsForDevelopmentUser: vi.fn(),
   notFound: vi.fn(() => {
@@ -66,6 +68,18 @@ vi.mock("@/src/server/logs/agent-logs", async (importOriginal) => {
   };
 });
 
+vi.mock("@/src/server/runners/manual-runner-status", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/server/runners/manual-runner-status")>();
+
+  return {
+    ...actual,
+    getAssignedManualRunnerStatusForDevelopmentUserAgent:
+      mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent,
+    listManualRunnerStatusSummariesForDevelopmentUser:
+      mocks.listManualRunnerStatusSummariesForDevelopmentUser,
+  };
+});
+
 vi.mock("next/navigation", () => ({
   notFound: mocks.notFound,
   useRouter: () => ({
@@ -88,6 +102,8 @@ describe("product shell routes", () => {
       },
     });
     mocks.listLatestActiveAgentProcessLogs.mockResolvedValue([]);
+    mocks.listManualRunnerStatusSummariesForDevelopmentUser.mockResolvedValue([]);
+    mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockResolvedValue(null);
     mocks.listPendingApprovalsForDevelopmentUser.mockResolvedValue([]);
     mocks.listPendingApprovalsForDevelopmentUserAgent.mockResolvedValue([]);
     mocks.listAgentEventFeed.mockResolvedValue({
@@ -107,6 +123,8 @@ describe("product shell routes", () => {
     mocks.listLatestAgentActivity.mockReset();
     mocks.listLatestActiveAgentProcessLogs.mockReset();
     mocks.listActiveAgentsForDevelopmentUser.mockReset();
+    mocks.listManualRunnerStatusSummariesForDevelopmentUser.mockReset();
+    mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockReset();
     mocks.listPendingApprovalsForDevelopmentUserAgent.mockReset();
     mocks.listPendingApprovalsForDevelopmentUser.mockReset();
     mocks.notFound.mockClear();
@@ -171,6 +189,38 @@ describe("product shell routes", () => {
     expect(html).toContain('href="/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774"');
   });
 
+  it("renders known manual runner status on the dashboard without secret endpoint details", async () => {
+    mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([]);
+    mocks.listManualRunnerStatusSummariesForDevelopmentUser.mockResolvedValueOnce([
+      {
+        name: "Manual Runner",
+        kind: "manual_vps",
+        endpointHost: "runner.example.com:8443",
+        status: "online",
+        updatedAt: "2026-07-05T01:00:00.000Z",
+        checkedAt: null,
+      },
+    ]);
+
+    const element = await DashboardPage();
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Manual runner status");
+    expect(html).toContain("known");
+    expect(html).toContain("Manual Runner");
+    expect(html).toContain("manual_vps");
+    expect(html).toContain("runner.example.com:8443");
+    expect(html).toContain("online");
+    expect(html).toContain("2026-07-05T01:00:00.000Z");
+    expect(html).toContain("Not available");
+    expect(html).not.toContain("https://user:password@runner.example.com");
+    expect(html).not.toContain("runnerId");
+    expect(html).not.toContain("runner_id");
+    expect(html).not.toContain("00000000-0000-4000-8000-000000000901");
+    expect(html).not.toContain("token");
+    expect(html).not.toContain("bearer");
+  });
+
   it("renders latest dashboard process logs with agent links and safe summaries", async () => {
     mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([
       {
@@ -191,6 +241,8 @@ describe("product shell routes", () => {
         agentHref: "/agents/00000000-0000-4000-8000-000000000201",
         runnerId: "00000000-0000-4000-8000-000000000901",
         localRunnerProcessId: "00000000-0000-4000-8000-000000000901",
+        dockerRunnerContainerId: null,
+        source: "manual_runner",
         stream: "stdout",
         level: "info",
         message: "runner booted",
@@ -204,6 +256,8 @@ describe("product shell routes", () => {
         agentHref: "/agents/00000000-0000-4000-8000-000000000201",
         runnerId: "00000000-0000-4000-8000-000000000901",
         localRunnerProcessId: "00000000-0000-4000-8000-000000000901",
+        dockerRunnerContainerId: null,
+        source: "manual_runner",
         stream: "stderr",
         level: "error",
         message: "TOKEN=stored-for-downstream failed",
@@ -219,6 +273,7 @@ describe("product shell routes", () => {
     expect(html).toContain("runner booted");
     expect(html).toContain("stdout");
     expect(html).toContain("stderr");
+    expect(html).toContain("manual_runner");
     expect(html).toContain("Process Log Agent");
     expect(html).toContain('href="/agents/00000000-0000-4000-8000-000000000201"');
     expect(html).toContain("Sensitive details omitted.");
@@ -523,7 +578,9 @@ describe("product shell routes", () => {
     expect(html).toContain("Save config");
     expect(html).toContain("Operational alerts");
     expect(html).toContain("No active alerts");
-    expect(html).toContain("Runner offline and degraded alerts are deferred");
+    expect(html).toContain("No assigned manual runner state is available");
+    expect(html).toContain("Assigned runner");
+    expect(html).toContain("No runner assigned");
     expect(html).toContain("Latest log summaries");
     expect(html).toContain("Loading runtime logs.");
     expect(html).toContain("Pending approvals");
@@ -537,6 +594,9 @@ describe("product shell routes", () => {
     expect(html).not.toContain("runnerId");
     expect(html).not.toContain("agent_id");
     expect(mocks.listPendingApprovalsForDevelopmentUserAgent).toHaveBeenCalledWith(
+      "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+    );
+    expect(mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent).toHaveBeenCalledWith(
       "3e47bed7-b58f-4394-93c0-01e3d1e51774",
     );
     expect(mocks.listAgentEventFeed).toHaveBeenCalledWith({
@@ -598,7 +658,7 @@ describe("product shell routes", () => {
     expect(html).toContain("Approval expired");
     expect(html).toContain("Agent error");
     expect(html).toContain("Sensitive details omitted.");
-    expect(html).toContain("Runner offline and degraded alerts are deferred");
+    expect(html).toContain("No assigned manual runner state is available");
     const alertPanelHtml = html.slice(
       html.indexOf('class="operational-alert-panel"'),
       html.indexOf('class="runtime-log-panel"'),
@@ -608,6 +668,44 @@ describe("product shell routes", () => {
     expect(alertPanelHtml).not.toContain("token=stored-for-downstream");
     expect(alertPanelHtml).not.toContain("/app/worker.ts");
     expect(alertPanelHtml).not.toContain("payload_json");
+  });
+
+  it("renders assigned manual runner details and offline alerts safely", async () => {
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
+    mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockResolvedValueOnce({
+      name: "Remote Runner",
+      kind: "manual_vps",
+      endpointHost: "runner.example.com",
+      status: "offline",
+      updatedAt: "2026-07-05T01:30:00.000Z",
+      checkedAt: null,
+      assignmentNotice: "This agent is assigned to Remote Runner.",
+      alertState: "offline",
+      alertMessage:
+        "Assigned manual runner is inactive or unreachable. Check the runner host and service before restarting work.",
+    });
+
+    const element = await AgentDetailPage({
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+    });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Assigned runner");
+    expect(html).toContain("Remote Runner");
+    expect(html).toContain("This agent is assigned to Remote Runner.");
+    expect(html).toContain("manual_vps");
+    expect(html).toContain("runner.example.com");
+    expect(html).toContain("offline");
+    expect(html).toContain("2026-07-05T01:30:00.000Z");
+    expect(html).toContain("Runner is offline");
+    expect(html).toContain("Assigned manual runner is inactive or unreachable.");
+    expect(html).not.toContain("runnerId");
+    expect(html).not.toContain("runner_id");
+    expect(html).not.toContain("00000000-0000-4000-8000-000000000901");
+    expect(html).not.toContain("https://user:password@runner.example.com");
+    expect(html).not.toContain("TOKEN=stored-for-downstream");
+    expect(html).not.toContain("postgres://");
+    expect(html).not.toContain("/app/worker.ts");
   });
 
   it("renders persisted pending approvals on the agent detail page without raw payload details", async () => {

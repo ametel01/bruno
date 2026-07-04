@@ -23,6 +23,11 @@ import {
 } from "@/src/server/approvals/agent-approvals";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { listAgentEventFeed } from "@/src/server/events/agent-events";
+import {
+  getAssignedManualRunnerStatusForDevelopmentUserAgent,
+  ManualRunnerStatusPersistenceError,
+  type AssignedManualRunnerStatusSummary,
+} from "@/src/server/runners/manual-runner-status";
 
 type AgentDetailPageProps = {
   params: Promise<{
@@ -34,6 +39,7 @@ type AgentDetailPageProps = {
 };
 
 type AgentApprovalsResult = Awaited<ReturnType<typeof loadAgentApprovals>>;
+type AssignedRunnerResult = Awaited<ReturnType<typeof loadAssignedManualRunner>>;
 
 export const dynamic = "force-dynamic";
 
@@ -84,11 +90,26 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
     ? "There are no older persisted events for this agent."
     : "Create or update this agent to show persisted activity here.";
   const approvalsResult = await loadAgentApprovals(agent.id);
+  const assignedRunnerResult = await loadAssignedManualRunner(agent.id);
+  const assignedRunner = assignedRunnerResult.ok ? assignedRunnerResult.runner : null;
   const operationalAlerts = buildAgentOperationalAlerts({
     agent,
     approvals: approvalsResult.ok ? approvalsResult.approvals : [],
     events: activityEvents,
-    runnerState: null,
+    runnerState:
+      assignedRunner?.alertState === null
+        ? {
+            status: "online",
+            message: null,
+            updatedAt: assignedRunner.updatedAt,
+          }
+        : assignedRunner?.alertState
+          ? {
+              status: assignedRunner.alertState,
+              message: assignedRunner.alertMessage,
+              updatedAt: assignedRunner.updatedAt,
+            }
+          : null,
   });
 
   return (
@@ -197,6 +218,7 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
           alerts={operationalAlerts.alerts}
           runnerStateNotice={operationalAlerts.runnerStateNotice}
         />
+        <AssignedRunnerPanel result={assignedRunnerResult} />
         <AgentRuntimeLogPanel agentId={agent.id} status={agent.status} />
         <AgentApprovalsPanel result={approvalsResult} />
         <ActivityFeedPanel
@@ -218,6 +240,76 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
         />
       </div>
     </ProductShell>
+  );
+}
+
+function AssignedRunnerPanel({ result }: { result: AssignedRunnerResult }) {
+  return (
+    <section className="manual-runner-panel" aria-labelledby="agent-assigned-runner-title">
+      <div className="section-heading">
+        <h2 id="agent-assigned-runner-title">Assigned runner</h2>
+        {result.ok ? <span>{result.runner ? result.runner.status : "none"}</span> : null}
+      </div>
+      {result.ok ? (
+        result.runner ? (
+          <AssignedRunnerStatus runner={result.runner} />
+        ) : (
+          <div className="activity-empty-state">
+            <h3>No runner assigned</h3>
+            <p>This agent is not assigned to the manual VPS runner.</p>
+          </div>
+        )
+      ) : (
+        <div className="safe-error" role="alert">
+          Assigned runner status could not be loaded.
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AssignedRunnerStatus({ runner }: { runner: AssignedManualRunnerStatusSummary }) {
+  return (
+    <div className="manual-runner-item" data-status={runner.status}>
+      <div className="manual-runner-header">
+        <div>
+          <h3>{runner.name}</h3>
+          <p>{runner.assignmentNotice}</p>
+        </div>
+        <span className="status-pill">{runner.status}</span>
+      </div>
+      <dl className="definition-list compact-definition-list">
+        <div>
+          <dt>Kind</dt>
+          <dd>{runner.kind}</dd>
+        </div>
+        <div>
+          <dt>Endpoint host</dt>
+          <dd>{runner.endpointHost}</dd>
+        </div>
+        <div>
+          <dt>Updated</dt>
+          <dd>
+            <time dateTime={runner.updatedAt}>{runner.updatedAt}</time>
+          </dd>
+        </div>
+        <div>
+          <dt>Checked</dt>
+          <dd>
+            {runner.checkedAt ? (
+              <time dateTime={runner.checkedAt}>{runner.checkedAt}</time>
+            ) : (
+              "Not available"
+            )}
+          </dd>
+        </div>
+      </dl>
+      {runner.alertMessage ? (
+        <div className="safe-error manual-runner-alert" role="alert">
+          {runner.alertMessage}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -390,6 +482,23 @@ async function loadAgentApprovals(agentId: string) {
     };
   } catch (error) {
     if (error instanceof AgentApprovalPersistenceError) {
+      return {
+        ok: false as const,
+      };
+    }
+
+    throw error;
+  }
+}
+
+async function loadAssignedManualRunner(agentId: string) {
+  try {
+    return {
+      ok: true as const,
+      runner: await getAssignedManualRunnerStatusForDevelopmentUserAgent(agentId),
+    };
+  } catch (error) {
+    if (error instanceof ManualRunnerStatusPersistenceError) {
       return {
         ok: false as const,
       };

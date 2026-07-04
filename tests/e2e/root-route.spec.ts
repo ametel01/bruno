@@ -10,8 +10,10 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 
 const createdAgentIds = new Set<string>();
+const createdRunnerIds = new Set<string>();
 const AGENTBAY_AGENT_ID_LABEL = "agentbay.agent_id";
 const DOCKER_RUNNER_FIXTURE_IMAGE = "busybox:1.36";
+const DEVELOPMENT_USER_E2E_LOCK_KEY = 125_125;
 
 test.afterEach(async ({ request }) => {
   const agentIds = [...createdAgentIds];
@@ -20,12 +22,14 @@ test.afterEach(async ({ request }) => {
   if (agentIds.length > 0) {
     await stopCreatedAgents(request, agentIds);
     await deleteCreatedAgents(agentIds);
+    await deleteCreatedRunners();
 
     for (const agentId of agentIds) {
       await removeDockerContainersForAgent(agentId);
     }
   }
 
+  await deleteCreatedRunners();
   await removeOrphanedStoppedAgentBayDockerContainers();
 });
 
@@ -190,6 +194,94 @@ test("/dashboard shows latest persisted process logs scoped to active agents", a
   await expect(processLogsPanel).not.toContainText(deletedName);
   await expect(processLogsPanel).not.toContainText("agent_id");
   await expect(processLogsPanel).not.toContainText("runner_id");
+});
+
+test("manual runner status, alerts, and remote logs stay visible and safe", async ({
+  page,
+  request,
+}, testInfo) => {
+  const name = `Manual Runner UI Agent ${testInfo.project.name}`;
+  const created = await createAgent(request, name);
+  const localRunnerIds: string[] = [];
+
+  try {
+    const runner = await insertManualRunnerForAgent(created.id, {
+      name: `Manual Runner ${testInfo.project.name}`,
+      endpointUrl: `https://user:password@runner-${randomUUID()}.example.com:8443/runner/v1?token=hidden`,
+      status: "inactive",
+      updatedAt: "2026-07-05T01:30:00.000Z",
+    });
+    localRunnerIds.push(runner.id);
+    await insertManualRunnerLog(created.id, runner.id, {
+      stream: "stderr",
+      level: "error",
+      message: "remote manual runner unreachable",
+      sequence: 1,
+      createdAt: "2026-07-05T01:31:00.000Z",
+    });
+
+    await withPinnedDevelopmentUserForAgent(created.id, async () => {
+      await page.goto("/dashboard");
+
+      const runnerPanel = page.locator(".manual-runner-panel", {
+        hasText: "Manual runner status",
+      });
+      await expect(runnerPanel).toContainText("Manual runner status");
+      await expect(runnerPanel).toContainText(`Manual Runner ${testInfo.project.name}`);
+      await expect(runnerPanel).toContainText("manual_vps");
+      await expect(runnerPanel).toContainText(new URL(runner.endpointUrl).host);
+      await expect(runnerPanel).toContainText("offline");
+      await expect(runnerPanel).toContainText("2026-07-05T01:30:00.000Z");
+      await expect(runnerPanel).not.toContainText("password");
+      await expect(runnerPanel).not.toContainText("token=hidden");
+      await expect(runnerPanel).not.toContainText("/runner/v1");
+      await expect(runnerPanel).not.toContainText(runner.id);
+
+      const processLogsPanel = page.locator(".dashboard-process-log-panel");
+      await expect(processLogsPanel).toContainText("remote manual runner unreachable");
+      await expect(processLogsPanel).toContainText("manual_runner");
+      await expect(processLogsPanel).toContainText("stderr");
+      await expect(processLogsPanel).toContainText("error");
+      await expect(processLogsPanel).not.toContainText(runner.id);
+      await expect(processLogsPanel).not.toContainText("runner_id");
+
+      await page.goto(`/agents/${created.id}`);
+
+      const assignedRunnerPanel = page.locator(".manual-runner-panel", {
+        hasText: "Assigned runner",
+      });
+      await expect(assignedRunnerPanel).toContainText("Assigned runner");
+      await expect(assignedRunnerPanel).toContainText(`Manual Runner ${testInfo.project.name}`);
+      await expect(assignedRunnerPanel).toContainText("This agent is assigned to");
+      await expect(assignedRunnerPanel).toContainText("offline");
+      await expect(assignedRunnerPanel).toContainText(new URL(runner.endpointUrl).host);
+      await expect(assignedRunnerPanel).toContainText(
+        "Assigned manual runner is inactive or unreachable.",
+      );
+      await expect(assignedRunnerPanel).not.toContainText("password");
+      await expect(assignedRunnerPanel).not.toContainText("token=hidden");
+      await expect(assignedRunnerPanel).not.toContainText(runner.id);
+
+      const alertPanel = page.locator(".operational-alert-panel");
+      await expect(alertPanel).toContainText("Runner is offline");
+      await expect(alertPanel).toContainText("Assigned manual runner is inactive or unreachable.");
+      await expect(alertPanel).not.toContainText("postgres://");
+      await expect(alertPanel).not.toContainText("/app/worker.ts");
+
+      const runtimeLogs = page.locator(".runtime-log-panel", { hasText: "Latest log summaries" });
+      await expect(runtimeLogs).toContainText("remote manual runner unreachable");
+      await expect(runtimeLogs).toContainText("manual_runner");
+      await expect(runtimeLogs).toContainText("stderr");
+      await expect(runtimeLogs).toContainText("#1");
+      await expect(runtimeLogs).not.toContainText(runner.id);
+      await expect(runtimeLogs).not.toContainText("runnerId");
+      await expect(runtimeLogs).not.toContainText("runner_id");
+      await expectPageNotHorizontallyOverflowing(page);
+    });
+  } finally {
+    await deleteCreatedAgents([created.id]);
+    await deleteRunnerRows(localRunnerIds);
+  }
 });
 
 test.describe
@@ -1580,7 +1672,7 @@ test.describe("mobile latest logs and operational alerts", () => {
     await expect(alertPanel).toContainText("Agent is in error");
     await expect(alertPanel).toContainText("Approval expired");
     await expect(alertPanel).toContainText("Agent error");
-    await expect(alertPanel).toContainText("Runner offline and degraded alerts are deferred");
+    await expect(alertPanel).toContainText("No assigned manual runner state is available");
     await expect(alertPanel).toContainText("Sensitive details omitted.");
     await expect(alertPanel).not.toContainText("token=stored-for-downstream");
     await expect(alertPanel).not.toContainText("postgres://");
@@ -2265,6 +2357,94 @@ async function insertProcessRuntimeLogs(
   });
 }
 
+async function insertManualRunnerForAgent(
+  agentId: string,
+  runner: {
+    name: string;
+    endpointUrl: string;
+    status: "active" | "inactive";
+    updatedAt: string;
+  },
+): Promise<{ id: string; endpointUrl: string }> {
+  let runnerId = "";
+
+  await withDatabase(async (sql) => {
+    const [inserted] = await sql<{ id: string }[]>`
+      insert into runners (
+        user_id,
+        name,
+        kind,
+        endpoint_url,
+        status,
+        created_at,
+        updated_at
+      )
+      select user_id,
+             ${runner.name},
+             'manual_vps',
+             ${runner.endpointUrl},
+             ${runner.status},
+             ${runner.updatedAt},
+             ${runner.updatedAt}
+      from agents
+      where id = ${agentId}
+      returning id
+    `;
+
+    runnerId = inserted?.id ?? "";
+    expect(runnerId).toMatch(/^[0-9a-f-]+$/);
+
+    await sql`
+      update agents
+      set runner_id = ${runnerId},
+          updated_at = ${runner.updatedAt}
+      where id = ${agentId}
+    `;
+  });
+
+  return {
+    id: runnerId,
+    endpointUrl: runner.endpointUrl,
+  };
+}
+
+async function insertManualRunnerLog(
+  agentId: string,
+  runnerId: string,
+  log: {
+    stream: "stdout" | "stderr";
+    level: string;
+    message: string;
+    sequence: number;
+    createdAt: string;
+  },
+): Promise<void> {
+  await withDatabase(async (sql) => {
+    await sql`
+      insert into agent_logs (
+        agent_id,
+        runner_id,
+        source,
+        stream,
+        level,
+        message,
+        sequence,
+        created_at
+      )
+      values (
+        ${agentId},
+        ${runnerId},
+        'manual_runner',
+        ${log.stream},
+        ${log.level},
+        ${log.message},
+        ${log.sequence},
+        ${log.createdAt}
+      )
+    `;
+  });
+}
+
 async function markAgentErrored(agentId: string, statusReason: string): Promise<void> {
   await withDatabase(async (sql) => {
     await sql`
@@ -2362,6 +2542,34 @@ async function pinDevelopmentUserToAgent(agentId: string): Promise<void> {
   });
 }
 
+async function withPinnedDevelopmentUserForAgent<T>(
+  agentId: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  return withDatabase(async (sql) => {
+    await sql`select pg_advisory_lock(${DEVELOPMENT_USER_E2E_LOCK_KEY})`;
+
+    try {
+      const [agent] = await sql<{ user_id: string }[]>`
+        select user_id from agents where id = ${agentId} limit 1
+      `;
+
+      expect(agent).toBeDefined();
+      await sql`
+        insert into app_metadata (key, value)
+        values ('local_development_user_id', ${agent?.user_id ?? ""})
+        on conflict (key) do update
+        set value = excluded.value,
+            updated_at = now()
+      `;
+
+      return await run();
+    } finally {
+      await sql`select pg_advisory_unlock(${DEVELOPMENT_USER_E2E_LOCK_KEY})`;
+    }
+  });
+}
+
 async function deleteCreatedAgents(agentIds: string[]): Promise<void> {
   await withDatabase(async (sql) => {
     await sql`delete from agent_approvals where agent_id in ${sql(agentIds)}`;
@@ -2371,6 +2579,23 @@ async function deleteCreatedAgents(agentIds: string[]): Promise<void> {
     await sql`delete from agent_events where agent_id in ${sql(agentIds)}`;
     await sql`delete from agent_configs where agent_id in ${sql(agentIds)}`;
     await sql`delete from agents where id in ${sql(agentIds)}`;
+  });
+}
+
+async function deleteCreatedRunners(): Promise<void> {
+  const runnerIds = [...createdRunnerIds];
+  createdRunnerIds.clear();
+
+  await deleteRunnerRows(runnerIds);
+}
+
+async function deleteRunnerRows(runnerIds: string[]): Promise<void> {
+  if (runnerIds.length === 0) {
+    return;
+  }
+
+  await withDatabase(async (sql) => {
+    await sql`delete from runners where id in ${sql(runnerIds)}`;
   });
 }
 

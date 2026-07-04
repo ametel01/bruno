@@ -14,6 +14,7 @@
 ### Issue Checklist
 
 - [ ] #122 Persist manual VPS runner identity and assignment. Status: ready for checker review on `codex/issue-122-manual-runner-persistence`; Wave 0 prerequisite for #128 runner auth persistence.
+- [ ] #125 Show manual runner status and failures. Status: ready for checker review on `codex/issue-125-manual-runner-status`; display-only status/log UI slice using persisted manual runner state.
 - [x] #127 Initialize Milestone 12 execution tracking. Status: ready for checker review on `codex/issue-127-milestone-12-tracking`; tracking section restored/initialized.
 - [ ] #128 Add the runner auth persistence contract. Status: ready for checker review on `codex/issue-128-runner-auth-persistence`.
 - [ ] #129 Implement one-time runner registration. Status: open; blocked by #128.
@@ -30,6 +31,7 @@
 - Milestone 12 acceptance criteria from `docs/MILESTONES.md`: unauthorized runner API requests fail; registered runner heartbeat changes status to `online`; missing heartbeat changes status to `offline`; agent pages show runner health; credential revocation prevents further runner communication.
 - #127 is tracking-only. It restores the progress record, records the Milestone 12 source plan and issue map, verifies changelog structure, and intentionally leaves `CHANGELOG.md` unchanged because no functional behavior ships in this issue.
 - #122 adds durable manual VPS runner identity rows, nullable agent assignment, non-secret development bootstrap/upsert, endpoint validation, and active-agent assigned-runner lookup while preserving no-runner lifecycle behavior.
+- #125 adds product-visible manual runner status on dashboard and agent detail using persisted runner assignment/state and safe public runtime log fields; it does not add lifecycle forwarding, runner provisioning, token storage/display, heartbeat/auth behavior, or secret-management UI.
 - #128 owns the shared persistence/auth foundation: durable runner identity, one-time registration token state, hashed credential material, heartbeat history, runner status values, optional agent-runner assignment, and reusable token/hash helpers.
 - #129 owns one-time runner registration: dashboard token creation, runner exchange for durable identity plus visible-once scoped credential, safe rejection of bad token states, and no hash exposure.
 - #130 owns authenticated heartbeat and offline detection: bearer credential enforcement, safe unauthorized failures, heartbeat row writes, last-seen updates, `online` status, and stale-heartbeat `offline` reconciliation.
@@ -54,8 +56,36 @@
 - 2026-07-05: #128 rebased onto current `origin/main` after #123 merged, generated additive runner auth persistence migration `drizzle/0009_worried_switch.sql`, added hash-only runner registration token, credential, and heartbeat schema state, and added reusable runner token/hash helpers.
 - 2026-07-05: #124 added assignment-aware dashboard lifecycle forwarding for active agents assigned to `manual_vps` runners, including safe remote start/stop/restart/status/log calls, `manual_runner` log persistence, temporary bearer-token request auth, bounded timeouts, and Docker fallback for unassigned agents.
 - 2026-07-05: #124 fast-forwarded onto merged #128 `origin/main` commit `6e5ebfd`, resolved only `PROGRESS.md` and `CHANGELOG.md` append conflicts, preserved the manual-runner lifecycle implementation, and reran focused packaging checks.
+- 2026-07-05: #125 implemented dashboard and agent-detail manual runner status panels, assigned-runner offline/degraded alerts, safe manual runner status summaries, dashboard remote/manual runner log inclusion, unit coverage, and seeded Playwright coverage without adding #124 lifecycle forwarding or #128 heartbeat/auth behavior.
+- 2026-07-05: #125 rebased onto current `origin/main` after #128 merged, preserved the manual runner status UI/data slice and PostgreSQL advisory-lock Playwright isolation fix, resolved only `PROGRESS.md`/`CHANGELOG.md` append conflicts, and kept `next-env.d.ts` out of the diff.
+- 2026-07-05: #125 rebased onto current `origin/main` after #124 merged, resolved only `CHANGELOG.md` and `PROGRESS.md` append conflicts by keeping both #124 and #125 entries, preserved the #125 status/log UI slice and advisory-lock E2E isolation fix, and reran the requested focused checks.
 
 ### Validation Evidence
+
+- 2026-07-05 #125:
+  - `bun install`: pass; restored local package shims in this worktree after `bun run format` initially failed with `/opt/homebrew/bin/bash: line 1: biome: command not found`.
+  - `bun run format`: pass; Biome formatted the changed app, server, test, and CSS files.
+  - `bun run format:check`: pass; Biome checked 98 files with no fixes applied.
+  - `bun run lint`: pass; Biome lint checked app, src, scripts, tests, and root TS/JSON files with no fixes applied.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed successfully.
+  - `bun run test -- tests/unit/manual-runner-status.test.ts tests/unit/root-page.test.tsx tests/unit/agent-logs-route.test.ts`: pass; 45 focused tests passed for safe runner status summaries, dashboard/detail runner rendering, safe log DTO output, and remote/manual runner log visibility.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3125 bun run test`: pass; 27 files and 246 tests passed.
+  - `PORT=3125 DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3125 bun run test:e2e -- --project=chromium-desktop --project=chromium-mobile -g "manual runner status"`: pass; 2 Playwright tests passed, covering dashboard runner status, assigned-runner detail, offline alert text, remote/manual runner logs, safe omission of raw endpoint credentials, runner IDs, `runnerId`, `runner_id`, stack traces, database URLs, and mobile overflow.
+  - `PORT=3125 DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3125 bun run build`: pass; Next.js production build completed and included `/dashboard`, `/agents/[agentId]`, and `/api/agents/[agentId]/logs`.
+  - `PORT=3125 DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3125 bun run test:e2e`: failed in the existing full parallel E2E suite; targeted #125 test passed in the same run on mobile and passes standalone on desktop/mobile, while unrelated/full-suite failures included shared DB foreign-key races in existing process-log specs, 500s from existing create-agent flows, Docker final-acceptance failures, and old shared-state runtime-log specs. This is recorded as a full-suite environment/isolation blocker, not a #125 targeted coverage failure.
+  - Post-#128 rebase `git status --short --branch --untracked-files=all`: pass; branch is current with `origin/main`, dirty only with the intended #125 implementation/tracker files, and `next-env.d.ts` is absent.
+  - Post-#128 rebase `git diff --name-status origin/main...HEAD`: pass; empty because the #125 implementation remains uncommitted worktree state on top of current `origin/main`.
+  - Post-#128 rebase `git diff --name-status origin/main && git ls-files --others --exclude-standard`: pass; working-tree diff is limited to #125 dashboard/detail/status/log/test/tracker files plus new `manual-runner-status` helper and test.
+  - Post-#128 rebase `bun run format:check`: pass; Biome checked 100 files with no fixes applied.
+  - Post-#128 rebase `bun run test -- tests/unit/manual-runner-status.test.ts tests/unit/root-page.test.tsx tests/unit/agent-logs-route.test.ts`: pass; 45 focused tests passed.
+  - Post-#128 rebase clean DB setup: pass; `agentbay_125_check` was recreated, migrations applied successfully through #128, and `db:health` returned `status: ok`.
+  - Post-#128 rebase `PORT=3125 DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay_125_check NEXT_PUBLIC_APP_URL=http://localhost:3125 bun run test:e2e -- --project=chromium-desktop --project=chromium-mobile -g "manual runner status"`: pass; 2 tests passed using 2 workers.
+  - Post-#124 rebase `git status --short --branch --untracked-files=all`: pass; branch is rebased on `origin/main` and ahead of/behind the pre-rebase PR remote before force-push.
+  - Post-#124 rebase `git diff --check`: pass; no whitespace errors.
+  - Post-#124 rebase `bun run format:check`: pass; Biome checked 102 files with no fixes applied.
+  - Post-#124 rebase `bun run test -- tests/unit/manual-runner-status.test.ts tests/unit/root-page.test.tsx tests/unit/agent-logs-route.test.ts`: pass; 46 focused tests passed for safe manual runner summaries, dashboard/detail rendering, lifecycle-runner log reads, and public log DTO safety.
+  - Post-#124 rebase clean DB setup: pass; `agentbay_125_check` was recreated and migrations applied successfully through merged #124.
+  - Post-#124 rebase `PORT=3125 DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay_125_check NEXT_PUBLIC_APP_URL=http://localhost:3125 bun run test:e2e -- --project=chromium-desktop --project=chromium-mobile -g "manual runner status"`: pass; 2 tests passed using 2 default Playwright workers across desktop and mobile.
 
 - 2026-07-05 #122:
   - `git status --short --branch --untracked-files=all`: pass; branch is rebased onto `origin/main`, #122 implementation files remain dirty/untracked as intended, and `next-env.d.ts` is not modified.

@@ -135,7 +135,7 @@ export function buildAgentOperationalAlerts(
     alerts: alerts.slice(0, MAX_ALERTS),
     runnerStateNotice: input.runnerState
       ? null
-      : "Runner offline and degraded alerts are deferred until runner state is available in a runner milestone.",
+      : "No assigned manual runner state is available for this agent.",
   };
 }
 

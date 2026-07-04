@@ -237,6 +237,7 @@ h2 {
 .placeholder-panel,
 .activity-feed-panel,
 .approval-panel,
+.manual-runner-panel,
 .operational-alert-panel,
 .runtime-log-panel,
 .agent-list-panel {
@@ -303,6 +304,11 @@ h2 {
 }
 
 .approval-panel {
+  min-width: 0;
+  padding: 22px;
+}
+
+.manual-runner-panel {
   min-width: 0;
   padding: 22px;
 }
@@ -1172,6 +1178,72 @@ h2 {
   color: var(--muted);
   margin-top: 14px;
   padding-top: 12px;
+}
+
+.manual-runner-list {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.manual-runner-item {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.manual-runner-list .manual-runner-item {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.manual-runner-list .manual-runner-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.manual-runner-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.manual-runner-header h3 {
+  font-size: 1rem;
+  line-height: 1.35;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.manual-runner-header p {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.manual-runner-header .status-pill {
+  flex: 0 0 auto;
+}
+
+.manual-runner-item[data-status="offline"] .status-pill,
+.manual-runner-item[data-status="degraded"] .status-pill {
+  border-color: #d8b376;
+  background: #fff8e8;
+  color: #76521b;
+}
+
+.manual-runner-alert {
+  margin-top: 0;
+}
+
+.compact-definition-list {
+  gap: 10px;
 }
 
 .start-agent-action {

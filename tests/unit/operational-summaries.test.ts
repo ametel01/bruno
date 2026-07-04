@@ -61,7 +61,7 @@ describe("operational summaries", () => {
       "critical",
     ]);
     expect(JSON.stringify(result.alerts)).not.toContain("Other agent");
-    expect(result.runnerStateNotice).toContain("deferred until runner state is available");
+    expect(result.runnerStateNotice).toContain("No assigned manual runner state is available");
   });
 
   it("derives runner offline and degraded alerts when runner state is supplied", () => {
