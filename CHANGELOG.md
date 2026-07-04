@@ -47,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker runner adapter primitives for starting, stopping, restarting, inspecting, and log-streaming one selected-agent container through Docker CLI argument arrays with labels, isolated workspaces, read-only config mounts, and initial CPU/memory limits.
 - Agent runtime log rows now persist a source and metadata alongside stdout/stderr line content, and the product log API/detail panel expose only a safe public log DTO without log-row, agent, runner, container, or raw metadata identifiers.
 - Lifecycle-launched local runner crash handling that moves agents to `error`, records safe status reasons, persists process exit details, captures stdout/stderr logs, and writes an `agent.error` audit event.
+- Start, Stop, and Restart API/dashboard/detail controls now run through the Docker runner adapter, preserving the existing lifecycle UI while creating, stopping, or replacing only the selected agent's Docker container and surfacing captured Docker stdout/stderr logs.
 
 ### Fixed
 

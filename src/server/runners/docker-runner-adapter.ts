@@ -38,6 +38,7 @@ const DUMMY_DOCKER_RUNNER_ARGS = [
   "-c",
   [
     'printf "agentbay docker dummy runner started for %s\\n" "$AGENTBAY_AGENT_ID"',
+    'printf "agentbay docker dummy runner stderr ready for %s\\n" "$AGENTBAY_AGENT_ID" >&2',
     'trap \'printf "agentbay docker dummy runner stopping for %s\\n" "$AGENTBAY_AGENT_ID"; exit 0\' TERM INT',
     "while true; do sleep 1; done",
   ].join("; "),
@@ -512,10 +513,12 @@ export function resolveDockerRunnerMounts(
 
   return {
     ...((input.configPath ?? envConfigPath)
-      ? { configPath: resolve(input.configPath ?? envConfigPath ?? "") }
+      ? { configPath: resolve(/* turbopackIgnore: true */ input.configPath ?? envConfigPath ?? "") }
       : {}),
     configTarget: input.configTarget ?? DEFAULT_DOCKER_CONFIG_TARGET,
-    workspaceRoot: resolve(workspaceRoot || join(tmpdir(), "agentbay-docker-workspaces")),
+    workspaceRoot: resolve(
+      /* turbopackIgnore: true */ workspaceRoot || join(tmpdir(), "agentbay-docker-workspaces"),
+    ),
     workspaceTarget: input.workspaceTarget ?? DEFAULT_DOCKER_WORKSPACE_TARGET,
   };
 }
@@ -528,7 +531,10 @@ export function buildDockerRunPlan(input: {
   resources: DockerRunnerResources;
 }): DockerRunPlan {
   const containerName = dockerContainerName(input.agentId, input.nameSuffix);
-  const workspacePath = resolve(input.mounts.workspaceRoot, input.agentId);
+  const workspacePath = resolve(
+    /* turbopackIgnore: true */ input.mounts.workspaceRoot,
+    input.agentId,
+  );
   const args = [
     "run",
     "--detach",

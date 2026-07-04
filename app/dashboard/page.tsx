@@ -152,7 +152,7 @@ export function DashboardContent({
         </PlaceholderPanel>
         <PlaceholderPanel title="Upcoming surfaces">
           <ul className="plain-list">
-            <li>Start, Stop, and Restart use the local runner adapter and existing controls.</li>
+            <li>Start, Stop, and Restart use the Docker runner adapter and existing controls.</li>
             <li>
               Full per-agent log streams and local-development config editing are present on agent
               detail pages.

@@ -1694,7 +1694,7 @@ describe("create agent persistence", () => {
         agent: {
           id: agent?.id,
           status: "running",
-          statusReason: "Local runner is running.",
+          statusReason: "Docker runner container is running.",
           updatedAt: "2026-07-03T06:00:00.000Z",
         },
         event: {
@@ -1704,7 +1704,7 @@ describe("create agent persistence", () => {
       });
       expect(persistedAgent).toMatchObject({
         status: "running",
-        statusReason: "Local runner is running.",
+        statusReason: "Docker runner container is running.",
         updatedAt: now,
       });
       expect(persistedEvents).toHaveLength(2);
@@ -1967,8 +1967,13 @@ describe("create agent persistence", () => {
       .select()
       .from(agentEvents)
       .where(eq(agentEvents.agentId, stoppedAgentId));
+    const persistedContainers = await connection.db
+      .select()
+      .from(dockerRunnerContainers)
+      .where(eq(dockerRunnerContainers.agentId, stoppedAgentId));
 
     expect(persistedEvents).toHaveLength(2);
+    expect(persistedContainers).toHaveLength(1);
     expect(persistedEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1976,6 +1981,11 @@ describe("create agent persistence", () => {
           metadata: expect.objectContaining({
             fromStatus: "stopped",
             toStatus: "running",
+            dockerRunnerContainerId: persistedContainers[0]?.id,
+            dockerContainerId: persistedContainers[0]?.containerId,
+            dockerContainerName: persistedContainers[0]?.containerName,
+            dockerImage: persistedContainers[0]?.image,
+            dockerObservedStatus: "running",
           }),
         }),
         expect.objectContaining({
@@ -1983,6 +1993,11 @@ describe("create agent persistence", () => {
           metadata: expect.objectContaining({
             fromStatus: "stopped",
             toStatus: "running",
+            dockerRunnerContainerId: persistedContainers[0]?.id,
+            dockerContainerId: persistedContainers[0]?.containerId,
+            dockerContainerName: persistedContainers[0]?.containerName,
+            dockerImage: persistedContainers[0]?.image,
+            dockerObservedStatus: "running",
           }),
         }),
       ]),
@@ -2081,7 +2096,7 @@ describe("create agent persistence", () => {
       agent: {
         id: runningAgent?.id,
         status: "running",
-        statusReason: "Local runner is running.",
+        statusReason: "Docker runner container is running.",
         updatedAt: "2026-07-03T06:00:00.000Z",
       },
       event: {
@@ -2091,7 +2106,7 @@ describe("create agent persistence", () => {
     });
     expect(persistedAgent).toMatchObject({
       status: "running",
-      statusReason: "Local runner is running.",
+      statusReason: "Docker runner container is running.",
       updatedAt: now,
     });
     expect(persistedEvents).toHaveLength(2);
@@ -2421,7 +2436,7 @@ describe("create agent persistence", () => {
       agent: {
         id: runningAgent?.id,
         status: "running",
-        statusReason: "Local runner is running.",
+        statusReason: "Docker runner container is running.",
       },
       event: { type: RESTART_REQUESTED_EVENT_TYPE },
       events: [{ type: RESTART_REQUESTED_EVENT_TYPE }, { type: RESTART_COMPLETED_EVENT_TYPE }],
@@ -2431,8 +2446,14 @@ describe("create agent persistence", () => {
       .select()
       .from(agentEvents)
       .where(eq(agentEvents.agentId, runningAgentId));
+    const persistedContainers = await connection.db
+      .select()
+      .from(dockerRunnerContainers)
+      .where(eq(dockerRunnerContainers.agentId, runningAgentId))
+      .orderBy(dockerRunnerContainers.createdAt);
 
     expect(persistedEvents).toHaveLength(4);
+    expect(persistedContainers).toHaveLength(2);
     expect(persistedEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -2440,6 +2461,11 @@ describe("create agent persistence", () => {
           metadata: expect.objectContaining({
             fromStatus: "running",
             toStatus: "running",
+            dockerRunnerContainerId: persistedContainers[1]?.id,
+            dockerContainerId: persistedContainers[1]?.containerId,
+            dockerContainerName: persistedContainers[1]?.containerName,
+            dockerImage: persistedContainers[1]?.image,
+            dockerObservedStatus: "running",
           }),
         }),
         expect.objectContaining({
@@ -2447,10 +2473,16 @@ describe("create agent persistence", () => {
           metadata: expect.objectContaining({
             fromStatus: "running",
             toStatus: "running",
+            dockerRunnerContainerId: persistedContainers[1]?.id,
+            dockerContainerId: persistedContainers[1]?.containerId,
+            dockerContainerName: persistedContainers[1]?.containerName,
+            dockerImage: persistedContainers[1]?.image,
+            dockerObservedStatus: "running",
           }),
         }),
       ]),
     );
+    expect(persistedContainers[0]?.containerId).not.toBe(persistedContainers[1]?.containerId);
 
     const missingIdResponse = await POST(new Request("http://localhost/api/agents/restart"), {
       params: Promise.resolve({}),
@@ -3699,8 +3731,17 @@ describe("create agent persistence", () => {
       .select()
       .from(agentEvents)
       .where(eq(agentEvents.agentId, runningAgentId));
+    const [persistedContainer] = await connection.db
+      .select()
+      .from(dockerRunnerContainers)
+      .where(eq(dockerRunnerContainers.agentId, runningAgentId))
+      .limit(1);
 
     expect(persistedEvents).toHaveLength(4);
+    expect(persistedContainer).toMatchObject({
+      agentId: runningAgentId,
+      observedStatus: "exited",
+    });
     expect(persistedEvents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -3708,6 +3749,11 @@ describe("create agent persistence", () => {
           metadata: expect.objectContaining({
             fromStatus: "running",
             toStatus: "stopped",
+            dockerRunnerContainerId: persistedContainer?.id,
+            dockerContainerId: persistedContainer?.containerId,
+            dockerContainerName: persistedContainer?.containerName,
+            dockerImage: persistedContainer?.image,
+            dockerObservedStatus: "exited",
           }),
         }),
         expect.objectContaining({
@@ -3715,6 +3761,11 @@ describe("create agent persistence", () => {
           metadata: expect.objectContaining({
             fromStatus: "running",
             toStatus: "stopped",
+            dockerRunnerContainerId: persistedContainer?.id,
+            dockerContainerId: persistedContainer?.containerId,
+            dockerContainerName: persistedContainer?.containerName,
+            dockerImage: persistedContainer?.image,
+            dockerObservedStatus: "exited",
           }),
         }),
       ]),
@@ -5615,7 +5666,7 @@ describe("create agent persistence", () => {
       agent: {
         id: created.agent.id,
         status: "running",
-        statusReason: "Local runner is running.",
+        statusReason: "Docker runner container is running.",
       },
       events: [{ type: START_REQUESTED_EVENT_TYPE }, { type: START_COMPLETED_EVENT_TYPE }],
     });

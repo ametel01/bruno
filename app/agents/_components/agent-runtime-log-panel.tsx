@@ -143,7 +143,7 @@ export function AgentRuntimeLogPanel({ agentId, status }: AgentRuntimeLogPanelPr
       {loadState !== "loading" && logs.length === 0 && loadState !== "error" ? (
         <div className="activity-empty-state">
           <h3>No runtime logs yet</h3>
-          <p>Start this agent to show the local simulator output.</p>
+          <p>Start this agent to show captured Docker stdout and stderr.</p>
         </div>
       ) : null}
       {logs.length > 0 ? (

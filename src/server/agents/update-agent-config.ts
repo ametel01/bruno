@@ -1,7 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { AGENT_NAME_MAX_LENGTH } from "@/src/server/agents/create-agent";
-import { isValidAgentId } from "@/src/server/agents/lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
 import { agentConfigs, agents } from "@/src/server/db/schema";

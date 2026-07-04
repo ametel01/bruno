@@ -1,5 +1,5 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { isValidAgentId } from "@/src/server/agents/lifecycle";
+import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { type agentApprovalStatusEnum, agentApprovals, agents } from "@/src/server/db/schema";
 import {
