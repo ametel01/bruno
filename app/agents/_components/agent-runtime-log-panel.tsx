@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import type { AgentLifecycleStatus } from "@/src/server/agents/lifecycle";
 
 type AgentRuntimeLogPanelProps = {
@@ -26,6 +27,7 @@ type LoadState = "loading" | "loaded" | "error";
 
 const POLLABLE_LOG_STATUSES = new Set<AgentLifecycleStatus>(["running"]);
 const RUNTIME_LOG_POLL_INTERVAL_MS = 1_500;
+const LATEST_LOG_SUMMARY_LIMIT = 6;
 
 export function AgentRuntimeLogPanel({ agentId, status }: AgentRuntimeLogPanelProps) {
   const [logs, setLogs] = useState<RuntimeLog[]>([]);
@@ -115,11 +117,18 @@ export function AgentRuntimeLogPanel({ agentId, status }: AgentRuntimeLogPanelPr
     };
   }, [loadLogs, status]);
 
+  const latestLogSummaries = logs.slice(-LATEST_LOG_SUMMARY_LIMIT).reverse();
+
   return (
     <section className="runtime-log-panel" aria-labelledby="agent-runtime-log-title">
       <div className="section-heading">
-        <h2 id="agent-runtime-log-title">Runtime logs</h2>
-        {loadState !== "error" ? <span>{logs.length} shown</span> : null}
+        <h2 id="agent-runtime-log-title">Latest log summaries</h2>
+        {loadState !== "error" ? (
+          <span>
+            {latestLogSummaries.length}
+            {logs.length > latestLogSummaries.length ? ` of ${logs.length}` : ""} shown
+          </span>
+        ) : null}
       </div>
       {loadState === "loading" ? (
         <div className="activity-loading-state" role="status">
@@ -138,14 +147,14 @@ export function AgentRuntimeLogPanel({ agentId, status }: AgentRuntimeLogPanelPr
         </div>
       ) : null}
       {logs.length > 0 ? (
-        <ol className="runtime-log-list" aria-label="Runtime log entries">
-          {logs.map((log) => (
+        <ol className="runtime-log-list" aria-label="Latest runtime log summaries">
+          {latestLogSummaries.map((log) => (
             <li className="runtime-log-item" key={log.id}>
               <div className="runtime-log-header">
                 <time dateTime={log.createdAt}>{log.createdAt}</time>
                 <span>#{log.sequence}</span>
               </div>
-              <p>{log.message}</p>
+              <p>{summarizeOperationalText(log.message, "Log details omitted.")}</p>
               <dl className="runtime-log-metadata">
                 <div>
                   <dt>Stream</dt>

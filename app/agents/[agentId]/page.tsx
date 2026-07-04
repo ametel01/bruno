@@ -8,6 +8,11 @@ import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle
 import { AgentRuntimeLogPanel } from "@/app/agents/_components/agent-runtime-log-panel";
 import { AGENT_NAME_MAX_LENGTH } from "@/src/server/agents/create-agent";
 import {
+  buildAgentOperationalAlerts,
+  type OperationalAlert,
+  summarizeOperationalText,
+} from "@/src/server/alerts/operational-summaries";
+import {
   AgentDetailPersistenceError,
   getActiveAgentForDevelopmentUser,
 } from "@/src/server/agents/list-agents";
@@ -79,6 +84,12 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
     ? "There are no older persisted events for this agent."
     : "Create or update this agent to show persisted activity here.";
   const approvalsResult = await loadAgentApprovals(agent.id);
+  const operationalAlerts = buildAgentOperationalAlerts({
+    agent,
+    approvals: approvalsResult.ok ? approvalsResult.approvals : [],
+    events: activityEvents,
+    runnerState: null,
+  });
 
   return (
     <ProductShell
@@ -123,7 +134,9 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
             {agent.statusReason ? (
               <div>
                 <dt>Status reason</dt>
-                <dd>{agent.statusReason}</dd>
+                <dd>
+                  {summarizeOperationalText(agent.statusReason, "Status reason unavailable.")}
+                </dd>
               </div>
             ) : null}
           </dl>
@@ -148,6 +161,10 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
             }}
           />
         </PlaceholderPanel>
+        <AgentOperationalAlertsPanel
+          alerts={operationalAlerts.alerts}
+          runnerStateNotice={operationalAlerts.runnerStateNotice}
+        />
         <AgentRuntimeLogPanel agentId={agent.id} status={agent.status} />
         <AgentApprovalsPanel result={approvalsResult} />
         <ActivityFeedPanel
@@ -169,6 +186,44 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
         />
       </div>
     </ProductShell>
+  );
+}
+
+function AgentOperationalAlertsPanel({
+  alerts,
+  runnerStateNotice,
+}: {
+  alerts: OperationalAlert[];
+  runnerStateNotice: string | null;
+}) {
+  return (
+    <section className="operational-alert-panel" aria-labelledby="agent-alerts-title">
+      <div className="section-heading">
+        <h2 id="agent-alerts-title">Operational alerts</h2>
+        <span>{alerts.length} active</span>
+      </div>
+      {alerts.length > 0 ? (
+        <ol className="operational-alert-list" aria-label="Operational alerts">
+          {alerts.map((alert) => (
+            <li className="operational-alert-item" data-severity={alert.severity} key={alert.id}>
+              <div className="operational-alert-header">
+                <span className="operational-alert-severity">{alert.severity}</span>
+                {alert.createdAt ? <time dateTime={alert.createdAt}>{alert.createdAt}</time> : null}
+              </div>
+              <h3>{alert.title}</h3>
+              <p>{alert.message}</p>
+              <span className="operational-alert-source">{alert.source}</span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <div className="activity-empty-state">
+          <h3>No active alerts</h3>
+          <p>Agent errors, approval blockers, and alert-relevant activity will appear here.</p>
+        </div>
+      )}
+      {runnerStateNotice ? <p className="operational-alert-note">{runnerStateNotice}</p> : null}
+    </section>
   );
 }
 
