@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AgentPersistenceError,
@@ -57,6 +57,9 @@ import {
   recordAgentEventsInTransaction,
 } from "@/src/server/events/agent-events";
 import {
+  FAKE_RUNNER_APPROVAL_REQUESTED_BY,
+  FAKE_RUNNER_APPROVAL_REQUESTED_EVENT_TYPE,
+  FAKE_RUNNER_APPROVAL_SOURCE,
   SIMULATED_RUNTIME_LOG_CYCLE_INTERVAL_MS,
   SIMULATED_RUNTIME_LOG_MESSAGES,
   generateSimulatedRuntimeLogsForRunningAgent,
@@ -3733,7 +3736,7 @@ describe("create agent persistence", () => {
     });
   });
 
-  it("generates one deterministic four-line cycle immediately for active running agents", async () => {
+  it("generates one deterministic four-line cycle and one pending fake approval for active running agents", async () => {
     const [createdUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
 
     expect(createdUser).toBeDefined();
@@ -3762,6 +3765,7 @@ describe("create agent persistence", () => {
       agentId: "00000000-0000-4000-8000-000000000201",
     });
     const persistedEvents = await connection.db.select().from(agentEvents);
+    const persistedApprovals = await connection.db.select().from(agentApprovals);
 
     expect(page.logs.map((log) => [log.sequence, log.runnerId, log.message])).toEqual([
       [1, null, "Checking task queue..."],
@@ -3771,7 +3775,40 @@ describe("create agent persistence", () => {
     ]);
     expect(page.logs.every((log) => log.stream === "stdout" && log.level === "info")).toBe(true);
     expect(page.logs.every((log) => log.createdAt === firstReadAt.toISOString())).toBe(true);
-    expect(persistedEvents).toHaveLength(0);
+    expect(persistedApprovals).toHaveLength(1);
+    expect(persistedApprovals[0]).toMatchObject({
+      agentId: "00000000-0000-4000-8000-000000000201",
+      status: "pending",
+      requestedBy: FAKE_RUNNER_APPROVAL_REQUESTED_BY,
+      resolvedBy: null,
+      resolvedAt: null,
+      createdAt: firstReadAt,
+      expiresAt: new Date("2026-07-04T06:30:01.000Z"),
+    });
+    expect(persistedApprovals[0]?.payloadJson).toEqual({
+      source: FAKE_RUNNER_APPROVAL_SOURCE,
+      actionType: expect.stringMatching(
+        /^(telegram\.send_message|research\.run_task|gmail\.access_inbox)$/,
+      ),
+      preview: expect.any(Object),
+      runningSegmentStartedAt: runningStartedAt.toISOString(),
+    });
+    expect(JSON.stringify(persistedApprovals[0]?.payloadJson)).not.toMatch(
+      /api[_-]?key|token|password|secret|credential|private[_-]?key|bearer|postgres:\/\//i,
+    );
+    expect(persistedEvents).toHaveLength(1);
+    expect(persistedEvents[0]).toMatchObject({
+      agentId: "00000000-0000-4000-8000-000000000201",
+      actorUserId: userId,
+      type: FAKE_RUNNER_APPROVAL_REQUESTED_EVENT_TYPE,
+      metadata: {
+        approvalId: persistedApprovals[0]?.id,
+        agentId: "00000000-0000-4000-8000-000000000201",
+        actionType: persistedApprovals[0]?.payloadJson.actionType,
+        source: FAKE_RUNNER_APPROVAL_SOURCE,
+        runningSegmentStartedAt: runningStartedAt.toISOString(),
+      },
+    });
   });
 
   it("keeps repeated reads at the same logical time idempotent and adds the next cycle only after the interval", async () => {
@@ -3837,6 +3874,12 @@ describe("create agent persistence", () => {
     expect(page.logs.slice(4).every((log) => log.createdAt === nextCycleAt.toISOString())).toBe(
       true,
     );
+    await expect(
+      countAgentApprovals(connection, "00000000-0000-4000-8000-000000000201"),
+    ).resolves.toBe(1);
+    await expect(
+      countAgentEventsByType(connection, FAKE_RUNNER_APPROVAL_REQUESTED_EVENT_TYPE),
+    ).resolves.toBe(1);
   });
 
   it("does not generate for non-running, missing, or soft-deleted agents", async () => {
@@ -3901,6 +3944,7 @@ describe("create agent persistence", () => {
         }),
       ).resolves.toEqual({ inserted: 0 });
       await expect(countAgentLogs(connection, agent.id)).resolves.toBe(agent.expectedLogs);
+      await expect(countAgentApprovals(connection, agent.id)).resolves.toBe(0);
     }
 
     await expect(
@@ -3918,6 +3962,124 @@ describe("create agent persistence", () => {
       }),
     ).resolves.toEqual({ inserted: 0 });
     await expect(countAgentLogs(connection, softDeletedAgent?.id ?? "")).resolves.toBe(0);
+    await expect(countAgentApprovals(connection, softDeletedAgent?.id ?? "")).resolves.toBe(0);
+    await expect(
+      countAgentApprovals(connection, "00000000-0000-4000-8000-000000000999"),
+    ).resolves.toBe(0);
+  });
+
+  it("does not generate fake approvals for running agents owned by a different user", async () => {
+    const [developmentUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ id: users.id });
+    const [otherUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+    expect(developmentUser).toBeDefined();
+    expect(otherUser).toBeDefined();
+    await connection.db.insert(appMetadata).values({
+      key: "local_development_user_id",
+      value: developmentUser?.id ?? "",
+    });
+    await connection.db.insert(agents).values({
+      id: "00000000-0000-4000-8000-000000000201",
+      userId: otherUser?.id ?? "",
+      name: "Other User Running Agent",
+      templateKey: "research_agent",
+      status: "running",
+      updatedAt: new Date("2026-07-04T06:00:00.000Z"),
+    });
+
+    await expect(
+      generateSimulatedRuntimeLogsForRunningAgent({
+        db: connection.db,
+        agentId: "00000000-0000-4000-8000-000000000201",
+        now: new Date("2026-07-04T06:00:01.000Z"),
+      }),
+    ).resolves.toEqual({ inserted: 0 });
+
+    await expect(countAgentLogs(connection, "00000000-0000-4000-8000-000000000201")).resolves.toBe(
+      0,
+    );
+    await expect(
+      countAgentApprovals(connection, "00000000-0000-4000-8000-000000000201"),
+    ).resolves.toBe(0);
+    await expect(
+      countAgentEventsByType(connection, FAKE_RUNNER_APPROVAL_REQUESTED_EVENT_TYPE),
+    ).resolves.toBe(0);
+  });
+
+  it("rolls back generated approvals and logs when approval-requested event writing fails", async () => {
+    const [createdUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.id ?? "";
+    const runningStartedAt = new Date("2026-07-04T06:00:00.000Z");
+    await connection.db.insert(agents).values({
+      id: "00000000-0000-4000-8000-000000000201",
+      userId,
+      name: "Rollback Event Agent",
+      templateKey: "research_agent",
+      status: "running",
+      updatedAt: runningStartedAt,
+    });
+
+    await expect(
+      generateSimulatedRuntimeLogsForRunningAgent({
+        db: connection.db,
+        agentId: "00000000-0000-4000-8000-000000000201",
+        now: new Date("2026-07-04T06:00:01.000Z"),
+        recordApprovalRequestedEvent: async () => {
+          throw new Error("synthetic event failure");
+        },
+      }),
+    ).rejects.toThrow("synthetic event failure");
+
+    await expect(countAgentLogs(connection, "00000000-0000-4000-8000-000000000201")).resolves.toBe(
+      0,
+    );
+    await expect(
+      countAgentApprovals(connection, "00000000-0000-4000-8000-000000000201"),
+    ).resolves.toBe(0);
+    await expect(
+      countAgentEventsByType(connection, FAKE_RUNNER_APPROVAL_REQUESTED_EVENT_TYPE),
+    ).resolves.toBe(0);
+  });
+
+  it("does not write approval-requested events when generated approval insertion fails", async () => {
+    const [createdUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.id ?? "";
+    await connection.db.insert(agents).values({
+      id: "00000000-0000-4000-8000-000000000201",
+      userId,
+      name: "Rollback Insert Agent",
+      templateKey: "research_agent",
+      status: "running",
+      updatedAt: new Date("2026-07-04T06:00:00.000Z"),
+    });
+
+    await expect(
+      generateSimulatedRuntimeLogsForRunningAgent({
+        db: connection.db,
+        agentId: "00000000-0000-4000-8000-000000000201",
+        now: new Date("2026-07-04T06:00:01.000Z"),
+        insertGeneratedApprovalRequest: async () => {
+          throw new Error("synthetic approval insert failure");
+        },
+      }),
+    ).rejects.toThrow("synthetic approval insert failure");
+
+    await expect(countAgentLogs(connection, "00000000-0000-4000-8000-000000000201")).resolves.toBe(
+      0,
+    );
+    await expect(
+      countAgentApprovals(connection, "00000000-0000-4000-8000-000000000201"),
+    ).resolves.toBe(0);
+    await expect(
+      countAgentEventsByType(connection, FAKE_RUNNER_APPROVAL_REQUESTED_EVENT_TYPE),
+    ).resolves.toBe(0);
   });
 
   it("allocates monotonic per-agent sequences independently across running agents", async () => {
@@ -4097,7 +4259,17 @@ describe("create agent persistence", () => {
     const completedEvents = await connection.db
       .select()
       .from(agentEvents)
+      .where(inArray(agentEvents.type, [START_COMPLETED_EVENT_TYPE, RESTART_COMPLETED_EVENT_TYPE]))
       .orderBy(agentEvents.agentId);
+    const requestedApprovalEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.type, FAKE_RUNNER_APPROVAL_REQUESTED_EVENT_TYPE))
+      .orderBy(agentEvents.agentId);
+    const generatedApprovals = await connection.db
+      .select()
+      .from(agentApprovals)
+      .orderBy(agentApprovals.agentId);
 
     expect(startResponse.status).toBe(200);
     expect(restartResponse.status).toBe(200);
@@ -4111,6 +4283,19 @@ describe("create agent persistence", () => {
       ["00000000-0000-4000-8000-000000000201", START_COMPLETED_EVENT_TYPE],
       ["00000000-0000-4000-8000-000000000202", RESTART_COMPLETED_EVENT_TYPE],
     ]);
+    expect(generatedApprovals.map((approval) => [approval.agentId, approval.status])).toEqual([
+      ["00000000-0000-4000-8000-000000000201", "pending"],
+      ["00000000-0000-4000-8000-000000000202", "pending"],
+    ]);
+    expect(requestedApprovalEvents.map((event) => [event.agentId, event.type])).toEqual([
+      ["00000000-0000-4000-8000-000000000201", FAKE_RUNNER_APPROVAL_REQUESTED_EVENT_TYPE],
+      ["00000000-0000-4000-8000-000000000202", FAKE_RUNNER_APPROVAL_REQUESTED_EVENT_TYPE],
+    ]);
+    expect(requestedApprovalEvents[0]?.metadata).toMatchObject({
+      approvalId: generatedApprovals[0]?.id,
+      actionType: generatedApprovals[0]?.payloadJson.actionType,
+      source: FAKE_RUNNER_APPROVAL_SOURCE,
+    });
   });
 
   it("does not write logs from simulate-error and stops generating after error", async () => {
@@ -4221,6 +4406,30 @@ async function insertDefaultConfigsForAgentIds(
 
 async function countAgentLogs(connection: DatabaseConnection, agentId: string): Promise<number> {
   const rows = await connection.db.select().from(agentLogs).where(eq(agentLogs.agentId, agentId));
+
+  return rows.length;
+}
+
+async function countAgentApprovals(
+  connection: DatabaseConnection,
+  agentId: string,
+): Promise<number> {
+  const rows = await connection.db
+    .select()
+    .from(agentApprovals)
+    .where(eq(agentApprovals.agentId, agentId));
+
+  return rows.length;
+}
+
+async function countAgentEventsByType(
+  connection: DatabaseConnection,
+  eventType: string,
+): Promise<number> {
+  const rows = await connection.db
+    .select()
+    .from(agentEvents)
+    .where(eq(agentEvents.type, eventType));
 
   return rows.length;
 }

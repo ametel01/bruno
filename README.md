@@ -1,6 +1,6 @@
 # AgentBay
 
-AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, and the Milestone 7 pending-approval queue foundation. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, scoped runtime logs, and dashboard plus agent-detail pending approvals for local development agents.
+AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, and the Milestone 7 pending-approval queue foundation. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, scoped runtime logs, dashboard plus agent-detail pending approvals for local development agents, and fake approval generation for running local-development agents.
 
 ## Requirements
 
@@ -95,7 +95,7 @@ The `/agents` page contains the current create/list and fake lifecycle workflow:
 4. Submit the form.
 5. Confirm the stopped agent appears in the `/agents` table with a generated `/agents/:agentId` link.
 6. Open the detail page and use Start to move the agent from `stopped` to `starting`, then to `running` after deterministic fake-runner settling.
-7. Confirm the detail runtime log panel shows the deterministic simulator output for the selected running agent.
+7. Confirm the detail runtime log panel shows the deterministic simulator output for the selected running agent and can create one pending fake approval for the current running segment.
 8. Use Restart while the agent is `running` to move it through `restarting` and back to `running`.
 9. Use Stop while the agent is `running` to move it back to `stopped` while already visible runtime logs remain readable.
 10. Use Simulate error outside production to move an active agent to `error` and record one `agent.error` audit event.
@@ -104,7 +104,7 @@ The `/agents` page contains the current create/list and fake lifecycle workflow:
 
 The dashboard reads active persisted agents from the database. The detail page loads active persisted agent records by ID and returns not found for missing, malformed, or soft-deleted IDs. Delete preserves the `agents` row and existing `agent_events`, but removes the agent from `/agents`, `/dashboard`, and active detail reads.
 
-Agent records are local-development records only. Lifecycle controls, runtime logs, the detail config editor, and dashboard plus agent-detail pending approvals panels use deterministic database state and local read/write paths, not real runner processes or provider integrations. Approval decisions, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
+Agent records are local-development records only. Lifecycle controls, runtime logs, the detail config editor, dashboard plus agent-detail pending approvals panels, and fake approval generation use deterministic database state and local read/write paths, not real runner processes or provider integrations. Approval decisions, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
 
 ## Agent Detail Config Editor
 
@@ -177,11 +177,13 @@ The dashboard shows pending approval requests persisted in `agent_approvals` for
 
 The agent detail page shows pending approval requests for the selected active local-development agent only. Each detail item displays the approval title, description, `pending` status, requester/source, created time, and expiry time when present.
 
+When `GET /api/agents/:agentId/logs` observes an active, non-deleted local-development agent that has settled to `running`, the fake runner can create one deterministic pending approval for that running segment. The generated request uses a representative fake sensitive action such as Telegram message sending, public research execution, or Gmail inbox access; stores only a fake `actionType`, safe preview fields, the fake-runner source, and the running-segment timestamp; and writes one matching `approval.requested` audit event with safe metadata.
+
 Approval rows store `payload_json` for downstream decision slices, but the dashboard and agent detail page do not render raw payload JSON, database internals, SQL, driver messages, stack traces, credentials, or environment values.
 
-Only `pending` approvals for active, non-deleted agents owned by the local development user appear in approval queues. Resolved approvals with `approved`, `denied`, `expired`, or `cancelled` status, approvals for other agents on a selected detail page, soft-deleted-agent approvals, and other-user approvals are excluded from the pending queues.
+Only `pending` approvals for active, non-deleted agents owned by the local development user appear in approval queues. Resolved approvals with `approved`, `denied`, `expired`, or `cancelled` status, approvals for other agents on a selected detail page, soft-deleted-agent approvals, stopped/non-running-agent approvals, and other-user approvals are excluded from the pending queues or fake generation path. Repeated observations of the same running segment/action do not create duplicate approval rows or duplicate `approval.requested` events.
 
-Approve and deny routes, decision controls, decision event writes, and fake runner approval generation are future Milestone 7 slices.
+Approve and deny routes, decision controls, and decision event writes are future Milestone 7 slices.
 
 ## Lifecycle APIs
 
@@ -225,6 +227,7 @@ Current audit event inventory:
 - `agent.error`
 - `agent.deleted`
 - `config.updated`
+- `approval.requested`
 
 Future milestones may add approval decision, runner, backup, restore, billing, and Hermes-related audit event types. Those future audit events should continue to describe control-plane facts, while high-volume runtime output remains separate log data.
 
@@ -249,7 +252,7 @@ Log reads are pull-driven for the local fake runner. When the selected active ag
 
 The first eligible read in a running segment creates the cycle immediately. Repeated reads at the same logical time are idempotent, and later reads create the next cycle only after the fixed simulator interval elapses while the agent remains in the same running segment. The running segment is based on the persisted `agents.updated_at` value after `starting` or `restarting` settles to `running`, so a later restart can generate a new cycle without being blocked by prior segment logs.
 
-Generated rows use `runner_id = null`, safe static `stdout`/`info` content only, and per-agent monotonic `sequence` values. Runtime log generation does not write `agent_events`; lifecycle actions, including `simulate-error`, do not directly write runtime logs. Stopped, idle, pending transition, error, deleting, missing, and soft-deleted agents do not receive newly generated log rows, though active stopped or error agents can still return existing readable rows.
+Generated rows use `runner_id = null`, safe static `stdout`/`info` content only, and per-agent monotonic `sequence` values. Runtime log generation does not mirror log lines into `agent_events`; it only writes the bounded `approval.requested` audit event when a running fake agent receives a generated approval request. Lifecycle actions, including `simulate-error`, do not directly write runtime logs. Stopped, idle, pending transition, error, deleting, missing, and soft-deleted agents do not receive newly generated log rows or fake approval requests, though active stopped or error agents can still return existing readable rows.
 
 The agent detail page renders those logs in a runtime log panel. The panel shows loading, empty, loaded, and safe error states; displays only the log timestamp, stream, level, sequence, and message; and keeps the rest of the detail page readable if log loading fails. It polls only while the current detail status is `running`, so stopping or simulating an error leaves existing visible rows readable without appending new generated rows after the settled state.
 

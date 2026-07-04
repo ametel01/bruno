@@ -1,7 +1,12 @@
 import { and, asc, desc, eq, gt, gte, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "@/src/server/db/schema";
-import { agentLogs, agents } from "@/src/server/db/schema";
+import { agentApprovals, agentLogs, agents } from "@/src/server/db/schema";
+import {
+  recordAgentEventInTransaction,
+  type AgentEventWrite,
+} from "@/src/server/events/agent-events";
+import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
 const DEFAULT_AGENT_LOG_LIMIT = 100;
 const MAX_AGENT_LOG_LIMIT = 100;
@@ -11,6 +16,39 @@ export const SIMULATED_RUNTIME_LOG_MESSAGES = [
   "No pending tasks.",
   "Heartbeat OK.",
   "Memory loaded.",
+] as const;
+export const FAKE_RUNNER_APPROVAL_REQUESTED_EVENT_TYPE = "approval.requested";
+export const FAKE_RUNNER_APPROVAL_REQUESTED_BY = "fake_runner";
+export const FAKE_RUNNER_APPROVAL_SOURCE = "fake_runner";
+
+const FAKE_APPROVAL_ACTIONS = [
+  {
+    actionType: "telegram.send_message",
+    title: "Approve Telegram message",
+    description: "Review a fake outbound Telegram message before it is sent.",
+    preview: {
+      destination: "Demo Telegram channel",
+      summary: "Daily operations summary is ready for review.",
+    },
+  },
+  {
+    actionType: "research.run_task",
+    title: "Approve research task",
+    description: "Review a fake research task before the agent starts collecting public notes.",
+    preview: {
+      topic: "Market signal scan",
+      summary: "Collect three public-source bullet points for operator review.",
+    },
+  },
+  {
+    actionType: "gmail.access_inbox",
+    title: "Approve Gmail inbox access",
+    description: "Review a fake inbox access request before the agent reads mailbox metadata.",
+    preview: {
+      mailbox: "Demo Gmail inbox",
+      summary: "Scan unread message subjects for triage candidates.",
+    },
+  },
 ] as const;
 
 export type AgentLogDto = {
@@ -36,8 +74,20 @@ type AgentLogTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
 >[0];
 type LockedRunningAgentRow = {
+  id: string;
+  user_id: string;
+  name: string;
   updated_at: Date | string;
 };
+type FakeApprovalAction = (typeof FAKE_APPROVAL_ACTIONS)[number];
+type InsertGeneratedApprovalRequest = (
+  tx: AgentLogTransaction,
+  values: typeof agentApprovals.$inferInsert,
+) => Promise<typeof agentApprovals.$inferSelect>;
+type RecordApprovalRequestedEvent = (
+  tx: AgentLogTransaction,
+  event: AgentEventWrite,
+) => Promise<void>;
 
 const logSelection = {
   id: agentLogs.id,
@@ -78,16 +128,37 @@ export async function generateSimulatedRuntimeLogsForRunningAgent(input: {
   db: AgentLogGenerationExecutor;
   agentId: string;
   now?: Date;
+  insertGeneratedApprovalRequest?: InsertGeneratedApprovalRequest;
+  recordApprovalRequestedEvent?: RecordApprovalRequestedEvent;
 }): Promise<{ inserted: number }> {
   const now = input.now ?? new Date();
+  const insertGeneratedApprovalRequest =
+    input.insertGeneratedApprovalRequest ?? insertGeneratedApprovalRequestInTransaction;
+  const recordApprovalRequestedEvent =
+    input.recordApprovalRequestedEvent ?? recordAgentEventInTransaction;
 
   return input.db.transaction(async (tx) => {
-    const [lockedAgent] = await lockRunningAgentInTransaction(tx, input.agentId);
-    const runningSegmentStartedAt = lockedAgent ? coerceTimestamp(lockedAgent.updated_at) : null;
+    const developmentUserId = await getDevelopmentUserId(tx);
 
-    if (!runningSegmentStartedAt || now < runningSegmentStartedAt) {
+    if (!developmentUserId) {
       return { inserted: 0 };
     }
+
+    const [lockedAgent] = await lockRunningAgentInTransaction(tx, input.agentId, developmentUserId);
+    const runningSegmentStartedAt = lockedAgent ? coerceTimestamp(lockedAgent.updated_at) : null;
+
+    if (!lockedAgent || !runningSegmentStartedAt || now < runningSegmentStartedAt) {
+      return { inserted: 0 };
+    }
+
+    await createFakeApprovalRequestForRunningSegment({
+      tx,
+      agent: lockedAgent,
+      runningSegmentStartedAt,
+      now,
+      insertGeneratedApprovalRequest,
+      recordApprovalRequestedEvent,
+    });
 
     const [latestGeneratedLog] = await tx
       .select({
@@ -179,11 +250,16 @@ function normalizeAgentLogLimit(limit: number | undefined): number {
 function lockRunningAgentInTransaction(
   tx: AgentLogTransaction,
   agentId: string,
+  developmentUserId: string,
 ): Promise<LockedRunningAgentRow[]> {
   return tx.execute<LockedRunningAgentRow>(sql`
-    select ${agents.updatedAt} as updated_at
+    select ${agents.id} as id,
+           ${agents.userId} as user_id,
+           ${agents.name} as name,
+           ${agents.updatedAt} as updated_at
     from ${agents}
     where ${agents.id} = ${agentId}
+      and ${agents.userId} = ${developmentUserId}
       and ${agents.status} = 'running'
       and ${agents.deletedAt} is null
     for update
@@ -192,4 +268,100 @@ function lockRunningAgentInTransaction(
 
 function coerceTimestamp(value: Date | string): Date {
   return value instanceof Date ? value : new Date(value);
+}
+
+async function createFakeApprovalRequestForRunningSegment(input: {
+  tx: AgentLogTransaction;
+  agent: LockedRunningAgentRow;
+  runningSegmentStartedAt: Date;
+  now: Date;
+  insertGeneratedApprovalRequest: InsertGeneratedApprovalRequest;
+  recordApprovalRequestedEvent: RecordApprovalRequestedEvent;
+}): Promise<void> {
+  const action = selectFakeApprovalAction(
+    input.agent.id,
+    input.runningSegmentStartedAt.toISOString(),
+  );
+  const runningSegmentStartedAt = input.runningSegmentStartedAt.toISOString();
+  const [existingApproval] = await input.tx
+    .select({ id: agentApprovals.id })
+    .from(agentApprovals)
+    .where(
+      and(
+        eq(agentApprovals.agentId, input.agent.id),
+        eq(agentApprovals.requestedBy, FAKE_RUNNER_APPROVAL_REQUESTED_BY),
+        sql`${agentApprovals.payloadJson}->>'source' = ${FAKE_RUNNER_APPROVAL_SOURCE}`,
+        sql`${agentApprovals.payloadJson}->>'actionType' = ${action.actionType}`,
+        sql`${agentApprovals.payloadJson}->>'runningSegmentStartedAt' = ${runningSegmentStartedAt}`,
+      ),
+    )
+    .limit(1);
+
+  if (existingApproval) {
+    return;
+  }
+
+  const approval = await input.insertGeneratedApprovalRequest(input.tx, {
+    agentId: input.agent.id,
+    title: action.title,
+    description: action.description,
+    status: "pending",
+    payloadJson: {
+      source: FAKE_RUNNER_APPROVAL_SOURCE,
+      actionType: action.actionType,
+      preview: action.preview,
+      runningSegmentStartedAt,
+    },
+    requestedBy: FAKE_RUNNER_APPROVAL_REQUESTED_BY,
+    resolvedBy: null,
+    resolvedAt: null,
+    createdAt: input.now,
+    expiresAt: new Date(input.now.getTime() + 30 * 60 * 1000),
+  });
+
+  await input.recordApprovalRequestedEvent(input.tx, {
+    agentId: input.agent.id,
+    actorUserId: input.agent.user_id,
+    type: FAKE_RUNNER_APPROVAL_REQUESTED_EVENT_TYPE,
+    message: `Approval requested for fake action "${action.actionType}" on agent "${input.agent.name}".`,
+    metadata: {
+      approvalId: approval.id,
+      agentId: input.agent.id,
+      actionType: action.actionType,
+      source: FAKE_RUNNER_APPROVAL_SOURCE,
+      runningSegmentStartedAt,
+    },
+  });
+}
+
+async function insertGeneratedApprovalRequestInTransaction(
+  tx: AgentLogTransaction,
+  values: typeof agentApprovals.$inferInsert,
+): Promise<typeof agentApprovals.$inferSelect> {
+  const [approval] = await tx.insert(agentApprovals).values(values).returning();
+
+  if (!approval) {
+    throw new Error("Generated approval insert returned no rows.");
+  }
+
+  return approval;
+}
+
+function selectFakeApprovalAction(
+  agentId: string,
+  runningSegmentStartedAt: string,
+): FakeApprovalAction {
+  let hash = 0;
+
+  for (const char of `${agentId}:${runningSegmentStartedAt}`) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+
+  const action = FAKE_APPROVAL_ACTIONS[hash % FAKE_APPROVAL_ACTIONS.length];
+
+  if (!action) {
+    return FAKE_APPROVAL_ACTIONS[0];
+  }
+
+  return action;
 }

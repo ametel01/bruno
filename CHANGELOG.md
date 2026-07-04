@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent detail config editor for persisted local-development agent configs, including model/spend edits through the validated PATCH API, safe validation failures, refresh-backed saved state, and readable `config.updated` Activity entries.
 - Dashboard pending approvals panel backed by the new `agent_approvals` persistence contract for active local-development agents.
 - Agent detail pending approvals panel that renders only the selected active local-development agent's persisted pending requests with safe empty and error states.
+- Fake running-agent approval generation that creates one deterministic pending approval and `approval.requested` event from the runtime-log observation path without exposing raw payload internals.
 
 ### Fixed
 
