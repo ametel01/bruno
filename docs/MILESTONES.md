@@ -275,7 +275,7 @@ Goal: Start, stop, restart, and delete controls work against fake state.
 - Integration test for UI status updates.
 - Event assertion for each action.
 
-## Milestone 3: Event Log and Activity Feed
+## Milestone 3: Event Log and Activity Feed [Completed]
 
 Goal: Every agent has a visible timeline of important actions and system events.
 
@@ -295,6 +295,7 @@ Goal: Every agent has a visible timeline of important actions and system events.
 - Events are ordered consistently.
 - The feed handles empty state, loading state, and pagination.
 - An operator can understand what happened without reading raw database rows.
+- Current shipped event types are `agent.created`, `agent.start_requested`, `agent.start_completed`, `agent.stop_requested`, `agent.stop_completed`, `agent.restart_requested`, `agent.restart_completed`, and `agent.deleted`; config, approval, error, backup, restore, runner, billing, Hermes, and Telegram events remain future milestone additions.
 
 ### Tests
 
