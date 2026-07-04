@@ -226,6 +226,7 @@ h2 {
 
 .empty-state,
 .placeholder-panel,
+.activity-feed-panel,
 .agent-list-panel {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -279,6 +280,11 @@ h2 {
 }
 
 .agent-list-panel {
+  min-width: 0;
+  padding: 22px;
+}
+
+.activity-feed-panel {
   min-width: 0;
   padding: 22px;
 }
@@ -358,6 +364,129 @@ h2 {
   font-size: 0.8rem;
   font-weight: 800;
   padding: 0 10px;
+}
+
+.activity-feed {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.activity-feed-item {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  padding: 14px 0 2px;
+}
+
+.activity-feed-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.activity-feed-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.activity-agent-context {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+}
+
+.activity-agent-context a {
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+
+.activity-agent-context a:hover {
+  text-decoration: underline;
+}
+
+.activity-feed-header time {
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.activity-message {
+  color: var(--foreground);
+  font-size: 0.94rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.activity-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 0;
+}
+
+.activity-metadata div {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.activity-metadata dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.activity-metadata dd {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+.activity-metadata code {
+  color: var(--foreground);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.78rem;
+}
+
+.deleted-agent-pill {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  border: 1px solid #d8b376;
+  border-radius: 999px;
+  background: #fff8e8;
+  color: #76521b;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0 8px;
+}
+
+.activity-empty-state {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  display: grid;
+  gap: 6px;
+  line-height: 1.55;
+  padding-top: 14px;
+}
+
+.activity-empty-state h3 {
+  color: var(--foreground);
+  font-size: 1rem;
+  margin-bottom: 0;
+}
+
+.activity-empty-state p {
+  margin: 0;
 }
 
 .agent-form {

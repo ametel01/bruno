@@ -5,24 +5,32 @@ import {
   AgentListPersistenceError,
   listActiveAgentsForDevelopmentUser,
 } from "@/src/server/agents/list-agents";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import { type AgentEventDto, listLatestAgentActivity } from "@/src/server/events/agent-events";
 
 type DashboardContentProps = {
   routeLabel?: string;
 };
 
+type DashboardAgentResult = Awaited<ReturnType<typeof loadDashboardAgents>>;
+type DashboardActivityResult = Awaited<ReturnType<typeof loadDashboardActivity>>;
+
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const listResult = await loadDashboardAgents();
+  const activityResult = await loadDashboardActivity();
 
-  return <DashboardContent listResult={listResult} />;
+  return <DashboardContent activityResult={activityResult} listResult={listResult} />;
 }
 
 export function DashboardContent({
+  activityResult = { ok: true, events: [] },
   routeLabel = "Dashboard",
   listResult = { ok: true, agents: [] },
 }: DashboardContentProps & {
-  listResult?: Awaited<ReturnType<typeof loadDashboardAgents>>;
+  activityResult?: DashboardActivityResult;
+  listResult?: DashboardAgentResult;
 }) {
   return (
     <ProductShell
@@ -83,6 +91,30 @@ export function DashboardContent({
             </div>
           )}
         </section>
+        <section className="activity-feed-panel" aria-labelledby="dashboard-activity-title">
+          <div className="section-heading">
+            <h2 id="dashboard-activity-title">Latest activity</h2>
+            {activityResult.ok ? <span>{activityResult.events.length} shown</span> : null}
+          </div>
+          {activityResult.ok ? (
+            activityResult.events.length > 0 ? (
+              <ol className="activity-feed">
+                {activityResult.events.map((event) => (
+                  <ActivityFeedItem event={event} key={event.id} />
+                ))}
+              </ol>
+            ) : (
+              <div className="activity-empty-state">
+                <h3>No activity yet</h3>
+                <p>Create or update an agent to show the newest persisted activity here.</p>
+              </div>
+            )
+          ) : (
+            <div className="safe-error" role="alert">
+              Latest activity could not be loaded.
+            </div>
+          )}
+        </section>
         <PlaceholderPanel title="Readiness">
           <dl className="definition-list">
             <div>
@@ -102,12 +134,61 @@ export function DashboardContent({
         <PlaceholderPanel title="Upcoming surfaces">
           <ul className="plain-list">
             <li>Start, Stop, Restart, and Delete use deterministic fake lifecycle controls.</li>
-            <li>Approvals, logs, event-log UI, and activity feeds wait for later milestones.</li>
+            <li>Approvals, logs, and agent detail event timelines wait for later milestones.</li>
             <li>Runner provisioning and external integrations are placeholders only.</li>
           </ul>
         </PlaceholderPanel>
       </div>
     </ProductShell>
+  );
+}
+
+function ActivityFeedItem({ event }: { event: AgentEventDto }) {
+  const agent = event.agent;
+  const agentDeleted = Boolean(agent?.deletedAt);
+  const agentLabel = agent?.name ?? event.agentId;
+
+  return (
+    <li className="activity-feed-item">
+      <div className="activity-feed-header">
+        <div className="activity-agent-context">
+          {agent && !agentDeleted ? (
+            <Link href={`/agents/${agent.id}`}>{agentLabel}</Link>
+          ) : (
+            <span>{agentLabel}</span>
+          )}
+          {agentDeleted ? <span className="deleted-agent-pill">Deleted agent</span> : null}
+        </div>
+        <time dateTime={event.createdAt}>{event.createdAt}</time>
+      </div>
+      <p className="activity-message">{event.message}</p>
+      <dl className="activity-metadata">
+        <div>
+          <dt>Type</dt>
+          <dd>
+            <code>{event.type}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>Actor</dt>
+          <dd>{event.actor.displayName}</dd>
+        </div>
+        {agent ? (
+          <div>
+            <dt>Agent</dt>
+            <dd>
+              {agent.templateKey} / {agent.status}
+            </dd>
+          </div>
+        ) : null}
+        {event.metadataSummary ? (
+          <div>
+            <dt>Metadata</dt>
+            <dd>{event.metadataSummary}</dd>
+          </div>
+        ) : null}
+      </dl>
+    </li>
   );
 }
 
@@ -125,5 +206,38 @@ async function loadDashboardAgents() {
     }
 
     throw error;
+  }
+}
+
+async function loadDashboardActivity(
+  dependencies: { createConnection?: () => DatabaseConnection } = {},
+) {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    const result = await listLatestAgentActivity({
+      db: connection.db,
+      limit: 8,
+    });
+
+    if (!result.ok) {
+      return {
+        ok: false as const,
+      };
+    }
+
+    return {
+      ok: true as const,
+      events: result.page.events,
+    };
+  } catch {
+    return {
+      ok: false as const,
+    };
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
   }
 }
