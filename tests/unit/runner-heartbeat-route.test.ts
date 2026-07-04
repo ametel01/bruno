@@ -83,6 +83,32 @@ describe("POST /runner/v1/heartbeat route", () => {
     expect(JSON.stringify(body)).not.toContain("agb_run_secret");
   });
 
+  it.each([
+    ["missing authorization", undefined],
+    ["malformed authorization", "Basic agb_run_secret"],
+  ])("returns safe 401 before parsing malformed JSON with %s", async (_label, authorization) => {
+    const { POST } = await import("@/app/runner/v1/heartbeat/route");
+
+    const response = await POST(
+      new Request("http://localhost/runner/v1/heartbeat", {
+        method: "POST",
+        ...(authorization ? { headers: { authorization } } : {}),
+        body: "{",
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body).toEqual({
+      error: {
+        code: "runner_unauthorized",
+        message: "Runner credentials are invalid.",
+      },
+    });
+    expect(mocks.recordRunnerHeartbeat).not.toHaveBeenCalled();
+    expect(JSON.stringify(body)).not.toContain("agb_run_secret");
+  });
+
   it("returns validation JSON for malformed request bodies", async () => {
     const { POST } = await import("@/app/runner/v1/heartbeat/route");
 

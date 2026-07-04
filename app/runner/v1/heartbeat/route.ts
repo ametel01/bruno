@@ -6,6 +6,12 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const authorizationHeader = request.headers.get("authorization");
+
+  if (!hasBearerCredentialShape(authorizationHeader)) {
+    return unauthorizedResponse();
+  }
+
   let payload: unknown;
 
   try {
@@ -16,7 +22,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await recordRunnerHeartbeat({
-      authorizationHeader: request.headers.get("authorization"),
+      authorizationHeader,
       payload,
     });
 
@@ -59,6 +65,16 @@ export async function POST(request: Request) {
 
     throw error;
   }
+}
+
+function hasBearerCredentialShape(authorizationHeader: string | null) {
+  if (!authorizationHeader) {
+    return false;
+  }
+
+  const credential = /^Bearer\s+(.+)$/i.exec(authorizationHeader.trim())?.[1]?.trim();
+
+  return Boolean(credential && !/\s/.test(credential));
 }
 
 function unauthorizedResponse() {
