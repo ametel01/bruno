@@ -93,6 +93,17 @@ export type DockerRunnerStopResult =
         | "state_persistence_failed";
     };
 
+export type DockerRunnerCleanupResult =
+  | { ok: true; container: DockerRunnerContainerDto | null }
+  | {
+      ok: false;
+      reason:
+        | "docker_inspect_failed"
+        | "docker_rm_failed"
+        | "label_mismatch"
+        | "state_persistence_failed";
+    };
+
 export type DockerRunnerRestartResult =
   | { ok: true; container: DockerRunnerContainerDto }
   | ({
@@ -127,6 +138,9 @@ type DockerInspectContainer = {
     Labels?: Record<string, string> | null;
   };
   State?: {
+    Error?: string;
+    ExitCode?: number;
+    OOMKilled?: boolean;
     Status?: string;
     StartedAt?: string;
     FinishedAt?: string;
@@ -272,9 +286,43 @@ export class DockerRunnerAdapter
         return { ok: false, reason: target.reason };
       }
 
+      if (isCleanlyExitedContainer(target.target.inspect)) {
+        const container = await this.recordInspectedContainer(
+          connection,
+          target.target.stored,
+          target.target.inspect,
+        );
+
+        await this.closeOwnedConnection(connection);
+        return container
+          ? { ok: true, container }
+          : { ok: false, reason: "state_persistence_failed" };
+      }
+
       try {
         await this.dockerCli(["stop", target.target.stored.containerId]);
       } catch {
+        const inspectedAfterFailedStop = await this.inspectExpectedContainer(
+          target.target.stored.containerId,
+          agentId,
+        );
+
+        if (
+          inspectedAfterFailedStop.ok &&
+          isCleanlyExitedContainer(inspectedAfterFailedStop.inspect)
+        ) {
+          const container = await this.recordInspectedContainer(
+            connection,
+            target.target.stored,
+            inspectedAfterFailedStop.inspect,
+          );
+
+          await this.closeOwnedConnection(connection);
+          return container
+            ? { ok: true, container }
+            : { ok: false, reason: "state_persistence_failed" };
+        }
+
         await this.closeOwnedConnection(connection);
         return { ok: false, reason: "docker_stop_failed" };
       }
@@ -315,6 +363,43 @@ export class DockerRunnerAdapter
     const startResult = await this.start(agentId);
 
     return startResult.ok ? startResult : { ...startResult, replacementStartFailed: true };
+  }
+
+  async cleanup(agentId: string): Promise<DockerRunnerCleanupResult> {
+    const connection = this.createConnection();
+
+    try {
+      const target = await this.resolveContainerTarget(connection, agentId);
+
+      if (!target.ok) {
+        await this.closeOwnedConnection(connection);
+        return target.reason === "no_container"
+          ? { ok: true, container: null }
+          : { ok: false, reason: target.reason };
+      }
+
+      try {
+        await this.dockerCli(["rm", "--force", target.target.stored.containerId]);
+      } catch {
+        await this.closeOwnedConnection(connection);
+        return { ok: false, reason: "docker_rm_failed" };
+      }
+
+      const container = await this.recordInspectedContainer(
+        connection,
+        target.target.stored,
+        target.target.inspect,
+        "removed",
+      );
+
+      await this.closeOwnedConnection(connection);
+      return container
+        ? { ok: true, container }
+        : { ok: false, reason: "state_persistence_failed" };
+    } catch {
+      await this.closeOwnedConnection(connection);
+      return { ok: false, reason: "state_persistence_failed" };
+    }
   }
 
   async status(agentId: string): Promise<DockerRunnerStatusResult> {
@@ -469,6 +554,7 @@ export class DockerRunnerAdapter
     connection: DatabaseConnection,
     stored: DockerRunnerContainerDto,
     inspect: DockerInspectContainer,
+    observedStatus = observedStatusFromInspect(inspect),
   ): Promise<DockerRunnerContainerDto | null> {
     return recordDockerRunnerContainerForDevelopmentUser({
       db: connection.db,
@@ -476,8 +562,11 @@ export class DockerRunnerAdapter
       containerId: stored.containerId,
       containerName: stored.containerName,
       image: inspect.Config?.Image ?? stored.image,
-      observedStatus: observedStatusFromInspect(inspect),
-      metadata: stored.metadata,
+      observedStatus,
+      metadata: {
+        ...stored.metadata,
+        dockerState: dockerInspectStateMetadata(inspect),
+      },
       observedAt: this.now(),
       startedAt: dockerTimestampToDate(inspect.State?.StartedAt),
       finishedAt: dockerTimestampToDate(inspect.State?.FinishedAt),
@@ -638,6 +727,23 @@ function parseDockerInspectJson(result: DockerCliResult): DockerInspectContainer
 
 function observedStatusFromInspect(inspect: DockerInspectContainer): string {
   return inspect.State?.Status?.trim() || "unknown";
+}
+
+function isCleanlyExitedContainer(inspect: DockerInspectContainer): boolean {
+  return inspect.State?.Status === "exited" && inspect.State.ExitCode === 0;
+}
+
+function dockerInspectStateMetadata(inspect: DockerInspectContainer): Record<string, unknown> {
+  return {
+    status: observedStatusFromInspect(inspect),
+    ...(typeof inspect.State?.ExitCode === "number" ? { exitCode: inspect.State.ExitCode } : {}),
+    ...(typeof inspect.State?.OOMKilled === "boolean"
+      ? { oomKilled: inspect.State.OOMKilled }
+      : {}),
+    ...(inspect.State?.Error?.trim() ? { error: inspect.State.Error } : {}),
+    ...(inspect.State?.StartedAt ? { startedAt: inspect.State.StartedAt } : {}),
+    ...(inspect.State?.FinishedAt ? { finishedAt: inspect.State.FinishedAt } : {}),
+  };
 }
 
 function dockerRunnerMetadata(input: {

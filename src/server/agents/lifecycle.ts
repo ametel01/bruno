@@ -1,11 +1,25 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agents, type agentStatusEnum } from "@/src/server/db/schema";
+import {
+  agentLogs,
+  agents,
+  dockerRunnerContainers,
+  type agentStatusEnum,
+} from "@/src/server/db/schema";
 import {
   recordAgentEventInTransaction,
   recordAgentEventsInTransaction,
 } from "@/src/server/events/agent-events";
+import {
+  DockerRunnerMaintenanceAdapter,
+  type DockerRunnerCleanupResult,
+  type DockerRunnerStatusResult as DockerRunnerMaintenanceStatusResult,
+} from "@/src/server/runners/docker-runner-maintenance";
+import {
+  DOCKER_RUNNER_LOG_SOURCE,
+  type DockerRunnerContainerDto,
+} from "@/src/server/runners/docker-runner-state";
 import {
   LocalRunnerAdapter,
   type LocalRunnerRestartResult,
@@ -18,10 +32,9 @@ import {
   DockerRunnerAdapter,
   type DockerRunnerRestartResult,
   type DockerRunnerStartResult,
-  type DockerRunnerStatusResult,
+  type DockerRunnerStatusResult as DockerRunnerLifecycleStatusResult,
   type DockerRunnerStopResult,
 } from "@/src/server/runners/docker-runner-adapter";
-import type { DockerRunnerContainerDto } from "@/src/server/runners/docker-runner-state";
 import type { RunnerAdapter as RunnerAdapterContract } from "@/src/server/runners/runner-adapter";
 
 export type AgentLifecycleStatus = (typeof agentStatusEnum.enumValues)[number];
@@ -48,15 +61,19 @@ export const DELETE_EVENT_TYPE = "agent.deleted";
 export const FAKE_RUNNER_START_DELAY_MS = 400;
 
 const RUNNING_STATUS_REASON = "Docker runner container is running.";
+const DOCKER_RECONCILABLE_AGENT_STATUSES = ["starting", "running", "restarting"] as const;
+const DOCKER_TERMINAL_CONTAINER_STATUSES = ["dead", "exited"] as const;
 export const LOCAL_RUNNER_UNEXPECTED_EXIT_STATUS_REASON =
   "Local runner exited unexpectedly. Check captured process logs for details.";
+export const DOCKER_RUNNER_UNEXPECTED_EXIT_STATUS_REASON =
+  "Docker runner container exited unexpectedly. Check captured Docker logs for details.";
 export const SIMULATED_ERROR_STATUS_REASON = "Simulated error requested for development testing.";
 
 type LifecycleClock = () => Date;
 type LifecycleRunnerStartResult = LocalRunnerStartResult | DockerRunnerStartResult;
 type LifecycleRunnerStopResult = LocalRunnerStopResult | DockerRunnerStopResult;
 type LifecycleRunnerRestartResult = LocalRunnerRestartResult | DockerRunnerRestartResult;
-type LifecycleRunnerStatusResult = LocalRunnerStatusResult | DockerRunnerStatusResult;
+type LifecycleRunnerStatusResult = LocalRunnerStatusResult | DockerRunnerLifecycleStatusResult;
 type LifecycleRunnerAdapter = RunnerAdapterContract<
   LifecycleRunnerStartResult,
   LifecycleRunnerStopResult,
@@ -64,10 +81,25 @@ type LifecycleRunnerAdapter = RunnerAdapterContract<
   LifecycleRunnerStatusResult
 >;
 
+type DockerRunnerStatusAdapter = {
+  status(agentId: string): Promise<DockerRunnerMaintenanceStatusResult>;
+};
+type DockerRunnerCleanupAdapter = {
+  cleanup(agentId: string): Promise<DockerRunnerCleanupResult>;
+};
+
 export type AgentLifecycleDependencies = {
   createConnection?: () => DatabaseConnection;
+  dockerRunnerAdapter?: DockerRunnerCleanupAdapter;
   now?: LifecycleClock;
   runnerAdapter?: LifecycleRunnerAdapter;
+};
+
+export type DockerRunnerReconciliationDependencies = {
+  createConnection?: () => DatabaseConnection;
+  dockerRunnerAdapter?: DockerRunnerStatusAdapter;
+  limit?: number;
+  now?: LifecycleClock;
 };
 
 export type StartAgentResult =
@@ -220,7 +252,12 @@ export type DeleteAgentResult =
     }
   | {
       ok: false;
-      reason: "missing_agent_id" | "malformed_agent_id" | "agent_not_found" | "invalid_status";
+      reason:
+        | "missing_agent_id"
+        | "malformed_agent_id"
+        | "agent_not_found"
+        | "invalid_status"
+        | "runner_cleanup_failed";
       status?: AgentLifecycleStatus;
     };
 
@@ -815,6 +852,174 @@ export async function recordUnexpectedLocalRunnerExitForDevelopmentUser(
   }
 }
 
+export async function reconcileDockerRunnerAgentsForDevelopmentUser(
+  dependencies: DockerRunnerReconciliationDependencies = {},
+): Promise<number> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const limit =
+    typeof dependencies.limit === "number" && Number.isInteger(dependencies.limit)
+      ? Math.min(Math.max(dependencies.limit, 1), 25)
+      : 10;
+  const dockerRunnerAdapter =
+    dependencies.dockerRunnerAdapter ?? (await createDefaultDockerRunnerAdapter(connection));
+
+  try {
+    const candidateRows = await connection.db
+      .select({ agentId: agents.id })
+      .from(dockerRunnerContainers)
+      .innerJoin(agents, eq(agents.id, dockerRunnerContainers.agentId))
+      .where(
+        and(
+          isNull(agents.deletedAt),
+          inArray(agents.status, [...DOCKER_RECONCILABLE_AGENT_STATUSES]),
+        ),
+      )
+      .orderBy(desc(dockerRunnerContainers.observedAt), desc(dockerRunnerContainers.createdAt))
+      .limit(limit);
+    const candidateAgentIds = [...new Set(candidateRows.map((row) => row.agentId))];
+    let reconciled = 0;
+
+    for (const candidateAgentId of candidateAgentIds) {
+      const didReconcile = await reconcileDockerRunnerAgentForDevelopmentUser(candidateAgentId, {
+        createConnection: () => connection,
+        dockerRunnerAdapter,
+        ...(dependencies.now ? { now: dependencies.now } : {}),
+      });
+
+      if (didReconcile) {
+        reconciled += 1;
+      }
+    }
+
+    return reconciled;
+  } catch {
+    throw new AgentLifecyclePersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function reconcileDockerRunnerAgentForDevelopmentUser(
+  agentId: string,
+  dependencies: DockerRunnerReconciliationDependencies = {},
+): Promise<boolean> {
+  const normalizedAgentId = agentId.trim();
+
+  if (!isValidAgentId(normalizedAgentId)) {
+    return false;
+  }
+
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
+  const dockerRunnerAdapter =
+    dependencies.dockerRunnerAdapter ?? (await createDefaultDockerRunnerAdapter(connection));
+
+  try {
+    const status = await dockerRunnerAdapter.status(normalizedAgentId);
+
+    if (!status.ok || !status.container || !isUnexpectedDockerExit(status.container)) {
+      return false;
+    }
+
+    const reconciledContainer = status.container;
+
+    return await connection.db.transaction(async (tx) => {
+      const [currentAgent] = await tx
+        .select()
+        .from(agents)
+        .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
+        .limit(1);
+
+      if (
+        !currentAgent ||
+        !DOCKER_RECONCILABLE_AGENT_STATUSES.includes(
+          currentAgent.status as (typeof DOCKER_RECONCILABLE_AGENT_STATUSES)[number],
+        )
+      ) {
+        return false;
+      }
+
+      const [storedContainer] = await tx
+        .select({ id: dockerRunnerContainers.id })
+        .from(dockerRunnerContainers)
+        .where(
+          and(
+            eq(dockerRunnerContainers.id, reconciledContainer.id),
+            eq(dockerRunnerContainers.agentId, normalizedAgentId),
+            eq(dockerRunnerContainers.containerId, reconciledContainer.containerId),
+          ),
+        )
+        .limit(1);
+
+      if (!storedContainer) {
+        return false;
+      }
+
+      const [erroredAgent] = await tx
+        .update(agents)
+        .set({
+          status: "error",
+          statusReason: DOCKER_RUNNER_UNEXPECTED_EXIT_STATUS_REASON,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(agents.id, normalizedAgentId),
+            isNull(agents.deletedAt),
+            inArray(agents.status, [...DOCKER_RECONCILABLE_AGENT_STATUSES]),
+          ),
+        )
+        .returning();
+
+      if (!erroredAgent) {
+        return false;
+      }
+
+      const metadata = dockerCrashMetadata(reconciledContainer, currentAgent.status);
+      const [latestAgentLog] = await tx
+        .select({ sequence: agentLogs.sequence })
+        .from(agentLogs)
+        .where(eq(agentLogs.agentId, normalizedAgentId))
+        .orderBy(desc(agentLogs.sequence))
+        .limit(1);
+
+      await tx.insert(agentLogs).values({
+        agentId: normalizedAgentId,
+        runnerId: null,
+        localRunnerProcessId: null,
+        dockerRunnerContainerId: reconciledContainer.id,
+        source: DOCKER_RUNNER_LOG_SOURCE,
+        stream: "stderr",
+        level: "error",
+        message: dockerCrashLogMessage(reconciledContainer),
+        metadata,
+        sequence: (latestAgentLog?.sequence ?? 0) + 1,
+        createdAt: now,
+      });
+
+      await recordAgentEventInTransaction(tx, {
+        agentId: erroredAgent.id,
+        actorUserId: erroredAgent.userId,
+        type: SIMULATED_ERROR_EVENT_TYPE,
+        message: `Docker runner container exited unexpectedly for agent "${erroredAgent.name}".`,
+        metadata,
+      });
+
+      return true;
+    });
+  } catch {
+    throw new AgentLifecyclePersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
 export async function deleteAgentForDevelopmentUser(
   agentId: string,
   dependencies: AgentLifecycleDependencies = {},
@@ -832,9 +1037,11 @@ export async function deleteAgentForDevelopmentUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
+  const dockerRunnerAdapter =
+    dependencies.dockerRunnerAdapter ?? (await createDefaultDockerRunnerAdapter(connection));
 
   try {
-    return await connection.db.transaction(async (tx) => {
+    const validation = await connection.db.transaction(async (tx) => {
       const [currentAgent] = await tx
         .select()
         .from(agents)
@@ -842,13 +1049,31 @@ export async function deleteAgentForDevelopmentUser(
         .limit(1);
 
       if (!currentAgent) {
-        return { ok: false, reason: "agent_not_found" };
+        return { ok: false, reason: "agent_not_found" } as const;
       }
 
       if (!canDeleteAgentStatus(currentAgent.status)) {
-        return { ok: false, reason: "invalid_status", status: currentAgent.status };
+        return { ok: false, reason: "invalid_status", status: currentAgent.status } as const;
       }
 
+      return { ok: true, agent: currentAgent } as const;
+    });
+
+    if (!validation.ok) {
+      return validation;
+    }
+
+    const cleanup = await dockerRunnerAdapter.cleanup(normalizedAgentId);
+
+    if (!cleanup.ok) {
+      return {
+        ok: false,
+        reason: "runner_cleanup_failed",
+        status: validation.agent.status,
+      };
+    }
+
+    return await connection.db.transaction(async (tx) => {
       const [deletedAgent] = await tx
         .update(agents)
         .set({
@@ -874,9 +1099,15 @@ export async function deleteAgentForDevelopmentUser(
         type: DELETE_EVENT_TYPE,
         message: `Agent "${deletedAgent.name}" deleted from active views.`,
         metadata: {
-          fromStatus: currentAgent.status,
+          fromStatus: validation.agent.status,
           toStatus: "deleted",
           deletedAt: now.toISOString(),
+          ...(cleanup.container
+            ? {
+                dockerContainerId: cleanup.container.containerId,
+                dockerContainerStatus: cleanup.container.observedStatus,
+              }
+            : {}),
         },
       });
 
@@ -1029,4 +1260,78 @@ function dockerRunnerLifecycleMetadata(
     dockerImage: container.image,
     dockerObservedStatus: container.observedStatus,
   };
+}
+
+function isUnexpectedDockerExit(container: DockerRunnerContainerDto): boolean {
+  const state = readDockerStateMetadata(container);
+  const observedStatus = container.observedStatus.toLowerCase();
+
+  if (typeof state.exitCode === "number") {
+    return state.exitCode !== 0;
+  }
+
+  if (
+    DOCKER_TERMINAL_CONTAINER_STATUSES.includes(
+      observedStatus as (typeof DOCKER_TERMINAL_CONTAINER_STATUSES)[number],
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function dockerCrashMetadata(
+  container: DockerRunnerContainerDto,
+  fromStatus: AgentLifecycleStatus,
+): Record<string, unknown> {
+  const state = readDockerStateMetadata(container);
+
+  return {
+    fromStatus,
+    toStatus: "error",
+    source: "docker_runner",
+    dockerContainerId: container.containerId,
+    dockerContainerStatus: container.observedStatus,
+    ...(typeof state.exitCode === "number" ? { dockerExitCode: state.exitCode } : {}),
+    ...(typeof state.oomKilled === "boolean" ? { dockerOomKilled: state.oomKilled } : {}),
+    ...(typeof state.finishedAt === "string" ? { dockerFinishedAt: state.finishedAt } : {}),
+  };
+}
+
+function dockerCrashLogMessage(container: DockerRunnerContainerDto): string {
+  const state = readDockerStateMetadata(container);
+  const exitCode = typeof state.exitCode === "number" ? `, exit code: ${state.exitCode}` : "";
+
+  return `Docker runner container exited unexpectedly (status: ${container.observedStatus}${exitCode}).`;
+}
+
+function readDockerStateMetadata(container: DockerRunnerContainerDto): {
+  exitCode?: number;
+  finishedAt?: string;
+  oomKilled?: boolean;
+} {
+  const state = container.metadata.dockerState;
+
+  if (!isRecord(state)) {
+    return {};
+  }
+
+  return {
+    ...(typeof state.exitCode === "number" ? { exitCode: state.exitCode } : {}),
+    ...(typeof state.finishedAt === "string" ? { finishedAt: state.finishedAt } : {}),
+    ...(typeof state.oomKilled === "boolean" ? { oomKilled: state.oomKilled } : {}),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+async function createDefaultDockerRunnerAdapter(
+  connection: DatabaseConnection,
+): Promise<DockerRunnerCleanupAdapter & DockerRunnerStatusAdapter> {
+  return new DockerRunnerMaintenanceAdapter({
+    createConnection: () => connection,
+  });
 }

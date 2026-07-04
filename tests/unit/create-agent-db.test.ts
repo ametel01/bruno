@@ -23,6 +23,7 @@ import {
 } from "@/src/server/approvals/agent-approvals";
 import {
   DELETE_EVENT_TYPE,
+  DOCKER_RUNNER_UNEXPECTED_EXIT_STATUS_REASON,
   FAKE_RUNNER_START_DELAY_MS,
   LOCAL_RUNNER_UNEXPECTED_EXIT_STATUS_REASON,
   RESTART_COMPLETED_EVENT_TYPE,
@@ -34,6 +35,7 @@ import {
   STOP_COMPLETED_EVENT_TYPE,
   STOP_REQUESTED_EVENT_TYPE,
   deleteAgentForDevelopmentUser,
+  reconcileDockerRunnerAgentForDevelopmentUser,
   recordUnexpectedLocalRunnerExitForDevelopmentUser,
   restartAgentForDevelopmentUser,
   settleDueFakeRunnerTransitions,
@@ -4985,6 +4987,9 @@ describe("create agent persistence", () => {
     });
     await deleteAgentForDevelopmentUser(created.agent.id, {
       createConnection: () => connection,
+      dockerRunnerAdapter: {
+        cleanup: async () => ({ ok: true, container: null }),
+      },
     });
 
     const appended = await appendDockerRunnerLogLines({
@@ -5226,6 +5231,190 @@ describe("create agent persistence", () => {
     expect(dockerCalls).toEqual([["inspect", "--format", "{{json .}}", "stored-container-id"]]);
   });
 
+  it("docker runner adapter treats an already cleanly exited container as stopped", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Docker Already Stopped Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      containerId: "already-stopped-container",
+      containerName: "agentbay-already-stopped",
+      image: "agentbay/dummy-runner:test",
+      observedStatus: "running",
+    });
+    const dockerCalls: string[][] = [];
+    const dockerCli: DockerCliRunner = async (args) => {
+      dockerCalls.push([...args]);
+
+      if (args[0] === "inspect") {
+        return dockerInspectResult({
+          agentId: created.agent.id,
+          containerId: "already-stopped-container",
+          image: "agentbay/dummy-runner:test",
+          status: "exited",
+        });
+      }
+
+      throw new Error(`unexpected docker mutation: ${args.join(" ")}`);
+    };
+    const adapter = new DockerRunnerAdapter({
+      createConnection: () => connection,
+      dockerCli,
+    });
+
+    await expect(adapter.stop(created.agent.id)).resolves.toMatchObject({
+      ok: true,
+      container: {
+        containerId: "already-stopped-container",
+        observedStatus: "exited",
+      },
+    });
+
+    const [persistedContainer] = await connection.db.select().from(dockerRunnerContainers);
+
+    expect(persistedContainer).toMatchObject({
+      containerId: "already-stopped-container",
+      observedStatus: "exited",
+      metadata: expect.objectContaining({
+        dockerState: expect.objectContaining({
+          exitCode: 0,
+          status: "exited",
+        }),
+      }),
+    });
+    expect(dockerCalls).toEqual([
+      ["inspect", "--format", "{{json .}}", "already-stopped-container"],
+    ]);
+  });
+
+  it("docker runner adapter cleanup removes only the owning agent's exact labeled container", async () => {
+    const agentA = await createAgentForDevelopmentUser(
+      { name: "Docker Cleanup Agent A", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const agentB = await createAgentForDevelopmentUser(
+      { name: "Docker Cleanup Agent B", templateKey: "github_issue_agent" },
+      { createConnection: () => connection },
+    );
+    await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: agentA.agent.id,
+      containerId: "cleanup-agent-a-container",
+      containerName: "agentbay-cleanup-a",
+      image: "agentbay/dummy-runner:test",
+      observedStatus: "exited",
+    });
+    await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: agentB.agent.id,
+      containerId: "cleanup-agent-b-container",
+      containerName: "agentbay-cleanup-b",
+      image: "agentbay/dummy-runner:test",
+      observedStatus: "running",
+    });
+    const dockerCalls: string[][] = [];
+    const dockerCli: DockerCliRunner = async (args) => {
+      dockerCalls.push([...args]);
+
+      if (args[0] === "inspect") {
+        return dockerInspectResult({
+          agentId: agentA.agent.id,
+          containerId: "cleanup-agent-a-container",
+          image: "agentbay/dummy-runner:test",
+          status: "exited",
+        });
+      }
+
+      if (args[0] === "rm") {
+        expect(args).toEqual(["rm", "--force", "cleanup-agent-a-container"]);
+        return { stdout: "cleanup-agent-a-container\n", stderr: "" };
+      }
+
+      throw new Error(`unexpected docker mutation: ${args.join(" ")}`);
+    };
+    const adapter = new DockerRunnerAdapter({
+      createConnection: () => connection,
+      dockerCli,
+      now: () => new Date("2026-07-04T08:15:00.000Z"),
+    });
+
+    await expect(adapter.cleanup(agentA.agent.id)).resolves.toMatchObject({
+      ok: true,
+      container: {
+        agentId: agentA.agent.id,
+        containerId: "cleanup-agent-a-container",
+        observedStatus: "removed",
+      },
+    });
+
+    const persistedAgentB = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, agentB.agent.id));
+    const persistedContainerB = await connection.db
+      .select()
+      .from(dockerRunnerContainers)
+      .where(eq(dockerRunnerContainers.agentId, agentB.agent.id));
+    const agentBLogs = await listAgentLogs({ db: connection.db, agentId: agentB.agent.id });
+
+    expect(dockerCalls).toEqual([
+      ["inspect", "--format", "{{json .}}", "cleanup-agent-a-container"],
+      ["rm", "--force", "cleanup-agent-a-container"],
+    ]);
+    expect(persistedAgentB[0]?.status).toBe("stopped");
+    expect(persistedContainerB).toHaveLength(1);
+    expect(persistedContainerB[0]?.containerId).toBe("cleanup-agent-b-container");
+    expect(persistedContainerB[0]?.observedStatus).toBe("running");
+    expect(agentBLogs.logs).toEqual([]);
+  });
+
+  it("docker runner adapter cleanup fails closed when the stored container label mismatches", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Docker Cleanup Mismatch Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      containerId: "cleanup-mismatch-container",
+      containerName: "agentbay-cleanup-mismatch",
+      image: "agentbay/dummy-runner:test",
+      observedStatus: "running",
+    });
+    const dockerCalls: string[][] = [];
+    const dockerCli: DockerCliRunner = async (args) => {
+      dockerCalls.push([...args]);
+
+      if (args[0] === "inspect") {
+        return dockerInspectResult({
+          agentId: "00000000-0000-4000-8000-000000000999",
+          containerId: "cleanup-mismatch-container",
+          image: "agentbay/dummy-runner:test",
+          status: "running",
+        });
+      }
+
+      throw new Error(`unexpected docker mutation: ${args.join(" ")}`);
+    };
+    const adapter = new DockerRunnerAdapter({
+      createConnection: () => connection,
+      dockerCli,
+    });
+
+    await expect(adapter.cleanup(created.agent.id)).resolves.toEqual({
+      ok: false,
+      reason: "label_mismatch",
+    });
+
+    const persistedContainer = await connection.db.select().from(dockerRunnerContainers);
+    expect(dockerCalls).toEqual([
+      ["inspect", "--format", "{{json .}}", "cleanup-mismatch-container"],
+    ]);
+    expect(persistedContainer[0]?.observedStatus).toBe("running");
+  });
+
   it("docker runner adapter validates labels before reading logs and stores parsed lines once", async () => {
     const created = await createAgentForDevelopmentUser(
       { name: "Docker Logs Agent", templateKey: "research_agent" },
@@ -5286,6 +5475,198 @@ describe("create agent persistence", () => {
     ]);
     expect(persistedLogs).toHaveLength(2);
     expect(persistedLogs.every((log) => log.dockerRunnerContainerId !== null)).toBe(true);
+  });
+
+  it("reconciles an unexpected Docker exit only for the owning running agent", async () => {
+    const agentA = await createAgentForDevelopmentUser(
+      { name: "Docker Crash Agent A", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const agentB = await createAgentForDevelopmentUser(
+      { name: "Docker Crash Agent B", templateKey: "github_issue_agent" },
+      { createConnection: () => connection },
+    );
+    await connection.db
+      .update(agents)
+      .set({ status: "running", statusReason: "Docker runner is running." })
+      .where(inArray(agents.id, [agentA.agent.id, agentB.agent.id]));
+    const containerA = await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: agentA.agent.id,
+      containerId: "crash-agent-a-container",
+      containerName: "agentbay-crash-a",
+      image: "agentbay/dummy-runner:test",
+      observedStatus: "running",
+    });
+    const containerB = await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: agentB.agent.id,
+      containerId: "crash-agent-b-container",
+      containerName: "agentbay-crash-b",
+      image: "agentbay/dummy-runner:test",
+      observedStatus: "running",
+    });
+    const dockerCalls: string[][] = [];
+    const dockerCli: DockerCliRunner = async (args) => {
+      dockerCalls.push([...args]);
+
+      if (args[0] === "inspect") {
+        return dockerInspectResult({
+          agentId: agentA.agent.id,
+          containerId: "crash-agent-a-container",
+          exitCode: 137,
+          image: "agentbay/dummy-runner:test",
+          oomKilled: true,
+          status: "exited",
+        });
+      }
+
+      throw new Error(`unexpected docker mutation: ${args.join(" ")}`);
+    };
+    const adapter = new DockerRunnerAdapter({
+      createConnection: () => connection,
+      dockerCli,
+      now: () => new Date("2026-07-04T08:20:00.000Z"),
+    });
+
+    await expect(
+      reconcileDockerRunnerAgentForDevelopmentUser(agentA.agent.id, {
+        createConnection: () => connection,
+        dockerRunnerAdapter: adapter,
+        now: () => new Date("2026-07-04T08:20:01.000Z"),
+      }),
+    ).resolves.toBe(true);
+
+    const [persistedAgentA] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, agentA.agent.id));
+    const [persistedAgentB] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, agentB.agent.id));
+    const agentAEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, agentA.agent.id));
+    const agentBEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, agentB.agent.id));
+    const agentALogs = await listAgentLogs({ db: connection.db, agentId: agentA.agent.id });
+    const agentBLogs = await listAgentLogs({ db: connection.db, agentId: agentB.agent.id });
+    const [persistedContainerA] = await connection.db
+      .select()
+      .from(dockerRunnerContainers)
+      .where(eq(dockerRunnerContainers.id, containerA?.id ?? ""));
+    const [persistedContainerB] = await connection.db
+      .select()
+      .from(dockerRunnerContainers)
+      .where(eq(dockerRunnerContainers.id, containerB?.id ?? ""));
+    const errorEvent = agentAEvents.find((event) => event.type === SIMULATED_ERROR_EVENT_TYPE);
+
+    expect(dockerCalls).toEqual([["inspect", "--format", "{{json .}}", "crash-agent-a-container"]]);
+    expect(persistedAgentA).toMatchObject({
+      status: "error",
+      statusReason: DOCKER_RUNNER_UNEXPECTED_EXIT_STATUS_REASON,
+    });
+    expect(persistedAgentB).toMatchObject({
+      status: "running",
+      statusReason: "Docker runner is running.",
+    });
+    expect(errorEvent).toMatchObject({
+      type: SIMULATED_ERROR_EVENT_TYPE,
+      message: `Docker runner container exited unexpectedly for agent "${agentA.agent.name}".`,
+      metadata: expect.objectContaining({
+        dockerContainerId: "crash-agent-a-container",
+        dockerContainerStatus: "exited",
+        dockerExitCode: 137,
+        dockerOomKilled: true,
+        fromStatus: "running",
+        source: "docker_runner",
+        toStatus: "error",
+      }),
+    });
+    expect(agentBEvents.every((event) => event.type === "agent.created")).toBe(true);
+    expect(agentALogs.logs).toEqual([
+      expect.objectContaining({
+        dockerRunnerContainerId: containerA?.id,
+        level: "error",
+        message: "Docker runner container exited unexpectedly (status: exited, exit code: 137).",
+        source: DOCKER_RUNNER_LOG_SOURCE,
+        stream: "stderr",
+      }),
+    ]);
+    expect(agentBLogs.logs).toEqual([]);
+    expect(persistedContainerA?.observedStatus).toBe("exited");
+    expect(persistedContainerA?.metadata).toMatchObject({
+      dockerState: {
+        exitCode: 137,
+        oomKilled: true,
+        status: "exited",
+      },
+    });
+    expect(persistedContainerB).toMatchObject({
+      containerId: "crash-agent-b-container",
+      observedStatus: "running",
+    });
+    expect(JSON.stringify(errorEvent)).not.toContain("postgres://");
+    expect(JSON.stringify(agentALogs.logs)).not.toContain("raw-token");
+  });
+
+  it("does not reconcile clean Docker exits as crashes", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Docker Clean Exit Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    await connection.db
+      .update(agents)
+      .set({ status: "running", statusReason: "Docker runner is running." })
+      .where(eq(agents.id, created.agent.id));
+    await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      containerId: "clean-exit-container",
+      containerName: "agentbay-clean-exit",
+      image: "agentbay/dummy-runner:test",
+      observedStatus: "running",
+    });
+    const dockerCli: DockerCliRunner = async (args) => {
+      if (args[0] === "inspect") {
+        return dockerInspectResult({
+          agentId: created.agent.id,
+          containerId: "clean-exit-container",
+          image: "agentbay/dummy-runner:test",
+          status: "exited",
+        });
+      }
+
+      throw new Error(`unexpected docker mutation: ${args.join(" ")}`);
+    };
+    const adapter = new DockerRunnerAdapter({
+      createConnection: () => connection,
+      dockerCli,
+    });
+
+    await expect(
+      reconcileDockerRunnerAgentForDevelopmentUser(created.agent.id, {
+        createConnection: () => connection,
+        dockerRunnerAdapter: adapter,
+        now: () => new Date("2026-07-04T08:30:00.000Z"),
+      }),
+    ).resolves.toBe(false);
+
+    const [persistedAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, created.agent.id));
+    const logs = await listAgentLogs({ db: connection.db, agentId: created.agent.id });
+
+    expect(persistedAgent).toMatchObject({
+      status: "running",
+      statusReason: "Docker runner is running.",
+    });
+    expect(logs.logs).toEqual([]);
   });
 
   it("docker runner adapter starts, inspects, streams logs, and stops a real container when Docker is available", async () => {
@@ -6922,7 +7303,9 @@ function logValue(
 function dockerInspectResult(input: {
   agentId: string;
   containerId: string;
+  exitCode?: number;
   image: string;
+  oomKilled?: boolean;
   status: string;
 }) {
   return {
@@ -6936,6 +7319,8 @@ function dockerInspectResult(input: {
         },
       },
       State: {
+        ExitCode: input.exitCode ?? 0,
+        OOMKilled: input.oomKilled ?? false,
         Status: input.status,
         StartedAt: "2026-07-04T08:00:00.000000000Z",
         FinishedAt:
