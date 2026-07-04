@@ -245,6 +245,13 @@ export function summarizeAgentEventMetadata(metadata: AgentEventMetadata): strin
     summarizedKeys.add("deletedAt");
   }
 
+  const changedFieldsSummary = summarizeChangedFields(metadata.changedFields);
+
+  if (changedFieldsSummary) {
+    parts.push(changedFieldsSummary);
+    summarizedKeys.add("changedFields");
+  }
+
   for (const key of Object.keys(metadata).sort()) {
     if (summarizedKeys.has(key)) {
       continue;
@@ -442,6 +449,30 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function isDisplayScalar(value: unknown): value is boolean | number | string {
   return ["boolean", "number", "string"].includes(typeof value);
+}
+
+function summarizeChangedFields(value: unknown): string | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const fieldSummaries = value.flatMap((entry) => {
+    if (!isPlainObject(entry)) {
+      return [];
+    }
+
+    const field = entry.field;
+    const before = entry.before;
+    const after = entry.after;
+
+    if (!isDisplayScalar(field) || !isDisplayScalar(before) || !isDisplayScalar(after)) {
+      return [];
+    }
+
+    return `${humanizeMetadataKey(String(field))}: ${String(before)} -> ${String(after)}`;
+  });
+
+  return fieldSummaries.length > 0 ? `Changed: ${fieldSummaries.join(", ")}` : null;
 }
 
 function humanizeMetadataKey(key: string): string {

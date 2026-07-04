@@ -84,6 +84,14 @@ describe("agent event helpers", () => {
     ).toBe(
       "running -> stopped; Template: research_agent; Status: stopped; Deleted at: 2026-07-04T06:00:00.000Z; Retry Count: 2",
     );
+    expect(
+      summarizeAgentEventMetadata({
+        changedFields: [
+          { field: "modelName", before: "not_configured", after: "gpt-4.1-mini" },
+          { field: "maxDailySpend", before: "$0.00", after: "$12.34" },
+        ],
+      }),
+    ).toBe("Changed: Model Name: not_configured -> gpt-4.1-mini, Max Daily Spend: $0.00 -> $12.34");
     expect(summarizeAgentEventMetadata({ nested: { ignored: true } })).toBeNull();
 
     const dto = mapAgentEventToDto(

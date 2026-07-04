@@ -26,6 +26,11 @@ import {
   type AgentLifecycleStatus,
 } from "@/src/server/agents/lifecycle";
 import {
+  AgentConfigUpdatePersistenceError,
+  CONFIG_UPDATED_EVENT_TYPE,
+  updateAgentConfigForDevelopmentUser,
+} from "@/src/server/agents/update-agent-config";
+import {
   getActiveAgentForDevelopmentUser,
   listActiveAgentsForDevelopmentUser,
 } from "@/src/server/agents/list-agents";
@@ -165,6 +170,251 @@ describe("create agent persistence", () => {
     await expectTableCount(connection, "agent_configs", 0);
     await expectTableCount(connection, "agent_events", 0);
     await expectTableCount(connection, "app_metadata", 0);
+  });
+
+  it("updates agent identity and config values atomically with one safe config event", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Research Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const now = new Date("2026-07-04T08:00:00.000Z");
+
+    const result = await updateAgentConfigForDevelopmentUser(
+      created.agent.id,
+      {
+        name: "Renamed Agent",
+        modelName: "gpt-4.1-mini",
+        maxDailySpendCents: 1234,
+      },
+      {
+        createConnection: () => connection,
+        now: () => now,
+      },
+    );
+
+    const [persistedAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+    const [persistedConfig] = await connection.db
+      .select()
+      .from(agentConfigs)
+      .where(eq(agentConfigs.agentId, created.agent.id))
+      .limit(1);
+    const configUpdatedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.type, CONFIG_UPDATED_EVENT_TYPE));
+
+    expect(result).toMatchObject({
+      ok: true,
+      noOp: false,
+      agent: {
+        id: created.agent.id,
+        name: "Renamed Agent",
+        updatedAt: "2026-07-04T08:00:00.000Z",
+      },
+      config: {
+        modelName: "gpt-4.1-mini",
+        maxDailySpendCents: 1234,
+        updatedAt: "2026-07-04T08:00:00.000Z",
+      },
+      changedFields: [
+        { field: "name", before: "Research Agent", after: "Renamed Agent" },
+        { field: "modelName", before: "not_configured", after: "gpt-4.1-mini" },
+        { field: "maxDailySpend", before: "$0.00", after: "$12.34" },
+      ],
+      event: {
+        type: CONFIG_UPDATED_EVENT_TYPE,
+      },
+    });
+    expect(persistedAgent).toMatchObject({
+      name: "Renamed Agent",
+      updatedAt: now,
+    });
+    expect(persistedConfig).toMatchObject({
+      modelName: "gpt-4.1-mini",
+      maxDailySpendCents: 1234,
+      updatedAt: now,
+    });
+    expect(configUpdatedEvents).toHaveLength(1);
+    expect(configUpdatedEvents[0]).toMatchObject({
+      agentId: created.agent.id,
+      actorUserId: created.agent.userId,
+      type: CONFIG_UPDATED_EVENT_TYPE,
+      metadata: {
+        changedFields: [
+          { field: "name", before: "Research Agent", after: "Renamed Agent" },
+          { field: "modelName", before: "not_configured", after: "gpt-4.1-mini" },
+          { field: "maxDailySpend", before: "$0.00", after: "$12.34" },
+        ],
+      },
+    });
+    expect(JSON.stringify(configUpdatedEvents[0]?.metadata)).not.toMatch(
+      /api[_-]?key|token|password|secret|credential|private[_-]?key|bearer/i,
+    );
+  });
+
+  it("returns deterministic config no-ops without updating rows or writing events", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Research Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const [beforeAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+    const [beforeConfig] = await connection.db
+      .select()
+      .from(agentConfigs)
+      .where(eq(agentConfigs.agentId, created.agent.id))
+      .limit(1);
+
+    const result = await updateAgentConfigForDevelopmentUser(
+      created.agent.id,
+      {
+        name: "Research Agent",
+        modelName: "not_configured",
+        maxDailySpendCents: 0,
+        scheduleMode: "manual",
+        scheduleCron: null,
+      },
+      { createConnection: () => connection },
+    );
+
+    const [afterAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+    const [afterConfig] = await connection.db
+      .select()
+      .from(agentConfigs)
+      .where(eq(agentConfigs.agentId, created.agent.id))
+      .limit(1);
+    const events = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.type, CONFIG_UPDATED_EVENT_TYPE));
+
+    expect(result).toMatchObject({
+      ok: true,
+      noOp: true,
+      changedFields: [],
+      event: null,
+    });
+    expect(afterAgent).toEqual(beforeAgent);
+    expect(afterConfig).toEqual(beforeConfig);
+    expect(events).toHaveLength(0);
+  });
+
+  it("rejects config schedules that would violate the persisted manual or cron contract", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Research Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const beforeConfig = await connection.db.select().from(agentConfigs);
+
+    const result = await updateAgentConfigForDevelopmentUser(
+      created.agent.id,
+      {
+        scheduleCron: "0 9 * * *",
+      },
+      { createConnection: () => connection },
+    );
+
+    const afterConfig = await connection.db.select().from(agentConfigs);
+    const events = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.type, CONFIG_UPDATED_EVENT_TYPE));
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "validation_failed",
+      issues: [
+        {
+          field: "scheduleCron",
+          message: "Manual schedule mode cannot persist a cron expression.",
+        },
+      ],
+    });
+    expect(afterConfig).toEqual(beforeConfig);
+    expect(events).toHaveLength(0);
+  });
+
+  it("rolls back config and agent updates when config event writing fails", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Research Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const beforeAgent = await connection.db.select().from(agents);
+    const beforeConfig = await connection.db.select().from(agentConfigs);
+    const beforeEvents = await connection.db.select().from(agentEvents);
+
+    await expect(
+      updateAgentConfigForDevelopmentUser(
+        created.agent.id,
+        {
+          name: "Rolled Back Agent",
+          modelName: "gpt-4.1-mini",
+        },
+        {
+          createConnection: () => connection,
+          recordConfigUpdatedEvent: async () => {
+            throw new Error("synthetic event failure");
+          },
+        },
+      ),
+    ).rejects.toBeInstanceOf(AgentConfigUpdatePersistenceError);
+
+    await expect(connection.db.select().from(agents)).resolves.toEqual(beforeAgent);
+    await expect(connection.db.select().from(agentConfigs)).resolves.toEqual(beforeConfig);
+    await expect(connection.db.select().from(agentEvents)).resolves.toEqual(beforeEvents);
+  });
+
+  it("returns not found for missing or soft-deleted config update targets without mutation", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Research Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const deletedAt = new Date("2026-07-04T09:00:00.000Z");
+
+    await connection.db.update(agents).set({ deletedAt }).where(eq(agents.id, created.agent.id));
+
+    const beforeConfig = await connection.db.select().from(agentConfigs);
+
+    await expect(
+      updateAgentConfigForDevelopmentUser(
+        "00000000-0000-4000-8000-000000000000",
+        {
+          modelName: "gpt-4.1-mini",
+        },
+        {
+          createConnection: () => connection,
+        },
+      ),
+    ).resolves.toEqual({ ok: false, reason: "agent_not_found" });
+    await expect(
+      updateAgentConfigForDevelopmentUser(
+        created.agent.id,
+        { modelName: "gpt-4.1-mini" },
+        {
+          createConnection: () => connection,
+        },
+      ),
+    ).resolves.toEqual({ ok: false, reason: "agent_not_found" });
+
+    const afterConfig = await connection.db.select().from(agentConfigs);
+    const events = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.type, CONFIG_UPDATED_EVENT_TYPE));
+
+    expect(afterConfig).toEqual(beforeConfig);
+    expect(events).toHaveLength(0);
   });
 
   it("lists active persisted agents with stopped status and stable links", async () => {
