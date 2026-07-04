@@ -22,7 +22,7 @@ export default async function AgentsPage() {
       active="agents"
       eyebrow="Agents"
       title="Agent inventory"
-      description="Create persistent agents, exercise fake lifecycle controls, and confirm active records remain visible after refresh."
+      description="Create persistent agents, exercise local runner lifecycle controls, and confirm active records remain visible after refresh."
     >
       <div className="content-grid">
         <section className="agent-list-panel" aria-labelledby="agent-list-title">

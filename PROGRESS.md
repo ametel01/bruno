@@ -2,11 +2,11 @@
 
 ## Milestone 9 Local Runner Persistence
 
-- Status: #74 local runner lifecycle wiring is implementation-complete and ready for checker review.
+- Status: complete for #71/#72/#73/#74/#75; Milestone 9 is ready for checker review.
 - Source plan: `docs/MILESTONES.md` Milestone 9
 - Tracking issues: #71-#75
-- Current branch: `codex/issue-74-local-runner-lifecycle`
-- Next step: checker should review lifecycle route/service wiring, crash-to-error handling, and local runner process cleanup evidence.
+- Current branch: `codex/issue-75-local-runner-acceptance`
+- Next step: checker should review the final documentation updates, stale fake-lifecycle wording cleanup, and acceptance evidence below.
 
 ### Issue Checklist
 
@@ -14,7 +14,7 @@
 - [x] #72 Implement the local runner adapter with a dummy process
 - [x] #73 Expose persisted process logs in the dashboard
 - [x] #74 Run lifecycle controls through the local runner
-- [ ] #75 Document and verify the Milestone 9 local runner
+- [x] #75 Document and verify the Milestone 9 local runner
 - Later Milestone 9 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 9 work.
 
 ### Current Status
@@ -41,8 +41,46 @@
 - #74 records unexpected lifecycle-launched process exits as `error` with safe status reason, persisted process exit details, captured stdout/stderr logs, and one `agent.error` audit event.
 - #74 leaves invalid lifecycle actions as safe validation/conflict responses without runner calls, state mutation, or mutation events.
 - #74 keeps Docker/cloud/Hermes/provider/auth/billing/secrets and Docker runtime metadata out of scope.
+- #75 updates README operator docs to describe the local runner adapter, dummy runner default, optional executable/argv configuration, lifecycle behavior, stdout/stderr log storage, unexpected crash behavior, and local validation workflow.
+- #75 corrects stale product/docs wording that described current lifecycle controls as deterministic fake lifecycle behavior or said Milestone 9 did not spawn real processes.
+- #75 keeps `CHANGELOG.md` unchanged because the issue is documentation, copy correction, and final evidence only; no new user/operator-visible runtime behavior was added.
+- #75 marks Milestone 9 completed in `docs/MILESTONES.md` after final acceptance evidence and aggregate validation passed.
 
 ### Validation
+
+#### #75
+
+- Date: 2026-07-04
+- Environment:
+  - Isolated database target: container `agentbay_issue_75-postgres` on host port `54375`, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54375/agentbay`.
+  - Isolated app/test server target: `PORT=3075`, `PLAYWRIGHT_BASE_URL=http://localhost:3075`, `NEXT_PUBLIC_APP_URL=http://localhost:3075`.
+- Setup:
+  - `test -d node_modules && echo node_modules-present || echo node_modules-missing`: pass; reported `node_modules-missing` before setup.
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile.
+  - `docker info --format '{{.ServerVersion}}'`: pass; Docker daemon reachable with server version `29.3.1`.
+  - `docker ps -a --filter name=agentbay_issue_75-postgres --format '{{.Names}} {{.Status}} {{.Ports}}'`: pass; no existing #75 container was present before setup.
+  - `docker run --name agentbay_issue_75-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54375:5432 -d postgres:17-alpine`: pass; started isolated Postgres for #75.
+  - `docker exec agentbay_issue_75-postgres pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54375/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3075 bun run db:migrate`: pass; migrations applied successfully.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54375/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3075 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+- Focused acceptance checks:
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54375/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3075 bun run test -- tests/unit/create-agent-db.test.ts tests/unit/local-runner-adapter.test.ts tests/unit/root-page.test.tsx`: pass; 3 files and 108 tests passed.
+  - Evidence from the focused unit suite: local runner command configuration defaults to the dummy Node process and accepts explicit executable/argv configuration; start records a real child pid and status; stop terminates the tracked managed child; stdout/stderr process lines persist in `agent_logs`; lifecycle-launched crash moves the agent to `error` and writes `agent.error`; dashboard copy keeps existing lifecycle controls while no longer describing them as fake lifecycle controls.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54375/agentbay PORT=3075 PLAYWRIGHT_BASE_URL=http://localhost:3075 NEXT_PUBLIC_APP_URL=http://localhost:3075 bun run test:e2e -- --project=chromium-desktop --grep "dashboard shows latest persisted process logs|scoped runtime logs|creates Research Agent"`: failed in the first combined targeted run; the dashboard process-log case passed, while the two lifecycle cases received `Agent could not be started.` during concurrent DB-mutating execution.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54375/agentbay PORT=3075 PLAYWRIGHT_BASE_URL=http://localhost:3075 NEXT_PUBLIC_APP_URL=http://localhost:3075 bun run test:e2e -- tests/e2e/root-route.spec.ts:604 --project=chromium-desktop --workers=1`: pass; the browser create/lifecycle flow proved existing dashboard lifecycle controls and status pills remain the control model across Start, Restart, and Stop.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54375/agentbay PORT=3075 PLAYWRIGHT_BASE_URL=http://localhost:3075 NEXT_PUBLIC_APP_URL=http://localhost:3075 bun run test:e2e -- tests/e2e/root-route.spec.ts:1312 --project=chromium-desktop --workers=1`: pass; the detail runtime log flow proved the local dummy runner stdout/stderr lines are persisted and visible in the product log experience.
+- Final aggregate gate:
+  - The #75 Postgres container was reset before final aggregate validation with `docker rm -f -v agentbay_issue_75-postgres`, recreated on host port `54375`, and migrated successfully.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54375/agentbay PORT=3075 PLAYWRIGHT_BASE_URL=http://localhost:3075 NEXT_PUBLIC_APP_URL=http://localhost:3075 bun run verify`: pass; aggregate format, lint, typecheck, unit test, production build, and Playwright gates passed with 207 unit tests and 38 E2E passed / 18 expected skips.
+- Acceptance evidence map:
+  - README accuracy: updated for the adapter, default dummy process, optional executable/argv env vars, lifecycle behavior, log storage, crash behavior, and local validation workflow.
+  - Stale fake-runner wording: `rg -n "fake lifecycle|deterministic fake lifecycle|does not spawn|does not spawn or supervise|real processes do not exist|runner processes do not exist|logs .*do not exist" README.md app tests/unit/root-page.test.tsx docs/MILESTONES.md` returns only the intentional Milestone 9 goal statement that the milestone replaces fake lifecycle behavior.
+  - Start launches a real local child process: covered by focused unit tests for adapter start pid/status and lifecycle start wiring, plus the browser lifecycle Start path in `tests/e2e/root-route.spec.ts:604`.
+  - Stop terminates the tracked local process: covered by focused unit tests for adapter stop and the browser Stop path in `tests/e2e/root-route.spec.ts:604`.
+  - stdout/stderr lines persist and are visible in dashboard/detail experience: covered by focused unit tests, `tests/e2e/root-route.spec.ts:53`, and `tests/e2e/root-route.spec.ts:1312`.
+  - Forced dummy runner crash changes status to `error` and records an audit event: covered by `tests/unit/create-agent-db.test.ts` crash coverage in the focused unit suite.
+  - Existing lifecycle controls and status pills remain the dashboard control model: covered by `tests/unit/root-page.test.tsx` and `tests/e2e/root-route.spec.ts:604`.
+  - Aggregate validation passes against a migrated local database: final `bun run verify` passed against the reset and migrated `agentbay_issue_75-postgres` database.
 
 #### #74
 

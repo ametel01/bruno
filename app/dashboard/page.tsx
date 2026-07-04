@@ -65,7 +65,7 @@ export function DashboardContent({
       active="dashboard"
       eyebrow={routeLabel}
       title="Operational dashboard"
-      description="A control surface for persisted agent records, pending approval requests, deterministic fake lifecycle status, and local development activity."
+      description="A control surface for persisted agent records, pending approval requests, local runner lifecycle status, and local development activity."
     >
       <div className="content-grid">
         <section className="agent-list-panel" aria-labelledby="dashboard-agents-title">
@@ -152,7 +152,7 @@ export function DashboardContent({
         </PlaceholderPanel>
         <PlaceholderPanel title="Upcoming surfaces">
           <ul className="plain-list">
-            <li>Start, Stop, Restart, and Delete use deterministic fake lifecycle controls.</li>
+            <li>Start, Stop, and Restart use the local runner adapter and existing controls.</li>
             <li>
               Full per-agent log streams and local-development config editing are present on agent
               detail pages.

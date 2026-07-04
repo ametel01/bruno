@@ -493,7 +493,7 @@ Goal: The core operations surface is usable from a phone.
 - UI test for mobile approval flow.
 - UI test for mobile stop/resume action.
 
-## Milestone 9: Local Hermes Runner Adapter
+## Milestone 9: Local Hermes Runner Adapter [Completed]
 
 Goal: Replace fake lifecycle behavior with a real local process adapter.
 
