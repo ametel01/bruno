@@ -50,6 +50,7 @@
 - 2026-07-05: #127 restored `PROGRESS.md` from the latest tracked progress history after it had been removed by docs cleanup, initialized this Milestone 12 section from `docs/MILESTONES.md`, `docs/PRD.md`, `docs/conversation_dump.md`, GitHub issues #127-#134, and the coordinator decisions in `STATUS.md`.
 - 2026-07-05: #127 confirmed `CHANGELOG.md` has Keep a Changelog framing and `## [Unreleased]`; `CHANGELOG.md` is intentionally unchanged for #127 because this issue creates tracking only and ships no functional product behavior.
 - 2026-07-05: #122 rebased onto current `origin/main` after #127 restored this tracker, removed generated `next-env.d.ts` build churn from the diff, and recorded validation evidence below.
+- 2026-07-05: #123 rebased onto latest `origin/main` after #122 merged, preserved the manual VPS runner service implementation, discarded generated `next-env.d.ts` churn, and appended validation evidence here.
 
 ### Validation Evidence
 
@@ -66,6 +67,14 @@
   - `rg -n "Keep a Changelog|## \\[Unreleased\\]" CHANGELOG.md`: pass; matched the Keep a Changelog framing and `## [Unreleased]`.
   - `git diff -- PROGRESS.md CHANGELOG.md`: pass for review; diff contains the restored `PROGRESS.md` plus this Milestone 12 section, and no `CHANGELOG.md` changes.
   - `bun run format:check`: skipped after attempted run failed with `biome: command not found`; `node_modules` is missing in this worktree, `command -v biome` returned no binary, and #127 explicitly forbids editing `node_modules`.
+
+- 2026-07-05 #123:
+  - `git rebase origin/main`: pass after resolving expected `.env.example` and `PROGRESS.md` merge-order conflicts with #122; branch `codex/issue-123-manual-runner-service` is current with `origin/main`.
+  - `git restore -- next-env.d.ts`: pass; removed generated Next route-type import churn from the #123 diff before rebasing.
+  - `git status --short --branch --untracked-files=all`: pass; branch is current with `origin/main`, with intended #123 runner-service files plus docs/package updates and `PROGRESS.md`.
+  - `git diff --name-status`: pass; no `next-env.d.ts` diff remains.
+  - `bun run format:check`: pass; Biome checked 95 files with no fixes applied.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed after the rebase and generated-file cleanup.
 
 ## Milestone 9 Local Runner Persistence
 

@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Start, Stop, and Restart API/dashboard/detail controls now run through the Docker runner adapter, preserving the existing lifecycle UI while creating, stopping, or replacing only the selected agent's Docker container and surfacing captured Docker stdout/stderr logs.
 - Docker runner crash reconciliation that moves unexpectedly exited selected-agent containers to `error`, writes a safe `agent.error` audit event, and records a visible Docker-sourced stderr system log with exit metadata.
 - Selected-agent Docker cleanup that validates the exact stored container ID and `agentbay.agent_id` label before removing containers during delete cleanup.
+- Standalone manual VPS runner service for selected-agent Docker start, stop, restart, status, and log APIs with temporary bearer-token auth, argv-only Docker calls, and `agentbay.agent_id` label scoping.
 - Milestone 5 agent templates with a typed metadata registry, durable template version/snapshot persistence, create-flow template metadata, and persisted template settings on agent detail pages.
 - Manual VPS runner persistence with durable runner identity rows, nullable agent assignment, optional non-secret development bootstrap, endpoint validation, and active-agent assigned-runner helpers without changing no-runner lifecycle behavior.
 
