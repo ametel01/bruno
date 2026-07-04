@@ -32,6 +32,7 @@
 - #73 keeps internal runner/process identifiers available to server helpers but strips `runnerId` and `localRunnerProcessId` from the product `GET /api/agents/:agentId/logs` response.
 - #73 returns sanitized public log messages from the product `GET /api/agents/:agentId/logs` response, reusing the operational summarizer to omit token-like values, redact Postgres URLs, and drop stack-frame paths.
 - #73 keeps lifecycle controls/status pills unchanged and does not implement process spawning, local runner adapter behavior, lifecycle endpoint replacement, Docker/cloud runners, Hermes, Telegram, auth, billing, provider integrations, or secrets.
+- #72 scopes process-id log streaming to the requested active local-development agent at the state helper boundary, so a known process UUID for another agent returns no logs through both the helper and adapter.
 
 ### Validation
 
@@ -51,16 +52,17 @@
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run db:migrate`: pass; migrations applied successfully against the isolated #72 database.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
 - Focused checks:
-  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run test -- tests/unit/local-runner-adapter.test.ts tests/unit/create-agent-db.test.ts`: pass; 2 files and 78 tests passed, including adapter command configuration, safe executable/argv spawning with `shell: false`, real dummy child start/status/stop, stdout/stderr persistence, restart process-log separation, and unexpected-exit terminal state.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run test -- tests/unit/local-runner-adapter.test.ts tests/unit/create-agent-db.test.ts`: pass; 2 files and 79 tests passed, including adapter command configuration, safe executable/argv spawning with `shell: false`, real dummy child start/status/stop, stdout/stderr persistence, restart process-log separation, unexpected-exit terminal state, and a cross-agent process-id log streaming regression.
 - Required gates:
   - `bun run format:check`: pass; Biome checked 83 files.
   - `bun run lint`: pass; Biome checked 83 files.
   - `bun run typecheck`: pass; `tsc --noEmit` passed.
-  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run test`: pass; 23 files and 196 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run test`: pass; 23 files and 197 tests passed.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay PORT=3072 PLAYWRIGHT_BASE_URL=http://localhost:3072 NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run build`: pass; Next.js build completed and included dashboard, agent detail, lifecycle, approval decision, log, health, and settings routes.
-  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay PORT=3072 PLAYWRIGHT_BASE_URL=http://localhost:3072 NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run verify`: pass; aggregate format, lint, typecheck, unit test, production build, and Playwright gates passed with 196 unit tests and 37 E2E passed / 17 expected skips.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay PORT=3072 PLAYWRIGHT_BASE_URL=http://localhost:3072 NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run verify`: pass; aggregate format, lint, typecheck, unit test, production build, and Playwright gates passed with 197 unit tests and 37 E2E passed / 17 expected skips.
 - Reconciliation:
   - A concurrent `bun run test:e2e` and `bun run verify` attempt against the same #72 database failed with Postgres deadlocks and polluted E2E assertions. This was an invalid validation setup caused by running two DB-mutating suites in parallel. Rerunning `bun run verify` alone against the same isolated #72 database passed.
+  - Checker found that process-id log streaming trusted `processId` without proving ownership. `listLocalRunnerProcessLogs` now requires `agentId` and joins `agent_logs`, `local_runner_processes`, and `agents` against the active development user; the adapter passes the requested agent id into that helper. The new two-agent regression proves `adapter.streamLogs({ agentId: agentA.id, processId: processB.id })` returns an empty page and does not expose agent B's log.
 
 #### #73
 

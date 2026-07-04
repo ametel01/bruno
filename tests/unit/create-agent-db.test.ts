@@ -4428,6 +4428,7 @@ describe("create agent persistence", () => {
     const agentBPage = await listAgentLogs({ db: connection.db, agentId: agentB.agent.id });
     const processALogs = await listLocalRunnerProcessLogs({
       db: connection.db,
+      agentId: agentA.agent.id,
       processId: processA?.id ?? "",
     });
     const persistedEvents = await connection.db.select().from(agentEvents);
@@ -4850,6 +4851,64 @@ describe("create agent persistence", () => {
     } finally {
       await adapter.stop(created.agent.id);
     }
+  });
+
+  it("local runner adapter does not stream another agent's process logs by process id", async () => {
+    const agentA = await createAgentForDevelopmentUser(
+      { name: "Scoped Adapter Agent A", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const agentB = await createAgentForDevelopmentUser(
+      { name: "Scoped Adapter Agent B", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const processA = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: agentA.agent.id,
+      pid: 43230,
+      commandMetadata: { command: "bun", args: ["runner", "agent-a"] },
+    });
+    const processB = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: agentB.agent.id,
+      pid: 43231,
+      commandMetadata: { command: "bun", args: ["runner", "agent-b"] },
+    });
+    await appendLocalRunnerLogLines({
+      db: connection.db,
+      processId: processA?.id ?? "",
+      lines: [{ stream: "stdout", message: "agent-a-public-log" }],
+    });
+    await appendLocalRunnerLogLines({
+      db: connection.db,
+      processId: processB?.id ?? "",
+      lines: [{ stream: "stderr", message: "agent-b-private-log" }],
+    });
+    const adapter = createTestLocalRunnerAdapter(connection);
+
+    const crossAgentHelperLogs = await listLocalRunnerProcessLogs({
+      db: connection.db,
+      agentId: agentA.agent.id,
+      processId: processB?.id ?? "",
+    });
+    const crossAgentAdapterPage = await adapter.streamLogs({
+      agentId: agentA.agent.id,
+      processId: processB?.id ?? "",
+    });
+    const ownProcessAdapterPage = await adapter.streamLogs({
+      agentId: agentB.agent.id,
+      processId: processB?.id ?? "",
+    });
+
+    expect(crossAgentHelperLogs).toEqual([]);
+    expect(crossAgentAdapterPage).toEqual({
+      logs: [],
+      nextAfter: null,
+    });
+    expect(JSON.stringify(crossAgentAdapterPage)).not.toContain("agent-b-private-log");
+    expect(ownProcessAdapterPage.logs.map((log) => [log.agentId, log.message])).toEqual([
+      [agentB.agent.id, "agent-b-private-log"],
+    ]);
   });
 
   it("local runner adapter restarts by replacing the tracked child without mixing process-scoped logs", async () => {

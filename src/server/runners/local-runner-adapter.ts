@@ -261,6 +261,7 @@ export class LocalRunnerAdapter implements RunnerAdapter {
       if (input.processId) {
         const logs = await listLocalRunnerProcessLogs({
           db: connection.db,
+          agentId: input.agentId,
           processId: input.processId,
           ...(input.limit === undefined ? {} : { limit: input.limit }),
         });
