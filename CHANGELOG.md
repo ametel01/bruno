@@ -16,9 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `POST /api/agents` for validated transactional creation of stopped persistent agents and matching `agent.created` events.
 - Database-backed `/agents` create/list workflow for creating stopped persistent agents and showing refreshed active records with stable links.
 - Database-backed dashboard and agent detail read surfaces for active persisted agents, including refreshed stopped status visibility and not-found handling for missing or inactive detail records.
-- `POST /api/agents/:agentId/actions/start` and Start UI controls for fake lifecycle start requests, deterministic settling to running, and matching lifecycle events.
-- `POST /api/agents/:agentId/actions/stop` and Stop UI controls for running agents, including transactional stop events and visible status refresh back to stopped.
-- `POST /api/agents/:agentId/actions/restart` and Restart UI controls for running agents, including deterministic fake-runner settling back to running and matching lifecycle events.
+- `POST /api/agents/:agentId/actions/start` and Start UI controls that launch a real local runner child process, transition to running only after spawn succeeds, and record matching lifecycle events.
+- `POST /api/agents/:agentId/actions/stop` and Stop UI controls that terminate the tracked local runner child process before refreshing status back to stopped.
+- `POST /api/agents/:agentId/actions/restart` and Restart UI controls that terminate the tracked local runner child, start a replacement process, and record matching lifecycle events.
 - `DELETE /api/agents/:agentId` and Delete UI controls for soft-deleting non-transitioning active agents from active views while preserving audit events.
 - Dashboard lifecycle controls for starting, stopping, restarting, and deleting active persisted agents without opening the detail page.
 - Milestone 3 event timeline foundation with shared transactional event writers, event DTO mapping, opaque cursor helpers, and newest-first query helpers for per-agent and latest dashboard activity feeds.
@@ -45,10 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local runner adapter interface for starting, stopping, restarting, status checks, and persisted log-stream reads with a real dummy child process by default and explicit executable/argv configuration for future Hermes swaps.
 - Docker runner container metadata persistence for selected agents, including exact container ID, container name, image, observed status, timestamps, sanitized metadata, and exact-container scoped log helpers for future Docker adapter work.
 - Agent runtime log rows now persist a source and metadata alongside stdout/stderr line content, and the product log API/detail panel expose only a safe public log DTO without log-row, agent, runner, container, or raw metadata identifiers.
+- Lifecycle-launched local runner crash handling that moves agents to `error`, records safe status reasons, persists process exit details, captures stdout/stderr logs, and writes an `agent.error` audit event.
 
 ### Fixed
 
 - Local runner adapter start failures now terminate spawned child processes when durable runner-state persistence fails, preventing orphaned dummy/local processes.
 - Local runner process log streaming now scopes process-id reads to the requested active development-user agent so a known process UUID for another agent cannot return that agent's stdout/stderr.
+- Restart controls now clear their local busy state when the local runner restart returns directly to `running`.
 - Dashboard persisted-agent controls remain available on phone widths by using the mobile agent status card list when the desktop table is hidden, with hardened wrapping and focus states for combined mobile agent, approval, log, and alert controls.
 - Create-agent failures now return safe actionable database setup errors when Postgres is unavailable or migrations are missing, and the create form prevents pre-hydration no-op submissions.

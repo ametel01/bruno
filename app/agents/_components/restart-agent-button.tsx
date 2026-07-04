@@ -56,6 +56,22 @@ export function RestartAgentButton({ agentId, status }: RestartAgentButtonProps)
     };
   }, [router, state.status, status]);
 
+  useEffect(() => {
+    if (state.status !== "polling" || status !== "running") {
+      return;
+    }
+
+    const settleTimeout = window.setTimeout(() => {
+      observedRestartingRef.current = false;
+      requestedAtRef.current = 0;
+      setState((current) => (current.status === "polling" ? { status: "idle" } : current));
+    }, RESTART_SETTLE_FALLBACK_MS);
+
+    return () => {
+      window.clearTimeout(settleTimeout);
+    };
+  }, [state.status, status]);
+
   async function handleRestart() {
     if (status !== "running") {
       return;

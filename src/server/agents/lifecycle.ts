@@ -1,12 +1,15 @@
-import { and, eq, inArray, isNull, lte } from "drizzle-orm";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import type * as schema from "@/src/server/db/schema";
 import { agents, type agentStatusEnum } from "@/src/server/db/schema";
 import {
   recordAgentEventInTransaction,
   recordAgentEventsInTransaction,
 } from "@/src/server/events/agent-events";
+import {
+  LocalRunnerAdapter,
+  type LocalRunnerUnexpectedExitEvent,
+  type RunnerAdapter,
+} from "@/src/server/runners/local-runner-adapter";
 
 export type AgentLifecycleStatus = (typeof agentStatusEnum.enumValues)[number];
 
@@ -32,20 +35,17 @@ export const DELETE_EVENT_TYPE = "agent.deleted";
 export const FAKE_RUNNER_START_DELAY_MS = 400;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const STARTING_STATUS_REASON = "Start requested.";
-const RESTARTING_STATUS_REASON = "Restart requested.";
-const RUNNING_STATUS_REASON = "Fake runner is running.";
+const RUNNING_STATUS_REASON = "Local runner is running.";
+export const LOCAL_RUNNER_UNEXPECTED_EXIT_STATUS_REASON =
+  "Local runner exited unexpectedly. Check captured process logs for details.";
 export const SIMULATED_ERROR_STATUS_REASON = "Simulated error requested for development testing.";
-
-type AgentTransaction = Parameters<
-  Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
->[0];
 
 type LifecycleClock = () => Date;
 
 export type AgentLifecycleDependencies = {
   createConnection?: () => DatabaseConnection;
   now?: LifecycleClock;
+  runnerAdapter?: RunnerAdapter;
 };
 
 export type StartAgentResult =
@@ -55,10 +55,23 @@ export type StartAgentResult =
       event: {
         type: typeof START_REQUESTED_EVENT_TYPE;
       };
+      events: [
+        {
+          type: typeof START_REQUESTED_EVENT_TYPE;
+        },
+        {
+          type: typeof START_COMPLETED_EVENT_TYPE;
+        },
+      ];
     }
   | {
       ok: false;
-      reason: "missing_agent_id" | "malformed_agent_id" | "agent_not_found" | "invalid_status";
+      reason:
+        | "missing_agent_id"
+        | "malformed_agent_id"
+        | "agent_not_found"
+        | "invalid_status"
+        | "runner_start_failed";
       status?: AgentLifecycleStatus;
     };
 
@@ -67,7 +80,7 @@ export type StartedAgent = {
   userId: string;
   name: string;
   templateKey: string;
-  status: "starting";
+  status: "running";
   statusReason: string;
   createdAt: string;
   updatedAt: string;
@@ -89,7 +102,12 @@ export type StopAgentResult =
     }
   | {
       ok: false;
-      reason: "missing_agent_id" | "malformed_agent_id" | "agent_not_found" | "invalid_status";
+      reason:
+        | "missing_agent_id"
+        | "malformed_agent_id"
+        | "agent_not_found"
+        | "invalid_status"
+        | "runner_stop_failed";
       status?: AgentLifecycleStatus;
     };
 
@@ -112,10 +130,23 @@ export type RestartAgentResult =
       event: {
         type: typeof RESTART_REQUESTED_EVENT_TYPE;
       };
+      events: [
+        {
+          type: typeof RESTART_REQUESTED_EVENT_TYPE;
+        },
+        {
+          type: typeof RESTART_COMPLETED_EVENT_TYPE;
+        },
+      ];
     }
   | {
       ok: false;
-      reason: "missing_agent_id" | "malformed_agent_id" | "agent_not_found" | "invalid_status";
+      reason:
+        | "missing_agent_id"
+        | "malformed_agent_id"
+        | "agent_not_found"
+        | "invalid_status"
+        | "runner_restart_failed";
       status?: AgentLifecycleStatus;
     };
 
@@ -124,7 +155,7 @@ export type RestartedAgent = {
   userId: string;
   name: string;
   templateKey: string;
-  status: "restarting";
+  status: "running";
   statusReason: string;
   createdAt: string;
   updatedAt: string;
@@ -190,6 +221,18 @@ export class AgentLifecyclePersistenceError extends Error {
   }
 }
 
+let lifecycleLocalRunnerAdapter: RunnerAdapter | null = null;
+
+export function getLifecycleLocalRunnerAdapter(): RunnerAdapter {
+  lifecycleLocalRunnerAdapter ??= new LocalRunnerAdapter({
+    onUnexpectedExit: async (event) => {
+      await recordUnexpectedLocalRunnerExitForDevelopmentUser(event);
+    },
+  });
+
+  return lifecycleLocalRunnerAdapter;
+}
+
 export function isValidAgentId(agentId: string): boolean {
   return UUID_PATTERN.test(agentId);
 }
@@ -233,9 +276,10 @@ export async function startAgentForDevelopmentUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
+  const runnerAdapter = dependencies.runnerAdapter ?? getLifecycleLocalRunnerAdapter();
 
   try {
-    return await connection.db.transaction(async (tx) => {
+    const validation = await connection.db.transaction(async (tx) => {
       const [currentAgent] = await tx
         .select()
         .from(agents)
@@ -243,18 +287,32 @@ export async function startAgentForDevelopmentUser(
         .limit(1);
 
       if (!currentAgent) {
-        return { ok: false, reason: "agent_not_found" };
+        return { ok: false, reason: "agent_not_found" } as const;
       }
 
       if (!canStartAgentStatus(currentAgent.status)) {
-        return { ok: false, reason: "invalid_status", status: currentAgent.status };
+        return { ok: false, reason: "invalid_status", status: currentAgent.status } as const;
       }
 
+      return { ok: true, agent: currentAgent } as const;
+    });
+
+    if (!validation.ok) {
+      return validation;
+    }
+
+    const runnerStart = await runnerAdapter.start(normalizedAgentId);
+
+    if (!runnerStart.ok) {
+      return { ok: false, reason: "runner_start_failed" } as const;
+    }
+
+    return await connection.db.transaction(async (tx) => {
       const [startedAgent] = await tx
         .update(agents)
         .set({
-          status: "starting",
-          statusReason: STARTING_STATUS_REASON,
+          status: "running",
+          statusReason: RUNNING_STATUS_REASON,
           updatedAt: now,
         })
         .where(
@@ -267,19 +325,34 @@ export async function startAgentForDevelopmentUser(
         .returning();
 
       if (!startedAgent) {
+        await runnerAdapter.stop(normalizedAgentId);
         throw new Error("Agent start update returned no rows.");
       }
 
-      await recordAgentEventInTransaction(tx, {
-        agentId: startedAgent.id,
-        actorUserId: startedAgent.userId,
-        type: START_REQUESTED_EVENT_TYPE,
-        message: `Start requested for agent "${startedAgent.name}".`,
-        metadata: {
-          fromStatus: currentAgent.status,
-          toStatus: "starting",
+      await recordAgentEventsInTransaction(tx, [
+        {
+          agentId: startedAgent.id,
+          actorUserId: startedAgent.userId,
+          type: START_REQUESTED_EVENT_TYPE,
+          message: `Start requested for agent "${startedAgent.name}".`,
+          metadata: {
+            fromStatus: validation.agent.status,
+            toStatus: "running",
+            localRunnerProcessId: runnerStart.process.id,
+          },
         },
-      });
+        {
+          agentId: startedAgent.id,
+          actorUserId: startedAgent.userId,
+          type: START_COMPLETED_EVENT_TYPE,
+          message: `Start completed for agent "${startedAgent.name}".`,
+          metadata: {
+            fromStatus: validation.agent.status,
+            toStatus: "running",
+            localRunnerProcessId: runnerStart.process.id,
+          },
+        },
+      ]);
 
       return {
         ok: true,
@@ -287,6 +360,14 @@ export async function startAgentForDevelopmentUser(
         event: {
           type: START_REQUESTED_EVENT_TYPE,
         },
+        events: [
+          {
+            type: START_REQUESTED_EVENT_TYPE,
+          },
+          {
+            type: START_COMPLETED_EVENT_TYPE,
+          },
+        ],
       };
     });
   } catch {
@@ -315,12 +396,10 @@ export async function stopAgentForDevelopmentUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
-  const dueBefore = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS);
+  const runnerAdapter = dependencies.runnerAdapter ?? getLifecycleLocalRunnerAdapter();
 
   try {
-    return await connection.db.transaction(async (tx) => {
-      await settleDueFakeRunnerTransitionsInTransaction(tx, now, dueBefore);
-
+    const validation = await connection.db.transaction(async (tx) => {
       const [currentAgent] = await tx
         .select()
         .from(agents)
@@ -328,13 +407,27 @@ export async function stopAgentForDevelopmentUser(
         .limit(1);
 
       if (!currentAgent) {
-        return { ok: false, reason: "agent_not_found" };
+        return { ok: false, reason: "agent_not_found" } as const;
       }
 
       if (!canStopAgentStatus(currentAgent.status)) {
-        return { ok: false, reason: "invalid_status", status: currentAgent.status };
+        return { ok: false, reason: "invalid_status", status: currentAgent.status } as const;
       }
 
+      return { ok: true, agent: currentAgent } as const;
+    });
+
+    if (!validation.ok) {
+      return validation;
+    }
+
+    const runnerStop = await runnerAdapter.stop(normalizedAgentId);
+
+    if (!runnerStop.ok) {
+      return { ok: false, reason: "runner_stop_failed" } as const;
+    }
+
+    return await connection.db.transaction(async (tx) => {
       const [stoppedAgent] = await tx
         .update(agents)
         .set({
@@ -362,8 +455,9 @@ export async function stopAgentForDevelopmentUser(
           type: STOP_REQUESTED_EVENT_TYPE,
           message: `Stop requested for agent "${stoppedAgent.name}".`,
           metadata: {
-            fromStatus: currentAgent.status,
+            fromStatus: validation.agent.status,
             toStatus: "stopped",
+            localRunnerProcessId: runnerStop.process.id,
           },
         },
         {
@@ -372,8 +466,9 @@ export async function stopAgentForDevelopmentUser(
           type: STOP_COMPLETED_EVENT_TYPE,
           message: `Stop completed for agent "${stoppedAgent.name}".`,
           metadata: {
-            fromStatus: currentAgent.status,
+            fromStatus: validation.agent.status,
             toStatus: "stopped",
+            localRunnerProcessId: runnerStop.process.id,
           },
         },
       ]);
@@ -417,12 +512,10 @@ export async function restartAgentForDevelopmentUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
-  const dueBefore = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS);
+  const runnerAdapter = dependencies.runnerAdapter ?? getLifecycleLocalRunnerAdapter();
 
   try {
-    return await connection.db.transaction(async (tx) => {
-      await settleDueFakeRunnerTransitionsInTransaction(tx, now, dueBefore);
-
+    const validation = await connection.db.transaction(async (tx) => {
       const [currentAgent] = await tx
         .select()
         .from(agents)
@@ -430,18 +523,32 @@ export async function restartAgentForDevelopmentUser(
         .limit(1);
 
       if (!currentAgent) {
-        return { ok: false, reason: "agent_not_found" };
+        return { ok: false, reason: "agent_not_found" } as const;
       }
 
       if (!canRestartAgentStatus(currentAgent.status)) {
-        return { ok: false, reason: "invalid_status", status: currentAgent.status };
+        return { ok: false, reason: "invalid_status", status: currentAgent.status } as const;
       }
 
+      return { ok: true, agent: currentAgent } as const;
+    });
+
+    if (!validation.ok) {
+      return validation;
+    }
+
+    const runnerRestart = await runnerAdapter.restart(normalizedAgentId);
+
+    if (!runnerRestart.ok) {
+      return { ok: false, reason: "runner_restart_failed" } as const;
+    }
+
+    return await connection.db.transaction(async (tx) => {
       const [restartedAgent] = await tx
         .update(agents)
         .set({
-          status: "restarting",
-          statusReason: RESTARTING_STATUS_REASON,
+          status: "running",
+          statusReason: RUNNING_STATUS_REASON,
           updatedAt: now,
         })
         .where(
@@ -454,19 +561,34 @@ export async function restartAgentForDevelopmentUser(
         .returning();
 
       if (!restartedAgent) {
+        await runnerAdapter.stop(normalizedAgentId);
         throw new Error("Agent restart update returned no rows.");
       }
 
-      await recordAgentEventInTransaction(tx, {
-        agentId: restartedAgent.id,
-        actorUserId: restartedAgent.userId,
-        type: RESTART_REQUESTED_EVENT_TYPE,
-        message: `Restart requested for agent "${restartedAgent.name}".`,
-        metadata: {
-          fromStatus: currentAgent.status,
-          toStatus: "restarting",
+      await recordAgentEventsInTransaction(tx, [
+        {
+          agentId: restartedAgent.id,
+          actorUserId: restartedAgent.userId,
+          type: RESTART_REQUESTED_EVENT_TYPE,
+          message: `Restart requested for agent "${restartedAgent.name}".`,
+          metadata: {
+            fromStatus: validation.agent.status,
+            toStatus: "running",
+            localRunnerProcessId: runnerRestart.process.id,
+          },
         },
-      });
+        {
+          agentId: restartedAgent.id,
+          actorUserId: restartedAgent.userId,
+          type: RESTART_COMPLETED_EVENT_TYPE,
+          message: `Restart completed for agent "${restartedAgent.name}".`,
+          metadata: {
+            fromStatus: validation.agent.status,
+            toStatus: "running",
+            localRunnerProcessId: runnerRestart.process.id,
+          },
+        },
+      ]);
 
       return {
         ok: true,
@@ -474,6 +596,14 @@ export async function restartAgentForDevelopmentUser(
         event: {
           type: RESTART_REQUESTED_EVENT_TYPE,
         },
+        events: [
+          {
+            type: RESTART_REQUESTED_EVENT_TYPE,
+          },
+          {
+            type: RESTART_COMPLETED_EVENT_TYPE,
+          },
+        ],
       };
     });
   } catch {
@@ -568,6 +698,73 @@ export async function simulateErrorAgentForDevelopmentUser(
   }
 }
 
+export async function recordUnexpectedLocalRunnerExitForDevelopmentUser(
+  event: LocalRunnerUnexpectedExitEvent,
+  dependencies: Pick<AgentLifecycleDependencies, "createConnection" | "now"> = {},
+): Promise<boolean> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
+
+  try {
+    return await connection.db.transaction(async (tx) => {
+      const [currentAgent] = await tx
+        .select()
+        .from(agents)
+        .where(and(eq(agents.id, event.agentId), isNull(agents.deletedAt)))
+        .limit(1);
+
+      if (!currentAgent || !["starting", "running", "restarting"].includes(currentAgent.status)) {
+        return false;
+      }
+
+      const [erroredAgent] = await tx
+        .update(agents)
+        .set({
+          status: "error",
+          statusReason: LOCAL_RUNNER_UNEXPECTED_EXIT_STATUS_REASON,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(agents.id, event.agentId),
+            isNull(agents.deletedAt),
+            inArray(agents.status, ["starting", "running", "restarting"]),
+          ),
+        )
+        .returning();
+
+      if (!erroredAgent) {
+        return false;
+      }
+
+      await recordAgentEventInTransaction(tx, {
+        agentId: erroredAgent.id,
+        actorUserId: erroredAgent.userId,
+        type: SIMULATED_ERROR_EVENT_TYPE,
+        message: `Local runner exited unexpectedly for agent "${erroredAgent.name}".`,
+        metadata: {
+          fromStatus: currentAgent.status,
+          toStatus: "error",
+          source: "local_runner",
+          localRunnerProcessId: event.process.id,
+          localRunnerProcessStatus: event.process.status,
+          exitCode: event.exitCode,
+          signal: event.signal,
+        },
+      });
+
+      return true;
+    });
+  } catch {
+    throw new AgentLifecyclePersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
 export async function deleteAgentForDevelopmentUser(
   agentId: string,
   dependencies: AgentLifecycleDependencies = {},
@@ -585,12 +782,9 @@ export async function deleteAgentForDevelopmentUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
-  const dueBefore = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS);
 
   try {
     return await connection.db.transaction(async (tx) => {
-      await settleDueFakeRunnerTransitionsInTransaction(tx, now, dueBefore);
-
       const [currentAgent] = await tx
         .select()
         .from(agents)
@@ -660,99 +854,9 @@ export async function settleDueStartingAgents(
 }
 
 export async function settleDueFakeRunnerTransitions(
-  dependencies: AgentLifecycleDependencies = {},
+  _dependencies: AgentLifecycleDependencies = {},
 ): Promise<number> {
-  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
-  const ownsConnection = !dependencies.createConnection;
-  const now = dependencies.now?.() ?? new Date();
-  const dueBefore = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS);
-
-  try {
-    return await connection.db.transaction(async (tx) =>
-      settleDueFakeRunnerTransitionsInTransaction(tx, now, dueBefore),
-    );
-  } catch {
-    throw new AgentLifecyclePersistenceError();
-  } finally {
-    if (ownsConnection) {
-      await connection.close();
-    }
-  }
-}
-
-async function settleDueFakeRunnerTransitionsInTransaction(
-  tx: AgentTransaction,
-  now: Date,
-  dueBefore: Date,
-): Promise<number> {
-  const settledStartingAgents = await settleDueStatusInTransaction({
-    tx,
-    now,
-    dueBefore,
-    fromStatus: "starting",
-    eventType: START_COMPLETED_EVENT_TYPE,
-    messageAction: "Start",
-  });
-  const settledRestartingAgents = await settleDueStatusInTransaction({
-    tx,
-    now,
-    dueBefore,
-    fromStatus: "restarting",
-    eventType: RESTART_COMPLETED_EVENT_TYPE,
-    messageAction: "Restart",
-  });
-
-  return settledStartingAgents + settledRestartingAgents;
-}
-
-async function settleDueStatusInTransaction(input: {
-  tx: AgentTransaction;
-  now: Date;
-  dueBefore: Date;
-  fromStatus: "starting" | "restarting";
-  eventType: typeof START_COMPLETED_EVENT_TYPE | typeof RESTART_COMPLETED_EVENT_TYPE;
-  messageAction: "Start" | "Restart";
-}): Promise<number> {
-  const { tx, now, dueBefore, fromStatus, eventType, messageAction } = input;
-  const settledAgents = await tx
-    .update(agents)
-    .set({
-      status: "running",
-      statusReason: RUNNING_STATUS_REASON,
-      updatedAt: now,
-    })
-    .where(
-      and(
-        eq(agents.status, fromStatus),
-        isNull(agents.deletedAt),
-        lte(agents.updatedAt, dueBefore),
-      ),
-    )
-    .returning({
-      id: agents.id,
-      userId: agents.userId,
-      name: agents.name,
-    });
-
-  if (settledAgents.length === 0) {
-    return 0;
-  }
-
-  await recordAgentEventsInTransaction(
-    tx,
-    settledAgents.map((agent) => ({
-      agentId: agent.id,
-      actorUserId: agent.userId,
-      type: eventType,
-      message: `${messageAction} completed for agent "${agent.name}".`,
-      metadata: {
-        fromStatus,
-        toStatus: "running",
-      },
-    })),
-  );
-
-  return settledAgents.length;
+  return 0;
 }
 
 function toStartedAgent(agent: typeof agents.$inferSelect): StartedAgent {
@@ -761,8 +865,8 @@ function toStartedAgent(agent: typeof agents.$inferSelect): StartedAgent {
     userId: agent.userId,
     name: agent.name,
     templateKey: agent.templateKey,
-    status: "starting",
-    statusReason: STARTING_STATUS_REASON,
+    status: "running",
+    statusReason: RUNNING_STATUS_REASON,
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
     deletedAt: null,
@@ -789,8 +893,8 @@ function toRestartedAgent(agent: typeof agents.$inferSelect): RestartedAgent {
     userId: agent.userId,
     name: agent.name,
     templateKey: agent.templateKey,
-    status: "restarting",
-    statusReason: RESTARTING_STATUS_REASON,
+    status: "running",
+    statusReason: RUNNING_STATUS_REASON,
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
     deletedAt: null,

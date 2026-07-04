@@ -51,6 +51,20 @@ export async function POST(_request: Request, context: StopAgentRouteContext) {
       );
     }
 
+    if (result.reason === "runner_stop_failed") {
+      return Response.json(
+        {
+          error: {
+            code: "agent_stop_failed",
+            message: "Agent could not be stopped.",
+          },
+        },
+        {
+          status: 500,
+        },
+      );
+    }
+
     return Response.json(
       {
         error: {
