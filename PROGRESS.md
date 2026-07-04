@@ -1,5 +1,44 @@
 # Progress
 
+## Milestone 4 Running Agent Runtime Logs
+
+- Status: complete
+- Issues: #46
+- Branch: `codex/issue-46-running-logs`
+
+### Completion Evidence
+
+- [x] #46 keeps runtime log generation pull-driven from `GET /api/agents/:agentId/logs`; no background worker, timer loop, queue, scheduler, SSE, websocket, runner service, lifecycle direct log writes, or event-feed writes were added.
+- [x] #46 generates the deterministic four-line simulator cycle only for active running fake agents: `Checking task queue...`, `No pending tasks.`, `Heartbeat OK.`, `Memory loaded.`
+- [x] #46 settles due fake `starting` and `restarting` transitions through the existing active-agent read path before generation, then uses the persisted `agents.updated_at` running segment boundary.
+- [x] #46 keeps repeated reads at the same logical time idempotent and adds the next cycle only after the fixed simulator interval while the agent remains in the same running segment.
+- [x] #46 allocates per-agent monotonic sequences inside a generation transaction after locking the active running agent row; the existing unique `(agent_id, sequence)` index remains the collision backstop.
+- [x] #46 does not generate for stopped, idle, pending transition, error, deleting, missing, or soft-deleted agents; existing readable rows for active stopped/error agents remain listable.
+- [x] #46 preserves #45 `simulate-error` as audit-only: it writes `agent.error` but no runtime logs, and reads stop generating after an agent enters `error`.
+- [x] #46 uses safe static generated content only with `runner_id = null` and no secrets, environment values, database URLs, stacks, provider credentials, or real process output.
+
+### Validation
+
+- Date: 2026-07-04
+- Environment:
+  - Isolated database: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54346/agentbay`.
+  - Isolated app/test server: `PORT=3020`, `PLAYWRIGHT_BASE_URL=http://localhost:3020`, `NEXT_PUBLIC_APP_URL=http://localhost:3020`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree had no local `node_modules`.
+  - `docker compose -p agentbay_issue_46 -f compose.yaml -f /tmp/agentbay-issue-46-compose.override.yaml up -d --force-recreate postgres`: pass; started `agentbay_issue_46-postgres-1` on host port `54346`.
+  - `bun run db:generate`: not run; #46 made no schema or migration changes.
+- Required gates:
+  - `bun run db:migrate`: pass; migrations applied successfully against the isolated database.
+  - `bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+  - `bun run test -- tests/unit/create-agent-db.test.ts tests/unit/agent-logs-route.test.ts`: pass after timestamp-normalization fix; 2 files and 58 tests passed.
+  - `bun run format:check`: pass; Biome checked 63 files.
+  - `bun run lint`: pass; Biome checked 63 files.
+  - `bun run typecheck`: pass.
+  - `bun run test`: pass; 16 files and 118 tests passed.
+  - `bun run build`: pass; Next.js build completed and included `/api/agents/:agentId/logs`.
+  - `bun run test:e2e`: pass; 18 passed and 2 expected project skips.
+  - `bun run verify`: pass; aggregate format, lint, typecheck, test, build, and E2E gates passed with 18 E2E passed and 2 expected project skips.
+
 ## Milestone 4 Development Error Simulator
 
 - Status: in progress

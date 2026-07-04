@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => {
     AgentDetailPersistenceError,
     close: vi.fn(),
     createDatabaseConnection: vi.fn(),
+    generateSimulatedRuntimeLogsForRunningAgent: vi.fn(),
     getActiveAgentForDevelopmentUser: vi.fn(),
     listAgentLogs: vi.fn(),
   };
@@ -29,6 +30,7 @@ vi.mock("@/src/server/agents/list-agents", () => ({
 }));
 
 vi.mock("@/src/server/logs/agent-logs", () => ({
+  generateSimulatedRuntimeLogsForRunningAgent: mocks.generateSimulatedRuntimeLogsForRunningAgent,
   listAgentLogs: mocks.listAgentLogs,
 }));
 
@@ -36,6 +38,7 @@ describe("GET /api/agents/[agentId]/logs route", () => {
   afterEach(() => {
     mocks.close.mockReset();
     mocks.createDatabaseConnection.mockReset();
+    mocks.generateSimulatedRuntimeLogsForRunningAgent.mockReset();
     mocks.getActiveAgentForDevelopmentUser.mockReset();
     mocks.listAgentLogs.mockReset();
   });
@@ -45,6 +48,7 @@ describe("GET /api/agents/[agentId]/logs route", () => {
     mocks.getActiveAgentForDevelopmentUser.mockResolvedValue({
       id: ACTIVE_AGENT_ID,
     });
+    mocks.generateSimulatedRuntimeLogsForRunningAgent.mockResolvedValue({ inserted: 4 });
     mocks.listAgentLogs.mockResolvedValue({
       logs: [logDto(1), logDto(2)],
       nextAfter: 2,
@@ -67,12 +71,22 @@ describe("GET /api/agents/[agentId]/logs route", () => {
     expect(mocks.getActiveAgentForDevelopmentUser).toHaveBeenCalledWith(ACTIVE_AGENT_ID, {
       createConnection: expect.any(Function),
     });
+    expect(mocks.generateSimulatedRuntimeLogsForRunningAgent).toHaveBeenCalledWith({
+      db: "db",
+      agentId: ACTIVE_AGENT_ID,
+    });
     expect(mocks.listAgentLogs).toHaveBeenCalledWith({
       db: "db",
       agentId: ACTIVE_AGENT_ID,
       after: 0,
       limit: 100,
     });
+    expect(firstInvocationOrder(mocks.getActiveAgentForDevelopmentUser)).toBeLessThan(
+      firstInvocationOrder(mocks.generateSimulatedRuntimeLogsForRunningAgent),
+    );
+    expect(firstInvocationOrder(mocks.generateSimulatedRuntimeLogsForRunningAgent)).toBeLessThan(
+      firstInvocationOrder(mocks.listAgentLogs),
+    );
     expect(JSON.stringify(body)).not.toContain("agent_id");
     expect(mocks.close).toHaveBeenCalledOnce();
   });
@@ -198,6 +212,34 @@ describe("GET /api/agents/[agentId]/logs route", () => {
       },
     });
     expect(mocks.listAgentLogs).not.toHaveBeenCalled();
+    expect(mocks.generateSimulatedRuntimeLogsForRunningAgent).not.toHaveBeenCalled();
+    expect(mocks.close).toHaveBeenCalledOnce();
+  });
+
+  it("returns safe JSON when simulated generation fails before listing logs", async () => {
+    mocks.createDatabaseConnection.mockReturnValue({ db: "db", close: mocks.close });
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValue({
+      id: ACTIVE_AGENT_ID,
+    });
+    mocks.generateSimulatedRuntimeLogsForRunningAgent.mockRejectedValue(
+      new Error("postgres://user:pass@localhost/db"),
+    );
+    const { GET } = await import("@/app/api/agents/[agentId]/logs/route");
+
+    const response = await GET(new Request("http://localhost/api/agents/id/logs"), {
+      params: Promise.resolve({ agentId: ACTIVE_AGENT_ID }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body).toEqual({
+      error: {
+        code: "agent_logs_failed",
+        message: "Agent logs could not be loaded.",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("postgres://");
+    expect(mocks.listAgentLogs).not.toHaveBeenCalled();
     expect(mocks.close).toHaveBeenCalledOnce();
   });
 
@@ -206,6 +248,7 @@ describe("GET /api/agents/[agentId]/logs route", () => {
     mocks.getActiveAgentForDevelopmentUser.mockResolvedValue({
       id: ACTIVE_AGENT_ID,
     });
+    mocks.generateSimulatedRuntimeLogsForRunningAgent.mockResolvedValue({ inserted: 0 });
     mocks.listAgentLogs.mockRejectedValue(new Error("postgres://user:pass@localhost/db"));
     const { GET } = await import("@/app/api/agents/[agentId]/logs/route");
 
@@ -237,4 +280,14 @@ function logDto(sequence: number) {
     sequence,
     createdAt: "2026-07-04T06:00:00.000Z",
   };
+}
+
+function firstInvocationOrder(mock: { mock: { invocationCallOrder: number[] } }): number {
+  const [order] = mock.mock.invocationCallOrder;
+
+  if (order === undefined) {
+    throw new Error("Expected mock to have been called.");
+  }
+
+  return order;
 }

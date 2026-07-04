@@ -58,9 +58,10 @@ The migration set creates the local application metadata table plus the persiste
 - `users`: local development user records used until production auth exists.
 - `agents`: persistent agent identity, template, lifecycle status, timestamps, and soft-delete marker.
 - `agent_events`: transactional audit events for agent creation, fake lifecycle transitions, dashboard activity, and per-agent activity.
+- `agent_logs`: runtime log rows with nullable runner identity, static stream/level/message fields, and per-agent positive sequence values.
 - `agent_status`: Postgres enum used by `agents.status`.
 
-The migrations do not create log, approval, runner, billing, auth, Hermes, Telegram, secrets, provisioning, or provider integration tables.
+The migrations do not create approval, runner, billing, auth, Hermes, Telegram, secrets, provisioning, or provider integration tables.
 
 ## Development Server
 
@@ -97,7 +98,7 @@ The `/agents` page contains the current create/list and fake lifecycle workflow:
 
 The dashboard reads active persisted agents from the database. The detail page loads active persisted agent records by ID and returns not found for missing, malformed, or soft-deleted IDs. Delete preserves the `agents` row and existing `agent_events`, but removes the agent from `/agents`, `/dashboard`, and active detail reads.
 
-Milestone 3 records are local-development records only. Lifecycle controls use deterministic database state, not real runner processes. Runtime logs, approvals, config editing, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
+Milestone 3 records are local-development records only. Lifecycle controls use deterministic database state, not real runner processes. Runtime log UI, approvals, config editing, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
 
 ## Create Agent API
 
@@ -159,6 +160,29 @@ Current audit event inventory:
 - `agent.deleted`
 
 Future milestones may add config, approval, runner, backup, restore, billing, and Hermes-related audit event types. Those future audit events should continue to describe control-plane facts, while high-volume runtime output remains separate log data.
+
+## Runtime Logs
+
+`GET /api/agents/:agentId/logs` returns active-agent scoped runtime logs from `agent_logs`:
+
+- `agentId` must be a valid UUID for an active, non-deleted local development agent.
+- Missing or soft-deleted agents return 404 JSON.
+- `limit` is optional, must be a positive integer, and is capped at 100.
+- `after` is optional and must be a non-negative integer sequence cursor from a previous page.
+- Responses are oldest first by per-agent `sequence`.
+- Successful responses have `{ "logs": [...], "nextAfter": number | null }`.
+- Malformed IDs, repeated `after` or `limit` parameters, invalid limits, and persistence failures return safe JSON without database URLs, SQL errors, stack traces, credentials, or driver messages.
+
+Log reads are pull-driven for the local fake runner. When the selected active agent has already settled to `running`, the read transactionally generates one deterministic four-line cycle before listing logs:
+
+1. `Checking task queue...`
+2. `No pending tasks.`
+3. `Heartbeat OK.`
+4. `Memory loaded.`
+
+The first eligible read in a running segment creates the cycle immediately. Repeated reads at the same logical time are idempotent, and later reads create the next cycle only after the fixed simulator interval elapses while the agent remains in the same running segment. The running segment is based on the persisted `agents.updated_at` value after `starting` or `restarting` settles to `running`, so a later restart can generate a new cycle without being blocked by prior segment logs.
+
+Generated rows use `runner_id = null`, safe static `stdout`/`info` content only, and per-agent monotonic `sequence` values. Runtime log generation does not write `agent_events`; lifecycle actions, including `simulate-error`, do not directly write runtime logs. Stopped, idle, pending transition, error, deleting, missing, and soft-deleted agents do not receive newly generated log rows, though active stopped or error agents can still return existing readable rows.
 
 ## Quality Gates
 
@@ -248,6 +272,6 @@ Milestone 3 is complete when:
 - The detail page shows per-agent activity with event time, type, message, actor, metadata summary, empty state, error state, and pagination.
 - Browser coverage proves create and lifecycle activity appears in both the dashboard latest activity feed and the agent detail activity feed.
 - Soft delete removes agents from `/agents`, `/dashboard`, and active detail reads while preserving the database row and prior events.
-- Runtime logs, approvals, config editing, runner APIs, real runner/provisioning behavior, Hermes, Telegram, billing, production auth, secret storage, backups, restore, and cloud provisioning remain out of scope.
+- Runtime log UI, approvals, config editing, runner APIs, real runner/provisioning behavior, Hermes, Telegram, billing, production auth, secret storage, backups, restore, and cloud provisioning remain out of scope.
 - `.env.example` documents every required local/deploy variable without secrets.
 - `bun run format:check`, `bun run lint`, `bun run typecheck`, `bun run test`, `bun run db:migrate`, `bun run db:health`, `bun run build`, `bun run test:e2e`, and `bun run verify` pass against a migrated local database.
