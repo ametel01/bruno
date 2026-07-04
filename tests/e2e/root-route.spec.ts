@@ -114,25 +114,33 @@ test("/dashboard shows latest persisted process logs scoped to active agents", a
   expect(logsResponse.status()).toBe(200);
   const logsBody = (await logsResponse.json()) as {
     logs: Array<{
-      agentId: string;
+      source: string;
       stream: string;
       message: string;
       sequence: number;
+      id?: string;
+      agentId?: string;
       runnerId?: string;
       localRunnerProcessId?: string;
+      dockerRunnerContainerId?: string;
+      metadata?: Record<string, unknown>;
     }>;
     nextAfter: number | null;
   };
-  expect(logsBody.logs.map((log) => [log.sequence, log.stream, log.message])).toEqual([
-    [1, "stdout", "primary stdout line"],
-    [2, "stderr", "Sensitive details omitted."],
-    [3, "stdout", "simulator row should not render"],
-    [4, "stderr", "Error: failed [redacted database URL]"],
+  expect(logsBody.logs.map((log) => [log.sequence, log.source, log.stream, log.message])).toEqual([
+    [1, "local_runner", "stdout", "primary stdout line"],
+    [2, "local_runner", "stderr", "Sensitive details omitted."],
+    [3, "simulator", "stdout", "simulator row should not render"],
+    [4, "local_runner", "stderr", "Error: failed [redacted database URL]"],
   ]);
-  expect(logsBody.logs.every((log) => log.agentId === primaryAgent.id)).toBe(true);
   expect(logsBody.nextAfter).toBe(4);
+  expect(JSON.stringify(logsBody)).not.toContain('"id"');
+  expect(JSON.stringify(logsBody)).not.toContain("agentId");
+  expect(JSON.stringify(logsBody)).not.toContain(primaryAgent.id);
   expect(JSON.stringify(logsBody)).not.toContain("runnerId");
   expect(JSON.stringify(logsBody)).not.toContain("localRunnerProcessId");
+  expect(JSON.stringify(logsBody)).not.toContain("dockerRunnerContainerId");
+  expect(JSON.stringify(logsBody)).not.toContain("metadata");
   expect(JSON.stringify(logsBody)).not.toContain("stored-for-downstream");
   expect(JSON.stringify(logsBody)).not.toContain("postgres://");
   expect(JSON.stringify(logsBody)).not.toContain("/app/worker.ts");
@@ -1617,6 +1625,7 @@ async function insertProcessRuntimeLogs(
           agent_id,
           runner_id,
           local_runner_process_id,
+          source,
           stream,
           level,
           message,
@@ -1627,6 +1636,7 @@ async function insertProcessRuntimeLogs(
           ${agentId},
           ${processId},
           ${processId},
+          'local_runner',
           ${log.stream},
           ${log.level},
           ${log.message},

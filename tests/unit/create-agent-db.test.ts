@@ -55,6 +55,7 @@ import {
   agentLogs,
   agents,
   appMetadata,
+  dockerRunnerContainers,
   localRunnerProcesses,
   users,
 } from "@/src/server/db/schema";
@@ -75,6 +76,13 @@ import {
   listLatestActiveAgentProcessLogs,
   mapAgentLogToDto,
 } from "@/src/server/logs/agent-logs";
+import {
+  appendDockerRunnerLogLines,
+  DOCKER_RUNNER_LOG_SOURCE,
+  DOCKER_RUNNER_METADATA_REDACTION,
+  listDockerRunnerContainerLogs,
+  recordDockerRunnerContainerForDevelopmentUser,
+} from "@/src/server/runners/docker-runner-state";
 import {
   appendLocalRunnerLogLines,
   createLocalRunnerProcessForDevelopmentUser,
@@ -4465,6 +4473,202 @@ describe("create agent persistence", () => {
     expect(persistedEvents.every((event) => event.type === "agent.created")).toBe(true);
   });
 
+  it("records Docker runtime metadata for active agents without exposing another container's logs", async () => {
+    const agentA = await createAgentForDevelopmentUser(
+      { name: "Docker Log Agent A", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const agentB = await createAgentForDevelopmentUser(
+      { name: "Docker Log Agent B", templateKey: "github_issue_agent" },
+      { createConnection: () => connection },
+    );
+    const observedAt = new Date("2026-07-04T07:00:00.000Z");
+    const containerA = await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: agentA.agent.id,
+      containerId: "sha256:docker-agent-a-container",
+      containerName: "agentbay-agent-a",
+      image: "agentbay/runner:issue-77",
+      observedStatus: "running",
+      metadata: {
+        labels: {
+          "agentbay.agent_id": agentA.agent.id,
+          safe: "visible-safe-metadata",
+        },
+        config: "DATABASE_URL=postgres://agentbay:secret@127.0.0.1/agentbay --token=raw-token",
+      },
+      observedAt,
+      startedAt: new Date("2026-07-04T06:59:59.000Z"),
+    });
+    const containerB = await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: agentB.agent.id,
+      containerId: "sha256:docker-agent-b-container",
+      containerName: "agentbay-agent-b",
+      image: "agentbay/runner:issue-77",
+      observedStatus: "running",
+      metadata: { labels: { "agentbay.agent_id": agentB.agent.id } },
+      observedAt,
+    });
+    const mismatchedContainer = await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: agentA.agent.id,
+      containerId: "sha256:docker-agent-b-container",
+      containerName: "agentbay-agent-b",
+      image: "agentbay/runner:issue-77",
+      observedStatus: "running",
+      observedAt,
+    });
+
+    await connection.db
+      .insert(agentLogs)
+      .values(logValue(agentA.agent.id, 4, "stdout", "info", "prior simulator output"));
+    const appendedA = await appendDockerRunnerLogLines({
+      db: connection.db,
+      containerId: "sha256:docker-agent-a-container",
+      lines: [
+        {
+          stream: "stdout",
+          message: "docker stdout line",
+          metadata: { frame: "stdout", env: "API_TOKEN=raw-token-value" },
+          createdAt: new Date("2026-07-04T07:00:01.000Z"),
+        },
+        {
+          stream: "stderr",
+          message: "docker stderr line",
+          metadata: { frame: "stderr" },
+          createdAt: new Date("2026-07-04T07:00:02.000Z"),
+        },
+      ],
+    });
+    await appendDockerRunnerLogLines({
+      db: connection.db,
+      containerId: "sha256:docker-agent-b-container",
+      lines: [{ stream: "stdout", message: "other docker output" }],
+      now: new Date("2026-07-04T07:00:03.000Z"),
+    });
+
+    const agentAPage = await listAgentLogs({ db: connection.db, agentId: agentA.agent.id });
+    const agentBPage = await listAgentLogs({ db: connection.db, agentId: agentB.agent.id });
+    const crossContainerLogs = await listDockerRunnerContainerLogs({
+      db: connection.db,
+      agentId: agentA.agent.id,
+      containerId: "sha256:docker-agent-b-container",
+    });
+    const ownContainerLogs = await listDockerRunnerContainerLogs({
+      db: connection.db,
+      agentId: agentA.agent.id,
+      containerId: "sha256:docker-agent-a-container",
+    });
+    const persistedContainers = await connection.db
+      .select()
+      .from(dockerRunnerContainers)
+      .orderBy(dockerRunnerContainers.containerName);
+    const persistedEvents = await connection.db.select().from(agentEvents);
+    const serializedContainers = JSON.stringify(persistedContainers);
+    const serializedLogs = JSON.stringify(appendedA.logs);
+
+    expect(containerA).toMatchObject({
+      agentId: agentA.agent.id,
+      containerId: "sha256:docker-agent-a-container",
+      containerName: "agentbay-agent-a",
+      image: "agentbay/runner:issue-77",
+      observedStatus: "running",
+      observedAt: "2026-07-04T07:00:00.000Z",
+      startedAt: "2026-07-04T06:59:59.000Z",
+      finishedAt: null,
+    });
+    expect(containerA?.metadata).toMatchObject({
+      labels: {
+        "agentbay.agent_id": agentA.agent.id,
+        safe: "visible-safe-metadata",
+      },
+      config: `DATABASE_URL=${DOCKER_RUNNER_METADATA_REDACTION} --token=${DOCKER_RUNNER_METADATA_REDACTION}`,
+    });
+    expect(containerB).toMatchObject({
+      agentId: agentB.agent.id,
+      containerId: "sha256:docker-agent-b-container",
+    });
+    expect(mismatchedContainer).toBeNull();
+    expect(
+      appendedA.logs.map((log) => [log.sequence, log.source, log.stream, log.message]),
+    ).toEqual([
+      [5, DOCKER_RUNNER_LOG_SOURCE, "stdout", "docker stdout line"],
+      [6, DOCKER_RUNNER_LOG_SOURCE, "stderr", "docker stderr line"],
+    ]);
+    expect(appendedA.logs.every((log) => log.dockerRunnerContainerId === containerA?.id)).toBe(
+      true,
+    );
+    expect(appendedA.logs.every((log) => log.localRunnerProcessId === null)).toBe(true);
+    expect(agentAPage.logs.map((log) => [log.sequence, log.source, log.message])).toEqual([
+      [4, "simulator", "prior simulator output"],
+      [5, DOCKER_RUNNER_LOG_SOURCE, "docker stdout line"],
+      [6, DOCKER_RUNNER_LOG_SOURCE, "docker stderr line"],
+    ]);
+    expect(agentBPage.logs.map((log) => [log.sequence, log.source, log.message])).toEqual([
+      [1, DOCKER_RUNNER_LOG_SOURCE, "other docker output"],
+    ]);
+    expect(crossContainerLogs).toEqual([]);
+    expect(JSON.stringify(crossContainerLogs)).not.toContain("other docker output");
+    expect(ownContainerLogs.map((log) => [log.agentId, log.message])).toEqual([
+      [agentA.agent.id, "docker stdout line"],
+      [agentA.agent.id, "docker stderr line"],
+    ]);
+    expect(persistedContainers).toHaveLength(2);
+    expect(persistedEvents.every((event) => event.type === "agent.created")).toBe(true);
+    expect(serializedContainers).not.toContain("postgres://");
+    expect(serializedContainers).not.toContain("raw-token");
+    expect(serializedLogs).not.toContain("raw-token-value");
+  });
+
+  it("does not append Docker logs after the owning agent is soft-deleted", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Deleted Docker Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      containerId: "sha256:deleted-agent-container",
+      containerName: "agentbay-deleted-agent",
+      image: "agentbay/runner:issue-77",
+      observedStatus: "running",
+      observedAt: new Date("2026-07-04T07:10:00.000Z"),
+    });
+    await deleteAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+    });
+
+    const appended = await appendDockerRunnerLogLines({
+      db: connection.db,
+      containerId: "sha256:deleted-agent-container",
+      lines: [
+        {
+          stream: "stdout",
+          message: "should-not-write-for-deleted-agent",
+        },
+      ],
+      now: new Date("2026-07-04T07:10:01.000Z"),
+    });
+    const persistedForbiddenLogs = await connection.db
+      .select()
+      .from(agentLogs)
+      .where(eq(agentLogs.message, "should-not-write-for-deleted-agent"));
+    const deletedAgentPage = await listAgentLogs({
+      db: connection.db,
+      agentId: created.agent.id,
+    });
+
+    expect(appended).toEqual({
+      inserted: 0,
+      logs: [],
+    });
+    expect(persistedForbiddenLogs).toEqual([]);
+    expect(deletedAgentPage.logs.map((log) => log.message)).not.toContain(
+      "should-not-write-for-deleted-agent",
+    );
+  });
+
   it("lists latest active-agent process logs without mixing deleted agents or simulator rows", async () => {
     const agentA = await createAgentForDevelopmentUser(
       { name: "Dashboard Process Agent A", templateKey: "research_agent" },
@@ -5080,9 +5284,12 @@ describe("create agent persistence", () => {
         agentId: "00000000-0000-4000-8000-000000000201",
         runnerId: null,
         localRunnerProcessId: null,
+        dockerRunnerContainerId: null,
+        source: "simulator",
         stream: "stdout",
         level: "info",
         message: "Agent booted.",
+        metadata: {},
         sequence: 1,
         createdAt: new Date("2026-07-04T06:00:00.000Z"),
       }),
@@ -5091,9 +5298,12 @@ describe("create agent persistence", () => {
       agentId: "00000000-0000-4000-8000-000000000201",
       runnerId: null,
       localRunnerProcessId: null,
+      dockerRunnerContainerId: null,
+      source: "simulator",
       stream: "stdout",
       level: "info",
       message: "Agent booted.",
+      metadata: {},
       sequence: 1,
       createdAt: "2026-07-04T06:00:00.000Z",
     });
@@ -5821,7 +6031,7 @@ describe("create agent persistence", () => {
 });
 
 async function resetCreateAgentTables(connection: DatabaseConnection): Promise<void> {
-  await connection.client`truncate table agent_approvals, agent_configs, agent_logs, local_runner_processes, agent_events, agents, app_metadata, users restart identity cascade`;
+  await connection.client`truncate table agent_approvals, agent_configs, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, app_metadata, users restart identity cascade`;
 }
 
 async function createTestApproval(
@@ -5850,6 +6060,7 @@ async function expectTableCount(
     | "agents"
     | "agent_configs"
     | "agent_events"
+    | "docker_runner_containers"
     | "local_runner_processes"
     | "app_metadata",
   expected: number,
@@ -5865,6 +6076,7 @@ async function countRows(
     | "agent_configs"
     | "agent_events"
     | "agent_logs"
+    | "docker_runner_containers"
     | "local_runner_processes"
     | "app_metadata",
 ): Promise<number> {

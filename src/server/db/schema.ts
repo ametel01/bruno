@@ -137,6 +137,41 @@ export const localRunnerProcesses = pgTable(
   ],
 );
 
+export const dockerRunnerContainers = pgTable(
+  "docker_runner_containers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agents.id),
+    containerId: text("container_id").notNull(),
+    containerName: text("container_name").notNull(),
+    image: text("image").notNull(),
+    observedStatus: text("observed_status").notNull(),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "docker_runner_containers_observed_status_not_empty_check",
+      sql`length(trim(${table.observedStatus})) > 0`,
+    ),
+    check(
+      "docker_runner_containers_started_finished_order_check",
+      sql`${table.finishedAt} IS NULL OR ${table.startedAt} IS NULL OR ${table.finishedAt} >= ${table.startedAt}`,
+    ),
+    index("docker_runner_containers_agent_observed_idx").on(table.agentId, table.observedAt),
+    uniqueIndex("docker_runner_containers_container_id_idx").on(table.containerId),
+  ],
+);
+
 export const agentLogs = pgTable(
   "agent_logs",
   {
@@ -146,9 +181,17 @@ export const agentLogs = pgTable(
       .references(() => agents.id),
     runnerId: uuid("runner_id"),
     localRunnerProcessId: uuid("local_runner_process_id").references(() => localRunnerProcesses.id),
+    dockerRunnerContainerId: uuid("docker_runner_container_id").references(
+      () => dockerRunnerContainers.id,
+    ),
+    source: text("source").notNull().default("simulator"),
     stream: text("stream").notNull(),
     level: text("level").notNull(),
     message: text("message").notNull(),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     sequence: integer("sequence").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

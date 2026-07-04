@@ -43,6 +43,13 @@
       "when": 1783171300696,
       "tag": "0005_local_runner_state",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783176949222,
+      "tag": "0006_docker_runner_metadata",
+      "breakpoints": true
     }
   ]
 }

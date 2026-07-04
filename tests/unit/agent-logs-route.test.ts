@@ -88,8 +88,14 @@ describe("GET /api/agents/[agentId]/logs route", () => {
       firstInvocationOrder(mocks.listAgentLogs),
     );
     expect(JSON.stringify(body)).not.toContain("agent_id");
+    expect(JSON.stringify(body)).not.toContain("agentId");
+    expect(JSON.stringify(body)).not.toContain(ACTIVE_AGENT_ID);
+    expect(JSON.stringify(body)).not.toContain("00000000-0000-4000-8000-000000000301");
+    expect(JSON.stringify(body)).not.toContain("00000000-0000-4000-8000-000000000302");
     expect(JSON.stringify(body)).not.toContain("runnerId");
     expect(JSON.stringify(body)).not.toContain("localRunnerProcessId");
+    expect(JSON.stringify(body)).not.toContain("dockerRunnerContainerId");
+    expect(JSON.stringify(body)).not.toContain("metadata");
     expect(JSON.stringify(body)).not.toContain("00000000-0000-4000-8000-00000000090");
     expect(mocks.close).toHaveBeenCalledOnce();
   });
@@ -141,14 +147,18 @@ describe("GET /api/agents/[agentId]/logs route", () => {
       ],
       nextAfter: 3,
     });
-    expect(body.logs.map((log: { agentId: string }) => log.agentId)).toEqual([
-      ACTIVE_AGENT_ID,
-      ACTIVE_AGENT_ID,
-      ACTIVE_AGENT_ID,
-    ]);
+    expect(JSON.stringify(body)).not.toContain("agentId");
+    expect(JSON.stringify(body)).not.toContain(ACTIVE_AGENT_ID);
+    expect(JSON.stringify(body)).not.toContain("00000000-0000-4000-8000-000000000301");
+    expect(JSON.stringify(body)).not.toContain("00000000-0000-4000-8000-000000000302");
+    expect(JSON.stringify(body)).not.toContain("00000000-0000-4000-8000-000000000303");
     expect(JSON.stringify(body)).not.toContain("runnerId");
     expect(JSON.stringify(body)).not.toContain("localRunnerProcessId");
+    expect(JSON.stringify(body)).not.toContain("dockerRunnerContainerId");
+    expect(JSON.stringify(body)).not.toContain("metadata");
     expect(JSON.stringify(body)).not.toContain("00000000-0000-4000-8000-000000000901");
+    expect(JSON.stringify(body)).not.toContain("00000000-0000-4000-8000-000000000902");
+    expect(JSON.stringify(body)).not.toContain("raw-token-metadata");
     expect(JSON.stringify(body)).not.toContain("stored-for-downstream");
     expect(JSON.stringify(body)).not.toContain("postgres://");
     expect(JSON.stringify(body)).not.toContain("/app/worker.ts");
@@ -345,9 +355,14 @@ function logDto(
     agentId: ACTIVE_AGENT_ID,
     runnerId: "00000000-0000-4000-8000-000000000901",
     localRunnerProcessId: "00000000-0000-4000-8000-000000000901",
+    dockerRunnerContainerId: "00000000-0000-4000-8000-000000000902",
+    source: "docker",
     stream: overrides.stream ?? "stdout",
     level: overrides.level ?? "info",
     message: overrides.message ?? `line ${sequence}`,
+    metadata: {
+      token: "raw-token-metadata",
+    },
     sequence,
     createdAt: "2026-07-04T06:00:00.000Z",
   };
@@ -362,8 +377,7 @@ function publicLogDto(
   }> = {},
 ) {
   return {
-    id: `00000000-0000-4000-8000-00000000030${sequence}`,
-    agentId: ACTIVE_AGENT_ID,
+    source: "docker",
     stream: overrides.stream ?? "stdout",
     level: overrides.level ?? "info",
     message: overrides.message ?? `line ${sequence}`,

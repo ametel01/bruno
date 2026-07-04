@@ -10,8 +10,8 @@ type AgentRuntimeLogPanelProps = {
 };
 
 type RuntimeLog = {
-  id: string;
   createdAt: string;
+  source: string;
   stream: string;
   level: string;
   sequence: number;
@@ -80,8 +80,8 @@ export function AgentRuntimeLogPanel({ agentId, status }: AgentRuntimeLogPanelPr
             return currentLogs;
           }
 
-          const seenLogIds = new Set(currentLogs.map((log) => log.id));
-          const newLogs = page.logs.filter((log) => !seenLogIds.has(log.id));
+          const seenLogSequences = new Set(currentLogs.map((log) => log.sequence));
+          const newLogs = page.logs.filter((log) => !seenLogSequences.has(log.sequence));
 
           return [...currentLogs, ...newLogs];
         });
@@ -149,13 +149,17 @@ export function AgentRuntimeLogPanel({ agentId, status }: AgentRuntimeLogPanelPr
       {logs.length > 0 ? (
         <ol className="runtime-log-list" aria-label="Latest runtime log summaries">
           {latestLogSummaries.map((log) => (
-            <li className="runtime-log-item" key={log.id}>
+            <li className="runtime-log-item" key={log.sequence}>
               <div className="runtime-log-header">
                 <time dateTime={log.createdAt}>{log.createdAt}</time>
                 <span>#{log.sequence}</span>
               </div>
               <p>{summarizeOperationalText(log.message, "Log details omitted.")}</p>
               <dl className="runtime-log-metadata">
+                <div>
+                  <dt>Source</dt>
+                  <dd>{log.source}</dd>
+                </div>
                 <div>
                   <dt>Stream</dt>
                   <dd>{log.stream}</dd>
@@ -195,11 +199,11 @@ function parseRuntimeLog(value: unknown): RuntimeLog {
     throw new Error("Invalid runtime log.");
   }
 
-  const { id, createdAt, stream, level, sequence, message } = value;
+  const { createdAt, source, stream, level, sequence, message } = value;
 
   if (
-    typeof id !== "string" ||
     typeof createdAt !== "string" ||
+    typeof source !== "string" ||
     typeof stream !== "string" ||
     typeof level !== "string" ||
     typeof message !== "string" ||
@@ -209,8 +213,8 @@ function parseRuntimeLog(value: unknown): RuntimeLog {
   }
 
   return {
-    id,
     createdAt,
+    source,
     stream,
     level,
     sequence,

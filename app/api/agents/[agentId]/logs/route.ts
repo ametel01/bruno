@@ -29,7 +29,10 @@ type ParsedIntegerQuery =
 
 const MAX_ROUTE_AGENT_LOG_LIMIT = 100;
 
-type PublicAgentLogDto = Omit<AgentLogDto, "runnerId" | "localRunnerProcessId">;
+type PublicAgentLogDto = Omit<
+  AgentLogDto,
+  "id" | "agentId" | "runnerId" | "localRunnerProcessId" | "dockerRunnerContainerId" | "metadata"
+>;
 
 type PublicAgentLogPage = {
   logs: PublicAgentLogDto[];
@@ -125,8 +128,7 @@ function toPublicAgentLogPage(page: AgentLogPage): PublicAgentLogPage {
 
 function toPublicAgentLog(log: AgentLogDto): PublicAgentLogDto {
   return {
-    id: log.id,
-    agentId: log.agentId,
+    source: log.source,
     stream: log.stream,
     level: log.level,
     message: summarizeOperationalText(log.message, "Log details omitted."),

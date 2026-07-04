@@ -11,6 +11,7 @@ import {
   agents,
   agentStatusEnum,
   appMetadata,
+  dockerRunnerContainers,
   localRunnerProcesses,
   localRunnerProcessStatusEnum,
   users,
@@ -25,6 +26,7 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(getTableName(agentApprovals)).toBe("agent_approvals");
     expect(getTableName(agentEvents)).toBe("agent_events");
     expect(getTableName(localRunnerProcesses)).toBe("local_runner_processes");
+    expect(getTableName(dockerRunnerContainers)).toBe("docker_runner_containers");
     expect(getTableName(agentLogs)).toBe("agent_logs");
     expect(agentStatusEnum.enumValues).toEqual([
       "idle",
@@ -139,9 +141,12 @@ describe("Milestone 1 agent persistence schema", () => {
       "agentId",
       "runnerId",
       "localRunnerProcessId",
+      "dockerRunnerContainerId",
+      "source",
       "stream",
       "level",
       "message",
+      "metadata",
       "sequence",
       "createdAt",
     ]);
@@ -149,12 +154,49 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.agentId.notNull).toBe(true);
     expect(columns.runnerId.notNull).toBe(false);
     expect(columns.localRunnerProcessId.notNull).toBe(false);
+    expect(columns.dockerRunnerContainerId.notNull).toBe(false);
+    expect(columns.source.notNull).toBe(true);
+    expect(columns.source.default).toBe("simulator");
     expect(columns.stream.notNull).toBe(true);
     expect(columns.level.notNull).toBe(true);
     expect(columns.message.notNull).toBe(true);
+    expect(columns.metadata.notNull).toBe(true);
+    expect(columns.metadata.dataType).toBe("json");
     expect(columns.sequence.notNull).toBe(true);
     expect(columns.sequence.dataType).toBe("number");
     expect(columns.createdAt.notNull).toBe(true);
+  });
+
+  it("defines Docker runner container metadata rows scoped to agents", () => {
+    const columns = getTableColumns(dockerRunnerContainers);
+
+    expect(Object.keys(columns)).toEqual([
+      "id",
+      "agentId",
+      "containerId",
+      "containerName",
+      "image",
+      "observedStatus",
+      "metadata",
+      "observedAt",
+      "startedAt",
+      "finishedAt",
+      "createdAt",
+      "updatedAt",
+    ]);
+    expect(columns.id.notNull).toBe(true);
+    expect(columns.agentId.notNull).toBe(true);
+    expect(columns.containerId.notNull).toBe(true);
+    expect(columns.containerName.notNull).toBe(true);
+    expect(columns.image.notNull).toBe(true);
+    expect(columns.observedStatus.notNull).toBe(true);
+    expect(columns.metadata.notNull).toBe(true);
+    expect(columns.metadata.dataType).toBe("json");
+    expect(columns.observedAt.notNull).toBe(true);
+    expect(columns.startedAt.notNull).toBe(false);
+    expect(columns.finishedAt.notNull).toBe(false);
+    expect(columns.createdAt.notNull).toBe(true);
+    expect(columns.updatedAt.notNull).toBe(true);
   });
 
   it("defines local runner process metadata rows scoped to agents", () => {

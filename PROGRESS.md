@@ -162,16 +162,16 @@
 
 ## Milestone 10 Dockerized Agent Runner Gate Classification
 
-- Status: #76 gate/tracking setup is implementation-complete and ready for checker review.
+- Status: #77 Docker runtime metadata/log persistence is implementation-complete and ready for checker review.
 - Source plan: `docs/MILESTONES.md` Milestone 10
 - Tracking issues: #76-#81
-- Current branch: `codex/issue-76-docker-gate-classification`
-- Next step: checker should review the Docker availability helper, Milestone 10 tracking setup, and baseline gate evidence.
+- Current branch: `codex/issue-77-docker-runtime-metadata`
+- Next step: checker should review the additive Docker metadata schema/helper contract, public log DTO redaction, and full gate evidence.
 
 ### Issue Checklist
 
 - [x] #76 Classify Docker runner quality gates
-- [ ] #77 Persist Docker runtime metadata and agent logs
+- [x] #77 Persist Docker runtime metadata and agent logs
 - [ ] #78 Add the Docker runner adapter
 - [ ] #79 Run lifecycle controls through Docker containers
 - [ ] #80 Detect Docker crashes and clean up selected-agent containers
@@ -186,6 +186,11 @@
 - #76 does not add a dedicated Docker test package script. Future real-Docker test slices should add one only when there are real Docker tests to run, then record the command here.
 - #76 leaves `CHANGELOG.md` unchanged because this is tracking and quality-gate setup only, with no user/operator-visible product behavior shipped.
 - #76 does not change schema, migrations, runtime metadata tables, log persistence, dependencies, lockfiles, Docker runner behavior, lifecycle controls, container crash detection, selected-agent containers, provider integrations, auth, billing, or secrets.
+- #77 adds the additive `docker_runner_containers` table for selected active agents with exact container ID, container name, image, observed status, observed/start/finish timestamps, and sanitized metadata.
+- #77 extends durable `agent_logs` with `source`, `metadata`, and optional `docker_runner_container_id` so simulator, local-runner, and future Docker logs can share the same agent-scoped ordered read path.
+- #77 adds Docker runner state helpers for recording observed container metadata, appending stdout/stderr Docker log rows, and reading logs only when the requested active development-user agent and exact container ID both match.
+- #77 updates the product log route and agent detail log panel to use a safe public log DTO: `source`, `stream`, `level`, sanitized `message`, `sequence`, and `createdAt`; log-row, agent, runner, local process, Docker container, and raw metadata identifiers stay server-side.
+- #77 does not start Docker containers, add a Docker adapter, wire lifecycle controls through Docker, detect crashes, clean up containers, implement #74 lifecycle endpoint behavior, or complete Milestone 10 acceptance.
 
 ### Update Log Requirements
 
@@ -202,6 +207,35 @@
 - When a future slice adds real Docker tests, group them behind this availability check and record whether they ran or skipped in this Milestone 10 progress section.
 
 ### Validation
+
+#### #77
+
+- Date: 2026-07-04
+- Environment:
+  - Docker daemon: reachable; `docker info --format '{{.ServerVersion}}'` returned `29.3.1`.
+  - Isolated database: container `agentbay_issue_77`, host port `54377`, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54377/agentbay`.
+  - Isolated app/test server: `PORT=3077`, `PLAYWRIGHT_BASE_URL=http://localhost:3077`, `NEXT_PUBLIC_APP_URL=http://localhost:3077`.
+- Setup:
+  - `test -d node_modules && echo node_modules-present || echo node_modules-missing`: pass; reported `node_modules-missing` before setup.
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile.
+  - `docker ps -a --filter name=agentbay_issue_77 --format '{{.Names}} {{.Status}} {{.Ports}}'`: pass; no existing #77 container was present before setup.
+  - `docker run --name agentbay_issue_77 -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54377:5432 -d postgres:17-alpine`: pass; started isolated Postgres for #77.
+  - `docker exec agentbay_issue_77 pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54377/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3077 bun run db:migrate`: pass; migrations applied successfully. Postgres emitted a notice that Drizzle's long `agent_logs_docker_runner_container_id...` FK identifier was truncated.
+- Implementation checks:
+  - `bun run db:generate`: pass; generated the additive Docker runtime metadata migration, then the SQL file was renamed to `drizzle/0006_docker_runner_metadata.sql` and the Drizzle journal tag was updated to match.
+  - `bun run format`: pass; Biome formatted 84 files and fixed edited files.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed successfully.
+  - `bun run test -- tests/unit/agent-logs-route.test.ts tests/unit/agent-schema.test.ts`: pass; 2 files and 31 tests passed for schema shape and safe public log route DTOs.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54377/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3077 bun run test -- tests/unit/create-agent-db.test.ts`: pass; 1 file and 82 tests passed, including Docker metadata persistence, exact-container cross-agent log isolation, source/metadata log rows, and metadata redaction.
+- Required gates:
+  - `bun run format:check`: pass; Biome checked 84 files.
+  - `bun run lint`: pass; Biome checked 84 files.
+  - `bun run typecheck`: pass; `tsc --noEmit` passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54377/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3077 bun run test`: pass; 23 files and 205 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54377/agentbay PORT=3077 PLAYWRIGHT_BASE_URL=http://localhost:3077 NEXT_PUBLIC_APP_URL=http://localhost:3077 bun run build`: pass; Next.js production build completed and included dashboard, agent detail, lifecycle, approval, log, health, and settings routes.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54377/agentbay PORT=3077 PLAYWRIGHT_BASE_URL=http://localhost:3077 NEXT_PUBLIC_APP_URL=http://localhost:3077 bun run test:e2e`: pass; full browser suite passed with 38 tests and 18 expected skips.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54377/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3077 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
 
 #### #76
 
