@@ -42,8 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mobile-ready agent detail latest log summaries and operational alerts derived from selected-agent status, pending or expired approvals, and alert-relevant events, with safe bounded text and documented runner-state alert deferral until runner state exists.
 - Local runner process metadata and stdout/stderr agent log persistence helpers for Milestone 9, including safe last-error storage, process-scoped log reads, stable per-agent log ordering, and audit-event separation.
 - Dashboard latest process logs panel for active agents, with stdout/stderr lines, timestamps, agent links, safe empty/error states, and seeded UI coverage for scoped persisted process logs.
+- Local runner adapter interface for starting, stopping, restarting, status checks, and persisted log-stream reads with a real dummy child process by default and explicit executable/argv configuration for future Hermes swaps.
 
 ### Fixed
 
+- Local runner adapter start failures now terminate spawned child processes when durable runner-state persistence fails, preventing orphaned dummy/local processes.
+- Local runner process log streaming now scopes process-id reads to the requested active development-user agent so a known process UUID for another agent cannot return that agent's stdout/stderr.
 - Dashboard persisted-agent controls remain available on phone widths by using the mobile agent status card list when the desktop table is hidden, with hardened wrapping and focus states for combined mobile agent, approval, log, and alert controls.
 - Create-agent failures now return safe actionable database setup errors when Postgres is unavailable or migrations are missing, and the create form prevents pre-hydration no-op submissions.
