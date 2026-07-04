@@ -25,6 +25,8 @@ test.afterEach(async ({ request }) => {
       await removeDockerContainersForAgent(agentId);
     }
   }
+
+  await removeOrphanedStoppedAgentBayDockerContainers();
 });
 
 const shellRoutes = [
@@ -2003,6 +2005,28 @@ async function removeDockerContainersForAgent(agentId: string): Promise<void> {
     .toEqual([]);
 }
 
+async function removeOrphanedStoppedAgentBayDockerContainers(): Promise<void> {
+  const removableStatuses = ["created", "exited", "dead"] as const;
+
+  for (const status of removableStatuses) {
+    await removeDockerContainersByIds(await listOrphanedAgentBayDockerContainerIdsByStatus(status));
+  }
+
+  await expect
+    .poll(
+      async () =>
+        (
+          await Promise.all(
+            removableStatuses.map((status) =>
+              listOrphanedAgentBayDockerContainerIdsByStatus(status),
+            ),
+          )
+        ).flat(),
+      { timeout: 10_000 },
+    )
+    .toEqual([]);
+}
+
 async function listDockerContainerIdsForAgent(agentId: string): Promise<string[]> {
   const result = await runDocker([
     "ps",
@@ -2017,6 +2041,61 @@ async function listDockerContainerIdsForAgent(agentId: string): Promise<string[]
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
+}
+
+async function listOrphanedAgentBayDockerContainerIdsByStatus(status: string): Promise<string[]> {
+  const result = await runDocker([
+    "ps",
+    "-a",
+    "--format",
+    `{{.ID}}\t{{.Label "${AGENTBAY_AGENT_ID_LABEL}"}}`,
+    "--filter",
+    `label=${AGENTBAY_AGENT_ID_LABEL}`,
+    "--filter",
+    `status=${status}`,
+  ]).catch(() => ({ stdout: "", stderr: "" }));
+  const containers = result.stdout
+    .trim()
+    .split("\n")
+    .map((line) => {
+      const [containerId, agentId] = line.trim().split("\t");
+
+      return {
+        agentId: agentId?.trim() ?? "",
+        containerId: containerId?.trim() ?? "",
+      };
+    })
+    .filter((container) => container.containerId.length > 0);
+
+  if (containers.length === 0) {
+    return [];
+  }
+
+  const existingAgentIds = await getExistingAgentIds(
+    containers.map((container) => container.agentId),
+  );
+
+  return containers
+    .filter((container) => !existingAgentIds.has(container.agentId))
+    .map((container) => container.containerId);
+}
+
+async function getExistingAgentIds(agentIds: string[]): Promise<Set<string>> {
+  const uniqueAgentIds = [...new Set(agentIds.filter((agentId) => agentId.length > 0))];
+
+  if (uniqueAgentIds.length === 0) {
+    return new Set();
+  }
+
+  return await withDatabase(async (sql) => {
+    const rows = await sql<{ id: string }[]>`
+      select id
+      from agents
+      where id in ${sql(uniqueAgentIds)}
+    `;
+
+    return new Set(rows.map((row) => row.id));
+  });
 }
 
 async function removeDockerContainersByIds(containerIds: string[]): Promise<void> {
