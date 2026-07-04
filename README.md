@@ -1,6 +1,6 @@
 # AgentBay
 
-AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 3 activity feed slice. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, deterministic Start, Stop, Restart, and Delete controls, and persisted activity feeds for local development agents.
+AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, and scoped runtime logs for local development agents.
 
 ## Requirements
 
@@ -91,14 +91,16 @@ The `/agents` page contains the current create/list and fake lifecycle workflow:
 4. Submit the form.
 5. Confirm the stopped agent appears in the `/agents` table with a generated `/agents/:agentId` link.
 6. Open the detail page and use Start to move the agent from `stopped` to `starting`, then to `running` after deterministic fake-runner settling.
-7. Use Restart while the agent is `running` to move it through `restarting` and back to `running`.
-8. Use Stop while the agent is `running` to move it back to `stopped`.
-9. Use Delete while the agent is not transitioning to soft-delete it from active views.
-10. Refresh `/agents`, `/dashboard`, and the detail page to confirm active records remain visible and deleted records return not found.
+7. Confirm the detail runtime log panel shows the deterministic simulator output for the selected running agent.
+8. Use Restart while the agent is `running` to move it through `restarting` and back to `running`.
+9. Use Stop while the agent is `running` to move it back to `stopped` while already visible runtime logs remain readable.
+10. Use Simulate error outside production to move an active agent to `error` and record one `agent.error` audit event.
+11. Use Delete while the agent is not transitioning to soft-delete it from active views.
+12. Refresh `/agents`, `/dashboard`, and the detail page to confirm active records remain visible and deleted records return not found.
 
 The dashboard reads active persisted agents from the database. The detail page loads active persisted agent records by ID and returns not found for missing, malformed, or soft-deleted IDs. Delete preserves the `agents` row and existing `agent_events`, but removes the agent from `/agents`, `/dashboard`, and active detail reads.
 
-Milestone 3 records are local-development records only. Lifecycle controls use deterministic database state, not real runner processes. Runtime log UI, approvals, config editing, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
+Milestone 4 records are local-development records only. Lifecycle controls and runtime logs use deterministic database state, not real runner processes. Approvals, config editing, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
 
 ## Create Agent API
 
@@ -184,6 +186,8 @@ The first eligible read in a running segment creates the cycle immediately. Repe
 
 Generated rows use `runner_id = null`, safe static `stdout`/`info` content only, and per-agent monotonic `sequence` values. Runtime log generation does not write `agent_events`; lifecycle actions, including `simulate-error`, do not directly write runtime logs. Stopped, idle, pending transition, error, deleting, missing, and soft-deleted agents do not receive newly generated log rows, though active stopped or error agents can still return existing readable rows.
 
+The agent detail page renders those logs in a runtime log panel. The panel shows loading, empty, loaded, and safe error states; displays only the log timestamp, stream, level, sequence, and message; and keeps the rest of the detail page readable if log loading fails. It polls only while the current detail status is `running`, so stopping or simulating an error leaves existing visible rows readable without appending new generated rows after the settled state.
+
 ## Quality Gates
 
 Run individual gates when isolating failures:
@@ -203,7 +207,7 @@ Run the aggregate gate before handoff or deployment:
 bun run verify
 ```
 
-The Playwright E2E suite starts the Next.js dev server and smoke-tests the browser create, lifecycle, dashboard activity, detail activity, soft-delete, active-view removal, and not-found flows on desktop and mobile Chromium profiles. It expects a reachable migrated database for `/health`, agent records, and activity feeds, so run:
+The Playwright E2E suite starts the Next.js dev server and smoke-tests the browser create, lifecycle, dashboard activity, detail activity, scoped detail runtime logs, soft-delete, active-view removal, and not-found flows on desktop and mobile Chromium profiles. It expects a reachable migrated database for `/health`, agent records, activity feeds, and runtime logs, so run:
 
 ```bash
 docker compose up -d postgres
@@ -221,7 +225,7 @@ Initial preview URL:
 https://agentbay-9wi2xvhbh-ametel01s-projects.vercel.app
 ```
 
-For the completed Milestone 3 app, validate local gates first:
+For the completed Milestone 4 app, validate local gates first:
 
 ```bash
 docker compose up -d postgres
@@ -253,14 +257,14 @@ NEXT_PUBLIC_APP_URL
 
 The Vercel CLI creates local `.vercel/` metadata and may create `.env.local` for local credentials. Both are ignored and should remain local-only.
 
-## Milestone 3 Acceptance
+## Milestone 4 Acceptance
 
-Milestone 3 is complete when:
+Milestone 4 is complete when:
 
 - The app scaffold, TypeScript, formatter, linting, tests, build, and deployment path are present.
 - `PROGRESS.md` and `CHANGELOG.md` exist and follow the tracking rules.
 - Local Postgres starts, migrations run, and `/health` reports success only when the database is reachable.
-- The migration set creates `users`, `agents`, `agent_events`, and `agent_status` for persistent agent records.
+- The migration set creates `users`, `agents`, `agent_events`, `agent_logs`, and `agent_status` for persistent agent records, audit events, and runtime logs.
 - `POST /api/agents` creates a stopped agent and `agent.created` event transactionally with safe validation and persistence responses.
 - `/agents` creates and lists active stopped agent records with stable detail links.
 - `/dashboard` and `/agents/:agentId` read active persisted agent records from the database after refresh.
@@ -270,8 +274,12 @@ Milestone 3 is complete when:
 - `GET /api/agents/:agentId/events` returns safe per-agent event pages with opaque cursor pagination.
 - The dashboard shows a compact latest activity feed across agents.
 - The detail page shows per-agent activity with event time, type, message, actor, metadata summary, empty state, error state, and pagination.
+- `GET /api/agents/:agentId/logs` returns safe active-agent scoped runtime logs with numeric `after` pagination and pull-driven deterministic simulator generation for running agents.
+- The detail page shows runtime log loading, empty, loaded, and safe error states without exposing internal row names, database URLs, stack traces, credentials, or raw SQL/driver errors.
+- Browser coverage proves detail Start eventually shows `Checking task queue...`, `No pending tasks.`, `Heartbeat OK.`, and `Memory loaded.`
+- Browser coverage proves runtime logs stay scoped to the selected agent, visible rows remain readable after Stop, polling/generation does not append after Stop or Simulate error, and `agent.error` appears in the detail activity feed.
 - Browser coverage proves create and lifecycle activity appears in both the dashboard latest activity feed and the agent detail activity feed.
 - Soft delete removes agents from `/agents`, `/dashboard`, and active detail reads while preserving the database row and prior events.
-- Runtime log UI, approvals, config editing, runner APIs, real runner/provisioning behavior, Hermes, Telegram, billing, production auth, secret storage, backups, restore, and cloud provisioning remain out of scope.
+- Approvals, config editing, runner APIs, real runner/provisioning behavior, Hermes, Telegram, billing, production auth, secret storage, backups, restore, and cloud provisioning remain out of scope.
 - `.env.example` documents every required local/deploy variable without secrets.
 - `bun run format:check`, `bun run lint`, `bun run typecheck`, `bun run test`, `bun run db:migrate`, `bun run db:health`, `bun run build`, `bun run test:e2e`, and `bun run verify` pass against a migrated local database.

@@ -43,7 +43,7 @@ export function RestartAgentButton({ agentId, status }: RestartAgentButtonProps)
       return;
     }
 
-    if (state.status !== "polling") {
+    if (state.status !== "polling" && status !== "restarting") {
       return;
     }
 
@@ -82,7 +82,8 @@ export function RestartAgentButton({ agentId, status }: RestartAgentButtonProps)
     }
   }
 
-  const busy = state.status === "requesting" || state.status === "polling";
+  const busy =
+    state.status === "requesting" || state.status === "polling" || status === "restarting";
 
   if (status !== "running" && !busy && state.status !== "error") {
     return null;
@@ -90,7 +91,7 @@ export function RestartAgentButton({ agentId, status }: RestartAgentButtonProps)
 
   return (
     <div className="start-agent-action">
-      {status === "running" ? (
+      {status === "running" || status === "restarting" ? (
         <button className="secondary-button" type="button" disabled={busy} onClick={handleRestart}>
           {busy ? "Restarting" : "Restart"}
         </button>

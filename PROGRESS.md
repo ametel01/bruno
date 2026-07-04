@@ -1,5 +1,44 @@
 # Progress
 
+## Milestone 4 Agent Detail Runtime Logs
+
+- Status: complete
+- Issues: #47
+- Branch: `codex/issue-47-agent-detail-logs`
+
+### Completion Evidence
+
+- [x] #47 adds an agent detail runtime log panel that fetches `GET /api/agents/:agentId/logs` and renders only safe log DTO fields: `createdAt`, `stream`, `level`, `sequence`, and `message`.
+- [x] The panel has loading, empty, loaded, and safe error states; the agent record, identity, and activity panels remain readable when runtime log loading fails.
+- [x] Runtime log polling is scoped to the selected detail agent and only continues while the current detail status is `running`; stopped and error states keep already visible rows readable without appending new generated rows.
+- [x] Starting from the detail UI shows the deterministic simulator cycle: `Checking task queue...`, `No pending tasks.`, `Heartbeat OK.`, and `Memory loaded.`
+- [x] Stopping from the detail UI leaves visible rows readable, and simulating an error moves the agent to `error` while the detail activity feed shows the existing `agent.error` audit event.
+- [x] E2E coverage creates two agents and proves runtime logs stay scoped to the selected detail page; cleanup deletes `agent_logs` before `agent_events` and `agents`.
+- [x] Detail log layout uses wrapping list rows, and Playwright verifies no horizontal overflow on both the existing desktop and mobile projects.
+- [x] Final Milestone 4 docs/tracking now describe the detail runtime log panel as present behavior instead of future scope.
+- [x] No schema, migration, worker, real runner, auth, provider, secret, GitHub issue, or Milestone 5 work was added.
+
+### Validation
+
+- Date: 2026-07-04
+- Environment:
+  - Isolated database: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54347/agentbay`.
+  - Isolated app/test server: `PORT=3021`, `PLAYWRIGHT_BASE_URL=http://localhost:3021`, `NEXT_PUBLIC_APP_URL=http://localhost:3021`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree had no local `node_modules`.
+  - `docker compose -p agentbay_issue_47 -f compose.yaml -f <port override> up -d --force-recreate postgres`: pass; started `agentbay_issue_47-postgres-1` on host port `54347`.
+  - `bun run db:generate`: not run; #47 made no schema or migration changes.
+- Required gates:
+  - `bun run db:migrate`: pass; migrations applied successfully against the isolated database.
+  - `bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+  - `bun run format:check`: pass; Biome checked 64 files.
+  - `bun run lint`: pass; Biome checked 64 files.
+  - `bun run typecheck`: pass.
+  - `bun run test`: pass; 16 files and 118 tests passed.
+  - `bun run build`: pass; Next.js build completed and included `/agents/:agentId` and `/api/agents/:agentId/logs`.
+  - `bun run test:e2e`: pass; 22 passed and 2 expected project skips across `chromium-desktop` and `chromium-mobile`.
+  - `bun run verify`: pass; aggregate format, lint, typecheck, test, build, and E2E gates passed with 22 E2E passed and 2 expected project skips.
+
 ## Milestone 4 Running Agent Runtime Logs
 
 - Status: complete

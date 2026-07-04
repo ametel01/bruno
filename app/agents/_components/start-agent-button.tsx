@@ -27,7 +27,7 @@ export function StartAgentButton({ agentId, status }: StartAgentButtonProps) {
       return;
     }
 
-    if (state.status !== "polling") {
+    if (state.status !== "polling" && status !== "starting") {
       return;
     }
 

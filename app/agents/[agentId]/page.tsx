@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { ActivityFeedPanel } from "@/app/_components/activity-feed";
 import { PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
+import { AgentRuntimeLogPanel } from "@/app/agents/_components/agent-runtime-log-panel";
 import {
   AgentDetailPersistenceError,
   getActiveAgentForDevelopmentUser,
@@ -72,7 +73,7 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
       active="agents"
       eyebrow="Agent detail"
       title={agent.name}
-      description="This detail view reads the current persisted lifecycle status for an active agent record without real runner processes, logs, approvals, or config editing."
+      description="This detail view reads the current persisted lifecycle status, scoped runtime logs, and audit activity for an active local development agent without real runner processes, approvals, or config editing."
     >
       <div className="content-grid">
         <PlaceholderPanel title="Agent record">
@@ -125,6 +126,7 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
             </div>
           </dl>
         </PlaceholderPanel>
+        <AgentRuntimeLogPanel agentId={agent.id} status={agent.status} />
         <ActivityFeedPanel
           context={{ kind: "detail", agentLabel: agent.name }}
           countLabel={
