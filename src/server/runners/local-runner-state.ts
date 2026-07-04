@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "@/src/server/db/schema";
 import { agentLogs, agents, localRunnerProcesses } from "@/src/server/db/schema";
@@ -139,6 +139,41 @@ export async function createLocalRunnerProcessForDevelopmentUser(input: {
     }
 
     return mapLocalRunnerProcessToDto(processRow);
+  });
+}
+
+export async function getLatestLocalRunnerProcessForDevelopmentUser(input: {
+  db: LocalRunnerStateDatabase;
+  agentId: string;
+  statuses?: readonly LocalRunnerProcessStatus[];
+}): Promise<LocalRunnerProcessDto | null> {
+  return input.db.transaction(async (tx) => {
+    const developmentUserId = await getDevelopmentUserId(tx);
+
+    if (!developmentUserId) {
+      return null;
+    }
+
+    const predicates = [
+      eq(localRunnerProcesses.agentId, input.agentId),
+      eq(agents.id, input.agentId),
+      eq(agents.userId, developmentUserId),
+      isNull(agents.deletedAt),
+    ];
+
+    if (input.statuses && input.statuses.length > 0) {
+      predicates.push(inArray(localRunnerProcesses.status, [...input.statuses]));
+    }
+
+    const [processRow] = await tx
+      .select(localRunnerProcessSelection)
+      .from(localRunnerProcesses)
+      .innerJoin(agents, eq(agents.id, localRunnerProcesses.agentId))
+      .where(and(...predicates))
+      .orderBy(desc(localRunnerProcesses.startedAt), desc(localRunnerProcesses.createdAt))
+      .limit(1);
+
+    return processRow ? mapLocalRunnerProcessToDto(processRow) : null;
   });
 }
 

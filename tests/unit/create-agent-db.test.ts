@@ -1,5 +1,8 @@
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { eq, inArray, sql } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AgentPersistenceError,
   DEFAULT_AGENT_CONFIG,
@@ -82,6 +85,12 @@ import {
   recordLocalRunnerProcessExit,
   sanitizeLocalRunnerLastError,
 } from "@/src/server/runners/local-runner-state";
+import {
+  LocalRunnerAdapter,
+  type LocalRunnerAdapterDependencies,
+  type LocalRunnerCommand,
+  type LocalRunnerSpawn,
+} from "@/src/server/runners/local-runner-adapter";
 
 describe("create agent persistence", () => {
   let connection: DatabaseConnection;
@@ -4717,6 +4726,237 @@ describe("create agent persistence", () => {
     });
   });
 
+  it("local runner adapter spawns configured commands as executable plus argv with shell disabled", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Safe Spawn Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const child = new FakeChildProcess(24680);
+    const spawnCalls: Parameters<LocalRunnerSpawn>[] = [];
+    const spawnProcess: LocalRunnerSpawn = (executable, args, options) => {
+      spawnCalls.push([executable, args, options]);
+      return child as unknown as ChildProcessWithoutNullStreams;
+    };
+    const adapter = createTestLocalRunnerAdapter(connection, {
+      command: {
+        executable: "/opt/hermes/bin/hermes",
+        args: ["run", "agent; rm -rf /", "$(whoami)"],
+        env: { HERMES_MODE: "local" },
+      },
+      spawnProcess,
+    });
+
+    const started = await adapter.start(created.agent.id);
+
+    try {
+      expect(started).toMatchObject({ ok: true });
+      expect(spawnCalls).toHaveLength(1);
+      expect(spawnCalls[0]?.[0]).toBe("/opt/hermes/bin/hermes");
+      expect(spawnCalls[0]?.[1]).toEqual(["run", "agent; rm -rf /", "$(whoami)"]);
+      expect(spawnCalls[0]?.[2]).toMatchObject({
+        shell: false,
+        stdio: "pipe",
+      });
+      expect(spawnCalls[0]?.[2].env).toMatchObject({
+        AGENTBAY_AGENT_ID: created.agent.id,
+        HERMES_MODE: "local",
+      });
+    } finally {
+      await adapter.stop(created.agent.id);
+    }
+  });
+
+  it("local runner adapter starts a real dummy child, records its pid, reports status, and stops it cleanly", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Dummy Start Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const adapter = createTestLocalRunnerAdapter(connection);
+
+    const started = await adapter.start(created.agent.id);
+
+    expect(started).toMatchObject({ ok: true });
+    if (!started.ok) {
+      throw new Error(started.reason);
+    }
+    expect(started.process.pid).toBeGreaterThan(0);
+    expect(() => process.kill(started.process.pid, 0)).not.toThrow();
+    expect(started.process.commandMetadata).toMatchObject({
+      command: process.execPath,
+    });
+
+    await expect(adapter.status(created.agent.id)).resolves.toMatchObject({
+      ok: true,
+      process: {
+        id: started.process.id,
+        pid: started.process.pid,
+        status: "running",
+      },
+    });
+
+    const stopped = await adapter.stop(created.agent.id);
+
+    expect(stopped).toMatchObject({
+      ok: true,
+      process: {
+        id: started.process.id,
+        status: "stopped",
+        exitCode: null,
+        signal: null,
+      },
+    });
+    await expect(adapter.status(created.agent.id)).resolves.toMatchObject({
+      ok: true,
+      process: {
+        id: started.process.id,
+        status: "stopped",
+      },
+    });
+  });
+
+  it("local runner adapter captures stdout and stderr from the child into persisted process logs", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Log Capture Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const adapter = createTestLocalRunnerAdapter(connection, {
+      command: nodeScriptCommand(`
+        console.log("adapter stdout one");
+        console.error("adapter stderr one");
+        process.on("SIGTERM", () => process.exit(0));
+        setInterval(() => {}, 1000);
+      `),
+    });
+
+    const started = await adapter.start(created.agent.id);
+
+    try {
+      if (!started.ok) {
+        throw new Error(started.reason);
+      }
+
+      const logPage = await waitForAdapterLogs(adapter, {
+        agentId: created.agent.id,
+        processId: started.process.id,
+        messages: ["adapter stdout one", "adapter stderr one"],
+      });
+
+      expect(
+        logPage.logs.map((log) => [log.localRunnerProcessId, log.stream, log.message]),
+      ).toEqual([
+        [started.process.id, "stdout", "adapter stdout one"],
+        [started.process.id, "stderr", "adapter stderr one"],
+      ]);
+    } finally {
+      await adapter.stop(created.agent.id);
+    }
+  });
+
+  it("local runner adapter restarts by replacing the tracked child without mixing process-scoped logs", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Restart Adapter Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const adapter = createTestLocalRunnerAdapter(connection, {
+      command: nodeScriptCommand(`
+        console.log("restart process boot");
+        process.on("SIGTERM", () => {
+          console.log("restart process stop");
+          process.exit(0);
+        });
+        setInterval(() => {}, 1000);
+      `),
+    });
+
+    const first = await adapter.start(created.agent.id);
+
+    try {
+      if (!first.ok) {
+        throw new Error(first.reason);
+      }
+      await waitForAdapterLogs(adapter, {
+        agentId: created.agent.id,
+        processId: first.process.id,
+        messages: ["restart process boot"],
+      });
+
+      const restarted = await adapter.restart(created.agent.id);
+      if (!restarted.ok) {
+        throw new Error(restarted.reason);
+      }
+
+      expect(restarted.process.id).not.toBe(first.process.id);
+      expect(restarted.process.pid).not.toBe(first.process.pid);
+      await waitForAdapterLogs(adapter, {
+        agentId: created.agent.id,
+        processId: restarted.process.id,
+        messages: ["restart process boot"],
+      });
+
+      const firstLogs = await adapter.streamLogs({
+        agentId: created.agent.id,
+        processId: first.process.id,
+      });
+      const restartedLogs = await adapter.streamLogs({
+        agentId: created.agent.id,
+        processId: restarted.process.id,
+      });
+
+      expect(firstLogs.logs.every((log) => log.localRunnerProcessId === first.process.id)).toBe(
+        true,
+      );
+      expect(
+        restartedLogs.logs.every((log) => log.localRunnerProcessId === restarted.process.id),
+      ).toBe(true);
+      expect(firstLogs.logs.map((log) => log.sequence)).toEqual([1, 2]);
+      expect(restartedLogs.logs.map((log) => log.sequence)).toEqual([3]);
+    } finally {
+      await adapter.stop(created.agent.id);
+    }
+  });
+
+  it("local runner adapter records unexpected child exits as terminal durable state while preserving output", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Unexpected Exit Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const adapter = createTestLocalRunnerAdapter(connection, {
+      command: nodeScriptCommand(`
+        console.log("about to exit");
+        console.error("exit failure");
+        setTimeout(() => process.exit(7), 20);
+      `),
+    });
+
+    const started = await adapter.start(created.agent.id);
+    if (!started.ok) {
+      throw new Error(started.reason);
+    }
+
+    await waitForAdapterStatus(adapter, created.agent.id, "failed");
+    const status = await adapter.status(created.agent.id);
+    const logPage = await waitForAdapterLogs(adapter, {
+      agentId: created.agent.id,
+      processId: started.process.id,
+      messages: ["about to exit", "exit failure"],
+    });
+
+    expect(status).toMatchObject({
+      ok: true,
+      process: {
+        id: started.process.id,
+        status: "failed",
+        exitCode: 7,
+        signal: null,
+        lastError: "Local runner exited with code 7.",
+      },
+    });
+    expect(logPage.logs.map((log) => [log.stream, log.message])).toEqual([
+      ["stdout", "about to exit"],
+      ["stderr", "exit failure"],
+    ]);
+  });
+
   it("maps persisted log rows to the public DTO shape", () => {
     expect(
       mapAgentLogToDto({
@@ -5577,6 +5817,87 @@ function logValue(
     sequence,
     createdAt: new Date(`2026-07-04T06:00:0${sequence}.000Z`),
   };
+}
+
+class FakeChildProcess extends EventEmitter {
+  readonly stdout = new PassThrough();
+  readonly stderr = new PassThrough();
+  readonly pid: number;
+  killed = false;
+  readonly kill = vi.fn((signal?: NodeJS.Signals | number) => {
+    this.killed = true;
+    setImmediate(() => this.emit("close", 0, signal ?? null));
+    return true;
+  });
+
+  constructor(pid: number) {
+    super();
+    this.pid = pid;
+  }
+}
+
+function createTestLocalRunnerAdapter(
+  connection: DatabaseConnection,
+  dependencies: Omit<LocalRunnerAdapterDependencies, "createConnection"> = {},
+): LocalRunnerAdapter {
+  return new LocalRunnerAdapter({
+    createConnection: () => connection,
+    ...dependencies,
+  });
+}
+
+function nodeScriptCommand(script: string): LocalRunnerCommand {
+  return {
+    executable: process.execPath,
+    args: ["-e", script],
+  };
+}
+
+async function waitForAdapterLogs(
+  adapter: LocalRunnerAdapter,
+  input: {
+    agentId: string;
+    processId: string;
+    messages: string[];
+  },
+) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const page = await adapter.streamLogs({
+      agentId: input.agentId,
+      processId: input.processId,
+    });
+    const messages = page.logs.map((log) => log.message);
+
+    if (input.messages.every((message) => messages.includes(message))) {
+      return page;
+    }
+
+    await sleep(25);
+  }
+
+  throw new Error(`Timed out waiting for logs: ${input.messages.join(", ")}`);
+}
+
+async function waitForAdapterStatus(
+  adapter: LocalRunnerAdapter,
+  agentId: string,
+  status: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const result = await adapter.status(agentId);
+
+    if (result.ok && result.process?.status === status) {
+      return;
+    }
+
+    await sleep(25);
+  }
+
+  throw new Error(`Timed out waiting for status: ${status}`);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function setNodeEnvForTest(value: string | undefined) {

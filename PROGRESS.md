@@ -2,16 +2,16 @@
 
 ## Milestone 9 Local Runner Persistence
 
-- Status: #73 is implementation-complete and ready for checker review.
+- Status: #72 is implementation-complete and ready for checker review.
 - Source plan: `docs/MILESTONES.md` Milestone 9
 - Tracking issues: #71-#75
-- Current branch: `codex/issue-73-persisted-log-ui`
-- Next step: checker should review the active-agent process log read helper, dashboard process-log panel, seeded log UI coverage, and migrated database gate evidence.
+- Current branch: `codex/issue-72-local-runner-adapter`
+- Next step: checker should review the local runner adapter process spawning, durable state/log integration, contract tests, and isolated #72 gate evidence.
 
 ### Issue Checklist
 
 - [x] #71 Persist local runner state and agent logs
-- [ ] #72 Implement the local runner adapter with a dummy process
+- [x] #72 Implement the local runner adapter with a dummy process
 - [x] #73 Expose persisted process logs in the dashboard
 - [ ] #74 Run lifecycle controls through the local runner
 - [ ] #75 Document and verify the Milestone 9 local runner
@@ -23,6 +23,10 @@
 - #71 adds an additive `local_runner_processes` table with process id, sanitized command metadata, status, start/stop timestamps, exit code, signal, and sanitized last-error storage scoped to active local-development agents.
 - #71 links `agent_logs` rows to an optional local runner process id, constrains persisted streams to `stdout` or `stderr`, preserves per-agent sequence ordering, and keeps process output separate from `agent_events`.
 - #71 adds local runner state helpers for creating process rows, recording terminal state, appending stdout/stderr log lines, and reading process-scoped logs without spawning or controlling processes.
+- #72 adds the local runner adapter interface with `start`, `stop`, `restart`, `status`, and persisted log-stream reads while leaving lifecycle route replacement to #74 and dashboard log UI to #73.
+- #72 defaults to a real dummy Node child process and keeps future Hermes execution behind explicit `AGENTBAY_LOCAL_RUNNER_EXECUTABLE` plus JSON argv configuration.
+- #72 spawns child processes with executable plus argument array and `shell: false`, records the child pid in `local_runner_processes`, captures stdout/stderr into process-scoped `agent_logs`, records stopped state for intentional stops, and records failed/exited state for unexpected exits.
+- #72 adds a latest-process state read helper for active local-development agents so adapter `status` and `stop` can use the #71 durable state contract without dashboard, endpoint, Docker, cloud, auth, billing, provider, Telegram, or Hermes integration work.
 - #73 adds a latest active-agent process log read helper that returns public DTOs with agent names/links, filters out soft-deleted agents, ignores non-process simulator rows, and preserves stable newest-first ordering by timestamp and sequence.
 - #73 adds a dashboard Latest process logs panel with stdout/stderr, timestamp, level, sequence, redacted summaries, empty state, safe failure state, and direct links to each agent detail log stream.
 - #73 keeps internal runner/process identifiers available to server helpers but strips `runnerId` and `localRunnerProcessId` from the product `GET /api/agents/:agentId/logs` response.
@@ -30,6 +34,33 @@
 - #73 keeps lifecycle controls/status pills unchanged and does not implement process spawning, local runner adapter behavior, lifecycle endpoint replacement, Docker/cloud runners, Hermes, Telegram, auth, billing, provider integrations, or secrets.
 
 ### Validation
+
+#### #72
+
+- Date: 2026-07-04
+- Environment:
+  - Isolated database target: container `agentbay_issue_72-postgres` on host port `54372`, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay`.
+  - Isolated app/test server target: `PORT=3072`, `PLAYWRIGHT_BASE_URL=http://localhost:3072`, `NEXT_PUBLIC_APP_URL=http://localhost:3072`.
+- Setup:
+  - `test -d node_modules && echo node_modules-present || echo node_modules-missing`: pass; reported `node_modules-missing` before setup.
+  - `bun install --frozen-lockfile`: pass; installed committed lockfile dependencies.
+  - `docker info --format '{{.ServerVersion}}'`: pass; Docker daemon reachable with server version `29.3.1`.
+  - `docker ps -a --filter name=agentbay_issue_72-postgres --format '{{.Names}} {{.Status}} {{.Ports}}'`: pass; no existing #72 container was present before setup.
+  - `docker run --name agentbay_issue_72-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54372:5432 -d postgres:17-alpine`: pass; started isolated Postgres for #72.
+  - `docker exec agentbay_issue_72-postgres pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run db:migrate`: pass; migrations applied successfully against the isolated #72 database.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+- Focused checks:
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run test -- tests/unit/local-runner-adapter.test.ts tests/unit/create-agent-db.test.ts`: pass; 2 files and 78 tests passed, including adapter command configuration, safe executable/argv spawning with `shell: false`, real dummy child start/status/stop, stdout/stderr persistence, restart process-log separation, and unexpected-exit terminal state.
+- Required gates:
+  - `bun run format:check`: pass; Biome checked 83 files.
+  - `bun run lint`: pass; Biome checked 83 files.
+  - `bun run typecheck`: pass; `tsc --noEmit` passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run test`: pass; 23 files and 196 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay PORT=3072 PLAYWRIGHT_BASE_URL=http://localhost:3072 NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run build`: pass; Next.js build completed and included dashboard, agent detail, lifecycle, approval decision, log, health, and settings routes.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay PORT=3072 PLAYWRIGHT_BASE_URL=http://localhost:3072 NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run verify`: pass; aggregate format, lint, typecheck, unit test, production build, and Playwright gates passed with 196 unit tests and 37 E2E passed / 17 expected skips.
+- Reconciliation:
+  - A concurrent `bun run test:e2e` and `bun run verify` attempt against the same #72 database failed with Postgres deadlocks and polluted E2E assertions. This was an invalid validation setup caused by running two DB-mutating suites in parallel. Rerunning `bun run verify` alone against the same isolated #72 database passed.
 
 #### #73
 
@@ -83,7 +114,6 @@
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay PORT=3073 PLAYWRIGHT_BASE_URL=http://localhost:3073 NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run build`: pass; Next.js production build completed and included dashboard, agent detail, lifecycle, approval, log, health, and settings routes.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay PORT=3073 PLAYWRIGHT_BASE_URL=http://localhost:3073 NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run test:e2e`: pass; full browser suite passed with 38 tests and 18 expected skips.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54373/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3073 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
-
 #### #71
 
 - Date: 2026-07-04
