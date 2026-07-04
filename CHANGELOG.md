@@ -43,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local runner process metadata and stdout/stderr agent log persistence helpers for Milestone 9, including safe last-error storage, process-scoped log reads, stable per-agent log ordering, and audit-event separation.
 - Dashboard latest process logs panel for active agents, with stdout/stderr lines, timestamps, agent links, safe empty/error states, and seeded UI coverage for scoped persisted process logs.
 - Local runner adapter interface for starting, stopping, restarting, status checks, and persisted log-stream reads with a real dummy child process by default and explicit executable/argv configuration for future Hermes swaps.
+- Docker runner container metadata persistence for selected agents, including exact container ID, container name, image, observed status, timestamps, sanitized metadata, and exact-container scoped log helpers for future Docker adapter work.
+- Agent runtime log rows now persist a source and metadata alongside stdout/stderr line content, and the product log API/detail panel expose only a safe public log DTO without log-row, agent, runner, container, or raw metadata identifiers.
 
 ### Fixed
 

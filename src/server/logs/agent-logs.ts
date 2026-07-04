@@ -56,9 +56,12 @@ export type AgentLogDto = {
   agentId: string;
   runnerId: string | null;
   localRunnerProcessId: string | null;
+  dockerRunnerContainerId: string | null;
+  source: string;
   stream: string;
   level: string;
   message: string;
+  metadata: Record<string, unknown>;
   sequence: number;
   createdAt: string;
 };
@@ -100,9 +103,12 @@ const logSelection = {
   agentId: agentLogs.agentId,
   runnerId: agentLogs.runnerId,
   localRunnerProcessId: agentLogs.localRunnerProcessId,
+  dockerRunnerContainerId: agentLogs.dockerRunnerContainerId,
+  source: agentLogs.source,
   stream: agentLogs.stream,
   level: agentLogs.level,
   message: agentLogs.message,
+  metadata: agentLogs.metadata,
   sequence: agentLogs.sequence,
   createdAt: agentLogs.createdAt,
 };
@@ -232,9 +238,12 @@ export async function generateSimulatedRuntimeLogsForRunningAgent(input: {
         agentId: input.agentId,
         runnerId: null,
         localRunnerProcessId: null,
+        dockerRunnerContainerId: null,
+        source: "simulator",
         stream: "stdout",
         level: "info",
         message,
+        metadata: {},
         sequence: nextSequence + index,
         createdAt: now,
       })),
@@ -250,9 +259,12 @@ export function mapAgentLogToDto(log: AgentLogRow): AgentLogDto {
     agentId: log.agentId,
     runnerId: log.runnerId,
     localRunnerProcessId: log.localRunnerProcessId,
+    dockerRunnerContainerId: log.dockerRunnerContainerId,
+    source: log.source,
     stream: log.stream,
     level: log.level,
     message: log.message,
+    metadata: log.metadata,
     sequence: log.sequence,
     createdAt: log.createdAt.toISOString(),
   };
