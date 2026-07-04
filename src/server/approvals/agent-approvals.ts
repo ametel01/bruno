@@ -2,7 +2,13 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { isValidAgentId } from "@/src/server/agents/lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentApprovals, agents } from "@/src/server/db/schema";
+import {
+  recordAgentEventInTransaction,
+  type AgentEventTransaction,
+} from "@/src/server/events/agent-events";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
+
+export const APPROVAL_APPROVED_EVENT_TYPE = "approval.approved";
 
 export type PendingApprovalDto = {
   id: string;
@@ -31,10 +37,181 @@ export type AgentApprovalDependencies = {
   createConnection?: () => DatabaseConnection;
 };
 
+export type ApprovalDecisionStatus = "approved" | "denied" | "expired" | "cancelled";
+
+export type ApprovedApprovalDto = {
+  id: string;
+  agentId: string;
+  agentName: string;
+  title: string;
+  status: "approved";
+  resolvedBy: string;
+  resolvedAt: string;
+};
+
+export type ApprovePendingApprovalResult =
+  | {
+      ok: true;
+      approval: ApprovedApprovalDto;
+      event: {
+        type: typeof APPROVAL_APPROVED_EVENT_TYPE;
+      };
+    }
+  | {
+      ok: false;
+      reason:
+        | "missing_approval_id"
+        | "malformed_approval_id"
+        | "approval_not_found"
+        | "approval_already_resolved";
+      status?: ApprovalDecisionStatus;
+    };
+
+type ApprovalDecisionEventWriter = typeof recordAgentEventInTransaction;
+
+export type ApprovePendingApprovalDependencies = AgentApprovalDependencies & {
+  now?: () => Date;
+  recordApprovedEvent?: ApprovalDecisionEventWriter;
+};
+
 export class AgentApprovalPersistenceError extends Error {
   constructor() {
     super("Approval request failed.");
     this.name = "AgentApprovalPersistenceError";
+  }
+}
+
+export async function approvePendingApprovalForDevelopmentUser(
+  approvalId: string,
+  dependencies: ApprovePendingApprovalDependencies = {},
+): Promise<ApprovePendingApprovalResult> {
+  if (approvalId.length === 0) {
+    return {
+      ok: false,
+      reason: "missing_approval_id",
+    };
+  }
+
+  if (!isValidApprovalId(approvalId)) {
+    return {
+      ok: false,
+      reason: "malformed_approval_id",
+    };
+  }
+
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now ?? (() => new Date());
+  const recordApprovedEvent = dependencies.recordApprovedEvent ?? recordAgentEventInTransaction;
+
+  try {
+    return await connection.db.transaction(async (tx) => {
+      const developmentUserId = await getDevelopmentUserId(tx);
+
+      if (!developmentUserId) {
+        return {
+          ok: false as const,
+          reason: "approval_not_found" as const,
+        };
+      }
+
+      const approval = await selectScopedApproval(tx, approvalId, developmentUserId);
+
+      if (!approval) {
+        return {
+          ok: false as const,
+          reason: "approval_not_found" as const,
+        };
+      }
+
+      if (approval.status !== "pending") {
+        return {
+          ok: false as const,
+          reason: "approval_already_resolved" as const,
+          status: approval.status,
+        };
+      }
+
+      const resolvedAt = now();
+      const [updatedApproval] = await tx
+        .update(agentApprovals)
+        .set({
+          status: "approved",
+          resolvedBy: developmentUserId,
+          resolvedAt,
+        })
+        .where(and(eq(agentApprovals.id, approval.id), eq(agentApprovals.status, "pending")))
+        .returning({
+          id: agentApprovals.id,
+          agentId: agentApprovals.agentId,
+          title: agentApprovals.title,
+          status: agentApprovals.status,
+          resolvedBy: agentApprovals.resolvedBy,
+          resolvedAt: agentApprovals.resolvedAt,
+        });
+
+      if (!updatedApproval) {
+        const currentApproval = await selectScopedApproval(tx, approvalId, developmentUserId);
+
+        if (!currentApproval) {
+          return {
+            ok: false as const,
+            reason: "approval_not_found" as const,
+          };
+        }
+
+        if (currentApproval.status !== "pending") {
+          return {
+            ok: false as const,
+            reason: "approval_already_resolved" as const,
+            status: currentApproval.status,
+          };
+        }
+
+        throw new Error("Approval update returned no rows.");
+      }
+
+      if (!updatedApproval.resolvedBy || !updatedApproval.resolvedAt) {
+        throw new Error("Approval update returned an incomplete row.");
+      }
+
+      await recordApprovedEvent(tx, {
+        agentId: approval.agentId,
+        actorUserId: developmentUserId,
+        type: APPROVAL_APPROVED_EVENT_TYPE,
+        message: `Approval "${approval.title}" approved for agent "${approval.agentName}".`,
+        metadata: {
+          approvalId: approval.id,
+          agentId: approval.agentId,
+          previousStatus: "pending",
+          approvalStatus: "approved",
+          decision: "approved",
+          title: approval.title,
+        },
+      });
+
+      return {
+        ok: true as const,
+        approval: {
+          id: updatedApproval.id,
+          agentId: updatedApproval.agentId,
+          agentName: approval.agentName,
+          title: updatedApproval.title,
+          status: "approved" as const,
+          resolvedBy: updatedApproval.resolvedBy,
+          resolvedAt: updatedApproval.resolvedAt.toISOString(),
+        },
+        event: {
+          type: APPROVAL_APPROVED_EVENT_TYPE,
+        },
+      };
+    });
+  } catch {
+    throw new AgentApprovalPersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
   }
 }
 
@@ -243,4 +420,35 @@ function toPendingApprovalDto(
     createdAt: approval.createdAt.toISOString(),
     expiresAt: approval.expiresAt?.toISOString() ?? null,
   };
+}
+
+function isValidApprovalId(approvalId: string): boolean {
+  return isValidAgentId(approvalId);
+}
+
+async function selectScopedApproval(
+  tx: AgentEventTransaction,
+  approvalId: string,
+  developmentUserId: string,
+) {
+  const [row] = await tx
+    .select({
+      id: agentApprovals.id,
+      agentId: agentApprovals.agentId,
+      title: agentApprovals.title,
+      status: agentApprovals.status,
+      agentName: agents.name,
+    })
+    .from(agentApprovals)
+    .innerJoin(agents, eq(agents.id, agentApprovals.agentId))
+    .where(
+      and(
+        eq(agentApprovals.id, approvalId),
+        eq(agents.userId, developmentUserId),
+        isNull(agents.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  return row ?? null;
 }

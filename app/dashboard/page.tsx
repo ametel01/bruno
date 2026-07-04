@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ActivityFeedPanel } from "@/app/_components/activity-feed";
 import { EmptyState, PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
+import { ApprovalActionButton } from "@/app/dashboard/_components/approval-action-button";
 import {
   AgentListPersistenceError,
   listActiveAgentsForDevelopmentUser,
@@ -142,7 +143,7 @@ export function DashboardContent({
             </li>
             <li>Runner provisioning and external integrations are placeholders only.</li>
             <li>
-              Approval decisions, production runners, billing, and secret storage wait for later
+              Deny decisions, production runners, billing, and secret storage wait for later
               milestones.
             </li>
           </ul>
@@ -208,6 +209,7 @@ function PendingApprovalItem({ approval }: { approval: PendingApprovalDto }) {
           </div>
         ) : null}
       </dl>
+      <ApprovalActionButton approvalId={approval.id} />
     </li>
   );
 }
