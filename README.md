@@ -1,6 +1,6 @@
 # AgentBay
 
-AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, and the Milestone 7 pending-approval queue foundation. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, scoped runtime logs, dashboard plus agent-detail pending approvals for local development agents, and fake approval generation for running local-development agents.
+AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, and the Milestone 7 pending-approval queue foundation. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, scoped runtime logs, dashboard plus agent-detail pending approvals for local development agents, dashboard approval controls, and fake approval generation for running local-development agents.
 
 ## Requirements
 
@@ -104,7 +104,7 @@ The `/agents` page contains the current create/list and fake lifecycle workflow:
 
 The dashboard reads active persisted agents from the database. The detail page loads active persisted agent records by ID and returns not found for missing, malformed, or soft-deleted IDs. Delete preserves the `agents` row and existing `agent_events`, but removes the agent from `/agents`, `/dashboard`, and active detail reads.
 
-Agent records are local-development records only. Lifecycle controls, runtime logs, the detail config editor, dashboard plus agent-detail pending approvals panels, and fake approval generation use deterministic database state and local read/write paths, not real runner processes or provider integrations. Approval decisions, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
+Agent records are local-development records only. Lifecycle controls, runtime logs, the detail config editor, dashboard plus agent-detail pending approvals panels, dashboard approval controls, and fake approval generation use deterministic database state and local read/write paths, not real runner processes or provider integrations. Deny decisions, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
 
 ## Agent Detail Config Editor
 
@@ -173,7 +173,7 @@ Validation failures, missing or soft-deleted agents, and persistence failures re
 
 ## Pending Approvals
 
-The dashboard shows pending approval requests persisted in `agent_approvals` for active local-development agents. Each dashboard item displays the agent link, approval title, description, `pending` status, created time, and expiry time when present.
+The dashboard shows pending approval requests persisted in `agent_approvals` for active local-development agents. Each dashboard item displays the agent link, approval title, description, `pending` status, created time, expiry time when present, and an Approve control.
 
 The agent detail page shows pending approval requests for the selected active local-development agent only. Each detail item displays the approval title, description, `pending` status, requester/source, created time, and expiry time when present.
 
@@ -181,9 +181,11 @@ When `GET /api/agents/:agentId/logs` observes an active, non-deleted local-devel
 
 Approval rows store `payload_json` for downstream decision slices, but the dashboard and agent detail page do not render raw payload JSON, database internals, SQL, driver messages, stack traces, credentials, or environment values.
 
-Only `pending` approvals for active, non-deleted agents owned by the local development user appear in approval queues. Resolved approvals with `approved`, `denied`, `expired`, or `cancelled` status, approvals for other agents on a selected detail page, soft-deleted-agent approvals, stopped/non-running-agent approvals, and other-user approvals are excluded from the pending queues or fake generation path. Repeated observations of the same running segment/action do not create duplicate approval rows or duplicate `approval.requested` events.
+`POST /api/approvals/:approvalId/approve` approves one pending approval for an active, non-deleted local-development agent. Success updates only that approval from `pending` to `approved`, records `resolved_by` and `resolved_at`, and writes exactly one `approval.approved` event in the same transaction. Malformed approval IDs return validation JSON, missing or inaccessible approvals return not found JSON, already resolved approvals return a shared `approval_already_resolved` conflict with safe status, and persistence failures return generic safe errors.
 
-Approve and deny routes, decision controls, and decision event writes are future Milestone 7 slices.
+Only `pending` approvals for active, non-deleted agents owned by the local development user appear in approval queues. Resolved approvals with `approved`, `denied`, `expired`, or `cancelled` status, approvals for other agents on a selected detail page, soft-deleted-agent approvals, stopped/non-running-agent approvals, and other-user approvals are excluded from the pending queues or fake generation path. Repeated observations of the same running segment/action do not create duplicate approval rows or duplicate `approval.requested` events. Repeated approval attempts against an already resolved approval do not create duplicate `approval.approved` events.
+
+Deny routes, Deny controls, and `approval.denied` event writes are future Milestone 7 slices.
 
 ## Lifecycle APIs
 

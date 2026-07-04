@@ -6,7 +6,9 @@ import {
   createAgentForDevelopmentUser,
 } from "@/src/server/agents/create-agent";
 import {
+  APPROVAL_APPROVED_EVENT_TYPE,
   AgentApprovalPersistenceError,
+  approvePendingApprovalForDevelopmentUser,
   createPendingApprovalForDevelopmentUser,
   listPendingApprovalsForDevelopmentUserAgent,
   listPendingApprovalsForDevelopmentUser,
@@ -452,6 +454,362 @@ describe("create agent persistence", () => {
     const persistedRows = await connection.db.select().from(agentApprovals);
 
     expect(persistedRows).toHaveLength(1);
+  });
+
+  it("approves one pending approval and writes one safe approval-approved event atomically", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Approval Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const approval = await createTestApproval(
+      connection,
+      created.agent.id,
+      "Approve outbound message",
+      "2026-07-04T08:00:00.000Z",
+    );
+    const resolvedAt = new Date("2026-07-04T10:00:00.000Z");
+
+    expect(approval).not.toBeNull();
+    const result = await approvePendingApprovalForDevelopmentUser(approval?.id ?? "", {
+      createConnection: () => connection,
+      now: () => resolvedAt,
+    });
+    const [persistedApproval] = await connection.db
+      .select()
+      .from(agentApprovals)
+      .where(eq(agentApprovals.id, approval?.id ?? ""))
+      .limit(1);
+    const approvedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.type, APPROVAL_APPROVED_EVENT_TYPE));
+
+    expect(result).toMatchObject({
+      ok: true,
+      approval: {
+        id: approval?.id,
+        agentId: created.agent.id,
+        agentName: "Approval Agent",
+        title: "Approve outbound message",
+        status: "approved",
+        resolvedBy: created.agent.userId,
+        resolvedAt: "2026-07-04T10:00:00.000Z",
+      },
+      event: {
+        type: APPROVAL_APPROVED_EVENT_TYPE,
+      },
+    });
+    expect(persistedApproval).toMatchObject({
+      id: approval?.id,
+      agentId: created.agent.id,
+      title: "Approve outbound message",
+      description: "Approve outbound message description",
+      status: "approved",
+      payloadJson: { action: "Approve outbound message" },
+      requestedBy: "test-runner",
+      resolvedBy: created.agent.userId,
+      createdAt: new Date("2026-07-04T08:00:00.000Z"),
+      resolvedAt,
+    });
+    expect(approvedEvents).toHaveLength(1);
+    expect(approvedEvents[0]).toMatchObject({
+      agentId: created.agent.id,
+      actorUserId: created.agent.userId,
+      type: APPROVAL_APPROVED_EVENT_TYPE,
+      message: 'Approval "Approve outbound message" approved for agent "Approval Agent".',
+      metadata: {
+        approvalId: approval?.id,
+        agentId: created.agent.id,
+        previousStatus: "pending",
+        approvalStatus: "approved",
+        decision: "approved",
+        title: "Approve outbound message",
+      },
+    });
+    expect(JSON.stringify(approvedEvents[0]?.metadata)).not.toContain("payload_json");
+    expect(JSON.stringify(approvedEvents[0]?.metadata)).not.toContain("stored-for-downstream");
+  });
+
+  it("returns validation and not-found results without touching approval rows", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Approval Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const approval = await createTestApproval(
+      connection,
+      created.agent.id,
+      "Untouched approval",
+      "2026-07-04T08:00:00.000Z",
+    );
+    const beforeRows = await connection.db.select().from(agentApprovals);
+
+    await expect(
+      approvePendingApprovalForDevelopmentUser("", { createConnection: () => connection }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "missing_approval_id",
+    });
+    await expect(
+      approvePendingApprovalForDevelopmentUser("not-a-uuid", {
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "malformed_approval_id",
+    });
+    await expect(
+      approvePendingApprovalForDevelopmentUser("00000000-0000-4000-8000-000000000999", {
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "approval_not_found",
+    });
+
+    const afterRows = await connection.db.select().from(agentApprovals);
+
+    expect(afterRows).toEqual(beforeRows);
+    expect(afterRows[0]).toMatchObject({
+      id: approval?.id,
+      status: "pending",
+      resolvedBy: null,
+      resolvedAt: null,
+    });
+    await expect(countAgentEventsByType(connection, APPROVAL_APPROVED_EVENT_TYPE)).resolves.toBe(0);
+  });
+
+  it("does not approve other-user or soft-deleted-agent approvals", async () => {
+    const selected = await createAgentForDevelopmentUser(
+      { name: "Selected Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const deleted = await createAgentForDevelopmentUser(
+      { name: "Deleted Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const [otherUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+    const [otherUserAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId: otherUser?.id ?? "",
+        name: "Other User Agent",
+        templateKey: "research_agent",
+        status: "stopped",
+      })
+      .returning({ id: agents.id });
+    const [selectedApproval] = await connection.db
+      .insert(agentApprovals)
+      .values({
+        agentId: selected.agent.id,
+        title: "Selected approval",
+        description: "Selected approval description",
+        status: "pending",
+        payloadJson: { action: "selected" },
+        requestedBy: "test-runner",
+      })
+      .returning({ id: agentApprovals.id });
+    const [deletedApproval] = await connection.db
+      .insert(agentApprovals)
+      .values({
+        agentId: deleted.agent.id,
+        title: "Deleted approval",
+        description: "Deleted approval description",
+        status: "pending",
+        payloadJson: { action: "deleted" },
+        requestedBy: "test-runner",
+      })
+      .returning({ id: agentApprovals.id });
+    const [otherUserApproval] = await connection.db
+      .insert(agentApprovals)
+      .values({
+        agentId: otherUserAgent?.id ?? "",
+        title: "Other-user approval",
+        description: "Other-user approval description",
+        status: "pending",
+        payloadJson: { action: "other-user" },
+        requestedBy: "test-runner",
+      })
+      .returning({ id: agentApprovals.id });
+
+    await connection.db
+      .update(agents)
+      .set({ deletedAt: new Date("2026-07-04T09:00:00.000Z") })
+      .where(eq(agents.id, deleted.agent.id));
+
+    await expect(
+      approvePendingApprovalForDevelopmentUser(deletedApproval?.id ?? "", {
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "approval_not_found",
+    });
+    await expect(
+      approvePendingApprovalForDevelopmentUser(otherUserApproval?.id ?? "", {
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "approval_not_found",
+    });
+    await expect(
+      approvePendingApprovalForDevelopmentUser(selectedApproval?.id ?? "", {
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      approval: {
+        status: "approved",
+      },
+    });
+
+    const persistedRows = await connection.db
+      .select({
+        id: agentApprovals.id,
+        status: agentApprovals.status,
+        resolvedBy: agentApprovals.resolvedBy,
+      })
+      .from(agentApprovals)
+      .orderBy(agentApprovals.title);
+
+    expect(persistedRows).toEqual([
+      { id: deletedApproval?.id, status: "pending", resolvedBy: null },
+      { id: otherUserApproval?.id, status: "pending", resolvedBy: null },
+      { id: selectedApproval?.id, status: "approved", resolvedBy: selected.agent.userId },
+    ]);
+    await expect(countAgentEventsByType(connection, APPROVAL_APPROVED_EVENT_TYPE)).resolves.toBe(1);
+  });
+
+  it("returns a stable conflict and does not duplicate approval-approved events", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Approval Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const approval = await createTestApproval(
+      connection,
+      created.agent.id,
+      "Already approved",
+      "2026-07-04T08:00:00.000Z",
+    );
+
+    await expect(
+      approvePendingApprovalForDevelopmentUser(approval?.id ?? "", {
+        createConnection: () => connection,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      approval: {
+        status: "approved",
+      },
+    });
+    await expect(
+      approvePendingApprovalForDevelopmentUser(approval?.id ?? "", {
+        createConnection: () => connection,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "approval_already_resolved",
+      status: "approved",
+    });
+    await expect(countAgentEventsByType(connection, APPROVAL_APPROVED_EVENT_TYPE)).resolves.toBe(1);
+  });
+
+  it("returns a stable conflict when two approval requests race the same pending row", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Approval Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const approval = await createTestApproval(
+      connection,
+      created.agent.id,
+      "Racing approval",
+      "2026-07-04T08:00:00.000Z",
+    );
+    let releaseFirstEvent!: () => void;
+    let firstEventStarted!: () => void;
+    const firstEventStartedPromise = new Promise<void>((resolve) => {
+      firstEventStarted = resolve;
+    });
+    const releaseFirstEventPromise = new Promise<void>((resolve) => {
+      releaseFirstEvent = resolve;
+    });
+    const firstConnection = createDatabaseConnection();
+    const secondConnection = createDatabaseConnection();
+
+    try {
+      const firstApproval = approvePendingApprovalForDevelopmentUser(approval?.id ?? "", {
+        createConnection: () => firstConnection,
+        recordApprovedEvent: async (tx, event) => {
+          firstEventStarted();
+          await releaseFirstEventPromise;
+          await recordAgentEventInTransaction(tx, event);
+        },
+      });
+
+      await firstEventStartedPromise;
+
+      const secondApproval = approvePendingApprovalForDevelopmentUser(approval?.id ?? "", {
+        createConnection: () => secondConnection,
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      releaseFirstEvent();
+
+      await expect(firstApproval).resolves.toMatchObject({
+        ok: true,
+        approval: {
+          status: "approved",
+        },
+      });
+      await expect(secondApproval).resolves.toEqual({
+        ok: false,
+        reason: "approval_already_resolved",
+        status: "approved",
+      });
+      await expect(countAgentEventsByType(connection, APPROVAL_APPROVED_EVENT_TYPE)).resolves.toBe(
+        1,
+      );
+    } finally {
+      await firstConnection.close();
+      await secondConnection.close();
+    }
+  });
+
+  it("rolls back the approval update when approval-approved event writing fails", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Rollback Approval Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const approval = await createTestApproval(
+      connection,
+      created.agent.id,
+      "Rollback outbound message",
+      "2026-07-04T08:00:00.000Z",
+    );
+
+    await expect(
+      approvePendingApprovalForDevelopmentUser(approval?.id ?? "", {
+        createConnection: () => connection,
+        now: () => new Date("2026-07-04T10:00:00.000Z"),
+        recordApprovedEvent: async () => {
+          throw new Error("synthetic event failure");
+        },
+      }),
+    ).rejects.toBeInstanceOf(AgentApprovalPersistenceError);
+
+    const [persistedApproval] = await connection.db
+      .select()
+      .from(agentApprovals)
+      .where(eq(agentApprovals.id, approval?.id ?? ""))
+      .limit(1);
+
+    expect(persistedApproval).toMatchObject({
+      id: approval?.id,
+      status: "pending",
+      resolvedBy: null,
+      resolvedAt: null,
+    });
+    await expect(countAgentEventsByType(connection, APPROVAL_APPROVED_EVENT_TYPE)).resolves.toBe(0);
   });
 
   it("returns safe generic approval persistence errors without driver details or payload internals", async () => {

@@ -2,15 +2,15 @@
 
 ## Milestone 7 Approval Queue
 
-- Status: complete for #59/#62/#63; #60/#61/#64 remain pending
+- Status: complete for #59/#60/#62/#63; #61/#64 remain pending
 - Source plan: `docs/MILESTONES.md` Milestone 7
 - Tracking issues: #59-#64
-- Current branch: `codex/issue-63-fake-running-approvals`
+- Current branch: `codex/issue-60-approve-approvals`
 
 ### Issue Checklist
 
 - [x] #59 Show pending approvals on the dashboard
-- [ ] #60 Approve pending approvals end to end
+- [x] #60 Approve pending approvals end to end
 - [ ] #61 Deny pending approvals end to end
 - [x] #62 Show pending approvals on agent detail
 - [x] #63 Generate fake approvals for running agents
@@ -26,6 +26,11 @@
 - [x] #59 renders a dashboard pending approvals panel from persisted data with agent identity/link, title, description, status, created time, and expiry when present.
 - [x] #59 keeps raw `payload_json`, database internals, SQL, driver messages, stack traces, credentials, and environment values out of dashboard output and safe persistence errors.
 - [x] #59 updates README and CHANGELOG to describe the dashboard pending approval queue as present behavior while leaving the remaining Milestone 7 slices to #60-#64.
+- [x] #60 adds `POST /api/approvals/:approvalId/approve` with safe validation, not-found, conflict, success, and persistence-failure JSON responses.
+- [x] #60 transactionally resolves one pending local-development approval to `approved`, records `resolved_by` and `resolved_at`, and writes exactly one `approval.approved` event with safe approval/agent metadata.
+- [x] #60 rolls back the approval update when approval-approved event writing fails, and repeated approval attempts return `approval_already_resolved` without duplicate decision events.
+- [x] #60 adds a dashboard Approve control that posts only through the approve route, keeps safe error text on failures, refreshes after success, and removes the resolved row from the pending queue.
+- [x] #60 documents the shared already-resolved conflict shape for #61/#64 as HTTP 409 with `approval_already_resolved` and safe current status.
 - [x] #62 adds an agent-scoped pending approval read helper for the selected active local-development agent.
 - [x] #62 renders a read-only agent-detail pending approvals panel with title, description, `pending` status, requester/source, created time, optional expiry, empty state, and safe error state.
 - [x] #62 keeps resolved approvals, other-agent approvals, soft-deleted-agent approvals, and other-user approvals out of the selected detail page.
@@ -39,6 +44,35 @@
 - [x] #63 keeps approve/deny routes, decision controls/events, and agent-detail approval sections out of scope for #60/#61/#62.
 
 ### Validation
+
+#### #60
+
+- Date: 2026-07-04
+- Environment:
+  - Default Postgres port `54329` was occupied by local Docker listener `com.docke` PID `53372`.
+  - Default app port `3000` was occupied by local `node` process `60238`.
+  - Isolated database: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54360/agentbay`.
+  - Isolated app/test server: `PORT=3060`, `PLAYWRIGHT_BASE_URL=http://localhost:3060`, `NEXT_PUBLIC_APP_URL=http://localhost:3060`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree had no local `node_modules`.
+  - `docker info --format '{{.ServerVersion}}'`: pass; Docker daemon reachable with server version `29.3.1`.
+  - `docker run --name agentbay_issue_60-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54360:5432 -d postgres:17-alpine`: pass; started isolated Postgres because default port was occupied.
+  - `docker exec agentbay_issue_60-postgres pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54360/agentbay bun run db:migrate`: pass; migrations applied successfully against the isolated database.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54360/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3060 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+- Focused checks:
+  - `bun run test -- tests/unit/create-agent-db.test.ts tests/unit/approve-approval-route.test.ts tests/unit/root-page.test.tsx`: pass with isolated DB/app env; 3 files and 86 tests passed. Covers approve success, malformed ID, not found/inaccessible approvals, already resolved conflict, duplicate event prevention, event-write rollback, safe route response mapping, dashboard Approve control rendering, and safe dashboard error state.
+  - `bun run test:e2e -- --project=chromium-desktop -g "approve"`: pass with isolated DB/app env; 2 Chromium desktop tests passed. Covers dashboard approve success, pending-row removal after refresh, `approval.approved` activity evidence, and safe client failure text that leaves the pending row readable.
+- Required gates:
+  - `bun run format:check`: pass; Biome checked 73 files.
+  - `bun run lint`: pass; Biome checked 73 files.
+  - `bun run typecheck`: pass.
+  - `bun run test`: pass with isolated DB/app env; 19 files and 162 tests passed.
+  - `bun run build`: pass; Next.js build completed and included `/api/approvals/[approvalId]/approve` and `/dashboard`.
+  - `bun run test:e2e`: pass with isolated DB/app env; 28 browser tests passed with 8 expected skips.
+  - `bun run verify`: pass with isolated DB/app env; aggregate format, lint, typecheck, unit test, build, and E2E gates passed with 162 unit tests and 28 E2E passed / 8 expected skips.
+- Reconciliation:
+  - The first full E2E run exposed the existing fake-approval proof could still race with parallel tests over the shared local-development-user pointer between pinning and logs-route observation. The test now pins inside a bounded retry around the logs read; focused fake-approval proof and full E2E both passed afterward.
 
 #### #63
 
