@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ActivityFeedPanel } from "@/app/_components/activity-feed";
 import { EmptyState, PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import {
@@ -6,7 +7,7 @@ import {
   listActiveAgentsForDevelopmentUser,
 } from "@/src/server/agents/list-agents";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { type AgentEventDto, listLatestAgentActivity } from "@/src/server/events/agent-events";
+import { listLatestAgentActivity } from "@/src/server/events/agent-events";
 
 type DashboardContentProps = {
   routeLabel?: string;
@@ -91,30 +92,16 @@ export function DashboardContent({
             </div>
           )}
         </section>
-        <section className="activity-feed-panel" aria-labelledby="dashboard-activity-title">
-          <div className="section-heading">
-            <h2 id="dashboard-activity-title">Latest activity</h2>
-            {activityResult.ok ? <span>{activityResult.events.length} shown</span> : null}
-          </div>
-          {activityResult.ok ? (
-            activityResult.events.length > 0 ? (
-              <ol className="activity-feed">
-                {activityResult.events.map((event) => (
-                  <ActivityFeedItem event={event} key={event.id} />
-                ))}
-              </ol>
-            ) : (
-              <div className="activity-empty-state">
-                <h3>No activity yet</h3>
-                <p>Create or update an agent to show the newest persisted activity here.</p>
-              </div>
-            )
-          ) : (
-            <div className="safe-error" role="alert">
-              Latest activity could not be loaded.
-            </div>
-          )}
-        </section>
+        <ActivityFeedPanel
+          context={{ kind: "dashboard" }}
+          emptyDescription="Create or update an agent to show the newest persisted activity here."
+          emptyTitle="No activity yet"
+          errorMessage="Latest activity could not be loaded."
+          events={activityResult.ok ? activityResult.events : []}
+          hasError={!activityResult.ok}
+          title="Latest activity"
+          titleId="dashboard-activity-title"
+        />
         <PlaceholderPanel title="Readiness">
           <dl className="definition-list">
             <div>
@@ -140,55 +127,6 @@ export function DashboardContent({
         </PlaceholderPanel>
       </div>
     </ProductShell>
-  );
-}
-
-function ActivityFeedItem({ event }: { event: AgentEventDto }) {
-  const agent = event.agent;
-  const agentDeleted = Boolean(agent?.deletedAt);
-  const agentLabel = agent?.name ?? event.agentId;
-
-  return (
-    <li className="activity-feed-item">
-      <div className="activity-feed-header">
-        <div className="activity-agent-context">
-          {agent && !agentDeleted ? (
-            <Link href={`/agents/${agent.id}`}>{agentLabel}</Link>
-          ) : (
-            <span>{agentLabel}</span>
-          )}
-          {agentDeleted ? <span className="deleted-agent-pill">Deleted agent</span> : null}
-        </div>
-        <time dateTime={event.createdAt}>{event.createdAt}</time>
-      </div>
-      <p className="activity-message">{event.message}</p>
-      <dl className="activity-metadata">
-        <div>
-          <dt>Type</dt>
-          <dd>
-            <code>{event.type}</code>
-          </dd>
-        </div>
-        <div>
-          <dt>Actor</dt>
-          <dd>{event.actor.displayName}</dd>
-        </div>
-        {agent ? (
-          <div>
-            <dt>Agent</dt>
-            <dd>
-              {agent.templateKey} / {agent.status}
-            </dd>
-          </div>
-        ) : null}
-        {event.metadataSummary ? (
-          <div>
-            <dt>Metadata</dt>
-            <dd>{event.metadataSummary}</dd>
-          </div>
-        ) : null}
-      </dl>
-    </li>
   );
 }
 

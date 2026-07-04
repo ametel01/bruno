@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 
 const createdAgentIds = new Set<string>();
@@ -118,16 +119,56 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   expect(agentHref).not.toBeNull();
   await page.goto(agentHref ?? "/agents/missing");
   await expect(page.getByRole("heading", { name })).toBeVisible();
-  await expect(page.getByText("stopped")).toBeVisible();
-  await expect(page.getByText("research_agent")).toBeVisible();
-  await expect(page.getByText("Created")).toBeVisible();
-  await expect(page.getByText("Updated")).toBeVisible();
+  const detailRecord = page.locator(".placeholder-panel").filter({ hasText: "Agent record" });
+  await expect(detailRecord.locator(".status-pill", { hasText: "stopped" })).toBeVisible();
+  await expect(detailRecord).toContainText("research_agent");
+  await expect(detailRecord).toContainText("Created");
+  await expect(detailRecord).toContainText("Updated");
   await expect(page.getByRole("button", { name: "Start" })).toBeVisible();
+  let detailActivity = page.locator(".activity-feed-panel");
+  await expect(detailActivity).toContainText("Activity");
+  await expect(detailActivity).toContainText("agent.created");
+  await expect(detailActivity).toContainText(`Created agent "${name}".`);
+  await expect(detailActivity).toContainText("agent.start_requested");
+  await expect(detailActivity).toContainText("agent.restart_completed");
+  await expect(detailActivity).toContainText("agent.stop_completed");
+  await expect(detailActivity).toContainText("Local development user");
+  await expect(detailActivity).toContainText("Template: research_agent; Status: stopped");
+  await expect(detailActivity).not.toContainText("actorUserId");
 
   await page.reload();
 
   await expect(page.getByRole("heading", { name })).toBeVisible();
   await expect(page.locator(".status-pill", { hasText: "stopped" })).toBeVisible();
+  await page.getByRole("button", { name: "Start" }).click();
+  await expect(page.getByRole("status")).toContainText("Start requested.");
+  await expect(page.locator(".status-pill", { hasText: "running" })).toBeVisible({
+    timeout: 5_000,
+  });
+  detailActivity = page.locator(".activity-feed-panel");
+  await expect(detailActivity).toContainText("agent.start_requested");
+  await expect(detailActivity).toContainText("agent.start_completed");
+  await expect(detailActivity).toContainText(`Start completed for agent "${name}".`);
+  await expect(page.getByRole("button", { name: "Restart" })).toBeVisible();
+  await page.getByRole("button", { name: "Restart" }).click();
+  await expect(page.getByRole("status")).toContainText("Restart requested.");
+  await expect(page.locator(".status-pill", { hasText: "restarting" })).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(page.locator(".status-pill", { hasText: "running" })).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(detailActivity).toContainText("agent.restart_requested");
+  await expect(detailActivity).toContainText("agent.restart_completed");
+  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
+  await page.getByRole("button", { name: "Stop" }).click();
+  await expect(page.locator(".status-pill", { hasText: "stopped" })).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(detailActivity).toContainText("agent.stop_requested");
+  await expect(detailActivity).toContainText("agent.stop_completed");
+  await expect(detailActivity.getByRole("link", { name: "Older activity" })).toBeVisible();
+  await expectPageNotHorizontallyOverflowing(page);
   await expect(page.getByRole("button", { name: "Delete" })).toBeVisible();
   await page.getByRole("button", { name: "Delete" }).click();
 
@@ -143,10 +184,37 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   await expect(dashboardActivity).toContainText("Deleted agent");
 
   expect(agentHref).not.toBeNull();
-  const deletedDetailResponse = await page.goto(agentHref ?? "/agents/missing");
-
-  expect(deletedDetailResponse?.status()).toBe(404);
+  await page.goto(agentHref ?? "/agents/missing");
+  await expectNotFoundPage(page);
   await expect(page.locator("body")).not.toContainText(name);
+});
+
+test("/agents detail activity feed wraps on mobile without horizontal overflow", async ({
+  isMobile,
+  page,
+  request,
+}, testInfo) => {
+  test.skip(!isMobile, "mobile wrapping check runs on the mobile project");
+
+  const name = `Mobile Activity Agent ${testInfo.project.name}`;
+  const createResponse = await request.post("/api/agents", {
+    data: {
+      name,
+      templateKey: "research_agent",
+    },
+  });
+  expect(createResponse.status()).toBe(201);
+  const created = (await createResponse.json()) as { agent: { id: string } };
+  createdAgentIds.add(created.agent.id);
+
+  await page.goto(`/agents/${created.agent.id}`);
+
+  const detailActivity = page.locator(".activity-feed-panel");
+  await expect(page.getByRole("heading", { name })).toBeVisible();
+  await expect(detailActivity).toContainText("agent.created");
+  await expect(detailActivity).toContainText(`Created agent "${name}".`);
+  await expect(detailActivity).toContainText("Template: research_agent; Status: stopped");
+  await expectPageNotHorizontallyOverflowing(page);
 });
 
 test("/agents shows safe client validation for invalid create input", async ({ page }) => {
@@ -162,14 +230,12 @@ test("/agents detail returns not found for missing, malformed, and soft-deleted 
   page,
   request,
 }, testInfo) => {
-  const missingResponse = await page.goto("/agents/00000000-0000-4000-8000-000000000000");
-
-  expect(missingResponse?.status()).toBe(404);
+  await page.goto(`/agents/${randomUUID()}`);
+  await expectNotFoundPage(page);
   await expect(page.locator("body")).not.toContainText("No record lookup is performed");
 
-  const malformedResponse = await page.goto("/agents/not-a-uuid");
-
-  expect(malformedResponse?.status()).toBe(404);
+  await page.goto("/agents/not-a-uuid");
+  await expectNotFoundPage(page);
   await expect(page.locator("body")).not.toContainText("No record lookup is performed");
 
   const createResponse = await request.post("/api/agents", {
@@ -184,9 +250,8 @@ test("/agents detail returns not found for missing, malformed, and soft-deleted 
 
   await markAgentDeleted(created.agent.id);
 
-  const deletedResponse = await page.goto(`/agents/${created.agent.id}`);
-
-  expect(deletedResponse?.status()).toBe(404);
+  await page.goto(`/agents/${created.agent.id}`);
+  await expectNotFoundPage(page);
   await expect(page.locator("body")).not.toContainText("Soft Deleted Agent");
   await expect(page.locator("body")).not.toContainText("No record lookup is performed");
 });
@@ -210,6 +275,20 @@ async function deleteCreatedAgents(agentIds: string[]): Promise<void> {
     await sql`delete from agent_events where agent_id in ${sql(agentIds)}`;
     await sql`delete from agents where id in ${sql(agentIds)}`;
   });
+}
+
+async function expectNotFoundPage(page: Page): Promise<void> {
+  await expect(page.getByRole("heading", { name: "404" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "This page could not be found." })).toBeVisible();
+}
+
+async function expectPageNotHorizontallyOverflowing(page: Page): Promise<void> {
+  const dimensions = await page.evaluate(() => ({
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: document.documentElement.clientWidth,
+  }));
+
+  expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
 }
 
 async function withDatabase(run: (sql: postgres.Sql) => Promise<void>): Promise<void> {

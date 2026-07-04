@@ -6,11 +6,13 @@ import AgentsPage from "@/app/agents/page";
 import DashboardPage, { DashboardContent } from "@/app/dashboard/page";
 import Home from "@/app/page";
 import SettingsPage from "@/app/settings/page";
+import type { AgentEventDto } from "@/src/server/events/agent-events";
 
 const mocks = vi.hoisted(() => ({
   closeDashboardConnection: vi.fn(),
   createDatabaseConnection: vi.fn(),
   getActiveAgentForDevelopmentUser: vi.fn(),
+  listAgentEventFeed: vi.fn(),
   listLatestAgentActivity: vi.fn(),
   listActiveAgentsForDevelopmentUser: vi.fn(),
   notFound: vi.fn(() => {
@@ -37,6 +39,7 @@ vi.mock("@/src/server/events/agent-events", async (importOriginal) => {
 
   return {
     ...actual,
+    listAgentEventFeed: mocks.listAgentEventFeed,
     listLatestAgentActivity: mocks.listLatestAgentActivity,
   };
 });
@@ -62,12 +65,20 @@ describe("product shell routes", () => {
         nextCursor: null,
       },
     });
+    mocks.listAgentEventFeed.mockResolvedValue({
+      ok: true,
+      page: {
+        events: [],
+        nextCursor: null,
+      },
+    });
   });
 
   afterEach(() => {
     mocks.closeDashboardConnection.mockReset();
     mocks.createDatabaseConnection.mockReset();
     mocks.getActiveAgentForDevelopmentUser.mockReset();
+    mocks.listAgentEventFeed.mockReset();
     mocks.listLatestAgentActivity.mockReset();
     mocks.listActiveAgentsForDevelopmentUser.mockReset();
     mocks.notFound.mockClear();
@@ -280,18 +291,10 @@ describe("product shell routes", () => {
     expect(html).not.toContain("Agent list failed.");
   });
 
-  it("renders persisted agent detail records", async () => {
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce({
-      id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
-      name: "Research Agent",
-      templateKey: "research_agent",
-      templateLabel: "Research Agent",
-      status: "stopped",
-      statusReason: "Waiting for setup.",
-      href: "/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774",
-      createdAt: "2026-07-03T05:00:00.000Z",
-      updatedAt: "2026-07-03T05:30:00.000Z",
-    });
+  it("renders persisted agent detail records with the empty activity state", async () => {
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(
+      detailAgent({ statusReason: "Waiting for setup." }),
+    );
     const element = await AgentDetailPage({
       params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
     });
@@ -303,7 +306,123 @@ describe("product shell routes", () => {
     expect(html).toContain("2026-07-03T05:00:00.000Z");
     expect(html).toContain("2026-07-03T05:30:00.000Z");
     expect(html).toContain("Waiting for setup.");
+    expect(html).toContain("Activity");
+    expect(html).toContain("No activity yet");
+    expect(html).toContain("0 shown");
     expect(html).not.toContain("No record lookup is performed");
+    expect(mocks.listAgentEventFeed).toHaveBeenCalledWith({
+      db: {},
+      agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+      cursor: null,
+      limit: 10,
+    });
+    expect(mocks.closeDashboardConnection).toHaveBeenCalledOnce();
+  });
+
+  it("renders agent detail activity newest-first with safe event fields and pagination", async () => {
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
+    mocks.listAgentEventFeed.mockResolvedValueOnce({
+      ok: true,
+      page: {
+        events: [
+          activityEvent({
+            id: "00000000-0000-4000-8000-000000000303",
+            type: "agent.stop_completed",
+            message: 'Stop completed for agent "Research Agent".',
+            metadata: {
+              fromStatus: "running",
+              toStatus: "stopped",
+              internalNote: "raw value should not render without summary",
+            },
+            metadataSummary: "running -> stopped",
+            createdAt: "2026-07-04T06:10:00.000Z",
+          }),
+          activityEvent({
+            id: "00000000-0000-4000-8000-000000000301",
+            type: "agent.created",
+            message: 'Created agent "Research Agent".',
+            metadata: {
+              templateKey: "research_agent",
+              status: "stopped",
+            },
+            metadataSummary: "Template: research_agent; Status: stopped",
+            createdAt: "2026-07-04T05:00:00.000Z",
+          }),
+        ],
+        nextCursor: "next cursor",
+      },
+    });
+    const element = await AgentDetailPage({
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+    });
+    const html = renderToStaticMarkup(element);
+
+    expect(html.indexOf("Stop completed for agent")).toBeLessThan(html.indexOf("Created agent"));
+    expect(html).toContain("agent.stop_completed");
+    expect(html).toContain("agent.created");
+    expect(html).toContain("Jane Operator");
+    expect(html).toContain("running -&gt; stopped");
+    expect(html).toContain("Template: research_agent; Status: stopped");
+    expect(html).toContain(
+      'href="/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774?activityCursor=next%20cursor"',
+    );
+    expect(html).toContain("Older activity");
+    expect(html).not.toContain("actorUserId");
+    expect(html).not.toContain("00000000-0000-4000-8000-000000000101");
+    expect(html).not.toContain("raw value should not render without summary");
+  });
+
+  it("renders older detail activity pagination with a newest-page link", async () => {
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
+    mocks.listAgentEventFeed.mockResolvedValueOnce({
+      ok: true,
+      page: {
+        events: [],
+        nextCursor: null,
+      },
+    });
+    const element = await AgentDetailPage({
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+      searchParams: Promise.resolve({ activityCursor: "older-cursor" }),
+    });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("No older activity");
+    expect(html).toContain("There are no older persisted events for this agent.");
+    expect(html).toContain('href="/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774"');
+    expect(html).toContain("Newest activity");
+    expect(mocks.listAgentEventFeed).toHaveBeenCalledWith({
+      db: {},
+      agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+      cursor: "older-cursor",
+      limit: 10,
+    });
+  });
+
+  it("keeps the detail record visible when activity cannot be loaded", async () => {
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
+    mocks.listAgentEventFeed.mockRejectedValueOnce(new Error("postgres://user:pass@localhost/db"));
+    const element = await AgentDetailPage({
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+    });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Research Agent");
+    expect(html).toContain("Agent activity could not be loaded.");
+    expect(html).not.toContain("postgres://");
+  });
+
+  it("renders a safe detail activity error for repeated cursor parameters", async () => {
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
+    const element = await AgentDetailPage({
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+      searchParams: Promise.resolve({ activityCursor: ["first", "second"] }),
+    });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Research Agent");
+    expect(html).toContain("Agent activity could not be loaded.");
+    expect(mocks.listAgentEventFeed).not.toHaveBeenCalled();
   });
 
   it("renders not found when agent detail lookup has no active record", async () => {
@@ -340,3 +459,47 @@ describe("product shell routes", () => {
     );
   });
 });
+
+type DetailAgent = {
+  id: string;
+  name: string;
+  templateKey: string;
+  templateLabel: string;
+  status: string;
+  statusReason: string | null;
+  href: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function detailAgent(overrides: Partial<DetailAgent> = {}): DetailAgent {
+  return {
+    id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+    name: "Research Agent",
+    templateKey: "research_agent",
+    templateLabel: "Research Agent",
+    status: "stopped",
+    statusReason: null,
+    href: "/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774",
+    createdAt: "2026-07-03T05:00:00.000Z",
+    updatedAt: "2026-07-03T05:30:00.000Z",
+    ...overrides,
+  };
+}
+
+function activityEvent(overrides: Partial<AgentEventDto> = {}): AgentEventDto {
+  return {
+    id: "00000000-0000-4000-8000-000000000301",
+    agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+    actor: {
+      userId: "00000000-0000-4000-8000-000000000101",
+      displayName: "Jane Operator",
+    },
+    type: "agent.created",
+    message: 'Created agent "Research Agent".',
+    metadata: {},
+    metadataSummary: null,
+    createdAt: "2026-07-04T05:00:00.000Z",
+    ...overrides,
+  };
+}
