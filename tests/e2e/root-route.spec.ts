@@ -710,6 +710,95 @@ test("/agents mobile list exposes status controls without horizontal overflow", 
   await expectPageNotHorizontallyOverflowing(page);
 });
 
+test("core mobile control routes stay readable without horizontal page overflow", async ({
+  isMobile,
+  page,
+  request,
+}, testInfo) => {
+  test.skip(!isMobile, "core mobile layout hardening proof runs on the mobile project");
+
+  const name = `Mobile Hardening Agent ${testInfo.project.name} ${"long-name-".repeat(8)}`;
+  const approvalTitle = `Review mobile hardening approval ${"approval-id-".repeat(10)}`;
+  const created = await createAgent(request, name, "social_content_agent");
+  createdAgentIds.add(created.id);
+
+  await pinDevelopmentUserToAgent(created.id);
+  await markAgentErrored(
+    created.id,
+    `Mobile hardening status reason ${"reason-fragment-".repeat(14)} should wrap.`,
+  );
+  await insertPendingApproval(created.id, {
+    title: approvalTitle,
+    description: `Approve this phone-sized control review with ${"description-fragment-".repeat(
+      10,
+    )} and keep the action buttons reachable.`,
+    createdAt: "2026-07-04T14:15:00.000Z",
+    expiresAt: "2026-07-04T14:45:00.000Z",
+  });
+  await insertAgentEvent(created.id, {
+    type: "agent.error",
+    message: `Agent failed during mobile hardening ${"event-fragment-".repeat(12)}.`,
+  });
+  await insertRuntimeLog(
+    created.id,
+    `Runtime log line for mobile hardening ${"log-fragment-".repeat(18)} remains readable.`,
+  );
+
+  for (const viewport of [
+    { width: 375, height: 667 },
+    { width: 360, height: 740 },
+  ]) {
+    await page.setViewportSize(viewport);
+
+    await page.goto("/agents");
+    const agentsPanel = page.locator(".agent-list-panel");
+    const agentsMobileCard = agentsPanel.locator(".mobile-agent-card", { hasText: name });
+    await expect(agentsMobileCard.getByRole("link", { name })).toHaveAttribute(
+      "href",
+      `/agents/${created.id}`,
+    );
+    await expect(agentsMobileCard).toContainText("social_content_agent");
+    await expect(agentsMobileCard).toContainText(created.id);
+    await expect(agentsMobileCard.locator(".status-pill", { hasText: "error" })).toBeVisible();
+    await expect(agentsMobileCard.getByRole("button", { name: "Resume" })).toBeVisible();
+    await expect(agentsMobileCard.getByRole("button", { name: "Delete" })).toHaveCount(0);
+    await expectPageNotHorizontallyOverflowing(page);
+
+    await page.goto("/dashboard");
+    const dashboardAgentCard = page
+      .locator(".agent-list-panel")
+      .locator(".mobile-agent-card", { hasText: name });
+    await expect(dashboardAgentCard.getByRole("link", { name })).toHaveAttribute(
+      "href",
+      `/agents/${created.id}`,
+    );
+    await expect(dashboardAgentCard.locator(".status-pill", { hasText: "error" })).toBeVisible();
+    await expect(dashboardAgentCard.getByRole("button", { name: "Resume" })).toBeVisible();
+
+    const dashboardApproval = page.locator(".approval-item", { hasText: approvalTitle });
+    await expect(dashboardApproval).toContainText("Payload summary");
+    await expect(dashboardApproval.getByRole("button", { name: "Approve" })).toBeVisible();
+    await expect(dashboardApproval.getByRole("button", { name: "Deny" })).toBeVisible();
+    await dashboardApproval.getByRole("button", { name: "Approve" }).focus();
+    await expect(dashboardApproval.getByRole("button", { name: "Approve" })).toBeFocused();
+    await expectPageNotHorizontallyOverflowing(page);
+
+    await page.goto(`/agents/${created.id}`);
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+    await expect(
+      page.locator(".placeholder-panel").filter({ hasText: "Agent record" }),
+    ).toContainText("Status reason");
+    await expect(page.locator(".operational-alert-panel")).toContainText("Operational alerts");
+    await expect(page.locator(".operational-alert-panel")).toContainText("Agent is in error");
+    await expect(page.locator(".runtime-log-panel")).toContainText("Latest log summaries");
+    const detailApproval = page.locator(".approval-item", { hasText: approvalTitle });
+    await expect(detailApproval.getByRole("button", { name: "Approve" })).toBeVisible();
+    await detailApproval.getByRole("button", { name: "Deny" }).focus();
+    await expect(detailApproval.getByRole("button", { name: "Deny" })).toBeFocused();
+    await expectPageNotHorizontallyOverflowing(page);
+  }
+});
+
 test.describe
   .serial("mobile approval decisions", () => {
     test("/dashboard mobile approves a pending approval and shows resolved state", async ({

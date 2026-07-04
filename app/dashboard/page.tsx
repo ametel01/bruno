@@ -3,6 +3,7 @@ import { ActivityFeedPanel } from "@/app/_components/activity-feed";
 import { ApprovalDecisionControls } from "@/app/_components/approval-decision-controls";
 import { EmptyState, PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
+import { MobileAgentList } from "@/app/agents/_components/mobile-agent-list";
 import {
   AgentListPersistenceError,
   listActiveAgentsForDevelopmentUser,
@@ -64,38 +65,41 @@ export function DashboardContent({
           </div>
           {listResult.ok ? (
             listResult.agents.length > 0 ? (
-              <div className="agent-table-wrap">
-                <table className="agent-table compact-agent-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Name</th>
-                      <th scope="col">Template</th>
-                      <th scope="col">Status</th>
-                      <th scope="col">Action</th>
-                      <th scope="col">Created</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {listResult.agents.map((agent) => (
-                      <tr key={agent.id}>
-                        <td>
-                          <Link href={agent.href}>{agent.name}</Link>
-                        </td>
-                        <td>{agent.templateLabel}</td>
-                        <td>
-                          <span className="status-pill">{agent.status}</span>
-                        </td>
-                        <td>
-                          <AgentLifecycleControls agentId={agent.id} status={agent.status} />
-                        </td>
-                        <td>
-                          <time dateTime={agent.createdAt}>{agent.createdAt}</time>
-                        </td>
+              <>
+                <div className="agent-table-wrap">
+                  <table className="agent-table compact-agent-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Name</th>
+                        <th scope="col">Template</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Action</th>
+                        <th scope="col">Created</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {listResult.agents.map((agent) => (
+                        <tr key={agent.id}>
+                          <td>
+                            <Link href={agent.href}>{agent.name}</Link>
+                          </td>
+                          <td>{agent.templateLabel}</td>
+                          <td>
+                            <span className="status-pill">{agent.status}</span>
+                          </td>
+                          <td>
+                            <AgentLifecycleControls agentId={agent.id} status={agent.status} />
+                          </td>
+                          <td>
+                            <time dateTime={agent.createdAt}>{agent.createdAt}</time>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <MobileAgentList agents={listResult.agents} />
+              </>
             ) : (
               <EmptyState
                 title="No agent records"
