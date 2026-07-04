@@ -2,16 +2,17 @@
 
 ## Milestone 6 Agent Config Editor
 
-- Status: complete for #54/#56; #57 implemented and in validation
+- Status: complete for #54/#56/#57/#58
 - Source plan: `docs/MILESTONES.md` Milestone 6
-- Tracking issue: #57
-- Current branch: `codex/issue-57-config-editor`
+- Tracking issue: #58
+- Current branch: `codex/issue-58-m6-docs-acceptance`
 
 ### Issue Checklist
 
 - [x] #54 Add persistent agent config defaults
 - [x] #56 Add validated config update API
 - [x] #57 Add agent detail config editor
+- [x] #58 Document and verify Milestone 6 acceptance
 - Later Milestone 6 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 6 work.
 
 ### Completion Evidence
@@ -35,8 +36,53 @@
 - [x] #57 shows safe client feedback for invalid spend, blank required fields, invalid cron/timezone, malformed or failed save responses, and persistence failures without leaking database URLs, SQL, stack traces, driver details, or secrets.
 - [x] #57 keeps rejected saves and no-op saves from updating the saved config summary or Activity timeline, and no-op saves do not create `config.updated` events.
 - [x] #57 removes detail-page copy that described config editing as future or unavailable, without adding template metadata/snapshots, provider integrations, auth/billing, runner behavior, external services, or #58 final docs acceptance.
+- [x] #58 updates README operator documentation so the detail config editor is described as completed local-development behavior, including edit, save, refresh persistence, validation, and `config.updated` Activity review steps.
+- [x] #58 confirms README API/schema notes cover `PATCH /api/agents/:agentId`, `agent_configs`, and `agent_schedule_mode`.
+- [x] #58 confirms `CHANGELOG.md` has only non-empty Keep a Changelog sections with qualifying functional Milestone 6 entries for config defaults, the validated PATCH API, and the detail config editor.
+- [x] #58 records the final acceptance checklist below without adding new behavior, migrations, schemas, tests, template registry work, auth/billing, runner/deployment changes, or unrelated refactors.
+
+### Final Acceptance Checklist
+
+- [x] README describes the completed agent detail config editor workflow and does not frame config editing as future or unavailable.
+- [x] README API documentation covers `PATCH /api/agents/:agentId`, validated editable fields, max daily spend normalization to integer cents, schedule validation, secret-like key rejection, no-op responses, and safe `config.updated` events.
+- [x] README schema/migration notes cover `agent_configs` and the `agent_schedule_mode` enum.
+- [x] `PROGRESS.md` marks Milestone 6 complete for #54/#56/#57/#58 and removes stale #57 in-validation/current-branch wording.
+- [x] `CHANGELOG.md` contains only qualifying functional Milestone 6 entries under non-empty Keep a Changelog headings.
+- [x] Browser acceptance evidence covers editing model name to `gpt-5.5-mini` and max daily spend to `$2.00`.
+- [x] Browser acceptance evidence covers refresh persistence for the edited model name and max daily spend.
+- [x] Browser acceptance evidence covers invalid spend rejection without updating saved config or Activity.
+- [x] Browser acceptance evidence covers blank required-field rejection without updating saved config or Activity.
+- [x] Browser acceptance evidence covers invalid schedule rejection without updating saved config or Activity.
+- [x] Browser acceptance evidence covers exactly one readable `config.updated` timeline event with model and spend metadata.
 
 ### Validation
+
+#### #58
+
+- Date: 2026-07-04
+- Environment:
+  - Default Postgres port `54329` was occupied by existing Docker container `agentbay-postgres-1`.
+  - Default app port `3000` was occupied by local `node` process `60238`.
+  - Isolated database: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54358/agentbay`.
+  - Isolated app/test server: `PORT=3058`, `PLAYWRIGHT_BASE_URL=http://localhost:3058`, `NEXT_PUBLIC_APP_URL=http://localhost:3058`.
+- Setup:
+  - `docker compose up -d postgres`: failed before validation because `0.0.0.0:54329` was already allocated by `agentbay-postgres-1`.
+  - `docker compose down -v`: pass; removed the failed #58 compose container, network, and volume.
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree had no local `node_modules`.
+  - `docker run --name agentbay_issue_58-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54358:5432 -d postgres:17-alpine`: pass; started an isolated Postgres service because the default port was occupied.
+  - `docker exec agentbay_issue_58-postgres pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+- Documentation checks:
+  - README reviewed against `app/agents/_components/agent-config-editor.tsx`, `app/api/agents/[agentId]/route.ts`, `src/server/agents/update-agent-config.ts`, and `tests/e2e/root-route.spec.ts`.
+  - `CHANGELOG.md` reviewed for Keep a Changelog heading hygiene and qualifying functional Milestone 6 entries only.
+- Acceptance evidence:
+  - `tests/e2e/root-route.spec.ts` test `/agents detail edits config through persisted save and safe validation` covers no-op save behavior, safe failed persistence handling, invalid spend rejection, blank required-field rejection, invalid cron rejection, invalid timezone rejection, persisted `gpt-5.5-mini` and `$2.00` after refresh, exactly one readable `config.updated` Activity event, and no horizontal overflow.
+- Required gates:
+  - `bun run db:migrate`: pass; migrations applied successfully against the isolated database.
+  - `bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+  - `bun run test -- tests/unit/update-agent-config-validation.test.ts tests/unit/update-agent-config-route.test.ts tests/unit/create-agent-db.test.ts tests/unit/agent-events.test.ts tests/unit/root-page.test.tsx`: pass; 5 files and 76 tests passed.
+  - `bun run test:e2e -- --project=chromium-desktop -g "edits config"` with default `NEXT_PUBLIC_APP_URL=http://localhost:3000`: failed before tests because `127.0.0.1:3000` was already in use by local `node` process `60238`.
+  - `bun run test:e2e -- --project=chromium-desktop -g "edits config"` with isolated app env: pass; 1 Chromium desktop test passed and proved config editor acceptance behavior.
+  - `bun run verify` with isolated database/app env: pass; aggregate format, lint, typecheck, unit test, build, and E2E gates passed with 137 unit tests and 23 E2E passed / 3 expected skips.
 
 #### #57
 

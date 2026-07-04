@@ -1,6 +1,6 @@
 # AgentBay
 
-AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice plus the Milestone 6 config-persistence and update API foundation. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, and scoped runtime logs for local development agents.
+AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice plus the completed Milestone 6 local-development config editor workflow. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, and scoped runtime logs for local development agents.
 
 ## Requirements
 
@@ -103,6 +103,21 @@ The `/agents` page contains the current create/list and fake lifecycle workflow:
 The dashboard reads active persisted agents from the database. The detail page loads active persisted agent records by ID and returns not found for missing, malformed, or soft-deleted IDs. Delete preserves the `agents` row and existing `agent_events`, but removes the agent from `/agents`, `/dashboard`, and active detail reads.
 
 Agent records are local-development records only. Lifecycle controls, runtime logs, and the detail config editor use deterministic database state and the validated local update API, not real runner processes or provider integrations. Approvals, runner APIs, runner provisioning, Hermes, Telegram, billing, production auth, secret storage, backups, restore, cloud provisioning, and external provider integrations remain future scope.
+
+## Agent Detail Config Editor
+
+The agent detail page includes the completed local-development configuration editor for active, non-deleted agents. The editor shows the saved model, max daily spend, schedule, and timezone summary above the editable form so draft edits stay separate from persisted state until a save is accepted.
+
+Use the editor locally after creating an agent:
+
+1. Open `/agents/:agentId`.
+2. Edit supported local config fields: display name, system prompt, model provider, model name, max daily spend, schedule mode, schedule cron, and timezone.
+3. Save config to send changed fields through `PATCH /api/agents/:agentId`.
+4. Confirm the saved summary refreshes from persisted detail data after accepted saves.
+5. Refresh the page and confirm accepted model and spend changes remain visible.
+6. Check the Activity panel for a readable `config.updated` timeline entry with safe changed-field display values.
+
+The editor rejects invalid draft values before save for blank required fields, malformed max daily spend values, invalid cron schedules, and invalid IANA timezones. The server-side `PATCH /api/agents/:agentId` validation remains authoritative, including recursive secret-like key rejection and persisted `agent_schedule_mode` constraints. Rejected saves and no-op saves do not update the saved summary and do not create `config.updated` events.
 
 ## Create Agent API
 
