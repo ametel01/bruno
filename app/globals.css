@@ -227,6 +227,7 @@ h2 {
 .empty-state,
 .placeholder-panel,
 .activity-feed-panel,
+.runtime-log-panel,
 .agent-list-panel {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -285,6 +286,11 @@ h2 {
 }
 
 .activity-feed-panel {
+  min-width: 0;
+  padding: 22px;
+}
+
+.runtime-log-panel {
   min-width: 0;
   padding: 22px;
 }
@@ -587,6 +593,80 @@ h2 {
 
 .activity-empty-state .secondary-button {
   width: fit-content;
+}
+
+.runtime-log-list {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.runtime-log-item {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  padding: 14px 0 2px;
+}
+
+.runtime-log-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.runtime-log-header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.78rem;
+}
+
+.runtime-log-header time,
+.runtime-log-header span {
+  overflow-wrap: anywhere;
+}
+
+.runtime-log-item p {
+  color: var(--foreground);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.runtime-log-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 0;
+}
+
+.runtime-log-metadata div {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.runtime-log-metadata dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.runtime-log-metadata dd {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .activity-pagination .secondary-button,

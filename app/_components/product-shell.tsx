@@ -24,7 +24,7 @@ export function ProductShell({ active, eyebrow, title, description, children }: 
           </Link>
           <div>
             <p className="brand-name">AgentBay</p>
-            <p className="brand-subtitle">Milestone 3</p>
+            <p className="brand-subtitle">Milestone 4</p>
           </div>
         </div>
         <nav className="nav-list" aria-label="Product routes">

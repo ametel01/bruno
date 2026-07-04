@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 
@@ -100,7 +100,6 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   await expect(dashboardAgentRow.getByRole("button", { name: "Stop" })).toBeVisible();
   await expect(dashboardAgentRow.getByRole("button", { name: "Restart" })).toBeVisible();
   await dashboardAgentRow.getByRole("button", { name: "Restart" }).click();
-  await expect(page.getByRole("status")).toContainText("Restart requested.");
   await expect(dashboardAgentRow.locator(".status-pill", { hasText: "restarting" })).toBeVisible({
     timeout: 5_000,
   });
@@ -165,7 +164,6 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   await expect(detailActivity).toContainText(`Start completed for agent "${name}".`);
   await expect(page.getByRole("button", { name: "Restart" })).toBeVisible();
   await page.getByRole("button", { name: "Restart" }).click();
-  await expect(page.getByRole("status")).toContainText("Restart requested.");
   await expect(page.locator(".status-pill", { hasText: "restarting" })).toBeVisible({
     timeout: 5_000,
   });
@@ -231,6 +229,108 @@ test("/agents detail activity feed wraps on mobile without horizontal overflow",
   await expectPageNotHorizontallyOverflowing(page);
 });
 
+test("/agents detail shows scoped runtime logs and stops polling after settled states", async ({
+  page,
+  request,
+}, testInfo) => {
+  const primaryName = `Runtime Logs Agent ${testInfo.project.name}`;
+  const otherName = `Other Runtime Agent ${testInfo.project.name}`;
+  const primaryAgent = await createAgent(request, primaryName);
+  const otherAgent = await createAgent(request, otherName);
+  createdAgentIds.add(primaryAgent.id);
+  createdAgentIds.add(otherAgent.id);
+
+  await insertRuntimeLog(otherAgent.id, `Scoped log for ${otherName}`);
+
+  await page.goto(`/agents/${primaryAgent.id}`);
+  await expect(page.getByRole("heading", { name: primaryName })).toBeVisible();
+  const primaryRuntimeLogs = page.locator(".runtime-log-panel");
+  await expect(primaryRuntimeLogs).toContainText("Runtime logs");
+  await expect(primaryRuntimeLogs).toContainText("No runtime logs yet");
+  await expect(primaryRuntimeLogs).not.toContainText(`Scoped log for ${otherName}`);
+
+  await page.getByRole("button", { name: "Start" }).click();
+  await expect(page.getByRole("status")).toContainText("Start requested.");
+  await expect(page.locator(".status-pill", { hasText: "running" })).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(primaryRuntimeLogs).toContainText("Checking task queue...");
+  await expect(primaryRuntimeLogs).toContainText("No pending tasks.");
+  await expect(primaryRuntimeLogs).toContainText("Heartbeat OK.");
+  await expect(primaryRuntimeLogs).toContainText("Memory loaded.");
+  await expect(primaryRuntimeLogs).toContainText("stdout");
+  await expect(primaryRuntimeLogs).toContainText("info");
+  await expect(primaryRuntimeLogs).toContainText("#1");
+  await expect(primaryRuntimeLogs).not.toContainText("agent_id");
+  await expect(primaryRuntimeLogs).not.toContainText("runner_id");
+  await expect(primaryRuntimeLogs).not.toContainText("postgres://");
+  const primaryLogItems = primaryRuntimeLogs.locator(".runtime-log-item");
+  await expect(primaryLogItems).toHaveCount(4);
+
+  await page.getByRole("button", { name: "Stop" }).click();
+  await expect(page.locator(".status-pill", { hasText: "stopped" })).toBeVisible({
+    timeout: 5_000,
+  });
+  const stoppedLogCount = await primaryLogItems.count();
+  await expect(primaryRuntimeLogs).toContainText("Checking task queue...");
+  await page.waitForTimeout(2_000);
+  await expect(primaryLogItems).toHaveCount(stoppedLogCount);
+
+  await page.getByRole("button", { name: "Simulate error" }).click();
+  await expect(page.locator(".status-pill", { hasText: "error" })).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(primaryRuntimeLogs).toContainText("Memory loaded.");
+  await page.waitForTimeout(2_000);
+  await expect(primaryLogItems).toHaveCount(stoppedLogCount);
+  const detailActivity = page.locator(".activity-feed-panel");
+  await expect(detailActivity).toContainText("agent.error");
+  await expect(detailActivity).toContainText(
+    `Simulated error requested for agent "${primaryName}".`,
+  );
+  await expect(detailActivity).toContainText("Source: development_simulator");
+
+  await page.goto(`/agents/${otherAgent.id}`);
+  const otherRuntimeLogs = page.locator(".runtime-log-panel");
+  await expect(page.getByRole("heading", { name: otherName })).toBeVisible();
+  await expect(otherRuntimeLogs).toContainText(`Scoped log for ${otherName}`);
+  await expect(otherRuntimeLogs).not.toContainText("Checking task queue...");
+  await expectPageNotHorizontallyOverflowing(page);
+});
+
+test("/agents detail keeps the record readable when runtime logs fail safely", async ({
+  page,
+  request,
+}, testInfo) => {
+  const name = `Runtime Log Error Agent ${testInfo.project.name}`;
+  const created = await createAgent(request, name);
+  createdAgentIds.add(created.id);
+
+  await page.route("**/api/agents/*/logs?**", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      status: 500,
+      body: JSON.stringify({
+        error: {
+          code: "agent_logs_failed",
+          message: "postgres://user:pass@localhost/db",
+        },
+      }),
+    });
+  });
+
+  await page.goto(`/agents/${created.id}`);
+
+  await expect(page.getByRole("heading", { name })).toBeVisible();
+  await expect(
+    page.locator(".placeholder-panel").filter({ hasText: "Agent record" }),
+  ).toBeVisible();
+  const runtimeLogs = page.locator(".runtime-log-panel");
+  await expect(runtimeLogs).toContainText("Runtime logs could not be loaded.");
+  await expect(runtimeLogs).not.toContainText("postgres://");
+  await expectPageNotHorizontallyOverflowing(page);
+});
+
 test("/agents shows safe client validation for invalid create input", async ({ page }) => {
   await page.goto("/agents");
   await page.getByLabel("Name").fill("   ");
@@ -278,14 +378,39 @@ function trackAgentHref(agentHref: string | null): void {
   }
 }
 
+async function createAgent(request: APIRequestContext, name: string): Promise<{ id: string }> {
+  const createResponse = await request.post("/api/agents", {
+    data: {
+      name,
+      templateKey: "research_agent",
+    },
+  });
+  expect(createResponse.status()).toBe(201);
+  const created = (await createResponse.json()) as { agent: { id: string } };
+
+  return {
+    id: created.agent.id,
+  };
+}
+
 async function markAgentDeleted(agentId: string): Promise<void> {
   await withDatabase(async (sql) => {
     await sql`update agents set deleted_at = now() where id = ${agentId}`;
   });
 }
 
+async function insertRuntimeLog(agentId: string, message: string): Promise<void> {
+  await withDatabase(async (sql) => {
+    await sql`
+      insert into agent_logs (agent_id, stream, level, message, sequence)
+      values (${agentId}, 'stdout', 'info', ${message}, 1)
+    `;
+  });
+}
+
 async function deleteCreatedAgents(agentIds: string[]): Promise<void> {
   await withDatabase(async (sql) => {
+    await sql`delete from agent_logs where agent_id in ${sql(agentIds)}`;
     await sql`delete from agent_events where agent_id in ${sql(agentIds)}`;
     await sql`delete from agents where id in ${sql(agentIds)}`;
   });

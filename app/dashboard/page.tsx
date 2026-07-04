@@ -38,7 +38,7 @@ export function DashboardContent({
       active="dashboard"
       eyebrow={routeLabel}
       title="Operational dashboard"
-      description="A control surface for persisted agent records with deterministic fake lifecycle status and without real runner processes, logs, or approvals."
+      description="A control surface for persisted agent records with deterministic fake lifecycle status and without real runner processes or approvals."
     >
       <div className="content-grid">
         <section className="agent-list-panel" aria-labelledby="dashboard-agents-title">

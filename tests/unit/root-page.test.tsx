@@ -306,10 +306,14 @@ describe("product shell routes", () => {
     expect(html).toContain("2026-07-03T05:00:00.000Z");
     expect(html).toContain("2026-07-03T05:30:00.000Z");
     expect(html).toContain("Waiting for setup.");
+    expect(html).toContain("Runtime logs");
+    expect(html).toContain("Loading runtime logs.");
     expect(html).toContain("Activity");
     expect(html).toContain("No activity yet");
     expect(html).toContain("0 shown");
     expect(html).not.toContain("No record lookup is performed");
+    expect(html).not.toContain("runnerId");
+    expect(html).not.toContain("agent_id");
     expect(mocks.listAgentEventFeed).toHaveBeenCalledWith({
       db: {},
       agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
