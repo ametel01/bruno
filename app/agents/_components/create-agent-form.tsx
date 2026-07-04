@@ -1,14 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useState } from "react";
-
-const TEMPLATE_LABELS = {
-  research_agent: "Research Agent",
-  inbox_triage_agent: "Inbox Triage Agent",
-  github_issue_agent: "GitHub Issue Agent",
-  social_content_agent: "Social Content Agent",
-} as const;
+import { type ChangeEvent, type FormEvent, useEffect, useState } from "react";
+import type { AgentTemplateSnapshot } from "@/src/server/agents/templates";
 
 type SubmitState =
   | { status: "idle" }
@@ -18,17 +12,26 @@ type SubmitState =
 
 type CreateAgentFormProps = {
   maxNameLength: number;
-  templateKeys: Array<keyof typeof TEMPLATE_LABELS>;
+  templates: AgentTemplateSnapshot[];
 };
 
-export function CreateAgentForm({ maxNameLength, templateKeys }: CreateAgentFormProps) {
+export function CreateAgentForm({ maxNameLength, templates }: CreateAgentFormProps) {
   const router = useRouter();
   const [state, setState] = useState<SubmitState>({ status: "idle" });
   const [hydrated, setHydrated] = useState(false);
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState<string>(
+    templates[0]?.key ?? "research_agent",
+  );
+  const selectedTemplate =
+    templates.find((template) => template.key === selectedTemplateKey) ?? templates[0];
 
   useEffect(() => {
     setHydrated(true);
   }, []);
+
+  function handleTemplateChange(event: ChangeEvent<HTMLSelectElement>) {
+    setSelectedTemplateKey(event.target.value);
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -86,13 +89,63 @@ export function CreateAgentForm({ maxNameLength, templateKeys }: CreateAgentForm
       </div>
       <div className="field-group">
         <label htmlFor="agent-template">Template</label>
-        <select id="agent-template" name="templateKey" defaultValue="research_agent">
-          {templateKeys.map((templateKey) => (
-            <option key={templateKey} value={templateKey}>
-              {TEMPLATE_LABELS[templateKey]}
+        <select
+          id="agent-template"
+          name="templateKey"
+          onChange={handleTemplateChange}
+          value={selectedTemplateKey}
+        >
+          {templates.map((template) => (
+            <option key={template.key} value={template.key}>
+              {template.name}
             </option>
           ))}
         </select>
+      </div>
+      {selectedTemplate ? (
+        <div className="selected-template-summary" aria-live="polite">
+          <h3>{selectedTemplate.name}</h3>
+          <p>{selectedTemplate.description}</p>
+          <dl className="template-metadata-list">
+            <div>
+              <dt>Version</dt>
+              <dd>{selectedTemplate.version}</dd>
+            </div>
+            <div>
+              <dt>Schedule</dt>
+              <dd>{selectedTemplate.defaultSchedule}</dd>
+            </div>
+            <div>
+              <dt>Required integrations</dt>
+              <dd>{formatList(selectedTemplate.requiredIntegrations)}</dd>
+            </div>
+          </dl>
+          <TemplateToolList tools={selectedTemplate.defaultTools} />
+        </div>
+      ) : null}
+      <div className="template-option-list">
+        {templates.map((template) => (
+          <article
+            className="template-option-card"
+            data-selected={template.key === selectedTemplateKey}
+            key={template.key}
+          >
+            <div>
+              <h3>{template.name}</h3>
+              <p>{template.description}</p>
+            </div>
+            <dl className="template-metadata-list">
+              <div>
+                <dt>Tools</dt>
+                <dd>{formatList(template.defaultTools)}</dd>
+              </div>
+              <div>
+                <dt>Schedule</dt>
+                <dd>{template.defaultSchedule}</dd>
+              </div>
+            </dl>
+          </article>
+        ))}
       </div>
       <button className="primary-button" type="submit" disabled={disabled}>
         {submitting ? "Creating" : "Create agent"}
@@ -104,6 +157,20 @@ export function CreateAgentForm({ maxNameLength, templateKeys }: CreateAgentForm
       ) : null}
     </form>
   );
+}
+
+function TemplateToolList({ tools }: { tools: string[] }) {
+  return (
+    <ul className="template-chip-list" aria-label="Default tools">
+      {tools.map((tool) => (
+        <li key={tool}>{tool}</li>
+      ))}
+    </ul>
+  );
+}
+
+function formatList(values: string[]): string {
+  return values.length > 0 ? values.join(", ") : "None";
 }
 
 async function safeFailureMessage(response: Response): Promise<string> {

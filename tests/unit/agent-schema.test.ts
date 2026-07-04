@@ -62,6 +62,8 @@ describe("Milestone 1 agent persistence schema", () => {
       "userId",
       "name",
       "templateKey",
+      "templateVersion",
+      "templateSnapshotJson",
       "status",
       "statusReason",
       "createdAt",
@@ -71,6 +73,10 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.userId.notNull).toBe(true);
     expect(columns.name.notNull).toBe(true);
     expect(columns.templateKey.notNull).toBe(true);
+    expect(columns.templateVersion.notNull).toBe(true);
+    expect(columns.templateVersion.default).toBe("1.0.0");
+    expect(columns.templateSnapshotJson.notNull).toBe(true);
+    expect(columns.templateSnapshotJson.dataType).toBe("json");
     expect(columns.status.notNull).toBe(true);
     expect(columns.status.default).toBe("stopped");
     expect(columns.statusReason.notNull).toBe(false);

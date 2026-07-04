@@ -26,6 +26,19 @@ describe("POST /api/agents route", () => {
         userId: "f3fbda50-7269-4534-94d9-4819f1a38da7",
         name: "Research Agent",
         templateKey: "research_agent",
+        templateVersion: "1.0.0",
+        templateSnapshotJson: {
+          key: "research_agent",
+          version: "1.0.0",
+          name: "Research Agent",
+          description:
+            "Tracks a research question, gathers source notes, and produces concise summaries for later review.",
+          defaultTools: ["Web search", "Notes", "Summaries"],
+          defaultSchedule: "Manual",
+          defaultSystemPrompt:
+            "You are a Research Agent. Gather relevant information, keep source notes, and produce concise summaries. Do not take external actions or contact third parties. Ask for approval before using any integration or publishing output.",
+          requiredIntegrations: [],
+        },
         status: "stopped",
         statusReason: null,
         createdAt: "2026-07-03T05:00:00.000Z",
@@ -51,6 +64,7 @@ describe("POST /api/agents route", () => {
       agent: {
         name: "Research Agent",
         templateKey: "research_agent",
+        templateVersion: "1.0.0",
         status: "stopped",
         statusReason: null,
         deletedAt: null,

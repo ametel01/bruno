@@ -1121,28 +1121,28 @@
 
 ## Milestone 5 Agent Templates
 
-- Status: initialized
+- Status: complete locally on `codex/milestone-5-agent-templates`
 - Source plan: `docs/MILESTONES.md` Milestone 5
-- Tracking issue: #48
-- Current branch: `codex/issue-48-m5-tracking`
+- Tracking issues: #48-#53
+- Current branch: `codex/milestone-5-agent-templates`
 
 ### Issue Checklist
 
 - [x] #48 Initialize Milestone 5 progress and changelog tracking
-- [ ] #49 Add the typed agent template registry
-- [ ] #50 Persist template versions and snapshots on agents
-- [ ] #51 Show template metadata in the create-agent flow
-- [ ] #52 Show persisted template settings on agent detail
-- [ ] #53 Prove Milestone 5 template acceptance end to end
+- [x] #49 Add the typed agent template registry
+- [x] #50 Persist template versions and snapshots on agents
+- [x] #51 Show template metadata in the create-agent flow
+- [x] #52 Show persisted template settings on agent detail
+- [x] #53 Prove Milestone 5 template acceptance end to end
 - Later Milestone 5 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 5 work.
 
 ### Current Status
 
-Milestone 5 execution is ready for template implementation work, but no template registry, schema, API, UI, runner, auth, billing, provider, secret, migration, lifecycle, event, or runtime log behavior has been added by #48.
+Milestone 5 is implemented locally as metadata-only template behavior. The source registry exposes exactly `research_agent`, `inbox_triage_agent`, `github_issue_agent`, and `social_content_agent` with version `1.0.0`, names, descriptions, default tools, manual schedules, default prompts, and empty required integration lists.
 
-The source scope remains `docs/MILESTONES.md` Milestone 5: a typed template registry, initial template keys, template fields, durable template key/version/snapshot persistence, create-flow and detail-page metadata display, and metadata-only templates without tool or model API integration.
+Agent creation now stores `template_key`, `template_version`, and immutable `template_snapshot_json`, initializes the editable config prompt from the selected template default prompt, and records template version in the `agent.created` event metadata. The create flow renders template metadata from the registry, and agent detail renders the persisted snapshot so later registry edits do not silently change existing agent displays.
 
-The stale issue context was checked against current `main` at the start of #48. The earlier concern that `PROGRESS.md` was deleted or `CHANGELOG.md` might be missing is not current after #47/#90 because both root tracking files exist in this branch.
+No tool, model-provider, runner, auth, billing, secret, or integration execution was added for Milestone 5.
 
 ### Tracking Rules
 
@@ -1153,6 +1153,22 @@ The stale issue context was checked against current `main` at the start of #48. 
 ### Update Log
 
 - 2026-07-04: #48 initialized Milestone 5 tracking from `docs/MILESTONES.md`, recorded the #48-#53 checklist, documented the stale-context check for existing root tracking files, and recorded the `CHANGELOG.md` update rule. `CHANGELOG.md` was left unchanged because it already has the required Keep a Changelog preamble and `## [Unreleased]` section.
+- 2026-07-05: #49-#53 implemented on `codex/milestone-5-agent-templates`. Added typed template registry, backfill-safe template snapshot migration, create-agent snapshot persistence, create-flow metadata display, detail-page persisted template settings, focused registry/schema/API/persistence/UI tests, and marked `docs/MILESTONES.md` Milestone 5 complete.
+
+### Validation
+
+- `bun run db:migrate`: pass; applied `drizzle/0007_plain_hedge_knight.sql` with existing-agent snapshot backfill.
+- `bun run db:health`: pass; local Postgres reachable.
+- `bun run typecheck`: pass.
+- `DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} bun run test -- tests/unit/agent-templates.test.ts tests/unit/create-agent-validation.test.ts tests/unit/agent-schema.test.ts tests/unit/create-agent-route.test.ts tests/unit/create-agent-db.test.ts tests/unit/root-page.test.tsx`: pass; 145 tests passed.
+- `bun run db:generate`: pass; no schema changes, nothing to migrate.
+- `bun run format:check`: pass.
+- `bun run lint`: pass.
+- `DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} bun run test`: pass; 227 unit tests passed.
+- `DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} bun run build`: pass.
+- `DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} bun run test:e2e -- --project=chromium-desktop -g "/agents creates Research Agent and persists it across read surfaces"`: pass; Milestone 5 browser proof passed.
+- `DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} bun run test:e2e`: pass on rerun; 39 E2E passed / 19 expected skips.
+- `DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} bun run verify`: one aggregate retry failed during E2E on two transient Docker start waits (`Agent could not be started.`); the same focused create/read test passed before the retry and the full E2E suite passed immediately after.
 
 ## Milestone 4 Agent Detail Runtime Logs
 

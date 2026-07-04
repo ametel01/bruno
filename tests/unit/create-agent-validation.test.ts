@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   AGENT_NAME_MAX_LENGTH,
-  SUPPORTED_AGENT_TEMPLATE_KEYS,
   validateCreateAgentPayload,
 } from "@/src/server/agents/create-agent";
+import { SUPPORTED_AGENT_TEMPLATE_KEYS } from "@/src/server/agents/templates";
 
 describe("create agent validation", () => {
   it("accepts supported template keys and trims the requested agent name", () => {

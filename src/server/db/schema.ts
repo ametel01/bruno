@@ -11,6 +11,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { AgentTemplateSnapshot } from "@/src/server/agents/templates";
 
 export const appMetadata = pgTable("app_metadata", {
   key: text("key").primaryKey(),
@@ -59,6 +60,13 @@ export const agents = pgTable("agents", {
     .references(() => users.id),
   name: text("name").notNull(),
   templateKey: text("template_key").notNull(),
+  templateVersion: text("template_version").notNull().default("1.0.0"),
+  templateSnapshotJson: jsonb("template_snapshot_json")
+    .$type<AgentTemplateSnapshot>()
+    .notNull()
+    .default(
+      sql`'{"key":"research_agent","version":"1.0.0","name":"Research Agent","description":"Tracks a research question, gathers source notes, and produces concise summaries for later review.","defaultTools":["Web search","Notes","Summaries"],"defaultSchedule":"Manual","defaultSystemPrompt":"You are a Research Agent. Gather relevant information, keep source notes, and produce concise summaries. Do not take external actions or contact third parties. Ask for approval before using any integration or publishing output.","requiredIntegrations":[]}'::jsonb`,
+    ),
   status: agentStatusEnum("status").notNull().default("stopped"),
   statusReason: text("status_reason"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

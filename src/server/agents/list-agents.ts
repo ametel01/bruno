@@ -7,18 +7,13 @@ import {
 } from "@/src/server/agents/lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentConfigs, agents } from "@/src/server/db/schema";
-
-const AGENT_TEMPLATE_LABELS = {
-  github_issue_agent: "GitHub Issue Agent",
-  inbox_triage_agent: "Inbox Triage Agent",
-  research_agent: "Research Agent",
-  social_content_agent: "Social Content Agent",
-} as const;
+import { getAgentTemplateLabel, type AgentTemplateSnapshot } from "@/src/server/agents/templates";
 
 export type ListedAgent = {
   id: string;
   name: string;
   templateKey: string;
+  templateVersion: string;
   templateLabel: string;
   status: AgentLifecycleStatus;
   href: string;
@@ -28,6 +23,7 @@ export type ListedAgent = {
 export type AgentDetail = ListedAgent & {
   statusReason: string | null;
   updatedAt: string;
+  templateSnapshot: AgentTemplateSnapshot;
   config: AgentDetailConfig;
 };
 
@@ -74,6 +70,7 @@ export async function listActiveAgentsForDevelopmentUser(
         id: agents.id,
         name: agents.name,
         templateKey: agents.templateKey,
+        templateVersion: agents.templateVersion,
         status: agents.status,
         createdAt: agents.createdAt,
       })
@@ -85,6 +82,7 @@ export async function listActiveAgentsForDevelopmentUser(
       id: row.id,
       name: row.name,
       templateKey: row.templateKey,
+      templateVersion: row.templateVersion,
       templateLabel: getAgentTemplateLabel(row.templateKey),
       status: row.status,
       href: `/agents/${row.id}`,
@@ -120,6 +118,8 @@ export async function getActiveAgentForDevelopmentUser(
         id: agents.id,
         name: agents.name,
         templateKey: agents.templateKey,
+        templateVersion: agents.templateVersion,
+        templateSnapshotJson: agents.templateSnapshotJson,
         status: agents.status,
         statusReason: agents.statusReason,
         createdAt: agents.createdAt,
@@ -146,12 +146,14 @@ export async function getActiveAgentForDevelopmentUser(
       id: row.id,
       name: row.name,
       templateKey: row.templateKey,
+      templateVersion: row.templateVersion,
       templateLabel: getAgentTemplateLabel(row.templateKey),
       status: row.status,
       statusReason: row.statusReason,
       href: `/agents/${row.id}`,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
+      templateSnapshot: row.templateSnapshotJson,
       config: {
         systemPrompt: row.configSystemPrompt,
         modelProvider: row.configModelProvider,
@@ -170,8 +172,4 @@ export async function getActiveAgentForDevelopmentUser(
       await connection.close();
     }
   }
-}
-
-function getAgentTemplateLabel(templateKey: string): string {
-  return AGENT_TEMPLATE_LABELS[templateKey as keyof typeof AGENT_TEMPLATE_LABELS] ?? templateKey;
 }

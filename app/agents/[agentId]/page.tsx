@@ -116,8 +116,12 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
             <div>
               <dt>Template</dt>
               <dd>
-                {agent.templateLabel} <code>{agent.templateKey}</code>
+                {agent.templateSnapshot.name} <code>{agent.templateKey}</code>
               </dd>
+            </div>
+            <div>
+              <dt>Template version</dt>
+              <dd>{agent.templateVersion}</dd>
             </div>
             <div>
               <dt>Created</dt>
@@ -148,6 +152,34 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
               <dd>
                 <code>{agent.id}</code>
               </dd>
+            </div>
+          </dl>
+        </PlaceholderPanel>
+        <PlaceholderPanel title="Template settings">
+          <dl className="definition-list">
+            <div>
+              <dt>Description</dt>
+              <dd>{agent.templateSnapshot.description}</dd>
+            </div>
+            <div>
+              <dt>Default tools</dt>
+              <dd>{agent.templateSnapshot.defaultTools.join(", ")}</dd>
+            </div>
+            <div>
+              <dt>Schedule</dt>
+              <dd>{agent.templateSnapshot.defaultSchedule}</dd>
+            </div>
+            <div>
+              <dt>Required integrations</dt>
+              <dd>
+                {agent.templateSnapshot.requiredIntegrations.length > 0
+                  ? agent.templateSnapshot.requiredIntegrations.join(", ")
+                  : "None"}
+              </dd>
+            </div>
+            <div>
+              <dt>Default prompt</dt>
+              <dd>{agent.templateSnapshot.defaultSystemPrompt}</dd>
             </div>
           </dl>
         </PlaceholderPanel>

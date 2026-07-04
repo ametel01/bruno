@@ -2,13 +2,17 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
 import { agentConfigs, agents } from "@/src/server/db/schema";
+import {
+  getAgentTemplateSnapshot,
+  isSupportedTemplateKey,
+  type AgentTemplateSnapshot,
+  type SupportedAgentTemplateKey,
+} from "@/src/server/agents/templates";
 import { recordAgentEventInTransaction } from "@/src/server/events/agent-events";
 import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
 
 export const AGENT_NAME_MAX_LENGTH = 120;
-export const DEFAULT_AGENT_CONFIG = {
-  systemPrompt:
-    "You are an AgentBay agent. Follow the operator's instructions and keep responses concise.",
+export const DEFAULT_AGENT_CONFIG_BASE = {
   modelProvider: "not_configured",
   modelName: "not_configured",
   maxDailySpendCents: 0,
@@ -16,14 +20,11 @@ export const DEFAULT_AGENT_CONFIG = {
   scheduleCron: null,
   timezone: "UTC",
 } as const;
-export const SUPPORTED_AGENT_TEMPLATE_KEYS = [
-  "research_agent",
-  "inbox_triage_agent",
-  "github_issue_agent",
-  "social_content_agent",
-] as const;
 
-export type SupportedAgentTemplateKey = (typeof SUPPORTED_AGENT_TEMPLATE_KEYS)[number];
+export const DEFAULT_AGENT_CONFIG = {
+  systemPrompt: getAgentTemplateSnapshot("research_agent").defaultSystemPrompt,
+  ...DEFAULT_AGENT_CONFIG_BASE,
+} as const;
 
 export type CreateAgentValidationIssue = {
   field: "body" | "name" | "templateKey";
@@ -49,6 +50,8 @@ export type CreatedAgentResponse = {
     userId: string;
     name: string;
     templateKey: SupportedAgentTemplateKey;
+    templateVersion: string;
+    templateSnapshotJson: AgentTemplateSnapshot;
     status: "stopped";
     statusReason: null;
     createdAt: string;
@@ -66,6 +69,7 @@ type AgentTransaction = Parameters<
 
 type CreatedAgentRow = typeof agents.$inferSelect & {
   templateKey: SupportedAgentTemplateKey;
+  templateSnapshotJson: AgentTemplateSnapshot;
   status: "stopped";
 };
 
@@ -161,12 +165,15 @@ export async function createAgentForDevelopmentUser(
   try {
     const result = await connection.db.transaction(async (tx) => {
       const userId = await getOrCreateDevelopmentUserId(tx);
+      const templateSnapshot = getAgentTemplateSnapshot(input.templateKey);
       const [agent] = await tx
         .insert(agents)
         .values({
           userId,
           name: input.name,
           templateKey: input.templateKey,
+          templateVersion: templateSnapshot.version,
+          templateSnapshotJson: templateSnapshot,
           status: "stopped",
         })
         .returning();
@@ -196,13 +203,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isSupportedTemplateKey(value: unknown): value is SupportedAgentTemplateKey {
-  return (
-    typeof value === "string" &&
-    SUPPORTED_AGENT_TEMPLATE_KEYS.includes(value as SupportedAgentTemplateKey)
-  );
-}
-
 async function insertDefaultConfigForCreatedAgent(
   tx: AgentTransaction,
   input: {
@@ -211,7 +211,8 @@ async function insertDefaultConfigForCreatedAgent(
 ): Promise<void> {
   await tx.insert(agentConfigs).values({
     agentId: input.agent.id,
-    ...DEFAULT_AGENT_CONFIG,
+    systemPrompt: input.agent.templateSnapshotJson.defaultSystemPrompt,
+    ...DEFAULT_AGENT_CONFIG_BASE,
   });
 }
 
@@ -229,6 +230,7 @@ async function insertDefaultCreatedEvent(
     message: `Created agent "${input.agent.name}".`,
     metadata: {
       templateKey: input.agent.templateKey,
+      templateVersion: input.agent.templateVersion,
       status: input.agent.status,
     },
   });
@@ -241,6 +243,8 @@ function toCreatedAgentResponse(agent: CreatedAgentRow): CreatedAgentResponse {
       userId: agent.userId,
       name: agent.name,
       templateKey: agent.templateKey,
+      templateVersion: agent.templateVersion,
+      templateSnapshotJson: agent.templateSnapshotJson,
       status: "stopped",
       statusReason: null,
       createdAt: agent.createdAt.toISOString(),

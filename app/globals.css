@@ -848,6 +848,79 @@ h2 {
   margin: 0;
 }
 
+.selected-template-summary,
+.template-option-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f9fbfb;
+  padding: 14px;
+}
+
+.selected-template-summary h3,
+.template-option-card h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.selected-template-summary p,
+.template-option-card p {
+  margin: 0;
+}
+
+.template-option-list {
+  display: grid;
+  gap: 10px;
+}
+
+.template-option-card[data-selected="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.template-metadata-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.template-metadata-list div {
+  display: grid;
+  gap: 3px;
+}
+
+.template-metadata-list dt {
+  color: var(--foreground);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.template-metadata-list dd {
+  color: var(--muted);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.template-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.template-chip-list li {
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--foreground);
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 5px 9px;
+}
+
 .config-editor {
   display: grid;
   gap: 18px;

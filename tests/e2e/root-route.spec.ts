@@ -745,6 +745,11 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   const name = "Research Agent";
 
   await page.goto("/agents");
+  await expect(page.locator(".selected-template-summary")).toContainText("Web search");
+  await expect(page.locator(".selected-template-summary")).toContainText("Manual");
+  await expect(page.locator(".template-option-list")).toContainText("Inbox Triage Agent");
+  await expect(page.locator(".template-option-list")).toContainText("GitHub Issue Agent");
+  await expect(page.locator(".template-option-list")).toContainText("Social Content Agent");
   await page.getByLabel("Name").fill(name);
   await page.getByLabel("Template").selectOption("research_agent");
   await page.getByRole("button", { name: "Create agent" }).click();
@@ -826,9 +831,20 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   const detailRecord = page.locator(".placeholder-panel").filter({ hasText: "Agent record" });
   await expect(detailRecord.locator(".status-pill", { hasText: "error" })).toBeVisible();
   await expect(detailRecord).toContainText("research_agent");
+  await expect(detailRecord).toContainText("Template version");
+  await expect(detailRecord).toContainText("1.0.0");
   await expect(detailRecord).toContainText("Simulated error requested for development testing.");
   await expect(detailRecord).toContainText("Created");
   await expect(detailRecord).toContainText("Updated");
+  const templateSettings = page
+    .locator(".placeholder-panel")
+    .filter({ hasText: "Template settings" });
+  await expect(templateSettings).toContainText("Default tools");
+  await expect(templateSettings).toContainText("Web search, Notes, Summaries");
+  await expect(templateSettings).toContainText("Schedule");
+  await expect(templateSettings).toContainText("Manual");
+  await expect(templateSettings).toContainText("Default prompt");
+  await expect(templateSettings).toContainText("You are a Research Agent.");
   await expect(page.getByRole("button", { name: "Start" })).toBeVisible();
   let detailActivity = page.locator(".activity-feed-panel");
   await expect(detailActivity).toContainText("Activity");
