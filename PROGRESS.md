@@ -2,11 +2,11 @@
 
 ## Milestone 8 Mobile Control Panel Readiness
 
-- Status: #69 implemented and ready for checker review; #70 remains open.
+- Status: Milestone 8 is implementation-complete through #70 and ready for checker review.
 - Source plan: `docs/MILESTONES.md` Milestone 8
 - Tracking issues: #65-#70
-- Current branch: `codex/issue-69-mobile-hardening`
-- Next step: checker should review #69 combined mobile layout hardening, overflow coverage, and gate evidence.
+- Current branch: `codex/issue-70-m8-mobile-acceptance`
+- Next step: checker should review #70 final mobile acceptance proof, checklist, and gate evidence.
 
 ### Issue Checklist
 
@@ -15,7 +15,7 @@
 - [x] #67 Add mobile approval review and decisions
 - [x] #68 Surface mobile latest logs and alerts
 - [x] #69 Harden mobile control layouts
-- [ ] #70 Verify Milestone 8 mobile acceptance
+- [x] #70 Verify Milestone 8 mobile acceptance
 - Later Milestone 8 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 8 work.
 
 ### Current Status
@@ -35,9 +35,21 @@
 - #69 reuses the `/agents` mobile status card list on the dashboard so persisted-agent status controls do not disappear when the wide desktop table is hidden on phone widths.
 - #69 adds defensive mobile layout hardening for shared panels, approval titles/links/actions, action messages, wrapped button labels, and visible focus outlines without changing desktop table behavior.
 - #69 adds mobile Playwright coverage that visits `/agents`, `/dashboard`, and `/agents/:agentId` at iPhone-sized `375x667` and small Android `360x740` widths with long agent names, IDs, approval titles/descriptions, status reasons, log lines, and alert messages, proving visible core controls and no horizontal document overflow.
-- Milestone 8 predecessor readiness is documented from #65, and #66/#67/#68/#69 have since added the mobile UI slices without adding new APIs, schema/migrations, dependencies, lockfile changes, provider/runner/auth/billing/secret behavior, or Milestone 9/10 behavior.
-- `CHANGELOG.md` has Keep a Changelog framing plus `## [Unreleased]` and now includes the #66, #67, #68, and #69 mobile behavior entries.
-- No required Milestone 3-7 predecessor contract is missing. The remaining implementation slice is #70 final responsive/mobile acceptance tests and documentation.
+- #70 adds final mobile acceptance Playwright coverage that runs the Milestone 8 checklist at iPhone-sized `375x667` and small Android `360x740` widths, including readable/actionable agent cards, Resume, confirmed Stop, dashboard mobile status controls, detail latest logs, detail operational alerts, Approve, Deny with mobile confirmation, and no horizontal overflow.
+- #70 marks Milestone 8 completed in `docs/MILESTONES.md`, keeps `CHANGELOG.md` limited to the qualifying user-visible #66-#69 behavior entries, and adds no new APIs, schema/migrations, dependencies, lockfile changes, provider/runner/auth/billing/secret behavior, or Milestone 9/10 behavior.
+- No required Milestone 3-7 predecessor contract is missing. Milestone 8 is ready for checker verification after passing #70 final gates.
+
+### Final Acceptance Checklist
+
+- [x] On a phone viewport, the agent list is readable and actionable.
+- [x] User can stop or resume an agent without layout issues.
+- [x] User can approve or deny a request from mobile.
+- [x] Latest logs and alerts are readable.
+- [x] No core mobile controls are hidden behind desktop-only UI.
+- [x] Responsive viewport checks cover iPhone-sized `375x667` and small Android-sized `360x740` widths.
+- [x] Mobile approval flow and mobile pause/resume flow are covered by Playwright tests.
+- [x] `CHANGELOG.md` contains only qualifying user-visible Milestone 8 behavior entries and no empty Keep a Changelog headings.
+- [x] Final validation runs against the isolated migrated #70 database on host port `54370`.
 
 ### Predecessor Contract Audit
 
@@ -50,6 +62,26 @@
 - Existing coverage evidence: Milestone 7 validation already covered dashboard/detail approval visibility, approve, deny, decision event counts, duplicate-decision conflicts, pending queue removal, safe UI/API output, runtime-log-triggered fake approval generation, and full aggregate gates against an isolated migrated database.
 
 ### Validation
+
+#### #70
+
+- Date: 2026-07-04
+- Environment:
+  - Isolated database: container `agentbay_issue_70-postgres` on host port `54370`, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54370/agentbay`.
+  - Isolated app/test server: `PORT=3070`, `PLAYWRIGHT_BASE_URL=http://localhost:3070`, `NEXT_PUBLIC_APP_URL=http://localhost:3070`.
+- Setup:
+  - `docker info --format '{{.ServerVersion}}'`: pass; Docker daemon reachable with server version `29.3.1`.
+  - `docker run --name agentbay_issue_70-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54370:5432 -d postgres:17-alpine`: container name already existed during setup; direct inspection showed `agentbay_issue_70-postgres` running on `0.0.0.0:54370->5432/tcp`.
+  - `docker exec agentbay_issue_70-postgres pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54370/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3070 bun run db:migrate`: pass; migrations applied successfully against the isolated #70 database.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54370/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3070 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+- Focused checks:
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54370/agentbay PORT=3070 PLAYWRIGHT_BASE_URL=http://localhost:3070 NEXT_PUBLIC_APP_URL=http://localhost:3070 bun run test:e2e -- --project=chromium-mobile -g "Milestone 8 mobile acceptance"`: pass; 1 Chromium mobile test passed. Covers `/agents`, `/dashboard`, and `/agents/:agentId` at `375x667` and `360x740`, readable/actionable phone agent cards, Resume, confirmed Stop, dashboard Approve and Deny with persisted statuses, latest log summaries, operational alerts, reachable core controls, and no horizontal overflow.
+- Changelog scope:
+  - `rg -n "^## |^### " CHANGELOG.md`: pass; only `## [Unreleased]`, `### Added`, and `### Fixed` headings are present, and both sections contain qualifying user-visible entries.
+  - `CHANGELOG.md` was intentionally left unchanged because #70 adds validation/docs only; existing Milestone 8 entries are limited to user-visible #66/#67/#68/#69 behavior.
+- Required gates:
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54370/agentbay PORT=3070 PLAYWRIGHT_BASE_URL=http://localhost:3070 NEXT_PUBLIC_APP_URL=http://localhost:3070 bun run verify`: pass; aggregate format, lint, typecheck, unit test, build, and E2E gates passed with 177 unit tests and 37 E2E passed / 17 expected skips.
 
 #### #69
 

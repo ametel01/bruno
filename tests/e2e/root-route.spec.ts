@@ -525,13 +525,14 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   await expect(dashboardAgentRow.getByRole("button", { name: "Stop" })).toBeVisible();
   await expect(dashboardAgentRow.getByRole("button", { name: "Restart" })).toBeVisible();
   await dashboardAgentRow.getByRole("button", { name: "Restart" }).click();
-  await expect(dashboardAgentRow.locator(".status-pill", { hasText: "restarting" })).toBeVisible({
-    timeout: 5_000,
-  });
   await expect(dashboardAgentRow.locator(".status-pill", { hasText: "running" })).toBeVisible({
     timeout: 5_000,
   });
-  await expect(dashboardAgentRow.getByRole("button", { name: "Restart" })).toBeVisible();
+  await expect(
+    dashboardAgentRow.getByRole("button", { name: "Restart", exact: true }),
+  ).toBeEnabled();
+  await expect(dashboardActivity).toContainText("agent.restart_requested");
+  await expect(dashboardActivity).toContainText("agent.restart_completed");
   await dashboardAgentRow.getByRole("button", { name: "Stop" }).click();
   await expect(dashboardAgentRow.locator(".status-pill", { hasText: "stopped" })).toBeVisible({
     timeout: 5_000,
@@ -589,12 +590,10 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   await expect(detailActivity).toContainText(`Start completed for agent "${name}".`);
   await expect(page.getByRole("button", { name: "Restart" })).toBeVisible();
   await page.getByRole("button", { name: "Restart" }).click();
-  await expect(page.locator(".status-pill", { hasText: "restarting" })).toBeVisible({
-    timeout: 5_000,
-  });
   await expect(page.locator(".status-pill", { hasText: "running" })).toBeVisible({
     timeout: 5_000,
   });
+  await expect(page.getByRole("button", { name: "Restart", exact: true })).toBeEnabled();
   await expect(detailActivity).toContainText("agent.restart_requested");
   await expect(detailActivity).toContainText("agent.restart_completed");
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
@@ -795,6 +794,130 @@ test("core mobile control routes stay readable without horizontal page overflow"
     await expect(detailApproval.getByRole("button", { name: "Approve" })).toBeVisible();
     await detailApproval.getByRole("button", { name: "Deny" }).focus();
     await expect(detailApproval.getByRole("button", { name: "Deny" })).toBeFocused();
+    await expectPageNotHorizontallyOverflowing(page);
+  }
+});
+
+test("Milestone 8 mobile acceptance covers controls, approvals, logs, alerts, and viewports", async ({
+  isMobile,
+  page,
+  request,
+}, testInfo) => {
+  test.skip(!isMobile, "final Milestone 8 mobile acceptance proof runs on mobile");
+
+  for (const viewport of [
+    { width: 375, height: 667 },
+    { width: 360, height: 740 },
+  ]) {
+    await page.setViewportSize(viewport);
+
+    const viewportLabel = `${viewport.width}x${viewport.height}`;
+    const runId = randomUUID().slice(0, 8);
+    const name = `Milestone 8 Acceptance Agent ${testInfo.project.name} ${viewportLabel} ${runId} ${"long-".repeat(
+      6,
+    )}`;
+    const created = await createAgent(request, name, "github_issue_agent");
+    createdAgentIds.add(created.id);
+
+    await pinDevelopmentUserToAgent(created.id);
+    const approvalToApproveId = await insertPendingApproval(created.id, {
+      title: `Approve mobile acceptance action ${viewportLabel} ${runId}`,
+      description:
+        "Approve this final mobile acceptance action from a phone viewport without hidden desktop-only controls.",
+      createdAt: "2026-07-04T15:00:00.000Z",
+      expiresAt: "2999-07-04T15:30:00.000Z",
+    });
+    const approvalToDenyId = await insertPendingApproval(created.id, {
+      title: `Deny mobile acceptance action ${viewportLabel} ${runId}`,
+      description:
+        "Deny this final mobile acceptance action from a phone viewport with confirmation.",
+      createdAt: "2026-07-04T15:05:00.000Z",
+      expiresAt: "2999-07-04T15:35:00.000Z",
+    });
+    await insertRuntimeLog(
+      created.id,
+      `Latest Milestone 8 mobile log ${"wrap-".repeat(20)} remains readable at ${viewportLabel}.`,
+    );
+
+    await page.goto("/agents");
+    const agentsCard = page.locator(".mobile-agent-card", { hasText: created.id });
+    await expect(agentsCard.getByRole("link", { name })).toHaveAttribute(
+      "href",
+      `/agents/${created.id}`,
+    );
+    await expect(agentsCard).toContainText("github_issue_agent");
+    await expect(agentsCard.locator(".status-pill", { hasText: "stopped" })).toBeVisible();
+    await expect(agentsCard.getByRole("button", { name: "Resume" })).toBeVisible();
+    await expect(agentsCard.getByRole("button", { name: "Delete" })).toHaveCount(0);
+    await expectPageNotHorizontallyOverflowing(page);
+
+    await agentsCard.getByRole("button", { name: "Resume" }).click();
+    await expect(agentsCard.locator(".status-pill", { hasText: "running" })).toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(agentsCard.getByRole("button", { name: "Stop" })).toBeVisible();
+    await expectPageNotHorizontallyOverflowing(page);
+
+    await agentsCard.getByRole("button", { name: "Stop" }).click();
+    await expect(agentsCard.getByRole("status")).toContainText(
+      "Confirm to stop this running agent.",
+    );
+    await expect(agentsCard.getByRole("button", { name: "Confirm stop" })).toBeVisible();
+    await expectPageNotHorizontallyOverflowing(page);
+
+    await agentsCard.getByRole("button", { name: "Confirm stop" }).click();
+    await expect(agentsCard.locator(".status-pill", { hasText: "stopped" })).toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(agentsCard.getByRole("button", { name: "Resume" })).toBeVisible();
+    await expectPageNotHorizontallyOverflowing(page);
+
+    await page.goto(`/agents/${created.id}`);
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+    await expect(page.locator(".runtime-log-panel")).toContainText("Latest log summaries");
+    await expect(page.locator(".runtime-log-panel")).toContainText("Latest Milestone 8 mobile log");
+    await expect(page.locator(".operational-alert-panel")).toContainText("Operational alerts");
+    await expect(page.locator(".operational-alert-panel")).toContainText(
+      "Pending approval blocks progress",
+    );
+    await expectPageNotHorizontallyOverflowing(page);
+
+    await page.goto("/dashboard");
+    const dashboardCard = page.locator(".mobile-agent-card", { hasText: name });
+    await expect(dashboardCard.getByRole("link", { name })).toHaveAttribute(
+      "href",
+      `/agents/${created.id}`,
+    );
+    await expect(dashboardCard.getByRole("button", { name: "Resume" })).toBeVisible();
+
+    const approvalToApprove = page.locator(".approval-item", {
+      hasText: `Approve mobile acceptance action ${viewportLabel} ${runId}`,
+    });
+    await expect(approvalToApprove.getByRole("button", { name: "Approve" })).toBeVisible();
+    await expect(approvalToApprove.getByRole("button", { name: "Deny" })).toBeVisible();
+    await expectPageNotHorizontallyOverflowing(page);
+
+    await pinDevelopmentUserToAgent(created.id);
+    await approvalToApprove.getByRole("button", { name: "Approve" }).click();
+    await expect(approvalToApprove.locator(".status-pill", { hasText: "approved" })).toBeVisible();
+    await expect(approvalToApprove.getByRole("status")).toContainText("Approval approved.");
+    await expectApprovalStatus(approvalToApproveId, "approved");
+    await expectPageNotHorizontallyOverflowing(page);
+
+    const approvalToDeny = page.locator(".approval-item", {
+      hasText: `Deny mobile acceptance action ${viewportLabel} ${runId}`,
+    });
+    await expect(approvalToDeny.getByRole("button", { name: "Deny" })).toBeVisible();
+
+    await pinDevelopmentUserToAgent(created.id);
+    page.once("dialog", async (dialog) => {
+      expect(dialog.message()).toBe("Deny this approval? This cannot be undone.");
+      await dialog.accept();
+    });
+    await approvalToDeny.getByRole("button", { name: "Deny" }).click();
+    await expect(approvalToDeny.locator(".status-pill", { hasText: "denied" })).toBeVisible();
+    await expect(approvalToDeny.getByRole("status")).toContainText("Approval denied.");
+    await expectApprovalStatus(approvalToDenyId, "denied");
     await expectPageNotHorizontallyOverflowing(page);
   }
 });

@@ -458,7 +458,7 @@ Goal: Agents can request approval for actions, and users can approve or deny the
 - Transaction test that approval decision and event are written together.
 - UI test for pending approval, approve, and deny.
 
-## Milestone 8: Mobile Control Panel
+## Milestone 8: Mobile Control Panel [Completed]
 
 Goal: The core operations surface is usable from a phone.
 
