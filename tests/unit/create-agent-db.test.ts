@@ -4621,6 +4621,54 @@ describe("create agent persistence", () => {
     expect(serializedLogs).not.toContain("raw-token-value");
   });
 
+  it("does not append Docker logs after the owning agent is soft-deleted", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Deleted Docker Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      containerId: "sha256:deleted-agent-container",
+      containerName: "agentbay-deleted-agent",
+      image: "agentbay/runner:issue-77",
+      observedStatus: "running",
+      observedAt: new Date("2026-07-04T07:10:00.000Z"),
+    });
+    await deleteAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+    });
+
+    const appended = await appendDockerRunnerLogLines({
+      db: connection.db,
+      containerId: "sha256:deleted-agent-container",
+      lines: [
+        {
+          stream: "stdout",
+          message: "should-not-write-for-deleted-agent",
+        },
+      ],
+      now: new Date("2026-07-04T07:10:01.000Z"),
+    });
+    const persistedForbiddenLogs = await connection.db
+      .select()
+      .from(agentLogs)
+      .where(eq(agentLogs.message, "should-not-write-for-deleted-agent"));
+    const deletedAgentPage = await listAgentLogs({
+      db: connection.db,
+      agentId: created.agent.id,
+    });
+
+    expect(appended).toEqual({
+      inserted: 0,
+      logs: [],
+    });
+    expect(persistedForbiddenLogs).toEqual([]);
+    expect(deletedAgentPage.logs.map((log) => log.message)).not.toContain(
+      "should-not-write-for-deleted-agent",
+    );
+  });
+
   it("lists latest active-agent process logs without mixing deleted agents or simulator rows", async () => {
     const agentA = await createAgentForDevelopmentUser(
       { name: "Dashboard Process Agent A", templateKey: "research_agent" },

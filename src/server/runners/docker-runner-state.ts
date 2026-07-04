@@ -180,7 +180,17 @@ export async function appendDockerRunnerLogLines(input: {
   }
 
   return input.db.transaction(async (tx) => {
-    const [containerRow] = await lockDockerContainerInTransaction(tx, input.containerId);
+    const developmentUserId = await getDevelopmentUserId(tx);
+
+    if (!developmentUserId) {
+      return { inserted: 0, logs: [] };
+    }
+
+    const [containerRow] = await lockActiveDockerContainerInTransaction(
+      tx,
+      input.containerId,
+      developmentUserId,
+    );
 
     if (!containerRow) {
       return { inserted: 0, logs: [] };
@@ -367,15 +377,20 @@ function assertValidDockerLogLine(line: DockerRunnerLogLineInput): void {
   }
 }
 
-function lockDockerContainerInTransaction(
+function lockActiveDockerContainerInTransaction(
   tx: DockerRunnerStateTransaction,
   containerId: string,
+  developmentUserId: string,
 ): Promise<{ id: string; agent_id: string }[]> {
   return tx.execute<{ id: string; agent_id: string }>(sql`
     select ${dockerRunnerContainers.id} as id,
            ${dockerRunnerContainers.agentId} as agent_id
     from ${dockerRunnerContainers}
+    inner join ${agents}
+      on ${agents.id} = ${dockerRunnerContainers.agentId}
     where ${dockerRunnerContainers.containerId} = ${containerId}
+      and ${agents.userId} = ${developmentUserId}
+      and ${agents.deletedAt} is null
     for update
   `);
 }
