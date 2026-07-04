@@ -116,9 +116,10 @@ export class LocalRunnerAdapter implements RunnerAdapter {
 
   async start(agentId: string): Promise<LocalRunnerStartResult> {
     const connection = this.createConnection();
+    let child: ChildProcessWithoutNullStreams | null = null;
 
     try {
-      const child = this.spawnProcess(this.command.executable, this.command.args, {
+      child = this.spawnProcess(this.command.executable, this.command.args, {
         ...(this.command.cwd === undefined ? {} : { cwd: this.command.cwd }),
         env: {
           ...process.env,
@@ -130,7 +131,7 @@ export class LocalRunnerAdapter implements RunnerAdapter {
       });
 
       if (!child.pid) {
-        child.kill("SIGTERM");
+        await terminateUntrackedChildProcess(child, this.stopTimeoutMs);
         await this.closeOwnedConnection(connection);
         return { ok: false, reason: "spawn_failed" };
       }
@@ -149,7 +150,7 @@ export class LocalRunnerAdapter implements RunnerAdapter {
       });
 
       if (!processRow) {
-        child.kill("SIGTERM");
+        await terminateUntrackedChildProcess(child, this.stopTimeoutMs);
         await this.closeOwnedConnection(connection);
         return { ok: false, reason: "agent_not_found" };
       }
@@ -174,6 +175,7 @@ export class LocalRunnerAdapter implements RunnerAdapter {
 
       return { ok: true, process: processRow };
     } catch {
+      await terminateUntrackedChildProcess(child, this.stopTimeoutMs);
       await this.closeOwnedConnection(connection);
       return { ok: false, reason: "state_persistence_failed" };
     }
@@ -462,6 +464,51 @@ async function waitForManagedProcessStop(
   }
 
   return terminalUpdate;
+}
+
+async function terminateUntrackedChildProcess(
+  child: ChildProcessWithoutNullStreams | null,
+  stopTimeoutMs: number,
+): Promise<void> {
+  if (!child || child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+
+  const closePromise = new Promise<void>((resolve) => {
+    child.once("close", () => resolve());
+  });
+
+  try {
+    if (!child.killed) {
+      child.kill("SIGTERM");
+    }
+  } catch {
+    return;
+  }
+
+  const timedOut = await Promise.race([
+    closePromise.then(() => false),
+    new Promise<true>((resolve) => {
+      setTimeout(() => resolve(true), stopTimeoutMs);
+    }),
+  ]);
+
+  if (!timedOut || child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    return;
+  }
+
+  await Promise.race([
+    closePromise,
+    new Promise<void>((resolve) => {
+      setTimeout(() => resolve(), stopTimeoutMs);
+    }),
+  ]);
 }
 
 function waitForTerminalUpdate(

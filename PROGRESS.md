@@ -2,11 +2,11 @@
 
 ## Milestone 9 Local Runner Persistence
 
-- Status: #72 is implementation-complete and ready for checker review.
+- Status: #72 maintainer fix is implementation-complete and ready for maintainer re-review.
 - Source plan: `docs/MILESTONES.md` Milestone 9
 - Tracking issues: #71-#75
 - Current branch: `codex/issue-72-local-runner-adapter`
-- Next step: checker should review the local runner adapter process spawning, durable state/log integration, contract tests, and isolated #72 gate evidence.
+- Next step: maintainer should re-review the start/persistence-failure cleanup path and focused adapter regression evidence.
 
 ### Issue Checklist
 
@@ -33,6 +33,7 @@
 - #73 returns sanitized public log messages from the product `GET /api/agents/:agentId/logs` response, reusing the operational summarizer to omit token-like values, redact Postgres URLs, and drop stack-frame paths.
 - #73 keeps lifecycle controls/status pills unchanged and does not implement process spawning, local runner adapter behavior, lifecycle endpoint replacement, Docker/cloud runners, Hermes, Telegram, auth, billing, provider integrations, or secrets.
 - #72 scopes process-id log streaming to the requested active local-development agent at the state helper boundary, so a known process UUID for another agent returns no logs through both the helper and adapter.
+- #72 terminates spawned-but-untracked child processes when start-time durable state persistence fails, including defensive handling for already-exited children and cleanup kill failures.
 
 ### Validation
 
@@ -63,6 +64,15 @@
 - Reconciliation:
   - A concurrent `bun run test:e2e` and `bun run verify` attempt against the same #72 database failed with Postgres deadlocks and polluted E2E assertions. This was an invalid validation setup caused by running two DB-mutating suites in parallel. Rerunning `bun run verify` alone against the same isolated #72 database passed.
   - Checker found that process-id log streaming trusted `processId` without proving ownership. `listLocalRunnerProcessLogs` now requires `agentId` and joins `agent_logs`, `local_runner_processes`, and `agents` against the active development user; the adapter passes the requested agent id into that helper. The new two-agent regression proves `adapter.streamLogs({ agentId: agentA.id, processId: processB.id })` returns an empty page and does not expose agent B's log.
+  - Maintainer review found that `LocalRunnerAdapter.start()` left a spawned child alive if durable state persistence threw before the process row was recorded. `start()` now retains the spawned child reference and runs bounded SIGTERM/SIGKILL cleanup before returning `state_persistence_failed`, with defensive no-throw behavior if the child already exited or `kill` throws.
+  - Maintainer-fix focused validation:
+    - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run db:migrate`: pass; migrations were already applied successfully.
+    - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun test tests/unit/create-agent-db.test.ts --test-name-pattern "local runner adapter"`: pass; 8 tests passed including the new spawned-child cleanup regression and cleanup-throws regression.
+    - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run format:check`: pass; Biome checked 83 files.
+    - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run lint`: pass; Biome checked 83 files.
+    - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run typecheck`: pass; `tsc --noEmit` passed.
+    - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run verify`: failed twice in the existing Playwright E2E test `tests/e2e/root-route.spec.ts:471` because `page.getByRole("status")` resolved both the action message `Start requested.` and the latest-log loading status. Both runs passed format, lint, typecheck, 23 Vitest files / 199 tests, and production build before the unrelated E2E failure.
+    - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54372/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3072 bun run test:e2e tests/e2e/root-route.spec.ts:471 --project chromium-desktop`: pass; the exact failed Playwright case passed standalone.
 
 #### #73
 

@@ -4767,6 +4767,63 @@ describe("create agent persistence", () => {
     }
   });
 
+  it("local runner adapter terminates a spawned child when durable start state persistence fails", async () => {
+    const child = new FakeChildProcess(24681);
+    const spawnProcess: LocalRunnerSpawn = () => child as unknown as ChildProcessWithoutNullStreams;
+    const adapter = new LocalRunnerAdapter({
+      command: {
+        executable: "/opt/hermes/bin/hermes",
+        args: ["run"],
+      },
+      createConnection: () =>
+        ({
+          db: {
+            transaction: vi.fn(async () => {
+              throw new Error("synthetic persistence failure");
+            }),
+          },
+          close: vi.fn(async () => {}),
+        }) as unknown as DatabaseConnection,
+      spawnProcess,
+      stopTimeoutMs: 50,
+    });
+
+    const result = await adapter.start("00000000-0000-4000-8000-000000000201");
+
+    expect(result).toEqual({ ok: false, reason: "state_persistence_failed" });
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(child.killed).toBe(true);
+    expect(child.signalCode).toBe("SIGTERM");
+  });
+
+  it("local runner adapter still reports persistence failure when spawned-child cleanup throws", async () => {
+    const child = new FakeChildProcess(24682, { throwOnKill: true });
+    const spawnProcess: LocalRunnerSpawn = () => child as unknown as ChildProcessWithoutNullStreams;
+    const adapter = new LocalRunnerAdapter({
+      command: {
+        executable: "/opt/hermes/bin/hermes",
+        args: ["run"],
+      },
+      createConnection: () =>
+        ({
+          db: {
+            transaction: vi.fn(async () => {
+              throw new Error("synthetic persistence failure");
+            }),
+          },
+          close: vi.fn(async () => {}),
+        }) as unknown as DatabaseConnection,
+      spawnProcess,
+      stopTimeoutMs: 50,
+    });
+
+    await expect(adapter.start("00000000-0000-4000-8000-000000000202")).resolves.toEqual({
+      ok: false,
+      reason: "state_persistence_failed",
+    });
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
   it("local runner adapter starts a real dummy child, records its pid, reports status, and stops it cleanly", async () => {
     const created = await createAgentForDevelopmentUser(
       { name: "Dummy Start Agent", templateKey: "research_agent" },
@@ -5882,14 +5939,27 @@ class FakeChildProcess extends EventEmitter {
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
   readonly pid: number;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
   killed = false;
   readonly kill = vi.fn((signal?: NodeJS.Signals | number) => {
+    if (this.options.throwOnKill) {
+      throw new Error("synthetic kill failure");
+    }
+
     this.killed = true;
-    setImmediate(() => this.emit("close", 0, signal ?? null));
+    setImmediate(() => {
+      this.exitCode = 0;
+      this.signalCode = typeof signal === "string" ? signal : null;
+      this.emit("close", 0, signal ?? null);
+    });
     return true;
   });
 
-  constructor(pid: number) {
+  constructor(
+    pid: number,
+    private readonly options: { throwOnKill?: boolean } = {},
+  ) {
     super();
     this.pid = pid;
   }
