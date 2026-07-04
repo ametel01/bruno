@@ -152,7 +152,11 @@ export async function listLatestActiveAgentProcessLogs(input: {
     .where(
       and(
         isNull(agents.deletedAt),
-        or(isNotNull(agentLogs.localRunnerProcessId), isNotNull(agentLogs.dockerRunnerContainerId)),
+        or(
+          isNotNull(agentLogs.runnerId),
+          isNotNull(agentLogs.localRunnerProcessId),
+          isNotNull(agentLogs.dockerRunnerContainerId),
+        ),
       ),
     )
     .orderBy(desc(agentLogs.createdAt), desc(agentLogs.sequence), desc(agentLogs.id))

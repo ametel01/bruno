@@ -20,6 +20,11 @@ import {
   listLatestActiveAgentProcessLogs,
   type LatestAgentProcessLogDto,
 } from "@/src/server/logs/agent-logs";
+import {
+  listManualRunnerStatusSummariesForDevelopmentUser,
+  ManualRunnerStatusPersistenceError,
+  type ManualRunnerStatusSummary,
+} from "@/src/server/runners/manual-runner-status";
 
 type DashboardContentProps = {
   routeLabel?: string;
@@ -29,6 +34,7 @@ type DashboardAgentResult = Awaited<ReturnType<typeof loadDashboardAgents>>;
 type DashboardActivityResult = Awaited<ReturnType<typeof loadDashboardActivity>>;
 type DashboardApprovalsResult = Awaited<ReturnType<typeof loadDashboardApprovals>>;
 type DashboardProcessLogsResult = Awaited<ReturnType<typeof loadDashboardProcessLogs>>;
+type DashboardManualRunnersResult = Awaited<ReturnType<typeof loadDashboardManualRunners>>;
 
 export const dynamic = "force-dynamic";
 
@@ -37,12 +43,14 @@ export default async function DashboardPage() {
   const activityResult = await loadDashboardActivity();
   const approvalsResult = await loadDashboardApprovals();
   const processLogsResult = await loadDashboardProcessLogs();
+  const manualRunnersResult = await loadDashboardManualRunners();
 
   return (
     <DashboardContent
       activityResult={activityResult}
       approvalsResult={approvalsResult}
       listResult={listResult}
+      manualRunnersResult={manualRunnersResult}
       processLogsResult={processLogsResult}
     />
   );
@@ -51,12 +59,14 @@ export default async function DashboardPage() {
 export function DashboardContent({
   activityResult = { ok: true, events: [] },
   approvalsResult = { ok: true, approvals: [] },
+  manualRunnersResult = { ok: true, runners: [] },
   processLogsResult = { ok: true, logs: [] },
   routeLabel = "Dashboard",
   listResult = { ok: true, agents: [] },
 }: DashboardContentProps & {
   activityResult?: DashboardActivityResult;
   approvalsResult?: DashboardApprovalsResult;
+  manualRunnersResult?: DashboardManualRunnersResult;
   processLogsResult?: DashboardProcessLogsResult;
   listResult?: DashboardAgentResult;
 }) {
@@ -133,6 +143,7 @@ export function DashboardContent({
           titleId="dashboard-activity-title"
         />
         <PendingApprovalsPanel result={approvalsResult} />
+        <DashboardManualRunnerPanel result={manualRunnersResult} />
         <DashboardProcessLogsPanel result={processLogsResult} />
         <PlaceholderPanel title="Readiness">
           <dl className="definition-list">
@@ -166,6 +177,75 @@ export function DashboardContent({
         </PlaceholderPanel>
       </div>
     </ProductShell>
+  );
+}
+
+function DashboardManualRunnerPanel({ result }: { result: DashboardManualRunnersResult }) {
+  return (
+    <section className="manual-runner-panel" aria-labelledby="dashboard-manual-runner-title">
+      <div className="section-heading">
+        <h2 id="dashboard-manual-runner-title">Manual runner status</h2>
+        {result.ok ? <span>{result.runners.length > 0 ? "known" : "not configured"}</span> : null}
+      </div>
+      {result.ok ? (
+        result.runners.length > 0 ? (
+          <ol className="manual-runner-list" aria-label="Known manual runners">
+            {result.runners.map((runner) => (
+              <ManualRunnerStatusItem
+                key={`${runner.name}:${runner.endpointHost}`}
+                runner={runner}
+              />
+            ))}
+          </ol>
+        ) : (
+          <div className="activity-empty-state">
+            <h3>No manual runner known</h3>
+            <p>Configure the manual VPS runner endpoint to show runner status here.</p>
+          </div>
+        )
+      ) : (
+        <div className="safe-error" role="alert">
+          Manual runner status could not be loaded.
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ManualRunnerStatusItem({ runner }: { runner: ManualRunnerStatusSummary }) {
+  return (
+    <li className="manual-runner-item" data-status={runner.status}>
+      <div className="manual-runner-header">
+        <h3>{runner.name}</h3>
+        <span className="status-pill">{runner.status}</span>
+      </div>
+      <dl className="definition-list compact-definition-list">
+        <div>
+          <dt>Kind</dt>
+          <dd>{runner.kind}</dd>
+        </div>
+        <div>
+          <dt>Endpoint host</dt>
+          <dd>{runner.endpointHost}</dd>
+        </div>
+        <div>
+          <dt>Updated</dt>
+          <dd>
+            <time dateTime={runner.updatedAt}>{runner.updatedAt}</time>
+          </dd>
+        </div>
+        <div>
+          <dt>Checked</dt>
+          <dd>
+            {runner.checkedAt ? (
+              <time dateTime={runner.checkedAt}>{runner.checkedAt}</time>
+            ) : (
+              "Not available"
+            )}
+          </dd>
+        </div>
+      </dl>
+    </li>
   );
 }
 
@@ -223,6 +303,10 @@ function DashboardProcessLogItem({ log }: { log: LatestAgentProcessLogDto }) {
         <div>
           <dt>Level</dt>
           <dd>{log.level}</dd>
+        </div>
+        <div>
+          <dt>Source</dt>
+          <dd>{log.source}</dd>
         </div>
       </dl>
     </li>
@@ -386,5 +470,22 @@ async function loadDashboardProcessLogs(
     if (ownsConnection) {
       await connection.close();
     }
+  }
+}
+
+async function loadDashboardManualRunners() {
+  try {
+    return {
+      ok: true as const,
+      runners: await listManualRunnerStatusSummariesForDevelopmentUser(),
+    };
+  } catch (error) {
+    if (error instanceof ManualRunnerStatusPersistenceError) {
+      return {
+        ok: false as const,
+      };
+    }
+
+    throw error;
   }
 }
