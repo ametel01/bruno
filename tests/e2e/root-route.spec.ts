@@ -81,6 +81,13 @@ test("/dashboard shows latest persisted process logs scoped to active agents", a
       sequence: 2,
       createdAt: "2026-07-04T06:00:02.000Z",
     },
+    {
+      stream: "stderr",
+      level: "error",
+      message: "Error: failed\n    at run (/app/worker.ts:10:2)\npostgres://user:pass@localhost/db",
+      sequence: 4,
+      createdAt: "2026-07-04T06:00:05.000Z",
+    },
   ]);
   await insertProcessRuntimeLogs(otherAgent.id, [
     {
@@ -118,13 +125,17 @@ test("/dashboard shows latest persisted process logs scoped to active agents", a
   };
   expect(logsBody.logs.map((log) => [log.sequence, log.stream, log.message])).toEqual([
     [1, "stdout", "primary stdout line"],
-    [2, "stderr", "TOKEN=stored-for-downstream should not render"],
+    [2, "stderr", "Sensitive details omitted."],
     [3, "stdout", "simulator row should not render"],
+    [4, "stderr", "Error: failed [redacted database URL]"],
   ]);
   expect(logsBody.logs.every((log) => log.agentId === primaryAgent.id)).toBe(true);
-  expect(logsBody.nextAfter).toBe(3);
+  expect(logsBody.nextAfter).toBe(4);
   expect(JSON.stringify(logsBody)).not.toContain("runnerId");
   expect(JSON.stringify(logsBody)).not.toContain("localRunnerProcessId");
+  expect(JSON.stringify(logsBody)).not.toContain("stored-for-downstream");
+  expect(JSON.stringify(logsBody)).not.toContain("postgres://");
+  expect(JSON.stringify(logsBody)).not.toContain("/app/worker.ts");
   expect(JSON.stringify(logsBody)).not.toContain("other active process line");
   expect(JSON.stringify(logsBody)).not.toContain("deleted process line should not render");
 
@@ -138,7 +149,7 @@ test("/dashboard shows latest persisted process logs scoped to active agents", a
     hasText: "other active process line",
   });
   await expect(processLogsPanel).toContainText("Latest process logs");
-  await expect(processLogsPanel).toContainText("3 shown");
+  await expect(processLogsPanel).toContainText("4 shown");
   await expect(primaryLogItem.getByRole("link", { name: primaryName })).toHaveAttribute(
     "href",
     `/agents/${primaryAgent.id}`,
@@ -152,13 +163,15 @@ test("/dashboard shows latest persisted process logs scoped to active agents", a
   await expect(processLogsPanel).toContainText("stdout");
   await expect(processLogsPanel).toContainText("stderr");
   await expect(processLogsPanel).toContainText("Sensitive details omitted.");
+  await expect(processLogsPanel).toContainText("Error: failed [redacted database URL]");
   await expect(processLogsPanel).not.toContainText("stored-for-downstream");
+  await expect(processLogsPanel).not.toContainText("postgres://");
+  await expect(processLogsPanel).not.toContainText("/app/worker.ts");
   await expect(processLogsPanel).not.toContainText("simulator row should not render");
   await expect(processLogsPanel).not.toContainText("deleted process line should not render");
   await expect(processLogsPanel).not.toContainText(deletedName);
   await expect(processLogsPanel).not.toContainText("agent_id");
   await expect(processLogsPanel).not.toContainText("runner_id");
-  await expect(processLogsPanel).not.toContainText("postgres://");
 });
 
 test.describe

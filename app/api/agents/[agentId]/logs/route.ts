@@ -3,6 +3,7 @@ import {
   getActiveAgentForDevelopmentUser,
 } from "@/src/server/agents/list-agents";
 import { isValidAgentId } from "@/src/server/agents/lifecycle";
+import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   type AgentLogDto,
@@ -128,7 +129,7 @@ function toPublicAgentLog(log: AgentLogDto): PublicAgentLogDto {
     agentId: log.agentId,
     stream: log.stream,
     level: log.level,
-    message: log.message,
+    message: summarizeOperationalText(log.message, "Log details omitted."),
     sequence: log.sequence,
     createdAt: log.createdAt,
   };

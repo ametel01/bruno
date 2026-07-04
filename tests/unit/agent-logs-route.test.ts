@@ -103,9 +103,19 @@ describe("GET /api/agents/[agentId]/logs route", () => {
     mocks.listAgentLogs.mockResolvedValue({
       logs: [
         logDto(1, { stream: "stdout", message: "runner stdout line" }),
-        logDto(2, { stream: "stderr", level: "error", message: "runner stderr line" }),
+        logDto(2, {
+          stream: "stderr",
+          level: "error",
+          message: "TOKEN=stored-for-downstream failed",
+        }),
+        logDto(3, {
+          stream: "stderr",
+          level: "error",
+          message:
+            "Error: failed\n    at run (/app/worker.ts:10:2)\npostgres://user:pass@localhost/db",
+        }),
       ],
-      nextAfter: 2,
+      nextAfter: 3,
     });
     const { GET } = await import("@/app/api/agents/[agentId]/logs/route");
 
@@ -118,17 +128,30 @@ describe("GET /api/agents/[agentId]/logs route", () => {
     expect(body).toEqual({
       logs: [
         publicLogDto(1, { stream: "stdout", message: "runner stdout line" }),
-        publicLogDto(2, { stream: "stderr", level: "error", message: "runner stderr line" }),
+        publicLogDto(2, {
+          stream: "stderr",
+          level: "error",
+          message: "Sensitive details omitted.",
+        }),
+        publicLogDto(3, {
+          stream: "stderr",
+          level: "error",
+          message: "Error: failed [redacted database URL]",
+        }),
       ],
-      nextAfter: 2,
+      nextAfter: 3,
     });
     expect(body.logs.map((log: { agentId: string }) => log.agentId)).toEqual([
+      ACTIVE_AGENT_ID,
       ACTIVE_AGENT_ID,
       ACTIVE_AGENT_ID,
     ]);
     expect(JSON.stringify(body)).not.toContain("runnerId");
     expect(JSON.stringify(body)).not.toContain("localRunnerProcessId");
     expect(JSON.stringify(body)).not.toContain("00000000-0000-4000-8000-000000000901");
+    expect(JSON.stringify(body)).not.toContain("stored-for-downstream");
+    expect(JSON.stringify(body)).not.toContain("postgres://");
+    expect(JSON.stringify(body)).not.toContain("/app/worker.ts");
   });
 
   it.each([
