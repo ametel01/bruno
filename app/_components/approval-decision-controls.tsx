@@ -17,6 +17,11 @@ type DecisionState =
   | { status: "success"; decision: ApprovalDecision; message: string }
   | { status: "error"; message: string };
 
+type DecisionFailure = {
+  message: string;
+  resolvedStatus?: ApprovalDecision;
+};
+
 export function ApprovalDecisionControls({
   approvalId,
   initialStatus,
@@ -48,7 +53,19 @@ export function ApprovalDecisionControls({
       });
 
       if (!response.ok) {
-        setState({ status: "error", message: await safeFailureMessage(response, decision) });
+        const failure = await safeFailureMessage(response, decision);
+
+        if (failure.resolvedStatus) {
+          setCurrentStatus(failure.resolvedStatus);
+          setState({
+            status: "success",
+            decision: failure.resolvedStatus,
+            message: failure.message,
+          });
+          return;
+        }
+
+        setState({ status: "error", message: failure.message });
         return;
       }
 
@@ -113,28 +130,40 @@ function genericFailureMessage(decision: ApprovalDecision): string {
     : "Approval could not be denied.";
 }
 
-async function safeFailureMessage(response: Response, decision: ApprovalDecision): Promise<string> {
+async function safeFailureMessage(
+  response: Response,
+  decision: ApprovalDecision,
+): Promise<DecisionFailure> {
   try {
     const body: unknown = await response.json();
 
     if (isErrorBody(body)) {
       if (body.error?.code === "approval_not_found") {
-        return "Approval could not be found.";
+        return { message: "Approval could not be found." };
       }
 
       if (body.error?.code === "approval_already_resolved") {
-        return "Approval has already been resolved.";
+        const resolvedStatus = normalizeResolvedStatus(body.error.status);
+
+        return {
+          message: "Approval has already been resolved.",
+          ...(resolvedStatus ? { resolvedStatus } : {}),
+        };
       }
     }
   } catch {
     // Keep user-facing failures generic when the response is not safe JSON.
   }
 
-  return genericFailureMessage(decision);
+  return { message: genericFailureMessage(decision) };
 }
 
-function isErrorBody(value: unknown): value is { error?: { code?: unknown } } {
+function isErrorBody(value: unknown): value is { error?: { code?: unknown; status?: unknown } } {
   return typeof value === "object" && value !== null && "error" in value;
+}
+
+function normalizeResolvedStatus(status: unknown): ApprovalDecision | null {
+  return status === "approved" || status === "denied" ? status : null;
 }
 
 function shouldConfirmMobileDeny(): boolean {

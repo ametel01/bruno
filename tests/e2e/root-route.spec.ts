@@ -778,6 +778,12 @@ test.describe
       const name = `Mobile Deny Agent ${testInfo.project.name}`;
       const created = await createAgent(request, name);
       createdAgentIds.add(created.id);
+      const staleApprovalId = await insertPendingApproval(created.id, {
+        title: "Already resolved mobile inbox access",
+        description: "Show a safe stale-response state without leaving mobile actions active.",
+        createdAt: "2026-07-04T13:10:00.000Z",
+        expiresAt: "2026-07-04T13:40:00.000Z",
+      });
       const approvalId = await insertPendingApproval(created.id, {
         title: "Deny mobile inbox access",
         description: "Deny this pending fake inbox access from the agent detail view.",
@@ -802,7 +808,11 @@ test.describe
       await expect(approvalItem.locator(".status-pill", { hasText: "pending" })).toBeVisible();
       await expectPageNotHorizontallyOverflowing(page);
 
-      await page.route(`**/api/approvals/${approvalId}/deny`, async (route) => {
+      const staleApprovalItem = approvalPanel.locator(".approval-item", {
+        hasText: "Already resolved mobile inbox access",
+      });
+      await expect(staleApprovalItem.locator(".status-pill", { hasText: "pending" })).toBeVisible();
+      await page.route(`**/api/approvals/${staleApprovalId}/deny`, async (route) => {
         await route.fulfill({
           contentType: "application/json",
           status: 409,
@@ -819,14 +829,16 @@ test.describe
         expect(dialog.message()).toBe("Deny this approval? This cannot be undone.");
         await dialog.accept();
       });
-      await approvalItem.getByRole("button", { name: "Deny" }).click();
-      await expect(approvalItem.getByRole("status")).toContainText(
+      await staleApprovalItem.getByRole("button", { name: "Deny" }).click();
+      await expect(staleApprovalItem.locator(".status-pill", { hasText: "denied" })).toBeVisible();
+      await expect(staleApprovalItem.getByRole("status")).toContainText(
         "Approval has already been resolved.",
       );
-      await expect(approvalItem.getByRole("status")).not.toContainText("postgres://");
-      await expect(approvalItem.getByRole("status")).not.toContainText("payload_json");
-      await expect(approvalItem.locator(".status-pill", { hasText: "pending" })).toBeVisible();
-      await page.unroute(`**/api/approvals/${approvalId}/deny`);
+      await expect(staleApprovalItem.getByRole("button", { name: "Approve" })).toHaveCount(0);
+      await expect(staleApprovalItem.getByRole("button", { name: "Deny" })).toHaveCount(0);
+      await expect(staleApprovalItem.getByRole("status")).not.toContainText("postgres://");
+      await expect(staleApprovalItem.getByRole("status")).not.toContainText("payload_json");
+      await page.unroute(`**/api/approvals/${staleApprovalId}/deny`);
 
       await pinDevelopmentUserToAgent(created.id);
       page.once("dialog", async (dialog) => {
