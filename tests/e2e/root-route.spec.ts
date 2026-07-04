@@ -77,10 +77,15 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   await expect(
     page.getByRole("row", { name: new RegExp(`${name}.*Research Agent.*stopped`) }),
   ).toBeVisible();
+  let dashboardActivity = page.locator(".activity-feed-panel");
+  await expect(dashboardActivity).toContainText("Latest activity");
+  await expect(dashboardActivity).toContainText("agent.created");
+  await expect(dashboardActivity).toContainText(`Created agent "${name}".`);
+  await expect(dashboardActivity).toContainText("Local development user");
 
   await page.reload();
 
-  await expect(page.getByRole("link", { name })).toBeVisible();
+  await expect(page.locator(".agent-list-panel").getByRole("link", { name })).toBeVisible();
   const dashboardAgentRow = page
     .getByRole("row", { name: new RegExp(`${name}.*Research Agent`) })
     .first();
@@ -132,6 +137,10 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   await page.goto("/dashboard");
   await expect(page.getByRole("heading", { name: "Persisted agents" })).toBeVisible();
   await expect(page.getByRole("link", { name })).toHaveCount(0);
+  dashboardActivity = page.locator(".activity-feed-panel");
+  await expect(dashboardActivity).toContainText(`Agent "${name}" deleted from active views.`);
+  await expect(dashboardActivity).toContainText("agent.deleted");
+  await expect(dashboardActivity).toContainText("Deleted agent");
 
   expect(agentHref).not.toBeNull();
   const deletedDetailResponse = await page.goto(agentHref ?? "/agents/missing");

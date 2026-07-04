@@ -1,14 +1,17 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AgentDetailPage from "@/app/agents/[agentId]/page";
 import AgentsPage from "@/app/agents/page";
-import DashboardPage from "@/app/dashboard/page";
+import DashboardPage, { DashboardContent } from "@/app/dashboard/page";
 import Home from "@/app/page";
 import SettingsPage from "@/app/settings/page";
 
 const mocks = vi.hoisted(() => ({
+  closeDashboardConnection: vi.fn(),
+  createDatabaseConnection: vi.fn(),
   getActiveAgentForDevelopmentUser: vi.fn(),
+  listLatestAgentActivity: vi.fn(),
   listActiveAgentsForDevelopmentUser: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
@@ -25,6 +28,19 @@ vi.mock("@/src/server/agents/list-agents", async (importOriginal) => {
   };
 });
 
+vi.mock("@/src/server/db/client", () => ({
+  createDatabaseConnection: mocks.createDatabaseConnection,
+}));
+
+vi.mock("@/src/server/events/agent-events", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/server/events/agent-events")>();
+
+  return {
+    ...actual,
+    listLatestAgentActivity: mocks.listLatestAgentActivity,
+  };
+});
+
 vi.mock("next/navigation", () => ({
   notFound: mocks.notFound,
   useRouter: () => ({
@@ -33,8 +49,26 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("product shell routes", () => {
+  beforeEach(() => {
+    mocks.createDatabaseConnection.mockReturnValue({
+      db: {},
+      close: mocks.closeDashboardConnection,
+    });
+    mocks.closeDashboardConnection.mockResolvedValue(undefined);
+    mocks.listLatestAgentActivity.mockResolvedValue({
+      ok: true,
+      page: {
+        events: [],
+        nextCursor: null,
+      },
+    });
+  });
+
   afterEach(() => {
+    mocks.closeDashboardConnection.mockReset();
+    mocks.createDatabaseConnection.mockReset();
     mocks.getActiveAgentForDevelopmentUser.mockReset();
+    mocks.listLatestAgentActivity.mockReset();
     mocks.listActiveAgentsForDevelopmentUser.mockReset();
     mocks.notFound.mockClear();
   });
@@ -54,6 +88,7 @@ describe("product shell routes", () => {
     const html = renderToStaticMarkup(element);
 
     expect(html).toContain("No agent records");
+    expect(html).toContain("No activity yet");
     expect(html).toContain("Active persisted records are read from the database.");
     expect(html).toContain(
       "Start, Stop, Restart, and Delete use deterministic fake lifecycle controls.",
@@ -84,6 +119,121 @@ describe("product shell routes", () => {
     expect(html).toContain("Start");
     expect(html).toContain("Delete");
     expect(html).toContain('href="/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774"');
+  });
+
+  it("renders latest dashboard activity newest-first with agent context and deleted labels", () => {
+    const html = renderToStaticMarkup(
+      createElement(DashboardContent, {
+        listResult: {
+          ok: true,
+          agents: [
+            {
+              id: "00000000-0000-4000-8000-000000000201",
+              name: "Active Feed Agent",
+              templateKey: "research_agent",
+              templateLabel: "Research Agent",
+              status: "running",
+              href: "/agents/00000000-0000-4000-8000-000000000201",
+              createdAt: "2026-07-04T05:00:00.000Z",
+            },
+          ],
+        },
+        activityResult: {
+          ok: true,
+          events: [
+            {
+              id: "00000000-0000-4000-8000-000000000411",
+              agentId: "00000000-0000-4000-8000-000000000212",
+              actor: {
+                userId: "00000000-0000-4000-8000-000000000101",
+                displayName: "Local development user",
+              },
+              type: "agent.deleted",
+              message: 'Agent "Deleted Feed Agent" deleted from active views.',
+              metadata: {
+                fromStatus: "stopped",
+                toStatus: "deleted",
+                deletedAt: "2026-07-04T06:30:00.000Z",
+              },
+              metadataSummary: "stopped -> deleted; Deleted at: 2026-07-04T06:30:00.000Z",
+              createdAt: "2026-07-04T06:30:00.000Z",
+              agent: {
+                id: "00000000-0000-4000-8000-000000000212",
+                name: "Deleted Feed Agent",
+                templateKey: "github_issue_agent",
+                status: "stopped",
+                deletedAt: "2026-07-04T06:30:00.000Z",
+              },
+            },
+            {
+              id: "00000000-0000-4000-8000-000000000311",
+              agentId: "00000000-0000-4000-8000-000000000201",
+              actor: {
+                userId: "00000000-0000-4000-8000-000000000101",
+                displayName: "Jane Operator",
+              },
+              type: "agent.started",
+              message: 'Start completed for agent "Active Feed Agent".',
+              metadata: {
+                fromStatus: "starting",
+                toStatus: "running",
+              },
+              metadataSummary: "starting -> running",
+              createdAt: "2026-07-04T06:00:00.000Z",
+              agent: {
+                id: "00000000-0000-4000-8000-000000000201",
+                name: "Active Feed Agent",
+                templateKey: "research_agent",
+                status: "running",
+                deletedAt: null,
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(html.indexOf("deleted from active views")).toBeLessThan(
+      html.indexOf("Start completed for agent"),
+    );
+    expect(html).toContain("Latest activity");
+    expect(html).toContain("Deleted agent");
+    expect(html).toContain("agent.deleted");
+    expect(html).toContain("agent.started");
+    expect(html).toContain("Local development user");
+    expect(html).toContain("Jane Operator");
+    expect(html).toContain("stopped -&gt; deleted; Deleted at: 2026-07-04T06:30:00.000Z");
+    expect(html).toContain("starting -&gt; running");
+    expect(html).toContain('href="/agents/00000000-0000-4000-8000-000000000201"');
+    expect(html).not.toContain('href="/agents/00000000-0000-4000-8000-000000000212"');
+  });
+
+  it("keeps the active agent list visible when dashboard activity cannot be loaded", () => {
+    const html = renderToStaticMarkup(
+      createElement(DashboardContent, {
+        listResult: {
+          ok: true,
+          agents: [
+            {
+              id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+              name: "Research Agent",
+              templateKey: "research_agent",
+              templateLabel: "Research Agent",
+              status: "stopped",
+              href: "/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774",
+              createdAt: "2026-07-03T05:00:00.000Z",
+            },
+          ],
+        },
+        activityResult: {
+          ok: false,
+        },
+      }),
+    );
+
+    expect(html).toContain("Research Agent");
+    expect(html).toContain("Latest activity could not be loaded.");
+    expect(html).not.toContain("postgres://");
   });
 
   it("renders the agents empty database-backed list state and create form", async () => {
