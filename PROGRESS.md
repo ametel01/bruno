@@ -52,13 +52,13 @@
 
 ## Milestone 12 Secure Runner Auth
 
-- Status: #128 implementation in progress; Milestone 12 implementation is not complete.
+- Status: #129 implementation complete and ready for checker review; Milestone 12 implementation is not complete until the remaining heartbeat, rotation, health UI, settings, and final acceptance issues merge.
 - Source plan:
   - `docs/MILESTONES.md` Milestone 12: Secure Runner Auth.
   - `docs/PRD.md` runner-auth product/testing decisions.
   - `docs/conversation_dump.md` Milestone 12 secure runner auth outline.
   - GitHub issues #127-#134 and GitHub milestone "Milestone 12: Secure Runner Auth".
-- Current branch: `codex/issue-128-runner-auth-persistence`.
+- Current branch: `codex/issue-129-runner-registration`.
 - Next step: implementation agents should append validation evidence to this section after their issue gates pass, then update `CHANGELOG.md` only when the issue ships functional user/operator-visible behavior.
 
 ### Issue Checklist
@@ -66,8 +66,8 @@
 - [ ] #122 Persist manual VPS runner identity and assignment. Status: ready for checker review on `codex/issue-122-manual-runner-persistence`; Wave 0 prerequisite for #128 runner auth persistence.
 - [ ] #125 Show manual runner status and failures. Status: ready for checker review on `codex/issue-125-manual-runner-status`; display-only status/log UI slice using persisted manual runner state.
 - [x] #127 Initialize Milestone 12 execution tracking. Status: ready for checker review on `codex/issue-127-milestone-12-tracking`; tracking section restored/initialized.
-- [ ] #128 Add the runner auth persistence contract. Status: ready for checker review on `codex/issue-128-runner-auth-persistence`.
-- [ ] #129 Implement one-time runner registration. Status: open; blocked by #128.
+- [x] #128 Add the runner auth persistence contract. Status: merged; provides runner registration-token, credential, heartbeat schema, and reusable secret helpers.
+- [x] #129 Implement one-time runner registration. Status: ready for checker review on `codex/issue-129-runner-registration`; adds visible-once dashboard registration tokens and one-time runner exchange for durable identity plus visible-once credential.
 - [ ] #130 Authenticate runner heartbeat and offline status. Status: open; blocked by #128.
 - [ ] #131 Add runner credential rotation and revocation. Status: open; blocked by #130.
 - [ ] #132 Show runner health on assigned agents. Status: open; blocked by #130.
@@ -109,8 +109,24 @@
 - 2026-07-05: #125 implemented dashboard and agent-detail manual runner status panels, assigned-runner offline/degraded alerts, safe manual runner status summaries, dashboard remote/manual runner log inclusion, unit coverage, and seeded Playwright coverage without adding #124 lifecycle forwarding or #128 heartbeat/auth behavior.
 - 2026-07-05: #125 rebased onto current `origin/main` after #128 merged, preserved the manual runner status UI/data slice and PostgreSQL advisory-lock Playwright isolation fix, resolved only `PROGRESS.md`/`CHANGELOG.md` append conflicts, and kept `next-env.d.ts` out of the diff.
 - 2026-07-05: #125 rebased onto current `origin/main` after #124 merged, resolved only `CHANGELOG.md` and `PROGRESS.md` append conflicts by keeping both #124 and #125 entries, preserved the #125 status/log UI slice and advisory-lock E2E isolation fix, and reran the requested focused checks.
+- 2026-07-05: #129 added `POST /api/runners/registration-tokens` for visible-once dashboard registration tokens and `POST /runner/v1/register` for atomic one-time runner exchange into durable runner identity plus visible-once bearer credential, with hash-only persistence and safe rejection for bad token states.
 
 ### Validation Evidence
+
+- 2026-07-05 #129:
+  - `bun install`: pass; restored local package shims after initial `bun run format` failed with `/opt/homebrew/bin/bash: line 1: biome: command not found`.
+  - `bun run format`: pass; Biome formatted the new registration route, service, and test files.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/runner-registration-routes.test.ts tests/unit/runner-registration.test.ts`: pass; 2 files and 10 tests passed for visible-once create/exchange responses, safe validation/errors, hash-only persistence, bad token states, and concurrent one-time exchange behavior.
+  - `bun run format:check`: pass; Biome checked 107 files with no fixes applied.
+  - `bun run lint`: pass; Biome lint checked 107 files with no fixes applied.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed.
+  - Isolated DB setup for broader validation: `DROP DATABASE IF EXISTS agentbay_129_check WITH (FORCE)`, `CREATE DATABASE agentbay_129_check`, and `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay_129_check NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:migrate` all passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay_129_check NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/runner-registration-routes.test.ts tests/unit/runner-registration.test.ts`: pass; 2 files and 10 tests passed on isolated DB after avoiding parallel validation-command collision.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay_129_check NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism`: pass; 31 files and 272 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay_129_check NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: pass; Next.js compiled, typechecked, generated pages, and listed `/api/runners/registration-tokens` and `/runner/v1/register`.
+  - `rg -n "console\\.(log|error|warn|info)|tokenHash|credentialHash|agb_reg_[A-Za-z0-9_-]{20,}|agb_run_[A-Za-z0-9_-]{20,}|rawToken|rawCredential|postgres://[^ ]*@" app/api/runners app/runner src/server/runners/runner-registration.ts tests/unit/runner-registration*.test.ts -S`: pass after review; matches are stored hash field names in service code and synthetic test tokens/negative assertions only, with no runtime logging or raw secret persistence.
+  - `git diff --check`: pass; no whitespace errors.
+  - Skipped full E2E because #129 adds server-side registration routes and service behavior only; no browser UI workflow changed. Earlier accidental parallel validation commands against the same isolated DB produced deadlocks/resets, then passed when rerun serially.
 
 - 2026-07-05 #125:
   - `bun install`: pass; restored local package shims in this worktree after `bun run format` initially failed with `/opt/homebrew/bin/bash: line 1: biome: command not found`.
