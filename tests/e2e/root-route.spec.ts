@@ -8,8 +8,6 @@ import {
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 
-test.describe.configure({ mode: "serial" });
-
 const createdAgentIds = new Set<string>();
 
 test.afterEach(async () => {
