@@ -1,6 +1,6 @@
 # AgentBay
 
-AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, and scoped runtime logs for local development agents.
+AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice plus the first Milestone 6 config-persistence foundation. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records and config defaults, deterministic Start, Stop, Restart, and Delete controls, persisted activity feeds, and scoped runtime logs for local development agents.
 
 ## Requirements
 
@@ -57,9 +57,11 @@ The migration set creates the local application metadata table plus the persiste
 
 - `users`: local development user records used until production auth exists.
 - `agents`: persistent agent identity, template, lifecycle status, timestamps, and soft-delete marker.
+- `agent_configs`: one typed config row per active agent with system prompt, model provider, model name, integer-cent daily spend cap, schedule mode, optional cron, timezone, and timestamps.
 - `agent_events`: transactional audit events for agent creation, fake lifecycle transitions, dashboard activity, and per-agent activity.
 - `agent_logs`: runtime log rows with nullable runner identity, static stream/level/message fields, and per-agent positive sequence values.
 - `agent_status`: Postgres enum used by `agents.status`.
+- `agent_schedule_mode`: Postgres enum used by `agent_configs.schedule_mode`.
 
 The migrations do not create approval, runner, billing, auth, Hermes, Telegram, secrets, provisioning, or provider integration tables.
 
@@ -104,7 +106,7 @@ Milestone 4 records are local-development records only. Lifecycle controls and r
 
 ## Create Agent API
 
-`POST /api/agents` creates one stopped persistent agent record for the local development user and records one `agent.created` event in the same transaction.
+`POST /api/agents` creates one stopped persistent agent record for the local development user, writes a default `agent_configs` row, and records one `agent.created` event in the same transaction.
 
 Request body:
 
@@ -118,6 +120,8 @@ Request body:
 Supported `templateKey` values are `research_agent`, `inbox_triage_agent`, `github_issue_agent`, and `social_content_agent`. The `name` value is trimmed, required, and limited to 120 characters.
 
 Successful responses return HTTP 201 with the created agent identity, `stopped` status, timestamps, and the `agent.created` event type. Validation failures return safe JSON without database URLs, SQL errors, stack traces, or driver messages. Persistence failures return generic safe errors.
+
+The initial persisted config defaults are intentionally non-secret and non-integrated: model provider and model name are `not_configured`, max daily spend is `0` cents, schedule mode is `manual`, schedule cron is `null`, timezone is `UTC`, and the generic system prompt is stored with the config row. Config editing, config update APIs, `config.updated` events, real provider/model integration, Hermes config generation, BYOK keys, and secret storage remain future scope.
 
 ## Lifecycle APIs
 

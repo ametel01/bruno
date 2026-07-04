@@ -412,6 +412,7 @@ async function deleteCreatedAgents(agentIds: string[]): Promise<void> {
   await withDatabase(async (sql) => {
     await sql`delete from agent_logs where agent_id in ${sql(agentIds)}`;
     await sql`delete from agent_events where agent_id in ${sql(agentIds)}`;
+    await sql`delete from agent_configs where agent_id in ${sql(agentIds)}`;
     await sql`delete from agents where id in ${sql(agentIds)}`;
   });
 }

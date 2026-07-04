@@ -2,11 +2,21 @@ import { asc, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
-import { agents, appMetadata, users } from "@/src/server/db/schema";
+import { agentConfigs, agents, appMetadata, users } from "@/src/server/db/schema";
 import { recordAgentEventInTransaction } from "@/src/server/events/agent-events";
 
 const DEVELOPMENT_USER_METADATA_KEY = "local_development_user_id";
 export const AGENT_NAME_MAX_LENGTH = 120;
+export const DEFAULT_AGENT_CONFIG = {
+  systemPrompt:
+    "You are an AgentBay agent. Follow the operator's instructions and keep responses concise.",
+  modelProvider: "not_configured",
+  modelName: "not_configured",
+  maxDailySpendCents: 0,
+  scheduleMode: "manual",
+  scheduleCron: null,
+  timezone: "UTC",
+} as const;
 export const SUPPORTED_AGENT_TEMPLATE_KEYS = [
   "research_agent",
   "inbox_triage_agent",
@@ -68,8 +78,16 @@ type InsertCreatedEvent = (
   },
 ) => Promise<void>;
 
+type InsertDefaultAgentConfig = (
+  tx: AgentTransaction,
+  input: {
+    agent: CreatedAgentRow;
+  },
+) => Promise<void>;
+
 export type CreateAgentDependencies = {
   createConnection?: () => DatabaseConnection;
+  insertDefaultAgentConfig?: InsertDefaultAgentConfig;
   insertCreatedEvent?: InsertCreatedEvent;
 };
 
@@ -137,6 +155,8 @@ export async function createAgentForDevelopmentUser(
 ): Promise<CreatedAgentResponse> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
+  const insertDefaultAgentConfig =
+    dependencies.insertDefaultAgentConfig ?? insertDefaultConfigForCreatedAgent;
   const insertCreatedEvent = dependencies.insertCreatedEvent ?? insertDefaultCreatedEvent;
 
   try {
@@ -157,6 +177,7 @@ export async function createAgentForDevelopmentUser(
       }
 
       const createdAgent = agent as CreatedAgentRow;
+      await insertDefaultAgentConfig(tx, { agent: createdAgent });
       await insertCreatedEvent(tx, { agent: createdAgent, actorUserId: userId });
 
       return toCreatedAgentResponse(createdAgent);
@@ -237,6 +258,18 @@ async function rememberDevelopmentUserId(tx: AgentTransaction, userId: string): 
         updatedAt: new Date(),
       },
     });
+}
+
+async function insertDefaultConfigForCreatedAgent(
+  tx: AgentTransaction,
+  input: {
+    agent: CreatedAgentRow;
+  },
+): Promise<void> {
+  await tx.insert(agentConfigs).values({
+    agentId: input.agent.id,
+    ...DEFAULT_AGENT_CONFIG,
+  });
 }
 
 async function insertDefaultCreatedEvent(

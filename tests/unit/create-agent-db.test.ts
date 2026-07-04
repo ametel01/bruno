@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   AgentPersistenceError,
+  DEFAULT_AGENT_CONFIG,
   createAgentForDevelopmentUser,
 } from "@/src/server/agents/create-agent";
 import {
@@ -29,7 +30,14 @@ import {
   listActiveAgentsForDevelopmentUser,
 } from "@/src/server/agents/list-agents";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agentEvents, agentLogs, agents, appMetadata, users } from "@/src/server/db/schema";
+import {
+  agentConfigs,
+  agentEvents,
+  agentLogs,
+  agents,
+  appMetadata,
+  users,
+} from "@/src/server/db/schema";
 import {
   listAgentEventFeed,
   listLatestAgentActivity,
@@ -71,6 +79,10 @@ describe("create agent persistence", () => {
       .select()
       .from(agentEvents)
       .orderBy(agentEvents.createdAt);
+    const persistedConfigs = await connection.db
+      .select()
+      .from(agentConfigs)
+      .orderBy(agentConfigs.agentId);
     const persistedUsers = await connection.db.select().from(users);
     const metadata = await connection.db.select().from(appMetadata);
 
@@ -84,6 +96,19 @@ describe("create agent persistence", () => {
     });
     expect(persistedUsers).toHaveLength(1);
     expect(persistedAgents).toHaveLength(2);
+    expect(persistedConfigs).toHaveLength(2);
+    expect(persistedConfigs).toContainEqual(
+      expect.objectContaining({
+        agentId: created.agent.id,
+        ...DEFAULT_AGENT_CONFIG,
+      }),
+    );
+    expect(persistedConfigs).toContainEqual(
+      expect.objectContaining({
+        agentId: second.agent.id,
+        ...DEFAULT_AGENT_CONFIG,
+      }),
+    );
     expect(persistedEvents).toHaveLength(2);
     expect(persistedEvents.filter((event) => event.agentId === created.agent.id)).toHaveLength(1);
     expect(persistedEvents[0]).toMatchObject({
@@ -117,6 +142,27 @@ describe("create agent persistence", () => {
 
     await expectTableCount(connection, "users", 0);
     await expectTableCount(connection, "agents", 0);
+    await expectTableCount(connection, "agent_configs", 0);
+    await expectTableCount(connection, "agent_events", 0);
+    await expectTableCount(connection, "app_metadata", 0);
+  });
+
+  it("rolls back the agent and development user when default config creation fails", async () => {
+    await expect(
+      createAgentForDevelopmentUser(
+        { name: "Research Agent", templateKey: "research_agent" },
+        {
+          createConnection: () => connection,
+          insertDefaultAgentConfig: async () => {
+            throw new Error("synthetic config failure");
+          },
+        },
+      ),
+    ).rejects.toBeInstanceOf(AgentPersistenceError);
+
+    await expectTableCount(connection, "users", 0);
+    await expectTableCount(connection, "agents", 0);
+    await expectTableCount(connection, "agent_configs", 0);
     await expectTableCount(connection, "agent_events", 0);
     await expectTableCount(connection, "app_metadata", 0);
   });
@@ -3529,12 +3575,12 @@ describe("create agent persistence", () => {
 });
 
 async function resetCreateAgentTables(connection: DatabaseConnection): Promise<void> {
-  await connection.client`truncate table agent_logs, agent_events, agents, app_metadata, users restart identity cascade`;
+  await connection.client`truncate table agent_configs, agent_logs, agent_events, agents, app_metadata, users restart identity cascade`;
 }
 
 async function expectTableCount(
   connection: DatabaseConnection,
-  tableName: "users" | "agents" | "agent_events" | "app_metadata",
+  tableName: "users" | "agents" | "agent_configs" | "agent_events" | "app_metadata",
   expected: number,
 ): Promise<void> {
   await expect(countRows(connection, tableName)).resolves.toBe(expected);
@@ -3542,7 +3588,7 @@ async function expectTableCount(
 
 async function countRows(
   connection: DatabaseConnection,
-  tableName: "users" | "agents" | "agent_events" | "agent_logs" | "app_metadata",
+  tableName: "users" | "agents" | "agent_configs" | "agent_events" | "agent_logs" | "app_metadata",
 ): Promise<number> {
   const [row] = await connection.db.execute<{ count: string }>(
     sql.raw(`select count(*)::text as count from ${tableName}`),
