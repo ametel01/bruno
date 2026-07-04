@@ -129,7 +129,7 @@ Missing, malformed, absent, already soft-deleted, and invalid-status targets ret
 
 ## Activity Feeds
 
-Activity feeds are the operator audit timeline for important persisted control-plane actions. They explain who changed an agent, what changed, and when it happened without requiring raw database access. They are intentionally low-volume audit events, not runtime logs. Chatty stdout, stderr, Hermes output, runner output, and generated task logs belong to future `agent_logs` work.
+Activity feeds are the operator audit timeline for important persisted control-plane actions. They explain who changed an agent, what changed, and when it happened without requiring raw database access. They are intentionally low-volume audit events, not runtime logs. Chatty stdout, stderr, Hermes output, runner output, and generated task logs belong to the separate `agent_logs` runtime log path.
 
 The dashboard shows the newest persisted activity across all agents. The agent detail page shows the selected agent's activity with pagination.
 

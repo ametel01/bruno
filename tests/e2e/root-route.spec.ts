@@ -115,13 +115,25 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   await expect(dashboardAgentRow.getByRole("button", { name: "Stop" })).toHaveCount(0);
   await expect(dashboardAgentRow.getByRole("button", { name: "Restart" })).toHaveCount(0);
   await expect(dashboardAgentRow.getByRole("button", { name: "Start" })).toBeVisible();
+  await expect(dashboardAgentRow.getByRole("button", { name: "Simulate error" })).toBeVisible();
+  await dashboardAgentRow.getByRole("button", { name: "Simulate error" }).click();
+  await expect(dashboardAgentRow.locator(".status-pill", { hasText: "error" })).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(dashboardAgentRow.getByRole("button", { name: "Simulate error" })).toHaveCount(0);
+  dashboardActivity = page.locator(".activity-feed-panel");
+  await expect(dashboardActivity).toContainText("agent.error");
+  await expect(dashboardActivity).toContainText(`Simulated error requested for agent "${name}".`);
+  await expect(dashboardActivity).toContainText("stopped -> error");
+  await expect(dashboardActivity).toContainText("Source: development_simulator");
 
   expect(agentHref).not.toBeNull();
   await page.goto(agentHref ?? "/agents/missing");
   await expect(page.getByRole("heading", { name })).toBeVisible();
   const detailRecord = page.locator(".placeholder-panel").filter({ hasText: "Agent record" });
-  await expect(detailRecord.locator(".status-pill", { hasText: "stopped" })).toBeVisible();
+  await expect(detailRecord.locator(".status-pill", { hasText: "error" })).toBeVisible();
   await expect(detailRecord).toContainText("research_agent");
+  await expect(detailRecord).toContainText("Simulated error requested for development testing.");
   await expect(detailRecord).toContainText("Created");
   await expect(detailRecord).toContainText("Updated");
   await expect(page.getByRole("button", { name: "Start" })).toBeVisible();
@@ -132,6 +144,8 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   await expect(detailActivity).toContainText("agent.start_requested");
   await expect(detailActivity).toContainText("agent.restart_completed");
   await expect(detailActivity).toContainText("agent.stop_completed");
+  await expect(detailActivity).toContainText("agent.error");
+  await expect(detailActivity).toContainText("Source: development_simulator");
   await expect(detailActivity).toContainText("Local development user");
   await expect(detailActivity).toContainText("Template: research_agent; Status: stopped");
   await expect(detailActivity).not.toContainText("actorUserId");
@@ -139,7 +153,7 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
   await page.reload();
 
   await expect(page.getByRole("heading", { name })).toBeVisible();
-  await expect(page.locator(".status-pill", { hasText: "stopped" })).toBeVisible();
+  await expect(page.locator(".status-pill", { hasText: "error" })).toBeVisible();
   await page.getByRole("button", { name: "Start" }).click();
   await expect(page.getByRole("status")).toContainText("Start requested.");
   await expect(page.locator(".status-pill", { hasText: "running" })).toBeVisible({

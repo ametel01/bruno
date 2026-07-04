@@ -13,6 +13,13 @@ export type AgentLifecycleStatus = (typeof agentStatusEnum.enumValues)[number];
 export const STARTABLE_AGENT_STATUSES = ["idle", "stopped", "error"] as const;
 export const STOPPABLE_AGENT_STATUSES = ["running"] as const;
 export const RESTARTABLE_AGENT_STATUSES = ["running"] as const;
+export const SIMULATE_ERROR_AGENT_STATUSES = [
+  "idle",
+  "stopped",
+  "starting",
+  "running",
+  "restarting",
+] as const;
 export const DELETABLE_AGENT_STATUSES = ["idle", "running", "stopped", "error"] as const;
 export const START_REQUESTED_EVENT_TYPE = "agent.start_requested";
 export const START_COMPLETED_EVENT_TYPE = "agent.start_completed";
@@ -20,6 +27,7 @@ export const STOP_REQUESTED_EVENT_TYPE = "agent.stop_requested";
 export const STOP_COMPLETED_EVENT_TYPE = "agent.stop_completed";
 export const RESTART_REQUESTED_EVENT_TYPE = "agent.restart_requested";
 export const RESTART_COMPLETED_EVENT_TYPE = "agent.restart_completed";
+export const SIMULATED_ERROR_EVENT_TYPE = "agent.error";
 export const DELETE_EVENT_TYPE = "agent.deleted";
 export const FAKE_RUNNER_START_DELAY_MS = 400;
 
@@ -27,6 +35,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const STARTING_STATUS_REASON = "Start requested.";
 const RESTARTING_STATUS_REASON = "Restart requested.";
 const RUNNING_STATUS_REASON = "Fake runner is running.";
+export const SIMULATED_ERROR_STATUS_REASON = "Simulated error requested for development testing.";
 
 type AgentTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -122,6 +131,32 @@ export type RestartedAgent = {
   deletedAt: null;
 };
 
+export type SimulateErrorAgentResult =
+  | {
+      ok: true;
+      agent: SimulatedErrorAgent;
+      event: {
+        type: typeof SIMULATED_ERROR_EVENT_TYPE;
+      };
+    }
+  | {
+      ok: false;
+      reason: "missing_agent_id" | "malformed_agent_id" | "agent_not_found" | "invalid_status";
+      status?: AgentLifecycleStatus;
+    };
+
+export type SimulatedErrorAgent = {
+  id: string;
+  userId: string;
+  name: string;
+  templateKey: string;
+  status: "error";
+  statusReason: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: null;
+};
+
 export type DeleteAgentResult =
   | {
       ok: true;
@@ -169,6 +204,12 @@ export function canStopAgentStatus(status: AgentLifecycleStatus): boolean {
 
 export function canRestartAgentStatus(status: AgentLifecycleStatus): boolean {
   return RESTARTABLE_AGENT_STATUSES.includes(status as (typeof RESTARTABLE_AGENT_STATUSES)[number]);
+}
+
+export function canSimulateErrorAgentStatus(status: AgentLifecycleStatus): boolean {
+  return SIMULATE_ERROR_AGENT_STATUSES.includes(
+    status as (typeof SIMULATE_ERROR_AGENT_STATUSES)[number],
+  );
 }
 
 export function canDeleteAgentStatus(status: AgentLifecycleStatus): boolean {
@@ -444,6 +485,89 @@ export async function restartAgentForDevelopmentUser(
   }
 }
 
+export async function simulateErrorAgentForDevelopmentUser(
+  agentId: string,
+  dependencies: AgentLifecycleDependencies = {},
+): Promise<SimulateErrorAgentResult> {
+  const normalizedAgentId = agentId.trim();
+
+  if (normalizedAgentId.length === 0) {
+    return { ok: false, reason: "missing_agent_id" };
+  }
+
+  if (!isValidAgentId(normalizedAgentId)) {
+    return { ok: false, reason: "malformed_agent_id" };
+  }
+
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
+
+  try {
+    return await connection.db.transaction(async (tx) => {
+      const [currentAgent] = await tx
+        .select()
+        .from(agents)
+        .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
+        .limit(1);
+
+      if (!currentAgent) {
+        return { ok: false, reason: "agent_not_found" };
+      }
+
+      if (!canSimulateErrorAgentStatus(currentAgent.status)) {
+        return { ok: false, reason: "invalid_status", status: currentAgent.status };
+      }
+
+      const [erroredAgent] = await tx
+        .update(agents)
+        .set({
+          status: "error",
+          statusReason: SIMULATED_ERROR_STATUS_REASON,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(agents.id, normalizedAgentId),
+            isNull(agents.deletedAt),
+            inArray(agents.status, [...SIMULATE_ERROR_AGENT_STATUSES]),
+          ),
+        )
+        .returning();
+
+      if (!erroredAgent) {
+        throw new Error("Agent simulated error update returned no rows.");
+      }
+
+      await recordAgentEventInTransaction(tx, {
+        agentId: erroredAgent.id,
+        actorUserId: erroredAgent.userId,
+        type: SIMULATED_ERROR_EVENT_TYPE,
+        message: `Simulated error requested for agent "${erroredAgent.name}".`,
+        metadata: {
+          fromStatus: currentAgent.status,
+          toStatus: "error",
+          source: "development_simulator",
+        },
+      });
+
+      return {
+        ok: true,
+        agent: toSimulatedErrorAgent(erroredAgent),
+        event: {
+          type: SIMULATED_ERROR_EVENT_TYPE,
+        },
+      };
+    });
+  } catch {
+    throw new AgentLifecyclePersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
 export async function deleteAgentForDevelopmentUser(
   agentId: string,
   dependencies: AgentLifecycleDependencies = {},
@@ -667,6 +791,20 @@ function toRestartedAgent(agent: typeof agents.$inferSelect): RestartedAgent {
     templateKey: agent.templateKey,
     status: "restarting",
     statusReason: RESTARTING_STATUS_REASON,
+    createdAt: agent.createdAt.toISOString(),
+    updatedAt: agent.updatedAt.toISOString(),
+    deletedAt: null,
+  };
+}
+
+function toSimulatedErrorAgent(agent: typeof agents.$inferSelect): SimulatedErrorAgent {
+  return {
+    id: agent.id,
+    userId: agent.userId,
+    name: agent.name,
+    templateKey: agent.templateKey,
+    status: "error",
+    statusReason: SIMULATED_ERROR_STATUS_REASON,
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
     deletedAt: null,
