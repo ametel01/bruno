@@ -104,8 +104,12 @@ describe("product shell routes", () => {
     expect(html).toContain(
       "Start, Stop, Restart, and Delete use deterministic fake lifecycle controls.",
     );
+    expect(html).toContain(
+      "Runtime logs and local-development config editing are present on agent detail pages.",
+    );
     expect(html).not.toContain("lifecycle verification waits");
     expect(html).not.toContain("Delete controls wait");
+    expect(html).not.toContain("config editing, and runner work wait");
     expect(html).not.toContain("No persisted agent table or records are queried");
   });
 
