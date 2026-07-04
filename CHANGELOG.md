@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dashboard lifecycle forwarding for active agents assigned to `manual_vps` runners, including dashboard-side start, stop, restart, status, and log pulls with temporary bearer auth, bounded timeouts, safe remote failures, persisted `manual_runner` log rows, and Docker fallback for unassigned agents.
 - Dashboard and agent detail manual runner status surfaces with safe runner name, kind, endpoint host, persisted status, updated timing, assigned-runner notices, offline/degraded alerts, and remote runner log visibility without exposing runner IDs, credentials, raw endpoint internals, or metadata.
 - One-time runner registration APIs: `POST /api/runners/registration-tokens` returns a visible-once `agb_reg_*` token for the development user, and `POST /runner/v1/register` atomically exchanges it for durable runner identity plus a visible-once `agb_run_*` credential while persisting only hashes and returning safe errors for unusable tokens.
+- `POST /runner/v1/heartbeat` with scoped runner credential authentication, safe credential failure responses, bounded non-secret heartbeat metrics, credential last-used updates, online status transitions, and stale/missing heartbeat reconciliation to `offline`.
 
 ### Fixed
 
