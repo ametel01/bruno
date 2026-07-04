@@ -2,17 +2,17 @@
 
 ## Milestone 7 Approval Queue
 
-- Status: initialized for #59; #60-#64 remain pending
+- Status: complete for #59/#62; #60/#61/#63/#64 remain pending
 - Source plan: `docs/MILESTONES.md` Milestone 7
-- Tracking issue: #59
-- Current branch: `codex/issue-59-dashboard-approvals`
+- Tracking issue: #62
+- Current branch: `codex/issue-62-agent-detail-approvals`
 
 ### Issue Checklist
 
 - [x] #59 Show pending approvals on the dashboard
 - [ ] #60 Approve pending approvals end to end
 - [ ] #61 Deny pending approvals end to end
-- [ ] #62 Show pending approvals on agent detail
+- [x] #62 Show pending approvals on agent detail
 - [ ] #63 Generate fake approvals for running agents
 - [ ] #64 Verify Milestone 7 approval queue acceptance
 - Later Milestone 7 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 7 work.
@@ -25,7 +25,12 @@
 - [x] #59 keeps resolved approvals, soft-deleted-agent approvals, and other-user approvals out of the dashboard pending queue.
 - [x] #59 renders a dashboard pending approvals panel from persisted data with agent identity/link, title, description, status, created time, and expiry when present.
 - [x] #59 keeps raw `payload_json`, database internals, SQL, driver messages, stack traces, credentials, and environment values out of dashboard output and safe persistence errors.
-- [x] #59 updates README and CHANGELOG to describe the dashboard pending approval queue as present behavior while leaving approve/deny routes, decision controls, agent-detail approvals, fake approval generation, and final Milestone 7 acceptance to #60-#64.
+- [x] #59 updates README and CHANGELOG to describe the dashboard pending approval queue as present behavior while leaving the remaining Milestone 7 slices to #60-#64.
+- [x] #62 adds an agent-scoped pending approval read helper for the selected active local-development agent.
+- [x] #62 renders a read-only agent-detail pending approvals panel with title, description, `pending` status, requester/source, created time, optional expiry, empty state, and safe error state.
+- [x] #62 keeps resolved approvals, other-agent approvals, soft-deleted-agent approvals, and other-user approvals out of the selected detail page.
+- [x] #62 keeps the agent record, config editor, runtime logs, and activity visible when approval loading fails.
+- [x] #62 updates README and CHANGELOG to describe agent-detail approval visibility as present behavior while leaving approve/deny decisions and fake approval generation to sibling Milestone 7 slices.
 
 ### Validation
 
@@ -57,6 +62,33 @@
   - `bun run verify`: pass with isolated DB/app env; aggregate format, lint, typecheck, unit test, build, and E2E gates passed with 145 unit tests and 24 E2E passed / 4 expected skips.
 - Reconciliation:
   - After #58 merged as PR #97 at `197244c`, #59 was rebased onto `origin/main`; README conflict was resolved by preserving #58 completed config-editor wording and layering in the #59 pending-approval queue foundation.
+
+#### #62
+
+- Date: 2026-07-04
+- Environment:
+  - Default Postgres port `54329` was occupied by existing Docker container `agentbay-postgres-1`.
+  - Default app port `3000` was occupied by local `node` process `60238`.
+  - Isolated database: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54362/agentbay`.
+  - Isolated app/test server: `PORT=3062`, `PLAYWRIGHT_BASE_URL=http://localhost:3062`, `NEXT_PUBLIC_APP_URL=http://localhost:3062`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree had no local `node_modules`.
+  - `docker run --name agentbay_issue_62-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54362:5432 -d postgres:17-alpine`: pass; started isolated Postgres because the default port was occupied.
+  - `bun run db:migrate`: pass with isolated DB env; migrations applied successfully.
+  - `bun run db:health`: pass with isolated DB/app env; returned `status: ok` and `database: reachable`.
+- Focused checks:
+  - `bun run test -- tests/unit/create-agent-db.test.ts tests/unit/root-page.test.tsx`: pass with isolated DB env; 2 files and 72 tests passed. Covers agent-scoped pending-only listing, no cross-agent/resolved/soft-deleted/other-user leakage, detail render, empty state, and safe approval-load failure that keeps record/config/log/activity visible.
+  - `bun run test:e2e -- --project=chromium-desktop -g "approval persistence surfaces"`: pass with isolated DB/app env; 2 Chromium desktop tests passed. Covers dashboard approval persistence and agent-detail approval visibility for the selected agent while another agent's approval does not render.
+- Required gates:
+  - `bun run format:check`: pass; Biome checked 70 files.
+  - `bun run lint`: pass; Biome checked 70 files.
+  - `bun run typecheck`: pass.
+  - `bun run test`: pass with isolated DB env; 18 files and 148 tests passed.
+  - `bun run build`: pass; Next.js build completed and included `/agents/[agentId]`.
+  - `bun run test:e2e`: pass with isolated DB/app env; 25 browser tests passed with 5 expected skips.
+  - `bun run verify`: pass with isolated DB/app env; aggregate format, lint, typecheck, unit test, build, and E2E gates passed with 148 unit tests and 25 E2E passed / 5 expected skips.
+- Reconciliation:
+  - Initial aggregate `bun run verify` exposed a Playwright data race between the dashboard and detail approval persistence tests over the shared local-development-user pointer; the approval persistence tests now run in one serial group while the rest of the E2E suite remains parallel.
 
 ## Milestone 6 Agent Config Editor
 

@@ -9,6 +9,11 @@ import {
   AgentDetailPersistenceError,
   getActiveAgentForDevelopmentUser,
 } from "@/src/server/agents/list-agents";
+import {
+  AgentApprovalPersistenceError,
+  listPendingApprovalsForDevelopmentUserAgent,
+  type PendingApprovalDto,
+} from "@/src/server/approvals/agent-approvals";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { listAgentEventFeed } from "@/src/server/events/agent-events";
 
@@ -20,6 +25,8 @@ type AgentDetailPageProps = {
     activityCursor?: string | string[];
   }>;
 };
+
+type AgentApprovalsResult = Awaited<ReturnType<typeof loadAgentApprovals>>;
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +76,7 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
   const emptyActivityDescription = activityCursor
     ? "There are no older persisted events for this agent."
     : "Create or update this agent to show persisted activity here.";
+  const approvalsResult = await loadAgentApprovals(agent.id);
 
   return (
     <ProductShell
@@ -139,6 +147,7 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
           />
         </PlaceholderPanel>
         <AgentRuntimeLogPanel agentId={agent.id} status={agent.status} />
+        <AgentApprovalsPanel result={approvalsResult} />
         <ActivityFeedPanel
           context={{ kind: "detail", agentLabel: agent.name }}
           countLabel={
@@ -158,6 +167,69 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
         />
       </div>
     </ProductShell>
+  );
+}
+
+function AgentApprovalsPanel({ result }: { result: AgentApprovalsResult }) {
+  return (
+    <section className="approval-panel" aria-labelledby="agent-approvals-title">
+      <div className="section-heading">
+        <h2 id="agent-approvals-title">Pending approvals</h2>
+        {result.ok ? <span>{result.approvals.length} pending</span> : null}
+      </div>
+      {result.ok ? (
+        result.approvals.length > 0 ? (
+          <ol className="approval-list">
+            {result.approvals.map((approval) => (
+              <AgentApprovalItem approval={approval} key={approval.id} />
+            ))}
+          </ol>
+        ) : (
+          <div className="activity-empty-state">
+            <h3>No pending approvals</h3>
+            <p>Persisted approval requests for this agent will appear here.</p>
+          </div>
+        )
+      ) : (
+        <div className="safe-error" role="alert">
+          Pending approvals could not be loaded.
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AgentApprovalItem({ approval }: { approval: PendingApprovalDto }) {
+  return (
+    <li className="approval-item">
+      <div className="approval-item-header">
+        <div>
+          <h3>{approval.title}</h3>
+        </div>
+        <span className="status-pill">{approval.status}</span>
+      </div>
+      <p>{approval.description}</p>
+      <dl className="approval-metadata">
+        <div>
+          <dt>Requested</dt>
+          <dd>{approval.requestedBy}</dd>
+        </div>
+        <div>
+          <dt>Created</dt>
+          <dd>
+            <time dateTime={approval.createdAt}>{approval.createdAt}</time>
+          </dd>
+        </div>
+        {approval.expiresAt ? (
+          <div>
+            <dt>Expires</dt>
+            <dd>
+              <time dateTime={approval.expiresAt}>{approval.expiresAt}</time>
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+    </li>
   );
 }
 
@@ -213,6 +285,23 @@ async function loadAgentActivity(
     if (ownsConnection) {
       await connection.close();
     }
+  }
+}
+
+async function loadAgentApprovals(agentId: string) {
+  try {
+    return {
+      ok: true as const,
+      approvals: await listPendingApprovalsForDevelopmentUserAgent(agentId),
+    };
+  } catch (error) {
+    if (error instanceof AgentApprovalPersistenceError) {
+      return {
+        ok: false as const,
+      };
+    }
+
+    throw error;
   }
 }
 

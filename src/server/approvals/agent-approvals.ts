@@ -164,6 +164,69 @@ export async function listPendingApprovalsForDevelopmentUser(
   }
 }
 
+export async function listPendingApprovalsForDevelopmentUserAgent(
+  agentId: string,
+  dependencies: AgentApprovalDependencies = {},
+): Promise<PendingApprovalDto[]> {
+  if (!isValidAgentId(agentId)) {
+    return [];
+  }
+
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    const developmentUserId = await connection.db.transaction((tx) => getDevelopmentUserId(tx));
+
+    if (!developmentUserId) {
+      return [];
+    }
+
+    const rows = await connection.db
+      .select({
+        id: agentApprovals.id,
+        agentId: agentApprovals.agentId,
+        title: agentApprovals.title,
+        description: agentApprovals.description,
+        status: agentApprovals.status,
+        requestedBy: agentApprovals.requestedBy,
+        createdAt: agentApprovals.createdAt,
+        expiresAt: agentApprovals.expiresAt,
+        agentName: agents.name,
+      })
+      .from(agentApprovals)
+      .innerJoin(agents, eq(agents.id, agentApprovals.agentId))
+      .where(
+        and(
+          eq(agentApprovals.agentId, agentId),
+          eq(agentApprovals.status, "pending"),
+          eq(agents.userId, developmentUserId),
+          isNull(agents.deletedAt),
+        ),
+      )
+      .orderBy(desc(agentApprovals.createdAt), desc(agentApprovals.id));
+
+    return rows.map((row) => ({
+      id: row.id,
+      agentId: row.agentId,
+      agentName: row.agentName,
+      agentHref: `/agents/${row.agentId}`,
+      title: row.title,
+      description: row.description,
+      status: "pending",
+      requestedBy: row.requestedBy,
+      createdAt: row.createdAt.toISOString(),
+      expiresAt: row.expiresAt?.toISOString() ?? null,
+    }));
+  } catch {
+    throw new AgentApprovalPersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
 function toPendingApprovalDto(
   approval: typeof agentApprovals.$inferSelect,
   agent: { id: string; name: string },
