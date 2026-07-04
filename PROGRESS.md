@@ -234,11 +234,11 @@
 
 ## Milestone 10 Dockerized Agent Runner Gate Classification
 
-- Status: #79 Docker lifecycle wiring is implementation-complete and ready for checker review; #80/#81 remain pending.
+- Status: #80 Docker crash reconciliation and selected-container cleanup is implementation-complete and ready for checker review.
 - Source plan: `docs/MILESTONES.md` Milestone 10
 - Tracking issues: #76-#81
-- Current branch: `codex/issue-79-docker-lifecycle`
-- Next step: checker should review the Docker lifecycle endpoint/UI wiring, selected-agent container targeting, Docker log surfacing, and validation evidence below.
+- Current branch: `codex/issue-80-docker-crash-cleanup`
+- Next step: checker should review the post-#79 rebase composition of Docker lifecycle wiring with crash reconciliation, fail-closed cleanup, bounded read-path hooks, and cross-agent regression coverage.
 
 ### Issue Checklist
 
@@ -246,7 +246,7 @@
 - [x] #77 Persist Docker runtime metadata and agent logs
 - [x] #78 Add the Docker runner adapter
 - [x] #79 Run lifecycle controls through Docker containers
-- [ ] #80 Detect Docker crashes and clean up selected-agent containers
+- [x] #80 Detect Docker crashes and clean up selected-agent containers
 - [ ] #81 Verify Docker runner milestone acceptance
 - Later Milestone 10 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 10 work.
 
@@ -277,6 +277,13 @@
 - #79 start and restart now reject a newly created Docker container unless inspect reports `State.Status === "running"`; any restart replacement-start failure after the old selected container is stopped moves the agent to `stopped` instead of leaving stale `running`.
 - #79 product log reads now poll the lifecycle runner for running agents so Docker stdout/stderr lines are captured into `agent_logs`, and dashboard/detail log surfaces include Docker-sourced rows without exposing internal runner/container identifiers.
 - #79 keeps validation, not-found, invalid-status, safe error responses, local runner adapter tests, crash reconciliation, deleted-agent cleanup, cloud/auth/billing/Hermes/Telegram/provider work, and dependency changes out of scope.
+- #80 extends Docker inspect persistence with sanitized Docker state metadata including observed status, exit code, OOM flag, and timestamps.
+- #80 adds bounded Docker reconciliation on active-agent list/detail reads so a stale `running` selected-agent container that exits unexpectedly is moved to `error`.
+- #80 crash reconciliation writes one `agent.error` audit event and one visible stderr Docker system log with safe Docker status/exit metadata, without exposing raw Docker error text or secrets.
+- #80 adds selected-agent Docker cleanup that validates the exact stored container ID and expected `agentbay.agent_id` label before `docker rm --force`; no-container cleanup is a no-op, and label/inspect/remove failures fail closed.
+- #80 wires delete through selected-agent Docker cleanup before soft deletion, while preserving #79 product start/stop/restart Docker lifecycle wiring.
+- #80 treats selected-agent containers that already exited with code `0` as clean stop targets, so intentional Docker stops do not become false crash reconciliation or stop-failure states.
+- #80 regression coverage proves one agent's Docker crash or cleanup does not change another agent's container, status, events, or logs.
 
 ### Update Log Requirements
 
@@ -311,7 +318,6 @@
   - Maintainer-fix regression: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54379/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3079 bun run test -- tests/unit/create-agent-db.test.ts`: pass; 1 file and 92 tests passed, including fast-exit Docker start/restart regressions plus a `docker_run_failed` restart replacement regression after the old selected container stops.
   - Maintainer-fix quality checks: `bun run format`: pass; Biome formatted 88 files and fixed 1 lifecycle file. `bun run format:check`: pass; Biome checked 88 files. `bun run lint`: pass; Biome checked 88 files. `bun run typecheck`: pass; `tsc --noEmit` passed.
   - Checker-fix regression: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54379/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3079 bun run test -- tests/unit/create-agent-db.test.ts`: pass; 1 file and 91 tests passed, including fast-exit Docker start/restart regressions that reject `exited` inspected containers, remove the failed replacement container, keep start from marking the agent `running`, and move failed restart out of stale `running`.
-  - `bun run typecheck`: pass; `tsc --noEmit` passed after the lifecycle adapter type change.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54379/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3079 bun run test -- tests/unit/create-agent-db.test.ts tests/unit/docker-runner-adapter.test.ts tests/unit/agent-logs-route.test.ts tests/unit/root-page.test.tsx`: pass; 4 files and 132 tests passed, including Docker lifecycle route metadata, Docker adapter behavior, log route streaming, and dashboard copy/rendering.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54379/agentbay PORT=3079 PLAYWRIGHT_BASE_URL=http://localhost:3079 NEXT_PUBLIC_APP_URL=http://localhost:3079 bun run test:e2e -- --project=chromium-desktop --grep "creates Research Agent|scoped runtime logs" --workers=1`: pass after fixing E2E teardown for `docker_runner_containers`; 2 browser tests passed.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54379/agentbay PORT=3079 PLAYWRIGHT_BASE_URL=http://localhost:3079 NEXT_PUBLIC_APP_URL=http://localhost:3079 bun run test:e2e -- tests/e2e/root-route.spec.ts:554 --project=chromium-desktop --workers=1`: pass; the dashboard showed Docker logs captured by observing the selected running agent.
@@ -327,13 +333,59 @@
 - Acceptance evidence map:
   - Existing lifecycle controls preserved: dashboard, detail, and mobile controls still call the existing Start/Stop/Restart API routes; `tests/e2e/root-route.spec.ts:600` covers dashboard and detail lifecycle controls through the browser.
   - Start creates exactly one selected-agent Docker container: `tests/unit/create-agent-db.test.ts` route coverage asserts one `docker_runner_containers` row for the started agent and matching start requested/completed Docker metadata.
-  - Start rejects fast-exit containers safely: `tests/unit/create-agent-db.test.ts` now mocks BusyBox-style `sh -c "printf fast-exit; exit 0"` behavior, asserts `DockerRunnerAdapter.start()` returns `container_not_running`, removes the just-created container, persists no Docker container row, returns lifecycle `runner_start_failed`, writes no start requested/completed events, and leaves the agent `stopped`.
+  - Start rejects fast-exit containers safely: `tests/unit/create-agent-db.test.ts` mocks BusyBox-style `sh -c "printf fast-exit; exit 0"` behavior, asserts `DockerRunnerAdapter.start()` returns `container_not_running`, removes the just-created container, persists no Docker container row, returns lifecycle `runner_start_failed`, writes no start requested/completed events, and leaves the agent `stopped`.
   - Stop targets only the selected agent's stored container: Docker adapter label validation remains covered, and stop route coverage asserts stopped status plus exited selected-container metadata on stop requested/completed events.
   - Restart replaces only the selected agent's stored container: route coverage asserts two selected-agent container rows across start/restart, different exact container IDs, and restart requested/completed metadata for the replacement container.
-  - Restart rejects replacement-start failures safely: `tests/unit/create-agent-db.test.ts` now proves inspected `exited` replacements and `docker_run_failed` replacements after a successful old-container stop both return lifecycle `runner_restart_failed`, write no restart requested/completed events, keep selected old container metadata as `exited`, and do not leave the agent marked `running`.
+  - Restart rejects replacement-start failures safely: `tests/unit/create-agent-db.test.ts` proves inspected `exited` replacements and `docker_run_failed` replacements after a successful old-container stop both return lifecycle `runner_restart_failed`, write no restart requested/completed events, keep selected old container metadata as `exited`, and do not leave the agent marked `running`.
   - Docker logs are captured and surfaced: `GET /api/agents/:agentId/logs` streams through the lifecycle runner for running agents, `tests/e2e/root-route.spec.ts:554` proves dashboard latest process logs show captured Docker stdout, and `tests/e2e/root-route.spec.ts:1308` proves detail logs show selected-agent Docker stdout/stderr without internal identifiers.
   - Safe lifecycle behavior preserved: route unit tests still cover validation, not-found, invalid-status, and persistence error responses; invalid lifecycle actions do not call runner helpers or mutate events.
-  - Scope boundaries: #79 did not add crash reconciliation, deleted-agent cleanup, cloud/auth/billing/Hermes/Telegram/provider work, dependency changes, or a broad Docker cleanup path. The E2E helper deletes `docker_runner_containers` rows only for test-created agents so teardown can remove test records; #80 still owns product crash/deleted cleanup.
+  - Scope boundaries: #79 did not add crash reconciliation, deleted-agent cleanup, cloud/auth/billing/Hermes/Telegram/provider work, dependency changes, or a broad Docker cleanup path.
+
+#### #80
+
+- Date: 2026-07-05
+- Environment:
+  - Docker daemon: reachable; `docker info --format '{{.ServerVersion}}'` returned `29.3.1`.
+  - Isolated database: container `agentbay_issue_80-postgres`, host port `54380`, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54380/agentbay`.
+  - Isolated app/test server target: `PORT=3080`, `PLAYWRIGHT_BASE_URL=http://localhost:3080`, `NEXT_PUBLIC_APP_URL=http://localhost:3080`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed committed lockfile dependencies because this worktree initially had no `node_modules`.
+  - `docker ps -a --filter name=agentbay_issue_80-postgres --format '{{.Names}} {{.Status}} {{.Ports}}'`: pass; no existing #80 Postgres container was present before setup.
+  - `docker run --name agentbay_issue_80-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54380:5432 -d postgres:17-alpine`: pass; started isolated Postgres for #80.
+  - `docker exec agentbay_issue_80-postgres pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54380/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3080 bun run db:migrate`: pass; migrations applied successfully. Postgres emitted the expected notice that Drizzle's long Docker FK identifier was truncated.
+- Focused checks:
+  - `bun run format`: pass after `bun install`; initial attempt failed with `biome: command not found` because dependencies were not installed in the new worktree.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54380/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3080 bun run test -- tests/unit/create-agent-db.test.ts`: pass; 1 file and 91 tests passed, including Docker crash reconciliation, fail-closed cleanup, exact-label cleanup, cross-agent isolation, and the existing real-Docker adapter contract.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54380/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3080 bun run test -- tests/unit/delete-agent-route.test.ts tests/unit/agent-logs-route.test.ts tests/unit/agent-events-route.test.ts tests/unit/docker-runner-adapter.test.ts`: pass; 4 files and 34 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54380/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3080 bun run test -- tests/unit/create-agent-db.test.ts tests/unit/delete-agent-route.test.ts tests/unit/agent-logs-route.test.ts tests/unit/agent-events-route.test.ts tests/unit/docker-runner-adapter.test.ts`: pass; 5 files and 125 tests passed.
+  - Post-#79 rebase regression: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54380/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3080 bun run test -- tests/unit/create-agent-db.test.ts tests/unit/docker-runner-adapter.test.ts`: pass; 2 files and 100 tests passed, including clean zero-exit Docker stop idempotency and clean-exit reconciliation coverage.
+  - Post-#79 rebase browser regression: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54380/agentbay PORT=3080 PLAYWRIGHT_BASE_URL=http://localhost:3080 NEXT_PUBLIC_APP_URL=http://localhost:3080 bun run test:e2e -- tests/e2e/root-route.spec.ts:600 --project=chromium-desktop --workers=1`: pass; dashboard/detail Docker Start, Restart, Stop, Simulate error, and Delete flow passed after clean zero-exit stops no longer reconcile as crashes.
+  - Post-#79 rebase mobile regression: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54380/agentbay PORT=3080 PLAYWRIGHT_BASE_URL=http://localhost:3080 NEXT_PUBLIC_APP_URL=http://localhost:3080 bun run test:e2e -- tests/e2e/root-route.spec.ts:785 --project=chromium-mobile --workers=1`: pass; mobile Resume and confirmed Stop flow passed.
+- Required gates:
+  - `bun run format:check`: pass; Biome checked 88 files.
+  - `bun run lint`: pass; Biome checked 88 files.
+  - `bun run typecheck`: pass; `tsc --noEmit` passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54380/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3080 bun run test`: pass; 24 files and 217 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54380/agentbay PORT=3080 PLAYWRIGHT_BASE_URL=http://localhost:3080 NEXT_PUBLIC_APP_URL=http://localhost:3080 bun run build`: pass; Next.js production build completed without the Docker adapter tracing warning after the lightweight maintenance adapter split.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54380/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3080 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54380/agentbay PORT=3080 PLAYWRIGHT_BASE_URL=http://localhost:3080 NEXT_PUBLIC_APP_URL=http://localhost:3080 bun run verify`: failed only in Playwright after format, lint, typecheck, unit tests, and build passed; the failing full-concurrency case was `tests/e2e/root-route.spec.ts:1312`, where heartbeat logs pushed the expected startup line out of the latest-six runtime log panel before the assertion.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54380/agentbay PORT=3080 PLAYWRIGHT_BASE_URL=http://localhost:3080 NEXT_PUBLIC_APP_URL=http://localhost:3080 bun run test:e2e -- tests/e2e/root-route.spec.ts:1312 --project=chromium-desktop --workers=1`: pass; exact failed case passed standalone.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54380/agentbay PORT=3080 PLAYWRIGHT_BASE_URL=http://localhost:3080 NEXT_PUBLIC_APP_URL=http://localhost:3080 bun run test:e2e -- --workers=1`: pass; full browser suite passed with 38 tests and 18 expected skips.
+  - Post-#79 rebase gate: `bun run format:check && bun run lint && bun run typecheck`: pass; Biome checked 89 files and `tsc --noEmit` passed.
+  - Post-#79 rebase final gate: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54380/agentbay PORT=3080 PLAYWRIGHT_BASE_URL=http://localhost:3080 NEXT_PUBLIC_APP_URL=http://localhost:3080 bun run verify`: pass; aggregate format, lint, typecheck, unit test, production build, and Playwright gates passed with 223 unit tests and 38 E2E passed / 18 expected skips.
+- Acceptance evidence map:
+  - Crash detection: `reconcileDockerRunnerAgentForDevelopmentUser` calls Docker status for the exact stored selected-agent container and marks the active `starting`/`running`/`restarting` agent `error` when Docker reports `exited`/`dead` or a non-zero exit code.
+  - Clean intentional exits: Docker stop treats an already `exited` container with exit code `0` as an idempotent stopped target, and crash reconciliation ignores clean zero-exit container observations.
+  - Audit trail and visible log: crash reconciliation inserts one `agent.error` event plus one Docker-sourced stderr `agent_logs` row with status, exit code, OOM flag, and finished timestamp metadata.
+  - Secret safety: event/log crash metadata omits raw Docker `State.Error`; Docker container metadata still flows through the existing Docker metadata sanitizer.
+  - Bounded reconciliation hooks: active-agent list reads reconcile at most 10 Docker-backed transitioning/running agents; active-agent detail reads reconcile only the selected agent before returning status.
+  - Cleanup isolation: `DockerRunnerAdapter.cleanup()` resolves the active selected agent's stored container, validates `agentbay.agent_id`, and only then runs `docker rm --force <storedContainerId>`.
+  - Fail-closed behavior: label mismatch, inspect failure, and remove failure return cleanup errors without Docker mutation; delete returns a safe failure and does not soft-delete when cleanup fails.
+  - Cross-agent regression: unit coverage verifies one agent's crash or cleanup does not mutate another agent's container row, status, events, or logs.
+- Coordination notes:
+  - #80 was rebased after #79 so product lifecycle wiring remains Docker-backed while read/delete paths add reconciliation and exact-label cleanup.
+  - Intentional #79 stop paths leave stopped containers for #80 cleanup/delete reconciliation rather than adding a broad cleanup loop in lifecycle stop.
 
 #### #78
 

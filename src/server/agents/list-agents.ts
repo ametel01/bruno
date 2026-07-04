@@ -1,6 +1,10 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
-import type { AgentLifecycleStatus } from "@/src/server/agents/lifecycle";
+import {
+  type AgentLifecycleStatus,
+  reconcileDockerRunnerAgentForDevelopmentUser,
+  reconcileDockerRunnerAgentsForDevelopmentUser,
+} from "@/src/server/agents/lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentConfigs, agents } from "@/src/server/db/schema";
 
@@ -63,6 +67,8 @@ export async function listActiveAgentsForDevelopmentUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
+    await reconcileDockerRunnerAgentsForDevelopmentUser({ createConnection: () => connection });
+
     const rows = await connection.db
       .select({
         id: agents.id,
@@ -105,6 +111,10 @@ export async function getActiveAgentForDevelopmentUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
+    await reconcileDockerRunnerAgentForDevelopmentUser(agentId, {
+      createConnection: () => connection,
+    });
+
     const [row] = await connection.db
       .select({
         id: agents.id,

@@ -109,6 +109,20 @@ export async function DELETE(_request: Request, context: DeleteAgentRouteContext
       );
     }
 
+    if (result.reason === "runner_cleanup_failed") {
+      return Response.json(
+        {
+          error: {
+            code: "agent_delete_failed",
+            message: "Agent could not be deleted.",
+          },
+        },
+        {
+          status: 500,
+        },
+      );
+    }
+
     return Response.json(
       {
         error: {
