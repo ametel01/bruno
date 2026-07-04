@@ -5,10 +5,13 @@ import {
   type APIResponse,
   type Page,
 } from "@playwright/test";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 
 const createdAgentIds = new Set<string>();
+const AGENTBAY_AGENT_ID_LABEL = "agentbay.agent_id";
+const DOCKER_RUNNER_FIXTURE_IMAGE = "busybox:1.36";
 
 test.afterEach(async ({ request }) => {
   const agentIds = [...createdAgentIds];
@@ -17,7 +20,13 @@ test.afterEach(async ({ request }) => {
   if (agentIds.length > 0) {
     await stopCreatedAgents(request, agentIds);
     await deleteCreatedAgents(agentIds);
+
+    for (const agentId of agentIds) {
+      await removeDockerContainersForAgent(agentId);
+    }
   }
+
+  await removeOrphanedStoppedAgentBayDockerContainers();
 });
 
 const shellRoutes = [
@@ -595,6 +604,136 @@ test("/dashboard shows Docker logs captured by observing a running agent", async
   await expect(capturedLog).not.toContainText("dockerRunnerContainerId");
   await expect(capturedLog).not.toContainText("agent_id");
   await expect(capturedLog).not.toContainText("postgres://");
+});
+
+test("/dashboard Docker runner final acceptance keeps selected containers isolated", async ({
+  isMobile,
+  request,
+}, testInfo) => {
+  test.setTimeout(90_000);
+  test.skip(isMobile, "Docker runner final acceptance smoke runs once on desktop");
+
+  const docker = await detectDockerForE2e();
+  if (!docker.available) {
+    test.skip(true, docker.reason);
+  }
+
+  const fixtureImage = await ensureDockerImage(DOCKER_RUNNER_FIXTURE_IMAGE);
+  if (!fixtureImage.available) {
+    test.skip(true, fixtureImage.reason);
+  }
+  await deferDockerAcceptanceSmokeWhenSuiteIsParallel(testInfo);
+
+  const primary = await createAgent(request, `Docker Acceptance Primary ${testInfo.project.name}`);
+  const sibling = await createAgent(
+    request,
+    `Docker Acceptance Sibling ${testInfo.project.name}`,
+    "github_issue_agent",
+  );
+  const tamper = await createAgent(
+    request,
+    `Docker Acceptance Fail Closed ${testInfo.project.name}`,
+  );
+  createdAgentIds.add(primary.id);
+  createdAgentIds.add(sibling.id);
+  createdAgentIds.add(tamper.id);
+  const cleanupAgentIds = [primary.id, sibling.id, tamper.id];
+  const cleanupContainerIds = new Set<string>();
+
+  try {
+    await expectAgentAction(request, primary.id, "start", 202);
+    await expectAgentAction(request, sibling.id, "start", 202);
+
+    const primaryStarted = await expectLatestDockerContainer(primary.id, "running");
+    const siblingStarted = await expectLatestDockerContainer(sibling.id, "running");
+    cleanupContainerIds.add(primaryStarted.containerId);
+    cleanupContainerIds.add(siblingStarted.containerId);
+    expect(await countDockerContainersForAgent(primary.id)).toBe(1);
+    expect(await countDockerContainersForAgent(sibling.id)).toBe(1);
+    await expectDockerContainer(primaryStarted.containerId, primary.id, "running");
+    await expectDockerContainer(siblingStarted.containerId, sibling.id, "running");
+
+    const primaryLogs = await expectAgentLogs(request, primary.id);
+    const siblingLogs = await expectAgentLogs(request, sibling.id);
+    expect(primaryLogs).toContain(`agentbay docker dummy runner started for ${primary.id}`);
+    expect(primaryLogs).not.toContain(sibling.id);
+    expect(siblingLogs).toContain(`agentbay docker dummy runner started for ${sibling.id}`);
+    expect(siblingLogs).not.toContain(primary.id);
+
+    await expectAgentAction(request, primary.id, "restart", 202);
+    const primaryRestarted = await expectRunningReplacementDockerContainer(
+      primary.id,
+      primaryStarted.containerId,
+    );
+    cleanupContainerIds.add(primaryRestarted.containerId);
+    expect(primaryRestarted.containerId).not.toBe(primaryStarted.containerId);
+    await expectDockerContainer(primaryRestarted.containerId, primary.id, "running");
+    await expectDockerContainer(siblingStarted.containerId, sibling.id, "running");
+
+    await expectAgentAction(request, primary.id, "stop", 200);
+    const primaryStopped = await expectDockerContainerMetadata(
+      primary.id,
+      primaryRestarted.containerId,
+      "exited",
+    );
+    expect(primaryStopped.containerId).toBe(primaryRestarted.containerId);
+    await expectDockerContainer(primaryRestarted.containerId, primary.id, "exited");
+    await expectDockerContainer(siblingStarted.containerId, sibling.id, "running");
+
+    await expectAgentAction(request, primary.id, "start", 202);
+    const primaryCrashTarget = await expectRunningReplacementDockerContainer(
+      primary.id,
+      primaryRestarted.containerId,
+    );
+    cleanupContainerIds.add(primaryCrashTarget.containerId);
+    await runDocker(["kill", "--signal", "KILL", primaryCrashTarget.containerId]);
+    await expect
+      .poll(
+        async () => {
+          await request.get(`/agents/${primary.id}`);
+          return (await getAgentStatus(primary.id))?.status;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe("error");
+    const primaryCrashLogs = await expectAgentLogs(request, primary.id);
+    expect(primaryCrashLogs).toContain("Docker runner container exited unexpectedly");
+    await expectDockerContainer(siblingStarted.containerId, sibling.id, "running");
+
+    const deletePrimary = await request.delete(`/api/agents/${primary.id}`);
+    expect(deletePrimary.status()).toBe(200);
+    await expectDockerContainerRemoved(primaryCrashTarget.containerId);
+    await expectDockerContainer(siblingStarted.containerId, sibling.id, "running");
+
+    await expectAgentAction(request, tamper.id, "start", 202);
+    const tamperStarted = await expectLatestDockerContainer(tamper.id, "running");
+    cleanupContainerIds.add(tamperStarted.containerId);
+    await pointLatestDockerContainerAtOtherAgent({
+      sourceAgentId: tamper.id,
+      targetAgentId: sibling.id,
+      targetContainer: siblingStarted,
+    });
+
+    const failedDelete = await request.delete(`/api/agents/${tamper.id}`);
+    expect(failedDelete.status()).toBe(500);
+    expect(await failedDelete.json()).toEqual({
+      error: {
+        code: "agent_delete_failed",
+        message: "Agent could not be deleted.",
+      },
+    });
+    expect(await getAgentStatus(tamper.id)).toMatchObject({
+      deletedAt: null,
+    });
+    await expectDockerContainer(siblingStarted.containerId, sibling.id, "running");
+    await expectDockerContainer(tamperStarted.containerId, tamper.id, "running");
+  } finally {
+    await removeDockerContainersByIds([...cleanupContainerIds]);
+
+    for (const agentId of cleanupAgentIds) {
+      await removeDockerContainersForAgent(agentId);
+    }
+  }
 });
 
 test("/agents creates Research Agent and persists it across read surfaces", async ({
@@ -1550,6 +1689,467 @@ function trackAgentHref(agentHref: string | null): void {
   if (agentId) {
     createdAgentIds.add(agentId);
   }
+}
+
+type DockerContainerRow = {
+  containerId: string;
+  containerName: string;
+  observedStatus: string;
+};
+
+type AgentStatusRow = {
+  deletedAt: string | null;
+  status: string;
+};
+
+type DockerInspect = {
+  Config?: {
+    Labels?: Record<string, string> | null;
+  };
+  State?: {
+    Status?: string;
+  };
+};
+
+async function expectAgentAction(
+  request: APIRequestContext,
+  agentId: string,
+  action: "restart" | "start" | "stop",
+  expectedStatus: number,
+): Promise<void> {
+  const response = await request.post(`/api/agents/${agentId}/actions/${action}`);
+  const body = await response.json();
+
+  expect(response.status()).toBe(expectedStatus);
+  expect(body).toMatchObject({
+    ok: true,
+    agent: {
+      id: agentId,
+    },
+  });
+}
+
+async function expectLatestDockerContainer(
+  agentId: string,
+  expectedStatus: string,
+): Promise<DockerContainerRow> {
+  const container = await getLatestDockerContainer(agentId);
+
+  expect(container).toMatchObject({
+    observedStatus: expectedStatus,
+  });
+
+  if (!container) {
+    throw new Error(`Expected Docker container metadata for agent ${agentId}.`);
+  }
+
+  return container;
+}
+
+async function expectRunningReplacementDockerContainer(
+  agentId: string,
+  previousContainerId: string,
+): Promise<DockerContainerRow> {
+  await expect
+    .poll(
+      async () => {
+        const containers = await getDockerContainersForAgent(agentId);
+        return (
+          containers.find(
+            (container) =>
+              container.containerId !== previousContainerId &&
+              container.observedStatus === "running",
+          )?.containerId ?? null
+        );
+      },
+      { timeout: 10_000 },
+    )
+    .not.toBeNull();
+
+  const replacement = (await getDockerContainersForAgent(agentId)).find(
+    (container) =>
+      container.containerId !== previousContainerId && container.observedStatus === "running",
+  );
+
+  if (!replacement) {
+    throw new Error(`Expected replacement Docker container metadata for agent ${agentId}.`);
+  }
+
+  return replacement;
+}
+
+async function expectDockerContainerMetadata(
+  agentId: string,
+  containerId: string,
+  expectedStatus: string,
+): Promise<DockerContainerRow> {
+  await expect
+    .poll(
+      async () => {
+        const container = await getDockerContainerForAgent(agentId, containerId);
+        return container?.observedStatus ?? null;
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(expectedStatus);
+
+  const container = await getDockerContainerForAgent(agentId, containerId);
+
+  if (!container) {
+    throw new Error(`Expected Docker container ${containerId} metadata for agent ${agentId}.`);
+  }
+
+  return container;
+}
+
+async function getLatestDockerContainer(agentId: string): Promise<DockerContainerRow | null> {
+  const [container] = await getDockerContainersForAgent(agentId);
+
+  return container ?? null;
+}
+
+async function getDockerContainerForAgent(
+  agentId: string,
+  containerId: string,
+): Promise<DockerContainerRow | null> {
+  return (
+    (await getDockerContainersForAgent(agentId)).find(
+      (container) => container.containerId === containerId,
+    ) ?? null
+  );
+}
+
+async function getDockerContainersForAgent(agentId: string): Promise<DockerContainerRow[]> {
+  return await withDatabase(async (sql) => {
+    return await sql<DockerContainerRow[]>`
+      select
+        container_id as "containerId",
+        container_name as "containerName",
+        observed_status as "observedStatus"
+      from docker_runner_containers
+      where agent_id = ${agentId}
+      order by observed_at desc, created_at desc
+    `;
+  });
+}
+
+async function getAgentStatus(agentId: string): Promise<AgentStatusRow | null> {
+  return await withDatabase(async (sql) => {
+    const [agent] = await sql<AgentStatusRow[]>`
+      select
+        status,
+        deleted_at as "deletedAt"
+      from agents
+      where id = ${agentId}
+      limit 1
+    `;
+
+    return agent ?? null;
+  });
+}
+
+async function expectAgentLogs(request: APIRequestContext, agentId: string): Promise<string> {
+  await pinDevelopmentUserToAgent(agentId);
+  const response = await request.get(`/api/agents/${agentId}/logs?limit=100`);
+  const body = (await response.json()) as {
+    logs: Array<{
+      message: string;
+    }>;
+  };
+
+  expect(response.status()).toBe(200);
+
+  return body.logs.map((log) => log.message).join("\n");
+}
+
+async function pointLatestDockerContainerAtOtherAgent(input: {
+  sourceAgentId: string;
+  targetAgentId: string;
+  targetContainer: DockerContainerRow;
+}): Promise<void> {
+  await withDatabase(async (sql) => {
+    await sql`
+      update docker_runner_containers
+      set
+        container_id = ${`${input.targetContainer.containerId}-detached-for-fail-closed-test`},
+        container_name = ${`${input.targetContainer.containerName}-detached-for-fail-closed-test`},
+        updated_at = now()
+      where agent_id = ${input.targetAgentId}
+    `;
+    await sql`
+      update docker_runner_containers
+      set
+        container_id = ${input.targetContainer.containerId},
+        container_name = ${input.targetContainer.containerName},
+        updated_at = now()
+      where id = (
+        select id
+        from docker_runner_containers
+        where agent_id = ${input.sourceAgentId}
+        order by observed_at desc, created_at desc
+        limit 1
+      )
+    `;
+  });
+}
+
+async function detectDockerForE2e(): Promise<
+  | {
+      available: true;
+    }
+  | {
+      available: false;
+      reason: string;
+    }
+> {
+  try {
+    await runDocker(["info", "--format", "{{.ServerVersion}}"]);
+
+    return { available: true };
+  } catch (error) {
+    return {
+      available: false,
+      reason: `Skipping real Docker acceptance smoke: ${describeDockerError(error)}`,
+    };
+  }
+}
+
+async function ensureDockerImage(image: string): Promise<
+  | {
+      available: true;
+    }
+  | {
+      available: false;
+      reason: string;
+    }
+> {
+  try {
+    await runDocker(["image", "inspect", image]);
+
+    return { available: true };
+  } catch {
+    try {
+      await runDocker(["pull", image]);
+
+      return { available: true };
+    } catch (error) {
+      return {
+        available: false,
+        reason: `Skipping real Docker acceptance smoke: ${describeDockerError(error)}`,
+      };
+    }
+  }
+}
+
+async function deferDockerAcceptanceSmokeWhenSuiteIsParallel(testInfo: {
+  config: {
+    workers: number;
+  };
+}): Promise<void> {
+  if (testInfo.config.workers <= 1) {
+    return;
+  }
+
+  // The aggregate suite already has Docker lifecycle coverage. Defer this heavier final smoke
+  // so it does not starve older 5-second lifecycle assertions when Playwright runs workers.
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 15_000);
+  });
+}
+
+async function countDockerContainersForAgent(agentId: string): Promise<number> {
+  const result = await runDocker([
+    "ps",
+    "-a",
+    "--filter",
+    `label=${AGENTBAY_AGENT_ID_LABEL}=${agentId}`,
+    "--format",
+    "{{.ID}}",
+  ]);
+
+  return result.stdout
+    .trim()
+    .split("\n")
+    .filter((line) => line.trim().length > 0).length;
+}
+
+async function expectDockerContainer(
+  containerId: string,
+  agentId: string,
+  expectedStatus: string,
+): Promise<void> {
+  const inspect = await inspectDockerContainer(containerId);
+
+  expect(inspect.Config?.Labels?.[AGENTBAY_AGENT_ID_LABEL]).toBe(agentId);
+  expect(inspect.State?.Status).toBe(expectedStatus);
+}
+
+async function expectDockerContainerRemoved(containerId: string): Promise<void> {
+  await expect(runDocker(["inspect", containerId])).rejects.toThrow();
+}
+
+async function inspectDockerContainer(containerId: string): Promise<DockerInspect> {
+  const result = await runDocker(["inspect", "--format", "{{json .}}", containerId]);
+  const parsed = JSON.parse(result.stdout.trim()) as DockerInspect;
+
+  return parsed;
+}
+
+async function removeDockerContainersForAgent(agentId: string): Promise<void> {
+  const containerIds = await listDockerContainerIdsForAgent(agentId);
+
+  await removeDockerContainersByIds(containerIds);
+
+  await expect
+    .poll(async () => await listDockerContainerIdsForAgent(agentId), { timeout: 10_000 })
+    .toEqual([]);
+}
+
+async function removeOrphanedStoppedAgentBayDockerContainers(): Promise<void> {
+  const removableStatuses = ["created", "exited", "dead"] as const;
+
+  for (const status of removableStatuses) {
+    await removeDockerContainersByIds(await listOrphanedAgentBayDockerContainerIdsByStatus(status));
+  }
+
+  await expect
+    .poll(
+      async () =>
+        (
+          await Promise.all(
+            removableStatuses.map((status) =>
+              listOrphanedAgentBayDockerContainerIdsByStatus(status),
+            ),
+          )
+        ).flat(),
+      { timeout: 10_000 },
+    )
+    .toEqual([]);
+}
+
+async function listDockerContainerIdsForAgent(agentId: string): Promise<string[]> {
+  const result = await runDocker([
+    "ps",
+    "-a",
+    "--quiet",
+    "--filter",
+    `label=${AGENTBAY_AGENT_ID_LABEL}=${agentId}`,
+  ]).catch(() => ({ stdout: "", stderr: "" }));
+
+  return result.stdout
+    .trim()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+async function listOrphanedAgentBayDockerContainerIdsByStatus(status: string): Promise<string[]> {
+  const result = await runDocker([
+    "ps",
+    "-a",
+    "--format",
+    `{{.ID}}\t{{.Label "${AGENTBAY_AGENT_ID_LABEL}"}}`,
+    "--filter",
+    `label=${AGENTBAY_AGENT_ID_LABEL}`,
+    "--filter",
+    `status=${status}`,
+  ]).catch(() => ({ stdout: "", stderr: "" }));
+  const containers = result.stdout
+    .trim()
+    .split("\n")
+    .map((line) => {
+      const [containerId, agentId] = line.trim().split("\t");
+
+      return {
+        agentId: agentId?.trim() ?? "",
+        containerId: containerId?.trim() ?? "",
+      };
+    })
+    .filter((container) => container.containerId.length > 0);
+
+  if (containers.length === 0) {
+    return [];
+  }
+
+  const existingAgentIds = await getExistingAgentIds(
+    containers.map((container) => container.agentId),
+  );
+
+  return containers
+    .filter((container) => !existingAgentIds.has(container.agentId))
+    .map((container) => container.containerId);
+}
+
+async function getExistingAgentIds(agentIds: string[]): Promise<Set<string>> {
+  const uniqueAgentIds = [...new Set(agentIds.filter((agentId) => agentId.length > 0))];
+
+  if (uniqueAgentIds.length === 0) {
+    return new Set();
+  }
+
+  return await withDatabase(async (sql) => {
+    const rows = await sql<{ id: string }[]>`
+      select id
+      from agents
+      where id in ${sql(uniqueAgentIds)}
+    `;
+
+    return new Set(rows.map((row) => row.id));
+  });
+}
+
+async function removeDockerContainersByIds(containerIds: string[]): Promise<void> {
+  const uniqueContainerIds = [
+    ...new Set(containerIds.filter((containerId) => containerId.length > 0)),
+  ];
+
+  for (const containerId of uniqueContainerIds) {
+    await expect
+      .poll(
+        async () => {
+          const inspect = await runDocker(["inspect", containerId]).catch(() => null);
+
+          if (!inspect) {
+            return "removed";
+          }
+
+          await runDocker(["rm", "--force", containerId]).catch(() => undefined);
+
+          return "present";
+        },
+        { timeout: 10_000 },
+      )
+      .toBe("removed");
+  }
+}
+
+function runDocker(args: readonly string[]): Promise<{ stderr: string; stdout: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "docker",
+      [...args],
+      {
+        encoding: "utf8",
+        timeout: 20_000,
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve({ stderr, stdout });
+      },
+    );
+  });
+}
+
+function describeDockerError(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message.trim();
+  }
+
+  return "Docker command failed.";
 }
 
 async function createAgent(

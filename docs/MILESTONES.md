@@ -535,7 +535,7 @@ interface RunnerAdapter {
 - API integration test through lifecycle endpoints.
 - Crash test that exits the process and verifies `error` status and event.
 
-## Milestone 10: Dockerized Agent Runner
+## Milestone 10: Dockerized Agent Runner [Completed]
 
 Goal: Each agent runs in its own container.
 

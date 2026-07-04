@@ -5289,6 +5289,89 @@ describe("create agent persistence", () => {
     ]);
   });
 
+  it("docker runner adapter stops the running replacement when an exited row was observed later", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Docker Replacement Stop Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      containerId: "replacement-running-container",
+      containerName: "agentbay-replacement-running",
+      image: "agentbay/dummy-runner:test",
+      observedAt: new Date("2026-07-04T08:00:00.000Z"),
+      observedStatus: "running",
+    });
+    await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      containerId: "previous-exited-container",
+      containerName: "agentbay-previous-exited",
+      image: "agentbay/dummy-runner:test",
+      observedAt: new Date("2026-07-04T08:01:00.000Z"),
+      observedStatus: "exited",
+    });
+    let replacementStopped = false;
+    const dockerCalls: string[][] = [];
+    const dockerCli: DockerCliRunner = async (args) => {
+      dockerCalls.push([...args]);
+
+      if (args[0] === "inspect" && args.at(-1) === "replacement-running-container") {
+        return dockerInspectResult({
+          agentId: created.agent.id,
+          containerId: "replacement-running-container",
+          image: "agentbay/dummy-runner:test",
+          status: replacementStopped ? "exited" : "running",
+        });
+      }
+
+      if (args[0] === "stop") {
+        expect(args).toEqual(["stop", "replacement-running-container"]);
+        replacementStopped = true;
+        return { stdout: "replacement-running-container\n", stderr: "" };
+      }
+
+      throw new Error(`unexpected docker mutation: ${args.join(" ")}`);
+    };
+    const adapter = new DockerRunnerAdapter({
+      createConnection: () => connection,
+      dockerCli,
+      now: () => new Date("2026-07-04T08:02:00.000Z"),
+    });
+
+    await expect(adapter.stop(created.agent.id)).resolves.toMatchObject({
+      ok: true,
+      container: {
+        containerId: "replacement-running-container",
+        observedStatus: "exited",
+      },
+    });
+
+    const [replacementContainer] = await connection.db
+      .select()
+      .from(dockerRunnerContainers)
+      .where(eq(dockerRunnerContainers.containerId, "replacement-running-container"));
+    const [previousContainer] = await connection.db
+      .select()
+      .from(dockerRunnerContainers)
+      .where(eq(dockerRunnerContainers.containerId, "previous-exited-container"));
+
+    expect(replacementContainer).toMatchObject({
+      containerId: "replacement-running-container",
+      observedStatus: "exited",
+    });
+    expect(previousContainer).toMatchObject({
+      containerId: "previous-exited-container",
+      observedStatus: "exited",
+    });
+    expect(dockerCalls).toEqual([
+      ["inspect", "--format", "{{json .}}", "replacement-running-container"],
+      ["stop", "replacement-running-container"],
+      ["inspect", "--format", "{{json .}}", "replacement-running-container"],
+    ]);
+  });
+
   it("docker runner adapter cleanup removes only the owning agent's exact labeled container", async () => {
     const agentA = await createAgentForDevelopmentUser(
       { name: "Docker Cleanup Agent A", templateKey: "research_agent" },
