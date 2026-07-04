@@ -53,11 +53,39 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const runners = pgTable(
+  "runners",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    name: text("name").notNull(),
+    kind: text("kind").notNull().default("manual_vps"),
+    endpointUrl: text("endpoint_url").notNull(),
+    status: text("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    check("runners_name_not_empty_check", sql`length(trim(${table.name})) > 0`),
+    check("runners_kind_manual_vps_check", sql`${table.kind} = 'manual_vps'`),
+    check("runners_endpoint_url_not_empty_check", sql`length(trim(${table.endpointUrl})) > 0`),
+    check("runners_status_check", sql`${table.status} IN ('active', 'inactive')`),
+    index("runners_user_status_idx").on(table.userId, table.status),
+    uniqueIndex("runners_active_user_endpoint_idx")
+      .on(table.userId, table.endpointUrl)
+      .where(sql`${table.deletedAt} IS NULL`),
+  ],
+);
+
 export const agents = pgTable("agents", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
     .notNull()
     .references(() => users.id),
+  runnerId: uuid("runner_id").references(() => runners.id),
   name: text("name").notNull(),
   templateKey: text("template_key").notNull(),
   templateVersion: text("template_version").notNull().default("1.0.0"),

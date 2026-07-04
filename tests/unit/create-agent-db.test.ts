@@ -65,6 +65,7 @@ import {
   appMetadata,
   dockerRunnerContainers,
   localRunnerProcesses,
+  runners,
   users,
 } from "@/src/server/db/schema";
 import {
@@ -91,6 +92,11 @@ import {
   listDockerRunnerContainerLogs,
   recordDockerRunnerContainerForDevelopmentUser,
 } from "@/src/server/runners/docker-runner-state";
+import {
+  assignRunnerToActiveAgentForDevelopmentUser,
+  bootstrapManualRunnerForDevelopmentUser,
+  getAssignedRunnerForActiveAgentDevelopmentUser,
+} from "@/src/server/runners/manual-runner-persistence";
 import {
   AGENTBAY_AGENT_ID_LABEL,
   DEFAULT_DOCKER_RUNNER_IMAGE,
@@ -221,6 +227,216 @@ describe("create agent persistence", () => {
         value: created.agent.userId,
       }),
     );
+  });
+
+  it("creates agents with no assigned runner by default and preserves no-runner lifecycle behavior", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "No Runner Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const runnerAdapter = createLifecycleRunnerStub();
+    const now = new Date("2026-07-05T01:00:00.000Z");
+    const [persistedCreatedAgent] = await connection.db
+      .select({ runnerId: agents.runnerId })
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+
+    expect(persistedCreatedAgent?.runnerId).toBeNull();
+
+    const result = await startAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+      now: () => now,
+      runnerAdapter,
+    });
+    const [persistedStartedAgent] = await connection.db
+      .select({ runnerId: agents.runnerId, status: agents.status })
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+
+    expect(result).toMatchObject({
+      ok: true,
+      agent: {
+        status: "running",
+        updatedAt: "2026-07-05T01:00:00.000Z",
+      },
+    });
+    expect(persistedStartedAgent).toEqual({
+      runnerId: null,
+      status: "running",
+    });
+  });
+
+  it("bootstraps one active manual runner idempotently from non-secret env values", async () => {
+    const createdAt = new Date("2026-07-05T01:00:00.000Z");
+    const updatedAt = new Date("2026-07-05T01:05:00.000Z");
+    const first = await bootstrapManualRunnerForDevelopmentUser({
+      createConnection: () => connection,
+      env: {
+        AGENTBAY_MANUAL_RUNNER_NAME: "Runner A",
+        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "https://runner.example.com",
+      },
+      now: () => createdAt,
+    });
+    const second = await bootstrapManualRunnerForDevelopmentUser({
+      createConnection: () => connection,
+      env: {
+        AGENTBAY_MANUAL_RUNNER_NAME: "Runner A Updated",
+        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "https://runner.example.com",
+      },
+      now: () => updatedAt,
+    });
+    const persistedRunners = await connection.db.select().from(runners);
+
+    expect(first).toMatchObject({
+      name: "Runner A",
+      kind: "manual_vps",
+      endpointUrl: "https://runner.example.com",
+      status: "active",
+      createdAt: "2026-07-05T01:00:00.000Z",
+      updatedAt: "2026-07-05T01:00:00.000Z",
+      deletedAt: null,
+    });
+    expect(second).toMatchObject({
+      id: first?.id,
+      name: "Runner A Updated",
+      kind: "manual_vps",
+      endpointUrl: "https://runner.example.com",
+      status: "active",
+      createdAt: "2026-07-05T01:00:00.000Z",
+      updatedAt: "2026-07-05T01:05:00.000Z",
+      deletedAt: null,
+    });
+    expect(persistedRunners).toHaveLength(1);
+    expect(JSON.stringify(persistedRunners)).not.toContain("token");
+    expect(JSON.stringify(persistedRunners)).not.toContain("secret");
+  });
+
+  it("assigns an active manual runner to an active agent and reads it by development user", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Assigned Runner Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const runner = await bootstrapManualRunnerForDevelopmentUser({
+      createConnection: () => connection,
+      env: {
+        AGENTBAY_MANUAL_RUNNER_NAME: "Dev Runner",
+        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "http://127.0.0.1:8787",
+      },
+      now: () => new Date("2026-07-05T01:00:00.000Z"),
+    });
+
+    const assignment = await assignRunnerToActiveAgentForDevelopmentUser(
+      {
+        agentId: created.agent.id,
+        runnerId: runner?.id ?? "",
+      },
+      {
+        createConnection: () => connection,
+        now: () => new Date("2026-07-05T01:10:00.000Z"),
+      },
+    );
+    const assignedRunner = await getAssignedRunnerForActiveAgentDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+    });
+
+    expect(assignment).toEqual({
+      ok: true,
+      agent: {
+        id: created.agent.id,
+        runnerId: runner?.id,
+      },
+    });
+    expect(assignedRunner).toMatchObject({
+      id: runner?.id,
+      userId: created.agent.userId,
+      name: "Dev Runner",
+      kind: "manual_vps",
+      endpointUrl: "http://127.0.0.1:8787",
+      status: "active",
+      deletedAt: null,
+    });
+  });
+
+  it("excludes soft-deleted runners, soft-deleted agents, and other-user runners from assignment reads", async () => {
+    const active = await createAgentForDevelopmentUser(
+      { name: "Active Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const deleted = await createAgentForDevelopmentUser(
+      { name: "Deleted Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const activeRunner = await bootstrapManualRunnerForDevelopmentUser({
+      createConnection: () => connection,
+      env: {
+        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "https://active-runner.example.com",
+      },
+    });
+    const deletedRunner = await bootstrapManualRunnerForDevelopmentUser({
+      createConnection: () => connection,
+      env: {
+        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "https://deleted-runner.example.com",
+      },
+    });
+    const [otherUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
+    const [otherUserRunner] = await connection.db
+      .insert(runners)
+      .values({
+        userId: otherUser?.id ?? "",
+        name: "Other Runner",
+        endpointUrl: "https://other-runner.example.com",
+      })
+      .returning({ id: runners.id });
+
+    await connection.db
+      .update(runners)
+      .set({ deletedAt: new Date("2026-07-05T02:00:00.000Z") })
+      .where(eq(runners.id, deletedRunner?.id ?? ""));
+    await connection.db
+      .update(agents)
+      .set({ deletedAt: new Date("2026-07-05T02:00:00.000Z") })
+      .where(eq(agents.id, deleted.agent.id));
+
+    await expect(
+      assignRunnerToActiveAgentForDevelopmentUser(
+        { agentId: active.agent.id, runnerId: deletedRunner?.id ?? "" },
+        { createConnection: () => connection },
+      ),
+    ).resolves.toEqual({ ok: false, reason: "runner_not_found" });
+    await expect(
+      assignRunnerToActiveAgentForDevelopmentUser(
+        { agentId: active.agent.id, runnerId: otherUserRunner?.id ?? "" },
+        { createConnection: () => connection },
+      ),
+    ).resolves.toEqual({ ok: false, reason: "runner_not_found" });
+    await expect(
+      assignRunnerToActiveAgentForDevelopmentUser(
+        { agentId: deleted.agent.id, runnerId: activeRunner?.id ?? "" },
+        { createConnection: () => connection },
+      ),
+    ).resolves.toEqual({ ok: false, reason: "agent_not_found" });
+
+    await assignRunnerToActiveAgentForDevelopmentUser(
+      { agentId: active.agent.id, runnerId: activeRunner?.id ?? "" },
+      { createConnection: () => connection },
+    );
+    await connection.db
+      .update(runners)
+      .set({ deletedAt: new Date("2026-07-05T02:05:00.000Z") })
+      .where(eq(runners.id, activeRunner?.id ?? ""));
+
+    await expect(
+      getAssignedRunnerForActiveAgentDevelopmentUser(active.agent.id, {
+        createConnection: () => connection,
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      getAssignedRunnerForActiveAgentDevelopmentUser(deleted.agent.id, {
+        createConnection: () => connection,
+      }),
+    ).resolves.toBeNull();
   });
 
   it("rolls back the agent and development user when event creation fails", async () => {
@@ -1381,9 +1597,11 @@ describe("create agent persistence", () => {
       ),
     ).rejects.toBeInstanceOf(AgentConfigUpdatePersistenceError);
 
-    await expect(connection.db.select().from(agents)).resolves.toEqual(beforeAgent);
-    await expect(connection.db.select().from(agentConfigs)).resolves.toEqual(beforeConfig);
-    await expect(connection.db.select().from(agentEvents)).resolves.toEqual(beforeEvents);
+    await expect(connection.db.select().from(agents).execute()).resolves.toEqual(beforeAgent);
+    await expect(connection.db.select().from(agentConfigs).execute()).resolves.toEqual(
+      beforeConfig,
+    );
+    await expect(connection.db.select().from(agentEvents).execute()).resolves.toEqual(beforeEvents);
   });
 
   it("returns not found for missing or soft-deleted config update targets without mutation", async () => {
@@ -7308,7 +7526,7 @@ describe("create agent persistence", () => {
 });
 
 async function resetCreateAgentTables(connection: DatabaseConnection): Promise<void> {
-  await connection.client`truncate table agent_approvals, agent_configs, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, app_metadata, users restart identity cascade`;
+  await connection.client`truncate table agent_approvals, agent_configs, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runners, app_metadata, users restart identity cascade`;
 }
 
 async function createTestApproval(
@@ -7335,6 +7553,7 @@ async function expectTableCount(
   tableName:
     | "users"
     | "agents"
+    | "runners"
     | "agent_configs"
     | "agent_events"
     | "docker_runner_containers"
@@ -7350,6 +7569,7 @@ async function countRows(
   tableName:
     | "users"
     | "agents"
+    | "runners"
     | "agent_configs"
     | "agent_events"
     | "agent_logs"
