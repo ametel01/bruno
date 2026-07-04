@@ -1,5 +1,8 @@
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { eq, inArray, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -86,6 +89,12 @@ import {
   recordDockerRunnerContainerForDevelopmentUser,
 } from "@/src/server/runners/docker-runner-state";
 import {
+  AGENTBAY_AGENT_ID_LABEL,
+  DEFAULT_DOCKER_RUNNER_IMAGE,
+  DockerRunnerAdapter,
+  type DockerCliRunner,
+} from "@/src/server/runners/docker-runner-adapter";
+import {
   appendLocalRunnerLogLines,
   createLocalRunnerProcessForDevelopmentUser,
   type LocalRunnerProcessDto,
@@ -103,6 +112,10 @@ import {
   type LocalRunnerSpawn,
   type RunnerAdapter,
 } from "@/src/server/runners/local-runner-adapter";
+import {
+  detectDockerAvailability,
+  dockerUnavailableSkipReason,
+} from "@/tests/helpers/docker-availability";
 
 describe("create agent persistence", () => {
   let connection: DatabaseConnection;
@@ -4665,6 +4678,303 @@ describe("create agent persistence", () => {
     );
   });
 
+  it("docker runner adapter builds docker run as argv with labels, limits, and isolated mounts", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentbay-docker-adapter-test-"));
+
+    try {
+      const configPath = join(tempRoot, "agentbay-config.json");
+      const workspaceRoot = join(tempRoot, "workspaces");
+      await writeFile(configPath, JSON.stringify({ fixture: true }));
+      const created = await createAgentForDevelopmentUser(
+        { name: "Docker Command Agent", templateKey: "research_agent" },
+        { createConnection: () => connection },
+      );
+      const dockerCalls: string[][] = [];
+      const containerId = "mock-container-command";
+      const dockerCli: DockerCliRunner = async (args) => {
+        dockerCalls.push([...args]);
+
+        if (args[0] === "run") {
+          return { stdout: `${containerId}\n`, stderr: "" };
+        }
+
+        if (args[0] === "inspect") {
+          return dockerInspectResult({
+            agentId: created.agent.id,
+            containerId,
+            image: "agentbay/dummy-runner:test",
+            status: "running",
+          });
+        }
+
+        throw new Error(`unexpected docker call: ${args.join(" ")}`);
+      };
+      const adapter = new DockerRunnerAdapter({
+        command: {
+          image: "agentbay/dummy-runner:test",
+          args: ["run", "agent; rm -rf /", "$(whoami)"],
+        },
+        createConnection: () => connection,
+        dockerCli,
+        mounts: {
+          configPath,
+          workspaceRoot,
+        },
+        nameSuffix: () => "fixed001",
+        now: () => new Date("2026-07-04T08:00:00.000Z"),
+        resources: {
+          cpus: "0.5",
+          memory: "256m",
+        },
+      });
+
+      const started = await adapter.start(created.agent.id);
+
+      expect(started).toMatchObject({
+        ok: true,
+        container: {
+          agentId: created.agent.id,
+          containerId,
+          containerName: `agentbay-${created.agent.id}-fixed001`,
+          observedStatus: "running",
+        },
+      });
+      expect(dockerCalls).toHaveLength(2);
+      expect(dockerCalls[0]).toEqual([
+        "run",
+        "--detach",
+        "--name",
+        `agentbay-${created.agent.id}-fixed001`,
+        "--label",
+        `${AGENTBAY_AGENT_ID_LABEL}=${created.agent.id}`,
+        "--cpus",
+        "0.5",
+        "--memory",
+        "256m",
+        "--mount",
+        `type=bind,source=${join(workspaceRoot, created.agent.id)},target=/workspace`,
+        "--workdir",
+        "/workspace",
+        "--env",
+        `AGENTBAY_AGENT_ID=${created.agent.id}`,
+        "--env",
+        "AGENTBAY_WORKSPACE=/workspace",
+        "--mount",
+        `type=bind,source=${configPath},target=/etc/agentbay/config,readonly`,
+        "--env",
+        "AGENTBAY_CONFIG_PATH=/etc/agentbay/config",
+        "agentbay/dummy-runner:test",
+        "run",
+        "agent; rm -rf /",
+        "$(whoami)",
+      ]);
+      expect(dockerCalls[1]).toEqual(["inspect", "--format", "{{json .}}", containerId]);
+
+      const [persistedContainer] = await connection.db.select().from(dockerRunnerContainers);
+      expect(persistedContainer?.metadata).toMatchObject({
+        labels: {
+          [AGENTBAY_AGENT_ID_LABEL]: created.agent.id,
+        },
+        resources: {
+          cpus: "0.5",
+          memory: "256m",
+        },
+        mounts: {
+          configSource: configPath,
+          configTarget: "/etc/agentbay/config",
+          configReadonly: true,
+          workspaceSource: join(workspaceRoot, created.agent.id),
+          workspaceTarget: "/workspace",
+          workspaceReadonly: false,
+        },
+      });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("docker runner adapter refuses stop when the stored container label mismatches", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Docker Label Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      containerId: "stored-container-id",
+      containerName: "agentbay-stored-container",
+      image: "agentbay/dummy-runner:test",
+      observedStatus: "running",
+    });
+    const dockerCalls: string[][] = [];
+    const dockerCli: DockerCliRunner = async (args) => {
+      dockerCalls.push([...args]);
+
+      if (args[0] === "inspect") {
+        return dockerInspectResult({
+          agentId: "00000000-0000-4000-8000-000000000999",
+          containerId: "stored-container-id",
+          image: "agentbay/dummy-runner:test",
+          status: "running",
+        });
+      }
+
+      throw new Error(`unexpected docker mutation: ${args.join(" ")}`);
+    };
+    const adapter = new DockerRunnerAdapter({
+      createConnection: () => connection,
+      dockerCli,
+    });
+
+    await expect(adapter.stop(created.agent.id)).resolves.toEqual({
+      ok: false,
+      reason: "label_mismatch",
+    });
+    expect(dockerCalls).toEqual([["inspect", "--format", "{{json .}}", "stored-container-id"]]);
+  });
+
+  it("docker runner adapter validates labels before reading logs and stores parsed lines once", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Docker Logs Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      containerId: "log-container-id",
+      containerName: "agentbay-log-container",
+      image: "agentbay/dummy-runner:test",
+      observedStatus: "running",
+    });
+    const dockerCalls: string[][] = [];
+    const dockerCli: DockerCliRunner = async (args) => {
+      dockerCalls.push([...args]);
+
+      if (args[0] === "inspect") {
+        return dockerInspectResult({
+          agentId: created.agent.id,
+          containerId: "log-container-id",
+          image: "agentbay/dummy-runner:test",
+          status: "running",
+        });
+      }
+
+      if (args[0] === "logs") {
+        return {
+          stdout: "2026-07-04T08:00:01.000000000Z stdout one\n",
+          stderr: "2026-07-04T08:00:02.000000000Z stderr one\n",
+        };
+      }
+
+      throw new Error(`unexpected docker call: ${args.join(" ")}`);
+    };
+    const adapter = new DockerRunnerAdapter({
+      createConnection: () => connection,
+      dockerCli,
+    });
+
+    const firstPage = await adapter.streamLogs({ agentId: created.agent.id });
+    const secondPage = await adapter.streamLogs({ agentId: created.agent.id });
+    const persistedLogs = await connection.db.select().from(agentLogs).orderBy(agentLogs.sequence);
+
+    expect(dockerCalls).toEqual([
+      ["inspect", "--format", "{{json .}}", "log-container-id"],
+      ["logs", "--timestamps", "log-container-id"],
+      ["inspect", "--format", "{{json .}}", "log-container-id"],
+      ["logs", "--timestamps", "log-container-id"],
+    ]);
+    expect(firstPage.logs.map((log) => [log.sequence, log.stream, log.message])).toEqual([
+      [1, "stdout", "stdout one"],
+      [2, "stderr", "stderr one"],
+    ]);
+    expect(secondPage.logs.map((log) => [log.sequence, log.stream, log.message])).toEqual([
+      [1, "stdout", "stdout one"],
+      [2, "stderr", "stderr one"],
+    ]);
+    expect(persistedLogs).toHaveLength(2);
+    expect(persistedLogs.every((log) => log.dockerRunnerContainerId !== null)).toBe(true);
+  });
+
+  it("docker runner adapter starts, inspects, streams logs, and stops a real container when Docker is available", async () => {
+    const availability = await detectDockerAvailability();
+    const skipReason = dockerUnavailableSkipReason(availability);
+
+    if (skipReason) {
+      console.warn(skipReason);
+      return;
+    }
+
+    const fixtureImage = await ensureDockerFixtureImage(DEFAULT_DOCKER_RUNNER_IMAGE);
+
+    if (!fixtureImage.available) {
+      console.warn(`Skipping real Docker tests: ${fixtureImage.reason}`);
+      return;
+    }
+
+    const tempRoot = await mkdtemp(join(tmpdir(), "agentbay-real-docker-adapter-test-"));
+    let containerId: string | null = null;
+
+    try {
+      const configPath = join(tempRoot, "real-config.json");
+      const workspaceRoot = join(tempRoot, "real-workspaces");
+      await writeFile(configPath, JSON.stringify({ fixture: "real-docker" }));
+      const created = await createAgentForDevelopmentUser(
+        { name: "Real Docker Agent", templateKey: "research_agent" },
+        { createConnection: () => connection },
+      );
+      const adapter = new DockerRunnerAdapter({
+        createConnection: () => connection,
+        mounts: {
+          configPath,
+          workspaceRoot,
+        },
+        nameSuffix: () => "real001",
+        resources: {
+          cpus: "0.25",
+          memory: "128m",
+        },
+      });
+      const started = await adapter.start(created.agent.id);
+      expect(started).toMatchObject({ ok: true });
+
+      if (!started.ok) {
+        throw new Error(started.reason);
+      }
+
+      containerId = started.container.containerId;
+      await expect(adapter.status(created.agent.id)).resolves.toMatchObject({
+        ok: true,
+        container: {
+          containerId,
+          observedStatus: "running",
+        },
+      });
+
+      const logs = await waitForDockerLogs(
+        adapter,
+        created.agent.id,
+        "agentbay docker dummy runner started",
+      );
+      expect(logs.logs.map((log) => log.message).join("\n")).toContain(
+        `agentbay docker dummy runner started for ${created.agent.id}`,
+      );
+
+      await expect(adapter.stop(created.agent.id)).resolves.toMatchObject({
+        ok: true,
+        container: {
+          containerId,
+          observedStatus: "exited",
+        },
+      });
+    } finally {
+      if (containerId) {
+        await runDocker(["rm", "--force", containerId]).catch(() => undefined);
+      }
+
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it("lists latest active-agent process logs without mixing deleted agents or simulator rows", async () => {
     const agentA = await createAgentForDevelopmentUser(
       { name: "Dashboard Process Agent A", templateKey: "research_agent" },
@@ -6214,6 +6524,89 @@ function logValue(
     sequence,
     createdAt: new Date(`2026-07-04T06:00:0${sequence}.000Z`),
   };
+}
+
+function dockerInspectResult(input: {
+  agentId: string;
+  containerId: string;
+  image: string;
+  status: string;
+}) {
+  return {
+    stdout: `${JSON.stringify({
+      Id: input.containerId,
+      Name: `/agentbay-${input.agentId}`,
+      Config: {
+        Image: input.image,
+        Labels: {
+          [AGENTBAY_AGENT_ID_LABEL]: input.agentId,
+        },
+      },
+      State: {
+        Status: input.status,
+        StartedAt: "2026-07-04T08:00:00.000000000Z",
+        FinishedAt:
+          input.status === "exited" ? "2026-07-04T08:00:03.000000000Z" : "0001-01-01T00:00:00Z",
+      },
+    })}\n`,
+    stderr: "",
+  };
+}
+
+async function ensureDockerFixtureImage(
+  image: string,
+): Promise<{ available: true } | { available: false; reason: string }> {
+  const inspected = await runDocker(["image", "inspect", image]).then(
+    () => true,
+    () => false,
+  );
+
+  if (inspected) {
+    return { available: true };
+  }
+
+  try {
+    await runDocker(["pull", image]);
+    return { available: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Docker image pull failed.";
+    return {
+      available: false,
+      reason: `fixture image ${image} is unavailable: ${message}`,
+    };
+  }
+}
+
+async function waitForDockerLogs(adapter: DockerRunnerAdapter, agentId: string, message: string) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const page = await adapter.streamLogs({ agentId });
+
+    if (page.logs.some((log) => log.message.includes(message))) {
+      return page;
+    }
+
+    await sleep(100);
+  }
+
+  throw new Error(`Timed out waiting for Docker log containing "${message}".`);
+}
+
+function runDocker(args: readonly string[]): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolvePromise, reject) => {
+    execFile(
+      "docker",
+      [...args],
+      { encoding: "utf8", timeout: 30_000 },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolvePromise({ stdout, stderr });
+      },
+    );
+  });
 }
 
 class FakeChildProcess extends EventEmitter {

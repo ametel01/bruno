@@ -234,17 +234,17 @@
 
 ## Milestone 10 Dockerized Agent Runner Gate Classification
 
-- Status: #77 Docker runtime metadata/log persistence is implementation-complete and ready for checker review.
+- Status: #78 Docker runner adapter is implementation-complete and ready for checker review.
 - Source plan: `docs/MILESTONES.md` Milestone 10
 - Tracking issues: #76-#81
-- Current branch: `codex/issue-77-docker-runtime-metadata`
-- Next step: checker should review the additive Docker metadata schema/helper contract, public log DTO redaction, and full gate evidence.
+- Current branch: `codex/issue-78-docker-runner-adapter`
+- Next step: checker should review the Docker adapter command construction, exact-container label validation, log parsing/persistence, and real-Docker contract evidence.
 
 ### Issue Checklist
 
 - [x] #76 Classify Docker runner quality gates
 - [x] #77 Persist Docker runtime metadata and agent logs
-- [ ] #78 Add the Docker runner adapter
+- [x] #78 Add the Docker runner adapter
 - [ ] #79 Run lifecycle controls through Docker containers
 - [ ] #80 Detect Docker crashes and clean up selected-agent containers
 - [ ] #81 Verify Docker runner milestone acceptance
@@ -263,6 +263,13 @@
 - #77 adds Docker runner state helpers for recording observed container metadata, appending stdout/stderr Docker log rows, and reading logs only when the requested active development-user agent and exact container ID both match.
 - #77 updates the product log route and agent detail log panel to use a safe public log DTO: `source`, `stream`, `level`, sanitized `message`, `sequence`, and `createdAt`; log-row, agent, runner, local process, Docker container, and raw metadata identifiers stay server-side.
 - #77 does not start Docker containers, add a Docker adapter, wire lifecycle controls through Docker, detect crashes, clean up containers, implement #74 lifecycle endpoint behavior, or complete Milestone 10 acceptance.
+- #78 adds a generic server runner adapter contract for `start`, `stop`, `restart`, `status`, and log streaming while preserving the existing local runner adapter result shape for current lifecycle flows.
+- #78 adds `DockerRunnerAdapter`, which runs Docker CLI commands through executable plus argument arrays, defaults to a deterministic dummy BusyBox runner command, and accepts explicit image/argv configuration without real Hermes.
+- #78 `docker run` creates a unique AgentBay container name, applies `agentbay.agent_id=<agentId>`, mounts per-agent mutable workspace storage, mounts config read-only when configured, sets `AGENTBAY_AGENT_ID`/workspace/config env vars, and applies initial CPU/memory limits.
+- #78 stop, status, restart, log streaming, and start-failure cleanup target the exact stored Docker container ID and validate the expected `agentbay.agent_id` label before Docker mutation or log persistence.
+- #78 log streaming reads `docker logs --timestamps` for the exact validated container, parses stdout/stderr timestamped lines, persists Docker log rows once, and returns container-scoped logs without exposing another agent's container rows.
+- #78 real Docker contract coverage uses the #76 Docker availability helper and skips with a clear reason when Docker or the fixture image is unavailable.
+- #78 does not wire product lifecycle endpoints/UI through Docker, detect Docker crashes, reconcile deleted containers, complete Milestone 10 acceptance, or add cloud/auth/billing/Hermes/Telegram/provider integrations.
 
 ### Update Log Requirements
 
@@ -279,6 +286,42 @@
 - When a future slice adds real Docker tests, group them behind this availability check and record whether they ran or skipped in this Milestone 10 progress section.
 
 ### Validation
+
+#### #78
+
+- Date: 2026-07-04
+- Environment:
+  - Docker daemon: reachable; `docker info --format '{{.ServerVersion}}'` returned `29.3.1`.
+  - Isolated database: container `agentbay_issue_78-postgres`, host port `54378`, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54378/agentbay`.
+  - Isolated app/test server: `PORT=3078`, `PLAYWRIGHT_BASE_URL=http://localhost:3078`, `NEXT_PUBLIC_APP_URL=http://localhost:3078`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree initially had no `node_modules`.
+  - `docker ps -a --filter name=agentbay_issue_78-postgres --format '{{.Names}} {{.Status}} {{.Ports}}'`: pass; no existing #78 Postgres container was present before setup.
+  - `docker run --name agentbay_issue_78-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54378:5432 -d postgres:17-alpine`: pass; started isolated Postgres for #78.
+  - `docker exec agentbay_issue_78-postgres pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54378/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3078 bun run db:migrate`: pass; migrations applied successfully. Postgres emitted the expected notice that Drizzle's long Docker FK identifier was truncated.
+- Focused checks:
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54378/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3078 bun run test -- tests/unit/docker-runner-adapter.test.ts`: pass; 1 file and 3 deterministic command/configuration/availability tests passed without requiring real Docker containers.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54378/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3078 bun run test -- tests/unit/create-agent-db.test.ts tests/unit/docker-runner-adapter.test.ts tests/unit/docker-availability.test.ts`: pass; 3 files and 95 tests passed, including mocked Docker command construction, exact-container label validation, Docker log parsing/persistence, Docker availability helper coverage, and the real Docker adapter contract test.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54378/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3078 bun run test`: pass; 24 files and 214 tests passed.
+- Required gates:
+  - `bun run format:check`: pass; Biome checked 87 files.
+  - `bun run lint`: pass; Biome checked 87 files.
+  - `bun run typecheck`: pass; `tsc --noEmit` passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54378/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3078 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54378/agentbay PORT=3078 PLAYWRIGHT_BASE_URL=http://localhost:3078 NEXT_PUBLIC_APP_URL=http://localhost:3078 bun run build`: pass; Next.js production build completed and included dashboard, agent detail, lifecycle, approval, log, health, and settings routes.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54378/agentbay PORT=3078 PLAYWRIGHT_BASE_URL=http://localhost:3078 NEXT_PUBLIC_APP_URL=http://localhost:3078 bun run verify`: pass; aggregate format, lint, typecheck, unit test, production build, and Playwright gates passed with 214 unit tests and 38 E2E passed / 18 expected skips.
+- Docker contract evidence:
+  - Real Docker tests ran rather than skipping because Docker was reachable and the `busybox:1.36` fixture image was available or pullable.
+  - The real Docker adapter test created one selected-agent container with `agentbay.agent_id=<agentId>`, config/workspace bind mounts, and CPU/memory limits, then inspected exact status, streamed dummy runner logs through `docker logs --timestamps`, stopped the exact stored container ID, and force-removed the test container in cleanup.
+- Acceptance evidence map:
+  - Server-side adapter contract: `src/server/runners/runner-adapter.ts` defines `start`, `stop`, `restart`, `status`, and `streamLogs`; the local adapter now implements that contract without changing product lifecycle behavior.
+  - Docker argument arrays: `DockerRunnerAdapter` accepts an injectable `DockerCliRunner` and all Docker operations pass `string[]` args; mocked tests assert the exact `docker run`, `inspect`, `logs`, and guarded `stop` calls.
+  - Container name, label, config/workspace mounts, and resource limits: mocked start coverage asserts the unique `agentbay-<agentId>-<suffix>` name, `agentbay.agent_id` label, read-only config bind, per-agent workspace bind, `--cpus`, and `--memory`; the real Docker contract test exercises the same path.
+  - Exact container targeting and label validation: stop/status/log paths resolve the stored container ID from Docker metadata, run `docker inspect --format '{{json .}}' <containerId>`, and refuse mutation/log persistence when the expected agent label mismatches.
+  - Deterministic dummy fixture: the default Docker command uses `busybox:1.36` with a deterministic shell loop that prints the selected `AGENTBAY_AGENT_ID`; no Hermes integration is required.
+  - Log parsing: timestamped stdout/stderr Docker log output is parsed into durable Docker log rows, duplicate timestamps already persisted for the container are not re-appended, and returned log pages remain container-scoped.
+  - Scope boundaries: lifecycle endpoints/UI still use the local runner; crash reconciliation, deleted-agent cleanup, Milestone 10 acceptance, cloud/auth/billing/Hermes/Telegram/provider work, and dependency changes remain out of scope.
 
 #### #77
 

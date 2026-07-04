@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dashboard latest process logs panel for active agents, with stdout/stderr lines, timestamps, agent links, safe empty/error states, and seeded UI coverage for scoped persisted process logs.
 - Local runner adapter interface for starting, stopping, restarting, status checks, and persisted log-stream reads with a real dummy child process by default and explicit executable/argv configuration for future Hermes swaps.
 - Docker runner container metadata persistence for selected agents, including exact container ID, container name, image, observed status, timestamps, sanitized metadata, and exact-container scoped log helpers for future Docker adapter work.
+- Docker runner adapter primitives for starting, stopping, restarting, inspecting, and log-streaming one selected-agent container through Docker CLI argument arrays with labels, isolated workspaces, read-only config mounts, and initial CPU/memory limits.
 - Agent runtime log rows now persist a source and metadata alongside stdout/stderr line content, and the product log API/detail panel expose only a safe public log DTO without log-row, agent, runner, container, or raw metadata identifiers.
 - Lifecycle-launched local runner crash handling that moves agents to `error`, records safe status reasons, persists process exit details, captures stdout/stderr logs, and writes an `agent.error` audit event.
 

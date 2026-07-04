@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "@/src/server/db/schema";
 import { agentLogs, agents, dockerRunnerContainers } from "@/src/server/db/schema";
@@ -233,17 +233,47 @@ export async function appendDockerRunnerLogLines(input: {
   });
 }
 
-export async function listDockerRunnerContainerLogs(input: {
+export async function getDockerRunnerContainerForDevelopmentUser(input: {
+  db: DockerRunnerStateDatabase;
+  agentId: string;
+  containerId?: string;
+}): Promise<DockerRunnerContainerDto | null> {
+  return input.db.transaction(async (tx) => {
+    const developmentUserId = await getDevelopmentUserId(tx);
+
+    if (!developmentUserId) {
+      return null;
+    }
+
+    const predicates = [
+      eq(dockerRunnerContainers.agentId, input.agentId),
+      eq(agents.id, input.agentId),
+      eq(agents.userId, developmentUserId),
+      isNull(agents.deletedAt),
+    ];
+
+    if (input.containerId) {
+      predicates.push(eq(dockerRunnerContainers.containerId, input.containerId));
+    }
+
+    const [containerRow] = await tx
+      .select(dockerContainerSelection)
+      .from(dockerRunnerContainers)
+      .innerJoin(agents, eq(agents.id, dockerRunnerContainers.agentId))
+      .where(and(...predicates))
+      .orderBy(desc(dockerRunnerContainers.observedAt), desc(dockerRunnerContainers.createdAt))
+      .limit(1);
+
+    return containerRow ? mapDockerRunnerContainerToDto(containerRow) : null;
+  });
+}
+
+export async function getLatestDockerRunnerLogCursor(input: {
   db: DockerRunnerStateDatabase;
   agentId: string;
   containerId: string;
-  limit?: number;
-}): Promise<AgentLogDto[]> {
-  const limit =
-    typeof input.limit === "number" && Number.isInteger(input.limit)
-      ? Math.min(Math.max(input.limit, 1), 100)
-      : 100;
-  const rows = await input.db.transaction(async (tx) => {
+}): Promise<{ sequence: number; createdAt: Date } | null> {
+  const [latestLog] = await input.db.transaction(async (tx) => {
     const developmentUserId = await getDevelopmentUserId(tx);
 
     if (!developmentUserId) {
@@ -251,7 +281,10 @@ export async function listDockerRunnerContainerLogs(input: {
     }
 
     return tx
-      .select(dockerLogSelection)
+      .select({
+        sequence: agentLogs.sequence,
+        createdAt: agentLogs.createdAt,
+      })
       .from(agentLogs)
       .innerJoin(
         dockerRunnerContainers,
@@ -268,6 +301,53 @@ export async function listDockerRunnerContainerLogs(input: {
           isNull(agents.deletedAt),
         ),
       )
+      .orderBy(desc(agentLogs.createdAt), desc(agentLogs.sequence))
+      .limit(1);
+  });
+
+  return latestLog ?? null;
+}
+
+export async function listDockerRunnerContainerLogs(input: {
+  db: DockerRunnerStateDatabase;
+  agentId: string;
+  containerId: string;
+  after?: number | null;
+  limit?: number;
+}): Promise<AgentLogDto[]> {
+  const limit =
+    typeof input.limit === "number" && Number.isInteger(input.limit)
+      ? Math.min(Math.max(input.limit, 1), 100)
+      : 100;
+  const rows = await input.db.transaction(async (tx) => {
+    const developmentUserId = await getDevelopmentUserId(tx);
+
+    if (!developmentUserId) {
+      return [];
+    }
+
+    const predicates = [
+      eq(agentLogs.agentId, input.agentId),
+      eq(dockerRunnerContainers.agentId, input.agentId),
+      eq(dockerRunnerContainers.containerId, input.containerId),
+      eq(agents.id, input.agentId),
+      eq(agents.userId, developmentUserId),
+      isNull(agents.deletedAt),
+    ];
+
+    if (input.after !== null && input.after !== undefined) {
+      predicates.push(gt(agentLogs.sequence, input.after));
+    }
+
+    return tx
+      .select(dockerLogSelection)
+      .from(agentLogs)
+      .innerJoin(
+        dockerRunnerContainers,
+        eq(dockerRunnerContainers.id, agentLogs.dockerRunnerContainerId),
+      )
+      .innerJoin(agents, eq(agents.id, dockerRunnerContainers.agentId))
+      .where(and(...predicates))
       .orderBy(asc(agentLogs.sequence))
       .limit(limit);
   });
