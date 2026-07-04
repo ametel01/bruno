@@ -9,6 +9,8 @@ import {
   FAKE_RUNNER_START_DELAY_MS,
   RESTART_COMPLETED_EVENT_TYPE,
   RESTART_REQUESTED_EVENT_TYPE,
+  SIMULATED_ERROR_EVENT_TYPE,
+  SIMULATED_ERROR_STATUS_REASON,
   START_COMPLETED_EVENT_TYPE,
   START_REQUESTED_EVENT_TYPE,
   STOP_COMPLETED_EVENT_TYPE,
@@ -17,6 +19,7 @@ import {
   restartAgentForDevelopmentUser,
   settleDueFakeRunnerTransitions,
   settleDueStartingAgents,
+  simulateErrorAgentForDevelopmentUser,
   startAgentForDevelopmentUser,
   stopAgentForDevelopmentUser,
   type AgentLifecycleStatus,
@@ -1152,6 +1155,366 @@ describe("create agent persistence", () => {
     const eventCount = await countRows(connection, "agent_events");
 
     expect(eventCount).toBe(1);
+  });
+
+  it("simulates errors for accepted non-deleted statuses with persisted reason and one event", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const now = new Date("2026-07-03T06:00:00.000Z");
+    const simulatableStatuses: AgentLifecycleStatus[] = [
+      "idle",
+      "stopped",
+      "starting",
+      "running",
+      "restarting",
+    ];
+
+    for (const status of simulatableStatuses) {
+      const [agent] = await connection.db
+        .insert(agents)
+        .values({
+          userId,
+          name: `${status} Simulate Error Agent`,
+          templateKey: "research_agent",
+          status,
+          statusReason: `${status} preserved reason.`,
+          createdAt: new Date("2026-07-03T05:00:00.000Z"),
+          updatedAt: new Date("2026-07-03T05:30:00.000Z"),
+        })
+        .returning();
+
+      expect(agent).toBeDefined();
+
+      const result = await simulateErrorAgentForDevelopmentUser(agent?.id ?? "", {
+        createConnection: () => connection,
+        now: () => now,
+      });
+
+      const [persistedAgent] = await connection.db
+        .select()
+        .from(agents)
+        .where(eq(agents.id, agent?.id ?? ""))
+        .limit(1);
+      const persistedEvents = await connection.db
+        .select()
+        .from(agentEvents)
+        .where(eq(agentEvents.agentId, agent?.id ?? ""));
+
+      expect(result).toMatchObject({
+        ok: true,
+        agent: {
+          id: agent?.id,
+          status: "error",
+          statusReason: SIMULATED_ERROR_STATUS_REASON,
+          updatedAt: "2026-07-03T06:00:00.000Z",
+        },
+        event: {
+          type: SIMULATED_ERROR_EVENT_TYPE,
+        },
+      });
+      expect(persistedAgent).toMatchObject({
+        status: "error",
+        statusReason: SIMULATED_ERROR_STATUS_REASON,
+        updatedAt: now,
+      });
+      expect(persistedEvents).toHaveLength(1);
+      expect(persistedEvents[0]).toMatchObject({
+        actorUserId: userId,
+        type: SIMULATED_ERROR_EVENT_TYPE,
+        message: `Simulated error requested for agent "${status} Simulate Error Agent".`,
+        metadata: {
+          fromStatus: status,
+          toStatus: "error",
+          source: "development_simulator",
+        },
+      });
+    }
+  });
+
+  it("rejects malformed, missing, absent, soft-deleted, error, and deleting simulations without mutation or events", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const now = new Date("2026-07-03T06:00:00.000Z");
+    const invalidStatuses: AgentLifecycleStatus[] = ["error", "deleting"];
+    const invalidAgents: { id: string; status: AgentLifecycleStatus }[] = [];
+
+    for (const status of invalidStatuses) {
+      const [agent] = await connection.db
+        .insert(agents)
+        .values({
+          userId,
+          name: `${status} Simulate Rejected Agent`,
+          templateKey: "research_agent",
+          status,
+          statusReason: `${status} preserved reason.`,
+          createdAt: new Date("2026-07-03T05:00:00.000Z"),
+          updatedAt: now,
+        })
+        .returning({ id: agents.id, status: agents.status });
+
+      expect(agent).toBeDefined();
+
+      if (agent) {
+        invalidAgents.push(agent);
+      }
+    }
+
+    const [deletedAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Deleted Simulate Error Agent",
+        templateKey: "research_agent",
+        status: "running",
+        statusReason: "Deleted preserved reason.",
+        updatedAt: now,
+        deletedAt: now,
+      })
+      .returning();
+
+    expect(deletedAgent).toBeDefined();
+
+    const beforeAgents = await connection.db.select().from(agents).orderBy(agents.name);
+
+    await expect(
+      simulateErrorAgentForDevelopmentUser("", {
+        createConnection: () => connection,
+        now: () => now,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "missing_agent_id" });
+    await expect(
+      simulateErrorAgentForDevelopmentUser("not-a-uuid", {
+        createConnection: () => connection,
+        now: () => now,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "malformed_agent_id" });
+    await expect(
+      simulateErrorAgentForDevelopmentUser("00000000-0000-4000-8000-000000000000", {
+        createConnection: () => connection,
+        now: () => now,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "agent_not_found" });
+    await expect(
+      simulateErrorAgentForDevelopmentUser(deletedAgent?.id ?? "", {
+        createConnection: () => connection,
+        now: () => now,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "agent_not_found" });
+
+    for (const agent of invalidAgents) {
+      await expect(
+        simulateErrorAgentForDevelopmentUser(agent.id, {
+          createConnection: () => connection,
+          now: () => now,
+        }),
+      ).resolves.toEqual({ ok: false, reason: "invalid_status", status: agent.status });
+    }
+
+    const afterAgents = await connection.db.select().from(agents).orderBy(agents.name);
+    const persistedEvents = await connection.db.select().from(agentEvents);
+
+    expect(afterAgents).toEqual(beforeAgents);
+    expect(persistedEvents).toHaveLength(0);
+  });
+
+  it("exposes the simulate-error route success, validation, not-found, deleted, invalid status, and event behavior", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const [runningAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Route Simulate Error Agent",
+        templateKey: "research_agent",
+        status: "running",
+        statusReason: "Fake runner is running.",
+      })
+      .returning();
+    const [errorAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Already Error Route Agent",
+        templateKey: "research_agent",
+        status: "error",
+      })
+      .returning();
+    const [deletedAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Deleted Simulate Error Route Agent",
+        templateKey: "research_agent",
+        status: "running",
+        deletedAt: new Date("2026-07-03T06:00:00.000Z"),
+      })
+      .returning();
+    const [productionGuardAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Production Guard Simulate Error Agent",
+        templateKey: "research_agent",
+        status: "running",
+        statusReason: "Production guard must preserve this.",
+      })
+      .returning();
+
+    expect(runningAgent).toBeDefined();
+    expect(errorAgent).toBeDefined();
+    expect(deletedAgent).toBeDefined();
+    expect(productionGuardAgent).toBeDefined();
+    const runningAgentId = runningAgent?.id ?? "";
+    const errorAgentId = errorAgent?.id ?? "";
+    const deletedAgentId = deletedAgent?.id ?? "";
+    const productionGuardAgentId = productionGuardAgent?.id ?? "";
+
+    const { POST } = await import("@/app/api/agents/[agentId]/actions/simulate-error/route");
+    const successResponse = await POST(new Request("http://localhost/api/agents/simulate-error"), {
+      params: Promise.resolve({ agentId: runningAgentId }),
+    });
+    const successBody = await successResponse.json();
+
+    expect(successResponse.status).toBe(200);
+    expect(successBody).toMatchObject({
+      ok: true,
+      agent: {
+        id: runningAgent?.id,
+        status: "error",
+        statusReason: SIMULATED_ERROR_STATUS_REASON,
+      },
+      event: { type: SIMULATED_ERROR_EVENT_TYPE },
+    });
+
+    const [persistedAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, runningAgentId))
+      .limit(1);
+    const persistedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, runningAgentId));
+
+    expect(persistedAgent).toMatchObject({
+      status: "error",
+      statusReason: SIMULATED_ERROR_STATUS_REASON,
+    });
+    expect(persistedEvents).toHaveLength(1);
+    expect(persistedEvents[0]).toMatchObject({
+      type: SIMULATED_ERROR_EVENT_TYPE,
+      metadata: {
+        fromStatus: "running",
+        toStatus: "error",
+        source: "development_simulator",
+      },
+    });
+
+    const missingIdResponse = await POST(
+      new Request("http://localhost/api/agents/simulate-error"),
+      {
+        params: Promise.resolve({}),
+      },
+    );
+    const malformedResponse = await POST(
+      new Request("http://localhost/api/agents/simulate-error"),
+      {
+        params: Promise.resolve({ agentId: "not-a-uuid" }),
+      },
+    );
+    const missingAgentResponse = await POST(
+      new Request("http://localhost/api/agents/simulate-error"),
+      {
+        params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000000" }),
+      },
+    );
+    const deletedResponse = await POST(new Request("http://localhost/api/agents/simulate-error"), {
+      params: Promise.resolve({ agentId: deletedAgentId }),
+    });
+    const invalidStatusResponse = await POST(
+      new Request("http://localhost/api/agents/simulate-error"),
+      {
+        params: Promise.resolve({ agentId: errorAgentId }),
+      },
+    );
+
+    expect(missingIdResponse.status).toBe(400);
+    expect(await missingIdResponse.json()).toMatchObject({
+      error: { code: "validation_failed" },
+    });
+    expect(malformedResponse.status).toBe(400);
+    expect(await malformedResponse.json()).toMatchObject({
+      error: { code: "validation_failed" },
+    });
+    expect(missingAgentResponse.status).toBe(404);
+    expect(await missingAgentResponse.json()).toMatchObject({
+      error: { code: "agent_not_found" },
+    });
+    expect(deletedResponse.status).toBe(404);
+    expect(await deletedResponse.json()).toMatchObject({
+      error: { code: "agent_not_found" },
+    });
+    expect(invalidStatusResponse.status).toBe(409);
+    expect(await invalidStatusResponse.json()).toMatchObject({
+      error: { code: "invalid_agent_status", status: "error" },
+    });
+
+    const originalNodeEnv = process.env.NODE_ENV;
+    setNodeEnvForTest("production");
+
+    try {
+      const productionResponse = await POST(
+        new Request("http://localhost/api/agents/simulate-error"),
+        {
+          params: Promise.resolve({ agentId: productionGuardAgentId }),
+        },
+      );
+
+      expect(productionResponse.status).toBe(403);
+      expect(await productionResponse.json()).toEqual({
+        error: {
+          code: "development_only_action",
+          message: "Simulated error actions are unavailable in production.",
+        },
+      });
+    } finally {
+      setNodeEnvForTest(originalNodeEnv);
+    }
+
+    const [persistedProductionGuardAgent] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, productionGuardAgentId))
+      .limit(1);
+    const persistedProductionGuardEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, productionGuardAgentId));
+    const eventCount = await countRows(connection, "agent_events");
+    const logCount = await countRows(connection, "agent_logs");
+
+    expect(persistedProductionGuardAgent).toMatchObject({
+      status: "running",
+      statusReason: "Production guard must preserve this.",
+    });
+    expect(persistedProductionGuardEvents).toHaveLength(0);
+    expect(eventCount).toBe(1);
+    expect(logCount).toBe(0);
   });
 
   it("soft-deletes active non-transitioning agents while preserving existing events", async () => {
@@ -2746,7 +3109,7 @@ async function expectTableCount(
 
 async function countRows(
   connection: DatabaseConnection,
-  tableName: "users" | "agents" | "agent_events" | "app_metadata",
+  tableName: "users" | "agents" | "agent_events" | "agent_logs" | "app_metadata",
 ): Promise<number> {
   const [row] = await connection.db.execute<{ count: string }>(
     sql.raw(`select count(*)::text as count from ${tableName}`),
@@ -2771,4 +3134,13 @@ function logValue(
     sequence,
     createdAt: new Date(`2026-07-04T06:00:0${sequence}.000Z`),
   };
+}
+
+function setNodeEnvForTest(value: string | undefined) {
+  Object.defineProperty(process.env, "NODE_ENV", {
+    value,
+    configurable: true,
+    enumerable: true,
+    writable: true,
+  });
 }

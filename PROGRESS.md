@@ -1,5 +1,38 @@
 # Progress
 
+## Milestone 4 Development Error Simulator
+
+- Status: in progress
+- Issues: #45
+- Branch: `codex/issue-45-simulate-error`
+
+### Completion Evidence
+
+- [x] #45 adds development/test-only `POST /api/agents/:agentId/actions/simulate-error` guarded before lifecycle DB work when `NODE_ENV === "production"`.
+- [x] #45 simulates an active non-deleted agent error by transactionally setting `status = "error"`, persisting a safe status reason, and writing exactly one `agent.error` audit event with `fromStatus`, `toStatus`, and `source` metadata.
+- [x] #45 exposes the simulator from the shared lifecycle controls only outside production, so dashboard and detail surfaces inherit the same tester action.
+- [x] #45 keeps simulated error audit events separate from `agent_logs` and does not add runtime log generation, log panel UI, runner integration, or schema changes.
+
+### Validation
+
+- Date: 2026-07-04
+- Environment:
+  - Isolated database: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54341/agentbay`.
+  - Isolated app/test server: `PORT=3015`, `PLAYWRIGHT_BASE_URL=http://localhost:3015`, `NEXT_PUBLIC_APP_URL=http://localhost:3015`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree had no local `node_modules`.
+  - `docker compose -p agentbay_issue_45 -f compose.yaml -f <port override> up -d postgres`: pass; started `agentbay_issue_45-postgres-1` on host port `54341`.
+- Required gates:
+  - `bun run db:migrate`: pass; migrations applied successfully against the isolated database.
+  - `bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+  - `bun run format:check`: pass; Biome checked 63 files.
+  - `bun run lint`: pass; Biome checked 63 files.
+  - `bun run typecheck`: pass.
+  - `bun run test`: pass; 16 files and 110 tests passed.
+  - `bun run build`: pass; Next.js build completed and included `/api/agents/:agentId/actions/simulate-error`.
+  - `bun run test:e2e`: pass; 18 passed and 2 expected project skips.
+  - `bun run verify`: pass; aggregate format, lint, typecheck, test, build, and E2E gates passed with 18 E2E passed and 2 expected project skips.
+
 ## Milestone 4 Durable Agent Logs
 
 - Status: in progress

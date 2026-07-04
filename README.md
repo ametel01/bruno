@@ -123,13 +123,14 @@ The current fake lifecycle APIs are:
 - `POST /api/agents/:agentId/actions/start`: accepts active `idle`, `stopped`, or `error` agents, persists `starting`, records `agent.start_requested`, and deterministic settling records `agent.start_completed` when the fake runner reaches `running`.
 - `POST /api/agents/:agentId/actions/stop`: accepts active `running` agents, persists `stopped`, and records `agent.stop_requested` plus `agent.stop_completed` transactionally.
 - `POST /api/agents/:agentId/actions/restart`: accepts active `running` agents, persists `restarting`, records `agent.restart_requested`, and deterministic settling records `agent.restart_completed` when the fake runner returns to `running`.
+- `POST /api/agents/:agentId/actions/simulate-error`: development/test-only and rejected in production. Outside production, accepts active non-deleted `idle`, `stopped`, `starting`, `running`, or `restarting` agents, persists `error`, and records exactly one `agent.error` audit event.
 - `DELETE /api/agents/:agentId`: accepts active non-transitioning `idle`, `running`, `stopped`, or `error` agents, soft-deletes the row, and records exactly one `agent.deleted` event.
 
 Missing, malformed, absent, already soft-deleted, and invalid-status targets return safe JSON errors and do not write mutation events. Delete is blocked while an agent is still `starting` or `restarting`.
 
 ## Activity Feeds
 
-Activity feeds are the operator audit timeline for important persisted control-plane actions. They explain who changed an agent, what changed, and when it happened without requiring raw database access. They are intentionally low-volume audit events, not runtime logs. Chatty stdout, stderr, Hermes output, runner output, and generated task logs belong to future `agent_logs` work.
+Activity feeds are the operator audit timeline for important persisted control-plane actions. They explain who changed an agent, what changed, and when it happened without requiring raw database access. They are intentionally low-volume audit events, not runtime logs. Chatty stdout, stderr, Hermes output, runner output, and generated task logs belong to the separate `agent_logs` runtime log path.
 
 The dashboard shows the newest persisted activity across all agents. The agent detail page shows the selected agent's activity with pagination.
 
@@ -145,7 +146,7 @@ The dashboard shows the newest persisted activity across all agents. The agent d
 
 Cursor values are opaque base64url strings. Clients should store or pass them back exactly as received and must not parse them. A non-null `nextCursor` points to the next older page. The detail UI renders that as Older activity and links back to the newest page when viewing older results.
 
-Current Milestone 3 event inventory:
+Current audit event inventory:
 
 - `agent.created`
 - `agent.start_requested`
@@ -154,9 +155,10 @@ Current Milestone 3 event inventory:
 - `agent.stop_completed`
 - `agent.restart_requested`
 - `agent.restart_completed`
+- `agent.error`
 - `agent.deleted`
 
-Future milestones may add config, approval, error, runner, backup, restore, billing, and Hermes-related audit event types. Those future audit events should continue to describe control-plane facts, while high-volume runtime output remains separate log data.
+Future milestones may add config, approval, runner, backup, restore, billing, and Hermes-related audit event types. Those future audit events should continue to describe control-plane facts, while high-volume runtime output remains separate log data.
 
 ## Quality Gates
 
