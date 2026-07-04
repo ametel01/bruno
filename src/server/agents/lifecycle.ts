@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
+import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agents, type agentStatusEnum } from "@/src/server/db/schema";
 import {
@@ -7,9 +8,21 @@ import {
 } from "@/src/server/events/agent-events";
 import {
   LocalRunnerAdapter,
+  type LocalRunnerRestartResult,
+  type LocalRunnerStartResult,
+  type LocalRunnerStatusResult,
+  type LocalRunnerStopResult,
   type LocalRunnerUnexpectedExitEvent,
-  type RunnerAdapter,
 } from "@/src/server/runners/local-runner-adapter";
+import {
+  DockerRunnerAdapter,
+  type DockerRunnerRestartResult,
+  type DockerRunnerStartResult,
+  type DockerRunnerStatusResult,
+  type DockerRunnerStopResult,
+} from "@/src/server/runners/docker-runner-adapter";
+import type { DockerRunnerContainerDto } from "@/src/server/runners/docker-runner-state";
+import type { RunnerAdapter as RunnerAdapterContract } from "@/src/server/runners/runner-adapter";
 
 export type AgentLifecycleStatus = (typeof agentStatusEnum.enumValues)[number];
 
@@ -34,18 +47,27 @@ export const SIMULATED_ERROR_EVENT_TYPE = "agent.error";
 export const DELETE_EVENT_TYPE = "agent.deleted";
 export const FAKE_RUNNER_START_DELAY_MS = 400;
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const RUNNING_STATUS_REASON = "Local runner is running.";
+const RUNNING_STATUS_REASON = "Docker runner container is running.";
 export const LOCAL_RUNNER_UNEXPECTED_EXIT_STATUS_REASON =
   "Local runner exited unexpectedly. Check captured process logs for details.";
 export const SIMULATED_ERROR_STATUS_REASON = "Simulated error requested for development testing.";
 
 type LifecycleClock = () => Date;
+type LifecycleRunnerStartResult = LocalRunnerStartResult | DockerRunnerStartResult;
+type LifecycleRunnerStopResult = LocalRunnerStopResult | DockerRunnerStopResult;
+type LifecycleRunnerRestartResult = LocalRunnerRestartResult | DockerRunnerRestartResult;
+type LifecycleRunnerStatusResult = LocalRunnerStatusResult | DockerRunnerStatusResult;
+type LifecycleRunnerAdapter = RunnerAdapterContract<
+  LifecycleRunnerStartResult,
+  LifecycleRunnerStopResult,
+  LifecycleRunnerRestartResult,
+  LifecycleRunnerStatusResult
+>;
 
 export type AgentLifecycleDependencies = {
   createConnection?: () => DatabaseConnection;
   now?: LifecycleClock;
-  runnerAdapter?: RunnerAdapter;
+  runnerAdapter?: LifecycleRunnerAdapter;
 };
 
 export type StartAgentResult =
@@ -221,9 +243,16 @@ export class AgentLifecyclePersistenceError extends Error {
   }
 }
 
-let lifecycleLocalRunnerAdapter: RunnerAdapter | null = null;
+let lifecycleRunnerAdapter: LifecycleRunnerAdapter | null = null;
+let lifecycleLocalRunnerAdapter: LifecycleRunnerAdapter | null = null;
 
-export function getLifecycleLocalRunnerAdapter(): RunnerAdapter {
+export function getLifecycleRunnerAdapter(): LifecycleRunnerAdapter {
+  lifecycleRunnerAdapter ??= new DockerRunnerAdapter();
+
+  return lifecycleRunnerAdapter;
+}
+
+export function getLifecycleLocalRunnerAdapter(): LifecycleRunnerAdapter {
   lifecycleLocalRunnerAdapter ??= new LocalRunnerAdapter({
     onUnexpectedExit: async (event) => {
       await recordUnexpectedLocalRunnerExitForDevelopmentUser(event);
@@ -233,9 +262,7 @@ export function getLifecycleLocalRunnerAdapter(): RunnerAdapter {
   return lifecycleLocalRunnerAdapter;
 }
 
-export function isValidAgentId(agentId: string): boolean {
-  return UUID_PATTERN.test(agentId);
-}
+export { isValidAgentId };
 
 export function canStartAgentStatus(status: AgentLifecycleStatus): boolean {
   return STARTABLE_AGENT_STATUSES.includes(status as (typeof STARTABLE_AGENT_STATUSES)[number]);
@@ -276,7 +303,7 @@ export async function startAgentForDevelopmentUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
-  const runnerAdapter = dependencies.runnerAdapter ?? getLifecycleLocalRunnerAdapter();
+  const runnerAdapter = dependencies.runnerAdapter ?? getLifecycleRunnerAdapter();
 
   try {
     const validation = await connection.db.transaction(async (tx) => {
@@ -306,6 +333,8 @@ export async function startAgentForDevelopmentUser(
     if (!runnerStart.ok) {
       return { ok: false, reason: "runner_start_failed" } as const;
     }
+
+    await captureLifecycleRunnerLogs(runnerAdapter, normalizedAgentId);
 
     return await connection.db.transaction(async (tx) => {
       const [startedAgent] = await tx
@@ -338,7 +367,7 @@ export async function startAgentForDevelopmentUser(
           metadata: {
             fromStatus: validation.agent.status,
             toStatus: "running",
-            localRunnerProcessId: runnerStart.process.id,
+            ...runnerLifecycleEventMetadata(runnerStart),
           },
         },
         {
@@ -349,7 +378,7 @@ export async function startAgentForDevelopmentUser(
           metadata: {
             fromStatus: validation.agent.status,
             toStatus: "running",
-            localRunnerProcessId: runnerStart.process.id,
+            ...runnerLifecycleEventMetadata(runnerStart),
           },
         },
       ]);
@@ -396,7 +425,7 @@ export async function stopAgentForDevelopmentUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
-  const runnerAdapter = dependencies.runnerAdapter ?? getLifecycleLocalRunnerAdapter();
+  const runnerAdapter = dependencies.runnerAdapter ?? getLifecycleRunnerAdapter();
 
   try {
     const validation = await connection.db.transaction(async (tx) => {
@@ -426,6 +455,8 @@ export async function stopAgentForDevelopmentUser(
     if (!runnerStop.ok) {
       return { ok: false, reason: "runner_stop_failed" } as const;
     }
+
+    await captureLifecycleRunnerLogs(runnerAdapter, normalizedAgentId);
 
     return await connection.db.transaction(async (tx) => {
       const [stoppedAgent] = await tx
@@ -457,7 +488,7 @@ export async function stopAgentForDevelopmentUser(
           metadata: {
             fromStatus: validation.agent.status,
             toStatus: "stopped",
-            localRunnerProcessId: runnerStop.process.id,
+            ...runnerLifecycleEventMetadata(runnerStop),
           },
         },
         {
@@ -468,7 +499,7 @@ export async function stopAgentForDevelopmentUser(
           metadata: {
             fromStatus: validation.agent.status,
             toStatus: "stopped",
-            localRunnerProcessId: runnerStop.process.id,
+            ...runnerLifecycleEventMetadata(runnerStop),
           },
         },
       ]);
@@ -512,7 +543,7 @@ export async function restartAgentForDevelopmentUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
-  const runnerAdapter = dependencies.runnerAdapter ?? getLifecycleLocalRunnerAdapter();
+  const runnerAdapter = dependencies.runnerAdapter ?? getLifecycleRunnerAdapter();
 
   try {
     const validation = await connection.db.transaction(async (tx) => {
@@ -540,8 +571,27 @@ export async function restartAgentForDevelopmentUser(
     const runnerRestart = await runnerAdapter.restart(normalizedAgentId);
 
     if (!runnerRestart.ok) {
+      if (isDockerReplacementStartFailure(runnerRestart)) {
+        await connection.db
+          .update(agents)
+          .set({
+            status: "stopped",
+            statusReason: null,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(agents.id, normalizedAgentId),
+              isNull(agents.deletedAt),
+              inArray(agents.status, [...RESTARTABLE_AGENT_STATUSES]),
+            ),
+          );
+      }
+
       return { ok: false, reason: "runner_restart_failed" } as const;
     }
+
+    await captureLifecycleRunnerLogs(runnerAdapter, normalizedAgentId);
 
     return await connection.db.transaction(async (tx) => {
       const [restartedAgent] = await tx
@@ -574,7 +624,7 @@ export async function restartAgentForDevelopmentUser(
           metadata: {
             fromStatus: validation.agent.status,
             toStatus: "running",
-            localRunnerProcessId: runnerRestart.process.id,
+            ...runnerLifecycleEventMetadata(runnerRestart),
           },
         },
         {
@@ -585,7 +635,7 @@ export async function restartAgentForDevelopmentUser(
           metadata: {
             fromStatus: validation.agent.status,
             toStatus: "running",
-            localRunnerProcessId: runnerRestart.process.id,
+            ...runnerLifecycleEventMetadata(runnerRestart),
           },
         },
       ]);
@@ -859,6 +909,15 @@ export async function settleDueFakeRunnerTransitions(
   return 0;
 }
 
+function isDockerReplacementStartFailure(result: LifecycleRunnerRestartResult): result is Extract<
+  DockerRunnerRestartResult,
+  { ok: false }
+> & {
+  replacementStartFailed: true;
+} {
+  return !result.ok && "replacementStartFailed" in result && result.replacementStartFailed === true;
+}
+
 function toStartedAgent(agent: typeof agents.$inferSelect): StartedAgent {
   return {
     id: agent.id,
@@ -930,5 +989,44 @@ function toDeletedAgent(agent: typeof agents.$inferSelect): DeletedAgent {
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
     deletedAt: agent.deletedAt.toISOString(),
+  };
+}
+
+async function captureLifecycleRunnerLogs(
+  runnerAdapter: LifecycleRunnerAdapter,
+  agentId: string,
+): Promise<void> {
+  try {
+    await runnerAdapter.streamLogs({ agentId });
+  } catch {
+    // Lifecycle state should reflect the successful runner transition even if log capture fails.
+  }
+}
+
+function runnerLifecycleEventMetadata(
+  result: LifecycleRunnerStartResult | LifecycleRunnerStopResult | LifecycleRunnerRestartResult,
+): Record<string, unknown> {
+  if (!result.ok) {
+    return {};
+  }
+
+  if ("container" in result) {
+    return dockerRunnerLifecycleMetadata(result.container);
+  }
+
+  return {
+    localRunnerProcessId: result.process.id,
+  };
+}
+
+function dockerRunnerLifecycleMetadata(
+  container: DockerRunnerContainerDto,
+): Record<string, unknown> {
+  return {
+    dockerRunnerContainerId: container.id,
+    dockerContainerId: container.containerId,
+    dockerContainerName: container.containerName,
+    dockerImage: container.image,
+    dockerObservedStatus: container.observedStatus,
   };
 }

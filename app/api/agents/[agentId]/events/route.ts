@@ -2,7 +2,7 @@ import {
   AgentDetailPersistenceError,
   getActiveAgentForDevelopmentUser,
 } from "@/src/server/agents/list-agents";
-import { isValidAgentId } from "@/src/server/agents/lifecycle";
+import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { listAgentEventFeed } from "@/src/server/events/agent-events";
 

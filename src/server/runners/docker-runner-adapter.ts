@@ -38,6 +38,7 @@ const DUMMY_DOCKER_RUNNER_ARGS = [
   "-c",
   [
     'printf "agentbay docker dummy runner started for %s\\n" "$AGENTBAY_AGENT_ID"',
+    'printf "agentbay docker dummy runner stderr ready for %s\\n" "$AGENTBAY_AGENT_ID" >&2',
     'trap \'printf "agentbay docker dummy runner stopping for %s\\n" "$AGENTBAY_AGENT_ID"; exit 0\' TERM INT',
     "while true; do sleep 1; done",
   ].join("; "),
@@ -75,6 +76,7 @@ export type DockerRunnerStartResult =
         | "agent_not_found"
         | "docker_run_failed"
         | "docker_inspect_failed"
+        | "container_not_running"
         | "label_mismatch"
         | "state_persistence_failed";
     };
@@ -93,12 +95,12 @@ export type DockerRunnerStopResult =
 
 export type DockerRunnerRestartResult =
   | { ok: true; container: DockerRunnerContainerDto }
-  | {
+  | ({
       ok: false;
       reason:
         | Extract<DockerRunnerStopResult, { ok: false }>["reason"]
         | Extract<DockerRunnerStartResult, { ok: false }>["reason"];
-    };
+    } & { replacementStartFailed?: boolean });
 
 export type DockerRunnerStatusResult =
   | { ok: true; container: DockerRunnerContainerDto | null }
@@ -213,6 +215,13 @@ export class DockerRunnerAdapter
         return { ok: false, reason: inspected.reason };
       }
 
+      const observedStatus = observedStatusFromInspect(inspected.inspect);
+      if (observedStatus !== "running") {
+        await this.cleanupStartedContainer(containerId, agentId);
+        await this.closeOwnedConnection(connection);
+        return { ok: false, reason: "container_not_running" };
+      }
+
       try {
         const container = await recordDockerRunnerContainerForDevelopmentUser({
           db: connection.db,
@@ -220,7 +229,7 @@ export class DockerRunnerAdapter
           containerId,
           containerName: plan.containerName,
           image: this.command.image,
-          observedStatus: observedStatusFromInspect(inspected.inspect),
+          observedStatus,
           metadata: dockerRunnerMetadata({
             agentId,
             command: this.command,
@@ -303,7 +312,9 @@ export class DockerRunnerAdapter
       return stopResult;
     }
 
-    return this.start(agentId);
+    const startResult = await this.start(agentId);
+
+    return startResult.ok ? startResult : { ...startResult, replacementStartFailed: true };
   }
 
   async status(agentId: string): Promise<DockerRunnerStatusResult> {
@@ -512,10 +523,12 @@ export function resolveDockerRunnerMounts(
 
   return {
     ...((input.configPath ?? envConfigPath)
-      ? { configPath: resolve(input.configPath ?? envConfigPath ?? "") }
+      ? { configPath: resolve(/* turbopackIgnore: true */ input.configPath ?? envConfigPath ?? "") }
       : {}),
     configTarget: input.configTarget ?? DEFAULT_DOCKER_CONFIG_TARGET,
-    workspaceRoot: resolve(workspaceRoot || join(tmpdir(), "agentbay-docker-workspaces")),
+    workspaceRoot: resolve(
+      /* turbopackIgnore: true */ workspaceRoot || join(tmpdir(), "agentbay-docker-workspaces"),
+    ),
     workspaceTarget: input.workspaceTarget ?? DEFAULT_DOCKER_WORKSPACE_TARGET,
   };
 }
@@ -528,7 +541,10 @@ export function buildDockerRunPlan(input: {
   resources: DockerRunnerResources;
 }): DockerRunPlan {
   const containerName = dockerContainerName(input.agentId, input.nameSuffix);
-  const workspacePath = resolve(input.mounts.workspaceRoot, input.agentId);
+  const workspacePath = resolve(
+    /* turbopackIgnore: true */ input.mounts.workspaceRoot,
+    input.agentId,
+  );
   const args = [
     "run",
     "--detach",

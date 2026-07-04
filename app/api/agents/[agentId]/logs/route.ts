@@ -2,15 +2,11 @@ import {
   AgentDetailPersistenceError,
   getActiveAgentForDevelopmentUser,
 } from "@/src/server/agents/list-agents";
-import { isValidAgentId } from "@/src/server/agents/lifecycle";
+import { isValidAgentId } from "@/src/server/agents/agent-id";
+import { getLifecycleRunnerAdapter } from "@/src/server/agents/lifecycle";
 import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import {
-  type AgentLogDto,
-  type AgentLogPage,
-  generateSimulatedRuntimeLogsForRunningAgent,
-  listAgentLogs,
-} from "@/src/server/logs/agent-logs";
+import { type AgentLogDto, type AgentLogPage, listAgentLogs } from "@/src/server/logs/agent-logs";
 
 type AgentLogsRouteContext = {
   params: Promise<{
@@ -85,17 +81,19 @@ export async function GET(request: Request, context: AgentLogsRouteContext) {
       );
     }
 
-    await generateSimulatedRuntimeLogsForRunningAgent({
-      db: routeConnection.db,
-      agentId: decodedAgentId.value,
-    });
-
-    const page = await listAgentLogs({
-      db: routeConnection.db,
-      agentId: decodedAgentId.value,
-      ...(parsedAfter.value === undefined ? {} : { after: parsedAfter.value }),
-      ...(parsedLimit.value === undefined ? {} : { limit: parsedLimit.value }),
-    });
+    const page =
+      activeAgent.status === "running"
+        ? await getLifecycleRunnerAdapter().streamLogs({
+            agentId: decodedAgentId.value,
+            ...(parsedAfter.value === undefined ? {} : { after: parsedAfter.value }),
+            ...(parsedLimit.value === undefined ? {} : { limit: parsedLimit.value }),
+          })
+        : await listAgentLogs({
+            db: routeConnection.db,
+            agentId: decodedAgentId.value,
+            ...(parsedAfter.value === undefined ? {} : { after: parsedAfter.value }),
+            ...(parsedLimit.value === undefined ? {} : { limit: parsedLimit.value }),
+          });
 
     return Response.json(toPublicAgentLogPage(page));
   } catch (error) {

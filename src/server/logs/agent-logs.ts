@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "@/src/server/db/schema";
 import { agentApprovals, agentLogs, agents } from "@/src/server/db/schema";
@@ -149,7 +149,12 @@ export async function listLatestActiveAgentProcessLogs(input: {
     })
     .from(agentLogs)
     .innerJoin(agents, eq(agentLogs.agentId, agents.id))
-    .where(and(isNull(agents.deletedAt), isNotNull(agentLogs.localRunnerProcessId)))
+    .where(
+      and(
+        isNull(agents.deletedAt),
+        or(isNotNull(agentLogs.localRunnerProcessId), isNotNull(agentLogs.dockerRunnerContainerId)),
+      ),
+    )
     .orderBy(desc(agentLogs.createdAt), desc(agentLogs.sequence), desc(agentLogs.id))
     .limit(limit);
 
