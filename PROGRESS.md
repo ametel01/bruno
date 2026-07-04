@@ -2,11 +2,11 @@
 
 ## Milestone 8 Mobile Control Panel Readiness
 
-- Status: #68 implemented and ready for checker review; #69-#70 remain open.
+- Status: #69 implemented and ready for checker review; #70 remains open.
 - Source plan: `docs/MILESTONES.md` Milestone 8
 - Tracking issues: #65-#70
-- Current branch: `codex/issue-68-mobile-logs-alerts`
-- Next step: checker should review #68 latest log summaries, operational alerts, mobile wrapping/scoping, and gate evidence.
+- Current branch: `codex/issue-69-mobile-hardening`
+- Next step: checker should review #69 combined mobile layout hardening, overflow coverage, and gate evidence.
 
 ### Issue Checklist
 
@@ -14,7 +14,7 @@
 - [x] #66 Make agent status and pause/resume mobile-ready
 - [x] #67 Add mobile approval review and decisions
 - [x] #68 Surface mobile latest logs and alerts
-- [ ] #69 Harden mobile control layouts
+- [x] #69 Harden mobile control layouts
 - [ ] #70 Verify Milestone 8 mobile acceptance
 - Later Milestone 8 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 8 work.
 
@@ -32,9 +32,12 @@
 - #68 adds an agent-detail operational alerts panel derived only from the selected active agent's status, pending or expired approvals, and alert-relevant selected-agent events; cross-agent approvals/events are filtered out before rendering.
 - #68 documents runner offline/degraded alerts as deferred in the UI until runner state exists in a runner milestone, while still showing available agent, event, and approval blockers now.
 - #68 adds unit coverage for alert derivation/redaction and mobile Playwright coverage at iPhone-sized `375x667` and small Android `360x740` widths, proving readable logs/alerts, safe summaries, selected-agent scoping, and no horizontal overflow.
-- Milestone 8 predecessor readiness is documented from #65, and #66/#67/#68 have since added the first mobile UI slices without adding new APIs, schema/migrations, dependencies, lockfile changes, provider/runner/auth/billing/secret behavior, or Milestone 9/10 behavior.
-- `CHANGELOG.md` has Keep a Changelog framing plus `## [Unreleased]` and now includes the #66, #67, and #68 mobile behavior entries.
-- No required Milestone 3-7 predecessor contract is missing. The remaining implementation slices still need Milestone 8-owned hardening and final responsive/mobile acceptance tests.
+- #69 reuses the `/agents` mobile status card list on the dashboard so persisted-agent status controls do not disappear when the wide desktop table is hidden on phone widths.
+- #69 adds defensive mobile layout hardening for shared panels, approval titles/links/actions, action messages, wrapped button labels, and visible focus outlines without changing desktop table behavior.
+- #69 adds mobile Playwright coverage that visits `/agents`, `/dashboard`, and `/agents/:agentId` at iPhone-sized `375x667` and small Android `360x740` widths with long agent names, IDs, approval titles/descriptions, status reasons, log lines, and alert messages, proving visible core controls and no horizontal document overflow.
+- Milestone 8 predecessor readiness is documented from #65, and #66/#67/#68/#69 have since added the mobile UI slices without adding new APIs, schema/migrations, dependencies, lockfile changes, provider/runner/auth/billing/secret behavior, or Milestone 9/10 behavior.
+- `CHANGELOG.md` has Keep a Changelog framing plus `## [Unreleased]` and now includes the #66, #67, #68, and #69 mobile behavior entries.
+- No required Milestone 3-7 predecessor contract is missing. The remaining implementation slice is #70 final responsive/mobile acceptance tests and documentation.
 
 ### Predecessor Contract Audit
 
@@ -47,6 +50,32 @@
 - Existing coverage evidence: Milestone 7 validation already covered dashboard/detail approval visibility, approve, deny, decision event counts, duplicate-decision conflicts, pending queue removal, safe UI/API output, runtime-log-triggered fake approval generation, and full aggregate gates against an isolated migrated database.
 
 ### Validation
+
+#### #69
+
+- Date: 2026-07-04
+- Environment:
+  - Isolated database: container `agentbay_issue_69-postgres` on host port `54369`, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54369/agentbay`.
+  - Isolated app/test server: `PORT=3069`, `PLAYWRIGHT_BASE_URL=http://localhost:3069`, `NEXT_PUBLIC_APP_URL=http://localhost:3069`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree had no local `node_modules`.
+  - `docker info --format '{{.ServerVersion}}'`: pass; Docker daemon reachable with server version `29.3.1`.
+  - `docker run --name agentbay_issue_69-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54369:5432 -d postgres:17-alpine`: pass; started isolated Postgres for #69.
+  - `docker exec agentbay_issue_69-postgres pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54369/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3069 bun run db:migrate`: pass; migrations applied successfully against the isolated #69 database.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54369/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3069 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+- Focused checks:
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54369/agentbay PORT=3069 PLAYWRIGHT_BASE_URL=http://localhost:3069 NEXT_PUBLIC_APP_URL=http://localhost:3069 bun run test:e2e -- --project=chromium-mobile -g "core mobile control routes"`: pass; 1 Chromium mobile test passed. Covers `/agents`, `/dashboard`, and `/agents/:agentId` at `375x667` and `360x740`, long wrapped names/IDs/approval titles/logs/alerts, dashboard mobile status controls, focusable approval decisions, no mobile Delete quick action, and no horizontal overflow.
+- Required gates:
+  - `bun run format:check`: pass; Biome checked 78 files.
+  - `bun run lint`: pass; Biome checked 78 files.
+  - `bun run typecheck`: pass.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54369/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3069 bun run test`: pass; 21 files and 177 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54369/agentbay PORT=3069 PLAYWRIGHT_BASE_URL=http://localhost:3069 NEXT_PUBLIC_APP_URL=http://localhost:3069 bun run build`: pass; Next.js build completed and included dashboard, agent detail, lifecycle, approval decision, log, health, and settings routes.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54369/agentbay PORT=3069 PLAYWRIGHT_BASE_URL=http://localhost:3069 NEXT_PUBLIC_APP_URL=http://localhost:3069 bun run test:e2e`: pass; 36 browser tests passed with 16 expected skips.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54369/agentbay PORT=3069 PLAYWRIGHT_BASE_URL=http://localhost:3069 NEXT_PUBLIC_APP_URL=http://localhost:3069 bun run verify`: pass; aggregate format, lint, typecheck, unit test, build, and E2E gates passed with 177 unit tests and 36 E2E passed / 16 expected skips.
+- Reconciliation:
+  - Initial `bun run format` failed because the worktree had no local `node_modules`; `bun install --frozen-lockfile` installed committed dependencies and the rerun passed.
 
 #### #68
 

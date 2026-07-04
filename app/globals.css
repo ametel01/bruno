@@ -42,6 +42,15 @@ select {
   font: inherit;
 }
 
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
 h1,
 h2,
 p {
@@ -231,6 +240,7 @@ h2 {
 .operational-alert-panel,
 .runtime-log-panel,
 .agent-list-panel {
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
@@ -655,6 +665,7 @@ h2 {
   color: var(--accent-strong);
   font-size: 0.82rem;
   font-weight: 800;
+  overflow-wrap: anywhere;
   text-decoration: none;
 }
 
@@ -666,6 +677,7 @@ h2 {
   font-size: 1rem;
   line-height: 1.35;
   margin: 4px 0 0;
+  overflow-wrap: anywhere;
 }
 
 .approval-item p {
@@ -708,6 +720,11 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
+}
+
+.approval-actions button {
+  min-width: 0;
 }
 
 .approval-decision-controls {
@@ -874,6 +891,7 @@ h2 {
   border: 1px solid var(--accent);
   border-radius: 6px;
   font-weight: 800;
+  overflow-wrap: anywhere;
   padding: 0 14px;
 }
 
@@ -1101,6 +1119,9 @@ h2 {
   color: var(--muted);
   font-size: 0.82rem;
   font-weight: 700;
+  line-height: 1.4;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .action-message.error {
