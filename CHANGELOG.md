@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `POST /api/agents/:agentId/actions/restart` and Restart UI controls for running agents, including deterministic fake-runner settling back to running and matching lifecycle events.
 - `DELETE /api/agents/:agentId` and Delete UI controls for soft-deleting non-transitioning active agents from active views while preserving audit events.
 - Dashboard lifecycle controls for starting, stopping, restarting, and deleting active persisted agents without opening the detail page.
+- Milestone 3 event timeline foundation with shared transactional event writers, event DTO mapping, opaque cursor helpers, and newest-first query helpers for per-agent and latest dashboard activity feeds.
 
 ### Fixed
 

@@ -27,6 +27,12 @@ import {
 } from "@/src/server/agents/list-agents";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentEvents, agents, appMetadata, users } from "@/src/server/db/schema";
+import {
+  listAgentEventFeed,
+  listLatestAgentActivity,
+  recordAgentEventInTransaction,
+  recordAgentEventsInTransaction,
+} from "@/src/server/events/agent-events";
 
 describe("create agent persistence", () => {
   let connection: DatabaseConnection;
@@ -2089,6 +2095,312 @@ describe("create agent persistence", () => {
     const eventCount = await countRows(connection, "agent_events");
 
     expect(eventCount).toBe(2);
+  });
+
+  it("records one or many events through the shared transactional event helper", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const [agent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Helper Agent",
+        templateKey: "research_agent",
+        status: "stopped",
+      })
+      .returning();
+
+    expect(agent).toBeDefined();
+    const agentId = agent?.id ?? "";
+
+    await connection.db.transaction(async (tx) => {
+      await recordAgentEventInTransaction(tx, {
+        agentId,
+        actorUserId: userId,
+        type: "agent.created",
+        message: 'Created agent "Helper Agent".',
+        metadata: {
+          templateKey: "research_agent",
+          status: "stopped",
+        },
+      });
+      await recordAgentEventsInTransaction(tx, [
+        {
+          agentId,
+          actorUserId: userId,
+          type: START_REQUESTED_EVENT_TYPE,
+          message: 'Start requested for agent "Helper Agent".',
+          metadata: {
+            fromStatus: "stopped",
+            toStatus: "starting",
+          },
+        },
+        {
+          agentId,
+          actorUserId: userId,
+          type: START_COMPLETED_EVENT_TYPE,
+          message: 'Start completed for agent "Helper Agent".',
+          metadata: {
+            fromStatus: "starting",
+            toStatus: "running",
+          },
+        },
+      ]);
+    });
+
+    const persistedEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, agentId))
+      .orderBy(agentEvents.createdAt);
+
+    expect(persistedEvents.map((event) => [event.type, event.message, event.metadata])).toEqual([
+      [
+        "agent.created",
+        'Created agent "Helper Agent".',
+        {
+          templateKey: "research_agent",
+          status: "stopped",
+        },
+      ],
+      [
+        START_REQUESTED_EVENT_TYPE,
+        'Start requested for agent "Helper Agent".',
+        {
+          fromStatus: "stopped",
+          toStatus: "starting",
+        },
+      ],
+      [
+        START_COMPLETED_EVENT_TYPE,
+        'Start completed for agent "Helper Agent".',
+        {
+          fromStatus: "starting",
+          toStatus: "running",
+        },
+      ],
+    ]);
+  });
+
+  it("queries per-agent event feeds newest-first with a stable cursor", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const [agent] = await connection.db
+      .insert(agents)
+      .values({
+        id: "00000000-0000-4000-8000-000000000201",
+        userId,
+        name: "Feed Agent",
+        templateKey: "research_agent",
+        status: "running",
+      })
+      .returning();
+    const [otherAgent] = await connection.db
+      .insert(agents)
+      .values({
+        id: "00000000-0000-4000-8000-000000000202",
+        userId,
+        name: "Other Agent",
+        templateKey: "github_issue_agent",
+        status: "running",
+      })
+      .returning();
+
+    expect(agent).toBeDefined();
+    expect(otherAgent).toBeDefined();
+
+    await connection.db.insert(agentEvents).values([
+      {
+        id: "00000000-0000-4000-8000-000000000301",
+        agentId: "00000000-0000-4000-8000-000000000201",
+        actorUserId: userId,
+        type: "agent.created",
+        message: 'Created agent "Feed Agent".',
+        metadata: {
+          templateKey: "research_agent",
+          status: "stopped",
+        },
+        createdAt: new Date("2026-07-04T05:59:00.000Z"),
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000302",
+        agentId: "00000000-0000-4000-8000-000000000201",
+        actorUserId: userId,
+        type: START_REQUESTED_EVENT_TYPE,
+        message: 'Start requested for agent "Feed Agent".',
+        metadata: {
+          fromStatus: "stopped",
+          toStatus: "starting",
+        },
+        createdAt: new Date("2026-07-04T06:00:00.000Z"),
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000303",
+        agentId: "00000000-0000-4000-8000-000000000201",
+        actorUserId: userId,
+        type: START_COMPLETED_EVENT_TYPE,
+        message: 'Start completed for agent "Feed Agent".',
+        metadata: {
+          fromStatus: "starting",
+          toStatus: "running",
+        },
+        createdAt: new Date("2026-07-04T06:00:00.000Z"),
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000401",
+        agentId: "00000000-0000-4000-8000-000000000202",
+        actorUserId: userId,
+        type: START_COMPLETED_EVENT_TYPE,
+        message: 'Start completed for agent "Other Agent".',
+        metadata: {
+          fromStatus: "starting",
+          toStatus: "running",
+        },
+        createdAt: new Date("2026-07-04T06:30:00.000Z"),
+      },
+    ]);
+
+    const firstPage = await listAgentEventFeed({
+      db: connection.db,
+      agentId: "00000000-0000-4000-8000-000000000201",
+      limit: 2,
+    });
+
+    expect(firstPage).toMatchObject({ ok: true });
+
+    if (!firstPage.ok) {
+      throw firstPage.error;
+    }
+
+    expect(firstPage.page.events.map((event) => event.id)).toEqual([
+      "00000000-0000-4000-8000-000000000303",
+      "00000000-0000-4000-8000-000000000302",
+    ]);
+    expect(firstPage.page.nextCursor).toBeTruthy();
+
+    const secondPage = await listAgentEventFeed({
+      db: connection.db,
+      agentId: "00000000-0000-4000-8000-000000000201",
+      cursor: firstPage.page.nextCursor,
+      limit: 2,
+    });
+
+    expect(secondPage).toMatchObject({ ok: true });
+
+    if (!secondPage.ok) {
+      throw secondPage.error;
+    }
+
+    expect(secondPage.page.events.map((event) => event.id)).toEqual([
+      "00000000-0000-4000-8000-000000000301",
+    ]);
+    expect(secondPage.page.nextCursor).toBeNull();
+    await expect(
+      listAgentEventFeed({
+        db: connection.db,
+        agentId: "00000000-0000-4000-8000-000000000201",
+        cursor: "not a cursor",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: expect.objectContaining({ reason: "invalid_encoding" }),
+    });
+  });
+
+  it("queries latest dashboard activity with deleted-agent audit context", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    await connection.db.insert(agents).values([
+      {
+        id: "00000000-0000-4000-8000-000000000211",
+        userId,
+        name: "Active Feed Agent",
+        templateKey: "research_agent",
+        status: "running",
+        createdAt: new Date("2026-07-04T05:00:00.000Z"),
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000212",
+        userId,
+        name: "Deleted Feed Agent",
+        templateKey: "github_issue_agent",
+        status: "stopped",
+        createdAt: new Date("2026-07-04T05:10:00.000Z"),
+        updatedAt: new Date("2026-07-04T06:30:00.000Z"),
+        deletedAt: new Date("2026-07-04T06:30:00.000Z"),
+      },
+    ]);
+    await connection.db.insert(agentEvents).values([
+      {
+        id: "00000000-0000-4000-8000-000000000311",
+        agentId: "00000000-0000-4000-8000-000000000211",
+        actorUserId: userId,
+        type: START_COMPLETED_EVENT_TYPE,
+        message: 'Start completed for agent "Active Feed Agent".',
+        metadata: {
+          fromStatus: "starting",
+          toStatus: "running",
+        },
+        createdAt: new Date("2026-07-04T06:00:00.000Z"),
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000411",
+        agentId: "00000000-0000-4000-8000-000000000212",
+        actorUserId: userId,
+        type: DELETE_EVENT_TYPE,
+        message: 'Agent "Deleted Feed Agent" deleted from active views.',
+        metadata: {
+          fromStatus: "stopped",
+          toStatus: "deleted",
+          deletedAt: "2026-07-04T06:30:00.000Z",
+        },
+        createdAt: new Date("2026-07-04T06:30:00.000Z"),
+      },
+    ]);
+
+    const page = await listLatestAgentActivity({
+      db: connection.db,
+      limit: 2,
+    });
+    const activeAgents = await listActiveAgentsForDevelopmentUser({
+      createConnection: () => connection,
+    });
+
+    expect(page).toMatchObject({ ok: true });
+
+    if (!page.ok) {
+      throw page.error;
+    }
+
+    expect(page.page.events.map((event) => event.id)).toEqual([
+      "00000000-0000-4000-8000-000000000411",
+      "00000000-0000-4000-8000-000000000311",
+    ]);
+    expect(page.page.events[0]?.agent).toEqual({
+      id: "00000000-0000-4000-8000-000000000212",
+      name: "Deleted Feed Agent",
+      templateKey: "github_issue_agent",
+      status: "stopped",
+      deletedAt: "2026-07-04T06:30:00.000Z",
+    });
+    expect(activeAgents.map((activeAgent) => activeAgent.id)).toEqual([
+      "00000000-0000-4000-8000-000000000211",
+    ]);
   });
 });
 
