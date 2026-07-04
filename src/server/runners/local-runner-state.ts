@@ -11,10 +11,18 @@ import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
 export const LOCAL_RUNNER_LAST_ERROR_FALLBACK =
   "Local runner error. Check captured process logs for details.";
+export const LOCAL_RUNNER_COMMAND_METADATA_REDACTION = "[redacted]";
 
 const MAX_SAFE_LAST_ERROR_LENGTH = 500;
 const UNSAFE_ERROR_PATTERN =
   /(postgres(?:ql)?:\/\/\S+|[A-Z0-9_]*(?:API[_-]?KEY|TOKEN|PASSWORD|SECRET|CREDENTIAL|PRIVATE[_-]?KEY|BEARER|AUTHORIZATION)[A-Z0-9_]*\s*[:=]\s*\S+)/i;
+const SECRET_OPTION_PATTERN =
+  /^--?(?:api[-_]?key|token|password|secret|credential|private[-_]?key|bearer|authorization)$/i;
+const SECRET_OPTION_ASSIGNMENT_PATTERN =
+  /(^|[\s"'`])(--?(?:api[-_]?key|token|password|secret|credential|private[-_]?key|bearer|authorization)=)([^\s"'`]+)/gi;
+const SECRET_ENV_ASSIGNMENT_PATTERN =
+  /(^|[\s"'`])([A-Z0-9_]*(?:API[_-]?KEY|TOKEN|PASSWORD|SECRET|CREDENTIAL|PRIVATE[_-]?KEY|BEARER|AUTHORIZATION)[A-Z0-9_]*\s*[:=]\s*)([^\s"'`]+)/gi;
+const DATABASE_DSN_PATTERN = /\b(?:postgres(?:ql)?):\/\/[^\s"'`]+/gi;
 
 type LocalRunnerStateDatabase = Pick<PostgresJsDatabase<typeof schema>, "transaction">;
 type LocalRunnerStateTransaction = Parameters<
@@ -145,12 +153,19 @@ export async function recordLocalRunnerProcessExit(input: {
 }): Promise<LocalRunnerProcessDto | null> {
   return input.db.transaction(async (tx) => {
     const stoppedAt = input.stoppedAt ?? new Date();
+    const signal = normalizeOptionalText(input.signal);
+    const lastError = sanitizeLocalRunnerLastError(input.lastError);
     const updateValues: Partial<typeof localRunnerProcesses.$inferInsert> = {
-      status: input.status ?? inferStoppedStatus(input),
+      status: normalizeTerminalStatus({
+        ...(input.status === undefined ? {} : { requestedStatus: input.status }),
+        exitCode: input.exitCode,
+        signal,
+        lastError,
+      }),
       stoppedAt,
       exitCode: input.exitCode ?? null,
-      signal: normalizeOptionalText(input.signal),
-      lastError: sanitizeLocalRunnerLastError(input.lastError),
+      signal,
+      lastError,
       updatedAt: stoppedAt,
     };
 
@@ -184,6 +199,8 @@ export async function appendLocalRunnerLogLines(input: {
     if (!processRow) {
       return { inserted: 0, logs: [] };
     }
+
+    await lockAgentLogSequenceInTransaction(tx, processRow.agent_id);
 
     const [latestAgentLog] = await tx
       .select({ sequence: agentLogs.sequence })
@@ -274,21 +291,34 @@ export function sanitizeLocalRunnerLastError(error: unknown): string | null {
   return normalized.slice(0, MAX_SAFE_LAST_ERROR_LENGTH);
 }
 
-function normalizeCommandMetadata(metadata: LocalRunnerCommandMetadata): Record<string, unknown> {
+export function normalizeCommandMetadata(
+  metadata: LocalRunnerCommandMetadata,
+): Record<string, unknown> {
   return {
-    command: metadata.command,
-    ...(metadata.args === undefined ? {} : { args: metadata.args }),
-    ...(metadata.cwd === undefined ? {} : { cwd: metadata.cwd }),
+    command: sanitizeCommandMetadataValue(metadata.command),
+    ...(metadata.args === undefined ? {} : { args: sanitizeCommandMetadataArgs(metadata.args) }),
+    ...(metadata.cwd === undefined ? {} : { cwd: sanitizeCommandMetadataValue(metadata.cwd) }),
     ...(metadata.envKeys === undefined ? {} : { envKeys: metadata.envKeys }),
   };
 }
 
-function inferStoppedStatus(input: {
-  exitCode?: number | null;
+function normalizeTerminalStatus(input: {
+  requestedStatus?: Extract<LocalRunnerProcessStatus, "stopped" | "exited" | "failed">;
+  exitCode: number | null | undefined;
   signal?: string | null;
-  lastError?: unknown;
+  lastError?: string | null;
 }): Extract<LocalRunnerProcessStatus, "stopped" | "exited" | "failed"> {
-  if (input.lastError !== undefined || normalizeOptionalText(input.signal) !== null) {
+  const inferredStatus = inferStoppedStatus(input);
+
+  return input.requestedStatus === inferredStatus ? input.requestedStatus : inferredStatus;
+}
+
+function inferStoppedStatus(input: {
+  exitCode: number | null | undefined;
+  signal?: string | null;
+  lastError?: string | null;
+}): Extract<LocalRunnerProcessStatus, "stopped" | "exited" | "failed"> {
+  if (input.lastError || input.signal) {
     return "failed";
   }
 
@@ -297,6 +327,44 @@ function inferStoppedStatus(input: {
   }
 
   return "stopped";
+}
+
+function sanitizeCommandMetadataArgs(args: readonly string[]): string[] {
+  const sanitizedArgs: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? "";
+
+    sanitizedArgs.push(sanitizeCommandMetadataValue(arg));
+
+    if (SECRET_OPTION_PATTERN.test(arg) && index + 1 < args.length) {
+      index += 1;
+      sanitizedArgs.push(LOCAL_RUNNER_COMMAND_METADATA_REDACTION);
+    }
+  }
+
+  return sanitizedArgs;
+}
+
+function sanitizeCommandMetadataValue(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+
+  if (!normalized) {
+    return normalized;
+  }
+
+  return normalized
+    .replace(DATABASE_DSN_PATTERN, LOCAL_RUNNER_COMMAND_METADATA_REDACTION)
+    .replace(
+      SECRET_ENV_ASSIGNMENT_PATTERN,
+      (_match, prefix: string, keyPrefix: string) =>
+        `${prefix}${keyPrefix}${LOCAL_RUNNER_COMMAND_METADATA_REDACTION}`,
+    )
+    .replace(
+      SECRET_OPTION_ASSIGNMENT_PATTERN,
+      (_match, prefix: string, optionPrefix: string) =>
+        `${prefix}${optionPrefix}${LOCAL_RUNNER_COMMAND_METADATA_REDACTION}`,
+    );
 }
 
 function normalizeOptionalText(value: string | null | undefined): string | null {
@@ -328,6 +396,18 @@ function lockLocalRunnerProcessInTransaction(
            ${localRunnerProcesses.agentId} as agent_id
     from ${localRunnerProcesses}
     where ${localRunnerProcesses.id} = ${processId}
+    for update
+  `);
+}
+
+function lockAgentLogSequenceInTransaction(
+  tx: LocalRunnerStateTransaction,
+  agentId: string,
+): Promise<{ id: string }[]> {
+  return tx.execute<{ id: string }>(sql`
+    select ${agents.id} as id
+    from ${agents}
+    where ${agents.id} = ${agentId}
     for update
   `);
 }

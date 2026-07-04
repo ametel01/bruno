@@ -75,7 +75,9 @@ import {
   appendLocalRunnerLogLines,
   createLocalRunnerProcessForDevelopmentUser,
   listLocalRunnerProcessLogs,
+  LOCAL_RUNNER_COMMAND_METADATA_REDACTION,
   LOCAL_RUNNER_LAST_ERROR_FALLBACK,
+  normalizeCommandMetadata,
   recordLocalRunnerProcessExit,
   sanitizeLocalRunnerLastError,
 } from "@/src/server/runners/local-runner-state";
@@ -4302,6 +4304,60 @@ describe("create agent persistence", () => {
     expect(JSON.stringify(persistedProcesses)).not.toContain("secret");
   });
 
+  it("redacts unsafe command metadata before persisting local runner process rows", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Sensitive Command Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+
+    const processRow = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      pid: 43217,
+      commandMetadata: {
+        command: "DATABASE_URL=postgres://agentbay:pg-password@127.0.0.1/agentbay bun run local",
+        args: [
+          "run",
+          "local",
+          "--database-url=postgres://agentbay:another-password@127.0.0.1/agentbay",
+          "--token",
+          "raw-token-value",
+          "--api-key=raw-api-key-value",
+          "--safe-name",
+          "research-agent",
+        ],
+        cwd: "/tmp/postgres://agentbay:cwd-password@127.0.0.1/agentbay",
+      },
+      startedAt: new Date("2026-07-04T06:00:00.000Z"),
+    });
+    const [persistedProcess] = await connection.db.select().from(localRunnerProcesses).limit(1);
+    const persistedMetadata = persistedProcess?.commandMetadata ?? {};
+    const serializedMetadata = JSON.stringify(persistedMetadata);
+
+    expect(processRow?.commandMetadata).toEqual(persistedMetadata);
+    expect(persistedMetadata).toMatchObject({
+      command: `DATABASE_URL=${LOCAL_RUNNER_COMMAND_METADATA_REDACTION} bun run local`,
+      args: [
+        "run",
+        "local",
+        `--database-url=${LOCAL_RUNNER_COMMAND_METADATA_REDACTION}`,
+        "--token",
+        LOCAL_RUNNER_COMMAND_METADATA_REDACTION,
+        `--api-key=${LOCAL_RUNNER_COMMAND_METADATA_REDACTION}`,
+        "--safe-name",
+        "research-agent",
+      ],
+      cwd: `/tmp/${LOCAL_RUNNER_COMMAND_METADATA_REDACTION}`,
+    });
+    expect(serializedMetadata).not.toContain("postgres://");
+    expect(serializedMetadata).not.toContain("pg-password");
+    expect(serializedMetadata).not.toContain("another-password");
+    expect(serializedMetadata).not.toContain("cwd-password");
+    expect(serializedMetadata).not.toContain("raw-token-value");
+    expect(serializedMetadata).not.toContain("raw-api-key-value");
+    expect(serializedMetadata).toContain("research-agent");
+  });
+
   it("appends stdout and stderr local runner logs in stable per-agent order without audit events", async () => {
     const agentA = await createAgentForDevelopmentUser(
       { name: "Log Agent A", templateKey: "research_agent" },
@@ -4398,6 +4454,110 @@ describe("create agent persistence", () => {
     expect(persistedEvents.every((event) => event.type === "agent.created")).toBe(true);
   });
 
+  it("allocates stable log sequences across multiple local runner processes for one agent", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Multi Process Log Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const firstProcess = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      pid: 43218,
+      commandMetadata: { command: "bun", args: ["runner", "first"] },
+      startedAt: new Date("2026-07-04T06:00:00.000Z"),
+    });
+    const secondProcess = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      pid: 43219,
+      commandMetadata: { command: "bun", args: ["runner", "second"] },
+      startedAt: new Date("2026-07-04T06:01:00.000Z"),
+    });
+
+    await appendLocalRunnerLogLines({
+      db: connection.db,
+      processId: firstProcess?.id ?? "",
+      lines: [{ stream: "stdout", message: "first process line" }],
+      now: new Date("2026-07-04T06:01:01.000Z"),
+    });
+    await appendLocalRunnerLogLines({
+      db: connection.db,
+      processId: secondProcess?.id ?? "",
+      lines: [
+        { stream: "stdout", message: "second process line 1" },
+        { stream: "stderr", message: "second process line 2" },
+      ],
+      now: new Date("2026-07-04T06:01:02.000Z"),
+    });
+
+    const page = await listAgentLogs({ db: connection.db, agentId: created.agent.id });
+
+    expect(page.logs.map((log) => [log.sequence, log.localRunnerProcessId, log.message])).toEqual([
+      [1, firstProcess?.id, "first process line"],
+      [2, secondProcess?.id, "second process line 1"],
+      [3, secondProcess?.id, "second process line 2"],
+    ]);
+  });
+
+  it("normalizes inconsistent local runner terminal statuses from exit details", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Terminal Status Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const failedProcess = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      pid: 43220,
+      commandMetadata: { command: "bun" },
+    });
+    const stoppedProcess = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      pid: 43221,
+      commandMetadata: { command: "bun" },
+    });
+    const exitedProcess = await createLocalRunnerProcessForDevelopmentUser({
+      db: connection.db,
+      agentId: created.agent.id,
+      pid: 43222,
+      commandMetadata: { command: "bun" },
+    });
+
+    await expect(
+      recordLocalRunnerProcessExit({
+        db: connection.db,
+        processId: failedProcess?.id ?? "",
+        status: "exited",
+        exitCode: 1,
+      }),
+    ).resolves.toMatchObject({
+      status: "failed",
+      exitCode: 1,
+    });
+    await expect(
+      recordLocalRunnerProcessExit({
+        db: connection.db,
+        processId: stoppedProcess?.id ?? "",
+        status: "stopped",
+        signal: "SIGTERM",
+      }),
+    ).resolves.toMatchObject({
+      status: "failed",
+      signal: "SIGTERM",
+    });
+    await expect(
+      recordLocalRunnerProcessExit({
+        db: connection.db,
+        processId: exitedProcess?.id ?? "",
+        status: "failed",
+        exitCode: 0,
+      }),
+    ).resolves.toMatchObject({
+      status: "exited",
+      exitCode: 0,
+    });
+  });
+
   it("does not create local runner state for missing, soft-deleted, or other-user agents", async () => {
     const active = await createAgentForDevelopmentUser(
       { name: "Active Runner Agent", templateKey: "research_agent" },
@@ -4468,6 +4628,17 @@ describe("create agent persistence", () => {
     expect(sanitizeLocalRunnerLastError(new Error("postgres://user:pass@localhost/db"))).toBe(
       LOCAL_RUNNER_LAST_ERROR_FALLBACK,
     );
+    expect(
+      normalizeCommandMetadata({
+        command: "ACCESS_TOKEN=raw-token bun",
+        args: ["--password", "raw-password", "--safe", "value"],
+        cwd: "postgres://user:pass@localhost/db",
+      }),
+    ).toEqual({
+      command: `ACCESS_TOKEN=${LOCAL_RUNNER_COMMAND_METADATA_REDACTION} bun`,
+      args: ["--password", LOCAL_RUNNER_COMMAND_METADATA_REDACTION, "--safe", "value"],
+      cwd: LOCAL_RUNNER_COMMAND_METADATA_REDACTION,
+    });
   });
 
   it("maps persisted log rows to the public DTO shape", () => {
