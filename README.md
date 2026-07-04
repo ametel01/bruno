@@ -141,6 +141,26 @@ Lifecycle behavior:
 
 Process stdout and stderr lines are persisted in `agent_logs` with stable per-agent sequence values and a private local runner process link. The product log API and UI expose only safe public fields such as timestamp, stream, level, sequence, source, and sanitized message. The dashboard's Latest process logs panel shows captured stdout/stderr lines for active agents; the agent detail runtime log panel shows the selected agent's scoped log stream.
 
+## Manual VPS Runner Service
+
+Milestone 11 adds a standalone runner-facing Bun service that can run on a manually provisioned VPS without connecting to the dashboard database. Start it locally with a temporary bearer token:
+
+```bash
+AGENTBAY_RUNNER_BEARER_TOKEN=replace-with-local-token bun run runner:service
+```
+
+The service listens on `127.0.0.1:3045` by default. Override the bind address with `AGENTBAY_RUNNER_HOST` and `AGENTBAY_RUNNER_PORT`.
+
+Runner API:
+
+- `POST /runner/v1/agents/:agentId/start`
+- `POST /runner/v1/agents/:agentId/stop`
+- `POST /runner/v1/agents/:agentId/restart`
+- `GET /runner/v1/agents/:agentId/status`
+- `GET /runner/v1/agents/:agentId/logs`
+
+Requests must send `Authorization: Bearer <AGENTBAY_RUNNER_BEARER_TOKEN>`. Unauthorized requests return safe JSON errors. Docker operations use executable-plus-argv calls, label containers with `agentbay.agent_id=<agentId>`, and scope start, stop, restart, status, and logs to that selected-agent label. The token is a temporary Milestone 11 mechanism and is intentionally replaced by Milestone 12 secure runner auth.
+
 ## Agent Detail Config Editor
 
 The agent detail page includes the completed local-development configuration editor for active, non-deleted agents. The editor shows the saved model, max daily spend, schedule, and timezone summary above the editable form so draft edits stay separate from persisted state until a save is accepted.
