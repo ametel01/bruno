@@ -7,20 +7,31 @@ import type { AgentLifecycleStatus } from "@/src/server/agents/lifecycle";
 type StopAgentButtonProps = {
   agentId: string;
   status: AgentLifecycleStatus;
+  requireConfirmation?: boolean;
 };
 
 type StopState =
   | { status: "idle" }
+  | { status: "confirming" }
   | { status: "requesting" }
   | { status: "completed"; message: string }
   | { status: "error"; message: string };
 
-export function StopAgentButton({ agentId, status }: StopAgentButtonProps) {
+export function StopAgentButton({
+  agentId,
+  status,
+  requireConfirmation = false,
+}: StopAgentButtonProps) {
   const router = useRouter();
   const [state, setState] = useState<StopState>({ status: "idle" });
 
   async function handleStop() {
     if (status !== "running") {
+      return;
+    }
+
+    if (requireConfirmation && state.status !== "confirming") {
+      setState({ status: "confirming" });
       return;
     }
 
@@ -44,12 +55,29 @@ export function StopAgentButton({ agentId, status }: StopAgentButtonProps) {
   }
 
   const disabled = status !== "running" || state.status === "requesting";
+  const label = getButtonLabel(state.status, requireConfirmation);
 
   return (
     <div className="start-agent-action">
       <button className="secondary-button" type="button" disabled={disabled} onClick={handleStop}>
-        {state.status === "requesting" ? "Stopping" : "Stop"}
+        {label}
       </button>
+      {state.status === "confirming" ? (
+        <button
+          className="secondary-button"
+          type="button"
+          onClick={() => {
+            setState({ status: "idle" });
+          }}
+        >
+          Cancel
+        </button>
+      ) : null}
+      {state.status === "confirming" ? (
+        <span className="action-message" role="status">
+          Confirm to stop this running agent.
+        </span>
+      ) : null}
       {state.status === "completed" || state.status === "error" ? (
         <span className={`action-message ${state.status}`} role="status">
           {state.message}
@@ -57,6 +85,18 @@ export function StopAgentButton({ agentId, status }: StopAgentButtonProps) {
       ) : null}
     </div>
   );
+}
+
+function getButtonLabel(state: StopState["status"], requireConfirmation: boolean): string {
+  if (state === "requesting") {
+    return "Stopping";
+  }
+
+  if (requireConfirmation && state === "confirming") {
+    return "Confirm stop";
+  }
+
+  return "Stop";
 }
 
 async function safeFailureMessage(response: Response): Promise<string> {

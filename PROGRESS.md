@@ -2,16 +2,16 @@
 
 ## Milestone 8 Mobile Control Panel Readiness
 
-- Status: #65 checked and ready to merge; implementation issues #66-#70 remain blocked until this audit lands.
+- Status: #66 implemented and ready for checker review; #67-#70 remain open.
 - Source plan: `docs/MILESTONES.md` Milestone 8
 - Tracking issues: #65-#70
-- Current branch: `codex/issue-65-m8-readiness`
-- Next step: coordinator should merge this audit, then assign #66 as the first implementation slice.
+- Current branch: `codex/issue-66-mobile-status-controls`
+- Next step: checker should review #66 mobile `/agents` status controls, confirmation behavior, and gate evidence.
 
 ### Issue Checklist
 
 - [x] #65 Audit Milestone 8 readiness and tracking
-- [ ] #66 Make agent status and pause/resume mobile-ready
+- [x] #66 Make agent status and pause/resume mobile-ready
 - [ ] #67 Add mobile approval review and decisions
 - [ ] #68 Surface mobile latest logs and alerts
 - [ ] #69 Harden mobile control layouts
@@ -20,6 +20,10 @@
 
 ### Current Status
 
+- #66 adds a phone-specific `/agents` card list that keeps long agent names, template labels, template keys, IDs, statuses, and action messages wrapped within the viewport while preserving the existing desktop table.
+- #66 mobile cards expose current status plus only quick lifecycle controls in scope for the status: `Resume` for `idle`, `stopped`, or `error` agents through the existing start action, and `Stop` for `running` agents through the existing stop action.
+- #66 mobile Stop requires a second explicit `Confirm stop` click before mutation and includes a cancel path; Delete is not rendered as a mobile card action.
+- #66 adds mobile Playwright coverage proving a long-name stopped agent can resume to running, require confirmation before stopping, stop to `stopped`, and resume again without horizontal page overflow.
 - Milestone 8 predecessor readiness is documented without adding mobile UI, pause/resume, mobile approval review, alerts, new APIs, schema/migrations, dependencies, lockfile changes, provider/runner/auth/billing/secret behavior, or Milestone 9/10 behavior.
 - `CHANGELOG.md` was inspected and already has Keep a Changelog framing plus `## [Unreleased]`; no functional changelog entry was added for this audit-only work.
 - No required Milestone 3-7 predecessor contract is missing. The implementation slices still need Milestone 8-owned product decisions and UI work for pause/resume naming, alert derivation, dedicated mobile routes, and responsive/mobile acceptance tests.
@@ -35,6 +39,33 @@
 - Existing coverage evidence: Milestone 7 validation already covered dashboard/detail approval visibility, approve, deny, decision event counts, duplicate-decision conflicts, pending queue removal, safe UI/API output, runtime-log-triggered fake approval generation, and full aggregate gates against an isolated migrated database.
 
 ### Validation
+
+#### #66
+
+- Date: 2026-07-04
+- Environment:
+  - Isolated database: container `agentbay_issue_66-postgres` on host port `54366`, `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54366/agentbay`.
+  - Isolated app/test server: `PORT=3066`, `PLAYWRIGHT_BASE_URL=http://localhost:3066`, `NEXT_PUBLIC_APP_URL=http://localhost:3066`.
+- Setup:
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed lockfile because this worktree had no local `node_modules`.
+  - `docker info --format '{{.ServerVersion}}'`: pass; Docker daemon reachable with server version `29.3.1`.
+  - `docker run --name agentbay_issue_66-postgres -e POSTGRES_DB=agentbay -e POSTGRES_USER=agentbay -e POSTGRES_PASSWORD=agentbay -p 54366:5432 -d postgres:17-alpine`: pass; started isolated Postgres for #66.
+  - `docker exec agentbay_issue_66-postgres pg_isready -U agentbay -d agentbay`: pass; Postgres accepted connections.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54366/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3066 bun run db:migrate`: pass; migrations applied successfully against the isolated #66 database.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54366/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3066 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+- Focused checks:
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54366/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3066 bun run test -- tests/unit/root-page.test.tsx`: pass; 1 file and 20 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54366/agentbay PORT=3066 PLAYWRIGHT_BASE_URL=http://localhost:3066 NEXT_PUBLIC_APP_URL=http://localhost:3066 bun run test:e2e -- --project=chromium-mobile -g "mobile list exposes status controls"`: pass; 1 Chromium mobile test passed. Covers long mobile card content, no horizontal overflow, no mobile Delete action, Resume through existing start behavior, Stop confirmation before mutation, stopped status after confirmation, and a second Resume to running.
+- Required gates:
+  - `bun run format:check`: pass; Biome checked 77 files.
+  - `bun run lint`: pass; Biome checked 77 files.
+  - `bun run typecheck`: pass.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54366/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3066 bun run test`: pass; 20 files and 173 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54366/agentbay PORT=3066 PLAYWRIGHT_BASE_URL=http://localhost:3066 NEXT_PUBLIC_APP_URL=http://localhost:3066 bun run build`: pass; Next.js build completed and included `/agents`, lifecycle action routes, dashboard, logs, approvals, health, and detail routes.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54366/agentbay PORT=3066 PLAYWRIGHT_BASE_URL=http://localhost:3066 NEXT_PUBLIC_APP_URL=http://localhost:3066 bun run test:e2e`: pass; 31 browser tests passed with 11 expected skips.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54366/agentbay PORT=3066 PLAYWRIGHT_BASE_URL=http://localhost:3066 NEXT_PUBLIC_APP_URL=http://localhost:3066 bun run verify`: pass; aggregate format, lint, typecheck, unit test, build, and E2E gates passed with 173 unit tests and 31 E2E passed / 11 expected skips.
+- Reconciliation:
+  - An initial focused mobile E2E assertion waited for the transient `Resume requested.` status message, but the fake runner can settle to `running` before that message is observed. The final test asserts durable running/stopped states and keeps the confirmation message assertion for the explicit Stop intent step.
 
 #### #65
 

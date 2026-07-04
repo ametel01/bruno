@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent detail pending approvals panel that renders only the selected active local-development agent's persisted pending requests with safe empty and error states.
 - Fake running-agent approval generation that creates one deterministic pending approval and `approval.requested` event from the runtime-log observation path without exposing raw payload internals.
 - `POST /api/approvals/:approvalId/deny` and dashboard Deny controls that transactionally resolve one pending approval to `denied`, record resolver fields, and write one safe `approval.denied` event.
+- Mobile `/agents` status cards with wrapped agent identity fields, status-aware Resume and confirmed Stop controls backed by the existing lifecycle actions, and no one-tap mobile Delete action.
 
 ### Fixed
 

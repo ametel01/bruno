@@ -7,6 +7,11 @@ import type { AgentLifecycleStatus } from "@/src/server/agents/lifecycle";
 type StartAgentButtonProps = {
   agentId: string;
   status: AgentLifecycleStatus;
+  label?: string;
+  busyLabel?: string;
+  requestedMessage?: string;
+  failureMessage?: string;
+  invalidStatusMessage?: string;
 };
 
 type StartState =
@@ -17,7 +22,15 @@ type StartState =
 
 const STARTABLE_STATUSES = new Set<AgentLifecycleStatus>(["idle", "stopped", "error"]);
 
-export function StartAgentButton({ agentId, status }: StartAgentButtonProps) {
+export function StartAgentButton({
+  agentId,
+  status,
+  label = "Start",
+  busyLabel = "Starting",
+  requestedMessage = "Start requested.",
+  failureMessage = "Agent could not be started.",
+  invalidStatusMessage = "Agent cannot be started from its current status.",
+}: StartAgentButtonProps) {
   const router = useRouter();
   const [state, setState] = useState<StartState>({ status: "idle" });
 
@@ -53,26 +66,29 @@ export function StartAgentButton({ agentId, status }: StartAgentButtonProps) {
       });
 
       if (!response.ok) {
-        setState({ status: "error", message: await safeFailureMessage(response) });
+        setState({
+          status: "error",
+          message: await safeFailureMessage(response, invalidStatusMessage, failureMessage),
+        });
         return;
       }
 
-      setState({ status: "polling", message: "Start requested." });
+      setState({ status: "polling", message: requestedMessage });
       router.refresh();
     } catch {
-      setState({ status: "error", message: "Agent could not be started." });
+      setState({ status: "error", message: failureMessage });
     }
   }
 
   const startable = STARTABLE_STATUSES.has(status);
   const busy = state.status === "requesting" || state.status === "polling" || status === "starting";
   const disabled = !startable || busy;
-  const label = getButtonLabel(status, state.status);
+  const buttonLabel = getButtonLabel(status, state.status, label, busyLabel);
 
   return (
     <div className="start-agent-action">
       <button className="secondary-button" type="button" disabled={disabled} onClick={handleStart}>
-        {label}
+        {buttonLabel}
       </button>
       {state.status === "polling" || state.status === "error" ? (
         <span className={`action-message ${state.status}`} role="status">
@@ -83,19 +99,28 @@ export function StartAgentButton({ agentId, status }: StartAgentButtonProps) {
   );
 }
 
-function getButtonLabel(status: AgentLifecycleStatus, state: StartState["status"]): string {
+function getButtonLabel(
+  status: AgentLifecycleStatus,
+  state: StartState["status"],
+  label: string,
+  busyLabel: string,
+): string {
   if (state === "requesting" || state === "polling" || status === "starting") {
-    return "Starting";
+    return busyLabel;
   }
 
   if (status === "running") {
     return "Running";
   }
 
-  return "Start";
+  return label;
 }
 
-async function safeFailureMessage(response: Response): Promise<string> {
+async function safeFailureMessage(
+  response: Response,
+  invalidStatusMessage: string,
+  fallbackMessage: string,
+): Promise<string> {
   try {
     const body = (await response.json()) as {
       error?: {
@@ -104,7 +129,7 @@ async function safeFailureMessage(response: Response): Promise<string> {
     };
 
     if (body.error?.code === "invalid_agent_status") {
-      return "Agent cannot be started from its current status.";
+      return invalidStatusMessage;
     }
 
     if (body.error?.code === "agent_not_found") {
@@ -114,5 +139,5 @@ async function safeFailureMessage(response: Response): Promise<string> {
     // Keep user-facing failures generic when the response is not safe JSON.
   }
 
-  return "Agent could not be started.";
+  return fallbackMessage;
 }

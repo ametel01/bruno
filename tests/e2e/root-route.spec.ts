@@ -649,6 +649,62 @@ test("/agents detail activity feed wraps on mobile without horizontal overflow",
   await expectPageNotHorizontallyOverflowing(page);
 });
 
+test("/agents mobile list exposes status controls without horizontal overflow", async ({
+  isMobile,
+  page,
+  request,
+}, testInfo) => {
+  test.skip(!isMobile, "mobile agent status control proof runs on the mobile project");
+
+  const name = `Mobile Status Control Agent ${testInfo.project.name} with a deliberately long operational name`;
+  const created = await createAgent(request, name, "social_content_agent");
+  createdAgentIds.add(created.id);
+
+  await page.goto("/agents");
+
+  const agentsPanel = page.locator(".agent-list-panel");
+  const mobileCard = agentsPanel.locator(".mobile-agent-card", { hasText: name });
+  await expect(mobileCard.getByRole("link", { name })).toHaveAttribute(
+    "href",
+    `/agents/${created.id}`,
+  );
+  await expect(mobileCard).toContainText("Social Content Agent");
+  await expect(mobileCard).toContainText("social_content_agent");
+  await expect(mobileCard).toContainText(created.id);
+  await expect(mobileCard.locator(".status-pill", { hasText: "stopped" })).toBeVisible();
+  await expect(mobileCard.getByRole("button", { name: "Resume" })).toBeVisible();
+  await expect(mobileCard.getByRole("button", { name: "Delete" })).toHaveCount(0);
+  await expectPageNotHorizontallyOverflowing(page);
+
+  await mobileCard.getByRole("button", { name: "Resume" }).click();
+  await expect(mobileCard.locator(".status-pill", { hasText: "running" })).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(mobileCard.getByRole("button", { name: "Stop" })).toBeVisible();
+  await expect(mobileCard.getByRole("button", { name: "Resume" })).toHaveCount(0);
+  await expectPageNotHorizontallyOverflowing(page);
+
+  await mobileCard.getByRole("button", { name: "Stop" }).click();
+  await expect(mobileCard.getByRole("status")).toContainText("Confirm to stop this running agent.");
+  await expect(mobileCard.locator(".status-pill", { hasText: "running" })).toBeVisible();
+  await expectPageNotHorizontallyOverflowing(page);
+
+  await mobileCard.getByRole("button", { name: "Confirm stop" }).click();
+  await expect(mobileCard.locator(".status-pill", { hasText: "stopped" })).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(mobileCard.getByRole("button", { name: "Resume" })).toBeVisible();
+  await expect(mobileCard.getByRole("button", { name: "Stop" })).toHaveCount(0);
+  await expectPageNotHorizontallyOverflowing(page);
+
+  await mobileCard.getByRole("button", { name: "Resume" }).click();
+  await expect(mobileCard.locator(".status-pill", { hasText: "running" })).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(mobileCard.getByRole("button", { name: "Stop" })).toBeVisible();
+  await expectPageNotHorizontallyOverflowing(page);
+});
+
 test("/agents detail edits config through persisted save and safe validation", async ({
   isMobile,
   page,
@@ -908,11 +964,15 @@ function trackAgentHref(agentHref: string | null): void {
   }
 }
 
-async function createAgent(request: APIRequestContext, name: string): Promise<{ id: string }> {
+async function createAgent(
+  request: APIRequestContext,
+  name: string,
+  templateKey = "research_agent",
+): Promise<{ id: string }> {
   const createResponse = await request.post("/api/agents", {
     data: {
       name,
-      templateKey: "research_agent",
+      templateKey,
     },
   });
   expect(createResponse.status()).toBe(201);
