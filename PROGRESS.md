@@ -118,6 +118,7 @@
 - 2026-07-06: #150 confirmed `CHANGELOG.md` has Keep a Changelog 1.0.0 framing and `## [Unreleased]`; `CHANGELOG.md` is intentionally unchanged for #150 because this issue creates tracking only and ships no functional product behavior.
 - 2026-07-06: #150 recorded baseline gate expectations for `bun run verify`, `bun run test:e2e`, the local Postgres `DATABASE_URL`, and `NEXT_PUBLIC_APP_URL` before cloud provisioning work starts.
 - 2026-07-06: #151 added additive runner provisioning columns and constraints, expanded runner kind support to `digitalocean`, kept manual VPS endpoint compatibility constraints, added server-only DigitalOcean env/config validation, added a fake DigitalOcean provider, and added schema/provider/server-only tests.
+- 2026-07-06: #151 maintainer review requested a compiler-enforced server-only boundary; token-bearing provider modules now import Next's `server-only` package, and Vitest aliases that package to an empty test helper for server-unit tests only.
 
 ### Validation Evidence
 
@@ -131,6 +132,7 @@
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism tests/unit/runner-registration.test.ts tests/unit/runner-heartbeat.test.ts tests/unit/manual-runner-status.test.ts tests/unit/runner-registration-routes.test.ts tests/unit/runner-heartbeat-route.test.ts`: pass; 5 files and 34 tests passed for existing manual registration, heartbeat, status, and route compatibility.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/agent-schema.test.ts tests/unit/digitalocean-provider.test.ts tests/unit/server-env.test.ts`: pass; 3 files and 26 tests passed for schema/migration coverage, fake DigitalOcean provider behavior, and server-only provider config/client import guards.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism`: pass; 37 files and 310 tests passed against the migrated local database.
+  - After maintainer review fix: `bun run format:check`, `bun run lint`, `bun run typecheck`, and `git diff --check` pass; focused schema/provider/server-env tests pass (3 files and 26 tests); existing manual runner compatibility tests pass (5 files and 34 tests); `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build` passes; serialized full unit suite passes (37 files and 310 tests).
   - Full `bun run verify` was not run before checker handoff because #151 currently has focused schema/provider/config/compatibility coverage plus package gates, and this repo has known default-parallel shared-DB Vitest isolation risk recorded above.
 
 - 2026-07-06 #150:

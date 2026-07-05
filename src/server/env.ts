@@ -1,7 +1,6 @@
-import { EnvValidationError, validateRequiredEnv } from "@/src/env/validation";
-import { assertServerOnlyModule } from "@/src/server/server-only";
+import "server-only";
 
-assertServerOnlyModule("src/server/env");
+import { EnvValidationError, validateRequiredEnv } from "@/src/env/validation";
 
 export type DigitalOceanProviderConfig = {
   token: string;

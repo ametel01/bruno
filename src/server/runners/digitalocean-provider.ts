@@ -1,6 +1,4 @@
-import { assertServerOnlyModule } from "@/src/server/server-only";
-
-assertServerOnlyModule("src/server/runners/digitalocean-provider");
+import "server-only";
 
 export const DIGITALOCEAN_PROVIDER = "digitalocean";
 export const DIGITALOCEAN_RUNNER_KIND = "digitalocean";

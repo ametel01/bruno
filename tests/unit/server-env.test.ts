@@ -46,6 +46,10 @@ describe("server-only provider environment validation", () => {
     await expect(readFile("src/env/validation.ts", "utf8")).resolves.not.toContain(
       "AGENTBAY_DIGITALOCEAN_TOKEN",
     );
+    await expect(readFile("src/server/env.ts", "utf8")).resolves.toContain('import "server-only";');
+    await expect(
+      readFile("src/server/runners/digitalocean-provider.ts", "utf8"),
+    ).resolves.toContain('import "server-only";');
 
     for (const filePath of await listSourceFiles("app")) {
       const source = await readFile(filePath, "utf8");
