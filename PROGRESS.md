@@ -67,6 +67,67 @@
   - Final `bun run format:check`: pass; Biome checked 102 files with no fixes applied after the final README edit.
   - External smoke: blocked; no authorized hosted dashboard URL, manual VPS endpoint, temporary bearer token, hosted database/Vercel env access, or permission to mutate staging runner containers was provided.
 
+## Milestone 13 Cloud Provisioning V1
+
+- Status: initialized for execution on `codex/issue-150-m13-tracking`; cloud provisioning implementation has not started.
+- Source plan:
+  - `docs/MILESTONES.md` Milestone 13: Cloud Provisioning V1.
+  - GitHub issue #150: Prepare Milestone 13 tracking and baseline gates.
+  - `PLAN.md` is absent in this worktree; the published #150 issue body and `docs/MILESTONES.md` are the active Step 0 contract.
+- Current branch: `codex/issue-150-m13-tracking`.
+
+### Issue Checklist
+
+- [x] #150 Prepare Milestone 13 tracking and baseline gates. Status: tracking initialized locally; checker handoff pending.
+- [ ] #151 Add cloud runner provisioning model and provider contract. Status: blocked until #150 is accepted.
+- [ ] #152 Implement Create runner provisioning workflow. Status: blocked until #151 is complete.
+- [ ] #153 Add cloud runner bootstrap registration and readiness. Status: blocked until #151 and #152 are complete.
+- [ ] #154 Show cloud provisioning progress and failures in the UI. Status: blocked until provisioning state and workflow slices are complete.
+- [ ] #155 Complete assignment, cleanup, and Milestone 13 evidence. Status: blocked until #151-#154 are complete.
+- Later Milestone 13 issue agents must append validation evidence here after their implementation slices.
+
+### Current Status
+
+- Milestone 13 goal from `docs/MILESTONES.md`: automatically create a DigitalOcean runner without exposing cloud setup to the user.
+- Milestone 13 acceptance criteria: user can click Create runner and see provisioning progress; a Droplet is created; the runner installs itself and registers; the dashboard shows the runner `online`; a user can create or assign an agent to the new runner; provisioning failure is visible and actionable.
+- Milestone 13 test expectations from `docs/MILESTONES.md`: provider unit tests with a fake DigitalOcean client, provisioning job success/failure tests, one real small-Droplet smoke before beta, and a security test that provider credentials are never exposed to the browser.
+- #150 is tracking-only. It initializes the Milestone 13 progress record, records baseline gate expectations, verifies changelog structure, and intentionally leaves `CHANGELOG.md` unchanged because no functional user/operator-visible behavior ships in this issue.
+- `CHANGELOG.md` has the Keep a Changelog 1.0.0 framing and an `## [Unreleased]` section. Agents should keep that structure and add changelog bullets only for shipped functional user/operator-visible changes.
+
+### Baseline Gate Expectations
+
+- Default local database for verify, DB-backed unit tests, migrations, health checks, and default E2E: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay`.
+- Default local app URL for verify and E2E: `NEXT_PUBLIC_APP_URL=http://localhost:3000`.
+- Default E2E server URL: `PORT=3000` and `PLAYWRIGHT_BASE_URL=http://localhost:3000` unless an issue uses an isolated port; when an isolated E2E port is used, set `PORT`, `PLAYWRIGHT_BASE_URL`, and `NEXT_PUBLIC_APP_URL` to the same localhost port.
+- Canonical aggregate gate: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run verify`.
+- Required #150 baseline commands: `bun run format:check` and `git diff --check`.
+- Known repo caveat from Milestone 12 evidence: default-parallel DB-backed Vitest inside `bun run verify` has previously failed from shared-DB isolation races. If this repeats, rerun the relevant branch command and prove whether the same failure reproduces on current `main` before calling it baseline.
+
+### Update Rules
+
+- Every Milestone 13 implementation issue must update this section after validation with the issue number, changed behavior, commands run, pass/fail result, skipped checks with reasons, and remaining risks.
+- Keep DigitalOcean credentials, cloud provider secrets, bearer tokens, production URLs, and provisioning credentials out of committed docs, UI output, tests, logs, and status messages.
+- Update `CHANGELOG.md` only for shipped functional user/operator-visible changes. Do not add changelog entries for tracking-only, validation-only, test-only, or documentation-only work.
+- Preserve Milestone 14 and Milestone 15 as future scope; do not add multi-agent capacity, backup, restore, billing, production deploy, or unrelated provider work while executing Milestone 13.
+
+### Update Log
+
+- 2026-07-06: #150 initialized Milestone 13 tracking from `docs/MILESTONES.md` and the published #150 issue body; noted that `PLAN.md` is absent in this worktree and the published issue body plus milestone document are the active Step 0 contract.
+- 2026-07-06: #150 confirmed `CHANGELOG.md` has Keep a Changelog 1.0.0 framing and `## [Unreleased]`; `CHANGELOG.md` is intentionally unchanged for #150 because this issue creates tracking only and ships no functional product behavior.
+- 2026-07-06: #150 recorded baseline gate expectations for `bun run verify`, `bun run test:e2e`, the local Postgres `DATABASE_URL`, and `NEXT_PUBLIC_APP_URL` before cloud provisioning work starts.
+
+### Validation Evidence
+
+- 2026-07-06 #150:
+  - `gh issue view 150 --repo ametel01/agentbay --json number,title,body,state,url`: pass; issue is open and maps Milestone 13 tracking to `docs/MILESTONES.md` plus PLAN Step 0.
+  - `test -f PLAN.md`: not present in this worktree; #150 issue body and `docs/MILESTONES.md` are recorded above as the active contract.
+  - `rg -n "Keep a Changelog|## \\[Unreleased\\]|Semantic Versioning" CHANGELOG.md`: pass; required changelog structure is present.
+  - Initial `bun run format:check`: environment failure; `biome` binary was unavailable in the fresh worktree (`/opt/homebrew/bin/bash: line 1: biome: command not found`).
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed `bun.lock` without changing tracked files.
+  - `bun run format:check`: pass; Biome checked 117 files with no fixes applied.
+  - `git diff --check`: pass; no whitespace errors.
+  - `git status --short --branch --untracked-files=all`: branch `codex/issue-150-m13-tracking` is based on `origin/main` with only `PROGRESS.md` modified.
+
 ## Milestone 12 Secure Runner Auth
 
 - Status: Milestone 12 local automated acceptance is complete on `codex/issue-134-milestone-12-acceptance`; #126 remains separately external-blocked for Milestone 11 hosted-dashboard/manual-VPS smoke.
