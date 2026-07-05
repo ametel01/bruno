@@ -208,10 +208,31 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
     const runner = await insertManualRunnerForAgent(created.id, {
       name: `Manual Runner ${testInfo.project.name}`,
       endpointUrl: `https://user:password@runner-${randomUUID()}.example.com:8443/runner/v1?token=hidden`,
-      status: "inactive",
+      status: "offline",
       updatedAt: "2026-07-05T01:30:00.000Z",
     });
     localRunnerIds.push(runner.id);
+    await insertRunnerHeartbeat(runner.id, {
+      status: "offline",
+      version: "agentbay-runner/1.2.3",
+      observedAt: "2026-07-05T01:30:30.000Z",
+    });
+    const onlineRunner = await insertManualRunnerForAgent(
+      created.id,
+      {
+        name: `Online Runner ${testInfo.project.name}`,
+        endpointUrl: `https://online-${randomUUID()}.example.com:8443/runner/v1`,
+        status: "online",
+        updatedAt: "2026-07-05T01:32:00.000Z",
+      },
+      { assign: false },
+    );
+    localRunnerIds.push(onlineRunner.id);
+    await insertRunnerHeartbeat(onlineRunner.id, {
+      status: "online",
+      version: "agentbay-runner/2.0.0",
+      observedAt: "2026-07-05T01:32:30.000Z",
+    });
     await insertManualRunnerLog(created.id, runner.id, {
       stream: "stderr",
       level: "error",
@@ -224,18 +245,30 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
       await page.goto("/dashboard");
 
       const runnerPanel = page.locator(".manual-runner-panel", {
-        hasText: "Manual runner status",
+        hasText: "Runner health",
       });
-      await expect(runnerPanel).toContainText("Manual runner status");
+      await expect(runnerPanel).toContainText("Runner health");
       await expect(runnerPanel).toContainText(`Manual Runner ${testInfo.project.name}`);
+      await expect(runnerPanel).toContainText(`Online Runner ${testInfo.project.name}`);
       await expect(runnerPanel).toContainText("manual_vps");
       await expect(runnerPanel).toContainText(new URL(runner.endpointUrl).host);
+      await expect(runnerPanel).toContainText(new URL(onlineRunner.endpointUrl).host);
       await expect(runnerPanel).toContainText("offline");
+      await expect(runnerPanel).toContainText("online");
+      await expect(runnerPanel).toContainText("agentbay-runner/1.2.3");
+      await expect(runnerPanel).toContainText("agentbay-runner/2.0.0");
+      await expect(runnerPanel).toContainText("2026-07-05T01:30:30.000Z");
+      await expect(runnerPanel).toContainText("2026-07-05T01:32:30.000Z");
       await expect(runnerPanel).toContainText("2026-07-05T01:30:00.000Z");
       await expect(runnerPanel).not.toContainText("password");
       await expect(runnerPanel).not.toContainText("token=hidden");
       await expect(runnerPanel).not.toContainText("/runner/v1");
       await expect(runnerPanel).not.toContainText(runner.id);
+      await expect(runnerPanel).not.toContainText(onlineRunner.id);
+      await expect(runnerPanel).not.toContainText("credentialHash");
+      await expect(runnerPanel).not.toContainText("tokenHash");
+      await expect(runnerPanel).not.toContainText("cpuPercent");
+      await expect(runnerPanel).not.toContainText("apiToken");
 
       const processLogsPanel = page.locator(".dashboard-process-log-panel");
       await expect(processLogsPanel).toContainText("remote manual runner unreachable");
@@ -255,12 +288,16 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
       await expect(assignedRunnerPanel).toContainText("This agent is assigned to");
       await expect(assignedRunnerPanel).toContainText("offline");
       await expect(assignedRunnerPanel).toContainText(new URL(runner.endpointUrl).host);
+      await expect(assignedRunnerPanel).toContainText("agentbay-runner/1.2.3");
+      await expect(assignedRunnerPanel).toContainText("2026-07-05T01:30:30.000Z");
       await expect(assignedRunnerPanel).toContainText(
         "Assigned manual runner is inactive or unreachable.",
       );
       await expect(assignedRunnerPanel).not.toContainText("password");
       await expect(assignedRunnerPanel).not.toContainText("token=hidden");
       await expect(assignedRunnerPanel).not.toContainText(runner.id);
+      await expect(assignedRunnerPanel).not.toContainText("credentialHash");
+      await expect(assignedRunnerPanel).not.toContainText("cpuPercent");
 
       const alertPanel = page.locator(".operational-alert-panel");
       await expect(alertPanel).toContainText("Runner is offline");
@@ -276,6 +313,25 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
       await expect(runtimeLogs).not.toContainText(runner.id);
       await expect(runtimeLogs).not.toContainText("runnerId");
       await expect(runtimeLogs).not.toContainText("runner_id");
+
+      await page.goto("/settings");
+
+      const settingsRunnerPanel = page.locator(".manual-runner-panel", {
+        hasText: "Registered runners",
+      });
+      await expect(settingsRunnerPanel).toContainText("Registered runners");
+      await expect(settingsRunnerPanel).toContainText(`Manual Runner ${testInfo.project.name}`);
+      await expect(settingsRunnerPanel).toContainText(`Online Runner ${testInfo.project.name}`);
+      await expect(settingsRunnerPanel).toContainText("offline");
+      await expect(settingsRunnerPanel).toContainText("online");
+      await expect(settingsRunnerPanel).toContainText("agentbay-runner/1.2.3");
+      await expect(settingsRunnerPanel).toContainText("agentbay-runner/2.0.0");
+      await expect(settingsRunnerPanel).not.toContainText(runner.id);
+      await expect(settingsRunnerPanel).not.toContainText(onlineRunner.id);
+      await expect(settingsRunnerPanel).not.toContainText("credentialHash");
+      await expect(settingsRunnerPanel).not.toContainText("tokenHash");
+      await expect(settingsRunnerPanel).not.toContainText("cpuPercent");
+      await expect(settingsRunnerPanel).not.toContainText("apiToken");
       await expectPageNotHorizontallyOverflowing(page);
     });
   } finally {
@@ -2362,11 +2418,13 @@ async function insertManualRunnerForAgent(
   runner: {
     name: string;
     endpointUrl: string;
-    status: "active" | "inactive";
+    status: "active" | "inactive" | "online" | "offline" | "degraded";
     updatedAt: string;
   },
+  options: { assign?: boolean } = {},
 ): Promise<{ id: string; endpointUrl: string }> {
   let runnerId = "";
+  const shouldAssign = options.assign ?? true;
 
   await withDatabase(async (sql) => {
     const [inserted] = await sql<{ id: string }[]>`
@@ -2394,18 +2452,54 @@ async function insertManualRunnerForAgent(
     runnerId = inserted?.id ?? "";
     expect(runnerId).toMatch(/^[0-9a-f-]+$/);
 
-    await sql`
-      update agents
-      set runner_id = ${runnerId},
-          updated_at = ${runner.updatedAt}
-      where id = ${agentId}
-    `;
+    if (shouldAssign) {
+      await sql`
+        update agents
+        set runner_id = ${runnerId},
+            updated_at = ${runner.updatedAt}
+        where id = ${agentId}
+      `;
+    }
   });
 
   return {
     id: runnerId,
     endpointUrl: runner.endpointUrl,
   };
+}
+
+async function insertRunnerHeartbeat(
+  runnerId: string,
+  heartbeat: {
+    status: "online" | "offline" | "degraded";
+    version: string;
+    observedAt: string;
+  },
+): Promise<void> {
+  await withDatabase(async (sql) => {
+    await sql`
+      insert into runner_heartbeats (
+        runner_id,
+        status,
+        metadata,
+        observed_at,
+        created_at
+      )
+      values (
+        ${runnerId},
+        ${heartbeat.status},
+        ${sql.json({
+          version: heartbeat.version,
+          metrics: {
+            cpuPercent: 37,
+            apiToken: "must-not-render",
+          },
+        })},
+        ${heartbeat.observedAt},
+        ${heartbeat.observedAt}
+      )
+    `;
+  });
 }
 
 async function insertManualRunnerLog(
@@ -2595,6 +2689,8 @@ async function deleteRunnerRows(runnerIds: string[]): Promise<void> {
   }
 
   await withDatabase(async (sql) => {
+    await sql`delete from runner_heartbeats where runner_id in ${sql(runnerIds)}`;
+    await sql`delete from runner_credentials where runner_id in ${sql(runnerIds)}`;
     await sql`delete from runners where id in ${sql(runnerIds)}`;
   });
 }

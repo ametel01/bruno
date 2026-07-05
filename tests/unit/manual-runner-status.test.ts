@@ -18,9 +18,10 @@ describe("manual runner status summaries", () => {
       name: "Manual Runner",
       kind: "manual_vps",
       endpointHost: "runner.example.com:8443",
-      status: "online",
+      status: "unknown",
+      version: null,
+      lastSeenAt: null,
       updatedAt: "2026-07-05T01:00:00.000Z",
-      checkedAt: null,
     });
     expect(JSON.stringify(summary)).not.toContain("password");
     expect(JSON.stringify(summary)).not.toContain("token");
@@ -47,5 +48,61 @@ describe("manual runner status summaries", () => {
     expect(JSON.stringify(assigned)).not.toContain("stored-for-downstream");
     expect(JSON.stringify(assigned)).not.toContain("runnerId");
     expect(JSON.stringify(assigned)).not.toContain("runner_id");
+  });
+
+  it("uses latest heartbeat status, version, and last-seen fields without metrics", () => {
+    const summary = toManualRunnerStatusSummary({
+      name: "Online Runner",
+      kind: "manual_vps",
+      endpointUrl: "https://runner.example.com",
+      status: "active",
+      updatedAt: "2026-07-05T02:00:00.000Z",
+      latestHeartbeat: {
+        status: "online",
+        metadata: {
+          version: "agentbay-runner/1.2.3",
+          metrics: {
+            cpuPercent: 37,
+            memoryUsedMb: 512,
+            apiToken: "must-not-render",
+          },
+        },
+        observedAt: "2026-07-05T02:01:00.000Z",
+      },
+    });
+
+    expect(summary).toEqual({
+      name: "Online Runner",
+      kind: "manual_vps",
+      endpointHost: "runner.example.com",
+      status: "online",
+      version: "agentbay-runner/1.2.3",
+      lastSeenAt: "2026-07-05T02:01:00.000Z",
+      updatedAt: "2026-07-05T02:00:00.000Z",
+    });
+    expect(JSON.stringify(summary)).not.toContain("metrics");
+    expect(JSON.stringify(summary)).not.toContain("cpuPercent");
+    expect(JSON.stringify(summary)).not.toContain("memoryUsedMb");
+    expect(JSON.stringify(summary)).not.toContain("must-not-render");
+  });
+
+  it("redacts secret-looking heartbeat versions", () => {
+    const summary = toManualRunnerStatusSummary({
+      name: "Degraded Runner",
+      kind: "manual_vps",
+      endpointUrl: "https://runner.example.com",
+      status: "degraded",
+      updatedAt: "2026-07-05T02:00:00.000Z",
+      latestHeartbeat: {
+        status: "degraded",
+        metadata: {
+          version: "token=stored-for-downstream",
+        },
+        observedAt: "2026-07-05T02:01:00.000Z",
+      },
+    });
+
+    expect(summary.version).toBe("Sensitive details omitted.");
+    expect(JSON.stringify(summary)).not.toContain("stored-for-downstream");
   });
 });

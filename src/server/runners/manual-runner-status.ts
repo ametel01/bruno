@@ -1,11 +1,8 @@
 import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agents, runners } from "@/src/server/db/schema";
-import {
-  ACTIVE_RUNNER_STATUS,
-  MANUAL_RUNNER_KIND,
-} from "@/src/server/runners/manual-runner-persistence";
+import { agents, runnerHeartbeats, runners } from "@/src/server/db/schema";
+import { MANUAL_RUNNER_KIND } from "@/src/server/runners/manual-runner-persistence";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
 export type ManualRunnerDisplayStatus = "online" | "offline" | "degraded" | "unknown";
@@ -15,8 +12,9 @@ export type ManualRunnerStatusSummary = {
   kind: typeof MANUAL_RUNNER_KIND;
   endpointHost: string;
   status: ManualRunnerDisplayStatus;
+  version: string | null;
+  lastSeenAt: string | null;
   updatedAt: string;
-  checkedAt: string | null;
 };
 
 export type AssignedManualRunnerStatusSummary = ManualRunnerStatusSummary & {
@@ -26,11 +24,17 @@ export type AssignedManualRunnerStatusSummary = ManualRunnerStatusSummary & {
 };
 
 type ManualRunnerStatusRow = {
+  id?: string;
   name: string;
   kind: string;
   endpointUrl: string;
   status: string;
   updatedAt: Date | string;
+  latestHeartbeat?: {
+    status: string;
+    metadata: Record<string, unknown>;
+    observedAt: Date | string;
+  } | null;
 };
 
 export class ManualRunnerStatusPersistenceError extends Error {
@@ -56,6 +60,7 @@ export async function listManualRunnerStatusSummariesForDevelopmentUser(
 
       const rows = await tx
         .select({
+          id: runners.id,
           name: runners.name,
           kind: runners.kind,
           endpointUrl: runners.endpointUrl,
@@ -71,9 +76,31 @@ export async function listManualRunnerStatusSummariesForDevelopmentUser(
           ),
         )
         .orderBy(desc(runners.updatedAt), desc(runners.createdAt))
-        .limit(3);
+        .limit(10);
 
-      return rows.map(toManualRunnerStatusSummary);
+      const summaries: ManualRunnerStatusSummary[] = [];
+
+      for (const row of rows) {
+        const [latestHeartbeat] = await tx
+          .select({
+            status: runnerHeartbeats.status,
+            metadata: runnerHeartbeats.metadata,
+            observedAt: runnerHeartbeats.observedAt,
+          })
+          .from(runnerHeartbeats)
+          .where(eq(runnerHeartbeats.runnerId, row.id))
+          .orderBy(desc(runnerHeartbeats.observedAt))
+          .limit(1);
+
+        summaries.push(
+          toManualRunnerStatusSummary({
+            ...row,
+            latestHeartbeat: latestHeartbeat ?? null,
+          }),
+        );
+      }
+
+      return summaries;
     });
   } catch {
     throw new ManualRunnerStatusPersistenceError();
@@ -103,6 +130,7 @@ export async function getAssignedManualRunnerStatusForDevelopmentUserAgent(
 
       const [row] = await tx
         .select({
+          id: runners.id,
           name: runners.name,
           kind: runners.kind,
           endpointUrl: runners.endpointUrl,
@@ -124,7 +152,25 @@ export async function getAssignedManualRunnerStatusForDevelopmentUserAgent(
         )
         .limit(1);
 
-      return row ? toAssignedManualRunnerStatusSummary(row) : null;
+      if (!row) {
+        return null;
+      }
+
+      const [latestHeartbeat] = await tx
+        .select({
+          status: runnerHeartbeats.status,
+          metadata: runnerHeartbeats.metadata,
+          observedAt: runnerHeartbeats.observedAt,
+        })
+        .from(runnerHeartbeats)
+        .where(eq(runnerHeartbeats.runnerId, row.id))
+        .orderBy(desc(runnerHeartbeats.observedAt))
+        .limit(1);
+
+      return toAssignedManualRunnerStatusSummary({
+        ...row,
+        latestHeartbeat: latestHeartbeat ?? null,
+      });
     });
   } catch {
     throw new ManualRunnerStatusPersistenceError();
@@ -137,15 +183,20 @@ export async function getAssignedManualRunnerStatusForDevelopmentUserAgent(
 
 export function toManualRunnerStatusSummary(row: ManualRunnerStatusRow): ManualRunnerStatusSummary {
   const endpointHost = extractEndpointHost(row.endpointUrl);
-  const status = toDisplayStatus(row.status, endpointHost);
+  const status = toDisplayStatus({
+    endpointHost,
+    heartbeatStatus: row.latestHeartbeat?.status ?? null,
+    runnerStatus: row.status,
+  });
 
   return {
     name: summarizeOperationalText(row.name, "Manual runner"),
     kind: MANUAL_RUNNER_KIND,
     endpointHost,
     status,
+    version: toSafeVersion(row.latestHeartbeat?.metadata),
+    lastSeenAt: row.latestHeartbeat ? toIsoTimestamp(row.latestHeartbeat.observedAt) : null,
     updatedAt: toIsoTimestamp(row.updatedAt),
-    checkedAt: null,
   };
 }
 
@@ -169,20 +220,46 @@ export function toAssignedManualRunnerStatusSummary(
   };
 }
 
-function toDisplayStatus(rawStatus: string, endpointHost: string): ManualRunnerDisplayStatus {
-  if (endpointHost === "Endpoint unavailable") {
+function toDisplayStatus(input: {
+  endpointHost: string;
+  heartbeatStatus: string | null;
+  runnerStatus: string;
+}): ManualRunnerDisplayStatus {
+  if (
+    input.heartbeatStatus === "online" ||
+    input.heartbeatStatus === "offline" ||
+    input.heartbeatStatus === "degraded"
+  ) {
+    return input.heartbeatStatus;
+  }
+
+  if (
+    input.runnerStatus === "online" ||
+    input.runnerStatus === "offline" ||
+    input.runnerStatus === "degraded"
+  ) {
+    return input.runnerStatus;
+  }
+
+  if (input.endpointHost === "Endpoint unavailable") {
     return "degraded";
   }
 
-  if (rawStatus === ACTIVE_RUNNER_STATUS) {
-    return "online";
-  }
-
-  if (rawStatus === "inactive") {
+  if (input.runnerStatus === "inactive") {
     return "offline";
   }
 
   return "unknown";
+}
+
+function toSafeVersion(metadata: Record<string, unknown> | null | undefined): string | null {
+  if (!metadata || typeof metadata.version !== "string") {
+    return null;
+  }
+
+  const version = summarizeOperationalText(metadata.version, "");
+
+  return version.length > 0 ? version : null;
 }
 
 function extractEndpointHost(endpointUrl: string): string {

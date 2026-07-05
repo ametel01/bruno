@@ -184,12 +184,12 @@ function DashboardManualRunnerPanel({ result }: { result: DashboardManualRunners
   return (
     <section className="manual-runner-panel" aria-labelledby="dashboard-manual-runner-title">
       <div className="section-heading">
-        <h2 id="dashboard-manual-runner-title">Manual runner status</h2>
+        <h2 id="dashboard-manual-runner-title">Runner health</h2>
         {result.ok ? <span>{result.runners.length > 0 ? "known" : "not configured"}</span> : null}
       </div>
       {result.ok ? (
         result.runners.length > 0 ? (
-          <ol className="manual-runner-list" aria-label="Known manual runners">
+          <ol className="manual-runner-list" aria-label="Known runner health">
             {result.runners.map((runner) => (
               <ManualRunnerStatusItem
                 key={`${runner.name}:${runner.endpointHost}`}
@@ -199,13 +199,13 @@ function DashboardManualRunnerPanel({ result }: { result: DashboardManualRunners
           </ol>
         ) : (
           <div className="activity-empty-state">
-            <h3>No manual runner known</h3>
-            <p>Configure the manual VPS runner endpoint to show runner status here.</p>
+            <h3>No runner known</h3>
+            <p>Register or seed a manual VPS runner to show runner health here.</p>
           </div>
         )
       ) : (
         <div className="safe-error" role="alert">
-          Manual runner status could not be loaded.
+          Runner health could not be loaded.
         </div>
       )}
     </section>
@@ -229,19 +229,23 @@ function ManualRunnerStatusItem({ runner }: { runner: ManualRunnerStatusSummary 
           <dd>{runner.endpointHost}</dd>
         </div>
         <div>
-          <dt>Updated</dt>
+          <dt>Version</dt>
+          <dd>{runner.version ?? "Not reported"}</dd>
+        </div>
+        <div>
+          <dt>Last seen</dt>
           <dd>
-            <time dateTime={runner.updatedAt}>{runner.updatedAt}</time>
+            {runner.lastSeenAt ? (
+              <time dateTime={runner.lastSeenAt}>{runner.lastSeenAt}</time>
+            ) : (
+              "No heartbeat yet"
+            )}
           </dd>
         </div>
         <div>
-          <dt>Checked</dt>
+          <dt>Updated</dt>
           <dd>
-            {runner.checkedAt ? (
-              <time dateTime={runner.checkedAt}>{runner.checkedAt}</time>
-            ) : (
-              "Not available"
-            )}
+            <time dateTime={runner.updatedAt}>{runner.updatedAt}</time>
           </dd>
         </div>
       </dl>
