@@ -444,7 +444,7 @@ Goal: Agents can request approval for actions, and users can approve or deny the
 - Extend the fake running-agent simulator to occasionally create approval requests for actions such as sending a Telegram message, running a research task, or accessing Gmail.
 - Ensure resolved approvals cannot be approved or denied again.
 
-### Acceptance criteria
+### Acceptance criteria *done*
 
 - Pending approvals appear on dashboard and agent detail.
 - Approve changes status to `approved`.
@@ -479,7 +479,7 @@ Goal: The core operations surface is usable from a phone.
 - Ensure dangerous actions require confirmation on mobile.
 - Keep full agent creation and complex config editing available but not optimized as the primary mobile workflow.
 
-### Acceptance criteria
+### Acceptance criteria *done*
 
 - On a phone viewport, agent list is readable and actionable.
 - User can stop or resume an agent without layout issues.
@@ -552,7 +552,7 @@ Goal: Each agent runs in its own container.
 - Avoid mixing logs by always filtering by container label or exact container ID.
 - Add a cleanup path for stopped and deleted agents.
 
-### Acceptance criteria
+### Acceptance criteria *done*
 
 - Start creates one container for the selected agent.
 - Stop stops only that agent's container.
@@ -631,7 +631,7 @@ Status: local automated acceptance is complete. The final #134 evidence map cove
 - Rotate or revoke runner credentials from settings.
 - Reject unauthenticated and wrong-runner requests.
 
-### Acceptance criteria
+### Acceptance criteria **done**
 
 - Unauthorized runner API requests fail.
 - Registered runner heartbeat changes status to `online`.

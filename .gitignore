@@ -18,3 +18,5 @@ tsconfig.tsbuildinfo
 # Logs
 *.log
 .vercel/
+.vercel
+.env*
