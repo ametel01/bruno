@@ -307,6 +307,8 @@ async function seedRunner(
       kind: "manual_vps",
       endpointUrl: input.endpointUrl,
       status: input.status,
+      createdAt: new Date("2026-07-05T07:00:00.000Z"),
+      updatedAt: new Date("2026-07-05T07:00:00.000Z"),
     })
     .returning({ id: runners.id });
 

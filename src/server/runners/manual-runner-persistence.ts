@@ -305,7 +305,24 @@ async function upsertManualRunnerInTransaction(
   return toManualRunnerRecord(createdRunner);
 }
 
-function toManualRunnerRecord(row: typeof runners.$inferSelect): ManualRunnerRecord {
+function toManualRunnerRecord(
+  row: Pick<
+    typeof runners.$inferSelect,
+    | "id"
+    | "userId"
+    | "name"
+    | "kind"
+    | "endpointUrl"
+    | "status"
+    | "createdAt"
+    | "updatedAt"
+    | "deletedAt"
+  >,
+): ManualRunnerRecord {
+  if (!row.endpointUrl) {
+    throw new Error("Manual runner row is missing an endpoint URL.");
+  }
+
   return {
     id: row.id,
     userId: row.userId,

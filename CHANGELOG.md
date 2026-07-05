@@ -61,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Operator runner credential lifecycle APIs: `POST /api/runners/:runnerId/credentials/rotate` returns a visible-once replacement `agb_run_*` credential while revoking existing active credentials, and `POST /api/runners/:runnerId/credentials/revoke` revokes active credentials so heartbeat authentication rejects old or revoked credentials without exposing stored hashes or previous raw credentials.
 - Runner health visibility on dashboard, assigned-agent detail, and settings read surfaces, showing safe runner name, kind, endpoint host, heartbeat-derived status, version, last-seen time, and updated time without exposing runner IDs, credential material, hashes, or heartbeat metrics.
 - Settings runner management controls for creating visible-once `agb_reg_*` registration tokens, rotating registered runner credentials with visible-once `agb_run_*` replacement display, and revoking active runner credentials with safe success, loading, validation, and error states.
+- Cloud runner provisioning persistence and a server-only DigitalOcean provider contract with fake create, tag, firewall, cleanup, and failure paths for follow-on provisioning workflow tests.
 
 ### Fixed
 

@@ -31,7 +31,7 @@ type ManualRunnerStatusRow = {
   id?: string;
   name: string;
   kind: string;
-  endpointUrl: string;
+  endpointUrl: string | null;
   status: string;
   updatedAt: Date | string;
   latestHeartbeat?: {
@@ -342,7 +342,11 @@ function toSafeVersion(metadata: Record<string, unknown> | null | undefined): st
   return version.length > 0 ? version : null;
 }
 
-function extractEndpointHost(endpointUrl: string): string {
+function extractEndpointHost(endpointUrl: string | null): string {
+  if (!endpointUrl) {
+    return "Endpoint unavailable";
+  }
+
   try {
     const parsedUrl = new URL(endpointUrl);
     return parsedUrl.host || "Endpoint unavailable";

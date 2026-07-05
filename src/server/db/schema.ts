@@ -62,24 +62,73 @@ export const runners = pgTable(
       .references(() => users.id),
     name: text("name").notNull(),
     kind: text("kind").notNull().default("manual_vps"),
-    endpointUrl: text("endpoint_url").notNull(),
+    endpointUrl: text("endpoint_url"),
     status: text("status").notNull().default("active"),
+    provider: text("provider"),
+    providerResourceId: text("provider_resource_id"),
+    region: text("region"),
+    sizeSlug: text("size_slug"),
+    image: text("image"),
+    provisioningStatus: text("provisioning_status"),
+    provisioningError: text("provisioning_error"),
+    provisioningStartedAt: timestamp("provisioning_started_at", { withTimezone: true }),
+    provisioningCompletedAt: timestamp("provisioning_completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (table) => [
     check("runners_name_not_empty_check", sql`length(trim(${table.name})) > 0`),
-    check("runners_kind_manual_vps_check", sql`${table.kind} = 'manual_vps'`),
-    check("runners_endpoint_url_not_empty_check", sql`length(trim(${table.endpointUrl})) > 0`),
+    check("runners_kind_check", sql`${table.kind} IN ('manual_vps', 'digitalocean')`),
+    check(
+      "runners_manual_endpoint_required_check",
+      sql`${table.kind} <> 'manual_vps' OR ${table.endpointUrl} IS NOT NULL`,
+    ),
+    check(
+      "runners_endpoint_url_not_empty_check",
+      sql`${table.endpointUrl} IS NULL OR length(trim(${table.endpointUrl})) > 0`,
+    ),
     check(
       "runners_status_check",
       sql`${table.status} IN ('active', 'inactive', 'registering', 'online', 'offline', 'degraded', 'provisioning', 'provision_failed', 'deleting', 'deleted')`,
     ),
+    check(
+      "runners_provider_check",
+      sql`${table.provider} IS NULL OR ${table.provider} = 'digitalocean'`,
+    ),
+    check(
+      "runners_provider_resource_id_not_empty_check",
+      sql`${table.providerResourceId} IS NULL OR length(trim(${table.providerResourceId})) > 0`,
+    ),
+    check(
+      "runners_region_not_empty_check",
+      sql`${table.region} IS NULL OR length(trim(${table.region})) > 0`,
+    ),
+    check(
+      "runners_size_slug_not_empty_check",
+      sql`${table.sizeSlug} IS NULL OR length(trim(${table.sizeSlug})) > 0`,
+    ),
+    check(
+      "runners_image_not_empty_check",
+      sql`${table.image} IS NULL OR length(trim(${table.image})) > 0`,
+    ),
+    check(
+      "runners_provisioning_status_check",
+      sql`${table.provisioningStatus} IS NULL OR ${table.provisioningStatus} IN ('pending', 'creating', 'tagging', 'firewall_configuring', 'bootstrapping', 'waiting_for_runner', 'ready', 'failed', 'cleaning_up', 'deleted')`,
+    ),
+    check(
+      "runners_digitalocean_provider_fields_check",
+      sql`(${table.kind} = 'manual_vps' AND ${table.provider} IS NULL AND ${table.providerResourceId} IS NULL AND ${table.region} IS NULL AND ${table.sizeSlug} IS NULL AND ${table.image} IS NULL AND ${table.provisioningStatus} IS NULL AND ${table.provisioningError} IS NULL AND ${table.provisioningStartedAt} IS NULL AND ${table.provisioningCompletedAt} IS NULL) OR (${table.kind} = 'digitalocean' AND ${table.provider} = 'digitalocean' AND ${table.region} IS NOT NULL AND ${table.sizeSlug} IS NOT NULL AND ${table.image} IS NOT NULL AND ${table.provisioningStatus} IS NOT NULL)`,
+    ),
+    check(
+      "runners_provisioning_completed_after_started_check",
+      sql`${table.provisioningCompletedAt} IS NULL OR ${table.provisioningStartedAt} IS NULL OR ${table.provisioningCompletedAt} >= ${table.provisioningStartedAt}`,
+    ),
     index("runners_user_status_idx").on(table.userId, table.status),
+    index("runners_provider_resource_idx").on(table.provider, table.providerResourceId),
     uniqueIndex("runners_active_user_endpoint_idx")
       .on(table.userId, table.endpointUrl)
-      .where(sql`${table.deletedAt} IS NULL`),
+      .where(sql`${table.deletedAt} IS NULL AND ${table.endpointUrl} IS NOT NULL`),
   ],
 );
 

@@ -105,6 +105,15 @@ describe("Milestone 1 agent persistence schema", () => {
       "kind",
       "endpointUrl",
       "status",
+      "provider",
+      "providerResourceId",
+      "region",
+      "sizeSlug",
+      "image",
+      "provisioningStatus",
+      "provisioningError",
+      "provisioningStartedAt",
+      "provisioningCompletedAt",
       "createdAt",
       "updatedAt",
       "deletedAt",
@@ -114,9 +123,18 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.name.notNull).toBe(true);
     expect(columns.kind.notNull).toBe(true);
     expect(columns.kind.default).toBe("manual_vps");
-    expect(columns.endpointUrl.notNull).toBe(true);
+    expect(columns.endpointUrl.notNull).toBe(false);
     expect(columns.status.notNull).toBe(true);
     expect(columns.status.default).toBe("active");
+    expect(columns.provider.notNull).toBe(false);
+    expect(columns.providerResourceId.notNull).toBe(false);
+    expect(columns.region.notNull).toBe(false);
+    expect(columns.sizeSlug.notNull).toBe(false);
+    expect(columns.image.notNull).toBe(false);
+    expect(columns.provisioningStatus.notNull).toBe(false);
+    expect(columns.provisioningError.notNull).toBe(false);
+    expect(columns.provisioningStartedAt.notNull).toBe(false);
+    expect(columns.provisioningCompletedAt.notNull).toBe(false);
     expect(columns.createdAt.notNull).toBe(true);
     expect(columns.updatedAt.notNull).toBe(true);
     expect(columns.deletedAt.notNull).toBe(false);
@@ -586,5 +604,38 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(migration).not.toContain('"credential" text');
     expect(migration).not.toContain("raw_token");
     expect(migration).not.toContain("raw_credential");
+  });
+
+  it("generates a durable cloud runner provisioning migration without secret columns", async () => {
+    const migration = await readFile("drizzle/0010_quick_warbird.sql", "utf8");
+
+    expect(migration).toContain('ALTER TABLE "runners" ADD COLUMN "provider" text');
+    expect(migration).toContain('ALTER TABLE "runners" ADD COLUMN "provider_resource_id" text');
+    expect(migration).toContain('ALTER TABLE "runners" ADD COLUMN "region" text');
+    expect(migration).toContain('ALTER TABLE "runners" ADD COLUMN "size_slug" text');
+    expect(migration).toContain('ALTER TABLE "runners" ADD COLUMN "image" text');
+    expect(migration).toContain('ALTER TABLE "runners" ADD COLUMN "provisioning_status" text');
+    expect(migration).toContain('ALTER TABLE "runners" ADD COLUMN "provisioning_error" text');
+    expect(migration).toContain(
+      'ALTER TABLE "runners" ADD COLUMN "provisioning_started_at" timestamp with time zone',
+    );
+    expect(migration).toContain(
+      'ALTER TABLE "runners" ADD COLUMN "provisioning_completed_at" timestamp with time zone',
+    );
+    expect(migration).toContain('DROP CONSTRAINT "runners_kind_manual_vps_check"');
+    expect(migration).toContain('CONSTRAINT "runners_kind_check"');
+    expect(migration).toContain("'manual_vps'");
+    expect(migration).toContain("'digitalocean'");
+    expect(migration).toContain('CONSTRAINT "runners_digitalocean_provider_fields_check"');
+    expect(migration).toContain("'firewall_configuring'");
+    expect(migration).toContain("'waiting_for_runner'");
+    expect(migration).toContain('CREATE INDEX "runners_provider_resource_idx"');
+    expect(migration).toContain(
+      'CREATE UNIQUE INDEX "runners_active_user_endpoint_idx" ON "runners"',
+    );
+    expect(migration).toContain('WHERE "runners"."deleted_at" IS NULL');
+    expect(migration).toContain('"runners"."endpoint_url" IS NOT NULL');
+    expect(migration).not.toContain("DROP TABLE");
+    expect(migration).not.toMatch(/api[_ ]?key|token|password|secret|credential/i);
   });
 });

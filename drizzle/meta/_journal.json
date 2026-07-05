@@ -71,6 +71,13 @@
       "when": 1783202928149,
       "tag": "0009_worried_switch",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783288013888,
+      "tag": "0010_quick_warbird",
+      "breakpoints": true
     }
   ]
 }

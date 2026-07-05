@@ -69,18 +69,18 @@
 
 ## Milestone 13 Cloud Provisioning V1
 
-- Status: initialized for execution on `codex/issue-150-m13-tracking`; cloud provisioning implementation has not started.
+- Status: #151 cloud provisioning model and provider contract are implemented locally on `codex/issue-151-cloud-runner-model`; checker handoff pending.
 - Source plan:
   - `docs/MILESTONES.md` Milestone 13: Cloud Provisioning V1.
   - GitHub issue #150: Prepare Milestone 13 tracking and baseline gates.
   - `PLAN.md` is absent in this worktree; the published #150 issue body and `docs/MILESTONES.md` are the active Step 0 contract.
-- Current branch: `codex/issue-150-m13-tracking`.
+- Current branch: `codex/issue-151-cloud-runner-model`.
 
 ### Issue Checklist
 
-- [x] #150 Prepare Milestone 13 tracking and baseline gates. Status: tracking initialized locally; checker handoff pending.
-- [ ] #151 Add cloud runner provisioning model and provider contract. Status: blocked until #150 is accepted.
-- [ ] #152 Implement Create runner provisioning workflow. Status: blocked until #151 is complete.
+- [x] #150 Prepare Milestone 13 tracking and baseline gates. Status: merged in PR #169.
+- [x] #151 Add cloud runner provisioning model and provider contract. Status: implemented locally; checker handoff pending.
+- [ ] #152 Implement Create runner provisioning workflow. Status: blocked until #151 is merged.
 - [ ] #153 Add cloud runner bootstrap registration and readiness. Status: blocked until #151 and #152 are complete.
 - [ ] #154 Show cloud provisioning progress and failures in the UI. Status: blocked until provisioning state and workflow slices are complete.
 - [ ] #155 Complete assignment, cleanup, and Milestone 13 evidence. Status: blocked until #151-#154 are complete.
@@ -92,6 +92,8 @@
 - Milestone 13 acceptance criteria: user can click Create runner and see provisioning progress; a Droplet is created; the runner installs itself and registers; the dashboard shows the runner `online`; a user can create or assign an agent to the new runner; provisioning failure is visible and actionable.
 - Milestone 13 test expectations from `docs/MILESTONES.md`: provider unit tests with a fake DigitalOcean client, provisioning job success/failure tests, one real small-Droplet smoke before beta, and a security test that provider credentials are never exposed to the browser.
 - #150 is tracking-only. It initializes the Milestone 13 progress record, records baseline gate expectations, verifies changelog structure, and intentionally leaves `CHANGELOG.md` unchanged because no functional user/operator-visible behavior ships in this issue.
+- #151 adds the durable cloud runner provisioning foundation: `runners.kind` can now represent `digitalocean`, DigitalOcean runner rows store provider, provider resource id, region, size slug, image, provisioning status, provisioning error, and provisioning timing fields, and manual VPS rows continue to require a non-empty endpoint.
+- #151 adds a server-only DigitalOcean provider configuration reader and fake provider abstraction for create, tag, firewall, cleanup, and failure-path tests without network calls. Provider tokens remain out of client env validation and client component import paths.
 - `CHANGELOG.md` has the Keep a Changelog 1.0.0 framing and an `## [Unreleased]` section. Agents should keep that structure and add changelog bullets only for shipped functional user/operator-visible changes.
 
 ### Baseline Gate Expectations
@@ -115,8 +117,21 @@
 - 2026-07-06: #150 initialized Milestone 13 tracking from `docs/MILESTONES.md` and the published #150 issue body; noted that `PLAN.md` is absent in this worktree and the published issue body plus milestone document are the active Step 0 contract.
 - 2026-07-06: #150 confirmed `CHANGELOG.md` has Keep a Changelog 1.0.0 framing and `## [Unreleased]`; `CHANGELOG.md` is intentionally unchanged for #150 because this issue creates tracking only and ships no functional product behavior.
 - 2026-07-06: #150 recorded baseline gate expectations for `bun run verify`, `bun run test:e2e`, the local Postgres `DATABASE_URL`, and `NEXT_PUBLIC_APP_URL` before cloud provisioning work starts.
+- 2026-07-06: #151 added additive runner provisioning columns and constraints, expanded runner kind support to `digitalocean`, kept manual VPS endpoint compatibility constraints, added server-only DigitalOcean env/config validation, added a fake DigitalOcean provider, and added schema/provider/server-only tests.
 
 ### Validation Evidence
+
+- 2026-07-06 #151:
+  - `bun run format:check`: pass; Biome checked 121 files with no fixes applied.
+  - `bun run lint`: pass; Biome lint checked 121 files with no fixes applied.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:migrate`: pass; migration `0010_quick_warbird.sql` applied successfully to the shared local database with existing `drizzle` schema/relation notices only.
+  - Initial existing-runner compatibility test before migration: failed with missing `runners.provider` column, confirming the local database needed the new migration before exercising the branch.
+  - Initial post-migration compatibility rerun exposed a brittle heartbeat test fixture: seeded runner `updated_at` used database real time while the test simulated `2026-07-05T08:02:00.000Z`, so the production `updated_at < now` safeguard correctly blocked moving rows backward in time. The test helper now seeds deterministic pre-cutoff timestamps.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism tests/unit/runner-registration.test.ts tests/unit/runner-heartbeat.test.ts tests/unit/manual-runner-status.test.ts tests/unit/runner-registration-routes.test.ts tests/unit/runner-heartbeat-route.test.ts`: pass; 5 files and 34 tests passed for existing manual registration, heartbeat, status, and route compatibility.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/agent-schema.test.ts tests/unit/digitalocean-provider.test.ts tests/unit/server-env.test.ts`: pass; 3 files and 26 tests passed for schema/migration coverage, fake DigitalOcean provider behavior, and server-only provider config/client import guards.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism`: pass; 37 files and 310 tests passed against the migrated local database.
+  - Full `bun run verify` was not run before checker handoff because #151 currently has focused schema/provider/config/compatibility coverage plus package gates, and this repo has known default-parallel shared-DB Vitest isolation risk recorded above.
 
 - 2026-07-06 #150:
   - `gh issue view 150 --repo ametel01/agentbay --json number,title,body,state,url`: pass; issue is open and maps Milestone 13 tracking to `docs/MILESTONES.md` plus PLAN Step 0.
