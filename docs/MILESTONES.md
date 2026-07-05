@@ -604,9 +604,11 @@ Status: local contract implementation and operator documentation are present, bu
 - Staging smoke test against the manual VPS.
 - UI test showing remote runner status and agent logs.
 
-## Milestone 12: Secure Runner Auth
+## Milestone 12: Secure Runner Auth [Completed]
 
 Goal: Dashboard and runner communicate safely with registration, identity, and heartbeat.
+
+Status: local automated acceptance is complete. The final #134 evidence map covers every acceptance criterion with passing focused tests, serialized aggregate unit coverage, production build, and Playwright smoke/full-suite evidence. The default-parallel `bun run verify` path still fails in the known shared local database isolation mode, so completion relies on the documented serialized/focused rerun evidence rather than claiming the default-parallel aggregate passed.
 
 ### Technical implementation
 

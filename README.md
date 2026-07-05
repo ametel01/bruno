@@ -1,6 +1,6 @@
 # AgentBay
 
-AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, the completed Milestone 7 pending-approval queue workflow, the completed Milestone 9 local runner workflow, and the Milestone 11 manual VPS runner control path. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, Start, Stop, Restart, and Delete controls wired through local, Docker, or assigned manual runner adapters, persisted activity feeds, scoped runtime logs, local and Docker runner state storage, manual runner identity and assignment storage, dashboard plus agent-detail pending approvals for local development agents, dashboard approval decision controls, and fake approval generation for running local-development agents.
+AgentBay is a Bun-managed Next.js App Router app for the completed Milestone 4 runtime monitoring slice, the completed Milestone 6 local-development config editor workflow, the completed Milestone 7 pending-approval queue workflow, the completed Milestone 9 local runner workflow, the Milestone 11 manual VPS runner control path, and the Milestone 12 secure runner registration and heartbeat path. It includes a dashboard-oriented shell, local Postgres migration tooling, runtime environment validation, a database-backed `/health` endpoint, persistent agent records, validated config defaults and updates, an agent detail config editor backed by the local PATCH API, Start, Stop, Restart, and Delete controls wired through local, Docker, or assigned manual runner adapters, persisted activity feeds, scoped runtime logs, local and Docker runner state storage, manual runner identity and assignment storage, secure runner registration tokens, scoped runner heartbeat credentials, heartbeat-derived runner health, dashboard plus agent-detail pending approvals for local development agents, dashboard approval decision controls, and fake approval generation for running local-development agents.
 
 ## Requirements
 
@@ -34,7 +34,7 @@ AGENTBAY_MANUAL_RUNNER_NAME=Manual VPS Runner
 AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL=https://runner.example.com
 ```
 
-`AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL` must use `https://` for remote hosts. Loopback `http://` endpoints such as `http://127.0.0.1:8787` are allowed for local tests. These values create or update durable runner identity for dashboard assignment; they do not provision a VPS, rotate credentials, expose token-management UI, or implement the Milestone 12 registration and heartbeat flows.
+`AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL` must use `https://` for remote hosts. Loopback `http://` endpoints such as `http://127.0.0.1:8787` are allowed for local tests. These values create or update durable runner identity for dashboard assignment. The settings registration flow can also create registered runner identity and scoped heartbeat credentials without storing raw secrets.
 
 The dashboard and manual runner service must also share a temporary Milestone 11 bearer token for dashboard-to-runner requests:
 
@@ -258,6 +258,115 @@ Run this smoke only when you have explicit authorization for a hosted dashboard 
 
 If hosted dashboard or manual VPS credentials are unavailable, record the exact blocker in `PROGRESS.md` and do not mark Milestone 11 complete.
 
+## Secure Runner Auth and Heartbeat
+
+Milestone 12 adds a secure registration and heartbeat path for manually hosted runners. It does not require committing runner secrets, and it does not replace the Milestone 11 selected-agent command token used by the standalone manual runner service for start, stop, restart, status, and log forwarding.
+
+### Registration Token Creation
+
+Operators create a registration token from `/settings` in the Registered runners panel by selecting Create Token. The dashboard calls:
+
+```http
+POST /api/runners/registration-tokens
+```
+
+Successful responses return one visible-once `agb_reg_*` token:
+
+```json
+{
+  "registrationToken": {
+    "id": "00000000-0000-4000-8000-000000000101",
+    "token": "agb_reg_replace-with-visible-once-token",
+    "prefix": "agb_reg_replace",
+    "expiresAt": "2026-07-05T08:15:00.000Z"
+  }
+}
+```
+
+The raw token is shown only in the current browser state. Copy it immediately. Dismissing the visible-once panel or refreshing the page removes the raw value from the UI. The database stores only the token hash, prefix, status, expiry, and related runner linkage after exchange.
+
+Registration tokens currently expire 15 minutes after creation. Create a new token if the previous token expires, is used, or is revoked.
+
+### Registration Exchange
+
+The runner host exchanges the visible-once registration token for durable runner identity plus a visible-once scoped runner credential:
+
+```http
+POST /runner/v1/register
+Content-Type: application/json
+```
+
+```json
+{
+  "registrationToken": "agb_reg_replace-with-visible-once-token",
+  "endpointUrl": "https://runner.example.com",
+  "name": "Manual VPS Runner"
+}
+```
+
+Successful responses return the registered runner ID and one visible-once `agb_run_*` credential:
+
+```json
+{
+  "ok": true,
+  "runner": {
+    "id": "00000000-0000-4000-8000-000000000201"
+  },
+  "credential": {
+    "token": "agb_run_replace-with-visible-once-credential",
+    "prefix": "agb_run_replace"
+  }
+}
+```
+
+Store the raw runner credential only on the runner host or in the host's secret manager. The dashboard persists only credential hash and prefix state. Registration rejects missing, malformed, wrong-prefix, unknown, expired, revoked, and already-used tokens with safe JSON responses that do not echo the submitted token.
+
+### Bearer Heartbeat
+
+Registered runners report health by posting to the heartbeat endpoint with their scoped `agb_run_*` credential:
+
+```http
+POST /runner/v1/heartbeat
+Authorization: Bearer <agb_run_credential>
+Content-Type: application/json
+```
+
+```json
+{
+  "runnerId": "00000000-0000-4000-8000-000000000201",
+  "status": "online",
+  "version": "agentbay-runner/1.0.0",
+  "metrics": {
+    "cpuPercent": 12.5,
+    "memoryUsedMb": 512,
+    "memoryTotalMb": 2048,
+    "diskUsedMb": 2048,
+    "diskTotalMb": 10240,
+    "runningAgents": 1,
+    "maxAgents": 4
+  }
+}
+```
+
+`status` may be `online` or `degraded`; omitting it defaults to `online`. The server validates that the bearer credential exists, is active, has not expired, and belongs to the submitted `runnerId`. Missing, malformed, unknown, expired, revoked, and wrong-runner credentials fail before heartbeat state is written. Safe failures do not echo bearer tokens, hashes, database URLs, SQL, or stack traces.
+
+Heartbeat metadata is bounded before persistence. `version` is trimmed, sanitized, and limited to 80 characters. Metrics accept only the known numeric keys shown above, clamp values to server limits, and ignore untrusted keys such as token, password, secret, credential, private key, bearer, or authorization data.
+
+### Offline Threshold
+
+The local offline reconciliation helper uses `RUNNER_HEARTBEAT_STALE_THRESHOLD_MS = 90000`. A runner that is currently `online` or `degraded` moves to `offline` when it has no heartbeat or its latest heartbeat is older than 90 seconds at reconciliation time. The dashboard, settings, and assigned-agent detail surfaces prefer reconciled offline or degraded runner state over a stale historical heartbeat row, so the UI does not overstate health.
+
+### Rotation And Revocation
+
+Settings lists registered runners with safe runner name, kind, endpoint host, status, version, last-seen time, and updated time. It does not show runner IDs on dashboard or agent pages, raw credentials, token hashes, credential hashes, heartbeat metrics, endpoint userinfo, endpoint query strings, or raw endpoint paths.
+
+For each registered runner, settings exposes:
+
+- Rotate Credential: calls `POST /api/runners/:runnerId/credentials/rotate`, revokes active credentials, and returns one visible-once replacement `agb_run_*` credential. Old credentials fail future heartbeat authentication.
+- Revoke Credential: calls `POST /api/runners/:runnerId/credentials/revoke`, revokes active credentials, and does not return a raw credential. Revoked credentials fail future heartbeat authentication.
+
+Copy rotated credentials immediately and store them on the runner host. Dismissing a rotated credential panel or refreshing the settings page removes the raw value from the browser UI. If a runner credential is revoked before a replacement is installed on the runner host, the runner cannot authenticate heartbeats until it receives a new rotated credential.
+
 ### Troubleshooting
 
 - `runner_token_not_configured`: set `AGENTBAY_RUNNER_BEARER_TOKEN` on the runner service and the dashboard.
@@ -266,6 +375,9 @@ If hosted dashboard or manual VPS credentials are unavailable, record the exact 
 - `runner_request_failed`: check firewall, reverse proxy, TLS certificate, runner service health, and supervisor logs.
 - `docker_command_failed`: verify Docker is installed, the service account can run Docker, the configured image exists or can be pulled, and no stale selected-agent container has an invalid label.
 - Runner appears after local startup but not after hosted redeploy: confirm the hosted deployment uses the same database and has `AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL` configured.
+- Runner heartbeat returns `runner_unauthorized`: confirm the runner is sending `Authorization: Bearer <agb_run_credential>`, the credential has not been rotated or revoked, and the runner is using the registered `runnerId`.
+- Runner heartbeat returns `runner_forbidden`: the bearer credential belongs to a different runner than the submitted `runnerId`.
+- Runner shows `offline`: confirm the runner is posting heartbeats more frequently than the 90-second stale threshold, then run the stale-heartbeat reconciliation path in the hosting environment that owns background work.
 
 ## Agent Detail Config Editor
 
