@@ -547,6 +547,24 @@ Run the aggregate gate before handoff or deployment:
 bun run verify
 ```
 
+### Fresh Worktree Dependency Recovery
+
+Fresh git worktrees may not have local dependencies installed yet. If a validation gate such as `bun run format:check`, `bun run lint`, or `bun run typecheck` fails because tool binaries such as `biome`, `vitest`, or `tsc` are unavailable, prefer installing the committed dependency set in that worktree:
+
+```bash
+bun install --frozen-lockfile
+```
+
+Use that recovery when dependency installation is permitted by the issue scope. Do not edit `package.json`, `bun.lock`, package scripts, dependencies, CI, app behavior, or test behavior just to make a local gate runnable.
+
+For a narrow checker fallback, if the issue forbids dependency edits or local dependency installation and the main worktree has matching dependencies for the same commit range, the checker may prepend the main worktree tool path for that command only:
+
+```bash
+PATH=/path/to/main/node_modules/.bin:$PATH bun run format:check
+```
+
+When using this fallback, record that the command borrowed tool binaries from the main worktree, that no repository files were modified by the fallback, and which main dependency path was used.
+
 The Playwright E2E suite starts the Next.js dev server and smoke-tests the browser create, local runner lifecycle, dashboard activity, detail activity, scoped detail runtime logs, dashboard process logs, soft-delete, active-view removal, and not-found flows on desktop and mobile Chromium profiles. It expects a reachable migrated database for `/health`, agent records, activity feeds, and runtime logs, so run:
 
 ```bash

@@ -1,5 +1,22 @@
 # Progress
 
+## Process Follow-ups
+
+### #136 Validation fallback for dependency-less worktrees
+
+- Status: documentation update complete locally on `codex/issue-136-validation-fallback-docs`; PR handoff pending.
+- Scope: document local validation recovery for fresh git worktrees that do not have `node_modules` yet.
+- Non-goals: no package scripts, dependencies, lockfiles, CI, app behavior, test behavior, or changelog entries.
+- Current docs change: `README.md` now records the preferred `bun install --frozen-lockfile` recovery and the narrow checker-only `PATH=/path/to/main/node_modules/.bin:$PATH bun run format:check` fallback, including the requirement to record that no files were modified.
+- Validation evidence:
+  - `bun install --frozen-lockfile`: pass; installed committed dependencies because this fresh worktree had no `node_modules`.
+  - `bun run format:check`: pass; Biome checked 117 files with no fixes applied.
+  - `bun run lint`: pass; Biome lint checked 117 files with no fixes applied.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed.
+  - `git diff --check`: pass; no whitespace errors.
+  - Targeted `rg` checks confirmed `README.md` contains the fresh-worktree recovery note, `bun install --frozen-lockfile`, the checker fallback example, and the no-files-modified recording requirement.
+  - Broader tests, build, and E2E were not run because #136 is documentation-only validation workflow guidance with no app or test behavior changes.
+
 ## Milestone 11 Manual VPS Deployment
 
 - Status: #126 local documentation and validation evidence complete; Milestone 11 is not complete because an authorized hosted dashboard plus manual VPS smoke target is not available in this worktree.
