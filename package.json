@@ -9,6 +9,8 @@
     "db:health": "DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} bun scripts/db-health.ts",
     "db:migrate": "DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} drizzle-kit migrate",
     "dev": "next dev",
+    "local:down": "docker compose down --remove-orphans",
+    "local:up": "docker compose up -d postgres && bun run db:migrate && bun run dev",
     "format": "biome format --write app src scripts tests app/globals.css *.ts *.json",
     "format:check": "biome ci --linter-enabled=false --assist-enabled=false app src scripts tests app/globals.css *.ts *.json",
     "lint": "biome lint app src scripts tests *.ts *.json",
