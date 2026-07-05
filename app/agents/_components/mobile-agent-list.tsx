@@ -34,6 +34,12 @@ export function MobileAgentList({ agents }: MobileAgentListProps) {
               </dd>
             </div>
           </dl>
+          <Link
+            className="secondary-button agent-config-link"
+            href={`${agent.href}#configuration-title`}
+          >
+            Configure
+          </Link>
           <MobileAgentActions agentId={agent.id} status={agent.status} />
         </li>
       ))}

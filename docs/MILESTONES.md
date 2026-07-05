@@ -380,7 +380,7 @@ Goal: Users can choose useful predefined agent types.
 - Agent creation test with template snapshot.
 - UI test for selecting and viewing template metadata.
 
-## Milestone 6: Agent Config Editor
+## Milestone 6: Agent Config Editor [Completed]
 
 Goal: Users can edit basic agent configuration and see changes persisted.
 
@@ -404,10 +404,10 @@ Goal: Users can edit basic agent configuration and see changes persisted.
 
 ### Acceptance criteria
 
-- User can edit max daily spend and model name.
-- Refreshing the page preserves config changes.
-- Invalid spend, blank required fields, and invalid schedule values are rejected.
-- Config changes create readable timeline events.
+- User can edit max daily spend and model name. *done*
+- Refreshing the page preserves config changes. *done*
+- Invalid spend, blank required fields, and invalid schedule values are rejected. *done*
+- Config changes create readable timeline events. *done*
 
 ### Tests
 

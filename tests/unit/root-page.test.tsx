@@ -550,6 +550,10 @@ describe("product shell routes", () => {
     expect(html).toContain("stopped");
     expect(html).toContain("3e47bed7-b58f-4394-93c0-01e3d1e51774");
     expect(html).toContain('href="/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774"');
+    expect(html).toContain("Configure");
+    expect(html).toContain(
+      'href="/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774#configuration-title"',
+    );
   });
 
   it("renders safe feedback when persisted agents cannot be loaded", async () => {
@@ -590,6 +594,8 @@ describe("product shell routes", () => {
     expect(html).toContain("Saved config");
     expect(html).toContain("gpt-4.1-mini");
     expect(html).toContain("$2.00");
+    expect(html).toContain("Model name");
+    expect(html).toContain("Max daily spend");
     expect(html).toContain("System prompt");
     expect(html).toContain("Save config");
     expect(html).toContain("Operational alerts");

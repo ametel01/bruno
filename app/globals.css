@@ -381,6 +381,13 @@ h2 {
   text-decoration: underline;
 }
 
+.agent-config-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 .agent-table code {
   color: var(--muted);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;

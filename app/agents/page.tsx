@@ -39,6 +39,7 @@ export default async function AgentsPage() {
                         <th scope="col">Template</th>
                         <th scope="col">Status</th>
                         <th scope="col">Action</th>
+                        <th scope="col">Config</th>
                         <th scope="col">Identity</th>
                       </tr>
                     </thead>
@@ -54,6 +55,14 @@ export default async function AgentsPage() {
                           </td>
                           <td>
                             <AgentLifecycleControls agentId={agent.id} status={agent.status} />
+                          </td>
+                          <td>
+                            <Link
+                              className="secondary-button agent-config-link"
+                              href={`${agent.href}#configuration-title`}
+                            >
+                              Configure
+                            </Link>
                           </td>
                           <td>
                             <code>{agent.id}</code>
