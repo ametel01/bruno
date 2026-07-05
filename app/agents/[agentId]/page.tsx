@@ -101,13 +101,13 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
         ? {
             status: "online",
             message: null,
-            updatedAt: assignedRunner.updatedAt,
+            updatedAt: assignedRunner.lastSeenAt ?? assignedRunner.updatedAt,
           }
         : assignedRunner?.alertState
           ? {
               status: assignedRunner.alertState,
               message: assignedRunner.alertMessage,
-              updatedAt: assignedRunner.updatedAt,
+              updatedAt: assignedRunner.lastSeenAt ?? assignedRunner.updatedAt,
             }
           : null,
   });
@@ -288,19 +288,23 @@ function AssignedRunnerStatus({ runner }: { runner: AssignedManualRunnerStatusSu
           <dd>{runner.endpointHost}</dd>
         </div>
         <div>
-          <dt>Updated</dt>
+          <dt>Version</dt>
+          <dd>{runner.version ?? "Not reported"}</dd>
+        </div>
+        <div>
+          <dt>Last seen</dt>
           <dd>
-            <time dateTime={runner.updatedAt}>{runner.updatedAt}</time>
+            {runner.lastSeenAt ? (
+              <time dateTime={runner.lastSeenAt}>{runner.lastSeenAt}</time>
+            ) : (
+              "No heartbeat yet"
+            )}
           </dd>
         </div>
         <div>
-          <dt>Checked</dt>
+          <dt>Updated</dt>
           <dd>
-            {runner.checkedAt ? (
-              <time dateTime={runner.checkedAt}>{runner.checkedAt}</time>
-            ) : (
-              "Not available"
-            )}
+            <time dateTime={runner.updatedAt}>{runner.updatedAt}</time>
           </dd>
         </div>
       </dl>

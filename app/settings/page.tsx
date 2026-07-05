@@ -1,12 +1,23 @@
 import { PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
+import {
+  listManualRunnerStatusSummariesForDevelopmentUser,
+  ManualRunnerStatusPersistenceError,
+  type ManualRunnerStatusSummary,
+} from "@/src/server/runners/manual-runner-status";
 
-export default function SettingsPage() {
+type SettingsRunnerHealthResult = Awaited<ReturnType<typeof loadSettingsRunnerHealth>>;
+
+export const dynamic = "force-dynamic";
+
+export default async function SettingsPage() {
+  const runnerHealthResult = await loadSettingsRunnerHealth();
+
   return (
     <ProductShell
       active="settings"
       eyebrow="Settings"
       title="Workspace settings"
-      description="Configuration categories are visible as placeholders while integrations, billing, runners, and secret storage remain out of scope."
+      description="Configuration categories are visible while registered runner health is read from the current development workspace."
     >
       <div className="settings-grid">
         <PlaceholderPanel title="Application">
@@ -21,13 +32,101 @@ export default function SettingsPage() {
         <PlaceholderPanel title="Integrations">
           <p>Hermes, Telegram, provider integrations, and webhooks are not configured here.</p>
         </PlaceholderPanel>
-        <PlaceholderPanel title="Runners">
-          <p>Provisioning, capacity, and execution policies wait for future runner work.</p>
-        </PlaceholderPanel>
+        <SettingsRunnerHealthPanel result={runnerHealthResult} />
         <PlaceholderPanel title="Secrets">
           <p>Secret values and credential storage are not accepted by the current app.</p>
         </PlaceholderPanel>
       </div>
     </ProductShell>
   );
+}
+
+function SettingsRunnerHealthPanel({ result }: { result: SettingsRunnerHealthResult }) {
+  return (
+    <section className="manual-runner-panel" aria-labelledby="settings-runner-health-title">
+      <div className="section-heading">
+        <h2 id="settings-runner-health-title">Registered runners</h2>
+        {result.ok ? <span>{result.runners.length} listed</span> : null}
+      </div>
+      {result.ok ? (
+        result.runners.length > 0 ? (
+          <ol className="manual-runner-list" aria-label="Registered runner health">
+            {result.runners.map((runner) => (
+              <SettingsRunnerHealthItem
+                key={`${runner.name}:${runner.endpointHost}`}
+                runner={runner}
+              />
+            ))}
+          </ol>
+        ) : (
+          <div className="activity-empty-state">
+            <h3>No runners registered</h3>
+            <p>Registration and credential controls are handled by later runner settings work.</p>
+          </div>
+        )
+      ) : (
+        <div className="safe-error" role="alert">
+          Registered runners could not be loaded.
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SettingsRunnerHealthItem({ runner }: { runner: ManualRunnerStatusSummary }) {
+  return (
+    <li className="manual-runner-item" data-status={runner.status}>
+      <div className="manual-runner-header">
+        <h3>{runner.name}</h3>
+        <span className="status-pill">{runner.status}</span>
+      </div>
+      <dl className="definition-list compact-definition-list">
+        <div>
+          <dt>Kind</dt>
+          <dd>{runner.kind}</dd>
+        </div>
+        <div>
+          <dt>Endpoint host</dt>
+          <dd>{runner.endpointHost}</dd>
+        </div>
+        <div>
+          <dt>Version</dt>
+          <dd>{runner.version ?? "Not reported"}</dd>
+        </div>
+        <div>
+          <dt>Last seen</dt>
+          <dd>
+            {runner.lastSeenAt ? (
+              <time dateTime={runner.lastSeenAt}>{runner.lastSeenAt}</time>
+            ) : (
+              "No heartbeat yet"
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt>Updated</dt>
+          <dd>
+            <time dateTime={runner.updatedAt}>{runner.updatedAt}</time>
+          </dd>
+        </div>
+      </dl>
+    </li>
+  );
+}
+
+async function loadSettingsRunnerHealth() {
+  try {
+    return {
+      ok: true as const,
+      runners: await listManualRunnerStatusSummariesForDevelopmentUser(),
+    };
+  } catch (error) {
+    if (error instanceof ManualRunnerStatusPersistenceError) {
+      return {
+        ok: false as const,
+      };
+    }
+
+    throw error;
+  }
 }

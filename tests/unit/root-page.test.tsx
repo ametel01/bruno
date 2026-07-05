@@ -197,28 +197,32 @@ describe("product shell routes", () => {
         kind: "manual_vps",
         endpointHost: "runner.example.com:8443",
         status: "online",
+        version: "agentbay-runner/1.2.3",
+        lastSeenAt: "2026-07-05T01:01:00.000Z",
         updatedAt: "2026-07-05T01:00:00.000Z",
-        checkedAt: null,
       },
     ]);
 
     const element = await DashboardPage();
     const html = renderToStaticMarkup(element);
 
-    expect(html).toContain("Manual runner status");
+    expect(html).toContain("Runner health");
     expect(html).toContain("known");
     expect(html).toContain("Manual Runner");
     expect(html).toContain("manual_vps");
     expect(html).toContain("runner.example.com:8443");
     expect(html).toContain("online");
+    expect(html).toContain("agentbay-runner/1.2.3");
+    expect(html).toContain("2026-07-05T01:01:00.000Z");
     expect(html).toContain("2026-07-05T01:00:00.000Z");
-    expect(html).toContain("Not available");
     expect(html).not.toContain("https://user:password@runner.example.com");
     expect(html).not.toContain("runnerId");
     expect(html).not.toContain("runner_id");
     expect(html).not.toContain("00000000-0000-4000-8000-000000000901");
     expect(html).not.toContain("token");
     expect(html).not.toContain("bearer");
+    expect(html).not.toContain("credentialHash");
+    expect(html).not.toContain("cpuPercent");
   });
 
   it("renders latest dashboard process logs with agent links and safe summaries", async () => {
@@ -677,8 +681,9 @@ describe("product shell routes", () => {
       kind: "manual_vps",
       endpointHost: "runner.example.com",
       status: "offline",
+      version: "agentbay-runner/1.2.3",
+      lastSeenAt: "2026-07-05T01:31:00.000Z",
       updatedAt: "2026-07-05T01:30:00.000Z",
-      checkedAt: null,
       assignmentNotice: "This agent is assigned to Remote Runner.",
       alertState: "offline",
       alertMessage:
@@ -696,6 +701,8 @@ describe("product shell routes", () => {
     expect(html).toContain("manual_vps");
     expect(html).toContain("runner.example.com");
     expect(html).toContain("offline");
+    expect(html).toContain("agentbay-runner/1.2.3");
+    expect(html).toContain("2026-07-05T01:31:00.000Z");
     expect(html).toContain("2026-07-05T01:30:00.000Z");
     expect(html).toContain("Runner is offline");
     expect(html).toContain("Assigned manual runner is inactive or unreachable.");
@@ -706,6 +713,9 @@ describe("product shell routes", () => {
     expect(html).not.toContain("TOKEN=stored-for-downstream");
     expect(html).not.toContain("postgres://");
     expect(html).not.toContain("/app/worker.ts");
+    expect(html).not.toContain("credentialHash");
+    expect(html).not.toContain("tokenHash");
+    expect(html).not.toContain("cpuPercent");
   });
 
   it("renders persisted pending approvals on the agent detail page without raw payload details", async () => {
@@ -903,14 +913,40 @@ describe("product shell routes", () => {
     expect(html).not.toContain("Agent detail failed.");
   });
 
-  it("renders future-facing settings placeholders only", () => {
-    const html = renderToStaticMarkup(createElement(SettingsPage));
+  it("renders registered runner health in settings without controls or secret fields", async () => {
+    mocks.listManualRunnerStatusSummariesForDevelopmentUser.mockResolvedValueOnce([
+      {
+        name: "Settings Runner",
+        kind: "manual_vps",
+        endpointHost: "runner-settings.example.com",
+        status: "offline",
+        version: null,
+        lastSeenAt: "2026-07-05T03:00:00.000Z",
+        updatedAt: "2026-07-05T03:01:00.000Z",
+      },
+    ]);
+    const element = await SettingsPage();
+    const html = renderToStaticMarkup(element);
 
     expect(html).toContain("Workspace settings");
+    expect(html).toContain("Registered runners");
+    expect(html).toContain("1 listed");
+    expect(html).toContain("Settings Runner");
+    expect(html).toContain("runner-settings.example.com");
+    expect(html).toContain("offline");
+    expect(html).toContain("Not reported");
+    expect(html).toContain("2026-07-05T03:00:00.000Z");
     expect(html).toContain("Billing");
     expect(html).toContain(
       "Secret values and credential storage are not accepted by the current app.",
     );
+    expect(html).not.toContain("Rotate");
+    expect(html).not.toContain("Revoke");
+    expect(html).not.toContain("registration token");
+    expect(html).not.toContain("credentialHash");
+    expect(html).not.toContain("tokenHash");
+    expect(html).not.toContain("runnerId");
+    expect(html).not.toContain("cpuPercent");
   });
 });
 
