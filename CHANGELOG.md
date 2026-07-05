@@ -58,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dashboard and agent detail manual runner status surfaces with safe runner name, kind, endpoint host, persisted status, updated timing, assigned-runner notices, offline/degraded alerts, and remote runner log visibility without exposing runner IDs, credentials, raw endpoint internals, or metadata.
 - One-time runner registration APIs: `POST /api/runners/registration-tokens` returns a visible-once `agb_reg_*` token for the development user, and `POST /runner/v1/register` atomically exchanges it for durable runner identity plus a visible-once `agb_run_*` credential while persisting only hashes and returning safe errors for unusable tokens.
 - `POST /runner/v1/heartbeat` with scoped runner credential authentication, safe credential failure responses, bounded non-secret heartbeat metrics, credential last-used updates, online status transitions, and stale/missing heartbeat reconciliation to `offline`.
+- Operator runner credential lifecycle APIs: `POST /api/runners/:runnerId/credentials/rotate` returns a visible-once replacement `agb_run_*` credential while revoking existing active credentials, and `POST /api/runners/:runnerId/credentials/revoke` revokes active credentials so heartbeat authentication rejects old or revoked credentials without exposing stored hashes or previous raw credentials.
 
 ### Fixed
 
