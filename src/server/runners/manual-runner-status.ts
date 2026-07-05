@@ -17,6 +17,10 @@ export type ManualRunnerStatusSummary = {
   updatedAt: string;
 };
 
+export type SettingsRunnerManagementSummary = ManualRunnerStatusSummary & {
+  managementId: string;
+};
+
 export type AssignedManualRunnerStatusSummary = ManualRunnerStatusSummary & {
   assignmentNotice: string;
   alertState: "offline" | "degraded" | null;
@@ -94,6 +98,73 @@ export async function listManualRunnerStatusSummariesForDevelopmentUser(
 
         summaries.push(
           toManualRunnerStatusSummary({
+            ...row,
+            latestHeartbeat: latestHeartbeat ?? null,
+          }),
+        );
+      }
+
+      return summaries;
+    });
+  } catch {
+    throw new ManualRunnerStatusPersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function listSettingsRunnerManagementSummariesForDevelopmentUser(
+  dependencies: { createConnection?: () => DatabaseConnection } = {},
+): Promise<SettingsRunnerManagementSummary[]> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    return await connection.db.transaction(async (tx) => {
+      const userId = await getDevelopmentUserId(tx);
+
+      if (!userId) {
+        return [];
+      }
+
+      const rows = await tx
+        .select({
+          id: runners.id,
+          name: runners.name,
+          kind: runners.kind,
+          endpointUrl: runners.endpointUrl,
+          status: runners.status,
+          updatedAt: runners.updatedAt,
+        })
+        .from(runners)
+        .where(
+          and(
+            eq(runners.userId, userId),
+            eq(runners.kind, MANUAL_RUNNER_KIND),
+            isNull(runners.deletedAt),
+          ),
+        )
+        .orderBy(desc(runners.updatedAt), desc(runners.createdAt))
+        .limit(10);
+
+      const summaries: SettingsRunnerManagementSummary[] = [];
+
+      for (const row of rows) {
+        const [latestHeartbeat] = await tx
+          .select({
+            status: runnerHeartbeats.status,
+            metadata: runnerHeartbeats.metadata,
+            observedAt: runnerHeartbeats.observedAt,
+          })
+          .from(runnerHeartbeats)
+          .where(eq(runnerHeartbeats.runnerId, row.id))
+          .orderBy(desc(runnerHeartbeats.observedAt))
+          .limit(1);
+
+        summaries.push(
+          toSettingsRunnerManagementSummary({
             ...row,
             latestHeartbeat: latestHeartbeat ?? null,
           }),
@@ -197,6 +268,15 @@ export function toManualRunnerStatusSummary(row: ManualRunnerStatusRow): ManualR
     version: toSafeVersion(row.latestHeartbeat?.metadata),
     lastSeenAt: row.latestHeartbeat ? toIsoTimestamp(row.latestHeartbeat.observedAt) : null,
     updatedAt: toIsoTimestamp(row.updatedAt),
+  };
+}
+
+export function toSettingsRunnerManagementSummary(
+  row: ManualRunnerStatusRow & { id: string },
+): SettingsRunnerManagementSummary {
+  return {
+    ...toManualRunnerStatusSummary(row),
+    managementId: row.id,
   };
 }
 

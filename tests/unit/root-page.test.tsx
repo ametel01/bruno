@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   listLatestActiveAgentProcessLogs: vi.fn(),
   listActiveAgentsForDevelopmentUser: vi.fn(),
   listManualRunnerStatusSummariesForDevelopmentUser: vi.fn(),
+  listSettingsRunnerManagementSummariesForDevelopmentUser: vi.fn(),
   getAssignedManualRunnerStatusForDevelopmentUserAgent: vi.fn(),
   listPendingApprovalsForDevelopmentUserAgent: vi.fn(),
   listPendingApprovalsForDevelopmentUser: vi.fn(),
@@ -77,6 +78,8 @@ vi.mock("@/src/server/runners/manual-runner-status", async (importOriginal) => {
       mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent,
     listManualRunnerStatusSummariesForDevelopmentUser:
       mocks.listManualRunnerStatusSummariesForDevelopmentUser,
+    listSettingsRunnerManagementSummariesForDevelopmentUser:
+      mocks.listSettingsRunnerManagementSummariesForDevelopmentUser,
   };
 });
 
@@ -103,6 +106,7 @@ describe("product shell routes", () => {
     });
     mocks.listLatestActiveAgentProcessLogs.mockResolvedValue([]);
     mocks.listManualRunnerStatusSummariesForDevelopmentUser.mockResolvedValue([]);
+    mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockResolvedValue([]);
     mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockResolvedValue(null);
     mocks.listPendingApprovalsForDevelopmentUser.mockResolvedValue([]);
     mocks.listPendingApprovalsForDevelopmentUserAgent.mockResolvedValue([]);
@@ -124,6 +128,7 @@ describe("product shell routes", () => {
     mocks.listLatestActiveAgentProcessLogs.mockReset();
     mocks.listActiveAgentsForDevelopmentUser.mockReset();
     mocks.listManualRunnerStatusSummariesForDevelopmentUser.mockReset();
+    mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockReset();
     mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockReset();
     mocks.listPendingApprovalsForDevelopmentUserAgent.mockReset();
     mocks.listPendingApprovalsForDevelopmentUser.mockReset();
@@ -913,9 +918,10 @@ describe("product shell routes", () => {
     expect(html).not.toContain("Agent detail failed.");
   });
 
-  it("renders registered runner health in settings without controls or secret fields", async () => {
-    mocks.listManualRunnerStatusSummariesForDevelopmentUser.mockResolvedValueOnce([
+  it("renders registered runner controls in settings without raw secret fields", async () => {
+    mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockResolvedValueOnce([
       {
+        managementId: "00000000-0000-4000-8000-000000000133",
         name: "Settings Runner",
         kind: "manual_vps",
         endpointHost: "runner-settings.example.com",
@@ -940,12 +946,16 @@ describe("product shell routes", () => {
     expect(html).toContain(
       "Secret values and credential storage are not accepted by the current app.",
     );
-    expect(html).not.toContain("Rotate");
-    expect(html).not.toContain("Revoke");
-    expect(html).not.toContain("registration token");
+    expect(html).toContain("Create Registration Token");
+    expect(html).toContain("Create Token");
+    expect(html).toContain("Rotate Credential");
+    expect(html).toContain("Revoke Credential");
+    expect(html).not.toContain("agb_reg_");
+    expect(html).not.toContain("agb_run_");
     expect(html).not.toContain("credentialHash");
     expect(html).not.toContain("tokenHash");
     expect(html).not.toContain("runnerId");
+    expect(html).not.toContain("00000000-0000-4000-8000-000000000133");
     expect(html).not.toContain("cpuPercent");
   });
 });

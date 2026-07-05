@@ -1,8 +1,12 @@
 import { PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
 import {
-  listManualRunnerStatusSummariesForDevelopmentUser,
+  RunnerCredentialControls,
+  RunnerRegistrationTokenControls,
+} from "@/app/settings/_components/runner-management-controls";
+import {
+  listSettingsRunnerManagementSummariesForDevelopmentUser,
   ManualRunnerStatusPersistenceError,
-  type ManualRunnerStatusSummary,
+  type SettingsRunnerManagementSummary,
 } from "@/src/server/runners/manual-runner-status";
 
 type SettingsRunnerHealthResult = Awaited<ReturnType<typeof loadSettingsRunnerHealth>>;
@@ -48,20 +52,18 @@ function SettingsRunnerHealthPanel({ result }: { result: SettingsRunnerHealthRes
         <h2 id="settings-runner-health-title">Registered runners</h2>
         {result.ok ? <span>{result.runners.length} listed</span> : null}
       </div>
+      <RunnerRegistrationTokenControls disabled={!result.ok} />
       {result.ok ? (
         result.runners.length > 0 ? (
           <ol className="manual-runner-list" aria-label="Registered runner health">
             {result.runners.map((runner) => (
-              <SettingsRunnerHealthItem
-                key={`${runner.name}:${runner.endpointHost}`}
-                runner={runner}
-              />
+              <SettingsRunnerHealthItem key={runner.managementId} runner={runner} />
             ))}
           </ol>
         ) : (
           <div className="activity-empty-state">
             <h3>No runners registered</h3>
-            <p>Registration and credential controls are handled by later runner settings work.</p>
+            <p>Create a registration token, then exchange it from a runner host.</p>
           </div>
         )
       ) : (
@@ -73,7 +75,7 @@ function SettingsRunnerHealthPanel({ result }: { result: SettingsRunnerHealthRes
   );
 }
 
-function SettingsRunnerHealthItem({ runner }: { runner: ManualRunnerStatusSummary }) {
+function SettingsRunnerHealthItem({ runner }: { runner: SettingsRunnerManagementSummary }) {
   return (
     <li className="manual-runner-item" data-status={runner.status}>
       <div className="manual-runner-header">
@@ -110,6 +112,7 @@ function SettingsRunnerHealthItem({ runner }: { runner: ManualRunnerStatusSummar
           </dd>
         </div>
       </dl>
+      <RunnerCredentialControls runnerId={runner.managementId} runnerName={runner.name} />
     </li>
   );
 }
@@ -118,7 +121,7 @@ async function loadSettingsRunnerHealth() {
   try {
     return {
       ok: true as const,
-      runners: await listManualRunnerStatusSummariesForDevelopmentUser(),
+      runners: await listSettingsRunnerManagementSummariesForDevelopmentUser(),
     };
   } catch (error) {
     if (error instanceof ManualRunnerStatusPersistenceError) {

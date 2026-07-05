@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   toAssignedManualRunnerStatusSummary,
   toManualRunnerStatusSummary,
+  toSettingsRunnerManagementSummary,
 } from "@/src/server/runners/manual-runner-status";
 
 describe("manual runner status summaries", () => {
@@ -147,5 +148,31 @@ describe("manual runner status summaries", () => {
 
     expect(summary.version).toBe("Sensitive details omitted.");
     expect(JSON.stringify(summary)).not.toContain("stored-for-downstream");
+  });
+
+  it("adds a settings-only management id without adding secret or hash fields", () => {
+    const summary = toSettingsRunnerManagementSummary({
+      id: "00000000-0000-4000-8000-000000000133",
+      name: "Settings Runner",
+      kind: "manual_vps",
+      endpointUrl: "https://user:password@runner-settings.example.com:8443/runner/v1?token=hidden",
+      status: "online",
+      updatedAt: "2026-07-05T03:01:00.000Z",
+    });
+
+    expect(summary).toEqual({
+      managementId: "00000000-0000-4000-8000-000000000133",
+      name: "Settings Runner",
+      kind: "manual_vps",
+      endpointHost: "runner-settings.example.com:8443",
+      status: "online",
+      version: null,
+      lastSeenAt: null,
+      updatedAt: "2026-07-05T03:01:00.000Z",
+    });
+    expect(JSON.stringify(summary)).not.toContain("password");
+    expect(JSON.stringify(summary)).not.toContain("token=hidden");
+    expect(JSON.stringify(summary)).not.toContain("credentialHash");
+    expect(JSON.stringify(summary)).not.toContain("tokenHash");
   });
 });

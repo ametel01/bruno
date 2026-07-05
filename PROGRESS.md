@@ -52,13 +52,13 @@
 
 ## Milestone 12 Secure Runner Auth
 
-- Status: #129, #130, and #131 are merged; #132 is implemented on `codex/issue-132-runner-health-surfaces`; Milestone 12 implementation is not complete until the remaining settings controls and final acceptance issues land.
+- Status: #129, #130, #131, and #132 are merged; #133 is implemented on `codex/issue-133-runner-settings-controls`; Milestone 12 implementation is not complete until #133 merges and final acceptance issue #134 lands.
 - Source plan:
   - `docs/MILESTONES.md` Milestone 12: Secure Runner Auth.
   - `docs/PRD.md` runner-auth product/testing decisions.
   - `docs/conversation_dump.md` Milestone 12 secure runner auth outline.
   - GitHub issues #127-#134 and GitHub milestone "Milestone 12: Secure Runner Auth".
-- Current branch: `codex/issue-132-runner-health-surfaces`.
+- Current branch: `codex/issue-133-runner-settings-controls`.
 - Next step: implementation agents should append validation evidence to this section after their issue gates pass, then update `CHANGELOG.md` only when the issue ships functional user/operator-visible behavior.
 
 ### Issue Checklist
@@ -70,8 +70,8 @@
 - [x] #129 Implement one-time runner registration. Status: merged; adds visible-once dashboard registration tokens and one-time runner exchange for durable identity plus visible-once credential.
 - [x] #130 Authenticate runner heartbeat and offline status. Status: merged; adds scoped heartbeat auth, safe failure responses, last-used updates, online transitions, and stale/missing offline reconciliation.
 - [x] #131 Add runner credential rotation and revocation. Status: merged; adds visible-once replacement credentials and revocation enforcement through runner auth.
-- [x] #132 Show runner health on assigned agents. Status: implemented on `codex/issue-132-runner-health-surfaces`; ready for checker review after local validation.
-- [ ] #133 Wire runner management controls in settings. Status: open; blocked by #129 and #131.
+- [x] #132 Show runner health on assigned agents. Status: merged; adds heartbeat-derived runner health read surfaces.
+- [x] #133 Wire runner management controls in settings. Status: implemented on `codex/issue-133-runner-settings-controls`; ready for checker review after local validation.
 - [ ] #134 Document and verify Milestone 12 acceptance. Status: open; blocked by #127, #129, #130, #131, #132, and #133.
 - Later Milestone 12 issue agents must append new issue rows here before implementation evidence if GitHub adds more Milestone 12 work.
 
@@ -115,8 +115,29 @@
 - 2026-07-05: #130 implemented the authenticated runner heartbeat route, scoped credential verification, bounded metric persistence, credential last-use and runner online updates, and stale/missing heartbeat offline reconciliation on `codex/issue-130-runner-heartbeat`.
 - 2026-07-05: #131 implemented operator runner credential rotation/revocation routes and a lifecycle service that preserves hash-only persistence, returns only replacement credentials visible-once, and proves old/revoked credentials cannot authenticate through heartbeat.
 - 2026-07-05: #132 implemented heartbeat-derived runner health read surfaces on dashboard, assigned-agent detail, and settings, including safe version and last-seen display while omitting runner IDs, credential material, hashes, and heartbeat metrics.
+- 2026-07-05: #133 implemented settings runner management controls for visible-once registration-token creation, visible-once credential rotation, credential revocation, safe UI states, and browser proof that dismissed/refreshed raw secrets are not rendered.
 
 ### Validation Evidence
+
+- 2026-07-05 #133:
+  - Initial `bun run format`: environment failure before install; `biome` binary was unavailable in the worktree.
+  - `bun install --frozen-lockfile`: pass; restored local package binaries from `bun.lock`.
+  - `bun run format`: pass; Biome formatted app, source, script, test, CSS, TS, and JSON files.
+  - `bun run test -- tests/unit/manual-runner-status.test.ts tests/unit/root-page.test.tsx`: pass; 2 files and 31 tests passed for settings runner management summaries, page rendering, visible controls, and negative raw secret/hash assertions.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:migrate`: pass; migrations applied successfully with existing `drizzle` schema notices only.
+  - `PORT=3133 DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3133 bun run test:e2e -- --project=chromium-desktop -g "manual runner status, alerts, and remote logs stay visible and safe"`: pass; 1 browser smoke passed for settings create-token loading/error/success, visible-once `agb_reg_*` display and dismissal, credential rotate validation/loading/success, visible-once `agb_run_*` display and dismissal, old credential heartbeat rejection after rotation, revoke confirmation/loading/success, revoked credential heartbeat rejection, refresh hiding dismissed raw secrets, and safe omission of hashes/unsafe server error text.
+  - `bun run format:check`: pass; Biome checked 117 files with no fixes applied.
+  - Initial `bun run lint`: failed on two accessibility rules in `runner-management-controls` (`aria-label` on a plain `div` and `div role="region"`); fixed by using semantic `section` elements.
+  - `bun run lint`: pass; Biome lint checked 117 files with no fixes applied.
+  - `bun run test -- tests/unit/manual-runner-status.test.ts tests/unit/root-page.test.tsx tests/unit/runner-registration-routes.test.ts tests/unit/runner-credential-lifecycle-routes.test.ts`: pass; 4 files and 42 tests passed for settings/page coverage plus adjacent create/rotate/revoke route contracts.
+  - Static production-path scans: pass; `rg` found no long raw `agb_reg_*` or `agb_run_*` literals in `app`/`src`, no production logging or hash rendering in settings/control paths, and long secret-looking values only in intentional test fixtures/negative assertions.
+  - `git diff --check`: pass; no whitespace errors.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism`: pass; 35 files and 302 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: pass; Next.js compiled, typechecked, generated static pages, and listed the runner management API routes plus `/settings`.
+  - Final `PORT=3133 DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3133 bun run test:e2e -- --project=chromium-desktop -g "manual runner status, alerts, and remote logs stay visible and safe"`: pass; 1 browser smoke passed on the final files. The run emitted the existing PostgreSQL advisory-unlock warning from shared test cleanup, but the test passed.
+  - Full default-parallel `bun run verify` was not run because focused tests, package checks, production build, targeted browser smoke, serialized aggregate unit, and static scans passed, and this repo has known shared-DB default-parallel isolation risk recorded above.
 
 - 2026-07-05 #132:
   - Initial `bun run format`: environment failure before install; `biome` binary was unavailable in the worktree.
