@@ -52,13 +52,13 @@
 
 ## Milestone 12 Secure Runner Auth
 
-- Status: #129 is merged and #130 is ready for review; Milestone 12 implementation is not complete until the remaining rotation, health UI, settings, and final acceptance issues land.
+- Status: #129 and #130 are merged; #131 is implemented on the current branch; Milestone 12 implementation is not complete until the remaining health UI, settings, and final acceptance issues land.
 - Source plan:
   - `docs/MILESTONES.md` Milestone 12: Secure Runner Auth.
   - `docs/PRD.md` runner-auth product/testing decisions.
   - `docs/conversation_dump.md` Milestone 12 secure runner auth outline.
   - GitHub issues #127-#134 and GitHub milestone "Milestone 12: Secure Runner Auth".
-- Current branch: `codex/issue-130-runner-heartbeat`.
+- Current branch: `codex/issue-131-runner-credential-lifecycle`.
 - Next step: implementation agents should append validation evidence to this section after their issue gates pass, then update `CHANGELOG.md` only when the issue ships functional user/operator-visible behavior.
 
 ### Issue Checklist
@@ -68,8 +68,8 @@
 - [x] #127 Initialize Milestone 12 execution tracking. Status: ready for checker review on `codex/issue-127-milestone-12-tracking`; tracking section restored/initialized.
 - [x] #128 Add the runner auth persistence contract. Status: merged; provides runner registration-token, credential, heartbeat schema, and reusable secret helpers.
 - [x] #129 Implement one-time runner registration. Status: merged; adds visible-once dashboard registration tokens and one-time runner exchange for durable identity plus visible-once credential.
-- [x] #130 Authenticate runner heartbeat and offline status. Status: ready for maintainer review on `codex/issue-130-runner-heartbeat`.
-- [ ] #131 Add runner credential rotation and revocation. Status: open; blocked by #130.
+- [x] #130 Authenticate runner heartbeat and offline status. Status: merged; adds scoped authenticated runner heartbeat and offline reconciliation.
+- [x] #131 Add runner credential rotation and revocation. Status: implemented on `codex/issue-131-runner-credential-lifecycle`; ready for checker after local gates.
 - [ ] #132 Show runner health on assigned agents. Status: open; blocked by #130.
 - [ ] #133 Wire runner management controls in settings. Status: open; blocked by #129 and #131.
 - [ ] #134 Document and verify Milestone 12 acceptance. Status: open; blocked by #127, #129, #130, #131, #132, and #133.
@@ -87,6 +87,7 @@
 - #130 owns authenticated heartbeat and offline detection: bearer credential enforcement, safe unauthorized failures, heartbeat row writes, last-seen updates, `online` status, and stale-heartbeat `offline` reconciliation.
 - #130 now adds `POST /runner/v1/heartbeat`, verifies hashed scoped runner credentials from #128, rejects missing/malformed/unknown/expired/revoked/wrong-runner credentials with safe responses, stores only bounded non-secret metrics, updates credential `lastUsedAt`, and exports `RUNNER_HEARTBEAT_STALE_THRESHOLD_MS` for offline reconciliation.
 - #131 owns credential rotation/revocation: visible-once replacement credential, old credential rejection after rotation, revoked credential rejection, and safe credential management errors.
+- #131 now adds `POST /api/runners/:runnerId/credentials/rotate` and `POST /api/runners/:runnerId/credentials/revoke` for development-user registered runners, revokes active credential rows before replacement or retirement, returns only a newly generated visible-once credential on rotation, rejects malformed/missing/already-revoked management states safely, and relies on the heartbeat auth path to reject old or revoked credentials.
 - #132 owns runner health visibility: assigned agent pages and runner list/read surfaces show real online/offline/degraded state and last-seen context without rendering credential material.
 - #133 owns settings controls for registration-token creation, credential rotation, and credential revocation with visible-once secret display and safe UI states.
 - #134 owns final operator docs and acceptance evidence mapping after behavior branches merge.
@@ -112,6 +113,7 @@
 - 2026-07-05: #125 rebased onto current `origin/main` after #124 merged, resolved only `CHANGELOG.md` and `PROGRESS.md` append conflicts by keeping both #124 and #125 entries, preserved the #125 status/log UI slice and advisory-lock E2E isolation fix, and reran the requested focused checks.
 - 2026-07-05: #129 added `POST /api/runners/registration-tokens` for visible-once dashboard registration tokens and `POST /runner/v1/register` for atomic one-time runner exchange into durable runner identity plus visible-once bearer credential, with hash-only persistence and safe rejection for bad token states.
 - 2026-07-05: #130 implemented the authenticated runner heartbeat route, scoped credential verification, bounded metric persistence, credential last-use and runner online updates, and stale/missing heartbeat offline reconciliation on `codex/issue-130-runner-heartbeat`.
+- 2026-07-05: #131 implemented operator runner credential rotation/revocation routes and a lifecycle service that preserves hash-only persistence, returns only replacement credentials visible-once, and proves old/revoked credentials cannot authenticate through heartbeat.
 
 ### Validation Evidence
 
@@ -147,6 +149,29 @@
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism`: baseline failure outside #130 after 30 files and 276 tests passed; `tests/unit/create-agent-db.test.ts` had two failures: rollback expected preserved `agent_events` but received `[]`, and the existing start-route behavior expected `202` but received `500`.
   - Baseline confirmation on current `main`: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/create-agent-db.test.ts -t "rolls back config and agent updates when config event writing fails|exposes the start route success, validation, not-found, deleted, invalid status, and event behavior"` failed with the same start-route `expected 202, received 500` assertion. The rollback subcase passed when isolated by the focused filter.
   - Full E2E was not run because #130 adds a server runner endpoint and offline helper with focused route/persistence coverage; existing repo notes already record shared DB/E2E isolation risks for broader suites.
+
+- 2026-07-05 #131:
+  - Initial `bun run test -- tests/unit/runner-credential-lifecycle-routes.test.ts`: environment failure before install; `vitest` binary was unavailable in the worktree.
+  - Initial `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/runner-credential-lifecycle.test.ts`: environment failure before install; `vitest` binary was unavailable in the worktree.
+  - `bun install`: pass; restored local package shims for Vitest, Biome, TypeScript, and Next.js in the issue worktree.
+  - `bun run test -- tests/unit/runner-credential-lifecycle-routes.test.ts`: pass; 1 route file and 5 tests passed for rotate visible-once response shape, revoke response shape, malformed runner ID validation, missing runner errors, already-revoked errors, persistence failure mapping, and no hash/raw-secret exposure.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/runner-credential-lifecycle.test.ts`: pass; 1 DB-backed file and 3 tests passed for hash-only rotation persistence, old credential rejection through heartbeat auth, new credential heartbeat success, revoked credential heartbeat rejection, and safe malformed/missing/already-revoked management failures.
+  - `bun run format`: pass; Biome formatted the new lifecycle service, routes, and tests.
+  - Initial `bun run lint`: warning; unused test import after a small edit, then fixed.
+  - `bun run lint`: pass; Biome lint checked 116 files with no fixes applied.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed.
+  - `bun run format:check`: pass; Biome checked 116 files with no fixes applied.
+  - Isolated DB setup for broader validation: `DROP DATABASE IF EXISTS agentbay_131_check WITH (FORCE)`, `CREATE DATABASE agentbay_131_check`, and `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay_131_check NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:migrate` all passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay_131_check NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:health`: pass; returned `status: ok` and `database: reachable`.
+  - `bun run test -- tests/unit/runner-credential-lifecycle-routes.test.ts`: pass after final formatting; 1 file and 5 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay_131_check NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/runner-credential-lifecycle.test.ts`: pass on isolated DB; 1 file and 3 tests passed.
+  - Default-parallel adjacent runner-auth command failed with known shared-table DB reset symptoms: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay_131_check NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- tests/unit/runner-registration-routes.test.ts tests/unit/runner-registration.test.ts tests/unit/runner-heartbeat-route.test.ts tests/unit/runner-heartbeat.test.ts tests/unit/runner-credential-lifecycle-routes.test.ts tests/unit/runner-credential-lifecycle.test.ts` produced Postgres deadlocks, foreign-key races, and duplicate `app_metadata` rows while DB-backed files truncated shared tables in parallel.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay_131_check NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism tests/unit/runner-registration-routes.test.ts tests/unit/runner-registration.test.ts tests/unit/runner-heartbeat-route.test.ts tests/unit/runner-heartbeat.test.ts tests/unit/runner-credential-lifecycle-routes.test.ts tests/unit/runner-credential-lifecycle.test.ts`: pass; 6 files and 36 adjacent runner-auth tests passed serialized.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay_131_check NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism`: pass; 35 files and 298 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay_131_check NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: pass; Next.js compiled, typechecked, generated static pages, and listed `/api/runners/[runnerId]/credentials/rotate` and `/api/runners/[runnerId]/credentials/revoke`. Generated `next-env.d.ts` build churn was reverted from the patch.
+  - Production-path secret/logging scan over `app/api/runners/[runnerId]` and `src/server/runners/runner-credential-lifecycle.ts`: pass; no runtime logging, generated raw credential literals, raw-token fields, private keys, provider keys, GitHub tokens, or DSNs. The only `credentialHash` match is the intentional hash-only persistence write.
+  - `git diff --check`: pass; no whitespace errors.
+  - Full E2E was not run because #131 adds server-side operator credential lifecycle APIs and DB/auth service behavior only; no browser UI workflow changed, and #133 owns settings UI controls.
 
 - 2026-07-05 #125:
   - `bun install`: pass; restored local package shims in this worktree after `bun run format` initially failed with `/opt/homebrew/bin/bash: line 1: biome: command not found`.
