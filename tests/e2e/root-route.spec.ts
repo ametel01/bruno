@@ -213,7 +213,7 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
     });
     localRunnerIds.push(runner.id);
     await insertRunnerHeartbeat(runner.id, {
-      status: "offline",
+      status: "online",
       version: "agentbay-runner/1.2.3",
       observedAt: "2026-07-05T01:30:30.000Z",
     });

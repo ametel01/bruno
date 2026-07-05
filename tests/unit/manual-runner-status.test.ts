@@ -86,6 +86,49 @@ describe("manual runner status summaries", () => {
     expect(JSON.stringify(summary)).not.toContain("must-not-render");
   });
 
+  it("keeps reconciled offline runner state ahead of a stale online heartbeat", () => {
+    const summary = toManualRunnerStatusSummary({
+      name: "Stale Runner",
+      kind: "manual_vps",
+      endpointUrl: "https://runner.example.com",
+      status: "offline",
+      updatedAt: "2026-07-05T08:02:00.000Z",
+      latestHeartbeat: {
+        status: "online",
+        metadata: {
+          version: "agentbay-runner/1.0.0",
+        },
+        observedAt: "2026-07-05T08:00:29.999Z",
+      },
+    });
+    const assigned = toAssignedManualRunnerStatusSummary({
+      name: "Assigned Stale Runner",
+      kind: "manual_vps",
+      endpointUrl: "https://runner.example.com",
+      status: "offline",
+      updatedAt: "2026-07-05T08:02:00.000Z",
+      latestHeartbeat: {
+        status: "online",
+        metadata: {
+          version: "agentbay-runner/1.0.0",
+        },
+        observedAt: "2026-07-05T08:00:29.999Z",
+      },
+    });
+
+    expect(summary).toMatchObject({
+      status: "offline",
+      version: "agentbay-runner/1.0.0",
+      lastSeenAt: "2026-07-05T08:00:29.999Z",
+    });
+    expect(assigned).toMatchObject({
+      status: "offline",
+      alertState: "offline",
+      alertMessage:
+        "Assigned manual runner is inactive or unreachable. Check the runner host and service before restarting work.",
+    });
+  });
+
   it("redacts secret-looking heartbeat versions", () => {
     const summary = toManualRunnerStatusSummary({
       name: "Degraded Runner",

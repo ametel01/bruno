@@ -225,6 +225,10 @@ function toDisplayStatus(input: {
   heartbeatStatus: string | null;
   runnerStatus: string;
 }): ManualRunnerDisplayStatus {
+  if (input.runnerStatus === "offline" || input.runnerStatus === "degraded") {
+    return input.runnerStatus;
+  }
+
   if (
     input.heartbeatStatus === "online" ||
     input.heartbeatStatus === "offline" ||
@@ -233,11 +237,7 @@ function toDisplayStatus(input: {
     return input.heartbeatStatus;
   }
 
-  if (
-    input.runnerStatus === "online" ||
-    input.runnerStatus === "offline" ||
-    input.runnerStatus === "degraded"
-  ) {
+  if (input.runnerStatus === "online") {
     return input.runnerStatus;
   }
 
