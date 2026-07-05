@@ -2084,6 +2084,56 @@ describe("create agent persistence", () => {
     });
   });
 
+  it("loads a template default prompt for legacy detail snapshots missing the prompt field", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const currentSnapshot = getAgentTemplateSnapshot("github_issue_agent");
+    const legacySnapshot = {
+      key: currentSnapshot.key,
+      version: currentSnapshot.version,
+      name: currentSnapshot.name,
+      description: currentSnapshot.description,
+      defaultTools: currentSnapshot.defaultTools,
+      defaultSchedule: currentSnapshot.defaultSchedule,
+      requiredIntegrations: currentSnapshot.requiredIntegrations,
+    } as unknown as ReturnType<typeof getAgentTemplateSnapshot>;
+
+    const [createdAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        name: "Legacy GitHub Agent",
+        templateKey: "github_issue_agent",
+        templateVersion: "1.0.0",
+        templateSnapshotJson: legacySnapshot,
+        status: "stopped",
+      })
+      .returning();
+
+    expect(createdAgent).toBeDefined();
+    await connection.db.insert(agentConfigs).values({
+      agentId: createdAgent?.id ?? "",
+      systemPrompt: "Use GitHub issue context only.",
+      modelProvider: "openai",
+      modelName: "gpt-5.5-mini",
+      maxDailySpendCents: 200,
+      scheduleMode: "manual",
+      scheduleCron: null,
+      timezone: "Asia/Manila",
+    });
+
+    const detail = await getActiveAgentForDevelopmentUser(createdAgent?.id ?? "", {
+      createConnection: () => connection,
+    });
+
+    expect(detail?.templateSnapshot.defaultSystemPrompt).toBe(currentSnapshot.defaultSystemPrompt);
+  });
+
   it("returns no detail for missing, malformed, or soft-deleted agent IDs", async () => {
     const [createdUser] = await connection.db
       .insert(users)

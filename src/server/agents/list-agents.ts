@@ -7,7 +7,12 @@ import {
 } from "@/src/server/agents/lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentConfigs, agents } from "@/src/server/db/schema";
-import { getAgentTemplateLabel, type AgentTemplateSnapshot } from "@/src/server/agents/templates";
+import {
+  getAgentTemplateLabel,
+  getAgentTemplateSnapshot,
+  isSupportedTemplateKey,
+  type AgentTemplateSnapshot,
+} from "@/src/server/agents/templates";
 
 export type ListedAgent = {
   id: string;
@@ -142,6 +147,8 @@ export async function getActiveAgentForDevelopmentUser(
       return null;
     }
 
+    const templateSnapshot = normalizeTemplateSnapshot(row.templateKey, row.templateSnapshotJson);
+
     return {
       id: row.id,
       name: row.name,
@@ -153,7 +160,7 @@ export async function getActiveAgentForDevelopmentUser(
       href: `/agents/${row.id}`,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
-      templateSnapshot: row.templateSnapshotJson,
+      templateSnapshot,
       config: {
         systemPrompt: row.configSystemPrompt,
         modelProvider: row.configModelProvider,
@@ -172,4 +179,26 @@ export async function getActiveAgentForDevelopmentUser(
       await connection.close();
     }
   }
+}
+
+function normalizeTemplateSnapshot(
+  templateKey: string,
+  templateSnapshot: AgentTemplateSnapshot,
+): AgentTemplateSnapshot {
+  if (typeof templateSnapshot.defaultSystemPrompt === "string") {
+    const defaultSystemPrompt = templateSnapshot.defaultSystemPrompt.trim();
+
+    if (defaultSystemPrompt.length > 0) {
+      return templateSnapshot;
+    }
+  }
+
+  if (!isSupportedTemplateKey(templateKey)) {
+    return templateSnapshot;
+  }
+
+  return {
+    ...templateSnapshot,
+    defaultSystemPrompt: getAgentTemplateSnapshot(templateKey).defaultSystemPrompt,
+  };
 }

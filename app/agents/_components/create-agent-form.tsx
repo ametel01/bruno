@@ -119,6 +119,12 @@ export function CreateAgentForm({ maxNameLength, templates }: CreateAgentFormPro
               <dt>Required integrations</dt>
               <dd>{formatList(selectedTemplate.requiredIntegrations)}</dd>
             </div>
+            <div>
+              <dt>Default prompt</dt>
+              <dd className="template-default-prompt">
+                <p>{selectedTemplate.defaultSystemPrompt}</p>
+              </dd>
+            </div>
           </dl>
           <TemplateToolList tools={selectedTemplate.defaultTools} />
         </div>

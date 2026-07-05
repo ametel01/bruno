@@ -369,10 +369,10 @@ Goal: Users can choose useful predefined agent types.
 
 ### Acceptance criteria
 
-- The create-agent form lists the initial templates.
-- Creating from `Research Agent` persists the template key and snapshot.
-- Agent detail shows template name, tools, schedule, and default prompt.
-- Template display works after page refresh.
+- The create-agent form lists the initial templates. *done*
+- Creating from `Research Agent` persists the template key and snapshot. *done*
+- Agent detail shows template name, tools, schedule, and default prompt. *done*
+- Template display works after page refresh. *done*
 
 ### Tests
 

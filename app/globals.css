@@ -1384,6 +1384,15 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.template-default-prompt p {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafb;
+  color: var(--foreground);
+  padding: 12px;
+}
+
 .plain-list {
   display: grid;
   gap: 10px;

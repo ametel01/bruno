@@ -522,6 +522,10 @@ describe("product shell routes", () => {
     expect(html).toContain("Web search, Notes, Summaries");
     expect(html).toContain("Schedule");
     expect(html).toContain("Manual");
+    expect(html).toContain("Default prompt");
+    expect(html).toContain(
+      "You are a Research Agent. Gather relevant information, keep source notes, and produce concise summaries.",
+    );
     expect(html).toContain("inbox_triage_agent");
     expect(html).not.toContain("Create agent in Milestone 1");
   });
@@ -576,6 +580,9 @@ describe("product shell routes", () => {
     expect(html).toContain("Default tools");
     expect(html).toContain("Web search, Notes, Summaries");
     expect(html).toContain("Default prompt");
+    expect(html).toContain(
+      "You are a Research Agent. Gather relevant information, keep source notes, and produce concise summaries.",
+    );
     expect(html).toContain("2026-07-03T05:00:00.000Z");
     expect(html).toContain("2026-07-03T05:30:00.000Z");
     expect(html).toContain("Waiting for setup.");

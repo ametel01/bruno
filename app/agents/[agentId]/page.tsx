@@ -200,7 +200,9 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
             </div>
             <div>
               <dt>Default prompt</dt>
-              <dd>{agent.templateSnapshot.defaultSystemPrompt}</dd>
+              <dd className="template-default-prompt">
+                <p>{agent.templateSnapshot.defaultSystemPrompt}</p>
+              </dd>
             </div>
           </dl>
         </PlaceholderPanel>
