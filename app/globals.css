@@ -1242,6 +1242,68 @@ h2 {
   margin-top: 0;
 }
 
+.runner-management-block,
+.runner-credential-controls,
+.visible-once-secret {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding-top: 14px;
+}
+
+.runner-management-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.runner-management-header h3 {
+  font-size: 0.95rem;
+  line-height: 1.35;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.runner-management-header p,
+.visible-once-secret p {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.runner-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.visible-once-secret {
+  border: 1px solid #a8cbbb;
+  border-radius: 6px;
+  background: #f5fbf8;
+  padding: 12px;
+}
+
+.visible-once-secret span {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.visible-once-secret code {
+  display: block;
+  margin-top: 8px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .compact-definition-list {
   gap: 10px;
 }

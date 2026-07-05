@@ -4,9 +4,10 @@ import {
   type APIRequestContext,
   type APIResponse,
   type Page,
+  type Route,
 } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import postgres from "postgres";
 
 const createdAgentIds = new Set<string>();
@@ -233,6 +234,8 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
       version: "agentbay-runner/2.0.0",
       observedAt: "2026-07-05T01:32:30.000Z",
     });
+    const oldRunnerCredential = `agb_run_old_${randomUUID().replaceAll("-", "")}`;
+    await insertRunnerCredential(runner.id, oldRunnerCredential, "2026-07-05T01:33:00.000Z");
     await insertManualRunnerLog(created.id, runner.id, {
       stream: "stderr",
       level: "error",
@@ -332,6 +335,110 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
       await expect(settingsRunnerPanel).not.toContainText("tokenHash");
       await expect(settingsRunnerPanel).not.toContainText("cpuPercent");
       await expect(settingsRunnerPanel).not.toContainText("apiToken");
+
+      const registrationFailureRoute = async (route: Route) => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await route.fulfill({
+          contentType: "application/json",
+          status: 503,
+          body: JSON.stringify({
+            error: {
+              code: "database_unavailable",
+              message: "postgres://user:pass@localhost/db agb_reg_should_not_render",
+            },
+          }),
+        });
+      };
+      await page.route("**/api/runners/registration-tokens", registrationFailureRoute);
+      await settingsRunnerPanel.getByRole("button", { name: "Create Token" }).click();
+      await expect(settingsRunnerPanel.getByRole("button", { name: "Creating…" })).toBeVisible();
+      await expect(settingsRunnerPanel.locator(".form-message").last()).toContainText(
+        "Registration token could not be created. Start the database and run migrations.",
+      );
+      await expect(settingsRunnerPanel).not.toContainText("postgres://");
+      await expect(settingsRunnerPanel).not.toContainText("agb_reg_should_not_render");
+      await page.unroute("**/api/runners/registration-tokens", registrationFailureRoute);
+
+      await settingsRunnerPanel.getByRole("button", { name: "Create Token" }).click();
+      const registrationSecret = settingsRunnerPanel
+        .locator(".visible-once-secret", { hasText: "Registration token" })
+        .first();
+      await expect(registrationSecret).toContainText("agb_reg_");
+      await expect(registrationSecret).toContainText("Expires");
+      const registrationToken = await registrationSecret.locator("code").innerText();
+      expect(registrationToken).toMatch(/^agb_reg_/);
+      await registrationSecret.getByRole("button", { name: "Dismiss" }).click();
+      await expect(settingsRunnerPanel).not.toContainText(registrationToken);
+
+      const managedRunnerItem = settingsRunnerPanel.locator(".manual-runner-item", {
+        hasText: `Manual Runner ${testInfo.project.name}`,
+      });
+      const rotateValidationRoute = async (route: Route) => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await route.fulfill({
+          contentType: "application/json",
+          status: 400,
+          body: JSON.stringify({
+            ok: false,
+            error: {
+              code: "validation_failed",
+              message: "agb_run_validation_leak should not render",
+            },
+          }),
+        });
+      };
+      await page.route("**/api/runners/*/credentials/rotate", rotateValidationRoute);
+      await managedRunnerItem.getByRole("button", { name: "Rotate Credential" }).click();
+      await expect(managedRunnerItem.getByRole("button", { name: "Rotating…" })).toBeVisible();
+      await expect(managedRunnerItem.locator(".form-message").last()).toContainText(
+        "Runner credential request was invalid.",
+      );
+      await expect(managedRunnerItem).not.toContainText("agb_run_validation_leak");
+      await page.unroute("**/api/runners/*/credentials/rotate", rotateValidationRoute);
+
+      const rotateDelayRoute = async (route: Route) => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await route.continue();
+      };
+      await page.route("**/api/runners/*/credentials/rotate", rotateDelayRoute);
+      await managedRunnerItem.getByRole("button", { name: "Rotate Credential" }).click();
+      await expect(managedRunnerItem.getByRole("button", { name: "Rotating…" })).toBeVisible();
+      const runnerCredentialSecret = managedRunnerItem
+        .locator(".visible-once-secret", { hasText: "Runner credential" })
+        .first();
+      await expect(runnerCredentialSecret).toContainText("agb_run_");
+      await expect(runnerCredentialSecret).toContainText("Rotated");
+      const rotatedCredential = await runnerCredentialSecret.locator("code").innerText();
+      expect(rotatedCredential).toMatch(/^agb_run_/);
+      await page.unroute("**/api/runners/*/credentials/rotate", rotateDelayRoute);
+      await expectRunnerHeartbeat(request, runner.id, oldRunnerCredential, 401);
+      await runnerCredentialSecret.getByRole("button", { name: "Dismiss" }).click();
+      await expect(managedRunnerItem).not.toContainText(rotatedCredential);
+
+      await managedRunnerItem.getByRole("button", { name: "Revoke Credential" }).click();
+      await expect(managedRunnerItem.locator(".form-message").last()).toContainText(
+        "Confirm revocation to stop this runner credential from authenticating.",
+      );
+      const revokeDelayRoute = async (route: Route) => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await route.continue();
+      };
+      await page.route("**/api/runners/*/credentials/revoke", revokeDelayRoute);
+      await managedRunnerItem.getByRole("button", { name: "Confirm Revoke" }).click();
+      await expect(managedRunnerItem.getByRole("button", { name: "Revoking…" })).toBeVisible();
+      await expect(managedRunnerItem.locator(".form-message").last()).toContainText(
+        "can no longer authenticate",
+      );
+      await page.unroute("**/api/runners/*/credentials/revoke", revokeDelayRoute);
+      await expectRunnerHeartbeat(request, runner.id, rotatedCredential, 401);
+      await expect(settingsRunnerPanel).not.toContainText("credentialHash");
+      await expect(settingsRunnerPanel).not.toContainText("tokenHash");
+      await expect(settingsRunnerPanel).not.toContainText("postgres://");
+
+      await page.reload();
+      await expect(settingsRunnerPanel).not.toContainText(registrationToken);
+      await expect(settingsRunnerPanel).not.toContainText(rotatedCredential);
+      await expect(settingsRunnerPanel).not.toContainText(oldRunnerCredential);
       await expectPageNotHorizontallyOverflowing(page);
     });
   } finally {
@@ -2502,6 +2609,33 @@ async function insertRunnerHeartbeat(
   });
 }
 
+async function insertRunnerCredential(
+  runnerId: string,
+  credential: string,
+  createdAt: string,
+): Promise<void> {
+  await withDatabase(async (sql) => {
+    await sql`
+      insert into runner_credentials (
+        runner_id,
+        credential_hash,
+        credential_prefix,
+        status,
+        created_at,
+        updated_at
+      )
+      values (
+        ${runnerId},
+        ${hashRunnerSecretForE2e(credential)},
+        ${credential.slice(0, 16)},
+        'active',
+        ${createdAt},
+        ${createdAt}
+      )
+    `;
+  });
+}
+
 async function insertManualRunnerLog(
   agentId: string,
   runnerId: string,
@@ -2786,6 +2920,47 @@ async function expectNotFoundPage(page: Page): Promise<void> {
   await expect(page.getByRole("heading", { name: "This page could not be found." })).toBeVisible();
 }
 
+async function expectRunnerHeartbeat(
+  request: APIRequestContext,
+  runnerId: string,
+  credential: string,
+  expectedStatus: number,
+): Promise<void> {
+  const response = await request.post("/runner/v1/heartbeat", {
+    headers: {
+      authorization: `Bearer ${credential}`,
+    },
+    data: {
+      runnerId,
+      status: "online",
+      version: "agentbay-runner/e2e",
+    },
+  });
+  const body = await response.json();
+
+  expect(response.status()).toBe(expectedStatus);
+
+  if (expectedStatus === 200) {
+    expect(body).toMatchObject({
+      ok: true,
+      runner: {
+        id: runnerId,
+        status: "online",
+      },
+    });
+    return;
+  }
+
+  expect(body).toEqual({
+    error: {
+      code: "runner_unauthorized",
+      message: "Runner credentials are invalid.",
+    },
+  });
+  expect(JSON.stringify(body)).not.toContain(credential);
+  expect(JSON.stringify(body)).not.toContain("credentialHash");
+}
+
 async function expectPageNotHorizontallyOverflowing(page: Page): Promise<void> {
   const dimensions = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
@@ -2809,4 +2984,8 @@ async function withDatabase<T>(run: (sql: postgres.Sql) => Promise<T>): Promise<
   } finally {
     await sql.end({ timeout: 5 });
   }
+}
+
+function hashRunnerSecretForE2e(value: string): string {
+  return createHash("sha256").update(value.trim(), "utf8").digest("hex");
 }
