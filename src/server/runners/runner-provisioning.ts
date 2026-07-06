@@ -189,7 +189,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now ?? (() => new Date());
-  const firewallName = DEFAULT_FIREWALL_NAME;
+  const firewallNamePrefix = DEFAULT_FIREWALL_NAME;
 
   try {
     const duplicate = await connection.db.transaction(async (tx) => {
@@ -307,7 +307,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
           sizeSlug: config.sizeSlug,
           image: config.image,
           tags: config.tags,
-          firewallName,
+          firewallNamePrefix,
         },
         now: createdAt,
       });
@@ -358,7 +358,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
           sizeSlug: config.sizeSlug,
           image: config.image,
           tags: config.tags,
-          firewallName,
+          firewallName: firewallNamePrefix,
           userData: bootstrap.userData,
         }),
     });
@@ -477,6 +477,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       };
     }
 
+    const firewallName = toRunnerFirewallName(resource.value.providerResourceId);
     const firewall = await runProviderStep(connection, {
       provider,
       runnerId,
@@ -486,6 +487,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       safeFailureMessage:
         "DigitalOcean firewall intent could not be applied. Check firewall permissions and Droplet state.",
       failureReason: "firewall_failed",
+      firewallName,
       now,
       execute: () =>
         provider.applyFirewall({
@@ -566,6 +568,7 @@ async function runProviderStep(
     completedMessage: string;
     safeFailureMessage: string;
     failureReason: DigitalOceanProviderErrorReason;
+    firewallName?: string;
     now: () => Date;
     execute: () => Promise<DigitalOceanProviderResult<DigitalOceanResource>>;
   },
@@ -603,6 +606,12 @@ async function runProviderStep(
   }
 
   if (!result.ok) {
+    logRunnerProvisioning("provider_step_failed", {
+      runnerId: input.runnerId,
+      phase: input.phase,
+      reason: result.reason,
+    });
+
     await failProvisioning(connection, {
       runnerId: input.runnerId,
       phase: input.phase,
@@ -637,7 +646,7 @@ async function runProviderStep(
     };
 
     if (input.phase === "firewall_configuring") {
-      metadata.firewallName = DEFAULT_FIREWALL_NAME;
+      metadata.firewallName = input.firewallName ?? DEFAULT_FIREWALL_NAME;
     }
 
     await recordProvisioningEvent(tx, {
@@ -740,6 +749,18 @@ async function resolveDigitalOceanPublicEndpoint(
 
 function publicIpv4ToSslipEndpoint(publicIpv4: string): string {
   return `https://${publicIpv4.replaceAll(".", "-")}.sslip.io`;
+}
+
+function toRunnerFirewallName(providerResourceId: string): string {
+  const suffix = providerResourceId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32)
+    .replace(/-+$/g, "");
+
+  return suffix ? `${DEFAULT_FIREWALL_NAME}-${suffix}` : DEFAULT_FIREWALL_NAME;
 }
 
 function normalizePublicIpv4(value: string | null): string | null {
@@ -852,6 +873,12 @@ async function cleanupFailedProvisioningResource(
   });
 
   if (cleanup.ok) {
+    logRunnerProvisioning("cleanup_completed", {
+      runnerId: input.runnerId,
+      providerResourceId: input.providerResourceId,
+      failedPhase: input.failedPhase,
+    });
+
     await connection.db.transaction(async (tx) => {
       const deletedAt = input.now();
       await tx
@@ -884,6 +911,13 @@ async function cleanupFailedProvisioningResource(
   }
 
   const message = manualCleanupMessage(input.providerResourceId);
+  logRunnerProvisioning("cleanup_failed", {
+    runnerId: input.runnerId,
+    providerResourceId: input.providerResourceId,
+    failedPhase: input.failedPhase,
+    reason: cleanup.reason,
+  });
+
   await connection.db.transaction(async (tx) => {
     const failedCleanupAt = input.now();
     await tx

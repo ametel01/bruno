@@ -95,7 +95,7 @@ describe.sequential("runner provisioning service", () => {
         step: "firewall",
         input: {
           providerResourceId: "droplet-1",
-          firewallName: "agentbay-runners",
+          firewallName: "agentbay-runners-droplet-1",
         },
       },
     ]);
@@ -145,7 +145,7 @@ describe.sequential("runner provisioning service", () => {
       )?.metadata,
     ).toMatchObject({
       firewallApplied: true,
-      firewallName: "agentbay-runners",
+      firewallName: "agentbay-runners-droplet-1",
     });
 
     const persistedTokens = await connection.db.select().from(runnerRegistrationTokens);
