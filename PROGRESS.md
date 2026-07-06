@@ -8,9 +8,9 @@
 
 ## Current Status
 
-- Status: Step 9 complete locally; live Vercel/DigitalOcean smoke is environment-blocked by missing secrets.
-- Active step: Milestone 13 local implementation complete; external smoke pending authorized deployment credentials.
-- Last updated: 2026-07-06 18:16:10 PST.
+- Status: Step 9 docs and local validation complete; live Vercel/DigitalOcean smoke remains environment-blocked.
+- Active step: Step 9 - run the required live Vercel/DigitalOcean smoke after the deployment env has all required secrets.
+- Last updated: 2026-07-06 18:19:02 PST.
 
 ## Step Checklist
 
@@ -23,7 +23,7 @@
 - [x] Step 6: Command Authentication for Cloud Runner Lifecycle Calls
 - [x] Step 7: Bootstrap Timeout, Failure State, and Cleanup Guidance
 - [x] Step 8: Production No-Runner Behavior and Agent Assignment UX
-- [x] Step 9: End-to-End Cloud Provisioning Smoke and Operator Docs
+- [ ] Step 9: End-to-End Cloud Provisioning Smoke and Operator Docs
 
 ## Update Rules
 
@@ -175,7 +175,7 @@
 - Commit: this step commit.
 - Next step: Step 9 - End-to-End Cloud Provisioning Smoke and Operator Docs.
 
-### 2026-07-06 18:16:10 PST - Step 9 complete locally
+### 2026-07-06 18:16:10 PST - Step 9 docs/local validation complete; live smoke blocked
 
 - Added DigitalOcean cloud runner operator documentation covering required Vercel env vars, optional provider defaults, provisioning phases, public HTTPS runner endpoint behavior, live smoke steps, and cleanup/failure triage.
 - Added commented DigitalOcean provisioning placeholders to `.env.example` without committing secrets.
@@ -187,8 +187,21 @@
   - Passed: `bun run test -- tests/unit/digitalocean-provider.test.ts tests/unit/runner-provisioning.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/runner-registration.test.ts tests/unit/runner-heartbeat.test.ts tests/unit/runner-service-bootstrap.test.ts tests/unit/runner-service.test.ts tests/unit/runner-placement.test.ts tests/unit/start-agent-route.test.ts tests/unit/create-agent-db.test.ts` (10 files, 174 tests)
   - Passed: `bun run build`
   - Passed: `bun run verify` (52 unit test files / 410 tests, production build, 44 Playwright tests passed with 20 expected skips)
-- Live smoke: environment-blocked. This shell is authenticated to Vercel as `ametel01`, but `VERCEL_TOKEN`, `AGENTBAY_DIGITALOCEAN_TOKEN`, `AGENTBAY_RUNNER_BEARER_TOKEN`, `DATABASE_URL`, and `NEXT_PUBLIC_APP_URL` are not set in the local environment, so the real Vercel/DigitalOcean smoke was not run from this checkout.
+- Live smoke: environment-blocked. This shell is authenticated to Vercel as `ametel01`, but `VERCEL_TOKEN`, `AGENTBAY_DIGITALOCEAN_TOKEN`, `AGENTBAY_RUNNER_BEARER_TOKEN`, `DATABASE_URL`, and `NEXT_PUBLIC_APP_URL` are not exported in the local environment, so the real Vercel/DigitalOcean smoke was not run from this checkout.
 - Smoke resource IDs: none. No DigitalOcean Droplet was created and no cleanup was required.
 - Changelog: no new entry added because this step changed operator documentation and env examples only; functional Milestone 13 behavior is already represented by the earlier `Added`, `Changed`, and `Fixed` entries.
 - Commit: this step commit.
 - Next step: provide authorized deployment secrets and run the documented live Vercel/DigitalOcean smoke, or accept the local implementation evidence as the Milestone 13 handoff gate.
+
+### 2026-07-06 18:19:02 PST - Step 9 live-smoke environment audit
+
+- Confirmed local uncommitted env files do not contain the required AgentBay DigitalOcean provisioning variable names:
+  - `.env` contains `DATABASE_URL`, `NEXT_PUBLIC_APP_URL`, and `DO_API_KEY`, but the application reads `AGENTBAY_DIGITALOCEAN_TOKEN`.
+  - `.env.local` contains `VERCEL_OIDC_TOKEN` only.
+- Confirmed Vercel project env names without reading secret values:
+  - Production has `DATABASE_URL`, `NEXT_PUBLIC_APP_URL`, `AGENTBAY_DIGITALOCEAN_TOKEN`, and `AGENTBAY_DIGITALOCEAN_SIZE_SLUG`.
+  - Production does not list `AGENTBAY_RUNNER_BEARER_TOKEN`, which is required when DigitalOcean provisioning is configured.
+  - Preview has `DATABASE_URL`, `NEXT_PUBLIC_APP_URL`, `AGENTBAY_RUNNER_BEARER_TOKEN`, `AGENTBAY_MANUAL_RUNNER_NAME`, and `AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL`.
+  - Preview does not list `AGENTBAY_DIGITALOCEAN_TOKEN`.
+- No deployment, secret mutation, Droplet creation, or cleanup was attempted.
+- Next step: add or authorize the missing deployment env vars for one target environment, deploy the current commit, then run the README live smoke and record deployment URL, Droplet ID, runner ID, smoke agent ID, and cleanup status here.
