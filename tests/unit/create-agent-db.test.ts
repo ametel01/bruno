@@ -966,6 +966,44 @@ describe("create agent persistence", () => {
     expect(calls).toEqual([`start:${created.agent.id}`, `logs:${created.agent.id}`]);
   });
 
+  it("does not fall back to the Docker lifecycle adapter in production when no online runner exists", async () => {
+    const previousVercel = process.env.VERCEL;
+
+    process.env.VERCEL = "1";
+
+    try {
+      const created = await createAgentForDevelopmentUser(
+        { name: "Production No Runner Agent", templateKey: "research_agent" },
+        { createConnection: () => connection },
+      );
+      const calls: string[] = [];
+
+      const result = await startAgentForDevelopmentUser(created.agent.id, {
+        createConnection: () => connection,
+        manualRunnerAdapter: () => createFailingLifecycleRunnerStub("manual should not run"),
+        runnerAdapter: createLifecycleRunnerStub(calls),
+      });
+      const [persistedAgent] = await connection.db
+        .select({ runnerId: agents.runnerId, status: agents.status })
+        .from(agents)
+        .where(eq(agents.id, created.agent.id))
+        .limit(1);
+
+      expect(result).toEqual({ ok: false, reason: "no_online_runner" });
+      expect(persistedAgent).toEqual({
+        runnerId: null,
+        status: "stopped",
+      });
+      expect(calls).toEqual([]);
+    } finally {
+      if (previousVercel === undefined) {
+        delete process.env.VERCEL;
+      } else {
+        process.env.VERCEL = previousVercel;
+      }
+    }
+  });
+
   it("excludes soft-deleted runners, soft-deleted agents, and other-user runners from assignment reads", async () => {
     const active = await createAgentForDevelopmentUser(
       { name: "Active Agent", templateKey: "research_agent" },

@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { toCloudRunnerProvisioningSummary } from "@/src/server/runners/cloud-runner-provisioning";
+import { eq } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import { appMetadata, runnerProvisioningEvents, runners, users } from "@/src/server/db/schema";
+import {
+  listCloudRunnerProvisioningSummariesForDevelopmentUser,
+  toCloudRunnerProvisioningSummary,
+} from "@/src/server/runners/cloud-runner-provisioning";
+import { DEVELOPMENT_USER_METADATA_KEY } from "@/src/server/users/development-user";
 
 describe("cloud runner provisioning summaries", () => {
   it("renders only safe persisted provisioning fields", () => {
@@ -119,3 +126,94 @@ describe("cloud runner provisioning summaries", () => {
     expect(JSON.stringify(summary)).not.toContain("token=");
   });
 });
+
+describe.sequential("cloud runner provisioning stale bootstrap reconciliation", () => {
+  let connection: DatabaseConnection;
+
+  beforeEach(async () => {
+    connection = createDatabaseConnection();
+    await resetTables(connection);
+  });
+
+  afterEach(async () => {
+    await resetTables(connection);
+    await connection.close();
+  });
+
+  it("marks stale waiting_for_runner rows failed when summaries are read", async () => {
+    const [user] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+    if (!user) {
+      throw new Error("User insert returned no rows.");
+    }
+
+    await connection.db.insert(appMetadata).values({
+      key: DEVELOPMENT_USER_METADATA_KEY,
+      value: user.id,
+    });
+    const [runner] = await connection.db
+      .insert(runners)
+      .values({
+        userId: user.id,
+        name: "Stale Cloud Runner",
+        kind: "digitalocean",
+        endpointUrl: "https://203-0-113-10.sslip.io",
+        status: "registering",
+        provider: "digitalocean",
+        providerResourceId: "do-droplet-154",
+        region: "sfo3",
+        sizeSlug: "s-1vcpu-512mb-10gb",
+        image: "ubuntu-24-04-x64",
+        provisioningStatus: "waiting_for_runner",
+        provisioningStartedAt: new Date("2026-07-06T01:00:00.000Z"),
+        createdAt: new Date("2026-07-06T01:00:00.000Z"),
+        updatedAt: new Date("2026-07-06T01:05:00.000Z"),
+      })
+      .returning({ id: runners.id });
+
+    const summaries = await listCloudRunnerProvisioningSummariesForDevelopmentUser({
+      createConnection: () => connection,
+      now: () => new Date("2026-07-06T02:30:00.000Z"),
+    } as Parameters<typeof listCloudRunnerProvisioningSummariesForDevelopmentUser>[0] & {
+      now: () => Date;
+    });
+    const [persistedRunner] = await connection.db
+      .select({
+        status: runners.status,
+        provisioningStatus: runners.provisioningStatus,
+        provisioningError: runners.provisioningError,
+      })
+      .from(runners)
+      .where(eq(runners.id, runner?.id ?? ""))
+      .limit(1);
+    const events = await connection.db.select().from(runnerProvisioningEvents);
+
+    expect(summaries[0]).toMatchObject({
+      readinessStatus: "failed",
+      provisioning: {
+        status: "failed",
+        error:
+          "Cloud runner bootstrap did not register before the timeout. Check Droplet cloud-init logs, confirm ports 80/443 are reachable, then delete the Droplet do-droplet-154 if it is not needed and create a new runner.",
+      },
+    });
+    expect(persistedRunner).toEqual({
+      status: "provision_failed",
+      provisioningStatus: "failed",
+      provisioningError:
+        "Cloud runner bootstrap did not register before the timeout. Check Droplet cloud-init logs, confirm ports 80/443 are reachable, then delete the Droplet do-droplet-154 if it is not needed and create a new runner.",
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        runnerId: runner?.id,
+        phase: "failed",
+        status: "failed",
+        message:
+          "Cloud runner bootstrap did not register before the timeout. Check Droplet cloud-init logs, confirm ports 80/443 are reachable, then delete the Droplet do-droplet-154 if it is not needed and create a new runner.",
+      }),
+    );
+  });
+});
+
+async function resetTables(connection: DatabaseConnection): Promise<void> {
+  await connection.client`truncate table runner_provisioning_events, runner_heartbeats, runner_credentials, runner_registration_tokens, runners, app_metadata, users restart identity cascade`;
+}

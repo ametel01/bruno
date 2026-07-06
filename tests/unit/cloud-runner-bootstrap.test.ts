@@ -50,6 +50,31 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).not.toContain("agb_run_1234567890123456789012345678901234567890123");
   });
 
+  it("rejects loopback runner endpoint URLs for cloud bootstrap registration", () => {
+    expect(() =>
+      buildCloudRunnerBootstrapContent({
+        appBaseUrl: "https://app.agentbay.test",
+        registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+        runnerEndpointUrl: "http://127.0.0.1:3045",
+        runnerName: "Cloud Runner 1",
+      }),
+    ).toThrow("runnerEndpointUrl must be a public HTTPS URL.");
+  });
+
+  it("configures an HTTPS reverse proxy for the public runner hostname", () => {
+    const content = buildCloudRunnerBootstrapContent({
+      appBaseUrl: "https://app.agentbay.test",
+      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      runnerEndpointUrl: "https://203-0-113-10.sslip.io",
+      runnerName: "Cloud Runner 1",
+    });
+
+    expect(content.userData).toContain("apt-get install -y caddy");
+    expect(content.userData).toContain("203-0-113-10.sslip.io");
+    expect(content.userData).toContain("reverse_proxy 127.0.0.1:3045");
+    expect(content.safeSummary.runnerEndpointUrl).toBe("https://203-0-113-10.sslip.io");
+  });
+
   it("redacts provider tokens, one-time registration tokens, and runner credentials from safe output", () => {
     const unsafeOutput = [
       "AGENTBAY_DIGITALOCEAN_TOKEN=dop_v1_super_secret",

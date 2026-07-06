@@ -26,6 +26,44 @@ describe("manual runner service HTTP contract", () => {
     });
   });
 
+  it("starts a continuous heartbeat loop when configured with runner identity", () => {
+    const starts: Array<{ runnerId: string; credential: string; appBaseUrl: string }> = [];
+
+    createRunnerService({
+      authToken: "test-token",
+      docker: new ManualRunnerDocker({
+        command: testCommand(),
+        docker: createMockDocker(),
+      }),
+      heartbeat: {
+        runnerId: "00000000-0000-4000-8000-000000000153",
+        credential: "agb_run_1234567890123456789012345678901234567890123",
+        appBaseUrl: "https://app.agentbay.test",
+        start(input: { runnerId: string; credential: string; appBaseUrl: string }) {
+          starts.push(input);
+          return { stop() {} };
+        },
+      },
+    } as Parameters<typeof createRunnerService>[0] & {
+      heartbeat: {
+        runnerId: string;
+        credential: string;
+        appBaseUrl: string;
+        start(input: { runnerId: string; credential: string; appBaseUrl: string }): {
+          stop(): void;
+        };
+      };
+    });
+
+    expect(starts).toEqual([
+      {
+        runnerId: "00000000-0000-4000-8000-000000000153",
+        credential: "agb_run_1234567890123456789012345678901234567890123",
+        appBaseUrl: "https://app.agentbay.test",
+      },
+    ]);
+  });
+
   it("rejects invalid agent IDs before invoking Docker", async () => {
     const calls: string[][] = [];
     const service = createTestService({ docker: createMockDocker({ calls }) });

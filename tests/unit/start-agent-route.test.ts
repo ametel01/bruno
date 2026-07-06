@@ -85,6 +85,28 @@ describe("POST /api/agents/[agentId]/actions/start route", () => {
     expect(JSON.stringify(body)).not.toContain("postgres://");
   });
 
+  it("returns a safe no-online-runner response when production start is blocked", async () => {
+    mocks.startAgentForDevelopmentUser.mockResolvedValueOnce({
+      ok: false,
+      reason: "no_online_runner",
+    });
+    const { POST } = await import("@/app/api/agents/[agentId]/actions/start/route");
+
+    const response = await POST(new Request("http://localhost/api/agents/start"), {
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body).toEqual({
+      error: {
+        code: "no_online_runner",
+        message: "No online runner is available yet.",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("postgres://");
+  });
+
   it("returns a safe plan-limit response when start is blocked", async () => {
     mocks.startAgentForDevelopmentUser.mockResolvedValueOnce({
       ok: false,

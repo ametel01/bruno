@@ -8,14 +8,14 @@
 
 ## Current Status
 
-- Status: Step 0 complete; Step 1 is next.
-- Active step: Step 1 - Baseline Characterization and Failing Tests.
-- Last updated: 2026-07-06 17:32:16 PST.
+- Status: Step 1 complete; Step 2 is next.
+- Active step: Step 2 - Public Droplet Endpoint and HTTPS Proxy Bootstrap.
+- Last updated: 2026-07-06 17:38:14 PST.
 
 ## Step Checklist
 
 - [x] Step 0: Progress and Changelog Tracking Setup
-- [ ] Step 1: Baseline Characterization and Failing Tests
+- [x] Step 1: Baseline Characterization and Failing Tests
 - [ ] Step 2: Public Droplet Endpoint and HTTPS Proxy Bootstrap
 - [ ] Step 3: Reliable Cheap-Droplet Bootstrap Runtime
 - [ ] Step 4: Durable Registration Credential Persistence
@@ -43,3 +43,23 @@
 - Changelog: no entry added because this step is tracking-only and ships no functional behavior.
 - Commit: this step commit.
 - Next step: Step 1 - Baseline Characterization and Failing Tests.
+
+### 2026-07-06 17:38:14 PST - Step 1 complete
+
+- Added failing characterization coverage for Milestone 13 cloud-runner gaps:
+  - cloud bootstrap must reject loopback public endpoints and configure a public HTTPS reverse proxy.
+  - provisioning must inject a public `sslip.io` runner endpoint instead of `http://127.0.0.1:3045`.
+  - stale `waiting_for_runner` rows must reconcile to a safe failed state with operator cleanup guidance.
+  - production start with no online runner must not fall back to local Docker.
+  - start route must return a safe `no_online_runner` error.
+  - runner bootstrap must persist exchanged runner ID and credential for restarts.
+  - runner service startup must start a continuous heartbeat loop when runner identity is configured.
+- Validation:
+  - Passed: `bun run format:check`
+  - Passed: `bun run lint`
+  - Passed: `bun run typecheck`
+  - Expected failure: `bun run test -- tests/unit/cloud-runner-bootstrap.test.ts tests/unit/runner-provisioning.test.ts tests/unit/runner-service-bootstrap.test.ts tests/unit/runner-service.test.ts tests/unit/runner-placement.test.ts tests/unit/start-agent-route.test.ts tests/unit/create-agent-db.test.ts tests/unit/cloud-runner-provisioning.test.ts`
+  - Expected red result: 8 failed assertions, 147 passed tests. Failures cover loopback endpoint acceptance, missing Caddy reverse proxy, stale bootstrap not failing, production Docker fallback, loopback provisioning user-data, missing credential env persistence, missing continuous heartbeat startup, and missing route mapping for `no_online_runner`.
+- Changelog: no entry added because characterization tests alone ship no functional behavior.
+- Commit: this step commit.
+- Next step: Step 2 - Public Droplet Endpoint and HTTPS Proxy Bootstrap.

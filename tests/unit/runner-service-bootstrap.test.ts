@@ -69,6 +69,57 @@ describe("runner service bootstrap registration", () => {
     });
   });
 
+  it("persists exchanged runner credentials for restart-safe bootstrap", async () => {
+    const writes: Array<{ path: string; content: string; mode: number }> = [];
+    const result = await bootstrapRegisteredRunner({
+      env: {
+        AGENTBAY_APP_URL: "https://app.agentbay.test",
+        AGENTBAY_RUNNER_REGISTRATION_TOKEN: "agb_reg_1234567890123456789012345678901234567890123",
+        AGENTBAY_RUNNER_ENDPOINT_URL: "https://runner.agentbay.test",
+        AGENTBAY_RUNNER_NAME: "Cloud Runner 1",
+        AGENTBAY_RUNNER_ENV_FILE: "/etc/agentbay/runner.env",
+      },
+      fetch: async (url) => {
+        if (String(url).endsWith("/runner/v1/register")) {
+          return Response.json(
+            {
+              ok: true,
+              runner: { id: "00000000-0000-4000-8000-000000000153" },
+              credential: {
+                token: "agb_run_1234567890123456789012345678901234567890123",
+                prefix: "agb_run_12345678",
+              },
+            },
+            { status: 201 },
+          );
+        }
+
+        return Response.json({ ok: true }, { status: 200 });
+      },
+      writeEnvFile: async (path: string, content: string, options: { mode: number }) => {
+        writes.push({ path, content, mode: options.mode });
+      },
+    } as Parameters<typeof bootstrapRegisteredRunner>[0] & {
+      writeEnvFile: (path: string, content: string, options: { mode: number }) => Promise<void>;
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      runnerId: "00000000-0000-4000-8000-000000000153",
+      status: "online",
+    });
+    expect(writes).toEqual([
+      {
+        path: "/etc/agentbay/runner.env",
+        mode: 0o600,
+        content: expect.stringContaining("AGENTBAY_RUNNER_ID=00000000-0000-4000-8000-000000000153"),
+      },
+    ]);
+    expect(writes[0]?.content).toContain(
+      "AGENTBAY_RUNNER_CREDENTIAL=agb_run_1234567890123456789012345678901234567890123",
+    );
+  });
+
   it("uses existing runner credentials when already registered", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const result = await bootstrapRegisteredRunner({

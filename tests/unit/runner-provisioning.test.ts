@@ -113,6 +113,14 @@ describe.sequential("runner provisioning service", () => {
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
+    ).toContain('AGENTBAY_RUNNER_ENDPOINT_URL="https://203-0-113-10.sslip.io"');
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
+    ).not.toContain('AGENTBAY_RUNNER_ENDPOINT_URL="http://127.0.0.1:3045"');
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
     ).toContain("ExecStartPre=/root/.bun/bin/bun run runner:bootstrap");
     expect(
       result.runner.provisioning.phases.find((event) => event.phase === "bootstrapping")?.metadata,
