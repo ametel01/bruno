@@ -244,7 +244,6 @@ export async function createManualBackupForDevelopmentUser(
         metadata: {
           backupId: updatedBackup.id,
           status: updatedBackup.status,
-          storageUri: updatedBackup.storageUri,
         },
       });
 
