@@ -214,18 +214,18 @@
 
 ## Milestone 14 One User, Multiple Agents
 
-- Status: #157 runner capacity and placement contract is in progress on `codex/issue-157-capacity-placement` after #156 merged.
+- Status: #158 capacity and plan enforcement is locally complete on `codex/issue-158-capacity-plan-limits`; checker handoff pending.
 - Source plan:
   - `docs/MILESTONES.md` Milestone 14: One User, Multiple Agents.
   - GitHub issue #156: Prepare Milestone 14 tracking and baseline gates.
   - `PLAN.md` is absent in this worktree; the published #156 issue body and `docs/MILESTONES.md` are the active Step 0 contract.
-- Current branch: `codex/issue-157-capacity-placement`.
+- Current branch: `codex/issue-158-capacity-plan-limits`.
 
 ### Issue Checklist
 
 - [x] #156 Prepare Milestone 14 tracking and baseline gates. Status: merged in PR #175.
-- [ ] #157 Add runner capacity snapshots and placement contract. Status: implementation and validation in progress.
-- [ ] #158 Enforce capacity and plan limits on create and start. Status: pending #156 baseline tracking.
+- [x] #157 Add runner capacity snapshots and placement contract. Status: merged in PR #176.
+- [x] #158 Enforce capacity and plan limits on create and start. Status: locally complete; checker handoff pending.
 - [ ] #159 Harden per-agent runtime and log isolation. Status: pending #156 baseline tracking.
 - [ ] #160 Show runner capacity in the operations UI. Status: pending #156 baseline tracking.
 - [ ] #161 Complete multi-agent runner acceptance evidence. Status: pending #156 baseline tracking and implementation slices.
@@ -238,6 +238,7 @@
 - Milestone 14 test expectations from `docs/MILESTONES.md`: placement tests for capacity available and unavailable, concurrency tests for simultaneous start requests, integration tests with multiple agents and separated logs, and UI tests for capacity display.
 - #156 is tracking-only. It initializes the Milestone 14 progress record, records baseline gate expectations, verifies changelog structure, and intentionally leaves `CHANGELOG.md` unchanged because no functional user/operator-visible behavior ships in this issue.
 - #157 adds a shared server-side runner placement contract that selects an eligible online runner for the development user, normalizes latest heartbeat metrics into stable snake_case capacity fields, combines heartbeat-reported running-agent count with assigned running agents from the database, and returns safe structured blockers for no runner, plan limit, and runner capacity cases.
+- #158 consumes the placement contract from agent create and lifecycle start: new agents persist an eligible online runner assignment when placement succeeds, create/start return safe plan-limit and runner-capacity blockers, and online runner starts reserve capacity under a PostgreSQL advisory lock before invoking the runner adapter so concurrent starts cannot overbook the final slot.
 - `CHANGELOG.md` has the Keep a Changelog 1.0.0 framing and an `## [Unreleased]` section. Agents should keep that structure and add changelog bullets only for shipped functional user/operator-visible changes.
 
 ### Baseline Gate Expectations
@@ -265,6 +266,7 @@
 - 2026-07-06: #156 confirmed `CHANGELOG.md` has Keep a Changelog 1.0.0 framing and `## [Unreleased]`; `CHANGELOG.md` is intentionally unchanged for #156 because this issue creates tracking only and ships no functional product behavior.
 - 2026-07-06: #156 recorded baseline gate expectations for `bun run verify`, `bun run test:e2e`, the local Postgres `DATABASE_URL`, and `NEXT_PUBLIC_APP_URL` before multi-agent runner work starts.
 - 2026-07-06: #157 added `src/server/runners/runner-placement.ts` with the shared capacity snapshot shape, metric normalization, capacity availability helper, and development-user placement selector; added focused tests for capacity available, capacity unavailable, no online runner, plan limit, and snake_case metric normalization.
+- 2026-07-06: #158 wired placement into `POST /api/agents` creation and lifecycle start, added transaction-aware runner placement reuse, added runner-capacity advisory locking for start reservations, preserved no-online-runner local fallback behavior, and added safe route responses for plan and capacity blockers.
 
 ### Validation Evidence
 
@@ -288,6 +290,22 @@
   - Final `bun run lint`: pass; Biome checked 136 files with no fixes applied.
   - `bun run format:check`: pass; Biome checked 136 files with no fixes applied.
   - `git diff --check`: pass; no whitespace errors.
+
+- 2026-07-06 #158:
+  - `gh issue view 158 --json title,body,labels,state`: pass; issue is open and maps Milestone 14 enforcement to PLAN Step 2 with create/start placement consumption, safe blockers, and concurrent-start protection.
+  - Initial `bun run typecheck`: environment failure before install; `tsc` was unavailable in the fresh issue worktree.
+  - `bun install --frozen-lockfile`: pass; installed committed dependencies from `bun.lock`.
+  - `bun run format`: pass; Biome formatted the touched app, server, and test files.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism tests/unit/runner-placement.test.ts tests/unit/create-agent-db.test.ts tests/unit/create-agent-route.test.ts tests/unit/start-agent-route.test.ts`: pass; 4 files and 131 tests covered placement, create assignment, safe create blockers, start reservation, start capacity blocking before adapter launch, concurrent final-slot starts, and route-safe 409 responses.
+  - `bun run format:check`: pass; Biome checked 136 files with no fixes applied.
+  - Initial `bun run lint`: warning for a type-only test import; fixed by making `AgentCreateBlockedError` a type import.
+  - `bun run lint`: pass; Biome checked 136 files with no fixes applied.
+  - `git diff --check`: pass; no whitespace errors.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: pass; Next.js production build completed and listed `/api/agents`, `/api/agents/:agentId/actions/start`, runner APIs, dashboard, agents, and settings routes.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism`: pass; 44 files and 359 tests passed.
+  - Checker fix cycle 2: checker found that assigned online-runner starts did not forward `planMaxAgents` into the placement check, while unassigned starts did. The assigned-runner branch now forwards the plan limit and preserves `plan_limit_reached` instead of collapsing it to capacity.
+  - Fix cycle 2 validation: `bun run format`, `bun run typecheck`, `bun run format:check`, `bun run lint`, and `git diff --check` pass. Focused suite `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism tests/unit/runner-placement.test.ts tests/unit/create-agent-db.test.ts tests/unit/create-agent-route.test.ts tests/unit/start-agent-route.test.ts` passes with 4 files and 132 tests, including an assigned-runner start plan-limit regression that proves no runner adapter launches.
 
 ## Milestone 12 Secure Runner Auth
 

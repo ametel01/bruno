@@ -1,4 +1,5 @@
 import {
+  AgentCreateBlockedError,
   AgentPersistenceError,
   createAgentForDevelopmentUser,
   validateCreateAgentPayload,
@@ -28,6 +29,10 @@ export async function POST(request: Request) {
       status: 201,
     });
   } catch (error) {
+    if (error instanceof AgentCreateBlockedError) {
+      return createBlockedResponse(error);
+    }
+
     if (error instanceof AgentPersistenceError) {
       return persistenceErrorResponse(error);
     }
@@ -47,6 +52,36 @@ function validationResponse(issues: Array<{ field: string; message: string }>) {
     },
     {
       status: 400,
+    },
+  );
+}
+
+function createBlockedResponse(error: AgentCreateBlockedError) {
+  if (error.reason === "plan_limit_reached") {
+    return Response.json(
+      {
+        error: {
+          code: "plan_limit_reached",
+          message: "Agent plan limit reached.",
+          currentAgents: error.currentAgents,
+          maxAgents: error.maxAgents,
+        },
+      },
+      {
+        status: 409,
+      },
+    );
+  }
+
+  return Response.json(
+    {
+      error: {
+        code: "runner_capacity_reached",
+        message: "Runner capacity reached.",
+      },
+    },
+    {
+      status: 409,
     },
   );
 }

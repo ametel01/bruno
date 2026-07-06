@@ -67,6 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Settings and dashboard cloud runner provisioning surfaces with a Create Runner action, safe persisted provider/phase/readiness details, online heartbeat visibility, and redacted actionable failure guidance.
 - Cloud runner assignment, failed-provision cleanup, and Milestone 13 operator evidence so online DigitalOcean runners can back assigned agents, owned failed Droplets are deleted where safe, and unsafe cleanup returns explicit manual instructions.
 - Runner capacity normalization and placement selection so Milestone 14 create/start enforcement and UI summaries can share max-agent, running-agent, CPU, memory, and disk capacity fields.
+- Agent creation and start now consume runner placement, assign eligible online runners, return safe plan/capacity blockers, and reserve runner capacity before start so concurrent starts cannot overbook the final slot.
 
 ### Fixed
 

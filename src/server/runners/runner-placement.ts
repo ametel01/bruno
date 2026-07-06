@@ -1,6 +1,8 @@
-import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agents, runnerHeartbeats, runners } from "@/src/server/db/schema";
+import type * as schema from "@/src/server/db/schema";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
 export const DEFAULT_RUNNER_MAX_AGENTS = 1;
@@ -69,6 +71,15 @@ export type RunnerPlacementResult =
       runner: RunnerPlacementSelection;
     };
 
+export type RunnerPlacementInput = {
+  planMaxAgents?: number | null | undefined;
+  runnerId?: string | null | undefined;
+};
+
+export type RunnerPlacementTransaction = Parameters<
+  Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
+>[0];
+
 export class RunnerPlacementPersistenceError extends Error {
   constructor() {
     super("Runner placement failed.");
@@ -77,9 +88,7 @@ export class RunnerPlacementPersistenceError extends Error {
 }
 
 export async function selectRunnerPlacementForDevelopmentUser(
-  input: {
-    planMaxAgents?: number | null;
-  } = {},
+  input: RunnerPlacementInput = {},
   dependencies: {
     createConnection?: () => DatabaseConnection;
   } = {},
@@ -88,112 +97,9 @@ export async function selectRunnerPlacementForDevelopmentUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
-    return await connection.db.transaction(async (tx) => {
-      const userId = await getDevelopmentUserId(tx);
-
-      if (!userId) {
-        return { ok: false, reason: "no_online_runner" } as const;
-      }
-
-      const activeAgentRows = await tx
-        .select({ id: agents.id })
-        .from(agents)
-        .where(and(eq(agents.userId, userId), isNull(agents.deletedAt)));
-      const planMaxAgents = normalizePlanMaxAgents(input.planMaxAgents);
-
-      if (planMaxAgents !== null && activeAgentRows.length >= planMaxAgents) {
-        return {
-          ok: false,
-          reason: "plan_limit_reached",
-          currentAgents: activeAgentRows.length,
-          maxAgents: planMaxAgents,
-        } as const;
-      }
-
-      const runnerRows = await tx
-        .select({
-          id: runners.id,
-          name: runners.name,
-          kind: runners.kind,
-          endpointUrl: runners.endpointUrl,
-          status: runners.status,
-          updatedAt: runners.updatedAt,
-        })
-        .from(runners)
-        .where(
-          and(
-            eq(runners.userId, userId),
-            eq(runners.status, "online"),
-            isNotNull(runners.endpointUrl),
-            isNull(runners.deletedAt),
-          ),
-        )
-        .orderBy(desc(runners.updatedAt), desc(runners.createdAt));
-
-      const candidates: RunnerPlacementSelection[] = [];
-
-      for (const row of runnerRows) {
-        if (!row.endpointUrl) {
-          continue;
-        }
-
-        const [latestHeartbeat] = await tx
-          .select({
-            status: runnerHeartbeats.status,
-            metadata: runnerHeartbeats.metadata,
-            observedAt: runnerHeartbeats.observedAt,
-          })
-          .from(runnerHeartbeats)
-          .where(eq(runnerHeartbeats.runnerId, row.id))
-          .orderBy(desc(runnerHeartbeats.observedAt))
-          .limit(1);
-        const assignedRunningAgents = await tx
-          .select({ id: agents.id })
-          .from(agents)
-          .where(
-            and(
-              eq(agents.runnerId, row.id),
-              eq(agents.userId, userId),
-              inArray(agents.status, [...RUNNER_PLACEMENT_AGENT_STATUSES]),
-              isNull(agents.deletedAt),
-            ),
-          );
-        const capacity = normalizeRunnerCapacitySnapshot(
-          latestHeartbeat?.metadata,
-          assignedRunningAgents.length,
-        );
-        const candidate = toRunnerPlacementSelection(
-          {
-            ...row,
-            endpointUrl: row.endpointUrl,
-            latestHeartbeat: latestHeartbeat ?? null,
-          },
-          capacity,
-        );
-
-        candidates.push(candidate);
-
-        if (hasAvailableRunnerCapacity(capacity)) {
-          return { ok: true, runner: candidate } as const;
-        }
-      }
-
-      if (candidates.length === 0) {
-        return { ok: false, reason: "no_online_runner" } as const;
-      }
-
-      const [firstCandidate] = candidates;
-
-      if (!firstCandidate) {
-        return { ok: false, reason: "no_online_runner" } as const;
-      }
-
-      return {
-        ok: false,
-        reason: "runner_capacity_reached",
-        runner: firstCandidate,
-      } as const;
-    });
+    return await connection.db.transaction((tx) =>
+      selectRunnerPlacementForDevelopmentUserInTransaction(tx, input),
+    );
   } catch {
     throw new RunnerPlacementPersistenceError();
   } finally {
@@ -201,6 +107,127 @@ export async function selectRunnerPlacementForDevelopmentUser(
       await connection.close();
     }
   }
+}
+
+export async function selectRunnerPlacementForDevelopmentUserInTransaction(
+  tx: RunnerPlacementTransaction,
+  input: RunnerPlacementInput = {},
+): Promise<RunnerPlacementResult> {
+  const userId = await getDevelopmentUserId(tx);
+
+  if (!userId) {
+    return { ok: false, reason: "no_online_runner" } as const;
+  }
+
+  const activeAgentRows = await tx
+    .select({ id: agents.id })
+    .from(agents)
+    .where(and(eq(agents.userId, userId), isNull(agents.deletedAt)));
+  const planMaxAgents = normalizePlanMaxAgents(input.planMaxAgents);
+
+  if (planMaxAgents !== null && activeAgentRows.length >= planMaxAgents) {
+    return {
+      ok: false,
+      reason: "plan_limit_reached",
+      currentAgents: activeAgentRows.length,
+      maxAgents: planMaxAgents,
+    } as const;
+  }
+
+  const runnerFilters = [
+    eq(runners.userId, userId),
+    eq(runners.status, "online"),
+    isNotNull(runners.endpointUrl),
+    isNull(runners.deletedAt),
+  ];
+
+  if (input.runnerId) {
+    runnerFilters.push(eq(runners.id, input.runnerId));
+  }
+
+  const runnerRows = await tx
+    .select({
+      id: runners.id,
+      name: runners.name,
+      kind: runners.kind,
+      endpointUrl: runners.endpointUrl,
+      status: runners.status,
+      updatedAt: runners.updatedAt,
+    })
+    .from(runners)
+    .where(and(...runnerFilters))
+    .orderBy(desc(runners.updatedAt), desc(runners.createdAt));
+
+  const candidates: RunnerPlacementSelection[] = [];
+
+  for (const row of runnerRows) {
+    if (!row.endpointUrl) {
+      continue;
+    }
+
+    const [latestHeartbeat] = await tx
+      .select({
+        status: runnerHeartbeats.status,
+        metadata: runnerHeartbeats.metadata,
+        observedAt: runnerHeartbeats.observedAt,
+      })
+      .from(runnerHeartbeats)
+      .where(eq(runnerHeartbeats.runnerId, row.id))
+      .orderBy(desc(runnerHeartbeats.observedAt))
+      .limit(1);
+    const assignedRunningAgents = await tx
+      .select({ id: agents.id })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.runnerId, row.id),
+          eq(agents.userId, userId),
+          inArray(agents.status, [...RUNNER_PLACEMENT_AGENT_STATUSES]),
+          isNull(agents.deletedAt),
+        ),
+      );
+    const capacity = normalizeRunnerCapacitySnapshot(
+      latestHeartbeat?.metadata,
+      assignedRunningAgents.length,
+    );
+    const candidate = toRunnerPlacementSelection(
+      {
+        ...row,
+        endpointUrl: row.endpointUrl,
+        latestHeartbeat: latestHeartbeat ?? null,
+      },
+      capacity,
+    );
+
+    candidates.push(candidate);
+
+    if (hasAvailableRunnerCapacity(capacity)) {
+      return { ok: true, runner: candidate } as const;
+    }
+  }
+
+  if (candidates.length === 0) {
+    return { ok: false, reason: "no_online_runner" } as const;
+  }
+
+  const [firstCandidate] = candidates;
+
+  if (!firstCandidate) {
+    return { ok: false, reason: "no_online_runner" } as const;
+  }
+
+  return {
+    ok: false,
+    reason: "runner_capacity_reached",
+    runner: firstCandidate,
+  } as const;
+}
+
+export async function lockRunnerPlacementCapacityInTransaction(
+  tx: RunnerPlacementTransaction,
+  runnerId: string,
+): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${runnerId}))`);
 }
 
 export function normalizeRunnerCapacitySnapshot(
