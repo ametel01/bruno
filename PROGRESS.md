@@ -214,22 +214,21 @@
 
 ## Milestone 14 One User, Multiple Agents
 
-- Status: #159 runtime and log isolation hardening is in progress on `codex/issue-159-runtime-log-isolation`.
+- Status: #161 final acceptance evidence is in progress on `codex/issue-161-m14-acceptance`.
 - Source plan:
   - `docs/MILESTONES.md` Milestone 14: One User, Multiple Agents.
   - GitHub issue #156: Prepare Milestone 14 tracking and baseline gates.
   - `PLAN.md` is absent in this worktree; the published #156 issue body and `docs/MILESTONES.md` are the active Step 0 contract.
-- Current branch: `codex/issue-159-runtime-log-isolation`.
+- Current branch: `codex/issue-161-m14-acceptance`.
 
 ### Issue Checklist
 
 - [x] #156 Prepare Milestone 14 tracking and baseline gates. Status: merged in PR #175.
 - [x] #157 Add runner capacity snapshots and placement contract. Status: merged in PR #176.
 - [x] #158 Enforce capacity and plan limits on create and start. Status: merged in PR #177.
-- [ ] #159 Harden per-agent runtime and log isolation. Status: implementation and validation in progress.
-- [ ] #160 Show runner capacity in the operations UI. Status: pending #156 baseline tracking.
-- [ ] #161 Complete multi-agent runner acceptance evidence. Status: pending #156 baseline tracking and implementation slices.
-- Later Milestone 14 issue agents must append validation evidence here after their implementation slices.
+- [x] #159 Harden per-agent runtime and log isolation. Status: merged in PR #178.
+- [x] #160 Show runner capacity in the operations UI. Status: merged in PR #179.
+- [ ] #161 Complete multi-agent runner acceptance evidence. Status: implementation and validation in progress.
 
 ### Current Status
 
@@ -240,6 +239,15 @@
 - #157 adds a shared server-side runner placement contract that selects an eligible online runner for the development user, normalizes latest heartbeat metrics into stable snake_case capacity fields, combines heartbeat-reported running-agent count with assigned running agents from the database, and returns safe structured blockers for no runner, plan limit, and runner capacity cases.
 - #158 consumes the placement contract from agent create and lifecycle start: new agents persist an eligible online runner assignment when placement succeeds, create/start return safe plan-limit and runner-capacity blockers, and online runner starts reserve capacity under a PostgreSQL advisory lock before invoking the runner adapter so concurrent starts cannot overbook the final slot.
 - #159 hardens Docker runner isolation by deriving a unique container-side config path per agent, while preserving the configured host config file; focused regressions prove three agents on one runner get distinct container names, labels, workspace paths, config paths, and bind mount strings, and stopping one Docker-backed agent does not mutate a sibling agent's status or runtime row.
+- #160 adds runner capacity rows to dashboard runner health, settings registered runners, and assigned-runner detail. These surfaces render compact running/max agent capacity, CPU/memory/disk metrics when reported, clean `Not reported` fallbacks when unknown, and runner-capacity blocker state without exposing raw heartbeat metadata keys or secrets.
+- #161 adds a focused database acceptance regression proving three agents can be created, assigned to one online runner, and started successfully before a fourth create is rejected by runner capacity.
+- Final Milestone 14 acceptance map:
+  - User can create three agents and start all on one runner: #161 `create-agent-db` regression creates three agents, starts all through the assigned online runner adapter, and verifies every persisted agent is `running` with the same `runner_id`.
+  - Stopping one agent does not affect the others: #159 Docker lifecycle regression proves stopping one Docker-backed agent leaves the sibling agent status and runtime row unchanged; the real-Docker acceptance smoke also verifies the sibling selected container remains running after stop/restart/delete paths.
+  - Logs stay separated by agent: #159 focused unit coverage proves Docker runtime metadata/log scoping and dashboard latest log identity; the existing real-Docker smoke verifies selected-agent log responses contain only that agent id and reject sibling ids.
+  - Runner capacity is visible and updates: #160 status summaries combine normalized heartbeat capacity with persisted assigned running-agent counts, and dashboard/settings/assigned-runner unit plus Playwright coverage assert `3 / 5 agents running` and resource metrics.
+  - Capacity and plan limits block excess starts or creates: #158 create/start placement tests cover plan-limit and runner-capacity create/start blockers, concurrent final-slot protection, and safe route responses; #161 adds the three-running-agents fourth-create capacity rejection.
+  - Test categories from `docs/MILESTONES.md`: #157 placement tests cover capacity available/unavailable; #158 covers concurrent start protection; #159 and #161 cover multi-agent integration and separated logs/status; #160 covers UI capacity display.
 - `CHANGELOG.md` has the Keep a Changelog 1.0.0 framing and an `## [Unreleased]` section. Agents should keep that structure and add changelog bullets only for shipped functional user/operator-visible changes.
 
 ### Baseline Gate Expectations
@@ -269,6 +277,8 @@
 - 2026-07-06: #157 added `src/server/runners/runner-placement.ts` with the shared capacity snapshot shape, metric normalization, capacity availability helper, and development-user placement selector; added focused tests for capacity available, capacity unavailable, no online runner, plan limit, and snake_case metric normalization.
 - 2026-07-06: #158 wired placement into `POST /api/agents` creation and lifecycle start, added transaction-aware runner placement reuse, added runner-capacity advisory locking for start reservations, preserved no-online-runner local fallback behavior, and added safe route responses for plan and capacity blockers.
 - 2026-07-06: #159 changed Docker run planning so `AGENTBAY_CONFIG_PATH` and the config bind-mount target include the agent id, added a three-agent run-plan isolation regression, and added a Docker stop regression that proves sibling status/runtime rows are untouched.
+- 2026-07-06: #160 exposed runner capacity in dashboard, settings, and assigned-runner surfaces, including compact running/max agent counts, resource metrics when available, unknown-metric fallbacks, and runner capacity blocker copy.
+- 2026-07-06: #161 added the final Milestone 14 acceptance map and a three-agent one-runner start regression that blocks a fourth create at runner capacity.
 
 ### Validation Evidence
 
@@ -322,6 +332,36 @@
   - `git diff --check`: pass; no whitespace errors.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: pass; Next.js production build completed and listed the existing app/API routes. The generated `next-env.d.ts` route-reference churn from build was restored before commit.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism`: pass; 44 files and 362 tests passed.
+
+- 2026-07-06 #160:
+  - `gh issue view 160 --repo ametel01/agentbay --json number,title,state,url,body,labels`: pass; issue mapped Milestone 14 runner capacity UI to compact running/max agents, CPU/memory/disk display, graceful unknown metrics, blocker copy, and focused UI/browser coverage.
+  - `bun install`: pass; installed committed dependencies in the fresh issue worktree.
+  - `bun run test tests/unit/manual-runner-status.test.ts`: pass; 1 file and 6 tests covered capacity summaries, assigned lifecycle counts, safe metadata omission, and settings management DTO shape.
+  - `bun run test tests/unit/root-page.test.tsx`: pass; 1 file and 28 tests covered dashboard/settings/assigned capacity rendering and unknown metric fallbacks.
+  - `bun run format:check`: pass; Biome checked 137 files with no fixes applied.
+  - `bun run lint`: pass; Biome checked 137 files with no fixes applied.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test tests/unit/runner-placement.test.ts`: pass; 1 file and 5 tests covered the shared capacity placement contract.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test tests/unit/create-agent-db.test.ts -t "assigns an active manual runner to an active agent and reads it by development user"`: pass; 1 focused DB test covered assigned runner reads after lifecycle placement.
+  - `bun run test:e2e -- --grep "manual runner status, alerts, and remote logs stay visible and safe"`: pass; Chromium desktop and mobile covered dashboard/settings/assigned capacity display, resource metrics, capacity blocker copy, and safe omission of secrets/raw metric keys.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: pass; Next.js production build completed.
+  - `git diff --check`: pass; no whitespace errors.
+  - Unscoped `bun run test` without env failed immediately because DB-backed tests require `DATABASE_URL` and `NEXT_PUBLIC_APP_URL`. An env-backed broad parallel `bun run test` later failed with shared Postgres truncate deadlocks/hook timeouts/FK fallout when DB-heavy suites ran in parallel; targeted affected DB suites passed in isolation.
+
+- 2026-07-06 #161:
+  - `gh issue view 161 --repo ametel01/agentbay --json number,title,state,url,body,labels`: pass; issue maps Milestone 14 final acceptance to three agents on one runner, isolated status/logs, capacity display updates, capacity/plan-limit blockers, and final progress evidence.
+  - `bun install --frozen-lockfile`: pass; installed committed dependencies in the fresh issue worktree.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism tests/unit/create-agent-db.test.ts -t "starts three agents on one runner and blocks a fourth create at capacity"`: pass; 1 focused test created three agents, started all on the same online runner, verified persisted running status/runner assignment, and rejected a fourth create with `runner_capacity_reached`.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism tests/unit/runner-placement.test.ts tests/unit/docker-runner-adapter.test.ts tests/unit/manual-runner-status.test.ts tests/unit/root-page.test.tsx`: pass; 4 files and 43 tests covered placement, Docker isolation, runner status summaries, and runner capacity UI rendering.
+  - `bun run format:check`: pass; Biome checked 137 files with no fixes applied.
+  - `bun run lint`: pass; Biome checked 137 files with no fixes applied.
+  - `bun run typecheck`: pass after simplifying the new test assertion to avoid sorting nullable runner ids; `tsc --noEmit` completed.
+  - `git diff --check`: pass; no whitespace errors.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism`: pass; 44 files and 363 tests passed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: pass; Next.js production build completed and listed the expected app/API routes. The generated `next-env.d.ts` route-reference churn from build was not kept in the diff.
+  - `PORT=3161 DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3161 bun run test:e2e -- --project=chromium-desktop --grep "manual runner status, alerts, and remote logs stay visible and safe"`: pass; 1 Chromium desktop smoke covered capacity display/resource metrics and safe runner surfaces. The run emitted the existing PostgreSQL advisory-unlock warning from shared test cleanup, but the test passed.
+  - `PORT=3162 DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3162 bun run test:e2e -- tests/e2e/root-route.spec.ts --project=chromium-desktop --grep "Docker runner final acceptance" --workers=1`: pass; 1 Chromium desktop smoke covered selected Docker container isolation, restart/stop/delete sibling safety, scoped logs, crash reconciliation, and fail-closed cleanup.
+  - `CHANGELOG.md` is intentionally unchanged for #161 because this issue adds final acceptance evidence and regression coverage, not a new user/operator-visible product behavior beyond the already merged #157-#160 slices.
 
 ## Milestone 12 Secure Runner Auth
 
