@@ -8,9 +8,9 @@
 
 ## Current Status
 
-- Status: Step 4 complete; Step 5 is next.
-- Active step: Step 5 - Continuous Runner Heartbeat and Capacity Metrics.
-- Last updated: 2026-07-06 17:54:19 PST.
+- Status: Step 5 complete; Step 6 is next.
+- Active step: Step 6 - Command Authentication for Cloud Runner Lifecycle Calls.
+- Last updated: 2026-07-06 17:57:41 PST.
 
 ## Step Checklist
 
@@ -19,7 +19,7 @@
 - [x] Step 2: Public Droplet Endpoint and HTTPS Proxy Bootstrap
 - [x] Step 3: Reliable Cheap-Droplet Bootstrap Runtime
 - [x] Step 4: Durable Registration Credential Persistence
-- [ ] Step 5: Continuous Runner Heartbeat and Capacity Metrics
+- [x] Step 5: Continuous Runner Heartbeat and Capacity Metrics
 - [ ] Step 6: Command Authentication for Cloud Runner Lifecycle Calls
 - [ ] Step 7: Bootstrap Timeout, Failure State, and Cleanup Guidance
 - [ ] Step 8: Production No-Runner Behavior and Agent Assignment UX
@@ -109,3 +109,19 @@
 - Changelog: added one `Fixed` entry for cloud runner registration surviving restarts.
 - Commit: this step commit.
 - Next step: Step 5 - Continuous Runner Heartbeat and Capacity Metrics.
+
+### 2026-07-06 17:57:41 PST - Step 5 complete
+
+- Added a runner-service heartbeat loop that sends an immediate startup heartbeat and interval heartbeats to `/runner/v1/heartbeat`.
+- Wired the Bun runner service entrypoint to start the heartbeat loop when `AGENTBAY_APP_URL`, `AGENTBAY_RUNNER_ID`, and `AGENTBAY_RUNNER_CREDENTIAL` are present in the env file environment.
+- Heartbeat payloads include `online` status, `agentbay-runner/service` version, and capacity metrics compatible with existing placement normalization.
+- Validation:
+  - Passed: `bun run format:check`
+  - Passed: `bun run lint`
+  - Passed: `bun run typecheck`
+  - Passed: `bun run test -- tests/unit/runner-service.test.ts tests/unit/runner-heartbeat.test.ts tests/unit/runner-placement.test.ts`
+  - Expected pending Step 7 failure: `bun run test -- tests/unit/runner-service.test.ts tests/unit/runner-heartbeat.test.ts tests/unit/runner-placement.test.ts tests/unit/cloud-runner-provisioning.test.ts` still fails only on stale `waiting_for_runner` timeout reconciliation.
+  - Passed: `bun run build`
+- Changelog: added one `Added` entry for continuous runner heartbeat and capacity metrics.
+- Commit: this step commit.
+- Next step: Step 6 - Command Authentication for Cloud Runner Lifecycle Calls.

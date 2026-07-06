@@ -64,6 +64,52 @@ describe("manual runner service HTTP contract", () => {
     ]);
   });
 
+  it("sends startup heartbeat payloads with capacity metrics without requiring Docker calls", async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const service = createRunnerService({
+      authToken: "test-token",
+      docker: new ManualRunnerDocker({
+        command: testCommand(),
+        docker: createMockDocker(),
+      }),
+      heartbeat: {
+        runnerId: "00000000-0000-4000-8000-000000000153",
+        credential: "agb_run_1234567890123456789012345678901234567890123",
+        appBaseUrl: "https://app.agentbay.test/",
+        intervalMs: 60_000,
+        maxAgents: 5,
+        fetch: async (url, init) => {
+          requests.push({ url: String(url), init: init ?? {} });
+          return Response.json({ ok: true });
+        },
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    service.heartbeatLoop?.stop();
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      url: "https://app.agentbay.test/runner/v1/heartbeat",
+      init: {
+        method: "POST",
+        headers: {
+          authorization: "Bearer agb_run_1234567890123456789012345678901234567890123",
+          "content-type": "application/json",
+        },
+      },
+    });
+    expect(JSON.parse(String(requests[0]?.init.body))).toEqual({
+      runnerId: "00000000-0000-4000-8000-000000000153",
+      status: "online",
+      version: "agentbay-runner/service",
+      metrics: {
+        maxAgents: 5,
+        runningAgents: 0,
+      },
+    });
+  });
+
   it("rejects invalid agent IDs before invoking Docker", async () => {
     const calls: string[][] = [];
     const service = createTestService({ docker: createMockDocker({ calls }) });

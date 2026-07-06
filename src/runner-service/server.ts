@@ -8,13 +8,29 @@ type RunnerAction = "start" | "stop" | "restart" | "status" | "logs";
 export type RunnerServiceOptions = {
   authToken?: string;
   docker?: Pick<ManualRunnerDocker, RunnerAction>;
+  heartbeat?: RunnerHeartbeatLoopOptions;
 };
+
+export type RunnerHeartbeatLoopOptions = {
+  appBaseUrl: string;
+  credential: string;
+  intervalMs?: number;
+  maxAgents?: number;
+  runnerId: string;
+  start?: (input: { appBaseUrl: string; credential: string; runnerId: string }) => { stop(): void };
+  fetch?: typeof fetch;
+};
+
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
+const DEFAULT_RUNNER_MAX_AGENTS = 3;
 
 export function createRunnerService(options: RunnerServiceOptions = {}) {
   const docker = options.docker ?? new ManualRunnerDocker();
   const authToken = options.authToken ?? process.env[RUNNER_TOKEN_ENV]?.trim();
+  const heartbeatLoop = options.heartbeat ? startRunnerHeartbeatLoop(options.heartbeat) : null;
 
   return {
+    heartbeatLoop,
     fetch: async (request: Request): Promise<Response> => {
       const authFailure = authenticateRequest(request, authToken);
 
@@ -51,6 +67,61 @@ export function createRunnerService(options: RunnerServiceOptions = {}) {
       } catch {
         return jsonError(502, "docker_command_failed", "Runner Docker command failed.");
       }
+    },
+  };
+}
+
+export function startRunnerHeartbeatLoop(options: RunnerHeartbeatLoopOptions): { stop(): void } {
+  const customStartInput = {
+    appBaseUrl: options.appBaseUrl,
+    credential: options.credential,
+    runnerId: options.runnerId,
+  };
+
+  if (options.start) {
+    return options.start(customStartInput);
+  }
+
+  let stopped = false;
+  const fetchImplementation = options.fetch ?? fetch;
+  const intervalMs = options.intervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+
+  async function sendHeartbeat() {
+    if (stopped) {
+      return;
+    }
+
+    try {
+      await fetchImplementation(`${normalizeBaseUrl(options.appBaseUrl)}/runner/v1/heartbeat`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${options.credential}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          runnerId: options.runnerId,
+          status: "online",
+          version: "agentbay-runner/service",
+          metrics: {
+            maxAgents: normalizePositiveInteger(options.maxAgents, DEFAULT_RUNNER_MAX_AGENTS),
+            runningAgents: 0,
+          },
+        }),
+      });
+    } catch {
+      // Heartbeat failures should not terminate the command server.
+    }
+  }
+
+  void sendHeartbeat();
+  const interval = setInterval(() => {
+    void sendHeartbeat();
+  }, intervalMs);
+
+  return {
+    stop() {
+      stopped = true;
+      clearInterval(interval);
     },
   };
 }
@@ -114,4 +185,12 @@ function jsonError(
       ...(headers ? { headers } : {}),
     },
   );
+}
+
+function normalizeBaseUrl(value: string): string {
+  return new URL(value).toString().replace(/\/$/, "");
+}
+
+function normalizePositiveInteger(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
 }
