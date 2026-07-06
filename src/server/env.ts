@@ -2,9 +2,12 @@ import "server-only";
 
 import { EnvValidationError, validateRequiredEnv } from "@/src/env/validation";
 
+export const DEFAULT_AGENTBAY_RUNNER_IMAGE = "ghcr.io/ametel01/agentbay-runner:main";
+
 export type DigitalOceanProviderConfig = {
   token: string;
   runnerBearerToken: string;
+  runnerImage: string;
   region: string;
   sizeSlug: string;
   image: string;
@@ -43,6 +46,10 @@ export function readDigitalOceanProviderConfig(
   return {
     token,
     runnerBearerToken,
+    runnerImage: readNonEmptyProviderSetting(input.AGENTBAY_RUNNER_IMAGE, {
+      envName: "AGENTBAY_RUNNER_IMAGE",
+      defaultValue: DEFAULT_AGENTBAY_RUNNER_IMAGE,
+    }),
     region: readNonEmptyProviderSetting(input.AGENTBAY_DIGITALOCEAN_REGION, {
       envName: "AGENTBAY_DIGITALOCEAN_REGION",
       defaultValue: "sfo3",

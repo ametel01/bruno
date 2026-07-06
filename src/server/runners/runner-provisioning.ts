@@ -255,6 +255,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       region: config.region,
       sizeSlug: config.sizeSlug,
       image: config.image,
+      runnerImage: config.runnerImage,
       tagCount: config.tags.length,
       hasRunnerBearerToken: Boolean(config.runnerBearerToken),
       sshKeyMode:
@@ -313,6 +314,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
         region: config.region,
         sizeSlug: config.sizeSlug,
         image: config.image,
+        runnerImage: config.runnerImage,
       });
 
       const registrationToken = createRegistrationTokenDependency();
@@ -346,6 +348,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
           region: config.region,
           sizeSlug: config.sizeSlug,
           image: config.image,
+          runnerImage: config.runnerImage,
           tags: config.tags,
           firewallNamePrefix,
         },
@@ -407,6 +410,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       runnerName: initialized.runner.name,
       registrationToken: initialized.registrationToken,
       commandBearerToken: config.runnerBearerToken,
+      runnerImage: config.runnerImage,
       sizeSlug: initialized.runner.sizeSlug,
       now,
     });
@@ -420,6 +424,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
         "DigitalOcean Droplet could not be created. Check provider quota, image, region, and token permissions.",
       failureReason: "create_failed",
       startedMetadata: {
+        runnerImage: config.runnerImage,
         sshKeyCount: sshAccess.sshKeyIds.length,
       },
       now,
@@ -907,6 +912,7 @@ async function buildProvisioningBootstrap(input: {
   runnerName: string;
   registrationToken: string;
   commandBearerToken: string;
+  runnerImage: string;
   sizeSlug: string;
   now: () => Date;
 }): Promise<CloudRunnerBootstrapContent> {
@@ -918,6 +924,7 @@ async function buildProvisioningBootstrap(input: {
       appBaseUrl,
       registrationToken: input.registrationToken,
       commandBearerToken: input.commandBearerToken,
+      runnerImage: input.runnerImage,
       endpointDiscovery: { type: "digitalocean_metadata" },
       enableSwap: LOW_MEMORY_DIGITALOCEAN_SIZE_SLUGS.has(input.sizeSlug),
       runnerName: input.runnerName,
