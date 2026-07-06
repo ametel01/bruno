@@ -48,6 +48,7 @@ import {
   MANUAL_RUNNER_KIND,
   type ManualRunnerRecord,
 } from "@/src/server/runners/manual-runner-persistence";
+import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
 import type { RunnerAdapter as RunnerAdapterContract } from "@/src/server/runners/runner-adapter";
 
 export type AgentLifecycleStatus = (typeof agentStatusEnum.enumValues)[number];
@@ -63,6 +64,8 @@ export const SIMULATE_ERROR_AGENT_STATUSES = [
   "restarting",
 ] as const;
 export const DELETABLE_AGENT_STATUSES = ["idle", "running", "stopped", "error"] as const;
+const ASSIGNABLE_LIFECYCLE_RUNNER_KINDS = [MANUAL_RUNNER_KIND, DIGITALOCEAN_RUNNER_KIND] as const;
+const ASSIGNABLE_LIFECYCLE_RUNNER_STATUSES = [ACTIVE_RUNNER_STATUS, "online"] as const;
 export const START_REQUESTED_EVENT_TYPE = "agent.start_requested";
 export const START_COMPLETED_EVENT_TYPE = "agent.start_completed";
 export const STOP_REQUESTED_EVENT_TYPE = "agent.stop_requested";
@@ -399,8 +402,8 @@ export async function startAgentForDevelopmentUser(
           and(
             eq(runners.id, agents.runnerId),
             eq(runners.userId, agents.userId),
-            eq(runners.kind, MANUAL_RUNNER_KIND),
-            eq(runners.status, ACTIVE_RUNNER_STATUS),
+            inArray(runners.kind, [...ASSIGNABLE_LIFECYCLE_RUNNER_KINDS]),
+            inArray(runners.status, [...ASSIGNABLE_LIFECYCLE_RUNNER_STATUSES]),
             isNull(runners.deletedAt),
           ),
         )
@@ -544,8 +547,8 @@ export async function stopAgentForDevelopmentUser(
           and(
             eq(runners.id, agents.runnerId),
             eq(runners.userId, agents.userId),
-            eq(runners.kind, MANUAL_RUNNER_KIND),
-            eq(runners.status, ACTIVE_RUNNER_STATUS),
+            inArray(runners.kind, [...ASSIGNABLE_LIFECYCLE_RUNNER_KINDS]),
+            inArray(runners.status, [...ASSIGNABLE_LIFECYCLE_RUNNER_STATUSES]),
             isNull(runners.deletedAt),
           ),
         )
@@ -685,8 +688,8 @@ export async function restartAgentForDevelopmentUser(
           and(
             eq(runners.id, agents.runnerId),
             eq(runners.userId, agents.userId),
-            eq(runners.kind, MANUAL_RUNNER_KIND),
-            eq(runners.status, ACTIVE_RUNNER_STATUS),
+            inArray(runners.kind, [...ASSIGNABLE_LIFECYCLE_RUNNER_KINDS]),
+            inArray(runners.status, [...ASSIGNABLE_LIFECYCLE_RUNNER_STATUSES]),
             isNull(runners.deletedAt),
           ),
         )
@@ -1304,9 +1307,9 @@ function toManualRunnerRecordOrNull(
     !row?.id ||
     !row.userId ||
     !row.name ||
-    row.kind !== MANUAL_RUNNER_KIND ||
+    !isAssignableRunnerKind(row.kind) ||
     !row.endpointUrl ||
-    row.status !== ACTIVE_RUNNER_STATUS ||
+    !isAssignableRunnerStatus(row.status) ||
     !row.createdAt ||
     !row.updatedAt
   ) {
@@ -1317,13 +1320,25 @@ function toManualRunnerRecordOrNull(
     id: row.id,
     userId: row.userId,
     name: row.name,
-    kind: MANUAL_RUNNER_KIND,
+    kind: row.kind,
     endpointUrl: row.endpointUrl,
-    status: ACTIVE_RUNNER_STATUS,
+    status: row.status,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     deletedAt: row.deletedAt?.toISOString() ?? null,
   };
+}
+
+function isAssignableRunnerKind(
+  kind: string | null,
+): kind is typeof MANUAL_RUNNER_KIND | typeof DIGITALOCEAN_RUNNER_KIND {
+  return kind === MANUAL_RUNNER_KIND || kind === DIGITALOCEAN_RUNNER_KIND;
+}
+
+function isAssignableRunnerStatus(
+  status: string | null,
+): status is typeof ACTIVE_RUNNER_STATUS | "online" {
+  return status === ACTIVE_RUNNER_STATUS || status === "online";
 }
 
 function toStartedAgent(agent: typeof agents.$inferSelect): StartedAgent {

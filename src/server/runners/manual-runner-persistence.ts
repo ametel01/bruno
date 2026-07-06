@@ -1,10 +1,11 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { validateManualRunnerEndpointUrl } from "@/src/env/validation";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agents, runners } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
+import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
 import {
   getDevelopmentUserId,
   getOrCreateDevelopmentUserId,
@@ -13,14 +14,15 @@ import {
 export const DEFAULT_MANUAL_RUNNER_NAME = "Manual VPS Runner";
 export const MANUAL_RUNNER_KIND = "manual_vps";
 export const ACTIVE_RUNNER_STATUS = "active";
+const ASSIGNABLE_RUNNER_STATUSES = [ACTIVE_RUNNER_STATUS, "online"] as const;
 
 export type ManualRunnerRecord = {
   id: string;
   userId: string;
   name: string;
-  kind: typeof MANUAL_RUNNER_KIND;
+  kind: typeof MANUAL_RUNNER_KIND | typeof DIGITALOCEAN_RUNNER_KIND;
   endpointUrl: string;
-  status: typeof ACTIVE_RUNNER_STATUS | "inactive";
+  status: (typeof ASSIGNABLE_RUNNER_STATUSES)[number] | "inactive" | "offline" | "degraded";
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
@@ -144,7 +146,8 @@ export async function assignRunnerToActiveAgentForDevelopmentUser(
           and(
             eq(runners.id, normalizedRunnerId),
             eq(runners.userId, userId),
-            eq(runners.status, ACTIVE_RUNNER_STATUS),
+            inArray(runners.status, [...ASSIGNABLE_RUNNER_STATUSES]),
+            isNotNull(runners.endpointUrl),
             isNull(runners.deletedAt),
           ),
         )
@@ -231,7 +234,8 @@ export async function getAssignedRunnerForActiveAgentDevelopmentUser(
             eq(agents.userId, userId),
             isNull(agents.deletedAt),
             eq(runners.userId, userId),
-            eq(runners.status, ACTIVE_RUNNER_STATUS),
+            inArray(runners.status, [...ASSIGNABLE_RUNNER_STATUSES]),
+            isNotNull(runners.endpointUrl),
             isNull(runners.deletedAt),
           ),
         )
@@ -327,11 +331,21 @@ function toManualRunnerRecord(
     id: row.id,
     userId: row.userId,
     name: row.name,
-    kind: row.kind as typeof MANUAL_RUNNER_KIND,
+    kind: toAssignableRunnerKind(row.kind),
     endpointUrl: row.endpointUrl,
     status: row.status as ManualRunnerRecord["status"],
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     deletedAt: row.deletedAt?.toISOString() ?? null,
   };
+}
+
+function toAssignableRunnerKind(
+  kind: string,
+): typeof MANUAL_RUNNER_KIND | typeof DIGITALOCEAN_RUNNER_KIND {
+  if (kind === DIGITALOCEAN_RUNNER_KIND) {
+    return DIGITALOCEAN_RUNNER_KIND;
+  }
+
+  return MANUAL_RUNNER_KIND;
 }

@@ -856,7 +856,7 @@ describe("product shell routes", () => {
       assignmentNotice: "This agent is assigned to Remote Runner.",
       alertState: "offline",
       alertMessage:
-        "Assigned manual runner is inactive or unreachable. Check the runner host and service before restarting work.",
+        "Assigned runner is inactive or unreachable. Check the runner host and service before restarting work.",
     });
 
     const element = await AgentDetailPage({
@@ -874,7 +874,7 @@ describe("product shell routes", () => {
     expect(html).toContain("2026-07-05T01:31:00.000Z");
     expect(html).toContain("2026-07-05T01:30:00.000Z");
     expect(html).toContain("Runner is offline");
-    expect(html).toContain("Assigned manual runner is inactive or unreachable.");
+    expect(html).toContain("Assigned runner is inactive or unreachable.");
     expect(html).not.toContain("runnerId");
     expect(html).not.toContain("runner_id");
     expect(html).not.toContain("00000000-0000-4000-8000-000000000901");
@@ -885,6 +885,41 @@ describe("product shell routes", () => {
     expect(html).not.toContain("credentialHash");
     expect(html).not.toContain("tokenHash");
     expect(html).not.toContain("cpuPercent");
+  });
+
+  it("renders assigned cloud runner details safely", async () => {
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
+    mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockResolvedValueOnce({
+      name: "Provisioned Cloud Runner",
+      kind: "digitalocean",
+      endpointHost: "cloud-runner.example.com",
+      status: "online",
+      version: "agentbay-runner/3.0.0",
+      lastSeenAt: "2026-07-06T01:31:00.000Z",
+      updatedAt: "2026-07-06T01:30:00.000Z",
+      assignmentNotice: "This agent is assigned to Provisioned Cloud Runner.",
+      alertState: null,
+      alertMessage: null,
+    });
+
+    const element = await AgentDetailPage({
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+    });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Assigned runner");
+    expect(html).toContain("Provisioned Cloud Runner");
+    expect(html).toContain("digitalocean");
+    expect(html).toContain("cloud-runner.example.com");
+    expect(html).toContain("online");
+    expect(html).toContain("agentbay-runner/3.0.0");
+    expect(html).not.toContain("runnerId");
+    expect(html).not.toContain("registrationToken");
+    expect(html).not.toContain("agb_reg_");
+    expect(html).not.toContain("agb_run_");
+    expect(html).not.toContain("credentialHash");
+    expect(html).not.toContain("tokenHash");
+    expect(html).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN");
   });
 
   it("renders persisted pending approvals on the agent detail page without raw payload details", async () => {
