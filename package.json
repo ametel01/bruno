@@ -22,6 +22,8 @@
     "verify": "bun run format:check && bun run lint && bun run typecheck && bun run test && bun run build && bun run test:e2e"
   },
   "dependencies": {
+    "@digitalocean/dots": "^1.17.0",
+    "@microsoft/kiota-http-fetchlibrary": "^1.0.0-preview.103",
     "drizzle-orm": "^0.45.2",
     "next": "16.2.10",
     "postgres": "^3.4.9",

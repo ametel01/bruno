@@ -35,7 +35,7 @@ export function readDigitalOceanProviderConfig(
     }),
     sizeSlug: readNonEmptyProviderSetting(input.AGENTBAY_DIGITALOCEAN_SIZE_SLUG, {
       envName: "AGENTBAY_DIGITALOCEAN_SIZE_SLUG",
-      defaultValue: "s-1vcpu-1gb",
+      defaultValue: "s-1vcpu-512mb-10gb",
     }),
     image: readNonEmptyProviderSetting(input.AGENTBAY_DIGITALOCEAN_IMAGE, {
       envName: "AGENTBAY_DIGITALOCEAN_IMAGE",

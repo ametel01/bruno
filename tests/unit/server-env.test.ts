@@ -10,6 +10,17 @@ describe("server-only provider environment validation", () => {
   });
 
   it("validates DigitalOcean token and non-secret provisioning defaults on the server path", () => {
+    expect(
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+      }),
+    ).toMatchObject({
+      region: "sfo3",
+      sizeSlug: "s-1vcpu-512mb-10gb",
+      image: "ubuntu-24-04-x64",
+      tags: ["agentbay", "agentbay-runner"],
+    });
+
     const config = readDigitalOceanProviderConfig({
       AGENTBAY_DIGITALOCEAN_TOKEN: " dop_v1_test_token ",
       AGENTBAY_DIGITALOCEAN_REGION: " nyc3 ",

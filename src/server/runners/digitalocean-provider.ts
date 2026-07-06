@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createDigitalOceanSdkClient } from "@/src/server/runners/digitalocean-sdk-runtime";
+
 export const DIGITALOCEAN_PROVIDER = "digitalocean";
 export const DIGITALOCEAN_RUNNER_KIND = "digitalocean";
 
@@ -99,40 +101,99 @@ export type FakeDigitalOceanProviderOptions = {
 
 export type DigitalOceanApiProviderOptions = {
   token: string;
-  fetch?: typeof fetch;
+  client?: DigitalOceanSdkClient;
   apiBaseUrl?: string;
   now?: () => Date;
 };
 
+export type DigitalOceanSdkClient = {
+  v2: {
+    droplets: {
+      post(
+        body: DigitalOceanDropletCreateBody,
+      ): Promise<DigitalOceanDropletCreateResponse | undefined>;
+      byDroplet_id(id: number): { delete(): Promise<void> };
+    };
+    firewalls: {
+      post(body: DigitalOceanFirewallBody): Promise<DigitalOceanFirewallCreateResponse | undefined>;
+    };
+    tags: {
+      byTag_id(tag: string): {
+        resources: {
+          post(body: DigitalOceanTagResourceBody): Promise<void>;
+        };
+      };
+    };
+  };
+};
+
+type DigitalOceanDropletCreateBody = {
+  name?: string | null;
+  region?: string | null;
+  size?: string | null;
+  image?: number | string | null;
+  tags?: string[] | null;
+  monitoring?: boolean | null;
+  sshKeys?: string[] | null;
+  userData?: string | null;
+};
+
+type DigitalOceanDropletCreateResponse = {
+  droplet?: DigitalOceanApiDroplet | null;
+};
+
+type DigitalOceanFirewallCreateResponse = {
+  firewall?: { id?: string | null } | null;
+};
+
 type DigitalOceanApiDroplet = {
-  id?: number | string;
-  name?: string;
-  region?: { slug?: string } | string;
-  size_slug?: string;
-  image?: { slug?: string } | string;
-  tags?: string[];
-  created_at?: string;
+  id?: number | string | null;
+  name?: string | null;
+  region?: { slug?: string | null } | string | null;
+  sizeSlug?: string | null;
+  image?: { slug?: string | null } | string | null;
+  tags?: string[] | null;
+  createdAt?: Date | string | null;
+};
+
+type DigitalOceanFirewallBody = {
+  name?: string | null;
+  dropletIds?: number[] | null;
+  inboundRules?: DigitalOceanFirewallInboundRule[] | null;
+  outboundRules?: DigitalOceanFirewallOutboundRule[] | null;
+};
+
+type DigitalOceanFirewallInboundRule = {
+  protocol?: "icmp" | "tcp" | "udp" | null;
+  ports?: string | null;
+  sources?: { addresses?: string[] | null } | null;
+};
+
+type DigitalOceanFirewallOutboundRule = {
+  protocol?: "icmp" | "tcp" | "udp" | null;
+  ports?: string | null;
+  destinations?: { addresses?: string[] | null } | null;
+};
+
+type DigitalOceanTagResourceBody = {
+  resources?: Array<{ resourceId?: string | null; resourceType?: string | null }> | null;
 };
 
 export class DigitalOceanApiProvider implements DigitalOceanProvider {
-  readonly #token: string;
-  readonly #fetch: typeof fetch;
-  readonly #apiBaseUrl: string;
+  readonly #client: DigitalOceanSdkClient;
   readonly #now: () => Date;
   readonly #resources = new Map<string, DigitalOceanResource>();
 
   constructor(options: DigitalOceanApiProviderOptions) {
-    this.#token = options.token;
-    this.#fetch = options.fetch ?? fetch;
-    this.#apiBaseUrl = options.apiBaseUrl ?? "https://api.digitalocean.com/v2";
+    this.#client = options.client ?? createDigitalOceanSdkClient(options.token, options.apiBaseUrl);
     this.#now = options.now ?? (() => new Date());
   }
 
   async createRunner(
     input: DigitalOceanRunnerSpec,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
-    const body: Record<string, unknown> = {
-      name: input.name,
+    const body: DigitalOceanDropletCreateBody = {
+      name: toDropletName(input.name),
       region: input.region,
       size: input.sizeSlug,
       image: input.image,
@@ -141,25 +202,20 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
     };
 
     if (input.sshKeyIds && input.sshKeyIds.length > 0) {
-      body.ssh_keys = input.sshKeyIds;
+      body.sshKeys = input.sshKeyIds;
     }
 
     if (input.userData) {
-      body.user_data = input.userData;
+      body.userData = input.userData;
     }
 
-    const response = await this.#request<{ droplet?: DigitalOceanApiDroplet }>(
-      "/droplets",
-      "POST",
-      body,
-      "create_failed",
-    );
+    const response = await runSdkStep("create_failed", () => this.#client.v2.droplets.post(body));
 
     if (!response.ok) {
       return response;
     }
 
-    const resource = apiDropletToResource(response.value.droplet, input, this.#now);
+    const resource = apiDropletToResource(response.value?.droplet, input, this.#now);
 
     if (!resource) {
       return {
@@ -184,13 +240,10 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
     }
 
     for (const tag of [...new Set(input.tags)].sort()) {
-      const response = await this.#request<unknown>(
-        `/tags/${encodeURIComponent(tag)}/resources`,
-        "POST",
-        {
-          resources: [{ resource_id: input.providerResourceId, resource_type: "droplet" }],
-        },
-        "tag_failed",
+      const response = await runSdkStep("tag_failed", () =>
+        this.#client.v2.tags.byTag_id(tag).resources.post({
+          resources: [{ resourceId: input.providerResourceId, resourceType: "droplet" }],
+        }),
       );
 
       if (!response.ok) {
@@ -222,31 +275,13 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
       };
     }
 
-    const response = await this.#request<unknown>(
-      "/firewalls",
-      "POST",
-      {
+    const response = await runSdkStep("firewall_failed", () =>
+      this.#client.v2.firewalls.post({
         name: input.firewallName,
-        droplet_ids: [dropletId],
-        inbound_rules: [tcpInboundRule("22"), tcpInboundRule("80"), tcpInboundRule("443")],
-        outbound_rules: [
-          {
-            protocol: "tcp",
-            ports: "all",
-            destinations: { addresses: ["0.0.0.0/0", "::/0"] },
-          },
-          {
-            protocol: "udp",
-            ports: "all",
-            destinations: { addresses: ["0.0.0.0/0", "::/0"] },
-          },
-          {
-            protocol: "icmp",
-            destinations: { addresses: ["0.0.0.0/0", "::/0"] },
-          },
-        ],
-      },
-      "firewall_failed",
+        dropletIds: [dropletId],
+        inboundRules: [tcpInboundRule("22"), tcpInboundRule("80"), tcpInboundRule("443")],
+        outboundRules: [outboundRule("tcp"), outboundRule("udp"), outboundRule("icmp")],
+      }),
     );
 
     if (!response.ok) {
@@ -267,11 +302,8 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
       return missingResource();
     }
 
-    const response = await this.#request<unknown>(
-      `/droplets/${encodeURIComponent(input.providerResourceId)}`,
-      "DELETE",
-      undefined,
-      "cleanup_failed",
+    const response = await runSdkStep("cleanup_failed", () =>
+      this.#client.v2.droplets.byDroplet_id(Number(input.providerResourceId)).delete(),
     );
 
     if (!response.ok) {
@@ -281,49 +313,6 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
     resource.deletedAt = this.#now().toISOString();
 
     return { ok: true, value: cloneResource(resource) };
-  }
-
-  async #request<T>(
-    path: string,
-    method: "DELETE" | "GET" | "POST",
-    body: unknown,
-    reason: DigitalOceanProviderErrorReason,
-  ): Promise<DigitalOceanProviderResult<T>> {
-    try {
-      const init: RequestInit = {
-        method,
-        headers: {
-          Authorization: `Bearer ${this.#token}`,
-          "Content-Type": "application/json",
-        },
-      };
-
-      if (body !== undefined) {
-        init.body = JSON.stringify(body);
-      }
-
-      const response = await this.#fetch(`${this.#apiBaseUrl}${path}`, init);
-
-      if (!response.ok) {
-        return {
-          ok: false,
-          reason,
-          message: `DigitalOcean API request failed with status ${response.status}.`,
-        };
-      }
-
-      if (response.status === 204) {
-        return { ok: true, value: undefined as T };
-      }
-
-      return { ok: true, value: (await response.json()) as T };
-    } catch {
-      return {
-        ok: false,
-        reason,
-        message: "DigitalOcean API request failed.",
-      };
-    }
   }
 }
 
@@ -463,7 +452,7 @@ function missingResource(): DigitalOceanProviderResult<DigitalOceanResource> {
 }
 
 function apiDropletToResource(
-  droplet: DigitalOceanApiDroplet | undefined,
+  droplet: DigitalOceanApiDroplet | null | undefined,
   fallback: DigitalOceanRunnerSpec,
   now: () => Date,
 ): DigitalOceanResource | null {
@@ -476,16 +465,43 @@ function apiDropletToResource(
     providerResourceId: String(droplet.id),
     name: droplet.name ?? fallback.name,
     region: readApiSlug(droplet.region) ?? fallback.region,
-    sizeSlug: droplet.size_slug ?? fallback.sizeSlug,
+    sizeSlug: droplet.sizeSlug ?? fallback.sizeSlug,
     image: readApiSlug(droplet.image) ?? fallback.image,
     tags: [...new Set(droplet.tags ?? fallback.tags)].sort(),
     firewallApplied: false,
-    createdAt: droplet.created_at ?? now().toISOString(),
+    createdAt: readApiDate(droplet.createdAt) ?? now().toISOString(),
     deletedAt: null,
   };
 }
 
-function readApiSlug(value: { slug?: string } | string | undefined): string | null {
+async function runSdkStep<T>(
+  reason: DigitalOceanProviderErrorReason,
+  execute: () => Promise<T>,
+): Promise<DigitalOceanProviderResult<T>> {
+  try {
+    return { ok: true, value: await execute() };
+  } catch (error) {
+    return {
+      ok: false,
+      reason,
+      message: `DigitalOcean API request failed${readSdkStatusSuffix(error)}.`,
+    };
+  }
+}
+
+function readSdkStatusSuffix(error: unknown): string {
+  if (!error || typeof error !== "object") {
+    return "";
+  }
+
+  const statusCode = "statusCode" in error ? error.statusCode : null;
+  const responseStatus = "responseStatusCode" in error ? error.responseStatusCode : null;
+  const status = typeof statusCode === "number" ? statusCode : responseStatus;
+
+  return typeof status === "number" ? ` with status ${status}` : "";
+}
+
+function readApiSlug(value: { slug?: string | null } | string | null | undefined): string | null {
   if (typeof value === "string") {
     return value;
   }
@@ -493,12 +509,41 @@ function readApiSlug(value: { slug?: string } | string | undefined): string | nu
   return value?.slug ?? null;
 }
 
-function tcpInboundRule(port: string) {
+function readApiDate(value: Date | string | null | undefined): string | null {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  return value ?? null;
+}
+
+function tcpInboundRule(port: string): DigitalOceanFirewallInboundRule {
   return {
     protocol: "tcp",
     ports: port,
     sources: { addresses: ["0.0.0.0/0", "::/0"] },
   };
+}
+
+function outboundRule(protocol: "icmp" | "tcp" | "udp"): DigitalOceanFirewallOutboundRule {
+  return {
+    protocol,
+    ...(protocol === "icmp" ? {} : { ports: "all" }),
+    destinations: { addresses: ["0.0.0.0/0", "::/0"] },
+  };
+}
+
+function toDropletName(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-")
+    .slice(0, 63)
+    .replace(/-+$/g, "");
+
+  return normalized || "agentbay-runner";
 }
 
 function cloneResource(resource: DigitalOceanResource): DigitalOceanResource {

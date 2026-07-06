@@ -3,6 +3,7 @@ import {
   DigitalOceanApiProvider,
   DIGITALOCEAN_PROVIDER,
   FakeDigitalOceanProvider,
+  type DigitalOceanSdkClient,
 } from "@/src/server/runners/digitalocean-provider";
 
 describe("fake DigitalOcean provider", () => {
@@ -117,48 +118,60 @@ describe("fake DigitalOcean provider", () => {
 });
 
 describe("DigitalOcean API provider", () => {
-  it("creates, tags, firewalls, and cleans up resources through safe API requests", async () => {
-    const calls: Array<{ url: string; init: RequestInit }> = [];
-    const provider = new DigitalOceanApiProvider({
-      token: "dop_v1_super_secret",
-      apiBaseUrl: "https://api.example.test/v2",
-      now: () => new Date("2026-07-06T05:00:00.000Z"),
-      fetch: async (url, init = {}) => {
-        calls.push({ url: String(url), init });
+  it("creates, tags, firewalls, and cleans up resources through safe SDK requests", async () => {
+    const calls: Array<{ step: string; body?: unknown; id?: number; tag?: string }> = [];
+    const client: DigitalOceanSdkClient = {
+      v2: {
+        droplets: {
+          post: async (body) => {
+            calls.push({ step: "droplets.post", body });
 
-        if (String(url).endsWith("/droplets") && init.method === "POST") {
-          return Response.json(
-            {
+            return {
               droplet: {
                 id: 123456,
-                name: "AgentBay Cloud Runner",
+                name: body.name ?? "agentbay-cloud-runner",
                 region: { slug: "sfo3" },
-                size_slug: "s-1vcpu-1gb",
+                sizeSlug: "s-1vcpu-512mb-10gb",
                 image: { slug: "ubuntu-24-04-x64" },
                 tags: ["agentbay"],
-                created_at: "2026-07-06T05:00:01.000Z",
+                createdAt: new Date("2026-07-06T05:00:01.000Z"),
+              },
+            };
+          },
+          byDroplet_id: (id) => ({
+            delete: async () => {
+              calls.push({ step: "droplets.delete", id });
+            },
+          }),
+        },
+        firewalls: {
+          post: async (body) => {
+            calls.push({ step: "firewalls.post", body });
+
+            return { firewall: { id: "firewall-1" } };
+          },
+        },
+        tags: {
+          byTag_id: (tag) => ({
+            resources: {
+              post: async (body) => {
+                calls.push({ step: "tags.resources.post", tag, body });
               },
             },
-            { status: 202 },
-          );
-        }
-
-        if (
-          String(url).includes("/tags/") ||
-          String(url).endsWith("/firewalls") ||
-          String(url).endsWith("/droplets/123456")
-        ) {
-          return new Response(null, { status: 204 });
-        }
-
-        return Response.json({ message: "not found" }, { status: 404 });
+          }),
+        },
       },
+    };
+    const provider = new DigitalOceanApiProvider({
+      token: "dop_v1_super_secret",
+      client,
+      now: () => new Date("2026-07-06T05:00:00.000Z"),
     });
 
     const created = await provider.createRunner({
       name: "AgentBay Cloud Runner",
       region: "sfo3",
-      sizeSlug: "s-1vcpu-1gb",
+      sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "agentbay-runner"],
       firewallName: "agentbay-runners",
@@ -170,7 +183,7 @@ describe("DigitalOcean API provider", () => {
         provider: DIGITALOCEAN_PROVIDER,
         providerResourceId: "123456",
         region: "sfo3",
-        sizeSlug: "s-1vcpu-1gb",
+        sizeSlug: "s-1vcpu-512mb-10gb",
         image: "ubuntu-24-04-x64",
         firewallApplied: false,
       },
@@ -204,17 +217,41 @@ describe("DigitalOcean API provider", () => {
       ok: true,
       value: { deletedAt: "2026-07-06T05:00:00.000Z" },
     });
-    expect(calls.map((call) => [call.url, call.init.method])).toEqual([
-      ["https://api.example.test/v2/droplets", "POST"],
-      ["https://api.example.test/v2/tags/agentbay-runner/resources", "POST"],
-      ["https://api.example.test/v2/firewalls", "POST"],
-      ["https://api.example.test/v2/droplets/123456", "DELETE"],
+    expect(calls.map((call) => call.step)).toEqual([
+      "droplets.post",
+      "tags.resources.post",
+      "firewalls.post",
+      "droplets.delete",
     ]);
-    expect(
-      calls.every(
-        (call) => readHeader(call.init.headers, "Authorization") === "Bearer dop_v1_super_secret",
-      ),
-    ).toBe(true);
+    expect(calls[0]?.body).toMatchObject({
+      name: "agentbay-cloud-runner",
+      region: "sfo3",
+      size: "s-1vcpu-512mb-10gb",
+      image: "ubuntu-24-04-x64",
+      tags: ["agentbay", "agentbay-runner"],
+      monitoring: true,
+    });
+    expect(calls[1]).toMatchObject({
+      tag: "agentbay-runner",
+      body: {
+        resources: [{ resourceId: "123456", resourceType: "droplet" }],
+      },
+    });
+    expect(calls[2]?.body).toMatchObject({
+      name: "agentbay-runners",
+      dropletIds: [123456],
+      inboundRules: [
+        { protocol: "tcp", ports: "22" },
+        { protocol: "tcp", ports: "80" },
+        { protocol: "tcp", ports: "443" },
+      ],
+      outboundRules: [
+        { protocol: "tcp", ports: "all" },
+        { protocol: "udp", ports: "all" },
+        { protocol: "icmp" },
+      ],
+    });
+    expect(calls[3]).toMatchObject({ id: 123456 });
     expect(JSON.stringify([created, tagged, firewalled, cleaned])).not.toContain(
       "dop_v1_super_secret",
     );
@@ -223,14 +260,24 @@ describe("DigitalOcean API provider", () => {
   it("returns safe API failures without echoing provider credentials", async () => {
     const provider = new DigitalOceanApiProvider({
       token: "dop_v1_super_secret",
-      fetch: async () =>
-        Response.json(
-          {
-            id: "forbidden",
-            message: "token dop_v1_super_secret is forbidden",
+      client: {
+        v2: {
+          droplets: {
+            post: async () => {
+              throw Object.assign(new Error("token dop_v1_super_secret is forbidden"), {
+                statusCode: 403,
+              });
+            },
+            byDroplet_id: () => ({ delete: async () => {} }),
           },
-          { status: 403 },
-        ),
+          firewalls: { post: async () => ({ firewall: { id: "firewall-1" } }) },
+          tags: {
+            byTag_id: () => ({
+              resources: { post: async () => {} },
+            }),
+          },
+        },
+      },
     });
 
     const result = await provider.createRunner({
@@ -249,11 +296,3 @@ describe("DigitalOcean API provider", () => {
     expect(JSON.stringify(result)).not.toContain("dop_v1_super_secret");
   });
 });
-
-function readHeader(headers: HeadersInit | undefined, name: string): string | null {
-  if (!headers) {
-    return null;
-  }
-
-  return new Headers(headers).get(name);
-}
