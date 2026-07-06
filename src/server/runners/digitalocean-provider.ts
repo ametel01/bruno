@@ -171,6 +171,7 @@ type DigitalOceanDropletCreateResponse = {
 
 type DigitalOceanSshKeysResponse = {
   sshKeys?: DigitalOceanApiSshKey[] | null;
+  ssh_keys?: DigitalOceanApiSshKey[] | null;
 };
 
 type DigitalOceanApiSshKey = {
@@ -246,7 +247,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
 
     return {
       ok: true,
-      value: (response.value?.sshKeys ?? []).flatMap((key) => {
+      value: (response.value?.sshKeys ?? response.value?.ssh_keys ?? []).flatMap((key) => {
         const id = key.id === undefined || key.id === null ? "" : String(key.id).trim();
 
         return id

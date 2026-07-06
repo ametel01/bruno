@@ -155,7 +155,7 @@ describe("DigitalOcean API provider", () => {
         account: {
           keys: {
             get: async () => ({
-              sshKeys: [
+              ssh_keys: [
                 {
                   id: 52830696,
                   name: "macos",
