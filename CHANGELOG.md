@@ -70,6 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent creation and start now consume runner placement, assign eligible online runners, return safe plan/capacity blockers, and reserve runner capacity before start so concurrent starts cannot overbook the final slot.
 - Docker runner start now gives each agent a distinct container-side config path and bind-mount target, strengthening multi-agent runtime isolation on shared runners.
 - Backup persistence foundation with a durable `backups` table, manifest validation for agent/config/template/skills/memory/log metadata, conservative backup status transitions, and raw-secret rejection with safe secret references.
+- Server-only backup object storage boundary with deterministic fake storage tests, S3-compatible configuration validation, safe storage URIs, and credential-free failure messages for backup artifacts.
 
 ### Fixed
 
