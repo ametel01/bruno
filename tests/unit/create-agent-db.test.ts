@@ -360,6 +360,90 @@ describe("create agent persistence", () => {
     });
   });
 
+  it("assigns an online cloud runner to an active agent and starts it through the runner adapter", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Assigned Cloud Runner Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const [cloudRunner] = await connection.db
+      .insert(runners)
+      .values({
+        userId: created.agent.userId,
+        name: "Provisioned Cloud Runner",
+        kind: "digitalocean",
+        endpointUrl: "https://cloud-runner.example.com",
+        status: "online",
+        provider: "digitalocean",
+        providerResourceId: "123456789",
+        region: "sfo3",
+        sizeSlug: "s-1vcpu-1gb",
+        image: "ubuntu-24-04-x64",
+        provisioningStatus: "ready",
+        provisioningStartedAt: new Date("2026-07-06T01:00:00.000Z"),
+        provisioningCompletedAt: new Date("2026-07-06T01:05:00.000Z"),
+        createdAt: new Date("2026-07-06T01:00:00.000Z"),
+        updatedAt: new Date("2026-07-06T01:05:00.000Z"),
+      })
+      .returning({ id: runners.id });
+    const calls: string[] = [];
+    const manualRunnerAdapter = createManualLifecycleRunnerStub(calls, {
+      connection,
+      runnerId: cloudRunner?.id ?? "",
+    });
+
+    const assignment = await assignRunnerToActiveAgentForDevelopmentUser(
+      {
+        agentId: created.agent.id,
+        runnerId: cloudRunner?.id ?? "",
+      },
+      {
+        createConnection: () => connection,
+        now: () => new Date("2026-07-06T01:10:00.000Z"),
+      },
+    );
+    const assignedRunner = await getAssignedRunnerForActiveAgentDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+    });
+    const started = await startAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: (runner) => {
+        expect(runner).toMatchObject({
+          id: cloudRunner?.id,
+          kind: "digitalocean",
+          endpointUrl: "https://cloud-runner.example.com",
+          status: "online",
+        });
+        return manualRunnerAdapter;
+      },
+      runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
+    });
+
+    expect(assignment).toEqual({
+      ok: true,
+      agent: {
+        id: created.agent.id,
+        runnerId: cloudRunner?.id,
+      },
+    });
+    expect(assignedRunner).toMatchObject({
+      id: cloudRunner?.id,
+      userId: created.agent.userId,
+      name: "Provisioned Cloud Runner",
+      kind: "digitalocean",
+      endpointUrl: "https://cloud-runner.example.com",
+      status: "online",
+      deletedAt: null,
+    });
+    expect(started).toMatchObject({
+      ok: true,
+      agent: {
+        id: created.agent.id,
+        status: "running",
+      },
+    });
+    expect(calls).toEqual([`start:${created.agent.id}`, `logs:${created.agent.id}`]);
+  });
+
   it("starts an assigned manual runner agent only after remote start succeeds and persists remote logs", async () => {
     const created = await createAgentForDevelopmentUser(
       { name: "Assigned Manual Start Agent", templateKey: "research_agent" },

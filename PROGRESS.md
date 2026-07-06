@@ -69,22 +69,21 @@
 
 ## Milestone 13 Cloud Provisioning V1
 
-- Status: #151 cloud provisioning model and provider contract are implemented locally on `codex/issue-151-cloud-runner-model`; checker handoff pending.
+- Status: #155 final assignment, cleanup, and evidence slice is locally complete on `codex/issue-155-m13-acceptance`; checker handoff pending.
 - Source plan:
   - `docs/MILESTONES.md` Milestone 13: Cloud Provisioning V1.
   - GitHub issue #150: Prepare Milestone 13 tracking and baseline gates.
   - `PLAN.md` is absent in this worktree; the published #150 issue body and `docs/MILESTONES.md` are the active Step 0 contract.
-- Current branch: `codex/issue-151-cloud-runner-model`.
+- Current branch: `codex/issue-155-m13-acceptance`.
 
 ### Issue Checklist
 
 - [x] #150 Prepare Milestone 13 tracking and baseline gates. Status: merged in PR #169.
-- [x] #151 Add cloud runner provisioning model and provider contract. Status: implemented locally; checker handoff pending.
-- [x] #152 Implement Create runner provisioning workflow. Status: implemented locally; checker handoff pending.
-- [x] #153 Add cloud runner bootstrap registration and readiness. Status: implemented locally; checker handoff pending.
-- [x] #154 Show cloud provisioning progress and failures in the UI. Status: implemented locally; checker handoff pending.
-- [ ] #155 Complete assignment, cleanup, and Milestone 13 evidence. Status: blocked until #151-#154 are complete.
-- Later Milestone 13 issue agents must append validation evidence here after their implementation slices.
+- [x] #151 Add cloud runner provisioning model and provider contract. Status: merged in PR #170.
+- [x] #152 Implement Create runner provisioning workflow. Status: merged in PR #171.
+- [x] #153 Add cloud runner bootstrap registration and readiness. Status: merged in PR #172.
+- [x] #154 Show cloud provisioning progress and failures in the UI. Status: merged in PR #173.
+- [x] #155 Complete assignment, cleanup, and Milestone 13 evidence. Status: locally complete; checker handoff pending.
 
 ### Current Status
 
@@ -97,6 +96,15 @@
 - #152 adds backend `POST /api/runners` provisioning for the development user. The route validates DigitalOcean create-runner input, creates a provisioning runner plus hash-only one-time registration token, persists phase events for refresh-safe progress, calls the DigitalOcean API provider create/tag/firewall contract with fakeable tests, returns duplicate-submit state for an in-progress runner, and reports provider failures as actionable safe runner state without exposing provider credentials or registration secrets.
 - #153 adds server-generated cloud runner bootstrap content and a runner-side bootstrap command that reuses the existing one-time registration-token exchange, credential lifecycle, and heartbeat path so DigitalOcean runners move from bootstrapping to registering to ready without a second auth mechanism.
 - #154 adds settings and dashboard cloud-runner provisioning surfaces backed by persisted runner state and the merged #152 `POST /api/runners` endpoint. The UI renders only safe DTO fields: provider, region, size, image, provisioning phase, readiness, heartbeat timing, and redacted failure guidance.
+- #155 completes the final Milestone 13 acceptance slice: online DigitalOcean runners can be assigned to active agents and started through the existing remote runner adapter path, failed provisioning after Droplet creation attempts safe owned-resource cleanup, unsafe cleanup returns explicit manual instructions, and `docs/MILESTONE_13_CLOUD_PROVISIONING_SMOKE.md` records the opt-in pre-beta real-Droplet smoke checklist.
+- Final Milestone 13 acceptance map:
+  - Create runner and progress visibility: #152 backend provisioning tests plus #154 settings/dashboard unit and browser smoke coverage.
+  - Droplet creation: #151 fake provider contract tests and #152 provisioning service tests cover the DigitalOcean create/tag/firewall contract without network calls; `docs/MILESTONE_13_CLOUD_PROVISIONING_SMOKE.md` defines the required real small-Droplet beta gate.
+  - Runner install and registration: #153 bootstrap, registration, heartbeat, and readiness tests cover cloud-init content, runner-side bootstrap, one-time registration exchange, and first-heartbeat readiness.
+  - Dashboard online state: #154 page and E2E coverage renders persisted online heartbeat readiness and keeps state after reload.
+  - Agent assignment: #155 DB/lifecycle coverage proves an online `digitalocean` runner can be assigned to an active agent and started through the assigned-runner adapter path.
+  - Actionable provisioning failure: #152 safe create-failure coverage plus #155 post-create cleanup/manual-cleanup coverage prove browser-safe actionable failure states.
+  - Security: #151 server-only provider config tests, #152 route/service secret-safety assertions, #153 bootstrap redaction tests, #154 safe DTO/UI assertions, and #155 assignment/cleanup safety tests cover provider credentials, registration secrets, runner credentials, hashes, and browser-visible output.
 - `CHANGELOG.md` has the Keep a Changelog 1.0.0 framing and an `## [Unreleased]` section. Agents should keep that structure and add changelog bullets only for shipped functional user/operator-visible changes.
 
 ### Baseline Gate Expectations
@@ -125,8 +133,24 @@
 - 2026-07-06: #152 added `runner_provisioning_events`, the `POST /api/runners` backend route, the DigitalOcean provisioning service/API provider, duplicate-submit handling, safe provider-failure state, and focused secret-safety tests for route and job behavior.
 - 2026-07-06: #153 added server-generated cloud-init bootstrap content that installs Docker, prepares the runner service, runs a runner bootstrap command, and starts `runner:service`; added safe bootstrap redaction helpers; reused the existing one-time registration-token exchange and heartbeat credential lifecycle for cloud runners; and recorded `bootstrapping`, registration-complete, and first-heartbeat-ready provisioning events.
 - 2026-07-06: #154 added a Create Runner action in Settings, dashboard/settings cloud provisioning panels, online readiness rendering from persisted runner status/heartbeat state, redacted failure guidance, focused unit coverage against the merged #152 route contract, and browser smoke coverage.
+- 2026-07-06: #155 broadened assigned-runner persistence, status summaries, and lifecycle adapter selection to accept online `digitalocean` runners with endpoints; added failed-provision cleanup for owned DigitalOcean Droplets after post-create failures; added explicit manual cleanup instructions when automatic cleanup cannot be confirmed; and documented the required opt-in real-Droplet pre-beta smoke checklist.
 
 ### Validation Evidence
+
+- 2026-07-06 #155:
+  - `bun install --frozen-lockfile`: pass; installed committed dependencies in the fresh issue worktree after the first focused test attempt failed before Vitest started with `vitest: command not found`.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism tests/unit/runner-provisioning.test.ts tests/unit/create-agent-db.test.ts tests/unit/manual-runner-status.test.ts tests/unit/root-page.test.tsx tests/unit/cloud-runner-provisioning.test.ts tests/unit/cloud-runner-route.test.ts tests/unit/runner-registration.test.ts tests/unit/runner-heartbeat.test.ts`: pass; 8 files and 170 tests covered post-create Droplet cleanup/manual-cleanup paths, cloud-runner assignment through the lifecycle adapter, assigned-runner status/UI safety, provisioning UI DTOs, route behavior, registration, and heartbeat readiness.
+  - `bun run format`: pass; Biome found no formatting changes to apply.
+  - `bun run format:check`: pass; Biome checked 134 files with no fixes applied.
+  - `bun run lint`: pass; Biome checked 134 files with no fixes applied.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: pass; Next.js production build completed and listed `/api/runners`.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:migrate`: pass; migrations applied successfully against the shared local database with existing `drizzle` schema/relation notices only.
+  - `PORT=3105 PLAYWRIGHT_BASE_URL=http://localhost:3105 DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3105 bun run test:e2e -- --project=chromium-desktop --grep "cloud runner create action"`: pass; focused browser smoke clicked Create Runner, verified persisted safe provisioning progress/failure/online states, and confirmed state survived reload on an isolated dev-server port.
+  - First `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism`: failed in `tests/unit/agent-logs-route.test.ts` because the test's hoisted mock for `manual-runner-persistence` hid constants that lifecycle now reads at module load. The mock was updated to expose `MANUAL_RUNNER_KIND` and `ACTIVE_RUNNER_STATUS`.
+  - Final `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism`: pass; 43 files and 344 tests passed.
+  - Final `git diff --check`: pass; no whitespace errors.
+  - Real DigitalOcean smoke: not run in this local issue branch. `docs/MILESTONE_13_CLOUD_PROVISIONING_SMOKE.md` records the required opt-in pre-beta real small-Droplet checklist with server-side env vars, expected evidence, and cleanup steps.
 
 - 2026-07-06 #154:
   - `bun install --frozen-lockfile`: pass; installed dependencies in the fresh worktree after the first `bun run format` attempt failed with `biome: command not found`.

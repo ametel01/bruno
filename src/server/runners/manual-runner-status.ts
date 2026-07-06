@@ -2,6 +2,7 @@ import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agents, runnerHeartbeats, runners } from "@/src/server/db/schema";
+import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
 import { MANUAL_RUNNER_KIND } from "@/src/server/runners/manual-runner-persistence";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
@@ -9,7 +10,7 @@ export type ManualRunnerDisplayStatus = "online" | "offline" | "degraded" | "unk
 
 export type ManualRunnerStatusSummary = {
   name: string;
-  kind: typeof MANUAL_RUNNER_KIND;
+  kind: typeof MANUAL_RUNNER_KIND | typeof DIGITALOCEAN_RUNNER_KIND;
   endpointHost: string;
   status: ManualRunnerDisplayStatus;
   version: string | null;
@@ -217,7 +218,6 @@ export async function getAssignedManualRunnerStatusForDevelopmentUserAgent(
             isNull(agents.deletedAt),
             isNotNull(agents.runnerId),
             eq(runners.userId, userId),
-            eq(runners.kind, MANUAL_RUNNER_KIND),
             isNull(runners.deletedAt),
           ),
         )
@@ -262,7 +262,7 @@ export function toManualRunnerStatusSummary(row: ManualRunnerStatusRow): ManualR
 
   return {
     name: summarizeOperationalText(row.name, "Manual runner"),
-    kind: MANUAL_RUNNER_KIND,
+    kind: toSupportedRunnerKind(row.kind),
     endpointHost,
     status,
     version: toSafeVersion(row.latestHeartbeat?.metadata),
@@ -295,9 +295,19 @@ export function toAssignedManualRunnerStatusSummary(
       alertState === null
         ? null
         : alertState === "offline"
-          ? "Assigned manual runner is inactive or unreachable. Check the runner host and service before restarting work."
-          : "Assigned manual runner has incomplete endpoint information. Check the runner configuration before restarting work.",
+          ? "Assigned runner is inactive or unreachable. Check the runner host and service before restarting work."
+          : "Assigned runner has incomplete endpoint information. Check the runner configuration before restarting work.",
   };
+}
+
+function toSupportedRunnerKind(
+  kind: string,
+): typeof MANUAL_RUNNER_KIND | typeof DIGITALOCEAN_RUNNER_KIND {
+  if (kind === DIGITALOCEAN_RUNNER_KIND) {
+    return DIGITALOCEAN_RUNNER_KIND;
+  }
+
+  return MANUAL_RUNNER_KIND;
 }
 
 function toDisplayStatus(input: {

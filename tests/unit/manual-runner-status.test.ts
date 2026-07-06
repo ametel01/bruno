@@ -44,7 +44,7 @@ describe("manual runner status summaries", () => {
       status: "offline",
       alertState: "offline",
       alertMessage:
-        "Assigned manual runner is inactive or unreachable. Check the runner host and service before restarting work.",
+        "Assigned runner is inactive or unreachable. Check the runner host and service before restarting work.",
     });
     expect(JSON.stringify(assigned)).not.toContain("stored-for-downstream");
     expect(JSON.stringify(assigned)).not.toContain("runnerId");
@@ -126,7 +126,7 @@ describe("manual runner status summaries", () => {
       status: "offline",
       alertState: "offline",
       alertMessage:
-        "Assigned manual runner is inactive or unreachable. Check the runner host and service before restarting work.",
+        "Assigned runner is inactive or unreachable. Check the runner host and service before restarting work.",
     });
   });
 

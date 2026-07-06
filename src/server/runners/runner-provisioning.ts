@@ -320,7 +320,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       };
     }
 
-    await runProviderStep(connection, {
+    const tagging = await runProviderStep(connection, {
       provider,
       runnerId,
       phase: "tagging",
@@ -337,6 +337,21 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
         }),
     });
 
+    if (!tagging.ok) {
+      return {
+        ok: true,
+        duplicate: false,
+        runner: await cleanupFailedProvisioningResource(connection, {
+          provider,
+          runnerId,
+          providerResourceId: resource.value.providerResourceId,
+          failedPhase: "tagging",
+          tags: config.tags,
+          now,
+        }),
+      };
+    }
+
     const afterTagging = await getRunnerProvisioningDto(connection, runnerId);
 
     if (afterTagging.provisioning.status === "failed") {
@@ -347,7 +362,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       };
     }
 
-    await runProviderStep(connection, {
+    const firewall = await runProviderStep(connection, {
       provider,
       runnerId,
       phase: "firewall_configuring",
@@ -363,6 +378,21 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
           firewallName,
         }),
     });
+
+    if (!firewall.ok) {
+      return {
+        ok: true,
+        duplicate: false,
+        runner: await cleanupFailedProvisioningResource(connection, {
+          provider,
+          runnerId,
+          providerResourceId: resource.value.providerResourceId,
+          failedPhase: "firewall_configuring",
+          tags: config.tags,
+          now,
+        }),
+      };
+    }
 
     const afterFirewall = await getRunnerProvisioningDto(connection, runnerId);
 
@@ -570,6 +600,118 @@ async function failProvisioning(
       now: input.now,
     });
   });
+}
+
+async function cleanupFailedProvisioningResource(
+  connection: DatabaseConnection,
+  input: {
+    provider: DigitalOceanProvider;
+    runnerId: string;
+    providerResourceId: string;
+    failedPhase: RunnerProvisioningPhase;
+    tags: string[];
+    now: () => Date;
+  },
+): Promise<RunnerProvisioningDto> {
+  await connection.db.transaction(async (tx) => {
+    const cleaningAt = input.now();
+    await tx
+      .update(runners)
+      .set({
+        status: "deleting",
+        provisioningStatus: "cleaning_up",
+        updatedAt: cleaningAt,
+      })
+      .where(eq(runners.id, input.runnerId));
+    await recordProvisioningEvent(tx, {
+      runnerId: input.runnerId,
+      phase: "cleaning_up",
+      status: "started",
+      message: "Provisioning failed after Droplet creation; attempting owned resource cleanup.",
+      metadata: {
+        provider: DIGITALOCEAN_PROVIDER,
+        providerResourceId: input.providerResourceId,
+        failedPhase: input.failedPhase,
+        tags: input.tags,
+      },
+      now: cleaningAt,
+    });
+  });
+
+  const cleanup = await input.provider.cleanupResource({
+    providerResourceId: input.providerResourceId,
+  });
+
+  if (cleanup.ok) {
+    await connection.db.transaction(async (tx) => {
+      const deletedAt = input.now();
+      await tx
+        .update(runners)
+        .set({
+          status: "deleted",
+          provisioningStatus: "deleted",
+          provisioningError: null,
+          provisioningCompletedAt: deletedAt,
+          deletedAt,
+          updatedAt: deletedAt,
+        })
+        .where(eq(runners.id, input.runnerId));
+      await recordProvisioningEvent(tx, {
+        runnerId: input.runnerId,
+        phase: "deleted",
+        status: "completed",
+        message: "Failed DigitalOcean runner was cleaned up safely.",
+        metadata: {
+          provider: DIGITALOCEAN_PROVIDER,
+          providerResourceId: input.providerResourceId,
+          failedPhase: input.failedPhase,
+          tags: input.tags,
+        },
+        now: deletedAt,
+      });
+    });
+
+    return getRunnerProvisioningDto(connection, input.runnerId);
+  }
+
+  const message = manualCleanupMessage(input.providerResourceId);
+  await connection.db.transaction(async (tx) => {
+    const failedCleanupAt = input.now();
+    await tx
+      .update(runners)
+      .set({
+        status: "provision_failed",
+        provisioningStatus: "failed",
+        provisioningError: message,
+        provisioningCompletedAt: failedCleanupAt,
+        updatedAt: failedCleanupAt,
+      })
+      .where(eq(runners.id, input.runnerId));
+    await recordProvisioningEvent(tx, {
+      runnerId: input.runnerId,
+      phase: "cleaning_up",
+      status: "failed",
+      message,
+      metadata: {
+        provider: DIGITALOCEAN_PROVIDER,
+        providerResourceId: input.providerResourceId,
+        failedPhase: input.failedPhase,
+        cleanupReason: cleanup.reason,
+        tags: input.tags,
+      },
+      now: failedCleanupAt,
+    });
+  });
+
+  return getRunnerProvisioningDto(connection, input.runnerId);
+}
+
+function manualCleanupMessage(providerResourceId: string): string {
+  const safeResourceId = /^[A-Za-z0-9_.:-]{1,120}$/.test(providerResourceId)
+    ? providerResourceId
+    : "the recorded provider resource";
+
+  return `Automatic cleanup could not confirm deletion for DigitalOcean Droplet ${safeResourceId}. In DigitalOcean, delete only that Droplet after confirming it has the AgentBay runner tags, then create a new runner.`;
 }
 
 async function findActiveProvisioningRunner(

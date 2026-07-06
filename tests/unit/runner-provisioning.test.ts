@@ -198,6 +198,127 @@ describe.sequential("runner provisioning service", () => {
     expect(JSON.stringify(result)).not.toContain("dop_v1_super_secret");
   });
 
+  it("cleans up an owned Droplet when provisioning fails after creation", async () => {
+    const provider = new FakeDigitalOceanProvider({
+      fail: { tag: "tag denied dop_v1_real_secret" },
+      idPrefix: "owned-droplet",
+    });
+
+    const result = await createDigitalOceanRunnerForDevelopmentUser(
+      { provider: "digitalocean", name: "Cleanup Runner" },
+      {
+        createConnection: () => connection,
+        provider,
+        readConfig: () => ({
+          token: "dop_v1_super_secret",
+          region: "sfo3",
+          sizeSlug: "s-1vcpu-1gb",
+          image: "ubuntu-24-04-x64",
+          tags: ["agentbay", "agentbay-runner"],
+        }),
+        now: sequenceClock("2026-07-06T03:30:00.000Z"),
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      duplicate: false,
+      runner: {
+        status: "deleted",
+        providerResourceId: "owned-droplet-1",
+        provisioning: {
+          status: "deleted",
+          error: null,
+          completedAt: expect.any(String),
+        },
+      },
+    });
+
+    if (!result.ok) {
+      throw new Error("Expected cleanup result to return safe runner state.");
+    }
+
+    expect(provider.calls.map((call) => call.step)).toEqual(["create", "tag", "cleanup"]);
+    expect(result.runner.provisioning.phases.map((event) => [event.phase, event.status])).toEqual([
+      ["pending", "started"],
+      ["bootstrapping", "started"],
+      ["creating", "started"],
+      ["creating", "completed"],
+      ["tagging", "started"],
+      ["failed", "failed"],
+      ["cleaning_up", "started"],
+      ["deleted", "completed"],
+    ]);
+    expect(JSON.stringify(result)).not.toContain("dop_v1_real_secret");
+    expect(JSON.stringify(result)).not.toContain("dop_v1_super_secret");
+  });
+
+  it("returns manual cleanup instructions when owned Droplet cleanup cannot be confirmed", async () => {
+    const provider = new FakeDigitalOceanProvider({
+      fail: {
+        firewall: "firewall denied dop_v1_real_secret",
+        cleanup: "delete denied dop_v1_real_secret",
+      },
+      idPrefix: "manual-cleanup",
+    });
+
+    const result = await createDigitalOceanRunnerForDevelopmentUser(
+      { provider: "digitalocean", name: "Manual Cleanup Runner" },
+      {
+        createConnection: () => connection,
+        provider,
+        readConfig: () => ({
+          token: "dop_v1_super_secret",
+          region: "sfo3",
+          sizeSlug: "s-1vcpu-1gb",
+          image: "ubuntu-24-04-x64",
+          tags: ["agentbay", "agentbay-runner"],
+        }),
+        now: sequenceClock("2026-07-06T03:45:00.000Z"),
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      duplicate: false,
+      runner: {
+        status: "provision_failed",
+        providerResourceId: "manual-cleanup-1",
+        provisioning: {
+          status: "failed",
+          error:
+            "Automatic cleanup could not confirm deletion for DigitalOcean Droplet manual-cleanup-1. In DigitalOcean, delete only that Droplet after confirming it has the AgentBay runner tags, then create a new runner.",
+          completedAt: expect.any(String),
+        },
+      },
+    });
+
+    if (!result.ok) {
+      throw new Error("Expected manual cleanup result to return safe runner state.");
+    }
+
+    expect(provider.calls.map((call) => call.step)).toEqual([
+      "create",
+      "tag",
+      "firewall",
+      "cleanup",
+    ]);
+    expect(result.runner.provisioning.phases.map((event) => [event.phase, event.status])).toEqual([
+      ["pending", "started"],
+      ["bootstrapping", "started"],
+      ["creating", "started"],
+      ["creating", "completed"],
+      ["tagging", "started"],
+      ["tagging", "completed"],
+      ["firewall_configuring", "started"],
+      ["failed", "failed"],
+      ["cleaning_up", "started"],
+      ["cleaning_up", "failed"],
+    ]);
+    expect(JSON.stringify(result)).not.toContain("dop_v1_real_secret");
+    expect(JSON.stringify(result)).not.toContain("dop_v1_super_secret");
+  });
+
   it("rejects invalid create input before touching the provider", async () => {
     const provider = new FakeDigitalOceanProvider();
 

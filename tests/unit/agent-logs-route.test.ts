@@ -48,8 +48,10 @@ vi.mock("@/src/server/logs/agent-logs", () => ({
 }));
 
 vi.mock("@/src/server/runners/manual-runner-persistence", () => ({
+  ACTIVE_RUNNER_STATUS: "active",
   getAssignedRunnerForActiveAgentDevelopmentUser:
     mocks.getAssignedRunnerForActiveAgentDevelopmentUser,
+  MANUAL_RUNNER_KIND: "manual_vps",
 }));
 
 describe("GET /api/agents/[agentId]/logs route", () => {
