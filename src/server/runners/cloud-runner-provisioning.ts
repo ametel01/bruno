@@ -182,7 +182,7 @@ export async function listCloudRunnerProvisioningSummariesForDevelopmentUser(
   }
 }
 
-async function reconcileTimedOutWaitingForRunnerRows(
+export async function reconcileTimedOutWaitingForRunnerRows(
   tx: CloudRunnerProvisioningTransaction,
   userId: string,
   now: Date,
@@ -238,7 +238,7 @@ async function reconcileTimedOutWaitingForRunnerRows(
 function timedOutWaitingForRunnerMessage(providerResourceId: string | null): string {
   const resource = safeProviderResourceIdForMessage(providerResourceId);
 
-  return `Cloud runner bootstrap did not register before the timeout. Check Droplet cloud-init logs, confirm ports 80/443 are reachable, then delete the Droplet ${resource} if it is not needed and create a new runner.`;
+  return `Cloud runner bootstrap did not register before the timeout. Check Droplet cloud-init logs, confirm SSH/HTTP ports are reachable, then delete the Droplet ${resource} if it is not needed and create a new runner.`;
 }
 
 function safeProviderResourceIdForMessage(value: string | null): string {

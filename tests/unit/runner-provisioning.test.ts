@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
@@ -309,6 +310,154 @@ describe.sequential("runner provisioning service", () => {
     expect(persistedRunner?.endpointUrl).toBe("https://203-0-113-77.sslip.io");
   });
 
+  it("does not reuse a stale waiting_for_runner row when creating a new cloud runner", async () => {
+    const staleProvider = new FakeDigitalOceanProvider({
+      idPrefix: "stale-droplet",
+    });
+    const freshProvider = new FakeDigitalOceanProvider({
+      idPrefix: "fresh-droplet",
+      publicIpv4: "203.0.113.11",
+    });
+    const config = {
+      token: "dop_v1_super_secret",
+      runnerBearerToken: "runner-command-token",
+      region: "sfo3",
+      sizeSlug: "s-1vcpu-512mb-10gb",
+      image: "ubuntu-24-04-x64",
+      tags: ["agentbay", "cloud-runner"],
+    };
+
+    const first = await createDigitalOceanRunnerForDevelopmentUser(
+      { provider: "digitalocean", name: "Stale Runner" },
+      {
+        createConnection: () => connection,
+        provider: staleProvider,
+        readConfig: () => config,
+        now: sequenceClock("2026-07-06T01:00:00.000Z"),
+      },
+    );
+    const second = await createDigitalOceanRunnerForDevelopmentUser(
+      { provider: "digitalocean", name: "Fresh Runner" },
+      {
+        createConnection: () => connection,
+        provider: freshProvider,
+        readConfig: () => config,
+        now: sequenceClock("2026-07-06T02:30:00.000Z"),
+      },
+    );
+
+    expect(first).toMatchObject({
+      ok: true,
+      duplicate: false,
+      runner: { providerResourceId: "stale-droplet-1" },
+    });
+    expect(second).toMatchObject({
+      ok: true,
+      duplicate: false,
+      runner: {
+        name: "Fresh Runner",
+        status: "registering",
+        providerResourceId: "fresh-droplet-1",
+        provisioning: { status: "waiting_for_runner" },
+      },
+    });
+    expect(freshProvider.calls.map((call) => call.step)).toEqual(["create", "tag", "firewall"]);
+
+    if (!first.ok) {
+      throw new Error("Expected initial provisioning to succeed.");
+    }
+
+    const [staleRunner] = await connection.db
+      .select({
+        status: runners.status,
+        provisioningStatus: runners.provisioningStatus,
+        provisioningError: runners.provisioningError,
+      })
+      .from(runners)
+      .where(eq(runners.id, first.runner.id))
+      .limit(1);
+
+    expect(staleRunner).toMatchObject({
+      status: "provision_failed",
+      provisioningStatus: "failed",
+      provisioningError: expect.stringContaining(
+        "Cloud runner bootstrap did not register before the timeout.",
+      ),
+    });
+  });
+
+  it("does not reuse a waiting_for_runner row when the provider Droplet was manually deleted", async () => {
+    const staleProvider = new FakeDigitalOceanProvider({
+      idPrefix: "deleted-droplet",
+    });
+    const freshProvider = new FakeDigitalOceanProvider({
+      idPrefix: "replacement-droplet",
+      publicIpv4: "203.0.113.12",
+    });
+    const config = {
+      token: "dop_v1_super_secret",
+      runnerBearerToken: "runner-command-token",
+      region: "sfo3",
+      sizeSlug: "s-1vcpu-512mb-10gb",
+      image: "ubuntu-24-04-x64",
+      tags: ["agentbay", "cloud-runner"],
+    };
+
+    const first = await createDigitalOceanRunnerForDevelopmentUser(
+      { provider: "digitalocean", name: "Deleted Runner" },
+      {
+        createConnection: () => connection,
+        provider: staleProvider,
+        readConfig: () => config,
+        now: sequenceClock("2026-07-06T01:00:00.000Z"),
+      },
+    );
+    const second = await createDigitalOceanRunnerForDevelopmentUser(
+      { provider: "digitalocean", name: "Replacement Runner" },
+      {
+        createConnection: () => connection,
+        provider: freshProvider,
+        readConfig: () => config,
+        now: sequenceClock("2026-07-06T01:10:00.000Z"),
+      },
+    );
+
+    expect(first).toMatchObject({
+      ok: true,
+      duplicate: false,
+      runner: { providerResourceId: "deleted-droplet-1" },
+    });
+    expect(second).toMatchObject({
+      ok: true,
+      duplicate: false,
+      runner: {
+        name: "Replacement Runner",
+        providerResourceId: "replacement-droplet-1",
+      },
+    });
+
+    if (!first.ok) {
+      throw new Error("Expected initial provisioning to succeed.");
+    }
+
+    const [deletedRunner] = await connection.db
+      .select({
+        status: runners.status,
+        provisioningStatus: runners.provisioningStatus,
+        provisioningError: runners.provisioningError,
+      })
+      .from(runners)
+      .where(eq(runners.id, first.runner.id))
+      .limit(1);
+
+    expect(deletedRunner).toMatchObject({
+      status: "provision_failed",
+      provisioningStatus: "failed",
+      provisioningError:
+        "DigitalOcean Droplet deleted-droplet-1 is no longer available for runner registration. AgentBay marked the stale runner failed and will create a new runner.",
+    });
+  });
+
   it("persists a safe actionable failed state when the provider create step fails", async () => {
     const provider = new FakeDigitalOceanProvider({
       fail: { create: "dop_v1_real_secret leaked by provider" },
@@ -515,7 +664,6 @@ describe.sequential("runner provisioning service", () => {
 
   it("returns an existing in-progress runner for duplicate submit without creating another Droplet or token", async () => {
     const firstProvider = new FakeDigitalOceanProvider({ idPrefix: "first-droplet" });
-    const secondProvider = new FakeDigitalOceanProvider({ idPrefix: "second-droplet" });
 
     const first = await createDigitalOceanRunnerForDevelopmentUser(
       { provider: "digitalocean", name: "First Runner" },
@@ -537,7 +685,7 @@ describe.sequential("runner provisioning service", () => {
       { provider: "digitalocean", name: "Second Runner" },
       {
         createConnection: () => connection,
-        provider: secondProvider,
+        provider: firstProvider,
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
@@ -559,7 +707,7 @@ describe.sequential("runner provisioning service", () => {
 
     expect(second.runner.id).toBe(first.runner.id);
     expect(second.runner.name).toBe("First Runner");
-    expect(secondProvider.calls).toEqual([]);
+    expect(firstProvider.calls.map((call) => call.step)).toEqual(["create", "tag", "firewall"]);
     await expect(countRows(connection, "runners")).resolves.toBe(1);
     await expect(countRows(connection, "runner_registration_tokens")).resolves.toBe(1);
   });

@@ -16,6 +16,7 @@ import {
   redactCloudRunnerBootstrapOutput,
   type CloudRunnerBootstrapContent,
 } from "@/src/server/runners/cloud-runner-bootstrap";
+import { reconcileTimedOutWaitingForRunnerRows } from "@/src/server/runners/cloud-runner-provisioning";
 import {
   DIGITALOCEAN_PROVIDER,
   DIGITALOCEAN_RUNNER_KIND,
@@ -189,32 +190,59 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now ?? (() => new Date());
+  const operationStartedAt = now();
   const firewallNamePrefix = DEFAULT_FIREWALL_NAME;
+  let resolvedConfig: DigitalOceanProviderConfig | null | undefined;
+  let resolvedProvider: DigitalOceanProvider | undefined;
 
   try {
     const duplicate = await connection.db.transaction(async (tx) => {
       const userId = await getOrCreateDevelopmentUserId(tx);
+      await reconcileTimedOutWaitingForRunnerRows(tx, userId, operationStartedAt);
       const duplicateRunner = await findActiveProvisioningRunner(tx, userId);
 
       return duplicateRunner ? await toRunnerProvisioningDto(tx, duplicateRunner.id) : null;
     });
 
     if (duplicate) {
-      logRunnerProvisioning("duplicate_reused", {
-        runnerId: duplicate.id,
-        runnerStatus: duplicate.status,
-        provisioningStatus: duplicate.provisioning.status,
-        providerResourceId: duplicate.providerResourceId,
+      const duplicateStillReusable = await verifyDuplicateRunnerStillReusable({
+        connection,
+        duplicate,
+        getConfig: () => {
+          resolvedConfig ??= dependencies.readConfig?.() ?? readDigitalOceanProviderConfig();
+          return resolvedConfig;
+        },
+        getProvider: (config) => {
+          resolvedProvider ??=
+            dependencies.provider ?? new DigitalOceanApiProvider({ token: config.token });
+          return resolvedProvider;
+        },
+        now: operationStartedAt,
       });
 
-      return {
-        ok: true,
-        duplicate: true,
-        runner: duplicate,
-      };
+      if (!duplicateStillReusable) {
+        logRunnerProvisioning("duplicate_provider_resource_missing", {
+          runnerId: duplicate.id,
+          providerResourceId: duplicate.providerResourceId,
+        });
+      } else {
+        logRunnerProvisioning("duplicate_reused", {
+          runnerId: duplicate.id,
+          runnerStatus: duplicate.status,
+          provisioningStatus: duplicate.provisioning.status,
+          providerResourceId: duplicate.providerResourceId,
+        });
+
+        return {
+          ok: true,
+          duplicate: true,
+          runner: duplicate,
+        };
+      }
     }
 
-    const config = dependencies.readConfig?.() ?? readDigitalOceanProviderConfig();
+    const config =
+      resolvedConfig ?? dependencies.readConfig?.() ?? readDigitalOceanProviderConfig();
 
     if (!config) {
       logRunnerProvisioning("provider_not_configured", {});
@@ -235,12 +263,16 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
             : "disabled",
     });
 
-    const provider = dependencies.provider ?? new DigitalOceanApiProvider({ token: config.token });
+    const provider =
+      resolvedProvider ??
+      dependencies.provider ??
+      new DigitalOceanApiProvider({ token: config.token });
     const createRegistrationTokenDependency =
       dependencies.createRegistrationToken ?? createRunnerRegistrationToken;
 
     const initialized = await connection.db.transaction(async (tx) => {
       const userId = await getOrCreateDevelopmentUserId(tx);
+      await reconcileTimedOutWaitingForRunnerRows(tx, userId, operationStartedAt);
       const duplicateRunner = await findActiveProvisioningRunner(tx, userId);
 
       if (duplicateRunner) {
@@ -251,7 +283,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
         };
       }
 
-      const createdAt = now();
+      const createdAt = operationStartedAt;
       const [runner] = await tx
         .insert(runners)
         .values({
@@ -705,6 +737,54 @@ async function runProviderStep(
   });
 
   return result;
+}
+
+async function verifyDuplicateRunnerStillReusable(input: {
+  connection: DatabaseConnection;
+  duplicate: RunnerProvisioningDto;
+  getConfig: () => DigitalOceanProviderConfig | null;
+  getProvider: (config: DigitalOceanProviderConfig) => DigitalOceanProvider;
+  now: Date;
+}): Promise<boolean> {
+  if (
+    input.duplicate.provisioning.status !== "waiting_for_runner" ||
+    !input.duplicate.providerResourceId
+  ) {
+    return true;
+  }
+
+  const config = input.getConfig();
+
+  if (!config) {
+    return true;
+  }
+
+  const provider = input.getProvider(config);
+  const resource = await provider.readResource({
+    providerResourceId: input.duplicate.providerResourceId,
+  });
+
+  if (resource.ok || resource.reason !== "resource_not_found") {
+    return true;
+  }
+
+  await failProvisioning(input.connection, {
+    runnerId: input.duplicate.id,
+    phase: "waiting_for_runner",
+    reason: "resource_not_found",
+    message: missingProviderResourceMessage(input.duplicate.providerResourceId),
+    now: input.now,
+  });
+
+  return false;
+}
+
+function missingProviderResourceMessage(providerResourceId: string): string {
+  const safeResourceId = /^[A-Za-z0-9_.:-]{1,120}$/.test(providerResourceId)
+    ? providerResourceId
+    : "the recorded provider resource";
+
+  return `DigitalOcean Droplet ${safeResourceId} is no longer available for runner registration. AgentBay marked the stale runner failed and will create a new runner.`;
 }
 
 async function resolveDigitalOceanSshAccess(
