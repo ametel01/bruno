@@ -86,6 +86,7 @@ export function buildCloudRunnerBootstrapContent(
     `AGENTBAY_RUNNER_REGISTRATION_TOKEN=${quoteSystemdEnvironmentValue(config.registrationToken)}`,
     `AGENTBAY_RUNNER_ENDPOINT_URL=${endpoint.envValue}`,
     `AGENTBAY_RUNNER_NAME=${quoteSystemdEnvironmentValue(config.runnerName)}`,
+    `AGENTBAY_RUNNER_ENV_FILE=${quoteSystemdEnvironmentValue(config.envFilePath)}`,
     `AGENTBAY_RUNNER_HOST=${quoteSystemdEnvironmentValue(config.runnerHost)}`,
     `AGENTBAY_RUNNER_PORT=${config.runnerPort}`,
   ].join("\n");

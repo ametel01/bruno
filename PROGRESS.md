@@ -8,9 +8,9 @@
 
 ## Current Status
 
-- Status: Step 3 complete; Step 4 is next.
-- Active step: Step 4 - Durable Registration Credential Persistence.
-- Last updated: 2026-07-06 17:48:50 PST.
+- Status: Step 4 complete; Step 5 is next.
+- Active step: Step 5 - Continuous Runner Heartbeat and Capacity Metrics.
+- Last updated: 2026-07-06 17:54:19 PST.
 
 ## Step Checklist
 
@@ -18,7 +18,7 @@
 - [x] Step 1: Baseline Characterization and Failing Tests
 - [x] Step 2: Public Droplet Endpoint and HTTPS Proxy Bootstrap
 - [x] Step 3: Reliable Cheap-Droplet Bootstrap Runtime
-- [ ] Step 4: Durable Registration Credential Persistence
+- [x] Step 4: Durable Registration Credential Persistence
 - [ ] Step 5: Continuous Runner Heartbeat and Capacity Metrics
 - [ ] Step 6: Command Authentication for Cloud Runner Lifecycle Calls
 - [ ] Step 7: Bootstrap Timeout, Failure State, and Cleanup Guidance
@@ -94,3 +94,18 @@
 - Changelog: added one `Changed` entry for low-memory Droplet bootstrap reliability.
 - Commit: this step commit.
 - Next step: Step 4 - Durable Registration Credential Persistence.
+
+### 2026-07-06 17:54:19 PST - Step 4 complete
+
+- Updated runner bootstrap so the first successful registration exchange persists `AGENTBAY_RUNNER_ID` and `AGENTBAY_RUNNER_CREDENTIAL` into the configured Droplet env file with `0600` permissions.
+- Kept bootstrap idempotent: if runner ID and credential are already present, registration is skipped and heartbeat uses the existing credential.
+- Updated cloud-init env generation to include `AGENTBAY_RUNNER_ENV_FILE=/etc/agentbay/runner.env` so the bootstrap process can persist restart-safe credentials.
+- Validation:
+  - Passed: `bun run format:check`
+  - Passed: `bun run lint`
+  - Passed: `bun run typecheck`
+  - Passed: `bun run test -- tests/unit/runner-service-bootstrap.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/runner-registration.test.ts tests/unit/runner-heartbeat.test.ts`
+  - Passed: `bun run build`
+- Changelog: added one `Fixed` entry for cloud runner registration surviving restarts.
+- Commit: this step commit.
+- Next step: Step 5 - Continuous Runner Heartbeat and Capacity Metrics.

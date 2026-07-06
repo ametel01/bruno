@@ -37,6 +37,7 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain("AGENTBAY_RUNNER_REGISTRATION_TOKEN=");
     expect(content.userData).toContain(registrationToken);
     expect(content.userData).toContain("AGENTBAY_RUNNER_ENDPOINT_URL=");
+    expect(content.userData).toContain('AGENTBAY_RUNNER_ENV_FILE="/etc/agentbay/runner.env"');
     expect(content.userData).toContain("ExecStartPre=/root/.bun/bin/bun run runner:bootstrap");
     expect(content.userData).toContain("ExecStart=/root/.bun/bin/bun run runner:service");
     expect(content.safeSummary).toMatchObject({

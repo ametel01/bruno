@@ -1,3 +1,5 @@
+import { writeFile } from "node:fs/promises";
+
 type RunnerBootstrapEnv = {
   AGENTBAY_APP_URL?: string;
   AGENTBAY_RUNNER_REGISTRATION_TOKEN?: string;
@@ -5,7 +7,17 @@ type RunnerBootstrapEnv = {
   AGENTBAY_RUNNER_NAME?: string;
   AGENTBAY_RUNNER_ID?: string;
   AGENTBAY_RUNNER_CREDENTIAL?: string;
+  AGENTBAY_RUNNER_ENV_FILE?: string;
+  AGENTBAY_RUNNER_HOST?: string;
+  AGENTBAY_RUNNER_PORT?: string;
+  AGENTBAY_RUNNER_BEARER_TOKEN?: string;
 };
+
+type WriteRunnerEnvFile = (
+  path: string,
+  content: string,
+  options: { mode: number },
+) => Promise<void>;
 
 export type RunnerBootstrapResult =
   | {
@@ -23,13 +35,15 @@ export type RunnerBootstrapResult =
     };
 
 export async function bootstrapRegisteredRunner(
-  input: { env?: RunnerBootstrapEnv; fetch?: typeof fetch } = {},
+  input: { env?: RunnerBootstrapEnv; fetch?: typeof fetch; writeEnvFile?: WriteRunnerEnvFile } = {},
 ): Promise<RunnerBootstrapResult> {
-  const env = input.env ?? process.env;
+  const env = (input.env ?? process.env) as RunnerBootstrapEnv;
   const fetchImplementation = input.fetch ?? fetch;
+  const writeEnvFile = input.writeEnvFile ?? defaultWriteEnvFile;
   const appBaseUrl = normalizeBaseUrl(env.AGENTBAY_APP_URL);
   const endpointUrl = env.AGENTBAY_RUNNER_ENDPOINT_URL?.trim();
   const runnerName = env.AGENTBAY_RUNNER_NAME?.trim() || "AgentBay Cloud Runner";
+  const envFilePath = env.AGENTBAY_RUNNER_ENV_FILE?.trim();
   let runnerId = env.AGENTBAY_RUNNER_ID?.trim() ?? "";
   let credential = env.AGENTBAY_RUNNER_CREDENTIAL?.trim() ?? "";
 
@@ -67,6 +81,21 @@ export async function bootstrapRegisteredRunner(
 
     runnerId = parsedRegistration.runnerId;
     credential = parsedRegistration.credential;
+
+    if (envFilePath) {
+      await writeEnvFile(
+        envFilePath,
+        buildPersistedRunnerEnv({
+          env,
+          appBaseUrl,
+          endpointUrl,
+          runnerName,
+          runnerId,
+          credential,
+        }),
+        { mode: 0o600 },
+      );
+    }
   }
 
   const heartbeat = await fetchImplementation(`${appBaseUrl}/runner/v1/heartbeat`, {
@@ -91,6 +120,49 @@ export async function bootstrapRegisteredRunner(
     runnerId,
     status: "online",
   };
+}
+
+function defaultWriteEnvFile(path: string, content: string, options: { mode: number }) {
+  return writeFile(path, content, { mode: options.mode });
+}
+
+function buildPersistedRunnerEnv(input: {
+  env: RunnerBootstrapEnv;
+  appBaseUrl: string;
+  endpointUrl: string;
+  runnerName: string;
+  runnerId: string;
+  credential: string;
+}): string {
+  const lines = [
+    envLine("AGENTBAY_APP_URL", input.appBaseUrl),
+    envLine("AGENTBAY_RUNNER_ENDPOINT_URL", input.endpointUrl),
+    envLine("AGENTBAY_RUNNER_NAME", input.runnerName),
+    envLine("AGENTBAY_RUNNER_ID", input.runnerId),
+    envLine("AGENTBAY_RUNNER_CREDENTIAL", input.credential),
+  ];
+
+  for (const key of [
+    "AGENTBAY_RUNNER_HOST",
+    "AGENTBAY_RUNNER_PORT",
+    "AGENTBAY_RUNNER_BEARER_TOKEN",
+  ] as const) {
+    const value = input.env[key]?.trim();
+
+    if (value) {
+      lines.push(envLine(key, value));
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function envLine(key: string, value: string): string {
+  return `${key}=${quoteEnvValue(value)}`;
+}
+
+function quoteEnvValue(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\$/g, "\\$").replace(/`/g, "\\`")}"`;
 }
 
 if (import.meta.main) {

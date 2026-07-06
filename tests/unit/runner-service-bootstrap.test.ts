@@ -112,11 +112,13 @@ describe("runner service bootstrap registration", () => {
       {
         path: "/etc/agentbay/runner.env",
         mode: 0o600,
-        content: expect.stringContaining("AGENTBAY_RUNNER_ID=00000000-0000-4000-8000-000000000153"),
+        content: expect.stringContaining(
+          'AGENTBAY_RUNNER_ID="00000000-0000-4000-8000-000000000153"',
+        ),
       },
     ]);
     expect(writes[0]?.content).toContain(
-      "AGENTBAY_RUNNER_CREDENTIAL=agb_run_1234567890123456789012345678901234567890123",
+      'AGENTBAY_RUNNER_CREDENTIAL="agb_run_1234567890123456789012345678901234567890123"',
     );
   });
 
