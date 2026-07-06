@@ -49,9 +49,68 @@ DigitalOcean cloud runner provisioning also requires the same server-side comman
 ```bash
 AGENTBAY_DIGITALOCEAN_TOKEN=replace-with-digitalocean-token
 AGENTBAY_RUNNER_BEARER_TOKEN=replace-with-runner-command-token
+# Optional overrides:
+AGENTBAY_DIGITALOCEAN_REGION=sfo3
+AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-512mb-10gb
+AGENTBAY_DIGITALOCEAN_IMAGE=ubuntu-24-04-x64
+AGENTBAY_DIGITALOCEAN_TAGS=agentbay,agentbay-runner
 ```
 
 The provisioning bootstrap injects `AGENTBAY_RUNNER_BEARER_TOKEN` only into the Droplet-local runner env file so lifecycle commands from the dashboard can authenticate to the cloud runner. It must not be exposed through browser JSON, HTML, logs, or provisioning summaries.
+
+## DigitalOcean Cloud Runners
+
+Milestone 13 cloud runner provisioning is an operator-owned production workflow. Do not run the live smoke against a personal or production DigitalOcean account unless the exact Vercel deployment, database, token, and cleanup window are authorized.
+
+The hosted app must have these Vercel environment variables before `/api/runners` can create DigitalOcean runners:
+
+```text
+DATABASE_URL
+NEXT_PUBLIC_APP_URL
+AGENTBAY_DIGITALOCEAN_TOKEN
+AGENTBAY_RUNNER_BEARER_TOKEN
+```
+
+`DATABASE_URL` must point at the deployment database, and `NEXT_PUBLIC_APP_URL` must match the Vercel preview or production URL that the Droplet can call back. `AGENTBAY_DIGITALOCEAN_TOKEN` must allow Droplet create/read/tag/firewall/delete operations in the target team or account. `AGENTBAY_RUNNER_BEARER_TOKEN` is the server-side command token used by the dashboard when forwarding selected-agent lifecycle commands to the cloud runner; store it only in Vercel environment settings and the generated Droplet env file.
+
+Optional provider settings default to:
+
+```text
+AGENTBAY_DIGITALOCEAN_REGION=sfo3
+AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-512mb-10gb
+AGENTBAY_DIGITALOCEAN_IMAGE=ubuntu-24-04-x64
+AGENTBAY_DIGITALOCEAN_TAGS=agentbay,agentbay-runner
+```
+
+The default low-memory size is supported by bootstrap swap setup. If bootstrap repeatedly fails during dependency installation, retry with `AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-1gb` and record the cost/reliability tradeoff in the deployment notes.
+
+Provisioning should progress through these safe UI phases:
+
+- `pending`: the request was accepted and local state was created.
+- `bootstrapping`: a one-time runner registration token and cloud-init content were prepared.
+- `creating`: the DigitalOcean Droplet create request is in flight.
+- `tagging`: AgentBay ownership tags are being attached.
+- `firewall_configuring`: the runner firewall is being restricted to HTTPS traffic.
+- `waiting_for_runner`: the Droplet exists and should be bootstrapping, registering, and sending heartbeats.
+- `ready`: the runner registered, heartbeated, and is usable for assignment.
+- `failed`: provisioning failed or timed out with safe operator guidance.
+
+Cloud-init keeps the runner service bound to `127.0.0.1:3045`, installs Caddy, exposes only ports 80 and 443 through the managed firewall, and registers the runner endpoint as `https://<public-ip-with-dashes>.sslip.io`. The Droplet-local env file persists `AGENTBAY_RUNNER_ID`, `AGENTBAY_RUNNER_CREDENTIAL`, and `AGENTBAY_RUNNER_BEARER_TOKEN` with owner-only permissions so service restarts do not reuse the one-time registration token.
+
+Use this live smoke only after deploying a Vercel preview or production build with the required environment:
+
+1. Open `GET <deployment-url>/health` and confirm it returns `status: "ok"` and `database: "reachable"`.
+2. Open `/settings` and click Create Runner in the Cloud runners panel, or call `POST /api/runners` with `{ "provider": "digitalocean", "name": "DigitalOcean Runner" }`.
+3. In DigitalOcean, confirm one Droplet exists with the configured region, size, image, ownership tags, and a public IPv4.
+4. Watch `/settings` or `/dashboard` until provisioning reaches `ready` and runner health shows `online` with a recent heartbeat.
+5. Create a new agent, then start it from `/agents` or the agent detail page.
+6. Confirm the agent is assigned to the DigitalOcean runner and reaches `running`; the dashboard should not fall back to Vercel-local Docker.
+7. Verify the controlled failure path with local fake-provider/unit coverage rather than intentionally breaking production credentials.
+8. Record the deployment URL, runner ID, DigitalOcean Droplet ID, smoke agent ID, and cleanup status in `PROGRESS.md`.
+
+Cleanup is required after every live smoke unless the runner is intentionally retained as an active environment resource. Prefer the in-app failed-runner cleanup action when the app owns a failed Droplet. For manual cleanup, delete only Droplets that have the expected AgentBay tags and the exact recorded Droplet ID. If a runner reached `ready` and is being retained, record that decision and verify the command bearer token and runner credential remain secret. If a runner is stuck in `waiting_for_runner` for more than 60 minutes, refresh the settings/dashboard read path so it reconciles to `failed`, then inspect `/var/log/agentbay-bootstrap.log`, Caddy status, firewall rules, and DigitalOcean events before deleting or retrying.
+
+Routine CI and local validation must use the fake provider, unit tests, and the existing Playwright cloud runner UI smoke. They must not create real Droplets by default.
 
 ## Local Database
 
@@ -687,9 +746,14 @@ NEXT_PUBLIC_APP_URL
 AGENTBAY_RUNNER_BEARER_TOKEN
 AGENTBAY_MANUAL_RUNNER_NAME
 AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL
+AGENTBAY_DIGITALOCEAN_TOKEN
+AGENTBAY_DIGITALOCEAN_REGION
+AGENTBAY_DIGITALOCEAN_SIZE_SLUG
+AGENTBAY_DIGITALOCEAN_IMAGE
+AGENTBAY_DIGITALOCEAN_TAGS
 ```
 
-`DATABASE_URL` should be a Vercel-accessible Postgres connection string, not the local Docker URL. `NEXT_PUBLIC_APP_URL` should be the preview or production app URL used by that deployment. `AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL` should be the HTTPS runner endpoint, not a private local URL. `AGENTBAY_RUNNER_BEARER_TOKEN` must be stored only in Vercel environment variables or an equivalent secret store. If the CLI has no credentials or Vercel lacks required env vars, record the exact blocker in `PROGRESS.md`.
+`DATABASE_URL` should be a Vercel-accessible Postgres connection string, not the local Docker URL. `NEXT_PUBLIC_APP_URL` should be the preview or production app URL used by that deployment. `AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL` should be the HTTPS runner endpoint, not a private local URL. `AGENTBAY_DIGITALOCEAN_TOKEN` enables managed cloud runner provisioning. `AGENTBAY_DIGITALOCEAN_REGION`, `AGENTBAY_DIGITALOCEAN_SIZE_SLUG`, `AGENTBAY_DIGITALOCEAN_IMAGE`, and `AGENTBAY_DIGITALOCEAN_TAGS` may be omitted to use defaults. `AGENTBAY_RUNNER_BEARER_TOKEN` must be stored only in Vercel environment variables or an equivalent secret store. If the CLI has no credentials or Vercel lacks required env vars, record the exact blocker in `PROGRESS.md`.
 
 The Vercel CLI creates local `.vercel/` metadata and may create `.env.local` for local credentials. Both are ignored and should remain local-only.
 

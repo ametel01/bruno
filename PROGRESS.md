@@ -8,9 +8,9 @@
 
 ## Current Status
 
-- Status: Step 8 complete; Step 9 is next.
-- Active step: Step 9 - End-to-End Cloud Provisioning Smoke and Operator Docs.
-- Last updated: 2026-07-06 18:11:04 PST.
+- Status: Step 9 complete locally; live Vercel/DigitalOcean smoke is environment-blocked by missing secrets.
+- Active step: Milestone 13 local implementation complete; external smoke pending authorized deployment credentials.
+- Last updated: 2026-07-06 18:16:10 PST.
 
 ## Step Checklist
 
@@ -23,7 +23,7 @@
 - [x] Step 6: Command Authentication for Cloud Runner Lifecycle Calls
 - [x] Step 7: Bootstrap Timeout, Failure State, and Cleanup Guidance
 - [x] Step 8: Production No-Runner Behavior and Agent Assignment UX
-- [ ] Step 9: End-to-End Cloud Provisioning Smoke and Operator Docs
+- [x] Step 9: End-to-End Cloud Provisioning Smoke and Operator Docs
 
 ## Update Rules
 
@@ -174,3 +174,21 @@
 - Changelog: added one `Fixed` entry for production agent starts without online cloud runners.
 - Commit: this step commit.
 - Next step: Step 9 - End-to-End Cloud Provisioning Smoke and Operator Docs.
+
+### 2026-07-06 18:16:10 PST - Step 9 complete locally
+
+- Added DigitalOcean cloud runner operator documentation covering required Vercel env vars, optional provider defaults, provisioning phases, public HTTPS runner endpoint behavior, live smoke steps, and cleanup/failure triage.
+- Added commented DigitalOcean provisioning placeholders to `.env.example` without committing secrets.
+- Confirmed the existing Playwright cloud runner UI smoke covers non-mutating routine validation and does not create real Droplets in CI.
+- Validation:
+  - Passed: `bun run format:check`
+  - Passed: `bun run lint`
+  - Passed: `bun run typecheck`
+  - Passed: `bun run test -- tests/unit/digitalocean-provider.test.ts tests/unit/runner-provisioning.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/runner-registration.test.ts tests/unit/runner-heartbeat.test.ts tests/unit/runner-service-bootstrap.test.ts tests/unit/runner-service.test.ts tests/unit/runner-placement.test.ts tests/unit/start-agent-route.test.ts tests/unit/create-agent-db.test.ts` (10 files, 174 tests)
+  - Passed: `bun run build`
+  - Passed: `bun run verify` (52 unit test files / 410 tests, production build, 44 Playwright tests passed with 20 expected skips)
+- Live smoke: environment-blocked. This shell is authenticated to Vercel as `ametel01`, but `VERCEL_TOKEN`, `AGENTBAY_DIGITALOCEAN_TOKEN`, `AGENTBAY_RUNNER_BEARER_TOKEN`, `DATABASE_URL`, and `NEXT_PUBLIC_APP_URL` are not set in the local environment, so the real Vercel/DigitalOcean smoke was not run from this checkout.
+- Smoke resource IDs: none. No DigitalOcean Droplet was created and no cleanup was required.
+- Changelog: no new entry added because this step changed operator documentation and env examples only; functional Milestone 13 behavior is already represented by the earlier `Added`, `Changed`, and `Fixed` entries.
+- Commit: this step commit.
+- Next step: provide authorized deployment secrets and run the documented live Vercel/DigitalOcean smoke, or accept the local implementation evidence as the Milestone 13 handoff gate.
