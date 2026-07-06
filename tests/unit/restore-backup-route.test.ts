@@ -46,10 +46,15 @@ describe("POST /api/agents/[agentId]/backups/[backupId]/restore route", () => {
     expect(response.status).toBe(201);
     expect(body).toEqual({
       ok: true,
-      backup: backupDto("restored"),
-      restoredAgent: restoredAgentDto(),
+      backup: clientBackupDto("restored"),
+      restoredAgent: clientRestoredAgentDto(),
       event: { type: "backup.restored" },
     });
+    expect(JSON.stringify(body)).not.toContain("storageUri");
+    expect(JSON.stringify(body)).not.toContain("s3://");
+    expect(JSON.stringify(body)).not.toContain("agentbay-backups");
+    expect(JSON.stringify(body)).not.toContain("templateSnapshotJson");
+    expect(JSON.stringify(body)).not.toContain("userId");
     expect(mocks.restoreBackupForDevelopmentUser).toHaveBeenCalledWith({
       agentId: AGENT_ID,
       backupId: BACKUP_ID,
@@ -97,8 +102,10 @@ describe("POST /api/agents/[agentId]/backups/[backupId]/restore route", () => {
         code: "backup_not_restorable",
         message: "Backup is not ready to restore.",
       },
-      backup: backupDto("failed"),
+      backup: clientBackupDto("failed"),
     });
+    expect(JSON.stringify(body)).not.toContain("storageUri");
+    expect(JSON.stringify(body)).not.toContain("s3://");
   });
 });
 
@@ -112,6 +119,17 @@ function backupDto(status: "failed" | "restored") {
       status === "restored"
         ? `s3://agentbay-backups/agents/${AGENT_ID}/backups/${BACKUP_ID}.json`
         : null,
+    createdAt: "2026-07-06T04:30:00.000Z",
+    restoredAt: status === "restored" ? "2026-07-06T05:00:00.000Z" : null,
+  };
+}
+
+function clientBackupDto(status: "failed" | "restored") {
+  return {
+    id: BACKUP_ID,
+    agentId: AGENT_ID,
+    runnerId: null,
+    status,
     createdAt: "2026-07-06T04:30:00.000Z",
     restoredAt: status === "restored" ? "2026-07-06T05:00:00.000Z" : null,
   };
@@ -139,5 +157,17 @@ function restoredAgentDto() {
     createdAt: "2026-07-06T05:00:00.000Z",
     updatedAt: "2026-07-06T05:00:00.000Z",
     deletedAt: null,
+  };
+}
+
+function clientRestoredAgentDto() {
+  return {
+    id: "00000000-0000-4000-8000-000000000366",
+    name: "Restored Research (restored)",
+    templateKey: "research_agent",
+    templateVersion: "1.0.0",
+    status: "stopped",
+    createdAt: "2026-07-06T05:00:00.000Z",
+    updatedAt: "2026-07-06T05:00:00.000Z",
   };
 }

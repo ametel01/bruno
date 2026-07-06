@@ -73,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Server-only backup object storage boundary with deterministic fake storage tests, S3-compatible configuration validation, safe storage URIs, and credential-free failure messages for backup artifacts.
 - Manual agent backup creation through `POST /api/agents/:agentId/backups`, including sanitized manifest assembly, backup artifact upload, ready/failed backup persistence, and `backup.created` audit events.
 - Backup restore creation through `POST /api/agents/:agentId/backups/:backupId/restore`, including artifact download, manifest validation, new stopped-agent creation, restored config/template metadata, restored backup status, and `backup.restored` audit events.
+- Agent detail backup controls showing safe backup status, created/restored timestamps, manual backup creation, ready-backup restore actions, and restored-agent discovery without rendering storage URIs or raw artifact internals.
 
 ### Fixed
 

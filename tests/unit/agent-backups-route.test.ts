@@ -41,9 +41,13 @@ describe("POST /api/agents/[agentId]/backups route", () => {
     expect(response.status).toBe(201);
     expect(body).toEqual({
       ok: true,
-      backup: backupDto("ready"),
+      backup: clientBackupDto("ready"),
       event: { type: "backup.created" },
     });
+    expect(JSON.stringify(body)).not.toContain("storageUri");
+    expect(JSON.stringify(body)).not.toContain("s3://");
+    expect(JSON.stringify(body)).not.toContain("agentbay-backups");
+    expect(JSON.stringify(body)).not.toContain("manifestJson");
     expect(mocks.createManualBackupForDevelopmentUser).toHaveBeenCalledWith({
       agentId: ACTIVE_AGENT_ID,
     });
@@ -90,8 +94,11 @@ describe("POST /api/agents/[agentId]/backups route", () => {
         code: "backup_storage_failed",
         message: "Backup artifact upload failed. Check object storage configuration.",
       },
-      backup: backupDto("failed"),
+      backup: clientBackupDto("failed"),
     });
+    expect(JSON.stringify(body)).not.toContain("storageUri");
+    expect(JSON.stringify(body)).not.toContain("s3://");
+    expect(JSON.stringify(body)).not.toContain("agentbay-backups");
   });
 });
 
@@ -105,6 +112,17 @@ function backupDto(status: "ready" | "failed") {
       status === "ready"
         ? "s3://agentbay-backups/agents/00000000-0000-4000-8000-000000000165/backups/00000000-0000-4000-8000-000000000265.json"
         : null,
+    createdAt: "2026-07-06T04:30:00.000Z",
+    restoredAt: null,
+  };
+}
+
+function clientBackupDto(status: "ready" | "failed") {
+  return {
+    id: "00000000-0000-4000-8000-000000000265",
+    agentId: ACTIVE_AGENT_ID,
+    runnerId: null,
+    status,
     createdAt: "2026-07-06T04:30:00.000Z",
     restoredAt: null,
   };
