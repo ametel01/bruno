@@ -212,6 +212,70 @@
   - `git diff --check`: pass; no whitespace errors.
   - `git status --short --branch --untracked-files=all`: branch `codex/issue-150-m13-tracking` is based on `origin/main` with only `PROGRESS.md` modified.
 
+## Milestone 14 One User, Multiple Agents
+
+- Status: #156 Milestone 14 tracking and baseline gate documentation is in progress on `codex/issue-156-m14-tracking`.
+- Source plan:
+  - `docs/MILESTONES.md` Milestone 14: One User, Multiple Agents.
+  - GitHub issue #156: Prepare Milestone 14 tracking and baseline gates.
+  - `PLAN.md` is absent in this worktree; the published #156 issue body and `docs/MILESTONES.md` are the active Step 0 contract.
+- Current branch: `codex/issue-156-m14-tracking`.
+
+### Issue Checklist
+
+- [ ] #156 Prepare Milestone 14 tracking and baseline gates. Status: implementation and validation in progress.
+- [ ] #157 Add runner capacity snapshots and placement contract. Status: pending #156 baseline tracking.
+- [ ] #158 Enforce capacity and plan limits on create and start. Status: pending #156 baseline tracking.
+- [ ] #159 Harden per-agent runtime and log isolation. Status: pending #156 baseline tracking.
+- [ ] #160 Show runner capacity in the operations UI. Status: pending #156 baseline tracking.
+- [ ] #161 Complete multi-agent runner acceptance evidence. Status: pending #156 baseline tracking and implementation slices.
+- Later Milestone 14 issue agents must append validation evidence here after their implementation slices.
+
+### Current Status
+
+- Milestone 14 goal from `docs/MILESTONES.md`: a user can run multiple agents on one runner with separated status, logs, and capacity.
+- Milestone 14 acceptance criteria: user can create three agents and start all on one runner; stopping one agent does not affect the others; logs stay separated by agent; runner capacity is visible and updates; capacity and plan limits block excess starts or creates.
+- Milestone 14 test expectations from `docs/MILESTONES.md`: placement tests for capacity available and unavailable, concurrency tests for simultaneous start requests, integration tests with multiple agents and separated logs, and UI tests for capacity display.
+- #156 is tracking-only. It initializes the Milestone 14 progress record, records baseline gate expectations, verifies changelog structure, and intentionally leaves `CHANGELOG.md` unchanged because no functional user/operator-visible behavior ships in this issue.
+- `CHANGELOG.md` has the Keep a Changelog 1.0.0 framing and an `## [Unreleased]` section. Agents should keep that structure and add changelog bullets only for shipped functional user/operator-visible changes.
+
+### Baseline Gate Expectations
+
+- Default local database for verify, DB-backed unit tests, migrations, health checks, and default E2E: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay`.
+- Default local app URL for verify and E2E: `NEXT_PUBLIC_APP_URL=http://localhost:3000`.
+- Default E2E server URL: `PORT=3000` and `PLAYWRIGHT_BASE_URL=http://localhost:3000` unless an issue uses an isolated port; when an isolated E2E port is used, set `PORT`, `PLAYWRIGHT_BASE_URL`, and `NEXT_PUBLIC_APP_URL` to the same localhost port.
+- Canonical aggregate gate: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run verify`.
+- Required #156 baseline command: `bun run format:check`.
+- Known repo caveats:
+  - Fresh worktrees may need `bun install --frozen-lockfile` before package scripts are available.
+  - Default-parallel DB-backed Vitest inside `bun run verify` has previously failed from shared-DB isolation races. If this repeats, rerun the relevant branch command and prove whether the same failure reproduces on current `main` before calling it a branch regression.
+  - As recorded during #155 checker review, `bun run db:health` currently fails under plain Bun on the existing baseline because the `server-only` import guard trips through `src/server/env.ts`; treat this as separate baseline follow-up unless a Milestone 14 issue changes that path.
+
+### Update Rules
+
+- Every Milestone 14 implementation issue must update this section after validation with the issue number, changed behavior, commands run, pass/fail result, skipped checks with reasons, and remaining risks.
+- Preserve Milestone 15 as future scope; do not add backup, restore, billing, production deploy, unrelated provider work, or non-Milestone-14 UI changes while executing Milestone 14.
+- Keep runner credentials, registration tokens, cloud provider secrets, bearer tokens, production URLs, and endpoint credentials out of committed docs, UI output, tests, logs, and status messages.
+- Update `CHANGELOG.md` only for shipped functional user/operator-visible changes. Do not add changelog entries for tracking-only, validation-only, test-only, or documentation-only work.
+
+### Update Log
+
+- 2026-07-06: #156 initialized Milestone 14 tracking from `docs/MILESTONES.md` and the published #156 issue body; noted that `PLAN.md` is absent in this worktree and the published issue body plus milestone document are the active Step 0 contract.
+- 2026-07-06: #156 confirmed `CHANGELOG.md` has Keep a Changelog 1.0.0 framing and `## [Unreleased]`; `CHANGELOG.md` is intentionally unchanged for #156 because this issue creates tracking only and ships no functional product behavior.
+- 2026-07-06: #156 recorded baseline gate expectations for `bun run verify`, `bun run test:e2e`, the local Postgres `DATABASE_URL`, and `NEXT_PUBLIC_APP_URL` before multi-agent runner work starts.
+
+### Validation Evidence
+
+- 2026-07-06 #156:
+  - `gh issue view 156 --repo ametel01/agentbay --json number,title,body,state,url,labels`: pass; issue is open and maps Milestone 14 tracking to `docs/MILESTONES.md` plus PLAN Step 0.
+  - `test -f PLAN.md`: not present in this worktree; #156 issue body and `docs/MILESTONES.md` are recorded above as the active contract.
+  - `rg -n "Keep a Changelog|## \\[Unreleased\\]|Semantic Versioning" CHANGELOG.md`: pass; required changelog structure is present.
+  - Initial `bun run format:check`: environment failure; `biome` binary was unavailable in the fresh worktree (`/opt/homebrew/bin/bash: line 1: biome: command not found`).
+  - `bun install --frozen-lockfile`: pass; installed dependencies from the committed `bun.lock` without changing tracked files.
+  - `bun run format:check`: pass; Biome checked 134 files with no fixes applied.
+  - `git diff --check`: pass; no whitespace errors.
+  - `git status --short --branch --untracked-files=all`: branch `codex/issue-156-m14-tracking` is based on `origin/main` with only `PROGRESS.md` modified.
+
 ## Milestone 12 Secure Runner Auth
 
 - Status: Milestone 12 local automated acceptance is complete on `codex/issue-134-milestone-12-acceptance`; #126 remains separately external-blocked for Milestone 11 hosted-dashboard/manual-VPS smoke.
