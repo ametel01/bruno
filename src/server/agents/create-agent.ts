@@ -1,8 +1,9 @@
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { and, eq, isNull } from "drizzle-orm";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
-import { agentConfigs, agents } from "@/src/server/db/schema";
+import { agentConfigs, agents, runners } from "@/src/server/db/schema";
 import {
   getAgentTemplateSnapshot,
   isSupportedTemplateKey,
@@ -14,6 +15,11 @@ import {
   selectRunnerPlacementForDevelopmentUserInTransaction,
   type RunnerPlacementResult,
 } from "@/src/server/runners/runner-placement";
+import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
+import {
+  createDigitalOceanRunnerForDevelopmentUser,
+  type CreateRunnerProvisioningResult,
+} from "@/src/server/runners/runner-provisioning";
 import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
 
 export const AGENT_NAME_MAX_LENGTH = 120;
@@ -95,10 +101,14 @@ type InsertDefaultAgentConfig = (
   },
 ) => Promise<void>;
 
+type EnsureCloudRunnerProvisioning = () => Promise<CreateRunnerProvisioningResult>;
+
 export type CreateAgentDependencies = {
   createConnection?: () => DatabaseConnection;
   insertDefaultAgentConfig?: InsertDefaultAgentConfig;
   insertCreatedEvent?: InsertCreatedEvent;
+  ensureCloudRunnerProvisioning?: EnsureCloudRunnerProvisioning;
+  autoProvisionCloudRunner?: boolean;
   planMaxAgents?: number | null;
 };
 
@@ -136,6 +146,17 @@ export class AgentRunnerAssignmentError extends Error {
   constructor() {
     super("Requested runner cannot be assigned to this agent.");
     this.name = "AgentRunnerAssignmentError";
+  }
+}
+
+export class AgentRunnerProvisioningError extends Error {
+  readonly reason: "provider_not_configured" | "provisioning_failed";
+
+  constructor(reason: "provider_not_configured" | "provisioning_failed", cause?: unknown) {
+    super("Cloud runner provisioning could not be started.");
+    this.name = "AgentRunnerProvisioningError";
+    this.reason = reason;
+    this.cause = cause;
   }
 }
 
@@ -211,6 +232,10 @@ export async function createAgentForDevelopmentUser(
   const insertDefaultAgentConfig =
     dependencies.insertDefaultAgentConfig ?? insertDefaultConfigForCreatedAgent;
   const insertCreatedEvent = dependencies.insertCreatedEvent ?? insertDefaultCreatedEvent;
+  const autoProvisionCloudRunner =
+    dependencies.autoProvisionCloudRunner ?? process.env.NODE_ENV !== "test";
+  const ensureCloudRunnerProvisioning =
+    dependencies.ensureCloudRunnerProvisioning ?? ensureDefaultCloudRunnerProvisioning;
 
   try {
     const result = await connection.db.transaction(async (tx) => {
@@ -233,31 +258,48 @@ export async function createAgentForDevelopmentUser(
         throw new AgentCreateBlockedError(placement);
       }
 
-      const [agent] = await tx
-        .insert(agents)
-        .values({
-          userId,
-          runnerId: placement.ok ? placement.runner.id : null,
-          name: input.name,
-          templateKey: input.templateKey,
-          templateVersion: templateSnapshot.version,
-          templateSnapshotJson: templateSnapshot,
-          status: "stopped",
-        })
-        .returning();
-
-      if (!agent) {
-        throw new Error("Agent insert returned no rows.");
+      if (!placement.ok && placement.reason === "no_online_runner" && autoProvisionCloudRunner) {
+        return { status: "needs_cloud_runner" } as const;
       }
 
-      const createdAgent = agent as CreatedAgentRow;
-      await insertDefaultAgentConfig(tx, { agent: createdAgent });
-      await insertCreatedEvent(tx, { agent: createdAgent, actorUserId: userId });
-
-      return toCreatedAgentResponse(createdAgent);
+      return {
+        status: "created",
+        response: await insertCreatedAgentInTransaction(tx, {
+          userId,
+          name: input.name,
+          templateKey: input.templateKey,
+          templateSnapshot,
+          runnerId: placement.ok ? placement.runner.id : null,
+          insertDefaultAgentConfig,
+          insertCreatedEvent,
+        }),
+      } as const;
     });
 
-    return result;
+    if (result.status === "created") {
+      return result.response;
+    }
+
+    const provisionedRunnerId = await ensureProvisionedRunnerId(ensureCloudRunnerProvisioning);
+
+    return await connection.db.transaction(async (tx) => {
+      const userId = await getOrCreateDevelopmentUserId(tx);
+      await assertActiveAgentPlanAllowsInsert(tx, userId, dependencies.planMaxAgents);
+      await assertProvisioningRunnerAssignableToUser(tx, {
+        userId,
+        runnerId: provisionedRunnerId,
+      });
+
+      return insertCreatedAgentInTransaction(tx, {
+        userId,
+        name: input.name,
+        templateKey: input.templateKey,
+        templateSnapshot: getAgentTemplateSnapshot(input.templateKey),
+        runnerId: provisionedRunnerId,
+        insertDefaultAgentConfig,
+        insertCreatedEvent,
+      });
+    });
   } catch (error) {
     if (error instanceof AgentCreateBlockedError) {
       throw error;
@@ -267,12 +309,150 @@ export async function createAgentForDevelopmentUser(
       throw error;
     }
 
+    if (error instanceof AgentRunnerProvisioningError) {
+      throw error;
+    }
+
     throw new AgentPersistenceError(error);
   } finally {
     if (ownsConnection) {
       await connection.close();
     }
   }
+}
+
+async function insertCreatedAgentInTransaction(
+  tx: AgentTransaction,
+  input: {
+    userId: string;
+    name: string;
+    templateKey: SupportedAgentTemplateKey;
+    templateSnapshot: AgentTemplateSnapshot;
+    runnerId: string | null;
+    insertDefaultAgentConfig: InsertDefaultAgentConfig;
+    insertCreatedEvent: InsertCreatedEvent;
+  },
+): Promise<CreatedAgentResponse> {
+  const [agent] = await tx
+    .insert(agents)
+    .values({
+      userId: input.userId,
+      runnerId: input.runnerId,
+      name: input.name,
+      templateKey: input.templateKey,
+      templateVersion: input.templateSnapshot.version,
+      templateSnapshotJson: input.templateSnapshot,
+      status: "stopped",
+    })
+    .returning();
+
+  if (!agent) {
+    throw new Error("Agent insert returned no rows.");
+  }
+
+  const createdAgent = agent as CreatedAgentRow;
+  await input.insertDefaultAgentConfig(tx, { agent: createdAgent });
+  await input.insertCreatedEvent(tx, { agent: createdAgent, actorUserId: input.userId });
+
+  return toCreatedAgentResponse(createdAgent);
+}
+
+async function ensureProvisionedRunnerId(
+  ensureCloudRunnerProvisioning: EnsureCloudRunnerProvisioning,
+): Promise<string> {
+  let result: CreateRunnerProvisioningResult;
+
+  try {
+    result = await ensureCloudRunnerProvisioning();
+  } catch (error) {
+    throw new AgentRunnerProvisioningError("provisioning_failed", error);
+  }
+
+  if (!result.ok) {
+    if (result.reason === "provider_not_configured") {
+      throw new AgentRunnerProvisioningError("provider_not_configured");
+    }
+
+    throw new AgentRunnerProvisioningError("provisioning_failed", result);
+  }
+
+  if (
+    result.runner.provisioning.status === "failed" ||
+    result.runner.provisioning.status === "deleted"
+  ) {
+    throw new AgentRunnerProvisioningError("provisioning_failed", result);
+  }
+
+  return result.runner.id;
+}
+
+async function assertActiveAgentPlanAllowsInsert(
+  tx: AgentTransaction,
+  userId: string,
+  planMaxAgents: number | null | undefined,
+): Promise<void> {
+  const normalizedPlanMaxAgents =
+    typeof planMaxAgents === "number" && Number.isInteger(planMaxAgents) && planMaxAgents > 0
+      ? planMaxAgents
+      : null;
+
+  if (normalizedPlanMaxAgents === null) {
+    return;
+  }
+
+  const activeAgentRows = await tx
+    .select({ id: agents.id })
+    .from(agents)
+    .where(and(eq(agents.userId, userId), isNull(agents.deletedAt)));
+
+  if (activeAgentRows.length >= normalizedPlanMaxAgents) {
+    throw new AgentCreateBlockedError({
+      ok: false,
+      reason: "plan_limit_reached",
+      currentAgents: activeAgentRows.length,
+      maxAgents: normalizedPlanMaxAgents,
+    });
+  }
+}
+
+async function assertProvisioningRunnerAssignableToUser(
+  tx: AgentTransaction,
+  input: {
+    userId: string;
+    runnerId: string;
+  },
+): Promise<void> {
+  const [runner] = await tx
+    .select({
+      id: runners.id,
+      kind: runners.kind,
+      provisioningStatus: runners.provisioningStatus,
+    })
+    .from(runners)
+    .where(
+      and(
+        eq(runners.id, input.runnerId),
+        eq(runners.userId, input.userId),
+        eq(runners.kind, DIGITALOCEAN_RUNNER_KIND),
+        isNull(runners.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (
+    !runner ||
+    runner.provisioningStatus === "failed" ||
+    runner.provisioningStatus === "deleted"
+  ) {
+    throw new AgentRunnerProvisioningError("provisioning_failed");
+  }
+}
+
+function ensureDefaultCloudRunnerProvisioning(): Promise<CreateRunnerProvisioningResult> {
+  return createDigitalOceanRunnerForDevelopmentUser({
+    provider: "digitalocean",
+    name: "AgentBay Cloud Runner",
+  });
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

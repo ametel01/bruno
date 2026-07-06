@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentCreateBlockedError, AgentPersistenceError } from "@/src/server/agents/create-agent";
+import {
+  AgentCreateBlockedError,
+  AgentPersistenceError,
+  AgentRunnerProvisioningError,
+} from "@/src/server/agents/create-agent";
 
 const mocks = vi.hoisted(() => ({
   createAgentForDevelopmentUser: vi.fn(),
@@ -220,6 +224,31 @@ describe("POST /api/agents route", () => {
       },
     });
     expect(JSON.stringify(body)).not.toContain("00000000-0000-4000-8000-000000000158");
+  });
+
+  it("returns an actionable response when automatic runner provisioning is not configured", async () => {
+    mocks.createAgentForDevelopmentUser.mockRejectedValueOnce(
+      new AgentRunnerProvisioningError("provider_not_configured"),
+    );
+    const { POST } = await import("@/app/api/agents/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/agents", {
+        method: "POST",
+        body: JSON.stringify({ name: "Research Agent", templateKey: "research_agent" }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toEqual({
+      error: {
+        code: "runner_provisioning_not_configured",
+        message:
+          "Cloud runner provisioning is not configured. Add DigitalOcean and runner credentials, then try again.",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("dop_v1");
   });
 
   it("returns a safe database unavailable response when Postgres cannot be reached", async () => {

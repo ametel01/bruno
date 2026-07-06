@@ -2,6 +2,10 @@ import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { runners } from "@/src/server/db/schema";
+import {
+  DIGITALOCEAN_RUNNER_KIND,
+  type DigitalOceanRunnerKind,
+} from "@/src/server/runners/digitalocean-provider";
 import { MANUAL_RUNNER_KIND } from "@/src/server/runners/manual-runner-persistence";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
@@ -10,7 +14,7 @@ const ASSIGNABLE_RUNNER_STATUS = "online";
 export type AssignableRunnerSummary = {
   id: string;
   name: string;
-  kind: typeof MANUAL_RUNNER_KIND;
+  kind: typeof MANUAL_RUNNER_KIND | DigitalOceanRunnerKind;
   status: typeof ASSIGNABLE_RUNNER_STATUS;
   detail: string;
 };
@@ -49,7 +53,6 @@ export async function listAssignableRunnersForDevelopmentUser(
           and(
             eq(runners.userId, userId),
             isNull(runners.deletedAt),
-            eq(runners.kind, MANUAL_RUNNER_KIND),
             eq(runners.status, ASSIGNABLE_RUNNER_STATUS),
             isNotNull(runners.endpointUrl),
           ),
@@ -60,9 +63,9 @@ export async function listAssignableRunnersForDevelopmentUser(
       return rows.map((row) => ({
         id: row.id,
         name: summarizeOperationalText(row.name, "Runner"),
-        kind: MANUAL_RUNNER_KIND,
+        kind: row.kind === DIGITALOCEAN_RUNNER_KIND ? DIGITALOCEAN_RUNNER_KIND : MANUAL_RUNNER_KIND,
         status: ASSIGNABLE_RUNNER_STATUS,
-        detail: manualRunnerDetail(row.endpointUrl),
+        detail: runnerDetail(row.endpointUrl, row.kind),
       }));
     });
   } catch {
@@ -74,14 +77,16 @@ export async function listAssignableRunnersForDevelopmentUser(
   }
 }
 
-function manualRunnerDetail(endpointUrl: string | null): string {
+function runnerDetail(endpointUrl: string | null, kind: string): string {
+  const fallback = kind === DIGITALOCEAN_RUNNER_KIND ? "DigitalOcean runner" : "Manual runner";
+
   if (!endpointUrl) {
-    return "Manual runner";
+    return fallback;
   }
 
   try {
-    return new URL(endpointUrl).host || "Manual runner";
+    return new URL(endpointUrl).host || fallback;
   } catch {
-    return "Manual runner";
+    return fallback;
   }
 }

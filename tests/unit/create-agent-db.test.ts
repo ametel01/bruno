@@ -100,6 +100,7 @@ import {
   bootstrapManualRunnerForDevelopmentUser,
   getAssignedRunnerForActiveAgentDevelopmentUser,
 } from "@/src/server/runners/manual-runner-persistence";
+import type { CreateRunnerProvisioningResult } from "@/src/server/runners/runner-provisioning";
 import {
   AGENTBAY_AGENT_ID_LABEL,
   DEFAULT_DOCKER_RUNNER_IMAGE,
@@ -231,6 +232,82 @@ describe("create agent persistence", () => {
         value: created.agent.userId,
       }),
     );
+  });
+
+  it("creates or reuses a DigitalOcean provisioning runner and assigns it when no online runner exists", async () => {
+    let provisionedRunnerId: string | null = null;
+    const ensureCloudRunnerProvisioning = vi.fn(
+      async (): Promise<CreateRunnerProvisioningResult> => {
+        const userId = await connection.db.transaction((tx) => getOrCreateDevelopmentUserId(tx));
+        const now = new Date("2026-07-06T08:00:00.000Z");
+        const [runner] = await connection.db
+          .insert(runners)
+          .values({
+            userId,
+            name: "AgentBay Cloud Runner",
+            kind: "digitalocean",
+            status: "provisioning",
+            provider: "digitalocean",
+            region: "sfo3",
+            sizeSlug: "s-1vcpu-512mb-10gb",
+            image: "ubuntu-24-04-x64",
+            provisioningStatus: "pending",
+            provisioningStartedAt: now,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
+
+        if (!runner) {
+          throw new Error("Runner insert returned no rows.");
+        }
+
+        provisionedRunnerId = runner.id;
+
+        return {
+          ok: true,
+          duplicate: false,
+          runner: {
+            id: runner.id,
+            name: runner.name,
+            kind: "digitalocean",
+            status: "provisioning",
+            provider: "digitalocean",
+            providerResourceId: null,
+            region: "sfo3",
+            sizeSlug: "s-1vcpu-512mb-10gb",
+            image: "ubuntu-24-04-x64",
+            provisioning: {
+              status: "pending",
+              error: null,
+              startedAt: now.toISOString(),
+              completedAt: null,
+              phases: [],
+            },
+          },
+        };
+      },
+    );
+
+    const created = await createAgentForDevelopmentUser(
+      { name: "Cloud Agent", templateKey: "research_agent" },
+      {
+        createConnection: () => connection,
+        autoProvisionCloudRunner: true,
+        ensureCloudRunnerProvisioning,
+      },
+    );
+
+    const [persistedAgent] = await connection.db
+      .select({ runnerId: agents.runnerId })
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+
+    expect(ensureCloudRunnerProvisioning).toHaveBeenCalledTimes(1);
+    expect(provisionedRunnerId).toEqual(expect.any(String));
+    expect(created.agent.runnerId).toBe(provisionedRunnerId);
+    expect(persistedAgent?.runnerId).toBe(provisionedRunnerId);
   });
 
   it("creates agents with no assigned runner by default and preserves no-runner lifecycle behavior", async () => {

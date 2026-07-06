@@ -34,6 +34,8 @@ import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-use
 const DEFAULT_CLOUD_RUNNER_NAME = "AgentBay Cloud Runner";
 const DEFAULT_FIREWALL_NAME = "agentbay-runners";
 const CLOUD_REGISTRATION_TOKEN_TTL_MS = 60 * 60 * 1000;
+const PUBLIC_ENDPOINT_POLL_ATTEMPTS = 20;
+const PUBLIC_ENDPOINT_POLL_INTERVAL_MS = 3_000;
 const LOW_MEMORY_DIGITALOCEAN_SIZE_SLUGS = new Set(["s-1vcpu-512mb-10gb"]);
 const MAX_RUNNER_NAME_LENGTH = 80;
 
@@ -167,6 +169,8 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
     provider?: DigitalOceanProvider;
     readConfig?: () => DigitalOceanProviderConfig | null;
     createRegistrationToken?: () => GeneratedRunnerSecret;
+    publicEndpointPollAttempts?: number;
+    publicEndpointPollIntervalMs?: number;
     now?: () => Date;
   } = {},
 ): Promise<CreateRunnerProvisioningResult> {
@@ -176,21 +180,37 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
     return { ok: false, reason: "validation_failed", issues: validated.issues };
   }
 
-  const config = dependencies.readConfig?.() ?? readDigitalOceanProviderConfig();
-
-  if (!config) {
-    return { ok: false, reason: "provider_not_configured" };
-  }
-
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now ?? (() => new Date());
-  const provider = dependencies.provider ?? new DigitalOceanApiProvider({ token: config.token });
-  const createRegistrationTokenDependency =
-    dependencies.createRegistrationToken ?? createRunnerRegistrationToken;
   const firewallName = DEFAULT_FIREWALL_NAME;
 
   try {
+    const duplicate = await connection.db.transaction(async (tx) => {
+      const userId = await getOrCreateDevelopmentUserId(tx);
+      const duplicateRunner = await findActiveProvisioningRunner(tx, userId);
+
+      return duplicateRunner ? await toRunnerProvisioningDto(tx, duplicateRunner.id) : null;
+    });
+
+    if (duplicate) {
+      return {
+        ok: true,
+        duplicate: true,
+        runner: duplicate,
+      };
+    }
+
+    const config = dependencies.readConfig?.() ?? readDigitalOceanProviderConfig();
+
+    if (!config) {
+      return { ok: false, reason: "provider_not_configured" };
+    }
+
+    const provider = dependencies.provider ?? new DigitalOceanApiProvider({ token: config.token });
+    const createRegistrationTokenDependency =
+      dependencies.createRegistrationToken ?? createRunnerRegistrationToken;
+
     const initialized = await connection.db.transaction(async (tx) => {
       const userId = await getOrCreateDevelopmentUserId(tx);
       const duplicateRunner = await findActiveProvisioningRunner(tx, userId);
@@ -321,7 +341,21 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       };
     }
 
-    const publicEndpoint = await resolveDigitalOceanPublicEndpoint(provider, resource.value);
+    const publicEndpointOptions: { attempts?: number; intervalMs?: number } = {};
+
+    if (dependencies.publicEndpointPollAttempts !== undefined) {
+      publicEndpointOptions.attempts = dependencies.publicEndpointPollAttempts;
+    }
+
+    if (dependencies.publicEndpointPollIntervalMs !== undefined) {
+      publicEndpointOptions.intervalMs = dependencies.publicEndpointPollIntervalMs;
+    }
+
+    const publicEndpoint = await resolveDigitalOceanPublicEndpoint(
+      provider,
+      resource.value,
+      publicEndpointOptions,
+    );
 
     if (!publicEndpoint.ok) {
       await failProvisioning(connection, {
@@ -601,6 +635,10 @@ async function buildProvisioningBootstrap(input: {
 async function resolveDigitalOceanPublicEndpoint(
   provider: DigitalOceanProvider,
   resource: DigitalOceanResource,
+  options: {
+    attempts?: number;
+    intervalMs?: number;
+  } = {},
 ): Promise<
   | {
       ok: true;
@@ -617,19 +655,34 @@ async function resolveDigitalOceanPublicEndpoint(
     return { ok: true, endpointUrl: publicIpv4ToSslipEndpoint(publicIpv4) };
   }
 
-  const refreshed = await provider.readResource({
-    providerResourceId: resource.providerResourceId,
-  });
+  const attempts = normalizePositiveInteger(options.attempts, PUBLIC_ENDPOINT_POLL_ATTEMPTS);
+  const intervalMs = normalizeNonNegativeInteger(
+    options.intervalMs,
+    PUBLIC_ENDPOINT_POLL_INTERVAL_MS,
+  );
+  let lastFailureReason: DigitalOceanProviderErrorReason = "resource_not_found";
 
-  if (!refreshed.ok) {
-    return { ok: false, reason: refreshed.reason };
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const refreshed = await provider.readResource({
+      providerResourceId: resource.providerResourceId,
+    });
+
+    if (!refreshed.ok) {
+      lastFailureReason = refreshed.reason;
+    } else {
+      const refreshedPublicIpv4 = normalizePublicIpv4(refreshed.value.publicIpv4);
+
+      if (refreshedPublicIpv4) {
+        return { ok: true, endpointUrl: publicIpv4ToSslipEndpoint(refreshedPublicIpv4) };
+      }
+    }
+
+    if (attempt < attempts - 1 && intervalMs > 0) {
+      await delay(intervalMs);
+    }
   }
 
-  const refreshedPublicIpv4 = normalizePublicIpv4(refreshed.value.publicIpv4);
-
-  return refreshedPublicIpv4
-    ? { ok: true, endpointUrl: publicIpv4ToSslipEndpoint(refreshedPublicIpv4) }
-    : { ok: false, reason: "resource_not_found" };
+  return { ok: false, reason: lastFailureReason };
 }
 
 function publicIpv4ToSslipEndpoint(publicIpv4: string): string {
@@ -655,6 +708,18 @@ function normalizePublicIpv4(value: string | null): string | null {
   })
     ? normalized
     : null;
+}
+
+function normalizePositiveInteger(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function normalizeNonNegativeInteger(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : fallback;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function failProvisioning(

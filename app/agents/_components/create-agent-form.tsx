@@ -15,7 +15,7 @@ type CreateAgentFormProps = {
   runners: Array<{
     id: string;
     name: string;
-    kind: "manual_vps";
+    kind: "manual_vps" | "digitalocean";
     status: "online";
     detail: string;
   }>;
@@ -232,6 +232,14 @@ async function safeFailureMessage(response: Response): Promise<string> {
 
     if (body.error?.code === "runner_not_assignable") {
       return "Runner could not be assigned. Refresh runners and try again.";
+    }
+
+    if (body.error?.code === "runner_provisioning_not_configured") {
+      return "Cloud runner provisioning is not configured. Add DigitalOcean and runner credentials, then try again.";
+    }
+
+    if (body.error?.code === "runner_provisioning_failed") {
+      return "Cloud runner provisioning could not be started. Check runner provisioning status.";
     }
   } catch {
     // Keep user-facing failures generic when the response is not safe validation JSON.

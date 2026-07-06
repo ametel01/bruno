@@ -302,4 +302,84 @@ describe("DigitalOcean API provider", () => {
     });
     expect(JSON.stringify(result)).not.toContain("dop_v1_super_secret");
   });
+
+  it("reads a Droplet public IPv4 through the SDK Droplet GET API", async () => {
+    const calls: Array<{ step: string; id?: number }> = [];
+    const provider = new DigitalOceanApiProvider({
+      token: "dop_v1_super_secret",
+      client: {
+        v2: {
+          droplets: {
+            post: async () => ({
+              droplet: {
+                id: 456789,
+                name: "agentbay-cloud-runner",
+                region: { slug: "sfo3" },
+                sizeSlug: "s-1vcpu-512mb-10gb",
+                image: { slug: "ubuntu-24-04-x64" },
+                networks: { v4: [] },
+                tags: ["agentbay"],
+                createdAt: "2026-07-06T08:00:00.000Z",
+              },
+            }),
+            byDroplet_id: (id) => ({
+              get: async () => {
+                calls.push({ step: "droplets.get", id });
+
+                return {
+                  droplet: {
+                    id,
+                    name: "agentbay-cloud-runner",
+                    region: { slug: "sfo3" },
+                    sizeSlug: "s-1vcpu-512mb-10gb",
+                    image: { slug: "ubuntu-24-04-x64" },
+                    networks: {
+                      v4: [
+                        { ipAddress: "10.0.0.5", type: "private" },
+                        { ipAddress: "203.0.113.88", type: "public" },
+                      ],
+                    },
+                    tags: ["agentbay"],
+                    createdAt: "2026-07-06T08:00:00.000Z",
+                  },
+                };
+              },
+              delete: async () => {},
+            }),
+          },
+          firewalls: { post: async () => ({ firewall: { id: "firewall-1" } }) },
+          tags: {
+            byTag_id: () => ({
+              resources: { post: async () => {} },
+            }),
+          },
+        },
+      },
+    });
+
+    const created = await provider.createRunner({
+      name: "AgentBay Cloud Runner",
+      region: "sfo3",
+      sizeSlug: "s-1vcpu-512mb-10gb",
+      image: "ubuntu-24-04-x64",
+      tags: ["agentbay"],
+    });
+
+    if (!created.ok) {
+      throw new Error("Expected API provider create to succeed.");
+    }
+
+    const refreshed = await provider.readResource({
+      providerResourceId: created.value.providerResourceId,
+    });
+
+    expect(refreshed).toMatchObject({
+      ok: true,
+      value: {
+        providerResourceId: "456789",
+        publicIpv4: "203.0.113.88",
+      },
+    });
+    expect(calls).toEqual([{ step: "droplets.get", id: 456789 }]);
+  });
 });

@@ -19,6 +19,8 @@ export function createDigitalOceanSdkClient(token, apiBaseUrl) {
       droplets: {
         post: (body) => sendJson(adapter, client.v2.droplets.toPostRequestInformation(body)),
         byDroplet_id: (id) => ({
+          get: () =>
+            sendJson(adapter, client.v2.droplets.byDroplet_id(id).toGetRequestInformation()),
           delete: () =>
             sendNoContent(
               adapter,

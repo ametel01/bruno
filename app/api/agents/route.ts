@@ -1,6 +1,7 @@
 import {
   AgentCreateBlockedError,
   AgentRunnerAssignmentError,
+  AgentRunnerProvisioningError,
   AgentPersistenceError,
   createAgentForDevelopmentUser,
   validateCreateAgentPayload,
@@ -46,12 +47,42 @@ export async function POST(request: Request) {
       );
     }
 
+    if (error instanceof AgentRunnerProvisioningError) {
+      return runnerProvisioningErrorResponse(error);
+    }
+
     if (error instanceof AgentPersistenceError) {
       return persistenceErrorResponse(error);
     }
 
     throw error;
   }
+}
+
+function runnerProvisioningErrorResponse(error: AgentRunnerProvisioningError) {
+  if (error.reason === "provider_not_configured") {
+    return Response.json(
+      {
+        error: {
+          code: "runner_provisioning_not_configured",
+          message:
+            "Cloud runner provisioning is not configured. Add DigitalOcean and runner credentials, then try again.",
+        },
+      },
+      { status: 503 },
+    );
+  }
+
+  return Response.json(
+    {
+      error: {
+        code: "runner_provisioning_failed",
+        message:
+          "Cloud runner provisioning could not be started. Check runner provisioning status.",
+      },
+    },
+    { status: 502 },
+  );
 }
 
 function validationResponse(issues: Array<{ field: string; message: string }>) {

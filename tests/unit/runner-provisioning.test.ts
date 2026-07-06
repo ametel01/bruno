@@ -205,6 +205,65 @@ describe.sequential("runner provisioning service", () => {
     expect(userData).toContain("/var/log/agentbay-bootstrap.log");
   });
 
+  it("polls DigitalOcean until a Droplet public IPv4 is available", async () => {
+    const provider = new FakeDigitalOceanProvider({
+      publicIpv4: null,
+      idPrefix: "droplet",
+    });
+    const readResource = provider.readResource.bind(provider);
+    let readCount = 0;
+    provider.readResource = async (input) => {
+      readCount += 1;
+
+      if (readCount === 3) {
+        const existing = provider.resources.get(input.providerResourceId);
+
+        if (existing) {
+          provider.resources.set(input.providerResourceId, {
+            ...existing,
+            publicIpv4: "203.0.113.77",
+          });
+        }
+      }
+
+      return readResource(input);
+    };
+
+    const result = await createDigitalOceanRunnerForDevelopmentUser(
+      { provider: "digitalocean", name: "Polling Runner" },
+      {
+        createConnection: () => connection,
+        provider,
+        readConfig: () => ({
+          token: "dop_v1_super_secret",
+          runnerBearerToken: "runner-command-token",
+          region: "sfo3",
+          sizeSlug: "s-1vcpu-512mb-10gb",
+          image: "ubuntu-24-04-x64",
+          tags: ["agentbay", "cloud-runner"],
+        }),
+        publicEndpointPollAttempts: 3,
+        publicEndpointPollIntervalMs: 0,
+        now: sequenceClock("2026-07-06T08:00:00.000Z"),
+      },
+    );
+
+    const [persistedRunner] = await connection.db
+      .select({ endpointUrl: runners.endpointUrl })
+      .from(runners)
+      .limit(1);
+
+    expect(result).toMatchObject({
+      ok: true,
+      runner: {
+        status: "registering",
+        provisioning: { status: "waiting_for_runner" },
+      },
+    });
+    expect(readCount).toBe(3);
+    expect(persistedRunner?.endpointUrl).toBe("https://203-0-113-77.sslip.io");
+  });
+
   it("persists a safe actionable failed state when the provider create step fails", async () => {
     const provider = new FakeDigitalOceanProvider({
       fail: { create: "dop_v1_real_secret leaked by provider" },
@@ -458,6 +517,45 @@ describe.sequential("runner provisioning service", () => {
     expect(secondProvider.calls).toEqual([]);
     await expect(countRows(connection, "runners")).resolves.toBe(1);
     await expect(countRows(connection, "runner_registration_tokens")).resolves.toBe(1);
+  });
+
+  it("reuses an existing in-progress runner before requiring provider config", async () => {
+    const firstProvider = new FakeDigitalOceanProvider({ idPrefix: "first-droplet" });
+    const secondProvider = new FakeDigitalOceanProvider({ idPrefix: "second-droplet" });
+
+    const first = await createDigitalOceanRunnerForDevelopmentUser(
+      { provider: "digitalocean", name: "First Runner" },
+      {
+        createConnection: () => connection,
+        provider: firstProvider,
+        readConfig: () => ({
+          token: "dop_v1_super_secret",
+          runnerBearerToken: "runner-command-token",
+          region: "sfo3",
+          sizeSlug: "s-1vcpu-1gb",
+          image: "ubuntu-24-04-x64",
+          tags: ["agentbay"],
+        }),
+      },
+    );
+    const second = await createDigitalOceanRunnerForDevelopmentUser(
+      { provider: "digitalocean", name: "Second Runner" },
+      {
+        createConnection: () => connection,
+        provider: secondProvider,
+        readConfig: () => null,
+      },
+    );
+
+    expect(first).toMatchObject({ ok: true, duplicate: false });
+    expect(second).toMatchObject({ ok: true, duplicate: true });
+
+    if (!first.ok || !second.ok) {
+      throw new Error("Expected duplicate create calls to return runner state.");
+    }
+
+    expect(second.runner.id).toBe(first.runner.id);
+    expect(secondProvider.calls).toEqual([]);
   });
 });
 

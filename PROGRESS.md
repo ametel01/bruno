@@ -8,8 +8,8 @@
 
 ## Current Status
 
-- Status: Step 9 docs and local validation complete; live Vercel/DigitalOcean smoke remains environment-blocked.
-- Active step: Step 9 - run the required live Vercel/DigitalOcean smoke after the deployment env has all required secrets.
+- Status: Step 9 blocked/pending; Milestone 13 is not complete until the UI flow creates or reuses a DigitalOcean runner, assigns the new agent to it, and the runner registers online.
+- Active step: Step 9 - verify the UI flow from Create agent through automatic runner provisioning, runner registration, agent start, and cleanup.
 - Last updated: 2026-07-06 18:19:02 PST.
 
 ## Step Checklist
@@ -175,7 +175,7 @@
 - Commit: this step commit.
 - Next step: Step 9 - End-to-End Cloud Provisioning Smoke and Operator Docs.
 
-### 2026-07-06 18:16:10 PST - Step 9 docs/local validation complete; live smoke blocked
+### 2026-07-06 18:16:10 PST - Step 9 blocked; docs/local validation only
 
 - Added DigitalOcean cloud runner operator documentation covering required Vercel env vars, optional provider defaults, provisioning phases, public HTTPS runner endpoint behavior, live smoke steps, and cleanup/failure triage.
 - Added commented DigitalOcean provisioning placeholders to `.env.example` without committing secrets.
@@ -191,7 +191,7 @@
 - Smoke resource IDs: none. No DigitalOcean Droplet was created and no cleanup was required.
 - Changelog: no new entry added because this step changed operator documentation and env examples only; functional Milestone 13 behavior is already represented by the earlier `Added`, `Changed`, and `Fixed` entries.
 - Commit: this step commit.
-- Next step: provide authorized deployment secrets and run the documented live Vercel/DigitalOcean smoke, or accept the local implementation evidence as the Milestone 13 handoff gate.
+- Next step: verify the real UI flow creates or reuses a DigitalOcean runner, assigns the new agent to it, waits for runner registration/online heartbeat, starts the agent on that runner, and records cleanup.
 
 ### 2026-07-06 18:19:02 PST - Step 9 live-smoke environment audit
 
