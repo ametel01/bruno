@@ -1,7 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type ChangeEvent, type FormEvent, useEffect, useState } from "react";
+import {
+  type ChangeEvent,
+  type FormEvent,
+  type RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { AgentTemplateSnapshot } from "@/src/server/agents/templates";
 
 type SubmitState =
@@ -55,6 +62,7 @@ type CreateAgentFormProps = {
 
 export function CreateAgentForm({ maxNameLength, runners, templates }: CreateAgentFormProps) {
   const router = useRouter();
+  const setupTraceRef = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<SubmitState>({ status: "idle" });
   const [hydrated, setHydrated] = useState(false);
   const [selectedTemplateKey, setSelectedTemplateKey] = useState<string>(
@@ -147,6 +155,14 @@ export function CreateAgentForm({ maxNameLength, runners, templates }: CreateAge
   const disabled = !hydrated || submitting;
   const showSetupTrace =
     state.status === "submitting" || (state.status === "error" && state.showSetupTrace === true);
+
+  useEffect(() => {
+    if (!showSetupTrace) {
+      return;
+    }
+
+    setupTraceRef.current?.scrollIntoView({ block: "center" });
+  }, [showSetupTrace]);
 
   return (
     <form className="agent-form" onSubmit={handleSubmit}>
@@ -241,15 +257,16 @@ export function CreateAgentForm({ maxNameLength, runners, templates }: CreateAge
           </article>
         ))}
       </div>
-      <button className="primary-button" type="submit" disabled={disabled}>
-        {submitting ? "Creating" : "Create agent"}
-      </button>
       {showSetupTrace ? (
         <AgentSetupTrace
           activeStageIndex={state.status === "submitting" ? state.stageIndex : null}
           failed={state.status === "error"}
+          traceRef={setupTraceRef}
         />
       ) : null}
+      <button className="primary-button" type="submit" disabled={disabled}>
+        {submitting ? "Creating" : "Create agent"}
+      </button>
       {state.status === "error" || state.status === "success" ? (
         <p className={`form-message ${state.status}`} role="status">
           {state.message}
@@ -262,20 +279,39 @@ export function CreateAgentForm({ maxNameLength, runners, templates }: CreateAge
 function AgentSetupTrace({
   activeStageIndex,
   failed,
+  traceRef,
 }: {
   activeStageIndex: number | null;
   failed: boolean;
+  traceRef: RefObject<HTMLDivElement | null>;
 }) {
+  const activeStage =
+    activeStageIndex === null
+      ? null
+      : SETUP_STAGES[Math.min(activeStageIndex, SETUP_STAGES.length - 1)];
+
   return (
-    <section className="agent-setup-trace" aria-live="polite" aria-label="Agent setup progress">
+    <section
+      className="agent-setup-trace"
+      aria-live="polite"
+      aria-label="Agent setup progress"
+      ref={traceRef}
+    >
       <div className="agent-setup-trace-header">
-        <h3>{failed ? "Setup stopped" : "Setup trace"}</h3>
+        <h3>{failed ? "Setup stopped" : "Setting up agent"}</h3>
         <span>{failed ? "needs attention" : "in progress"}</span>
       </div>
-      <p>
-        AgentBay is checking runner capacity and, when no online runner can take the agent,
-        provisioning a DigitalOcean runner before the agent record is created.
-      </p>
+      {activeStage ? (
+        <div className="agent-setup-current-stage">
+          <strong>{activeStage.label}</strong>
+          <p>{activeStage.detail}</p>
+        </div>
+      ) : (
+        <p>
+          AgentBay stopped while checking runner capacity or cloud provisioning. The error below has
+          the next action.
+        </p>
+      )}
       <ol className="agent-setup-stage-list">
         {SETUP_STAGES.map((stage, index) => (
           <li
@@ -289,15 +325,10 @@ function AgentSetupTrace({
             <span aria-hidden="true" />
             <div>
               <strong>{stage.label}</strong>
-              <p>{stage.detail}</p>
             </div>
           </li>
         ))}
       </ol>
-      <p className="agent-setup-trace-note">
-        Persisted Droplet phase, resource id, registration, and heartbeat details are shown in Cloud
-        setup status after the server records them.
-      </p>
     </section>
   );
 }

@@ -990,56 +990,67 @@ h2 {
   margin: 0;
 }
 
-.agent-setup-stage-list {
+.agent-setup-current-stage {
   display: grid;
-  gap: 10px;
+  gap: 4px;
+  border: 1px solid #d8e2f0;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.agent-setup-current-stage strong {
+  color: #334f7a;
+  font-size: 0.84rem;
+  line-height: 1.3;
+}
+
+.agent-setup-stage-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
 .agent-setup-stage-list li {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-  padding-left: 1px;
+  border: 1px solid #d8e2f0;
+  border-radius: 999px;
+  background: #ffffff;
+  padding: 5px 8px;
 }
 
 .agent-setup-stage-list li > span {
-  width: 12px;
-  height: 12px;
-  border: 2px solid #b7bec8;
+  width: 8px;
+  height: 8px;
+  border: 0;
   border-radius: 999px;
-  background: #ffffff;
-  margin-top: 4px;
+  background: #b7bec8;
 }
 
 .agent-setup-stage-list strong {
   display: block;
   color: var(--foreground);
-  font-size: 0.82rem;
+  font-size: 0.74rem;
   line-height: 1.3;
   overflow-wrap: anywhere;
 }
 
-.agent-setup-stage-list p {
-  margin-top: 2px;
-}
-
 .agent-setup-stage-list li[data-stage-status="completed"] > span {
-  border-color: #4c8f6f;
   background: #4c8f6f;
 }
 
 .agent-setup-stage-list li[data-stage-status="current"] > span {
-  border-color: #567db6;
-  background: radial-gradient(circle at center, #567db6 0 38%, transparent 41%), #ffffff;
-  box-shadow: 0 0 0 5px rgb(86 125 182 / 14%);
+  background: #567db6;
+  box-shadow: 0 0 0 4px rgb(86 125 182 / 14%);
 }
 
 .agent-setup-stage-list li[data-stage-status="failed"] > span {
-  border-color: #b97923;
   background: #b97923;
 }
 
