@@ -498,6 +498,85 @@ describe("create agent persistence", () => {
     expect(calls.filter((call) => call.startsWith("start:"))).toHaveLength(1);
   });
 
+  it("starts three agents on one runner and blocks a fourth create at capacity", async () => {
+    const userId = await ensureDevelopmentUser(connection);
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, userId, {
+      maxAgents: 3,
+      runningAgents: 0,
+    });
+    const createdAgents = [];
+
+    for (const [name, templateKey] of [
+      ["Three Runner Agent A", "research_agent"],
+      ["Three Runner Agent B", "github_issue_agent"],
+      ["Three Runner Agent C", "research_agent"],
+    ] as const) {
+      const created = await createAgentForDevelopmentUser(
+        { name, templateKey },
+        { createConnection: () => connection },
+      );
+
+      createdAgents.push(created.agent);
+    }
+
+    const calls: string[] = [];
+
+    for (const agent of createdAgents) {
+      const result = await startAgentForDevelopmentUser(agent.id, {
+        createConnection: () => connection,
+        manualRunnerAdapter: (assignedRunner) => {
+          expect(assignedRunner).toMatchObject({
+            id: runner.id,
+            status: "online",
+          });
+
+          return createManualLifecycleRunnerStub(calls, { connection, runnerId: runner.id });
+        },
+        runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
+      });
+
+      expect(result).toMatchObject({
+        ok: true,
+        agent: {
+          id: agent.id,
+          status: "running",
+        },
+      });
+    }
+
+    const persistedAgents = await connection.db
+      .select({ id: agents.id, runnerId: agents.runnerId, status: agents.status })
+      .from(agents)
+      .where(
+        inArray(
+          agents.id,
+          createdAgents.map((agent) => agent.id),
+        ),
+      );
+
+    expect(
+      persistedAgents.map((agent) => ({ runnerId: agent.runnerId, status: agent.status })),
+    ).toEqual([
+      { runnerId: runner.id, status: "running" },
+      { runnerId: runner.id, status: "running" },
+      { runnerId: runner.id, status: "running" },
+    ]);
+    expect(calls.filter((call) => call.startsWith("start:"))).toEqual(
+      createdAgents.map((agent) => `start:${agent.id}`),
+    );
+
+    await expect(
+      createAgentForDevelopmentUser(
+        { name: "Fourth Capacity Agent", templateKey: "research_agent" },
+        { createConnection: () => connection },
+      ),
+    ).rejects.toMatchObject({
+      name: "AgentCreateBlockedError",
+      reason: "runner_capacity_reached",
+    } satisfies Partial<AgentCreateBlockedError>);
+    await expect(connection.db.select().from(agents)).resolves.toHaveLength(3);
+  });
+
   it("bootstraps one active manual runner idempotently from non-secret env values", async () => {
     const createdAt = new Date("2026-07-05T01:00:00.000Z");
     const updatedAt = new Date("2026-07-05T01:05:00.000Z");
