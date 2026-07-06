@@ -87,7 +87,7 @@ Validation:
 - Targeted Docker context and changed-file checks confirmed `.dockerignore` excludes `.env*`, `.vercel`, `.git`, `node_modules`, `.next`, coverage, test output, Playwright reports, logs, local database dump patterns, and private key file patterns.
 - `git diff --check` passed.
 
-Commit reference: branch `codex/issue-189-runner-image` commit recorded in the #189 `STATUS.md` handoff after local commit creation.
+Commit reference: `1ee49e5` (`build: add runner Docker image`).
 
 ### Step 2: Add Configurable Runner Image Selection
 
