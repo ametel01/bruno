@@ -1,8 +1,13 @@
+import { CloudRunnerProvisioningPanel } from "@/app/_components/cloud-runner-provisioning-panel";
 import { PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
 import {
   RunnerCredentialControls,
   RunnerRegistrationTokenControls,
 } from "@/app/settings/_components/runner-management-controls";
+import {
+  CloudRunnerProvisioningPersistenceError,
+  listCloudRunnerProvisioningSummariesForDevelopmentUser,
+} from "@/src/server/runners/cloud-runner-provisioning";
 import {
   listSettingsRunnerManagementSummariesForDevelopmentUser,
   ManualRunnerStatusPersistenceError,
@@ -15,6 +20,7 @@ export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const runnerHealthResult = await loadSettingsRunnerHealth();
+  const cloudRunnersResult = await loadSettingsCloudRunners();
 
   return (
     <ProductShell
@@ -36,6 +42,12 @@ export default async function SettingsPage() {
         <PlaceholderPanel title="Integrations">
           <p>Hermes, Telegram, provider integrations, and webhooks are not configured here.</p>
         </PlaceholderPanel>
+        <CloudRunnerProvisioningPanel
+          result={cloudRunnersResult}
+          showCreateAction
+          title="Cloud runners"
+          titleId="settings-cloud-runner-title"
+        />
         <SettingsRunnerHealthPanel result={runnerHealthResult} />
         <PlaceholderPanel title="Secrets">
           <p>Secret values and credential storage are not accepted by the current app.</p>
@@ -125,6 +137,23 @@ async function loadSettingsRunnerHealth() {
     };
   } catch (error) {
     if (error instanceof ManualRunnerStatusPersistenceError) {
+      return {
+        ok: false as const,
+      };
+    }
+
+    throw error;
+  }
+}
+
+async function loadSettingsCloudRunners() {
+  try {
+    return {
+      ok: true as const,
+      runners: await listCloudRunnerProvisioningSummariesForDevelopmentUser(),
+    };
+  } catch (error) {
+    if (error instanceof CloudRunnerProvisioningPersistenceError) {
       return {
         ok: false as const,
       };

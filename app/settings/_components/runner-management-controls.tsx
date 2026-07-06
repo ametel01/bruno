@@ -31,10 +31,91 @@ type RunnerRegistrationTokenControlsProps = {
   disabled?: boolean;
 };
 
+type CreateCloudRunnerControlsProps = {
+  disabled?: boolean;
+};
+
 type RunnerCredentialControlsProps = {
   runnerId: string;
   runnerName: string;
 };
+
+export function CreateCloudRunnerControls({ disabled = false }: CreateCloudRunnerControlsProps) {
+  const router = useRouter();
+  const [state, setState] = useState<RequestState>({ status: "idle" });
+
+  async function handleCreateRunner() {
+    setState({ status: "loading" });
+
+    try {
+      const response = await fetch("/api/runners", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ provider: "digitalocean" }),
+      });
+      const body = (await safeJson(response)) as {
+        duplicate?: unknown;
+        runner?: {
+          provisioning?: {
+            status?: unknown;
+          };
+        };
+        error?: {
+          code?: unknown;
+        };
+      };
+
+      if (!response.ok) {
+        setState({
+          status: "error",
+          message: cloudRunnerFailureMessage(body.error?.code),
+        });
+        return;
+      }
+
+      const phase =
+        typeof body.runner?.provisioning?.status === "string"
+          ? body.runner.provisioning.status
+          : "pending";
+      const duplicate = body.duplicate === true;
+
+      setState({
+        status: "success",
+        message: duplicate
+          ? `Existing cloud runner is already tracked at ${phase}.`
+          : `Cloud runner provisioning started at ${phase}.`,
+      });
+      router.refresh();
+    } catch {
+      setState({
+        status: "error",
+        message: "Cloud runner could not be created. Check the database and try again.",
+      });
+    }
+  }
+
+  return (
+    <div className="runner-management-block">
+      <div className="runner-management-header">
+        <div>
+          <h3>Create Runner</h3>
+          <p>Start a DigitalOcean runner and track safe provisioning status here.</p>
+        </div>
+        <button
+          className="primary-button"
+          type="button"
+          disabled={disabled || state.status === "loading"}
+          onClick={handleCreateRunner}
+        >
+          {state.status === "loading" ? "Creating…" : "Create Runner"}
+        </button>
+      </div>
+      <RunnerActionMessage state={state} />
+    </div>
+  );
+}
 
 export function RunnerRegistrationTokenControls({
   disabled = false,
@@ -392,4 +473,12 @@ function credentialFailureMessage(code: unknown, action: "rotated" | "revoked"):
   }
 
   return `Runner credential could not be ${action}.`;
+}
+
+function cloudRunnerFailureMessage(code: unknown): string {
+  if (code === "database_unavailable" || code === "database_schema_missing") {
+    return "Cloud runner could not be created. Start the database and run migrations.";
+  }
+
+  return "Cloud runner could not be created. Check the provider configuration and try again.";
 }

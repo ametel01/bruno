@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ActivityFeedPanel } from "@/app/_components/activity-feed";
 import { ApprovalDecisionControls } from "@/app/_components/approval-decision-controls";
+import { CloudRunnerProvisioningPanel } from "@/app/_components/cloud-runner-provisioning-panel";
 import { EmptyState, PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { MobileAgentList } from "@/app/agents/_components/mobile-agent-list";
@@ -25,6 +26,10 @@ import {
   ManualRunnerStatusPersistenceError,
   type ManualRunnerStatusSummary,
 } from "@/src/server/runners/manual-runner-status";
+import {
+  CloudRunnerProvisioningPersistenceError,
+  listCloudRunnerProvisioningSummariesForDevelopmentUser,
+} from "@/src/server/runners/cloud-runner-provisioning";
 
 type DashboardContentProps = {
   routeLabel?: string;
@@ -35,6 +40,7 @@ type DashboardActivityResult = Awaited<ReturnType<typeof loadDashboardActivity>>
 type DashboardApprovalsResult = Awaited<ReturnType<typeof loadDashboardApprovals>>;
 type DashboardProcessLogsResult = Awaited<ReturnType<typeof loadDashboardProcessLogs>>;
 type DashboardManualRunnersResult = Awaited<ReturnType<typeof loadDashboardManualRunners>>;
+type DashboardCloudRunnersResult = Awaited<ReturnType<typeof loadDashboardCloudRunners>>;
 
 export const dynamic = "force-dynamic";
 
@@ -44,11 +50,13 @@ export default async function DashboardPage() {
   const approvalsResult = await loadDashboardApprovals();
   const processLogsResult = await loadDashboardProcessLogs();
   const manualRunnersResult = await loadDashboardManualRunners();
+  const cloudRunnersResult = await loadDashboardCloudRunners();
 
   return (
     <DashboardContent
       activityResult={activityResult}
       approvalsResult={approvalsResult}
+      cloudRunnersResult={cloudRunnersResult}
       listResult={listResult}
       manualRunnersResult={manualRunnersResult}
       processLogsResult={processLogsResult}
@@ -59,6 +67,7 @@ export default async function DashboardPage() {
 export function DashboardContent({
   activityResult = { ok: true, events: [] },
   approvalsResult = { ok: true, approvals: [] },
+  cloudRunnersResult = { ok: true, runners: [] },
   manualRunnersResult = { ok: true, runners: [] },
   processLogsResult = { ok: true, logs: [] },
   routeLabel = "Dashboard",
@@ -66,6 +75,7 @@ export function DashboardContent({
 }: DashboardContentProps & {
   activityResult?: DashboardActivityResult;
   approvalsResult?: DashboardApprovalsResult;
+  cloudRunnersResult?: DashboardCloudRunnersResult;
   manualRunnersResult?: DashboardManualRunnersResult;
   processLogsResult?: DashboardProcessLogsResult;
   listResult?: DashboardAgentResult;
@@ -144,6 +154,11 @@ export function DashboardContent({
         />
         <PendingApprovalsPanel result={approvalsResult} />
         <DashboardManualRunnerPanel result={manualRunnersResult} />
+        <CloudRunnerProvisioningPanel
+          result={cloudRunnersResult}
+          title="Cloud provisioning"
+          titleId="dashboard-cloud-runner-title"
+        />
         <DashboardProcessLogsPanel result={processLogsResult} />
         <PlaceholderPanel title="Readiness">
           <dl className="definition-list">
@@ -168,7 +183,7 @@ export function DashboardContent({
               Full per-agent log streams and local-development config editing are present on agent
               detail pages.
             </li>
-            <li>Runner provisioning and external integrations are placeholders only.</li>
+            <li>Cloud runner provisioning status is visible from persisted runner records.</li>
             <li>
               Approval decisions are available from the queue; production runners, billing, and
               secret storage wait for later milestones.
@@ -485,6 +500,23 @@ async function loadDashboardManualRunners() {
     };
   } catch (error) {
     if (error instanceof ManualRunnerStatusPersistenceError) {
+      return {
+        ok: false as const,
+      };
+    }
+
+    throw error;
+  }
+}
+
+async function loadDashboardCloudRunners() {
+  try {
+    return {
+      ok: true as const,
+      runners: await listCloudRunnerProvisioningSummariesForDevelopmentUser(),
+    };
+  } catch (error) {
+    if (error instanceof CloudRunnerProvisioningPersistenceError) {
       return {
         ok: false as const,
       };

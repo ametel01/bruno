@@ -447,6 +447,151 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
   }
 });
 
+test("cloud runner create action and provisioning status stay visible and safe", async ({
+  page,
+  request,
+}, testInfo) => {
+  const name = `Cloud Runner UI Agent ${testInfo.project.name}`;
+  const created = await createAgent(request, name);
+  const cloudRunnerIds: string[] = [];
+
+  try {
+    const failedRunner = await insertCloudRunnerForAgent(created.id, {
+      name: `Failed Cloud Runner ${testInfo.project.name}`,
+      status: "provision_failed",
+      providerResourceId: null,
+      region: "nyc3",
+      sizeSlug: "s-1vcpu-1gb",
+      image: "ubuntu-24-04-x64",
+      provisioningStatus: "failed",
+      provisioningError: "token=stored-for-downstream",
+      provisioningStartedAt: "2026-07-06T01:00:00.000Z",
+      provisioningCompletedAt: "2026-07-06T01:02:00.000Z",
+    });
+    cloudRunnerIds.push(failedRunner.id);
+    const onlineRunner = await insertCloudRunnerForAgent(created.id, {
+      name: `Online Cloud Runner ${testInfo.project.name}`,
+      status: "online",
+      providerResourceId: `do-${randomUUID()}`,
+      region: "sfo3",
+      sizeSlug: "s-2vcpu-2gb",
+      image: "ubuntu-24-04-x64",
+      provisioningStatus: "ready",
+      provisioningError: null,
+      provisioningStartedAt: "2026-07-06T01:05:00.000Z",
+      provisioningCompletedAt: "2026-07-06T01:08:00.000Z",
+    });
+    cloudRunnerIds.push(onlineRunner.id);
+    await insertRunnerHeartbeat(onlineRunner.id, {
+      status: "online",
+      version: "agentbay-runner/3.0.0",
+      observedAt: "2026-07-06T01:09:00.000Z",
+    });
+
+    await withPinnedDevelopmentUserForAgent(created.id, async () => {
+      await page.goto("/settings");
+
+      const cloudPanel = page.locator(".cloud-runner-panel", { hasText: "Cloud runners" });
+      await expect(cloudPanel).toContainText(`Failed Cloud Runner ${testInfo.project.name}`);
+      await expect(cloudPanel).toContainText(`Online Cloud Runner ${testInfo.project.name}`);
+      await expect(cloudPanel).toContainText("failed");
+      await expect(cloudPanel).toContainText("online");
+      await expect(cloudPanel).toContainText("nyc3");
+      await expect(cloudPanel).toContainText("s-1vcpu-1gb");
+      await expect(cloudPanel).toContainText("ubuntu-24-04-x64");
+      await expect(cloudPanel).toContainText("2026-07-06T01:09:00.000Z");
+      await expect(cloudPanel).toContainText("Next step: check the provider configuration");
+      await expect(cloudPanel).not.toContainText("token=stored-for-downstream");
+      await expect(cloudPanel).not.toContainText("AGENTBAY_DIGITALOCEAN_TOKEN");
+      await expect(cloudPanel).not.toContainText("agb_reg_");
+      await expect(cloudPanel).not.toContainText("agb_run_");
+      await expect(cloudPanel).not.toContainText("credentialHash");
+
+      await deleteRunnerRows(cloudRunnerIds.splice(0));
+      await page.reload();
+      await expect(cloudPanel).toContainText("No cloud runners");
+
+      await page.route("**/api/runners", async (route) => {
+        if (route.request().method() !== "POST") {
+          await route.fallback();
+          return;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await route.fulfill({
+          status: 201,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: true,
+            duplicate: false,
+            runner: {
+              id: "00000000-0000-4000-8000-000000000154",
+              name: "DigitalOcean Runner",
+              kind: "digitalocean",
+              status: "provisioning",
+              provider: "digitalocean",
+              providerResourceId: null,
+              region: "nyc3",
+              sizeSlug: "s-1vcpu-1gb",
+              image: "ubuntu-24-04-x64",
+              provisioning: {
+                status: "pending",
+                error: null,
+                startedAt: "2026-07-06T01:10:00.000Z",
+                completedAt: null,
+                phases: [],
+              },
+            },
+          }),
+        });
+      });
+      const createResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/runners") && response.request().method() === "POST",
+      );
+      await cloudPanel.getByRole("button", { name: "Create Runner" }).click();
+      await expect(cloudPanel.getByRole("button", { name: "Creating…" })).toBeVisible();
+      const createResponse = await createResponsePromise;
+      expect(createResponse.status()).toBe(201);
+      const createBody = (await createResponse.json()) as {
+        runner?: {
+          id?: string;
+        };
+      };
+      expect(createBody.runner?.id).toBe("00000000-0000-4000-8000-000000000154");
+      await page.unroute("**/api/runners");
+
+      await expect(cloudPanel).toContainText("Cloud runner provisioning started at pending.");
+      const pendingRunner = await insertCloudRunnerForAgent(created.id, {
+        name: "DigitalOcean Runner",
+        status: "provisioning",
+        providerResourceId: null,
+        region: "nyc3",
+        sizeSlug: "s-1vcpu-1gb",
+        image: "ubuntu-24-04-x64",
+        provisioningStatus: "pending",
+        provisioningError: null,
+        provisioningStartedAt: "2026-07-06T01:10:00.000Z",
+        provisioningCompletedAt: null,
+      });
+      cloudRunnerIds.push(pendingRunner.id);
+
+      await page.reload();
+      await expect(cloudPanel).toContainText("DigitalOcean Runner");
+      await expect(cloudPanel).toContainText("pending");
+      await expect(cloudPanel).toContainText("provisioning");
+      await expect(cloudPanel).not.toContainText("registrationToken");
+      await expect(cloudPanel).not.toContainText("agb_reg_");
+      await expect(cloudPanel).not.toContainText("agb_run_");
+
+      await expectPageNotHorizontallyOverflowing(page);
+    });
+  } finally {
+    await deleteCreatedAgents([created.id]);
+    await deleteRunnerRows(cloudRunnerIds);
+  }
+});
+
 test.describe
   .serial("approval persistence surfaces", () => {
     test("/dashboard shows persisted pending approvals for active agents", async ({
@@ -2572,6 +2717,79 @@ async function insertManualRunnerForAgent(
   return {
     id: runnerId,
     endpointUrl: runner.endpointUrl,
+  };
+}
+
+async function insertCloudRunnerForAgent(
+  agentId: string,
+  runner: {
+    name: string;
+    status: "provisioning" | "provision_failed" | "online" | "offline" | "degraded";
+    providerResourceId: string | null;
+    region: string;
+    sizeSlug: string;
+    image: string;
+    provisioningStatus:
+      | "pending"
+      | "creating"
+      | "tagging"
+      | "firewall_configuring"
+      | "bootstrapping"
+      | "waiting_for_runner"
+      | "ready"
+      | "failed";
+    provisioningError: string | null;
+    provisioningStartedAt: string;
+    provisioningCompletedAt: string | null;
+  },
+): Promise<{ id: string }> {
+  let runnerId = "";
+
+  await withDatabase(async (sql) => {
+    const [inserted] = await sql<{ id: string }[]>`
+      insert into runners (
+        user_id,
+        name,
+        kind,
+        status,
+        provider,
+        provider_resource_id,
+        region,
+        size_slug,
+        image,
+        provisioning_status,
+        provisioning_error,
+        provisioning_started_at,
+        provisioning_completed_at,
+        created_at,
+        updated_at
+      )
+      select user_id,
+             ${runner.name},
+             'digitalocean',
+             ${runner.status},
+             'digitalocean',
+             ${runner.providerResourceId},
+             ${runner.region},
+             ${runner.sizeSlug},
+             ${runner.image},
+             ${runner.provisioningStatus},
+             ${runner.provisioningError},
+             ${runner.provisioningStartedAt},
+             ${runner.provisioningCompletedAt},
+             ${runner.provisioningStartedAt},
+             ${runner.provisioningCompletedAt ?? runner.provisioningStartedAt}
+      from agents
+      where id = ${agentId}
+      returning id
+    `;
+
+    runnerId = inserted?.id ?? "";
+    expect(runnerId).toMatch(/^[0-9a-f-]+$/);
+  });
+
+  return {
+    id: runnerId,
   };
 }
 

@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   listLatestAgentActivity: vi.fn(),
   listLatestActiveAgentProcessLogs: vi.fn(),
   listActiveAgentsForDevelopmentUser: vi.fn(),
+  listCloudRunnerProvisioningSummariesForDevelopmentUser: vi.fn(),
   listManualRunnerStatusSummariesForDevelopmentUser: vi.fn(),
   listSettingsRunnerManagementSummariesForDevelopmentUser: vi.fn(),
   getAssignedManualRunnerStatusForDevelopmentUserAgent: vi.fn(),
@@ -83,6 +84,17 @@ vi.mock("@/src/server/runners/manual-runner-status", async (importOriginal) => {
   };
 });
 
+vi.mock("@/src/server/runners/cloud-runner-provisioning", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/src/server/runners/cloud-runner-provisioning")>();
+
+  return {
+    ...actual,
+    listCloudRunnerProvisioningSummariesForDevelopmentUser:
+      mocks.listCloudRunnerProvisioningSummariesForDevelopmentUser,
+  };
+});
+
 vi.mock("next/navigation", () => ({
   notFound: mocks.notFound,
   useRouter: () => ({
@@ -106,6 +118,7 @@ describe("product shell routes", () => {
     });
     mocks.listLatestActiveAgentProcessLogs.mockResolvedValue([]);
     mocks.listManualRunnerStatusSummariesForDevelopmentUser.mockResolvedValue([]);
+    mocks.listCloudRunnerProvisioningSummariesForDevelopmentUser.mockResolvedValue([]);
     mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockResolvedValue([]);
     mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockResolvedValue(null);
     mocks.listPendingApprovalsForDevelopmentUser.mockResolvedValue([]);
@@ -127,6 +140,7 @@ describe("product shell routes", () => {
     mocks.listLatestAgentActivity.mockReset();
     mocks.listLatestActiveAgentProcessLogs.mockReset();
     mocks.listActiveAgentsForDevelopmentUser.mockReset();
+    mocks.listCloudRunnerProvisioningSummariesForDevelopmentUser.mockReset();
     mocks.listManualRunnerStatusSummariesForDevelopmentUser.mockReset();
     mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockReset();
     mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockReset();
@@ -152,6 +166,8 @@ describe("product shell routes", () => {
     expect(html).toContain("No agent records");
     expect(html).toContain("No activity yet");
     expect(html).toContain("No pending approvals");
+    expect(html).toContain("Cloud provisioning");
+    expect(html).toContain("No cloud runners");
     expect(html).toContain("Active persisted records are read from the database.");
     expect(html).toContain(
       "Start, Stop, and Restart use the Docker runner adapter and existing controls.",
@@ -164,6 +180,7 @@ describe("product shell routes", () => {
     expect(html).not.toContain("config editing, and runner work wait");
     expect(html).not.toContain("approvals are absent");
     expect(html).toContain("Approval decisions are available from the queue");
+    expect(html).toContain("Cloud runner provisioning status is visible");
     expect(html).toContain("production runners, billing, and secret storage wait");
     expect(html).not.toContain("Approval decisions, production runners");
     expect(html).not.toContain("Deny decisions, production runners");
@@ -228,6 +245,140 @@ describe("product shell routes", () => {
     expect(html).not.toContain("bearer");
     expect(html).not.toContain("credentialHash");
     expect(html).not.toContain("cpuPercent");
+  });
+
+  it("renders cloud runner provisioning state on the dashboard without secrets", async () => {
+    mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([]);
+    mocks.listCloudRunnerProvisioningSummariesForDevelopmentUser.mockResolvedValueOnce([
+      {
+        id: "00000000-0000-4000-8000-000000000154",
+        name: "DigitalOcean Runner",
+        kind: "digitalocean",
+        status: "provisioning",
+        readinessStatus: "provisioning",
+        provider: "digitalocean",
+        providerResourceId: "do-droplet-154",
+        region: "nyc3",
+        sizeSlug: "s-1vcpu-1gb",
+        image: "ubuntu-24-04-x64",
+        latestHeartbeatAt: null,
+        provisioning: {
+          status: "waiting_for_runner",
+          error: null,
+          startedAt: "2026-07-06T01:00:00.000Z",
+          completedAt: null,
+          phases: [
+            {
+              name: "pending",
+              status: "completed",
+              startedAt: "2026-07-06T01:00:00.000Z",
+              completedAt: null,
+            },
+            {
+              name: "waiting_for_runner",
+              status: "current",
+              startedAt: "2026-07-06T01:00:00.000Z",
+              completedAt: null,
+            },
+          ],
+        },
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000155",
+        name: "Online Cloud Runner",
+        kind: "digitalocean",
+        status: "online",
+        readinessStatus: "online",
+        provider: "digitalocean",
+        providerResourceId: "do-droplet-155",
+        region: "sfo3",
+        sizeSlug: "s-2vcpu-2gb",
+        image: "ubuntu-24-04-x64",
+        latestHeartbeatAt: "2026-07-06T01:04:00.000Z",
+        provisioning: {
+          status: "ready",
+          error: null,
+          startedAt: "2026-07-06T01:00:00.000Z",
+          completedAt: "2026-07-06T01:03:00.000Z",
+          phases: [
+            {
+              name: "ready",
+              status: "completed",
+              startedAt: "2026-07-06T01:00:00.000Z",
+              completedAt: "2026-07-06T01:03:00.000Z",
+            },
+          ],
+        },
+      },
+    ]);
+
+    const element = await DashboardPage();
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Cloud provisioning");
+    expect(html).toContain("DigitalOcean Runner");
+    expect(html).toContain("Online Cloud Runner");
+    expect(html).toContain("digitalocean");
+    expect(html).toContain("nyc3");
+    expect(html).toContain("s-1vcpu-1gb");
+    expect(html).toContain("ubuntu-24-04-x64");
+    expect(html).toContain("waiting_for_runner");
+    expect(html).toContain("online");
+    expect(html).toContain("Runner heartbeat is online and ready for work.");
+    expect(html).toContain("2026-07-06T01:04:00.000Z");
+    expect(html).not.toContain("registrationToken");
+    expect(html).not.toContain("agb_reg_");
+    expect(html).not.toContain("agb_run_");
+    expect(html).not.toContain("credentialHash");
+    expect(html).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN");
+    expect(html).not.toContain("dop_v1");
+  });
+
+  it("renders cloud runner failures with safe next steps in settings", async () => {
+    mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockResolvedValueOnce([]);
+    mocks.listCloudRunnerProvisioningSummariesForDevelopmentUser.mockResolvedValueOnce([
+      {
+        id: "00000000-0000-4000-8000-000000000156",
+        name: "Failed Cloud Runner",
+        kind: "digitalocean",
+        status: "provision_failed",
+        readinessStatus: "failed",
+        provider: "digitalocean",
+        providerResourceId: null,
+        region: "nyc3",
+        sizeSlug: "s-1vcpu-1gb",
+        image: "ubuntu-24-04-x64",
+        latestHeartbeatAt: null,
+        provisioning: {
+          status: "failed",
+          error: "Sensitive details omitted.",
+          startedAt: "2026-07-06T01:00:00.000Z",
+          completedAt: "2026-07-06T01:02:00.000Z",
+          phases: [
+            {
+              name: "failed",
+              status: "failed",
+              startedAt: "2026-07-06T01:00:00.000Z",
+              completedAt: null,
+            },
+          ],
+        },
+      },
+    ]);
+
+    const element = await SettingsPage();
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Cloud runners");
+    expect(html).toContain("Create Runner");
+    expect(html).toContain("Failed Cloud Runner");
+    expect(html).toContain("failed");
+    expect(html).toContain("Sensitive details omitted.");
+    expect(html).toContain("Next step: check the provider configuration");
+    expect(html).not.toContain("token=stored-for-downstream");
+    expect(html).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN");
+    expect(html).not.toContain("dop_v1");
+    expect(html).not.toContain("credentialHash");
   });
 
   it("renders latest dashboard process logs with agent links and safe summaries", async () => {
