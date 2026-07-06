@@ -365,19 +365,20 @@
 
 ## Milestone 15 Backups and Restore
 
-- Status: #163 backup persistence, manifest, and secret-policy foundation is in progress on `codex/issue-163-backup-manifest`.
+- Status: #164 backup object storage boundary is in progress on `codex/issue-164-backup-storage`.
 - Source plan:
   - `docs/MILESTONES.md` Milestone 15: Backups and Restore.
   - GitHub issue #162: Prepare Milestone 15 tracking and baseline gates.
   - GitHub issue #163: Add backup persistence, manifest, and secret policy.
-  - `PLAN.md` is absent in this worktree; the published #162/#163 issue bodies and `docs/MILESTONES.md` are the active Milestone 15 contract.
-- Current branch: `codex/issue-163-backup-manifest`.
+  - GitHub issue #164: Add S3-compatible backup object storage boundary.
+  - `PLAN.md` is absent in this worktree; the published #162-#164 issue bodies and `docs/MILESTONES.md` are the active Milestone 15 contract.
+- Current branch: `codex/issue-164-backup-storage`.
 
 ### Issue Checklist
 
 - [x] #162 Prepare Milestone 15 tracking and baseline gates. Status: merged in PR #181.
-- [ ] #163 Add backup persistence, manifest, and secret policy. Status: implementation and validation in progress.
-- [ ] #164 Add S3-compatible backup object storage boundary. Status: pending #163 merge.
+- [x] #163 Add backup persistence, manifest, and secret policy. Status: merged in PR #182.
+- [ ] #164 Add S3-compatible backup object storage boundary. Status: implementation and validation in progress.
 - [ ] #165 Implement manual agent backup creation. Status: pending #163 and #164.
 - [ ] #166 Restore backups into new agents. Status: pending #163, #164, and #165.
 - [ ] #167 Add backup and restore controls to the agent UI. Status: pending backend backup and restore slices.
@@ -401,6 +402,11 @@
   - Backup statuses are `pending`, `uploading`, `ready`, `failed`, `restoring`, and `restored`.
   - Backup manifest validation covers agent metadata, config metadata, template snapshot, system prompt, skills file metadata, memory file metadata, and log metadata.
   - Raw secret-like manifest keys or values are rejected, while `config.secretReferences` allows safe `env`, `vault`, and `external` references.
+- #164 adds the server-only object storage boundary for downstream backup/restore slices:
+  - `BackupObjectStorage` supports `upload` and `download` through `FakeBackupObjectStorage` for deterministic no-network tests and `S3CompatibleBackupObjectStorage` for S3-compatible endpoints.
+  - Backup storage URIs use `s3://<bucket>/<key>` and reject empty, absolute, traversal, control-character, or oversized artifact keys.
+  - S3-compatible config validation reads only server-side `AGENTBAY_BACKUP_STORAGE_*` values, requires HTTPS for remote endpoints, rejects endpoint userinfo/query/fragment values, validates bucket and region shape, and keeps credentials out of shared/client env validation.
+  - Upload/download failures map to safe `failed` status objects with generic messages that omit endpoints, buckets, access keys, and secret keys.
 - `CHANGELOG.md` has the Keep a Changelog 1.0.0 framing and an `## [Unreleased]` section. Agents should keep that structure and add changelog bullets only for shipped functional user/operator-visible changes.
 
 ### Baseline Gate Expectations
@@ -428,6 +434,7 @@
 - 2026-07-06: #162 confirmed `CHANGELOG.md` has Keep a Changelog 1.0.0 framing and `## [Unreleased]`; `CHANGELOG.md` is intentionally unchanged for #162 because this issue creates tracking only and ships no functional product behavior.
 - 2026-07-06: #162 recorded baseline gate expectations for `bun run verify`, `bun run test:e2e`, the local Postgres `DATABASE_URL`, and `NEXT_PUBLIC_APP_URL` before backup and restore work starts.
 - 2026-07-06: #163 added the `backups` schema/migration, typed manifest validator, conservative backup status transition helper, raw-secret rejection policy, and focused schema/manifest tests.
+- 2026-07-06: #164 added the server-only backup object storage boundary, deterministic fake storage, S3-compatible request signing/config validation, safe storage URI helper, safe upload/download failure mapping, and focused storage/security tests.
 
 ### Validation Evidence
 
@@ -454,6 +461,20 @@
   - `git diff --check`: pass; no whitespace errors.
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: pass; Next.js production build completed. The generated `next-env.d.ts` route-reference churn from build was not kept in the diff.
   - `CHANGELOG.md` updated under `## [Unreleased]` because #163 ships the backup persistence and manifest-validation foundation for downstream Milestone 15 behavior.
+
+- 2026-07-06 #164:
+  - `gh issue view 164 --repo ametel01/agentbay --json number,title,state,url,body,labels`: pass; issue is open and maps Milestone 15 object storage boundary, fake storage tests, server-only S3-compatible config validation, credential secrecy, and safe failure mapping to PLAN Step 2.
+  - Initial `bun run format`, focused test, and `bun run typecheck`: environment failures before dependency install because `biome`, `vitest`, and `tsc` were unavailable in the fresh issue worktree.
+  - `bun install --frozen-lockfile`: pass; installed committed dependencies from `bun.lock`.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism tests/unit/backup-storage.test.ts tests/unit/server-env.test.ts`: pass; 2 files and 13 tests covered fake upload/download, missing artifact/invalid key failures, S3-compatible config validation, local HTTP exception, stubbed S3 upload/download without network calls, credential-free failure mapping, server-only import, and client-component exclusion checks.
+  - Initial `bun run typecheck`: failed on strict `RequestInit.body` and fetch stub input typing; fixed by copying PUT bodies to `ArrayBuffer` and normalizing stub inputs to `Request`.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed.
+  - Initial `bun run lint`: failed on a control-character regex in artifact-key validation; fixed by replacing it with an explicit character-code scan.
+  - `bun run lint`: pass; Biome checked 141 files with no fixes applied.
+  - `bun run format:check`: pass; Biome checked 141 files with no fixes applied.
+  - `git diff --check`: pass; no whitespace errors.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: pass; Next.js production build completed. The generated `next-env.d.ts` route-reference churn from build was not kept in the diff.
+  - `CHANGELOG.md` updated under `## [Unreleased]` because #164 ships the backup object-storage boundary for downstream Milestone 15 behavior.
 
 ## Milestone 12 Secure Runner Auth
 
