@@ -183,7 +183,7 @@ describe.sequential("runner provisioning service", () => {
     expect(serializedPersistence).not.toContain("dop_v1_super_secret");
   });
 
-  it("fails visibly before creating a Droplet when no DigitalOcean SSH keys can be attached", async () => {
+  it("creates a managed DigitalOcean SSH key before creating a Droplet when the account has none", async () => {
     const provider = new FakeDigitalOceanProvider({ sshKeys: [] });
 
     const result = await createDigitalOceanRunnerForDevelopmentUser(
@@ -207,16 +207,28 @@ describe.sequential("runner provisioning service", () => {
       ok: true,
       duplicate: false,
       runner: {
-        status: "provision_failed",
-        providerResourceId: null,
+        status: "registering",
+        providerResourceId: "do-fake-1",
         provisioning: {
-          status: "failed",
-          error:
-            "No DigitalOcean SSH keys are available for Droplet login. Add an SSH key to the DigitalOcean account or set AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS, then retry Create runner.",
+          status: "waiting_for_runner",
+          error: null,
         },
       },
     });
-    expect(provider.calls).toEqual([]);
+    expect(provider.calls[0]).toMatchObject({
+      step: "createSshKey",
+      input: {
+        name: "AgentBay managed runner key",
+        publicKey: expect.stringMatching(/^ssh-ed25519 [A-Za-z0-9+/=]+ agentbay-managed-runner$/),
+      },
+    });
+    expect(provider.calls[1]).toMatchObject({
+      step: "create",
+      input: {
+        sshKeyIds: ["ssh-key-1"],
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("PRIVATE KEY");
   });
 
   it("injects swap setup when provisioning the default low-memory DigitalOcean size", async () => {

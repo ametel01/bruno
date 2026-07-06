@@ -57,7 +57,8 @@ export type DigitalOceanProviderErrorReason =
   | "firewall_failed"
   | "cleanup_failed"
   | "resource_not_found"
-  | "ssh_key_lookup_failed";
+  | "ssh_key_lookup_failed"
+  | "ssh_key_create_failed";
 
 export type DigitalOceanProviderResult<T> =
   | {
@@ -89,8 +90,16 @@ export type DigitalOceanReadInput = {
   providerResourceId: string;
 };
 
+export type DigitalOceanCreateSshKeyInput = {
+  name: string;
+  publicKey: string;
+};
+
 export interface DigitalOceanProvider {
   listSshKeys(): Promise<DigitalOceanProviderResult<DigitalOceanSshKey[]>>;
+  createSshKey(
+    input: DigitalOceanCreateSshKeyInput,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanSshKey>>;
   createRunner(
     input: DigitalOceanRunnerSpec,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>>;
@@ -139,6 +148,9 @@ export type DigitalOceanSdkClient = {
     account: {
       keys: {
         get(): Promise<DigitalOceanSshKeysResponse | undefined>;
+        post(
+          body: DigitalOceanSshKeyCreateBody,
+        ): Promise<DigitalOceanSshKeyCreateResponse | undefined>;
       };
     };
     firewalls: {
@@ -172,6 +184,17 @@ type DigitalOceanDropletCreateResponse = {
 type DigitalOceanSshKeysResponse = {
   sshKeys?: DigitalOceanApiSshKey[] | null;
   ssh_keys?: DigitalOceanApiSshKey[] | null;
+};
+
+type DigitalOceanSshKeyCreateBody = {
+  name?: string | null;
+  publicKey?: string | null;
+  public_key?: string | null;
+};
+
+type DigitalOceanSshKeyCreateResponse = {
+  sshKey?: DigitalOceanApiSshKey | null;
+  ssh_key?: DigitalOceanApiSshKey | null;
 };
 
 type DigitalOceanApiSshKey = {
@@ -261,6 +284,31 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
           : [];
       }),
     };
+  }
+
+  async createSshKey(
+    input: DigitalOceanCreateSshKeyInput,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanSshKey>> {
+    const response = await runSdkStep("ssh_key_create_failed", () =>
+      this.#client.v2.account.keys.post({
+        name: input.name,
+        publicKey: input.publicKey,
+      }),
+    );
+
+    if (!response.ok) {
+      return response;
+    }
+
+    const sshKey = apiSshKeyToSshKey(response.value?.sshKey ?? response.value?.ssh_key);
+
+    return sshKey
+      ? { ok: true, value: sshKey }
+      : {
+          ok: false,
+          reason: "ssh_key_create_failed",
+          message: "DigitalOcean SSH key creation response was missing required fields.",
+        };
   }
 
   async createRunner(
@@ -450,6 +498,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
 export class FakeDigitalOceanProvider implements DigitalOceanProvider {
   readonly resources = new Map<string, DigitalOceanResource>();
   readonly calls: Array<
+    | { step: "createSshKey"; input: DigitalOceanCreateSshKeyInput }
     | { step: "create"; input: DigitalOceanRunnerSpec }
     | { step: "tag"; input: DigitalOceanTagInput }
     | { step: "firewall"; input: DigitalOceanFirewallInput }
@@ -482,6 +531,23 @@ export class FakeDigitalOceanProvider implements DigitalOceanProvider {
       ok: true,
       value: this.#sshKeys.map((key) => ({ ...key })),
     };
+  }
+
+  async createSshKey(
+    input: DigitalOceanCreateSshKeyInput,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanSshKey>> {
+    this.calls.push({ step: "createSshKey", input });
+
+    const id = `ssh-key-${this.#sshKeys.length + 1}`;
+    const created = {
+      id,
+      name: input.name,
+      fingerprint: `agentbay-managed-${id}`,
+    };
+
+    this.#sshKeys.push(created);
+
+    return { ok: true, value: { ...created } };
   }
 
   async createRunner(
@@ -610,6 +676,20 @@ function missingResource(): DigitalOceanProviderResult<DigitalOceanResource> {
     reason: "resource_not_found",
     message: "DigitalOcean resource was not found.",
   };
+}
+
+function apiSshKeyToSshKey(
+  key: DigitalOceanApiSshKey | null | undefined,
+): DigitalOceanSshKey | null {
+  const id = key?.id === undefined || key.id === null ? "" : String(key.id).trim();
+
+  return id
+    ? {
+        id,
+        name: key?.name?.trim() || null,
+        fingerprint: key?.fingerprint?.trim() || null,
+      }
+    : null;
 }
 
 function apiDropletToResource(

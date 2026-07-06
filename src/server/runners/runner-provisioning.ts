@@ -1,5 +1,6 @@
 import "server-only";
 
+import { generateKeyPairSync } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { DigitalOceanProviderConfig } from "@/src/server/env";
@@ -39,6 +40,7 @@ const PUBLIC_ENDPOINT_POLL_ATTEMPTS = 20;
 const PUBLIC_ENDPOINT_POLL_INTERVAL_MS = 3_000;
 const LOW_MEMORY_DIGITALOCEAN_SIZE_SLUGS = new Set(["s-1vcpu-512mb-10gb"]);
 const MAX_RUNNER_NAME_LENGTH = 80;
+const MANAGED_SSH_KEY_NAME = "AgentBay managed runner key";
 
 type RunnerProvisioningTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -370,7 +372,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
     }
 
     const runnerId = initialized.runner.id;
-    const sshAccess = await resolveDigitalOceanSshAccess(provider, config);
+    const sshAccess = await resolveDigitalOceanSshAccess(provider, config, { runnerId });
 
     if (!sshAccess.ok) {
       logRunnerProvisioning("ssh_key_resolution_failed", {
@@ -790,6 +792,7 @@ function missingProviderResourceMessage(providerResourceId: string): string {
 async function resolveDigitalOceanSshAccess(
   provider: DigitalOceanProvider,
   config: DigitalOceanProviderConfig,
+  options: { runnerId: string },
 ): Promise<
   | {
       ok: true;
@@ -798,7 +801,10 @@ async function resolveDigitalOceanSshAccess(
     }
   | {
       ok: false;
-      reason: Extract<DigitalOceanProviderErrorReason, "ssh_key_lookup_failed">;
+      reason: Extract<
+        DigitalOceanProviderErrorReason,
+        "ssh_key_lookup_failed" | "ssh_key_create_failed"
+      >;
       message: string;
     }
 > {
@@ -828,11 +834,32 @@ async function resolveDigitalOceanSshAccess(
   const sshKeyIds = normalizeUniqueStrings(listedKeys.value.map((key) => key.id));
 
   if (sshKeyIds.length === 0) {
+    logRunnerProvisioning("ssh_key_auto_create_needed", {
+      runnerId: options.runnerId,
+      sshKeyName: MANAGED_SSH_KEY_NAME,
+    });
+
+    const createdKey = await provider.createSshKey(createManagedSshKeyInput());
+
+    if (!createdKey.ok) {
+      return {
+        ok: false,
+        reason: "ssh_key_create_failed",
+        message:
+          "AgentBay could not create a DigitalOcean SSH key for Droplet login. Confirm the provider token has SSH key create permission, then retry Create runner.",
+      };
+    }
+
+    logRunnerProvisioning("ssh_key_auto_create_completed", {
+      runnerId: options.runnerId,
+      sshKeyId: createdKey.value.id,
+      sshKeyName: createdKey.value.name,
+    });
+
     return {
-      ok: false,
-      reason: "ssh_key_lookup_failed",
-      message:
-        "No DigitalOcean SSH keys are available for Droplet login. Add an SSH key to the DigitalOcean account or set AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS, then retry Create runner.",
+      ok: true,
+      sshKeyIds: [createdKey.value.id],
+      sshSourceAddresses: resolveSshSourceAddresses(config),
     };
   }
 
@@ -841,6 +868,29 @@ async function resolveDigitalOceanSshAccess(
     sshKeyIds,
     sshSourceAddresses: resolveSshSourceAddresses(config),
   };
+}
+
+function createManagedSshKeyInput(): { name: string; publicKey: string } {
+  const { publicKey } = generateKeyPairSync("ed25519");
+  const exported = publicKey.export({ format: "der", type: "spki" });
+  const publicKeyBytes = Buffer.from(exported).subarray(-32);
+  const opensshKey = Buffer.concat([
+    opensshBuffer("ssh-ed25519"),
+    opensshBuffer(publicKeyBytes),
+  ]).toString("base64");
+
+  return {
+    name: MANAGED_SSH_KEY_NAME,
+    publicKey: `ssh-ed25519 ${opensshKey} agentbay-managed-runner`,
+  };
+}
+
+function opensshBuffer(value: string | Buffer): Buffer {
+  const bytes = typeof value === "string" ? Buffer.from(value, "utf8") : value;
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(bytes.length, 0);
+
+  return Buffer.concat([length, bytes]);
 }
 
 function resolveSshSourceAddresses(config: DigitalOceanProviderConfig): string[] {

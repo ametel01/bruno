@@ -31,6 +31,7 @@ export function createDigitalOceanSdkClient(token, apiBaseUrl) {
       account: {
         keys: {
           get: () => sendJson(adapter, client.v2.account.keys.toGetRequestInformation()),
+          post: (body) => sendJson(adapter, client.v2.account.keys.toPostRequestInformation(body)),
         },
       },
       firewalls: {

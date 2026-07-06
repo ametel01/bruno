@@ -163,6 +163,13 @@ describe("DigitalOcean API provider", () => {
                 },
               ],
             }),
+            post: async () => ({
+              ssh_key: {
+                id: 52830700,
+                name: "AgentBay managed runner key",
+                fingerprint: "b4:78:1a:93:8c:33:49:15:a1:44:a9:dc:b2:4f:30:cc",
+              },
+            }),
           },
         },
         firewalls: {
@@ -282,6 +289,67 @@ describe("DigitalOcean API provider", () => {
     );
   });
 
+  it("creates SSH keys through raw DigitalOcean API fields", async () => {
+    const calls: Array<{ step: string; body?: unknown }> = [];
+    const provider = new DigitalOceanApiProvider({
+      token: "dop_v1_super_secret",
+      client: {
+        v2: {
+          droplets: {
+            post: async () => ({ droplet: null }),
+            byDroplet_id: () => ({ delete: async () => {} }),
+          },
+          account: {
+            keys: {
+              get: async () => ({ ssh_keys: [] }),
+              post: async (body) => {
+                calls.push({ step: "account.keys.post", body });
+
+                return {
+                  ssh_key: {
+                    id: 52830700,
+                    name: "AgentBay managed runner key",
+                    fingerprint: "b4:78:1a:93:8c:33:49:15:a1:44:a9:dc:b2:4f:30:cc",
+                  },
+                };
+              },
+            },
+          },
+          firewalls: { post: async () => ({ firewall: { id: "firewall-1" } }) },
+          tags: {
+            byTag_id: () => ({
+              resources: { post: async () => {} },
+            }),
+          },
+        },
+      },
+    });
+
+    const result = await provider.createSshKey({
+      name: "AgentBay managed runner key",
+      publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKey agentbay-managed-runner",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        id: "52830700",
+        name: "AgentBay managed runner key",
+        fingerprint: "b4:78:1a:93:8c:33:49:15:a1:44:a9:dc:b2:4f:30:cc",
+      },
+    });
+    expect(calls).toEqual([
+      {
+        step: "account.keys.post",
+        body: {
+          name: "AgentBay managed runner key",
+          publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKey agentbay-managed-runner",
+        },
+      },
+    ]);
+    expect(JSON.stringify(result)).not.toContain("dop_v1_super_secret");
+  });
+
   it("returns safe API failures without echoing provider credentials", async () => {
     const provider = new DigitalOceanApiProvider({
       token: "dop_v1_super_secret",
@@ -295,7 +363,12 @@ describe("DigitalOcean API provider", () => {
             },
             byDroplet_id: () => ({ delete: async () => {} }),
           },
-          account: { keys: { get: async () => ({ sshKeys: [] }) } },
+          account: {
+            keys: {
+              get: async () => ({ sshKeys: [] }),
+              post: async () => ({ sshKey: null }),
+            },
+          },
           firewalls: { post: async () => ({ firewall: { id: "firewall-1" } }) },
           tags: {
             byTag_id: () => ({
@@ -366,7 +439,12 @@ describe("DigitalOcean API provider", () => {
               delete: async () => {},
             }),
           },
-          account: { keys: { get: async () => ({ sshKeys: [] }) } },
+          account: {
+            keys: {
+              get: async () => ({ sshKeys: [] }),
+              post: async () => ({ sshKey: null }),
+            },
+          },
           firewalls: { post: async () => ({ firewall: { id: "firewall-1" } }) },
           tags: {
             byTag_id: () => ({
