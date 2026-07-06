@@ -1,0 +1,235 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import { agents, appMetadata, runnerHeartbeats, runners, users } from "@/src/server/db/schema";
+import {
+  normalizeRunnerCapacitySnapshot,
+  selectRunnerPlacementForDevelopmentUser,
+} from "@/src/server/runners/runner-placement";
+import { DEVELOPMENT_USER_METADATA_KEY } from "@/src/server/users/development-user";
+
+describe.sequential("runner placement contract", () => {
+  let connection: DatabaseConnection;
+
+  beforeEach(async () => {
+    connection = createDatabaseConnection();
+    await resetTables(connection);
+  });
+
+  afterEach(async () => {
+    await resetTables(connection);
+    await connection.close();
+  });
+
+  it("returns one eligible online runner when capacity is available", async () => {
+    const userId = await seedDevelopmentUser(connection);
+    const runner = await seedOnlineRunner(connection, userId, {
+      name: "Available Runner",
+      updatedAt: new Date("2026-07-06T04:00:00.000Z"),
+    });
+    await seedHeartbeat(connection, runner.id, {
+      observedAt: new Date("2026-07-06T04:01:00.000Z"),
+      metrics: {
+        maxAgents: 3,
+        runningAgents: 1,
+        cpuPercent: 37,
+        memoryUsedMb: 512,
+        memoryTotalMb: 2048,
+        diskUsedMb: 4096,
+        diskTotalMb: 20_480,
+      },
+    });
+
+    const result = await selectRunnerPlacementForDevelopmentUser(
+      {},
+      { createConnection: () => connection },
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      runner: {
+        id: runner.id,
+        kind: "manual_vps",
+        status: "online",
+        capacity: {
+          max_agents: 3,
+          running_agents: 1,
+          cpu_used_percent: 37,
+          memory_used_mb: 512,
+          memory_total_mb: 2048,
+          disk_used_mb: 4096,
+          disk_total_mb: 20_480,
+        },
+        latestHeartbeatAt: "2026-07-06T04:01:00.000Z",
+      },
+    });
+  });
+
+  it("rejects online runners when runner capacity is unavailable", async () => {
+    const userId = await seedDevelopmentUser(connection);
+    const runner = await seedOnlineRunner(connection, userId, {
+      name: "Full Runner",
+      endpointUrl: "https://full-runner.example.com",
+    });
+    await seedHeartbeat(connection, runner.id, {
+      observedAt: new Date("2026-07-06T04:05:00.000Z"),
+      metrics: {
+        maxAgents: 2,
+        runningAgents: 2,
+        cpuPercent: 94,
+      },
+    });
+
+    const result = await selectRunnerPlacementForDevelopmentUser(
+      {},
+      { createConnection: () => connection },
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "runner_capacity_reached",
+      runner: expect.objectContaining({
+        id: runner.id,
+        capacity: expect.objectContaining({
+          max_agents: 2,
+          running_agents: 2,
+          cpu_used_percent: 94,
+        }),
+      }),
+    });
+  });
+
+  it("rejects placement when there is no online runner", async () => {
+    const userId = await seedDevelopmentUser(connection);
+    await connection.db.insert(runners).values({
+      userId,
+      name: "Offline Runner",
+      kind: "manual_vps",
+      endpointUrl: "https://offline-runner.example.com",
+      status: "offline",
+    });
+
+    await expect(
+      selectRunnerPlacementForDevelopmentUser({}, { createConnection: () => connection }),
+    ).resolves.toEqual({ ok: false, reason: "no_online_runner" });
+  });
+
+  it("rejects placement when the plan limit is reached before runner selection", async () => {
+    const userId = await seedDevelopmentUser(connection);
+    await seedOnlineRunner(connection, userId, {
+      name: "Ignored Runner",
+      endpointUrl: "https://ignored-runner.example.com",
+    });
+    await connection.db.insert(agents).values({
+      userId,
+      name: "Existing Plan Agent",
+      templateKey: "research_agent",
+      status: "stopped",
+    });
+
+    const result = await selectRunnerPlacementForDevelopmentUser(
+      { planMaxAgents: 1 },
+      { createConnection: () => connection },
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "plan_limit_reached",
+      currentAgents: 1,
+      maxAgents: 1,
+    });
+  });
+
+  it("normalizes heartbeat metrics into shared capacity fields for enforcement and UI", () => {
+    expect(
+      normalizeRunnerCapacitySnapshot(
+        {
+          metrics: {
+            max_agents: 2,
+            running_agents: 1,
+            cpu_used_percent: 250,
+            memory_used_mb: 128.5,
+            memory_total_mb: 1024,
+            disk_used_mb: -5,
+            disk_total_mb: 50_000,
+            rawToken: "must-not-copy",
+          },
+        },
+        3,
+      ),
+    ).toEqual({
+      max_agents: 2,
+      running_agents: 3,
+      cpu_used_percent: 100,
+      memory_used_mb: 128.5,
+      memory_total_mb: 1024,
+      disk_used_mb: 0,
+      disk_total_mb: 50_000,
+    });
+  });
+});
+
+async function seedDevelopmentUser(connection: DatabaseConnection): Promise<string> {
+  const [user] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+  if (!user) {
+    throw new Error("User insert returned no rows.");
+  }
+
+  await connection.db.insert(appMetadata).values({
+    key: DEVELOPMENT_USER_METADATA_KEY,
+    value: user.id,
+  });
+
+  return user.id;
+}
+
+async function seedOnlineRunner(
+  connection: DatabaseConnection,
+  userId: string,
+  input: {
+    name: string;
+    endpointUrl?: string;
+    updatedAt?: Date;
+  },
+): Promise<{ id: string }> {
+  const [runner] = await connection.db
+    .insert(runners)
+    .values({
+      userId,
+      name: input.name,
+      kind: "manual_vps",
+      endpointUrl: input.endpointUrl ?? "https://available-runner.example.com",
+      status: "online",
+      updatedAt: input.updatedAt,
+    })
+    .returning({ id: runners.id });
+
+  if (!runner) {
+    throw new Error("Runner insert returned no rows.");
+  }
+
+  return runner;
+}
+
+async function seedHeartbeat(
+  connection: DatabaseConnection,
+  runnerId: string,
+  input: {
+    observedAt: Date;
+    metrics: Record<string, unknown>;
+  },
+): Promise<void> {
+  await connection.db.insert(runnerHeartbeats).values({
+    runnerId,
+    status: "online",
+    metadata: {
+      metrics: input.metrics,
+    },
+    observedAt: input.observedAt,
+    createdAt: input.observedAt,
+  });
+}
+
+async function resetTables(connection: DatabaseConnection): Promise<void> {
+  await connection.client`truncate table runner_provisioning_events, runner_heartbeats, runner_credentials, runner_registration_tokens, agent_approvals, agent_configs, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runners, app_metadata, users restart identity cascade`;
+}

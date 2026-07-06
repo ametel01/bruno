@@ -214,17 +214,17 @@
 
 ## Milestone 14 One User, Multiple Agents
 
-- Status: #156 Milestone 14 tracking and baseline gate documentation is in progress on `codex/issue-156-m14-tracking`.
+- Status: #157 runner capacity and placement contract is in progress on `codex/issue-157-capacity-placement` after #156 merged.
 - Source plan:
   - `docs/MILESTONES.md` Milestone 14: One User, Multiple Agents.
   - GitHub issue #156: Prepare Milestone 14 tracking and baseline gates.
   - `PLAN.md` is absent in this worktree; the published #156 issue body and `docs/MILESTONES.md` are the active Step 0 contract.
-- Current branch: `codex/issue-156-m14-tracking`.
+- Current branch: `codex/issue-157-capacity-placement`.
 
 ### Issue Checklist
 
-- [ ] #156 Prepare Milestone 14 tracking and baseline gates. Status: implementation and validation in progress.
-- [ ] #157 Add runner capacity snapshots and placement contract. Status: pending #156 baseline tracking.
+- [x] #156 Prepare Milestone 14 tracking and baseline gates. Status: merged in PR #175.
+- [ ] #157 Add runner capacity snapshots and placement contract. Status: implementation and validation in progress.
 - [ ] #158 Enforce capacity and plan limits on create and start. Status: pending #156 baseline tracking.
 - [ ] #159 Harden per-agent runtime and log isolation. Status: pending #156 baseline tracking.
 - [ ] #160 Show runner capacity in the operations UI. Status: pending #156 baseline tracking.
@@ -237,6 +237,7 @@
 - Milestone 14 acceptance criteria: user can create three agents and start all on one runner; stopping one agent does not affect the others; logs stay separated by agent; runner capacity is visible and updates; capacity and plan limits block excess starts or creates.
 - Milestone 14 test expectations from `docs/MILESTONES.md`: placement tests for capacity available and unavailable, concurrency tests for simultaneous start requests, integration tests with multiple agents and separated logs, and UI tests for capacity display.
 - #156 is tracking-only. It initializes the Milestone 14 progress record, records baseline gate expectations, verifies changelog structure, and intentionally leaves `CHANGELOG.md` unchanged because no functional user/operator-visible behavior ships in this issue.
+- #157 adds a shared server-side runner placement contract that selects an eligible online runner for the development user, normalizes latest heartbeat metrics into stable snake_case capacity fields, combines heartbeat-reported running-agent count with assigned running agents from the database, and returns safe structured blockers for no runner, plan limit, and runner capacity cases.
 - `CHANGELOG.md` has the Keep a Changelog 1.0.0 framing and an `## [Unreleased]` section. Agents should keep that structure and add changelog bullets only for shipped functional user/operator-visible changes.
 
 ### Baseline Gate Expectations
@@ -263,6 +264,7 @@
 - 2026-07-06: #156 initialized Milestone 14 tracking from `docs/MILESTONES.md` and the published #156 issue body; noted that `PLAN.md` is absent in this worktree and the published issue body plus milestone document are the active Step 0 contract.
 - 2026-07-06: #156 confirmed `CHANGELOG.md` has Keep a Changelog 1.0.0 framing and `## [Unreleased]`; `CHANGELOG.md` is intentionally unchanged for #156 because this issue creates tracking only and ships no functional product behavior.
 - 2026-07-06: #156 recorded baseline gate expectations for `bun run verify`, `bun run test:e2e`, the local Postgres `DATABASE_URL`, and `NEXT_PUBLIC_APP_URL` before multi-agent runner work starts.
+- 2026-07-06: #157 added `src/server/runners/runner-placement.ts` with the shared capacity snapshot shape, metric normalization, capacity availability helper, and development-user placement selector; added focused tests for capacity available, capacity unavailable, no online runner, plan limit, and snake_case metric normalization.
 
 ### Validation Evidence
 
@@ -275,6 +277,17 @@
   - `bun run format:check`: pass; Biome checked 134 files with no fixes applied.
   - `git diff --check`: pass; no whitespace errors.
   - `git status --short --branch --untracked-files=all`: branch `codex/issue-156-m14-tracking` is based on `origin/main` with only `PROGRESS.md` modified.
+
+- 2026-07-06 #157:
+  - `gh issue view 157 --repo ametel01/agentbay --json number,title,body,state,url,labels`: pass; issue is open and maps Milestone 14 placement/capacity contract work to `docs/MILESTONES.md` plus PLAN Step 1.
+  - `bun install --frozen-lockfile`: pass; installed committed dependencies in the fresh issue worktree after the first focused test attempt failed before Vitest started with `vitest: command not found`.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism tests/unit/runner-placement.test.ts`: pass; 1 file and 5 tests covered capacity available, capacity unavailable, no online runner, plan-limit rejection, and normalized shared capacity fields.
+  - First `bun run typecheck`: failed because the `runner_capacity_reached` return type could include an undefined first candidate; fixed with an explicit first-candidate guard.
+  - First `bun run lint`: warning for an unused test import; removed it.
+  - Final `bun run typecheck`: pass; `tsc --noEmit` completed.
+  - Final `bun run lint`: pass; Biome checked 136 files with no fixes applied.
+  - `bun run format:check`: pass; Biome checked 136 files with no fixes applied.
+  - `git diff --check`: pass; no whitespace errors.
 
 ## Milestone 12 Secure Runner Auth
 
