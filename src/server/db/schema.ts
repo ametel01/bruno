@@ -132,6 +132,39 @@ export const runners = pgTable(
   ],
 );
 
+export const runnerProvisioningEvents = pgTable(
+  "runner_provisioning_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runnerId: uuid("runner_id")
+      .notNull()
+      .references(() => runners.id),
+    phase: text("phase").notNull(),
+    status: text("status").notNull(),
+    message: text("message").notNull(),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "runner_provisioning_events_phase_check",
+      sql`${table.phase} IN ('pending', 'creating', 'tagging', 'firewall_configuring', 'bootstrapping', 'waiting_for_runner', 'ready', 'failed', 'cleaning_up', 'deleted')`,
+    ),
+    check(
+      "runner_provisioning_events_status_check",
+      sql`${table.status} IN ('started', 'completed', 'failed')`,
+    ),
+    check(
+      "runner_provisioning_events_message_not_empty_check",
+      sql`length(trim(${table.message})) > 0`,
+    ),
+    index("runner_provisioning_events_runner_created_idx").on(table.runnerId, table.createdAt),
+  ],
+);
+
 export const runnerRegistrationTokens = pgTable(
   "runner_registration_tokens",
   {
