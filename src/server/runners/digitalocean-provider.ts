@@ -45,12 +45,19 @@ export type DigitalOceanResource = {
   deletedAt: string | null;
 };
 
+export type DigitalOceanSshKey = {
+  id: string;
+  name: string | null;
+  fingerprint: string | null;
+};
+
 export type DigitalOceanProviderErrorReason =
   | "create_failed"
   | "tag_failed"
   | "firewall_failed"
   | "cleanup_failed"
-  | "resource_not_found";
+  | "resource_not_found"
+  | "ssh_key_lookup_failed";
 
 export type DigitalOceanProviderResult<T> =
   | {
@@ -71,6 +78,7 @@ export type DigitalOceanTagInput = {
 export type DigitalOceanFirewallInput = {
   providerResourceId: string;
   firewallName: string;
+  sshSourceAddresses?: string[];
 };
 
 export type DigitalOceanCleanupInput = {
@@ -82,6 +90,7 @@ export type DigitalOceanReadInput = {
 };
 
 export interface DigitalOceanProvider {
+  listSshKeys(): Promise<DigitalOceanProviderResult<DigitalOceanSshKey[]>>;
   createRunner(
     input: DigitalOceanRunnerSpec,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>>;
@@ -106,6 +115,7 @@ export type FakeDigitalOceanProviderOptions = {
   now?: () => Date;
   idPrefix?: string;
   publicIpv4?: string | null;
+  sshKeys?: DigitalOceanSshKey[];
 };
 
 export type DigitalOceanApiProviderOptions = {
@@ -124,6 +134,11 @@ export type DigitalOceanSdkClient = {
       byDroplet_id(id: number): {
         get?(): Promise<DigitalOceanDropletCreateResponse | undefined>;
         delete(): Promise<void>;
+      };
+    };
+    account: {
+      keys: {
+        get(): Promise<DigitalOceanSshKeysResponse | undefined>;
       };
     };
     firewalls: {
@@ -152,6 +167,16 @@ type DigitalOceanDropletCreateBody = {
 
 type DigitalOceanDropletCreateResponse = {
   droplet?: DigitalOceanApiDroplet | null;
+};
+
+type DigitalOceanSshKeysResponse = {
+  sshKeys?: DigitalOceanApiSshKey[] | null;
+};
+
+type DigitalOceanApiSshKey = {
+  id?: number | string | null;
+  name?: string | null;
+  fingerprint?: string | null;
 };
 
 type DigitalOceanFirewallCreateResponse = {
@@ -208,6 +233,33 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
   constructor(options: DigitalOceanApiProviderOptions) {
     this.#client = options.client ?? createDigitalOceanSdkClient(options.token, options.apiBaseUrl);
     this.#now = options.now ?? (() => new Date());
+  }
+
+  async listSshKeys(): Promise<DigitalOceanProviderResult<DigitalOceanSshKey[]>> {
+    const response = await runSdkStep("ssh_key_lookup_failed", () =>
+      this.#client.v2.account.keys.get(),
+    );
+
+    if (!response.ok) {
+      return response;
+    }
+
+    return {
+      ok: true,
+      value: (response.value?.sshKeys ?? []).flatMap((key) => {
+        const id = key.id === undefined || key.id === null ? "" : String(key.id).trim();
+
+        return id
+          ? [
+              {
+                id,
+                name: key.name?.trim() || null,
+                fingerprint: key.fingerprint?.trim() || null,
+              },
+            ]
+          : [];
+      }),
+    };
   }
 
   async createRunner(
@@ -353,7 +405,11 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
       this.#client.v2.firewalls.post({
         name: input.firewallName,
         dropletIds: [dropletId],
-        inboundRules: [tcpInboundRule("80"), tcpInboundRule("443")],
+        inboundRules: [
+          ...sshInboundRules(input.sshSourceAddresses),
+          tcpInboundRule("80"),
+          tcpInboundRule("443"),
+        ],
         outboundRules: [outboundRule("tcp"), outboundRule("udp"), outboundRule("icmp")],
       }),
     );
@@ -404,12 +460,27 @@ export class FakeDigitalOceanProvider implements DigitalOceanProvider {
   readonly #now: () => Date;
   readonly #idPrefix: string;
   readonly #publicIpv4: string | null;
+  readonly #sshKeys: DigitalOceanSshKey[];
 
   constructor(options: FakeDigitalOceanProviderOptions = {}) {
     this.#fail = options.fail ?? {};
     this.#now = options.now ?? (() => new Date());
     this.#idPrefix = options.idPrefix ?? "do-fake";
     this.#publicIpv4 = options.publicIpv4 === undefined ? "203.0.113.10" : options.publicIpv4;
+    this.#sshKeys = options.sshKeys ?? [
+      {
+        id: "52830696",
+        name: "macos",
+        fingerprint: "c3:2a:31:47:ef:86:aa:72:41:b4:33:c1:a2:36:1f:a8",
+      },
+    ];
+  }
+
+  async listSshKeys(): Promise<DigitalOceanProviderResult<DigitalOceanSshKey[]>> {
+    return {
+      ok: true,
+      value: this.#sshKeys.map((key) => ({ ...key })),
+    };
   }
 
   async createRunner(
@@ -636,12 +707,25 @@ function isPublicIpv4(value: string): boolean {
   });
 }
 
-function tcpInboundRule(port: string): DigitalOceanFirewallInboundRule {
+function sshInboundRules(addresses: string[] | undefined): DigitalOceanFirewallInboundRule[] {
+  const sourceAddresses = normalizeFirewallAddresses(addresses);
+
+  return sourceAddresses.length > 0 ? [tcpInboundRule("22", sourceAddresses)] : [];
+}
+
+function tcpInboundRule(
+  port: string,
+  addresses: string[] = ["0.0.0.0/0", "::/0"],
+): DigitalOceanFirewallInboundRule {
   return {
     protocol: "tcp",
     ports: port,
-    sources: { addresses: ["0.0.0.0/0", "::/0"] },
+    sources: { addresses },
   };
+}
+
+function normalizeFirewallAddresses(addresses: string[] | undefined): string[] {
+  return [...new Set((addresses ?? []).map((address) => address.trim()).filter(Boolean))].sort();
 }
 
 function outboundRule(protocol: "icmp" | "tcp" | "udp"): DigitalOceanFirewallOutboundRule {

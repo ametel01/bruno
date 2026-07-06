@@ -9,6 +9,8 @@ export type DigitalOceanProviderConfig = {
   sizeSlug: string;
   image: string;
   tags: string[];
+  sshKeyIds?: string[];
+  sshSourceAddresses?: string[];
 };
 
 export function getServerEnv(input = process.env) {
@@ -36,6 +38,8 @@ export function readDigitalOceanProviderConfig(
     ]);
   }
 
+  const sshKeyIds = readDigitalOceanSshKeyIds(input.AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS);
+
   return {
     token,
     runnerBearerToken,
@@ -52,6 +56,10 @@ export function readDigitalOceanProviderConfig(
       defaultValue: "ubuntu-24-04-x64",
     }),
     tags: readDigitalOceanTags(input.AGENTBAY_DIGITALOCEAN_TAGS),
+    sshSourceAddresses: readDigitalOceanSshSourceAddresses(
+      input.AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS,
+    ),
+    ...(sshKeyIds === null ? {} : { sshKeyIds }),
   };
 }
 
@@ -93,4 +101,55 @@ function readDigitalOceanTags(value: string | undefined): string[] {
   }
 
   return tags.sort();
+}
+
+function readDigitalOceanSshKeyIds(value: string | undefined): string[] | null {
+  if (value === undefined) {
+    return null;
+  }
+
+  const normalizedValue = value.trim();
+
+  if (!normalizedValue) {
+    throw new EnvValidationError([
+      "AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS cannot be blank when set. Use auto or omit it to discover account keys.",
+    ]);
+  }
+
+  if (normalizedValue.toLowerCase() === "auto") {
+    return null;
+  }
+
+  if (["none", "disabled", "false"].includes(normalizedValue.toLowerCase())) {
+    return [];
+  }
+
+  return readNonEmptyCsvSetting(normalizedValue, "AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS");
+}
+
+function readDigitalOceanSshSourceAddresses(value: string | undefined): string[] {
+  if (value === undefined) {
+    return ["0.0.0.0/0", "::/0"];
+  }
+
+  return readNonEmptyCsvSetting(value, "AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS");
+}
+
+function readNonEmptyCsvSetting(value: string, envName: string): string[] {
+  const values = [
+    ...new Set(
+      value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+  ];
+
+  if (values.length === 0) {
+    throw new EnvValidationError([
+      `${envName} must include at least one non-empty value when set.`,
+    ]);
+  }
+
+  return values.sort();
 }

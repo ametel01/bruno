@@ -81,6 +81,7 @@ describe.sequential("runner provisioning service", () => {
           image: "ubuntu-24-04-x64",
           tags: ["agentbay", "cloud-runner"],
           firewallName: "agentbay-runners",
+          sshKeyIds: ["52830696"],
           userData: expect.stringContaining("AGENTBAY_RUNNER_REGISTRATION_TOKEN="),
         },
       },
@@ -96,6 +97,7 @@ describe.sequential("runner provisioning service", () => {
         input: {
           providerResourceId: "droplet-1",
           firewallName: "agentbay-runners-droplet-1",
+          sshSourceAddresses: ["0.0.0.0/0", "::/0"],
         },
       },
     ]);
@@ -147,6 +149,13 @@ describe.sequential("runner provisioning service", () => {
       firewallApplied: true,
       firewallName: "agentbay-runners-droplet-1",
     });
+    expect(
+      result.runner.provisioning.phases.find(
+        (event) => event.phase === "creating" && event.status === "started",
+      )?.metadata,
+    ).toMatchObject({
+      sshKeyCount: 1,
+    });
 
     const persistedTokens = await connection.db.select().from(runnerRegistrationTokens);
     const [persistedRunner] = await connection.db
@@ -171,6 +180,42 @@ describe.sequential("runner provisioning service", () => {
     expect(serializedResult).not.toContain("dop_v1_super_secret");
     expect(serializedPersistence).not.toContain(generatedRegistrationToken.value);
     expect(serializedPersistence).not.toContain("dop_v1_super_secret");
+  });
+
+  it("fails visibly before creating a Droplet when no DigitalOcean SSH keys can be attached", async () => {
+    const provider = new FakeDigitalOceanProvider({ sshKeys: [] });
+
+    const result = await createDigitalOceanRunnerForDevelopmentUser(
+      { provider: "digitalocean", name: "No SSH Runner" },
+      {
+        createConnection: () => connection,
+        provider,
+        readConfig: () => ({
+          token: "dop_v1_super_secret",
+          runnerBearerToken: "runner-command-token",
+          region: "sfo3",
+          sizeSlug: "s-1vcpu-1gb",
+          image: "ubuntu-24-04-x64",
+          tags: ["agentbay"],
+        }),
+        now: sequenceClock("2026-07-06T02:30:00.000Z"),
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      duplicate: false,
+      runner: {
+        status: "provision_failed",
+        providerResourceId: null,
+        provisioning: {
+          status: "failed",
+          error:
+            "No DigitalOcean SSH keys are available for Droplet login. Add an SSH key to the DigitalOcean account or set AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS, then retry Create runner.",
+        },
+      },
+    });
+    expect(provider.calls).toEqual([]);
   });
 
   it("injects swap setup when provisioning the default low-memory DigitalOcean size", async () => {

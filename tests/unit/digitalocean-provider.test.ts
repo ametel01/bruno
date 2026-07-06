@@ -50,6 +50,7 @@ describe("fake DigitalOcean provider", () => {
     const firewalled = await provider.applyFirewall({
       providerResourceId: created.value.providerResourceId,
       firewallName: "agentbay-runners",
+      sshSourceAddresses: ["203.0.113.5/32"],
     });
     const cleaned = await provider.cleanupResource({
       providerResourceId: created.value.providerResourceId,
@@ -151,6 +152,19 @@ describe("DigitalOcean API provider", () => {
             },
           }),
         },
+        account: {
+          keys: {
+            get: async () => ({
+              sshKeys: [
+                {
+                  id: 52830696,
+                  name: "macos",
+                  fingerprint: "c3:2a:31:47:ef:86:aa:72:41:b4:33:c1:a2:36:1f:a8",
+                },
+              ],
+            }),
+          },
+        },
         firewalls: {
           post: async (body) => {
             calls.push({ step: "firewalls.post", body });
@@ -182,6 +196,7 @@ describe("DigitalOcean API provider", () => {
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "agentbay-runner"],
       firewallName: "agentbay-runners",
+      sshKeyIds: ["52830696"],
     });
 
     expect(created).toMatchObject({
@@ -208,6 +223,7 @@ describe("DigitalOcean API provider", () => {
     const firewalled = await provider.applyFirewall({
       providerResourceId: created.value.providerResourceId,
       firewallName: "agentbay-runners",
+      sshSourceAddresses: ["203.0.113.5/32"],
     });
     const cleaned = await provider.cleanupResource({
       providerResourceId: created.value.providerResourceId,
@@ -238,6 +254,7 @@ describe("DigitalOcean API provider", () => {
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "agentbay-runner"],
       monitoring: true,
+      sshKeys: ["52830696"],
     });
     expect(calls[1]).toMatchObject({
       tag: "agentbay-runner",
@@ -249,6 +266,7 @@ describe("DigitalOcean API provider", () => {
       name: "agentbay-runners",
       dropletIds: [123456],
       inboundRules: [
+        { protocol: "tcp", ports: "22", sources: { addresses: ["203.0.113.5/32"] } },
         { protocol: "tcp", ports: "80" },
         { protocol: "tcp", ports: "443" },
       ],
@@ -277,6 +295,7 @@ describe("DigitalOcean API provider", () => {
             },
             byDroplet_id: () => ({ delete: async () => {} }),
           },
+          account: { keys: { get: async () => ({ sshKeys: [] }) } },
           firewalls: { post: async () => ({ firewall: { id: "firewall-1" } }) },
           tags: {
             byTag_id: () => ({
@@ -347,6 +366,7 @@ describe("DigitalOcean API provider", () => {
               delete: async () => {},
             }),
           },
+          account: { keys: { get: async () => ({ sshKeys: [] }) } },
           firewalls: { post: async () => ({ firewall: { id: "firewall-1" } }) },
           tags: {
             byTag_id: () => ({

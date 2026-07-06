@@ -21,6 +21,7 @@ describe("server-only provider environment validation", () => {
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "agentbay-runner"],
+      sshSourceAddresses: ["0.0.0.0/0", "::/0"],
     });
 
     const config = readDigitalOceanProviderConfig({
@@ -39,7 +40,38 @@ describe("server-only provider environment validation", () => {
       sizeSlug: "s-2vcpu-2gb",
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "runner"],
+      sshSourceAddresses: ["0.0.0.0/0", "::/0"],
     });
+  });
+
+  it("parses DigitalOcean SSH access configuration for Droplet creation", () => {
+    expect(
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "52830696, c3:2a:31",
+        AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS: "203.0.113.5/32, 2001:db8::/64",
+      }),
+    ).toMatchObject({
+      sshKeyIds: ["52830696", "c3:2a:31"],
+      sshSourceAddresses: ["2001:db8::/64", "203.0.113.5/32"],
+    });
+
+    expect(
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "auto",
+      }),
+    ).not.toHaveProperty("sshKeyIds");
+
+    expect(
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "none",
+      }),
+    ).toMatchObject({ sshKeyIds: [] });
   });
 
   it("rejects blank DigitalOcean provider configuration", () => {
@@ -56,6 +88,14 @@ describe("server-only provider environment validation", () => {
         AGENTBAY_DIGITALOCEAN_REGION: " ",
       }),
     ).toThrow("AGENTBAY_DIGITALOCEAN_REGION cannot be blank when DigitalOcean is set.");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: " ",
+      }),
+    ).toThrow("AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS cannot be blank when set.");
 
     expect(() =>
       readDigitalOceanProviderConfig({

@@ -227,6 +227,12 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       image: config.image,
       tagCount: config.tags.length,
       hasRunnerBearerToken: Boolean(config.runnerBearerToken),
+      sshKeyMode:
+        config.sshKeyIds === undefined
+          ? "auto"
+          : config.sshKeyIds.length > 0
+            ? "configured"
+            : "disabled",
     });
 
     const provider = dependencies.provider ?? new DigitalOceanApiProvider({ token: config.token });
@@ -332,6 +338,35 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
     }
 
     const runnerId = initialized.runner.id;
+    const sshAccess = await resolveDigitalOceanSshAccess(provider, config);
+
+    if (!sshAccess.ok) {
+      logRunnerProvisioning("ssh_key_resolution_failed", {
+        runnerId,
+        reason: sshAccess.reason,
+      });
+
+      await failProvisioning(connection, {
+        runnerId,
+        phase: "creating",
+        reason: sshAccess.reason,
+        message: sshAccess.message,
+        now: now(),
+      });
+
+      return {
+        ok: true,
+        duplicate: false,
+        runner: await getRunnerProvisioningDto(connection, runnerId),
+      };
+    }
+
+    logRunnerProvisioning("ssh_access_resolved", {
+      runnerId,
+      sshKeyCount: sshAccess.sshKeyIds.length,
+      sshFirewallEnabled: sshAccess.sshSourceAddresses.length > 0,
+    });
+
     const bootstrap = await buildProvisioningBootstrap({
       connection,
       runnerId,
@@ -350,6 +385,9 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       safeFailureMessage:
         "DigitalOcean Droplet could not be created. Check provider quota, image, region, and token permissions.",
       failureReason: "create_failed",
+      startedMetadata: {
+        sshKeyCount: sshAccess.sshKeyIds.length,
+      },
       now,
       execute: () =>
         provider.createRunner({
@@ -359,6 +397,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
           image: config.image,
           tags: config.tags,
           firewallName: firewallNamePrefix,
+          sshKeyIds: sshAccess.sshKeyIds,
           userData: bootstrap.userData,
         }),
     });
@@ -488,11 +527,16 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
         "DigitalOcean firewall intent could not be applied. Check firewall permissions and Droplet state.",
       failureReason: "firewall_failed",
       firewallName,
+      startedMetadata: {
+        sshEnabled: sshAccess.sshSourceAddresses.length > 0,
+        sshSourceAddresses: sshAccess.sshSourceAddresses,
+      },
       now,
       execute: () =>
         provider.applyFirewall({
           providerResourceId: resource.value.providerResourceId,
           firewallName,
+          sshSourceAddresses: sshAccess.sshSourceAddresses,
         }),
     });
 
@@ -569,6 +613,7 @@ async function runProviderStep(
     safeFailureMessage: string;
     failureReason: DigitalOceanProviderErrorReason;
     firewallName?: string;
+    startedMetadata?: Record<string, unknown>;
     now: () => Date;
     execute: () => Promise<DigitalOceanProviderResult<DigitalOceanResource>>;
   },
@@ -588,7 +633,7 @@ async function runProviderStep(
       phase: input.phase,
       status: "started",
       message: input.startedMessage,
-      metadata: { provider: DIGITALOCEAN_PROVIDER },
+      metadata: { provider: DIGITALOCEAN_PROVIDER, ...input.startedMetadata },
       now: startedAt,
     });
   });
@@ -660,6 +705,70 @@ async function runProviderStep(
   });
 
   return result;
+}
+
+async function resolveDigitalOceanSshAccess(
+  provider: DigitalOceanProvider,
+  config: DigitalOceanProviderConfig,
+): Promise<
+  | {
+      ok: true;
+      sshKeyIds: string[];
+      sshSourceAddresses: string[];
+    }
+  | {
+      ok: false;
+      reason: Extract<DigitalOceanProviderErrorReason, "ssh_key_lookup_failed">;
+      message: string;
+    }
+> {
+  const configuredKeyIds = config.sshKeyIds;
+
+  if (configuredKeyIds !== undefined) {
+    const sshKeyIds = normalizeUniqueStrings(configuredKeyIds);
+
+    return {
+      ok: true,
+      sshKeyIds,
+      sshSourceAddresses: sshKeyIds.length > 0 ? resolveSshSourceAddresses(config) : [],
+    };
+  }
+
+  const listedKeys = await provider.listSshKeys();
+
+  if (!listedKeys.ok) {
+    return {
+      ok: false,
+      reason: "ssh_key_lookup_failed",
+      message:
+        "DigitalOcean SSH keys could not be listed. Confirm the provider token has SSH key read permission, then retry Create runner.",
+    };
+  }
+
+  const sshKeyIds = normalizeUniqueStrings(listedKeys.value.map((key) => key.id));
+
+  if (sshKeyIds.length === 0) {
+    return {
+      ok: false,
+      reason: "ssh_key_lookup_failed",
+      message:
+        "No DigitalOcean SSH keys are available for Droplet login. Add an SSH key to the DigitalOcean account or set AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS, then retry Create runner.",
+    };
+  }
+
+  return {
+    ok: true,
+    sshKeyIds,
+    sshSourceAddresses: resolveSshSourceAddresses(config),
+  };
+}
+
+function resolveSshSourceAddresses(config: DigitalOceanProviderConfig): string[] {
+  return normalizeUniqueStrings(config.sshSourceAddresses ?? ["0.0.0.0/0", "::/0"]);
+}
+
+function normalizeUniqueStrings(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort();
 }
 
 async function buildProvisioningBootstrap(input: {

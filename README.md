@@ -54,6 +54,8 @@ AGENTBAY_DIGITALOCEAN_REGION=sfo3
 AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-512mb-10gb
 AGENTBAY_DIGITALOCEAN_IMAGE=ubuntu-24-04-x64
 AGENTBAY_DIGITALOCEAN_TAGS=agentbay,agentbay-runner
+AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS=auto
+AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS=0.0.0.0/0,::/0
 ```
 
 The provisioning bootstrap injects `AGENTBAY_RUNNER_BEARER_TOKEN` only into the Droplet-local runner env file so lifecycle commands from the dashboard can authenticate to the cloud runner. It must not be exposed through browser JSON, HTML, logs, or provisioning summaries.
@@ -71,7 +73,7 @@ AGENTBAY_DIGITALOCEAN_TOKEN
 AGENTBAY_RUNNER_BEARER_TOKEN
 ```
 
-`DATABASE_URL` must point at the deployment database, and `NEXT_PUBLIC_APP_URL` must match the Vercel preview or production URL that the Droplet can call back. `AGENTBAY_DIGITALOCEAN_TOKEN` must allow Droplet create/read/tag/firewall/delete operations in the target team or account. `AGENTBAY_RUNNER_BEARER_TOKEN` is the server-side command token used by the dashboard when forwarding selected-agent lifecycle commands to the cloud runner; store it only in Vercel environment settings and the generated Droplet env file.
+`DATABASE_URL` must point at the deployment database, and `NEXT_PUBLIC_APP_URL` must match the Vercel preview or production URL that the Droplet can call back. `AGENTBAY_DIGITALOCEAN_TOKEN` must allow Droplet create/read/tag/firewall/delete operations plus SSH key read operations in the target team or account. `AGENTBAY_RUNNER_BEARER_TOKEN` is the server-side command token used by the dashboard when forwarding selected-agent lifecycle commands to the cloud runner; store it only in Vercel environment settings and the generated Droplet env file.
 
 Optional provider settings default to:
 
@@ -80,7 +82,11 @@ AGENTBAY_DIGITALOCEAN_REGION=sfo3
 AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-512mb-10gb
 AGENTBAY_DIGITALOCEAN_IMAGE=ubuntu-24-04-x64
 AGENTBAY_DIGITALOCEAN_TAGS=agentbay,agentbay-runner
+AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS=auto
+AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS=0.0.0.0/0,::/0
 ```
+
+By default, AgentBay lists DigitalOcean account SSH keys through the configured provider token and embeds every available key into new Droplets. Set `AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS` to a comma-separated list of key IDs or fingerprints to pin exact keys, or `none` only when intentionally disabling SSH access. The managed firewall opens TCP 22 only when at least one SSH key is attached.
 
 The default low-memory size is supported by bootstrap swap setup. If bootstrap repeatedly fails during dependency installation, retry with `AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-1gb` and record the cost/reliability tradeoff in the deployment notes.
 
@@ -90,12 +96,12 @@ Provisioning should progress through these safe UI phases:
 - `bootstrapping`: a one-time runner registration token and cloud-init content were prepared.
 - `creating`: the DigitalOcean Droplet create request is in flight.
 - `tagging`: AgentBay ownership tags are being attached.
-- `firewall_configuring`: the runner firewall is being restricted to HTTPS traffic.
+- `firewall_configuring`: the runner firewall is being restricted to SSH and HTTPS traffic.
 - `waiting_for_runner`: the Droplet exists and should be bootstrapping, registering, and sending heartbeats.
 - `ready`: the runner registered, heartbeated, and is usable for assignment.
 - `failed`: provisioning failed or timed out with safe operator guidance.
 
-Cloud-init keeps the runner service bound to `127.0.0.1:3045`, installs Caddy, exposes only ports 80 and 443 through the managed firewall, and registers the runner endpoint as `https://<public-ip-with-dashes>.sslip.io`. The Droplet-local env file persists `AGENTBAY_RUNNER_ID`, `AGENTBAY_RUNNER_CREDENTIAL`, and `AGENTBAY_RUNNER_BEARER_TOKEN` with owner-only permissions so service restarts do not reuse the one-time registration token.
+Cloud-init keeps the runner service bound to `127.0.0.1:3045`, installs Caddy, exposes ports 80 and 443 through the managed firewall, and also exposes port 22 when SSH keys are attached. It registers the runner endpoint as `https://<public-ip-with-dashes>.sslip.io`. The Droplet-local env file persists `AGENTBAY_RUNNER_ID`, `AGENTBAY_RUNNER_CREDENTIAL`, and `AGENTBAY_RUNNER_BEARER_TOKEN` with owner-only permissions so service restarts do not reuse the one-time registration token.
 
 Use this live smoke only after deploying a Vercel preview or production build with the required environment:
 
@@ -751,9 +757,11 @@ AGENTBAY_DIGITALOCEAN_REGION
 AGENTBAY_DIGITALOCEAN_SIZE_SLUG
 AGENTBAY_DIGITALOCEAN_IMAGE
 AGENTBAY_DIGITALOCEAN_TAGS
+AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS
+AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS
 ```
 
-`DATABASE_URL` should be a Vercel-accessible Postgres connection string, not the local Docker URL. `NEXT_PUBLIC_APP_URL` should be the preview or production app URL used by that deployment. `AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL` should be the HTTPS runner endpoint, not a private local URL. `AGENTBAY_DIGITALOCEAN_TOKEN` enables managed cloud runner provisioning. `AGENTBAY_DIGITALOCEAN_REGION`, `AGENTBAY_DIGITALOCEAN_SIZE_SLUG`, `AGENTBAY_DIGITALOCEAN_IMAGE`, and `AGENTBAY_DIGITALOCEAN_TAGS` may be omitted to use defaults. `AGENTBAY_RUNNER_BEARER_TOKEN` must be stored only in Vercel environment variables or an equivalent secret store. If the CLI has no credentials or Vercel lacks required env vars, record the exact blocker in `PROGRESS.md`.
+`DATABASE_URL` should be a Vercel-accessible Postgres connection string, not the local Docker URL. `NEXT_PUBLIC_APP_URL` should be the preview or production app URL used by that deployment. `AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL` should be the HTTPS runner endpoint, not a private local URL. `AGENTBAY_DIGITALOCEAN_TOKEN` enables managed cloud runner provisioning. `AGENTBAY_DIGITALOCEAN_REGION`, `AGENTBAY_DIGITALOCEAN_SIZE_SLUG`, `AGENTBAY_DIGITALOCEAN_IMAGE`, `AGENTBAY_DIGITALOCEAN_TAGS`, `AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS`, and `AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS` may be omitted to use defaults. `AGENTBAY_RUNNER_BEARER_TOKEN` must be stored only in Vercel environment variables or an equivalent secret store. If the CLI has no credentials or Vercel lacks required env vars, record the exact blocker in `PROGRESS.md`.
 
 The Vercel CLI creates local `.vercel/` metadata and may create `.env.local` for local credentials. Both are ignored and should remain local-only.
 
