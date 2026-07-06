@@ -177,8 +177,14 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
   const validated = validateCreateRunnerProvisioningPayload(payload);
 
   if (!validated.ok) {
+    logRunnerProvisioning("validation_failed", { issueCount: validated.issues.length });
     return { ok: false, reason: "validation_failed", issues: validated.issues };
   }
+
+  logRunnerProvisioning("request_received", {
+    provider: validated.value.provider,
+    name: validated.value.name,
+  });
 
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
@@ -194,6 +200,13 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
     });
 
     if (duplicate) {
+      logRunnerProvisioning("duplicate_reused", {
+        runnerId: duplicate.id,
+        runnerStatus: duplicate.status,
+        provisioningStatus: duplicate.provisioning.status,
+        providerResourceId: duplicate.providerResourceId,
+      });
+
       return {
         ok: true,
         duplicate: true,
@@ -204,8 +217,17 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
     const config = dependencies.readConfig?.() ?? readDigitalOceanProviderConfig();
 
     if (!config) {
+      logRunnerProvisioning("provider_not_configured", {});
       return { ok: false, reason: "provider_not_configured" };
     }
+
+    logRunnerProvisioning("provider_config_loaded", {
+      region: config.region,
+      sizeSlug: config.sizeSlug,
+      image: config.image,
+      tagCount: config.tags.length,
+      hasRunnerBearerToken: Boolean(config.runnerBearerToken),
+    });
 
     const provider = dependencies.provider ?? new DigitalOceanApiProvider({ token: config.token });
     const createRegistrationTokenDependency =
@@ -216,6 +238,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       const duplicateRunner = await findActiveProvisioningRunner(tx, userId);
 
       if (duplicateRunner) {
+        logRunnerProvisioning("duplicate_reused_after_lock", { runnerId: duplicateRunner.id });
         return {
           duplicate: true,
           runner: await toRunnerProvisioningDto(tx, duplicateRunner.id),
@@ -244,6 +267,13 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       if (!runner) {
         throw new Error("Provisioning runner insert returned no rows.");
       }
+
+      logRunnerProvisioning("runner_row_created", {
+        runnerId: runner.id,
+        region: config.region,
+        sizeSlug: config.sizeSlug,
+        image: config.image,
+      });
 
       const registrationToken = createRegistrationTokenDependency();
       const expiresAt = new Date(createdAt.getTime() + CLOUD_REGISTRATION_TOKEN_TTL_MS);
@@ -334,12 +364,23 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
     });
 
     if (!resource.ok) {
+      logRunnerProvisioning("provider_create_failed", {
+        runnerId,
+        reason: resource.reason,
+      });
+
       return {
         ok: true,
         duplicate: false,
         runner: await getRunnerProvisioningDto(connection, runnerId),
       };
     }
+
+    logRunnerProvisioning("provider_create_completed", {
+      runnerId,
+      providerResourceId: resource.value.providerResourceId,
+      publicIpv4ResolvedInCreateResponse: Boolean(resource.value.publicIpv4),
+    });
 
     const publicEndpointOptions: { attempts?: number; intervalMs?: number } = {};
 
@@ -358,6 +399,12 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
     );
 
     if (!publicEndpoint.ok) {
+      logRunnerProvisioning("public_endpoint_resolution_failed", {
+        runnerId,
+        providerResourceId: resource.value.providerResourceId,
+        reason: publicEndpoint.reason,
+      });
+
       await failProvisioning(connection, {
         runnerId,
         phase: "creating",
@@ -373,6 +420,12 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
         runner: await getRunnerProvisioningDto(connection, runnerId),
       };
     }
+
+    logRunnerProvisioning("public_endpoint_resolved", {
+      runnerId,
+      providerResourceId: resource.value.providerResourceId,
+      endpointUrl: publicEndpoint.endpointUrl,
+    });
 
     await connection.db
       .update(runners)
@@ -1001,4 +1054,12 @@ async function toRunnerProvisioningDto(
       })),
     },
   };
+}
+
+function logRunnerProvisioning(event: string, metadata: Record<string, unknown>): void {
+  if (process.env.NODE_ENV === "test") {
+    return;
+  }
+
+  console.info("[agentbay] runner.provisioning", { event, ...metadata });
 }

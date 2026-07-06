@@ -246,6 +246,12 @@ export async function createAgentForDevelopmentUser(
         runnerId: input.runnerId,
       });
 
+      logAgentCreate("placement_checked", {
+        autoProvisionCloudRunner,
+        requestedRunner: Boolean(input.runnerId),
+        placement: placement.ok ? "online_runner" : placement.reason,
+      });
+
       if (!placement.ok && input.runnerId && placement.reason === "no_online_runner") {
         throw new AgentRunnerAssignmentError();
       }
@@ -259,6 +265,10 @@ export async function createAgentForDevelopmentUser(
       }
 
       if (!placement.ok && placement.reason === "no_online_runner" && autoProvisionCloudRunner) {
+        logAgentCreate("cloud_runner_needed", {
+          autoProvisionCloudRunner,
+          requestedRunner: Boolean(input.runnerId),
+        });
         return { status: "needs_cloud_runner" } as const;
       }
 
@@ -277,10 +287,18 @@ export async function createAgentForDevelopmentUser(
     });
 
     if (result.status === "created") {
+      logAgentCreate("created_without_cloud_provisioning", {
+        agentId: result.response.agent.id,
+        assignedRunner: Boolean(result.response.agent.runnerId),
+      });
       return result.response;
     }
 
+    logAgentCreate("cloud_runner_provisioning_start", {});
     const provisionedRunnerId = await ensureProvisionedRunnerId(ensureCloudRunnerProvisioning);
+    logAgentCreate("cloud_runner_provisioning_ready_for_assignment", {
+      runnerId: provisionedRunnerId,
+    });
 
     return await connection.db.transaction(async (tx) => {
       const userId = await getOrCreateDevelopmentUserId(tx);
@@ -365,14 +383,19 @@ async function ensureProvisionedRunnerId(
   try {
     result = await ensureCloudRunnerProvisioning();
   } catch (error) {
+    logAgentCreate("cloud_runner_provisioning_threw", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
     throw new AgentRunnerProvisioningError("provisioning_failed", error);
   }
 
   if (!result.ok) {
     if (result.reason === "provider_not_configured") {
+      logAgentCreate("cloud_runner_provider_not_configured", {});
       throw new AgentRunnerProvisioningError("provider_not_configured");
     }
 
+    logAgentCreate("cloud_runner_provisioning_failed_result", { reason: result.reason });
     throw new AgentRunnerProvisioningError("provisioning_failed", result);
   }
 
@@ -380,8 +403,19 @@ async function ensureProvisionedRunnerId(
     result.runner.provisioning.status === "failed" ||
     result.runner.provisioning.status === "deleted"
   ) {
+    logAgentCreate("cloud_runner_unusable", {
+      runnerId: result.runner.id,
+      provisioningStatus: result.runner.provisioning.status,
+    });
     throw new AgentRunnerProvisioningError("provisioning_failed", result);
   }
+
+  logAgentCreate("cloud_runner_provisioning_result", {
+    duplicate: result.duplicate,
+    runnerId: result.runner.id,
+    runnerStatus: result.runner.status,
+    provisioningStatus: result.runner.provisioning.status,
+  });
 
   return result.runner.id;
 }
@@ -453,6 +487,14 @@ function ensureDefaultCloudRunnerProvisioning(): Promise<CreateRunnerProvisionin
     provider: "digitalocean",
     name: "AgentBay Cloud Runner",
   });
+}
+
+function logAgentCreate(event: string, metadata: Record<string, unknown>): void {
+  if (process.env.NODE_ENV === "test") {
+    return;
+  }
+
+  console.info("[agentbay] agent.create", { event, ...metadata });
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
