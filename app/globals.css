@@ -299,6 +299,12 @@ h2 {
   padding: 22px;
 }
 
+.create-agent-stack {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
 .activity-feed-panel {
   min-width: 0;
   padding: 22px;
@@ -938,6 +944,120 @@ h2 {
   font-size: 0.78rem;
   font-weight: 800;
   padding: 5px 9px;
+}
+
+.agent-setup-trace {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #b8c7df;
+  border-radius: 8px;
+  background: #f7faff;
+  padding: 14px;
+}
+
+.agent-setup-trace-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.agent-setup-trace-header h3 {
+  font-size: 0.96rem;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.agent-setup-trace-header span {
+  min-height: 26px;
+  border: 1px solid #b8c7df;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #334f7a;
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 6px 8px;
+  text-transform: uppercase;
+}
+
+.agent-setup-trace p {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.agent-setup-stage-list {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.agent-setup-stage-list li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+  padding-left: 1px;
+}
+
+.agent-setup-stage-list li > span {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #b7bec8;
+  border-radius: 999px;
+  background: #ffffff;
+  margin-top: 4px;
+}
+
+.agent-setup-stage-list strong {
+  display: block;
+  color: var(--foreground);
+  font-size: 0.82rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.agent-setup-stage-list p {
+  margin-top: 2px;
+}
+
+.agent-setup-stage-list li[data-stage-status="completed"] > span {
+  border-color: #4c8f6f;
+  background: #4c8f6f;
+}
+
+.agent-setup-stage-list li[data-stage-status="current"] > span {
+  border-color: #567db6;
+  background: radial-gradient(circle at center, #567db6 0 38%, transparent 41%), #ffffff;
+  box-shadow: 0 0 0 5px rgb(86 125 182 / 14%);
+}
+
+.agent-setup-stage-list li[data-stage-status="failed"] > span {
+  border-color: #b97923;
+  background: #b97923;
+}
+
+.agent-setup-stage-list li[data-stage-status="completed"] strong {
+  color: #315f4b;
+}
+
+.agent-setup-stage-list li[data-stage-status="current"] strong {
+  color: #334f7a;
+}
+
+.agent-setup-stage-list li[data-stage-status="failed"] strong {
+  color: #76521b;
+}
+
+.agent-setup-trace-note {
+  border-top: 1px solid #d8e2f0;
+  padding-top: 10px;
 }
 
 .config-editor {

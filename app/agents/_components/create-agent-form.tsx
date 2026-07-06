@@ -6,9 +6,40 @@ import type { AgentTemplateSnapshot } from "@/src/server/agents/templates";
 
 type SubmitState =
   | { status: "idle" }
-  | { status: "submitting" }
+  | { status: "submitting"; stageIndex: number }
   | { status: "success"; message: string }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; showSetupTrace?: boolean };
+
+const SETUP_STAGES = [
+  {
+    label: "Validate request",
+    detail: "Checks the agent name, selected template, and optional runner assignment.",
+  },
+  {
+    label: "Check capacity",
+    detail: "Looks for an assignable online runner before provisioning new infrastructure.",
+  },
+  {
+    label: "Create Droplet",
+    detail: "Requests a DigitalOcean runner host with the configured region, image, and size.",
+  },
+  {
+    label: "Apply network policy",
+    detail: "Records tags and firewall intent so the runner can be managed safely.",
+  },
+  {
+    label: "Inject bootstrap",
+    detail: "Prepares the registration token and startup script the Droplet will run.",
+  },
+  {
+    label: "Wait for runner",
+    detail: "Waits for registration and the first heartbeat before assignment is complete.",
+  },
+  {
+    label: "Persist agent",
+    detail: "Creates the stopped agent record and assigns it to the available runner.",
+  },
+] as const;
 
 type CreateAgentFormProps = {
   maxNameLength: number;
@@ -36,6 +67,27 @@ export function CreateAgentForm({ maxNameLength, runners, templates }: CreateAge
     setHydrated(true);
   }, []);
 
+  useEffect(() => {
+    if (state.status !== "submitting") {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setState((current) => {
+        if (current.status !== "submitting") {
+          return current;
+        }
+
+        return {
+          status: "submitting",
+          stageIndex: Math.min(current.stageIndex + 1, SETUP_STAGES.length - 2),
+        };
+      });
+    }, 1600);
+
+    return () => window.clearInterval(interval);
+  }, [state.status]);
+
   function handleTemplateChange(event: ChangeEvent<HTMLSelectElement>) {
     setSelectedTemplateKey(event.target.value);
   }
@@ -54,7 +106,7 @@ export function CreateAgentForm({ maxNameLength, runners, templates }: CreateAge
       return;
     }
 
-    setState({ status: "submitting" });
+    setState({ status: "submitting", stageIndex: 0 });
 
     try {
       const response = await fetch("/api/agents", {
@@ -66,20 +118,35 @@ export function CreateAgentForm({ maxNameLength, runners, templates }: CreateAge
       });
 
       if (!response.ok) {
-        setState({ status: "error", message: await safeFailureMessage(response) });
+        const failure = await safeFailureMessage(response);
+        setState({
+          status: "error",
+          message: failure.message,
+          ...(failure.showSetupTrace ? { showSetupTrace: true } : {}),
+        });
         return;
       }
 
       form.reset();
-      setState({ status: "success", message: "Agent created." });
+      setSelectedTemplateKey(templates[0]?.key ?? "research_agent");
+      setState({
+        status: "success",
+        message: "Agent created. Latest runner setup status is refreshed below.",
+      });
       router.refresh();
     } catch {
-      setState({ status: "error", message: "Agent could not be created." });
+      setState({
+        status: "error",
+        message: "Agent could not be created.",
+        showSetupTrace: true,
+      });
     }
   }
 
   const submitting = state.status === "submitting";
   const disabled = !hydrated || submitting;
+  const showSetupTrace =
+    state.status === "submitting" || (state.status === "error" && state.showSetupTrace === true);
 
   return (
     <form className="agent-form" onSubmit={handleSubmit}>
@@ -177,6 +244,12 @@ export function CreateAgentForm({ maxNameLength, runners, templates }: CreateAge
       <button className="primary-button" type="submit" disabled={disabled}>
         {submitting ? "Creating" : "Create agent"}
       </button>
+      {showSetupTrace ? (
+        <AgentSetupTrace
+          activeStageIndex={state.status === "submitting" ? state.stageIndex : null}
+          failed={state.status === "error"}
+        />
+      ) : null}
       {state.status === "error" || state.status === "success" ? (
         <p className={`form-message ${state.status}`} role="status">
           {state.message}
@@ -184,6 +257,77 @@ export function CreateAgentForm({ maxNameLength, runners, templates }: CreateAge
       ) : null}
     </form>
   );
+}
+
+function AgentSetupTrace({
+  activeStageIndex,
+  failed,
+}: {
+  activeStageIndex: number | null;
+  failed: boolean;
+}) {
+  return (
+    <section className="agent-setup-trace" aria-live="polite" aria-label="Agent setup progress">
+      <div className="agent-setup-trace-header">
+        <h3>{failed ? "Setup stopped" : "Setup trace"}</h3>
+        <span>{failed ? "needs attention" : "in progress"}</span>
+      </div>
+      <p>
+        AgentBay is checking runner capacity and, when no online runner can take the agent,
+        provisioning a DigitalOcean runner before the agent record is created.
+      </p>
+      <ol className="agent-setup-stage-list">
+        {SETUP_STAGES.map((stage, index) => (
+          <li
+            key={stage.label}
+            data-stage-status={stageStatus({
+              activeStageIndex,
+              failed,
+              index,
+            })}
+          >
+            <span aria-hidden="true" />
+            <div>
+              <strong>{stage.label}</strong>
+              <p>{stage.detail}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <p className="agent-setup-trace-note">
+        Persisted Droplet phase, resource id, registration, and heartbeat details are shown in Cloud
+        setup status after the server records them.
+      </p>
+    </section>
+  );
+}
+
+function stageStatus({
+  activeStageIndex,
+  failed,
+  index,
+}: {
+  activeStageIndex: number | null;
+  failed: boolean;
+  index: number;
+}): "pending" | "current" | "completed" | "failed" {
+  if (failed && (activeStageIndex === null || index === activeStageIndex)) {
+    return "failed";
+  }
+
+  if (activeStageIndex === null) {
+    return "pending";
+  }
+
+  if (index < activeStageIndex) {
+    return "completed";
+  }
+
+  if (index === activeStageIndex) {
+    return "current";
+  }
+
+  return "pending";
 }
 
 function TemplateToolList({ tools }: { tools: string[] }) {
@@ -200,7 +344,9 @@ function formatList(values: string[]): string {
   return values.length > 0 ? values.join(", ") : "None";
 }
 
-async function safeFailureMessage(response: Response): Promise<string> {
+async function safeFailureMessage(
+  response: Response,
+): Promise<{ message: string; showSetupTrace?: boolean }> {
   try {
     const body = (await response.json()) as {
       error?: {
@@ -216,34 +362,44 @@ async function safeFailureMessage(response: Response): Promise<string> {
           .filter((message) => message !== null) ?? [];
 
       if (messages.length > 0) {
-        return messages.join(" ");
+        return { message: messages.join(" ") };
       }
 
-      return "Check the agent name and template.";
+      return { message: "Check the agent name and template." };
     }
 
     if (body.error?.code === "database_unavailable") {
-      return "Database is unavailable. Start Postgres and run migrations, then try again.";
+      return {
+        message: "Database is unavailable. Start Postgres and run migrations, then try again.",
+      };
     }
 
     if (body.error?.code === "database_schema_missing") {
-      return "Database schema is missing. Run migrations, then try again.";
+      return { message: "Database schema is missing. Run migrations, then try again." };
     }
 
     if (body.error?.code === "runner_not_assignable") {
-      return "Runner could not be assigned. Refresh runners and try again.";
+      return { message: "Runner could not be assigned. Refresh runners and try again." };
     }
 
     if (body.error?.code === "runner_provisioning_not_configured") {
-      return "Cloud runner provisioning is not configured. Add DigitalOcean and runner credentials, then try again.";
+      return {
+        message:
+          "Cloud runner provisioning is not configured. Add DigitalOcean and runner credentials, then try again.",
+        showSetupTrace: true,
+      };
     }
 
     if (body.error?.code === "runner_provisioning_failed") {
-      return "Cloud runner provisioning could not be started. Check runner provisioning status.";
+      return {
+        message:
+          "Cloud runner provisioning could not be started. Check runner provisioning status.",
+        showSetupTrace: true,
+      };
     }
   } catch {
     // Keep user-facing failures generic when the response is not safe validation JSON.
   }
 
-  return "Agent could not be created.";
+  return { message: "Agent could not be created.", showSetupTrace: true };
 }

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CloudRunnerProvisioningPanel } from "@/app/_components/cloud-runner-provisioning-panel";
 import { EmptyState, PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { CreateAgentForm } from "@/app/agents/_components/create-agent-form";
@@ -13,12 +14,17 @@ import {
   listAssignableRunnersForDevelopmentUser,
   RunnerAssignmentPersistenceError,
 } from "@/src/server/runners/runner-assignment";
+import {
+  CloudRunnerProvisioningPersistenceError,
+  listCloudRunnerProvisioningSummariesForDevelopmentUser,
+} from "@/src/server/runners/cloud-runner-provisioning";
 
 export const dynamic = "force-dynamic";
 
 export default async function AgentsPage() {
   const listResult = await loadAgents();
   const runnerResult = await loadAssignableRunners();
+  const cloudRunnersResult = await loadCloudRunnerProvisioning();
 
   return (
     <ProductShell
@@ -91,13 +97,20 @@ export default async function AgentsPage() {
             </div>
           )}
         </section>
-        <PlaceholderPanel title="Create agent">
-          <CreateAgentForm
-            maxNameLength={AGENT_NAME_MAX_LENGTH}
-            runners={runnerResult.ok ? runnerResult.runners : []}
-            templates={AGENT_TEMPLATE_OPTIONS}
+        <div className="create-agent-stack">
+          <PlaceholderPanel title="Create agent">
+            <CreateAgentForm
+              maxNameLength={AGENT_NAME_MAX_LENGTH}
+              runners={runnerResult.ok ? runnerResult.runners : []}
+              templates={AGENT_TEMPLATE_OPTIONS}
+            />
+          </PlaceholderPanel>
+          <CloudRunnerProvisioningPanel
+            result={cloudRunnersResult}
+            title="Cloud setup status"
+            titleId="agents-cloud-runner-title"
           />
-        </PlaceholderPanel>
+        </div>
       </div>
     </ProductShell>
   );
@@ -111,6 +124,23 @@ async function loadAssignableRunners() {
     };
   } catch (error) {
     if (error instanceof RunnerAssignmentPersistenceError) {
+      return {
+        ok: false as const,
+      };
+    }
+
+    throw error;
+  }
+}
+
+async function loadCloudRunnerProvisioning() {
+  try {
+    return {
+      ok: true as const,
+      runners: await listCloudRunnerProvisioningSummariesForDevelopmentUser(),
+    };
+  } catch (error) {
+    if (error instanceof CloudRunnerProvisioningPersistenceError) {
       return {
         ok: false as const,
       };
