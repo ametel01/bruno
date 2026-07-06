@@ -71,6 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker runner start now gives each agent a distinct container-side config path and bind-mount target, strengthening multi-agent runtime isolation on shared runners.
 - Backup persistence foundation with a durable `backups` table, manifest validation for agent/config/template/skills/memory/log metadata, conservative backup status transitions, and raw-secret rejection with safe secret references.
 - Server-only backup object storage boundary with deterministic fake storage tests, S3-compatible configuration validation, safe storage URIs, and credential-free failure messages for backup artifacts.
+- Manual agent backup creation through `POST /api/agents/:agentId/backups`, including sanitized manifest assembly, backup artifact upload, ready/failed backup persistence, and `backup.created` audit events.
 
 ### Fixed
 
