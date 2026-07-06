@@ -5941,9 +5941,9 @@ describe("create agent persistence", () => {
         "--env",
         "AGENTBAY_WORKSPACE=/workspace",
         "--mount",
-        `type=bind,source=${configPath},target=/etc/agentbay/config,readonly`,
+        `type=bind,source=${configPath},target=/etc/agentbay/config-${created.agent.id},readonly`,
         "--env",
-        "AGENTBAY_CONFIG_PATH=/etc/agentbay/config",
+        `AGENTBAY_CONFIG_PATH=/etc/agentbay/config-${created.agent.id}`,
         "agentbay/dummy-runner:test",
         "run",
         "agent; rm -rf /",
@@ -5962,7 +5962,7 @@ describe("create agent persistence", () => {
         },
         mounts: {
           configSource: configPath,
-          configTarget: "/etc/agentbay/config",
+          configTarget: `/etc/agentbay/config-${created.agent.id}`,
           configReadonly: true,
           workspaceSource: join(workspaceRoot, created.agent.id),
           workspaceTarget: "/workspace",
@@ -6288,6 +6288,131 @@ describe("create agent persistence", () => {
     expect(persistedContainerB[0]?.containerId).toBe("cleanup-agent-b-container");
     expect(persistedContainerB[0]?.observedStatus).toBe("running");
     expect(agentBLogs.logs).toEqual([]);
+  });
+
+  it("stops one Docker-backed agent without mutating sibling status or runtime rows", async () => {
+    const agentA = await createAgentForDevelopmentUser(
+      { name: "Docker Stop Agent A", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const agentB = await createAgentForDevelopmentUser(
+      { name: "Docker Stop Agent B", templateKey: "github_issue_agent" },
+      { createConnection: () => connection },
+    );
+    await connection.db
+      .update(agents)
+      .set({ status: "running", statusReason: "Docker runner container is running." })
+      .where(inArray(agents.id, [agentA.agent.id, agentB.agent.id]));
+    const containerA = await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: agentA.agent.id,
+      containerId: "stop-agent-a-container",
+      containerName: "agentbay-stop-a",
+      image: "agentbay/dummy-runner:test",
+      observedStatus: "running",
+    });
+    const containerB = await recordDockerRunnerContainerForDevelopmentUser({
+      db: connection.db,
+      agentId: agentB.agent.id,
+      containerId: "stop-agent-b-container",
+      containerName: "agentbay-stop-b",
+      image: "agentbay/dummy-runner:test",
+      observedStatus: "running",
+    });
+    const dockerCalls: string[][] = [];
+    let stopped = false;
+    const dockerCli: DockerCliRunner = async (args) => {
+      dockerCalls.push([...args]);
+
+      if (args[0] === "inspect") {
+        expect(args[3]).toBe("stop-agent-a-container");
+
+        return dockerInspectResult({
+          agentId: agentA.agent.id,
+          containerId: "stop-agent-a-container",
+          image: "agentbay/dummy-runner:test",
+          status: stopped ? "exited" : "running",
+        });
+      }
+
+      if (args[0] === "stop") {
+        expect(args).toEqual(["stop", "stop-agent-a-container"]);
+        stopped = true;
+
+        return { stdout: "stop-agent-a-container\n", stderr: "" };
+      }
+
+      if (args[0] === "logs") {
+        expect(args).toEqual(["logs", "--timestamps", "stop-agent-a-container"]);
+
+        return { stdout: "", stderr: "" };
+      }
+
+      throw new Error(`unexpected docker mutation: ${args.join(" ")}`);
+    };
+    const adapter = new DockerRunnerAdapter({
+      createConnection: () => connection,
+      dockerCli,
+      now: () => new Date("2026-07-04T08:16:00.000Z"),
+    });
+
+    const result = await stopAgentForDevelopmentUser(agentA.agent.id, {
+      createConnection: () => connection,
+      now: () => new Date("2026-07-04T08:16:01.000Z"),
+      runnerAdapter: adapter,
+    });
+    const [persistedAgentA] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, agentA.agent.id));
+    const [persistedAgentB] = await connection.db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, agentB.agent.id));
+    const [persistedContainerA] = await connection.db
+      .select()
+      .from(dockerRunnerContainers)
+      .where(eq(dockerRunnerContainers.id, containerA?.id ?? ""));
+    const [persistedContainerB] = await connection.db
+      .select()
+      .from(dockerRunnerContainers)
+      .where(eq(dockerRunnerContainers.id, containerB?.id ?? ""));
+    const agentBEvents = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, agentB.agent.id));
+
+    expect(result).toMatchObject({
+      ok: true,
+      agent: {
+        id: agentA.agent.id,
+        status: "stopped",
+      },
+    });
+    expect(dockerCalls).toEqual([
+      ["inspect", "--format", "{{json .}}", "stop-agent-a-container"],
+      ["stop", "stop-agent-a-container"],
+      ["inspect", "--format", "{{json .}}", "stop-agent-a-container"],
+      ["inspect", "--format", "{{json .}}", "stop-agent-a-container"],
+      ["logs", "--timestamps", "stop-agent-a-container"],
+    ]);
+    expect(persistedAgentA).toMatchObject({
+      status: "stopped",
+      statusReason: null,
+    });
+    expect(persistedAgentB).toMatchObject({
+      status: "running",
+      statusReason: "Docker runner container is running.",
+    });
+    expect(persistedContainerA).toMatchObject({
+      containerId: "stop-agent-a-container",
+      observedStatus: "exited",
+    });
+    expect(persistedContainerB).toMatchObject({
+      containerId: "stop-agent-b-container",
+      observedStatus: "running",
+    });
+    expect(agentBEvents.every((event) => event.type === "agent.created")).toBe(true);
   });
 
   it("docker runner adapter cleanup fails closed when the stored container label mismatches", async () => {
