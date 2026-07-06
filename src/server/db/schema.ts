@@ -12,6 +12,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import type { AgentTemplateSnapshot } from "@/src/server/agents/templates";
+import type { BackupManifest, BackupStatus } from "@/src/server/backups/backup-manifest";
 
 export const appMetadata = pgTable("app_metadata", {
   key: text("key").primaryKey(),
@@ -296,6 +297,43 @@ export const agents = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (table) => [index("agents_runner_id_idx").on(table.runnerId)],
+);
+
+export const backups = pgTable(
+  "backups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agents.id),
+    runnerId: uuid("runner_id").references(() => runners.id),
+    status: text("status").$type<BackupStatus>().notNull().default("pending"),
+    storageUri: text("storage_uri"),
+    manifestJson: jsonb("manifest_json").$type<BackupManifest>().notNull(),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    restoredAt: timestamp("restored_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "backups_status_check",
+      sql`${table.status} IN ('pending', 'uploading', 'ready', 'failed', 'restoring', 'restored')`,
+    ),
+    check(
+      "backups_storage_uri_not_empty_check",
+      sql`${table.storageUri} IS NULL OR length(trim(${table.storageUri})) > 0`,
+    ),
+    check(
+      "backups_restored_at_status_check",
+      sql`(${table.status} = 'restored' AND ${table.restoredAt} IS NOT NULL) OR (${table.status} <> 'restored' AND ${table.restoredAt} IS NULL)`,
+    ),
+    index("backups_agent_created_idx").on(table.agentId, table.createdAt),
+    index("backups_runner_idx").on(table.runnerId),
+    index("backups_created_by_idx").on(table.createdBy),
+    index("backups_status_idx").on(table.status),
+  ],
 );
 
 export const agentConfigs = pgTable(

@@ -365,18 +365,19 @@
 
 ## Milestone 15 Backups and Restore
 
-- Status: #162 Milestone 15 tracking and baseline gates are locally complete on `codex/issue-162-m15-tracking`.
+- Status: #163 backup persistence, manifest, and secret-policy foundation is in progress on `codex/issue-163-backup-manifest`.
 - Source plan:
   - `docs/MILESTONES.md` Milestone 15: Backups and Restore.
   - GitHub issue #162: Prepare Milestone 15 tracking and baseline gates.
-  - `PLAN.md` is absent in this worktree; the published #162 issue body and `docs/MILESTONES.md` are the active Step 0 contract.
-- Current branch: `codex/issue-162-m15-tracking`.
+  - GitHub issue #163: Add backup persistence, manifest, and secret policy.
+  - `PLAN.md` is absent in this worktree; the published #162/#163 issue bodies and `docs/MILESTONES.md` are the active Milestone 15 contract.
+- Current branch: `codex/issue-163-backup-manifest`.
 
 ### Issue Checklist
 
-- [ ] #162 Prepare Milestone 15 tracking and baseline gates. Status: local implementation and validation complete.
-- [ ] #163 Add backup persistence, manifest, and secret policy. Status: pending #162 merge.
-- [ ] #164 Add S3-compatible backup object storage boundary. Status: pending #162 merge.
+- [x] #162 Prepare Milestone 15 tracking and baseline gates. Status: merged in PR #181.
+- [ ] #163 Add backup persistence, manifest, and secret policy. Status: implementation and validation in progress.
+- [ ] #164 Add S3-compatible backup object storage boundary. Status: pending #163 merge.
 - [ ] #165 Implement manual agent backup creation. Status: pending #163 and #164.
 - [ ] #166 Restore backups into new agents. Status: pending #163, #164, and #165.
 - [ ] #167 Add backup and restore controls to the agent UI. Status: pending backend backup and restore slices.
@@ -395,6 +396,11 @@
 - Sensitive backup payloads must be encrypted or excluded with secret references only. Raw secrets must not be written into backup manifests, docs, UI output, tests, logs, or status messages.
 - Restore can initially create a new agent from backup to avoid overwriting a running agent.
 - Backup and restore behavior should write `backup.created` and `backup.restored` events for timeline visibility.
+- #163 adds the shared persistence and validation foundation for the downstream backup/restore slices:
+  - `backups` stores `id`, `agent_id`, `runner_id`, `status`, `storage_uri`, `manifest_json`, `created_by`, `created_at`, and `restored_at`.
+  - Backup statuses are `pending`, `uploading`, `ready`, `failed`, `restoring`, and `restored`.
+  - Backup manifest validation covers agent metadata, config metadata, template snapshot, system prompt, skills file metadata, memory file metadata, and log metadata.
+  - Raw secret-like manifest keys or values are rejected, while `config.secretReferences` allows safe `env`, `vault`, and `external` references.
 - `CHANGELOG.md` has the Keep a Changelog 1.0.0 framing and an `## [Unreleased]` section. Agents should keep that structure and add changelog bullets only for shipped functional user/operator-visible changes.
 
 ### Baseline Gate Expectations
@@ -421,6 +427,7 @@
 - 2026-07-06: #162 initialized Milestone 15 tracking from `docs/MILESTONES.md` and the published #162 issue body; noted that `PLAN.md` is absent in this worktree and the published issue body plus milestone document are the active Step 0 contract.
 - 2026-07-06: #162 confirmed `CHANGELOG.md` has Keep a Changelog 1.0.0 framing and `## [Unreleased]`; `CHANGELOG.md` is intentionally unchanged for #162 because this issue creates tracking only and ships no functional product behavior.
 - 2026-07-06: #162 recorded baseline gate expectations for `bun run verify`, `bun run test:e2e`, the local Postgres `DATABASE_URL`, and `NEXT_PUBLIC_APP_URL` before backup and restore work starts.
+- 2026-07-06: #163 added the `backups` schema/migration, typed manifest validator, conservative backup status transition helper, raw-secret rejection policy, and focused schema/manifest tests.
 
 ### Validation Evidence
 
@@ -432,6 +439,21 @@
   - `bun run format:check`: pass; Biome checked 137 files with no fixes applied.
   - `git diff --check`: pass; no whitespace errors.
   - `git status --short --branch --untracked-files=all`: branch `codex/issue-162-m15-tracking` is based on `origin/main` with only `PROGRESS.md` modified.
+
+- 2026-07-06 #163:
+  - `gh issue view 163 --repo ametel01/agentbay --json number,title,state,url,body,labels`: pass; issue is open and maps Milestone 15 backup persistence, manifest validation, backup statuses, and raw-secret exclusion to PLAN Step 1.
+  - `bun install --frozen-lockfile`: pass; installed committed dependencies from `bun.lock` in the fresh issue worktree.
+  - `bun run db:generate`: pass; generated additive `drizzle/0012_curly_franklin_storm.sql` and metadata snapshot for the `backups` table.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:migrate`: pass; applied migrations successfully with existing Drizzle schema/table notices only.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism tests/unit/backup-manifest.test.ts tests/unit/agent-schema.test.ts`: pass; 2 files and 29 tests covered manifest validity, invalid required sections, raw-secret rejection, safe secret references, backup status transitions, schema shape, and migration contents.
+  - Initial `bun run typecheck`: failed on strict `unknown` narrowing in `backup-manifest.ts`; fixed with explicit numeric guards and a typed status-transition include.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed.
+  - Initial `bun run lint`: failed on expression-bodied `forEach` callbacks in `backup-manifest.ts`; fixed with block callbacks.
+  - `bun run lint`: pass; Biome checked 139 files with no fixes applied.
+  - `bun run format:check`: pass; Biome checked 139 files with no fixes applied.
+  - `git diff --check`: pass; no whitespace errors.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: pass; Next.js production build completed. The generated `next-env.d.ts` route-reference churn from build was not kept in the diff.
+  - `CHANGELOG.md` updated under `## [Unreleased]` because #163 ships the backup persistence and manifest-validation foundation for downstream Milestone 15 behavior.
 
 ## Milestone 12 Secure Runner Auth
 

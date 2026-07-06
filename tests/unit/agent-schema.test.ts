@@ -11,6 +11,7 @@ import {
   agents,
   agentStatusEnum,
   appMetadata,
+  backups,
   dockerRunnerContainers,
   localRunnerProcesses,
   localRunnerProcessStatusEnum,
@@ -27,6 +28,7 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(getTableName(appMetadata)).toBe("app_metadata");
     expect(getTableName(users)).toBe("users");
     expect(getTableName(agents)).toBe("agents");
+    expect(getTableName(backups)).toBe("backups");
     expect(getTableName(agentConfigs)).toBe("agent_configs");
     expect(getTableName(agentApprovals)).toBe("agent_approvals");
     expect(getTableName(agentEvents)).toBe("agent_events");
@@ -280,6 +282,37 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.timezone.default).toBe("UTC");
     expect(columns.createdAt.notNull).toBe(true);
     expect(columns.updatedAt.notNull).toBe(true);
+  });
+
+  it("defines backup rows with safe manifest storage and restore lifecycle columns", () => {
+    const columns = getTableColumns(backups);
+
+    expect(Object.keys(columns)).toEqual([
+      "id",
+      "agentId",
+      "runnerId",
+      "status",
+      "storageUri",
+      "manifestJson",
+      "createdBy",
+      "createdAt",
+      "restoredAt",
+    ]);
+    expect(columns.id.notNull).toBe(true);
+    expect(columns.agentId.notNull).toBe(true);
+    expect(columns.runnerId.notNull).toBe(false);
+    expect(columns.status.notNull).toBe(true);
+    expect(columns.status.default).toBe("pending");
+    expect(columns.storageUri.notNull).toBe(false);
+    expect(columns.manifestJson.notNull).toBe(true);
+    expect(columns.manifestJson.dataType).toBe("json");
+    expect(columns.createdBy.notNull).toBe(true);
+    expect(columns.createdAt.notNull).toBe(true);
+    expect(columns.restoredAt.notNull).toBe(false);
+    expect(Object.keys(columns)).not.toContain("secret");
+    expect(Object.keys(columns)).not.toContain("token");
+    expect(Object.keys(columns)).not.toContain("password");
+    expect(Object.keys(columns)).not.toContain("credential");
   });
 
   it("supports agent.created audit event rows with JSON metadata", () => {
@@ -677,6 +710,40 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(migration).toContain("'waiting_for_runner'");
     expect(migration).toContain("'ready'");
     expect(migration).toContain('"runner_provisioning_events_runner_created_idx"');
+    expect(migration).not.toMatch(/api[_ ]?key|token|password|secret|credential/i);
+  });
+
+  it("generates an additive backup manifest migration without raw secret columns", async () => {
+    const migration = await readFile("drizzle/0012_curly_franklin_storm.sql", "utf8");
+
+    expect(migration).toContain('CREATE TABLE "backups"');
+    expect(migration).toContain('"agent_id" uuid NOT NULL');
+    expect(migration).toContain('"runner_id" uuid');
+    expect(migration).toContain("\"status\" text DEFAULT 'pending' NOT NULL");
+    expect(migration).toContain('"storage_uri" text');
+    expect(migration).toContain('"manifest_json" jsonb NOT NULL');
+    expect(migration).toContain('"created_by" uuid NOT NULL');
+    expect(migration).toContain('"created_at" timestamp with time zone DEFAULT now() NOT NULL');
+    expect(migration).toContain('"restored_at" timestamp with time zone');
+    expect(migration).toContain('CONSTRAINT "backups_status_check"');
+    expect(migration).toContain("'pending'");
+    expect(migration).toContain("'uploading'");
+    expect(migration).toContain("'ready'");
+    expect(migration).toContain("'failed'");
+    expect(migration).toContain("'restoring'");
+    expect(migration).toContain("'restored'");
+    expect(migration).toContain('CONSTRAINT "backups_storage_uri_not_empty_check"');
+    expect(migration).toContain('CONSTRAINT "backups_restored_at_status_check"');
+    expect(migration).toContain('FOREIGN KEY ("agent_id") REFERENCES "public"."agents"("id")');
+    expect(migration).toContain('FOREIGN KEY ("runner_id") REFERENCES "public"."runners"("id")');
+    expect(migration).toContain('FOREIGN KEY ("created_by") REFERENCES "public"."users"("id")');
+    expect(migration).toContain('CREATE INDEX "backups_agent_created_idx"');
+    expect(migration).toContain('CREATE INDEX "backups_runner_idx"');
+    expect(migration).toContain('CREATE INDEX "backups_created_by_idx"');
+    expect(migration).toContain('CREATE INDEX "backups_status_idx"');
+    expect(migration).not.toContain("DROP TABLE");
+    expect(migration).not.toContain("DROP COLUMN");
+    expect(migration).not.toContain("ALTER COLUMN");
     expect(migration).not.toMatch(/api[_ ]?key|token|password|secret|credential/i);
   });
 });
