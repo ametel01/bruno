@@ -8,9 +8,9 @@
 
 ## Current Status
 
-- Status: Step 6 complete; Step 7 is next.
-- Active step: Step 7 - Bootstrap Timeout, Failure State, and Cleanup Guidance.
-- Last updated: 2026-07-06 18:02:20 PST.
+- Status: Step 7 complete; Step 8 is next.
+- Active step: Step 8 - Production No-Runner Behavior and Agent Assignment UX.
+- Last updated: 2026-07-06 18:05:23 PST.
 
 ## Step Checklist
 
@@ -21,7 +21,7 @@
 - [x] Step 4: Durable Registration Credential Persistence
 - [x] Step 5: Continuous Runner Heartbeat and Capacity Metrics
 - [x] Step 6: Command Authentication for Cloud Runner Lifecycle Calls
-- [ ] Step 7: Bootstrap Timeout, Failure State, and Cleanup Guidance
+- [x] Step 7: Bootstrap Timeout, Failure State, and Cleanup Guidance
 - [ ] Step 8: Production No-Runner Behavior and Agent Assignment UX
 - [ ] Step 9: End-to-End Cloud Provisioning Smoke and Operator Docs
 
@@ -142,3 +142,18 @@
 - Changelog: added one `Changed` entry for cloud runner command-auth requirements.
 - Commit: this step commit.
 - Next step: Step 7 - Bootstrap Timeout, Failure State, and Cleanup Guidance.
+
+### 2026-07-06 18:05:23 PST - Step 7 complete
+
+- Added read-path reconciliation for stale DigitalOcean runners stuck in `waiting_for_runner` longer than 60 minutes.
+- Reconciliation now marks stale runners `provision_failed` / `failed`, stores a safe actionable error message with Droplet cleanup guidance, and records a `failed` provisioning event.
+- The summary read path preserves safe/truncated UI text while the persisted failure and event retain the full operator message.
+- Validation:
+  - Passed: `bun run format:check`
+  - Passed: `bun run lint`
+  - Passed: `bun run typecheck`
+  - Passed: `bun run test -- tests/unit/runner-provisioning.test.ts tests/unit/cloud-runner-provisioning.test.ts tests/unit/root-page.test.tsx tests/unit/cloud-runner-route.test.ts`
+  - Passed: `bun run build`
+- Changelog: added one `Fixed` entry for stalled cloud runner provisioning becoming actionable.
+- Commit: this step commit.
+- Next step: Step 8 - Production No-Runner Behavior and Agent Assignment UX.

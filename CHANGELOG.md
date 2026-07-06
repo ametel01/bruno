@@ -83,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Stalled DigitalOcean runner bootstrap attempts now become actionable failed provisioning states instead of staying in progress indefinitely.
 - Cloud runner bootstrap now persists exchanged runner credentials on the Droplet so registration survives service restarts without reusing one-time tokens.
 - DigitalOcean cloud runner bootstrap now registers public `sslip.io` HTTPS endpoints through a Caddy reverse proxy instead of loopback runner URLs.
 - Backup-created timeline events no longer include backup storage URIs, keeping activity feeds free of artifact locations while preserving backup ID and status context.

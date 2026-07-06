@@ -1,9 +1,11 @@
 import "server-only";
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, lt } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { runnerHeartbeats, runners } from "@/src/server/db/schema";
+import { runnerHeartbeats, runnerProvisioningEvents, runners } from "@/src/server/db/schema";
+import type * as schema from "@/src/server/db/schema";
 import {
   DIGITALOCEAN_PROVIDER,
   DIGITALOCEAN_RUNNER_KIND,
@@ -12,6 +14,7 @@ import {
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
 const DEFAULT_CLOUD_RUNNER_NAME = "DigitalOcean Runner";
+const WAITING_FOR_RUNNER_TIMEOUT_MS = 60 * 60 * 1000;
 const READY_RUNNER_STATUSES = new Set(["online", "ready"]);
 
 const PROVISIONING_PHASES = [
@@ -97,6 +100,10 @@ type LatestHeartbeatRow = {
   observedAt: Date | string;
 } | null;
 
+type CloudRunnerProvisioningTransaction = Parameters<
+  Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
+>[0];
+
 export class CloudRunnerProvisioningPersistenceError extends Error {
   constructor(readonly cause?: unknown) {
     super("Cloud runner provisioning persistence failed.");
@@ -105,10 +112,11 @@ export class CloudRunnerProvisioningPersistenceError extends Error {
 }
 
 export async function listCloudRunnerProvisioningSummariesForDevelopmentUser(
-  dependencies: { createConnection?: () => DatabaseConnection } = {},
+  dependencies: { createConnection?: () => DatabaseConnection; now?: () => Date } = {},
 ): Promise<CloudRunnerProvisioningSummary[]> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
 
   try {
     return await connection.db.transaction(async (tx) => {
@@ -117,6 +125,8 @@ export async function listCloudRunnerProvisioningSummariesForDevelopmentUser(
       if (!userId) {
         return [];
       }
+
+      await reconcileTimedOutWaitingForRunnerRows(tx, userId, now);
 
       const rows = await tx
         .select({
@@ -170,6 +180,73 @@ export async function listCloudRunnerProvisioningSummariesForDevelopmentUser(
       await connection.close();
     }
   }
+}
+
+async function reconcileTimedOutWaitingForRunnerRows(
+  tx: CloudRunnerProvisioningTransaction,
+  userId: string,
+  now: Date,
+): Promise<void> {
+  const cutoff = new Date(now.getTime() - WAITING_FOR_RUNNER_TIMEOUT_MS);
+  const timedOutRows = await tx
+    .select({
+      id: runners.id,
+      providerResourceId: runners.providerResourceId,
+    })
+    .from(runners)
+    .where(
+      and(
+        eq(runners.userId, userId),
+        eq(runners.kind, DIGITALOCEAN_RUNNER_KIND),
+        eq(runners.provider, DIGITALOCEAN_PROVIDER),
+        eq(runners.provisioningStatus, "waiting_for_runner"),
+        lt(runners.updatedAt, cutoff),
+        isNull(runners.deletedAt),
+      ),
+    )
+    .limit(10);
+
+  for (const row of timedOutRows) {
+    const message = timedOutWaitingForRunnerMessage(row.providerResourceId);
+
+    await tx
+      .update(runners)
+      .set({
+        status: "provision_failed",
+        provisioningStatus: "failed",
+        provisioningError: message,
+        provisioningCompletedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(runners.id, row.id));
+    await tx.insert(runnerProvisioningEvents).values({
+      runnerId: row.id,
+      phase: "failed",
+      status: "failed",
+      message,
+      metadata: {
+        provider: DIGITALOCEAN_PROVIDER,
+        failedPhase: "waiting_for_runner",
+        providerResourceId: row.providerResourceId,
+        timeoutMs: WAITING_FOR_RUNNER_TIMEOUT_MS,
+      },
+      createdAt: now,
+    });
+  }
+}
+
+function timedOutWaitingForRunnerMessage(providerResourceId: string | null): string {
+  const resource = safeProviderResourceIdForMessage(providerResourceId);
+
+  return `Cloud runner bootstrap did not register before the timeout. Check Droplet cloud-init logs, confirm ports 80/443 are reachable, then delete the Droplet ${resource} if it is not needed and create a new runner.`;
+}
+
+function safeProviderResourceIdForMessage(value: string | null): string {
+  if (value && /^[A-Za-z0-9_.:-]{1,120}$/.test(value)) {
+    return value;
+  }
+
+  return "recorded in the provider";
 }
 
 export function toCloudRunnerProvisioningSummary(

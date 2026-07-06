@@ -192,8 +192,9 @@ describe.sequential("cloud runner provisioning stale bootstrap reconciliation", 
       readinessStatus: "failed",
       provisioning: {
         status: "failed",
-        error:
-          "Cloud runner bootstrap did not register before the timeout. Check Droplet cloud-init logs, confirm ports 80/443 are reachable, then delete the Droplet do-droplet-154 if it is not needed and create a new runner.",
+        error: expect.stringContaining(
+          "Cloud runner bootstrap did not register before the timeout.",
+        ),
       },
     });
     expect(persistedRunner).toEqual({
