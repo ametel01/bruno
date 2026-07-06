@@ -20,6 +20,7 @@ type CloudRunnerBootstrapInput = {
     type: "digitalocean_metadata";
     hostnameSuffix?: string;
   };
+  enableSwap?: boolean;
   runnerName?: string;
   repositoryUrl?: string;
   installDir?: string;
@@ -79,6 +80,7 @@ export function buildCloudRunnerBootstrapContent(
 ): CloudRunnerBootstrapContent {
   const config = normalizeBootstrapInput(input);
   const endpoint = buildEndpointConfig(config);
+  const swapCommands = config.enableSwap ? buildSwapCommands() : "";
   const envLines = [
     `AGENTBAY_APP_URL=${quoteSystemdEnvironmentValue(config.appBaseUrl)}`,
     `AGENTBAY_RUNNER_REGISTRATION_TOKEN=${quoteSystemdEnvironmentValue(config.registrationToken)}`,
@@ -92,6 +94,8 @@ export function buildCloudRunnerBootstrapContent(
   const userData = `#cloud-config
 package_update: true
 package_upgrade: false
+output:
+  all: '| tee -a /var/log/agentbay-bootstrap.log'
 packages:
   - ca-certificates
   - curl
@@ -103,7 +107,11 @@ runcmd:
   - chmod a+r /etc/apt/keyrings/docker.gpg
   - sh -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list'
   - apt-get update
-  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - |
+    set -euxo pipefail
+    touch /var/log/agentbay-bootstrap.log
+    chmod 0600 /var/log/agentbay-bootstrap.log
+${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
   - apt-get install -y caddy
   - systemctl enable --now docker
   - curl -fsSL https://bun.sh/install | bash
@@ -178,6 +186,7 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
       ? normalizePublicHttpsUrl(input.runnerEndpointUrl, "runnerEndpointUrl")
       : null,
     endpointDiscovery: input.endpointDiscovery ?? null,
+    enableSwap: input.enableSwap ?? false,
     runnerName: input.runnerName?.trim() || DEFAULT_CLOUD_RUNNER_NAME,
     repositoryUrl: input.repositoryUrl?.trim() || DEFAULT_CLOUD_RUNNER_REPOSITORY_URL,
     installDir: input.installDir?.trim() || DEFAULT_CLOUD_RUNNER_INSTALL_DIR,
@@ -195,6 +204,19 @@ function normalizeUrl(value: string, field: string): string {
   } catch {
     throw new Error(`${field} must be a valid URL.`);
   }
+}
+
+function buildSwapCommands(): string {
+  return `  - |
+    set -euxo pipefail
+    if [ ! -f /swapfile ]; then
+      fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024
+      chmod 600 /swapfile
+      mkswap /swapfile
+    fi
+    swapon /swapfile || true
+    grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+`;
 }
 
 function normalizePublicHttpsUrl(value: string, field: string): string {

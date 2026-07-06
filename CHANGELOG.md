@@ -75,6 +75,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Backup restore creation through `POST /api/agents/:agentId/backups/:backupId/restore`, including artifact download, manifest validation, new stopped-agent creation, restored config/template metadata, restored backup status, and `backup.restored` audit events.
 - Agent detail backup controls showing safe backup status, created/restored timestamps, manual backup creation, ready-backup restore actions, and restored-agent discovery without rendering storage URIs or raw artifact internals.
 
+### Changed
+
+- DigitalOcean cloud runner bootstrap now configures swap and longer one-time registration-token windows for low-memory Droplets.
+
 ### Fixed
 
 - DigitalOcean cloud runner bootstrap now registers public `sslip.io` HTTPS endpoints through a Caddy reverse proxy instead of loopback runner URLs.

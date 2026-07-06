@@ -75,6 +75,23 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.safeSummary.runnerEndpointUrl).toBe("https://203-0-113-10.sslip.io");
   });
 
+  it("adds bootstrap logging and swap setup when low-memory Droplet swap is enabled", () => {
+    const content = buildCloudRunnerBootstrapContent({
+      appBaseUrl: "https://app.agentbay.test",
+      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      runnerEndpointUrl: "https://203-0-113-10.sslip.io",
+      runnerName: "Cloud Runner 1",
+      enableSwap: true,
+    });
+
+    expect(content.userData).toContain("/var/log/agentbay-bootstrap.log");
+    expect(content.userData).toContain("set -euxo pipefail");
+    expect(content.userData).toContain("fallocate -l 1G /swapfile");
+    expect(content.userData).toContain("mkswap /swapfile");
+    expect(content.userData).toContain("swapon /swapfile");
+    expect(content.userData).toContain("/swapfile none swap sw 0 0");
+  });
+
   it("redacts provider tokens, one-time registration tokens, and runner credentials from safe output", () => {
     const unsafeOutput = [
       "AGENTBAY_DIGITALOCEAN_TOKEN=dop_v1_super_secret",

@@ -159,12 +159,44 @@ describe.sequential("runner provisioning service", () => {
       tokenHash: generatedRegistrationToken.hash,
       tokenPrefix: generatedRegistrationToken.prefix,
       status: "pending",
+      expiresAt: new Date("2026-07-06T03:00:00.000Z"),
     });
     expect(serializedResult).not.toContain(generatedRegistrationToken.value);
     expect(serializedResult).not.toContain(generatedRegistrationToken.hash);
     expect(serializedResult).not.toContain("dop_v1_super_secret");
     expect(serializedPersistence).not.toContain(generatedRegistrationToken.value);
     expect(serializedPersistence).not.toContain("dop_v1_super_secret");
+  });
+
+  it("injects swap setup when provisioning the default low-memory DigitalOcean size", async () => {
+    const provider = new FakeDigitalOceanProvider();
+
+    const result = await createDigitalOceanRunnerForDevelopmentUser(
+      { provider: "digitalocean", name: "Low Memory Runner" },
+      {
+        createConnection: () => connection,
+        provider,
+        readConfig: () => ({
+          token: "dop_v1_super_secret",
+          region: "sfo3",
+          sizeSlug: "s-1vcpu-512mb-10gb",
+          image: "ubuntu-24-04-x64",
+          tags: ["agentbay", "cloud-runner"],
+        }),
+        now: sequenceClock("2026-07-06T06:00:00.000Z"),
+      },
+    );
+    const userData = (
+      provider.calls.find((call) => call.step === "create")?.input as {
+        userData?: string;
+      }
+    ).userData;
+
+    expect(result).toMatchObject({ ok: true, duplicate: false });
+    expect(userData).toContain("fallocate -l 1G /swapfile");
+    expect(userData).toContain("mkswap /swapfile");
+    expect(userData).toContain("swapon /swapfile");
+    expect(userData).toContain("/var/log/agentbay-bootstrap.log");
   });
 
   it("persists a safe actionable failed state when the provider create step fails", async () => {

@@ -33,7 +33,8 @@ import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-use
 
 const DEFAULT_CLOUD_RUNNER_NAME = "AgentBay Cloud Runner";
 const DEFAULT_FIREWALL_NAME = "agentbay-runners";
-const DEFAULT_REGISTRATION_TOKEN_TTL_MS = 15 * 60 * 1000;
+const CLOUD_REGISTRATION_TOKEN_TTL_MS = 60 * 60 * 1000;
+const LOW_MEMORY_DIGITALOCEAN_SIZE_SLUGS = new Set(["s-1vcpu-512mb-10gb"]);
 const MAX_RUNNER_NAME_LENGTH = 80;
 
 type RunnerProvisioningTransaction = Parameters<
@@ -225,7 +226,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       }
 
       const registrationToken = createRegistrationTokenDependency();
-      const expiresAt = new Date(createdAt.getTime() + DEFAULT_REGISTRATION_TOKEN_TTL_MS);
+      const expiresAt = new Date(createdAt.getTime() + CLOUD_REGISTRATION_TOKEN_TTL_MS);
 
       const [createdToken] = await tx
         .insert(runnerRegistrationTokens)
@@ -286,6 +287,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       runnerId,
       runnerName: initialized.runner.name,
       registrationToken: initialized.registrationToken,
+      sizeSlug: initialized.runner.sizeSlug,
       now,
     });
     const resource = await runProviderStep(connection, {
@@ -568,6 +570,7 @@ async function buildProvisioningBootstrap(input: {
   runnerId: string;
   runnerName: string;
   registrationToken: string;
+  sizeSlug: string;
   now: () => Date;
 }): Promise<CloudRunnerBootstrapContent> {
   const appBaseUrl = getServerEnv().NEXT_PUBLIC_APP_URL;
@@ -578,6 +581,7 @@ async function buildProvisioningBootstrap(input: {
       appBaseUrl,
       registrationToken: input.registrationToken,
       endpointDiscovery: { type: "digitalocean_metadata" },
+      enableSwap: LOW_MEMORY_DIGITALOCEAN_SIZE_SLUGS.has(input.sizeSlug),
       runnerName: input.runnerName,
       createConnection: () => input.connection,
       now: input.now,

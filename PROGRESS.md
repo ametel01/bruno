@@ -8,16 +8,16 @@
 
 ## Current Status
 
-- Status: Step 2 complete; Step 3 is next.
-- Active step: Step 3 - Reliable Cheap-Droplet Bootstrap Runtime.
-- Last updated: 2026-07-06 17:44:20 PST.
+- Status: Step 3 complete; Step 4 is next.
+- Active step: Step 4 - Durable Registration Credential Persistence.
+- Last updated: 2026-07-06 17:48:50 PST.
 
 ## Step Checklist
 
 - [x] Step 0: Progress and Changelog Tracking Setup
 - [x] Step 1: Baseline Characterization and Failing Tests
 - [x] Step 2: Public Droplet Endpoint and HTTPS Proxy Bootstrap
-- [ ] Step 3: Reliable Cheap-Droplet Bootstrap Runtime
+- [x] Step 3: Reliable Cheap-Droplet Bootstrap Runtime
 - [ ] Step 4: Durable Registration Credential Persistence
 - [ ] Step 5: Continuous Runner Heartbeat and Capacity Metrics
 - [ ] Step 6: Command Authentication for Cloud Runner Lifecycle Calls
@@ -79,3 +79,18 @@
 - Changelog: added one `Fixed` entry for public HTTPS cloud runner endpoint registration.
 - Commit: this step commit.
 - Next step: Step 3 - Reliable Cheap-Droplet Bootstrap Runtime.
+
+### 2026-07-06 17:48:50 PST - Step 3 complete
+
+- Kept the default DigitalOcean size at `s-1vcpu-512mb-10gb` and added bootstrap swap setup for that low-memory size.
+- Added bootstrap logging to `/var/log/agentbay-bootstrap.log` and fail-fast shell settings for bootstrap setup blocks.
+- Extended cloud-provisioned one-time registration tokens to 60 minutes while leaving manual registration tokens on their existing 15-minute window.
+- Validation:
+  - Passed: `bun run format:check`
+  - Passed: `bun run lint`
+  - Passed: `bun run typecheck`
+  - Passed: `bun run test -- tests/unit/cloud-runner-bootstrap.test.ts tests/unit/runner-provisioning.test.ts tests/unit/runner-registration.test.ts tests/unit/server-env.test.ts`
+  - Passed: `bun run build`
+- Changelog: added one `Changed` entry for low-memory Droplet bootstrap reliability.
+- Commit: this step commit.
+- Next step: Step 4 - Durable Registration Credential Persistence.
