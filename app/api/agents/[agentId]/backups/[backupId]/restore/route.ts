@@ -1,8 +1,15 @@
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import {
   restoreBackupForDevelopmentUser,
+  type RestoredBackupResponse,
   RestoreBackupPersistenceError,
 } from "@/src/server/backups/restore-backup";
+
+type ClientBackupResponse = Omit<RestoredBackupResponse["backup"], "storageUri">;
+type ClientRestoredAgentResponse = Pick<
+  RestoredBackupResponse["restoredAgent"],
+  "id" | "name" | "templateKey" | "templateVersion" | "status" | "createdAt" | "updatedAt"
+>;
 
 type RestoreBackupRouteContext = {
   params: Promise<{
@@ -33,7 +40,14 @@ export async function POST(_request: Request, context: RestoreBackupRouteContext
     });
 
     if (result.ok) {
-      return Response.json(result, { status: 201 });
+      return Response.json(
+        {
+          ...result,
+          backup: toClientBackupResponse(result.backup),
+          restoredAgent: toClientRestoredAgentResponse(result.restoredAgent),
+        },
+        { status: 201 },
+      );
     }
 
     if (result.reason === "backup_not_found") {
@@ -55,7 +69,7 @@ export async function POST(_request: Request, context: RestoreBackupRouteContext
             code: result.reason,
             message: result.message,
           },
-          backup: result.backup,
+          ...(result.backup ? { backup: toClientBackupResponse(result.backup) } : {}),
         },
         { status: 409 },
       );
@@ -67,7 +81,7 @@ export async function POST(_request: Request, context: RestoreBackupRouteContext
           code: result.reason,
           message: result.message,
         },
-        backup: result.backup,
+        ...(result.backup ? { backup: toClientBackupResponse(result.backup) } : {}),
       },
       { status: 500 },
     );
@@ -86,6 +100,31 @@ export async function POST(_request: Request, context: RestoreBackupRouteContext
 
     throw error;
   }
+}
+
+function toClientBackupResponse(backup: RestoredBackupResponse["backup"]): ClientBackupResponse {
+  return {
+    id: backup.id,
+    agentId: backup.agentId,
+    runnerId: backup.runnerId,
+    status: backup.status,
+    createdAt: backup.createdAt,
+    restoredAt: backup.restoredAt,
+  };
+}
+
+function toClientRestoredAgentResponse(
+  restoredAgent: RestoredBackupResponse["restoredAgent"],
+): ClientRestoredAgentResponse {
+  return {
+    id: restoredAgent.id,
+    name: restoredAgent.name,
+    templateKey: restoredAgent.templateKey,
+    templateVersion: restoredAgent.templateVersion,
+    status: restoredAgent.status,
+    createdAt: restoredAgent.createdAt,
+    updatedAt: restoredAgent.updatedAt,
+  };
 }
 
 function decodeUuid(value: string):

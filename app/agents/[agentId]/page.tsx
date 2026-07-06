@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ActivityFeedPanel } from "@/app/_components/activity-feed";
 import { ApprovalDecisionControls } from "@/app/_components/approval-decision-controls";
 import { PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
+import { AgentBackupControls } from "@/app/agents/_components/agent-backup-controls";
 import { RunnerCapacityDefinitionItems } from "@/app/_components/runner-capacity-details";
 import { AgentConfigEditor } from "@/app/agents/_components/agent-config-editor";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
@@ -22,6 +23,10 @@ import {
   listPendingApprovalsForDevelopmentUserAgent,
   type PendingApprovalDto,
 } from "@/src/server/approvals/agent-approvals";
+import {
+  AgentBackupListPersistenceError,
+  listAgentBackupsForDevelopmentUser,
+} from "@/src/server/backups/list-backups";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { listAgentEventFeed } from "@/src/server/events/agent-events";
 import {
@@ -41,6 +46,7 @@ type AgentDetailPageProps = {
 
 type AgentApprovalsResult = Awaited<ReturnType<typeof loadAgentApprovals>>;
 type AssignedRunnerResult = Awaited<ReturnType<typeof loadAssignedManualRunner>>;
+type AgentBackupsResult = Awaited<ReturnType<typeof loadAgentBackups>>;
 
 export const dynamic = "force-dynamic";
 
@@ -91,6 +97,7 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
     ? "There are no older persisted events for this agent."
     : "Create or update this agent to show persisted activity here.";
   const approvalsResult = await loadAgentApprovals(agent.id);
+  const backupsResult = await loadAgentBackups(agent.id);
   const assignedRunnerResult = await loadAssignedManualRunner(agent.id);
   const assignedRunner = assignedRunnerResult.ok ? assignedRunnerResult.runner : null;
   const operationalAlerts = buildAgentOperationalAlerts({
@@ -217,6 +224,7 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
             }}
           />
         </PlaceholderPanel>
+        <AgentBackupsPanel agentId={agent.id} result={backupsResult} />
         <AgentOperationalAlertsPanel
           alerts={operationalAlerts.alerts}
           runnerStateNotice={operationalAlerts.runnerStateNotice}
@@ -243,6 +251,24 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
         />
       </div>
     </ProductShell>
+  );
+}
+
+function AgentBackupsPanel({ agentId, result }: { agentId: string; result: AgentBackupsResult }) {
+  return (
+    <section className="backup-panel" aria-labelledby="agent-backups-title">
+      <div className="section-heading">
+        <h2 id="agent-backups-title">Backups</h2>
+        {result.ok ? <span>{result.backups.length} listed</span> : null}
+      </div>
+      {result.ok ? (
+        <AgentBackupControls agentId={agentId} backups={result.backups} />
+      ) : (
+        <div className="safe-error" role="alert">
+          Backup status could not be loaded.
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -490,6 +516,23 @@ async function loadAgentApprovals(agentId: string) {
     };
   } catch (error) {
     if (error instanceof AgentApprovalPersistenceError) {
+      return {
+        ok: false as const,
+      };
+    }
+
+    throw error;
+  }
+}
+
+async function loadAgentBackups(agentId: string) {
+  try {
+    return {
+      ok: true as const,
+      backups: await listAgentBackupsForDevelopmentUser(agentId),
+    };
+  } catch (error) {
+    if (error instanceof AgentBackupListPersistenceError) {
       return {
         ok: false as const,
       };

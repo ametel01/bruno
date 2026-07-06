@@ -1371,6 +1371,100 @@ test("/agents detail activity feed wraps on mobile without horizontal overflow",
   await expectPageNotHorizontallyOverflowing(page);
 });
 
+test("/agents detail shows backup status and runs backup restore controls safely", async ({
+  isMobile,
+  page,
+  request,
+}, testInfo) => {
+  test.skip(isMobile, "backup control smoke runs once on desktop");
+
+  const name = `Backup UI Agent ${testInfo.project.name}`;
+  const created = await createAgent(request, name);
+  createdAgentIds.add(created.id);
+  const backupId = await insertBackupSummaryFixture(created.id, name);
+  const restoredAgentId = randomUUID();
+
+  await page.route(`**/api/agents/${created.id}/backups`, async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+
+    await route.fulfill({
+      contentType: "application/json",
+      status: 201,
+      body: JSON.stringify({
+        ok: true,
+        backup: {
+          id: randomUUID(),
+          agentId: created.id,
+          runnerId: null,
+          status: "ready",
+          createdAt: "2026-07-06T05:20:00.000Z",
+          restoredAt: null,
+        },
+        event: { type: "backup.created" },
+      }),
+    });
+  });
+  await page.route(`**/api/agents/${created.id}/backups/${backupId}/restore`, async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+
+    await route.fulfill({
+      contentType: "application/json",
+      status: 201,
+      body: JSON.stringify({
+        ok: true,
+        backup: {
+          id: backupId,
+          agentId: created.id,
+          runnerId: null,
+          status: "restored",
+          createdAt: "2026-07-06T05:10:00.000Z",
+          restoredAt: "2026-07-06T05:21:00.000Z",
+        },
+        restoredAgent: {
+          id: restoredAgentId,
+          name: `${name} (restored)`,
+          status: "stopped",
+        },
+        event: { type: "backup.restored" },
+      }),
+    });
+  });
+
+  await withPinnedDevelopmentUserForAgent(created.id, async () => {
+    await page.goto(`/agents/${created.id}`);
+
+    const backupPanel = page.locator(".backup-panel");
+    await expect(backupPanel).toContainText("Backups");
+    await expect(backupPanel).toContainText("ready");
+    await expect(backupPanel).toContainText("2026-07-06T05:10:00.000Z");
+    await expect(backupPanel).toContainText("Not restored");
+    await expect(backupPanel).toContainText(backupId);
+    await expect(backupPanel).not.toContainText("s3://");
+    await expect(backupPanel).not.toContainText("agentbay-backups");
+    await expect(backupPanel).not.toContainText("manifestJson");
+    await expect(backupPanel).not.toContainText("storageUri");
+    await expect(backupPanel).not.toContainText("sk-");
+
+    await backupPanel.getByRole("button", { name: "Create backup" }).click();
+    await expect(backupPanel.getByRole("status")).toContainText("Manual backup created.");
+
+    await backupPanel.getByRole("button", { name: "Restore backup" }).click();
+    await expect(backupPanel.getByRole("status")).toContainText(`Restored ${name} (restored).`);
+    await expect(backupPanel.getByRole("link", { name: "Open restored agent" })).toHaveAttribute(
+      "href",
+      `/agents/${restoredAgentId}`,
+    );
+    await expect(backupPanel).not.toContainText("AGENTBAY_BACKUP_STORAGE");
+    await expect(backupPanel).not.toContainText("token=stored-for-downstream");
+  });
+});
+
 test("/agents mobile list exposes status controls without horizontal overflow", async ({
   isMobile,
   page,
@@ -2636,6 +2730,41 @@ async function insertRuntimeLog(agentId: string, message: string, sequence = 1):
   });
 }
 
+async function insertBackupSummaryFixture(agentId: string, agentName: string): Promise<string> {
+  return await withDatabase(async (sql) => {
+    const [agent] = await sql<{ user_id: string }[]>`
+      select user_id from agents where id = ${agentId} limit 1
+    `;
+    const backupId = randomUUID();
+
+    expect(agent).toBeDefined();
+    await sql`
+      insert into backups (
+        id,
+        agent_id,
+        runner_id,
+        status,
+        storage_uri,
+        manifest_json,
+        created_by,
+        created_at
+      )
+      values (
+        ${backupId},
+        ${agentId},
+        null,
+        'ready',
+        ${`s3://agentbay-backups/agents/${agentId}/backups/${backupId}.json`},
+        ${sql.json(validBackupManifestForE2e(agentId, agentName))},
+        ${agent?.user_id ?? ""},
+        '2026-07-06T05:10:00.000Z'
+      )
+    `;
+
+    return backupId;
+  });
+}
+
 async function insertProcessRuntimeLogs(
   agentId: string,
   logs: Array<{
@@ -3062,6 +3191,7 @@ async function withPinnedDevelopmentUserForAgent<T>(
 
 async function deleteCreatedAgents(agentIds: string[]): Promise<void> {
   await withDatabase(async (sql) => {
+    await sql`delete from backups where agent_id in ${sql(agentIds)}`;
     await sql`delete from agent_approvals where agent_id in ${sql(agentIds)}`;
     await sql`delete from agent_logs where agent_id in ${sql(agentIds)}`;
     await sql`delete from docker_runner_containers where agent_id in ${sql(agentIds)}`;
@@ -3070,6 +3200,51 @@ async function deleteCreatedAgents(agentIds: string[]): Promise<void> {
     await sql`delete from agent_configs where agent_id in ${sql(agentIds)}`;
     await sql`delete from agents where id in ${sql(agentIds)}`;
   });
+}
+
+function validBackupManifestForE2e(agentId: string, agentName: string) {
+  return {
+    schemaVersion: 1,
+    agent: {
+      id: agentId,
+      name: agentName,
+      status: "stopped",
+      templateKey: "research_agent",
+      templateVersion: "1.0.0",
+      createdAt: "2026-07-06T05:00:00.000Z",
+      updatedAt: "2026-07-06T05:00:00.000Z",
+    },
+    config: {
+      modelProvider: "openai",
+      modelName: "gpt-4.1-mini",
+      scheduleMode: "manual",
+      timezone: "UTC",
+      maxDailySpendCents: 0,
+      scheduleCron: null,
+    },
+    templateSnapshot: {
+      key: "research_agent",
+      version: "1.0.0",
+      name: "Research Agent",
+      description: "Research template",
+      defaultTools: ["Web search"],
+      defaultSchedule: "Manual",
+      defaultSystemPrompt: "Gather notes.",
+      requiredIntegrations: [],
+    },
+    systemPrompt: "Gather notes.",
+    skills: {
+      folderPath: ".agent/skills",
+      files: [],
+    },
+    memory: {
+      files: [],
+    },
+    logs: {
+      included: true,
+      entries: [],
+    },
+  };
 }
 
 async function deleteCreatedRunners(): Promise<void> {

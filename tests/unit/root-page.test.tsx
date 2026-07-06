@@ -6,6 +6,7 @@ import AgentsPage from "@/app/agents/page";
 import DashboardPage, { DashboardContent } from "@/app/dashboard/page";
 import Home from "@/app/page";
 import SettingsPage from "@/app/settings/page";
+import type { AgentBackupSummary } from "@/src/server/backups/list-backups";
 import type { AgentEventDto } from "@/src/server/events/agent-events";
 import type { ManualRunnerCapacitySummary } from "@/src/server/runners/manual-runner-status";
 
@@ -21,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   listManualRunnerStatusSummariesForDevelopmentUser: vi.fn(),
   listSettingsRunnerManagementSummariesForDevelopmentUser: vi.fn(),
   getAssignedManualRunnerStatusForDevelopmentUserAgent: vi.fn(),
+  listAgentBackupsForDevelopmentUser: vi.fn(),
   listPendingApprovalsForDevelopmentUserAgent: vi.fn(),
   listPendingApprovalsForDevelopmentUser: vi.fn(),
   notFound: vi.fn(() => {
@@ -49,6 +51,15 @@ vi.mock("@/src/server/approvals/agent-approvals", async (importOriginal) => {
     ...actual,
     listPendingApprovalsForDevelopmentUserAgent: mocks.listPendingApprovalsForDevelopmentUserAgent,
     listPendingApprovalsForDevelopmentUser: mocks.listPendingApprovalsForDevelopmentUser,
+  };
+});
+
+vi.mock("@/src/server/backups/list-backups", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/server/backups/list-backups")>();
+
+  return {
+    ...actual,
+    listAgentBackupsForDevelopmentUser: mocks.listAgentBackupsForDevelopmentUser,
   };
 });
 
@@ -138,6 +149,7 @@ describe("product shell routes", () => {
     mocks.listCloudRunnerProvisioningSummariesForDevelopmentUser.mockResolvedValue([]);
     mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockResolvedValue([]);
     mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockResolvedValue(null);
+    mocks.listAgentBackupsForDevelopmentUser.mockResolvedValue([]);
     mocks.listPendingApprovalsForDevelopmentUser.mockResolvedValue([]);
     mocks.listPendingApprovalsForDevelopmentUserAgent.mockResolvedValue([]);
     mocks.listAgentEventFeed.mockResolvedValue({
@@ -161,6 +173,7 @@ describe("product shell routes", () => {
     mocks.listManualRunnerStatusSummariesForDevelopmentUser.mockReset();
     mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockReset();
     mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockReset();
+    mocks.listAgentBackupsForDevelopmentUser.mockReset();
     mocks.listPendingApprovalsForDevelopmentUserAgent.mockReset();
     mocks.listPendingApprovalsForDevelopmentUser.mockReset();
     mocks.notFound.mockClear();
@@ -811,6 +824,73 @@ describe("product shell routes", () => {
     expect(mocks.closeDashboardConnection).toHaveBeenCalledOnce();
   });
 
+  it("renders agent backup status and restore controls without artifact internals", async () => {
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
+    mocks.listAgentBackupsForDevelopmentUser.mockResolvedValueOnce([
+      backupSummary({
+        id: "00000000-0000-4000-8000-000000000267",
+        status: "ready",
+        createdAt: "2026-07-06T05:10:00.000Z",
+        canRestore: true,
+      }),
+      backupSummary({
+        id: "00000000-0000-4000-8000-000000000268",
+        status: "failed",
+        createdAt: "2026-07-06T05:11:00.000Z",
+      }),
+      backupSummary({
+        id: "00000000-0000-4000-8000-000000000269",
+        status: "restored",
+        createdAt: "2026-07-06T05:12:00.000Z",
+        restoredAt: "2026-07-06T05:13:00.000Z",
+      }),
+    ]);
+
+    const element = await AgentDetailPage({
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+    });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Backups");
+    expect(html).toContain("3 listed");
+    expect(html).toContain("Create backup");
+    expect(html).toContain("Restore backup");
+    expect(html).toContain("ready");
+    expect(html).toContain("failed");
+    expect(html).toContain("restored");
+    expect(html).toContain("2026-07-06T05:10:00.000Z");
+    expect(html).toContain("2026-07-06T05:13:00.000Z");
+    expect(html).toContain("00000000-0000-4000-8000-000000000267");
+    expect(html).not.toContain("s3://");
+    expect(html).not.toContain("agentbay-backups");
+    expect(html).not.toContain("manifestJson");
+    expect(html).not.toContain("storageUri");
+    expect(html).not.toContain("secretReferences");
+    expect(html).not.toContain("sk-");
+    expect(mocks.listAgentBackupsForDevelopmentUser).toHaveBeenCalledWith(
+      "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+    );
+  });
+
+  it("keeps detail record visible when backup status cannot be loaded", async () => {
+    const { AgentBackupListPersistenceError } = await import("@/src/server/backups/list-backups");
+    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
+    mocks.listAgentBackupsForDevelopmentUser.mockRejectedValueOnce(
+      new AgentBackupListPersistenceError(),
+    );
+
+    const element = await AgentDetailPage({
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+    });
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Research Agent");
+    expect(html).toContain("Backup status could not be loaded.");
+    expect(html).toContain("Configuration");
+    expect(html).toContain("Activity");
+    expect(html).not.toContain("postgres://");
+  });
+
   it("renders safe operational alerts on the agent detail page", async () => {
     mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(
       detailAgent({
@@ -1290,6 +1370,18 @@ function activityEvent(overrides: Partial<AgentEventDto> = {}): AgentEventDto {
     metadata: {},
     metadataSummary: null,
     createdAt: "2026-07-04T05:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function backupSummary(overrides: Partial<AgentBackupSummary> = {}): AgentBackupSummary {
+  return {
+    id: "00000000-0000-4000-8000-000000000267",
+    agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+    status: "ready",
+    createdAt: "2026-07-06T05:10:00.000Z",
+    restoredAt: null,
+    canRestore: false,
     ...overrides,
   };
 }
