@@ -363,6 +363,76 @@
   - `PORT=3162 DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3162 bun run test:e2e -- tests/e2e/root-route.spec.ts --project=chromium-desktop --grep "Docker runner final acceptance" --workers=1`: pass; 1 Chromium desktop smoke covered selected Docker container isolation, restart/stop/delete sibling safety, scoped logs, crash reconciliation, and fail-closed cleanup.
   - `CHANGELOG.md` is intentionally unchanged for #161 because this issue adds final acceptance evidence and regression coverage, not a new user/operator-visible product behavior beyond the already merged #157-#160 slices.
 
+## Milestone 15 Backups and Restore
+
+- Status: #162 Milestone 15 tracking and baseline gates are locally complete on `codex/issue-162-m15-tracking`.
+- Source plan:
+  - `docs/MILESTONES.md` Milestone 15: Backups and Restore.
+  - GitHub issue #162: Prepare Milestone 15 tracking and baseline gates.
+  - `PLAN.md` is absent in this worktree; the published #162 issue body and `docs/MILESTONES.md` are the active Step 0 contract.
+- Current branch: `codex/issue-162-m15-tracking`.
+
+### Issue Checklist
+
+- [ ] #162 Prepare Milestone 15 tracking and baseline gates. Status: local implementation and validation complete.
+- [ ] #163 Add backup persistence, manifest, and secret policy. Status: pending #162 merge.
+- [ ] #164 Add S3-compatible backup object storage boundary. Status: pending #162 merge.
+- [ ] #165 Implement manual agent backup creation. Status: pending #163 and #164.
+- [ ] #166 Restore backups into new agents. Status: pending #163, #164, and #165.
+- [ ] #167 Add backup and restore controls to the agent UI. Status: pending backend backup and restore slices.
+- [ ] #168 Complete backup restore acceptance and security evidence. Status: pending #163-#167.
+- Later Milestone 15 issue agents must append validation evidence here after their implementation slices merge.
+
+### Current Status
+
+- Milestone 15 goal from `docs/MILESTONES.md`: users can recover agent config, memory, and important metadata.
+- Milestone 15 acceptance criteria: user can create a manual backup; backup status is visible; user can restore an agent from backup; restored agent has expected config and metadata; backup and restore events appear in the timeline.
+- Milestone 15 test expectations from `docs/MILESTONES.md`: backup manifest schema tests, object storage fake tests for upload and download, restore test creating a new agent from backup, and a security test ensuring raw secrets are not written into backup manifests.
+- #162 is tracking-only. It initializes the Milestone 15 progress record, records baseline gate expectations, verifies changelog structure, and intentionally leaves `CHANGELOG.md` unchanged because no functional user/operator-visible behavior ships in this issue.
+- Backup implementation should start with manual backup and restore. Scheduled backups remain later scope.
+- Backup storage should use an S3-compatible object storage boundary, such as DigitalOcean Spaces or AWS S3, without committing provider credentials or production storage URIs.
+- The backup manifest should include agent metadata, config, template snapshot, system prompt, skills folder metadata, memory files, and logs metadata; high-volume logs are not required in full for the initial milestone.
+- Sensitive backup payloads must be encrypted or excluded with secret references only. Raw secrets must not be written into backup manifests, docs, UI output, tests, logs, or status messages.
+- Restore can initially create a new agent from backup to avoid overwriting a running agent.
+- Backup and restore behavior should write `backup.created` and `backup.restored` events for timeline visibility.
+- `CHANGELOG.md` has the Keep a Changelog 1.0.0 framing and an `## [Unreleased]` section. Agents should keep that structure and add changelog bullets only for shipped functional user/operator-visible changes.
+
+### Baseline Gate Expectations
+
+- Default local database for verify, DB-backed unit tests, migrations, health checks, and default E2E: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay`.
+- Default local app URL for verify and E2E: `NEXT_PUBLIC_APP_URL=http://localhost:3000`.
+- Default E2E server URL: `PORT=3000` and `PLAYWRIGHT_BASE_URL=http://localhost:3000` unless an issue uses an isolated port; when an isolated E2E port is used, set `PORT`, `PLAYWRIGHT_BASE_URL`, and `NEXT_PUBLIC_APP_URL` to the same localhost port.
+- Canonical aggregate gate: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run verify`.
+- Required #162 baseline command: `bun run format:check`.
+- Known repo caveats:
+  - Fresh worktrees may need `bun install --frozen-lockfile` before package scripts are available.
+  - Default-parallel DB-backed Vitest inside `bun run verify` has previously failed from shared-DB isolation races. If this repeats, rerun the relevant branch command and prove whether the same failure reproduces on current `main` before calling it a branch regression.
+  - As recorded during #155 checker review, `bun run db:health` currently fails under plain Bun on the existing baseline because the `server-only` import guard trips through `src/server/env.ts`; treat this as separate baseline follow-up unless a Milestone 15 issue changes that path.
+
+### Update Rules
+
+- Every Milestone 15 implementation issue must update this section after validation with the issue number, changed behavior, commands run, pass/fail result, skipped checks with reasons, and remaining risks.
+- Preserve Milestone 16 as future scope; do not add cost tracking, billing, production deploy, unrelated provider work, or non-Milestone-15 UI changes while executing Milestone 15.
+- Keep S3-compatible storage credentials, cloud provider credentials, runner credentials, bearer tokens, production URLs, endpoint credentials, and backup payload secrets out of committed docs, UI output, tests, logs, and status messages.
+- Update `CHANGELOG.md` only for shipped functional user/operator-visible changes. Do not add changelog entries for tracking-only, validation-only, test-only, or documentation-only work.
+
+### Update Log
+
+- 2026-07-06: #162 initialized Milestone 15 tracking from `docs/MILESTONES.md` and the published #162 issue body; noted that `PLAN.md` is absent in this worktree and the published issue body plus milestone document are the active Step 0 contract.
+- 2026-07-06: #162 confirmed `CHANGELOG.md` has Keep a Changelog 1.0.0 framing and `## [Unreleased]`; `CHANGELOG.md` is intentionally unchanged for #162 because this issue creates tracking only and ships no functional product behavior.
+- 2026-07-06: #162 recorded baseline gate expectations for `bun run verify`, `bun run test:e2e`, the local Postgres `DATABASE_URL`, and `NEXT_PUBLIC_APP_URL` before backup and restore work starts.
+
+### Validation Evidence
+
+- 2026-07-06 #162:
+  - `gh issue view 162 --repo ametel01/agentbay --json number,title,state,url,body,labels`: pass; issue is open and maps Milestone 15 tracking to `docs/MILESTONES.md` plus PLAN Step 0.
+  - `test -f PLAN.md`: not present in this worktree; #162 issue body and `docs/MILESTONES.md` are recorded above as the active contract.
+  - `rg -n "Keep a Changelog|## \\[Unreleased\\]|Semantic Versioning" CHANGELOG.md`: pass; required changelog structure is present.
+  - `bun install --frozen-lockfile`: pass; installed committed dependencies from `bun.lock` in the fresh issue worktree.
+  - `bun run format:check`: pass; Biome checked 137 files with no fixes applied.
+  - `git diff --check`: pass; no whitespace errors.
+  - `git status --short --branch --untracked-files=all`: branch `codex/issue-162-m15-tracking` is based on `origin/main` with only `PROGRESS.md` modified.
+
 ## Milestone 12 Secure Runner Auth
 
 - Status: Milestone 12 local automated acceptance is complete on `codex/issue-134-milestone-12-acceptance`; #126 remains separately external-blocked for Milestone 11 hosted-dashboard/manual-VPS smoke.
