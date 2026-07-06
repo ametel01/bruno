@@ -8,9 +8,9 @@
 
 ## Current Status
 
-- Status: Step 7 complete; Step 8 is next.
-- Active step: Step 8 - Production No-Runner Behavior and Agent Assignment UX.
-- Last updated: 2026-07-06 18:05:23 PST.
+- Status: Step 8 complete; Step 9 is next.
+- Active step: Step 9 - End-to-End Cloud Provisioning Smoke and Operator Docs.
+- Last updated: 2026-07-06 18:11:04 PST.
 
 ## Step Checklist
 
@@ -22,7 +22,7 @@
 - [x] Step 5: Continuous Runner Heartbeat and Capacity Metrics
 - [x] Step 6: Command Authentication for Cloud Runner Lifecycle Calls
 - [x] Step 7: Bootstrap Timeout, Failure State, and Cleanup Guidance
-- [ ] Step 8: Production No-Runner Behavior and Agent Assignment UX
+- [x] Step 8: Production No-Runner Behavior and Agent Assignment UX
 - [ ] Step 9: End-to-End Cloud Provisioning Smoke and Operator Docs
 
 ## Update Rules
@@ -157,3 +157,20 @@
 - Changelog: added one `Fixed` entry for stalled cloud runner provisioning becoming actionable.
 - Commit: this step commit.
 - Next step: Step 8 - Production No-Runner Behavior and Agent Assignment UX.
+
+### 2026-07-06 18:11:04 PST - Step 8 complete
+
+- Changed production start placement so Vercel deployments return a distinct `no_online_runner` result when no cloud runner is online instead of falling back to local Docker.
+- Updated the start API route to return a safe 409 `no_online_runner` response.
+- Updated the start button failure copy for no-online-runner and runner-capacity blockers.
+- Validation:
+  - Passed: `bun run format`
+  - Passed: `bun run typecheck`
+  - Passed: `bun run test -- tests/unit/start-agent-route.test.ts tests/unit/create-agent-db.test.ts tests/unit/runner-placement.test.ts tests/unit/root-page.test.tsx`
+  - Passed: `bun run format:check`
+  - Passed: `bun run lint`
+  - Passed: `bun run build`
+  - Passed: `PLAYWRIGHT_REUSE_EXISTING_SERVER=0 PORT=3100 bun run test:e2e -- --grep "cloud runner|agent.*start" --project=chromium-desktop`
+- Changelog: added one `Fixed` entry for production agent starts without online cloud runners.
+- Commit: this step commit.
+- Next step: Step 9 - End-to-End Cloud Provisioning Smoke and Operator Docs.

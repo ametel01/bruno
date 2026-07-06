@@ -146,6 +146,10 @@ type StartRunnerReservationResult =
   | {
       ok: false;
       reason: "runner_capacity_reached";
+    }
+  | {
+      ok: false;
+      reason: "no_online_runner";
     };
 
 export type AgentLifecycleDependencies = {
@@ -189,6 +193,7 @@ export type StartAgentResult =
         | "invalid_status"
         | "plan_limit_reached"
         | "runner_capacity_reached"
+        | "no_online_runner"
         | "runner_start_failed";
       status?: AgentLifecycleStatus;
       currentAgents?: number;
@@ -534,6 +539,10 @@ async function selectStartRunnerPlacement(
     }
 
     return { ok: true, runnerId: confirmedPlacement.runner.id } as const;
+  }
+
+  if (placement.reason === "no_online_runner" && shouldRequireOnlineRunnerForStart()) {
+    return { ok: false, reason: "no_online_runner" } as const;
   }
 
   if (placement.reason === "no_online_runner") {
@@ -1753,6 +1762,10 @@ function readDockerStateMetadata(container: DockerRunnerContainerDto): {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function shouldRequireOnlineRunnerForStart(): boolean {
+  return process.env.VERCEL === "1" || process.env.VERCEL_ENV === "production";
 }
 
 async function createDefaultDockerRunnerAdapter(

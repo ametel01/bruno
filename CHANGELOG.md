@@ -83,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Production agent starts now return a clear no-online-runner response instead of falling back to local Docker when no cloud runner is ready.
 - Stalled DigitalOcean runner bootstrap attempts now become actionable failed provisioning states instead of staying in progress indefinitely.
 - Cloud runner bootstrap now persists exchanged runner credentials on the Droplet so registration survives service restarts without reusing one-time tokens.
 - DigitalOcean cloud runner bootstrap now registers public `sslip.io` HTTPS endpoints through a Caddy reverse proxy instead of loopback runner URLs.

@@ -97,6 +97,20 @@ export async function POST(_request: Request, context: StartAgentRouteContext) {
       );
     }
 
+    if (result.reason === "no_online_runner") {
+      return Response.json(
+        {
+          error: {
+            code: "no_online_runner",
+            message: "No online runner is available yet.",
+          },
+        },
+        {
+          status: 409,
+        },
+      );
+    }
+
     return Response.json(
       {
         error: {

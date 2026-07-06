@@ -135,6 +135,14 @@ async function safeFailureMessage(
     if (body.error?.code === "agent_not_found") {
       return "Agent could not be found.";
     }
+
+    if (body.error?.code === "no_online_runner") {
+      return "No online runner is available yet.";
+    }
+
+    if (body.error?.code === "runner_capacity_reached") {
+      return "Runner capacity reached.";
+    }
   } catch {
     // Keep user-facing failures generic when the response is not safe JSON.
   }
