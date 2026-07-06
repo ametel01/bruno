@@ -1,9 +1,26 @@
 import { describe, expect, it } from "vitest";
 import {
+  type ManualRunnerCapacitySummary,
   toAssignedManualRunnerStatusSummary,
   toManualRunnerStatusSummary,
   toSettingsRunnerManagementSummary,
 } from "@/src/server/runners/manual-runner-status";
+
+function capacity(
+  overrides: Partial<ManualRunnerCapacitySummary> = {},
+): ManualRunnerCapacitySummary {
+  return {
+    runningAgents: 0,
+    maxAgents: 1,
+    cpuUsedPercent: null,
+    memoryUsedMb: null,
+    memoryTotalMb: null,
+    diskUsedMb: null,
+    diskTotalMb: null,
+    blocker: null,
+    ...overrides,
+  };
+}
 
 describe("manual runner status summaries", () => {
   it("exposes only safe runner fields and endpoint host", () => {
@@ -20,6 +37,7 @@ describe("manual runner status summaries", () => {
       kind: "manual_vps",
       endpointHost: "runner.example.com:8443",
       status: "unknown",
+      capacity: capacity(),
       version: null,
       lastSeenAt: null,
       updatedAt: "2026-07-05T01:00:00.000Z",
@@ -42,6 +60,7 @@ describe("manual runner status summaries", () => {
       name: "Sensitive details omitted.",
       endpointHost: "runner.example.com",
       status: "offline",
+      capacity: capacity(),
       alertState: "offline",
       alertMessage:
         "Assigned runner is inactive or unreachable. Check the runner host and service before restarting work.",
@@ -51,20 +70,26 @@ describe("manual runner status summaries", () => {
     expect(JSON.stringify(assigned)).not.toContain("runner_id");
   });
 
-  it("uses latest heartbeat status, version, and last-seen fields without metrics", () => {
+  it("uses latest heartbeat status, version, capacity, and last-seen fields without unsafe metadata", () => {
     const summary = toManualRunnerStatusSummary({
       name: "Online Runner",
       kind: "manual_vps",
       endpointUrl: "https://runner.example.com",
       status: "active",
       updatedAt: "2026-07-05T02:00:00.000Z",
+      assignedRunningAgents: 3,
       latestHeartbeat: {
         status: "online",
         metadata: {
           version: "agentbay-runner/1.2.3",
           metrics: {
+            maxAgents: 5,
+            runningAgents: 2,
             cpuPercent: 37,
             memoryUsedMb: 512,
+            memoryTotalMb: 2048,
+            diskUsedMb: 4096,
+            diskTotalMb: 8192,
             apiToken: "must-not-render",
           },
         },
@@ -77,13 +102,22 @@ describe("manual runner status summaries", () => {
       kind: "manual_vps",
       endpointHost: "runner.example.com",
       status: "online",
+      capacity: capacity({
+        runningAgents: 3,
+        maxAgents: 5,
+        cpuUsedPercent: 37,
+        memoryUsedMb: 512,
+        memoryTotalMb: 2048,
+        diskUsedMb: 4096,
+        diskTotalMb: 8192,
+      }),
       version: "agentbay-runner/1.2.3",
       lastSeenAt: "2026-07-05T02:01:00.000Z",
       updatedAt: "2026-07-05T02:00:00.000Z",
     });
     expect(JSON.stringify(summary)).not.toContain("metrics");
     expect(JSON.stringify(summary)).not.toContain("cpuPercent");
-    expect(JSON.stringify(summary)).not.toContain("memoryUsedMb");
+    expect(JSON.stringify(summary)).not.toContain("apiToken");
     expect(JSON.stringify(summary)).not.toContain("must-not-render");
   });
 
@@ -119,6 +153,7 @@ describe("manual runner status summaries", () => {
 
     expect(summary).toMatchObject({
       status: "offline",
+      capacity: capacity(),
       version: "agentbay-runner/1.0.0",
       lastSeenAt: "2026-07-05T08:00:29.999Z",
     });
@@ -166,6 +201,7 @@ describe("manual runner status summaries", () => {
       kind: "manual_vps",
       endpointHost: "runner-settings.example.com:8443",
       status: "online",
+      capacity: capacity(),
       version: null,
       lastSeenAt: null,
       updatedAt: "2026-07-05T03:01:00.000Z",
