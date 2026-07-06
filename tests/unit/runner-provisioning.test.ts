@@ -36,6 +36,7 @@ describe.sequential("runner provisioning service", () => {
         provider,
         readConfig: () => ({
           token: "dop_v1_super_secret",
+          runnerBearerToken: "runner-command-token",
           region: "nyc3",
           sizeSlug: "s-2vcpu-2gb",
           image: "ubuntu-24-04-x64",
@@ -117,6 +118,10 @@ describe.sequential("runner provisioning service", () => {
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
+    ).toContain('AGENTBAY_RUNNER_BEARER_TOKEN="runner-command-token"');
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
     ).toContain(
       'AGENTBAY_RUNNER_ENDPOINT_URL="https://$' + '{AGENTBAY_PUBLIC_IPV4_DASHED}.sslip.io"',
     );
@@ -178,6 +183,7 @@ describe.sequential("runner provisioning service", () => {
         provider,
         readConfig: () => ({
           token: "dop_v1_super_secret",
+          runnerBearerToken: "runner-command-token",
           region: "sfo3",
           sizeSlug: "s-1vcpu-512mb-10gb",
           image: "ubuntu-24-04-x64",
@@ -211,6 +217,7 @@ describe.sequential("runner provisioning service", () => {
         provider,
         readConfig: () => ({
           token: "dop_v1_super_secret",
+          runnerBearerToken: "runner-command-token",
           region: "sfo3",
           sizeSlug: "s-1vcpu-1gb",
           image: "ubuntu-24-04-x64",
@@ -262,6 +269,7 @@ describe.sequential("runner provisioning service", () => {
         provider,
         readConfig: () => ({
           token: "dop_v1_super_secret",
+          runnerBearerToken: "runner-command-token",
           region: "sfo3",
           sizeSlug: "s-1vcpu-1gb",
           image: "ubuntu-24-04-x64",
@@ -320,6 +328,7 @@ describe.sequential("runner provisioning service", () => {
         provider,
         readConfig: () => ({
           token: "dop_v1_super_secret",
+          runnerBearerToken: "runner-command-token",
           region: "sfo3",
           sizeSlug: "s-1vcpu-1gb",
           image: "ubuntu-24-04-x64",
@@ -380,6 +389,7 @@ describe.sequential("runner provisioning service", () => {
         provider,
         readConfig: () => ({
           token: "dop_v1_super_secret",
+          runnerBearerToken: "runner-command-token",
           region: "sfo3",
           sizeSlug: "s-1vcpu-1gb",
           image: "ubuntu-24-04-x64",
@@ -410,6 +420,7 @@ describe.sequential("runner provisioning service", () => {
         provider: firstProvider,
         readConfig: () => ({
           token: "dop_v1_super_secret",
+          runnerBearerToken: "runner-command-token",
           region: "sfo3",
           sizeSlug: "s-1vcpu-1gb",
           image: "ubuntu-24-04-x64",
@@ -425,6 +436,7 @@ describe.sequential("runner provisioning service", () => {
         provider: secondProvider,
         readConfig: () => ({
           token: "dop_v1_super_secret",
+          runnerBearerToken: "runner-command-token",
           region: "sfo3",
           sizeSlug: "s-1vcpu-1gb",
           image: "ubuntu-24-04-x64",

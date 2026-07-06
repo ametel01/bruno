@@ -78,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- DigitalOcean cloud runner provisioning now requires and injects the server-side runner command bearer token for lifecycle API authentication.
 - DigitalOcean cloud runner bootstrap now configures swap and longer one-time registration-token windows for low-memory Droplets.
 
 ### Fixed

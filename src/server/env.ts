@@ -4,6 +4,7 @@ import { EnvValidationError, validateRequiredEnv } from "@/src/env/validation";
 
 export type DigitalOceanProviderConfig = {
   token: string;
+  runnerBearerToken: string;
   region: string;
   sizeSlug: string;
   image: string;
@@ -27,8 +28,17 @@ export function readDigitalOceanProviderConfig(
     throw new EnvValidationError(["AGENTBAY_DIGITALOCEAN_TOKEN cannot be blank."]);
   }
 
+  const runnerBearerToken = input.AGENTBAY_RUNNER_BEARER_TOKEN?.trim();
+
+  if (!runnerBearerToken) {
+    throw new EnvValidationError([
+      "AGENTBAY_RUNNER_BEARER_TOKEN is required when DigitalOcean provisioning is set.",
+    ]);
+  }
+
   return {
     token,
+    runnerBearerToken,
     region: readNonEmptyProviderSetting(input.AGENTBAY_DIGITALOCEAN_REGION, {
       envName: "AGENTBAY_DIGITALOCEAN_REGION",
       defaultValue: "sfo3",

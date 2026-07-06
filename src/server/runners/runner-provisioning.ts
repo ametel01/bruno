@@ -287,6 +287,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       runnerId,
       runnerName: initialized.runner.name,
       registrationToken: initialized.registrationToken,
+      commandBearerToken: config.runnerBearerToken,
       sizeSlug: initialized.runner.sizeSlug,
       now,
     });
@@ -570,6 +571,7 @@ async function buildProvisioningBootstrap(input: {
   runnerId: string;
   runnerName: string;
   registrationToken: string;
+  commandBearerToken: string;
   sizeSlug: string;
   now: () => Date;
 }): Promise<CloudRunnerBootstrapContent> {
@@ -580,6 +582,7 @@ async function buildProvisioningBootstrap(input: {
       runnerId: input.runnerId,
       appBaseUrl,
       registrationToken: input.registrationToken,
+      commandBearerToken: input.commandBearerToken,
       endpointDiscovery: { type: "digitalocean_metadata" },
       enableSwap: LOW_MEMORY_DIGITALOCEAN_SIZE_SLUGS.has(input.sizeSlug),
       runnerName: input.runnerName,

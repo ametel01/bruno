@@ -13,8 +13,10 @@ describe("server-only provider environment validation", () => {
     expect(
       readDigitalOceanProviderConfig({
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
       }),
     ).toMatchObject({
+      runnerBearerToken: "runner-command-token",
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
@@ -23,6 +25,7 @@ describe("server-only provider environment validation", () => {
 
     const config = readDigitalOceanProviderConfig({
       AGENTBAY_DIGITALOCEAN_TOKEN: " dop_v1_test_token ",
+      AGENTBAY_RUNNER_BEARER_TOKEN: " runner-command-token ",
       AGENTBAY_DIGITALOCEAN_REGION: " nyc3 ",
       AGENTBAY_DIGITALOCEAN_SIZE_SLUG: " s-2vcpu-2gb ",
       AGENTBAY_DIGITALOCEAN_IMAGE: " ubuntu-24-04-x64 ",
@@ -31,6 +34,7 @@ describe("server-only provider environment validation", () => {
 
     expect(config).toEqual({
       token: "dop_v1_test_token",
+      runnerBearerToken: "runner-command-token",
       region: "nyc3",
       sizeSlug: "s-2vcpu-2gb",
       image: "ubuntu-24-04-x64",
@@ -48,9 +52,16 @@ describe("server-only provider environment validation", () => {
     expect(() =>
       readDigitalOceanProviderConfig({
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
         AGENTBAY_DIGITALOCEAN_REGION: " ",
       }),
     ).toThrow("AGENTBAY_DIGITALOCEAN_REGION cannot be blank when DigitalOcean is set.");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+      }),
+    ).toThrow("AGENTBAY_RUNNER_BEARER_TOKEN is required when DigitalOcean provisioning is set.");
   });
 
   it("keeps DigitalOcean provider tokens out of shared validation and client components", async () => {

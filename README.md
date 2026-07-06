@@ -44,6 +44,15 @@ AGENTBAY_RUNNER_BEARER_TOKEN=replace-with-manual-runner-token
 
 Set the real value only in local uncommitted env files or hosting provider secret settings. Do not commit real bearer tokens, production database URLs, Vercel tokens, private hostnames, SSH keys, or provider credentials.
 
+DigitalOcean cloud runner provisioning also requires the same server-side command token on the hosted app:
+
+```bash
+AGENTBAY_DIGITALOCEAN_TOKEN=replace-with-digitalocean-token
+AGENTBAY_RUNNER_BEARER_TOKEN=replace-with-runner-command-token
+```
+
+The provisioning bootstrap injects `AGENTBAY_RUNNER_BEARER_TOKEN` only into the Droplet-local runner env file so lifecycle commands from the dashboard can authenticate to the cloud runner. It must not be exposed through browser JSON, HTML, logs, or provisioning summaries.
+
 ## Local Database
 
 Start the local Postgres service:

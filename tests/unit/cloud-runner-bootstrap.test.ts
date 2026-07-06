@@ -27,6 +27,7 @@ describe.sequential("cloud runner bootstrap content", () => {
     const content = buildCloudRunnerBootstrapContent({
       appBaseUrl: "https://app.agentbay.test",
       registrationToken,
+      commandBearerToken: "runner-command-token",
       runnerEndpointUrl: "https://runner.agentbay.test",
       runnerName: "Cloud Runner 1",
     });
@@ -37,6 +38,7 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain("AGENTBAY_RUNNER_REGISTRATION_TOKEN=");
     expect(content.userData).toContain(registrationToken);
     expect(content.userData).toContain("AGENTBAY_RUNNER_ENDPOINT_URL=");
+    expect(content.userData).toContain('AGENTBAY_RUNNER_BEARER_TOKEN="runner-command-token"');
     expect(content.userData).toContain('AGENTBAY_RUNNER_ENV_FILE="/etc/agentbay/runner.env"');
     expect(content.userData).toContain("ExecStartPre=/root/.bun/bin/bun run runner:bootstrap");
     expect(content.userData).toContain("ExecStart=/root/.bun/bin/bun run runner:service");
@@ -47,6 +49,7 @@ describe.sequential("cloud runner bootstrap content", () => {
       registrationToken: BOOTSTRAP_REDACTION,
     });
     expect(JSON.stringify(content.safeSummary)).not.toContain(registrationToken);
+    expect(JSON.stringify(content.safeSummary)).not.toContain("runner-command-token");
     expect(content.userData).not.toContain("dop_v1_super_secret");
     expect(content.userData).not.toContain("agb_run_1234567890123456789012345678901234567890123");
   });
@@ -97,6 +100,7 @@ describe.sequential("cloud runner bootstrap content", () => {
     const unsafeOutput = [
       "AGENTBAY_DIGITALOCEAN_TOKEN=dop_v1_super_secret",
       "AGENTBAY_RUNNER_REGISTRATION_TOKEN=agb_reg_1234567890123456789012345678901234567890123",
+      "AGENTBAY_RUNNER_BEARER_TOKEN=runner-command-token",
       "AGENTBAY_RUNNER_CREDENTIAL=agb_run_1234567890123456789012345678901234567890123",
     ].join("\n");
 
@@ -105,6 +109,7 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(redacted).toContain(BOOTSTRAP_REDACTION);
     expect(redacted).not.toContain("dop_v1_super_secret");
     expect(redacted).not.toContain("agb_reg_1234567890123456789012345678901234567890123");
+    expect(redacted).not.toContain("runner-command-token");
     expect(redacted).not.toContain("agb_run_1234567890123456789012345678901234567890123");
   });
 

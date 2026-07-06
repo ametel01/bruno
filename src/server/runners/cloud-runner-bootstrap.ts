@@ -15,6 +15,7 @@ export const BOOTSTRAP_REDACTION = "[redacted]";
 type CloudRunnerBootstrapInput = {
   appBaseUrl: string;
   registrationToken: string;
+  commandBearerToken?: string;
   runnerEndpointUrl?: string;
   endpointDiscovery?: {
     type: "digitalocean_metadata";
@@ -87,6 +88,9 @@ export function buildCloudRunnerBootstrapContent(
     `AGENTBAY_RUNNER_ENDPOINT_URL=${endpoint.envValue}`,
     `AGENTBAY_RUNNER_NAME=${quoteSystemdEnvironmentValue(config.runnerName)}`,
     `AGENTBAY_RUNNER_ENV_FILE=${quoteSystemdEnvironmentValue(config.envFilePath)}`,
+    ...(config.commandBearerToken
+      ? [`AGENTBAY_RUNNER_BEARER_TOKEN=${quoteSystemdEnvironmentValue(config.commandBearerToken)}`]
+      : []),
     `AGENTBAY_RUNNER_HOST=${quoteSystemdEnvironmentValue(config.runnerHost)}`,
     `AGENTBAY_RUNNER_PORT=${config.runnerPort}`,
   ].join("\n");
@@ -176,6 +180,7 @@ export function redactCloudRunnerBootstrapOutput(value: string): string {
     .replace(/agb_run_[A-Za-z0-9_-]+/g, BOOTSTRAP_REDACTION)
     .replace(/(AGENTBAY_DIGITALOCEAN_TOKEN=)[^\s'"]+/g, `$1${BOOTSTRAP_REDACTION}`)
     .replace(/(AGENTBAY_RUNNER_REGISTRATION_TOKEN=)[^\n]+/g, `$1${BOOTSTRAP_REDACTION}`)
+    .replace(/(AGENTBAY_RUNNER_BEARER_TOKEN=)[^\n]+/g, `$1${BOOTSTRAP_REDACTION}`)
     .replace(/(AGENTBAY_RUNNER_CREDENTIAL=)[^\n]+/g, `$1${BOOTSTRAP_REDACTION}`);
 }
 
@@ -183,6 +188,7 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
   return {
     appBaseUrl: normalizeUrl(input.appBaseUrl, "appBaseUrl"),
     registrationToken: requireNonEmpty(input.registrationToken, "registrationToken"),
+    commandBearerToken: input.commandBearerToken?.trim() || null,
     runnerEndpointUrl: input.runnerEndpointUrl
       ? normalizePublicHttpsUrl(input.runnerEndpointUrl, "runnerEndpointUrl")
       : null,

@@ -8,9 +8,9 @@
 
 ## Current Status
 
-- Status: Step 5 complete; Step 6 is next.
-- Active step: Step 6 - Command Authentication for Cloud Runner Lifecycle Calls.
-- Last updated: 2026-07-06 17:57:41 PST.
+- Status: Step 6 complete; Step 7 is next.
+- Active step: Step 7 - Bootstrap Timeout, Failure State, and Cleanup Guidance.
+- Last updated: 2026-07-06 18:02:20 PST.
 
 ## Step Checklist
 
@@ -20,7 +20,7 @@
 - [x] Step 3: Reliable Cheap-Droplet Bootstrap Runtime
 - [x] Step 4: Durable Registration Credential Persistence
 - [x] Step 5: Continuous Runner Heartbeat and Capacity Metrics
-- [ ] Step 6: Command Authentication for Cloud Runner Lifecycle Calls
+- [x] Step 6: Command Authentication for Cloud Runner Lifecycle Calls
 - [ ] Step 7: Bootstrap Timeout, Failure State, and Cleanup Guidance
 - [ ] Step 8: Production No-Runner Behavior and Agent Assignment UX
 - [ ] Step 9: End-to-End Cloud Provisioning Smoke and Operator Docs
@@ -125,3 +125,20 @@
 - Changelog: added one `Added` entry for continuous runner heartbeat and capacity metrics.
 - Commit: this step commit.
 - Next step: Step 6 - Command Authentication for Cloud Runner Lifecycle Calls.
+
+### 2026-07-06 18:02:20 PST - Step 6 complete
+
+- Made `AGENTBAY_RUNNER_BEARER_TOKEN` required when DigitalOcean provisioning is configured on the server.
+- Injected the command bearer token into Droplet-local cloud-init env content without adding it to safe bootstrap summaries.
+- Extended bootstrap redaction to remove `AGENTBAY_RUNNER_BEARER_TOKEN` from unsafe bootstrap output.
+- Documented the DigitalOcean cloud runner command-auth requirement in `README.md`.
+- Validation:
+  - Passed: `bun run format:check`
+  - Passed: `bun run lint`
+  - Passed: `bun run typecheck`
+  - Passed: `bun run test -- tests/unit/server-env.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/manual-runner-adapter.test.ts tests/unit/runner-service.test.ts tests/unit/runner-provisioning.test.ts`
+  - Expected pending Step 8 failure: adding `tests/unit/start-agent-route.test.ts` to the command still fails only on the `no_online_runner` route mapping.
+  - Passed: `bun run build`
+- Changelog: added one `Changed` entry for cloud runner command-auth requirements.
+- Commit: this step commit.
+- Next step: Step 7 - Bootstrap Timeout, Failure State, and Cleanup Guidance.
