@@ -154,6 +154,7 @@ type ResolvedContainerTarget = {
 
 export type DockerRunPlan = {
   args: string[];
+  configTargetPath?: string;
   containerName: string;
   workspacePath: string;
 };
@@ -634,6 +635,9 @@ export function buildDockerRunPlan(input: {
     /* turbopackIgnore: true */ input.mounts.workspaceRoot,
     input.agentId,
   );
+  const configTargetPath = input.mounts.configPath
+    ? dockerAgentConfigTarget(input.mounts.configTarget, input.agentId)
+    : undefined;
   const args = [
     "run",
     "--detach",
@@ -655,12 +659,12 @@ export function buildDockerRunPlan(input: {
     `AGENTBAY_WORKSPACE=${input.mounts.workspaceTarget}`,
   ];
 
-  if (input.mounts.configPath) {
+  if (input.mounts.configPath && configTargetPath) {
     args.push(
       "--mount",
-      `type=bind,source=${input.mounts.configPath},target=${input.mounts.configTarget},readonly`,
+      `type=bind,source=${input.mounts.configPath},target=${configTargetPath},readonly`,
       "--env",
-      `AGENTBAY_CONFIG_PATH=${input.mounts.configTarget}`,
+      `AGENTBAY_CONFIG_PATH=${configTargetPath}`,
     );
   }
 
@@ -668,6 +672,7 @@ export function buildDockerRunPlan(input: {
 
   return {
     args,
+    ...(configTargetPath ? { configTargetPath } : {}),
     containerName,
     workspacePath,
   };
@@ -768,13 +773,23 @@ function dockerRunnerMetadata(input: {
       ...(input.mounts.configPath
         ? {
             configSource: input.mounts.configPath,
-            configTarget: input.mounts.configTarget,
+            configTarget: input.plan.configTargetPath,
             configReadonly: true,
           }
         : {}),
     },
     resources: input.resources,
   };
+}
+
+function dockerAgentConfigTarget(configTarget: string, agentId: string): string {
+  const normalizedTarget = configTarget.replace(/\/+$/, "");
+
+  if (!normalizedTarget) {
+    return `/${agentId}`;
+  }
+
+  return `${normalizedTarget}-${agentId}`;
 }
 
 function dockerTimestampToDate(value: string | undefined): Date | null {
