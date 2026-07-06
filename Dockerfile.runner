@@ -1,0 +1,16 @@
+FROM oven/bun:1-alpine
+
+RUN apk add --no-cache ca-certificates docker-cli
+
+WORKDIR /app
+
+COPY package.json bun.lock tsconfig.json ./
+COPY src/runner-service ./src/runner-service
+COPY src/server/agents/agent-id.ts ./src/server/agents/agent-id.ts
+
+ENV NODE_ENV=production
+ENV AGENTBAY_RUNNER_HOST=0.0.0.0
+
+EXPOSE 3045
+
+CMD ["sh", "-c", "bun run runner:bootstrap && exec bun run runner:service"]

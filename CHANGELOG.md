@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Dedicated runner Docker image artifact that packages the existing runner bootstrap and service runtime without Droplet-side source checkout or GitHub credentials.
 - Runner service heartbeat loop that reports cloud runner online status and capacity metrics using the persisted runner credential.
 - Initial AgentBay root app page that points users to the dashboard route.
 - Database-backed `/health` endpoint and local Postgres migration tooling for operator checks.
