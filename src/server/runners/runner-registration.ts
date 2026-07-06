@@ -10,6 +10,8 @@ import {
   hashRunnerSecret,
   REGISTRATION_TOKEN_PREFIX,
 } from "@/src/server/runners/runner-auth-secrets";
+import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
+import { markCloudRunnerRegistered } from "@/src/server/runners/runner-provisioning-events";
 import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
 
 const DEFAULT_REGISTRATION_TOKEN_TTL_MS = 15 * 60 * 1000;
@@ -216,6 +218,7 @@ export async function exchangeRunnerRegistrationTokenForCredential(
         .returning({
           id: runnerRegistrationTokens.id,
           userId: runnerRegistrationTokens.userId,
+          runnerId: runnerRegistrationTokens.runnerId,
         });
 
       if (!claimedToken) {
@@ -224,6 +227,7 @@ export async function exchangeRunnerRegistrationTokenForCredential(
 
       const runner = await upsertRegisteredRunnerInTransaction(tx, {
         userId: claimedToken.userId,
+        runnerId: claimedToken.runnerId,
         name: input.name,
         endpointUrl: input.endpointUrl,
         now,
@@ -347,11 +351,22 @@ async function upsertRegisteredRunnerInTransaction(
   tx: RunnerRegistrationTransaction,
   input: {
     userId: string;
+    runnerId: string | null;
     name: string;
     endpointUrl: string;
     now: Date;
   },
 ): Promise<{ id: string }> {
+  if (input.runnerId) {
+    return await updateProvisionedRunnerInTransaction(tx, {
+      userId: input.userId,
+      runnerId: input.runnerId,
+      name: input.name,
+      endpointUrl: input.endpointUrl,
+      now: input.now,
+    });
+  }
+
   const [existingRunner] = await tx
     .select({ id: runners.id })
     .from(runners)
@@ -401,4 +416,61 @@ async function upsertRegisteredRunnerInTransaction(
   }
 
   return createdRunner;
+}
+
+async function updateProvisionedRunnerInTransaction(
+  tx: RunnerRegistrationTransaction,
+  input: {
+    userId: string;
+    runnerId: string;
+    name: string;
+    endpointUrl: string;
+    now: Date;
+  },
+): Promise<{ id: string }> {
+  const [existingRunner] = await tx
+    .select({
+      id: runners.id,
+      kind: runners.kind,
+    })
+    .from(runners)
+    .where(
+      and(
+        eq(runners.id, input.runnerId),
+        eq(runners.userId, input.userId),
+        isNull(runners.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!existingRunner) {
+    throw new Error("Provisioned runner for registration token was not found.");
+  }
+
+  if (existingRunner.kind !== DIGITALOCEAN_RUNNER_KIND) {
+    throw new Error("Registration token is linked to an unsupported runner kind.");
+  }
+
+  const [updatedRunner] = await tx
+    .update(runners)
+    .set({
+      name: input.name,
+      endpointUrl: input.endpointUrl,
+      status: "registering",
+      provisioningStatus: "waiting_for_runner",
+      updatedAt: input.now,
+    })
+    .where(eq(runners.id, input.runnerId))
+    .returning({ id: runners.id });
+
+  if (!updatedRunner) {
+    throw new Error("Provisioned runner registration update returned no rows.");
+  }
+
+  await markCloudRunnerRegistered(tx, {
+    runnerId: updatedRunner.id,
+    now: input.now,
+  });
+
+  return updatedRunner;
 }

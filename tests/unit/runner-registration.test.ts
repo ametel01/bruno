@@ -1,8 +1,17 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { runnerCredentials, runnerRegistrationTokens, runners } from "@/src/server/db/schema";
-import { createRunnerRegistrationToken } from "@/src/server/runners/runner-auth-secrets";
+import {
+  runnerCredentials,
+  runnerProvisioningEvents,
+  runnerRegistrationTokens,
+  runners,
+  users,
+} from "@/src/server/db/schema";
+import {
+  createRunnerRegistrationToken,
+  hashRunnerSecret,
+} from "@/src/server/runners/runner-auth-secrets";
 import {
   createRunnerRegistrationTokenForDevelopmentUser,
   exchangeRunnerRegistrationTokenForCredential,
@@ -214,6 +223,85 @@ describe.sequential("runner registration service", () => {
     });
   });
 
+  it("exchanges a persisted cloud runner registration token without creating a second runner", async () => {
+    const token = createRunnerRegistrationToken({
+      randomBytes: (size) => Buffer.alloc(size, 9),
+    });
+    const cloudRunner = await seedCloudRunnerWithRegistrationToken(connection, {
+      token,
+      now: new Date("2026-07-06T02:00:00.000Z"),
+    });
+
+    const result = await exchangeRunnerRegistrationTokenForCredential(
+      {
+        registrationToken: token.value,
+        endpointUrl: "https://cloud-runner.example.com",
+        name: "Cloud Runner Registered",
+      },
+      {
+        createConnection: () => connection,
+        now: () => new Date("2026-07-06T02:01:00.000Z"),
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      runner: {
+        id: cloudRunner.id,
+      },
+      credential: {
+        token: expect.stringMatching(/^agb_run_/),
+        prefix: expect.any(String),
+      },
+    });
+
+    if (!result.ok) {
+      throw new Error("Expected cloud runner registration exchange to succeed.");
+    }
+
+    const persistedRunners = await connection.db.select().from(runners);
+    const [persistedRunner] = persistedRunners;
+    const [persistedToken] = await connection.db.select().from(runnerRegistrationTokens);
+    const [persistedCredential] = await connection.db.select().from(runnerCredentials);
+    const events = await connection.db.select().from(runnerProvisioningEvents);
+
+    expect(persistedRunners).toHaveLength(1);
+    expect(persistedRunner).toMatchObject({
+      id: cloudRunner.id,
+      kind: "digitalocean",
+      endpointUrl: "https://cloud-runner.example.com",
+      status: "registering",
+      provisioningStatus: "waiting_for_runner",
+    });
+    expect(persistedToken).toMatchObject({
+      runnerId: cloudRunner.id,
+      status: "used",
+    });
+    expect(persistedCredential).toMatchObject({
+      runnerId: cloudRunner.id,
+      status: "active",
+      credentialPrefix: result.credential.prefix,
+    });
+    expect(events).toEqual([
+      expect.objectContaining({
+        runnerId: cloudRunner.id,
+        phase: "waiting_for_runner",
+        status: "completed",
+        message: "Cloud runner exchanged its one-time registration token.",
+        metadata: {
+          provider: "digitalocean",
+          registration: "completed",
+        },
+      }),
+    ]);
+    expect(
+      JSON.stringify([persistedRunners, persistedToken, persistedCredential, events]),
+    ).not.toContain(token.value);
+    expect(
+      JSON.stringify([persistedRunners, persistedToken, persistedCredential, events]),
+    ).not.toContain(result.credential.token);
+  });
+
   async function expectExchangeReason(
     registrationToken: string,
     reason: ExchangeFailureReason,
@@ -236,5 +324,54 @@ describe.sequential("runner registration service", () => {
 });
 
 async function resetTables(connection: DatabaseConnection): Promise<void> {
-  await connection.client`truncate table runner_credentials, runner_heartbeats, runner_registration_tokens, agent_approvals, agent_configs, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runners, app_metadata, users restart identity cascade`;
+  await connection.client`truncate table runner_provisioning_events, runner_credentials, runner_heartbeats, runner_registration_tokens, agent_approvals, agent_configs, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runners, app_metadata, users restart identity cascade`;
+}
+
+async function seedCloudRunnerWithRegistrationToken(
+  connection: DatabaseConnection,
+  input: {
+    token: ReturnType<typeof createRunnerRegistrationToken>;
+    now: Date;
+  },
+): Promise<{ id: string }> {
+  const [user] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+  if (!user) {
+    throw new Error("Test user insert returned no rows.");
+  }
+
+  const [runner] = await connection.db
+    .insert(runners)
+    .values({
+      userId: user.id,
+      name: "Cloud Runner",
+      kind: "digitalocean",
+      status: "provisioning",
+      provider: "digitalocean",
+      region: "sfo3",
+      sizeSlug: "s-1vcpu-1gb",
+      image: "ubuntu-24-04-x64",
+      provisioningStatus: "bootstrapping",
+      provisioningStartedAt: input.now,
+      createdAt: input.now,
+      updatedAt: input.now,
+    })
+    .returning({ id: runners.id });
+
+  if (!runner) {
+    throw new Error("Cloud runner insert returned no rows.");
+  }
+
+  await connection.db.insert(runnerRegistrationTokens).values({
+    userId: user.id,
+    runnerId: runner.id,
+    tokenHash: hashRunnerSecret(input.token.value),
+    tokenPrefix: input.token.prefix,
+    status: "pending",
+    expiresAt: new Date(input.now.getTime() + 15 * 60 * 1000),
+    createdAt: input.now,
+    updatedAt: input.now,
+  });
+
+  return runner;
 }

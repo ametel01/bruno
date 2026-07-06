@@ -3,7 +3,7 @@ import "server-only";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { DigitalOceanProviderConfig } from "@/src/server/env";
-import { readDigitalOceanProviderConfig } from "@/src/server/env";
+import { getServerEnv, readDigitalOceanProviderConfig } from "@/src/server/env";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   runnerProvisioningEvents,
@@ -11,6 +11,13 @@ import {
   runners,
 } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
+import {
+  buildCloudRunnerBootstrapForRunner,
+  DEFAULT_CLOUD_RUNNER_HOST,
+  DEFAULT_CLOUD_RUNNER_PORT,
+  redactCloudRunnerBootstrapOutput,
+  type CloudRunnerBootstrapContent,
+} from "@/src/server/runners/cloud-runner-bootstrap";
 import {
   DIGITALOCEAN_PROVIDER,
   DIGITALOCEAN_RUNNER_KIND,
@@ -258,6 +265,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
 
       return {
         duplicate: false,
+        registrationToken: registrationToken.value,
         runner: await toRunnerProvisioningDto(tx, runner.id),
       };
     });
@@ -270,7 +278,18 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       };
     }
 
+    if (!initialized.registrationToken) {
+      throw new Error("Provisioning registration token was not available for bootstrap.");
+    }
+
     const runnerId = initialized.runner.id;
+    const bootstrap = await buildProvisioningBootstrap({
+      connection,
+      runnerId,
+      runnerName: initialized.runner.name,
+      registrationToken: initialized.registrationToken,
+      now,
+    });
     const resource = await runProviderStep(connection, {
       provider,
       runnerId,
@@ -289,6 +308,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
           image: config.image,
           tags: config.tags,
           firewallName,
+          userData: bootstrap.userData,
         }),
     });
 
@@ -486,6 +506,34 @@ async function runProviderStep(
   });
 
   return result;
+}
+
+async function buildProvisioningBootstrap(input: {
+  connection: DatabaseConnection;
+  runnerId: string;
+  runnerName: string;
+  registrationToken: string;
+  now: () => Date;
+}): Promise<CloudRunnerBootstrapContent> {
+  const appBaseUrl = getServerEnv().NEXT_PUBLIC_APP_URL;
+
+  try {
+    return await buildCloudRunnerBootstrapForRunner({
+      runnerId: input.runnerId,
+      appBaseUrl,
+      registrationToken: input.registrationToken,
+      runnerEndpointUrl: `http://${DEFAULT_CLOUD_RUNNER_HOST}:${DEFAULT_CLOUD_RUNNER_PORT}`,
+      runnerName: input.runnerName,
+      createConnection: () => input.connection,
+      now: input.now,
+    });
+  } catch (error) {
+    if (error instanceof Error) {
+      error.message = redactCloudRunnerBootstrapOutput(error.message);
+    }
+
+    throw error;
+  }
 }
 
 async function failProvisioning(

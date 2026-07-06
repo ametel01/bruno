@@ -1,7 +1,13 @@
 import { eq, inArray, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { runnerCredentials, runnerHeartbeats, runners, users } from "@/src/server/db/schema";
+import {
+  runnerCredentials,
+  runnerHeartbeats,
+  runnerProvisioningEvents,
+  runners,
+  users,
+} from "@/src/server/db/schema";
 import {
   recordRunnerHeartbeat,
   reconcileStaleRunnerHeartbeats,
@@ -232,6 +238,120 @@ describe("runner heartbeat persistence", () => {
     );
   });
 
+  it("marks a cloud runner ready through the first online heartbeat", async () => {
+    const now = new Date("2026-07-06T02:02:00.000Z");
+    const credential = createRunnerCredential({
+      randomBytes: (size) => Buffer.alloc(size, 8),
+    });
+    const runner = await seedRunnerCredential(connection, {
+      credentialValue: credential.value,
+      runnerStatus: "registering",
+      kind: "digitalocean",
+      endpointUrl: "https://cloud-runner.example.com",
+      provisioningStatus: "waiting_for_runner",
+      provisioningStartedAt: new Date("2026-07-06T02:00:00.000Z"),
+    });
+
+    const result = await recordRunnerHeartbeat(
+      {
+        authorizationHeader: `Bearer ${credential.value}`,
+        payload: {
+          runnerId: runner.id,
+          status: "online",
+          version: "agentbay-runner/bootstrap",
+        },
+      },
+      { createConnection: () => connection, now: () => now },
+    );
+
+    const [persistedRunner] = await connection.db
+      .select()
+      .from(runners)
+      .where(eq(runners.id, runner.id))
+      .limit(1);
+    const events = await connection.db
+      .select()
+      .from(runnerProvisioningEvents)
+      .where(eq(runnerProvisioningEvents.runnerId, runner.id));
+
+    expect(result).toEqual({
+      ok: true,
+      runner: {
+        id: runner.id,
+        status: "online",
+        observedAt: "2026-07-06T02:02:00.000Z",
+      },
+    });
+    expect(persistedRunner).toMatchObject({
+      status: "online",
+      provisioningStatus: "ready",
+      provisioningCompletedAt: now,
+    });
+    expect(events).toEqual([
+      expect.objectContaining({
+        phase: "ready",
+        status: "completed",
+        message: "First cloud runner heartbeat was observed.",
+        metadata: {
+          provider: "digitalocean",
+          heartbeatStatus: "online",
+        },
+      }),
+    ]);
+    expect(JSON.stringify([persistedRunner, events])).not.toContain(credential.value);
+  });
+
+  it("does not mark a cloud runner ready from a degraded bootstrap heartbeat", async () => {
+    const credential = createRunnerCredential({
+      randomBytes: (size) => Buffer.alloc(size, 6),
+    });
+    const runner = await seedRunnerCredential(connection, {
+      credentialValue: credential.value,
+      runnerStatus: "registering",
+      kind: "digitalocean",
+      endpointUrl: "https://degraded-cloud-runner.example.com",
+      provisioningStatus: "waiting_for_runner",
+      provisioningStartedAt: new Date("2026-07-06T02:00:00.000Z"),
+    });
+
+    const result = await recordRunnerHeartbeat(
+      {
+        authorizationHeader: `Bearer ${credential.value}`,
+        payload: {
+          runnerId: runner.id,
+          status: "degraded",
+        },
+      },
+      {
+        createConnection: () => connection,
+        now: () => new Date("2026-07-06T02:02:00.000Z"),
+      },
+    );
+
+    const [persistedRunner] = await connection.db
+      .select()
+      .from(runners)
+      .where(eq(runners.id, runner.id))
+      .limit(1);
+    const events = await connection.db
+      .select()
+      .from(runnerProvisioningEvents)
+      .where(eq(runnerProvisioningEvents.runnerId, runner.id));
+
+    expect(result).toMatchObject({
+      ok: true,
+      runner: {
+        status: "degraded",
+      },
+    });
+    expect(persistedRunner).toMatchObject({
+      status: "degraded",
+      provisioningStatus: "waiting_for_runner",
+      provisioningCompletedAt: null,
+    });
+    expect(events).toEqual([]);
+  });
+
   it("validates runner IDs and ignores untrusted metric keys", () => {
     expect(validateRunnerHeartbeatPayload({ runnerId: "not-a-uuid", metrics: [] })).toEqual({
       ok: false,
@@ -266,13 +386,19 @@ async function seedRunnerCredential(
   input: {
     credentialValue: string;
     runnerStatus: string;
+    kind?: "manual_vps" | "digitalocean";
     endpointUrl?: string;
+    provisioningStatus?: string;
+    provisioningStartedAt?: Date;
     credentialOverrides?: Partial<typeof runnerCredentials.$inferInsert>;
   },
 ): Promise<{ id: string }> {
   const runner = await seedRunner(connection, {
     endpointUrl: input.endpointUrl ?? "https://runner.example.com",
     status: input.runnerStatus,
+    ...(input.kind ? { kind: input.kind } : {}),
+    ...(input.provisioningStatus ? { provisioningStatus: input.provisioningStatus } : {}),
+    ...(input.provisioningStartedAt ? { provisioningStartedAt: input.provisioningStartedAt } : {}),
   });
 
   await connection.db.insert(runnerCredentials).values({
@@ -291,6 +417,9 @@ async function seedRunner(
   input: {
     endpointUrl: string;
     status: string;
+    kind?: "manual_vps" | "digitalocean";
+    provisioningStatus?: string;
+    provisioningStartedAt?: Date;
   },
 ): Promise<{ id: string }> {
   const [user] = await connection.db.insert(users).values({}).returning({ id: users.id });
@@ -304,9 +433,20 @@ async function seedRunner(
     .values({
       userId: user.id,
       name: "Test Runner",
-      kind: "manual_vps",
+      kind: input.kind ?? "manual_vps",
       endpointUrl: input.endpointUrl,
       status: input.status,
+      ...(input.kind === "digitalocean"
+        ? {
+            provider: "digitalocean",
+            region: "sfo3",
+            sizeSlug: "s-1vcpu-1gb",
+            image: "ubuntu-24-04-x64",
+            provisioningStatus: input.provisioningStatus ?? "waiting_for_runner",
+            provisioningStartedAt:
+              input.provisioningStartedAt ?? new Date("2026-07-05T07:00:00.000Z"),
+          }
+        : {}),
       createdAt: new Date("2026-07-05T07:00:00.000Z"),
       updatedAt: new Date("2026-07-05T07:00:00.000Z"),
     })
@@ -334,7 +474,7 @@ async function seedHeartbeat(
 }
 
 async function resetRunnerHeartbeatTables(connection: DatabaseConnection): Promise<void> {
-  await connection.client`truncate table runner_heartbeats, runner_credentials, runner_registration_tokens, runners, app_metadata, users restart identity cascade`;
+  await connection.client`truncate table runner_provisioning_events, runner_heartbeats, runner_credentials, runner_registration_tokens, runners, app_metadata, users restart identity cascade`;
 }
 
 async function countRows(

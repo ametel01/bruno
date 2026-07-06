@@ -81,7 +81,7 @@
 - [x] #150 Prepare Milestone 13 tracking and baseline gates. Status: merged in PR #169.
 - [x] #151 Add cloud runner provisioning model and provider contract. Status: implemented locally; checker handoff pending.
 - [x] #152 Implement Create runner provisioning workflow. Status: implemented locally; checker handoff pending.
-- [ ] #153 Add cloud runner bootstrap registration and readiness. Status: blocked until #151 and #152 are complete.
+- [x] #153 Add cloud runner bootstrap registration and readiness. Status: implemented locally; checker handoff pending.
 - [ ] #154 Show cloud provisioning progress and failures in the UI. Status: blocked until provisioning state and workflow slices are complete.
 - [ ] #155 Complete assignment, cleanup, and Milestone 13 evidence. Status: blocked until #151-#154 are complete.
 - Later Milestone 13 issue agents must append validation evidence here after their implementation slices.
@@ -95,6 +95,7 @@
 - #151 adds the durable cloud runner provisioning foundation: `runners.kind` can now represent `digitalocean`, DigitalOcean runner rows store provider, provider resource id, region, size slug, image, provisioning status, provisioning error, and provisioning timing fields, and manual VPS rows continue to require a non-empty endpoint.
 - #151 adds a server-only DigitalOcean provider configuration reader and fake provider abstraction for create, tag, firewall, cleanup, and failure-path tests without network calls. Provider tokens remain out of client env validation and client component import paths.
 - #152 adds backend `POST /api/runners` provisioning for the development user. The route validates DigitalOcean create-runner input, creates a provisioning runner plus hash-only one-time registration token, persists phase events for refresh-safe progress, calls the DigitalOcean API provider create/tag/firewall contract with fakeable tests, returns duplicate-submit state for an in-progress runner, and reports provider failures as actionable safe runner state without exposing provider credentials or registration secrets.
+- #153 adds server-generated cloud runner bootstrap content and a runner-side bootstrap command that reuses the existing one-time registration-token exchange, credential lifecycle, and heartbeat path so DigitalOcean runners move from bootstrapping to registering to ready without a second auth mechanism.
 - `CHANGELOG.md` has the Keep a Changelog 1.0.0 framing and an `## [Unreleased]` section. Agents should keep that structure and add changelog bullets only for shipped functional user/operator-visible changes.
 
 ### Baseline Gate Expectations
@@ -121,6 +122,7 @@
 - 2026-07-06: #151 added additive runner provisioning columns and constraints, expanded runner kind support to `digitalocean`, kept manual VPS endpoint compatibility constraints, added server-only DigitalOcean env/config validation, added a fake DigitalOcean provider, and added schema/provider/server-only tests.
 - 2026-07-06: #151 maintainer review requested a compiler-enforced server-only boundary; token-bearing provider modules now import Next's `server-only` package, and Vitest aliases that package to an empty test helper for server-unit tests only.
 - 2026-07-06: #152 added `runner_provisioning_events`, the `POST /api/runners` backend route, the DigitalOcean provisioning service/API provider, duplicate-submit handling, safe provider-failure state, and focused secret-safety tests for route and job behavior.
+- 2026-07-06: #153 added server-generated cloud-init bootstrap content that installs Docker, prepares the runner service, runs a runner bootstrap command, and starts `runner:service`; added safe bootstrap redaction helpers; reused the existing one-time registration-token exchange and heartbeat credential lifecycle for cloud runners; and recorded `bootstrapping`, registration-complete, and first-heartbeat-ready provisioning events.
 
 ### Validation Evidence
 
@@ -149,6 +151,18 @@
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism tests/unit/runner-provisioning.test.ts tests/unit/runner-provisioning-route.test.ts tests/unit/runner-registration.test.ts tests/unit/runner-registration-routes.test.ts tests/unit/runner-heartbeat.test.ts tests/unit/runner-heartbeat-route.test.ts tests/unit/runner-credential-lifecycle.test.ts tests/unit/runner-credential-lifecycle-routes.test.ts tests/unit/manual-runner-status.test.ts tests/unit/digitalocean-provider.test.ts tests/unit/server-env.test.ts tests/unit/agent-schema.test.ts`: pass; 12 files and 80 tests passed.
   - `git diff --check`: pass; no whitespace errors.
   - Full `bun run verify` and E2E were not run before checker handoff because #152 is a backend route/service slice with focused route/service/schema/provider coverage, broader runner unit coverage, and package gates; the repo has known default-parallel shared-DB Vitest isolation risk recorded above.
+
+- 2026-07-06 #153:
+  - `bun install --frozen-lockfile`: pass; restored local package binaries from the committed lockfile.
+  - `bunx drizzle-kit generate --name runner_provisioning_events`: pass after install; generated the provisioning-event table migration. The SQL hash matches the parallel #152 event-table migration, so this branch uses the same `0011_blushing_brother_voodoo` tag to avoid duplicate shared-DB migration application.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run db:migrate`: pass; existing `drizzle` schema notices only.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism tests/unit/cloud-runner-bootstrap.test.ts tests/unit/runner-service-bootstrap.test.ts tests/unit/runner-registration.test.ts tests/unit/runner-heartbeat.test.ts tests/unit/runner-registration-routes.test.ts tests/unit/runner-heartbeat-route.test.ts tests/unit/agent-schema.test.ts`: pass; 7 files and 59 tests covered bootstrap content, redaction, runner-side registration/heartbeat calls, cloud registration exchange, heartbeat readiness, routes, and schema/migration shape.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism tests/unit/runner-auth-secrets.test.ts tests/unit/runner-registration.test.ts tests/unit/runner-registration-routes.test.ts tests/unit/runner-heartbeat.test.ts tests/unit/runner-heartbeat-route.test.ts tests/unit/runner-credential-lifecycle.test.ts tests/unit/runner-credential-lifecycle-routes.test.ts tests/unit/runner-service.test.ts tests/unit/runner-service-bootstrap.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/digitalocean-provider.test.ts tests/unit/manual-runner-status.test.ts tests/unit/manual-runner-adapter.test.ts`: pass; 13 files and 67 broader runner tests passed.
+  - `bun run format:check`: pass; Biome checked 126 files with no fixes applied.
+  - `bun run lint`: pass; Biome lint checked 126 files with no fixes applied.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed.
+  - `git diff --check`: pass; no whitespace errors.
+  - Optional `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism`: failed outside the required #153 gate with shared-DB/reset symptoms and older `create-agent-db` route failures; the focused acceptance and broader runner slices above pass when run serially and are the checker handoff evidence for this issue.
 
 - 2026-07-06 #150:
   - `gh issue view 150 --repo ametel01/agentbay --json number,title,body,state,url`: pass; issue is open and maps Milestone 13 tracking to `docs/MILESTONES.md` plus PLAN Step 0.

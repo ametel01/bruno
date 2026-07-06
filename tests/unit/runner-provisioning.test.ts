@@ -76,6 +76,7 @@ describe.sequential("runner provisioning service", () => {
           image: "ubuntu-24-04-x64",
           tags: ["agentbay", "cloud-runner"],
           firewallName: "agentbay-runners",
+          userData: expect.stringContaining("AGENTBAY_RUNNER_REGISTRATION_TOKEN="),
         },
       },
       {
@@ -96,6 +97,7 @@ describe.sequential("runner provisioning service", () => {
 
     expect(result.runner.provisioning.phases.map((event) => [event.phase, event.status])).toEqual([
       ["pending", "started"],
+      ["bootstrapping", "started"],
       ["creating", "started"],
       ["creating", "completed"],
       ["tagging", "started"],
@@ -104,6 +106,20 @@ describe.sequential("runner provisioning service", () => {
       ["firewall_configuring", "completed"],
       ["waiting_for_runner", "started"],
     ]);
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
+    ).toContain(generatedRegistrationToken.value);
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
+    ).toContain("ExecStartPre=/root/.bun/bin/bun run runner:bootstrap");
+    expect(
+      result.runner.provisioning.phases.find((event) => event.phase === "bootstrapping")?.metadata,
+    ).toMatchObject({
+      provider: "digitalocean",
+      registrationToken: "injected",
+    });
     expect(
       result.runner.provisioning.phases.find(
         (event) => event.phase === "firewall_configuring" && event.status === "completed",
@@ -174,6 +190,7 @@ describe.sequential("runner provisioning service", () => {
 
     expect(result.runner.provisioning.phases.map((event) => [event.phase, event.status])).toEqual([
       ["pending", "started"],
+      ["bootstrapping", "started"],
       ["creating", "started"],
       ["failed", "failed"],
     ]);

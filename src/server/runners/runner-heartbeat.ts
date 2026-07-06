@@ -1,7 +1,9 @@
 import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { runnerCredentials, runnerHeartbeats, runners } from "@/src/server/db/schema";
+import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
 import { hashRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
+import { markCloudRunnerReadyAfterFirstHeartbeat } from "@/src/server/runners/runner-provisioning-events";
 
 export const RUNNER_HEARTBEAT_ONLINE_STATUS = "online";
 export const RUNNER_HEARTBEAT_DEGRADED_STATUS = "degraded";
@@ -119,6 +121,8 @@ export async function recordRunnerHeartbeat(
           credentialStatus: runnerCredentials.status,
           expiresAt: runnerCredentials.expiresAt,
           runnerId: runners.id,
+          runnerKind: runners.kind,
+          provisioningStatus: runners.provisioningStatus,
         })
         .from(runnerCredentials)
         .innerJoin(runners, eq(runners.id, runnerCredentials.runnerId))
@@ -152,13 +156,25 @@ export async function recordRunnerHeartbeat(
         })
         .where(eq(runnerCredentials.id, row.credentialId));
 
-      await tx
-        .update(runners)
-        .set({
-          status: payload.value.status,
-          updatedAt: now,
-        })
-        .where(eq(runners.id, payload.value.runnerId));
+      if (
+        row.runnerKind === DIGITALOCEAN_RUNNER_KIND &&
+        payload.value.status === RUNNER_HEARTBEAT_ONLINE_STATUS &&
+        row.provisioningStatus !== "ready"
+      ) {
+        await markCloudRunnerReadyAfterFirstHeartbeat(tx, {
+          runnerId: payload.value.runnerId,
+          now,
+          heartbeatStatus: payload.value.status,
+        });
+      } else {
+        await tx
+          .update(runners)
+          .set({
+            status: payload.value.status,
+            updatedAt: now,
+          })
+          .where(eq(runners.id, payload.value.runnerId));
+      }
 
       return {
         ok: true,

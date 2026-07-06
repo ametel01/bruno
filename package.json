@@ -14,6 +14,7 @@
     "format": "biome format --write app src scripts tests app/globals.css *.ts *.json",
     "format:check": "biome ci --linter-enabled=false --assist-enabled=false app src scripts tests app/globals.css *.ts *.json",
     "lint": "biome lint app src scripts tests *.ts *.json",
+    "runner:bootstrap": "bun src/runner-service/bootstrap.ts",
     "runner:service": "bun src/runner-service/index.ts",
     "test": "vitest run",
     "test:e2e": "DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} playwright test",
