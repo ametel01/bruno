@@ -163,15 +163,18 @@ type DigitalOceanApiDroplet = {
   name?: string | null;
   region?: { slug?: string | null } | string | null;
   sizeSlug?: string | null;
+  size_slug?: string | null;
   image?: { slug?: string | null } | string | null;
   networks?: {
     v4?: Array<{
       ipAddress?: string | null;
+      ip_address?: string | null;
       type?: string | null;
     }> | null;
   } | null;
   tags?: string[] | null;
   createdAt?: Date | string | null;
+  created_at?: Date | string | null;
 };
 
 type DigitalOceanFirewallBody = {
@@ -552,11 +555,11 @@ function apiDropletToResource(
     publicIpv4: readApiPublicIpv4(droplet),
     name: droplet.name ?? fallback?.name ?? "agentbay-runner",
     region: readApiSlug(droplet.region) ?? fallback?.region ?? "unknown",
-    sizeSlug: droplet.sizeSlug ?? fallback?.sizeSlug ?? "unknown",
+    sizeSlug: droplet.sizeSlug ?? droplet.size_slug ?? fallback?.sizeSlug ?? "unknown",
     image: readApiSlug(droplet.image) ?? fallback?.image ?? "unknown",
     tags: [...new Set(droplet.tags ?? fallback?.tags ?? [])].sort(),
     firewallApplied: false,
-    createdAt: readApiDate(droplet.createdAt) ?? now().toISOString(),
+    createdAt: readApiDate(droplet.createdAt ?? droplet.created_at) ?? now().toISOString(),
     deletedAt: null,
   };
 }
@@ -606,9 +609,11 @@ function readApiDate(value: Date | string | null | undefined): string | null {
 
 function readApiPublicIpv4(droplet: DigitalOceanApiDroplet): string | null {
   const publicNetwork = droplet.networks?.v4?.find(
-    (network) => network.type === "public" && typeof network.ipAddress === "string",
+    (network) =>
+      network.type === "public" &&
+      (typeof network.ipAddress === "string" || typeof network.ip_address === "string"),
   );
-  const ipAddress = publicNetwork?.ipAddress?.trim() ?? "";
+  const ipAddress = (publicNetwork?.ipAddress ?? publicNetwork?.ip_address)?.trim() ?? "";
 
   return isPublicIpv4(ipAddress) ? ipAddress : null;
 }

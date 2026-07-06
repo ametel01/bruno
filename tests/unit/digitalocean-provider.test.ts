@@ -303,7 +303,7 @@ describe("DigitalOcean API provider", () => {
     expect(JSON.stringify(result)).not.toContain("dop_v1_super_secret");
   });
 
-  it("reads a Droplet public IPv4 through the SDK Droplet GET API", async () => {
+  it("reads a Droplet public IPv4 from raw DigitalOcean API fields through the SDK GET API", async () => {
     const calls: Array<{ step: string; id?: number }> = [];
     const provider = new DigitalOceanApiProvider({
       token: "dop_v1_super_secret",
@@ -315,11 +315,11 @@ describe("DigitalOcean API provider", () => {
                 id: 456789,
                 name: "agentbay-cloud-runner",
                 region: { slug: "sfo3" },
-                sizeSlug: "s-1vcpu-512mb-10gb",
+                size_slug: "s-1vcpu-512mb-10gb",
                 image: { slug: "ubuntu-24-04-x64" },
                 networks: { v4: [] },
                 tags: ["agentbay"],
-                createdAt: "2026-07-06T08:00:00.000Z",
+                created_at: "2026-07-06T08:00:00.000Z",
               },
             }),
             byDroplet_id: (id) => ({
@@ -331,16 +331,16 @@ describe("DigitalOcean API provider", () => {
                     id,
                     name: "agentbay-cloud-runner",
                     region: { slug: "sfo3" },
-                    sizeSlug: "s-1vcpu-512mb-10gb",
+                    size_slug: "s-1vcpu-512mb-10gb",
                     image: { slug: "ubuntu-24-04-x64" },
                     networks: {
                       v4: [
-                        { ipAddress: "10.0.0.5", type: "private" },
-                        { ipAddress: "203.0.113.88", type: "public" },
+                        { ip_address: "10.0.0.5", type: "private" },
+                        { ip_address: "203.0.113.88", type: "public" },
                       ],
                     },
                     tags: ["agentbay"],
-                    createdAt: "2026-07-06T08:00:00.000Z",
+                    created_at: "2026-07-06T08:00:00.000Z",
                   },
                 };
               },
@@ -378,6 +378,8 @@ describe("DigitalOcean API provider", () => {
       value: {
         providerResourceId: "456789",
         publicIpv4: "203.0.113.88",
+        sizeSlug: "s-1vcpu-512mb-10gb",
+        createdAt: "2026-07-06T08:00:00.000Z",
       },
     });
     expect(calls).toEqual([{ step: "droplets.get", id: 456789 }]);
