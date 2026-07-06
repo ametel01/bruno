@@ -365,23 +365,24 @@
 
 ## Milestone 15 Backups and Restore
 
-- Status: #165 manual agent backup creation is in progress on `codex/issue-165-manual-backup`.
+- Status: #166 backup restore creation is in progress on `codex/issue-166-restore-backups`.
 - Source plan:
   - `docs/MILESTONES.md` Milestone 15: Backups and Restore.
   - GitHub issue #162: Prepare Milestone 15 tracking and baseline gates.
   - GitHub issue #163: Add backup persistence, manifest, and secret policy.
   - GitHub issue #164: Add S3-compatible backup object storage boundary.
   - GitHub issue #165: Implement manual agent backup creation.
-  - `PLAN.md` is absent in this worktree; the published #162-#165 issue bodies and `docs/MILESTONES.md` are the active Milestone 15 contract.
-- Current branch: `codex/issue-165-manual-backup`.
+  - GitHub issue #166: Restore backups into new agents.
+  - `PLAN.md` is absent in this worktree; the published #162-#166 issue bodies and `docs/MILESTONES.md` are the active Milestone 15 contract.
+- Current branch: `codex/issue-166-restore-backups`.
 
 ### Issue Checklist
 
 - [x] #162 Prepare Milestone 15 tracking and baseline gates. Status: merged in PR #181.
 - [x] #163 Add backup persistence, manifest, and secret policy. Status: merged in PR #182.
 - [x] #164 Add S3-compatible backup object storage boundary. Status: merged in PR #183.
-- [ ] #165 Implement manual agent backup creation. Status: implementation and validation in progress.
-- [ ] #166 Restore backups into new agents. Status: pending #163, #164, and #165.
+- [x] #165 Implement manual agent backup creation. Status: merged in PR #184.
+- [ ] #166 Restore backups into new agents. Status: implementation and validation in progress.
 - [ ] #167 Add backup and restore controls to the agent UI. Status: pending backend backup and restore slices.
 - [ ] #168 Complete backup restore acceptance and security evidence. Status: pending #163-#167.
 - Later Milestone 15 issue agents must append validation evidence here after their implementation slices merge.
@@ -413,6 +414,11 @@
   - Manual backup creation collects agent metadata, config, template snapshot, sanitized system prompt, skills metadata, memory metadata, and log metadata into the shared manifest format.
   - Backup artifacts upload through the `BackupObjectStorage` boundary; successful uploads mark the backup `ready`, persist `storage_uri`, and write one `backup.created` audit event.
   - Missing agents return `agent_not_found`, while storage or manifest failures leave a safe `failed` backup row without raw secrets or credential details.
+- #166 adds restore creation for ready backups:
+  - `POST /api/agents/:agentId/backups/:backupId/restore` validates the selected agent and backup IDs before invoking the server-only restore service.
+  - Restore downloads the backup artifact through `BackupObjectStorage`, validates the manifest and template snapshot shape, and rejects raw secret-like text before creating an agent.
+  - Successful restore creates a new stopped agent instead of overwriting the source, restores config/system prompt/template snapshot metadata, marks the backup `restored` with `restored_at`, and writes one `backup.restored` audit event on the restored agent.
+  - Missing artifacts, invalid manifests, unsafe artifacts, missing storage config, or non-restorable backups return safe errors without exposing credentials or artifact contents.
 - `CHANGELOG.md` has the Keep a Changelog 1.0.0 framing and an `## [Unreleased]` section. Agents should keep that structure and add changelog bullets only for shipped functional user/operator-visible changes.
 
 ### Baseline Gate Expectations
@@ -442,6 +448,7 @@
 - 2026-07-06: #163 added the `backups` schema/migration, typed manifest validator, conservative backup status transition helper, raw-secret rejection policy, and focused schema/manifest tests.
 - 2026-07-06: #164 added the server-only backup object storage boundary, deterministic fake storage, S3-compatible request signing/config validation, safe storage URI helper, safe upload/download failure mapping, and focused storage/security tests.
 - 2026-07-06: #165 added manual backup creation with sanitized manifest assembly, backup artifact upload, ready/failed backup persistence, route handling, and `backup.created` audit events.
+- 2026-07-06: #166 added backup restore creation with artifact download, manifest/template validation, unsafe artifact rejection, new stopped-agent creation, restored config/template metadata, restored backup status, and `backup.restored` audit events.
 
 ### Validation Evidence
 
@@ -498,6 +505,34 @@
   - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run verify`: failed during default-parallel `bun run test` with documented shared-database reset races: 9 files failed with PostgreSQL deadlocks, hook timeouts, duplicate `app_metadata` keys, and FK fallout while unrelated DB suites truncated overlapping tables concurrently. The decomposed gates above and the full `--no-file-parallelism` unit suite passed.
   - Post-aggregate rerun `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bunx vitest run tests/unit/create-agent-backup.test.ts tests/unit/agent-backups-route.test.ts`: pass; 2 files and 6 tests passed after the failed parallel aggregate run.
   - `CHANGELOG.md` updated under `## [Unreleased]` because #165 ships user/operator-visible manual backup creation behavior.
+
+- 2026-07-06 #166:
+  - `gh issue view 166 --repo ametel01/agentbay --json number,title,state,url,body,labels`: pass; issue is open and maps Milestone 15 restore-to-new-agent, manifest validation, restored config/template/system prompt metadata, restored backup status, `backup.restored` event, and secret-safety tests to PLAN Step 4.
+  - `bun install`: pass; installed dependencies in the fresh issue worktree before package-script validation.
+  - Initial `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bunx vitest run tests/unit/restore-agent-backup.test.ts tests/unit/restore-backup-route.test.ts`: failed because the first unsafe-artifact test exposed a restore hardening gap for embedded raw secret-like text; restore now performs an additional recursive raw-secret scan before creating an agent.
+  - Second focused restore suite run failed because the test seeded the persisted backup row with the unsafe artifact manifest; fixed the test to keep the persisted row safe and overwrite only the fake object-storage artifact.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bunx vitest run tests/unit/restore-agent-backup.test.ts tests/unit/restore-backup-route.test.ts`: pass; 2 files and 7 tests covered restore success, missing artifact failure, unsafe artifact failure, already-restoring backup rejection, `backup.restored` event creation, route validation, and non-restorable route conflict mapping.
+  - Initial `bun run typecheck`: failed because restored template snapshots were not narrowed to supported template keys and `defaultSchedule: "Manual"`; fixed by validating snapshot shape with `isSupportedTemplateKey` and exact `Manual` schedule.
+  - Initial `bun run lint`: warned on an unused import and transaction alias in `restore-backup.ts`; fixed.
+  - `bun run format`: pass; formatted the new restore service and route test files.
+  - `bun run format:check`: pass; Biome checked 149 files with no fixes applied.
+  - `bun run lint`: pass; Biome checked 149 files with no fixes applied.
+  - `bun run typecheck`: pass; `tsc --noEmit` completed.
+  - `git diff --check`: pass; no whitespace errors.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: pass; Next.js production build completed and listed `/api/agents/:agentId/backups/:backupId/restore`. The generated `next-env.d.ts` route-reference churn from build was not kept in the diff.
+  - Self-review found that already-`restoring` backups could be treated as restorable and concurrent restores could both pass the initial ready check; fixed by making only the call that atomically updates `ready` to `restoring` proceed, and added a regression for already-restoring backups.
+  - Checker Ohm found that invalid restore schedule metadata could pass manifest validation, then either restore incorrectly or strand the backup in `restoring` after a DB config check failure. Fixed by validating restore config schedule shape before agent/config creation, and added a regression for `cron` without `scheduleCron`.
+  - Combined focused DB test without serialization reproduced the known shared-table reset race; reran the same focused set with `--no-file-parallelism`.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism tests/unit/restore-agent-backup.test.ts tests/unit/restore-backup-route.test.ts tests/unit/backup-manifest.test.ts tests/unit/create-agent-backup.test.ts tests/unit/agent-backups-route.test.ts`: pass; 5 files and 19 tests passed.
+  - Post-checker-fix `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: pass; Next.js production build completed and listed `/api/agents/:agentId/backups/:backupId/restore`. The generated `next-env.d.ts` route-reference churn from build was not kept in the diff.
+  - `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism`: pass; 50 files and 393 tests passed.
+  - Maintainer reviewer Descartes found that restore config validation still accepted non-empty invalid cron strings and invalid time zones that the normal config update path rejects. Fixed restore validation to mirror the existing five-field cron parser and `Intl.DateTimeFormat` timezone check before agent creation, and added regressions proving invalid cron/timezone artifacts fail safely without creating restored agents.
+  - Post-maintainer-fix `bun run format`: pass; Biome found no formatting changes to apply.
+  - Post-maintainer-fix `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism tests/unit/restore-agent-backup.test.ts tests/unit/restore-backup-route.test.ts tests/unit/backup-manifest.test.ts tests/unit/create-agent-backup.test.ts tests/unit/agent-backups-route.test.ts`: pass; 5 files and 20 tests passed.
+  - Post-maintainer-fix `bun run format:check`, `bun run lint`, `bun run typecheck`, and `git diff --check`: pass.
+  - Post-maintainer-fix `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run build`: pass; Next.js production build completed and listed `/api/agents/:agentId/backups/:backupId/restore`. The generated `next-env.d.ts` route-reference churn from build was not kept in the diff.
+  - Post-maintainer-fix `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/agentbay NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run test -- --no-file-parallelism`: pass; 50 files and 394 tests passed.
+  - `CHANGELOG.md` updated under `## [Unreleased]` because #166 ships user/operator-visible restore creation behavior.
 
 ## Milestone 12 Secure Runner Auth
 
