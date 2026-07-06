@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentPersistenceError } from "@/src/server/agents/create-agent";
+import { AgentCreateBlockedError, AgentPersistenceError } from "@/src/server/agents/create-agent";
 
 const mocks = vi.hoisted(() => ({
   createAgentForDevelopmentUser: vi.fn(),
@@ -145,6 +145,79 @@ describe("POST /api/agents route", () => {
       },
     });
     expect(JSON.stringify(body)).not.toContain("postgres://");
+  });
+
+  it("returns a safe plan-limit response when creation is blocked", async () => {
+    mocks.createAgentForDevelopmentUser.mockRejectedValueOnce(
+      new AgentCreateBlockedError({
+        ok: false,
+        reason: "plan_limit_reached",
+        currentAgents: 2,
+        maxAgents: 2,
+      }),
+    );
+    const { POST } = await import("@/app/api/agents/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/agents", {
+        method: "POST",
+        body: JSON.stringify({ name: "Research Agent", templateKey: "research_agent" }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body).toEqual({
+      error: {
+        code: "plan_limit_reached",
+        message: "Agent plan limit reached.",
+        currentAgents: 2,
+        maxAgents: 2,
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("postgres://");
+  });
+
+  it("returns a safe runner-capacity response when creation is blocked", async () => {
+    mocks.createAgentForDevelopmentUser.mockRejectedValueOnce(
+      new AgentCreateBlockedError({
+        ok: false,
+        reason: "runner_capacity_reached",
+        runner: {
+          id: "00000000-0000-4000-8000-000000000158",
+          kind: "manual_vps",
+          status: "online",
+          latestHeartbeatAt: "2026-07-06T04:01:00.000Z",
+          capacity: {
+            max_agents: 1,
+            running_agents: 1,
+            cpu_used_percent: 20,
+            memory_used_mb: 128,
+            memory_total_mb: 1024,
+            disk_used_mb: 256,
+            disk_total_mb: 2048,
+          },
+        },
+      }),
+    );
+    const { POST } = await import("@/app/api/agents/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/agents", {
+        method: "POST",
+        body: JSON.stringify({ name: "Research Agent", templateKey: "research_agent" }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body).toEqual({
+      error: {
+        code: "runner_capacity_reached",
+        message: "Runner capacity reached.",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("00000000-0000-4000-8000-000000000158");
   });
 
   it("returns a safe database unavailable response when Postgres cannot be reached", async () => {

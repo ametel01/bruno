@@ -9,6 +9,10 @@ import {
   type SupportedAgentTemplateKey,
 } from "@/src/server/agents/templates";
 import { recordAgentEventInTransaction } from "@/src/server/events/agent-events";
+import {
+  selectRunnerPlacementForDevelopmentUserInTransaction,
+  type RunnerPlacementResult,
+} from "@/src/server/runners/runner-placement";
 import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
 
 export const AGENT_NAME_MAX_LENGTH = 120;
@@ -92,6 +96,7 @@ export type CreateAgentDependencies = {
   createConnection?: () => DatabaseConnection;
   insertDefaultAgentConfig?: InsertDefaultAgentConfig;
   insertCreatedEvent?: InsertCreatedEvent;
+  planMaxAgents?: number | null;
 };
 
 export class AgentPersistenceError extends Error {
@@ -99,6 +104,28 @@ export class AgentPersistenceError extends Error {
     super("Agent creation failed.");
     this.name = "AgentPersistenceError";
     this.cause = cause;
+  }
+}
+
+export class AgentCreateBlockedError extends Error {
+  readonly reason: "plan_limit_reached" | "runner_capacity_reached";
+  readonly currentAgents?: number;
+  readonly maxAgents?: number;
+
+  constructor(
+    result: Extract<
+      RunnerPlacementResult,
+      { reason: "plan_limit_reached" | "runner_capacity_reached" }
+    >,
+  ) {
+    super("Agent creation blocked.");
+    this.name = "AgentCreateBlockedError";
+    this.reason = result.reason;
+
+    if (result.reason === "plan_limit_reached") {
+      this.currentAgents = result.currentAgents;
+      this.maxAgents = result.maxAgents;
+    }
   }
 }
 
@@ -166,10 +193,23 @@ export async function createAgentForDevelopmentUser(
     const result = await connection.db.transaction(async (tx) => {
       const userId = await getOrCreateDevelopmentUserId(tx);
       const templateSnapshot = getAgentTemplateSnapshot(input.templateKey);
+      const placement = await selectRunnerPlacementForDevelopmentUserInTransaction(tx, {
+        planMaxAgents: dependencies.planMaxAgents,
+      });
+
+      if (
+        !placement.ok &&
+        (placement.reason === "plan_limit_reached" ||
+          placement.reason === "runner_capacity_reached")
+      ) {
+        throw new AgentCreateBlockedError(placement);
+      }
+
       const [agent] = await tx
         .insert(agents)
         .values({
           userId,
+          runnerId: placement.ok ? placement.runner.id : null,
           name: input.name,
           templateKey: input.templateKey,
           templateVersion: templateSnapshot.version,
@@ -191,6 +231,10 @@ export async function createAgentForDevelopmentUser(
 
     return result;
   } catch (error) {
+    if (error instanceof AgentCreateBlockedError) {
+      throw error;
+    }
+
     throw new AgentPersistenceError(error);
   } finally {
     if (ownsConnection) {

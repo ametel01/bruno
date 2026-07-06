@@ -11,6 +11,7 @@ import {
   DEFAULT_AGENT_CONFIG,
   createAgentForDevelopmentUser,
 } from "@/src/server/agents/create-agent";
+import type { AgentCreateBlockedError } from "@/src/server/agents/create-agent";
 import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
 import {
   APPROVAL_APPROVED_EVENT_TYPE,
@@ -65,6 +66,7 @@ import {
   appMetadata,
   dockerRunnerContainers,
   localRunnerProcesses,
+  runnerHeartbeats,
   runners,
   users,
 } from "@/src/server/db/schema";
@@ -74,6 +76,7 @@ import {
   recordAgentEventInTransaction,
   recordAgentEventsInTransaction,
 } from "@/src/server/events/agent-events";
+import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
 import {
   FAKE_RUNNER_APPROVAL_REQUESTED_BY,
   FAKE_RUNNER_APPROVAL_REQUESTED_EVENT_TYPE,
@@ -267,6 +270,232 @@ describe("create agent persistence", () => {
       runnerId: null,
       status: "running",
     });
+  });
+
+  it("assigns new agents to an eligible online runner when placement succeeds", async () => {
+    const userId = await ensureDevelopmentUser(connection);
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, userId, {
+      maxAgents: 2,
+      runningAgents: 0,
+    });
+
+    const created = await createAgentForDevelopmentUser(
+      { name: "Placed Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const [persistedAgent] = await connection.db
+      .select({ runnerId: agents.runnerId, status: agents.status })
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+
+    expect(persistedAgent).toEqual({
+      runnerId: runner.id,
+      status: "stopped",
+    });
+  });
+
+  it("returns a plan-limit blocker before creating an agent", async () => {
+    await createAgentForDevelopmentUser(
+      { name: "Existing Plan Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+
+    await expect(
+      createAgentForDevelopmentUser(
+        { name: "Blocked Plan Agent", templateKey: "research_agent" },
+        { createConnection: () => connection, planMaxAgents: 1 },
+      ),
+    ).rejects.toMatchObject({
+      name: "AgentCreateBlockedError",
+      reason: "plan_limit_reached",
+      currentAgents: 1,
+      maxAgents: 1,
+    } satisfies Partial<AgentCreateBlockedError>);
+
+    await expect(connection.db.select().from(agents)).resolves.toHaveLength(1);
+  });
+
+  it("returns a runner-capacity blocker before creating an agent", async () => {
+    const userId = await ensureDevelopmentUser(connection);
+    await seedOnlineRunnerWithHeartbeat(connection, userId, {
+      maxAgents: 1,
+      runningAgents: 1,
+    });
+
+    await expect(
+      createAgentForDevelopmentUser(
+        { name: "Blocked Capacity Agent", templateKey: "research_agent" },
+        { createConnection: () => connection },
+      ),
+    ).rejects.toMatchObject({
+      name: "AgentCreateBlockedError",
+      reason: "runner_capacity_reached",
+    } satisfies Partial<AgentCreateBlockedError>);
+
+    await expect(connection.db.select().from(agents)).resolves.toHaveLength(0);
+  });
+
+  it("assigns an unassigned agent to an online runner before starting", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Start Placement Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, created.agent.userId, {
+      maxAgents: 1,
+      runningAgents: 0,
+    });
+    const calls: string[] = [];
+    const manualRunnerAdapter = createManualLifecycleRunnerStub(calls, {
+      connection,
+      runnerId: runner.id,
+    });
+
+    const result = await startAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: (assignedRunner) => {
+        expect(assignedRunner).toMatchObject({
+          id: runner.id,
+          status: "online",
+        });
+        return manualRunnerAdapter;
+      },
+      runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
+      now: () => new Date("2026-07-06T05:00:00.000Z"),
+    });
+    const [persistedAgent] = await connection.db
+      .select({ runnerId: agents.runnerId, status: agents.status })
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+
+    expect(result).toMatchObject({
+      ok: true,
+      agent: {
+        id: created.agent.id,
+        status: "running",
+      },
+    });
+    expect(persistedAgent).toEqual({
+      runnerId: runner.id,
+      status: "running",
+    });
+    expect(calls).toEqual([`start:${created.agent.id}`, `logs:${created.agent.id}`]);
+  });
+
+  it("blocks an assigned online-runner start when the plan limit is reached", async () => {
+    const userId = await ensureDevelopmentUser(connection);
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, userId, {
+      maxAgents: 2,
+      runningAgents: 0,
+    });
+    const created = await createAgentForDevelopmentUser(
+      { name: "Assigned Plan Limit Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const calls: string[] = [];
+    const [createdAgent] = await connection.db
+      .select({ runnerId: agents.runnerId, status: agents.status })
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+
+    const result = await startAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: () => createManualLifecycleRunnerStub(calls, { runnerId: runner.id }),
+      planMaxAgents: 1,
+      runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
+    });
+    const [persistedAgent] = await connection.db
+      .select({ runnerId: agents.runnerId, status: agents.status })
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+
+    expect(createdAgent).toEqual({
+      runnerId: runner.id,
+      status: "stopped",
+    });
+    expect(result).toEqual({
+      ok: false,
+      reason: "plan_limit_reached",
+      currentAgents: 1,
+      maxAgents: 1,
+    });
+    expect(persistedAgent).toEqual({
+      runnerId: runner.id,
+      status: "stopped",
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("blocks start before launching the runner when capacity is unavailable", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Blocked Start Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    await seedOnlineRunnerWithHeartbeat(connection, created.agent.userId, {
+      maxAgents: 1,
+      runningAgents: 1,
+    });
+    const calls: string[] = [];
+
+    const result = await startAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: () => createManualLifecycleRunnerStub(calls),
+      runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
+    });
+    const [persistedAgent] = await connection.db
+      .select({ runnerId: agents.runnerId, status: agents.status })
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+
+    expect(result).toEqual({ ok: false, reason: "runner_capacity_reached" });
+    expect(persistedAgent).toEqual({
+      runnerId: null,
+      status: "stopped",
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("prevents concurrent starts from both consuming the final runner slot", async () => {
+    const agentA = await createAgentForDevelopmentUser(
+      { name: "Concurrent Agent A", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const agentB = await createAgentForDevelopmentUser(
+      { name: "Concurrent Agent B", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, agentA.agent.userId, {
+      maxAgents: 1,
+      runningAgents: 0,
+    });
+    const calls: string[] = [];
+
+    const results = await Promise.all([
+      startAgentForDevelopmentUser(agentA.agent.id, {
+        manualRunnerAdapter: () => createManualLifecycleRunnerStub(calls, { runnerId: runner.id }),
+      }),
+      startAgentForDevelopmentUser(agentB.agent.id, {
+        manualRunnerAdapter: () => createManualLifecycleRunnerStub(calls, { runnerId: runner.id }),
+      }),
+    ]);
+    const runningAgents = await connection.db
+      .select({ id: agents.id, runnerId: agents.runnerId, status: agents.status })
+      .from(agents)
+      .where(eq(agents.status, "running"));
+
+    expect(results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ok: true }),
+        { ok: false, reason: "runner_capacity_reached" },
+      ]),
+    );
+    expect(runningAgents).toHaveLength(1);
+    expect(runningAgents[0]?.runnerId).toBe(runner.id);
+    expect(calls.filter((call) => call.startsWith("start:"))).toHaveLength(1);
   });
 
   it("bootstraps one active manual runner idempotently from non-secret env values", async () => {
@@ -7875,7 +8104,52 @@ describe("create agent persistence", () => {
 });
 
 async function resetCreateAgentTables(connection: DatabaseConnection): Promise<void> {
-  await connection.client`truncate table agent_approvals, agent_configs, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runners, app_metadata, users restart identity cascade`;
+  await connection.client`truncate table agent_approvals, agent_configs, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runner_heartbeats, runners, app_metadata, users restart identity cascade`;
+}
+
+async function ensureDevelopmentUser(connection: DatabaseConnection): Promise<string> {
+  return await connection.db.transaction((tx) => getOrCreateDevelopmentUserId(tx));
+}
+
+async function seedOnlineRunnerWithHeartbeat(
+  connection: DatabaseConnection,
+  userId: string,
+  input: {
+    maxAgents: number;
+    runningAgents: number;
+  },
+): Promise<{ id: string }> {
+  const [runner] = await connection.db
+    .insert(runners)
+    .values({
+      userId,
+      name: "Online Capacity Runner",
+      kind: "manual_vps",
+      endpointUrl: "https://online-runner.example.com",
+      status: "online",
+      createdAt: new Date("2026-07-06T04:00:00.000Z"),
+      updatedAt: new Date("2026-07-06T04:00:00.000Z"),
+    })
+    .returning({ id: runners.id });
+
+  if (!runner) {
+    throw new Error("Runner insert returned no rows.");
+  }
+
+  await connection.db.insert(runnerHeartbeats).values({
+    runnerId: runner.id,
+    status: "online",
+    metadata: {
+      metrics: {
+        maxAgents: input.maxAgents,
+        runningAgents: input.runningAgents,
+      },
+    },
+    observedAt: new Date("2026-07-06T04:01:00.000Z"),
+    createdAt: new Date("2026-07-06T04:01:00.000Z"),
+  });
+
+  return runner;
 }
 
 async function createTestApproval(

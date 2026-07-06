@@ -67,6 +67,36 @@ export async function POST(_request: Request, context: StartAgentRouteContext) {
       );
     }
 
+    if (result.reason === "plan_limit_reached") {
+      return Response.json(
+        {
+          error: {
+            code: "plan_limit_reached",
+            message: "Agent plan limit reached.",
+            currentAgents: result.currentAgents,
+            maxAgents: result.maxAgents,
+          },
+        },
+        {
+          status: 409,
+        },
+      );
+    }
+
+    if (result.reason === "runner_capacity_reached") {
+      return Response.json(
+        {
+          error: {
+            code: "runner_capacity_reached",
+            message: "Runner capacity reached.",
+          },
+        },
+        {
+          status: 409,
+        },
+      );
+    }
+
     return Response.json(
       {
         error: {

@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
@@ -8,6 +9,7 @@ import {
   runners,
   type agentStatusEnum,
 } from "@/src/server/db/schema";
+import type * as schema from "@/src/server/db/schema";
 import {
   recordAgentEventInTransaction,
   recordAgentEventsInTransaction,
@@ -50,6 +52,10 @@ import {
 } from "@/src/server/runners/manual-runner-persistence";
 import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
 import type { RunnerAdapter as RunnerAdapterContract } from "@/src/server/runners/runner-adapter";
+import {
+  lockRunnerPlacementCapacityInTransaction,
+  selectRunnerPlacementForDevelopmentUserInTransaction,
+} from "@/src/server/runners/runner-placement";
 
 export type AgentLifecycleStatus = (typeof agentStatusEnum.enumValues)[number];
 
@@ -116,11 +122,38 @@ type DockerRunnerCleanupAdapter = {
   cleanup(agentId: string): Promise<DockerRunnerCleanupResult>;
 };
 
+type AgentLifecycleTransaction = Parameters<
+  Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
+>[0];
+
+type StartRunnerReservationResult =
+  | {
+      ok: true;
+      assignedRunner: ManualRunnerRecord | null;
+      reserved: boolean;
+    }
+  | {
+      ok: false;
+      reason: "invalid_status";
+      status: AgentLifecycleStatus;
+    }
+  | {
+      ok: false;
+      reason: "plan_limit_reached";
+      currentAgents: number;
+      maxAgents: number;
+    }
+  | {
+      ok: false;
+      reason: "runner_capacity_reached";
+    };
+
 export type AgentLifecycleDependencies = {
   createConnection?: () => DatabaseConnection;
   dockerRunnerAdapter?: DockerRunnerCleanupAdapter;
   manualRunnerAdapter?: (runner: ManualRunnerRecord) => LifecycleRunnerAdapter;
   now?: LifecycleClock;
+  planMaxAgents?: number | null;
   runnerAdapter?: LifecycleRunnerAdapter;
 };
 
@@ -154,8 +187,12 @@ export type StartAgentResult =
         | "malformed_agent_id"
         | "agent_not_found"
         | "invalid_status"
+        | "plan_limit_reached"
+        | "runner_capacity_reached"
         | "runner_start_failed";
       status?: AgentLifecycleStatus;
+      currentAgents?: number;
+      maxAgents?: number;
     };
 
 export type StartedAgent = {
@@ -371,6 +408,171 @@ export function canDeleteAgentStatus(status: AgentLifecycleStatus): boolean {
   return DELETABLE_AGENT_STATUSES.includes(status as (typeof DELETABLE_AGENT_STATUSES)[number]);
 }
 
+async function reserveRunnerForAgentStart(input: {
+  agentId: string;
+  assignedRunner: ManualRunnerRecord | null;
+  connection: DatabaseConnection;
+  now: Date;
+  planMaxAgents?: number | null | undefined;
+}): Promise<StartRunnerReservationResult> {
+  if (input.assignedRunner && input.assignedRunner.status !== "online") {
+    return { ok: true, assignedRunner: input.assignedRunner, reserved: false };
+  }
+
+  return await input.connection.db.transaction(async (tx) => {
+    const placement = await selectStartRunnerPlacement(tx, {
+      assignedRunner: input.assignedRunner,
+      planMaxAgents: input.planMaxAgents,
+    });
+
+    if (!placement.ok) {
+      return placement;
+    }
+
+    if (!placement.runnerId) {
+      return { ok: true, assignedRunner: null, reserved: false } as const;
+    }
+
+    const [runnerRow] = await tx
+      .select(assignedRunnerSelection)
+      .from(runners)
+      .where(and(eq(runners.id, placement.runnerId), isNull(runners.deletedAt)))
+      .limit(1);
+    const assignedRunner = toManualRunnerRecordOrNull(runnerRow ?? null);
+
+    if (!assignedRunner) {
+      return { ok: false, reason: "runner_capacity_reached" } as const;
+    }
+
+    const [reservedAgent] = await tx
+      .update(agents)
+      .set({
+        runnerId: placement.runnerId,
+        status: "starting",
+        statusReason: "Start requested.",
+        updatedAt: input.now,
+      })
+      .where(
+        and(
+          eq(agents.id, input.agentId),
+          isNull(agents.deletedAt),
+          inArray(agents.status, [...STARTABLE_AGENT_STATUSES]),
+        ),
+      )
+      .returning({ id: agents.id, status: agents.status });
+
+    if (!reservedAgent) {
+      return { ok: false, reason: "invalid_status", status: "starting" } as const;
+    }
+
+    return { ok: true, assignedRunner, reserved: true } as const;
+  });
+}
+
+async function selectStartRunnerPlacement(
+  tx: AgentLifecycleTransaction,
+  input: {
+    assignedRunner: ManualRunnerRecord | null;
+    planMaxAgents?: number | null | undefined;
+  },
+): Promise<
+  | {
+      ok: true;
+      runnerId: string | null;
+    }
+  | Exclude<StartRunnerReservationResult, { ok: true }>
+> {
+  if (input.assignedRunner) {
+    await lockRunnerPlacementCapacityInTransaction(tx, input.assignedRunner.id);
+    const placement = await selectRunnerPlacementForDevelopmentUserInTransaction(tx, {
+      planMaxAgents: input.planMaxAgents,
+      runnerId: input.assignedRunner.id,
+    });
+
+    if (placement.ok) {
+      return { ok: true, runnerId: placement.runner.id } as const;
+    }
+
+    if (placement.reason === "plan_limit_reached") {
+      return {
+        ok: false,
+        reason: "plan_limit_reached",
+        currentAgents: placement.currentAgents,
+        maxAgents: placement.maxAgents,
+      } as const;
+    }
+
+    if (placement.reason === "runner_capacity_reached") {
+      return { ok: false, reason: "runner_capacity_reached" } as const;
+    }
+
+    return { ok: false, reason: "runner_capacity_reached" } as const;
+  }
+
+  const placement = await selectRunnerPlacementForDevelopmentUserInTransaction(tx, {
+    planMaxAgents: input.planMaxAgents,
+  });
+
+  if (placement.ok) {
+    await lockRunnerPlacementCapacityInTransaction(tx, placement.runner.id);
+    const confirmedPlacement = await selectRunnerPlacementForDevelopmentUserInTransaction(tx, {
+      planMaxAgents: input.planMaxAgents,
+      runnerId: placement.runner.id,
+    });
+
+    if (!confirmedPlacement.ok && confirmedPlacement.reason === "plan_limit_reached") {
+      return {
+        ok: false,
+        reason: "plan_limit_reached",
+        currentAgents: confirmedPlacement.currentAgents,
+        maxAgents: confirmedPlacement.maxAgents,
+      } as const;
+    }
+
+    if (!confirmedPlacement.ok) {
+      return { ok: false, reason: "runner_capacity_reached" } as const;
+    }
+
+    return { ok: true, runnerId: confirmedPlacement.runner.id } as const;
+  }
+
+  if (placement.reason === "no_online_runner") {
+    return { ok: true, runnerId: null } as const;
+  }
+
+  if (placement.reason === "plan_limit_reached") {
+    return {
+      ok: false,
+      reason: "plan_limit_reached",
+      currentAgents: placement.currentAgents,
+      maxAgents: placement.maxAgents,
+    } as const;
+  }
+
+  if (placement.reason === "runner_capacity_reached") {
+    return { ok: false, reason: "runner_capacity_reached" } as const;
+  }
+
+  return { ok: false, reason: "runner_capacity_reached" } as const;
+}
+
+async function restoreAgentStartReservation(input: {
+  agentId: string;
+  connection: DatabaseConnection;
+  previousStatus: AgentLifecycleStatus;
+  previousStatusReason: string | null;
+  now: Date;
+}): Promise<void> {
+  await input.connection.db
+    .update(agents)
+    .set({
+      status: input.previousStatus,
+      statusReason: input.previousStatusReason,
+      updatedAt: input.now,
+    })
+    .where(and(eq(agents.id, input.agentId), eq(agents.status, "starting")));
+}
+
 export async function startAgentForDevelopmentUser(
   agentId: string,
   dependencies: AgentLifecycleDependencies = {},
@@ -429,7 +631,19 @@ export async function startAgentForDevelopmentUser(
       return validation;
     }
 
-    const runnerAdapter = selectLifecycleRunnerAdapter(validation.assignedRunner, {
+    const reservation = await reserveRunnerForAgentStart({
+      agentId: normalizedAgentId,
+      assignedRunner: validation.assignedRunner,
+      connection,
+      now,
+      planMaxAgents: dependencies.planMaxAgents,
+    });
+
+    if (!reservation.ok) {
+      return reservation;
+    }
+
+    const runnerAdapter = selectLifecycleRunnerAdapter(reservation.assignedRunner, {
       createConnection: () => connection,
       ...(dependencies.manualRunnerAdapter
         ? { manualRunnerAdapter: dependencies.manualRunnerAdapter }
@@ -439,6 +653,16 @@ export async function startAgentForDevelopmentUser(
     const runnerStart = await runnerAdapter.start(normalizedAgentId);
 
     if (!runnerStart.ok) {
+      if (reservation.reserved) {
+        await restoreAgentStartReservation({
+          agentId: normalizedAgentId,
+          connection,
+          previousStatus: validation.agent.status,
+          previousStatusReason: validation.agent.statusReason,
+          now,
+        });
+      }
+
       return { ok: false, reason: "runner_start_failed" } as const;
     }
 
@@ -456,7 +680,10 @@ export async function startAgentForDevelopmentUser(
           and(
             eq(agents.id, normalizedAgentId),
             isNull(agents.deletedAt),
-            inArray(agents.status, [...STARTABLE_AGENT_STATUSES]),
+            inArray(
+              agents.status,
+              reservation.reserved ? ["starting"] : [...STARTABLE_AGENT_STATUSES],
+            ),
           ),
         )
         .returning();
