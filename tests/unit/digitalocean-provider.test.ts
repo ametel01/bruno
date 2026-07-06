@@ -27,6 +27,7 @@ describe("fake DigitalOcean provider", () => {
       value: {
         provider: DIGITALOCEAN_PROVIDER,
         providerResourceId: "droplet-1",
+        publicIpv4: "203.0.113.10",
         name: "AgentBay Cloud Runner",
         region: "sfo3",
         sizeSlug: "s-1vcpu-1gb",
@@ -133,6 +134,12 @@ describe("DigitalOcean API provider", () => {
                 region: { slug: "sfo3" },
                 sizeSlug: "s-1vcpu-512mb-10gb",
                 image: { slug: "ubuntu-24-04-x64" },
+                networks: {
+                  v4: [
+                    { ipAddress: "10.0.0.5", type: "private" },
+                    { ipAddress: "203.0.113.42", type: "public" },
+                  ],
+                },
                 tags: ["agentbay"],
                 createdAt: new Date("2026-07-06T05:00:01.000Z"),
               },
@@ -182,6 +189,7 @@ describe("DigitalOcean API provider", () => {
       value: {
         provider: DIGITALOCEAN_PROVIDER,
         providerResourceId: "123456",
+        publicIpv4: "203.0.113.42",
         region: "sfo3",
         sizeSlug: "s-1vcpu-512mb-10gb",
         image: "ubuntu-24-04-x64",
@@ -241,7 +249,6 @@ describe("DigitalOcean API provider", () => {
       name: "agentbay-runners",
       dropletIds: [123456],
       inboundRules: [
-        { protocol: "tcp", ports: "22" },
         { protocol: "tcp", ports: "80" },
         { protocol: "tcp", ports: "443" },
       ],

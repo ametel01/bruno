@@ -15,7 +15,11 @@ export const BOOTSTRAP_REDACTION = "[redacted]";
 type CloudRunnerBootstrapInput = {
   appBaseUrl: string;
   registrationToken: string;
-  runnerEndpointUrl: string;
+  runnerEndpointUrl?: string;
+  endpointDiscovery?: {
+    type: "digitalocean_metadata";
+    hostnameSuffix?: string;
+  };
   runnerName?: string;
   repositoryUrl?: string;
   installDir?: string;
@@ -74,14 +78,17 @@ export function buildCloudRunnerBootstrapContent(
   input: CloudRunnerBootstrapInput,
 ): CloudRunnerBootstrapContent {
   const config = normalizeBootstrapInput(input);
+  const endpoint = buildEndpointConfig(config);
   const envLines = [
     `AGENTBAY_APP_URL=${quoteSystemdEnvironmentValue(config.appBaseUrl)}`,
     `AGENTBAY_RUNNER_REGISTRATION_TOKEN=${quoteSystemdEnvironmentValue(config.registrationToken)}`,
-    `AGENTBAY_RUNNER_ENDPOINT_URL=${quoteSystemdEnvironmentValue(config.runnerEndpointUrl)}`,
+    `AGENTBAY_RUNNER_ENDPOINT_URL=${endpoint.envValue}`,
     `AGENTBAY_RUNNER_NAME=${quoteSystemdEnvironmentValue(config.runnerName)}`,
     `AGENTBAY_RUNNER_HOST=${quoteSystemdEnvironmentValue(config.runnerHost)}`,
     `AGENTBAY_RUNNER_PORT=${config.runnerPort}`,
   ].join("\n");
+  const endpointDiscoveryCommands =
+    endpoint.discoveryCommands.length > 0 ? `${endpoint.discoveryCommands.join("\n")}\n    ` : "";
   const userData = `#cloud-config
 package_update: true
 package_upgrade: false
@@ -97,6 +104,7 @@ runcmd:
   - sh -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list'
   - apt-get update
   - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - apt-get install -y caddy
   - systemctl enable --now docker
   - curl -fsSL https://bun.sh/install | bash
   - rm -rf ${shellQuote(config.installDir)}
@@ -104,7 +112,14 @@ runcmd:
   - ${shellQuote("/root/.bun/bin/bun")} install --cwd ${shellQuote(config.installDir)} --frozen-lockfile
   - install -m 0700 -d ${shellQuote(dirname(config.envFilePath))}
   - |
-    cat > ${shellQuote(config.envFilePath)} <<'AGENTBAY_RUNNER_ENV'
+    ${endpointDiscoveryCommands}cat > /etc/caddy/Caddyfile <<AGENTBAY_CADDYFILE
+    ${endpoint.caddyHost} {
+      reverse_proxy ${config.runnerHost}:${config.runnerPort}
+    }
+    AGENTBAY_CADDYFILE
+  - systemctl enable --now caddy
+  - |
+    cat > ${shellQuote(config.envFilePath)} <<AGENTBAY_RUNNER_ENV
     ${indentHereDoc(envLines)}
     AGENTBAY_RUNNER_ENV
   - chmod 0600 ${shellQuote(config.envFilePath)}
@@ -135,7 +150,7 @@ runcmd:
     userData,
     safeSummary: {
       appBaseUrl: config.appBaseUrl,
-      runnerEndpointUrl: config.runnerEndpointUrl,
+      runnerEndpointUrl: endpoint.safeSummary,
       runnerName: config.runnerName,
       repositoryUrl: config.repositoryUrl,
       installDir: config.installDir,
@@ -159,7 +174,10 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
   return {
     appBaseUrl: normalizeUrl(input.appBaseUrl, "appBaseUrl"),
     registrationToken: requireNonEmpty(input.registrationToken, "registrationToken"),
-    runnerEndpointUrl: normalizeUrl(input.runnerEndpointUrl, "runnerEndpointUrl"),
+    runnerEndpointUrl: input.runnerEndpointUrl
+      ? normalizePublicHttpsUrl(input.runnerEndpointUrl, "runnerEndpointUrl")
+      : null,
+    endpointDiscovery: input.endpointDiscovery ?? null,
     runnerName: input.runnerName?.trim() || DEFAULT_CLOUD_RUNNER_NAME,
     repositoryUrl: input.repositoryUrl?.trim() || DEFAULT_CLOUD_RUNNER_REPOSITORY_URL,
     installDir: input.installDir?.trim() || DEFAULT_CLOUD_RUNNER_INSTALL_DIR,
@@ -179,6 +197,69 @@ function normalizeUrl(value: string, field: string): string {
   }
 }
 
+function normalizePublicHttpsUrl(value: string, field: string): string {
+  const normalized = normalizeUrl(value, field);
+  const url = new URL(normalized);
+
+  if (url.protocol !== "https:" || isLoopbackHostname(url.hostname)) {
+    throw new Error(`${field} must be a public HTTPS URL.`);
+  }
+
+  return normalized;
+}
+
+function buildEndpointConfig(config: ReturnType<typeof normalizeBootstrapInput>): {
+  caddyHost: string;
+  discoveryCommands: string[];
+  envValue: string;
+  safeSummary: string;
+} {
+  if (config.endpointDiscovery?.type === "digitalocean_metadata") {
+    const hostnameSuffix = normalizeHostnameSuffix(
+      config.endpointDiscovery.hostnameSuffix ?? "sslip.io",
+    );
+
+    return {
+      discoveryCommands: [
+        'AGENTBAY_PUBLIC_IPV4="$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)"',
+        'AGENTBAY_PUBLIC_IPV4_DASHED="$(printf \'%s\' "$AGENTBAY_PUBLIC_IPV4" | tr . -)"',
+      ],
+      envValue: `"https://\${AGENTBAY_PUBLIC_IPV4_DASHED}.${hostnameSuffix}"`,
+      caddyHost: `\${AGENTBAY_PUBLIC_IPV4_DASHED}.${hostnameSuffix}`,
+      safeSummary: `https://<public-ip>.${hostnameSuffix}`,
+    };
+  }
+
+  if (!config.runnerEndpointUrl) {
+    throw new Error("runnerEndpointUrl is required.");
+  }
+
+  const endpointUrl = new URL(config.runnerEndpointUrl);
+
+  return {
+    caddyHost: escapeHereDocShellExpansion(endpointUrl.hostname),
+    discoveryCommands: [],
+    envValue: quoteSystemdEnvironmentValue(config.runnerEndpointUrl),
+    safeSummary: config.runnerEndpointUrl,
+  };
+}
+
+function normalizeHostnameSuffix(value: string): string {
+  const normalized = value.trim().toLowerCase();
+
+  if (!/^[a-z0-9.-]+$/.test(normalized) || normalized.startsWith(".") || normalized.endsWith(".")) {
+    throw new Error("endpoint hostname suffix is invalid.");
+  }
+
+  return normalized;
+}
+
+function isLoopbackHostname(value: string): boolean {
+  const hostname = value.toLowerCase();
+
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
 function requireNonEmpty(value: string, field: string): string {
   const normalized = value.trim();
 
@@ -190,7 +271,11 @@ function requireNonEmpty(value: string, field: string): string {
 }
 
 function quoteSystemdEnvironmentValue(value: string): string {
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  return `"${escapeHereDocShellExpansion(value).replace(/"/g, '\\"')}"`;
+}
+
+function escapeHereDocShellExpansion(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/\$/g, "\\$").replace(/`/g, "\\`");
 }
 
 function shellQuote(value: string): string {

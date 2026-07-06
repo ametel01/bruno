@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { runnerProvisioningEvents, runnerRegistrationTokens } from "@/src/server/db/schema";
+import {
+  runnerProvisioningEvents,
+  runnerRegistrationTokens,
+  runners,
+} from "@/src/server/db/schema";
 import { FakeDigitalOceanProvider } from "@/src/server/runners/digitalocean-provider";
 import { createRunnerRegistrationToken } from "@/src/server/runners/runner-auth-secrets";
 import { createDigitalOceanRunnerForDevelopmentUser } from "@/src/server/runners/runner-provisioning";
@@ -113,7 +117,9 @@ describe.sequential("runner provisioning service", () => {
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
-    ).toContain('AGENTBAY_RUNNER_ENDPOINT_URL="https://203-0-113-10.sslip.io"');
+    ).toContain(
+      'AGENTBAY_RUNNER_ENDPOINT_URL="https://$' + '{AGENTBAY_PUBLIC_IPV4_DASHED}.sslip.io"',
+    );
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
@@ -138,11 +144,16 @@ describe.sequential("runner provisioning service", () => {
     });
 
     const persistedTokens = await connection.db.select().from(runnerRegistrationTokens);
+    const [persistedRunner] = await connection.db
+      .select({ endpointUrl: runners.endpointUrl })
+      .from(runners)
+      .limit(1);
     const persistedEvents = await connection.db.select().from(runnerProvisioningEvents);
     const serializedResult = JSON.stringify(result);
     const serializedPersistence = JSON.stringify([persistedTokens, persistedEvents]);
 
     expect(persistedTokens).toHaveLength(1);
+    expect(persistedRunner?.endpointUrl).toBe("https://203-0-113-10.sslip.io");
     expect(persistedTokens[0]).toMatchObject({
       runnerId: result.runner.id,
       tokenHash: generatedRegistrationToken.hash,

@@ -77,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- DigitalOcean cloud runner bootstrap now registers public `sslip.io` HTTPS endpoints through a Caddy reverse proxy instead of loopback runner URLs.
 - Backup-created timeline events no longer include backup storage URIs, keeping activity feeds free of artifact locations while preserving backup ID and status context.
 - Docker lifecycle start/restart now reject fast-exiting containers after inspect, handle replacement start failures safely, and avoid marking agents running unless Docker reports the selected replacement container is actually running.
 - Docker lifecycle stop and crash reconciliation now treat selected-agent containers that already exited with code `0` as clean stops instead of surfacing false crash or stop-failure states.

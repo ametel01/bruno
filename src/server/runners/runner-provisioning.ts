@@ -13,8 +13,6 @@ import {
 import type * as schema from "@/src/server/db/schema";
 import {
   buildCloudRunnerBootstrapForRunner,
-  DEFAULT_CLOUD_RUNNER_HOST,
-  DEFAULT_CLOUD_RUNNER_PORT,
   redactCloudRunnerBootstrapOutput,
   type CloudRunnerBootstrapContent,
 } from "@/src/server/runners/cloud-runner-bootstrap";
@@ -320,6 +318,33 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       };
     }
 
+    const publicEndpoint = await resolveDigitalOceanPublicEndpoint(provider, resource.value);
+
+    if (!publicEndpoint.ok) {
+      await failProvisioning(connection, {
+        runnerId,
+        phase: "creating",
+        reason: publicEndpoint.reason,
+        message:
+          "DigitalOcean Droplet did not expose a public IPv4 address for runner registration. Check Droplet networking and retry Create runner.",
+        now: now(),
+      });
+
+      return {
+        ok: true,
+        duplicate: false,
+        runner: await getRunnerProvisioningDto(connection, runnerId),
+      };
+    }
+
+    await connection.db
+      .update(runners)
+      .set({
+        endpointUrl: publicEndpoint.endpointUrl,
+        updatedAt: now(),
+      })
+      .where(eq(runners.id, runnerId));
+
     const tagging = await runProviderStep(connection, {
       provider,
       runnerId,
@@ -552,7 +577,7 @@ async function buildProvisioningBootstrap(input: {
       runnerId: input.runnerId,
       appBaseUrl,
       registrationToken: input.registrationToken,
-      runnerEndpointUrl: `http://${DEFAULT_CLOUD_RUNNER_HOST}:${DEFAULT_CLOUD_RUNNER_PORT}`,
+      endpointDiscovery: { type: "digitalocean_metadata" },
       runnerName: input.runnerName,
       createConnection: () => input.connection,
       now: input.now,
@@ -564,6 +589,65 @@ async function buildProvisioningBootstrap(input: {
 
     throw error;
   }
+}
+
+async function resolveDigitalOceanPublicEndpoint(
+  provider: DigitalOceanProvider,
+  resource: DigitalOceanResource,
+): Promise<
+  | {
+      ok: true;
+      endpointUrl: string;
+    }
+  | {
+      ok: false;
+      reason: DigitalOceanProviderErrorReason;
+    }
+> {
+  const publicIpv4 = normalizePublicIpv4(resource.publicIpv4);
+
+  if (publicIpv4) {
+    return { ok: true, endpointUrl: publicIpv4ToSslipEndpoint(publicIpv4) };
+  }
+
+  const refreshed = await provider.readResource({
+    providerResourceId: resource.providerResourceId,
+  });
+
+  if (!refreshed.ok) {
+    return { ok: false, reason: refreshed.reason };
+  }
+
+  const refreshedPublicIpv4 = normalizePublicIpv4(refreshed.value.publicIpv4);
+
+  return refreshedPublicIpv4
+    ? { ok: true, endpointUrl: publicIpv4ToSslipEndpoint(refreshedPublicIpv4) }
+    : { ok: false, reason: "resource_not_found" };
+}
+
+function publicIpv4ToSslipEndpoint(publicIpv4: string): string {
+  return `https://${publicIpv4.replaceAll(".", "-")}.sslip.io`;
+}
+
+function normalizePublicIpv4(value: string | null): string | null {
+  const normalized = value?.trim() ?? "";
+  const parts = normalized.split(".");
+
+  if (parts.length !== 4) {
+    return null;
+  }
+
+  return parts.every((part) => {
+    if (!/^\d{1,3}$/.test(part)) {
+      return false;
+    }
+
+    const parsed = Number(part);
+
+    return Number.isInteger(parsed) && parsed >= 0 && parsed <= 255;
+  })
+    ? normalized
+    : null;
 }
 
 async function failProvisioning(

@@ -8,15 +8,15 @@
 
 ## Current Status
 
-- Status: Step 1 complete; Step 2 is next.
-- Active step: Step 2 - Public Droplet Endpoint and HTTPS Proxy Bootstrap.
-- Last updated: 2026-07-06 17:38:14 PST.
+- Status: Step 2 complete; Step 3 is next.
+- Active step: Step 3 - Reliable Cheap-Droplet Bootstrap Runtime.
+- Last updated: 2026-07-06 17:44:20 PST.
 
 ## Step Checklist
 
 - [x] Step 0: Progress and Changelog Tracking Setup
 - [x] Step 1: Baseline Characterization and Failing Tests
-- [ ] Step 2: Public Droplet Endpoint and HTTPS Proxy Bootstrap
+- [x] Step 2: Public Droplet Endpoint and HTTPS Proxy Bootstrap
 - [ ] Step 3: Reliable Cheap-Droplet Bootstrap Runtime
 - [ ] Step 4: Durable Registration Credential Persistence
 - [ ] Step 5: Continuous Runner Heartbeat and Capacity Metrics
@@ -63,3 +63,19 @@
 - Changelog: no entry added because characterization tests alone ship no functional behavior.
 - Commit: this step commit.
 - Next step: Step 2 - Public Droplet Endpoint and HTTPS Proxy Bootstrap.
+
+### 2026-07-06 17:44:20 PST - Step 2 complete
+
+- Added public endpoint support to the DigitalOcean provider contract, including fake-provider public IPv4s and API-provider Droplet reads when the SDK exposes them.
+- Updated DigitalOcean firewall creation to expose only ports 80 and 443 for cloud runner traffic.
+- Changed provisioning to record `https://<public-ip>.sslip.io` on the runner after Droplet creation/read resolves a public IPv4.
+- Changed cloud-init bootstrap to compute the runner endpoint from DigitalOcean metadata on the Droplet, install Caddy, and reverse proxy public HTTPS traffic to the loopback runner service on `127.0.0.1:3045`.
+- Validation:
+  - Passed: `bun run format:check`
+  - Passed: `bun run lint`
+  - Passed: `bun run typecheck`
+  - Passed: `bun run test -- tests/unit/digitalocean-provider.test.ts tests/unit/runner-provisioning.test.ts tests/unit/cloud-runner-bootstrap.test.ts`
+  - Passed: `bun run build`
+- Changelog: added one `Fixed` entry for public HTTPS cloud runner endpoint registration.
+- Commit: this step commit.
+- Next step: Step 3 - Reliable Cheap-Droplet Bootstrap Runtime.

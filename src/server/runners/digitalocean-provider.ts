@@ -34,6 +34,7 @@ export type DigitalOceanRunnerSpec = {
 export type DigitalOceanResource = {
   provider: DigitalOceanProviderName;
   providerResourceId: string;
+  publicIpv4: string | null;
   name: string;
   region: string;
   sizeSlug: string;
@@ -76,9 +77,16 @@ export type DigitalOceanCleanupInput = {
   providerResourceId: string;
 };
 
+export type DigitalOceanReadInput = {
+  providerResourceId: string;
+};
+
 export interface DigitalOceanProvider {
   createRunner(
     input: DigitalOceanRunnerSpec,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanResource>>;
+  readResource(
+    input: DigitalOceanReadInput,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>>;
   tagResource(
     input: DigitalOceanTagInput,
@@ -97,6 +105,7 @@ export type FakeDigitalOceanProviderOptions = {
   fail?: Partial<Record<FakeProviderStep, string>>;
   now?: () => Date;
   idPrefix?: string;
+  publicIpv4?: string | null;
 };
 
 export type DigitalOceanApiProviderOptions = {
@@ -112,7 +121,10 @@ export type DigitalOceanSdkClient = {
       post(
         body: DigitalOceanDropletCreateBody,
       ): Promise<DigitalOceanDropletCreateResponse | undefined>;
-      byDroplet_id(id: number): { delete(): Promise<void> };
+      byDroplet_id(id: number): {
+        get?(): Promise<DigitalOceanDropletCreateResponse | undefined>;
+        delete(): Promise<void>;
+      };
     };
     firewalls: {
       post(body: DigitalOceanFirewallBody): Promise<DigitalOceanFirewallCreateResponse | undefined>;
@@ -152,6 +164,12 @@ type DigitalOceanApiDroplet = {
   region?: { slug?: string | null } | string | null;
   sizeSlug?: string | null;
   image?: { slug?: string | null } | string | null;
+  networks?: {
+    v4?: Array<{
+      ipAddress?: string | null;
+      type?: string | null;
+    }> | null;
+  } | null;
   tags?: string[] | null;
   createdAt?: Date | string | null;
 };
@@ -256,6 +274,59 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
     return { ok: true, value: cloneResource(resource) };
   }
 
+  async readResource(
+    input: DigitalOceanReadInput,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
+    const dropletId = Number(input.providerResourceId);
+
+    if (!Number.isSafeInteger(dropletId)) {
+      return missingResource();
+    }
+
+    const dropletResource = this.#client.v2.droplets.byDroplet_id(dropletId);
+
+    if (!dropletResource.get) {
+      const cached = this.#resources.get(input.providerResourceId);
+
+      return cached ? { ok: true, value: cloneResource(cached) } : missingResource();
+    }
+
+    const response = await runSdkStep("resource_not_found", () => {
+      if (!dropletResource.get) {
+        throw new Error("DigitalOcean Droplet read is unavailable.");
+      }
+
+      return dropletResource.get();
+    });
+
+    if (!response.ok) {
+      return response;
+    }
+
+    const fallback = this.#resources.get(input.providerResourceId);
+    const resource = apiDropletToResource(
+      response.value?.droplet,
+      fallback
+        ? {
+            name: fallback.name,
+            region: fallback.region,
+            sizeSlug: fallback.sizeSlug,
+            image: fallback.image,
+            tags: fallback.tags,
+          }
+        : null,
+      this.#now,
+    );
+
+    if (!resource) {
+      return missingResource();
+    }
+
+    this.#resources.set(resource.providerResourceId, resource);
+
+    return { ok: true, value: cloneResource(resource) };
+  }
+
   async applyFirewall(
     input: DigitalOceanFirewallInput,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
@@ -279,7 +350,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
       this.#client.v2.firewalls.post({
         name: input.firewallName,
         dropletIds: [dropletId],
-        inboundRules: [tcpInboundRule("22"), tcpInboundRule("80"), tcpInboundRule("443")],
+        inboundRules: [tcpInboundRule("80"), tcpInboundRule("443")],
         outboundRules: [outboundRule("tcp"), outboundRule("udp"), outboundRule("icmp")],
       }),
     );
@@ -329,11 +400,13 @@ export class FakeDigitalOceanProvider implements DigitalOceanProvider {
   readonly #fail: Partial<Record<FakeProviderStep, string>>;
   readonly #now: () => Date;
   readonly #idPrefix: string;
+  readonly #publicIpv4: string | null;
 
   constructor(options: FakeDigitalOceanProviderOptions = {}) {
     this.#fail = options.fail ?? {};
     this.#now = options.now ?? (() => new Date());
     this.#idPrefix = options.idPrefix ?? "do-fake";
+    this.#publicIpv4 = options.publicIpv4 === undefined ? "203.0.113.10" : options.publicIpv4;
   }
 
   async createRunner(
@@ -352,6 +425,7 @@ export class FakeDigitalOceanProvider implements DigitalOceanProvider {
     const resource: DigitalOceanResource = {
       provider: DIGITALOCEAN_PROVIDER,
       providerResourceId: `${this.#idPrefix}-${this.#counter}`,
+      publicIpv4: this.#publicIpv4,
       name: input.name,
       region: input.region,
       sizeSlug: input.sizeSlug,
@@ -363,6 +437,18 @@ export class FakeDigitalOceanProvider implements DigitalOceanProvider {
     };
 
     this.resources.set(resource.providerResourceId, resource);
+
+    return { ok: true, value: cloneResource(resource) };
+  }
+
+  async readResource(
+    input: DigitalOceanReadInput,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
+    const resource = this.resources.get(input.providerResourceId);
+
+    if (!resource) {
+      return missingResource();
+    }
 
     return { ok: true, value: cloneResource(resource) };
   }
@@ -453,7 +539,7 @@ function missingResource(): DigitalOceanProviderResult<DigitalOceanResource> {
 
 function apiDropletToResource(
   droplet: DigitalOceanApiDroplet | null | undefined,
-  fallback: DigitalOceanRunnerSpec,
+  fallback: Pick<DigitalOceanRunnerSpec, "image" | "name" | "region" | "sizeSlug" | "tags"> | null,
   now: () => Date,
 ): DigitalOceanResource | null {
   if (!droplet?.id) {
@@ -463,11 +549,12 @@ function apiDropletToResource(
   return {
     provider: DIGITALOCEAN_PROVIDER,
     providerResourceId: String(droplet.id),
-    name: droplet.name ?? fallback.name,
-    region: readApiSlug(droplet.region) ?? fallback.region,
-    sizeSlug: droplet.sizeSlug ?? fallback.sizeSlug,
-    image: readApiSlug(droplet.image) ?? fallback.image,
-    tags: [...new Set(droplet.tags ?? fallback.tags)].sort(),
+    publicIpv4: readApiPublicIpv4(droplet),
+    name: droplet.name ?? fallback?.name ?? "agentbay-runner",
+    region: readApiSlug(droplet.region) ?? fallback?.region ?? "unknown",
+    sizeSlug: droplet.sizeSlug ?? fallback?.sizeSlug ?? "unknown",
+    image: readApiSlug(droplet.image) ?? fallback?.image ?? "unknown",
+    tags: [...new Set(droplet.tags ?? fallback?.tags ?? [])].sort(),
     firewallApplied: false,
     createdAt: readApiDate(droplet.createdAt) ?? now().toISOString(),
     deletedAt: null,
@@ -515,6 +602,33 @@ function readApiDate(value: Date | string | null | undefined): string | null {
   }
 
   return value ?? null;
+}
+
+function readApiPublicIpv4(droplet: DigitalOceanApiDroplet): string | null {
+  const publicNetwork = droplet.networks?.v4?.find(
+    (network) => network.type === "public" && typeof network.ipAddress === "string",
+  );
+  const ipAddress = publicNetwork?.ipAddress?.trim() ?? "";
+
+  return isPublicIpv4(ipAddress) ? ipAddress : null;
+}
+
+function isPublicIpv4(value: string): boolean {
+  const parts = value.split(".");
+
+  if (parts.length !== 4) {
+    return false;
+  }
+
+  return parts.every((part) => {
+    if (!/^\d{1,3}$/.test(part)) {
+      return false;
+    }
+
+    const value = Number(part);
+
+    return Number.isInteger(value) && value >= 0 && value <= 255;
+  });
 }
 
 function tcpInboundRule(port: string): DigitalOceanFirewallInboundRule {
