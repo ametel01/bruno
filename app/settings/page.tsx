@@ -1,5 +1,6 @@
 import { CloudRunnerProvisioningPanel } from "@/app/_components/cloud-runner-provisioning-panel";
 import { PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
+import { RunnerCapacityDefinitionItems } from "@/app/_components/runner-capacity-details";
 import {
   RunnerCredentialControls,
   RunnerRegistrationTokenControls,
@@ -103,6 +104,7 @@ function SettingsRunnerHealthItem({ runner }: { runner: SettingsRunnerManagement
           <dt>Endpoint host</dt>
           <dd>{runner.endpointHost}</dd>
         </div>
+        <RunnerCapacityDefinitionItems capacity={runner.capacity} />
         <div>
           <dt>Version</dt>
           <dd>{runner.version ?? "Not reported"}</dd>

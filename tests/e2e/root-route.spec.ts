@@ -217,6 +217,15 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
       status: "online",
       version: "agentbay-runner/1.2.3",
       observedAt: "2026-07-05T01:30:30.000Z",
+      metrics: {
+        maxAgents: 1,
+        runningAgents: 1,
+        cpuPercent: 37,
+        memoryUsedMb: 512,
+        memoryTotalMb: 2048,
+        diskUsedMb: 1024,
+        diskTotalMb: 4096,
+      },
     });
     const onlineRunner = await insertManualRunnerForAgent(
       created.id,
@@ -233,6 +242,15 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
       status: "online",
       version: "agentbay-runner/2.0.0",
       observedAt: "2026-07-05T01:32:30.000Z",
+      metrics: {
+        maxAgents: 5,
+        runningAgents: 3,
+        cpuPercent: 42,
+        memoryUsedMb: 1024,
+        memoryTotalMb: 4096,
+        diskUsedMb: 2048,
+        diskTotalMb: 8192,
+      },
     });
     const oldRunnerCredential = `agb_run_old_${randomUUID().replaceAll("-", "")}`;
     await insertRunnerCredential(runner.id, oldRunnerCredential, "2026-07-05T01:33:00.000Z");
@@ -258,6 +276,12 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
       await expect(runnerPanel).toContainText(new URL(onlineRunner.endpointUrl).host);
       await expect(runnerPanel).toContainText("offline");
       await expect(runnerPanel).toContainText("online");
+      await expect(runnerPanel).toContainText("1 / 1 agent running");
+      await expect(runnerPanel).toContainText("3 / 5 agents running");
+      await expect(runnerPanel).toContainText("Runner capacity reached");
+      await expect(runnerPanel).toContainText("37%");
+      await expect(runnerPanel).toContainText("512 / 2,048 MB");
+      await expect(runnerPanel).toContainText("1,024 / 4,096 MB");
       await expect(runnerPanel).toContainText("agentbay-runner/1.2.3");
       await expect(runnerPanel).toContainText("agentbay-runner/2.0.0");
       await expect(runnerPanel).toContainText("2026-07-05T01:30:30.000Z");
@@ -290,11 +314,15 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
       await expect(assignedRunnerPanel).toContainText(`Manual Runner ${testInfo.project.name}`);
       await expect(assignedRunnerPanel).toContainText("This agent is assigned to");
       await expect(assignedRunnerPanel).toContainText("offline");
+      await expect(assignedRunnerPanel).toContainText("1 / 1 agent running");
+      await expect(assignedRunnerPanel).toContainText("Runner capacity reached");
+      await expect(assignedRunnerPanel).toContainText("37%");
+      await expect(assignedRunnerPanel).toContainText("512 / 2,048 MB");
       await expect(assignedRunnerPanel).toContainText(new URL(runner.endpointUrl).host);
       await expect(assignedRunnerPanel).toContainText("agentbay-runner/1.2.3");
       await expect(assignedRunnerPanel).toContainText("2026-07-05T01:30:30.000Z");
       await expect(assignedRunnerPanel).toContainText(
-        "Assigned manual runner is inactive or unreachable.",
+        "Assigned runner is inactive or unreachable.",
       );
       await expect(assignedRunnerPanel).not.toContainText("password");
       await expect(assignedRunnerPanel).not.toContainText("token=hidden");
@@ -304,7 +332,7 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
 
       const alertPanel = page.locator(".operational-alert-panel");
       await expect(alertPanel).toContainText("Runner is offline");
-      await expect(alertPanel).toContainText("Assigned manual runner is inactive or unreachable.");
+      await expect(alertPanel).toContainText("Assigned runner is inactive or unreachable.");
       await expect(alertPanel).not.toContainText("postgres://");
       await expect(alertPanel).not.toContainText("/app/worker.ts");
 
@@ -327,6 +355,12 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
       await expect(settingsRunnerPanel).toContainText(`Online Runner ${testInfo.project.name}`);
       await expect(settingsRunnerPanel).toContainText("offline");
       await expect(settingsRunnerPanel).toContainText("online");
+      await expect(settingsRunnerPanel).toContainText("1 / 1 agent running");
+      await expect(settingsRunnerPanel).toContainText("3 / 5 agents running");
+      await expect(settingsRunnerPanel).toContainText("Runner capacity reached");
+      await expect(settingsRunnerPanel).toContainText("42%");
+      await expect(settingsRunnerPanel).toContainText("1,024 / 4,096 MB");
+      await expect(settingsRunnerPanel).toContainText("2,048 / 8,192 MB");
       await expect(settingsRunnerPanel).toContainText("agentbay-runner/1.2.3");
       await expect(settingsRunnerPanel).toContainText("agentbay-runner/2.0.0");
       await expect(settingsRunnerPanel).not.toContainText(runner.id);
@@ -2799,6 +2833,15 @@ async function insertRunnerHeartbeat(
     status: "online" | "offline" | "degraded";
     version: string;
     observedAt: string;
+    metrics?: {
+      maxAgents?: number;
+      runningAgents?: number;
+      cpuPercent?: number;
+      memoryUsedMb?: number;
+      memoryTotalMb?: number;
+      diskUsedMb?: number;
+      diskTotalMb?: number;
+    };
   },
 ): Promise<void> {
   await withDatabase(async (sql) => {
@@ -2817,6 +2860,7 @@ async function insertRunnerHeartbeat(
           version: heartbeat.version,
           metrics: {
             cpuPercent: 37,
+            ...heartbeat.metrics,
             apiToken: "must-not-render",
           },
         })},

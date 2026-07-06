@@ -3,6 +3,7 @@ import { ActivityFeedPanel } from "@/app/_components/activity-feed";
 import { ApprovalDecisionControls } from "@/app/_components/approval-decision-controls";
 import { CloudRunnerProvisioningPanel } from "@/app/_components/cloud-runner-provisioning-panel";
 import { EmptyState, PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
+import { RunnerCapacityDefinitionItems } from "@/app/_components/runner-capacity-details";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { MobileAgentList } from "@/app/agents/_components/mobile-agent-list";
 import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
@@ -243,6 +244,7 @@ function ManualRunnerStatusItem({ runner }: { runner: ManualRunnerStatusSummary 
           <dt>Endpoint host</dt>
           <dd>{runner.endpointHost}</dd>
         </div>
+        <RunnerCapacityDefinitionItems capacity={runner.capacity} />
         <div>
           <dt>Version</dt>
           <dd>{runner.version ?? "Not reported"}</dd>

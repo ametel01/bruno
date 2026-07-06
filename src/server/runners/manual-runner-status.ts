@@ -1,18 +1,34 @@
-import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agents, runnerHeartbeats, runners } from "@/src/server/db/schema";
 import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
 import { MANUAL_RUNNER_KIND } from "@/src/server/runners/manual-runner-persistence";
+import {
+  normalizeRunnerCapacitySnapshot,
+  type RunnerPlacementTransaction,
+} from "@/src/server/runners/runner-placement";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
 export type ManualRunnerDisplayStatus = "online" | "offline" | "degraded" | "unknown";
+
+export type ManualRunnerCapacitySummary = {
+  runningAgents: number;
+  maxAgents: number;
+  cpuUsedPercent: number | null;
+  memoryUsedMb: number | null;
+  memoryTotalMb: number | null;
+  diskUsedMb: number | null;
+  diskTotalMb: number | null;
+  blocker: "runner_capacity_reached" | null;
+};
 
 export type ManualRunnerStatusSummary = {
   name: string;
   kind: typeof MANUAL_RUNNER_KIND | typeof DIGITALOCEAN_RUNNER_KIND;
   endpointHost: string;
   status: ManualRunnerDisplayStatus;
+  capacity: ManualRunnerCapacitySummary;
   version: string | null;
   lastSeenAt: string | null;
   updatedAt: string;
@@ -40,7 +56,10 @@ type ManualRunnerStatusRow = {
     metadata: Record<string, unknown>;
     observedAt: Date | string;
   } | null;
+  assignedRunningAgents?: number;
 };
+
+const RUNNER_STATUS_RUNNING_AGENT_STATES = ["starting", "running", "restarting"] as const;
 
 export class ManualRunnerStatusPersistenceError extends Error {
   constructor() {
@@ -96,11 +115,13 @@ export async function listManualRunnerStatusSummariesForDevelopmentUser(
           .where(eq(runnerHeartbeats.runnerId, row.id))
           .orderBy(desc(runnerHeartbeats.observedAt))
           .limit(1);
+        const assignedRunningAgents = await countAssignedRunningAgents(tx, row.id, userId);
 
         summaries.push(
           toManualRunnerStatusSummary({
             ...row,
             latestHeartbeat: latestHeartbeat ?? null,
+            assignedRunningAgents,
           }),
         );
       }
@@ -163,11 +184,13 @@ export async function listSettingsRunnerManagementSummariesForDevelopmentUser(
           .where(eq(runnerHeartbeats.runnerId, row.id))
           .orderBy(desc(runnerHeartbeats.observedAt))
           .limit(1);
+        const assignedRunningAgents = await countAssignedRunningAgents(tx, row.id, userId);
 
         summaries.push(
           toSettingsRunnerManagementSummary({
             ...row,
             latestHeartbeat: latestHeartbeat ?? null,
+            assignedRunningAgents,
           }),
         );
       }
@@ -237,10 +260,12 @@ export async function getAssignedManualRunnerStatusForDevelopmentUserAgent(
         .where(eq(runnerHeartbeats.runnerId, row.id))
         .orderBy(desc(runnerHeartbeats.observedAt))
         .limit(1);
+      const assignedRunningAgents = await countAssignedRunningAgents(tx, row.id, userId);
 
       return toAssignedManualRunnerStatusSummary({
         ...row,
         latestHeartbeat: latestHeartbeat ?? null,
+        assignedRunningAgents,
       });
     });
   } catch {
@@ -265,6 +290,7 @@ export function toManualRunnerStatusSummary(row: ManualRunnerStatusRow): ManualR
     kind: toSupportedRunnerKind(row.kind),
     endpointHost,
     status,
+    capacity: toCapacitySummary(row.latestHeartbeat?.metadata, row.assignedRunningAgents ?? 0),
     version: toSafeVersion(row.latestHeartbeat?.metadata),
     lastSeenAt: row.latestHeartbeat ? toIsoTimestamp(row.latestHeartbeat.observedAt) : null,
     updatedAt: toIsoTimestamp(row.updatedAt),
@@ -350,6 +376,71 @@ function toSafeVersion(metadata: Record<string, unknown> | null | undefined): st
   const version = summarizeOperationalText(metadata.version, "");
 
   return version.length > 0 ? version : null;
+}
+
+function toCapacitySummary(
+  metadata: Record<string, unknown> | null | undefined,
+  assignedRunningAgents: number,
+): ManualRunnerCapacitySummary {
+  const normalized = normalizeRunnerCapacitySnapshot(metadata, assignedRunningAgents);
+  const metrics = getMetrics(metadata);
+
+  return {
+    runningAgents: normalized.running_agents,
+    maxAgents: normalized.max_agents,
+    cpuUsedPercent: hasReportedMetric(metrics, "cpuPercent", "cpu_used_percent")
+      ? normalized.cpu_used_percent
+      : null,
+    memoryUsedMb: hasReportedMetric(metrics, "memoryUsedMb", "memory_used_mb")
+      ? normalized.memory_used_mb
+      : null,
+    memoryTotalMb: hasReportedMetric(metrics, "memoryTotalMb", "memory_total_mb")
+      ? normalized.memory_total_mb
+      : null,
+    diskUsedMb: hasReportedMetric(metrics, "diskUsedMb", "disk_used_mb")
+      ? normalized.disk_used_mb
+      : null,
+    diskTotalMb: hasReportedMetric(metrics, "diskTotalMb", "disk_total_mb")
+      ? normalized.disk_total_mb
+      : null,
+    blocker: normalized.running_agents >= normalized.max_agents ? "runner_capacity_reached" : null,
+  };
+}
+
+function getMetrics(metadata: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  if (!metadata || typeof metadata.metrics !== "object" || Array.isArray(metadata.metrics)) {
+    return {};
+  }
+
+  return metadata.metrics as Record<string, unknown>;
+}
+
+function hasReportedMetric(metrics: Record<string, unknown>, camelKey: string, snakeKey: string) {
+  return isFiniteNumber(metrics[camelKey]) || isFiniteNumber(metrics[snakeKey]);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+async function countAssignedRunningAgents(
+  tx: RunnerPlacementTransaction,
+  runnerId: string,
+  userId: string,
+): Promise<number> {
+  const rows = await tx
+    .select({ id: agents.id })
+    .from(agents)
+    .where(
+      and(
+        eq(agents.runnerId, runnerId),
+        eq(agents.userId, userId),
+        inArray(agents.status, [...RUNNER_STATUS_RUNNING_AGENT_STATES]),
+        isNull(agents.deletedAt),
+      ),
+    );
+
+  return rows.length;
 }
 
 function extractEndpointHost(endpointUrl: string | null): string {

@@ -7,6 +7,7 @@ import DashboardPage, { DashboardContent } from "@/app/dashboard/page";
 import Home from "@/app/page";
 import SettingsPage from "@/app/settings/page";
 import type { AgentEventDto } from "@/src/server/events/agent-events";
+import type { ManualRunnerCapacitySummary } from "@/src/server/runners/manual-runner-status";
 
 const mocks = vi.hoisted(() => ({
   closeDashboardConnection: vi.fn(),
@@ -101,6 +102,22 @@ vi.mock("next/navigation", () => ({
     refresh: vi.fn(),
   }),
 }));
+
+function capacity(
+  overrides: Partial<ManualRunnerCapacitySummary> = {},
+): ManualRunnerCapacitySummary {
+  return {
+    runningAgents: 0,
+    maxAgents: 1,
+    cpuUsedPercent: null,
+    memoryUsedMb: null,
+    memoryTotalMb: null,
+    diskUsedMb: null,
+    diskTotalMb: null,
+    blocker: null,
+    ...overrides,
+  };
+}
 
 describe("product shell routes", () => {
   beforeEach(() => {
@@ -219,6 +236,15 @@ describe("product shell routes", () => {
         kind: "manual_vps",
         endpointHost: "runner.example.com:8443",
         status: "online",
+        capacity: capacity({
+          runningAgents: 3,
+          maxAgents: 5,
+          cpuUsedPercent: 37,
+          memoryUsedMb: 512,
+          memoryTotalMb: 2048,
+          diskUsedMb: null,
+          diskTotalMb: null,
+        }),
         version: "agentbay-runner/1.2.3",
         lastSeenAt: "2026-07-05T01:01:00.000Z",
         updatedAt: "2026-07-05T01:00:00.000Z",
@@ -234,6 +260,10 @@ describe("product shell routes", () => {
     expect(html).toContain("manual_vps");
     expect(html).toContain("runner.example.com:8443");
     expect(html).toContain("online");
+    expect(html).toContain("3 / 5 agents running");
+    expect(html).toContain("37%");
+    expect(html).toContain("512 / 2,048 MB");
+    expect(html).toContain("No runner capacity blocker");
     expect(html).toContain("agentbay-runner/1.2.3");
     expect(html).toContain("2026-07-05T01:01:00.000Z");
     expect(html).toContain("2026-07-05T01:00:00.000Z");
@@ -850,6 +880,7 @@ describe("product shell routes", () => {
       kind: "manual_vps",
       endpointHost: "runner.example.com",
       status: "offline",
+      capacity: capacity({ runningAgents: 1, maxAgents: 1, blocker: "runner_capacity_reached" }),
       version: "agentbay-runner/1.2.3",
       lastSeenAt: "2026-07-05T01:31:00.000Z",
       updatedAt: "2026-07-05T01:30:00.000Z",
@@ -870,6 +901,8 @@ describe("product shell routes", () => {
     expect(html).toContain("manual_vps");
     expect(html).toContain("runner.example.com");
     expect(html).toContain("offline");
+    expect(html).toContain("1 / 1 agent running");
+    expect(html).toContain("Runner capacity reached");
     expect(html).toContain("agentbay-runner/1.2.3");
     expect(html).toContain("2026-07-05T01:31:00.000Z");
     expect(html).toContain("2026-07-05T01:30:00.000Z");
@@ -894,6 +927,15 @@ describe("product shell routes", () => {
       kind: "digitalocean",
       endpointHost: "cloud-runner.example.com",
       status: "online",
+      capacity: capacity({
+        runningAgents: 2,
+        maxAgents: 5,
+        cpuUsedPercent: null,
+        memoryUsedMb: null,
+        memoryTotalMb: null,
+        diskUsedMb: null,
+        diskTotalMb: null,
+      }),
       version: "agentbay-runner/3.0.0",
       lastSeenAt: "2026-07-06T01:31:00.000Z",
       updatedAt: "2026-07-06T01:30:00.000Z",
@@ -912,6 +954,8 @@ describe("product shell routes", () => {
     expect(html).toContain("digitalocean");
     expect(html).toContain("cloud-runner.example.com");
     expect(html).toContain("online");
+    expect(html).toContain("2 / 5 agents running");
+    expect(html).toContain("Not reported");
     expect(html).toContain("agentbay-runner/3.0.0");
     expect(html).not.toContain("runnerId");
     expect(html).not.toContain("registrationToken");
@@ -1125,6 +1169,7 @@ describe("product shell routes", () => {
         kind: "manual_vps",
         endpointHost: "runner-settings.example.com",
         status: "offline",
+        capacity: capacity({ runningAgents: 1, maxAgents: 1, blocker: "runner_capacity_reached" }),
         version: null,
         lastSeenAt: "2026-07-05T03:00:00.000Z",
         updatedAt: "2026-07-05T03:01:00.000Z",
@@ -1139,6 +1184,8 @@ describe("product shell routes", () => {
     expect(html).toContain("Settings Runner");
     expect(html).toContain("runner-settings.example.com");
     expect(html).toContain("offline");
+    expect(html).toContain("1 / 1 agent running");
+    expect(html).toContain("Runner capacity reached");
     expect(html).toContain("Not reported");
     expect(html).toContain("2026-07-05T03:00:00.000Z");
     expect(html).toContain("Billing");
