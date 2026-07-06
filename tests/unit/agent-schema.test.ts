@@ -16,6 +16,7 @@ import {
   localRunnerProcessStatusEnum,
   runnerCredentials,
   runnerHeartbeats,
+  runnerProvisioningEvents,
   runnerRegistrationTokens,
   runners,
   users,
@@ -30,6 +31,7 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(getTableName(agentApprovals)).toBe("agent_approvals");
     expect(getTableName(agentEvents)).toBe("agent_events");
     expect(getTableName(runners)).toBe("runners");
+    expect(getTableName(runnerProvisioningEvents)).toBe("runner_provisioning_events");
     expect(getTableName(runnerRegistrationTokens)).toBe("runner_registration_tokens");
     expect(getTableName(runnerCredentials)).toBe("runner_credentials");
     expect(getTableName(runnerHeartbeats)).toBe("runner_heartbeats");
@@ -170,6 +172,28 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.updatedAt.notNull).toBe(true);
     expect(Object.keys(columns)).not.toContain("token");
     expect(Object.keys(columns)).not.toContain("rawToken");
+  });
+
+  it("defines runner provisioning event rows with safe metadata snapshots", () => {
+    const columns = getTableColumns(runnerProvisioningEvents);
+
+    expect(Object.keys(columns)).toEqual([
+      "id",
+      "runnerId",
+      "phase",
+      "status",
+      "message",
+      "metadata",
+      "createdAt",
+    ]);
+    expect(columns.id.notNull).toBe(true);
+    expect(columns.runnerId.notNull).toBe(true);
+    expect(columns.phase.notNull).toBe(true);
+    expect(columns.status.notNull).toBe(true);
+    expect(columns.message.notNull).toBe(true);
+    expect(columns.metadata.notNull).toBe(true);
+    expect(columns.metadata.dataType).toBe("json");
+    expect(columns.createdAt.notNull).toBe(true);
   });
 
   it("defines runner credential rows with credential hashes only", () => {
