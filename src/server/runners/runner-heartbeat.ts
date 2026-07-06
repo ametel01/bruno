@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { runnerCredentials, runnerHeartbeats, runners } from "@/src/server/db/schema";
 import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
@@ -243,13 +243,7 @@ export async function reconcileStaleRunnerHeartbeats(
             status: RUNNER_HEARTBEAT_OFFLINE_STATUS,
             updatedAt: now,
           })
-          .where(
-            and(
-              inArray(runners.id, staleRunnerIds),
-              lt(runners.updatedAt, now),
-              isNull(runners.deletedAt),
-            ),
-          );
+          .where(and(inArray(runners.id, staleRunnerIds), isNull(runners.deletedAt)));
       }
 
       return {

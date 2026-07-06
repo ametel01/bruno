@@ -13,9 +13,38 @@ describe("create agent validation", () => {
         value: {
           name: "Research Agent",
           templateKey,
+          runnerId: null,
         },
       });
     }
+  });
+
+  it("accepts a valid runner ID and rejects malformed runner IDs", () => {
+    expect(
+      validateCreateAgentPayload({
+        name: "Research Agent",
+        templateKey: "research_agent",
+        runnerId: " 00000000-0000-4000-8000-000000000131 ",
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        name: "Research Agent",
+        templateKey: "research_agent",
+        runnerId: "00000000-0000-4000-8000-000000000131",
+      },
+    });
+
+    expect(
+      validateCreateAgentPayload({
+        name: "Research Agent",
+        templateKey: "research_agent",
+        runnerId: "not-a-runner-id",
+      }),
+    ).toMatchObject({
+      ok: false,
+      issues: [{ field: "runnerId" }],
+    });
   });
 
   it("rejects malformed payload shapes, invalid names, and unknown templates", () => {

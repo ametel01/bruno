@@ -1,4 +1,5 @@
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
 import { agentConfigs, agents } from "@/src/server/db/schema";
@@ -31,7 +32,7 @@ export const DEFAULT_AGENT_CONFIG = {
 } as const;
 
 export type CreateAgentValidationIssue = {
-  field: "body" | "name" | "templateKey";
+  field: "body" | "name" | "templateKey" | "runnerId";
   message: string;
 };
 
@@ -41,6 +42,7 @@ export type CreateAgentValidationResult =
       value: {
         name: string;
         templateKey: SupportedAgentTemplateKey;
+        runnerId: string | null;
       };
     }
   | {
@@ -61,6 +63,7 @@ export type CreatedAgentResponse = {
     createdAt: string;
     updatedAt: string;
     deletedAt: null;
+    runnerId: string | null;
   };
   event: {
     type: "agent.created";
@@ -129,6 +132,13 @@ export class AgentCreateBlockedError extends Error {
   }
 }
 
+export class AgentRunnerAssignmentError extends Error {
+  constructor() {
+    super("Requested runner cannot be assigned to this agent.");
+    this.name = "AgentRunnerAssignmentError";
+  }
+}
+
 export function validateCreateAgentPayload(payload: unknown): CreateAgentValidationResult {
   if (!isPlainObject(payload)) {
     return {
@@ -140,6 +150,7 @@ export function validateCreateAgentPayload(payload: unknown): CreateAgentValidat
   const issues: CreateAgentValidationIssue[] = [];
   const rawName = payload.name;
   const rawTemplateKey = payload.templateKey;
+  const rawRunnerId = payload.runnerId;
 
   if (typeof rawName !== "string") {
     issues.push({ field: "name", message: "Name is required." });
@@ -162,6 +173,16 @@ export function validateCreateAgentPayload(payload: unknown): CreateAgentValidat
     issues.push({ field: "templateKey", message: "Template key is not supported." });
   }
   const templateKey = isSupportedTemplateKey(rawTemplateKey) ? rawTemplateKey : undefined;
+  const runnerId =
+    typeof rawRunnerId === "string" && rawRunnerId.trim().length > 0 ? rawRunnerId.trim() : null;
+
+  if (
+    rawRunnerId !== undefined &&
+    rawRunnerId !== null &&
+    (typeof rawRunnerId !== "string" || (runnerId !== null && !isValidAgentId(runnerId)))
+  ) {
+    issues.push({ field: "runnerId", message: "Runner ID must be a valid UUID." });
+  }
 
   if (issues.length > 0 || !templateKey) {
     return { ok: false, issues };
@@ -172,6 +193,7 @@ export function validateCreateAgentPayload(payload: unknown): CreateAgentValidat
     value: {
       name,
       templateKey,
+      runnerId,
     },
   };
 }
@@ -180,6 +202,7 @@ export async function createAgentForDevelopmentUser(
   input: {
     name: string;
     templateKey: SupportedAgentTemplateKey;
+    runnerId?: string | null;
   },
   dependencies: CreateAgentDependencies = {},
 ): Promise<CreatedAgentResponse> {
@@ -195,7 +218,12 @@ export async function createAgentForDevelopmentUser(
       const templateSnapshot = getAgentTemplateSnapshot(input.templateKey);
       const placement = await selectRunnerPlacementForDevelopmentUserInTransaction(tx, {
         planMaxAgents: dependencies.planMaxAgents,
+        runnerId: input.runnerId,
       });
+
+      if (!placement.ok && input.runnerId && placement.reason === "no_online_runner") {
+        throw new AgentRunnerAssignmentError();
+      }
 
       if (
         !placement.ok &&
@@ -232,6 +260,10 @@ export async function createAgentForDevelopmentUser(
     return result;
   } catch (error) {
     if (error instanceof AgentCreateBlockedError) {
+      throw error;
+    }
+
+    if (error instanceof AgentRunnerAssignmentError) {
       throw error;
     }
 
@@ -276,6 +308,7 @@ async function insertDefaultCreatedEvent(
       templateKey: input.agent.templateKey,
       templateVersion: input.agent.templateVersion,
       status: input.agent.status,
+      runnerAssignment: input.agent.runnerId ? "assigned" : "none",
     },
   });
 }
@@ -291,6 +324,7 @@ function toCreatedAgentResponse(agent: CreatedAgentRow): CreatedAgentResponse {
       templateSnapshotJson: agent.templateSnapshotJson,
       status: "stopped",
       statusReason: null,
+      runnerId: agent.runnerId,
       createdAt: agent.createdAt.toISOString(),
       updatedAt: agent.updatedAt.toISOString(),
       deletedAt: null,

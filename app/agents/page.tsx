@@ -9,11 +9,16 @@ import {
   AgentListPersistenceError,
   listActiveAgentsForDevelopmentUser,
 } from "@/src/server/agents/list-agents";
+import {
+  listAssignableRunnersForDevelopmentUser,
+  RunnerAssignmentPersistenceError,
+} from "@/src/server/runners/runner-assignment";
 
 export const dynamic = "force-dynamic";
 
 export default async function AgentsPage() {
   const listResult = await loadAgents();
+  const runnerResult = await loadAssignableRunners();
 
   return (
     <ProductShell
@@ -89,12 +94,30 @@ export default async function AgentsPage() {
         <PlaceholderPanel title="Create agent">
           <CreateAgentForm
             maxNameLength={AGENT_NAME_MAX_LENGTH}
+            runners={runnerResult.ok ? runnerResult.runners : []}
             templates={AGENT_TEMPLATE_OPTIONS}
           />
         </PlaceholderPanel>
       </div>
     </ProductShell>
   );
+}
+
+async function loadAssignableRunners() {
+  try {
+    return {
+      ok: true as const,
+      runners: await listAssignableRunnersForDevelopmentUser(),
+    };
+  } catch (error) {
+    if (error instanceof RunnerAssignmentPersistenceError) {
+      return {
+        ok: false as const,
+      };
+    }
+
+    throw error;
+  }
 }
 
 async function loadAgents() {

@@ -5,8 +5,9 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${port}`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  fullyParallel: true,
+  fullyParallel: false,
   reporter: "list",
+  workers: 1,
   use: {
     baseURL,
     trace: "on-first-retry",
@@ -14,7 +15,7 @@ export default defineConfig({
   webServer: {
     command: `bun run dev --hostname 127.0.0.1 --port ${port}`,
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === "1",
     timeout: 120_000,
   },
   projects: [

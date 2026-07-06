@@ -1,5 +1,6 @@
 import {
   AgentCreateBlockedError,
+  AgentRunnerAssignmentError,
   AgentPersistenceError,
   createAgentForDevelopmentUser,
   validateCreateAgentPayload,
@@ -31,6 +32,18 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof AgentCreateBlockedError) {
       return createBlockedResponse(error);
+    }
+
+    if (error instanceof AgentRunnerAssignmentError) {
+      return Response.json(
+        {
+          error: {
+            code: "runner_not_assignable",
+            message: "Runner could not be assigned to this agent.",
+          },
+        },
+        { status: 404 },
+      );
     }
 
     if (error instanceof AgentPersistenceError) {

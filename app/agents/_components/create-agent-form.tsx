@@ -12,10 +12,17 @@ type SubmitState =
 
 type CreateAgentFormProps = {
   maxNameLength: number;
+  runners: Array<{
+    id: string;
+    name: string;
+    kind: "manual_vps";
+    status: "online";
+    detail: string;
+  }>;
   templates: AgentTemplateSnapshot[];
 };
 
-export function CreateAgentForm({ maxNameLength, templates }: CreateAgentFormProps) {
+export function CreateAgentForm({ maxNameLength, runners, templates }: CreateAgentFormProps) {
   const router = useRouter();
   const [state, setState] = useState<SubmitState>({ status: "idle" });
   const [hydrated, setHydrated] = useState(false);
@@ -40,6 +47,7 @@ export function CreateAgentForm({ maxNameLength, templates }: CreateAgentFormPro
     const formData = new FormData(form);
     const name = String(formData.get("name") ?? "").trim();
     const templateKey = String(formData.get("templateKey") ?? "");
+    const runnerId = String(formData.get("runnerId") ?? "").trim();
 
     if (name.length === 0) {
       setState({ status: "error", message: "Name is required." });
@@ -54,7 +62,7 @@ export function CreateAgentForm({ maxNameLength, templates }: CreateAgentFormPro
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ name, templateKey }),
+        body: JSON.stringify({ name, templateKey, runnerId: runnerId || null }),
       });
 
       if (!response.ok) {
@@ -102,6 +110,19 @@ export function CreateAgentForm({ maxNameLength, templates }: CreateAgentFormPro
           ))}
         </select>
       </div>
+      {runners.length > 0 ? (
+        <div className="field-group">
+          <label htmlFor="agent-runner">Runner</label>
+          <select id="agent-runner" name="runnerId" defaultValue="">
+            <option value="">No runner</option>
+            {runners.map((runner) => (
+              <option key={runner.id} value={runner.id}>
+                {runner.name} / {runner.kind} / {runner.status} / {runner.detail}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
       {selectedTemplate ? (
         <div className="selected-template-summary" aria-live="polite">
           <h3>{selectedTemplate.name}</h3>
@@ -207,6 +228,10 @@ async function safeFailureMessage(response: Response): Promise<string> {
 
     if (body.error?.code === "database_schema_missing") {
       return "Database schema is missing. Run migrations, then try again.";
+    }
+
+    if (body.error?.code === "runner_not_assignable") {
+      return "Runner could not be assigned. Refresh runners and try again.";
     }
   } catch {
     // Keep user-facing failures generic when the response is not safe validation JSON.

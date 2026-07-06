@@ -44,6 +44,7 @@ describe("POST /api/agents route", () => {
         createdAt: "2026-07-03T05:00:00.000Z",
         updatedAt: "2026-07-03T05:00:00.000Z",
         deletedAt: null,
+        runnerId: null,
       },
       event: {
         type: "agent.created",
@@ -77,6 +78,7 @@ describe("POST /api/agents route", () => {
     expect(mocks.createAgentForDevelopmentUser).toHaveBeenCalledWith({
       name: "Research Agent",
       templateKey: "research_agent",
+      runnerId: null,
     });
   });
 
