@@ -8,6 +8,7 @@
     "db:generate": "drizzle-kit generate",
     "db:health": "DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} bun scripts/db-health.ts",
     "db:migrate": "DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} drizzle-kit migrate",
+    "deploy:prod": "vercel deploy --prod --scope ametel01s-projects",
     "dev": "next dev",
     "local:down": "docker compose down --remove-orphans",
     "local:up": "docker compose up -d postgres && bun run db:migrate && bun run dev",
