@@ -365,7 +365,7 @@
 
 ## Milestone 15 Backups and Restore
 
-- Status: #167 backup and restore UI controls are in progress on `codex/issue-167-backup-restore-ui`.
+- Status: #168 final acceptance/security evidence is in progress on `codex/issue-168-backup-restore-evidence`.
 - Source plan:
   - `docs/MILESTONES.md` Milestone 15: Backups and Restore.
   - GitHub issue #162: Prepare Milestone 15 tracking and baseline gates.
@@ -376,7 +376,7 @@
   - GitHub issue #167: Add backup and restore controls to the agent UI.
   - GitHub issue #168: Complete backup restore acceptance and security evidence.
   - `PLAN.md` is absent in this worktree; the published #162-#168 issue bodies and `docs/MILESTONES.md` are the active Milestone 15 contract.
-- Current branch: `codex/issue-167-backup-restore-ui`.
+- Current branch: `codex/issue-168-backup-restore-evidence`.
 
 ### Issue Checklist
 
@@ -385,8 +385,8 @@
 - [x] #164 Add S3-compatible backup object storage boundary. Status: merged in PR #183.
 - [x] #165 Implement manual agent backup creation. Status: merged in PR #184.
 - [x] #166 Restore backups into new agents. Status: merged in PR #185.
-- [ ] #167 Add backup and restore controls to the agent UI. Status: implementation and validation in progress.
-- [ ] #168 Complete backup restore acceptance and security evidence. Status: pending #163-#167.
+- [x] #167 Add backup and restore controls to the agent UI. Status: merged in PR #186.
+- [ ] #168 Complete backup restore acceptance and security evidence. Status: implementation and validation in progress.
 - Later Milestone 15 issue agents must append validation evidence here after their implementation slices merge.
 
 ### Current Status
@@ -425,6 +425,12 @@
   - Agent detail now loads a safe backup summary read model with backup ID, status, created time, restored time, and restore eligibility only.
   - The Backups panel lets users create a manual backup and restore a ready backup through the existing #165/#166 routes, then refreshes the persisted view.
   - Restore success can link to the newly restored agent, making the restored agent discoverable without rendering storage URIs, manifest JSON, secret references, or raw artifact internals.
+- #168 completes final Milestone 15 acceptance/security evidence:
+  - `tests/unit/backup-restore-acceptance.test.ts` exercises the real DB-backed manual backup and restore services with fake object storage in one flow, then verifies visible backup status, restored config/template metadata, `backup.created` and `backup.restored` timeline events, and raw-secret exclusion from manifests, stored artifacts, event/read-model surfaces, and backup log summaries.
+  - `backup.created` event metadata now records only safe backup ID and status context, not backup storage URIs, so the activity feed can show backup timeline events without exposing artifact locations.
+  - Existing route/UI tests continue to prove browser-visible create/restore responses and the agent detail backup controls omit storage URIs, manifest JSON, secret references, and raw artifact internals.
+  - Validation: `bun install --frozen-lockfile` passed after the fresh worktree initially lacked package shims; `bun run format`; focused serialized backup/restore acceptance suite passed (7 files, 48 tests); `bun run format:check`; `bun run lint`; `bun run typecheck`; `git diff --check`; production `bun run build`; full serialized unit suite passed (52 files, 399 tests); focused Chromium backup-controls smoke passed on port 3168.
+  - Default `bun run verify` remains intentionally skipped because its default parallel DB-backed Vitest step is the documented shared-table reset race; this branch instead records equivalent serialized unit, build, static gates, and focused browser evidence.
 - `CHANGELOG.md` has the Keep a Changelog 1.0.0 framing and an `## [Unreleased]` section. Agents should keep that structure and add changelog bullets only for shipped functional user/operator-visible changes.
 
 ### Baseline Gate Expectations

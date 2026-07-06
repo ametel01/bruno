@@ -112,9 +112,10 @@ describe("manual agent backup creation", () => {
       metadata: {
         backupId: result.backup.id,
         status: "ready",
-        storageUri: result.backup.storageUri,
       },
     });
+    expect(JSON.stringify(persistedEvents)).not.toContain("storageUri");
+    expect(JSON.stringify(persistedEvents)).not.toContain(result.backup.storageUri);
     expect(manifest).toMatchObject({
       schemaVersion: 1,
       agent: {
