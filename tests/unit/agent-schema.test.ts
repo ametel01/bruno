@@ -194,6 +194,9 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.metadata.notNull).toBe(true);
     expect(columns.metadata.dataType).toBe("json");
     expect(columns.createdAt.notNull).toBe(true);
+    expect(Object.keys(columns)).not.toContain("registrationToken");
+    expect(Object.keys(columns)).not.toContain("credential");
+    expect(Object.keys(columns)).not.toContain("providerToken");
   });
 
   it("defines runner credential rows with credential hashes only", () => {
@@ -660,6 +663,20 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(migration).toContain('WHERE "runners"."deleted_at" IS NULL');
     expect(migration).toContain('"runners"."endpoint_url" IS NOT NULL');
     expect(migration).not.toContain("DROP TABLE");
+    expect(migration).not.toMatch(/api[_ ]?key|token|password|secret|credential/i);
+  });
+
+  it("generates durable cloud runner provisioning event migration without secret columns", async () => {
+    const migration = await readFile("drizzle/0011_blushing_brother_voodoo.sql", "utf8");
+
+    expect(migration).toContain('CREATE TABLE "runner_provisioning_events"');
+    expect(migration).toContain('"phase" text NOT NULL');
+    expect(migration).toContain('"status" text NOT NULL');
+    expect(migration).toContain("\"metadata\" jsonb DEFAULT '{}'::jsonb NOT NULL");
+    expect(migration).toContain("'bootstrapping'");
+    expect(migration).toContain("'waiting_for_runner'");
+    expect(migration).toContain("'ready'");
+    expect(migration).toContain('"runner_provisioning_events_runner_created_idx"');
     expect(migration).not.toMatch(/api[_ ]?key|token|password|secret|credential/i);
   });
 });

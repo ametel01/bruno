@@ -63,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Settings runner management controls for creating visible-once `agb_reg_*` registration tokens, rotating registered runner credentials with visible-once `agb_run_*` replacement display, and revoking active runner credentials with safe success, loading, validation, and error states.
 - Cloud runner provisioning persistence and a server-only DigitalOcean provider contract with fake create, tag, firewall, cleanup, and failure paths for follow-on provisioning workflow tests.
 - Backend `POST /api/runners` DigitalOcean provisioning workflow that validates create-runner input, persists refresh-safe provisioning phases, records Droplet create/tag/firewall API progress, creates a hash-only one-time registration token for bootstrap, returns duplicate-submit progress, and exposes safe failure state without provider credentials or registration secrets.
+- Cloud runner bootstrap content, runner-side bootstrap registration, provisioning event tracking, cloud registration-token exchange, and first-heartbeat readiness transitions without exposing provider credentials or long-lived runner credentials.
 
 ### Fixed
 
