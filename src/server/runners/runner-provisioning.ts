@@ -27,6 +27,7 @@ import {
   type DigitalOceanProviderResult,
   type DigitalOceanResource,
 } from "@/src/server/runners/digitalocean-provider";
+import { LocalDockerDigitalOceanProvider } from "@/src/server/runners/local-docker-digitalocean-provider";
 import {
   createRunnerRegistrationToken,
   type GeneratedRunnerSecret,
@@ -216,7 +217,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
         },
         getProvider: (config) => {
           resolvedProvider ??=
-            dependencies.provider ?? new DigitalOceanApiProvider({ token: config.token });
+            dependencies.provider ?? createConfiguredDigitalOceanProvider(config);
           return resolvedProvider;
         },
         now: operationStartedAt,
@@ -267,9 +268,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
     });
 
     const provider =
-      resolvedProvider ??
-      dependencies.provider ??
-      new DigitalOceanApiProvider({ token: config.token });
+      resolvedProvider ?? dependencies.provider ?? createConfiguredDigitalOceanProvider(config);
     const createRegistrationTokenDependency =
       dependencies.createRegistrationToken ?? createRunnerRegistrationToken;
 
@@ -641,6 +640,24 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
   }
 }
 
+function createConfiguredDigitalOceanProvider(
+  config: DigitalOceanProviderConfig,
+): DigitalOceanProvider {
+  if (config.providerMode === "local_docker") {
+    return new LocalDockerDigitalOceanProvider({
+      ...(config.localRunnerContainerName
+        ? { containerName: config.localRunnerContainerName }
+        : {}),
+      ...(config.localRunnerEndpointUrl ? { endpointUrl: config.localRunnerEndpointUrl } : {}),
+      ...(config.localRunnerStartDelayMs === undefined
+        ? {}
+        : { startDelayMs: config.localRunnerStartDelayMs }),
+    });
+  }
+
+  return new DigitalOceanApiProvider({ token: config.token });
+}
+
 async function runProviderStep(
   connection: DatabaseConnection,
   input: {
@@ -964,6 +981,10 @@ async function resolveDigitalOceanPublicEndpoint(
       reason: DigitalOceanProviderErrorReason;
     }
 > {
+  if (resource.publicEndpointUrl) {
+    return { ok: true, endpointUrl: resource.publicEndpointUrl };
+  }
+
   const publicIpv4 = normalizePublicIpv4(resource.publicIpv4);
 
   if (publicIpv4) {
@@ -985,6 +1006,10 @@ async function resolveDigitalOceanPublicEndpoint(
     if (!refreshed.ok) {
       lastFailureReason = refreshed.reason;
     } else {
+      if (refreshed.value.publicEndpointUrl) {
+        return { ok: true, endpointUrl: refreshed.value.publicEndpointUrl };
+      }
+
       const refreshedPublicIpv4 = normalizePublicIpv4(refreshed.value.publicIpv4);
 
       if (refreshedPublicIpv4) {

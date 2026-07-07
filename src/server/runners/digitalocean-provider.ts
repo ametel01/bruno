@@ -35,6 +35,7 @@ export type DigitalOceanResource = {
   provider: DigitalOceanProviderName;
   providerResourceId: string;
   publicIpv4: string | null;
+  publicEndpointUrl?: string;
   name: string;
   region: string;
   sizeSlug: string;

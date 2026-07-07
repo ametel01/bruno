@@ -36,6 +36,16 @@ describe("environment validation", () => {
     ).toMatchObject({
       AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "http://127.0.0.1:8787",
     });
+
+    expect(
+      validateRequiredEnv({
+        DATABASE_URL: "postgres://agentbay:agentbay@127.0.0.1:54329/agentbay",
+        NEXT_PUBLIC_APP_URL: "http://localhost:3000",
+        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "http://host.docker.internal:3045",
+      }),
+    ).toMatchObject({
+      AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "http://host.docker.internal:3045",
+    });
   });
 
   it("rejects blank, malformed, and non-HTTPS remote manual runner endpoints", () => {

@@ -13,4 +13,4 @@ ENV AGENTBAY_RUNNER_HOST=0.0.0.0
 
 EXPOSE 3045
 
-CMD ["sh", "-c", "bun run runner:bootstrap && exec bun run runner:service"]
+CMD ["sh", "-c", "bun run runner:bootstrap && set -a && . \"${AGENTBAY_RUNNER_ENV_FILE:-/etc/agentbay/runner.env}\" && set +a && exec bun run runner:service"]
