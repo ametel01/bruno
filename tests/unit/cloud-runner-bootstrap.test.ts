@@ -60,6 +60,8 @@ describe.sequential("cloud runner bootstrap content", () => {
       "AGENTBAY_RUNNER_IMAGE=ghcr.io/ametel01/agentbay-runner:sha-123",
     );
     expect(content.userData).toContain("AGENTBAY_RUNNER_ENV_FILE=/etc/agentbay/runner.env");
+    expect(content.userData).toContain("AGENTBAY_RUNNER_HOST=0.0.0.0");
+    expect(content.userData).not.toContain("AGENTBAY_RUNNER_HOST=127.0.0.1");
     expect(content.userData).not.toContain('AGENTBAY_APP_URL="https://app.agentbay.test"');
     expect(content.userData).not.toContain(
       'AGENTBAY_RUNNER_IMAGE="ghcr.io/ametel01/agentbay-runner:sha-123"',
@@ -121,6 +123,7 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain("apt-get install -y caddy");
     expect(content.userData).toContain("203-0-113-10.sslip.io");
     expect(content.userData).toContain("reverse_proxy 127.0.0.1:3045");
+    expect(content.userData).toContain("-p '127.0.0.1:3045:3045'");
     expect(content.safeSummary.runnerEndpointUrl).toBe("https://203-0-113-10.sslip.io");
   });
 
