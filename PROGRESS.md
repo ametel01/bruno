@@ -8,7 +8,9 @@ Source brief: Inline user-supplied design brief from the 2026-07-07 Codex turn.
 
 Steps 0, 1, and 2 are complete for issues #188, #189, and #190. The runner image rollout now has a dedicated Docker image artifact for the existing runner bootstrap and service plus server-side runner image selection for cloud provisioning.
 
-Next step: Step 3, publish runner images to GHCR, owned by downstream implementation issue #191.
+Step 3 is implemented for issue #191 as a main-branch GitHub Actions workflow that will publish the runner image after merge.
+
+Next step: Step 4, run DigitalOcean bootstrap from the runner image, owned by downstream implementation issue #192 after #191 is merged and GHCR pullability is confirmed.
 
 ## GHCR Pull Policy
 
@@ -31,7 +33,7 @@ No functional changelog entry was added for Step 0 because this issue is setup-o
 - [x] Step 0: Progress and Changelog Tracking Setup
 - [x] Step 1: Package the Cloud Runner Image
 - [x] Step 2: Add Configurable Runner Image Selection
-- [ ] Step 3: Publish Runner Images to GHCR
+- [x] Step 3: Publish Runner Images to GHCR
 - [ ] Step 4: Run DigitalOcean Bootstrap from the Runner Image
 - [ ] Step 5: Verify Hosted Runner Registration End to End
 - [ ] Step 6: Close Out the Rollout
@@ -117,11 +119,38 @@ Commit reference: `ae96054` (PR #196 merge commit).
 
 ### Step 3: Publish Runner Images to GHCR
 
-Status: pending downstream implementation.
+Status: implemented; pending main-branch publish validation after merge.
 
 Owner issue: #191.
 
-Expected outcome: publish `ghcr.io/ametel01/agentbay-runner:<git-sha>` and `ghcr.io/ametel01/agentbay-runner:main` from `main`, then confirm public unauthenticated pullability.
+Completed for issue #191:
+
+- Added `.github/workflows/publish-runner-image.yml` with a `push` trigger scoped to the `main` branch.
+- Granted the workflow minimum practical permissions for this publish path: `contents: read` and `packages: write`.
+- Configured GHCR login through GitHub Actions' built-in `GITHUB_TOKEN` via `${{ github.token }}`; no PAT, repository secret, Droplet-side credential, or custom registry credential was added.
+- Configured Docker Buildx to build `Dockerfile.runner` from the repository root and push both `ghcr.io/ametel01/agentbay-runner:${{ github.sha }}` and `ghcr.io/ametel01/agentbay-runner:main`.
+- Left feature-branch publishing disabled by omitting pull request, workflow dispatch, tag, and non-main branch triggers.
+- Left `CHANGELOG.md` unchanged because this slice adds CI publishing only and does not change operator-facing runtime behavior before merge.
+
+Pre-merge validation:
+
+- `bun run format:check` passed.
+- `bun run lint` passed.
+- `bun run typecheck` passed.
+- `docker build -f Dockerfile.runner -t agentbay-runner:test .` passed.
+- `git diff --check` passed.
+- Workflow YAML inspection passed for main-only publishing, `ghcr.io/ametel01/agentbay-runner:${{ github.sha }}`, `ghcr.io/ametel01/agentbay-runner:main`, built-in `GITHUB_TOKEN` login, and explicit `contents: read` / `packages: write` permissions.
+- Stale-placeholder scan over `PROGRESS.md`, `CHANGELOG.md`, and `.github/workflows` passed.
+- Targeted secret scan over changed files passed; matches are limited to expected GitHub Actions token expression names and public GHCR image references.
+
+Post-merge validation still pending:
+
+- Confirm the GitHub Actions run on `main` succeeds for the merge commit.
+- Confirm GHCR contains the immutable merge commit SHA tag and the moving `main` tag for `ghcr.io/ametel01/agentbay-runner`.
+- Confirm the package visibility is public or otherwise configured for credential-free infrastructure pulls.
+- Confirm unauthenticated pullability from a Docker environment without existing `ghcr.io` credentials: `docker pull ghcr.io/ametel01/agentbay-runner:main`.
+
+Commit reference: local builder commit `ci: publish cloud runner image`.
 
 ### Step 4: Run DigitalOcean Bootstrap from the Runner Image
 
@@ -152,3 +181,4 @@ Expected outcome: all rollout steps have validation evidence, `PROGRESS.md` and 
 - 2026-07-07 Asia/Manila: Step 0 completed for #188 with public unauthenticated GHCR pulls selected as the zero-setup path and private-registry credential design recorded as the stop condition if that policy is rejected.
 - 2026-07-07 Asia/Manila: Step 1 completed for #189 with a dedicated runner Docker image artifact, Docker-specific build-context allowlist, local Docker build proof, and non-Docker runner gates passing.
 - 2026-07-07 Asia/Manila: Step 2 completed for #190 with configurable runner image selection, safe bootstrap/provisioning metadata, and focused unit coverage.
+- 2026-07-07 Asia/Manila: Step 3 implemented for #191 with a main-branch-only GHCR publish workflow for SHA and `main` tags; first workflow run, GHCR package visibility, and unauthenticated pull validation remain pending until after merge.
