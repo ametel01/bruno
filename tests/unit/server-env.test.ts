@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { EnvValidationError } from "@/src/env/validation";
-import { readDigitalOceanProviderConfig } from "@/src/server/env";
+import { DEFAULT_AGENTBAY_RUNNER_IMAGE, readDigitalOceanProviderConfig } from "@/src/server/env";
 
 describe("server-only provider environment validation", () => {
   it("returns null when DigitalOcean provisioning is not configured", () => {
@@ -17,6 +17,7 @@ describe("server-only provider environment validation", () => {
       }),
     ).toMatchObject({
       runnerBearerToken: "runner-command-token",
+      runnerImage: DEFAULT_AGENTBAY_RUNNER_IMAGE,
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
@@ -30,12 +31,14 @@ describe("server-only provider environment validation", () => {
       AGENTBAY_DIGITALOCEAN_REGION: " nyc3 ",
       AGENTBAY_DIGITALOCEAN_SIZE_SLUG: " s-2vcpu-2gb ",
       AGENTBAY_DIGITALOCEAN_IMAGE: " ubuntu-24-04-x64 ",
+      AGENTBAY_RUNNER_IMAGE: " ghcr.io/ametel01/agentbay-runner:sha-123 ",
       AGENTBAY_DIGITALOCEAN_TAGS: "runner, agentbay, runner",
     });
 
     expect(config).toEqual({
       token: "dop_v1_test_token",
       runnerBearerToken: "runner-command-token",
+      runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
       region: "nyc3",
       sizeSlug: "s-2vcpu-2gb",
       image: "ubuntu-24-04-x64",
@@ -80,6 +83,14 @@ describe("server-only provider environment validation", () => {
         AGENTBAY_DIGITALOCEAN_TOKEN: " ",
       }),
     ).toThrowError(EnvValidationError);
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_RUNNER_IMAGE: " ",
+      }),
+    ).toThrow("AGENTBAY_RUNNER_IMAGE cannot be blank when DigitalOcean is set.");
 
     expect(() =>
       readDigitalOceanProviderConfig({
