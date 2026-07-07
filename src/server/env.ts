@@ -1,11 +1,16 @@
 import "server-only";
 
-import { EnvValidationError, validateRequiredEnv } from "@/src/env/validation";
+import {
+  EnvValidationError,
+  validateManualRunnerEndpointUrl,
+  validateRequiredEnv,
+} from "@/src/env/validation";
 
 export const DEFAULT_AGENTBAY_RUNNER_IMAGE = "ghcr.io/ametel01/agentbay-runner:main";
 
 export type DigitalOceanProviderConfig = {
   token: string;
+  providerMode?: "digitalocean" | "local_docker";
   runnerBearerToken: string;
   runnerImage: string;
   region: string;
@@ -14,6 +19,9 @@ export type DigitalOceanProviderConfig = {
   tags: string[];
   sshKeyIds?: string[];
   sshSourceAddresses?: string[];
+  localRunnerEndpointUrl?: string;
+  localRunnerContainerName?: string;
+  localRunnerStartDelayMs?: number;
 };
 
 export function getServerEnv(input = process.env) {
@@ -42,9 +50,34 @@ export function readDigitalOceanProviderConfig(
   }
 
   const sshKeyIds = readDigitalOceanSshKeyIds(input.AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS);
+  const providerMode = readDigitalOceanProviderMode(input.AGENTBAY_DIGITALOCEAN_PROVIDER_MODE);
+  const localRunnerEndpointUrl =
+    providerMode === "local_docker"
+      ? validateManualRunnerEndpointUrl(
+          readNonEmptyProviderSetting(input.AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL, {
+            envName: "AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL",
+            defaultValue: "http://127.0.0.1:3045",
+          }),
+        )
+      : undefined;
+  const localRunnerContainerName =
+    providerMode === "local_docker"
+      ? readNonEmptyProviderSetting(input.AGENTBAY_LOCAL_CLOUD_RUNNER_CONTAINER_NAME, {
+          envName: "AGENTBAY_LOCAL_CLOUD_RUNNER_CONTAINER_NAME",
+          defaultValue: "agentbay-local-cloud-runner",
+        })
+      : undefined;
+  const localRunnerStartDelayMs =
+    providerMode === "local_docker"
+      ? readNonNegativeInteger(input.AGENTBAY_LOCAL_CLOUD_RUNNER_START_DELAY_MS, {
+          envName: "AGENTBAY_LOCAL_CLOUD_RUNNER_START_DELAY_MS",
+          defaultValue: 1_000,
+        })
+      : undefined;
 
   return {
     token,
+    providerMode,
     runnerBearerToken,
     runnerImage: readNonEmptyProviderSetting(input.AGENTBAY_RUNNER_IMAGE, {
       envName: "AGENTBAY_RUNNER_IMAGE",
@@ -67,7 +100,26 @@ export function readDigitalOceanProviderConfig(
       input.AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS,
     ),
     ...(sshKeyIds === null ? {} : { sshKeyIds }),
+    ...(localRunnerEndpointUrl ? { localRunnerEndpointUrl } : {}),
+    ...(localRunnerContainerName ? { localRunnerContainerName } : {}),
+    ...(localRunnerStartDelayMs === undefined ? {} : { localRunnerStartDelayMs }),
   };
+}
+
+function readDigitalOceanProviderMode(value: string | undefined): "digitalocean" | "local_docker" {
+  if (value === undefined) {
+    return "digitalocean";
+  }
+
+  const normalizedValue = value.trim();
+
+  if (normalizedValue === "digitalocean" || normalizedValue === "local_docker") {
+    return normalizedValue;
+  }
+
+  throw new EnvValidationError([
+    "AGENTBAY_DIGITALOCEAN_PROVIDER_MODE must be digitalocean or local_docker when set.",
+  ]);
 }
 
 function readNonEmptyProviderSetting(
@@ -159,4 +211,27 @@ function readNonEmptyCsvSetting(value: string, envName: string): string[] {
   }
 
   return values.sort();
+}
+
+function readNonNegativeInteger(
+  value: string | undefined,
+  options: { envName: string; defaultValue: number },
+): number {
+  if (value === undefined) {
+    return options.defaultValue;
+  }
+
+  const normalizedValue = value.trim();
+
+  if (!normalizedValue) {
+    throw new EnvValidationError([`${options.envName} cannot be blank when set.`]);
+  }
+
+  const parsed = Number.parseInt(normalizedValue, 10);
+
+  if (!Number.isInteger(parsed) || parsed < 0 || String(parsed) !== normalizedValue) {
+    throw new EnvValidationError([`${options.envName} must be a non-negative integer.`]);
+  }
+
+  return parsed;
 }

@@ -37,6 +37,7 @@ describe("server-only provider environment validation", () => {
 
     expect(config).toEqual({
       token: "dop_v1_test_token",
+      providerMode: "digitalocean",
       runnerBearerToken: "runner-command-token",
       runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
       region: "nyc3",
@@ -44,6 +45,28 @@ describe("server-only provider environment validation", () => {
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "runner"],
       sshSourceAddresses: ["0.0.0.0/0", "::/0"],
+    });
+  });
+
+  it("parses local Docker provider mode for manual cloud-runner smoke tests", () => {
+    expect(
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
+        AGENTBAY_DIGITALOCEAN_TOKEN: "local-docker",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_RUNNER_IMAGE: "agentbay-runner:local",
+        AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: "http://host.docker.internal:3045",
+        AGENTBAY_LOCAL_CLOUD_RUNNER_CONTAINER_NAME: "agentbay-local-cloud-runner",
+        AGENTBAY_LOCAL_CLOUD_RUNNER_START_DELAY_MS: "0",
+      }),
+    ).toMatchObject({
+      token: "local-docker",
+      providerMode: "local_docker",
+      runnerBearerToken: "runner-command-token",
+      runnerImage: "agentbay-runner:local",
+      localRunnerEndpointUrl: "http://host.docker.internal:3045",
+      localRunnerContainerName: "agentbay-local-cloud-runner",
+      localRunnerStartDelayMs: 0,
     });
   });
 
@@ -113,6 +136,14 @@ describe("server-only provider environment validation", () => {
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
       }),
     ).toThrow("AGENTBAY_RUNNER_BEARER_TOKEN is required when DigitalOcean provisioning is set.");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "fake",
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+      }),
+    ).toThrow("AGENTBAY_DIGITALOCEAN_PROVIDER_MODE must be digitalocean or local_docker");
   });
 
   it("keeps DigitalOcean provider tokens out of shared validation and client components", async () => {

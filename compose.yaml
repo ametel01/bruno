@@ -11,9 +11,49 @@ services:
       timeout: 5s
       retries: 10
     ports:
-      - "54329:5432"
+      - "${AGENTBAY_POSTGRES_HOST_PORT:-54329}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.local-app
+    command: sh -lc "rm -rf .next/* && bun install --frozen-lockfile && bun run local:cloud:prepare && bun run db:migrate && bun run build && sed -i 's#./.next/types/routes.d.ts#./.next/dev/types/routes.d.ts#' next-env.d.ts && bun run start --hostname 0.0.0.0"
+    depends_on:
+      local-cloud-runner-image:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://agentbay:agentbay@postgres:5432/agentbay
+      NEXT_PUBLIC_APP_URL: http://host.docker.internal:3000
+      AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: local_docker
+      AGENTBAY_DIGITALOCEAN_TOKEN: local-docker
+      AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: none
+      AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: http://host.docker.internal:3045
+      AGENTBAY_RUNNER_BEARER_TOKEN: local-runner-command-token
+      AGENTBAY_RUNNER_IMAGE: agentbay-runner:local
+    ports:
+      - "3000:3000"
+    profiles:
+      - local-cloud
+    volumes:
+      - .:/app
+      - dashboard-next-cache:/app/.next
+      - dashboard-node-modules:/app/node_modules
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  local-cloud-runner-image:
+    image: agentbay-runner:local
+    build:
+      context: .
+      dockerfile: Dockerfile.runner
+    command: sh -lc "true"
+    profiles:
+      - local-cloud
+
 volumes:
+  dashboard-next-cache:
+  dashboard-node-modules:
   postgres-data:

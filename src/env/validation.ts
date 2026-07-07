@@ -120,6 +120,7 @@ function isLoopbackHostname(hostname: string): boolean {
   return (
     normalizedHostname === "localhost" ||
     normalizedHostname === "127.0.0.1" ||
+    normalizedHostname === "host.docker.internal" ||
     normalizedHostname === "::1" ||
     normalizedHostname.endsWith(".localhost")
   );
