@@ -6,9 +6,9 @@ Source brief: Inline user-supplied design brief from the 2026-07-07 Codex turn.
 
 ## Current Status
 
-Step 0 is complete for issue #188. Step 2 is complete for issue #190, adding server-side runner image selection for cloud provisioning.
+Steps 0, 1, and 2 are complete for issues #188, #189, and #190. The runner image rollout now has a dedicated Docker image artifact for the existing runner bootstrap and service plus server-side runner image selection for cloud provisioning.
 
-Next step: Step 1 remains the parallel image-packaging slice owned by #189; Step 3 waits for #189.
+Next step: Step 3, publish runner images to GHCR, owned by downstream implementation issue #191.
 
 ## GHCR Pull Policy
 
@@ -29,7 +29,7 @@ No functional changelog entry was added for Step 0 because this issue is setup-o
 ## Step Checklist
 
 - [x] Step 0: Progress and Changelog Tracking Setup
-- [ ] Step 1: Package the Cloud Runner Image
+- [x] Step 1: Package the Cloud Runner Image
 - [x] Step 2: Add Configurable Runner Image Selection
 - [ ] Step 3: Publish Runner Images to GHCR
 - [ ] Step 4: Run DigitalOcean Bootstrap from the Runner Image
@@ -59,15 +59,35 @@ Validation:
 - `rg "# Changelog|## \\[Unreleased\\]" CHANGELOG.md` passed.
 - `git diff --check` passed.
 
-Commit reference: 4a8167c (PR #195 merge commit).
+Commit reference: `4a8167c` (`docs: add runner image rollout tracking`, PR #195).
 
 ### Step 1: Package the Cloud Runner Image
 
-Status: pending downstream implementation.
+Status: complete.
 
 Owner issue: #189.
 
-Expected outcome: add `Dockerfile.runner` and package the existing runner bootstrap and service runtime without Droplet-side repository checkout or GitHub credentials.
+Completed for issue #189:
+
+- Added `Dockerfile.runner` using the Bun Alpine runtime and Docker CLI for the existing manual-runner Docker operations.
+- Added `.dockerignore` as a Docker-specific build-context contract with a default-deny allowlist for runner runtime inputs.
+- Packaged `package.json`, `bun.lock`, `tsconfig.json`, `src/runner-service/*`, and the imported shared `src/server/agents/agent-id.ts` module into the image.
+- Set the container default command to run `bun run runner:bootstrap` before `bun run runner:service`.
+- Kept `AGENTBAY_RUNNER_IMAGE`, GHCR publishing, DigitalOcean cloud-init pull/run changes, and provisioning config out of this slice.
+
+Validation:
+
+- `bun install --frozen-lockfile` passed after the fresh worktree initially lacked local toolchain binaries.
+- `bun run format:check` passed.
+- `bun run lint` passed.
+- `bun run typecheck` passed.
+- `bun run test tests/unit/runner-service-bootstrap.test.ts tests/unit/runner-heartbeat.test.ts` passed with 2 files and 15 tests.
+- `docker build -f Dockerfile.runner -t agentbay-runner:test .` passed on Docker Desktop 29.3.1.
+- `docker run --rm --entrypoint sh agentbay-runner:test -c 'find /app -maxdepth 5 -type f | sort && printf "--- docker cli ---\n" && docker --version'` showed only runner runtime inputs under `/app` and Docker CLI 28.3.3 in the image.
+- Targeted Docker context and changed-file checks confirmed `.dockerignore` excludes `.env*`, `.vercel`, `.git`, `node_modules`, `.next`, coverage, test output, Playwright reports, logs, local database dump patterns, and private key file patterns.
+- `git diff --check` passed.
+
+Commit reference: `1ee49e5` (`build: add runner Docker image`).
 
 ### Step 2: Add Configurable Runner Image Selection
 
@@ -93,7 +113,7 @@ Validation:
 - `git diff --check` passed.
 - Targeted secret scan over changed files and diff text passed; matches were limited to env var names, redaction patterns, changelog wildcard mentions, and deterministic fake test fixtures.
 
-Branch reference: `codex/issue-190-runner-image-config`; exact commit recorded in `STATUS.md` handoff after commit.
+Commit reference: `ae96054` (PR #196 merge commit).
 
 ### Step 3: Publish Runner Images to GHCR
 
@@ -130,4 +150,5 @@ Expected outcome: all rollout steps have validation evidence, `PROGRESS.md` and 
 ## Update Log
 
 - 2026-07-07 Asia/Manila: Step 0 completed for #188 with public unauthenticated GHCR pulls selected as the zero-setup path and private-registry credential design recorded as the stop condition if that policy is rejected.
+- 2026-07-07 Asia/Manila: Step 1 completed for #189 with a dedicated runner Docker image artifact, Docker-specific build-context allowlist, local Docker build proof, and non-Docker runner gates passing.
 - 2026-07-07 Asia/Manila: Step 2 completed for #190 with configurable runner image selection, safe bootstrap/provisioning metadata, and focused unit coverage.
