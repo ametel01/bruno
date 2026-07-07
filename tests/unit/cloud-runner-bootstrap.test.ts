@@ -48,6 +48,12 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain("    - bash\n    - -lc\n    - |\n      set -euxo pipefail");
     expect(content.userData).not.toContain("  - |\n    set -euo pipefail");
     expect(content.userData).not.toContain("  - |\n    set -euxo pipefail");
+    expect(content.userData).toContain(
+      "      sed 's/^    //' > /usr/local/bin/agentbay-bootstrap-event <<'AGENTBAY_BOOTSTRAP_EVENT_SCRIPT'\n" +
+        "          #!/usr/bin/env bash\n" +
+        "          set -euo pipefail",
+    );
+    expect(content.userData).not.toContain("\n    set -euo pipefail\n\nAGENTBAY_APP_URL=");
     expect(content.userData).toContain("apt-get install -y docker-ce");
     expect(content.userData).toContain("systemctl enable --now docker");
     expect(content.userData).toContain("AGENTBAY_RUNNER_REGISTRATION_TOKEN=");
@@ -63,6 +69,10 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain("AGENTBAY_RUNNER_BEARER_TOKEN=runner-command-token");
     expect(content.userData).toContain(
       "AGENTBAY_RUNNER_IMAGE=ghcr.io/ametel01/agentbay-runner:sha-123",
+    );
+    expect(content.userData).toContain(
+      "          AGENTBAY_APP_URL=https://app.agentbay.test\n" +
+        "          AGENTBAY_RUNNER_REGISTRATION_TOKEN=",
     );
     expect(content.userData).toContain("AGENTBAY_RUNNER_ENV_FILE=/etc/agentbay/runner.env");
     expect(content.userData).toContain("AGENTBAY_RUNNER_HOST=0.0.0.0");
@@ -164,6 +174,33 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain("mkswap /swapfile");
     expect(content.userData).toContain("swapon /swapfile");
     expect(content.userData).toContain("/swapfile none swap sw 0 0");
+  });
+
+  it("does not emit under-indented runcmd block content", () => {
+    const content = buildCloudRunnerBootstrapContent({
+      appBaseUrl: "https://app.agentbay.test",
+      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      endpointDiscovery: { type: "digitalocean_metadata" },
+      runnerName: "Cloud Runner 1",
+      enableSwap: true,
+    });
+
+    const lines = content.userData.split("\n");
+    const runcmdLines = lines.slice(lines.indexOf("runcmd:"));
+
+    for (const line of runcmdLines) {
+      if (!line.trim()) {
+        continue;
+      }
+
+      const allowed =
+        line === "runcmd:" ||
+        line.startsWith("  -") ||
+        line.startsWith("    -") ||
+        line.startsWith("      ");
+
+      expect(allowed, `unexpected runcmd indentation: ${line}`).toBe(true);
+    }
   });
 
   it("redacts provider tokens, one-time registration tokens, and runner credentials from safe output", () => {
