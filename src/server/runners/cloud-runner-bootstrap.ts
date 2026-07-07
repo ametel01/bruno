@@ -5,11 +5,10 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import { DIGITALOCEAN_PROVIDER } from "@/src/server/runners/digitalocean-provider";
 import { markCloudRunnerBootstrapInjected } from "@/src/server/runners/runner-provisioning-events";
 
-export const DEFAULT_CLOUD_RUNNER_REPOSITORY_URL = "https://github.com/ametel01/agentbay.git";
-export const DEFAULT_CLOUD_RUNNER_INSTALL_DIR = "/opt/agentbay";
 export const DEFAULT_CLOUD_RUNNER_ENV_FILE = "/etc/agentbay/runner.env";
 export const DEFAULT_CLOUD_RUNNER_HOST = "127.0.0.1";
 export const DEFAULT_CLOUD_RUNNER_PORT = 3045;
+export const DEFAULT_CLOUD_RUNNER_CONTAINER_NAME = "agentbay-runner";
 export const DEFAULT_CLOUD_RUNNER_NAME = "AgentBay Cloud Runner";
 export const BOOTSTRAP_REDACTION = "[redacted]";
 
@@ -25,8 +24,6 @@ type CloudRunnerBootstrapInput = {
   enableSwap?: boolean;
   runnerName?: string;
   runnerImage?: string;
-  repositoryUrl?: string;
-  installDir?: string;
   envFilePath?: string;
   runnerHost?: string;
   runnerPort?: number;
@@ -39,8 +36,6 @@ export type CloudRunnerBootstrapContent = {
     runnerEndpointUrl: string;
     runnerName: string;
     runnerImage: string;
-    repositoryUrl: string;
-    installDir: string;
     envFilePath: string;
     registrationToken: typeof BOOTSTRAP_REDACTION;
   };
@@ -109,7 +104,6 @@ output:
 packages:
   - ca-certificates
   - curl
-  - git
   - gnupg
 runcmd:
   - install -m 0755 -d /etc/apt/keyrings
@@ -124,10 +118,6 @@ runcmd:
 ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
   - apt-get install -y caddy
   - systemctl enable --now docker
-  - curl -fsSL https://bun.sh/install | bash
-  - rm -rf ${shellQuote(config.installDir)}
-  - git clone --depth=1 ${shellQuote(config.repositoryUrl)} ${shellQuote(config.installDir)}
-  - ${shellQuote("/root/.bun/bin/bun")} install --cwd ${shellQuote(config.installDir)} --frozen-lockfile
   - install -m 0700 -d ${shellQuote(dirname(config.envFilePath))}
   - |
     ${endpointDiscoveryCommands}cat > /etc/caddy/Caddyfile <<AGENTBAY_CADDYFILE
@@ -142,26 +132,11 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
     AGENTBAY_RUNNER_ENV
   - chmod 0600 ${shellQuote(config.envFilePath)}
   - |
-    cat > /etc/systemd/system/agentbay-runner.service <<'AGENTBAY_RUNNER_SERVICE'
-    [Unit]
-    Description=AgentBay cloud runner service
-    Requires=docker.service
-    After=network-online.target docker.service
-
-    [Service]
-    Type=simple
-    WorkingDirectory=${config.installDir}
-    EnvironmentFile=${config.envFilePath}
-    ExecStartPre=/root/.bun/bin/bun run runner:bootstrap
-    ExecStart=/root/.bun/bin/bun run runner:service
-    Restart=always
-    RestartSec=5
-
-    [Install]
-    WantedBy=multi-user.target
-    AGENTBAY_RUNNER_SERVICE
-  - systemctl daemon-reload
-  - systemctl enable --now agentbay-runner.service
+    set -euxo pipefail
+    . ${shellQuote(config.envFilePath)}
+    docker pull "$AGENTBAY_RUNNER_IMAGE"
+    docker rm --force ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} || true
+    docker run --detach --name ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} --restart always --env-file ${shellQuote(config.envFilePath)} -p ${shellQuote(`${config.runnerHost}:${config.runnerPort}:${config.runnerPort}`)} "$AGENTBAY_RUNNER_IMAGE"
 `;
 
   return {
@@ -171,8 +146,6 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
       runnerEndpointUrl: endpoint.safeSummary,
       runnerName: config.runnerName,
       runnerImage: config.runnerImage,
-      repositoryUrl: config.repositoryUrl,
-      installDir: config.installDir,
       envFilePath: config.envFilePath,
       registrationToken: BOOTSTRAP_REDACTION,
     },
@@ -202,8 +175,6 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
     enableSwap: input.enableSwap ?? false,
     runnerName: input.runnerName?.trim() || DEFAULT_CLOUD_RUNNER_NAME,
     runnerImage: input.runnerImage?.trim() || DEFAULT_AGENTBAY_RUNNER_IMAGE,
-    repositoryUrl: input.repositoryUrl?.trim() || DEFAULT_CLOUD_RUNNER_REPOSITORY_URL,
-    installDir: input.installDir?.trim() || DEFAULT_CLOUD_RUNNER_INSTALL_DIR,
     envFilePath: input.envFilePath?.trim() || DEFAULT_CLOUD_RUNNER_ENV_FILE,
     runnerHost: input.runnerHost?.trim() || DEFAULT_CLOUD_RUNNER_HOST,
     runnerPort: input.runnerPort ?? DEFAULT_CLOUD_RUNNER_PORT,

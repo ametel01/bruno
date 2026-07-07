@@ -6,11 +6,11 @@ Source brief: Inline user-supplied design brief from the 2026-07-07 Codex turn.
 
 ## Current Status
 
-Steps 0, 1, and 2 are complete for issues #188, #189, and #190. The runner image rollout now has a dedicated Docker image artifact for the existing runner bootstrap and service plus server-side runner image selection for cloud provisioning.
+Steps 0, 1, 2, and 4 are complete for issues #188, #189, #190, and #192. The runner image rollout now has a dedicated Docker image artifact for the existing runner bootstrap and service, server-side runner image selection for cloud provisioning, and DigitalOcean cloud-init that runs the configured image through Docker instead of host-side source checkout.
 
-Step 3 is implemented for issue #191 as a main-branch GitHub Actions workflow that will publish the runner image after merge.
+Step 3 is complete for issue #191 as a main-branch GitHub Actions workflow that published the runner image to GHCR with both immutable SHA and moving `main` tags.
 
-Next step: Step 4, run DigitalOcean bootstrap from the runner image, owned by downstream implementation issue #192 after #191 is merged and GHCR pullability is confirmed.
+Next step: Step 5, verify hosted runner registration end to end, after the Step 4 image-based bootstrap changes merge.
 
 ## GHCR Pull Policy
 
@@ -34,7 +34,7 @@ No functional changelog entry was added for Step 0 because this issue is setup-o
 - [x] Step 1: Package the Cloud Runner Image
 - [x] Step 2: Add Configurable Runner Image Selection
 - [x] Step 3: Publish Runner Images to GHCR
-- [ ] Step 4: Run DigitalOcean Bootstrap from the Runner Image
+- [x] Step 4: Run DigitalOcean Bootstrap from the Runner Image
 - [ ] Step 5: Verify Hosted Runner Registration End to End
 - [ ] Step 6: Close Out the Rollout
 
@@ -119,7 +119,7 @@ Commit reference: `ae96054` (PR #196 merge commit).
 
 ### Step 3: Publish Runner Images to GHCR
 
-Status: implemented; pending main-branch publish validation after merge.
+Status: complete.
 
 Owner issue: #191.
 
@@ -143,22 +143,42 @@ Pre-merge validation:
 - Stale-placeholder scan over `PROGRESS.md`, `CHANGELOG.md`, and `.github/workflows` passed.
 - Targeted secret scan over changed files passed; matches are limited to expected GitHub Actions token expression names and public GHCR image references.
 
-Post-merge validation still pending:
+Post-merge validation:
 
-- Confirm the GitHub Actions run on `main` succeeds for the merge commit.
-- Confirm GHCR contains the immutable merge commit SHA tag and the moving `main` tag for `ghcr.io/ametel01/agentbay-runner`.
-- Confirm the package visibility is public or otherwise configured for credential-free infrastructure pulls.
-- Confirm unauthenticated pullability from a Docker environment without existing `ghcr.io` credentials: `docker pull ghcr.io/ametel01/agentbay-runner:main`.
+- GitHub Actions run `28833694825` (`Publish runner image`) passed on `main` for merge commit `61ff9478bdf499378e7c24e32c2ec9a37e376613`.
+- Workflow logs show both `ghcr.io/ametel01/agentbay-runner:61ff9478bdf499378e7c24e32c2ec9a37e376613` and `ghcr.io/ametel01/agentbay-runner:main` were pushed with digest `sha256:80b008fef310cee2e66f341aaf156402519f0761049b4021e6cf7ff648c62b9f`.
+- Public unauthenticated pullability passed with an empty temporary Docker config for the target DigitalOcean platform: `DOCKER_CONFIG="$tmp" docker pull --platform linux/amd64 ghcr.io/ametel01/agentbay-runner:main`.
+- Local Apple Silicon Docker without `--platform linux/amd64` fails because the published image is currently `linux/amd64` only; that does not block DigitalOcean bootstrap validation.
 
-Commit reference: local builder commit `ci: publish cloud runner image`.
+Commit reference: `61ff9478bdf499378e7c24e32c2ec9a37e376613` (PR #198 merge commit).
 
 ### Step 4: Run DigitalOcean Bootstrap from the Runner Image
 
-Status: pending downstream implementation.
+Status: complete.
 
 Owner issue: #192.
 
 Expected outcome: replace Droplet-side private repo clone, host Bun install, and host `bun install` with Docker pull/run of the selected runner image while preserving Caddy, registration, heartbeat, and secret redaction behavior.
+
+Completed for issue #192:
+
+- Replaced DigitalOcean cloud-init source checkout and host Bun service setup with Docker pull/run of the selected `AGENTBAY_RUNNER_IMAGE`.
+- Preserved Docker and Caddy installation/enabling, sslip.io endpoint discovery, low-memory swap setup, `/etc/agentbay/runner.env`, and reverse proxying to `127.0.0.1:3045`.
+- Started the configured image as a detached Docker container named `agentbay-runner` with restart policy, env-file loading, and loopback-only `127.0.0.1:3045:3045` binding.
+- Kept `runnerImage` visible in safe bootstrap/provisioning metadata while preserving registration token and bearer-token redaction.
+- Left GHCR workflow publishing, hosted pullability, package settings, production resources, secrets, and hosted smoke validation to #191/#193.
+
+Validation:
+
+- `bun install --frozen-lockfile` passed after the fresh worktree initially lacked local toolchain binaries.
+- `bun run format:check` passed.
+- `bun run lint` passed.
+- `bun run typecheck` passed.
+- `bun run test tests/unit/cloud-runner-bootstrap.test.ts tests/unit/cloud-runner-provisioning.test.ts tests/unit/runner-provisioning.test.ts tests/unit/runner-registration.test.ts tests/unit/runner-heartbeat.test.ts` passed with 5 files and 39 tests.
+- `bun run build` passed.
+- Targeted generated-bootstrap and changed-test checks confirmed no legacy host checkout/bootstrap tokens are present.
+- Targeted secret scan over changed files and diff text passed; matches were limited to env var names, redaction patterns, public GHCR image names, and deterministic fake test fixtures.
+- Stale status wording scan passed.
 
 ### Step 5: Verify Hosted Runner Registration End to End
 
@@ -181,4 +201,5 @@ Expected outcome: all rollout steps have validation evidence, `PROGRESS.md` and 
 - 2026-07-07 Asia/Manila: Step 0 completed for #188 with public unauthenticated GHCR pulls selected as the zero-setup path and private-registry credential design recorded as the stop condition if that policy is rejected.
 - 2026-07-07 Asia/Manila: Step 1 completed for #189 with a dedicated runner Docker image artifact, Docker-specific build-context allowlist, local Docker build proof, and non-Docker runner gates passing.
 - 2026-07-07 Asia/Manila: Step 2 completed for #190 with configurable runner image selection, safe bootstrap/provisioning metadata, and focused unit coverage.
-- 2026-07-07 Asia/Manila: Step 3 implemented for #191 with a main-branch-only GHCR publish workflow for SHA and `main` tags; first workflow run, GHCR package visibility, and unauthenticated pull validation remain pending until after merge.
+- 2026-07-07 Asia/Manila: Step 3 completed for #191 with a main-branch-only GHCR publish workflow, successful SHA and `main` tag push, public GHCR visibility, and unauthenticated `linux/amd64` pull validation.
+- 2026-07-07 Asia/Manila: Step 4 completed for #192 with DigitalOcean cloud-init now pulling and running the configured runner image via Docker while preserving Caddy, registration, heartbeat compatibility, and redacted metadata.
