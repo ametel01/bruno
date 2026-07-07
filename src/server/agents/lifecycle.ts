@@ -6,6 +6,7 @@ import {
   agentLogs,
   agents,
   dockerRunnerContainers,
+  runnerHeartbeats,
   runners,
   type agentStatusEnum,
 } from "@/src/server/db/schema";
@@ -151,6 +152,20 @@ type StartRunnerReservationResult =
       ok: false;
       reason: "no_online_runner";
     };
+
+type AgentStartRunnerSnapshot = {
+  id: string;
+  kind: string;
+  status: string;
+  provider: string | null;
+  providerResourceId: string | null;
+  provisioningStatus: string | null;
+  provisioningError: string | null;
+  hasEndpointUrl: boolean;
+  deleted: boolean;
+  latestHeartbeatAt: string | null;
+  latestHeartbeatStatus: string | null;
+};
 
 export type AgentLifecycleDependencies = {
   createConnection?: () => DatabaseConnection;
@@ -363,6 +378,18 @@ const assignedRunnerSelection = {
   status: runners.status,
   createdAt: runners.createdAt,
   updatedAt: runners.updatedAt,
+  deletedAt: runners.deletedAt,
+};
+
+const agentStartRunnerSnapshotSelection = {
+  id: runners.id,
+  kind: runners.kind,
+  status: runners.status,
+  provider: runners.provider,
+  providerResourceId: runners.providerResourceId,
+  provisioningStatus: runners.provisioningStatus,
+  provisioningError: runners.provisioningError,
+  endpointUrl: runners.endpointUrl,
   deletedAt: runners.deletedAt,
 };
 
@@ -582,6 +609,45 @@ async function restoreAgentStartReservation(input: {
     .where(and(eq(agents.id, input.agentId), eq(agents.status, "starting")));
 }
 
+async function readAgentStartRunnerSnapshot(
+  tx: AgentLifecycleTransaction,
+  input: { runnerId: string; userId: string },
+): Promise<AgentStartRunnerSnapshot | null> {
+  const [runner] = await tx
+    .select(agentStartRunnerSnapshotSelection)
+    .from(runners)
+    .where(and(eq(runners.id, input.runnerId), eq(runners.userId, input.userId)))
+    .limit(1);
+
+  if (!runner) {
+    return null;
+  }
+
+  const [latestHeartbeat] = await tx
+    .select({
+      status: runnerHeartbeats.status,
+      observedAt: runnerHeartbeats.observedAt,
+    })
+    .from(runnerHeartbeats)
+    .where(eq(runnerHeartbeats.runnerId, runner.id))
+    .orderBy(desc(runnerHeartbeats.observedAt))
+    .limit(1);
+
+  return {
+    id: runner.id,
+    kind: runner.kind,
+    status: runner.status,
+    provider: runner.provider,
+    providerResourceId: runner.providerResourceId,
+    provisioningStatus: runner.provisioningStatus,
+    provisioningError: runner.provisioningError,
+    hasEndpointUrl: Boolean(runner.endpointUrl),
+    deleted: Boolean(runner.deletedAt),
+    latestHeartbeatAt: latestHeartbeat?.observedAt.toISOString() ?? null,
+    latestHeartbeatStatus: latestHeartbeat?.status ?? null,
+  };
+}
+
 export async function startAgentForDevelopmentUser(
   agentId: string,
   dependencies: AgentLifecycleDependencies = {},
@@ -629,16 +695,37 @@ export async function startAgentForDevelopmentUser(
         return { ok: false, reason: "invalid_status", status: currentAgent.agent.status } as const;
       }
 
+      const assignedRunnerSnapshot = currentAgent.agent.runnerId
+        ? await readAgentStartRunnerSnapshot(tx, {
+            runnerId: currentAgent.agent.runnerId,
+            userId: currentAgent.agent.userId,
+          })
+        : null;
+
       return {
         ok: true,
         agent: currentAgent.agent,
         assignedRunner: toManualRunnerRecordOrNull(currentAgent.runner),
+        assignedRunnerSnapshot,
       } as const;
     });
 
     if (!validation.ok) {
+      logAgentStart("validation_blocked", {
+        agentId: normalizedAgentId,
+        reason: validation.reason,
+        status: "status" in validation ? validation.status : undefined,
+      });
       return validation;
     }
+
+    logAgentStart("agent_loaded", {
+      agentId: normalizedAgentId,
+      agentStatus: validation.agent.status,
+      assignedRunnerId: validation.agent.runnerId,
+      assignedRunnerUsable: Boolean(validation.assignedRunner),
+      assignedRunner: validation.assignedRunnerSnapshot,
+    });
 
     const reservation = await reserveRunnerForAgentStart({
       agentId: normalizedAgentId,
@@ -649,8 +736,24 @@ export async function startAgentForDevelopmentUser(
     });
 
     if (!reservation.ok) {
+      logAgentStart("reservation_blocked", {
+        agentId: normalizedAgentId,
+        reason: reservation.reason,
+        currentAgents: "currentAgents" in reservation ? reservation.currentAgents : undefined,
+        maxAgents: "maxAgents" in reservation ? reservation.maxAgents : undefined,
+        assignedRunnerId: validation.agent.runnerId,
+        assignedRunner: validation.assignedRunnerSnapshot,
+      });
       return reservation;
     }
+
+    logAgentStart("reservation_succeeded", {
+      agentId: normalizedAgentId,
+      assignedRunnerId: reservation.assignedRunner?.id ?? null,
+      assignedRunnerKind: reservation.assignedRunner?.kind ?? null,
+      assignedRunnerStatus: reservation.assignedRunner?.status ?? null,
+      reserved: reservation.reserved,
+    });
 
     const runnerAdapter = selectLifecycleRunnerAdapter(reservation.assignedRunner, {
       createConnection: () => connection,
@@ -658,6 +761,12 @@ export async function startAgentForDevelopmentUser(
         ? { manualRunnerAdapter: dependencies.manualRunnerAdapter }
         : {}),
       ...(dependencies.runnerAdapter ? { runnerAdapter: dependencies.runnerAdapter } : {}),
+    });
+    logAgentStart("runner_start_requested", {
+      agentId: normalizedAgentId,
+      assignedRunnerId: reservation.assignedRunner?.id ?? null,
+      assignedRunnerKind: reservation.assignedRunner?.kind ?? null,
+      assignedRunnerStatus: reservation.assignedRunner?.status ?? null,
     });
     const runnerStart = await runnerAdapter.start(normalizedAgentId);
 
@@ -672,8 +781,20 @@ export async function startAgentForDevelopmentUser(
         });
       }
 
+      logAgentStart("runner_start_failed", {
+        agentId: normalizedAgentId,
+        reason: runnerStart.reason,
+        assignedRunnerId: reservation.assignedRunner?.id ?? null,
+        assignedRunnerKind: reservation.assignedRunner?.kind ?? null,
+      });
+
       return { ok: false, reason: "runner_start_failed" } as const;
     }
+
+    logAgentStart("runner_start_succeeded", {
+      agentId: normalizedAgentId,
+      ...runnerLifecycleEventMetadata(runnerStart),
+    });
 
     await captureLifecycleRunnerLogs(runnerAdapter, normalizedAgentId);
 
@@ -726,6 +847,13 @@ export async function startAgentForDevelopmentUser(
           },
         },
       ]);
+
+      logAgentStart("start_completed", {
+        agentId: normalizedAgentId,
+        fromStatus: validation.agent.status,
+        toStatus: "running",
+        ...runnerLifecycleEventMetadata(runnerStart),
+      });
 
       return {
         ok: true,
@@ -1762,6 +1890,10 @@ function readDockerStateMetadata(container: DockerRunnerContainerDto): {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function logAgentStart(event: string, metadata: Record<string, unknown>): void {
+  console.info("[agentbay] agent.start", { event, ...metadata });
 }
 
 function shouldRequireOnlineRunnerForStart(): boolean {

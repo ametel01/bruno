@@ -1081,6 +1081,97 @@ describe("create agent persistence", () => {
     }
   });
 
+  it("logs assigned provisioning runner state when production start has no online runner", async () => {
+    const previousVercel = process.env.VERCEL;
+    const created = await createAgentForDevelopmentUser(
+      { name: "Provisioning Runner Start Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const [cloudRunner] = await connection.db
+      .insert(runners)
+      .values({
+        userId: created.agent.userId,
+        name: "Provisioning Cloud Runner",
+        kind: "digitalocean",
+        endpointUrl: "https://provisioning-runner.example.com",
+        status: "registering",
+        provider: "digitalocean",
+        providerResourceId: "582974430",
+        region: "sfo3",
+        sizeSlug: "s-1vcpu-512mb-10gb",
+        image: "ubuntu-24-04-x64",
+        provisioningStatus: "waiting_for_runner",
+        provisioningStartedAt: new Date("2026-07-06T01:00:00.000Z"),
+        createdAt: new Date("2026-07-06T01:00:00.000Z"),
+        updatedAt: new Date("2026-07-06T01:05:00.000Z"),
+      })
+      .returning({ id: runners.id });
+
+    if (!cloudRunner) {
+      throw new Error("Cloud runner insert returned no rows.");
+    }
+
+    await connection.db
+      .update(agents)
+      .set({ runnerId: cloudRunner.id })
+      .where(eq(agents.id, created.agent.id));
+
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    process.env.VERCEL = "1";
+
+    try {
+      const result = await startAgentForDevelopmentUser(created.agent.id, {
+        createConnection: () => connection,
+        manualRunnerAdapter: () => createFailingLifecycleRunnerStub("manual should not run"),
+        runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
+      });
+      const startLogs = infoSpy.mock.calls
+        .filter(([scope]) => scope === "[agentbay] agent.start")
+        .map(([, payload]) => payload);
+
+      expect(result).toEqual({ ok: false, reason: "no_online_runner" });
+      expect(startLogs).toContainEqual(
+        expect.objectContaining({
+          event: "agent_loaded",
+          agentId: created.agent.id,
+          assignedRunnerId: cloudRunner.id,
+          assignedRunnerUsable: false,
+          assignedRunner: expect.objectContaining({
+            id: cloudRunner.id,
+            kind: "digitalocean",
+            status: "registering",
+            provider: "digitalocean",
+            providerResourceId: "582974430",
+            provisioningStatus: "waiting_for_runner",
+            hasEndpointUrl: true,
+            latestHeartbeatAt: null,
+            latestHeartbeatStatus: null,
+          }),
+        }),
+      );
+      expect(startLogs).toContainEqual(
+        expect.objectContaining({
+          event: "reservation_blocked",
+          agentId: created.agent.id,
+          reason: "no_online_runner",
+          assignedRunnerId: cloudRunner.id,
+          assignedRunner: expect.objectContaining({
+            status: "registering",
+            provisioningStatus: "waiting_for_runner",
+          }),
+        }),
+      );
+    } finally {
+      infoSpy.mockRestore();
+
+      if (previousVercel === undefined) {
+        delete process.env.VERCEL;
+      } else {
+        process.env.VERCEL = previousVercel;
+      }
+    }
+  });
+
   it("excludes soft-deleted runners, soft-deleted agents, and other-user runners from assignment reads", async () => {
     const active = await createAgentForDevelopmentUser(
       { name: "Active Agent", templateKey: "research_agent" },
