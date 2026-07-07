@@ -8,6 +8,7 @@ import {
   buildCloudRunnerBootstrapForRunner,
   redactCloudRunnerBootstrapOutput,
 } from "@/src/server/runners/cloud-runner-bootstrap";
+import { DEFAULT_AGENTBAY_RUNNER_IMAGE } from "@/src/server/env";
 
 describe.sequential("cloud runner bootstrap content", () => {
   let connection: DatabaseConnection;
@@ -30,6 +31,7 @@ describe.sequential("cloud runner bootstrap content", () => {
       commandBearerToken: "runner-command-token",
       runnerEndpointUrl: "https://runner.agentbay.test",
       runnerName: "Cloud Runner 1",
+      runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
     });
 
     expect(content.userData).toContain("#cloud-config");
@@ -39,6 +41,9 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain(registrationToken);
     expect(content.userData).toContain("AGENTBAY_RUNNER_ENDPOINT_URL=");
     expect(content.userData).toContain('AGENTBAY_RUNNER_BEARER_TOKEN="runner-command-token"');
+    expect(content.userData).toContain(
+      'AGENTBAY_RUNNER_IMAGE="ghcr.io/ametel01/agentbay-runner:sha-123"',
+    );
     expect(content.userData).toContain('AGENTBAY_RUNNER_ENV_FILE="/etc/agentbay/runner.env"');
     expect(content.userData).toContain("ExecStartPre=/root/.bun/bin/bun run runner:bootstrap");
     expect(content.userData).toContain("ExecStart=/root/.bun/bin/bun run runner:service");
@@ -46,12 +51,25 @@ describe.sequential("cloud runner bootstrap content", () => {
       appBaseUrl: "https://app.agentbay.test",
       runnerEndpointUrl: "https://runner.agentbay.test",
       runnerName: "Cloud Runner 1",
+      runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
       registrationToken: BOOTSTRAP_REDACTION,
     });
     expect(JSON.stringify(content.safeSummary)).not.toContain(registrationToken);
     expect(JSON.stringify(content.safeSummary)).not.toContain("runner-command-token");
     expect(content.userData).not.toContain("dop_v1_super_secret");
     expect(content.userData).not.toContain("agb_run_1234567890123456789012345678901234567890123");
+  });
+
+  it("defaults the selected runner image in safe bootstrap content", () => {
+    const content = buildCloudRunnerBootstrapContent({
+      appBaseUrl: "https://app.agentbay.test",
+      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      runnerEndpointUrl: "https://runner.agentbay.test",
+      runnerName: "Cloud Runner 1",
+    });
+
+    expect(content.safeSummary.runnerImage).toBe(DEFAULT_AGENTBAY_RUNNER_IMAGE);
+    expect(content.userData).toContain(`AGENTBAY_RUNNER_IMAGE="${DEFAULT_AGENTBAY_RUNNER_IMAGE}"`);
   });
 
   it("rejects loopback runner endpoint URLs for cloud bootstrap registration", () => {
@@ -122,6 +140,7 @@ describe.sequential("cloud runner bootstrap content", () => {
       appBaseUrl: "https://app.agentbay.test",
       registrationToken,
       runnerEndpointUrl: "https://runner.agentbay.test",
+      runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
       createConnection: () => connection,
       now: () => new Date("2026-07-06T02:00:30.000Z"),
     });
@@ -147,6 +166,7 @@ describe.sequential("cloud runner bootstrap content", () => {
         metadata: expect.objectContaining({
           provider: "digitalocean",
           registrationToken: "injected",
+          runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
         }),
       }),
     ]);

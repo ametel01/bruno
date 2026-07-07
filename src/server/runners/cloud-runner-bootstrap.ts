@@ -1,5 +1,6 @@
 import "server-only";
 
+import { DEFAULT_AGENTBAY_RUNNER_IMAGE } from "@/src/server/env";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { DIGITALOCEAN_PROVIDER } from "@/src/server/runners/digitalocean-provider";
 import { markCloudRunnerBootstrapInjected } from "@/src/server/runners/runner-provisioning-events";
@@ -23,6 +24,7 @@ type CloudRunnerBootstrapInput = {
   };
   enableSwap?: boolean;
   runnerName?: string;
+  runnerImage?: string;
   repositoryUrl?: string;
   installDir?: string;
   envFilePath?: string;
@@ -36,6 +38,7 @@ export type CloudRunnerBootstrapContent = {
     appBaseUrl: string;
     runnerEndpointUrl: string;
     runnerName: string;
+    runnerImage: string;
     repositoryUrl: string;
     installDir: string;
     envFilePath: string;
@@ -64,6 +67,7 @@ export async function buildCloudRunnerBootstrapForRunner(
           provider: DIGITALOCEAN_PROVIDER,
           appBaseUrl: content.safeSummary.appBaseUrl,
           runnerEndpointUrl: content.safeSummary.runnerEndpointUrl,
+          runnerImage: content.safeSummary.runnerImage,
         },
       }),
     );
@@ -87,6 +91,7 @@ export function buildCloudRunnerBootstrapContent(
     `AGENTBAY_RUNNER_REGISTRATION_TOKEN=${quoteSystemdEnvironmentValue(config.registrationToken)}`,
     `AGENTBAY_RUNNER_ENDPOINT_URL=${endpoint.envValue}`,
     `AGENTBAY_RUNNER_NAME=${quoteSystemdEnvironmentValue(config.runnerName)}`,
+    `AGENTBAY_RUNNER_IMAGE=${quoteSystemdEnvironmentValue(config.runnerImage)}`,
     `AGENTBAY_RUNNER_ENV_FILE=${quoteSystemdEnvironmentValue(config.envFilePath)}`,
     ...(config.commandBearerToken
       ? [`AGENTBAY_RUNNER_BEARER_TOKEN=${quoteSystemdEnvironmentValue(config.commandBearerToken)}`]
@@ -165,6 +170,7 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
       appBaseUrl: config.appBaseUrl,
       runnerEndpointUrl: endpoint.safeSummary,
       runnerName: config.runnerName,
+      runnerImage: config.runnerImage,
       repositoryUrl: config.repositoryUrl,
       installDir: config.installDir,
       envFilePath: config.envFilePath,
@@ -195,6 +201,7 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
     endpointDiscovery: input.endpointDiscovery ?? null,
     enableSwap: input.enableSwap ?? false,
     runnerName: input.runnerName?.trim() || DEFAULT_CLOUD_RUNNER_NAME,
+    runnerImage: input.runnerImage?.trim() || DEFAULT_AGENTBAY_RUNNER_IMAGE,
     repositoryUrl: input.repositoryUrl?.trim() || DEFAULT_CLOUD_RUNNER_REPOSITORY_URL,
     installDir: input.installDir?.trim() || DEFAULT_CLOUD_RUNNER_INSTALL_DIR,
     envFilePath: input.envFilePath?.trim() || DEFAULT_CLOUD_RUNNER_ENV_FILE,

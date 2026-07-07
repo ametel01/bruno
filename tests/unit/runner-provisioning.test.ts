@@ -38,6 +38,7 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
+          runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
           region: "nyc3",
           sizeSlug: "s-2vcpu-2gb",
           image: "ubuntu-24-04-x64",
@@ -125,6 +126,10 @@ describe.sequential("runner provisioning service", () => {
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
+    ).toContain('AGENTBAY_RUNNER_IMAGE="ghcr.io/ametel01/agentbay-runner:sha-123"');
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
     ).toContain(
       'AGENTBAY_RUNNER_ENDPOINT_URL="https://$' + '{AGENTBAY_PUBLIC_IPV4_DASHED}.sslip.io"',
     );
@@ -137,10 +142,25 @@ describe.sequential("runner provisioning service", () => {
         .userData,
     ).toContain("ExecStartPre=/root/.bun/bin/bun run runner:bootstrap");
     expect(
+      result.runner.provisioning.phases.find((event) => event.phase === "pending")?.metadata,
+    ).toMatchObject({
+      provider: "digitalocean",
+      runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
+    });
+    expect(
       result.runner.provisioning.phases.find((event) => event.phase === "bootstrapping")?.metadata,
     ).toMatchObject({
       provider: "digitalocean",
       registrationToken: "injected",
+      runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
+    });
+    expect(
+      result.runner.provisioning.phases.find(
+        (event) => event.phase === "creating" && event.status === "started",
+      )?.metadata,
+    ).toMatchObject({
+      runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
+      sshKeyCount: 1,
     });
     expect(
       result.runner.provisioning.phases.find(
@@ -149,13 +169,6 @@ describe.sequential("runner provisioning service", () => {
     ).toMatchObject({
       firewallApplied: true,
       firewallName: "agentbay-runners-droplet-1",
-    });
-    expect(
-      result.runner.provisioning.phases.find(
-        (event) => event.phase === "creating" && event.status === "started",
-      )?.metadata,
-    ).toMatchObject({
-      sshKeyCount: 1,
     });
 
     const persistedTokens = await connection.db.select().from(runnerRegistrationTokens);
@@ -194,6 +207,7 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
+          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-1gb",
           image: "ubuntu-24-04-x64",
@@ -242,6 +256,7 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
+          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-512mb-10gb",
           image: "ubuntu-24-04-x64",
@@ -295,6 +310,7 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
+          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-512mb-10gb",
           image: "ubuntu-24-04-x64",
@@ -333,6 +349,7 @@ describe.sequential("runner provisioning service", () => {
     const config = {
       token: "dop_v1_super_secret",
       runnerBearerToken: "runner-command-token",
+      runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
@@ -409,6 +426,7 @@ describe.sequential("runner provisioning service", () => {
     const config = {
       token: "dop_v1_super_secret",
       runnerBearerToken: "runner-command-token",
+      runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
@@ -483,6 +501,7 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
+          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-1gb",
           image: "ubuntu-24-04-x64",
@@ -535,6 +554,7 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
+          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-1gb",
           image: "ubuntu-24-04-x64",
@@ -594,6 +614,7 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
+          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-1gb",
           image: "ubuntu-24-04-x64",
@@ -655,6 +676,7 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
+          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-1gb",
           image: "ubuntu-24-04-x64",
@@ -685,6 +707,7 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
+          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-1gb",
           image: "ubuntu-24-04-x64",
@@ -701,6 +724,7 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
+          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-1gb",
           image: "ubuntu-24-04-x64",
@@ -736,6 +760,7 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
+          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-1gb",
           image: "ubuntu-24-04-x64",
