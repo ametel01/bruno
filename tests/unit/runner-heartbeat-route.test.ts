@@ -22,9 +22,12 @@ vi.mock("@/src/server/runners/runner-heartbeat", () => ({
 describe("POST /runner/v1/heartbeat route", () => {
   afterEach(() => {
     mocks.recordRunnerHeartbeat.mockReset();
+    vi.restoreAllMocks();
   });
 
   it("returns safe JSON for accepted authenticated heartbeats", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+
     mocks.recordRunnerHeartbeat.mockResolvedValueOnce({
       ok: true,
       runner: {
@@ -43,6 +46,9 @@ describe("POST /runner/v1/heartbeat route", () => {
       }),
     );
     const body = await response.json();
+    const ingressLogs = infoSpy.mock.calls
+      .filter(([scope]) => scope === "[agentbay] runner.ingress")
+      .map(([, payload]) => payload);
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
@@ -57,7 +63,24 @@ describe("POST /runner/v1/heartbeat route", () => {
       authorizationHeader: "Bearer agb_run_secret",
       payload: { runnerId: "00000000-0000-4000-8000-000000000130" },
     });
+    expect(ingressLogs).toContainEqual(
+      expect.objectContaining({
+        endpoint: "heartbeat",
+        event: "request_received",
+        runnerId: "00000000-0000-4000-8000-000000000130",
+      }),
+    );
+    expect(ingressLogs).toContainEqual(
+      expect.objectContaining({
+        endpoint: "heartbeat",
+        event: "heartbeat_recorded",
+        runnerId: "00000000-0000-4000-8000-000000000130",
+        runnerStatus: "online",
+        observedAt: "2026-07-05T08:00:00.000Z",
+      }),
+    );
     expect(JSON.stringify(body)).not.toContain("agb_run_secret");
+    expect(JSON.stringify(ingressLogs)).not.toContain("agb_run_secret");
   });
 
   it.each([

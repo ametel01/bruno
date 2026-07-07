@@ -28,9 +28,12 @@ vi.mock("@/src/server/runners/runner-bootstrap-events", async (importOriginal) =
 describe("POST /runner/v1/bootstrap-events route", () => {
   afterEach(() => {
     mocks.recordRunnerBootstrapEvent.mockReset();
+    vi.restoreAllMocks();
   });
 
   it("records safe bootstrap telemetry for a valid registration token", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+
     mocks.recordRunnerBootstrapEvent.mockResolvedValueOnce({
       ok: true,
       runnerId: "00000000-0000-4000-8000-000000000301",
@@ -50,6 +53,9 @@ describe("POST /runner/v1/bootstrap-events route", () => {
       }),
     );
     const body = await response.json();
+    const ingressLogs = infoSpy.mock.calls
+      .filter(([scope]) => scope === "[agentbay] runner.ingress")
+      .map(([, payload]) => payload);
 
     expect(response.status).toBe(200);
     expect(body).toEqual({
@@ -65,7 +71,26 @@ describe("POST /runner/v1/bootstrap-events route", () => {
       message: "Docker apt repository was configured.",
       metadata: { step: "docker_apt_repository" },
     });
+    expect(ingressLogs).toContainEqual(
+      expect.objectContaining({
+        endpoint: "bootstrap_events",
+        event: "request_validated",
+        phase: "bootstrapping",
+        status: "completed",
+        metadataStep: "docker_apt_repository",
+      }),
+    );
+    expect(ingressLogs).toContainEqual(
+      expect.objectContaining({
+        endpoint: "bootstrap_events",
+        event: "event_recorded",
+        runnerId: "00000000-0000-4000-8000-000000000301",
+        phase: "bootstrapping",
+        status: "completed",
+      }),
+    );
     expect(JSON.stringify(body)).not.toContain("agb_reg_");
+    expect(JSON.stringify(ingressLogs)).not.toContain("agb_reg_");
   });
 
   it("returns safe validation failures", async () => {

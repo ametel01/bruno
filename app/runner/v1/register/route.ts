@@ -3,6 +3,11 @@ import {
   RunnerRegistrationPersistenceError,
   validateRegisterRunnerPayload,
 } from "@/src/server/runners/runner-registration";
+import {
+  logRunnerIngress,
+  safeHostname,
+  validationIssueSummary,
+} from "@/src/server/runners/runner-ingress-logging";
 
 export const dynamic = "force-dynamic";
 
@@ -12,27 +17,50 @@ export async function POST(request: Request) {
   try {
     payload = await request.json();
   } catch {
+    logRunnerIngress("register", "json_parse_failed");
     return validationResponse([{ field: "body", message: "Request body must be valid JSON." }]);
   }
 
   const validation = validateRegisterRunnerPayload(payload);
 
   if (!validation.ok) {
+    logRunnerIngress("register", "validation_failed", {
+      ...validationIssueSummary(validation.issues),
+    });
     return validationResponse(validation.issues);
   }
+
+  logRunnerIngress("register", "request_validated", {
+    endpointHostname: safeHostname(validation.value.endpointUrl),
+    hasName: Boolean(validation.value.name),
+  });
 
   try {
     const result = await exchangeRunnerRegistrationTokenForCredential(validation.value);
 
     if (result.ok) {
+      logRunnerIngress("register", "runner_registered", {
+        runnerId: result.runner.id,
+        endpointHostname: safeHostname(validation.value.endpointUrl),
+      });
+
       return Response.json(result, {
         status: 201,
       });
     }
 
+    logRunnerIngress("register", "registration_rejected", {
+      reason: result.reason,
+      endpointHostname: safeHostname(validation.value.endpointUrl),
+    });
+
     return invalidRegistrationTokenResponse();
   } catch (error) {
     if (error instanceof RunnerRegistrationPersistenceError) {
+      logRunnerIngress("register", "persistence_failed", {
+        endpointHostname: safeHostname(validation.value.endpointUrl),
+      });
+
       return runnerRegistrationPersistenceErrorResponse(error);
     }
 

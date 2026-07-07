@@ -2,6 +2,11 @@ import {
   recordRunnerHeartbeat,
   RunnerHeartbeatPersistenceError,
 } from "@/src/server/runners/runner-heartbeat";
+import {
+  logRunnerIngress,
+  readPayloadRunnerId,
+  validationIssueSummary,
+} from "@/src/server/runners/runner-ingress-logging";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +14,9 @@ export async function POST(request: Request) {
   const authorizationHeader = request.headers.get("authorization");
 
   if (!hasBearerCredentialShape(authorizationHeader)) {
+    logRunnerIngress("heartbeat", "authorization_shape_invalid", {
+      hasAuthorizationHeader: Boolean(authorizationHeader),
+    });
     return unauthorizedResponse();
   }
 
@@ -17,8 +25,13 @@ export async function POST(request: Request) {
   try {
     payload = await request.json();
   } catch {
+    logRunnerIngress("heartbeat", "json_parse_failed");
     return validationResponse([{ field: "body", message: "Request body must be valid JSON." }]);
   }
+
+  logRunnerIngress("heartbeat", "request_received", {
+    runnerId: readPayloadRunnerId(payload),
+  });
 
   try {
     const result = await recordRunnerHeartbeat({
@@ -28,10 +41,20 @@ export async function POST(request: Request) {
 
     if (!result.ok) {
       if (result.reason === "invalid_payload") {
+        logRunnerIngress("heartbeat", "heartbeat_rejected", {
+          reason: result.reason,
+          runnerId: readPayloadRunnerId(payload),
+          ...validationIssueSummary(result.issues ?? []),
+        });
         return validationResponse(result.issues ?? []);
       }
 
       if (result.reason === "wrong_runner") {
+        logRunnerIngress("heartbeat", "heartbeat_rejected", {
+          reason: result.reason,
+          runnerId: readPayloadRunnerId(payload),
+        });
+
         return Response.json(
           {
             error: {
@@ -43,8 +66,19 @@ export async function POST(request: Request) {
         );
       }
 
+      logRunnerIngress("heartbeat", "heartbeat_rejected", {
+        reason: result.reason,
+        runnerId: readPayloadRunnerId(payload),
+      });
+
       return unauthorizedResponse();
     }
+
+    logRunnerIngress("heartbeat", "heartbeat_recorded", {
+      runnerId: result.runner.id,
+      runnerStatus: result.runner.status,
+      observedAt: result.runner.observedAt,
+    });
 
     return Response.json({
       ok: true,
@@ -52,6 +86,10 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     if (error instanceof RunnerHeartbeatPersistenceError) {
+      logRunnerIngress("heartbeat", "persistence_failed", {
+        runnerId: readPayloadRunnerId(payload),
+      });
+
       return Response.json(
         {
           error: {
