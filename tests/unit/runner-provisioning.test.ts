@@ -122,30 +122,30 @@ describe.sequential("runner provisioning service", () => {
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
-    ).toContain('AGENTBAY_RUNNER_BEARER_TOKEN="runner-command-token"');
+    ).toContain("AGENTBAY_RUNNER_BEARER_TOKEN=runner-command-token");
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
-    ).toContain('AGENTBAY_RUNNER_IMAGE="ghcr.io/ametel01/agentbay-runner:sha-123"');
+    ).toContain("AGENTBAY_RUNNER_IMAGE=ghcr.io/ametel01/agentbay-runner:sha-123");
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
     ).toContain(
-      'AGENTBAY_RUNNER_ENDPOINT_URL="https://$' + '{AGENTBAY_PUBLIC_IPV4_DASHED}.sslip.io"',
+      "AGENTBAY_RUNNER_ENDPOINT_URL=https://$" + "{AGENTBAY_PUBLIC_IPV4_DASHED}.sslip.io",
     );
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
-    ).not.toContain('AGENTBAY_RUNNER_ENDPOINT_URL="http://127.0.0.1:3045"');
+    ).not.toContain("AGENTBAY_RUNNER_ENDPOINT_URL=http://127.0.0.1:3045");
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
-    ).toContain('docker pull "$AGENTBAY_RUNNER_IMAGE"');
+    ).toContain("docker pull 'ghcr.io/ametel01/agentbay-runner:sha-123'");
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
     ).toContain(
-      "docker run --detach --name 'agentbay-runner' --restart always --env-file '/etc/agentbay/runner.env' -p '127.0.0.1:3045:3045' \"$AGENTBAY_RUNNER_IMAGE\"",
+      "docker run --detach --name 'agentbay-runner' --restart always --env-file '/etc/agentbay/runner.env' -p '127.0.0.1:3045:3045' 'ghcr.io/ametel01/agentbay-runner:sha-123'",
     );
     expect(
       result.runner.provisioning.phases.find((event) => event.phase === "pending")?.metadata,

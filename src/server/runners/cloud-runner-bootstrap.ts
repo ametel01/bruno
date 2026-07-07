@@ -82,16 +82,16 @@ export function buildCloudRunnerBootstrapContent(
   const endpoint = buildEndpointConfig(config);
   const swapCommands = config.enableSwap ? buildSwapCommands() : "";
   const envLines = [
-    `AGENTBAY_APP_URL=${quoteSystemdEnvironmentValue(config.appBaseUrl)}`,
-    `AGENTBAY_RUNNER_REGISTRATION_TOKEN=${quoteSystemdEnvironmentValue(config.registrationToken)}`,
+    `AGENTBAY_APP_URL=${escapeDockerEnvHereDocValue(config.appBaseUrl)}`,
+    `AGENTBAY_RUNNER_REGISTRATION_TOKEN=${escapeDockerEnvHereDocValue(config.registrationToken)}`,
     `AGENTBAY_RUNNER_ENDPOINT_URL=${endpoint.envValue}`,
-    `AGENTBAY_RUNNER_NAME=${quoteSystemdEnvironmentValue(config.runnerName)}`,
-    `AGENTBAY_RUNNER_IMAGE=${quoteSystemdEnvironmentValue(config.runnerImage)}`,
-    `AGENTBAY_RUNNER_ENV_FILE=${quoteSystemdEnvironmentValue(config.envFilePath)}`,
+    `AGENTBAY_RUNNER_NAME=${escapeDockerEnvHereDocValue(config.runnerName)}`,
+    `AGENTBAY_RUNNER_IMAGE=${escapeDockerEnvHereDocValue(config.runnerImage)}`,
+    `AGENTBAY_RUNNER_ENV_FILE=${escapeDockerEnvHereDocValue(config.envFilePath)}`,
     ...(config.commandBearerToken
-      ? [`AGENTBAY_RUNNER_BEARER_TOKEN=${quoteSystemdEnvironmentValue(config.commandBearerToken)}`]
+      ? [`AGENTBAY_RUNNER_BEARER_TOKEN=${escapeDockerEnvHereDocValue(config.commandBearerToken)}`]
       : []),
-    `AGENTBAY_RUNNER_HOST=${quoteSystemdEnvironmentValue(config.runnerHost)}`,
+    `AGENTBAY_RUNNER_HOST=${escapeDockerEnvHereDocValue(config.runnerHost)}`,
     `AGENTBAY_RUNNER_PORT=${config.runnerPort}`,
   ].join("\n");
   const endpointDiscoveryCommands =
@@ -133,10 +133,9 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
   - chmod 0600 ${shellQuote(config.envFilePath)}
   - |
     set -euxo pipefail
-    . ${shellQuote(config.envFilePath)}
-    docker pull "$AGENTBAY_RUNNER_IMAGE"
+    docker pull ${shellQuote(config.runnerImage)}
     docker rm --force ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} || true
-    docker run --detach --name ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} --restart always --env-file ${shellQuote(config.envFilePath)} -p ${shellQuote(`${config.runnerHost}:${config.runnerPort}:${config.runnerPort}`)} "$AGENTBAY_RUNNER_IMAGE"
+    docker run --detach --name ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} --restart always --env-file ${shellQuote(config.envFilePath)} -p ${shellQuote(`${config.runnerHost}:${config.runnerPort}:${config.runnerPort}`)} ${shellQuote(config.runnerImage)}
 `;
 
   return {
@@ -231,7 +230,7 @@ function buildEndpointConfig(config: ReturnType<typeof normalizeBootstrapInput>)
         'AGENTBAY_PUBLIC_IPV4="$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)"',
         'AGENTBAY_PUBLIC_IPV4_DASHED="$(printf \'%s\' "$AGENTBAY_PUBLIC_IPV4" | tr . -)"',
       ],
-      envValue: `"https://\${AGENTBAY_PUBLIC_IPV4_DASHED}.${hostnameSuffix}"`,
+      envValue: `https://\${AGENTBAY_PUBLIC_IPV4_DASHED}.${hostnameSuffix}`,
       caddyHost: `\${AGENTBAY_PUBLIC_IPV4_DASHED}.${hostnameSuffix}`,
       safeSummary: `https://<public-ip>.${hostnameSuffix}`,
     };
@@ -246,7 +245,7 @@ function buildEndpointConfig(config: ReturnType<typeof normalizeBootstrapInput>)
   return {
     caddyHost: escapeHereDocShellExpansion(endpointUrl.hostname),
     discoveryCommands: [],
-    envValue: quoteSystemdEnvironmentValue(config.runnerEndpointUrl),
+    envValue: escapeDockerEnvHereDocValue(config.runnerEndpointUrl),
     safeSummary: config.runnerEndpointUrl,
   };
 }
@@ -277,8 +276,8 @@ function requireNonEmpty(value: string, field: string): string {
   return normalized;
 }
 
-function quoteSystemdEnvironmentValue(value: string): string {
-  return `"${escapeHereDocShellExpansion(value).replace(/"/g, '\\"')}"`;
+function escapeDockerEnvHereDocValue(value: string): string {
+  return escapeHereDocShellExpansion(value).replace(/\r?\n/g, "");
 }
 
 function escapeHereDocShellExpansion(value: string): string {

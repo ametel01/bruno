@@ -47,15 +47,23 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain("AGENTBAY_RUNNER_REGISTRATION_TOKEN=");
     expect(content.userData).toContain(registrationToken);
     expect(content.userData).toContain("AGENTBAY_RUNNER_ENDPOINT_URL=");
-    expect(content.userData).toContain('AGENTBAY_RUNNER_BEARER_TOKEN="runner-command-token"');
+    expect(content.userData).toContain("AGENTBAY_APP_URL=https://app.agentbay.test");
+    expect(content.userData).toContain("AGENTBAY_RUNNER_ENDPOINT_URL=https://runner.agentbay.test");
+    expect(content.userData).toContain("AGENTBAY_RUNNER_NAME=Cloud Runner 1");
+    expect(content.userData).toContain("AGENTBAY_RUNNER_BEARER_TOKEN=runner-command-token");
     expect(content.userData).toContain(
+      "AGENTBAY_RUNNER_IMAGE=ghcr.io/ametel01/agentbay-runner:sha-123",
+    );
+    expect(content.userData).toContain("AGENTBAY_RUNNER_ENV_FILE=/etc/agentbay/runner.env");
+    expect(content.userData).not.toContain('AGENTBAY_APP_URL="https://app.agentbay.test"');
+    expect(content.userData).not.toContain(
       'AGENTBAY_RUNNER_IMAGE="ghcr.io/ametel01/agentbay-runner:sha-123"',
     );
-    expect(content.userData).toContain('AGENTBAY_RUNNER_ENV_FILE="/etc/agentbay/runner.env"');
-    expect(content.userData).toContain('docker pull "$AGENTBAY_RUNNER_IMAGE"');
+    expect(content.userData).not.toContain(". '/etc/agentbay/runner.env'");
+    expect(content.userData).toContain("docker pull 'ghcr.io/ametel01/agentbay-runner:sha-123'");
     expect(content.userData).toContain("docker rm --force 'agentbay-runner' || true");
     expect(content.userData).toContain(
-      "docker run --detach --name 'agentbay-runner' --restart always --env-file '/etc/agentbay/runner.env' -p '127.0.0.1:3045:3045' \"$AGENTBAY_RUNNER_IMAGE\"",
+      "docker run --detach --name 'agentbay-runner' --restart always --env-file '/etc/agentbay/runner.env' -p '127.0.0.1:3045:3045' 'ghcr.io/ametel01/agentbay-runner:sha-123'",
     );
     for (const token of LEGACY_HOST_BOOTSTRAP_TOKENS) {
       expect(content.userData).not.toContain(token);
@@ -82,7 +90,7 @@ describe.sequential("cloud runner bootstrap content", () => {
     });
 
     expect(content.safeSummary.runnerImage).toBe(DEFAULT_AGENTBAY_RUNNER_IMAGE);
-    expect(content.userData).toContain(`AGENTBAY_RUNNER_IMAGE="${DEFAULT_AGENTBAY_RUNNER_IMAGE}"`);
+    expect(content.userData).toContain(`AGENTBAY_RUNNER_IMAGE=${DEFAULT_AGENTBAY_RUNNER_IMAGE}`);
   });
 
   it("rejects loopback runner endpoint URLs for cloud bootstrap registration", () => {
