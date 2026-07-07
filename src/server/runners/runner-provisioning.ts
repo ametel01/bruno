@@ -917,6 +917,13 @@ async function buildProvisioningBootstrap(input: {
   now: () => Date;
 }): Promise<CloudRunnerBootstrapContent> {
   const appBaseUrl = getServerEnv().NEXT_PUBLIC_APP_URL;
+  const appUrl = new URL(appBaseUrl);
+
+  logRunnerProvisioning("bootstrap_callback_resolved", {
+    runnerId: input.runnerId,
+    appBaseUrlOrigin: appUrl.origin,
+    appBaseUrlHostname: appUrl.hostname,
+  });
 
   try {
     return await buildCloudRunnerBootstrapForRunner({
