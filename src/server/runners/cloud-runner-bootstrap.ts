@@ -97,7 +97,9 @@ export function buildCloudRunnerBootstrapContent(
     `AGENTBAY_RUNNER_PORT=${config.runnerPort}`,
   ].join("\n");
   const endpointDiscoveryCommands =
-    endpoint.discoveryCommands.length > 0 ? `${endpoint.discoveryCommands.join("\n")}\n    ` : "";
+    endpoint.discoveryCommands.length > 0
+      ? `${endpoint.discoveryCommands.join("\n    ")}\n    `
+      : "";
   const userData = `#cloud-config
 package_update: true
 package_upgrade: false

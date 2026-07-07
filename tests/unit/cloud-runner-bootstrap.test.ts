@@ -127,6 +127,22 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.safeSummary.runnerEndpointUrl).toBe("https://203-0-113-10.sslip.io");
   });
 
+  it("keeps metadata endpoint discovery commands inside the YAML block scalar", () => {
+    const content = buildCloudRunnerBootstrapContent({
+      appBaseUrl: "https://app.agentbay.test",
+      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      endpointDiscovery: { type: "digitalocean_metadata" },
+      runnerName: "Cloud Runner 1",
+    });
+
+    expect(content.userData).toContain(
+      '    AGENTBAY_PUBLIC_IPV4="$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)"\n' +
+        '    AGENTBAY_PUBLIC_IPV4_DASHED="$(printf \'%s\' "$AGENTBAY_PUBLIC_IPV4" | tr . -)"\n' +
+        "    sed 's/^    //' > /etc/caddy/Caddyfile <<AGENTBAY_CADDYFILE",
+    );
+    expect(content.userData).not.toContain("\nAGENTBAY_PUBLIC_IPV4_DASHED=");
+  });
+
   it("adds bootstrap logging and swap setup when low-memory Droplet swap is enabled", () => {
     const content = buildCloudRunnerBootstrapContent({
       appBaseUrl: "https://app.agentbay.test",
