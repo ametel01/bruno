@@ -10,6 +10,13 @@ import {
 } from "@/src/server/runners/cloud-runner-bootstrap";
 import { DEFAULT_AGENTBAY_RUNNER_IMAGE } from "@/src/server/env";
 
+const LEGACY_HOST_BOOTSTRAP_TOKENS = [
+  "git" + " clone",
+  "bun" + " install",
+  "/root/.bun/bin/" + "bun",
+  "https://github.com/ametel01/" + "agentbay.git",
+];
+
 describe.sequential("cloud runner bootstrap content", () => {
   let connection: DatabaseConnection;
 
@@ -23,7 +30,7 @@ describe.sequential("cloud runner bootstrap content", () => {
     await connection.close();
   });
 
-  it("builds cloud-init that installs Docker and starts the runner bootstrap/service unit", () => {
+  it("builds cloud-init that installs Docker and starts the runner container from the selected image", () => {
     const registrationToken = "agb_reg_1234567890123456789012345678901234567890123";
     const content = buildCloudRunnerBootstrapContent({
       appBaseUrl: "https://app.agentbay.test",
@@ -45,8 +52,14 @@ describe.sequential("cloud runner bootstrap content", () => {
       'AGENTBAY_RUNNER_IMAGE="ghcr.io/ametel01/agentbay-runner:sha-123"',
     );
     expect(content.userData).toContain('AGENTBAY_RUNNER_ENV_FILE="/etc/agentbay/runner.env"');
-    expect(content.userData).toContain("ExecStartPre=/root/.bun/bin/bun run runner:bootstrap");
-    expect(content.userData).toContain("ExecStart=/root/.bun/bin/bun run runner:service");
+    expect(content.userData).toContain('docker pull "$AGENTBAY_RUNNER_IMAGE"');
+    expect(content.userData).toContain("docker rm --force 'agentbay-runner' || true");
+    expect(content.userData).toContain(
+      "docker run --detach --name 'agentbay-runner' --restart always --env-file '/etc/agentbay/runner.env' -p '127.0.0.1:3045:3045' \"$AGENTBAY_RUNNER_IMAGE\"",
+    );
+    for (const token of LEGACY_HOST_BOOTSTRAP_TOKENS) {
+      expect(content.userData).not.toContain(token);
+    }
     expect(content.safeSummary).toMatchObject({
       appBaseUrl: "https://app.agentbay.test",
       runnerEndpointUrl: "https://runner.agentbay.test",

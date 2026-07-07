@@ -140,7 +140,13 @@ describe.sequential("runner provisioning service", () => {
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
-    ).toContain("ExecStartPre=/root/.bun/bin/bun run runner:bootstrap");
+    ).toContain('docker pull "$AGENTBAY_RUNNER_IMAGE"');
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
+    ).toContain(
+      "docker run --detach --name 'agentbay-runner' --restart always --env-file '/etc/agentbay/runner.env' -p '127.0.0.1:3045:3045' \"$AGENTBAY_RUNNER_IMAGE\"",
+    );
     expect(
       result.runner.provisioning.phases.find((event) => event.phase === "pending")?.metadata,
     ).toMatchObject({
