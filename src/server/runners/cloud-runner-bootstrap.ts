@@ -120,7 +120,7 @@ runcmd:
       touch /var/log/agentbay-bootstrap.log
       chmod 0600 /var/log/agentbay-bootstrap.log
       sed 's/^    //' > /usr/local/bin/agentbay-bootstrap-event <<'AGENTBAY_BOOTSTRAP_EVENT_SCRIPT'
-      ${indentHereDoc(bootstrapEventScript)}
+      ${indentYamlBlock(indentHereDoc(bootstrapEventScript))}
       AGENTBAY_BOOTSTRAP_EVENT_SCRIPT
       chmod 0700 /usr/local/bin/agentbay-bootstrap-event
       /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Cloud runner bootstrap started." bootstrap_started
@@ -157,7 +157,7 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
     - |
       /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Caddy reverse proxy was configured." caddy_configured
       sed 's/^    //' > ${shellQuote(config.envFilePath)} <<AGENTBAY_RUNNER_ENV
-      ${indentHereDoc(envLines)}
+      ${indentYamlBlock(indentHereDoc(envLines))}
       AGENTBAY_RUNNER_ENV
   - chmod 0600 ${shellQuote(config.envFilePath)}
   -
@@ -395,4 +395,8 @@ function indentHereDoc(value: string): string {
     .split("\n")
     .map((line) => `    ${line}`)
     .join("\n");
+}
+
+function indentYamlBlock(value: string): string {
+  return value.replace(/\n/g, "\n      ");
 }
