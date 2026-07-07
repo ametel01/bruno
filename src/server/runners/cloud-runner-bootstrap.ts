@@ -7,6 +7,7 @@ import { markCloudRunnerBootstrapInjected } from "@/src/server/runners/runner-pr
 
 export const DEFAULT_CLOUD_RUNNER_ENV_FILE = "/etc/agentbay/runner.env";
 export const DEFAULT_CLOUD_RUNNER_HOST = "127.0.0.1";
+export const DEFAULT_CLOUD_RUNNER_CONTAINER_HOST = "0.0.0.0";
 export const DEFAULT_CLOUD_RUNNER_PORT = 3045;
 export const DEFAULT_CLOUD_RUNNER_CONTAINER_NAME = "agentbay-runner";
 export const DEFAULT_CLOUD_RUNNER_NAME = "AgentBay Cloud Runner";
@@ -92,7 +93,7 @@ export function buildCloudRunnerBootstrapContent(
     ...(config.commandBearerToken
       ? [`AGENTBAY_RUNNER_BEARER_TOKEN=${escapeDockerEnvHereDocValue(config.commandBearerToken)}`]
       : []),
-    `AGENTBAY_RUNNER_HOST=${escapeDockerEnvHereDocValue(config.runnerHost)}`,
+    `AGENTBAY_RUNNER_HOST=${escapeDockerEnvHereDocValue(config.runnerContainerHost)}`,
     `AGENTBAY_RUNNER_PORT=${config.runnerPort}`,
   ].join("\n");
   const endpointDiscoveryCommands =
@@ -193,6 +194,7 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
     runnerImage: input.runnerImage?.trim() || DEFAULT_AGENTBAY_RUNNER_IMAGE,
     envFilePath: input.envFilePath?.trim() || DEFAULT_CLOUD_RUNNER_ENV_FILE,
     runnerHost: input.runnerHost?.trim() || DEFAULT_CLOUD_RUNNER_HOST,
+    runnerContainerHost: DEFAULT_CLOUD_RUNNER_CONTAINER_HOST,
     runnerPort: input.runnerPort ?? DEFAULT_CLOUD_RUNNER_PORT,
   };
 }
