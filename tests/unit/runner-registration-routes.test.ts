@@ -89,9 +89,12 @@ describe("POST /runner/v1/register route", () => {
   afterEach(() => {
     mocks.createRunnerRegistrationTokenForDevelopmentUser.mockReset();
     mocks.exchangeRunnerRegistrationTokenForCredential.mockReset();
+    vi.restoreAllMocks();
   });
 
   it("returns runner identity and one visible-once credential for a valid exchange", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+
     mocks.exchangeRunnerRegistrationTokenForCredential.mockResolvedValueOnce({
       ok: true,
       runner: {
@@ -115,6 +118,9 @@ describe("POST /runner/v1/register route", () => {
       }),
     );
     const body = await response.json();
+    const ingressLogs = infoSpy.mock.calls
+      .filter(([scope]) => scope === "[agentbay] runner.ingress")
+      .map(([, payload]) => payload);
 
     expect(response.status).toBe(201);
     expect(body).toEqual({
@@ -132,8 +138,26 @@ describe("POST /runner/v1/register route", () => {
       endpointUrl: "http://127.0.0.1:8787",
       name: "Registered Runner",
     });
+    expect(ingressLogs).toContainEqual(
+      expect.objectContaining({
+        endpoint: "register",
+        event: "request_validated",
+        endpointHostname: "127.0.0.1",
+        hasName: true,
+      }),
+    );
+    expect(ingressLogs).toContainEqual(
+      expect.objectContaining({
+        endpoint: "register",
+        event: "runner_registered",
+        runnerId: "00000000-0000-4000-8000-000000000201",
+        endpointHostname: "127.0.0.1",
+      }),
+    );
     expect(JSON.stringify(body)).not.toContain("tokenHash");
     expect(JSON.stringify(body)).not.toContain("credentialHash");
+    expect(JSON.stringify(ingressLogs)).not.toContain("agb_reg_");
+    expect(JSON.stringify(ingressLogs)).not.toContain("agb_run_");
   });
 
   it("returns safe validation failures for missing, malformed, and wrong-prefix tokens", async () => {
