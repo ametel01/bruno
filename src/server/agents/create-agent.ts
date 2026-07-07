@@ -296,7 +296,7 @@ export async function createAgentForDevelopmentUser(
 
     logAgentCreate("cloud_runner_provisioning_start", {});
     const provisionedRunnerId = await ensureProvisionedRunnerId(ensureCloudRunnerProvisioning);
-    logAgentCreate("cloud_runner_provisioning_ready_for_assignment", {
+    logAgentCreate("cloud_runner_provisioning_runner_selected", {
       runnerId: provisionedRunnerId,
     });
 
