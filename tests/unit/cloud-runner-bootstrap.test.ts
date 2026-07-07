@@ -42,6 +42,7 @@ describe.sequential("cloud runner bootstrap content", () => {
     });
 
     expect(content.userData).toContain("#cloud-config");
+    expect(content.userData).toContain("  - python3");
     expect(content.userData).toContain("apt-get install -y docker-ce");
     expect(content.userData).toContain("systemctl enable --now docker");
     expect(content.userData).toContain("AGENTBAY_RUNNER_REGISTRATION_TOKEN=");

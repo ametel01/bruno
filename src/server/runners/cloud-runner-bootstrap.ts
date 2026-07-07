@@ -106,6 +106,7 @@ packages:
   - ca-certificates
   - curl
   - gnupg
+  - python3
 runcmd:
   - |
     set -euo pipefail
