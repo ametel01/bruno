@@ -6,6 +6,7 @@ import { DIGITALOCEAN_PROVIDER } from "@/src/server/runners/digitalocean-provide
 import { markCloudRunnerBootstrapInjected } from "@/src/server/runners/runner-provisioning-events";
 
 export const DEFAULT_CLOUD_RUNNER_ENV_FILE = "/etc/agentbay/runner.env";
+export const DEFAULT_CLOUD_RUNNER_CONTAINER_ENV_FILE = "/tmp/agentbay-runner.env";
 export const DEFAULT_CLOUD_RUNNER_HOST = "127.0.0.1";
 export const DEFAULT_CLOUD_RUNNER_CONTAINER_HOST = "0.0.0.0";
 export const DEFAULT_CLOUD_RUNNER_PORT = 3045;
@@ -89,7 +90,7 @@ export function buildCloudRunnerBootstrapContent(
     `AGENTBAY_RUNNER_ENDPOINT_URL=${endpoint.envValue}`,
     `AGENTBAY_RUNNER_NAME=${escapeDockerEnvHereDocValue(config.runnerName)}`,
     `AGENTBAY_RUNNER_IMAGE=${escapeDockerEnvHereDocValue(config.runnerImage)}`,
-    `AGENTBAY_RUNNER_ENV_FILE=${escapeDockerEnvHereDocValue(config.envFilePath)}`,
+    `AGENTBAY_RUNNER_ENV_FILE=${escapeDockerEnvHereDocValue(config.containerEnvFilePath)}`,
     ...(config.commandBearerToken
       ? [`AGENTBAY_RUNNER_BEARER_TOKEN=${escapeDockerEnvHereDocValue(config.commandBearerToken)}`]
       : []),
@@ -156,7 +157,7 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
     - -lc
     - |
       /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Caddy reverse proxy was configured." caddy_configured
-      sed 's/^    //' > ${shellQuote(config.envFilePath)} <<AGENTBAY_RUNNER_ENV
+      ${endpointDiscoveryCommands}sed 's/^    //' > ${shellQuote(config.envFilePath)} <<AGENTBAY_RUNNER_ENV
       ${indentYamlBlock(indentHereDoc(envLines))}
       AGENTBAY_RUNNER_ENV
   - chmod 0600 ${shellQuote(config.envFilePath)}
@@ -211,6 +212,7 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
     runnerName: input.runnerName?.trim() || DEFAULT_CLOUD_RUNNER_NAME,
     runnerImage: input.runnerImage?.trim() || DEFAULT_AGENTBAY_RUNNER_IMAGE,
     envFilePath: input.envFilePath?.trim() || DEFAULT_CLOUD_RUNNER_ENV_FILE,
+    containerEnvFilePath: DEFAULT_CLOUD_RUNNER_CONTAINER_ENV_FILE,
     runnerHost: input.runnerHost?.trim() || DEFAULT_CLOUD_RUNNER_HOST,
     runnerContainerHost: DEFAULT_CLOUD_RUNNER_CONTAINER_HOST,
     runnerPort: input.runnerPort ?? DEFAULT_CLOUD_RUNNER_PORT,
@@ -327,7 +329,7 @@ function buildEndpointConfig(config: ReturnType<typeof normalizeBootstrapInput>)
         'AGENTBAY_PUBLIC_IPV4_DASHED="$(printf \'%s\' "$AGENTBAY_PUBLIC_IPV4" | tr . -)"',
       ],
       envValue: `https://\${AGENTBAY_PUBLIC_IPV4_DASHED}.${hostnameSuffix}`,
-      caddyHost: `\${AGENTBAY_PUBLIC_IPV4_DASHED}.${hostnameSuffix}`,
+      caddyHost: `https://\${AGENTBAY_PUBLIC_IPV4_DASHED}.${hostnameSuffix}`,
       safeSummary: `https://<public-ip>.${hostnameSuffix}`,
     };
   }
@@ -336,10 +338,8 @@ function buildEndpointConfig(config: ReturnType<typeof normalizeBootstrapInput>)
     throw new Error("runnerEndpointUrl is required.");
   }
 
-  const endpointUrl = new URL(config.runnerEndpointUrl);
-
   return {
-    caddyHost: escapeHereDocShellExpansion(endpointUrl.hostname),
+    caddyHost: escapeHereDocShellExpansion(config.runnerEndpointUrl),
     discoveryCommands: [],
     envValue: escapeDockerEnvHereDocValue(config.runnerEndpointUrl),
     safeSummary: config.runnerEndpointUrl,

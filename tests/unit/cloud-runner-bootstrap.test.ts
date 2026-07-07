@@ -74,7 +74,7 @@ describe.sequential("cloud runner bootstrap content", () => {
       "          AGENTBAY_APP_URL=https://app.agentbay.test\n" +
         "          AGENTBAY_RUNNER_REGISTRATION_TOKEN=",
     );
-    expect(content.userData).toContain("AGENTBAY_RUNNER_ENV_FILE=/etc/agentbay/runner.env");
+    expect(content.userData).toContain("AGENTBAY_RUNNER_ENV_FILE=/tmp/agentbay-runner.env");
     expect(content.userData).toContain("AGENTBAY_RUNNER_HOST=0.0.0.0");
     expect(content.userData).not.toContain("AGENTBAY_RUNNER_HOST=127.0.0.1");
     expect(content.userData).not.toContain('AGENTBAY_APP_URL="https://app.agentbay.test"');
@@ -136,24 +136,34 @@ describe.sequential("cloud runner bootstrap content", () => {
     });
 
     expect(content.userData).toContain("apt-get install -y caddy");
-    expect(content.userData).toContain("203-0-113-10.sslip.io");
+    expect(content.userData).toContain("https://203-0-113-10.sslip.io");
     expect(content.userData).toContain("reverse_proxy 127.0.0.1:3045");
     expect(content.userData).toContain("-p '127.0.0.1:3045:3045'");
     expect(content.safeSummary.runnerEndpointUrl).toBe("https://203-0-113-10.sslip.io");
   });
 
-  it("keeps metadata endpoint discovery commands inside the YAML block scalar", () => {
+  it("keeps metadata endpoint discovery commands inside each YAML block scalar that uses them", () => {
     const content = buildCloudRunnerBootstrapContent({
       appBaseUrl: "https://app.agentbay.test",
       registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
       endpointDiscovery: { type: "digitalocean_metadata" },
       runnerName: "Cloud Runner 1",
     });
+    const discoveredIpPlaceholder = ["$", "{AGENTBAY_PUBLIC_IPV4_DASHED}"].join("");
 
     expect(content.userData).toContain(
       '      AGENTBAY_PUBLIC_IPV4="$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)"\n' +
         '      AGENTBAY_PUBLIC_IPV4_DASHED="$(printf \'%s\' "$AGENTBAY_PUBLIC_IPV4" | tr . -)"\n' +
         "      sed 's/^    //' > /etc/caddy/Caddyfile <<AGENTBAY_CADDYFILE",
+    );
+    expect(content.userData).toContain(`      https://${discoveredIpPlaceholder}.sslip.io {`);
+    expect(content.userData).toContain(
+      '      AGENTBAY_PUBLIC_IPV4="$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)"\n' +
+        '      AGENTBAY_PUBLIC_IPV4_DASHED="$(printf \'%s\' "$AGENTBAY_PUBLIC_IPV4" | tr . -)"\n' +
+        "      sed 's/^    //' > '/etc/agentbay/runner.env' <<AGENTBAY_RUNNER_ENV",
+    );
+    expect(content.userData).toContain(
+      `          AGENTBAY_RUNNER_ENDPOINT_URL=https://${discoveredIpPlaceholder}.sslip.io`,
     );
     expect(content.userData).not.toContain("\nAGENTBAY_PUBLIC_IPV4_DASHED=");
   });
