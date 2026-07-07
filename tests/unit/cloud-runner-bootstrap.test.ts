@@ -42,7 +42,12 @@ describe.sequential("cloud runner bootstrap content", () => {
     });
 
     expect(content.userData).toContain("#cloud-config");
+    expect(content.userData).toContain("  - bash");
     expect(content.userData).toContain("  - python3");
+    expect(content.userData).toContain("    - bash\n    - -lc\n    - |\n      set -euo pipefail");
+    expect(content.userData).toContain("    - bash\n    - -lc\n    - |\n      set -euxo pipefail");
+    expect(content.userData).not.toContain("  - |\n    set -euo pipefail");
+    expect(content.userData).not.toContain("  - |\n    set -euxo pipefail");
     expect(content.userData).toContain("apt-get install -y docker-ce");
     expect(content.userData).toContain("systemctl enable --now docker");
     expect(content.userData).toContain("AGENTBAY_RUNNER_REGISTRATION_TOKEN=");
@@ -136,9 +141,9 @@ describe.sequential("cloud runner bootstrap content", () => {
     });
 
     expect(content.userData).toContain(
-      '    AGENTBAY_PUBLIC_IPV4="$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)"\n' +
-        '    AGENTBAY_PUBLIC_IPV4_DASHED="$(printf \'%s\' "$AGENTBAY_PUBLIC_IPV4" | tr . -)"\n' +
-        "    sed 's/^    //' > /etc/caddy/Caddyfile <<AGENTBAY_CADDYFILE",
+      '      AGENTBAY_PUBLIC_IPV4="$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)"\n' +
+        '      AGENTBAY_PUBLIC_IPV4_DASHED="$(printf \'%s\' "$AGENTBAY_PUBLIC_IPV4" | tr . -)"\n' +
+        "      sed 's/^    //' > /etc/caddy/Caddyfile <<AGENTBAY_CADDYFILE",
     );
     expect(content.userData).not.toContain("\nAGENTBAY_PUBLIC_IPV4_DASHED=");
   });
@@ -154,6 +159,7 @@ describe.sequential("cloud runner bootstrap content", () => {
 
     expect(content.userData).toContain("/var/log/agentbay-bootstrap.log");
     expect(content.userData).toContain("set -euxo pipefail");
+    expect(content.userData).toContain("    - bash\n    - -lc\n    - |\n      set -euxo pipefail");
     expect(content.userData).toContain("fallocate -l 1G /swapfile");
     expect(content.userData).toContain("mkswap /swapfile");
     expect(content.userData).toContain("swapon /swapfile");
