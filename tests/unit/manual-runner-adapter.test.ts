@@ -4,9 +4,11 @@ import { createAgentForDevelopmentUser } from "@/src/server/agents/create-agent"
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentLogs } from "@/src/server/db/schema";
 import {
+  DEFAULT_MANUAL_RUNNER_TIMEOUT_MS,
   ManualRunnerAdapter,
   RUNNER_BEARER_TOKEN_ENV,
 } from "@/src/server/runners/manual-runner-adapter";
+import { DOCKER_CLI_TIMEOUT_MS } from "@/src/runner-service/constants";
 import {
   assignRunnerToActiveAgentForDevelopmentUser,
   bootstrapManualRunnerForDevelopmentUser,
@@ -194,6 +196,48 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
       reason: "runner_token_not_configured",
     });
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps the dashboard timeout longer than the runner Docker command timeout", () => {
+    expect(DEFAULT_MANUAL_RUNNER_TIMEOUT_MS).toBeGreaterThan(DOCKER_CLI_TIMEOUT_MS);
+  });
+
+  it("logs safe runner request failure metadata without bearer credentials", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const adapter = new ManualRunnerAdapter(manualRunner("https://runner.example.com"), {
+      env: { [RUNNER_BEARER_TOKEN_ENV]: "contract-token" },
+      fetch: async () =>
+        Response.json(
+          {
+            ok: false,
+            error: {
+              code: "docker_command_failed",
+              message: "Runner Docker command failed.",
+            },
+          },
+          { status: 502 },
+        ),
+      timeoutMs: 250,
+    });
+
+    await expect(adapter.start("00000000-0000-4000-8000-000000000123")).resolves.toEqual({
+      ok: false,
+      reason: "runner_request_failed",
+    });
+
+    expect(info).toHaveBeenCalledWith(
+      "[agentbay] manual_runner.request",
+      expect.objectContaining({
+        event: "request_failed",
+        action: "start",
+        agentId: "00000000-0000-4000-8000-000000000123",
+        endpointHost: "runner.example.com",
+        responseStatus: 502,
+        responseErrorCode: "docker_command_failed",
+      }),
+    );
+    expect(JSON.stringify(info.mock.calls)).not.toContain("contract-token");
+    info.mockRestore();
   });
 
   async function createAssignedRunner(agentId: string, endpointUrl: string) {

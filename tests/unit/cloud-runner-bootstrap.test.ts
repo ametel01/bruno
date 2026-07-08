@@ -8,6 +8,7 @@ import {
   buildCloudRunnerBootstrapForRunner,
   redactCloudRunnerBootstrapOutput,
 } from "@/src/server/runners/cloud-runner-bootstrap";
+import { DEFAULT_MANUAL_RUNNER_IMAGE } from "@/src/runner-service/constants";
 import { DEFAULT_AGENTBAY_RUNNER_IMAGE } from "@/src/server/env";
 
 const LEGACY_HOST_BOOTSTRAP_TOKENS = [
@@ -71,6 +72,9 @@ describe.sequential("cloud runner bootstrap content", () => {
       "AGENTBAY_RUNNER_IMAGE=ghcr.io/ametel01/agentbay-runner:sha-123",
     );
     expect(content.userData).toContain(
+      `AGENTBAY_DOCKER_RUNNER_IMAGE=${DEFAULT_MANUAL_RUNNER_IMAGE}`,
+    );
+    expect(content.userData).toContain(
       "          AGENTBAY_APP_URL=https://app.agentbay.test\n" +
         "          AGENTBAY_RUNNER_REGISTRATION_TOKEN=",
     );
@@ -83,6 +87,7 @@ describe.sequential("cloud runner bootstrap content", () => {
     );
     expect(content.userData).not.toContain(". '/etc/agentbay/runner.env'");
     expect(content.userData).toContain("docker pull 'ghcr.io/ametel01/agentbay-runner:sha-123'");
+    expect(content.userData).toContain(`docker pull '${DEFAULT_MANUAL_RUNNER_IMAGE}'`);
     expect(content.userData).toContain("docker rm --force 'agentbay-runner' || true");
     expect(content.userData).toContain(
       "docker run --detach --name 'agentbay-runner' --restart always --env-file '/etc/agentbay/runner.env' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' 'ghcr.io/ametel01/agentbay-runner:sha-123'",

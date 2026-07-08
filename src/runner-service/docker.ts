@@ -1,9 +1,12 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import {
+  AGENTBAY_AGENT_ID_LABEL,
+  DEFAULT_MANUAL_RUNNER_IMAGE,
+  DOCKER_CLI_TIMEOUT_MS,
+} from "@/src/runner-service/constants";
 
-export const AGENTBAY_AGENT_ID_LABEL = "agentbay.agent_id";
-export const DEFAULT_MANUAL_RUNNER_IMAGE = "busybox:1.36";
-const DOCKER_CLI_TIMEOUT_MS = 15_000;
+export { AGENTBAY_AGENT_ID_LABEL, DEFAULT_MANUAL_RUNNER_IMAGE, DOCKER_CLI_TIMEOUT_MS };
 const DOCKER_RUNNER_IMAGE_ENV = "AGENTBAY_DOCKER_RUNNER_IMAGE";
 const DOCKER_RUNNER_ARGS_ENV = "AGENTBAY_DOCKER_RUNNER_ARGS_JSON";
 const DOCKER_EXECUTABLE_ENV = "AGENTBAY_RUNNER_DOCKER_EXECUTABLE";

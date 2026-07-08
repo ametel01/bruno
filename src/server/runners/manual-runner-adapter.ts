@@ -9,6 +9,7 @@ import {
   type AgentLogDto,
   type AgentLogPage,
 } from "@/src/server/logs/agent-logs";
+import { DOCKER_CLI_TIMEOUT_MS } from "@/src/runner-service/constants";
 import type { ManualRunnerRecord } from "@/src/server/runners/manual-runner-persistence";
 import type {
   RunnerAdapter as RunnerAdapterContract,
@@ -18,7 +19,7 @@ import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
 export const MANUAL_RUNNER_LOG_SOURCE = "manual_runner";
 export const RUNNER_BEARER_TOKEN_ENV = "AGENTBAY_RUNNER_BEARER_TOKEN";
-export const DEFAULT_MANUAL_RUNNER_TIMEOUT_MS = 10_000;
+export const DEFAULT_MANUAL_RUNNER_TIMEOUT_MS = DOCKER_CLI_TIMEOUT_MS + 5_000;
 
 type ManualRunnerAction = "start" | "stop" | "restart" | "status" | "logs";
 type ManualRunnerFetch = typeof fetch;
@@ -234,6 +235,7 @@ export class ManualRunnerAdapter
     );
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const startedAt = Date.now();
 
     try {
       const response = await this.fetch(requestUrl, {
@@ -246,17 +248,50 @@ export class ManualRunnerAdapter
       });
 
       if (!response.ok) {
+        logManualRunnerRequest("request_failed", {
+          action,
+          agentId,
+          runnerId: this.runner.id,
+          runnerKind: this.runner.kind,
+          endpointHost: safeEndpointHost(endpointUrl),
+          method,
+          responseStatus: response.status,
+          responseErrorCode: await readResponseErrorCode(response),
+          durationMs: Date.now() - startedAt,
+        });
         return { ok: false, reason: "runner_request_failed" };
       }
 
       const parsed: unknown = await response.json();
 
       if (!isRecord(parsed) || parsed.ok !== true) {
+        logManualRunnerRequest("response_invalid", {
+          action,
+          agentId,
+          runnerId: this.runner.id,
+          runnerKind: this.runner.kind,
+          endpointHost: safeEndpointHost(endpointUrl),
+          method,
+          responseStatus: response.status,
+          durationMs: Date.now() - startedAt,
+        });
         return { ok: false, reason: "runner_response_invalid" };
       }
 
       return { ok: true, body: parsed };
-    } catch {
+    } catch (error) {
+      logManualRunnerRequest("request_error", {
+        action,
+        agentId,
+        runnerId: this.runner.id,
+        runnerKind: this.runner.kind,
+        endpointHost: safeEndpointHost(endpointUrl),
+        method,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        errorMessage: safeErrorMessage(error),
+        timedOut: controller.signal.aborted,
+        durationMs: Date.now() - startedAt,
+      });
       return { ok: false, reason: "runner_request_failed" };
     } finally {
       clearTimeout(timeout);
@@ -516,7 +551,41 @@ function normalizeTimeoutMs(timeoutMs: number | undefined): number {
     return DEFAULT_MANUAL_RUNNER_TIMEOUT_MS;
   }
 
-  return Math.min(Math.max(timeoutMs, 100), 30_000);
+  return Math.min(Math.max(timeoutMs, 100), 60_000);
+}
+
+async function readResponseErrorCode(response: Response): Promise<string | null> {
+  try {
+    const parsed: unknown = await response.clone().json();
+
+    if (!isRecord(parsed) || !isRecord(parsed.error) || typeof parsed.error.code !== "string") {
+      return null;
+    }
+
+    return parsed.error.code.slice(0, 80);
+  } catch {
+    return null;
+  }
+}
+
+function safeEndpointHost(endpointUrl: string): string | null {
+  try {
+    return new URL(endpointUrl).host || null;
+  } catch {
+    return null;
+  }
+}
+
+function safeErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return "Unknown runner request error.";
+  }
+
+  return error.message.replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+function logManualRunnerRequest(event: string, metadata: Record<string, unknown>): void {
+  console.info("[agentbay] manual_runner.request", { event, ...metadata });
 }
 
 function isValidManualLogLine(line: ManualRunnerLogLineInput): boolean {
