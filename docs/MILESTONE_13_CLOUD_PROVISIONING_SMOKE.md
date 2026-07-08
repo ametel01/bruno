@@ -18,12 +18,17 @@ DATABASE_URL=postgres://...
 NEXT_PUBLIC_APP_URL=https://staging.example.invalid
 AGENTBAY_DIGITALOCEAN_TOKEN=<temporary-token>
 AGENTBAY_DIGITALOCEAN_REGION=sfo3
-AGENTBAY_DIGITALOCEAN_SIZE=s-1vcpu-1gb
+AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-512mb-10gb
 AGENTBAY_DIGITALOCEAN_IMAGE=ubuntu-24-04-x64
 AGENTBAY_DIGITALOCEAN_TAGS=agentbay,agentbay-runner,pre-beta-smoke
+# Optional SSH access for troubleshooting. Prefer your current operator IP CIDR.
+AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS=203.0.113.5/32
 ```
 
 Do not set `AGENTBAY_DIGITALOCEAN_TOKEN` in browser-visible or `NEXT_PUBLIC_*` configuration.
+If temporary public SSH is required for a smoke test, set
+`AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH=true` only for that run and disable it
+afterward.
 
 ## Smoke Steps
 

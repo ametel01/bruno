@@ -22,7 +22,7 @@ describe("server-only provider environment validation", () => {
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "agentbay-runner"],
-      sshSourceAddresses: ["0.0.0.0/0", "::/0"],
+      sshSourceAddresses: [],
     });
 
     const config = readDigitalOceanProviderConfig({
@@ -33,6 +33,7 @@ describe("server-only provider environment validation", () => {
       AGENTBAY_DIGITALOCEAN_IMAGE: " ubuntu-24-04-x64 ",
       AGENTBAY_RUNNER_IMAGE: " ghcr.io/ametel01/agentbay-runner:sha-123 ",
       AGENTBAY_DIGITALOCEAN_TAGS: "runner, agentbay, runner",
+      AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS: "203.0.113.5, 2001:db8::/64",
     });
 
     expect(config).toEqual({
@@ -44,7 +45,7 @@ describe("server-only provider environment validation", () => {
       sizeSlug: "s-2vcpu-2gb",
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "runner"],
-      sshSourceAddresses: ["0.0.0.0/0", "::/0"],
+      sshSourceAddresses: ["2001:db8::/64", "203.0.113.5/32"],
     });
   });
 
@@ -98,6 +99,127 @@ describe("server-only provider environment validation", () => {
         AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "none",
       }),
     ).toMatchObject({ sshKeyIds: [] });
+  });
+
+  it("requires explicit public SSH source access opt-in", () => {
+    expect(
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+      }),
+    ).toMatchObject({ sshSourceAddresses: [] });
+
+    expect(
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH: "true",
+      }),
+    ).toMatchObject({ sshSourceAddresses: ["0.0.0.0/0", "::/0"] });
+
+    expect(
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH: "false",
+      }),
+    ).toMatchObject({ sshSourceAddresses: [] });
+  });
+
+  it("rejects malformed cloud runner provider settings without echoing raw values", () => {
+    const invalidRunnerImage = "ghcr.io/ametel01/agentbay-runner:latest;rm";
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_RUNNER_IMAGE: invalidRunnerImage,
+      }),
+    ).toThrow("AGENTBAY_RUNNER_IMAGE must be a valid container image reference");
+
+    try {
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_RUNNER_IMAGE: invalidRunnerImage,
+      });
+    } catch (error) {
+      expect(error).toBeInstanceOf(EnvValidationError);
+      expect(String(error)).not.toContain(invalidRunnerImage);
+    }
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_DIGITALOCEAN_REGION: "nyc 3",
+      }),
+    ).toThrow("AGENTBAY_DIGITALOCEAN_REGION must be a DigitalOcean slug");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s/1vcpu",
+      }),
+    ).toThrow("AGENTBAY_DIGITALOCEAN_SIZE_SLUG must be a DigitalOcean slug");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_DIGITALOCEAN_IMAGE: "ubuntu,24",
+      }),
+    ).toThrow("AGENTBAY_DIGITALOCEAN_IMAGE must be a DigitalOcean slug");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_DIGITALOCEAN_TAGS: "agentbay,pre beta",
+      }),
+    ).toThrow("AGENTBAY_DIGITALOCEAN_TAGS entries must not contain whitespace");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "52830696, bad key",
+      }),
+    ).toThrow("AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS entries must not contain whitespace");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS: "example.com",
+      }),
+    ).toThrow("AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must be valid");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS: "203.0.113.5/33",
+      }),
+    ).toThrow("AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must use a valid");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH: "yes",
+      }),
+    ).toThrow("AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH must be true");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS: "203.0.113.5/32",
+        AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH: "yes",
+      }),
+    ).toThrow("AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH must be true");
   });
 
   it("rejects blank DigitalOcean provider configuration", () => {
