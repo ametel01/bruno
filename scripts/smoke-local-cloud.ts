@@ -9,6 +9,9 @@ type CreatedAgentResponse = {
 export {};
 
 const appUrl = normalizeBaseUrl(process.env.NEXT_PUBLIC_APP_URL ?? "http://127.0.0.1:3000");
+const runnerUrl = normalizeBaseUrl(
+  process.env.AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL ?? "http://127.0.0.1:3045",
+);
 const timeoutMs = readPositiveInteger(process.env.AGENTBAY_LOCAL_CLOUD_SMOKE_TIMEOUT_MS, 240_000);
 const pollMs = readPositiveInteger(process.env.AGENTBAY_LOCAL_CLOUD_SMOKE_POLL_MS, 2_000);
 
@@ -16,6 +19,7 @@ const startedAt = Date.now();
 
 await waitForDashboard();
 const { agentId, runnerId } = await createAgent();
+await waitForRunnerService(agentId, runnerId);
 await startAgent(agentId);
 
 console.log(
@@ -79,6 +83,48 @@ async function createAgent(): Promise<{ agentId: string; runnerId: string | null
   return { agentId, runnerId };
 }
 
+async function waitForRunnerService(agentId: string, runnerId: string | null): Promise<void> {
+  let attempt = 0;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    attempt += 1;
+
+    try {
+      const response = await fetch(`${runnerUrl}/`);
+
+      if (response.status === 401 || response.status === 404 || response.ok) {
+        console.log(
+          JSON.stringify({
+            event: "local_cloud_smoke_runner_service_ready",
+            agentId,
+            runnerId,
+            attempt,
+            httpStatus: response.status,
+          }),
+        );
+        return;
+      }
+    } catch {
+      // The local droplet simulator is still installing Docker/Caddy or starting the runner.
+    }
+
+    if (attempt === 1 || attempt % 10 === 0) {
+      console.log(
+        JSON.stringify({
+          event: "local_cloud_smoke_waiting_for_runner_service",
+          agentId,
+          runnerId,
+          attempt,
+        }),
+      );
+    }
+
+    await sleep(pollMs);
+  }
+
+  throw new Error(`Runner service did not become ready at ${runnerUrl} before timeout.`);
+}
+
 async function startAgent(agentId: string): Promise<void> {
   let attempt = 0;
 
@@ -109,14 +155,16 @@ async function startAgent(agentId: string): Promise<void> {
       (response.status === 409 && text.includes("No online runner is available yet")) ||
       (response.status === 500 && text.includes("agent_start_failed"))
     ) {
-      console.log(
-        JSON.stringify({
-          event: "local_cloud_smoke_waiting_for_runner",
-          agentId,
-          attempt,
-          httpStatus: response.status,
-        }),
-      );
+      if (attempt === 1 || attempt % 10 === 0) {
+        console.log(
+          JSON.stringify({
+            event: "local_cloud_smoke_waiting_for_start",
+            agentId,
+            attempt,
+            httpStatus: response.status,
+          }),
+        );
+      }
       await sleep(pollMs);
       continue;
     }
