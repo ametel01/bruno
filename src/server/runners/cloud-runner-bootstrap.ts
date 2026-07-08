@@ -12,6 +12,7 @@ export const DEFAULT_CLOUD_RUNNER_CONTAINER_HOST = "0.0.0.0";
 export const DEFAULT_CLOUD_RUNNER_PORT = 3045;
 export const DEFAULT_CLOUD_RUNNER_CONTAINER_NAME = "agentbay-runner";
 export const DEFAULT_CLOUD_RUNNER_NAME = "AgentBay Cloud Runner";
+export const DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET = "/var/run/docker.sock";
 export const BOOTSTRAP_REDACTION = "[redacted]";
 
 type CloudRunnerBootstrapInput = {
@@ -171,7 +172,7 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
       /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling cloud runner image." docker_pull
       docker pull ${shellQuote(config.runnerImage)}
       docker rm --force ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} || true
-      docker run --detach --name ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} --restart always --env-file ${shellQuote(config.envFilePath)} -p ${shellQuote(`${config.runnerHost}:${config.runnerPort}:${config.runnerPort}`)} ${shellQuote(config.runnerImage)}
+      docker run --detach --name ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} --restart always --env-file ${shellQuote(config.envFilePath)} -v ${shellQuote(`${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}:${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}`)} -p ${shellQuote(`${config.runnerHost}:${config.runnerPort}:${config.runnerPort}`)} ${shellQuote(config.runnerImage)}
       /usr/local/bin/agentbay-bootstrap-event waiting_for_runner started "Runner container started; waiting for registration and heartbeat." docker_container_started
 `;
 

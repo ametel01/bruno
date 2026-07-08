@@ -145,7 +145,7 @@ describe.sequential("runner provisioning service", () => {
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
     ).toContain(
-      "docker run --detach --name 'agentbay-runner' --restart always --env-file '/etc/agentbay/runner.env' -p '127.0.0.1:3045:3045' 'ghcr.io/ametel01/agentbay-runner:sha-123'",
+      "docker run --detach --name 'agentbay-runner' --restart always --env-file '/etc/agentbay/runner.env' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' 'ghcr.io/ametel01/agentbay-runner:sha-123'",
     );
     expect(
       result.runner.provisioning.phases.find((event) => event.phase === "pending")?.metadata,
