@@ -152,7 +152,9 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
         reverse_proxy ${config.runnerHost}:${config.runnerPort}
       }
       AGENTBAY_CADDYFILE
-  - systemctl enable --now caddy
+      caddy validate --config /etc/caddy/Caddyfile
+      systemctl enable --now caddy
+      systemctl reload caddy || systemctl restart caddy
   -
     - bash
     - -lc
