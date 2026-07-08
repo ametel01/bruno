@@ -84,6 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DigitalOcean cloud runner bootstrap now pulls and runs the selected runner image with Docker instead of depending on Droplet-side source checkout or host Bun setup.
 - DigitalOcean cloud runner provisioning now requires and injects the server-side runner command bearer token for lifecycle API authentication.
 - DigitalOcean cloud runner bootstrap now configures swap and longer one-time registration-token windows for low-memory Droplets.
+- DigitalOcean cloud runner configuration now validates runner image, region, size, image, tags, SSH keys, and SSH source settings before provisioning; broad SSH access requires explicit CIDRs or `AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH=true`.
 
 ### Fixed
 

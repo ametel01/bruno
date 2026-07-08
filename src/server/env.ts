@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isIP } from "node:net";
 import {
   EnvValidationError,
   validateManualRunnerEndpointUrl,
@@ -79,25 +80,26 @@ export function readDigitalOceanProviderConfig(
     token,
     providerMode,
     runnerBearerToken,
-    runnerImage: readNonEmptyProviderSetting(input.AGENTBAY_RUNNER_IMAGE, {
+    runnerImage: readRunnerImage(input.AGENTBAY_RUNNER_IMAGE, {
       envName: "AGENTBAY_RUNNER_IMAGE",
       defaultValue: DEFAULT_AGENTBAY_RUNNER_IMAGE,
     }),
-    region: readNonEmptyProviderSetting(input.AGENTBAY_DIGITALOCEAN_REGION, {
+    region: readDigitalOceanSlug(input.AGENTBAY_DIGITALOCEAN_REGION, {
       envName: "AGENTBAY_DIGITALOCEAN_REGION",
       defaultValue: "sfo3",
     }),
-    sizeSlug: readNonEmptyProviderSetting(input.AGENTBAY_DIGITALOCEAN_SIZE_SLUG, {
+    sizeSlug: readDigitalOceanSlug(input.AGENTBAY_DIGITALOCEAN_SIZE_SLUG, {
       envName: "AGENTBAY_DIGITALOCEAN_SIZE_SLUG",
       defaultValue: "s-1vcpu-512mb-10gb",
     }),
-    image: readNonEmptyProviderSetting(input.AGENTBAY_DIGITALOCEAN_IMAGE, {
+    image: readDigitalOceanSlug(input.AGENTBAY_DIGITALOCEAN_IMAGE, {
       envName: "AGENTBAY_DIGITALOCEAN_IMAGE",
       defaultValue: "ubuntu-24-04-x64",
     }),
     tags: readDigitalOceanTags(input.AGENTBAY_DIGITALOCEAN_TAGS),
     sshSourceAddresses: readDigitalOceanSshSourceAddresses(
       input.AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS,
+      input.AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH,
     ),
     ...(sshKeyIds === null ? {} : { sshKeyIds }),
     ...(localRunnerEndpointUrl ? { localRunnerEndpointUrl } : {}),
@@ -139,6 +141,36 @@ function readNonEmptyProviderSetting(
   return normalizedValue;
 }
 
+function readRunnerImage(
+  value: string | undefined,
+  options: { envName: string; defaultValue: string },
+): string {
+  const normalizedValue = readNonEmptyProviderSetting(value, options);
+
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,254}$/.test(normalizedValue)) {
+    throw new EnvValidationError([
+      `${options.envName} must be a valid container image reference without whitespace or shell-control characters.`,
+    ]);
+  }
+
+  return normalizedValue;
+}
+
+function readDigitalOceanSlug(
+  value: string | undefined,
+  options: { envName: string; defaultValue: string },
+): string {
+  const normalizedValue = readNonEmptyProviderSetting(value, options);
+
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/.test(normalizedValue)) {
+    throw new EnvValidationError([
+      `${options.envName} must be a DigitalOcean slug using only letters, numbers, and hyphens.`,
+    ]);
+  }
+
+  return normalizedValue;
+}
+
 function readDigitalOceanTags(value: string | undefined): string[] {
   if (value === undefined) {
     return ["agentbay", "agentbay-runner"];
@@ -156,6 +188,14 @@ function readDigitalOceanTags(value: string | undefined): string[] {
   if (tags.length === 0) {
     throw new EnvValidationError([
       "AGENTBAY_DIGITALOCEAN_TAGS must include at least one non-empty tag when set.",
+    ]);
+  }
+
+  const invalidTag = tags.some((tag) => !/^[A-Za-z0-9_.:-]{1,255}$/.test(tag));
+
+  if (invalidTag) {
+    throw new EnvValidationError([
+      "AGENTBAY_DIGITALOCEAN_TAGS entries must not contain whitespace, slash, comma, quote, or shell-control characters.",
     ]);
   }
 
@@ -183,15 +223,104 @@ function readDigitalOceanSshKeyIds(value: string | undefined): string[] | null {
     return [];
   }
 
-  return readNonEmptyCsvSetting(normalizedValue, "AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS");
-}
+  const sshKeyIds = readNonEmptyCsvSetting(normalizedValue, "AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS");
 
-function readDigitalOceanSshSourceAddresses(value: string | undefined): string[] {
-  if (value === undefined) {
-    return ["0.0.0.0/0", "::/0"];
+  if (sshKeyIds.some((sshKeyId) => !/^[A-Za-z0-9_.:-]{1,255}$/.test(sshKeyId))) {
+    throw new EnvValidationError([
+      "AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS entries must not contain whitespace, slash, quote, or shell-control characters.",
+    ]);
   }
 
-  return readNonEmptyCsvSetting(value, "AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS");
+  return sshKeyIds;
+}
+
+function readDigitalOceanSshSourceAddresses(
+  value: string | undefined,
+  allowPublicSshValue: string | undefined,
+): string[] {
+  const allowPublicSsh = readExplicitPublicSshFlag(allowPublicSshValue);
+
+  if (value === undefined) {
+    return allowPublicSsh ? ["0.0.0.0/0", "::/0"] : [];
+  }
+
+  return readNonEmptyCsvSetting(value, "AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS")
+    .map((address) => normalizeSshSourceCidr(address))
+    .sort();
+}
+
+function readExplicitPublicSshFlag(value: string | undefined): boolean {
+  if (value === undefined) {
+    return false;
+  }
+
+  const normalizedValue = value.trim().toLowerCase();
+
+  if (normalizedValue === "true") {
+    return true;
+  }
+
+  if (["false", "0", "no"].includes(normalizedValue)) {
+    return false;
+  }
+
+  throw new EnvValidationError([
+    "AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH must be true, false, 0, or no when set.",
+  ]);
+}
+
+function normalizeSshSourceCidr(value: string): string {
+  if (/[\s"'`$;&|<>\\]/.test(value)) {
+    throw new EnvValidationError([
+      "AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must be IP addresses or CIDRs without whitespace or shell-control characters.",
+    ]);
+  }
+
+  const plainIpVersion = isIP(value);
+
+  if (plainIpVersion === 4) {
+    return `${value}/32`;
+  }
+
+  if (plainIpVersion === 6) {
+    return `${value}/128`;
+  }
+
+  const parts = value.split("/");
+
+  if (parts.length !== 2) {
+    throw new EnvValidationError([
+      "AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must be valid IPv4 or IPv6 CIDRs.",
+    ]);
+  }
+
+  const address = parts[0];
+  const prefixText = parts[1];
+
+  if (address === undefined || prefixText === undefined) {
+    throw new EnvValidationError([
+      "AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must be valid IPv4 or IPv6 CIDRs.",
+    ]);
+  }
+
+  const ipVersion = isIP(address);
+
+  if (ipVersion === 0 || !/^\d{1,3}$/.test(prefixText)) {
+    throw new EnvValidationError([
+      "AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must be valid IPv4 or IPv6 CIDRs.",
+    ]);
+  }
+
+  const prefix = Number(prefixText);
+  const maxPrefix = ipVersion === 4 ? 32 : 128;
+
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > maxPrefix) {
+    throw new EnvValidationError([
+      "AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must use a valid IPv4 or IPv6 prefix length.",
+    ]);
+  }
+
+  return `${address}/${prefix}`;
 }
 
 function readNonEmptyCsvSetting(value: string, envName: string): string[] {
