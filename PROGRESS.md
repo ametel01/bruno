@@ -6,11 +6,11 @@ Source brief: Inline user-supplied design brief from the 2026-07-07 Codex turn.
 
 ## Current Status
 
-Steps 0, 1, 2, and 4 are complete for issues #188, #189, #190, and #192. The runner image rollout now has a dedicated Docker image artifact for the existing runner bootstrap and service, server-side runner image selection for cloud provisioning, and DigitalOcean cloud-init that runs the configured image through Docker instead of host-side source checkout.
+All rollout steps are complete for issues #188, #189, #190, #191, #192, #193, and #194. The runner image rollout now has a dedicated Docker image artifact for the existing runner bootstrap and service, server-side runner image selection for cloud provisioning, a public GHCR image published from `main`, and DigitalOcean cloud-init that runs the configured image through Docker instead of host-side source checkout.
 
-Step 3 is complete for issue #191 as a main-branch GitHub Actions workflow that published the runner image to GHCR with both immutable SHA and moving `main` tags.
+Production verification for issue #193 passed on 2026-07-08 after PR #219 fixed the Caddy reload gap found during the first hosted smoke. A fresh DigitalOcean runner registered, heartbeated online, reached persisted `ready`, accepted an assigned agent start, and the smoke agent was stopped cleanly.
 
-Next step: Step 5, verify hosted runner registration end to end, after the Step 4 image-based bootstrap changes merge.
+Final closeout for issue #194 confirms `PROGRESS.md` is current, `CHANGELOG.md` contains only functional Keep a Changelog entries, and normal cloud runner creation no longer requires private repository clone credentials or Droplet-side registry credentials.
 
 ## GHCR Pull Policy
 
@@ -35,8 +35,8 @@ No functional changelog entry was added for Step 0 because this issue is setup-o
 - [x] Step 2: Add Configurable Runner Image Selection
 - [x] Step 3: Publish Runner Images to GHCR
 - [x] Step 4: Run DigitalOcean Bootstrap from the Runner Image
-- [ ] Step 5: Verify Hosted Runner Registration End to End
-- [ ] Step 6: Close Out the Rollout
+- [x] Step 5: Verify Hosted Runner Registration End to End
+- [x] Step 6: Close Out the Rollout
 
 ## Step Notes
 
@@ -180,21 +180,82 @@ Validation:
 - Targeted secret scan over changed files and diff text passed; matches were limited to env var names, redaction patterns, public GHCR image names, and deterministic fake test fixtures.
 - Stale status wording scan passed.
 
+Commit reference: `28adb16b12832c25bdcd358c0d07e324adfa08d4` (PR #199 merge commit).
+
 ### Step 5: Verify Hosted Runner Registration End to End
 
-Status: pending downstream implementation.
+Status: complete.
 
 Owner issue: #193.
 
 Expected outcome: verify a fresh hosted cloud runner registers, heartbeats, reaches online/ready, and can start an agent without exposing secret material.
 
+Completed for issue #193:
+
+- Deployed production from merged main after issue #211, #212, #213, and #214 prerequisites landed.
+- Confirmed production operator access was configured without committing or printing the generated password.
+- Confirmed the public GHCR runner image was pullable unauthenticated for `linux/amd64`.
+- Created a fresh DigitalOcean runner and found a live Caddy reload bug during the first hosted smoke: the runner registered and heartbeated, but the package default Caddy config remained active and HTTPS start requests failed.
+- Fixed that production blocker in PR #219 by validating and reloading or restarting Caddy after writing the generated reverse-proxy config.
+- Re-deployed production from merge commit `b6d24af2b68f7686c91c8c08d5ea2b5f9151b886`, then created a second fresh DigitalOcean runner from the fixed build.
+- Verified the fixed runner registered, heartbeated online, reached persisted `ready`, served the runner service through HTTPS, accepted an assigned agent start, and allowed the smoke agent to stop cleanly.
+
+Validation:
+
+- PR #219 checks passed: Vercel, CodeRabbit, GitGuardian, Socket, and GitHub Actions CI `Verification gates`.
+- Main CI run `28938034660` passed after merge `b6d24af2b68f7686c91c8c08d5ea2b5f9151b886`.
+- Main runner-image publish run `28938034733` passed after merge `b6d24af2b68f7686c91c8c08d5ea2b5f9151b886`.
+- Production Vercel deployment for `b6d24af2b68f7686c91c8c08d5ea2b5f9151b886` became ready at `https://agentbay-2hnzbg730-ametel01s-projects.vercel.app`, aliased by `https://agentbay-tau.vercel.app`.
+- Fresh fixed runner: runner id `4870df3d-6bad-439f-99f9-e8a4f8787c37`; DigitalOcean Droplet id `583116563`; region `sfo3`; size `s-1vcpu-512mb-10gb`; image `ubuntu-24-04-x64`; tags `agentbay` and `agentbay-runner`; endpoint `https://159-223-199-152.sslip.io`; runner image `ghcr.io/ametel01/agentbay-runner:main`.
+- Vercel logs showed `POST /runner/v1/register` and `runner_registered` for runner `4870df3d-6bad-439f-99f9-e8a4f8787c37` at 2026-07-08T11:16:05Z.
+- Vercel logs showed repeated `POST /runner/v1/heartbeat` and `heartbeat_recorded` with `runnerStatus: online` for the same runner at 2026-07-08T11:16:05Z, 11:16:35Z, 11:17:05Z, 11:17:35Z, and 11:18:05Z.
+- Settings persisted the fixed runner as `online`, phase `ready`, completed at `2026-07-08T11:16:05.350Z`, with latest heartbeat `2026-07-08T11:18:05.665Z` during evidence capture.
+- Direct HTTPS endpoint probe reached Caddy and the runner service with safe `HTTP/2 401` unauthorized instead of connection refused.
+- Created smoke agent `ff76e950-9cb5-4cc2-90f2-0b4c3db15ed3` explicitly assigned to runner `4870df3d-6bad-439f-99f9-e8a4f8787c37`; start returned `ok: true`, status `running`, and `agent.start_requested` plus `agent.start_completed`; it did not return `no_online_runner`.
+- Stopped smoke agent `ff76e950-9cb5-4cc2-90f2-0b4c3db15ed3`; stop returned `ok: true`, status `stopped`, and `agent.stop_requested` plus `agent.stop_completed`.
+- Settings-page leak check was false for `agb_reg_`, `agb_run_`, `tokenHash`, `credentialHash`, `postgres://`, and `AGENTBAY_DIGITALOCEAN_TOKEN` patterns.
+
+Evidence reference:
+
+- Issue comment: https://github.com/ametel01/agentbay/issues/193#issuecomment-4914245910
+- Fix PR: https://github.com/ametel01/agentbay/pull/219
+
 ### Step 6: Close Out the Rollout
 
-Status: pending downstream closeout.
+Status: complete.
 
 Owner issue: #194.
 
 Expected outcome: all rollout steps have validation evidence, `PROGRESS.md` and `CHANGELOG.md` are current, stale private-clone guidance is removed or superseded, and any public-GHCR rejection is tracked as an explicit future private-registry credential design task.
+
+Completed for issue #194:
+
+- Marked every rollout checklist step complete and added hosted verification evidence for Step 5.
+- Preserved `CHANGELOG.md` as functional-only Keep a Changelog content; no validation-only closeout entry was added.
+- Confirmed committed rollout guidance points normal cloud runner creation at the public GHCR runner image path, not Droplet-side private repository clone credentials.
+- Added the final production handoff below.
+
+Final handoff:
+
+- Production status: production is serving merge `b6d24af2b68f7686c91c8c08d5ea2b5f9151b886`; fresh DigitalOcean runner registration, heartbeat, ready state, HTTPS runner endpoint, assigned agent start, and smoke-agent stop all passed.
+- Key commits and PRs: #195 `4a8167c` tracking setup; #197 `37f4137` runner image artifact; #196 `ae96054` configurable runner image selection; #198 `61ff9478` GHCR publishing; #199 `28adb16b` image-based DigitalOcean bootstrap; #219 `b6d24af` Caddy reload production fix.
+- Deployment evidence: Vercel production deployment `agentbay-2hnzbg730-ametel01s-projects.vercel.app`; main CI run `28938034660`; main runner image publish run `28938034733`; issue #193 evidence comment linked above.
+- Remaining operational actions: decide whether to keep the two smoke Droplets (`583112253` diagnostic runner and `583116563` fixed runner) for short-term observation or delete them from DigitalOcean after confirming their `agentbay` and `agentbay-runner` tags. No secret rotation is required from the recorded evidence because raw tokens and credentials were not printed or committed.
+
+Closeout validation:
+
+- `bun install --frozen-lockfile` passed.
+- `bun run format:check` passed.
+- `bun run lint` passed.
+- `bun run typecheck` passed.
+- `bun run test` passed.
+- `bun run build` passed.
+- `bun run test:e2e -- tests/e2e/health-route.spec.ts tests/e2e/root-route.spec.ts:45 tests/e2e/root-route.spec.ts:60 tests/e2e/root-route.spec.ts:2191` passed as the CI-equivalent Playwright smoke selection.
+- Full local `bun run verify` was not used as the final closeout gate in this worktree because the full Playwright suite creates agents without an online local runner or DigitalOcean provider config and returns `runner_provisioning_not_configured`; the relevant hosted registration/start/stop behavior is covered by the production Step 5 evidence above.
+- `git diff --check` passed.
+- `rg -n "private repository clone|host-side source checkout|Droplet-side private" PROGRESS.md CHANGELOG.md docs .github .env.example` found only historical/completed rollout wording that explicitly says the image path removed those requirements.
+- `rg -n "Step 5: Verify Hosted Runner Registration End to End|Status: complete|Step 6: Close Out the Rollout" PROGRESS.md` passed.
+- `git status --short` was clean except the intentional `PROGRESS.md` closeout edit and the matching `tests/unit/progress-status.test.ts` guard update before commit.
 
 ## Update Log
 
@@ -203,3 +264,5 @@ Expected outcome: all rollout steps have validation evidence, `PROGRESS.md` and 
 - 2026-07-07 Asia/Manila: Step 2 completed for #190 with configurable runner image selection, safe bootstrap/provisioning metadata, and focused unit coverage.
 - 2026-07-07 Asia/Manila: Step 3 completed for #191 with a main-branch-only GHCR publish workflow, successful SHA and `main` tag push, public GHCR visibility, and unauthenticated `linux/amd64` pull validation.
 - 2026-07-07 Asia/Manila: Step 4 completed for #192 with DigitalOcean cloud-init now pulling and running the configured runner image via Docker while preserving Caddy, registration, heartbeat compatibility, and redacted metadata.
+- 2026-07-08 Asia/Manila: Step 5 completed for #193 after PR #219 fixed the Caddy reload gap discovered by the first production smoke; the post-fix fresh runner registered, heartbeated, reached ready, served HTTPS, started an assigned agent, and stopped the smoke agent cleanly.
+- 2026-07-08 Asia/Manila: Step 6 completed for #194 with rollout progress, changelog status, production handoff, and remaining operational cleanup notes updated.
