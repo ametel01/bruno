@@ -138,6 +138,8 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain("apt-get install -y caddy");
     expect(content.userData).toContain("https://203-0-113-10.sslip.io");
     expect(content.userData).toContain("reverse_proxy 127.0.0.1:3045");
+    expect(content.userData).toContain("caddy validate --config /etc/caddy/Caddyfile");
+    expect(content.userData).toContain("systemctl reload caddy || systemctl restart caddy");
     expect(content.userData).toContain("-p '127.0.0.1:3045:3045'");
     expect(content.safeSummary.runnerEndpointUrl).toBe("https://203-0-113-10.sslip.io");
   });
