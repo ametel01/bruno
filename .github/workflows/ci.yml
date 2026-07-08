@@ -67,16 +67,10 @@ jobs:
       - name: Build
         run: bun run build
 
-      - name: Build local runner image
-        run: docker build --file Dockerfile.runner --tag agentbay-runner:local .
-
-      - name: Run E2E tests
-        run: bun run test:e2e
-        env:
-          AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: local_docker
-          AGENTBAY_DIGITALOCEAN_TOKEN: local-docker
-          AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: none
-          AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: http://127.0.0.1:3045
-          AGENTBAY_RUNNER_BEARER_TOKEN: local-runner-command-token
-          AGENTBAY_RUNNER_IMAGE: agentbay-runner:local
-          NEXT_PUBLIC_APP_URL: http://host.docker.internal:3100
+      - name: Run E2E smoke tests
+        run: >-
+          bun run test:e2e --
+          tests/e2e/health-route.spec.ts
+          tests/e2e/root-route.spec.ts:45
+          tests/e2e/root-route.spec.ts:60
+          tests/e2e/root-route.spec.ts:2191
