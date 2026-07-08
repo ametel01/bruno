@@ -57,6 +57,7 @@ import {
   lockRunnerPlacementCapacityInTransaction,
   selectRunnerPlacementForDevelopmentUserInTransaction,
 } from "@/src/server/runners/runner-placement";
+import { reconcileStaleRunnerHeartbeatsInTransaction } from "@/src/server/runners/runner-heartbeat";
 
 export type AgentLifecycleStatus = (typeof agentStatusEnum.enumValues)[number];
 
@@ -442,11 +443,16 @@ export function canDeleteAgentStatus(status: AgentLifecycleStatus): boolean {
 
 async function reserveRunnerForAgentStart(input: {
   agentId: string;
+  assignedRunnerId: string | null;
   assignedRunner: ManualRunnerRecord | null;
   connection: DatabaseConnection;
   now: Date;
   planMaxAgents?: number | null | undefined;
 }): Promise<StartRunnerReservationResult> {
+  if (input.assignedRunnerId && !input.assignedRunner) {
+    return { ok: false, reason: "no_online_runner" } as const;
+  }
+
   if (input.assignedRunner && input.assignedRunner.status !== "online") {
     return { ok: true, assignedRunner: input.assignedRunner, reserved: false };
   }
@@ -454,6 +460,7 @@ async function reserveRunnerForAgentStart(input: {
   return await input.connection.db.transaction(async (tx) => {
     const placement = await selectStartRunnerPlacement(tx, {
       assignedRunner: input.assignedRunner,
+      now: input.now,
       planMaxAgents: input.planMaxAgents,
     });
 
@@ -505,6 +512,7 @@ async function selectStartRunnerPlacement(
   tx: AgentLifecycleTransaction,
   input: {
     assignedRunner: ManualRunnerRecord | null;
+    now: Date;
     planMaxAgents?: number | null | undefined;
   },
 ): Promise<
@@ -516,10 +524,14 @@ async function selectStartRunnerPlacement(
 > {
   if (input.assignedRunner) {
     await lockRunnerPlacementCapacityInTransaction(tx, input.assignedRunner.id);
-    const placement = await selectRunnerPlacementForDevelopmentUserInTransaction(tx, {
-      planMaxAgents: input.planMaxAgents,
-      runnerId: input.assignedRunner.id,
-    });
+    const placement = await selectRunnerPlacementForDevelopmentUserInTransaction(
+      tx,
+      {
+        planMaxAgents: input.planMaxAgents,
+        runnerId: input.assignedRunner.id,
+      },
+      { now: input.now },
+    );
 
     if (placement.ok) {
       return { ok: true, runnerId: placement.runner.id } as const;
@@ -538,19 +550,27 @@ async function selectStartRunnerPlacement(
       return { ok: false, reason: "runner_capacity_reached" } as const;
     }
 
-    return { ok: false, reason: "runner_capacity_reached" } as const;
+    return { ok: false, reason: "no_online_runner" } as const;
   }
 
-  const placement = await selectRunnerPlacementForDevelopmentUserInTransaction(tx, {
-    planMaxAgents: input.planMaxAgents,
-  });
+  const placement = await selectRunnerPlacementForDevelopmentUserInTransaction(
+    tx,
+    {
+      planMaxAgents: input.planMaxAgents,
+    },
+    { now: input.now },
+  );
 
   if (placement.ok) {
     await lockRunnerPlacementCapacityInTransaction(tx, placement.runner.id);
-    const confirmedPlacement = await selectRunnerPlacementForDevelopmentUserInTransaction(tx, {
-      planMaxAgents: input.planMaxAgents,
-      runnerId: placement.runner.id,
-    });
+    const confirmedPlacement = await selectRunnerPlacementForDevelopmentUserInTransaction(
+      tx,
+      {
+        planMaxAgents: input.planMaxAgents,
+        runnerId: placement.runner.id,
+      },
+      { now: input.now },
+    );
 
     if (!confirmedPlacement.ok && confirmedPlacement.reason === "plan_limit_reached") {
       return {
@@ -668,6 +688,8 @@ export async function startAgentForDevelopmentUser(
 
   try {
     const validation = await connection.db.transaction(async (tx) => {
+      await reconcileStaleRunnerHeartbeatsInTransaction(tx, { now });
+
       const [currentAgent] = await tx
         .select({
           agent: agents,
@@ -729,6 +751,7 @@ export async function startAgentForDevelopmentUser(
 
     const reservation = await reserveRunnerForAgentStart({
       agentId: normalizedAgentId,
+      assignedRunnerId: validation.agent.runnerId,
       assignedRunner: validation.assignedRunner,
       connection,
       now,

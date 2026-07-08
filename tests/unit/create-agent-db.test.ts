@@ -100,6 +100,7 @@ import {
   bootstrapManualRunnerForDevelopmentUser,
   getAssignedRunnerForActiveAgentDevelopmentUser,
 } from "@/src/server/runners/manual-runner-persistence";
+import { RUNNER_HEARTBEAT_STALE_THRESHOLD_MS } from "@/src/server/runners/runner-heartbeat";
 import type { CreateRunnerProvisioningResult } from "@/src/server/runners/runner-provisioning";
 import {
   AGENTBAY_AGENT_ID_LABEL,
@@ -1182,6 +1183,123 @@ describe("create agent persistence", () => {
       } else {
         process.env.VERCEL = previousVercel;
       }
+    }
+  });
+
+  it("blocks assigned stale online-runner start as no online runner after reconciliation", async () => {
+    const now = new Date("2026-07-06T04:03:00.000Z");
+    const staleObservedAt = new Date(now.getTime() - RUNNER_HEARTBEAT_STALE_THRESHOLD_MS - 1);
+    const created = await createAgentForDevelopmentUser(
+      { name: "Assigned Stale Runner Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const [cloudRunner] = await connection.db
+      .insert(runners)
+      .values({
+        userId: created.agent.userId,
+        name: "Stale Cloud Runner",
+        kind: "digitalocean",
+        endpointUrl: "https://stale-cloud-runner.example.com",
+        status: "online",
+        provider: "digitalocean",
+        providerResourceId: "582974431",
+        region: "sfo3",
+        sizeSlug: "s-1vcpu-512mb-10gb",
+        image: "ubuntu-24-04-x64",
+        provisioningStatus: "ready",
+        provisioningStartedAt: new Date("2026-07-06T01:00:00.000Z"),
+        provisioningCompletedAt: new Date("2026-07-06T01:05:00.000Z"),
+        createdAt: new Date("2026-07-06T01:00:00.000Z"),
+        updatedAt: new Date("2026-07-06T01:05:00.000Z"),
+      })
+      .returning({ id: runners.id });
+
+    if (!cloudRunner) {
+      throw new Error("Cloud runner insert returned no rows.");
+    }
+
+    await connection.db.insert(runnerHeartbeats).values({
+      runnerId: cloudRunner.id,
+      status: "online",
+      metadata: {
+        metrics: {
+          maxAgents: 1,
+          runningAgents: 0,
+        },
+      },
+      observedAt: staleObservedAt,
+      createdAt: staleObservedAt,
+    });
+    await connection.db
+      .update(agents)
+      .set({ runnerId: cloudRunner.id })
+      .where(eq(agents.id, created.agent.id));
+
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const calls: string[] = [];
+
+    try {
+      const result = await startAgentForDevelopmentUser(created.agent.id, {
+        createConnection: () => connection,
+        manualRunnerAdapter: () => createManualLifecycleRunnerStub(calls),
+        runnerAdapter: createLifecycleRunnerStub(calls),
+        now: () => now,
+      });
+      const [persistedAgent] = await connection.db
+        .select({ runnerId: agents.runnerId, status: agents.status })
+        .from(agents)
+        .where(eq(agents.id, created.agent.id))
+        .limit(1);
+      const [persistedRunner] = await connection.db
+        .select({ status: runners.status, updatedAt: runners.updatedAt })
+        .from(runners)
+        .where(eq(runners.id, cloudRunner.id))
+        .limit(1);
+      const startLogs = infoSpy.mock.calls
+        .filter(([scope]) => scope === "[agentbay] agent.start")
+        .map(([, payload]) => payload);
+
+      expect(result).toEqual({ ok: false, reason: "no_online_runner" });
+      expect(persistedAgent).toEqual({
+        runnerId: cloudRunner.id,
+        status: "stopped",
+      });
+      expect(persistedRunner).toEqual({
+        status: "offline",
+        updatedAt: now,
+      });
+      expect(calls).toEqual([]);
+      expect(startLogs).toContainEqual(
+        expect.objectContaining({
+          event: "agent_loaded",
+          agentId: created.agent.id,
+          assignedRunnerId: cloudRunner.id,
+          assignedRunnerUsable: false,
+          assignedRunner: expect.objectContaining({
+            id: cloudRunner.id,
+            status: "offline",
+            latestHeartbeatAt: staleObservedAt.toISOString(),
+            latestHeartbeatStatus: "online",
+          }),
+        }),
+      );
+      expect(startLogs).toContainEqual(
+        expect.objectContaining({
+          event: "reservation_blocked",
+          agentId: created.agent.id,
+          reason: "no_online_runner",
+          assignedRunnerId: cloudRunner.id,
+          assignedRunner: expect.objectContaining({
+            id: cloudRunner.id,
+            status: "offline",
+          }),
+        }),
+      );
+      expect(startLogs).not.toContainEqual(
+        expect.objectContaining({ event: "runner_start_requested" }),
+      );
+    } finally {
+      infoSpy.mockRestore();
     }
   });
 
