@@ -1,6 +1,8 @@
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agents, appMetadata, runnerHeartbeats, runners, users } from "@/src/server/db/schema";
+import { RUNNER_HEARTBEAT_STALE_THRESHOLD_MS } from "@/src/server/runners/runner-heartbeat";
 import {
   normalizeRunnerCapacitySnapshot,
   selectRunnerPlacementForDevelopmentUser,
@@ -41,7 +43,10 @@ describe.sequential("runner placement contract", () => {
 
     const result = await selectRunnerPlacementForDevelopmentUser(
       {},
-      { createConnection: () => connection },
+      {
+        createConnection: () => connection,
+        now: () => new Date("2026-07-06T04:02:00.000Z"),
+      },
     );
 
     expect(result).toEqual({
@@ -81,7 +86,10 @@ describe.sequential("runner placement contract", () => {
 
     const result = await selectRunnerPlacementForDevelopmentUser(
       {},
-      { createConnection: () => connection },
+      {
+        createConnection: () => connection,
+        now: () => new Date("2026-07-06T04:06:00.000Z"),
+      },
     );
 
     expect(result).toEqual({
@@ -111,6 +119,36 @@ describe.sequential("runner placement contract", () => {
     await expect(
       selectRunnerPlacementForDevelopmentUser({}, { createConnection: () => connection }),
     ).resolves.toEqual({ ok: false, reason: "no_online_runner" });
+  });
+
+  it("marks stale online runners offline before placement selection", async () => {
+    const now = new Date("2026-07-06T04:03:00.000Z");
+    const staleObservedAt = new Date(now.getTime() - RUNNER_HEARTBEAT_STALE_THRESHOLD_MS - 1);
+    const userId = await seedDevelopmentUser(connection);
+    const runner = await seedOnlineRunner(connection, userId, {
+      name: "Stale Placement Runner",
+      endpointUrl: "https://stale-placement-runner.example.com",
+    });
+    await seedHeartbeat(connection, runner.id, {
+      observedAt: staleObservedAt,
+      metrics: { maxAgents: 3, runningAgents: 0 },
+    });
+
+    const result = await selectRunnerPlacementForDevelopmentUser(
+      {},
+      { createConnection: () => connection, now: () => now },
+    );
+    const [persistedRunner] = await connection.db
+      .select({ status: runners.status, updatedAt: runners.updatedAt })
+      .from(runners)
+      .where(eq(runners.id, runner.id))
+      .limit(1);
+
+    expect(result).toEqual({ ok: false, reason: "no_online_runner" });
+    expect(persistedRunner).toEqual({
+      status: "offline",
+      updatedAt: now,
+    });
   });
 
   it("rejects placement when the plan limit is reached before runner selection", async () => {

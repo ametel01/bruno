@@ -1,6 +1,8 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { runnerCredentials, runnerHeartbeats, runners } from "@/src/server/db/schema";
+import type * as schema from "@/src/server/db/schema";
 import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
 import { hashRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
 import { markCloudRunnerReadyAfterFirstHeartbeat } from "@/src/server/runners/runner-provisioning-events";
@@ -56,6 +58,16 @@ type RunnerCredentialValidation =
       ok: false;
       reason: "missing_credential" | "malformed_credential";
     };
+
+export type RunnerHeartbeatReconciliationResult = {
+  offlineCount: number;
+  runnerIds: string[];
+  cutoff: string;
+};
+
+export type RunnerHeartbeatTransaction = Parameters<
+  Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
+>[0];
 
 export type RecordRunnerHeartbeatResult =
   | {
@@ -200,58 +212,20 @@ export async function reconcileStaleRunnerHeartbeats(
     now?: () => Date;
     staleThresholdMs?: number;
   } = {},
-): Promise<{ offlineCount: number; runnerIds: string[]; cutoff: string }> {
+): Promise<RunnerHeartbeatReconciliationResult> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
-  const staleThresholdMs = dependencies.staleThresholdMs ?? RUNNER_HEARTBEAT_STALE_THRESHOLD_MS;
-  const cutoff = new Date(now.getTime() - staleThresholdMs);
 
   try {
-    return await connection.db.transaction(async (tx) => {
-      const candidateRunners = await tx
-        .select({ id: runners.id })
-        .from(runners)
-        .where(
-          and(
-            inArray(runners.status, [
-              RUNNER_HEARTBEAT_ONLINE_STATUS,
-              RUNNER_HEARTBEAT_DEGRADED_STATUS,
-            ]),
-            isNull(runners.deletedAt),
-          ),
-        );
-      const staleRunnerIds: string[] = [];
-
-      for (const candidate of candidateRunners) {
-        const [latestHeartbeat] = await tx
-          .select({ observedAt: runnerHeartbeats.observedAt })
-          .from(runnerHeartbeats)
-          .where(eq(runnerHeartbeats.runnerId, candidate.id))
-          .orderBy(desc(runnerHeartbeats.observedAt))
-          .limit(1);
-
-        if (!latestHeartbeat || latestHeartbeat.observedAt < cutoff) {
-          staleRunnerIds.push(candidate.id);
-        }
-      }
-
-      if (staleRunnerIds.length > 0) {
-        await tx
-          .update(runners)
-          .set({
-            status: RUNNER_HEARTBEAT_OFFLINE_STATUS,
-            updatedAt: now,
-          })
-          .where(and(inArray(runners.id, staleRunnerIds), isNull(runners.deletedAt)));
-      }
-
-      return {
-        offlineCount: staleRunnerIds.length,
-        runnerIds: staleRunnerIds,
-        cutoff: cutoff.toISOString(),
-      };
-    });
+    return await connection.db.transaction((tx) =>
+      reconcileStaleRunnerHeartbeatsInTransaction(tx, {
+        now,
+        ...(dependencies.staleThresholdMs === undefined
+          ? {}
+          : { staleThresholdMs: dependencies.staleThresholdMs }),
+      }),
+    );
   } catch (error) {
     throw new RunnerHeartbeatPersistenceError(error);
   } finally {
@@ -259,6 +233,53 @@ export async function reconcileStaleRunnerHeartbeats(
       await connection.close();
     }
   }
+}
+
+export async function reconcileStaleRunnerHeartbeatsInTransaction(
+  tx: RunnerHeartbeatTransaction,
+  input: { now: Date; staleThresholdMs?: number },
+): Promise<RunnerHeartbeatReconciliationResult> {
+  const staleThresholdMs = input.staleThresholdMs ?? RUNNER_HEARTBEAT_STALE_THRESHOLD_MS;
+  const cutoff = new Date(input.now.getTime() - staleThresholdMs);
+  const candidateRunners = await tx
+    .select({ id: runners.id })
+    .from(runners)
+    .where(
+      and(
+        inArray(runners.status, [RUNNER_HEARTBEAT_ONLINE_STATUS, RUNNER_HEARTBEAT_DEGRADED_STATUS]),
+        isNull(runners.deletedAt),
+      ),
+    );
+  const staleRunnerIds: string[] = [];
+
+  for (const candidate of candidateRunners) {
+    const [latestHeartbeat] = await tx
+      .select({ observedAt: runnerHeartbeats.observedAt })
+      .from(runnerHeartbeats)
+      .where(eq(runnerHeartbeats.runnerId, candidate.id))
+      .orderBy(desc(runnerHeartbeats.observedAt))
+      .limit(1);
+
+    if (!latestHeartbeat || latestHeartbeat.observedAt < cutoff) {
+      staleRunnerIds.push(candidate.id);
+    }
+  }
+
+  if (staleRunnerIds.length > 0) {
+    await tx
+      .update(runners)
+      .set({
+        status: RUNNER_HEARTBEAT_OFFLINE_STATUS,
+        updatedAt: input.now,
+      })
+      .where(and(inArray(runners.id, staleRunnerIds), isNull(runners.deletedAt)));
+  }
+
+  return {
+    offlineCount: staleRunnerIds.length,
+    runnerIds: staleRunnerIds,
+    cutoff: cutoff.toISOString(),
+  };
 }
 
 export function validateRunnerHeartbeatPayload(payload: unknown): RunnerHeartbeatValidation {
