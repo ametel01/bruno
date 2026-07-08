@@ -11,6 +11,7 @@ import {
   DIGITALOCEAN_RUNNER_KIND,
   type DigitalOceanProvisioningStatus,
 } from "@/src/server/runners/digitalocean-provider";
+import { reconcileStaleRunnerHeartbeatsInTransaction } from "@/src/server/runners/runner-heartbeat";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
 const DEFAULT_CLOUD_RUNNER_NAME = "DigitalOcean Runner";
@@ -127,6 +128,7 @@ export async function listCloudRunnerProvisioningSummariesForDevelopmentUser(
       }
 
       await reconcileTimedOutWaitingForRunnerRows(tx, userId, now);
+      await reconcileStaleRunnerHeartbeatsInTransaction(tx, { now });
 
       const rows = await tx
         .select({

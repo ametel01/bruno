@@ -776,6 +776,19 @@ describe("create agent persistence", () => {
       runnerId: cloudRunner?.id ?? "",
     });
 
+    await connection.db.insert(runnerHeartbeats).values({
+      runnerId: cloudRunner?.id ?? "",
+      status: "online",
+      metadata: {
+        metrics: {
+          maxAgents: 1,
+          runningAgents: 0,
+        },
+      },
+      observedAt: new Date("2099-01-01T00:00:00.000Z"),
+      createdAt: new Date("2099-01-01T00:00:00.000Z"),
+    });
+
     const assignment = await assignRunnerToActiveAgentForDevelopmentUser(
       {
         agentId: created.agent.id,
@@ -8529,6 +8542,7 @@ async function seedOnlineRunnerWithHeartbeat(
     runningAgents: number;
   },
 ): Promise<{ id: string }> {
+  const heartbeatAt = new Date("2099-01-01T00:00:00.000Z");
   const [runner] = await connection.db
     .insert(runners)
     .values({
@@ -8555,8 +8569,8 @@ async function seedOnlineRunnerWithHeartbeat(
         runningAgents: input.runningAgents,
       },
     },
-    observedAt: new Date("2026-07-06T04:01:00.000Z"),
-    createdAt: new Date("2026-07-06T04:01:00.000Z"),
+    observedAt: heartbeatAt,
+    createdAt: heartbeatAt,
   });
 
   return runner;

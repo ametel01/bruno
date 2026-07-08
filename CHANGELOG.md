@@ -88,6 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Stale runner heartbeats now reconcile runners to `offline` before status summaries, cloud provisioning summaries, and placement decisions read them.
 - Production agent starts now return a clear no-online-runner response instead of falling back to local Docker when no cloud runner is ready.
 - Stalled DigitalOcean runner bootstrap attempts now become actionable failed provisioning states instead of staying in progress indefinitely.
 - Cloud runner bootstrap now persists exchanged runner credentials on the Droplet so registration survives service restarts without reusing one-time tokens.

@@ -1,7 +1,14 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { appMetadata, runnerProvisioningEvents, runners, users } from "@/src/server/db/schema";
+import {
+  appMetadata,
+  runnerHeartbeats,
+  runnerProvisioningEvents,
+  runners,
+  users,
+} from "@/src/server/db/schema";
+import { RUNNER_HEARTBEAT_STALE_THRESHOLD_MS } from "@/src/server/runners/runner-heartbeat";
 import {
   listCloudRunnerProvisioningSummariesForDevelopmentUser,
   toCloudRunnerProvisioningSummary,
@@ -212,6 +219,73 @@ describe.sequential("cloud runner provisioning stale bootstrap reconciliation", 
           "Cloud runner bootstrap did not register before the timeout. Check Droplet cloud-init logs, confirm SSH/HTTP ports are reachable, then delete the Droplet do-droplet-154 if it is not needed and create a new runner.",
       }),
     );
+  });
+
+  it("marks stale ready cloud runners offline when summaries are read", async () => {
+    const now = new Date("2026-07-06T02:30:00.000Z");
+    const staleObservedAt = new Date(now.getTime() - RUNNER_HEARTBEAT_STALE_THRESHOLD_MS - 1);
+    const [user] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+    if (!user) {
+      throw new Error("User insert returned no rows.");
+    }
+
+    await connection.db.insert(appMetadata).values({
+      key: DEVELOPMENT_USER_METADATA_KEY,
+      value: user.id,
+    });
+    const [runner] = await connection.db
+      .insert(runners)
+      .values({
+        userId: user.id,
+        name: "Ready Stale Cloud Runner",
+        kind: "digitalocean",
+        endpointUrl: "https://203-0-113-11.sslip.io",
+        status: "online",
+        provider: "digitalocean",
+        providerResourceId: "do-droplet-155",
+        region: "sfo3",
+        sizeSlug: "s-1vcpu-512mb-10gb",
+        image: "ubuntu-24-04-x64",
+        provisioningStatus: "ready",
+        provisioningStartedAt: new Date("2026-07-06T01:00:00.000Z"),
+        provisioningCompletedAt: new Date("2026-07-06T01:03:00.000Z"),
+        createdAt: new Date("2026-07-06T01:00:00.000Z"),
+        updatedAt: new Date("2026-07-06T01:03:00.000Z"),
+      })
+      .returning({ id: runners.id });
+
+    if (!runner) {
+      throw new Error("Runner insert returned no rows.");
+    }
+
+    await connection.db.insert(runnerHeartbeats).values({
+      runnerId: runner.id,
+      status: "online",
+      metadata: {},
+      observedAt: staleObservedAt,
+      createdAt: staleObservedAt,
+    });
+
+    const summaries = await listCloudRunnerProvisioningSummariesForDevelopmentUser({
+      createConnection: () => connection,
+      now: () => now,
+    });
+    const [persistedRunner] = await connection.db
+      .select({ status: runners.status, updatedAt: runners.updatedAt })
+      .from(runners)
+      .where(eq(runners.id, runner.id))
+      .limit(1);
+
+    expect(summaries[0]).toMatchObject({
+      status: "offline",
+      readinessStatus: "offline",
+      latestHeartbeatAt: "2026-07-06T02:28:29.999Z",
+      provisioning: {
+        status: "ready",
+      },
+    });
+    expect(persistedRunner).toEqual({ status: "offline", updatedAt: now });
   });
 });
 

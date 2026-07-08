@@ -8,6 +8,7 @@ import {
   normalizeRunnerCapacitySnapshot,
   type RunnerPlacementTransaction,
 } from "@/src/server/runners/runner-placement";
+import { reconcileStaleRunnerHeartbeatsInTransaction } from "@/src/server/runners/runner-heartbeat";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
 export type ManualRunnerDisplayStatus = "online" | "offline" | "degraded" | "unknown";
@@ -69,10 +70,11 @@ export class ManualRunnerStatusPersistenceError extends Error {
 }
 
 export async function listManualRunnerStatusSummariesForDevelopmentUser(
-  dependencies: { createConnection?: () => DatabaseConnection } = {},
+  dependencies: { createConnection?: () => DatabaseConnection; now?: () => Date } = {},
 ): Promise<ManualRunnerStatusSummary[]> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
 
   try {
     return await connection.db.transaction(async (tx) => {
@@ -81,6 +83,8 @@ export async function listManualRunnerStatusSummariesForDevelopmentUser(
       if (!userId) {
         return [];
       }
+
+      await reconcileStaleRunnerHeartbeatsInTransaction(tx, { now });
 
       const rows = await tx
         .select({
@@ -138,10 +142,11 @@ export async function listManualRunnerStatusSummariesForDevelopmentUser(
 }
 
 export async function listSettingsRunnerManagementSummariesForDevelopmentUser(
-  dependencies: { createConnection?: () => DatabaseConnection } = {},
+  dependencies: { createConnection?: () => DatabaseConnection; now?: () => Date } = {},
 ): Promise<SettingsRunnerManagementSummary[]> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
 
   try {
     return await connection.db.transaction(async (tx) => {
@@ -150,6 +155,8 @@ export async function listSettingsRunnerManagementSummariesForDevelopmentUser(
       if (!userId) {
         return [];
       }
+
+      await reconcileStaleRunnerHeartbeatsInTransaction(tx, { now });
 
       const rows = await tx
         .select({
@@ -210,10 +217,12 @@ export async function getAssignedManualRunnerStatusForDevelopmentUserAgent(
   agentId: string,
   dependencies: {
     createConnection?: () => DatabaseConnection;
+    now?: () => Date;
   } = {},
 ): Promise<AssignedManualRunnerStatusSummary | null> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
 
   try {
     return await connection.db.transaction(async (tx) => {
@@ -222,6 +231,8 @@ export async function getAssignedManualRunnerStatusForDevelopmentUserAgent(
       if (!userId) {
         return null;
       }
+
+      await reconcileStaleRunnerHeartbeatsInTransaction(tx, { now });
 
       const [row] = await tx
         .select({

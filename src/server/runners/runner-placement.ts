@@ -3,6 +3,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agents, runnerHeartbeats, runners } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
+import { reconcileStaleRunnerHeartbeatsInTransaction } from "@/src/server/runners/runner-heartbeat";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
 export const DEFAULT_RUNNER_MAX_AGENTS = 1;
@@ -91,14 +92,16 @@ export async function selectRunnerPlacementForDevelopmentUser(
   input: RunnerPlacementInput = {},
   dependencies: {
     createConnection?: () => DatabaseConnection;
+    now?: () => Date;
   } = {},
 ): Promise<RunnerPlacementResult> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
 
   try {
     return await connection.db.transaction((tx) =>
-      selectRunnerPlacementForDevelopmentUserInTransaction(tx, input),
+      selectRunnerPlacementForDevelopmentUserInTransaction(tx, input, { now }),
     );
   } catch {
     throw new RunnerPlacementPersistenceError();
@@ -112,12 +115,15 @@ export async function selectRunnerPlacementForDevelopmentUser(
 export async function selectRunnerPlacementForDevelopmentUserInTransaction(
   tx: RunnerPlacementTransaction,
   input: RunnerPlacementInput = {},
+  options: { now?: Date } = {},
 ): Promise<RunnerPlacementResult> {
   const userId = await getDevelopmentUserId(tx);
 
   if (!userId) {
     return { ok: false, reason: "no_online_runner" } as const;
   }
+
+  await reconcileStaleRunnerHeartbeatsInTransaction(tx, { now: options.now ?? new Date() });
 
   const activeAgentRows = await tx
     .select({ id: agents.id })
