@@ -92,6 +92,13 @@
       "when": 1783310510966,
       "tag": "0012_curly_franklin_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1783565306447,
+      "tag": "0013_mighty_firestar",
+      "breakpoints": true
     }
   ]
 }

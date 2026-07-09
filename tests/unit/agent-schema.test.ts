@@ -8,6 +8,7 @@ import {
   agentEvents,
   agentLogs,
   agentScheduleModeEnum,
+  agentUsagePeriods,
   agents,
   agentStatusEnum,
   appMetadata,
@@ -30,6 +31,7 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(getTableName(agents)).toBe("agents");
     expect(getTableName(backups)).toBe("backups");
     expect(getTableName(agentConfigs)).toBe("agent_configs");
+    expect(getTableName(agentUsagePeriods)).toBe("agent_usage_periods");
     expect(getTableName(agentApprovals)).toBe("agent_approvals");
     expect(getTableName(agentEvents)).toBe("agent_events");
     expect(getTableName(runners)).toBe("runners");
@@ -64,6 +66,56 @@ describe("Milestone 1 agent persistence schema", () => {
       "exited",
       "failed",
     ]);
+  });
+
+  it("defines durable usage periods without secret-bearing fields", () => {
+    const columns = getTableColumns(agentUsagePeriods);
+
+    expect(Object.keys(columns)).toEqual([
+      "id",
+      "agentId",
+      "runnerId",
+      "source",
+      "startedAt",
+      "stoppedAt",
+      "createdAt",
+      "updatedAt",
+    ]);
+    expect(columns.id.notNull).toBe(true);
+    expect(columns.agentId.notNull).toBe(true);
+    expect(columns.runnerId.notNull).toBe(false);
+    expect(columns.source.notNull).toBe(true);
+    expect(columns.source.default).toBe("lifecycle");
+    expect(columns.startedAt.notNull).toBe(true);
+    expect(columns.stoppedAt.notNull).toBe(false);
+    expect(columns.createdAt.notNull).toBe(true);
+    expect(columns.updatedAt.notNull).toBe(true);
+    expect(Object.keys(columns)).not.toContain("metadata");
+    expect(Object.keys(columns)).not.toContain("endpointUrl");
+    expect(Object.keys(columns)).not.toContain("credential");
+    expect(Object.keys(columns)).not.toContain("providerToken");
+    expect(Object.keys(columns)).not.toContain("bearerToken");
+    expect(Object.keys(columns)).not.toContain("storageUri");
+  });
+
+  it("generates a durable usage-period migration with interval constraints and no secret columns", async () => {
+    const migration = await readFile("drizzle/0013_mighty_firestar.sql", "utf8");
+
+    expect(migration).toContain('CREATE TABLE "agent_usage_periods"');
+    expect(migration).toContain('"agent_id" uuid NOT NULL');
+    expect(migration).toContain('"runner_id" uuid');
+    expect(migration).toContain('"started_at" timestamp with time zone NOT NULL');
+    expect(migration).toContain('"stopped_at" timestamp with time zone');
+    expect(migration).toContain("agent_usage_periods_stopped_after_started_check");
+    expect(migration).toContain(
+      '"agent_usage_periods"."stopped_at" >= "agent_usage_periods"."started_at"',
+    );
+    expect(migration).toContain('CREATE INDEX "agent_usage_periods_agent_started_idx"');
+    expect(migration).toContain('CREATE INDEX "agent_usage_periods_runner_started_idx"');
+    expect(migration).toContain('CREATE INDEX "agent_usage_periods_agent_stopped_idx"');
+    expect(migration).not.toMatch(
+      /api[_ ]?key|token|password|secret|credential|endpoint|storage[_ ]?uri|metadata/i,
+    );
   });
 
   it("keeps agent records owned, stopped by default, timestamped, and soft deletable", () => {

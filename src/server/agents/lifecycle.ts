@@ -4,6 +4,7 @@ import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   agentLogs,
+  agentUsagePeriods,
   agents,
   dockerRunnerContainers,
   runnerHeartbeats,
@@ -846,6 +847,15 @@ export async function startAgentForDevelopmentUser(
         throw new Error("Agent start update returned no rows.");
       }
 
+      await tx.insert(agentUsagePeriods).values({
+        agentId: startedAgent.id,
+        runnerId: startedAgent.runnerId,
+        source: "lifecycle",
+        startedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+
       await recordAgentEventsInTransaction(tx, [
         {
           agentId: startedAgent.id,
@@ -996,6 +1006,11 @@ export async function stopAgentForDevelopmentUser(
       if (!stoppedAgent) {
         throw new Error("Agent stop update returned no rows.");
       }
+
+      await closeLatestOpenAgentUsagePeriodInTransaction(tx, {
+        agentId: stoppedAgent.id,
+        stoppedAt: now,
+      });
 
       await recordAgentEventsInTransaction(tx, [
         {
@@ -1208,6 +1223,30 @@ export async function restartAgentForDevelopmentUser(
       await connection.close();
     }
   }
+}
+
+async function closeLatestOpenAgentUsagePeriodInTransaction(
+  tx: AgentLifecycleTransaction,
+  input: { agentId: string; stoppedAt: Date },
+): Promise<void> {
+  const [openPeriod] = await tx
+    .select({ id: agentUsagePeriods.id })
+    .from(agentUsagePeriods)
+    .where(and(eq(agentUsagePeriods.agentId, input.agentId), isNull(agentUsagePeriods.stoppedAt)))
+    .orderBy(desc(agentUsagePeriods.startedAt), desc(agentUsagePeriods.createdAt))
+    .limit(1);
+
+  if (!openPeriod) {
+    return;
+  }
+
+  await tx
+    .update(agentUsagePeriods)
+    .set({
+      stoppedAt: input.stoppedAt,
+      updatedAt: input.stoppedAt,
+    })
+    .where(eq(agentUsagePeriods.id, openPeriod.id));
 }
 
 export async function simulateErrorAgentForDevelopmentUser(

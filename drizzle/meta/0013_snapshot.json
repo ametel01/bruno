@@ -1,0 +1,2145 @@
+{
+  "id": "0d6c5959-152c-4a3f-af5e-6c5fd1b007f7",
+  "prevId": "50261247-5a1c-4c3c-a8b8-a21c31e0cbab",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.agent_approvals": {
+      "name": "agent_approvals",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "agent_approval_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "payload_json": {
+          "name": "payload_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "requested_by": {
+          "name": "requested_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resolved_by": {
+          "name": "resolved_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "agent_approvals_agent_id_agents_id_fk": {
+          "name": "agent_approvals_agent_id_agents_id_fk",
+          "tableFrom": "agent_approvals",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.agent_configs": {
+      "name": "agent_configs",
+      "schema": "",
+      "columns": {
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "system_prompt": {
+          "name": "system_prompt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "model_provider": {
+          "name": "model_provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'not_configured'"
+        },
+        "model_name": {
+          "name": "model_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'not_configured'"
+        },
+        "max_daily_spend_cents": {
+          "name": "max_daily_spend_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "schedule_mode": {
+          "name": "schedule_mode",
+          "type": "agent_schedule_mode",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'manual'"
+        },
+        "schedule_cron": {
+          "name": "schedule_cron",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "timezone": {
+          "name": "timezone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'UTC'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "agent_configs_agent_id_agents_id_fk": {
+          "name": "agent_configs_agent_id_agents_id_fk",
+          "tableFrom": "agent_configs",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "agent_configs_max_daily_spend_nonnegative_check": {
+          "name": "agent_configs_max_daily_spend_nonnegative_check",
+          "value": "\"agent_configs\".\"max_daily_spend_cents\" >= 0"
+        },
+        "agent_configs_schedule_cron_mode_check": {
+          "name": "agent_configs_schedule_cron_mode_check",
+          "value": "(\"agent_configs\".\"schedule_mode\" = 'manual' AND \"agent_configs\".\"schedule_cron\" IS NULL) OR (\"agent_configs\".\"schedule_mode\" = 'cron' AND \"agent_configs\".\"schedule_cron\" IS NOT NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.agent_events": {
+      "name": "agent_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_user_id": {
+          "name": "actor_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message": {
+          "name": "message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "agent_events_agent_id_agents_id_fk": {
+          "name": "agent_events_agent_id_agents_id_fk",
+          "tableFrom": "agent_events",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_events_actor_user_id_users_id_fk": {
+          "name": "agent_events_actor_user_id_users_id_fk",
+          "tableFrom": "agent_events",
+          "tableTo": "users",
+          "columnsFrom": [
+            "actor_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.agent_logs": {
+      "name": "agent_logs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "runner_id": {
+          "name": "runner_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "local_runner_process_id": {
+          "name": "local_runner_process_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "docker_runner_container_id": {
+          "name": "docker_runner_container_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'simulator'"
+        },
+        "stream": {
+          "name": "stream",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "level": {
+          "name": "level",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message": {
+          "name": "message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "agent_logs_agent_sequence_idx": {
+          "name": "agent_logs_agent_sequence_idx",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sequence",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "agent_logs_agent_id_agents_id_fk": {
+          "name": "agent_logs_agent_id_agents_id_fk",
+          "tableFrom": "agent_logs",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_logs_local_runner_process_id_local_runner_processes_id_fk": {
+          "name": "agent_logs_local_runner_process_id_local_runner_processes_id_fk",
+          "tableFrom": "agent_logs",
+          "tableTo": "local_runner_processes",
+          "columnsFrom": [
+            "local_runner_process_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_logs_docker_runner_container_id_docker_runner_containers_id_fk": {
+          "name": "agent_logs_docker_runner_container_id_docker_runner_containers_id_fk",
+          "tableFrom": "agent_logs",
+          "tableTo": "docker_runner_containers",
+          "columnsFrom": [
+            "docker_runner_container_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "agent_logs_sequence_positive_check": {
+          "name": "agent_logs_sequence_positive_check",
+          "value": "\"agent_logs\".\"sequence\" > 0"
+        },
+        "agent_logs_stream_check": {
+          "name": "agent_logs_stream_check",
+          "value": "\"agent_logs\".\"stream\" IN ('stdout', 'stderr')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.agent_usage_periods": {
+      "name": "agent_usage_periods",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "runner_id": {
+          "name": "runner_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'lifecycle'"
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stopped_at": {
+          "name": "stopped_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "agent_usage_periods_agent_started_idx": {
+          "name": "agent_usage_periods_agent_started_idx",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_usage_periods_runner_started_idx": {
+          "name": "agent_usage_periods_runner_started_idx",
+          "columns": [
+            {
+              "expression": "runner_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_usage_periods_agent_stopped_idx": {
+          "name": "agent_usage_periods_agent_stopped_idx",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "stopped_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "agent_usage_periods_agent_id_agents_id_fk": {
+          "name": "agent_usage_periods_agent_id_agents_id_fk",
+          "tableFrom": "agent_usage_periods",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_usage_periods_runner_id_runners_id_fk": {
+          "name": "agent_usage_periods_runner_id_runners_id_fk",
+          "tableFrom": "agent_usage_periods",
+          "tableTo": "runners",
+          "columnsFrom": [
+            "runner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "agent_usage_periods_source_check": {
+          "name": "agent_usage_periods_source_check",
+          "value": "\"agent_usage_periods\".\"source\" IN ('lifecycle')"
+        },
+        "agent_usage_periods_stopped_after_started_check": {
+          "name": "agent_usage_periods_stopped_after_started_check",
+          "value": "\"agent_usage_periods\".\"stopped_at\" IS NULL OR \"agent_usage_periods\".\"stopped_at\" >= \"agent_usage_periods\".\"started_at\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.agents": {
+      "name": "agents",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "runner_id": {
+          "name": "runner_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "template_key": {
+          "name": "template_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "template_version": {
+          "name": "template_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'1.0.0'"
+        },
+        "template_snapshot_json": {
+          "name": "template_snapshot_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{\"key\":\"research_agent\",\"version\":\"1.0.0\",\"name\":\"Research Agent\",\"description\":\"Tracks a research question, gathers source notes, and produces concise summaries for later review.\",\"defaultTools\":[\"Web search\",\"Notes\",\"Summaries\"],\"defaultSchedule\":\"Manual\",\"defaultSystemPrompt\":\"You are a Research Agent. Gather relevant information, keep source notes, and produce concise summaries. Do not take external actions or contact third parties. Ask for approval before using any integration or publishing output.\",\"requiredIntegrations\":[]}'::jsonb"
+        },
+        "status": {
+          "name": "status",
+          "type": "agent_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'stopped'"
+        },
+        "status_reason": {
+          "name": "status_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "agents_runner_id_idx": {
+          "name": "agents_runner_id_idx",
+          "columns": [
+            {
+              "expression": "runner_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "agents_user_id_users_id_fk": {
+          "name": "agents_user_id_users_id_fk",
+          "tableFrom": "agents",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agents_runner_id_runners_id_fk": {
+          "name": "agents_runner_id_runners_id_fk",
+          "tableFrom": "agents",
+          "tableTo": "runners",
+          "columnsFrom": [
+            "runner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.app_metadata": {
+      "name": "app_metadata",
+      "schema": "",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.backups": {
+      "name": "backups",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "runner_id": {
+          "name": "runner_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "storage_uri": {
+          "name": "storage_uri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "manifest_json": {
+          "name": "manifest_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "restored_at": {
+          "name": "restored_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "backups_agent_created_idx": {
+          "name": "backups_agent_created_idx",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "backups_runner_idx": {
+          "name": "backups_runner_idx",
+          "columns": [
+            {
+              "expression": "runner_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "backups_created_by_idx": {
+          "name": "backups_created_by_idx",
+          "columns": [
+            {
+              "expression": "created_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "backups_status_idx": {
+          "name": "backups_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "backups_agent_id_agents_id_fk": {
+          "name": "backups_agent_id_agents_id_fk",
+          "tableFrom": "backups",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "backups_runner_id_runners_id_fk": {
+          "name": "backups_runner_id_runners_id_fk",
+          "tableFrom": "backups",
+          "tableTo": "runners",
+          "columnsFrom": [
+            "runner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "backups_created_by_users_id_fk": {
+          "name": "backups_created_by_users_id_fk",
+          "tableFrom": "backups",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "backups_status_check": {
+          "name": "backups_status_check",
+          "value": "\"backups\".\"status\" IN ('pending', 'uploading', 'ready', 'failed', 'restoring', 'restored')"
+        },
+        "backups_storage_uri_not_empty_check": {
+          "name": "backups_storage_uri_not_empty_check",
+          "value": "\"backups\".\"storage_uri\" IS NULL OR length(trim(\"backups\".\"storage_uri\")) > 0"
+        },
+        "backups_restored_at_status_check": {
+          "name": "backups_restored_at_status_check",
+          "value": "(\"backups\".\"status\" = 'restored' AND \"backups\".\"restored_at\" IS NOT NULL) OR (\"backups\".\"status\" <> 'restored' AND \"backups\".\"restored_at\" IS NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.docker_runner_containers": {
+      "name": "docker_runner_containers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "container_id": {
+          "name": "container_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "container_name": {
+          "name": "container_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "image": {
+          "name": "image",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "observed_status": {
+          "name": "observed_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "observed_at": {
+          "name": "observed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "docker_runner_containers_agent_observed_idx": {
+          "name": "docker_runner_containers_agent_observed_idx",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "observed_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "docker_runner_containers_container_id_idx": {
+          "name": "docker_runner_containers_container_id_idx",
+          "columns": [
+            {
+              "expression": "container_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "docker_runner_containers_agent_id_agents_id_fk": {
+          "name": "docker_runner_containers_agent_id_agents_id_fk",
+          "tableFrom": "docker_runner_containers",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "docker_runner_containers_observed_status_not_empty_check": {
+          "name": "docker_runner_containers_observed_status_not_empty_check",
+          "value": "length(trim(\"docker_runner_containers\".\"observed_status\")) > 0"
+        },
+        "docker_runner_containers_started_finished_order_check": {
+          "name": "docker_runner_containers_started_finished_order_check",
+          "value": "\"docker_runner_containers\".\"finished_at\" IS NULL OR \"docker_runner_containers\".\"started_at\" IS NULL OR \"docker_runner_containers\".\"finished_at\" >= \"docker_runner_containers\".\"started_at\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.local_runner_processes": {
+      "name": "local_runner_processes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pid": {
+          "name": "pid",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "command_metadata": {
+          "name": "command_metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "local_runner_process_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'running'"
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stopped_at": {
+          "name": "stopped_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "exit_code": {
+          "name": "exit_code",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "signal": {
+          "name": "signal",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "local_runner_processes_agent_started_idx": {
+          "name": "local_runner_processes_agent_started_idx",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "local_runner_processes_agent_id_agents_id_fk": {
+          "name": "local_runner_processes_agent_id_agents_id_fk",
+          "tableFrom": "local_runner_processes",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "local_runner_processes_pid_positive_check": {
+          "name": "local_runner_processes_pid_positive_check",
+          "value": "\"local_runner_processes\".\"pid\" > 0"
+        },
+        "local_runner_processes_exit_code_nonnegative_check": {
+          "name": "local_runner_processes_exit_code_nonnegative_check",
+          "value": "\"local_runner_processes\".\"exit_code\" IS NULL OR \"local_runner_processes\".\"exit_code\" >= 0"
+        },
+        "local_runner_processes_stopped_after_started_check": {
+          "name": "local_runner_processes_stopped_after_started_check",
+          "value": "\"local_runner_processes\".\"stopped_at\" IS NULL OR \"local_runner_processes\".\"stopped_at\" >= \"local_runner_processes\".\"started_at\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.runner_credentials": {
+      "name": "runner_credentials",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "runner_id": {
+          "name": "runner_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "credential_hash": {
+          "name": "credential_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "credential_prefix": {
+          "name": "credential_prefix",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "last_used_at": {
+          "name": "last_used_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "runner_credentials_hash_idx": {
+          "name": "runner_credentials_hash_idx",
+          "columns": [
+            {
+              "expression": "credential_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "runner_credentials_runner_status_idx": {
+          "name": "runner_credentials_runner_status_idx",
+          "columns": [
+            {
+              "expression": "runner_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "runner_credentials_runner_id_runners_id_fk": {
+          "name": "runner_credentials_runner_id_runners_id_fk",
+          "tableFrom": "runner_credentials",
+          "tableTo": "runners",
+          "columnsFrom": [
+            "runner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "runner_credentials_hash_not_empty_check": {
+          "name": "runner_credentials_hash_not_empty_check",
+          "value": "length(trim(\"runner_credentials\".\"credential_hash\")) > 0"
+        },
+        "runner_credentials_prefix_not_empty_check": {
+          "name": "runner_credentials_prefix_not_empty_check",
+          "value": "length(trim(\"runner_credentials\".\"credential_prefix\")) > 0"
+        },
+        "runner_credentials_status_check": {
+          "name": "runner_credentials_status_check",
+          "value": "\"runner_credentials\".\"status\" IN ('active', 'revoked')"
+        },
+        "runner_credentials_revoked_status_check": {
+          "name": "runner_credentials_revoked_status_check",
+          "value": "(\"runner_credentials\".\"status\" = 'revoked' AND \"runner_credentials\".\"revoked_at\" IS NOT NULL) OR (\"runner_credentials\".\"status\" <> 'revoked' AND \"runner_credentials\".\"revoked_at\" IS NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.runner_heartbeats": {
+      "name": "runner_heartbeats",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "runner_id": {
+          "name": "runner_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "observed_at": {
+          "name": "observed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "runner_heartbeats_runner_observed_idx": {
+          "name": "runner_heartbeats_runner_observed_idx",
+          "columns": [
+            {
+              "expression": "runner_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "observed_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "runner_heartbeats_runner_id_runners_id_fk": {
+          "name": "runner_heartbeats_runner_id_runners_id_fk",
+          "tableFrom": "runner_heartbeats",
+          "tableTo": "runners",
+          "columnsFrom": [
+            "runner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "runner_heartbeats_status_check": {
+          "name": "runner_heartbeats_status_check",
+          "value": "\"runner_heartbeats\".\"status\" IN ('online', 'offline', 'degraded')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.runner_provisioning_events": {
+      "name": "runner_provisioning_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "runner_id": {
+          "name": "runner_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phase": {
+          "name": "phase",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message": {
+          "name": "message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "runner_provisioning_events_runner_created_idx": {
+          "name": "runner_provisioning_events_runner_created_idx",
+          "columns": [
+            {
+              "expression": "runner_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "runner_provisioning_events_runner_id_runners_id_fk": {
+          "name": "runner_provisioning_events_runner_id_runners_id_fk",
+          "tableFrom": "runner_provisioning_events",
+          "tableTo": "runners",
+          "columnsFrom": [
+            "runner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "runner_provisioning_events_phase_check": {
+          "name": "runner_provisioning_events_phase_check",
+          "value": "\"runner_provisioning_events\".\"phase\" IN ('pending', 'creating', 'tagging', 'firewall_configuring', 'bootstrapping', 'waiting_for_runner', 'ready', 'failed', 'cleaning_up', 'deleted')"
+        },
+        "runner_provisioning_events_status_check": {
+          "name": "runner_provisioning_events_status_check",
+          "value": "\"runner_provisioning_events\".\"status\" IN ('started', 'completed', 'failed')"
+        },
+        "runner_provisioning_events_message_not_empty_check": {
+          "name": "runner_provisioning_events_message_not_empty_check",
+          "value": "length(trim(\"runner_provisioning_events\".\"message\")) > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.runner_registration_tokens": {
+      "name": "runner_registration_tokens",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "runner_id": {
+          "name": "runner_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "token_hash": {
+          "name": "token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_prefix": {
+          "name": "token_prefix",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "used_at": {
+          "name": "used_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "runner_registration_tokens_hash_idx": {
+          "name": "runner_registration_tokens_hash_idx",
+          "columns": [
+            {
+              "expression": "token_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "runner_registration_tokens_user_status_expires_idx": {
+          "name": "runner_registration_tokens_user_status_expires_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "runner_registration_tokens_runner_idx": {
+          "name": "runner_registration_tokens_runner_idx",
+          "columns": [
+            {
+              "expression": "runner_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "runner_registration_tokens_user_id_users_id_fk": {
+          "name": "runner_registration_tokens_user_id_users_id_fk",
+          "tableFrom": "runner_registration_tokens",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "runner_registration_tokens_runner_id_runners_id_fk": {
+          "name": "runner_registration_tokens_runner_id_runners_id_fk",
+          "tableFrom": "runner_registration_tokens",
+          "tableTo": "runners",
+          "columnsFrom": [
+            "runner_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "runner_registration_tokens_hash_not_empty_check": {
+          "name": "runner_registration_tokens_hash_not_empty_check",
+          "value": "length(trim(\"runner_registration_tokens\".\"token_hash\")) > 0"
+        },
+        "runner_registration_tokens_prefix_not_empty_check": {
+          "name": "runner_registration_tokens_prefix_not_empty_check",
+          "value": "length(trim(\"runner_registration_tokens\".\"token_prefix\")) > 0"
+        },
+        "runner_registration_tokens_status_check": {
+          "name": "runner_registration_tokens_status_check",
+          "value": "\"runner_registration_tokens\".\"status\" IN ('pending', 'used', 'revoked', 'expired')"
+        },
+        "runner_registration_tokens_used_status_check": {
+          "name": "runner_registration_tokens_used_status_check",
+          "value": "(\"runner_registration_tokens\".\"status\" = 'used' AND \"runner_registration_tokens\".\"used_at\" IS NOT NULL AND \"runner_registration_tokens\".\"runner_id\" IS NOT NULL) OR (\"runner_registration_tokens\".\"status\" <> 'used' AND \"runner_registration_tokens\".\"used_at\" IS NULL)"
+        },
+        "runner_registration_tokens_revoked_status_check": {
+          "name": "runner_registration_tokens_revoked_status_check",
+          "value": "(\"runner_registration_tokens\".\"status\" = 'revoked' AND \"runner_registration_tokens\".\"revoked_at\" IS NOT NULL) OR (\"runner_registration_tokens\".\"status\" <> 'revoked' AND \"runner_registration_tokens\".\"revoked_at\" IS NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.runners": {
+      "name": "runners",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'manual_vps'"
+        },
+        "endpoint_url": {
+          "name": "endpoint_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_resource_id": {
+          "name": "provider_resource_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "region": {
+          "name": "region",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "size_slug": {
+          "name": "size_slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "image": {
+          "name": "image",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provisioning_status": {
+          "name": "provisioning_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provisioning_error": {
+          "name": "provisioning_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provisioning_started_at": {
+          "name": "provisioning_started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provisioning_completed_at": {
+          "name": "provisioning_completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "runners_user_status_idx": {
+          "name": "runners_user_status_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "runners_provider_resource_idx": {
+          "name": "runners_provider_resource_idx",
+          "columns": [
+            {
+              "expression": "provider",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_resource_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "runners_active_user_endpoint_idx": {
+          "name": "runners_active_user_endpoint_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "endpoint_url",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"runners\".\"deleted_at\" IS NULL AND \"runners\".\"endpoint_url\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "runners_user_id_users_id_fk": {
+          "name": "runners_user_id_users_id_fk",
+          "tableFrom": "runners",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "runners_name_not_empty_check": {
+          "name": "runners_name_not_empty_check",
+          "value": "length(trim(\"runners\".\"name\")) > 0"
+        },
+        "runners_kind_check": {
+          "name": "runners_kind_check",
+          "value": "\"runners\".\"kind\" IN ('manual_vps', 'digitalocean')"
+        },
+        "runners_manual_endpoint_required_check": {
+          "name": "runners_manual_endpoint_required_check",
+          "value": "\"runners\".\"kind\" <> 'manual_vps' OR \"runners\".\"endpoint_url\" IS NOT NULL"
+        },
+        "runners_endpoint_url_not_empty_check": {
+          "name": "runners_endpoint_url_not_empty_check",
+          "value": "\"runners\".\"endpoint_url\" IS NULL OR length(trim(\"runners\".\"endpoint_url\")) > 0"
+        },
+        "runners_status_check": {
+          "name": "runners_status_check",
+          "value": "\"runners\".\"status\" IN ('active', 'inactive', 'registering', 'online', 'offline', 'degraded', 'provisioning', 'provision_failed', 'deleting', 'deleted')"
+        },
+        "runners_provider_check": {
+          "name": "runners_provider_check",
+          "value": "\"runners\".\"provider\" IS NULL OR \"runners\".\"provider\" = 'digitalocean'"
+        },
+        "runners_provider_resource_id_not_empty_check": {
+          "name": "runners_provider_resource_id_not_empty_check",
+          "value": "\"runners\".\"provider_resource_id\" IS NULL OR length(trim(\"runners\".\"provider_resource_id\")) > 0"
+        },
+        "runners_region_not_empty_check": {
+          "name": "runners_region_not_empty_check",
+          "value": "\"runners\".\"region\" IS NULL OR length(trim(\"runners\".\"region\")) > 0"
+        },
+        "runners_size_slug_not_empty_check": {
+          "name": "runners_size_slug_not_empty_check",
+          "value": "\"runners\".\"size_slug\" IS NULL OR length(trim(\"runners\".\"size_slug\")) > 0"
+        },
+        "runners_image_not_empty_check": {
+          "name": "runners_image_not_empty_check",
+          "value": "\"runners\".\"image\" IS NULL OR length(trim(\"runners\".\"image\")) > 0"
+        },
+        "runners_provisioning_status_check": {
+          "name": "runners_provisioning_status_check",
+          "value": "\"runners\".\"provisioning_status\" IS NULL OR \"runners\".\"provisioning_status\" IN ('pending', 'creating', 'tagging', 'firewall_configuring', 'bootstrapping', 'waiting_for_runner', 'ready', 'failed', 'cleaning_up', 'deleted')"
+        },
+        "runners_digitalocean_provider_fields_check": {
+          "name": "runners_digitalocean_provider_fields_check",
+          "value": "(\"runners\".\"kind\" = 'manual_vps' AND \"runners\".\"provider\" IS NULL AND \"runners\".\"provider_resource_id\" IS NULL AND \"runners\".\"region\" IS NULL AND \"runners\".\"size_slug\" IS NULL AND \"runners\".\"image\" IS NULL AND \"runners\".\"provisioning_status\" IS NULL AND \"runners\".\"provisioning_error\" IS NULL AND \"runners\".\"provisioning_started_at\" IS NULL AND \"runners\".\"provisioning_completed_at\" IS NULL) OR (\"runners\".\"kind\" = 'digitalocean' AND \"runners\".\"provider\" = 'digitalocean' AND \"runners\".\"region\" IS NOT NULL AND \"runners\".\"size_slug\" IS NOT NULL AND \"runners\".\"image\" IS NOT NULL AND \"runners\".\"provisioning_status\" IS NOT NULL)"
+        },
+        "runners_provisioning_completed_after_started_check": {
+          "name": "runners_provisioning_completed_after_started_check",
+          "value": "\"runners\".\"provisioning_completed_at\" IS NULL OR \"runners\".\"provisioning_started_at\" IS NULL OR \"runners\".\"provisioning_completed_at\" >= \"runners\".\"provisioning_started_at\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.agent_approval_status": {
+      "name": "agent_approval_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "approved",
+        "denied",
+        "expired",
+        "cancelled"
+      ]
+    },
+    "public.agent_schedule_mode": {
+      "name": "agent_schedule_mode",
+      "schema": "public",
+      "values": [
+        "manual",
+        "cron"
+      ]
+    },
+    "public.agent_status": {
+      "name": "agent_status",
+      "schema": "public",
+      "values": [
+        "idle",
+        "starting",
+        "running",
+        "stopped",
+        "restarting",
+        "error",
+        "deleting"
+      ]
+    },
+    "public.local_runner_process_status": {
+      "name": "local_runner_process_status",
+      "schema": "public",
+      "values": [
+        "starting",
+        "running",
+        "stopped",
+        "exited",
+        "failed"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

@@ -62,6 +62,7 @@ import {
   agentConfigs,
   agentEvents,
   agentLogs,
+  agentUsagePeriods,
   agents,
   appMetadata,
   dockerRunnerContainers,
@@ -348,6 +349,63 @@ describe("create agent persistence", () => {
       runnerId: null,
       status: "running",
     });
+  });
+
+  it("opens a credential-free usage period only after successful starts", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Usage Start Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, created.agent.userId, {
+      maxAgents: 2,
+      runningAgents: 0,
+    });
+    const calls: string[] = [];
+    const now = new Date("2026-07-07T01:00:00.000Z");
+
+    const result = await startAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: () =>
+        createManualLifecycleRunnerStub(calls, {
+          connection,
+          runnerId: runner.id,
+        }),
+      now: () => now,
+      runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
+    });
+    const periods = await connection.db.select().from(agentUsagePeriods);
+
+    expect(result).toMatchObject({ ok: true, agent: { status: "running" } });
+    expect(periods).toHaveLength(1);
+    expect(periods[0]).toMatchObject({
+      agentId: created.agent.id,
+      runnerId: runner.id,
+      source: "lifecycle",
+      startedAt: now,
+      stoppedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    expect(JSON.stringify(periods[0])).not.toMatch(
+      /endpoint|credential|providerToken|bearer|storageUri|secret/i,
+    );
+
+    const failingAgent = await createAgentForDevelopmentUser(
+      { name: "Usage Failed Start Agent", templateKey: "research_agent" },
+      { createConnection: () => connection, planMaxAgents: 2 },
+    );
+    const failed = await startAgentForDevelopmentUser(failingAgent.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: () =>
+        createManualLifecycleRunnerStub(calls, {
+          startOk: false,
+        }),
+      now: () => new Date("2026-07-07T01:05:00.000Z"),
+    });
+    const afterFailedStart = await connection.db.select().from(agentUsagePeriods);
+
+    expect(failed).toEqual({ ok: false, reason: "runner_start_failed" });
+    expect(afterFailedStart).toHaveLength(1);
   });
 
   it("assigns new agents to an eligible online runner when placement succeeds", async () => {
@@ -3512,6 +3570,67 @@ describe("create agent persistence", () => {
     );
   });
 
+  it("keeps one continuous open usage period through successful restart", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Usage Restart Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const startAt = new Date("2026-07-07T03:00:00.000Z");
+    const restartAt = new Date("2026-07-07T03:10:00.000Z");
+    const stopAt = new Date("2026-07-07T03:20:00.000Z");
+    const runnerAdapter = createLifecycleRunnerStub();
+
+    await expect(
+      startAgentForDevelopmentUser(created.agent.id, {
+        createConnection: () => connection,
+        now: () => startAt,
+        runnerAdapter,
+      }),
+    ).resolves.toMatchObject({ ok: true, agent: { status: "running" } });
+    await expect(
+      restartAgentForDevelopmentUser(created.agent.id, {
+        createConnection: () => connection,
+        now: () => restartAt,
+        runnerAdapter,
+      }),
+    ).resolves.toMatchObject({ ok: true, agent: { status: "running" } });
+
+    const afterRestart = await connection.db
+      .select()
+      .from(agentUsagePeriods)
+      .where(eq(agentUsagePeriods.agentId, created.agent.id));
+
+    expect(afterRestart).toHaveLength(1);
+    expect(afterRestart[0]).toMatchObject({
+      agentId: created.agent.id,
+      runnerId: null,
+      source: "lifecycle",
+      startedAt: startAt,
+      stoppedAt: null,
+      updatedAt: startAt,
+    });
+
+    await expect(
+      stopAgentForDevelopmentUser(created.agent.id, {
+        createConnection: () => connection,
+        now: () => stopAt,
+        runnerAdapter,
+      }),
+    ).resolves.toMatchObject({ ok: true, agent: { status: "stopped" } });
+
+    const afterStop = await connection.db
+      .select()
+      .from(agentUsagePeriods)
+      .where(eq(agentUsagePeriods.agentId, created.agent.id));
+
+    expect(afterStop).toHaveLength(1);
+    expect(afterStop[0]).toMatchObject({
+      startedAt: startAt,
+      stoppedAt: stopAt,
+      updatedAt: stopAt,
+    });
+  });
+
   it("does not leave an agent running when Docker restart replacement is non-running", async () => {
     const created = await createAgentForDevelopmentUser(
       { name: "Fast Exit Docker Restart Agent", templateKey: "research_agent" },
@@ -3963,9 +4082,11 @@ describe("create agent persistence", () => {
 
     const afterAgents = await connection.db.select().from(agents).orderBy(agents.name);
     const persistedEvents = await connection.db.select().from(agentEvents);
+    const usagePeriods = await connection.db.select().from(agentUsagePeriods);
 
     expect(afterAgents).toEqual(beforeAgents);
     expect(persistedEvents).toHaveLength(0);
+    expect(usagePeriods).toHaveLength(0);
   });
 
   it("exposes the restart route success, validation, not-found, deleted, invalid status, and event behavior", async () => {
@@ -5104,6 +5225,101 @@ describe("create agent persistence", () => {
         }),
       ]),
     );
+  });
+
+  it("closes only the latest open usage period after successful stops", async () => {
+    const [createdUser] = await connection.db
+      .insert(users)
+      .values({})
+      .returning({ userId: users.id });
+
+    expect(createdUser).toBeDefined();
+    const userId = createdUser?.userId ?? "";
+    const stopAt = new Date("2026-07-07T02:00:00.000Z");
+    const olderStartAt = new Date("2026-07-07T00:00:00.000Z");
+    const latestStartAt = new Date("2026-07-07T01:00:00.000Z");
+    const alreadyClosedAt = new Date("2026-07-07T00:30:00.000Z");
+    const [runner] = await connection.db
+      .insert(runners)
+      .values({
+        userId,
+        name: "Usage Stop Runner",
+        kind: "manual_vps",
+        endpointUrl: "https://usage-stop-runner.example.com",
+        status: "online",
+      })
+      .returning({ id: runners.id });
+    const [runningAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        runnerId: runner?.id,
+        name: "Usage Stop Agent",
+        templateKey: "research_agent",
+        status: "running",
+        statusReason: "Manual runner is running.",
+        updatedAt: latestStartAt,
+      })
+      .returning();
+
+    expect(runner).toBeDefined();
+    expect(runningAgent).toBeDefined();
+
+    await connection.db.insert(agentUsagePeriods).values([
+      {
+        agentId: runningAgent?.id ?? "",
+        runnerId: runner?.id,
+        startedAt: olderStartAt,
+        createdAt: olderStartAt,
+        updatedAt: olderStartAt,
+      },
+      {
+        agentId: runningAgent?.id ?? "",
+        runnerId: runner?.id,
+        startedAt: latestStartAt,
+        createdAt: latestStartAt,
+        updatedAt: latestStartAt,
+      },
+      {
+        agentId: runningAgent?.id ?? "",
+        runnerId: runner?.id,
+        startedAt: new Date("2026-07-06T23:00:00.000Z"),
+        stoppedAt: alreadyClosedAt,
+        createdAt: new Date("2026-07-06T23:00:00.000Z"),
+        updatedAt: alreadyClosedAt,
+      },
+    ]);
+
+    const firstStop = await stopAgentForDevelopmentUser(runningAgent?.id ?? "", {
+      createConnection: () => connection,
+      manualRunnerAdapter: () => createManualLifecycleRunnerStub([]),
+      now: () => stopAt,
+      runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
+    });
+    const afterFirstStop = await connection.db
+      .select()
+      .from(agentUsagePeriods)
+      .where(eq(agentUsagePeriods.agentId, runningAgent?.id ?? ""))
+      .orderBy(agentUsagePeriods.startedAt);
+    const secondStop = await stopAgentForDevelopmentUser(runningAgent?.id ?? "", {
+      createConnection: () => connection,
+      now: () => new Date("2026-07-07T02:05:00.000Z"),
+      runnerAdapter: createFailingLifecycleRunnerStub("stop should not run twice"),
+    });
+    const afterSecondStop = await connection.db
+      .select()
+      .from(agentUsagePeriods)
+      .where(eq(agentUsagePeriods.agentId, runningAgent?.id ?? ""))
+      .orderBy(agentUsagePeriods.startedAt);
+
+    expect(firstStop).toMatchObject({ ok: true, agent: { status: "stopped" } });
+    expect(afterFirstStop.map((period) => period.stoppedAt)).toEqual([
+      alreadyClosedAt,
+      null,
+      stopAt,
+    ]);
+    expect(secondStop).toEqual({ ok: false, reason: "invalid_status", status: "stopped" });
+    expect(afterSecondStop).toEqual(afterFirstStop);
   });
 
   it("rejects transitional stop requests without fake-settling them first", async () => {
@@ -8698,7 +8914,7 @@ describe("create agent persistence", () => {
 });
 
 async function resetCreateAgentTables(connection: DatabaseConnection): Promise<void> {
-  await connection.client`truncate table agent_approvals, agent_configs, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runner_heartbeats, runners, app_metadata, users restart identity cascade`;
+  await connection.client`truncate table agent_approvals, agent_configs, agent_usage_periods, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runner_heartbeats, runners, app_metadata, users restart identity cascade`;
 }
 
 async function ensureDevelopmentUser(connection: DatabaseConnection): Promise<string> {
