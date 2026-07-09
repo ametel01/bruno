@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { AccountControls } from "@/app/_components/clerk-auth-surfaces";
+import { resolveClerkTransition } from "@/src/auth/clerk-transition";
 
 type ProductShellProps = {
   active: "dashboard" | "agents" | "settings";
@@ -15,6 +17,8 @@ const navigationItems = [
 ] as const;
 
 export function ProductShell({ active, eyebrow, title, description, children }: ProductShellProps) {
+  const clerkEnabled = resolveClerkTransition(process.env).mode === "clerk";
+
   return (
     <div className="app-shell">
       <aside className="app-sidebar" aria-label="Primary navigation">
@@ -50,9 +54,12 @@ export function ProductShell({ active, eyebrow, title, description, children }: 
             <p className="eyebrow">{eyebrow}</p>
             <h1>{title}</h1>
           </div>
-          <a className="health-link" href="/health">
-            Health JSON
-          </a>
+          <div className="topbar-actions">
+            {clerkEnabled ? <AccountControls /> : null}
+            <a className="health-link" href="/health">
+              Health JSON
+            </a>
+          </div>
         </header>
         <p className="page-description">{description}</p>
         {children}

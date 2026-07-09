@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { NextRequest } from "next/server";
-import { middleware } from "@/middleware";
+import { type NextFetchEvent, NextRequest } from "next/server";
+import { proxy } from "@/proxy";
 import { evaluateOperatorAccess, isOperatorProtectedPath } from "@/src/auth/operator-access";
 
 describe("operator access path decisions", () => {
@@ -27,6 +27,10 @@ describe("operator access path decisions", () => {
     "/_next/static/chunks/app.js",
     "/favicon.ico",
     "/health",
+    "/sign-in",
+    "/sign-in/factor-one",
+    "/sign-up",
+    "/sign-up/verify-email-address",
     "/runner/v1/register",
     "/runner/v1/heartbeat",
     "/runner/v1/bootstrap-events",
@@ -132,12 +136,15 @@ describe("evaluateOperatorAccess", () => {
   });
 });
 
-describe("operator access middleware responses", () => {
+describe("operator access proxy responses", () => {
   it("returns safe JSON 401 responses for protected API paths", async () => {
     await withOperatorEnv(
       { AGENTBAY_OPERATOR_PASSWORD: "test-password", VERCEL: "1" },
       async () => {
-        const response = middleware(new NextRequest("http://localhost/api/agents"));
+        const response = await proxy(
+          new NextRequest("http://localhost/api/agents"),
+          {} as NextFetchEvent,
+        );
         const body = await response.json();
 
         expect(response.status).toBe(401);
@@ -157,7 +164,10 @@ describe("operator access middleware responses", () => {
     await withOperatorEnv(
       { AGENTBAY_OPERATOR_PASSWORD: "test-password", VERCEL: "1" },
       async () => {
-        const response = middleware(new NextRequest("http://localhost/dashboard"));
+        const response = await proxy(
+          new NextRequest("http://localhost/dashboard"),
+          {} as NextFetchEvent,
+        );
 
         expect(response.status).toBe(401);
         expect(response.headers.get("WWW-Authenticate")).toBe('Basic realm="AgentBay"');
@@ -168,7 +178,10 @@ describe("operator access middleware responses", () => {
 
   it("returns safe 503 responses when production operator access is not configured", async () => {
     await withOperatorEnv({ AGENTBAY_OPERATOR_PASSWORD: undefined, VERCEL: "1" }, async () => {
-      const response = middleware(new NextRequest("http://localhost/api/runners"));
+      const response = await proxy(
+        new NextRequest("http://localhost/api/runners"),
+        {} as NextFetchEvent,
+      );
       const body = await response.json();
 
       expect(response.status).toBe(503);

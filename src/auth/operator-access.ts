@@ -1,7 +1,10 @@
-const DEFAULT_OPERATOR_USERNAME = "agentbay";
+import {
+  isClerkAuthPagePath,
+  isPublicInfrastructurePath,
+  isRunnerMachineAuthPath,
+} from "@/src/auth/clerk-transition";
 
-const STATIC_ASSET_EXTENSION_PATTERN =
-  /\.(?:avif|css|gif|ico|jpeg|jpg|js|json|map|png|svg|txt|webmanifest|webp|woff|woff2)$/i;
+const DEFAULT_OPERATOR_USERNAME = "agentbay";
 
 export type OperatorAccessDecision =
   | { ok: true }
@@ -68,16 +71,11 @@ export function isOperatorProtectedPath(pathname: string): boolean {
 }
 
 function isOperatorPublicPath(pathname: string): boolean {
-  if (
-    isPathOrDescendant(pathname, "/_next") ||
-    isPathOrDescendant(pathname, "/runner/v1") ||
-    pathname === "/favicon.ico" ||
-    pathname === "/health"
-  ) {
-    return true;
-  }
-
-  return !isPathOrDescendant(pathname, "/api") && STATIC_ASSET_EXTENSION_PATTERN.test(pathname);
+  return (
+    isClerkAuthPagePath(pathname) ||
+    isRunnerMachineAuthPath(pathname) ||
+    isPublicInfrastructurePath(pathname)
+  );
 }
 
 function isPathOrDescendant(pathname: string, path: string): boolean {

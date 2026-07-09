@@ -30,6 +30,7 @@
     "vercel-build": "bun scripts/vercel-build.ts"
   },
   "dependencies": {
+    "@clerk/nextjs": "7.5.16",
     "@digitalocean/dots": "^1.17.0",
     "@microsoft/kiota-http-fetchlibrary": "^1.0.0-preview.103",
     "drizzle-orm": "^0.45.2",
