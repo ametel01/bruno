@@ -7,6 +7,11 @@ import DashboardPage, { DashboardContent } from "@/app/dashboard/page";
 import Home from "@/app/page";
 import SettingsPage from "@/app/settings/page";
 import type { AgentBackupSummary } from "@/src/server/backups/list-backups";
+import type {
+  CostEstimate,
+  CostEstimateWindowDto,
+  DevelopmentUserCostEstimatesDto,
+} from "@/src/server/costs/cost-estimates";
 import type { AgentEventDto } from "@/src/server/events/agent-events";
 import type { ManualRunnerCapacitySummary } from "@/src/server/runners/manual-runner-status";
 
@@ -14,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   closeDashboardConnection: vi.fn(),
   createDatabaseConnection: vi.fn(),
   getActiveAgentForDevelopmentUser: vi.fn(),
+  getCostEstimatesForDevelopmentUser: vi.fn(),
   listAgentEventFeed: vi.fn(),
   listLatestAgentActivity: vi.fn(),
   listLatestActiveAgentProcessLogs: vi.fn(),
@@ -29,6 +35,15 @@ const mocks = vi.hoisted(() => ({
     throw new Error("NEXT_NOT_FOUND");
   }),
 }));
+
+vi.mock("@/src/server/costs/cost-estimates", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/server/costs/cost-estimates")>();
+
+  return {
+    ...actual,
+    getCostEstimatesForDevelopmentUser: mocks.getCostEstimatesForDevelopmentUser,
+  };
+});
 
 vi.mock("@/src/server/agents/list-agents", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/src/server/agents/list-agents")>();
@@ -130,6 +145,76 @@ function capacity(
   };
 }
 
+const ESTIMATE_EXPLANATION =
+  "Raw compute estimate only; plans may also include orchestration, monitoring, backups, support, and margin.";
+
+function availableCost(cents: number): CostEstimate {
+  return {
+    available: true,
+    cents,
+    currency: "USD",
+    label: "Estimated raw infrastructure cost",
+    explanation: ESTIMATE_EXPLANATION,
+  };
+}
+
+function unavailableCost(
+  explanation = "A total is unavailable because at least one runner does not have provider price metadata.",
+): CostEstimate {
+  return {
+    available: false,
+    reason: "incomplete_runner_prices",
+    label: "Estimate unavailable",
+    explanation,
+  };
+}
+
+function costWindow(
+  key: "daily" | "monthly",
+  overrides: Partial<CostEstimateWindowDto> = {},
+): CostEstimateWindowDto {
+  const isDaily = key === "daily";
+
+  return {
+    key,
+    startsAt: isDaily ? "2026-07-09T08:00:00.000Z" : "2026-06-10T08:00:00.000Z",
+    endsAt: "2026-07-10T08:00:00.000Z",
+    durationMs: (isDaily ? 1 : 30) * 24 * 60 * 60 * 1_000,
+    runnerCount: 1,
+    runningAgentCount: 2,
+    windowActiveAgentCount: 2,
+    runnerMonthlyCost: availableCost(600),
+    estimatedInfrastructureCost: availableCost(isDaily ? 20 : 300),
+    estimatedInfrastructureCostPerAgent: availableCost(isDaily ? 10 : 150),
+    runners: [
+      {
+        runnerId: "00000000-0000-4000-8000-000000000225",
+        runnerName: "dop_v1_secret-looking-runner-name",
+        runnerKind: "digitalocean",
+        sizeSlug: "s-1vcpu-1gb",
+        uptimeMs: (isDaily ? 1 : 15) * 24 * 60 * 60 * 1_000,
+        runningAgentCount: 2,
+        windowActiveAgentCount: 2,
+        runnerMonthlyCost: availableCost(600),
+        estimatedInfrastructureCost: availableCost(isDaily ? 20 : 300),
+        estimatedInfrastructureCostPerAgent: availableCost(isDaily ? 10 : 150),
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function costEstimates(
+  overrides: Partial<DevelopmentUserCostEstimatesDto> = {},
+): DevelopmentUserCostEstimatesDto {
+  return {
+    generatedAt: "2026-07-10T08:00:00.000Z",
+    daily: costWindow("daily"),
+    monthly: costWindow("monthly"),
+    ...overrides,
+  };
+}
+
 describe("product shell routes", () => {
   beforeEach(() => {
     mocks.createDatabaseConnection.mockReturnValue({
@@ -147,6 +232,7 @@ describe("product shell routes", () => {
     mocks.listLatestActiveAgentProcessLogs.mockResolvedValue([]);
     mocks.listManualRunnerStatusSummariesForDevelopmentUser.mockResolvedValue([]);
     mocks.listCloudRunnerProvisioningSummariesForDevelopmentUser.mockResolvedValue([]);
+    mocks.getCostEstimatesForDevelopmentUser.mockResolvedValue(costEstimates());
     mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockResolvedValue([]);
     mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockResolvedValue(null);
     mocks.listAgentBackupsForDevelopmentUser.mockResolvedValue([]);
@@ -165,6 +251,7 @@ describe("product shell routes", () => {
     mocks.closeDashboardConnection.mockReset();
     mocks.createDatabaseConnection.mockReset();
     mocks.getActiveAgentForDevelopmentUser.mockReset();
+    mocks.getCostEstimatesForDevelopmentUser.mockReset();
     mocks.listAgentEventFeed.mockReset();
     mocks.listLatestAgentActivity.mockReset();
     mocks.listLatestActiveAgentProcessLogs.mockReset();
@@ -216,6 +303,159 @@ describe("product shell routes", () => {
     expect(html).not.toContain("Deny decisions, production runners");
     expect(html).not.toContain("Approvals, production runners");
     expect(html).not.toContain("No persisted agent table or records are queried");
+  });
+
+  it("renders accessible daily and monthly infrastructure estimates without DTO internals", () => {
+    const html = renderToStaticMarkup(
+      createElement(DashboardContent, {
+        costResult: {
+          ok: true,
+          estimates: costEstimates(),
+        },
+      }),
+    );
+
+    expect(html).toContain('aria-labelledby="dashboard-cost-summary-title"');
+    expect(html).toContain("Infrastructure cost estimates");
+    expect(html).toContain("Daily estimate");
+    expect(html).toContain("Monthly estimate");
+    expect(html).toContain("Estimated runner monthly cost");
+    expect(html).toContain("Estimated daily infrastructure cost");
+    expect(html).toContain("Estimated monthly infrastructure cost");
+    expect(html).toContain("Estimated infrastructure cost per agent");
+    expect(html).toContain("Running agents now");
+    expect(html).toContain("2 running");
+    expect(html).toContain("$6.00");
+    expect(html).toContain("$0.20");
+    expect(html).toContain("$0.10");
+    expect(html).toContain("$3.00");
+    expect(html).toContain("$1.50");
+    expect(html).toContain("Based on agents active during this window.");
+    expect(html).toContain("Raw compute estimate only");
+    expect(html).not.toContain("00000000-0000-4000-8000-000000000225");
+    expect(html).not.toContain("dop_v1_secret-looking-runner-name");
+    expect(html).not.toContain("runnerId");
+    expect(html).not.toContain("sizeSlug");
+    expect(html).not.toContain("providerResourceId");
+    expect(html).not.toContain("endpointUrl");
+    expect(html).not.toContain("credential");
+  });
+
+  it("keeps manual or unknown runner prices explicitly unavailable instead of showing zero", () => {
+    const unavailable = unavailableCost();
+    const html = renderToStaticMarkup(
+      createElement(DashboardContent, {
+        costResult: {
+          ok: true,
+          estimates: costEstimates({
+            daily: costWindow("daily", {
+              runnerMonthlyCost: unavailable,
+              estimatedInfrastructureCost: unavailable,
+              estimatedInfrastructureCostPerAgent: unavailable,
+            }),
+            monthly: costWindow("monthly", {
+              runnerMonthlyCost: unavailable,
+              estimatedInfrastructureCost: unavailable,
+              estimatedInfrastructureCostPerAgent: unavailable,
+            }),
+          }),
+        },
+      }),
+    );
+
+    expect(html).toContain("Estimate unavailable");
+    expect(html).toContain(
+      "A total is unavailable because at least one runner does not have provider price metadata.",
+    );
+    expect(html).toContain(
+      "Manual runners and unknown provider prices remain unavailable until price metadata is configured.",
+    );
+    expect(html).not.toContain("$0.00");
+  });
+
+  it("shows zero running agents while leaving the per-agent estimate unavailable", () => {
+    const noActiveAgents: CostEstimate = {
+      available: false,
+      reason: "no_active_agents",
+      label: "Estimate unavailable",
+      explanation:
+        "A per-agent estimate is unavailable because no agents were active in this window.",
+    };
+    const html = renderToStaticMarkup(
+      createElement(DashboardContent, {
+        costResult: {
+          ok: true,
+          estimates: costEstimates({
+            daily: costWindow("daily", {
+              runningAgentCount: 0,
+              windowActiveAgentCount: 0,
+              estimatedInfrastructureCostPerAgent: noActiveAgents,
+            }),
+            monthly: costWindow("monthly", {
+              runningAgentCount: 0,
+              windowActiveAgentCount: 0,
+              estimatedInfrastructureCostPerAgent: noActiveAgents,
+            }),
+          }),
+        },
+      }),
+    );
+
+    expect(html).toContain("0 running");
+    expect(html).toContain("No agents active");
+    expect(html).toContain(
+      "A per-agent estimate is unavailable because no agents were active in this window.",
+    );
+  });
+
+  it("keeps the rest of the dashboard useful when cost loading fails safely", async () => {
+    const { CostEstimatePersistenceError } = await import("@/src/server/costs/cost-estimates");
+    mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([
+      {
+        id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+        name: "Research Agent",
+        templateKey: "research_agent",
+        templateLabel: "Research Agent",
+        status: "stopped",
+        href: "/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774",
+        createdAt: "2026-07-03T05:00:00.000Z",
+      },
+    ]);
+    mocks.getCostEstimatesForDevelopmentUser.mockRejectedValueOnce(
+      new CostEstimatePersistenceError(),
+    );
+
+    const element = await DashboardPage();
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Research Agent");
+    expect(html).toContain("Latest activity");
+    expect(html).toContain("Infrastructure cost estimates could not be loaded.");
+    expect(html).toContain("Agent and runner operations remain available.");
+    expect(html).not.toContain("postgres://");
+    expect(html).not.toContain("Cost estimate calculation failed");
+  });
+
+  it("starts independent dashboard loaders concurrently", async () => {
+    let resolveAgents: ((agents: []) => void) | undefined;
+    const pendingAgents = new Promise<[]>((resolve) => {
+      resolveAgents = resolve;
+    });
+    mocks.listActiveAgentsForDevelopmentUser.mockReturnValueOnce(pendingAgents);
+
+    const renderPromise = DashboardPage();
+
+    await vi.waitFor(() => {
+      expect(mocks.getCostEstimatesForDevelopmentUser).toHaveBeenCalledTimes(1);
+      expect(mocks.listLatestAgentActivity).toHaveBeenCalledTimes(1);
+      expect(mocks.listPendingApprovalsForDevelopmentUser).toHaveBeenCalledTimes(1);
+      expect(mocks.listLatestActiveAgentProcessLogs).toHaveBeenCalledTimes(1);
+      expect(mocks.listManualRunnerStatusSummariesForDevelopmentUser).toHaveBeenCalledTimes(1);
+      expect(mocks.listCloudRunnerProvisioningSummariesForDevelopmentUser).toHaveBeenCalledTimes(1);
+    });
+
+    resolveAgents?.([]);
+    await renderPromise;
   });
 
   it("renders persisted agents on the dashboard with lifecycle controls", async () => {

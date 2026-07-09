@@ -7,6 +7,10 @@ import { RunnerCapacityDefinitionItems } from "@/app/_components/runner-capacity
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { listedAgentStartDisabledReason } from "@/app/agents/_components/agent-start-readiness";
 import { MobileAgentList } from "@/app/agents/_components/mobile-agent-list";
+import {
+  DashboardCostSummary,
+  type DashboardCostResult,
+} from "@/app/dashboard/_components/cost-summary";
 import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import {
   AgentListPersistenceError,
@@ -32,6 +36,10 @@ import {
   CloudRunnerProvisioningPersistenceError,
   listCloudRunnerProvisioningSummariesForDevelopmentUser,
 } from "@/src/server/runners/cloud-runner-provisioning";
+import {
+  CostEstimatePersistenceError,
+  getCostEstimatesForDevelopmentUser,
+} from "@/src/server/costs/cost-estimates";
 
 type DashboardContentProps = {
   routeLabel?: string;
@@ -47,18 +55,30 @@ type DashboardCloudRunnersResult = Awaited<ReturnType<typeof loadDashboardCloudR
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const listResult = await loadDashboardAgents();
-  const activityResult = await loadDashboardActivity();
-  const approvalsResult = await loadDashboardApprovals();
-  const processLogsResult = await loadDashboardProcessLogs();
-  const manualRunnersResult = await loadDashboardManualRunners();
-  const cloudRunnersResult = await loadDashboardCloudRunners();
+  const [
+    listResult,
+    activityResult,
+    approvalsResult,
+    processLogsResult,
+    manualRunnersResult,
+    cloudRunnersResult,
+    costResult,
+  ] = await Promise.all([
+    loadDashboardAgents(),
+    loadDashboardActivity(),
+    loadDashboardApprovals(),
+    loadDashboardProcessLogs(),
+    loadDashboardManualRunners(),
+    loadDashboardCloudRunners(),
+    loadDashboardCosts(),
+  ]);
 
   return (
     <DashboardContent
       activityResult={activityResult}
       approvalsResult={approvalsResult}
       cloudRunnersResult={cloudRunnersResult}
+      costResult={costResult}
       listResult={listResult}
       manualRunnersResult={manualRunnersResult}
       processLogsResult={processLogsResult}
@@ -70,6 +90,7 @@ export function DashboardContent({
   activityResult = { ok: true, events: [] },
   approvalsResult = { ok: true, approvals: [] },
   cloudRunnersResult = { ok: true, runners: [] },
+  costResult,
   manualRunnersResult = { ok: true, runners: [] },
   processLogsResult = { ok: true, logs: [] },
   routeLabel = "Dashboard",
@@ -78,6 +99,7 @@ export function DashboardContent({
   activityResult?: DashboardActivityResult;
   approvalsResult?: DashboardApprovalsResult;
   cloudRunnersResult?: DashboardCloudRunnersResult;
+  costResult?: DashboardCostResult;
   manualRunnersResult?: DashboardManualRunnersResult;
   processLogsResult?: DashboardProcessLogsResult;
   listResult?: DashboardAgentResult;
@@ -90,6 +112,7 @@ export function DashboardContent({
       description="A control surface for persisted agent records, pending approval requests, local runner lifecycle status, and local development activity."
     >
       <div className="content-grid">
+        {costResult ? <DashboardCostSummary result={costResult} /> : null}
         <section className="agent-list-panel" aria-labelledby="dashboard-agents-title">
           <div className="section-heading">
             <h2 id="dashboard-agents-title">Persisted agents</h2>
@@ -526,6 +549,23 @@ async function loadDashboardCloudRunners() {
     if (error instanceof CloudRunnerProvisioningPersistenceError) {
       return {
         ok: false as const,
+      };
+    }
+
+    throw error;
+  }
+}
+
+async function loadDashboardCosts(): Promise<DashboardCostResult> {
+  try {
+    return {
+      ok: true,
+      estimates: await getCostEstimatesForDevelopmentUser(),
+    };
+  } catch (error) {
+    if (error instanceof CostEstimatePersistenceError) {
+      return {
+        ok: false,
       };
     }
 
