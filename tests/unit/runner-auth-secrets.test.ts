@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createRunnerCredential,
   createRunnerRegistrationToken,
+  fingerprintRunnerSecret,
   hashRunnerSecret,
   REGISTRATION_TOKEN_PREFIX,
   RUNNER_AUTH_HASH_ALGORITHM,
@@ -47,6 +48,17 @@ describe("runner auth secret helpers", () => {
     expect(verifyRunnerSecret({ value: `${value}-wrong`, expectedHash: hash })).toBe(false);
     expect(verifyRunnerSecret({ value, expectedHash: "not-a-hash" })).toBe(false);
     expect(verifyRunnerSecret({ value, expectedHash: "" })).toBe(false);
+  });
+
+  it("derives a short stable fingerprint without exposing the runner secret", () => {
+    const value = createRunnerCredential({
+      randomBytes: (size) => Buffer.alloc(size, 13),
+    }).value;
+    const fingerprint = fingerprintRunnerSecret(`  ${value}  `);
+
+    expect(fingerprint).toBe(hashRunnerSecret(value).slice(0, 12));
+    expect(fingerprint).toMatch(/^[0-9a-f]{12}$/);
+    expect(value).not.toContain(fingerprint);
   });
 
   it("rejects empty runner secret values without echoing them in the error", () => {

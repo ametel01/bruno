@@ -34,6 +34,10 @@ export function hashRunnerSecret(value: string): string {
   return createHash(RUNNER_AUTH_HASH_ALGORITHM).update(normalizedValue, "utf8").digest("hex");
 }
 
+export function fingerprintRunnerSecret(value: string): string {
+  return hashRunnerSecret(value).slice(0, 12);
+}
+
 export function verifyRunnerSecret(input: { value: string; expectedHash: string }): boolean {
   const expectedHash = normalizeHash(input.expectedHash);
 

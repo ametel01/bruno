@@ -139,7 +139,11 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
             <div>
               <dt>Actions</dt>
               <dd>
-                <AgentLifecycleControls agentId={agent.id} status={agent.status} />
+                <AgentLifecycleControls
+                  agentId={agent.id}
+                  startDisabledReason={startDisabledReason(assignedRunner)}
+                  status={agent.status}
+                />
               </dd>
             </div>
             <div>
@@ -557,6 +561,14 @@ async function loadAssignedManualRunner(agentId: string) {
 
     throw error;
   }
+}
+
+function startDisabledReason(runner: AssignedManualRunnerStatusSummary | null): string | null {
+  if (!runner || runner.status === "online") {
+    return null;
+  }
+
+  return "Assigned runner is still becoming available.";
 }
 
 function parseActivityCursor(cursor: string | string[] | undefined): string | null | false {

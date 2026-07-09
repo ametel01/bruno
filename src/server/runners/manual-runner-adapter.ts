@@ -11,6 +11,7 @@ import {
 } from "@/src/server/logs/agent-logs";
 import { DOCKER_CLI_TIMEOUT_MS } from "@/src/runner-service/constants";
 import type { ManualRunnerRecord } from "@/src/server/runners/manual-runner-persistence";
+import { fingerprintRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
 import type {
   RunnerAdapter as RunnerAdapterContract,
   RunnerLogStreamInput,
@@ -229,6 +230,7 @@ export class ManualRunnerAdapter
       return { ok: false, reason: "runner_token_not_configured" };
     }
 
+    const tokenFingerprint = fingerprintRunnerSecret(token);
     const requestUrl = new URL(
       `/runner/v1/agents/${encodeURIComponent(agentId)}/${action}`,
       normalizeBaseEndpoint(endpointUrl),
@@ -257,6 +259,7 @@ export class ManualRunnerAdapter
           method,
           responseStatus: response.status,
           responseErrorCode: await readResponseErrorCode(response),
+          runnerBearerTokenFingerprint: tokenFingerprint,
           durationMs: Date.now() - startedAt,
         });
         return { ok: false, reason: "runner_request_failed" };
@@ -273,6 +276,7 @@ export class ManualRunnerAdapter
           endpointHost: safeEndpointHost(endpointUrl),
           method,
           responseStatus: response.status,
+          runnerBearerTokenFingerprint: tokenFingerprint,
           durationMs: Date.now() - startedAt,
         });
         return { ok: false, reason: "runner_response_invalid" };
@@ -290,6 +294,7 @@ export class ManualRunnerAdapter
         errorName: error instanceof Error ? error.name : "UnknownError",
         errorMessage: safeErrorMessage(error),
         timedOut: controller.signal.aborted,
+        runnerBearerTokenFingerprint: tokenFingerprint,
         durationMs: Date.now() - startedAt,
       });
       return { ok: false, reason: "runner_request_failed" };

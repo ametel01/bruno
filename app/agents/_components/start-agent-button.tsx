@@ -12,6 +12,7 @@ type StartAgentButtonProps = {
   requestedMessage?: string;
   failureMessage?: string;
   invalidStatusMessage?: string;
+  disabledReason?: string | null;
 };
 
 type StartState =
@@ -30,6 +31,7 @@ export function StartAgentButton({
   requestedMessage = "Start requested.",
   failureMessage = "Agent could not be started.",
   invalidStatusMessage = "Agent cannot be started from its current status.",
+  disabledReason = null,
 }: StartAgentButtonProps) {
   const router = useRouter();
   const [state, setState] = useState<StartState>({ status: "idle" });
@@ -82,7 +84,7 @@ export function StartAgentButton({
 
   const startable = STARTABLE_STATUSES.has(status);
   const busy = state.status === "requesting" || state.status === "polling" || status === "starting";
-  const disabled = !startable || busy;
+  const disabled = Boolean(disabledReason) || !startable || busy;
   const buttonLabel = getButtonLabel(status, state.status, label, busyLabel);
 
   return (
@@ -93,6 +95,10 @@ export function StartAgentButton({
       {state.status === "polling" || state.status === "error" ? (
         <span className={`action-message ${state.status}`} role="status">
           {state.message}
+        </span>
+      ) : disabledReason ? (
+        <span className="action-message" role="status">
+          {disabledReason}
         </span>
       ) : null}
     </div>

@@ -14,6 +14,7 @@ import {
   bootstrapManualRunnerForDevelopmentUser,
   type ManualRunnerRecord,
 } from "@/src/server/runners/manual-runner-persistence";
+import { fingerprintRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
 
 describe("ManualRunnerAdapter dashboard HTTP contract", () => {
   let connection: DatabaseConnection;
@@ -234,6 +235,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
         endpointHost: "runner.example.com",
         responseStatus: 502,
         responseErrorCode: "docker_command_failed",
+        runnerBearerTokenFingerprint: fingerprintRunnerSecret("contract-token"),
       }),
     );
     expect(JSON.stringify(info.mock.calls)).not.toContain("contract-token");

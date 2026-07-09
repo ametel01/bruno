@@ -30,6 +30,7 @@ import {
 import { LocalDockerDigitalOceanProvider } from "@/src/server/runners/local-docker-digitalocean-provider";
 import {
   createRunnerRegistrationToken,
+  fingerprintRunnerSecret,
   type GeneratedRunnerSecret,
 } from "@/src/server/runners/runner-auth-secrets";
 import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
@@ -259,6 +260,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       runnerImage: config.runnerImage,
       tagCount: config.tags.length,
       hasRunnerBearerToken: Boolean(config.runnerBearerToken),
+      runnerBearerTokenFingerprint: fingerprintRunnerSecret(config.runnerBearerToken),
       sshKeyMode:
         config.sshKeyIds === undefined
           ? "auto"

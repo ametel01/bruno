@@ -8,12 +8,17 @@ import { StopAgentButton } from "./stop-agent-button";
 type AgentLifecycleControlsProps = {
   agentId: string;
   status: AgentLifecycleStatus;
+  startDisabledReason?: string | null;
 };
 
-export function AgentLifecycleControls({ agentId, status }: AgentLifecycleControlsProps) {
+export function AgentLifecycleControls({
+  agentId,
+  status,
+  startDisabledReason = null,
+}: AgentLifecycleControlsProps) {
   return (
     <div className="agent-lifecycle-actions">
-      <StartAgentButton agentId={agentId} status={status} />
+      <StartAgentButton agentId={agentId} disabledReason={startDisabledReason} status={status} />
       {status === "running" ? <StopAgentButton agentId={agentId} status={status} /> : null}
       <RestartAgentButton agentId={agentId} status={status} />
       {process.env.NODE_ENV !== "production" ? (
