@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "@/src/server/db/schema";
 import { appMetadata, users } from "@/src/server/db/schema";
@@ -40,6 +40,8 @@ export async function getDevelopmentUserId(tx: DevelopmentUserTransaction): Prom
 export async function getOrCreateDevelopmentUserId(
   tx: DevelopmentUserTransaction,
 ): Promise<string> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${DEVELOPMENT_USER_METADATA_KEY}))`);
+
   const existingUserId = await getDevelopmentUserId(tx);
 
   if (existingUserId) {
