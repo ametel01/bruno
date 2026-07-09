@@ -182,10 +182,6 @@ export async function getCostEstimatesForDevelopmentUser(
           ),
         );
 
-      const usageRunnerIds = new Set(usageRows.map((row) => row.runnerId));
-      const includedRunners = runnerRows.filter(
-        (runner) => runner.deletedAt === null || usageRunnerIds.has(runner.id),
-      );
       const scopedRunningAgentRows = runningAgentRows.flatMap((row) =>
         row.runnerId === null ? [] : [{ id: row.id, runnerId: row.runnerId }],
       );
@@ -194,13 +190,13 @@ export async function getCostEstimatesForDevelopmentUser(
         generatedAt: now.toISOString(),
         daily: calculateWindowEstimate(
           windows.daily,
-          includedRunners,
+          runnerRows,
           usageRows,
           scopedRunningAgentRows,
         ),
         monthly: calculateWindowEstimate(
           windows.monthly,
-          includedRunners,
+          runnerRows,
           usageRows,
           scopedRunningAgentRows,
         ),
@@ -298,7 +294,15 @@ function calculateWindowEstimate(
   usageRows: UsagePeriodRow[],
   runningAgentRows: RunningAgentRow[],
 ): CostEstimateWindowDto {
-  const internalRunnerEstimates = runnerRows.map((runner) =>
+  const includedRunnerRows = runnerRows.filter(
+    (runner) =>
+      runner.deletedAt === null ||
+      usageRows.some(
+        (usage) =>
+          usage.runnerId === runner.id && clipUsageIntervalToWindow(usage, window) !== null,
+      ),
+  );
+  const internalRunnerEstimates = includedRunnerRows.map((runner) =>
     calculateRunnerEstimate(window, runner, usageRows, runningAgentRows),
   );
   const allPricesAvailable = internalRunnerEstimates.every(

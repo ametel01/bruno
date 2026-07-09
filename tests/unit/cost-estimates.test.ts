@@ -211,6 +211,67 @@ describe.sequential("development-user cost estimates", () => {
     });
   });
 
+  it("includes deleted runners only in windows overlapped by their historical usage", async () => {
+    const userId = await seedDevelopmentUser(connection);
+    const currentRunnerId = await seedDigitalOceanRunner(connection, userId, {
+      name: "Current Runner",
+      sizeSlug: "s-1vcpu-1gb",
+    });
+    const deletedRunnerId = await seedManualRunner(connection, userId);
+    const historicalAgentId = await seedAgent(connection, userId, deletedRunnerId, {
+      name: "Monthly Only Agent",
+      status: "stopped",
+    });
+    const historicalStartAt = new Date(NOW.getTime() - 20 * DAY_MS);
+
+    await seedUsagePeriod(connection, historicalAgentId, deletedRunnerId, {
+      startedAt: historicalStartAt,
+      stoppedAt: new Date(historicalStartAt.getTime() + HOUR_MS),
+    });
+    await connection.db
+      .update(runners)
+      .set({ deletedAt: new Date(historicalStartAt.getTime() + 2 * HOUR_MS) })
+      .where(eq(runners.id, deletedRunnerId));
+
+    const result = await getCostEstimatesForDevelopmentUser({
+      createConnection: () => connection,
+      now: () => NOW,
+    });
+
+    expect(result.daily).toMatchObject({
+      runnerCount: 1,
+      windowActiveAgentCount: 0,
+      runnerMonthlyCost: availableCents(600),
+      estimatedInfrastructureCost: availableCents(0),
+    });
+    expect(result.daily.runners.map((runner) => runner.runnerId)).toEqual([currentRunnerId]);
+    expect(result.monthly).toMatchObject({
+      runnerCount: 2,
+      windowActiveAgentCount: 1,
+      runnerMonthlyCost: {
+        available: false,
+        reason: "incomplete_runner_prices",
+      },
+      estimatedInfrastructureCost: {
+        available: false,
+        reason: "incomplete_runner_prices",
+      },
+    });
+    expect(result.monthly.runners).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          runnerId: deletedRunnerId,
+          uptimeMs: HOUR_MS,
+          windowActiveAgentCount: 1,
+          runnerMonthlyCost: expect.objectContaining({
+            available: false,
+            reason: "manual_runner",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("returns explicit unavailable estimates for manual and unsupported runners", async () => {
     const userId = await seedDevelopmentUser(connection);
     const knownRunnerId = await seedDigitalOceanRunner(connection, userId, {
