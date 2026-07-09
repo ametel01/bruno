@@ -2,6 +2,7 @@ import Link from "next/link";
 import { CloudRunnerProvisioningPanel } from "@/app/_components/cloud-runner-provisioning-panel";
 import { EmptyState, PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
+import { listedAgentStartDisabledReason } from "@/app/agents/_components/agent-start-readiness";
 import { CreateAgentForm } from "@/app/agents/_components/create-agent-form";
 import { MobileAgentList } from "@/app/agents/_components/mobile-agent-list";
 import { AGENT_NAME_MAX_LENGTH } from "@/src/server/agents/create-agent";
@@ -65,7 +66,11 @@ export default async function AgentsPage() {
                             <span className="status-pill">{agent.status}</span>
                           </td>
                           <td>
-                            <AgentLifecycleControls agentId={agent.id} status={agent.status} />
+                            <AgentLifecycleControls
+                              agentId={agent.id}
+                              startDisabledReason={listedAgentStartDisabledReason(agent)}
+                              status={agent.status}
+                            />
                           </td>
                           <td>
                             <Link

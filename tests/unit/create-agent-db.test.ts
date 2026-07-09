@@ -2645,6 +2645,9 @@ describe("create agent persistence", () => {
         templateVersion: "1.0.0",
         templateLabel: "Research Agent",
         status: "stopped",
+        assignedRunnerKind: null,
+        assignedRunnerStatus: null,
+        assignedRunnerProvisioningStatus: null,
         href: `/agents/${newAgent?.id}`,
         createdAt: "2026-07-03T05:00:00.000Z",
       },
@@ -2655,10 +2658,60 @@ describe("create agent persistence", () => {
         templateVersion: "1.0.0",
         templateLabel: "Inbox Triage Agent",
         status: "stopped",
+        assignedRunnerKind: null,
+        assignedRunnerStatus: null,
+        assignedRunnerProvisioningStatus: null,
         href: `/agents/${oldAgent?.id}`,
         createdAt: "2026-07-03T04:00:00.000Z",
       },
     ]);
+  });
+
+  it("includes assigned runner status in active agent listings", async () => {
+    const userId = await connection.db.transaction((tx) => getOrCreateDevelopmentUserId(tx));
+    const now = new Date("2026-07-03T05:00:00.000Z");
+    const [runner] = await connection.db
+      .insert(runners)
+      .values({
+        userId,
+        name: "Cloud Runner",
+        kind: "digitalocean",
+        status: "registering",
+        provider: "digitalocean",
+        region: "sfo3",
+        sizeSlug: "s-1vcpu-512mb-10gb",
+        image: "ubuntu-24-04-x64",
+        provisioningStatus: "waiting_for_runner",
+        provisioningStartedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+    const [agent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        runnerId: runner?.id,
+        name: "Cloud Agent",
+        templateKey: "research_agent",
+        templateVersion: "1.0.0",
+        templateSnapshotJson: getAgentTemplateSnapshot("research_agent"),
+        status: "stopped",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+
+    const listed = await listActiveAgentsForDevelopmentUser({ createConnection: () => connection });
+
+    expect(agent).toBeDefined();
+    expect(runner).toBeDefined();
+    expect(listed[0]).toMatchObject({
+      id: agent?.id,
+      assignedRunnerKind: "digitalocean",
+      assignedRunnerStatus: "registering",
+      assignedRunnerProvisioningStatus: "waiting_for_runner",
+    });
   });
 
   it("lists and loads transitional lifecycle statuses without fake runner settling", async () => {

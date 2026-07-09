@@ -148,7 +148,7 @@ function readinessCopy(runner: CloudRunnerProvisioningSummary): string {
   }
 
   if (runner.readinessStatus === "provisioning") {
-    return "Provisioning is in progress; refresh to load the latest persisted phase.";
+    return "Runner setup is still in progress; work cannot start until the first online heartbeat is recorded.";
   }
 
   return "Runner readiness is read from persisted server state.";

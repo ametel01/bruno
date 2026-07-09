@@ -16,7 +16,6 @@ import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
 const DEFAULT_CLOUD_RUNNER_NAME = "DigitalOcean Runner";
 const WAITING_FOR_RUNNER_TIMEOUT_MS = 60 * 60 * 1000;
-const READY_RUNNER_STATUSES = new Set(["online", "ready"]);
 
 const PROVISIONING_PHASES = [
   "pending",
@@ -327,20 +326,24 @@ function toReadinessStatus(
   runnerStatus: string,
   provisioningStatus: DigitalOceanProvisioningStatus,
 ): CloudRunnerReadinessStatus {
-  if (runnerStatus === "online" || READY_RUNNER_STATUSES.has(runnerStatus)) {
-    return "online";
-  }
-
-  if (runnerStatus === "offline" || runnerStatus === "degraded" || runnerStatus === "deleted") {
-    return runnerStatus;
-  }
-
   if (runnerStatus === "provision_failed" || provisioningStatus === "failed") {
     return "failed";
   }
 
-  if (runnerStatus === "provisioning") {
+  if (runnerStatus === "deleted" || provisioningStatus === "deleted") {
+    return "deleted";
+  }
+
+  if (provisioningStatus !== "ready") {
     return "provisioning";
+  }
+
+  if (runnerStatus === "online" || runnerStatus === "ready") {
+    return "online";
+  }
+
+  if (runnerStatus === "offline" || runnerStatus === "degraded") {
+    return runnerStatus;
   }
 
   return "unknown";

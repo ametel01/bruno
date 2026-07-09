@@ -6,7 +6,7 @@ import {
   reconcileDockerRunnerAgentsForDevelopmentUser,
 } from "@/src/server/agents/lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agentConfigs, agents } from "@/src/server/db/schema";
+import { agentConfigs, agents, runners } from "@/src/server/db/schema";
 import {
   getAgentTemplateLabel,
   getAgentTemplateSnapshot,
@@ -21,6 +21,9 @@ export type ListedAgent = {
   templateVersion: string;
   templateLabel: string;
   status: AgentLifecycleStatus;
+  assignedRunnerKind?: string | null;
+  assignedRunnerStatus?: string | null;
+  assignedRunnerProvisioningStatus?: string | null;
   href: string;
   createdAt: string;
 };
@@ -77,9 +80,13 @@ export async function listActiveAgentsForDevelopmentUser(
         templateKey: agents.templateKey,
         templateVersion: agents.templateVersion,
         status: agents.status,
+        assignedRunnerKind: runners.kind,
+        assignedRunnerStatus: runners.status,
+        assignedRunnerProvisioningStatus: runners.provisioningStatus,
         createdAt: agents.createdAt,
       })
       .from(agents)
+      .leftJoin(runners, eq(runners.id, agents.runnerId))
       .where(isNull(agents.deletedAt))
       .orderBy(desc(agents.createdAt), desc(agents.id));
 
@@ -90,6 +97,9 @@ export async function listActiveAgentsForDevelopmentUser(
       templateVersion: row.templateVersion,
       templateLabel: getAgentTemplateLabel(row.templateKey),
       status: row.status,
+      assignedRunnerKind: row.assignedRunnerKind,
+      assignedRunnerStatus: row.assignedRunnerStatus,
+      assignedRunnerProvisioningStatus: row.assignedRunnerProvisioningStatus,
       href: `/agents/${row.id}`,
       createdAt: row.createdAt.toISOString(),
     }));

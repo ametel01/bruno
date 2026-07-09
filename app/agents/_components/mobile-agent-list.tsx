@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ListedAgent } from "@/src/server/agents/list-agents";
 import type { AgentLifecycleStatus } from "@/src/server/agents/lifecycle";
+import { listedAgentStartDisabledReason } from "./agent-start-readiness";
 import { StartAgentButton } from "./start-agent-button";
 import { StopAgentButton } from "./stop-agent-button";
 
@@ -40,7 +41,11 @@ export function MobileAgentList({ agents }: MobileAgentListProps) {
           >
             Configure
           </Link>
-          <MobileAgentActions agentId={agent.id} status={agent.status} />
+          <MobileAgentActions
+            agentId={agent.id}
+            startDisabledReason={listedAgentStartDisabledReason(agent)}
+            status={agent.status}
+          />
         </li>
       ))}
     </ol>
@@ -49,9 +54,11 @@ export function MobileAgentList({ agents }: MobileAgentListProps) {
 
 function MobileAgentActions({
   agentId,
+  startDisabledReason,
   status,
 }: {
   agentId: string;
+  startDisabledReason: string | null;
   status: AgentLifecycleStatus;
 }) {
   if (RESUMABLE_STATUSES.has(status)) {
@@ -60,6 +67,7 @@ function MobileAgentActions({
         <StartAgentButton
           agentId={agentId}
           busyLabel="Resuming"
+          disabledReason={startDisabledReason}
           failureMessage="Agent could not be resumed."
           invalidStatusMessage="Agent cannot be resumed from its current status."
           label="Resume"

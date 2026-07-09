@@ -40,6 +40,7 @@ export type SettingsRunnerManagementSummary = ManualRunnerStatusSummary & {
 };
 
 export type AssignedManualRunnerStatusSummary = ManualRunnerStatusSummary & {
+  provisioningStatus: string | null;
   assignmentNotice: string;
   alertState: "offline" | "degraded" | null;
   alertMessage: string | null;
@@ -51,6 +52,7 @@ type ManualRunnerStatusRow = {
   kind: string;
   endpointUrl: string | null;
   status: string;
+  provisioningStatus?: string | null;
   updatedAt: Date | string;
   latestHeartbeat?: {
     status: string;
@@ -93,6 +95,7 @@ export async function listManualRunnerStatusSummariesForDevelopmentUser(
           kind: runners.kind,
           endpointUrl: runners.endpointUrl,
           status: runners.status,
+          provisioningStatus: runners.provisioningStatus,
           updatedAt: runners.updatedAt,
         })
         .from(runners)
@@ -165,6 +168,7 @@ export async function listSettingsRunnerManagementSummariesForDevelopmentUser(
           kind: runners.kind,
           endpointUrl: runners.endpointUrl,
           status: runners.status,
+          provisioningStatus: runners.provisioningStatus,
           updatedAt: runners.updatedAt,
         })
         .from(runners)
@@ -326,6 +330,7 @@ export function toAssignedManualRunnerStatusSummary(
 
   return {
     ...summary,
+    provisioningStatus: row.provisioningStatus ?? null,
     assignmentNotice: `This agent is assigned to ${summary.name}.`,
     alertState,
     alertMessage:

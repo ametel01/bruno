@@ -103,6 +103,33 @@ describe("cloud runner provisioning summaries", () => {
     );
   });
 
+  it("does not report online readiness before the ready provisioning phase", () => {
+    const summary = toCloudRunnerProvisioningSummary(
+      {
+        id: "00000000-0000-4000-8000-000000000157",
+        name: "Bootstrapping Cloud Runner",
+        kind: "digitalocean",
+        status: "online",
+        provider: "digitalocean",
+        providerResourceId: "do-droplet-157",
+        region: "sfo3",
+        sizeSlug: "s-1vcpu-512mb-10gb",
+        image: "ubuntu-24-04-x64",
+        provisioningStatus: "waiting_for_runner",
+        provisioningError: null,
+        provisioningStartedAt: "2026-07-06T01:00:00.000Z",
+        provisioningCompletedAt: null,
+      },
+      {
+        status: "online",
+        observedAt: "2026-07-06T01:02:00.000Z",
+      },
+    );
+
+    expect(summary.readinessStatus).toBe("provisioning");
+    expect(summary.provisioning.status).toBe("waiting_for_runner");
+  });
+
   it("redacts secret-looking failure details and supplies an actionable fallback", () => {
     const summary = toCloudRunnerProvisioningSummary({
       id: "00000000-0000-4000-8000-000000000156",

@@ -564,11 +564,18 @@ async function loadAssignedManualRunner(agentId: string) {
 }
 
 function startDisabledReason(runner: AssignedManualRunnerStatusSummary | null): string | null {
-  if (!runner || runner.status === "online") {
+  if (!runner) {
     return null;
   }
 
-  return "Assigned runner is still becoming available.";
+  if (
+    runner.status === "online" &&
+    (runner.kind !== "digitalocean" || runner.provisioningStatus === "ready")
+  ) {
+    return null;
+  }
+
+  return "Assigned runner is not fully ready yet.";
 }
 
 function parseActivityCursor(cursor: string | string[] | undefined): string | null | false {
