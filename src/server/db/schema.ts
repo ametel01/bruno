@@ -299,6 +299,32 @@ export const agents = pgTable(
   (table) => [index("agents_runner_id_idx").on(table.runnerId)],
 );
 
+export const agentUsagePeriods = pgTable(
+  "agent_usage_periods",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agents.id),
+    runnerId: uuid("runner_id").references(() => runners.id),
+    source: text("source").notNull().default("lifecycle"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    stoppedAt: timestamp("stopped_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("agent_usage_periods_source_check", sql`${table.source} IN ('lifecycle')`),
+    check(
+      "agent_usage_periods_stopped_after_started_check",
+      sql`${table.stoppedAt} IS NULL OR ${table.stoppedAt} >= ${table.startedAt}`,
+    ),
+    index("agent_usage_periods_agent_started_idx").on(table.agentId, table.startedAt),
+    index("agent_usage_periods_runner_started_idx").on(table.runnerId, table.startedAt),
+    index("agent_usage_periods_agent_stopped_idx").on(table.agentId, table.stoppedAt),
+  ],
+);
+
 export const backups = pgTable(
   "backups",
   {
