@@ -86,6 +86,8 @@ export const DELETE_EVENT_TYPE = "agent.deleted";
 export const FAKE_RUNNER_START_DELAY_MS = 400;
 
 const RUNNING_STATUS_REASON = "Docker runner container is running.";
+const START_FINALIZATION_CLEANUP_FAILED_STATUS_REASON =
+  "Runner start succeeded, but lifecycle finalization and runner cleanup failed.";
 const DOCKER_RECONCILABLE_AGENT_STATUSES = ["starting", "running", "restarting"] as const;
 const DOCKER_TERMINAL_CONTAINER_STATUSES = ["dead", "exited"] as const;
 export const LOCAL_RUNNER_UNEXPECTED_EXIT_STATUS_REASON =
@@ -630,6 +632,21 @@ async function restoreAgentStartReservation(input: {
     .where(and(eq(agents.id, input.agentId), eq(agents.status, "starting")));
 }
 
+async function markAgentStartFinalizationCleanupFailed(input: {
+  agentId: string;
+  connection: DatabaseConnection;
+  now: Date;
+}): Promise<void> {
+  await input.connection.db
+    .update(agents)
+    .set({
+      status: "error",
+      statusReason: START_FINALIZATION_CLEANUP_FAILED_STATUS_REASON,
+      updatedAt: input.now,
+    })
+    .where(and(eq(agents.id, input.agentId), isNull(agents.deletedAt)));
+}
+
 async function readAgentStartRunnerSnapshot(
   tx: AgentLifecycleTransaction,
   input: { runnerId: string; userId: string },
@@ -822,88 +839,118 @@ export async function startAgentForDevelopmentUser(
 
     await captureLifecycleRunnerLogs(runnerAdapter, normalizedAgentId);
 
-    return await connection.db.transaction(async (tx) => {
-      const [startedAgent] = await tx
-        .update(agents)
-        .set({
-          status: "running",
-          statusReason: RUNNING_STATUS_REASON,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(agents.id, normalizedAgentId),
-            isNull(agents.deletedAt),
-            inArray(
-              agents.status,
-              reservation.reserved ? ["starting"] : [...STARTABLE_AGENT_STATUSES],
+    try {
+      return await connection.db.transaction(async (tx) => {
+        const [startedAgent] = await tx
+          .update(agents)
+          .set({
+            status: "running",
+            statusReason: RUNNING_STATUS_REASON,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(agents.id, normalizedAgentId),
+              isNull(agents.deletedAt),
+              inArray(
+                agents.status,
+                reservation.reserved ? ["starting"] : [...STARTABLE_AGENT_STATUSES],
+              ),
             ),
-          ),
-        )
-        .returning();
+          )
+          .returning();
 
-      if (!startedAgent) {
-        await runnerAdapter.stop(normalizedAgentId);
-        throw new Error("Agent start update returned no rows.");
-      }
+        if (!startedAgent) {
+          throw new Error("Agent start update returned no rows.");
+        }
 
-      await tx.insert(agentUsagePeriods).values({
-        agentId: startedAgent.id,
-        runnerId: startedAgent.runnerId,
-        source: "lifecycle",
-        startedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      await recordAgentEventsInTransaction(tx, [
-        {
+        await tx.insert(agentUsagePeriods).values({
           agentId: startedAgent.id,
-          actorUserId: startedAgent.userId,
-          type: START_REQUESTED_EVENT_TYPE,
-          message: `Start requested for agent "${startedAgent.name}".`,
-          metadata: {
-            fromStatus: validation.agent.status,
-            toStatus: "running",
-            ...runnerLifecycleEventMetadata(runnerStart),
-          },
-        },
-        {
-          agentId: startedAgent.id,
-          actorUserId: startedAgent.userId,
-          type: START_COMPLETED_EVENT_TYPE,
-          message: `Start completed for agent "${startedAgent.name}".`,
-          metadata: {
-            fromStatus: validation.agent.status,
-            toStatus: "running",
-            ...runnerLifecycleEventMetadata(runnerStart),
-          },
-        },
-      ]);
+          runnerId: startedAgent.runnerId,
+          source: "lifecycle",
+          startedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
 
-      logAgentStart("start_completed", {
-        agentId: normalizedAgentId,
-        fromStatus: validation.agent.status,
-        toStatus: "running",
-        ...runnerLifecycleEventMetadata(runnerStart),
-      });
-
-      return {
-        ok: true,
-        agent: toStartedAgent(startedAgent),
-        event: {
-          type: START_REQUESTED_EVENT_TYPE,
-        },
-        events: [
+        await recordAgentEventsInTransaction(tx, [
           {
+            agentId: startedAgent.id,
+            actorUserId: startedAgent.userId,
+            type: START_REQUESTED_EVENT_TYPE,
+            message: `Start requested for agent "${startedAgent.name}".`,
+            metadata: {
+              fromStatus: validation.agent.status,
+              toStatus: "running",
+              ...runnerLifecycleEventMetadata(runnerStart),
+            },
+          },
+          {
+            agentId: startedAgent.id,
+            actorUserId: startedAgent.userId,
+            type: START_COMPLETED_EVENT_TYPE,
+            message: `Start completed for agent "${startedAgent.name}".`,
+            metadata: {
+              fromStatus: validation.agent.status,
+              toStatus: "running",
+              ...runnerLifecycleEventMetadata(runnerStart),
+            },
+          },
+        ]);
+
+        logAgentStart("start_completed", {
+          agentId: normalizedAgentId,
+          fromStatus: validation.agent.status,
+          toStatus: "running",
+          ...runnerLifecycleEventMetadata(runnerStart),
+        });
+
+        return {
+          ok: true,
+          agent: toStartedAgent(startedAgent),
+          event: {
             type: START_REQUESTED_EVENT_TYPE,
           },
-          {
-            type: START_COMPLETED_EVENT_TYPE,
-          },
-        ],
-      };
-    });
+          events: [
+            {
+              type: START_REQUESTED_EVENT_TYPE,
+            },
+            {
+              type: START_COMPLETED_EVENT_TYPE,
+            },
+          ],
+        };
+      });
+    } catch (error) {
+      const cleanup = await runnerAdapter.stop(normalizedAgentId).catch(() => null);
+
+      if (cleanup?.ok) {
+        if (reservation.reserved) {
+          await restoreAgentStartReservation({
+            agentId: normalizedAgentId,
+            connection,
+            previousStatus: validation.agent.status,
+            previousStatusReason: validation.agent.statusReason,
+            now,
+          });
+        }
+      } else {
+        await markAgentStartFinalizationCleanupFailed({
+          agentId: normalizedAgentId,
+          connection,
+          now,
+        }).catch(() => undefined);
+      }
+
+      logAgentStart("start_finalization_failed", {
+        agentId: normalizedAgentId,
+        assignedRunnerId: reservation.assignedRunner?.id ?? null,
+        runnerCleanupSucceeded: cleanup?.ok === true,
+        reservationRestored: cleanup?.ok === true && reservation.reserved,
+      });
+
+      throw error;
+    }
   } catch {
     throw new AgentLifecyclePersistenceError();
   } finally {

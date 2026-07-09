@@ -89,6 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Production Vercel builds now apply pending Drizzle migrations before compiling, and successful remote runner starts compensate failed lifecycle finalization instead of leaving agents permanently `starting`.
 - DigitalOcean cloud runner bootstrap now validates and reloads the generated Caddy reverse-proxy config after writing it, so fresh Droplets serve the runner endpoint instead of the package default site.
 - Stale runner heartbeats now reconcile runners to `offline` before status summaries, cloud provisioning summaries, and placement decisions read them.
 - Production agent starts now return a clear no-online-runner response instead of falling back to local Docker when no cloud runner is ready.

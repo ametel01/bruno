@@ -408,6 +408,63 @@ describe("create agent persistence", () => {
     expect(afterFailedStart).toHaveLength(1);
   });
 
+  it("stops the runner and restores the reservation when start finalization fails", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Finalization Failure Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, created.agent.userId, {
+      maxAgents: 1,
+      runningAgents: 0,
+    });
+    const calls: string[] = [];
+
+    await connection.client`alter table agent_usage_periods rename to agent_usage_periods_unavailable`;
+
+    try {
+      await expect(
+        startAgentForDevelopmentUser(created.agent.id, {
+          createConnection: () => connection,
+          manualRunnerAdapter: () =>
+            createManualLifecycleRunnerStub(calls, {
+              connection,
+              runnerId: runner.id,
+            }),
+          now: () => new Date("2026-07-07T01:10:00.000Z"),
+          runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
+        }),
+      ).rejects.toMatchObject({ name: "AgentLifecyclePersistenceError" });
+    } finally {
+      await connection.client`alter table agent_usage_periods_unavailable rename to agent_usage_periods`;
+    }
+
+    const [persistedAgent] = await connection.db
+      .select({
+        runnerId: agents.runnerId,
+        status: agents.status,
+        statusReason: agents.statusReason,
+      })
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+    const events = await connection.db
+      .select({ type: agentEvents.type })
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, created.agent.id));
+
+    expect(persistedAgent).toEqual({
+      runnerId: runner.id,
+      status: "stopped",
+      statusReason: null,
+    });
+    expect(events).toEqual([{ type: "agent.created" }]);
+    expect(calls).toEqual([
+      `start:${created.agent.id}`,
+      `logs:${created.agent.id}`,
+      `stop:${created.agent.id}`,
+    ]);
+  });
+
   it("assigns new agents to an eligible online runner when placement succeeds", async () => {
     const userId = await ensureDevelopmentUser(connection);
     const runner = await seedOnlineRunnerWithHeartbeat(connection, userId, {

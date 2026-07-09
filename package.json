@@ -26,7 +26,8 @@
     "test": "DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} vitest run --no-file-parallelism",
     "test:e2e": "PORT=${PORT:-3100} DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:${PORT:-3100}} playwright test",
     "typecheck": "tsc --noEmit",
-    "verify": "bun run format:check && bun run lint && bun run typecheck && bun run test && bun run build && bun run test:e2e"
+    "verify": "bun run format:check && bun run lint && bun run typecheck && bun run test && bun run build && bun run test:e2e",
+    "vercel-build": "bun scripts/vercel-build.ts"
   },
   "dependencies": {
     "@digitalocean/dots": "^1.17.0",
