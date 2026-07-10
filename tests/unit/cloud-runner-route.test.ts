@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const USER_ID = "00000000-0000-4000-8000-000000000111";
+
 const mocks = vi.hoisted(() => {
   class RunnerProvisioningPersistenceError extends Error {
     constructor(readonly cause?: unknown) {
@@ -9,7 +11,10 @@ const mocks = vi.hoisted(() => {
   }
 
   return {
-    createDigitalOceanRunnerForDevelopmentUser: vi.fn(),
+    createDigitalOceanRunnerForUser: vi.fn(),
+    requireConfiguredApplicationUser: vi.fn(
+      async (): Promise<Record<string, unknown>> => ({ ok: true, userId: USER_ID }),
+    ),
     RunnerProvisioningPersistenceError,
   };
 });
@@ -19,18 +24,24 @@ vi.mock("@/src/server/runners/runner-provisioning", async (importOriginal) => {
 
   return {
     ...actual,
-    createDigitalOceanRunnerForDevelopmentUser: mocks.createDigitalOceanRunnerForDevelopmentUser,
+    createDigitalOceanRunnerForUser: mocks.createDigitalOceanRunnerForUser,
     RunnerProvisioningPersistenceError: mocks.RunnerProvisioningPersistenceError,
   };
 });
 
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
+}));
+
 describe("POST /api/runners route", () => {
   afterEach(() => {
-    mocks.createDigitalOceanRunnerForDevelopmentUser.mockReset();
+    mocks.createDigitalOceanRunnerForUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
   });
 
   it("returns the safe #152-compatible create runner DTO", async () => {
-    mocks.createDigitalOceanRunnerForDevelopmentUser.mockResolvedValueOnce({
+    mocks.createDigitalOceanRunnerForUser.mockResolvedValueOnce({
       ok: true,
       duplicate: false,
       runner: {
@@ -84,7 +95,7 @@ describe("POST /api/runners route", () => {
         },
       },
     });
-    expect(mocks.createDigitalOceanRunnerForDevelopmentUser).toHaveBeenCalledWith({
+    expect(mocks.createDigitalOceanRunnerForUser).toHaveBeenCalledWith(USER_ID, {
       provider: "digitalocean",
       name: "DigitalOcean Runner",
     });
@@ -96,7 +107,7 @@ describe("POST /api/runners route", () => {
   });
 
   it("returns duplicate create runner state safely", async () => {
-    mocks.createDigitalOceanRunnerForDevelopmentUser.mockResolvedValueOnce({
+    mocks.createDigitalOceanRunnerForUser.mockResolvedValueOnce({
       ok: true,
       duplicate: true,
       runner: {
@@ -129,7 +140,7 @@ describe("POST /api/runners route", () => {
   });
 
   it("returns safe persistence errors without echoing cause details", async () => {
-    mocks.createDigitalOceanRunnerForDevelopmentUser.mockRejectedValueOnce(
+    mocks.createDigitalOceanRunnerForUser.mockRejectedValueOnce(
       new mocks.RunnerProvisioningPersistenceError({
         code: "ECONNREFUSED",
         message: "postgres://user:pass@localhost/db agb_reg_should_not_render",

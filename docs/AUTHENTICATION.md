@@ -3,6 +3,11 @@
 AgentBay resolves one server-only `AGENTBAY_AUTH_MODE` policy before browser requests reach the
 application user resolver. Request hosts and forwarded headers never select the mode.
 
+Browser runner settings and APIs resolve that configured application user once, then scope runner
+lists, placement, provisioning, registration-token creation, and credential rotation or revocation
+to the resulting internal user ID. A runner owned by another user is indistinguishable from a
+missing runner and cannot trigger provider or credential side effects.
+
 ## Local development
 
 For a non-Vercel loopback `NEXT_PUBLIC_APP_URL`, an unset mode defaults to `development`:

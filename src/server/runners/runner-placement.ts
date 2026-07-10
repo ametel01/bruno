@@ -159,6 +159,7 @@ export async function selectRunnerPlacementForUserInTransaction(
   await reconcileStaleRunnerHeartbeatsInTransaction(tx, {
     now: options.now ?? new Date(),
     userId,
+    ...(input.runnerId ? { runnerId: input.runnerId } : {}),
   });
 
   const activeAgentRows = await tx

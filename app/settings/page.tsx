@@ -7,18 +7,19 @@ import {
 } from "@/app/settings/_components/runner-management-controls";
 import {
   CostEstimatePersistenceError,
-  getCostEstimatesForDevelopmentUser,
+  getCostEstimatesForUser,
   type RunnerCostEstimateDto,
 } from "@/src/server/costs/cost-estimates";
 import {
   CloudRunnerProvisioningPersistenceError,
-  listCloudRunnerProvisioningSummariesForDevelopmentUser,
+  listCloudRunnerProvisioningSummariesForUser,
 } from "@/src/server/runners/cloud-runner-provisioning";
 import {
-  listSettingsRunnerManagementSummariesForDevelopmentUser,
+  listSettingsRunnerManagementSummariesForUser,
   ManualRunnerStatusPersistenceError,
   type SettingsRunnerManagementSummary,
 } from "@/src/server/runners/manual-runner-status";
+import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
 type SettingsRunnerHealthResult = Awaited<ReturnType<typeof loadSettingsRunnerHealth>>;
 type SettingsRunnerCostResult = { ok: true; runners: RunnerCostEstimateDto[] } | { ok: false };
@@ -26,10 +27,27 @@ type SettingsRunnerCostResult = { ok: true; runners: RunnerCostEstimateDto[] } |
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
+  const applicationUser = await requireConfiguredApplicationUser();
+
+  if (!applicationUser.ok) {
+    return (
+      <ProductShell
+        active="settings"
+        eyebrow="Settings"
+        title="Authentication required"
+        description="Sign in to load user-scoped workspace settings."
+      >
+        <div className="safe-error" role="alert">
+          Authentication is required.
+        </div>
+      </ProductShell>
+    );
+  }
+
   const [runnerHealthResult, cloudRunnersResult, runnerCostResult] = await Promise.all([
-    loadSettingsRunnerHealth(),
-    loadSettingsCloudRunners(),
-    loadSettingsRunnerCosts(),
+    loadSettingsRunnerHealth(applicationUser.userId),
+    loadSettingsCloudRunners(applicationUser.userId),
+    loadSettingsRunnerCosts(applicationUser.userId),
   ]);
 
   return (
@@ -37,7 +55,7 @@ export default async function SettingsPage() {
       active="settings"
       eyebrow="Settings"
       title="Workspace settings"
-      description="Configuration categories are visible while registered runner health is read from the current development workspace."
+      description="Configuration categories are visible while registered runner health is read from your workspace."
     >
       <div className="settings-grid">
         <PlaceholderPanel title="Application">
@@ -141,11 +159,11 @@ function SettingsRunnerHealthItem({ runner }: { runner: SettingsRunnerManagement
   );
 }
 
-async function loadSettingsRunnerHealth() {
+async function loadSettingsRunnerHealth(userId: string) {
   try {
     return {
       ok: true as const,
-      runners: await listSettingsRunnerManagementSummariesForDevelopmentUser(),
+      runners: await listSettingsRunnerManagementSummariesForUser(userId),
     };
   } catch (error) {
     if (error instanceof ManualRunnerStatusPersistenceError) {
@@ -158,11 +176,11 @@ async function loadSettingsRunnerHealth() {
   }
 }
 
-async function loadSettingsCloudRunners() {
+async function loadSettingsCloudRunners(userId: string) {
   try {
     return {
       ok: true as const,
-      runners: await listCloudRunnerProvisioningSummariesForDevelopmentUser(),
+      runners: await listCloudRunnerProvisioningSummariesForUser(userId),
     };
   } catch (error) {
     if (error instanceof CloudRunnerProvisioningPersistenceError) {
@@ -175,9 +193,9 @@ async function loadSettingsCloudRunners() {
   }
 }
 
-async function loadSettingsRunnerCosts(): Promise<SettingsRunnerCostResult> {
+async function loadSettingsRunnerCosts(userId: string): Promise<SettingsRunnerCostResult> {
   try {
-    const estimates = await getCostEstimatesForDevelopmentUser();
+    const estimates = await getCostEstimatesForUser(userId);
 
     return {
       ok: true,

@@ -1,8 +1,12 @@
 import {
-  revokeRunnerCredentialForDevelopmentUser,
+  revokeRunnerCredentialForUser,
   RunnerCredentialLifecyclePersistenceError,
   type RunnerCredentialLifecycleFailureReason,
 } from "@/src/server/runners/runner-credential-lifecycle";
+import {
+  type ConfiguredApplicationUserResolution,
+  requireConfiguredApplicationUser,
+} from "@/src/server/users/configured-application-user";
 
 type RunnerCredentialRouteContext = {
   params: Promise<{
@@ -10,9 +14,17 @@ type RunnerCredentialRouteContext = {
   }>;
 };
 
+type RunnerCredentialRouteDependencies = {
+  requireApplicationUser?: typeof requireConfiguredApplicationUser;
+};
+
 export const dynamic = "force-dynamic";
 
-export async function POST(_request: Request, context: RunnerCredentialRouteContext) {
+export async function POST(
+  _request: Request,
+  context: RunnerCredentialRouteContext,
+  dependencies: RunnerCredentialRouteDependencies = {},
+) {
   const decodedRunnerId = await decodeRunnerId(context);
 
   if (!decodedRunnerId.ok) {
@@ -20,7 +32,15 @@ export async function POST(_request: Request, context: RunnerCredentialRouteCont
   }
 
   try {
-    const result = await revokeRunnerCredentialForDevelopmentUser({
+    const applicationUser = await (
+      dependencies.requireApplicationUser ?? requireConfiguredApplicationUser
+    )();
+
+    if (!applicationUser.ok) {
+      return authenticationResponse(applicationUser);
+    }
+
+    const result = await revokeRunnerCredentialForUser(applicationUser.userId, {
       runnerId: decodedRunnerId.runnerId,
     });
 
@@ -36,6 +56,23 @@ export async function POST(_request: Request, context: RunnerCredentialRouteCont
 
     throw error;
   }
+}
+
+function authenticationResponse(
+  result: Exclude<ConfiguredApplicationUserResolution, { ok: true }>,
+) {
+  return Response.json(
+    {
+      error: {
+        code: result.code,
+        message:
+          result.status === 401
+            ? "Authentication is required."
+            : "Authentication is not configured safely.",
+      },
+    },
+    { status: result.status },
+  );
 }
 
 async function decodeRunnerId(context: RunnerCredentialRouteContext): Promise<

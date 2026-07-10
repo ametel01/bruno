@@ -63,12 +63,47 @@ export async function rotateRunnerCredentialForDevelopmentUser(
 
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
+
+  try {
+    const userId = await connection.db.transaction((tx) => getDevelopmentUserId(tx));
+
+    return userId
+      ? await rotateRunnerCredentialForUser(userId, input, {
+          ...dependencies,
+          createConnection: () => connection,
+        })
+      : { ok: false, reason: "runner_not_found" };
+  } catch (error) {
+    if (error instanceof RunnerCredentialLifecyclePersistenceError) {
+      throw error;
+    }
+
+    throw new RunnerCredentialLifecyclePersistenceError(error);
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function rotateRunnerCredentialForUser(
+  userId: string,
+  input: { runnerId: string },
+  dependencies: { createConnection?: () => DatabaseConnection; now?: () => Date } = {},
+): Promise<RotateRunnerCredentialResult> {
+  const runnerId = validateRunnerId(input.runnerId);
+
+  if (!runnerId.ok) {
+    return { ok: false, reason: runnerId.reason };
+  }
+
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
-  const generatedCredential = createRunnerCredential();
 
   try {
     return await connection.db.transaction(async (tx) => {
-      const runner = await findDevelopmentRunner(tx, runnerId.value);
+      const runner = await findRunnerForUser(tx, userId, runnerId.value);
 
       if (!runner) {
         return { ok: false, reason: "runner_not_found" } as const;
@@ -86,6 +121,7 @@ export async function rotateRunnerCredentialForDevelopmentUser(
         throw new Error("Runner credential rotation found active credentials but revoked none.");
       }
 
+      const generatedCredential = createRunnerCredential();
       const [createdCredential] = await tx
         .insert(runnerCredentials)
         .values({
@@ -102,7 +138,7 @@ export async function rotateRunnerCredentialForDevelopmentUser(
         throw new Error("Runner credential rotation insert returned no rows.");
       }
 
-      await touchRunner(tx, runner.id, now);
+      await touchRunner(tx, userId, runner.id, now);
 
       return {
         ok: true,
@@ -137,11 +173,47 @@ export async function revokeRunnerCredentialForDevelopmentUser(
 
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
+
+  try {
+    const userId = await connection.db.transaction((tx) => getDevelopmentUserId(tx));
+
+    return userId
+      ? await revokeRunnerCredentialForUser(userId, input, {
+          ...dependencies,
+          createConnection: () => connection,
+        })
+      : { ok: false, reason: "runner_not_found" };
+  } catch (error) {
+    if (error instanceof RunnerCredentialLifecyclePersistenceError) {
+      throw error;
+    }
+
+    throw new RunnerCredentialLifecyclePersistenceError(error);
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function revokeRunnerCredentialForUser(
+  userId: string,
+  input: { runnerId: string },
+  dependencies: { createConnection?: () => DatabaseConnection; now?: () => Date } = {},
+): Promise<RevokeRunnerCredentialResult> {
+  const runnerId = validateRunnerId(input.runnerId);
+
+  if (!runnerId.ok) {
+    return { ok: false, reason: runnerId.reason };
+  }
+
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
 
   try {
     return await connection.db.transaction(async (tx) => {
-      const runner = await findDevelopmentRunner(tx, runnerId.value);
+      const runner = await findRunnerForUser(tx, userId, runnerId.value);
 
       if (!runner) {
         return { ok: false, reason: "runner_not_found" } as const;
@@ -159,7 +231,7 @@ export async function revokeRunnerCredentialForDevelopmentUser(
         throw new Error("Runner credential revocation found active credentials but revoked none.");
       }
 
-      await touchRunner(tx, runner.id, now);
+      await touchRunner(tx, userId, runner.id, now);
 
       return {
         ok: true,
@@ -203,26 +275,15 @@ function validateRunnerId(runnerId: string):
   return { ok: true, value: normalizedRunnerId };
 }
 
-async function findDevelopmentRunner(
+async function findRunnerForUser(
   tx: Parameters<Parameters<DatabaseConnection["db"]["transaction"]>[0]>[0],
+  userId: string,
   runnerId: string,
 ): Promise<{ id: string } | null> {
-  const developmentUserId = await getDevelopmentUserId(tx);
-
-  if (!developmentUserId) {
-    return null;
-  }
-
   const [runner] = await tx
     .select({ id: runners.id })
     .from(runners)
-    .where(
-      and(
-        eq(runners.id, runnerId),
-        eq(runners.userId, developmentUserId),
-        isNull(runners.deletedAt),
-      ),
-    )
+    .where(and(eq(runners.id, runnerId), eq(runners.userId, userId), isNull(runners.deletedAt)))
     .limit(1);
 
   return runner ?? null;
@@ -273,10 +334,14 @@ async function revokeActiveRunnerCredentials(
 
 async function touchRunner(
   tx: Parameters<Parameters<DatabaseConnection["db"]["transaction"]>[0]>[0],
+  userId: string,
   runnerId: string,
   now: Date,
 ): Promise<void> {
-  await tx.update(runners).set({ updatedAt: now }).where(eq(runners.id, runnerId));
+  await tx
+    .update(runners)
+    .set({ updatedAt: now })
+    .where(and(eq(runners.id, runnerId), eq(runners.userId, userId)));
 }
 
 function isUuid(value: string): boolean {

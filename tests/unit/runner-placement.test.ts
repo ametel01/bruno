@@ -112,6 +112,44 @@ describe.sequential("runner placement contract", () => {
     expect(persistedForeignRunner?.status).toBe("online");
   });
 
+  it("does not reconcile owned runners when an explicit foreign runner is requested", async () => {
+    const now = new Date("2026-07-06T04:03:00.000Z");
+    const staleObservedAt = new Date(now.getTime() - RUNNER_HEARTBEAT_STALE_THRESHOLD_MS - 1);
+    const [owner, foreignUser] = await connection.db
+      .insert(users)
+      .values([{}, {}])
+      .returning({ id: users.id });
+
+    if (!owner || !foreignUser) {
+      throw new Error("User inserts returned no rows.");
+    }
+
+    const ownedRunner = await seedOnlineRunner(connection, owner.id, {
+      name: "Owned Stale Runner",
+    });
+    const foreignRunner = await seedOnlineRunner(connection, foreignUser.id, {
+      name: "Foreign Requested Runner",
+    });
+    await seedHeartbeat(connection, ownedRunner.id, {
+      observedAt: staleObservedAt,
+      metrics: { maxAgents: 2, runningAgents: 0 },
+    });
+
+    const result = await selectRunnerPlacementForUser(
+      owner.id,
+      { runnerId: foreignRunner.id },
+      { createConnection: () => connection, now: () => now },
+    );
+    const [persistedOwnedRunner] = await connection.db
+      .select({ status: runners.status, updatedAt: runners.updatedAt })
+      .from(runners)
+      .where(eq(runners.id, ownedRunner.id));
+
+    expect(result).toEqual({ ok: false, reason: "no_online_runner" });
+    expect(persistedOwnedRunner?.status).toBe("online");
+    expect(persistedOwnedRunner?.updatedAt).not.toEqual(now);
+  });
+
   it("rejects online runners when runner capacity is unavailable", async () => {
     const userId = await seedDevelopmentUser(connection);
     const runner = await seedOnlineRunner(connection, userId, {

@@ -237,7 +237,7 @@ export async function reconcileStaleRunnerHeartbeats(
 
 export async function reconcileStaleRunnerHeartbeatsInTransaction(
   tx: RunnerHeartbeatTransaction,
-  input: { now: Date; staleThresholdMs?: number; userId?: string },
+  input: { now: Date; staleThresholdMs?: number; userId?: string; runnerId?: string },
 ): Promise<RunnerHeartbeatReconciliationResult> {
   const staleThresholdMs = input.staleThresholdMs ?? RUNNER_HEARTBEAT_STALE_THRESHOLD_MS;
   const cutoff = new Date(input.now.getTime() - staleThresholdMs);
@@ -248,6 +248,10 @@ export async function reconcileStaleRunnerHeartbeatsInTransaction(
 
   if (input.userId) {
     runnerFilters.push(eq(runners.userId, input.userId));
+  }
+
+  if (input.runnerId) {
+    runnerFilters.push(eq(runners.id, input.runnerId));
   }
 
   const candidateRunners = await tx

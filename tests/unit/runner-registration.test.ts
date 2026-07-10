@@ -14,6 +14,7 @@ import {
 } from "@/src/server/runners/runner-auth-secrets";
 import {
   createRunnerRegistrationTokenForDevelopmentUser,
+  createRunnerRegistrationTokenForUser,
   exchangeRunnerRegistrationTokenForCredential,
   type ExchangeRunnerRegistrationTokenResult,
 } from "@/src/server/runners/runner-registration";
@@ -57,6 +58,29 @@ describe.sequential("runner registration service", () => {
     expect(persistedTokens[0]?.tokenHash).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(persistedTokens)).not.toContain(result.registrationToken.token);
     expect(JSON.stringify(result)).not.toContain(persistedTokens[0]?.tokenHash);
+  });
+
+  it("creates registration-token material only for the explicit user", async () => {
+    const [owner, foreignUser] = await connection.db
+      .insert(users)
+      .values([{}, {}])
+      .returning({ id: users.id });
+
+    if (!owner || !foreignUser) {
+      throw new Error("Test user inserts returned no rows.");
+    }
+
+    const result = await createRunnerRegistrationTokenForUser(owner.id, {
+      createConnection: () => connection,
+      now: () => new Date("2026-07-05T08:00:00.000Z"),
+    });
+    const persistedTokens = await connection.db
+      .select({ userId: runnerRegistrationTokens.userId })
+      .from(runnerRegistrationTokens);
+
+    expect(result.registrationToken.token).toMatch(/^agb_reg_/);
+    expect(persistedTokens).toEqual([{ userId: owner.id }]);
+    expect(persistedTokens).not.toContainEqual({ userId: foreignUser.id });
   });
 
   it("exchanges a valid registration token for runner identity and one visible-once credential", async () => {

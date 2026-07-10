@@ -6,7 +6,9 @@ import { recordRunnerHeartbeat } from "@/src/server/runners/runner-heartbeat";
 import { hashRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
 import {
   revokeRunnerCredentialForDevelopmentUser,
+  revokeRunnerCredentialForUser,
   rotateRunnerCredentialForDevelopmentUser,
+  rotateRunnerCredentialForUser,
 } from "@/src/server/runners/runner-credential-lifecycle";
 import { DEVELOPMENT_USER_METADATA_KEY } from "@/src/server/users/development-user";
 
@@ -210,6 +212,73 @@ describe.sequential("runner credential lifecycle", () => {
       ),
     ).resolves.toEqual({ ok: false, reason: "runner_credential_already_revoked" });
   });
+
+  it("returns the same not-found result for missing and foreign runners without touching credentials", async () => {
+    const [owner, foreignUser] = await connection.db
+      .insert(users)
+      .values([{}, {}])
+      .returning({ id: users.id });
+
+    if (!owner || !foreignUser) {
+      throw new Error("Test user inserts returned no rows.");
+    }
+
+    const credential = "agb_run_foreigncredential_123456789012345678901234567890";
+    const foreignRunner = await seedRunnerCredentialForUser(connection, foreignUser.id, {
+      credentialValue: credential,
+      updatedAt: new Date("2026-07-05T10:00:00.000Z"),
+    });
+    await connection.db
+      .update(runners)
+      .set({
+        kind: "digitalocean",
+        provider: "digitalocean",
+        providerResourceId: "foreign-droplet-1",
+        region: "sfo3",
+        sizeSlug: "s-1vcpu-1gb",
+        image: "ubuntu-24-04-x64",
+        provisioningStatus: "ready",
+        provisioningStartedAt: new Date("2026-07-05T09:55:00.000Z"),
+        provisioningCompletedAt: new Date("2026-07-05T10:00:00.000Z"),
+        updatedAt: new Date("2026-07-05T10:00:00.000Z"),
+      })
+      .where(eq(runners.id, foreignRunner.id));
+    const missingRunnerId = "00000000-0000-4000-8000-000000000199";
+
+    await expect(
+      rotateRunnerCredentialForUser(
+        owner.id,
+        { runnerId: foreignRunner.id },
+        { createConnection: () => connection },
+      ),
+    ).resolves.toEqual({ ok: false, reason: "runner_not_found" });
+    await expect(
+      rotateRunnerCredentialForUser(
+        owner.id,
+        { runnerId: missingRunnerId },
+        { createConnection: () => connection },
+      ),
+    ).resolves.toEqual({ ok: false, reason: "runner_not_found" });
+    await expect(
+      revokeRunnerCredentialForUser(
+        owner.id,
+        { runnerId: foreignRunner.id },
+        { createConnection: () => connection },
+      ),
+    ).resolves.toEqual({ ok: false, reason: "runner_not_found" });
+
+    const [persistedCredential] = await connection.db
+      .select({ status: runnerCredentials.status, revokedAt: runnerCredentials.revokedAt })
+      .from(runnerCredentials)
+      .where(eq(runnerCredentials.runnerId, foreignRunner.id));
+    const [persistedRunner] = await connection.db
+      .select({ updatedAt: runners.updatedAt })
+      .from(runners)
+      .where(eq(runners.id, foreignRunner.id));
+
+    expect(persistedCredential).toEqual({ status: "active", revokedAt: null });
+    expect(persistedRunner?.updatedAt).toEqual(new Date("2026-07-05T10:00:00.000Z"));
+  });
 });
 
 async function seedDevelopmentRunnerCredential(
@@ -230,14 +299,27 @@ async function seedDevelopmentRunnerCredential(
     value: user.id,
   });
 
+  return seedRunnerCredentialForUser(connection, user.id, input);
+}
+
+async function seedRunnerCredentialForUser(
+  connection: DatabaseConnection,
+  userId: string,
+  input: {
+    credentialValue: string;
+    credentialOverrides?: Partial<typeof runnerCredentials.$inferInsert>;
+    updatedAt?: Date;
+  },
+): Promise<{ id: string }> {
   const [runner] = await connection.db
     .insert(runners)
     .values({
-      userId: user.id,
+      userId,
       name: "Lifecycle Test Runner",
       kind: "manual_vps",
       endpointUrl: "https://lifecycle-runner.example.com",
       status: "active",
+      updatedAt: input.updatedAt,
     })
     .returning({ id: runners.id });
 

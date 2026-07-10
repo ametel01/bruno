@@ -11,6 +11,7 @@ import {
 import { RUNNER_HEARTBEAT_STALE_THRESHOLD_MS } from "@/src/server/runners/runner-heartbeat";
 import {
   listCloudRunnerProvisioningSummariesForDevelopmentUser,
+  listCloudRunnerProvisioningSummariesForUser,
   toCloudRunnerProvisioningSummary,
 } from "@/src/server/runners/cloud-runner-provisioning";
 import { DEVELOPMENT_USER_METADATA_KEY } from "@/src/server/users/development-user";
@@ -313,6 +314,77 @@ describe.sequential("cloud runner provisioning stale bootstrap reconciliation", 
       },
     });
     expect(persistedRunner).toEqual({ status: "offline", updatedAt: now });
+  });
+
+  it("lists and reconciles cloud runners only for the explicit user", async () => {
+    const now = new Date("2026-07-06T02:30:00.000Z");
+    const staleObservedAt = new Date(now.getTime() - RUNNER_HEARTBEAT_STALE_THRESHOLD_MS - 1);
+    const [owner, foreignUser] = await connection.db
+      .insert(users)
+      .values([{}, {}])
+      .returning({ id: users.id });
+
+    if (!owner || !foreignUser) {
+      throw new Error("User inserts returned no rows.");
+    }
+
+    const runnerValues = (userId: string, name: string, providerResourceId: string) => ({
+      userId,
+      name,
+      kind: "digitalocean",
+      endpointUrl: "https://203-0-113-11.sslip.io",
+      status: "online",
+      provider: "digitalocean",
+      providerResourceId,
+      region: "sfo3",
+      sizeSlug: "s-1vcpu-512mb-10gb",
+      image: "ubuntu-24-04-x64",
+      provisioningStatus: "ready",
+      provisioningStartedAt: new Date("2026-07-06T01:00:00.000Z"),
+      provisioningCompletedAt: new Date("2026-07-06T01:03:00.000Z"),
+      createdAt: new Date("2026-07-06T01:00:00.000Z"),
+      updatedAt: new Date("2026-07-06T01:03:00.000Z"),
+    });
+    const [ownedRunner, foreignRunner] = await connection.db
+      .insert(runners)
+      .values([
+        runnerValues(owner.id, "Owned Cloud Runner", "owned-droplet"),
+        runnerValues(foreignUser.id, "Foreign Cloud Runner", "foreign-droplet"),
+      ])
+      .returning({ id: runners.id });
+
+    if (!ownedRunner || !foreignRunner) {
+      throw new Error("Runner inserts returned no rows.");
+    }
+
+    await connection.db.insert(runnerHeartbeats).values([
+      {
+        runnerId: ownedRunner.id,
+        status: "online",
+        metadata: {},
+        observedAt: new Date("2026-07-06T02:29:30.000Z"),
+      },
+      {
+        runnerId: foreignRunner.id,
+        status: "online",
+        metadata: {},
+        observedAt: staleObservedAt,
+      },
+    ]);
+
+    const summaries = await listCloudRunnerProvisioningSummariesForUser(owner.id, {
+      createConnection: () => connection,
+      now: () => now,
+    });
+    const [persistedForeignRunner] = await connection.db
+      .select({ status: runners.status })
+      .from(runners)
+      .where(eq(runners.id, foreignRunner.id));
+
+    expect(summaries).toEqual([
+      expect.objectContaining({ id: ownedRunner.id, name: "Owned Cloud Runner" }),
+    ]);
+    expect(persistedForeignRunner?.status).toBe("online");
   });
 });
 
