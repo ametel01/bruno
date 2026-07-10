@@ -194,6 +194,7 @@ export async function listCloudRunnerProvisioningSummariesForUser(
   try {
     return await connection.db.transaction(async (tx) => {
       await reconcileTimedOutWaitingForRunnerRows(tx, userId, now);
+      await reconcileStaleRunnerHeartbeatsInTransaction(tx, { now, userId });
 
       const rows = await tx
         .select({

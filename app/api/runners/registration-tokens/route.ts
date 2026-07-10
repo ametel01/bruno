@@ -1,13 +1,23 @@
 import {
-  createRunnerRegistrationTokenForDevelopmentUser,
+  createRunnerRegistrationTokenForUser,
   RunnerRegistrationPersistenceError,
 } from "@/src/server/runners/runner-registration";
+import {
+  type ConfiguredApplicationUserResolution,
+  requireConfiguredApplicationUser,
+} from "@/src/server/users/configured-application-user";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(_request: Request) {
+  const applicationUser = await requireConfiguredApplicationUser();
+
+  if (!applicationUser.ok) {
+    return authenticationResponse(applicationUser);
+  }
+
   try {
-    const body = await createRunnerRegistrationTokenForDevelopmentUser();
+    const body = await createRunnerRegistrationTokenForUser(applicationUser.userId);
 
     return Response.json(body, {
       status: 201,
@@ -19,6 +29,23 @@ export async function POST(_request: Request) {
 
     throw error;
   }
+}
+
+function authenticationResponse(
+  result: Exclude<ConfiguredApplicationUserResolution, { ok: true }>,
+) {
+  return Response.json(
+    {
+      error: {
+        code: result.code,
+        message:
+          result.status === 401
+            ? "Authentication is required."
+            : "Authentication is not configured safely.",
+      },
+    },
+    { status: result.status },
+  );
 }
 
 function runnerRegistrationPersistenceErrorResponse(error: RunnerRegistrationPersistenceError) {

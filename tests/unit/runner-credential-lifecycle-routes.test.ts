@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const USER_ID = "00000000-0000-4000-8000-000000000111";
+
 const mocks = vi.hoisted(() => {
   class RunnerCredentialLifecyclePersistenceError extends Error {
     constructor(readonly cause?: unknown) {
@@ -9,8 +11,11 @@ const mocks = vi.hoisted(() => {
   }
 
   return {
-    rotateRunnerCredentialForDevelopmentUser: vi.fn(),
-    revokeRunnerCredentialForDevelopmentUser: vi.fn(),
+    rotateRunnerCredentialForUser: vi.fn(),
+    revokeRunnerCredentialForUser: vi.fn(),
+    requireConfiguredApplicationUser: vi.fn(
+      async (): Promise<Record<string, unknown>> => ({ ok: true, userId: USER_ID }),
+    ),
     RunnerCredentialLifecyclePersistenceError,
   };
 });
@@ -21,20 +26,26 @@ vi.mock("@/src/server/runners/runner-credential-lifecycle", async (importOrigina
 
   return {
     ...actual,
-    rotateRunnerCredentialForDevelopmentUser: mocks.rotateRunnerCredentialForDevelopmentUser,
-    revokeRunnerCredentialForDevelopmentUser: mocks.revokeRunnerCredentialForDevelopmentUser,
+    rotateRunnerCredentialForUser: mocks.rotateRunnerCredentialForUser,
+    revokeRunnerCredentialForUser: mocks.revokeRunnerCredentialForUser,
     RunnerCredentialLifecyclePersistenceError: mocks.RunnerCredentialLifecyclePersistenceError,
   };
 });
 
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
+}));
+
 describe("POST /api/runners/:runnerId/credentials/rotate route", () => {
   afterEach(() => {
-    mocks.rotateRunnerCredentialForDevelopmentUser.mockReset();
-    mocks.revokeRunnerCredentialForDevelopmentUser.mockReset();
+    mocks.rotateRunnerCredentialForUser.mockReset();
+    mocks.revokeRunnerCredentialForUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
   });
 
   it("returns one visible-once rotated credential without hash or old raw credential material", async () => {
-    mocks.rotateRunnerCredentialForDevelopmentUser.mockResolvedValueOnce({
+    mocks.rotateRunnerCredentialForUser.mockResolvedValueOnce({
       ok: true,
       runner: { id: "00000000-0000-4000-8000-000000000131" },
       credential: {
@@ -64,7 +75,7 @@ describe("POST /api/runners/:runnerId/credentials/rotate route", () => {
         rotatedAt: "2026-07-05T08:01:00.000Z",
       },
     });
-    expect(mocks.rotateRunnerCredentialForDevelopmentUser).toHaveBeenCalledWith({
+    expect(mocks.rotateRunnerCredentialForUser).toHaveBeenCalledWith(USER_ID, {
       runnerId: "00000000-0000-4000-8000-000000000131",
     });
     expect(JSON.stringify(body)).not.toContain("credentialHash");
@@ -98,7 +109,7 @@ describe("POST /api/runners/:runnerId/credentials/rotate route", () => {
       ["runner_not_found", 404, "runner_not_found"],
       ["runner_credential_already_revoked", 409, "runner_credential_already_revoked"],
     ] as const) {
-      mocks.rotateRunnerCredentialForDevelopmentUser.mockResolvedValueOnce({ ok: false, reason });
+      mocks.rotateRunnerCredentialForUser.mockResolvedValueOnce({ ok: false, reason });
 
       const response = await POST(
         new Request(
@@ -121,7 +132,7 @@ describe("POST /api/runners/:runnerId/credentials/rotate route", () => {
   });
 
   it("returns a safe persistence error", async () => {
-    mocks.rotateRunnerCredentialForDevelopmentUser.mockRejectedValueOnce(
+    mocks.rotateRunnerCredentialForUser.mockRejectedValueOnce(
       new mocks.RunnerCredentialLifecyclePersistenceError({ code: "42P01" }),
     );
     const { POST } = await import("@/app/api/runners/[runnerId]/credentials/rotate/route");
@@ -145,16 +156,38 @@ describe("POST /api/runners/:runnerId/credentials/rotate route", () => {
     });
     expect(JSON.stringify(body)).not.toContain("postgres://");
   });
+
+  it("rejects signed-out rotation before credential access", async () => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      code: "unauthenticated",
+    });
+    const { POST } = await import("@/app/api/runners/[runnerId]/credentials/rotate/route");
+
+    const response = await POST(
+      new Request(
+        "http://localhost/api/runners/00000000-0000-4000-8000-000000000131/credentials/rotate",
+        { method: "POST" },
+      ),
+      { params: Promise.resolve({ runnerId: "00000000-0000-4000-8000-000000000131" }) },
+    );
+
+    expect(response.status).toBe(401);
+    expect(mocks.rotateRunnerCredentialForUser).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/runners/:runnerId/credentials/revoke route", () => {
   afterEach(() => {
-    mocks.rotateRunnerCredentialForDevelopmentUser.mockReset();
-    mocks.revokeRunnerCredentialForDevelopmentUser.mockReset();
+    mocks.rotateRunnerCredentialForUser.mockReset();
+    mocks.revokeRunnerCredentialForUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
   });
 
   it("revokes credentials without returning raw credential or hash material", async () => {
-    mocks.revokeRunnerCredentialForDevelopmentUser.mockResolvedValueOnce({
+    mocks.revokeRunnerCredentialForUser.mockResolvedValueOnce({
       ok: true,
       runner: { id: "00000000-0000-4000-8000-000000000131" },
       credential: {
@@ -182,7 +215,7 @@ describe("POST /api/runners/:runnerId/credentials/revoke route", () => {
         revokedCredentialCount: 1,
       },
     });
-    expect(mocks.revokeRunnerCredentialForDevelopmentUser).toHaveBeenCalledWith({
+    expect(mocks.revokeRunnerCredentialForUser).toHaveBeenCalledWith(USER_ID, {
       runnerId: "00000000-0000-4000-8000-000000000131",
     });
     expect(JSON.stringify(body)).not.toContain("agb_run_");
@@ -213,7 +246,7 @@ describe("POST /api/runners/:runnerId/credentials/revoke route", () => {
       ["runner_not_found", 404, "runner_not_found"],
       ["runner_credential_already_revoked", 409, "runner_credential_already_revoked"],
     ] as const) {
-      mocks.revokeRunnerCredentialForDevelopmentUser.mockResolvedValueOnce({ ok: false, reason });
+      mocks.revokeRunnerCredentialForUser.mockResolvedValueOnce({ ok: false, reason });
 
       const response = await POST(
         new Request(

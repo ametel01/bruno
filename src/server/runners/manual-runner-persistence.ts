@@ -207,13 +207,38 @@ export async function getAssignedRunnerForActiveAgentDevelopmentUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
+    const userId = await connection.db.transaction((tx) => getDevelopmentUserId(tx));
+
+    return userId
+      ? await getAssignedRunnerForActiveAgentForUser(userId, normalizedAgentId, {
+          createConnection: () => connection,
+        })
+      : null;
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function getAssignedRunnerForActiveAgentForUser(
+  userId: string,
+  agentId: string,
+  dependencies: {
+    createConnection?: () => DatabaseConnection;
+  } = {},
+): Promise<ManualRunnerRecord | null> {
+  const normalizedAgentId = agentId.trim();
+
+  if (!isValidAgentId(normalizedAgentId)) {
+    return null;
+  }
+
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
     return await connection.db.transaction(async (tx) => {
-      const userId = await getDevelopmentUserId(tx);
-
-      if (!userId) {
-        return null;
-      }
-
       const [row] = await tx
         .select({
           id: runners.id,

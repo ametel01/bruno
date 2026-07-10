@@ -237,19 +237,27 @@ export async function reconcileStaleRunnerHeartbeats(
 
 export async function reconcileStaleRunnerHeartbeatsInTransaction(
   tx: RunnerHeartbeatTransaction,
-  input: { now: Date; staleThresholdMs?: number },
+  input: { now: Date; staleThresholdMs?: number; userId?: string; runnerId?: string },
 ): Promise<RunnerHeartbeatReconciliationResult> {
   const staleThresholdMs = input.staleThresholdMs ?? RUNNER_HEARTBEAT_STALE_THRESHOLD_MS;
   const cutoff = new Date(input.now.getTime() - staleThresholdMs);
+  const runnerFilters = [
+    inArray(runners.status, [RUNNER_HEARTBEAT_ONLINE_STATUS, RUNNER_HEARTBEAT_DEGRADED_STATUS]),
+    isNull(runners.deletedAt),
+  ];
+
+  if (input.userId) {
+    runnerFilters.push(eq(runners.userId, input.userId));
+  }
+
+  if (input.runnerId) {
+    runnerFilters.push(eq(runners.id, input.runnerId));
+  }
+
   const candidateRunners = await tx
     .select({ id: runners.id })
     .from(runners)
-    .where(
-      and(
-        inArray(runners.status, [RUNNER_HEARTBEAT_ONLINE_STATUS, RUNNER_HEARTBEAT_DEGRADED_STATUS]),
-        isNull(runners.deletedAt),
-      ),
-    );
+    .where(and(...runnerFilters));
   const staleRunnerIds: string[] = [];
 
   for (const candidate of candidateRunners) {

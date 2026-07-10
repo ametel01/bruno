@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const USER_ID = "00000000-0000-4000-8000-000000000111";
+
 const mocks = vi.hoisted(() => {
   class RunnerProvisioningPersistenceError extends Error {
     constructor(readonly cause?: unknown) {
@@ -9,7 +11,10 @@ const mocks = vi.hoisted(() => {
   }
 
   return {
-    createDigitalOceanRunnerForDevelopmentUser: vi.fn(),
+    createDigitalOceanRunnerForUser: vi.fn(),
+    requireConfiguredApplicationUser: vi.fn(
+      async (): Promise<Record<string, unknown>> => ({ ok: true, userId: USER_ID }),
+    ),
     RunnerProvisioningPersistenceError,
   };
 });
@@ -19,18 +24,24 @@ vi.mock("@/src/server/runners/runner-provisioning", async (importOriginal) => {
 
   return {
     ...actual,
-    createDigitalOceanRunnerForDevelopmentUser: mocks.createDigitalOceanRunnerForDevelopmentUser,
+    createDigitalOceanRunnerForUser: mocks.createDigitalOceanRunnerForUser,
     RunnerProvisioningPersistenceError: mocks.RunnerProvisioningPersistenceError,
   };
 });
 
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
+}));
+
 describe("POST /api/runners route", () => {
   afterEach(() => {
-    mocks.createDigitalOceanRunnerForDevelopmentUser.mockReset();
+    mocks.createDigitalOceanRunnerForUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
   });
 
   it("returns created provisioning runner state without registration or provider secrets", async () => {
-    mocks.createDigitalOceanRunnerForDevelopmentUser.mockResolvedValueOnce({
+    mocks.createDigitalOceanRunnerForUser.mockResolvedValueOnce({
       ok: true,
       duplicate: false,
       runner: safeRunnerDto({ status: "waiting_for_runner" }),
@@ -55,7 +66,7 @@ describe("POST /api/runners route", () => {
         provisioning: { status: "waiting_for_runner" },
       },
     });
-    expect(mocks.createDigitalOceanRunnerForDevelopmentUser).toHaveBeenCalledWith({
+    expect(mocks.createDigitalOceanRunnerForUser).toHaveBeenCalledWith(USER_ID, {
       provider: "digitalocean",
       name: "Cloud Runner",
     });
@@ -65,7 +76,7 @@ describe("POST /api/runners route", () => {
   });
 
   it("returns safe failed provisioning state from provider failures", async () => {
-    mocks.createDigitalOceanRunnerForDevelopmentUser.mockResolvedValueOnce({
+    mocks.createDigitalOceanRunnerForUser.mockResolvedValueOnce({
       ok: true,
       duplicate: false,
       runner: safeRunnerDto({
@@ -116,9 +127,9 @@ describe("POST /api/runners route", () => {
         issues: [{ field: "body", message: "Request body must be valid JSON." }],
       },
     });
-    expect(mocks.createDigitalOceanRunnerForDevelopmentUser).not.toHaveBeenCalled();
+    expect(mocks.createDigitalOceanRunnerForUser).not.toHaveBeenCalled();
 
-    mocks.createDigitalOceanRunnerForDevelopmentUser.mockResolvedValueOnce({
+    mocks.createDigitalOceanRunnerForUser.mockResolvedValueOnce({
       ok: false,
       reason: "validation_failed",
       issues: [{ field: "provider", message: "Provider must be digitalocean." }],
@@ -143,7 +154,7 @@ describe("POST /api/runners route", () => {
   });
 
   it("returns duplicate submit state with 200 status", async () => {
-    mocks.createDigitalOceanRunnerForDevelopmentUser.mockResolvedValueOnce({
+    mocks.createDigitalOceanRunnerForUser.mockResolvedValueOnce({
       ok: true,
       duplicate: true,
       runner: safeRunnerDto({ status: "waiting_for_runner" }),
@@ -168,7 +179,7 @@ describe("POST /api/runners route", () => {
   });
 
   it("returns safe provider configuration and persistence errors", async () => {
-    mocks.createDigitalOceanRunnerForDevelopmentUser.mockResolvedValueOnce({
+    mocks.createDigitalOceanRunnerForUser.mockResolvedValueOnce({
       ok: false,
       reason: "provider_not_configured",
     });
@@ -190,7 +201,7 @@ describe("POST /api/runners route", () => {
       },
     });
 
-    mocks.createDigitalOceanRunnerForDevelopmentUser.mockRejectedValueOnce(
+    mocks.createDigitalOceanRunnerForUser.mockRejectedValueOnce(
       new mocks.RunnerProvisioningPersistenceError({ code: "42P01" }),
     );
 
@@ -209,6 +220,26 @@ describe("POST /api/runners route", () => {
         message: "Database schema is missing. Run migrations before creating runners.",
       },
     });
+  });
+
+  it("requires one configured application user before parsing or provisioning", async () => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      code: "unauthenticated",
+    });
+    const { POST } = await import("@/app/api/runners/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/runners", { method: "POST", body: "{" }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      error: { code: "unauthenticated", message: "Authentication is required." },
+    });
+    expect(mocks.requireConfiguredApplicationUser).toHaveBeenCalledOnce();
+    expect(mocks.createDigitalOceanRunnerForUser).not.toHaveBeenCalled();
   });
 });
 

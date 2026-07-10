@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const USER_ID = "00000000-0000-4000-8000-000000000111";
+
 const mocks = vi.hoisted(() => {
   class RunnerRegistrationPersistenceError extends Error {
     constructor(readonly cause?: unknown) {
@@ -9,8 +11,11 @@ const mocks = vi.hoisted(() => {
   }
 
   return {
-    createRunnerRegistrationTokenForDevelopmentUser: vi.fn(),
+    createRunnerRegistrationTokenForUser: vi.fn(),
     exchangeRunnerRegistrationTokenForCredential: vi.fn(),
+    requireConfiguredApplicationUser: vi.fn(
+      async (): Promise<Record<string, unknown>> => ({ ok: true, userId: USER_ID }),
+    ),
     RunnerRegistrationPersistenceError,
   };
 });
@@ -20,22 +25,27 @@ vi.mock("@/src/server/runners/runner-registration", async (importOriginal) => {
 
   return {
     ...actual,
-    createRunnerRegistrationTokenForDevelopmentUser:
-      mocks.createRunnerRegistrationTokenForDevelopmentUser,
+    createRunnerRegistrationTokenForUser: mocks.createRunnerRegistrationTokenForUser,
     exchangeRunnerRegistrationTokenForCredential:
       mocks.exchangeRunnerRegistrationTokenForCredential,
     RunnerRegistrationPersistenceError: mocks.RunnerRegistrationPersistenceError,
   };
 });
 
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
+}));
+
 describe("POST /api/runners/registration-tokens route", () => {
   afterEach(() => {
-    mocks.createRunnerRegistrationTokenForDevelopmentUser.mockReset();
+    mocks.createRunnerRegistrationTokenForUser.mockReset();
     mocks.exchangeRunnerRegistrationTokenForCredential.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
   });
 
   it("returns one visible-once raw registration token without hash material", async () => {
-    mocks.createRunnerRegistrationTokenForDevelopmentUser.mockResolvedValueOnce({
+    mocks.createRunnerRegistrationTokenForUser.mockResolvedValueOnce({
       registrationToken: {
         id: "00000000-0000-4000-8000-000000000101",
         token: "agb_reg_1234567890123456789012345678901234567890123",
@@ -61,10 +71,11 @@ describe("POST /api/runners/registration-tokens route", () => {
     });
     expect(JSON.stringify(body)).not.toContain("tokenHash");
     expect(JSON.stringify(body)).not.toContain("credentialHash");
+    expect(mocks.createRunnerRegistrationTokenForUser).toHaveBeenCalledWith(USER_ID);
   });
 
   it("returns safe persistence errors", async () => {
-    mocks.createRunnerRegistrationTokenForDevelopmentUser.mockRejectedValueOnce(
+    mocks.createRunnerRegistrationTokenForUser.mockRejectedValueOnce(
       new mocks.RunnerRegistrationPersistenceError({ code: "42P01" }),
     );
     const { POST } = await import("@/app/api/runners/registration-tokens/route");
@@ -83,11 +94,30 @@ describe("POST /api/runners/registration-tokens route", () => {
     });
     expect(JSON.stringify(body)).not.toContain("postgres://");
   });
+
+  it("rejects signed-out browser token creation before generating a token", async () => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      code: "unauthenticated",
+    });
+    const { POST } = await import("@/app/api/runners/registration-tokens/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/runners/registration-tokens", { method: "POST" }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      error: { code: "unauthenticated", message: "Authentication is required." },
+    });
+    expect(mocks.createRunnerRegistrationTokenForUser).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /runner/v1/register route", () => {
   afterEach(() => {
-    mocks.createRunnerRegistrationTokenForDevelopmentUser.mockReset();
+    mocks.createRunnerRegistrationTokenForUser.mockReset();
     mocks.exchangeRunnerRegistrationTokenForCredential.mockReset();
     vi.restoreAllMocks();
   });
@@ -158,6 +188,7 @@ describe("POST /runner/v1/register route", () => {
     expect(JSON.stringify(body)).not.toContain("credentialHash");
     expect(JSON.stringify(ingressLogs)).not.toContain("agb_reg_");
     expect(JSON.stringify(ingressLogs)).not.toContain("agb_run_");
+    expect(mocks.requireConfiguredApplicationUser).not.toHaveBeenCalled();
   });
 
   it("returns safe validation failures for missing, malformed, and wrong-prefix tokens", async () => {

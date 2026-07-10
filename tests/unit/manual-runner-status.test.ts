@@ -5,8 +5,10 @@ import { agents, appMetadata, runnerHeartbeats, runners, users } from "@/src/ser
 import { RUNNER_HEARTBEAT_STALE_THRESHOLD_MS } from "@/src/server/runners/runner-heartbeat";
 import {
   getAssignedManualRunnerStatusForDevelopmentUserAgent,
+  getAssignedManualRunnerStatusForUserAgent,
   listManualRunnerStatusSummariesForDevelopmentUser,
   listSettingsRunnerManagementSummariesForDevelopmentUser,
+  listSettingsRunnerManagementSummariesForUser,
   type ManualRunnerCapacitySummary,
   toAssignedManualRunnerStatusSummary,
   toManualRunnerStatusSummary,
@@ -274,6 +276,76 @@ describe.sequential("manual runner status stale heartbeat reconciliation", () =>
     });
   });
 
+  it("lists and reconciles settings runners only for the explicit user", async () => {
+    const now = new Date("2026-07-05T08:02:00.000Z");
+    const staleObservedAt = new Date(now.getTime() - RUNNER_HEARTBEAT_STALE_THRESHOLD_MS - 1);
+    const [owner, foreignUser] = await connection.db
+      .insert(users)
+      .values([{}, {}])
+      .returning({ id: users.id });
+
+    if (!owner || !foreignUser) {
+      throw new Error("User inserts returned no rows.");
+    }
+
+    const [ownedRunner, foreignRunner] = await connection.db
+      .insert(runners)
+      .values([
+        {
+          userId: owner.id,
+          name: "Owned Settings Runner",
+          kind: "manual_vps",
+          endpointUrl: "https://owned-settings-runner.example.com",
+          status: "online",
+        },
+        {
+          userId: foreignUser.id,
+          name: "Foreign Settings Runner",
+          kind: "manual_vps",
+          endpointUrl: "https://foreign-settings-runner.example.com",
+          status: "online",
+        },
+      ])
+      .returning({ id: runners.id });
+
+    if (!ownedRunner || !foreignRunner) {
+      throw new Error("Runner inserts returned no rows.");
+    }
+
+    await connection.db.insert(runnerHeartbeats).values([
+      {
+        runnerId: ownedRunner.id,
+        status: "online",
+        metadata: {},
+        observedAt: new Date("2026-07-05T08:01:30.000Z"),
+      },
+      {
+        runnerId: foreignRunner.id,
+        status: "online",
+        metadata: {},
+        observedAt: staleObservedAt,
+      },
+    ]);
+
+    const summaries = await listSettingsRunnerManagementSummariesForUser(owner.id, {
+      createConnection: () => connection,
+      now: () => now,
+    });
+    const [persistedForeignRunner] = await connection.db
+      .select({ status: runners.status })
+      .from(runners)
+      .where(eq(runners.id, foreignRunner.id));
+
+    expect(summaries).toEqual([
+      expect.objectContaining({
+        managementId: ownedRunner.id,
+        name: "Owned Settings Runner",
+        status: "online",
+      }),
+    ]);
+    expect(persistedForeignRunner?.status).toBe("online");
+  });
+
   it("reconciles stale online runners before assigned runner summaries", async () => {
     const now = new Date("2026-07-05T08:02:00.000Z");
     const { agent, runner } = await seedStaleManualRunner(connection, now, {
@@ -296,6 +368,77 @@ describe.sequential("manual runner status stale heartbeat reconciliation", () =>
       lastSeenAt: "2026-07-05T08:00:29.999Z",
     });
     expect(persistedRunner).toEqual({ status: "offline", updatedAt: now });
+  });
+
+  it("does not reconcile any runner for a foreign agent lookup", async () => {
+    const now = new Date("2026-07-05T08:02:00.000Z");
+    const staleObservedAt = new Date(now.getTime() - RUNNER_HEARTBEAT_STALE_THRESHOLD_MS - 1);
+    const [owner, foreignUser] = await connection.db
+      .insert(users)
+      .values([{}, {}])
+      .returning({ id: users.id });
+
+    if (!owner || !foreignUser) {
+      throw new Error("User inserts returned no rows.");
+    }
+
+    const [ownedRunner, foreignRunner] = await connection.db
+      .insert(runners)
+      .values([
+        {
+          userId: owner.id,
+          name: "Owned Stale Runner",
+          kind: "manual_vps",
+          endpointUrl: "https://owned-stale-runner.example.com",
+          status: "online",
+        },
+        {
+          userId: foreignUser.id,
+          name: "Foreign Assigned Runner",
+          kind: "manual_vps",
+          endpointUrl: "https://foreign-assigned-runner.example.com",
+          status: "online",
+        },
+      ])
+      .returning({ id: runners.id });
+
+    if (!ownedRunner || !foreignRunner) {
+      throw new Error("Runner inserts returned no rows.");
+    }
+
+    const [foreignAgent] = await connection.db
+      .insert(agents)
+      .values({
+        userId: foreignUser.id,
+        runnerId: foreignRunner.id,
+        name: "Foreign Agent",
+        templateKey: "research_agent",
+        status: "running",
+      })
+      .returning({ id: agents.id });
+
+    if (!foreignAgent) {
+      throw new Error("Agent insert returned no rows.");
+    }
+
+    await connection.db.insert(runnerHeartbeats).values({
+      runnerId: ownedRunner.id,
+      status: "online",
+      metadata: {},
+      observedAt: staleObservedAt,
+    });
+
+    const result = await getAssignedManualRunnerStatusForUserAgent(owner.id, foreignAgent.id, {
+      createConnection: () => connection,
+      now: () => now,
+    });
+    const [persistedOwnedRunner] = await connection.db
+      .select({ status: runners.status })
+      .from(runners)
+      .where(eq(runners.id, ownedRunner.id));
+
+    expect(result).toBeNull();
+    expect(persistedOwnedRunner?.status).toBe("online");
   });
 });
 

@@ -139,13 +139,39 @@ export async function createRunnerRegistrationTokenForDevelopmentUser(
 ): Promise<CreateRunnerRegistrationTokenResult> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
+
+  try {
+    const userId = await connection.db.transaction((tx) => getOrCreateDevelopmentUserId(tx));
+
+    return await createRunnerRegistrationTokenForUser(userId, {
+      ...dependencies,
+      createConnection: () => connection,
+    });
+  } catch (error) {
+    if (error instanceof RunnerRegistrationPersistenceError) {
+      throw error;
+    }
+
+    throw new RunnerRegistrationPersistenceError(error);
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function createRunnerRegistrationTokenForUser(
+  userId: string,
+  dependencies: { createConnection?: () => DatabaseConnection; now?: () => Date } = {},
+): Promise<CreateRunnerRegistrationTokenResult> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
   const expiresAt = new Date(now.getTime() + DEFAULT_REGISTRATION_TOKEN_TTL_MS);
   const generated = createRunnerRegistrationToken();
 
   try {
     return await connection.db.transaction(async (tx) => {
-      const userId = await getOrCreateDevelopmentUserId(tx);
       const [createdToken] = await tx
         .insert(runnerRegistrationTokens)
         .values({

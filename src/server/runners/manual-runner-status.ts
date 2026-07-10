@@ -146,13 +146,16 @@ export async function listManualRunnerStatusSummariesForDevelopmentUser(
 
 export async function listManualRunnerStatusSummariesForUser(
   userId: string,
-  dependencies: { createConnection?: () => DatabaseConnection } = {},
+  dependencies: { createConnection?: () => DatabaseConnection; now?: () => Date } = {},
 ): Promise<ManualRunnerStatusSummary[]> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
 
   try {
     return await connection.db.transaction(async (tx) => {
+      await reconcileStaleRunnerHeartbeatsInTransaction(tx, { now, userId });
+
       const rows = await tx
         .select({
           id: runners.id,
@@ -217,14 +220,34 @@ export async function listSettingsRunnerManagementSummariesForDevelopmentUser(
   const now = dependencies.now?.() ?? new Date();
 
   try {
+    const userId = await connection.db.transaction((tx) => getDevelopmentUserId(tx));
+
+    return userId
+      ? await listSettingsRunnerManagementSummariesForUser(userId, {
+          createConnection: () => connection,
+          now: () => now,
+        })
+      : [];
+  } catch {
+    throw new ManualRunnerStatusPersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function listSettingsRunnerManagementSummariesForUser(
+  userId: string,
+  dependencies: { createConnection?: () => DatabaseConnection; now?: () => Date } = {},
+): Promise<SettingsRunnerManagementSummary[]> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
+
+  try {
     return await connection.db.transaction(async (tx) => {
-      const userId = await getDevelopmentUserId(tx);
-
-      if (!userId) {
-        return [];
-      }
-
-      await reconcileStaleRunnerHeartbeatsInTransaction(tx, { now });
+      await reconcileStaleRunnerHeartbeatsInTransaction(tx, { now, userId });
 
       const rows = await tx
         .select({
@@ -360,13 +383,40 @@ export async function getAssignedManualRunnerStatusForDevelopmentUserAgent(
 export async function getAssignedManualRunnerStatusForUserAgent(
   userId: string,
   agentId: string,
-  dependencies: { createConnection?: () => DatabaseConnection } = {},
+  dependencies: { createConnection?: () => DatabaseConnection; now?: () => Date } = {},
 ): Promise<AssignedManualRunnerStatusSummary | null> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
 
   try {
     return await connection.db.transaction(async (tx) => {
+      const [ownedRunner] = await tx
+        .select({ id: runners.id })
+        .from(agents)
+        .innerJoin(runners, eq(runners.id, agents.runnerId))
+        .where(
+          and(
+            eq(agents.id, agentId),
+            eq(agents.userId, userId),
+            isNull(agents.deletedAt),
+            isNotNull(agents.runnerId),
+            eq(runners.userId, userId),
+            isNull(runners.deletedAt),
+          ),
+        )
+        .limit(1);
+
+      if (!ownedRunner) {
+        return null;
+      }
+
+      await reconcileStaleRunnerHeartbeatsInTransaction(tx, {
+        now,
+        userId,
+        runnerId: ownedRunner.id,
+      });
+
       const [row] = await tx
         .select({
           id: runners.id,

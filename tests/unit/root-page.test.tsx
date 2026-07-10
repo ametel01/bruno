@@ -35,7 +35,7 @@ const mocks = vi.hoisted(() => ({
   listActiveAgentsForUser: vi.fn(),
   listCloudRunnerProvisioningSummariesForUser: vi.fn(),
   listManualRunnerStatusSummariesForUser: vi.fn(),
-  listSettingsRunnerManagementSummariesForDevelopmentUser: vi.fn(),
+  listSettingsRunnerManagementSummariesForUser: vi.fn(),
   getAssignedManualRunnerStatusForUserAgent: vi.fn(),
   listAgentBackupsForUser: vi.fn(),
   listPendingApprovalsForUserAgent: vi.fn(),
@@ -115,8 +115,10 @@ vi.mock("@/src/server/runners/manual-runner-status", async (importOriginal) => {
     ...actual,
     getAssignedManualRunnerStatusForUserAgent: mocks.getAssignedManualRunnerStatusForUserAgent,
     listManualRunnerStatusSummariesForUser: mocks.listManualRunnerStatusSummariesForUser,
+    listSettingsRunnerManagementSummariesForUser:
+      mocks.listSettingsRunnerManagementSummariesForUser,
     listSettingsRunnerManagementSummariesForDevelopmentUser:
-      mocks.listSettingsRunnerManagementSummariesForDevelopmentUser,
+      mocks.listSettingsRunnerManagementSummariesForUser,
   };
 });
 
@@ -251,7 +253,7 @@ describe("product shell routes", () => {
     mocks.listManualRunnerStatusSummariesForUser.mockResolvedValue([]);
     mocks.listCloudRunnerProvisioningSummariesForUser.mockResolvedValue([]);
     mocks.getCostEstimatesForUser.mockResolvedValue(costEstimates());
-    mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockResolvedValue([]);
+    mocks.listSettingsRunnerManagementSummariesForUser.mockResolvedValue([]);
     mocks.getAssignedManualRunnerStatusForUserAgent.mockResolvedValue(null);
     mocks.listAgentBackupsForUser.mockResolvedValue([]);
     mocks.listPendingApprovalsForUser.mockResolvedValue([]);
@@ -276,7 +278,7 @@ describe("product shell routes", () => {
     mocks.listActiveAgentsForUser.mockReset();
     mocks.listCloudRunnerProvisioningSummariesForUser.mockReset();
     mocks.listManualRunnerStatusSummariesForUser.mockReset();
-    mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockReset();
+    mocks.listSettingsRunnerManagementSummariesForUser.mockReset();
     mocks.getAssignedManualRunnerStatusForUserAgent.mockReset();
     mocks.listAgentBackupsForUser.mockReset();
     mocks.listPendingApprovalsForUserAgent.mockReset();
@@ -674,7 +676,7 @@ describe("product shell routes", () => {
   });
 
   it("renders cloud runner failures with safe next steps in settings", async () => {
-    mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockResolvedValueOnce([]);
+    mocks.listSettingsRunnerManagementSummariesForUser.mockResolvedValueOnce([]);
     mocks.listCloudRunnerProvisioningSummariesForUser.mockResolvedValueOnce([
       {
         id: "00000000-0000-4000-8000-000000000156",
@@ -1570,7 +1572,7 @@ describe("product shell routes", () => {
   });
 
   it("renders registered runner controls in settings without raw secret fields", async () => {
-    mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockResolvedValueOnce([
+    mocks.listSettingsRunnerManagementSummariesForUser.mockResolvedValueOnce([
       {
         managementId: "00000000-0000-4000-8000-000000000133",
         name: "Settings Runner",
@@ -1611,6 +1613,28 @@ describe("product shell routes", () => {
     expect(html).not.toContain("runnerId");
     expect(html).not.toContain("00000000-0000-4000-8000-000000000133");
     expect(html).not.toContain("cpuPercent");
+    expect(mocks.requireConfiguredApplicationUser).toHaveBeenCalledOnce();
+    expect(mocks.listSettingsRunnerManagementSummariesForUser).toHaveBeenCalledWith(
+      APPLICATION_USER_ID,
+    );
+    expect(mocks.listCloudRunnerProvisioningSummariesForUser).toHaveBeenCalledWith(
+      APPLICATION_USER_ID,
+    );
+    expect(mocks.getCostEstimatesForUser).toHaveBeenCalledWith(APPLICATION_USER_ID);
+  });
+
+  it.each(PAGE_AUTH_FAILURES)("renders a safe settings boundary for $name", async ({ result }) => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValueOnce(result);
+
+    const element = await SettingsPage();
+    const html = renderToStaticMarkup(element);
+
+    expect(html).toContain("Authentication required");
+    expect(html).not.toContain("Create Registration Token");
+    expect(mocks.requireConfiguredApplicationUser).toHaveBeenCalledOnce();
+    expect(mocks.listSettingsRunnerManagementSummariesForUser).not.toHaveBeenCalled();
+    expect(mocks.listCloudRunnerProvisioningSummariesForUser).not.toHaveBeenCalled();
+    expect(mocks.getCostEstimatesForUser).not.toHaveBeenCalled();
   });
 });
 

@@ -5,10 +5,14 @@ import {
   runnerProvisioningEvents,
   runnerRegistrationTokens,
   runners,
+  users,
 } from "@/src/server/db/schema";
 import { FakeDigitalOceanProvider } from "@/src/server/runners/digitalocean-provider";
 import { createRunnerRegistrationToken } from "@/src/server/runners/runner-auth-secrets";
-import { createDigitalOceanRunnerForDevelopmentUser } from "@/src/server/runners/runner-provisioning";
+import {
+  createDigitalOceanRunnerForDevelopmentUser,
+  createDigitalOceanRunnerForUser,
+} from "@/src/server/runners/runner-provisioning";
 
 describe.sequential("runner provisioning service", () => {
   let connection: DatabaseConnection;
@@ -200,6 +204,69 @@ describe.sequential("runner provisioning service", () => {
     expect(serializedResult).not.toContain("dop_v1_super_secret");
     expect(serializedPersistence).not.toContain(generatedRegistrationToken.value);
     expect(serializedPersistence).not.toContain("dop_v1_super_secret");
+  });
+
+  it("creates a DigitalOcean runner and registration token for the explicit user", async () => {
+    const [owner, foreignUser] = await connection.db
+      .insert(users)
+      .values([{}, {}])
+      .returning({ id: users.id });
+
+    if (!owner || !foreignUser) {
+      throw new Error("User inserts returned no rows.");
+    }
+
+    await connection.db.insert(runners).values({
+      userId: foreignUser.id,
+      name: "Foreign Provisioning Runner",
+      kind: "digitalocean",
+      status: "provisioning",
+      provider: "digitalocean",
+      region: "sfo3",
+      sizeSlug: "s-1vcpu-1gb",
+      image: "ubuntu-24-04-x64",
+      provisioningStatus: "creating",
+      provisioningStartedAt: new Date("2026-07-06T01:00:00.000Z"),
+    });
+    const provider = new FakeDigitalOceanProvider({ idPrefix: "owned-droplet" });
+
+    const result = await createDigitalOceanRunnerForUser(
+      owner.id,
+      { provider: "digitalocean", name: "Owned Cloud Runner" },
+      {
+        createConnection: () => connection,
+        provider,
+        readConfig: () => ({
+          token: "dop_v1_super_secret",
+          runnerBearerToken: "runner-command-token",
+          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          region: "sfo3",
+          sizeSlug: "s-1vcpu-1gb",
+          image: "ubuntu-24-04-x64",
+          tags: ["agentbay"],
+        }),
+        now: sequenceClock("2026-07-06T02:00:00.000Z"),
+      },
+    );
+    const persistedRunners = await connection.db
+      .select({ userId: runners.userId, name: runners.name })
+      .from(runners);
+    const persistedTokens = await connection.db
+      .select({ userId: runnerRegistrationTokens.userId })
+      .from(runnerRegistrationTokens);
+
+    expect(result).toMatchObject({
+      ok: true,
+      duplicate: false,
+      runner: { name: "Owned Cloud Runner" },
+    });
+    expect(persistedRunners).toEqual(
+      expect.arrayContaining([
+        { userId: foreignUser.id, name: "Foreign Provisioning Runner" },
+        { userId: owner.id, name: "Owned Cloud Runner" },
+      ]),
+    );
+    expect(persistedTokens).toEqual([{ userId: owner.id }]);
   });
 
   it("creates a managed DigitalOcean SSH key before creating a Droplet when the account has none", async () => {
