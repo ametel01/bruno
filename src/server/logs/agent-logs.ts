@@ -169,6 +169,40 @@ export async function listLatestActiveAgentProcessLogs(input: {
   }));
 }
 
+export async function listLatestActiveAgentProcessLogsForUser(input: {
+  db: AgentLogQueryExecutor;
+  userId: string;
+  limit?: number;
+}): Promise<LatestAgentProcessLogDto[]> {
+  const limit = normalizeAgentLogLimit(input.limit);
+  const rows = await input.db
+    .select({
+      ...logSelection,
+      agentName: agents.name,
+    })
+    .from(agentLogs)
+    .innerJoin(agents, eq(agentLogs.agentId, agents.id))
+    .where(
+      and(
+        eq(agents.userId, input.userId),
+        isNull(agents.deletedAt),
+        or(
+          isNotNull(agentLogs.runnerId),
+          isNotNull(agentLogs.localRunnerProcessId),
+          isNotNull(agentLogs.dockerRunnerContainerId),
+        ),
+      ),
+    )
+    .orderBy(desc(agentLogs.createdAt), desc(agentLogs.sequence), desc(agentLogs.id))
+    .limit(limit);
+
+  return rows.map((row) => ({
+    ...mapAgentLogToDto(row),
+    agentName: row.agentName,
+    agentHref: `/agents/${row.agentId}`,
+  }));
+}
+
 export async function generateSimulatedRuntimeLogsForRunningAgent(input: {
   db: AgentLogGenerationExecutor;
   agentId: string;

@@ -1,7 +1,11 @@
 import {
   AgentApprovalPersistenceError,
-  denyApprovalForDevelopmentUser,
+  denyApprovalForUser,
 } from "@/src/server/approvals/agent-approvals";
+import {
+  type ConfiguredApplicationUserResolution,
+  requireConfiguredApplicationUser,
+} from "@/src/server/users/configured-application-user";
 
 type DenyApprovalRouteContext = {
   params: Promise<{
@@ -9,9 +13,17 @@ type DenyApprovalRouteContext = {
   }>;
 };
 
+type DenyApprovalRouteDependencies = {
+  requireApplicationUser?: typeof requireConfiguredApplicationUser;
+};
+
 export const dynamic = "force-dynamic";
 
-export async function POST(_request: Request, context: DenyApprovalRouteContext) {
+export async function POST(
+  _request: Request,
+  context: DenyApprovalRouteContext,
+  dependencies: DenyApprovalRouteDependencies = {},
+) {
   const params = await context.params;
   const approvalId = params.approvalId ?? "";
   let decodedApprovalId: string;
@@ -27,10 +39,19 @@ export async function POST(_request: Request, context: DenyApprovalRouteContext)
   }
 
   try {
-    const result = await denyApprovalForDevelopmentUser(decodedApprovalId);
+    const applicationUser = await (
+      dependencies.requireApplicationUser ?? requireConfiguredApplicationUser
+    )();
+
+    if (!applicationUser.ok) {
+      return authenticationResponse(applicationUser);
+    }
+
+    const result = await denyApprovalForUser(applicationUser.userId, decodedApprovalId);
 
     if (result.ok) {
-      return Response.json(result);
+      const { resolvedBy: _resolvedBy, ...approval } = result.approval;
+      return Response.json({ ...result, approval });
     }
 
     if (result.reason === "missing_approval_id" || result.reason === "malformed_approval_id") {
@@ -80,6 +101,23 @@ export async function POST(_request: Request, context: DenyApprovalRouteContext)
 
     throw error;
   }
+}
+
+function authenticationResponse(
+  result: Exclude<ConfiguredApplicationUserResolution, { ok: true }>,
+) {
+  return Response.json(
+    {
+      error: {
+        code: result.code,
+        message:
+          result.status === 401
+            ? "Authentication is required."
+            : "Authentication is not configured safely.",
+      },
+    },
+    { status: result.status },
+  );
 }
 
 function validationResponse() {

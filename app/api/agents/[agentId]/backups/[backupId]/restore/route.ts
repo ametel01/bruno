@@ -1,9 +1,13 @@
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import {
-  restoreBackupForDevelopmentUser,
+  restoreBackupForUser,
   type RestoredBackupResponse,
   RestoreBackupPersistenceError,
 } from "@/src/server/backups/restore-backup";
+import {
+  type ConfiguredApplicationUserResolution,
+  requireConfiguredApplicationUser,
+} from "@/src/server/users/configured-application-user";
 
 type ClientBackupResponse = Omit<RestoredBackupResponse["backup"], "storageUri">;
 type ClientRestoredAgentResponse = Pick<
@@ -18,9 +22,17 @@ type RestoreBackupRouteContext = {
   }>;
 };
 
+type RestoreBackupRouteDependencies = {
+  requireApplicationUser?: typeof requireConfiguredApplicationUser;
+};
+
 export const dynamic = "force-dynamic";
 
-export async function POST(_request: Request, context: RestoreBackupRouteContext) {
+export async function POST(
+  _request: Request,
+  context: RestoreBackupRouteContext,
+  dependencies: RestoreBackupRouteDependencies = {},
+) {
   const params = await context.params;
   const decodedAgentId = decodeUuid(params.agentId ?? "");
   const decodedBackupId = decodeUuid(params.backupId ?? "");
@@ -34,9 +46,18 @@ export async function POST(_request: Request, context: RestoreBackupRouteContext
   }
 
   try {
-    const result = await restoreBackupForDevelopmentUser({
+    const applicationUser = await (
+      dependencies.requireApplicationUser ?? requireConfiguredApplicationUser
+    )();
+
+    if (!applicationUser.ok) {
+      return authenticationResponse(applicationUser);
+    }
+
+    const result = await restoreBackupForUser({
       agentId: decodedAgentId.value,
       backupId: decodedBackupId.value,
+      userId: applicationUser.userId,
     });
 
     if (result.ok) {
@@ -100,6 +121,23 @@ export async function POST(_request: Request, context: RestoreBackupRouteContext
 
     throw error;
   }
+}
+
+function authenticationResponse(
+  result: Exclude<ConfiguredApplicationUserResolution, { ok: true }>,
+) {
+  return Response.json(
+    {
+      error: {
+        code: result.code,
+        message:
+          result.status === 401
+            ? "Authentication is required."
+            : "Authentication is not configured safely.",
+      },
+    },
+    { status: result.status },
+  );
 }
 
 function toClientBackupResponse(backup: RestoredBackupResponse["backup"]): ClientBackupResponse {

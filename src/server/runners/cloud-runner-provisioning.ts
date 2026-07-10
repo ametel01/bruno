@@ -183,6 +183,72 @@ export async function listCloudRunnerProvisioningSummariesForDevelopmentUser(
   }
 }
 
+export async function listCloudRunnerProvisioningSummariesForUser(
+  userId: string,
+  dependencies: { createConnection?: () => DatabaseConnection; now?: () => Date } = {},
+): Promise<CloudRunnerProvisioningSummary[]> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
+
+  try {
+    return await connection.db.transaction(async (tx) => {
+      await reconcileTimedOutWaitingForRunnerRows(tx, userId, now);
+
+      const rows = await tx
+        .select({
+          id: runners.id,
+          name: runners.name,
+          kind: runners.kind,
+          status: runners.status,
+          provider: runners.provider,
+          providerResourceId: runners.providerResourceId,
+          region: runners.region,
+          sizeSlug: runners.sizeSlug,
+          image: runners.image,
+          provisioningStatus: runners.provisioningStatus,
+          provisioningError: runners.provisioningError,
+          provisioningStartedAt: runners.provisioningStartedAt,
+          provisioningCompletedAt: runners.provisioningCompletedAt,
+        })
+        .from(runners)
+        .where(
+          and(
+            eq(runners.userId, userId),
+            eq(runners.kind, DIGITALOCEAN_RUNNER_KIND),
+            isNull(runners.deletedAt),
+          ),
+        )
+        .orderBy(desc(runners.updatedAt), desc(runners.createdAt))
+        .limit(10);
+
+      const summaries: CloudRunnerProvisioningSummary[] = [];
+
+      for (const row of rows) {
+        const [latestHeartbeat] = await tx
+          .select({
+            status: runnerHeartbeats.status,
+            observedAt: runnerHeartbeats.observedAt,
+          })
+          .from(runnerHeartbeats)
+          .where(eq(runnerHeartbeats.runnerId, row.id))
+          .orderBy(desc(runnerHeartbeats.observedAt))
+          .limit(1);
+
+        summaries.push(toCloudRunnerProvisioningSummary(row, latestHeartbeat ?? null));
+      }
+
+      return summaries;
+    });
+  } catch (error) {
+    throw new CloudRunnerProvisioningPersistenceError(error);
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
 export async function reconcileTimedOutWaitingForRunnerRows(
   tx: CloudRunnerProvisioningTransaction,
   userId: string,
@@ -219,7 +285,14 @@ export async function reconcileTimedOutWaitingForRunnerRows(
         provisioningCompletedAt: now,
         updatedAt: now,
       })
-      .where(eq(runners.id, row.id));
+      .where(
+        and(
+          eq(runners.id, row.id),
+          eq(runners.userId, userId),
+          eq(runners.kind, DIGITALOCEAN_RUNNER_KIND),
+          isNull(runners.deletedAt),
+        ),
+      );
     await tx.insert(runnerProvisioningEvents).values({
       runnerId: row.id,
       phase: "failed",

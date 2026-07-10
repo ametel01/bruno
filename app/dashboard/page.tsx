@@ -14,32 +14,33 @@ import {
 import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import {
   AgentListPersistenceError,
-  listActiveAgentsForDevelopmentUser,
+  listActiveAgentsForUser,
 } from "@/src/server/agents/list-agents";
 import {
   AgentApprovalPersistenceError,
-  listPendingApprovalsForDevelopmentUser,
+  listPendingApprovalsForUser,
   type PendingApprovalDto,
 } from "@/src/server/approvals/agent-approvals";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { listLatestAgentActivity } from "@/src/server/events/agent-events";
+import { listLatestAgentActivityForUser } from "@/src/server/events/agent-events";
 import {
-  listLatestActiveAgentProcessLogs,
+  listLatestActiveAgentProcessLogsForUser,
   type LatestAgentProcessLogDto,
 } from "@/src/server/logs/agent-logs";
 import {
-  listManualRunnerStatusSummariesForDevelopmentUser,
+  listManualRunnerStatusSummariesForUser,
   ManualRunnerStatusPersistenceError,
   type ManualRunnerStatusSummary,
 } from "@/src/server/runners/manual-runner-status";
 import {
   CloudRunnerProvisioningPersistenceError,
-  listCloudRunnerProvisioningSummariesForDevelopmentUser,
+  listCloudRunnerProvisioningSummariesForUser,
 } from "@/src/server/runners/cloud-runner-provisioning";
 import {
   CostEstimatePersistenceError,
-  getCostEstimatesForDevelopmentUser,
+  getCostEstimatesForUser,
 } from "@/src/server/costs/cost-estimates";
+import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
 type DashboardContentProps = {
   routeLabel?: string;
@@ -55,6 +56,23 @@ type DashboardCloudRunnersResult = Awaited<ReturnType<typeof loadDashboardCloudR
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
+  const applicationUser = await requireConfiguredApplicationUser();
+
+  if (!applicationUser.ok) {
+    return (
+      <ProductShell
+        active="dashboard"
+        eyebrow="Dashboard"
+        title="Authentication required"
+        description="Sign in to load user-scoped operational data."
+      >
+        <div className="safe-error" role="alert">
+          Authentication is required.
+        </div>
+      </ProductShell>
+    );
+  }
+
   const [
     listResult,
     activityResult,
@@ -64,13 +82,13 @@ export default async function DashboardPage() {
     cloudRunnersResult,
     costResult,
   ] = await Promise.all([
-    loadDashboardAgents(),
-    loadDashboardActivity(),
-    loadDashboardApprovals(),
-    loadDashboardProcessLogs(),
-    loadDashboardManualRunners(),
-    loadDashboardCloudRunners(),
-    loadDashboardCosts(),
+    loadDashboardAgents(applicationUser.userId),
+    loadDashboardActivity(applicationUser.userId),
+    loadDashboardApprovals(applicationUser.userId),
+    loadDashboardProcessLogs(applicationUser.userId),
+    loadDashboardManualRunners(applicationUser.userId),
+    loadDashboardCloudRunners(applicationUser.userId),
+    loadDashboardCosts(applicationUser.userId),
   ]);
 
   return (
@@ -430,11 +448,11 @@ function PendingApprovalItem({ approval }: { approval: PendingApprovalDto }) {
   );
 }
 
-async function loadDashboardAgents() {
+async function loadDashboardAgents(userId: string) {
   try {
     return {
       ok: true as const,
-      agents: await listActiveAgentsForDevelopmentUser(),
+      agents: await listActiveAgentsForUser(userId),
     };
   } catch (error) {
     if (error instanceof AgentListPersistenceError) {
@@ -448,14 +466,16 @@ async function loadDashboardAgents() {
 }
 
 async function loadDashboardActivity(
+  userId: string,
   dependencies: { createConnection?: () => DatabaseConnection } = {},
 ) {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
 
   try {
-    const result = await listLatestAgentActivity({
+    const result = await listLatestAgentActivityForUser({
       db: connection.db,
+      userId,
       limit: 8,
     });
 
@@ -480,11 +500,11 @@ async function loadDashboardActivity(
   }
 }
 
-async function loadDashboardApprovals() {
+async function loadDashboardApprovals(userId: string) {
   try {
     return {
       ok: true as const,
-      approvals: await listPendingApprovalsForDevelopmentUser(),
+      approvals: await listPendingApprovalsForUser(userId),
     };
   } catch (error) {
     if (error instanceof AgentApprovalPersistenceError) {
@@ -498,6 +518,7 @@ async function loadDashboardApprovals() {
 }
 
 async function loadDashboardProcessLogs(
+  userId: string,
   dependencies: { createConnection?: () => DatabaseConnection } = {},
 ) {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
@@ -506,8 +527,9 @@ async function loadDashboardProcessLogs(
   try {
     return {
       ok: true as const,
-      logs: await listLatestActiveAgentProcessLogs({
+      logs: await listLatestActiveAgentProcessLogsForUser({
         db: connection.db,
+        userId,
         limit: 8,
       }),
     };
@@ -522,11 +544,11 @@ async function loadDashboardProcessLogs(
   }
 }
 
-async function loadDashboardManualRunners() {
+async function loadDashboardManualRunners(userId: string) {
   try {
     return {
       ok: true as const,
-      runners: await listManualRunnerStatusSummariesForDevelopmentUser(),
+      runners: await listManualRunnerStatusSummariesForUser(userId),
     };
   } catch (error) {
     if (error instanceof ManualRunnerStatusPersistenceError) {
@@ -539,11 +561,11 @@ async function loadDashboardManualRunners() {
   }
 }
 
-async function loadDashboardCloudRunners() {
+async function loadDashboardCloudRunners(userId: string) {
   try {
     return {
       ok: true as const,
-      runners: await listCloudRunnerProvisioningSummariesForDevelopmentUser(),
+      runners: await listCloudRunnerProvisioningSummariesForUser(userId),
     };
   } catch (error) {
     if (error instanceof CloudRunnerProvisioningPersistenceError) {
@@ -556,11 +578,11 @@ async function loadDashboardCloudRunners() {
   }
 }
 
-async function loadDashboardCosts(): Promise<DashboardCostResult> {
+async function loadDashboardCosts(userId: string): Promise<DashboardCostResult> {
   try {
     return {
       ok: true,
-      estimates: await getCostEstimatesForDevelopmentUser(),
+      estimates: await getCostEstimatesForUser(userId),
     };
   } catch (error) {
     if (error instanceof CostEstimatePersistenceError) {

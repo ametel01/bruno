@@ -6150,7 +6150,11 @@ describe("create agent persistence", () => {
     ]);
 
     const { GET } = await import("@/app/api/agents/[agentId]/events/route");
-    const firstPageResponse = await GET(
+    const getEvents = (request: Request, context: Parameters<typeof GET>[1]) =>
+      GET(request, context, {
+        requireApplicationUser: async () => ({ ok: true, userId }),
+      });
+    const firstPageResponse = await getEvents(
       new Request("http://localhost/api/agents/route-feed/events?limit=2"),
       {
         params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000221" }),
@@ -6172,7 +6176,7 @@ describe("create agent persistence", () => {
     expect(firstPage.events[0]).not.toHaveProperty("actorUserId");
     expect(firstPage.nextCursor).toEqual(expect.any(String));
 
-    const secondPageResponse = await GET(
+    const secondPageResponse = await getEvents(
       new Request(
         `http://localhost/api/agents/route-feed/events?cursor=${encodeURIComponent(
           firstPage.nextCursor ?? "",
@@ -6193,7 +6197,7 @@ describe("create agent persistence", () => {
     ]);
     expect(secondPage.nextCursor).toBeNull();
 
-    const emptyPageResponse = await GET(
+    const emptyPageResponse = await getEvents(
       new Request("http://localhost/api/agents/route-feed/events"),
       {
         params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000222" }),
@@ -6206,19 +6210,19 @@ describe("create agent persistence", () => {
       nextCursor: null,
     });
 
-    const deletedAgentResponse = await GET(
+    const deletedAgentResponse = await getEvents(
       new Request("http://localhost/api/agents/route-feed/events"),
       {
         params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000224" }),
       },
     );
-    const missingAgentResponse = await GET(
+    const missingAgentResponse = await getEvents(
       new Request("http://localhost/api/agents/route-feed/events"),
       {
         params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000000" }),
       },
     );
-    const malformedCursorResponse = await GET(
+    const malformedCursorResponse = await getEvents(
       new Request("http://localhost/api/agents/route-feed/events?cursor=not%20a%20cursor"),
       {
         params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000221" }),

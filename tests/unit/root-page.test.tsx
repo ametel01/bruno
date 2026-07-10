@@ -15,22 +15,32 @@ import type {
 import type { AgentEventDto } from "@/src/server/events/agent-events";
 import type { ManualRunnerCapacitySummary } from "@/src/server/runners/manual-runner-status";
 
+const APPLICATION_USER_ID = "00000000-0000-4000-8000-000000000101";
+const PAGE_AUTH_FAILURES = [
+  { name: "unauthenticated", result: { ok: false, status: 401, code: "unauthenticated" } },
+  {
+    name: "unsafe auth configuration",
+    result: { ok: false, status: 503, code: "development_auth_not_allowed" },
+  },
+] as const;
+
 const mocks = vi.hoisted(() => ({
   closeDashboardConnection: vi.fn(),
   createDatabaseConnection: vi.fn(),
-  getActiveAgentForDevelopmentUser: vi.fn(),
-  getCostEstimatesForDevelopmentUser: vi.fn(),
-  listAgentEventFeed: vi.fn(),
-  listLatestAgentActivity: vi.fn(),
-  listLatestActiveAgentProcessLogs: vi.fn(),
-  listActiveAgentsForDevelopmentUser: vi.fn(),
-  listCloudRunnerProvisioningSummariesForDevelopmentUser: vi.fn(),
-  listManualRunnerStatusSummariesForDevelopmentUser: vi.fn(),
+  getActiveAgentForUser: vi.fn(),
+  getCostEstimatesForUser: vi.fn(),
+  listAgentEventFeedForUser: vi.fn(),
+  listLatestAgentActivityForUser: vi.fn(),
+  listLatestActiveAgentProcessLogsForUser: vi.fn(),
+  listActiveAgentsForUser: vi.fn(),
+  listCloudRunnerProvisioningSummariesForUser: vi.fn(),
+  listManualRunnerStatusSummariesForUser: vi.fn(),
   listSettingsRunnerManagementSummariesForDevelopmentUser: vi.fn(),
-  getAssignedManualRunnerStatusForDevelopmentUserAgent: vi.fn(),
-  listAgentBackupsForDevelopmentUser: vi.fn(),
-  listPendingApprovalsForDevelopmentUserAgent: vi.fn(),
-  listPendingApprovalsForDevelopmentUser: vi.fn(),
+  getAssignedManualRunnerStatusForUserAgent: vi.fn(),
+  listAgentBackupsForUser: vi.fn(),
+  listPendingApprovalsForUserAgent: vi.fn(),
+  listPendingApprovalsForUser: vi.fn(),
+  requireConfiguredApplicationUser: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -41,7 +51,7 @@ vi.mock("@/src/server/costs/cost-estimates", async (importOriginal) => {
 
   return {
     ...actual,
-    getCostEstimatesForDevelopmentUser: mocks.getCostEstimatesForDevelopmentUser,
+    getCostEstimatesForUser: mocks.getCostEstimatesForUser,
   };
 });
 
@@ -50,8 +60,9 @@ vi.mock("@/src/server/agents/list-agents", async (importOriginal) => {
 
   return {
     ...actual,
-    getActiveAgentForDevelopmentUser: mocks.getActiveAgentForDevelopmentUser,
-    listActiveAgentsForDevelopmentUser: mocks.listActiveAgentsForDevelopmentUser,
+    getActiveAgentForUser: mocks.getActiveAgentForUser,
+    listActiveAgentsForUser: mocks.listActiveAgentsForUser,
+    listActiveAgentsForDevelopmentUser: mocks.listActiveAgentsForUser,
   };
 });
 
@@ -64,8 +75,8 @@ vi.mock("@/src/server/approvals/agent-approvals", async (importOriginal) => {
 
   return {
     ...actual,
-    listPendingApprovalsForDevelopmentUserAgent: mocks.listPendingApprovalsForDevelopmentUserAgent,
-    listPendingApprovalsForDevelopmentUser: mocks.listPendingApprovalsForDevelopmentUser,
+    listPendingApprovalsForUserAgent: mocks.listPendingApprovalsForUserAgent,
+    listPendingApprovalsForUser: mocks.listPendingApprovalsForUser,
   };
 });
 
@@ -74,7 +85,7 @@ vi.mock("@/src/server/backups/list-backups", async (importOriginal) => {
 
   return {
     ...actual,
-    listAgentBackupsForDevelopmentUser: mocks.listAgentBackupsForDevelopmentUser,
+    listAgentBackupsForUser: mocks.listAgentBackupsForUser,
   };
 });
 
@@ -83,8 +94,8 @@ vi.mock("@/src/server/events/agent-events", async (importOriginal) => {
 
   return {
     ...actual,
-    listAgentEventFeed: mocks.listAgentEventFeed,
-    listLatestAgentActivity: mocks.listLatestAgentActivity,
+    listAgentEventFeedForUser: mocks.listAgentEventFeedForUser,
+    listLatestAgentActivityForUser: mocks.listLatestAgentActivityForUser,
   };
 });
 
@@ -93,7 +104,7 @@ vi.mock("@/src/server/logs/agent-logs", async (importOriginal) => {
 
   return {
     ...actual,
-    listLatestActiveAgentProcessLogs: mocks.listLatestActiveAgentProcessLogs,
+    listLatestActiveAgentProcessLogsForUser: mocks.listLatestActiveAgentProcessLogsForUser,
   };
 });
 
@@ -102,10 +113,8 @@ vi.mock("@/src/server/runners/manual-runner-status", async (importOriginal) => {
 
   return {
     ...actual,
-    getAssignedManualRunnerStatusForDevelopmentUserAgent:
-      mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent,
-    listManualRunnerStatusSummariesForDevelopmentUser:
-      mocks.listManualRunnerStatusSummariesForDevelopmentUser,
+    getAssignedManualRunnerStatusForUserAgent: mocks.getAssignedManualRunnerStatusForUserAgent,
+    listManualRunnerStatusSummariesForUser: mocks.listManualRunnerStatusSummariesForUser,
     listSettingsRunnerManagementSummariesForDevelopmentUser:
       mocks.listSettingsRunnerManagementSummariesForDevelopmentUser,
   };
@@ -117,8 +126,9 @@ vi.mock("@/src/server/runners/cloud-runner-provisioning", async (importOriginal)
 
   return {
     ...actual,
+    listCloudRunnerProvisioningSummariesForUser: mocks.listCloudRunnerProvisioningSummariesForUser,
     listCloudRunnerProvisioningSummariesForDevelopmentUser:
-      mocks.listCloudRunnerProvisioningSummariesForDevelopmentUser,
+      mocks.listCloudRunnerProvisioningSummariesForUser,
   };
 });
 
@@ -127,6 +137,10 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({
     refresh: vi.fn(),
   }),
+}));
+
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
 }));
 
 function capacity(
@@ -217,28 +231,32 @@ function costEstimates(
 
 describe("product shell routes", () => {
   beforeEach(() => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({
+      ok: true,
+      userId: APPLICATION_USER_ID,
+    });
     mocks.createDatabaseConnection.mockReturnValue({
       db: {},
       close: mocks.closeDashboardConnection,
     });
     mocks.closeDashboardConnection.mockResolvedValue(undefined);
-    mocks.listLatestAgentActivity.mockResolvedValue({
+    mocks.listLatestAgentActivityForUser.mockResolvedValue({
       ok: true,
       page: {
         events: [],
         nextCursor: null,
       },
     });
-    mocks.listLatestActiveAgentProcessLogs.mockResolvedValue([]);
-    mocks.listManualRunnerStatusSummariesForDevelopmentUser.mockResolvedValue([]);
-    mocks.listCloudRunnerProvisioningSummariesForDevelopmentUser.mockResolvedValue([]);
-    mocks.getCostEstimatesForDevelopmentUser.mockResolvedValue(costEstimates());
+    mocks.listLatestActiveAgentProcessLogsForUser.mockResolvedValue([]);
+    mocks.listManualRunnerStatusSummariesForUser.mockResolvedValue([]);
+    mocks.listCloudRunnerProvisioningSummariesForUser.mockResolvedValue([]);
+    mocks.getCostEstimatesForUser.mockResolvedValue(costEstimates());
     mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockResolvedValue([]);
-    mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockResolvedValue(null);
-    mocks.listAgentBackupsForDevelopmentUser.mockResolvedValue([]);
-    mocks.listPendingApprovalsForDevelopmentUser.mockResolvedValue([]);
-    mocks.listPendingApprovalsForDevelopmentUserAgent.mockResolvedValue([]);
-    mocks.listAgentEventFeed.mockResolvedValue({
+    mocks.getAssignedManualRunnerStatusForUserAgent.mockResolvedValue(null);
+    mocks.listAgentBackupsForUser.mockResolvedValue([]);
+    mocks.listPendingApprovalsForUser.mockResolvedValue([]);
+    mocks.listPendingApprovalsForUserAgent.mockResolvedValue([]);
+    mocks.listAgentEventFeedForUser.mockResolvedValue({
       ok: true,
       page: {
         events: [],
@@ -250,19 +268,20 @@ describe("product shell routes", () => {
   afterEach(() => {
     mocks.closeDashboardConnection.mockReset();
     mocks.createDatabaseConnection.mockReset();
-    mocks.getActiveAgentForDevelopmentUser.mockReset();
-    mocks.getCostEstimatesForDevelopmentUser.mockReset();
-    mocks.listAgentEventFeed.mockReset();
-    mocks.listLatestAgentActivity.mockReset();
-    mocks.listLatestActiveAgentProcessLogs.mockReset();
-    mocks.listActiveAgentsForDevelopmentUser.mockReset();
-    mocks.listCloudRunnerProvisioningSummariesForDevelopmentUser.mockReset();
-    mocks.listManualRunnerStatusSummariesForDevelopmentUser.mockReset();
+    mocks.getActiveAgentForUser.mockReset();
+    mocks.getCostEstimatesForUser.mockReset();
+    mocks.listAgentEventFeedForUser.mockReset();
+    mocks.listLatestAgentActivityForUser.mockReset();
+    mocks.listLatestActiveAgentProcessLogsForUser.mockReset();
+    mocks.listActiveAgentsForUser.mockReset();
+    mocks.listCloudRunnerProvisioningSummariesForUser.mockReset();
+    mocks.listManualRunnerStatusSummariesForUser.mockReset();
     mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockReset();
-    mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockReset();
-    mocks.listAgentBackupsForDevelopmentUser.mockReset();
-    mocks.listPendingApprovalsForDevelopmentUserAgent.mockReset();
-    mocks.listPendingApprovalsForDevelopmentUser.mockReset();
+    mocks.getAssignedManualRunnerStatusForUserAgent.mockReset();
+    mocks.listAgentBackupsForUser.mockReset();
+    mocks.listPendingApprovalsForUserAgent.mockReset();
+    mocks.listPendingApprovalsForUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
     mocks.notFound.mockClear();
   });
 
@@ -276,7 +295,7 @@ describe("product shell routes", () => {
   });
 
   it("renders the dashboard empty persisted-agent state without fake records", async () => {
-    mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([]);
+    mocks.listActiveAgentsForUser.mockResolvedValueOnce([]);
     const element = await DashboardPage();
     const html = renderToStaticMarkup(element);
 
@@ -303,6 +322,33 @@ describe("product shell routes", () => {
     expect(html).not.toContain("Deny decisions, production runners");
     expect(html).not.toContain("Approvals, production runners");
     expect(html).not.toContain("No persisted agent table or records are queried");
+    expect(mocks.listActiveAgentsForUser).toHaveBeenCalledWith(APPLICATION_USER_ID);
+    expect(mocks.listManualRunnerStatusSummariesForUser).toHaveBeenCalledWith(APPLICATION_USER_ID);
+    expect(mocks.listCloudRunnerProvisioningSummariesForUser).toHaveBeenCalledWith(
+      APPLICATION_USER_ID,
+    );
+    expect(mocks.getCostEstimatesForUser).toHaveBeenCalledWith(APPLICATION_USER_ID);
+    expect(mocks.requireConfiguredApplicationUser).toHaveBeenCalledOnce();
+  });
+
+  it.each(PAGE_AUTH_FAILURES)("stops dashboard loading for $name configured-user results", async ({
+    result,
+  }) => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValueOnce(result);
+
+    const html = renderToStaticMarkup(await DashboardPage());
+
+    expect(html).toContain("Authentication required");
+    expect(html).toContain("Authentication is required.");
+    expect(html).not.toContain(result.code);
+    expect(mocks.requireConfiguredApplicationUser).toHaveBeenCalledOnce();
+    expect(mocks.listActiveAgentsForUser).not.toHaveBeenCalled();
+    expect(mocks.listLatestAgentActivityForUser).not.toHaveBeenCalled();
+    expect(mocks.listPendingApprovalsForUser).not.toHaveBeenCalled();
+    expect(mocks.listLatestActiveAgentProcessLogsForUser).not.toHaveBeenCalled();
+    expect(mocks.listManualRunnerStatusSummariesForUser).not.toHaveBeenCalled();
+    expect(mocks.listCloudRunnerProvisioningSummariesForUser).not.toHaveBeenCalled();
+    expect(mocks.getCostEstimatesForUser).not.toHaveBeenCalled();
   });
 
   it("renders accessible daily and monthly infrastructure estimates without DTO internals", () => {
@@ -410,7 +456,7 @@ describe("product shell routes", () => {
 
   it("keeps the rest of the dashboard useful when cost loading fails safely", async () => {
     const { CostEstimatePersistenceError } = await import("@/src/server/costs/cost-estimates");
-    mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([
+    mocks.listActiveAgentsForUser.mockResolvedValueOnce([
       {
         id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
         name: "Research Agent",
@@ -421,9 +467,7 @@ describe("product shell routes", () => {
         createdAt: "2026-07-03T05:00:00.000Z",
       },
     ]);
-    mocks.getCostEstimatesForDevelopmentUser.mockRejectedValueOnce(
-      new CostEstimatePersistenceError(),
-    );
+    mocks.getCostEstimatesForUser.mockRejectedValueOnce(new CostEstimatePersistenceError());
 
     const element = await DashboardPage();
     const html = renderToStaticMarkup(element);
@@ -441,17 +485,29 @@ describe("product shell routes", () => {
     const pendingAgents = new Promise<[]>((resolve) => {
       resolveAgents = resolve;
     });
-    mocks.listActiveAgentsForDevelopmentUser.mockReturnValueOnce(pendingAgents);
+    mocks.listActiveAgentsForUser.mockReturnValueOnce(pendingAgents);
 
     const renderPromise = DashboardPage();
 
     await vi.waitFor(() => {
-      expect(mocks.getCostEstimatesForDevelopmentUser).toHaveBeenCalledTimes(1);
-      expect(mocks.listLatestAgentActivity).toHaveBeenCalledTimes(1);
-      expect(mocks.listPendingApprovalsForDevelopmentUser).toHaveBeenCalledTimes(1);
-      expect(mocks.listLatestActiveAgentProcessLogs).toHaveBeenCalledTimes(1);
-      expect(mocks.listManualRunnerStatusSummariesForDevelopmentUser).toHaveBeenCalledTimes(1);
-      expect(mocks.listCloudRunnerProvisioningSummariesForDevelopmentUser).toHaveBeenCalledTimes(1);
+      expect(mocks.getCostEstimatesForUser).toHaveBeenCalledWith(APPLICATION_USER_ID);
+      expect(mocks.listLatestAgentActivityForUser).toHaveBeenCalledWith({
+        db: {},
+        userId: APPLICATION_USER_ID,
+        limit: 8,
+      });
+      expect(mocks.listPendingApprovalsForUser).toHaveBeenCalledWith(APPLICATION_USER_ID);
+      expect(mocks.listLatestActiveAgentProcessLogsForUser).toHaveBeenCalledWith({
+        db: {},
+        userId: APPLICATION_USER_ID,
+        limit: 8,
+      });
+      expect(mocks.listManualRunnerStatusSummariesForUser).toHaveBeenCalledWith(
+        APPLICATION_USER_ID,
+      );
+      expect(mocks.listCloudRunnerProvisioningSummariesForUser).toHaveBeenCalledWith(
+        APPLICATION_USER_ID,
+      );
     });
 
     resolveAgents?.([]);
@@ -459,7 +515,7 @@ describe("product shell routes", () => {
   });
 
   it("renders persisted agents on the dashboard with lifecycle controls", async () => {
-    mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([
+    mocks.listActiveAgentsForUser.mockResolvedValueOnce([
       {
         id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
         name: "Research Agent",
@@ -482,8 +538,8 @@ describe("product shell routes", () => {
   });
 
   it("renders known manual runner status on the dashboard without secret endpoint details", async () => {
-    mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([]);
-    mocks.listManualRunnerStatusSummariesForDevelopmentUser.mockResolvedValueOnce([
+    mocks.listActiveAgentsForUser.mockResolvedValueOnce([]);
+    mocks.listManualRunnerStatusSummariesForUser.mockResolvedValueOnce([
       {
         name: "Manual Runner",
         kind: "manual_vps",
@@ -531,8 +587,8 @@ describe("product shell routes", () => {
   });
 
   it("renders cloud runner provisioning state on the dashboard without secrets", async () => {
-    mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([]);
-    mocks.listCloudRunnerProvisioningSummariesForDevelopmentUser.mockResolvedValueOnce([
+    mocks.listActiveAgentsForUser.mockResolvedValueOnce([]);
+    mocks.listCloudRunnerProvisioningSummariesForUser.mockResolvedValueOnce([
       {
         id: "00000000-0000-4000-8000-000000000154",
         name: "DigitalOcean Runner",
@@ -619,7 +675,7 @@ describe("product shell routes", () => {
 
   it("renders cloud runner failures with safe next steps in settings", async () => {
     mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockResolvedValueOnce([]);
-    mocks.listCloudRunnerProvisioningSummariesForDevelopmentUser.mockResolvedValueOnce([
+    mocks.listCloudRunnerProvisioningSummariesForUser.mockResolvedValueOnce([
       {
         id: "00000000-0000-4000-8000-000000000156",
         name: "Failed Cloud Runner",
@@ -665,7 +721,7 @@ describe("product shell routes", () => {
   });
 
   it("renders latest dashboard process logs with agent links and safe summaries", async () => {
-    mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([
+    mocks.listActiveAgentsForUser.mockResolvedValueOnce([
       {
         id: "00000000-0000-4000-8000-000000000201",
         name: "Process Log Agent",
@@ -676,7 +732,7 @@ describe("product shell routes", () => {
         createdAt: "2026-07-04T05:00:00.000Z",
       },
     ]);
-    mocks.listLatestActiveAgentProcessLogs.mockResolvedValueOnce([
+    mocks.listLatestActiveAgentProcessLogsForUser.mockResolvedValueOnce([
       {
         id: "00000000-0000-4000-8000-000000000701",
         agentId: "00000000-0000-4000-8000-000000000201",
@@ -723,8 +779,9 @@ describe("product shell routes", () => {
     expect(html).not.toContain("postgres://");
     expect(html).not.toContain("stored-for-downstream");
     expect(html).not.toContain("runnerId");
-    expect(mocks.listLatestActiveAgentProcessLogs).toHaveBeenCalledWith({
+    expect(mocks.listLatestActiveAgentProcessLogsForUser).toHaveBeenCalledWith({
       db: {},
+      userId: APPLICATION_USER_ID,
       limit: 8,
     });
   });
@@ -843,8 +900,8 @@ describe("product shell routes", () => {
   });
 
   it("renders persisted pending approvals on the dashboard without raw payload details", async () => {
-    mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([]);
-    mocks.listPendingApprovalsForDevelopmentUser.mockResolvedValueOnce([
+    mocks.listActiveAgentsForUser.mockResolvedValueOnce([]);
+    mocks.listPendingApprovalsForUser.mockResolvedValueOnce([
       {
         id: "00000000-0000-4000-8000-000000000511",
         agentId: "00000000-0000-4000-8000-000000000201",
@@ -917,7 +974,7 @@ describe("product shell routes", () => {
     const { AgentApprovalPersistenceError } = await import(
       "@/src/server/approvals/agent-approvals"
     );
-    mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([
+    mocks.listActiveAgentsForUser.mockResolvedValueOnce([
       {
         id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
         name: "Research Agent",
@@ -928,9 +985,7 @@ describe("product shell routes", () => {
         createdAt: "2026-07-03T05:00:00.000Z",
       },
     ]);
-    mocks.listPendingApprovalsForDevelopmentUser.mockRejectedValueOnce(
-      new AgentApprovalPersistenceError(),
-    );
+    mocks.listPendingApprovalsForUser.mockRejectedValueOnce(new AgentApprovalPersistenceError());
 
     const element = await DashboardPage();
     const html = renderToStaticMarkup(element);
@@ -943,7 +998,7 @@ describe("product shell routes", () => {
   });
 
   it("renders the agents empty database-backed list state and create form", async () => {
-    mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([]);
+    mocks.listActiveAgentsForUser.mockResolvedValueOnce([]);
     const element = await AgentsPage();
     const html = renderToStaticMarkup(element);
 
@@ -965,7 +1020,7 @@ describe("product shell routes", () => {
   });
 
   it("renders persisted agents with stable identity and links", async () => {
-    mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([
+    mocks.listActiveAgentsForUser.mockResolvedValueOnce([
       {
         id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
         name: "Research Agent",
@@ -992,7 +1047,7 @@ describe("product shell routes", () => {
 
   it("renders safe feedback when persisted agents cannot be loaded", async () => {
     const { AgentListPersistenceError } = await import("@/src/server/agents/list-agents");
-    mocks.listActiveAgentsForDevelopmentUser.mockRejectedValueOnce(new AgentListPersistenceError());
+    mocks.listActiveAgentsForUser.mockRejectedValueOnce(new AgentListPersistenceError());
     const element = await AgentsPage();
     const html = renderToStaticMarkup(element);
 
@@ -1002,7 +1057,7 @@ describe("product shell routes", () => {
   });
 
   it("renders persisted agent detail records with the empty activity state", async () => {
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(
+    mocks.getActiveAgentForUser.mockResolvedValueOnce(
       detailAgent({ statusReason: "Waiting for setup." }),
     );
     const element = await AgentDetailPage({
@@ -1049,24 +1104,55 @@ describe("product shell routes", () => {
     expect(html).not.toContain("config editing");
     expect(html).not.toContain("runnerId");
     expect(html).not.toContain("agent_id");
-    expect(mocks.listPendingApprovalsForDevelopmentUserAgent).toHaveBeenCalledWith(
+    expect(mocks.getActiveAgentForUser).toHaveBeenCalledWith(
+      APPLICATION_USER_ID,
       "3e47bed7-b58f-4394-93c0-01e3d1e51774",
     );
-    expect(mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent).toHaveBeenCalledWith(
+    expect(mocks.listPendingApprovalsForUserAgent).toHaveBeenCalledWith(
+      APPLICATION_USER_ID,
       "3e47bed7-b58f-4394-93c0-01e3d1e51774",
     );
-    expect(mocks.listAgentEventFeed).toHaveBeenCalledWith({
+    expect(mocks.getAssignedManualRunnerStatusForUserAgent).toHaveBeenCalledWith(
+      APPLICATION_USER_ID,
+      "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+    );
+    expect(mocks.listAgentEventFeedForUser).toHaveBeenCalledWith({
       db: {},
+      userId: APPLICATION_USER_ID,
       agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
       cursor: null,
       limit: 10,
     });
     expect(mocks.closeDashboardConnection).toHaveBeenCalledTimes(2);
+    expect(mocks.requireConfiguredApplicationUser).toHaveBeenCalledOnce();
+  });
+
+  it.each(
+    PAGE_AUTH_FAILURES,
+  )("stops agent detail loading for $name configured-user results", async ({ result }) => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValueOnce(result);
+
+    const html = renderToStaticMarkup(
+      await AgentDetailPage({
+        params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+      }),
+    );
+
+    expect(html).toContain("Authentication required");
+    expect(html).toContain("Authentication is required.");
+    expect(html).not.toContain(result.code);
+    expect(mocks.requireConfiguredApplicationUser).toHaveBeenCalledOnce();
+    expect(mocks.getActiveAgentForUser).not.toHaveBeenCalled();
+    expect(mocks.createDatabaseConnection).not.toHaveBeenCalled();
+    expect(mocks.listPendingApprovalsForUserAgent).not.toHaveBeenCalled();
+    expect(mocks.listAgentBackupsForUser).not.toHaveBeenCalled();
+    expect(mocks.listAgentEventFeedForUser).not.toHaveBeenCalled();
+    expect(mocks.getAssignedManualRunnerStatusForUserAgent).not.toHaveBeenCalled();
   });
 
   it("renders agent backup status and restore controls without artifact internals", async () => {
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
-    mocks.listAgentBackupsForDevelopmentUser.mockResolvedValueOnce([
+    mocks.getActiveAgentForUser.mockResolvedValueOnce(detailAgent());
+    mocks.listAgentBackupsForUser.mockResolvedValueOnce([
       backupSummary({
         id: "00000000-0000-4000-8000-000000000267",
         status: "ready",
@@ -1107,17 +1193,16 @@ describe("product shell routes", () => {
     expect(html).not.toContain("storageUri");
     expect(html).not.toContain("secretReferences");
     expect(html).not.toContain("sk-");
-    expect(mocks.listAgentBackupsForDevelopmentUser).toHaveBeenCalledWith(
+    expect(mocks.listAgentBackupsForUser).toHaveBeenCalledWith(
+      APPLICATION_USER_ID,
       "3e47bed7-b58f-4394-93c0-01e3d1e51774",
     );
   });
 
   it("keeps detail record visible when backup status cannot be loaded", async () => {
     const { AgentBackupListPersistenceError } = await import("@/src/server/backups/list-backups");
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
-    mocks.listAgentBackupsForDevelopmentUser.mockRejectedValueOnce(
-      new AgentBackupListPersistenceError(),
-    );
+    mocks.getActiveAgentForUser.mockResolvedValueOnce(detailAgent());
+    mocks.listAgentBackupsForUser.mockRejectedValueOnce(new AgentBackupListPersistenceError());
 
     const element = await AgentDetailPage({
       params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
@@ -1132,14 +1217,14 @@ describe("product shell routes", () => {
   });
 
   it("renders safe operational alerts on the agent detail page", async () => {
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(
+    mocks.getActiveAgentForUser.mockResolvedValueOnce(
       detailAgent({
         status: "error",
         statusReason:
           "Unhandled failure before retry\n    at run (/app/worker.ts:10:2)\npostgres://user:pass@localhost/db",
       }),
     );
-    mocks.listPendingApprovalsForDevelopmentUserAgent.mockResolvedValueOnce([
+    mocks.listPendingApprovalsForUserAgent.mockResolvedValueOnce([
       {
         id: "00000000-0000-4000-8000-000000000511",
         agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
@@ -1154,7 +1239,7 @@ describe("product shell routes", () => {
         expiresAt: "2026-07-04T09:15:00.000Z",
       },
     ]);
-    mocks.listAgentEventFeed.mockResolvedValueOnce({
+    mocks.listAgentEventFeedForUser.mockResolvedValueOnce({
       ok: true,
       page: {
         events: [
@@ -1194,8 +1279,8 @@ describe("product shell routes", () => {
   });
 
   it("renders assigned manual runner details and offline alerts safely", async () => {
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
-    mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockResolvedValueOnce({
+    mocks.getActiveAgentForUser.mockResolvedValueOnce(detailAgent());
+    mocks.getAssignedManualRunnerStatusForUserAgent.mockResolvedValueOnce({
       name: "Remote Runner",
       kind: "manual_vps",
       endpointHost: "runner.example.com",
@@ -1241,8 +1326,8 @@ describe("product shell routes", () => {
   });
 
   it("renders assigned cloud runner details safely", async () => {
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
-    mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockResolvedValueOnce({
+    mocks.getActiveAgentForUser.mockResolvedValueOnce(detailAgent());
+    mocks.getAssignedManualRunnerStatusForUserAgent.mockResolvedValueOnce({
       name: "Provisioned Cloud Runner",
       kind: "digitalocean",
       endpointHost: "cloud-runner.example.com",
@@ -1287,8 +1372,8 @@ describe("product shell routes", () => {
   });
 
   it("renders persisted pending approvals on the agent detail page without raw payload details", async () => {
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
-    mocks.listPendingApprovalsForDevelopmentUserAgent.mockResolvedValueOnce([
+    mocks.getActiveAgentForUser.mockResolvedValueOnce(detailAgent());
+    mocks.listPendingApprovalsForUserAgent.mockResolvedValueOnce([
       {
         id: "00000000-0000-4000-8000-000000000511",
         agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
@@ -1329,8 +1414,8 @@ describe("product shell routes", () => {
   });
 
   it("renders agent detail activity newest-first with safe event fields and pagination", async () => {
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
-    mocks.listAgentEventFeed.mockResolvedValueOnce({
+    mocks.getActiveAgentForUser.mockResolvedValueOnce(detailAgent());
+    mocks.listAgentEventFeedForUser.mockResolvedValueOnce({
       ok: true,
       page: {
         events: [
@@ -1382,8 +1467,8 @@ describe("product shell routes", () => {
   });
 
   it("renders older detail activity pagination with a newest-page link", async () => {
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
-    mocks.listAgentEventFeed.mockResolvedValueOnce({
+    mocks.getActiveAgentForUser.mockResolvedValueOnce(detailAgent());
+    mocks.listAgentEventFeedForUser.mockResolvedValueOnce({
       ok: true,
       page: {
         events: [],
@@ -1400,8 +1485,9 @@ describe("product shell routes", () => {
     expect(html).toContain("There are no older persisted events for this agent.");
     expect(html).toContain('href="/agents/3e47bed7-b58f-4394-93c0-01e3d1e51774"');
     expect(html).toContain("Newest activity");
-    expect(mocks.listAgentEventFeed).toHaveBeenCalledWith({
+    expect(mocks.listAgentEventFeedForUser).toHaveBeenCalledWith({
       db: {},
+      userId: APPLICATION_USER_ID,
       agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
       cursor: "older-cursor",
       limit: 10,
@@ -1409,8 +1495,10 @@ describe("product shell routes", () => {
   });
 
   it("keeps the detail record visible when activity cannot be loaded", async () => {
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
-    mocks.listAgentEventFeed.mockRejectedValueOnce(new Error("postgres://user:pass@localhost/db"));
+    mocks.getActiveAgentForUser.mockResolvedValueOnce(detailAgent());
+    mocks.listAgentEventFeedForUser.mockRejectedValueOnce(
+      new Error("postgres://user:pass@localhost/db"),
+    );
     const element = await AgentDetailPage({
       params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
     });
@@ -1425,8 +1513,8 @@ describe("product shell routes", () => {
     const { AgentApprovalPersistenceError } = await import(
       "@/src/server/approvals/agent-approvals"
     );
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
-    mocks.listPendingApprovalsForDevelopmentUserAgent.mockRejectedValueOnce(
+    mocks.getActiveAgentForUser.mockResolvedValueOnce(detailAgent());
+    mocks.listPendingApprovalsForUserAgent.mockRejectedValueOnce(
       new AgentApprovalPersistenceError(),
     );
     const element = await AgentDetailPage({
@@ -1445,7 +1533,7 @@ describe("product shell routes", () => {
   });
 
   it("renders a safe detail activity error for repeated cursor parameters", async () => {
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(detailAgent());
+    mocks.getActiveAgentForUser.mockResolvedValueOnce(detailAgent());
     const element = await AgentDetailPage({
       params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
       searchParams: Promise.resolve({ activityCursor: ["first", "second"] }),
@@ -1454,11 +1542,11 @@ describe("product shell routes", () => {
 
     expect(html).toContain("Research Agent");
     expect(html).toContain("Agent activity could not be loaded.");
-    expect(mocks.listAgentEventFeed).not.toHaveBeenCalled();
+    expect(mocks.listAgentEventFeedForUser).not.toHaveBeenCalled();
   });
 
   it("renders not found when agent detail lookup has no active record", async () => {
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValueOnce(null);
+    mocks.getActiveAgentForUser.mockResolvedValueOnce(null);
 
     await expect(
       AgentDetailPage({
@@ -1470,7 +1558,7 @@ describe("product shell routes", () => {
 
   it("renders safe detail feedback when persisted agent detail cannot be loaded", async () => {
     const { AgentDetailPersistenceError } = await import("@/src/server/agents/list-agents");
-    mocks.getActiveAgentForDevelopmentUser.mockRejectedValueOnce(new AgentDetailPersistenceError());
+    mocks.getActiveAgentForUser.mockRejectedValueOnce(new AgentDetailPersistenceError());
     const element = await AgentDetailPage({
       params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
     });

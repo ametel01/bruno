@@ -138,13 +138,15 @@ describe("backup restore creation", () => {
       { name: "Missing Artifact Source", templateKey: "research_agent" },
       { createConnection: () => connection },
     );
+    const missingBackupId = "00000000-0000-4000-8000-000000000701";
     const [backup] = await connection.db
       .insert(backups)
       .values({
+        id: missingBackupId,
         agentId: original.agent.id,
         runnerId: null,
         status: "ready",
-        storageUri: `s3://agentbay-backups/agents/${original.agent.id}/backups/missing.json`,
+        storageUri: `s3://agentbay-backups/${backupArtifactKey(original.agent.userId, original.agent.id, missingBackupId)}`,
         manifestJson: validManifest(),
         createdBy: original.agent.userId,
       })
@@ -196,7 +198,7 @@ describe("backup restore creation", () => {
         agentId: original.agent.id,
         runnerId: null,
         status: "restoring",
-        storageUri: `s3://agentbay-backups/agents/${original.agent.id}/backups/restoring.json`,
+        storageUri: `s3://agentbay-backups/users/${original.agent.userId}/agents/${original.agent.id}/backups/restoring.json`,
         manifestJson: validManifest(),
         createdBy: original.agent.userId,
       })
@@ -245,7 +247,7 @@ describe("backup restore creation", () => {
       manifest: validManifest(),
     });
     await storage.upload({
-      key: `agents/${original.agent.id}/backups/restore-test.json`,
+      key: backupArtifactKey(original.agent.userId, original.agent.id, backup.id),
       body: new TextEncoder().encode(JSON.stringify(unsafeArtifactManifest, null, 2)),
       contentType: "application/vnd.agentbay.backup-manifest+json",
     });
@@ -307,7 +309,7 @@ describe("backup restore creation", () => {
       manifest: validManifest(),
     });
     await storage.upload({
-      key: `agents/${original.agent.id}/backups/restore-test.json`,
+      key: backupArtifactKey(original.agent.userId, original.agent.id, backup.id),
       body: new TextEncoder().encode(JSON.stringify(invalidScheduleManifest, null, 2)),
       contentType: "application/vnd.agentbay.backup-manifest+json",
     });
@@ -372,7 +374,7 @@ describe("backup restore creation", () => {
         manifest: validManifest(),
       });
       await storage.upload({
-        key: `agents/${recreated.agent.id}/backups/restore-test.json`,
+        key: backupArtifactKey(recreated.agent.userId, recreated.agent.id, backup.id),
         body: new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
         contentType: "application/vnd.agentbay.backup-manifest+json",
       });
@@ -416,24 +418,13 @@ async function seedReadyBackup(input: {
   userId: string;
   manifest: BackupManifest;
 }): Promise<typeof backups.$inferSelect> {
-  const key = `agents/${input.agentId}/backups/restore-test.json`;
-  const upload = await input.storage.upload({
-    key,
-    body: new TextEncoder().encode(JSON.stringify(input.manifest, null, 2)),
-    contentType: "application/vnd.agentbay.backup-manifest+json",
-  });
-
-  if (!upload.ok) {
-    throw new Error("Expected test backup artifact upload to succeed.");
-  }
-
   const [backup] = await input.connection.db
     .insert(backups)
     .values({
       agentId: input.agentId,
       runnerId: null,
       status: "ready",
-      storageUri: upload.storageUri,
+      storageUri: null,
       manifestJson: input.manifest,
       createdBy: input.userId,
     })
@@ -443,7 +434,31 @@ async function seedReadyBackup(input: {
     throw new Error("Expected backup seed to return a row.");
   }
 
-  return backup;
+  const upload = await input.storage.upload({
+    key: backupArtifactKey(input.userId, input.agentId, backup.id),
+    body: new TextEncoder().encode(JSON.stringify(input.manifest, null, 2)),
+    contentType: "application/vnd.agentbay.backup-manifest+json",
+  });
+
+  if (!upload.ok) {
+    throw new Error("Expected test backup artifact upload to succeed.");
+  }
+
+  const [updatedBackup] = await input.connection.db
+    .update(backups)
+    .set({ storageUri: upload.storageUri })
+    .where(eq(backups.id, backup.id))
+    .returning();
+
+  if (!updatedBackup) {
+    throw new Error("Expected backup storage URI update to return a row.");
+  }
+
+  return updatedBackup;
+}
+
+function backupArtifactKey(userId: string, agentId: string, backupId: string): string {
+  return `users/${userId}/agents/${agentId}/backups/${backupId}.json`;
 }
 
 function validManifest(

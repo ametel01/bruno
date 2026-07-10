@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const USER_ID = "00000000-0000-4000-8000-000000000101";
 
 const mocks = vi.hoisted(() => {
   class AgentApprovalPersistenceError extends Error {
@@ -10,18 +12,28 @@ const mocks = vi.hoisted(() => {
 
   return {
     AgentApprovalPersistenceError,
-    approvePendingApprovalForDevelopmentUser: vi.fn(),
+    approvePendingApprovalForUser: vi.fn(),
+    requireConfiguredApplicationUser: vi.fn(),
   };
 });
 
 vi.mock("@/src/server/approvals/agent-approvals", () => ({
   AgentApprovalPersistenceError: mocks.AgentApprovalPersistenceError,
-  approvePendingApprovalForDevelopmentUser: mocks.approvePendingApprovalForDevelopmentUser,
+  approvePendingApprovalForUser: mocks.approvePendingApprovalForUser,
+}));
+
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
 }));
 
 describe("POST /api/approvals/[approvalId]/approve route", () => {
+  beforeEach(() => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
+  });
+
   afterEach(() => {
-    mocks.approvePendingApprovalForDevelopmentUser.mockReset();
+    mocks.approvePendingApprovalForUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
   });
 
   it("returns validation JSON for malformed percent-encoded approval IDs", async () => {
@@ -39,11 +51,11 @@ describe("POST /api/approvals/[approvalId]/approve route", () => {
         message: "Approval ID must be a valid UUID.",
       },
     });
-    expect(mocks.approvePendingApprovalForDevelopmentUser).not.toHaveBeenCalled();
+    expect(mocks.approvePendingApprovalForUser).not.toHaveBeenCalled();
   });
 
   it("returns validation JSON for invalid approval IDs", async () => {
-    mocks.approvePendingApprovalForDevelopmentUser.mockResolvedValueOnce({
+    mocks.approvePendingApprovalForUser.mockResolvedValueOnce({
       ok: false,
       reason: "malformed_approval_id",
     });
@@ -64,7 +76,7 @@ describe("POST /api/approvals/[approvalId]/approve route", () => {
   });
 
   it("returns safe not-found JSON for missing or inaccessible approvals", async () => {
-    mocks.approvePendingApprovalForDevelopmentUser.mockResolvedValueOnce({
+    mocks.approvePendingApprovalForUser.mockResolvedValueOnce({
       ok: false,
       reason: "approval_not_found",
     });
@@ -85,7 +97,7 @@ describe("POST /api/approvals/[approvalId]/approve route", () => {
   });
 
   it("returns the shared safe conflict shape for already resolved approvals", async () => {
-    mocks.approvePendingApprovalForDevelopmentUser.mockResolvedValueOnce({
+    mocks.approvePendingApprovalForUser.mockResolvedValueOnce({
       ok: false,
       reason: "approval_already_resolved",
       status: "approved",
@@ -108,7 +120,7 @@ describe("POST /api/approvals/[approvalId]/approve route", () => {
   });
 
   it("returns a safe persistence error response", async () => {
-    mocks.approvePendingApprovalForDevelopmentUser.mockRejectedValueOnce(
+    mocks.approvePendingApprovalForUser.mockRejectedValueOnce(
       new mocks.AgentApprovalPersistenceError(),
     );
     const { POST } = await import("@/app/api/approvals/[approvalId]/approve/route");
@@ -130,7 +142,7 @@ describe("POST /api/approvals/[approvalId]/approve route", () => {
   });
 
   it("returns safe approval and event JSON after approval succeeds", async () => {
-    mocks.approvePendingApprovalForDevelopmentUser.mockResolvedValueOnce({
+    mocks.approvePendingApprovalForUser.mockResolvedValueOnce({
       ok: true,
       approval: {
         id: "00000000-0000-4000-8000-000000000511",
@@ -138,7 +150,7 @@ describe("POST /api/approvals/[approvalId]/approve route", () => {
         agentName: "Approval Agent",
         title: "Review outbound message",
         status: "approved",
-        resolvedBy: "00000000-0000-4000-8000-000000000101",
+        resolvedBy: USER_ID,
         resolvedAt: "2026-07-04T10:00:00.000Z",
       },
       event: {
@@ -161,7 +173,6 @@ describe("POST /api/approvals/[approvalId]/approve route", () => {
         agentName: "Approval Agent",
         title: "Review outbound message",
         status: "approved",
-        resolvedBy: "00000000-0000-4000-8000-000000000101",
         resolvedAt: "2026-07-04T10:00:00.000Z",
       },
       event: {
@@ -169,5 +180,10 @@ describe("POST /api/approvals/[approvalId]/approve route", () => {
       },
     });
     expect(JSON.stringify(body)).not.toContain("payload_json");
+    expect(JSON.stringify(body)).not.toContain("resolvedBy");
+    expect(mocks.approvePendingApprovalForUser).toHaveBeenCalledWith(
+      USER_ID,
+      "00000000-0000-4000-8000-000000000511",
+    );
   });
 });

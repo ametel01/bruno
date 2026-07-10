@@ -1,10 +1,12 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const AGENT_ID = "00000000-0000-4000-8000-000000000166";
 const BACKUP_ID = "00000000-0000-4000-8000-000000000266";
+const USER_ID = "00000000-0000-4000-8000-000000000466";
 
 const mocks = vi.hoisted(() => ({
-  restoreBackupForDevelopmentUser: vi.fn(),
+  restoreBackupForUser: vi.fn(),
+  requireConfiguredApplicationUser: vi.fn(),
 }));
 
 vi.mock("@/src/server/backups/restore-backup", () => ({
@@ -15,16 +17,25 @@ vi.mock("@/src/server/backups/restore-backup", () => ({
       this.name = "RestoreBackupPersistenceError";
     }
   },
-  restoreBackupForDevelopmentUser: mocks.restoreBackupForDevelopmentUser,
+  restoreBackupForUser: mocks.restoreBackupForUser,
+}));
+
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
 }));
 
 describe("POST /api/agents/[agentId]/backups/[backupId]/restore route", () => {
+  beforeEach(() => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
+  });
+
   afterEach(() => {
-    mocks.restoreBackupForDevelopmentUser.mockReset();
+    mocks.restoreBackupForUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
   });
 
   it("restores a backup for valid agent and backup ids", async () => {
-    mocks.restoreBackupForDevelopmentUser.mockResolvedValue({
+    mocks.restoreBackupForUser.mockResolvedValue({
       ok: true,
       backup: backupDto("restored"),
       restoredAgent: restoredAgentDto(),
@@ -55,9 +66,10 @@ describe("POST /api/agents/[agentId]/backups/[backupId]/restore route", () => {
     expect(JSON.stringify(body)).not.toContain("agentbay-backups");
     expect(JSON.stringify(body)).not.toContain("templateSnapshotJson");
     expect(JSON.stringify(body)).not.toContain("userId");
-    expect(mocks.restoreBackupForDevelopmentUser).toHaveBeenCalledWith({
+    expect(mocks.restoreBackupForUser).toHaveBeenCalledWith({
       agentId: AGENT_ID,
       backupId: BACKUP_ID,
+      userId: USER_ID,
     });
   });
 
@@ -76,11 +88,11 @@ describe("POST /api/agents/[agentId]/backups/[backupId]/restore route", () => {
         message: "Agent ID must be a valid UUID.",
       },
     });
-    expect(mocks.restoreBackupForDevelopmentUser).not.toHaveBeenCalled();
+    expect(mocks.restoreBackupForUser).not.toHaveBeenCalled();
   });
 
   it("maps non-restorable backups to a safe conflict response", async () => {
-    mocks.restoreBackupForDevelopmentUser.mockResolvedValue({
+    mocks.restoreBackupForUser.mockResolvedValue({
       ok: false,
       reason: "backup_not_restorable",
       message: "Backup is not ready to restore.",

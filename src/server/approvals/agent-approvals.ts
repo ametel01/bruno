@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { type agentApprovalStatusEnum, agentApprovals, agents } from "@/src/server/db/schema";
@@ -89,7 +89,8 @@ export class AgentApprovalPersistenceError extends Error {
   }
 }
 
-export async function approvePendingApprovalForDevelopmentUser(
+export async function approvePendingApprovalForUser(
+  userId: string,
   approvalId: string,
   dependencies: ApprovePendingApprovalDependencies = {},
 ): Promise<ApprovePendingApprovalResult> {
@@ -114,16 +115,7 @@ export async function approvePendingApprovalForDevelopmentUser(
 
   try {
     return await connection.db.transaction(async (tx) => {
-      const developmentUserId = await getDevelopmentUserId(tx);
-
-      if (!developmentUserId) {
-        return {
-          ok: false as const,
-          reason: "approval_not_found" as const,
-        };
-      }
-
-      const approval = await selectScopedApproval(tx, approvalId, developmentUserId);
+      const approval = await selectScopedApproval(tx, approvalId, userId);
 
       if (!approval) {
         return {
@@ -145,10 +137,23 @@ export async function approvePendingApprovalForDevelopmentUser(
         .update(agentApprovals)
         .set({
           status: "approved",
-          resolvedBy: developmentUserId,
+          resolvedBy: userId,
           resolvedAt,
         })
-        .where(and(eq(agentApprovals.id, approval.id), eq(agentApprovals.status, "pending")))
+        .where(
+          and(
+            eq(agentApprovals.id, approval.id),
+            eq(agentApprovals.agentId, approval.agentId),
+            eq(agentApprovals.status, "pending"),
+            inArray(
+              agentApprovals.agentId,
+              tx
+                .select({ id: agents.id })
+                .from(agents)
+                .where(and(eq(agents.userId, userId), isNull(agents.deletedAt))),
+            ),
+          ),
+        )
         .returning({
           id: agentApprovals.id,
           agentId: agentApprovals.agentId,
@@ -159,7 +164,7 @@ export async function approvePendingApprovalForDevelopmentUser(
         });
 
       if (!updatedApproval) {
-        const currentApproval = await selectScopedApproval(tx, approvalId, developmentUserId);
+        const currentApproval = await selectScopedApproval(tx, approvalId, userId);
 
         if (!currentApproval) {
           return {
@@ -185,7 +190,7 @@ export async function approvePendingApprovalForDevelopmentUser(
 
       await recordApprovedEvent(tx, {
         agentId: approval.agentId,
-        actorUserId: developmentUserId,
+        actorUserId: userId,
         type: APPROVAL_APPROVED_EVENT_TYPE,
         message: `Approval "${approval.title}" approved for agent "${approval.agentName}".`,
         metadata: {
@@ -254,7 +259,8 @@ export type DenyApprovalDependencies = AgentApprovalDependencies & {
   insertDecisionEvent?: InsertApprovalDecisionEvent;
 };
 
-export async function createPendingApprovalForDevelopmentUser(
+export async function createPendingApprovalForUser(
+  userId: string,
   input: CreatePendingApprovalInput,
   dependencies: AgentApprovalDependencies = {},
 ): Promise<PendingApprovalDto | null> {
@@ -267,12 +273,6 @@ export async function createPendingApprovalForDevelopmentUser(
 
   try {
     return await connection.db.transaction(async (tx) => {
-      const developmentUserId = await getDevelopmentUserId(tx);
-
-      if (!developmentUserId) {
-        return null;
-      }
-
       const [agent] = await tx
         .select({
           id: agents.id,
@@ -280,11 +280,7 @@ export async function createPendingApprovalForDevelopmentUser(
         })
         .from(agents)
         .where(
-          and(
-            eq(agents.id, input.agentId),
-            eq(agents.userId, developmentUserId),
-            isNull(agents.deletedAt),
-          ),
+          and(eq(agents.id, input.agentId), eq(agents.userId, userId), isNull(agents.deletedAt)),
         )
         .limit(1);
 
@@ -323,19 +319,14 @@ export async function createPendingApprovalForDevelopmentUser(
   }
 }
 
-export async function listPendingApprovalsForDevelopmentUser(
+export async function listPendingApprovalsForUser(
+  userId: string,
   dependencies: AgentApprovalDependencies = {},
 ): Promise<PendingApprovalDto[]> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
 
   try {
-    const developmentUserId = await connection.db.transaction((tx) => getDevelopmentUserId(tx));
-
-    if (!developmentUserId) {
-      return [];
-    }
-
     const rows = await connection.db
       .select({
         id: agentApprovals.id,
@@ -354,7 +345,7 @@ export async function listPendingApprovalsForDevelopmentUser(
       .where(
         and(
           eq(agentApprovals.status, "pending"),
-          eq(agents.userId, developmentUserId),
+          eq(agents.userId, userId),
           isNull(agents.deletedAt),
         ),
       )
@@ -382,7 +373,8 @@ export async function listPendingApprovalsForDevelopmentUser(
   }
 }
 
-export async function listPendingApprovalsForDevelopmentUserAgent(
+export async function listPendingApprovalsForUserAgent(
+  userId: string,
   agentId: string,
   dependencies: AgentApprovalDependencies = {},
 ): Promise<PendingApprovalDto[]> {
@@ -394,12 +386,6 @@ export async function listPendingApprovalsForDevelopmentUserAgent(
   const ownsConnection = !dependencies.createConnection;
 
   try {
-    const developmentUserId = await connection.db.transaction((tx) => getDevelopmentUserId(tx));
-
-    if (!developmentUserId) {
-      return [];
-    }
-
     const rows = await connection.db
       .select({
         id: agentApprovals.id,
@@ -419,7 +405,7 @@ export async function listPendingApprovalsForDevelopmentUserAgent(
         and(
           eq(agentApprovals.agentId, agentId),
           eq(agentApprovals.status, "pending"),
-          eq(agents.userId, developmentUserId),
+          eq(agents.userId, userId),
           isNull(agents.deletedAt),
         ),
       )
@@ -447,7 +433,8 @@ export async function listPendingApprovalsForDevelopmentUserAgent(
   }
 }
 
-export async function denyApprovalForDevelopmentUser(
+export async function denyApprovalForUser(
+  userId: string,
   approvalId: string,
   dependencies: DenyApprovalDependencies = {},
 ): Promise<DenyApprovalResult> {
@@ -468,13 +455,7 @@ export async function denyApprovalForDevelopmentUser(
 
   try {
     return await connection.db.transaction(async (tx) => {
-      const developmentUserId = await getDevelopmentUserId(tx);
-
-      if (!developmentUserId) {
-        return { ok: false, reason: "approval_not_found" };
-      }
-
-      const current = await selectScopedApproval(tx, normalizedApprovalId, developmentUserId);
+      const current = await selectScopedApproval(tx, normalizedApprovalId, userId);
 
       if (!current) {
         return { ok: false, reason: "approval_not_found" };
@@ -492,11 +473,22 @@ export async function denyApprovalForDevelopmentUser(
         .update(agentApprovals)
         .set({
           status: "denied",
-          resolvedBy: developmentUserId,
+          resolvedBy: userId,
           resolvedAt: now(),
         })
         .where(
-          and(eq(agentApprovals.id, normalizedApprovalId), eq(agentApprovals.status, "pending")),
+          and(
+            eq(agentApprovals.id, normalizedApprovalId),
+            eq(agentApprovals.agentId, current.agentId),
+            eq(agentApprovals.status, "pending"),
+            inArray(
+              agentApprovals.agentId,
+              tx
+                .select({ id: agents.id })
+                .from(agents)
+                .where(and(eq(agents.userId, userId), isNull(agents.deletedAt))),
+            ),
+          ),
         )
         .returning({
           id: agentApprovals.id,
@@ -507,11 +499,7 @@ export async function denyApprovalForDevelopmentUser(
         });
 
       if (!denied) {
-        const currentApproval = await selectScopedApproval(
-          tx,
-          normalizedApprovalId,
-          developmentUserId,
-        );
+        const currentApproval = await selectScopedApproval(tx, normalizedApprovalId, userId);
 
         if (!currentApproval) {
           return {
@@ -533,7 +521,7 @@ export async function denyApprovalForDevelopmentUser(
 
       await insertDecisionEvent(tx, {
         agentId: denied.agentId,
-        actorUserId: developmentUserId,
+        actorUserId: userId,
         type: APPROVAL_DENIED_EVENT_TYPE,
         message: `Denied approval "${current.title}" for agent "${current.agentName}".`,
         metadata: {
@@ -564,6 +552,83 @@ export async function denyApprovalForDevelopmentUser(
           type: APPROVAL_DENIED_EVENT_TYPE,
         },
       };
+    });
+  } catch {
+    throw new AgentApprovalPersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function approvePendingApprovalForDevelopmentUser(
+  approvalId: string,
+  dependencies: ApprovePendingApprovalDependencies = {},
+): Promise<ApprovePendingApprovalResult> {
+  return await withDevelopmentUser(
+    dependencies,
+    { ok: false, reason: "approval_not_found" },
+    (userId, scopedDependencies) =>
+      approvePendingApprovalForUser(userId, approvalId, scopedDependencies),
+  );
+}
+
+export async function createPendingApprovalForDevelopmentUser(
+  input: CreatePendingApprovalInput,
+  dependencies: AgentApprovalDependencies = {},
+): Promise<PendingApprovalDto | null> {
+  return await withDevelopmentUser(dependencies, null, (userId, scopedDependencies) =>
+    createPendingApprovalForUser(userId, input, scopedDependencies),
+  );
+}
+
+export async function listPendingApprovalsForDevelopmentUser(
+  dependencies: AgentApprovalDependencies = {},
+): Promise<PendingApprovalDto[]> {
+  return await withDevelopmentUser(dependencies, [], (userId, scopedDependencies) =>
+    listPendingApprovalsForUser(userId, scopedDependencies),
+  );
+}
+
+export async function listPendingApprovalsForDevelopmentUserAgent(
+  agentId: string,
+  dependencies: AgentApprovalDependencies = {},
+): Promise<PendingApprovalDto[]> {
+  return await withDevelopmentUser(dependencies, [], (userId, scopedDependencies) =>
+    listPendingApprovalsForUserAgent(userId, agentId, scopedDependencies),
+  );
+}
+
+export async function denyApprovalForDevelopmentUser(
+  approvalId: string,
+  dependencies: DenyApprovalDependencies = {},
+): Promise<DenyApprovalResult> {
+  return await withDevelopmentUser(
+    dependencies,
+    { ok: false, reason: "approval_not_found" },
+    (userId, scopedDependencies) => denyApprovalForUser(userId, approvalId, scopedDependencies),
+  );
+}
+
+async function withDevelopmentUser<T, TDependencies extends AgentApprovalDependencies>(
+  dependencies: TDependencies,
+  missingResult: T,
+  run: (userId: string, dependencies: TDependencies) => Promise<T>,
+): Promise<T> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    const userId = await connection.db.transaction((tx) => getDevelopmentUserId(tx));
+
+    if (!userId) {
+      return missingResult;
+    }
+
+    return await run(userId, {
+      ...dependencies,
+      createConnection: () => connection,
     });
   } catch {
     throw new AgentApprovalPersistenceError();

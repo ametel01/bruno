@@ -1,4 +1,4 @@
-import { and, desc, eq, lt, or, type SQL } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, or, type SQL } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "@/src/server/db/schema";
 import { agentEvents, agents } from "@/src/server/db/schema";
@@ -97,6 +97,13 @@ export type AgentEventFeedQueryResult =
   | {
       ok: false;
       error: MalformedEventCursorError;
+    };
+
+export type UserScopedAgentEventFeedQueryResult =
+  | AgentEventFeedQueryResult
+  | {
+      ok: false;
+      reason: "agent_not_found";
     };
 
 export type AgentEventQueryExecutor = Pick<PostgresJsDatabase<typeof schema>, "select">;
@@ -330,6 +337,53 @@ export async function listAgentEventFeed(input: {
   return toEventFeedPage(rows, limit);
 }
 
+export async function listAgentEventFeedForUser(input: {
+  db: AgentEventQueryExecutor;
+  userId: string;
+  agentId: string;
+  cursor?: string | null;
+  limit?: number;
+}): Promise<UserScopedAgentEventFeedQueryResult> {
+  const cursor = decodeOptionalEventCursor(input.cursor);
+
+  if (!cursor.ok) {
+    return cursor;
+  }
+
+  const [ownedAgent] = await input.db
+    .select({ id: agents.id })
+    .from(agents)
+    .where(
+      and(eq(agents.id, input.agentId), eq(agents.userId, input.userId), isNull(agents.deletedAt)),
+    )
+    .limit(1);
+
+  if (!ownedAgent) {
+    return { ok: false, reason: "agent_not_found" };
+  }
+
+  const limit = normalizeEventFeedLimit(input.limit);
+  const predicates = [
+    eq(agentEvents.agentId, ownedAgent.id),
+    eq(agents.userId, input.userId),
+    isNull(agents.deletedAt),
+  ];
+
+  if (cursor.cursor) {
+    predicates.push(eventCursorPredicate(cursor.cursor));
+  }
+
+  const rows = await input.db
+    .select(eventSelection)
+    .from(agentEvents)
+    .innerJoin(agents, eq(agentEvents.agentId, agents.id))
+    .where(and(...predicates))
+    .orderBy(desc(agentEvents.createdAt), desc(agentEvents.id))
+    .limit(limit + 1);
+
+  return toEventFeedPage(rows, limit);
+}
+
 export async function listLatestAgentActivity(input: {
   db: AgentEventQueryExecutor;
   cursor?: string | null;
@@ -357,6 +411,57 @@ export async function listLatestAgentActivity(input: {
     .from(agentEvents)
     .innerJoin(agents, eq(agentEvents.agentId, agents.id));
   const rows = await (predicates.length > 0 ? query.where(and(...predicates)) : query)
+    .orderBy(desc(agentEvents.createdAt), desc(agentEvents.id))
+    .limit(limit + 1);
+  const visibleRows = rows.slice(0, limit);
+  const hasNextPage = rows.length > limit;
+  const cursorRow = visibleRows.at(-1);
+
+  return {
+    ok: true,
+    page: {
+      events: visibleRows.map((row) => mapAgentEventToDto(row.event, { agent: row.agent })),
+      nextCursor:
+        hasNextPage && cursorRow
+          ? encodeEventFeedCursor({ createdAt: cursorRow.event.createdAt, id: cursorRow.event.id })
+          : null,
+    },
+  };
+}
+
+export async function listLatestAgentActivityForUser(input: {
+  db: AgentEventQueryExecutor;
+  userId: string;
+  cursor?: string | null;
+  limit?: number;
+}): Promise<AgentEventFeedQueryResult> {
+  const cursor = decodeOptionalEventCursor(input.cursor);
+
+  if (!cursor.ok) {
+    return cursor;
+  }
+
+  const limit = normalizeEventFeedLimit(input.limit);
+  const predicates = [eq(agents.userId, input.userId)];
+
+  if (cursor.cursor) {
+    predicates.push(eventCursorPredicate(cursor.cursor));
+  }
+
+  const rows = await input.db
+    .select({
+      event: eventSelection,
+      agent: {
+        id: agents.id,
+        name: agents.name,
+        templateKey: agents.templateKey,
+        status: agents.status,
+        deletedAt: agents.deletedAt,
+      },
+    })
+    .from(agentEvents)
+    .innerJoin(agents, eq(agentEvents.agentId, agents.id))
+    .where(and(...predicates))
     .orderBy(desc(agentEvents.createdAt), desc(agentEvents.id))
     .limit(limit + 1);
   const visibleRows = rows.slice(0, limit);

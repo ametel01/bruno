@@ -27,7 +27,8 @@ export class AgentBackupListPersistenceError extends Error {
   }
 }
 
-export async function listAgentBackupsForDevelopmentUser(
+export async function listAgentBackupsForUser(
+  userId: string,
   agentId: string,
   dependencies: ListAgentBackupsDependencies = {},
 ): Promise<AgentBackupSummary[]> {
@@ -40,12 +41,6 @@ export async function listAgentBackupsForDevelopmentUser(
 
   try {
     const rows = await connection.db.transaction(async (tx) => {
-      const userId = await getDevelopmentUserId(tx);
-
-      if (!userId) {
-        return [];
-      }
-
       return await tx
         .select({
           id: backups.id,
@@ -75,6 +70,33 @@ export async function listAgentBackupsForDevelopmentUser(
       restoredAt: row.restoredAt?.toISOString() ?? null,
       canRestore: row.status === "ready",
     }));
+  } catch {
+    throw new AgentBackupListPersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function listAgentBackupsForDevelopmentUser(
+  agentId: string,
+  dependencies: ListAgentBackupsDependencies = {},
+): Promise<AgentBackupSummary[]> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    const userId = await connection.db.transaction((tx) => getDevelopmentUserId(tx));
+
+    if (!userId) {
+      return [];
+    }
+
+    return await listAgentBackupsForUser(userId, agentId, {
+      ...dependencies,
+      createConnection: () => connection,
+    });
   } catch {
     throw new AgentBackupListPersistenceError();
   } finally {

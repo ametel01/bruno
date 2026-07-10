@@ -88,8 +88,8 @@ const RAW_SECRET_TEXT_PATTERNS = [
   /-----BEGIN (?:RSA |EC |OPENSSH |)PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |)PRIVATE KEY-----/g,
 ] as const;
 
-export async function createManualBackupForDevelopmentUser(
-  input: { agentId: string },
+export async function createManualBackupForUser(
+  input: { agentId: string; userId: string },
   dependencies: ManualBackupDependencies = {},
 ): Promise<ManualBackupCreateResult> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
@@ -98,15 +98,9 @@ export async function createManualBackupForDevelopmentUser(
 
   try {
     const backupContext = await connection.db.transaction(async (tx) => {
-      const userId = await getDevelopmentUserId(tx);
-
-      if (!userId) {
-        return null;
-      }
-
       const row = await selectAgentForBackup(tx, {
         agentId: input.agentId,
-        userId,
+        userId: input.userId,
       });
 
       if (!row) {
@@ -129,7 +123,7 @@ export async function createManualBackupForDevelopmentUser(
             runnerId: row.runnerId,
             status: "failed",
             manifestJson: buildFailureManifest(row, now()),
-            createdBy: userId,
+            createdBy: input.userId,
           })
           .returning();
 
@@ -138,7 +132,7 @@ export async function createManualBackupForDevelopmentUser(
         }
 
         return {
-          userId,
+          userId: input.userId,
           agent: row,
           backup: failedBackup,
           manifest: null,
@@ -153,7 +147,7 @@ export async function createManualBackupForDevelopmentUser(
           runnerId: row.runnerId,
           status: "uploading",
           manifestJson: validation.manifest,
-          createdBy: userId,
+          createdBy: input.userId,
         })
         .returning();
 
@@ -162,7 +156,7 @@ export async function createManualBackupForDevelopmentUser(
       }
 
       return {
-        userId,
+        userId: input.userId,
         agent: row,
         backup: createdBackup,
         manifest: validation.manifest,
@@ -191,7 +185,11 @@ export async function createManualBackupForDevelopmentUser(
     const storageResult = resolveBackupObjectStorage(dependencies);
 
     if (!storageResult.ok) {
-      const failedBackup = await markBackupFailed(connection, backupContext.backup.id);
+      const failedBackup = await markBackupFailed(connection, {
+        agentId: backupContext.agent.id,
+        backupId: backupContext.backup.id,
+        userId: backupContext.userId,
+      });
 
       return {
         ok: false,
@@ -202,6 +200,7 @@ export async function createManualBackupForDevelopmentUser(
     }
 
     const artifactKey = buildManualBackupArtifactKey({
+      userId: backupContext.userId,
       agentId: backupContext.agent.id,
       backupId: backupContext.backup.id,
     });
@@ -212,7 +211,11 @@ export async function createManualBackupForDevelopmentUser(
     });
 
     if (!uploadResult.ok) {
-      const failedBackup = await markBackupFailed(connection, backupContext.backup.id);
+      const failedBackup = await markBackupFailed(connection, {
+        agentId: backupContext.agent.id,
+        backupId: backupContext.backup.id,
+        userId: backupContext.userId,
+      });
 
       return {
         ok: false,
@@ -229,7 +232,14 @@ export async function createManualBackupForDevelopmentUser(
           status: "ready",
           storageUri: uploadResult.storageUri,
         })
-        .where(eq(backups.id, backupContext.backup.id))
+        .where(
+          and(
+            eq(backups.id, backupContext.backup.id),
+            eq(backups.agentId, backupContext.agent.id),
+            eq(backups.createdBy, backupContext.userId),
+            eq(backups.status, "uploading"),
+          ),
+        )
         .returning();
 
       if (!updatedBackup) {
@@ -255,6 +265,37 @@ export async function createManualBackupForDevelopmentUser(
       backup: toBackupResponse(readyBackup),
       event: { type: BACKUP_CREATED_EVENT_TYPE },
     };
+  } catch (error) {
+    throw new ManualBackupPersistenceError(error);
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function createManualBackupForDevelopmentUser(
+  input: { agentId: string },
+  dependencies: ManualBackupDependencies = {},
+): Promise<ManualBackupCreateResult> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    const userId = await connection.db.transaction((tx) => getDevelopmentUserId(tx));
+
+    if (!userId) {
+      return {
+        ok: false,
+        reason: "agent_not_found",
+        message: "Agent could not be found.",
+      };
+    }
+
+    return await createManualBackupForUser(
+      { ...input, userId },
+      { ...dependencies, createConnection: () => connection },
+    );
   } catch (error) {
     throw new ManualBackupPersistenceError(error);
   } finally {
@@ -420,12 +461,19 @@ function resolveBackupObjectStorage(dependencies: ManualBackupDependencies):
 
 async function markBackupFailed(
   connection: DatabaseConnection,
-  backupId: string,
+  input: { agentId: string; backupId: string; userId: string },
 ): Promise<BackupRow> {
   const [failedBackup] = await connection.db
     .update(backups)
     .set({ status: "failed" })
-    .where(eq(backups.id, backupId))
+    .where(
+      and(
+        eq(backups.id, input.backupId),
+        eq(backups.agentId, input.agentId),
+        eq(backups.createdBy, input.userId),
+        eq(backups.status, "uploading"),
+      ),
+    )
     .returning();
 
   if (!failedBackup) {
@@ -435,8 +483,12 @@ async function markBackupFailed(
   return failedBackup;
 }
 
-function buildManualBackupArtifactKey(input: { agentId: string; backupId: string }): string {
-  return `agents/${input.agentId}/backups/${input.backupId}.json`;
+function buildManualBackupArtifactKey(input: {
+  userId: string;
+  agentId: string;
+  backupId: string;
+}): string {
+  return `users/${input.userId}/agents/${input.agentId}/backups/${input.backupId}.json`;
 }
 
 function toBackupResponse(row: BackupRow): ManualBackupResponse["backup"] {

@@ -73,7 +73,7 @@ describe("Milestone 15 backup restore acceptance evidence", () => {
     const backupSummaryBeforeRestore = await listAgentBackupsForDevelopmentUser(original.agent.id, {
       createConnection: () => connection,
     });
-    const artifactKey = `agents/${original.agent.id}/backups/${createResult.backup.id}.json`;
+    const artifactKey = `users/${original.agent.userId}/agents/${original.agent.id}/backups/${createResult.backup.id}.json`;
     const artifact = await storage.download({ key: artifactKey });
 
     expect(backupSummaryBeforeRestore).toEqual([

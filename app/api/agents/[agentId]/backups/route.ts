@@ -1,9 +1,13 @@
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import {
-  createManualBackupForDevelopmentUser,
+  createManualBackupForUser,
   type ManualBackupResponse,
   ManualBackupPersistenceError,
 } from "@/src/server/backups/create-backup";
+import {
+  type ConfiguredApplicationUserResolution,
+  requireConfiguredApplicationUser,
+} from "@/src/server/users/configured-application-user";
 
 type ClientBackupResponse = Omit<ManualBackupResponse["backup"], "storageUri">;
 
@@ -13,9 +17,17 @@ type AgentBackupsRouteContext = {
   }>;
 };
 
+type AgentBackupsRouteDependencies = {
+  requireApplicationUser?: typeof requireConfiguredApplicationUser;
+};
+
 export const dynamic = "force-dynamic";
 
-export async function POST(_request: Request, context: AgentBackupsRouteContext) {
+export async function POST(
+  _request: Request,
+  context: AgentBackupsRouteContext,
+  dependencies: AgentBackupsRouteDependencies = {},
+) {
   const params = await context.params;
   const decodedAgentId = decodeAgentId(params.agentId ?? "");
 
@@ -24,8 +36,17 @@ export async function POST(_request: Request, context: AgentBackupsRouteContext)
   }
 
   try {
-    const result = await createManualBackupForDevelopmentUser({
+    const applicationUser = await (
+      dependencies.requireApplicationUser ?? requireConfiguredApplicationUser
+    )();
+
+    if (!applicationUser.ok) {
+      return authenticationResponse(applicationUser);
+    }
+
+    const result = await createManualBackupForUser({
       agentId: decodedAgentId.value,
+      userId: applicationUser.userId,
     });
 
     if (result.ok) {
@@ -75,6 +96,23 @@ export async function POST(_request: Request, context: AgentBackupsRouteContext)
 
     throw error;
   }
+}
+
+function authenticationResponse(
+  result: Exclude<ConfiguredApplicationUserResolution, { ok: true }>,
+) {
+  return Response.json(
+    {
+      error: {
+        code: result.code,
+        message:
+          result.status === 401
+            ? "Authentication is required."
+            : "Authentication is not configured safely.",
+      },
+    },
+    { status: result.status },
+  );
 }
 
 function toClientBackupResponse(backup: ManualBackupResponse["backup"]): ClientBackupResponse {
