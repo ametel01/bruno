@@ -127,14 +127,42 @@ export async function getCostEstimatesForDevelopmentUser(
 
   try {
     assertValidClock(now);
+    const userId = await connection.db.transaction((tx) => getDevelopmentUserId(tx));
+
+    if (!userId) {
+      return toEmptyCostEstimates(createWindows(now), now);
+    }
+
+    return await getCostEstimatesForUser(userId, {
+      createConnection: () => connection,
+      now: () => now,
+    });
+  } catch (error) {
+    if (error instanceof CostEstimatePersistenceError) {
+      throw error;
+    }
+
+    throw new CostEstimatePersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function getCostEstimatesForUser(
+  userId: string,
+  dependencies: { createConnection?: () => DatabaseConnection; now?: () => Date } = {},
+): Promise<DevelopmentUserCostEstimatesDto> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
+
+  try {
+    assertValidClock(now);
 
     return await connection.db.transaction(async (tx) => {
-      const userId = await getDevelopmentUserId(tx);
       const windows = createWindows(now);
-
-      if (!userId) {
-        return toEmptyCostEstimates(windows, now);
-      }
 
       const runnerRows = await tx
         .select({

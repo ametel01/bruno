@@ -144,6 +144,71 @@ export async function listManualRunnerStatusSummariesForDevelopmentUser(
   }
 }
 
+export async function listManualRunnerStatusSummariesForUser(
+  userId: string,
+  dependencies: { createConnection?: () => DatabaseConnection } = {},
+): Promise<ManualRunnerStatusSummary[]> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    return await connection.db.transaction(async (tx) => {
+      const rows = await tx
+        .select({
+          id: runners.id,
+          name: runners.name,
+          kind: runners.kind,
+          endpointUrl: runners.endpointUrl,
+          status: runners.status,
+          provisioningStatus: runners.provisioningStatus,
+          updatedAt: runners.updatedAt,
+        })
+        .from(runners)
+        .where(
+          and(
+            eq(runners.userId, userId),
+            eq(runners.kind, MANUAL_RUNNER_KIND),
+            isNull(runners.deletedAt),
+          ),
+        )
+        .orderBy(desc(runners.updatedAt), desc(runners.createdAt))
+        .limit(10);
+
+      const summaries: ManualRunnerStatusSummary[] = [];
+
+      for (const row of rows) {
+        const [latestHeartbeat] = await tx
+          .select({
+            status: runnerHeartbeats.status,
+            metadata: runnerHeartbeats.metadata,
+            observedAt: runnerHeartbeats.observedAt,
+          })
+          .from(runnerHeartbeats)
+          .where(eq(runnerHeartbeats.runnerId, row.id))
+          .orderBy(desc(runnerHeartbeats.observedAt))
+          .limit(1);
+        const assignedRunningAgents = await countAssignedRunningAgents(tx, row.id, userId);
+
+        summaries.push(
+          toManualRunnerStatusSummary({
+            ...row,
+            latestHeartbeat: latestHeartbeat ?? null,
+            assignedRunningAgents,
+          }),
+        );
+      }
+
+      return summaries;
+    });
+  } catch {
+    throw new ManualRunnerStatusPersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
 export async function listSettingsRunnerManagementSummariesForDevelopmentUser(
   dependencies: { createConnection?: () => DatabaseConnection; now?: () => Date } = {},
 ): Promise<SettingsRunnerManagementSummary[]> {
@@ -245,6 +310,71 @@ export async function getAssignedManualRunnerStatusForDevelopmentUserAgent(
           kind: runners.kind,
           endpointUrl: runners.endpointUrl,
           status: runners.status,
+          updatedAt: runners.updatedAt,
+        })
+        .from(agents)
+        .innerJoin(runners, eq(runners.id, agents.runnerId))
+        .where(
+          and(
+            eq(agents.id, agentId),
+            eq(agents.userId, userId),
+            isNull(agents.deletedAt),
+            isNotNull(agents.runnerId),
+            eq(runners.userId, userId),
+            isNull(runners.deletedAt),
+          ),
+        )
+        .limit(1);
+
+      if (!row) {
+        return null;
+      }
+
+      const [latestHeartbeat] = await tx
+        .select({
+          status: runnerHeartbeats.status,
+          metadata: runnerHeartbeats.metadata,
+          observedAt: runnerHeartbeats.observedAt,
+        })
+        .from(runnerHeartbeats)
+        .where(eq(runnerHeartbeats.runnerId, row.id))
+        .orderBy(desc(runnerHeartbeats.observedAt))
+        .limit(1);
+      const assignedRunningAgents = await countAssignedRunningAgents(tx, row.id, userId);
+
+      return toAssignedManualRunnerStatusSummary({
+        ...row,
+        latestHeartbeat: latestHeartbeat ?? null,
+        assignedRunningAgents,
+      });
+    });
+  } catch {
+    throw new ManualRunnerStatusPersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function getAssignedManualRunnerStatusForUserAgent(
+  userId: string,
+  agentId: string,
+  dependencies: { createConnection?: () => DatabaseConnection } = {},
+): Promise<AssignedManualRunnerStatusSummary | null> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    return await connection.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select({
+          id: runners.id,
+          name: runners.name,
+          kind: runners.kind,
+          endpointUrl: runners.endpointUrl,
+          status: runners.status,
+          provisioningStatus: runners.provisioningStatus,
           updatedAt: runners.updatedAt,
         })
         .from(agents)

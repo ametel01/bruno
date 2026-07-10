@@ -10,6 +10,8 @@ const ROUTE_FILES = [
   "app/api/agents/[agentId]/events/route.ts",
 ] as const;
 
+const OPERATIONAL_PAGE_FILES = ["app/dashboard/page.tsx", "app/agents/[agentId]/page.tsx"] as const;
+
 describe("user operations request boundaries", () => {
   it("resolves the application user and never calls development-user services", async () => {
     for (const file of ROUTE_FILES) {
@@ -21,13 +23,55 @@ describe("user operations request boundaries", () => {
     }
   });
 
-  it("passes the resolved user to dashboard activity and approval loaders", async () => {
-    const source = await readFile(join(process.cwd(), "app/dashboard/page.tsx"), "utf8");
+  it("keeps every dashboard and detail operational loader on user-explicit services", async () => {
+    for (const file of OPERATIONAL_PAGE_FILES) {
+      const source = await readFile(join(process.cwd(), file), "utf8");
 
-    expect(source).toContain("requireOperationalApplicationUser");
-    expect(source).toContain("listLatestAgentActivityForUser");
-    expect(source).toContain("listPendingApprovalsForUser");
-    expect(source).not.toContain("listPendingApprovalsForDevelopmentUser");
+      expect(source).toContain("requireOperationalApplicationUser");
+      expect(source).not.toContain("getDevelopmentUserId");
+      expect(source).not.toContain("ForDevelopmentUser");
+    }
+
+    const dashboardSource = await readFile(join(process.cwd(), "app/dashboard/page.tsx"), "utf8");
+    const detailSource = await readFile(
+      join(process.cwd(), "app/agents/[agentId]/page.tsx"),
+      "utf8",
+    );
+
+    for (const service of [
+      "listActiveAgentsForUser",
+      "listLatestAgentActivityForUser",
+      "listPendingApprovalsForUser",
+      "listLatestActiveAgentProcessLogsForUser",
+      "listManualRunnerStatusSummariesForUser",
+      "listCloudRunnerProvisioningSummariesForUser",
+      "getCostEstimatesForUser",
+    ]) {
+      expect(dashboardSource).toContain(service);
+    }
+
+    for (const service of [
+      "getActiveAgentForUser",
+      "listAgentEventFeedForUser",
+      "listPendingApprovalsForUserAgent",
+      "listAgentBackupsForUser",
+      "getAssignedManualRunnerStatusForUserAgent",
+      "getMonthlyRunnerCostForUserAgent",
+    ]) {
+      expect(detailSource).toContain(service);
+    }
+  });
+
+  it("qualifies dashboard agent and process-log reads at the database operation", async () => {
+    const agentSource = await readFile(
+      join(process.cwd(), "src/server/agents/list-agents.ts"),
+      "utf8",
+    );
+    const logSource = await readFile(join(process.cwd(), "src/server/logs/agent-logs.ts"), "utf8");
+
+    expect(agentSource).toContain("eq(agents.userId, userId)");
+    expect(agentSource).toContain("eq(runners.userId, userId)");
+    expect(logSource).toContain("eq(agents.userId, input.userId)");
   });
 
   it("keeps backup storage keys under the internal user namespace", async () => {

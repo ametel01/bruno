@@ -4,8 +4,10 @@ import { POST as createBackupRoute } from "@/app/api/agents/[agentId]/backups/ro
 import { POST as restoreBackupRoute } from "@/app/api/agents/[agentId]/backups/[backupId]/restore/route";
 import { GET as agentEventsRoute } from "@/app/api/agents/[agentId]/events/route";
 import { POST as approveApprovalRoute } from "@/app/api/approvals/[approvalId]/approve/route";
+import { POST as denyApprovalRoute } from "@/app/api/approvals/[approvalId]/deny/route";
 import {
   APPROVAL_APPROVED_EVENT_TYPE,
+  APPROVAL_DENIED_EVENT_TYPE,
   approvePendingApprovalForUser,
   denyApprovalForUser,
   listPendingApprovalsForUser,
@@ -120,6 +122,39 @@ describe("signed-in user operations isolation", () => {
     expect(decisionEvents[0]).toMatchObject({ agentId: AGENT_A_ID, actorUserId: USER_A_ID });
   });
 
+  it("returns identical deny responses for foreign and missing approvals with no audit write", async () => {
+    const foreignResponse = await denyApprovalRoute(
+      new Request(`http://localhost/api/approvals/${APPROVAL_B_ID}/deny`),
+      { params: Promise.resolve({ approvalId: APPROVAL_B_ID }) },
+      routeUser(USER_A_ID),
+    );
+    const missingResponse = await denyApprovalRoute(
+      new Request(`http://localhost/api/approvals/${MISSING_ID}/deny`),
+      { params: Promise.resolve({ approvalId: MISSING_ID }) },
+      routeUser(USER_A_ID),
+    );
+    const foreignBody = await foreignResponse.json();
+    const missingBody = await missingResponse.json();
+
+    expect(foreignResponse.status).toBe(404);
+    expect(missingResponse.status).toBe(404);
+    expect(foreignBody).toEqual(missingBody);
+    expect(JSON.stringify(foreignBody)).not.toContain(USER_B_ID);
+    expect(JSON.stringify(foreignBody)).not.toContain("User B approval");
+
+    const [foreignApproval] = await connection.db
+      .select()
+      .from(agentApprovals)
+      .where(eq(agentApprovals.id, APPROVAL_B_ID));
+    expect(foreignApproval).toMatchObject({ status: "pending", resolvedBy: null });
+    await expect(
+      connection.db
+        .select()
+        .from(agentEvents)
+        .where(eq(agentEvents.type, APPROVAL_DENIED_EVENT_TYPE)),
+    ).resolves.toHaveLength(0);
+  });
+
   it("binds backup rows and object keys to the owner before any foreign storage access", async () => {
     const storage = new FakeBackupObjectStorage("agentbay-backups");
     const download = vi.spyOn(storage, "download");
@@ -135,6 +170,14 @@ describe("signed-in user operations isolation", () => {
     expect(createResult.backup.storageUri).toContain(
       `users/${USER_A_ID}/agents/${AGENT_A_ID}/backups/${createResult.backup.id}.json`,
     );
+    const foreignCreateResult = await createManualBackupForUser(
+      { agentId: AGENT_B_ID, userId: USER_B_ID },
+      { createConnection: () => connection, storage },
+    );
+    expect(foreignCreateResult.ok).toBe(true);
+    if (!foreignCreateResult.ok) {
+      throw new Error("Expected foreign owner backup creation to succeed.");
+    }
 
     const foreignResult = await restoreBackupForUser(
       {
@@ -149,6 +192,36 @@ describe("signed-in user operations isolation", () => {
       reason: "backup_not_found",
       message: "Backup could not be found.",
     });
+    expect(download).not.toHaveBeenCalled();
+
+    const missingResult = await restoreBackupForUser(
+      {
+        userId: USER_B_ID,
+        agentId: AGENT_A_ID,
+        backupId: MISSING_ID,
+      },
+      { createConnection: () => connection, storage },
+    );
+    const ownerAgentForeignBackupResult = await restoreBackupForUser(
+      {
+        userId: USER_A_ID,
+        agentId: AGENT_A_ID,
+        backupId: foreignCreateResult.backup.id,
+      },
+      { createConnection: () => connection, storage },
+    );
+    const foreignAgentOwnerBackupResult = await restoreBackupForUser(
+      {
+        userId: USER_A_ID,
+        agentId: AGENT_B_ID,
+        backupId: createResult.backup.id,
+      },
+      { createConnection: () => connection, storage },
+    );
+
+    expect(foreignResult).toEqual(missingResult);
+    expect(ownerAgentForeignBackupResult).toEqual(missingResult);
+    expect(foreignAgentOwnerBackupResult).toEqual(missingResult);
     expect(download).not.toHaveBeenCalled();
 
     const foreignCreateResponse = await createBackupRoute(
@@ -168,14 +241,29 @@ describe("signed-in user operations isolation", () => {
       },
       routeUser(USER_B_ID),
     );
+    const missingRestoreResponse = await restoreBackupRoute(
+      new Request(`http://localhost/api/agents/${AGENT_A_ID}/backups/${MISSING_ID}/restore`),
+      {
+        params: Promise.resolve({
+          agentId: AGENT_A_ID,
+          backupId: MISSING_ID,
+        }),
+      },
+      routeUser(USER_B_ID),
+    );
     expect(foreignCreateResponse.status).toBe(404);
     expect(foreignRestoreResponse.status).toBe(404);
     expect(await foreignCreateResponse.json()).toEqual({
       error: { code: "agent_not_found", message: "Agent could not be found." },
     });
-    expect(await foreignRestoreResponse.json()).toEqual({
+    const foreignRestoreBody = await foreignRestoreResponse.json();
+    const missingRestoreBody = await missingRestoreResponse.json();
+    expect(foreignRestoreBody).toEqual({
       error: { code: "backup_not_found", message: "Backup could not be found." },
     });
+    expect(missingRestoreResponse.status).toBe(404);
+    expect(missingRestoreBody).toEqual(foreignRestoreBody);
+    expect(JSON.stringify(foreignRestoreBody)).not.toContain(foreignCreateResult.backup.id);
     expect(download).not.toHaveBeenCalled();
 
     const [persistedBackup] = await connection.db

@@ -16,28 +16,29 @@ import {
 } from "@/src/server/alerts/operational-summaries";
 import {
   AgentDetailPersistenceError,
-  getActiveAgentForDevelopmentUser,
+  getActiveAgentForUser,
 } from "@/src/server/agents/list-agents";
 import {
   AgentApprovalPersistenceError,
-  listPendingApprovalsForDevelopmentUserAgent,
+  listPendingApprovalsForUserAgent,
   type PendingApprovalDto,
 } from "@/src/server/approvals/agent-approvals";
 import {
   AgentBackupListPersistenceError,
-  listAgentBackupsForDevelopmentUser,
+  listAgentBackupsForUser,
 } from "@/src/server/backups/list-backups";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { listAgentEventFeed } from "@/src/server/events/agent-events";
+import { listAgentEventFeedForUser } from "@/src/server/events/agent-events";
 import {
-  getMonthlyRunnerCostForDevelopmentUserAgent,
+  getMonthlyRunnerCostForUserAgent,
   RunnerCostContextPersistenceError,
 } from "@/src/server/costs/runner-cost-context";
 import {
-  getAssignedManualRunnerStatusForDevelopmentUserAgent,
+  getAssignedManualRunnerStatusForUserAgent,
   ManualRunnerStatusPersistenceError,
   type AssignedManualRunnerStatusSummary,
 } from "@/src/server/runners/manual-runner-status";
+import { requireOperationalApplicationUser } from "@/src/server/users/operational-application-user";
 
 type AgentDetailPageProps = {
   params: Promise<{
@@ -59,7 +60,24 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
   const { agentId } = await params;
   const resolvedSearchParams = await searchParams;
   const decodedAgentId = decodeURIComponent(agentId);
-  const loadResult = await loadAgentDetail(decodedAgentId);
+  const applicationUser = await requireOperationalApplicationUser();
+
+  if (!applicationUser.ok) {
+    return (
+      <ProductShell
+        active="agents"
+        eyebrow="Agent detail"
+        title="Authentication required"
+        description="Sign in to load user-scoped operational data."
+      >
+        <div className="safe-error" role="alert">
+          Authentication is required.
+        </div>
+      </ProductShell>
+    );
+  }
+
+  const loadResult = await loadAgentDetail(applicationUser.userId, decodedAgentId);
 
   if (!loadResult.ok) {
     return (
@@ -88,7 +106,7 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
       ? Promise.resolve({
           ok: false as const,
         })
-      : loadAgentActivity(agent.id, activityCursor);
+      : loadAgentActivity(applicationUser.userId, agent.id, activityCursor);
   const [
     activityResult,
     approvalsResult,
@@ -97,10 +115,10 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
     assignedRunnerCostResult,
   ] = await Promise.all([
     activityPromise,
-    loadAgentApprovals(agent.id),
-    loadAgentBackups(agent.id),
-    loadAssignedManualRunner(agent.id),
-    loadAssignedRunnerCost(agent.id),
+    loadAgentApprovals(applicationUser.userId, agent.id),
+    loadAgentBackups(applicationUser.userId, agent.id),
+    loadAssignedManualRunner(applicationUser.userId, agent.id),
+    loadAssignedRunnerCost(applicationUser.userId, agent.id),
   ]);
   const activityEvents = activityResult.ok ? activityResult.events : [];
   const olderActivityHref =
@@ -395,11 +413,11 @@ function AgentApprovalItem({ approval }: { approval: PendingApprovalDto }) {
   );
 }
 
-async function loadAgentDetail(agentId: string) {
+async function loadAgentDetail(userId: string, agentId: string) {
   try {
     return {
       ok: true as const,
-      agent: await getActiveAgentForDevelopmentUser(agentId),
+      agent: await getActiveAgentForUser(userId, agentId),
     };
   } catch (error) {
     if (error instanceof AgentDetailPersistenceError) {
@@ -413,6 +431,7 @@ async function loadAgentDetail(agentId: string) {
 }
 
 async function loadAgentActivity(
+  userId: string,
   agentId: string,
   cursor: string | null,
   dependencies: { createConnection?: () => DatabaseConnection } = {},
@@ -421,8 +440,9 @@ async function loadAgentActivity(
   const ownsConnection = !dependencies.createConnection;
 
   try {
-    const result = await listAgentEventFeed({
+    const result = await listAgentEventFeedForUser({
       db: connection.db,
+      userId,
       agentId,
       cursor,
       limit: DETAIL_ACTIVITY_PAGE_SIZE,
@@ -450,11 +470,11 @@ async function loadAgentActivity(
   }
 }
 
-async function loadAgentApprovals(agentId: string) {
+async function loadAgentApprovals(userId: string, agentId: string) {
   try {
     return {
       ok: true as const,
-      approvals: await listPendingApprovalsForDevelopmentUserAgent(agentId),
+      approvals: await listPendingApprovalsForUserAgent(userId, agentId),
     };
   } catch (error) {
     if (error instanceof AgentApprovalPersistenceError) {
@@ -467,11 +487,11 @@ async function loadAgentApprovals(agentId: string) {
   }
 }
 
-async function loadAgentBackups(agentId: string) {
+async function loadAgentBackups(userId: string, agentId: string) {
   try {
     return {
       ok: true as const,
-      backups: await listAgentBackupsForDevelopmentUser(agentId),
+      backups: await listAgentBackupsForUser(userId, agentId),
     };
   } catch (error) {
     if (error instanceof AgentBackupListPersistenceError) {
@@ -484,11 +504,11 @@ async function loadAgentBackups(agentId: string) {
   }
 }
 
-async function loadAssignedManualRunner(agentId: string) {
+async function loadAssignedManualRunner(userId: string, agentId: string) {
   try {
     return {
       ok: true as const,
-      runner: await getAssignedManualRunnerStatusForDevelopmentUserAgent(agentId),
+      runner: await getAssignedManualRunnerStatusForUserAgent(userId, agentId),
     };
   } catch (error) {
     if (error instanceof ManualRunnerStatusPersistenceError) {
@@ -501,11 +521,11 @@ async function loadAssignedManualRunner(agentId: string) {
   }
 }
 
-async function loadAssignedRunnerCost(agentId: string) {
+async function loadAssignedRunnerCost(userId: string, agentId: string) {
   try {
     return {
       ok: true as const,
-      estimate: await getMonthlyRunnerCostForDevelopmentUserAgent(agentId),
+      estimate: await getMonthlyRunnerCostForUserAgent(userId, agentId),
     };
   } catch (error) {
     if (error instanceof RunnerCostContextPersistenceError) {

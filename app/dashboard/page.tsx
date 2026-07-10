@@ -14,7 +14,7 @@ import {
 import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import {
   AgentListPersistenceError,
-  listActiveAgentsForDevelopmentUser,
+  listActiveAgentsForUser,
 } from "@/src/server/agents/list-agents";
 import {
   AgentApprovalPersistenceError,
@@ -24,21 +24,21 @@ import {
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { listLatestAgentActivityForUser } from "@/src/server/events/agent-events";
 import {
-  listLatestActiveAgentProcessLogs,
+  listLatestActiveAgentProcessLogsForUser,
   type LatestAgentProcessLogDto,
 } from "@/src/server/logs/agent-logs";
 import {
-  listManualRunnerStatusSummariesForDevelopmentUser,
+  listManualRunnerStatusSummariesForUser,
   ManualRunnerStatusPersistenceError,
   type ManualRunnerStatusSummary,
 } from "@/src/server/runners/manual-runner-status";
 import {
   CloudRunnerProvisioningPersistenceError,
-  listCloudRunnerProvisioningSummariesForDevelopmentUser,
+  listCloudRunnerProvisioningSummariesForUser,
 } from "@/src/server/runners/cloud-runner-provisioning";
 import {
   CostEstimatePersistenceError,
-  getCostEstimatesForDevelopmentUser,
+  getCostEstimatesForUser,
 } from "@/src/server/costs/cost-estimates";
 import { requireOperationalApplicationUser } from "@/src/server/users/operational-application-user";
 
@@ -82,13 +82,13 @@ export default async function DashboardPage() {
     cloudRunnersResult,
     costResult,
   ] = await Promise.all([
-    loadDashboardAgents(),
+    loadDashboardAgents(applicationUser.userId),
     loadDashboardActivity(applicationUser.userId),
     loadDashboardApprovals(applicationUser.userId),
-    loadDashboardProcessLogs(),
-    loadDashboardManualRunners(),
-    loadDashboardCloudRunners(),
-    loadDashboardCosts(),
+    loadDashboardProcessLogs(applicationUser.userId),
+    loadDashboardManualRunners(applicationUser.userId),
+    loadDashboardCloudRunners(applicationUser.userId),
+    loadDashboardCosts(applicationUser.userId),
   ]);
 
   return (
@@ -448,11 +448,11 @@ function PendingApprovalItem({ approval }: { approval: PendingApprovalDto }) {
   );
 }
 
-async function loadDashboardAgents() {
+async function loadDashboardAgents(userId: string) {
   try {
     return {
       ok: true as const,
-      agents: await listActiveAgentsForDevelopmentUser(),
+      agents: await listActiveAgentsForUser(userId),
     };
   } catch (error) {
     if (error instanceof AgentListPersistenceError) {
@@ -518,6 +518,7 @@ async function loadDashboardApprovals(userId: string) {
 }
 
 async function loadDashboardProcessLogs(
+  userId: string,
   dependencies: { createConnection?: () => DatabaseConnection } = {},
 ) {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
@@ -526,8 +527,9 @@ async function loadDashboardProcessLogs(
   try {
     return {
       ok: true as const,
-      logs: await listLatestActiveAgentProcessLogs({
+      logs: await listLatestActiveAgentProcessLogsForUser({
         db: connection.db,
+        userId,
         limit: 8,
       }),
     };
@@ -542,11 +544,11 @@ async function loadDashboardProcessLogs(
   }
 }
 
-async function loadDashboardManualRunners() {
+async function loadDashboardManualRunners(userId: string) {
   try {
     return {
       ok: true as const,
-      runners: await listManualRunnerStatusSummariesForDevelopmentUser(),
+      runners: await listManualRunnerStatusSummariesForUser(userId),
     };
   } catch (error) {
     if (error instanceof ManualRunnerStatusPersistenceError) {
@@ -559,11 +561,11 @@ async function loadDashboardManualRunners() {
   }
 }
 
-async function loadDashboardCloudRunners() {
+async function loadDashboardCloudRunners(userId: string) {
   try {
     return {
       ok: true as const,
-      runners: await listCloudRunnerProvisioningSummariesForDevelopmentUser(),
+      runners: await listCloudRunnerProvisioningSummariesForUser(userId),
     };
   } catch (error) {
     if (error instanceof CloudRunnerProvisioningPersistenceError) {
@@ -576,11 +578,11 @@ async function loadDashboardCloudRunners() {
   }
 }
 
-async function loadDashboardCosts(): Promise<DashboardCostResult> {
+async function loadDashboardCosts(userId: string): Promise<DashboardCostResult> {
   try {
     return {
       ok: true,
-      estimates: await getCostEstimatesForDevelopmentUser(),
+      estimates: await getCostEstimatesForUser(userId),
     };
   } catch (error) {
     if (error instanceof CostEstimatePersistenceError) {
