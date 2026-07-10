@@ -73,6 +73,22 @@ describe("Vercel build workflow", () => {
     ).toThrow("Preview development authentication requires verified deployment protection.");
   });
 
+  it.each([
+    ["missing", undefined, undefined],
+    ["malformed", "not a URL", "not a hostname"],
+  ])("fails closed before planning an attested preview build with %s hosts", (_label, appUrl, vercelUrl) => {
+    expect(() =>
+      planVercelBuildCommands({
+        AGENTBAY_AUTH_MODE: "development",
+        AGENTBAY_PREVIEW_PROTECTION_VERIFIED: "true",
+        NEXT_PUBLIC_APP_URL: appUrl,
+        VERCEL: "1",
+        VERCEL_ENV: "preview",
+        VERCEL_URL: vercelUrl,
+      }),
+    ).toThrow("Development authentication is not allowed in this environment.");
+  });
+
   it("allows a no-key local build through the loopback development default", () => {
     expect(planVercelBuildCommands({ NEXT_PUBLIC_APP_URL: "http://localhost:3000" })).toEqual([
       { command: "bun", args: ["run", "build"] },

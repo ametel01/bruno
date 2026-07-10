@@ -53,7 +53,12 @@ export function resolveAuthMode(env: AuthEnvironment): AuthModeDecision {
   }
 
   if (isPreview) {
-    if (configuredMode !== "development" || appHostname !== currentPreviewHostname) {
+    if (
+      configuredMode !== "development" ||
+      appHostname === null ||
+      currentPreviewHostname === null ||
+      appHostname !== currentPreviewHostname
+    ) {
       return { mode: "invalid", code: "development_auth_not_allowed" };
     }
 
@@ -150,12 +155,20 @@ function isLoopbackHostname(hostname: string | null): boolean {
     return false;
   }
 
-  return (
+  if (
     hostname === "localhost" ||
     hostname.endsWith(".localhost") ||
     hostname === "::1" ||
-    hostname === "[::1]" ||
-    hostname.startsWith("127.")
+    hostname === "[::1]"
+  ) {
+    return true;
+  }
+
+  const octets = hostname.split(".");
+  return (
+    octets.length === 4 &&
+    octets[0] === "127" &&
+    octets.every((octet) => /^(0|[1-9]\d{0,2})$/.test(octet) && Number(octet) <= 255)
   );
 }
 

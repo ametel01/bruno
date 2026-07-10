@@ -231,6 +231,24 @@ describe("Clerk session proxy", () => {
     expect(mocks.clerkInvocations).toBe(0);
   });
 
+  it("does not treat a DNS name beginning 127 as a local development host", async () => {
+    process.env.AGENTBAY_AUTH_MODE = "development";
+    process.env.NEXT_PUBLIC_APP_URL = "https://127.attacker.example";
+    delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    delete process.env.CLERK_SECRET_KEY;
+
+    const response = await proxy(
+      new NextRequest("https://127.attacker.example/dashboard"),
+      {} as NextFetchEvent,
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.text()).toBe(
+      "Development authentication is not allowed in this environment.",
+    );
+    expect(mocks.clerkInvocations).toBe(0);
+  });
+
   it("permits only an attested development preview after the independent operator barrier", async () => {
     process.env.AGENTBAY_AUTH_MODE = "development";
     process.env.AGENTBAY_PREVIEW_PROTECTION_VERIFIED = "true";

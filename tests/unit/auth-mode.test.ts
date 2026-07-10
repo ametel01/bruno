@@ -102,6 +102,24 @@ describe("authentication mode policy", () => {
   });
 
   it.each([
+    ["missing hosts", undefined, undefined],
+    ["malformed hosts", "not a URL", "not a hostname"],
+    ["missing app host", undefined, "agentbay-git-feature.example.vercel.app"],
+    ["missing current preview host", "https://agentbay-git-feature.example.vercel.app", undefined],
+  ])("refuses an attested development preview with %s", (_label, appUrl, vercelUrl) => {
+    expect(
+      resolveAuthMode({
+        AGENTBAY_AUTH_MODE: "development",
+        AGENTBAY_PREVIEW_PROTECTION_VERIFIED: "true",
+        NEXT_PUBLIC_APP_URL: appUrl,
+        VERCEL: "1",
+        VERCEL_ENV: "preview",
+        VERCEL_URL: vercelUrl,
+      }),
+    ).toEqual({ mode: "invalid", code: "development_auth_not_allowed" });
+  });
+
+  it.each([
     ["mismatched current deployment", "https://other.example.vercel.app"],
     ["custom preview hostname", "https://preview.example.com"],
     ["production hostname", "https://plingpling.xyz"],
@@ -145,6 +163,11 @@ describe("authentication mode policy", () => {
       },
     ],
     ["ambiguous Vercel marker", { NEXT_PUBLIC_APP_URL: "http://localhost", VERCEL: "1" }],
+    ["DNS name beginning 127", { NEXT_PUBLIC_APP_URL: "https://127.attacker.example" }],
+    [
+      "DNS name extending an IPv4 loopback",
+      { NEXT_PUBLIC_APP_URL: "https://127.0.0.1.attacker.example" },
+    ],
   ])("requires Clerk instead of development for %s", (_label, env) => {
     expect(resolveAuthMode({ AGENTBAY_AUTH_MODE: "development", ...env })).toEqual({
       mode: "invalid",
