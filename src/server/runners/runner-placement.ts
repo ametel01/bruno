@@ -88,12 +88,14 @@ export class RunnerPlacementPersistenceError extends Error {
   }
 }
 
+export type RunnerPlacementDependencies = {
+  createConnection?: () => DatabaseConnection;
+  now?: () => Date;
+};
+
 export async function selectRunnerPlacementForDevelopmentUser(
   input: RunnerPlacementInput = {},
-  dependencies: {
-    createConnection?: () => DatabaseConnection;
-    now?: () => Date;
-  } = {},
+  dependencies: RunnerPlacementDependencies = {},
 ): Promise<RunnerPlacementResult> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
@@ -102,6 +104,28 @@ export async function selectRunnerPlacementForDevelopmentUser(
   try {
     return await connection.db.transaction((tx) =>
       selectRunnerPlacementForDevelopmentUserInTransaction(tx, input, { now }),
+    );
+  } catch {
+    throw new RunnerPlacementPersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function selectRunnerPlacementForUser(
+  userId: string,
+  input: RunnerPlacementInput = {},
+  dependencies: RunnerPlacementDependencies = {},
+): Promise<RunnerPlacementResult> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now?.() ?? new Date();
+
+  try {
+    return await connection.db.transaction((tx) =>
+      selectRunnerPlacementForUserInTransaction(tx, userId, input, { now }),
     );
   } catch {
     throw new RunnerPlacementPersistenceError();
@@ -123,7 +147,19 @@ export async function selectRunnerPlacementForDevelopmentUserInTransaction(
     return { ok: false, reason: "no_online_runner" } as const;
   }
 
-  await reconcileStaleRunnerHeartbeatsInTransaction(tx, { now: options.now ?? new Date() });
+  return selectRunnerPlacementForUserInTransaction(tx, userId, input, options);
+}
+
+export async function selectRunnerPlacementForUserInTransaction(
+  tx: RunnerPlacementTransaction,
+  userId: string,
+  input: RunnerPlacementInput = {},
+  options: { now?: Date } = {},
+): Promise<RunnerPlacementResult> {
+  await reconcileStaleRunnerHeartbeatsInTransaction(tx, {
+    now: options.now ?? new Date(),
+    userId,
+  });
 
   const activeAgentRows = await tx
     .select({ id: agents.id })

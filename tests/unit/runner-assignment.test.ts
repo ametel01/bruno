@@ -1,8 +1,12 @@
 import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { appMetadata, runners, users } from "@/src/server/db/schema";
-import { listAssignableRunnersForDevelopmentUser } from "@/src/server/runners/runner-assignment";
+import { agents, appMetadata, runners, users } from "@/src/server/db/schema";
+import {
+  listAssignableRunnersForDevelopmentUser,
+  listAssignableRunnersForUser,
+} from "@/src/server/runners/runner-assignment";
+import { getAssignedRunnerForActiveAgentForUser } from "@/src/server/runners/manual-runner-persistence";
 import { DEVELOPMENT_USER_METADATA_KEY } from "@/src/server/users/development-user";
 
 describe.sequential("runner assignment list", () => {
@@ -68,6 +72,70 @@ describe.sequential("runner assignment list", () => {
       },
     ]);
   });
+
+  it("keeps assignable and assigned runner reads within the explicit user", async () => {
+    const [owner, foreignUser] = await connection.db
+      .insert(users)
+      .values([{}, {}])
+      .returning({ id: users.id });
+
+    if (!owner || !foreignUser) {
+      throw new Error("User inserts returned no rows.");
+    }
+
+    const [ownedRunner, foreignRunner] = await connection.db
+      .insert(runners)
+      .values([
+        {
+          userId: owner.id,
+          name: "Owned Runner",
+          kind: "manual_vps",
+          status: "online",
+          endpointUrl: "https://owned-runner.example.com",
+        },
+        {
+          userId: foreignUser.id,
+          name: "Foreign Runner",
+          kind: "manual_vps",
+          status: "online",
+          endpointUrl: "https://foreign-runner.example.com",
+        },
+      ])
+      .returning({ id: runners.id });
+
+    if (!ownedRunner || !foreignRunner) {
+      throw new Error("Runner inserts returned no rows.");
+    }
+
+    const [agent] = await connection.db
+      .insert(agents)
+      .values({
+        userId: owner.id,
+        runnerId: ownedRunner.id,
+        name: "Owned Agent",
+        templateKey: "research_agent",
+        status: "running",
+      })
+      .returning({ id: agents.id });
+
+    if (!agent) {
+      throw new Error("Agent insert returned no rows.");
+    }
+
+    const assignable = await listAssignableRunnersForUser(owner.id, {
+      createConnection: () => connection,
+    });
+    const assigned = await getAssignedRunnerForActiveAgentForUser(owner.id, agent.id, {
+      createConnection: () => connection,
+    });
+    const foreignRead = await getAssignedRunnerForActiveAgentForUser(foreignUser.id, agent.id, {
+      createConnection: () => connection,
+    });
+
+    expect(assignable.map((runner) => runner.id)).toEqual([ownedRunner.id]);
+    expect(assigned).toMatchObject({ id: ownedRunner.id, userId: owner.id });
+    expect(foreignRead).toBeNull();
+  });
 });
 
 async function seedDevelopmentUser(connection: DatabaseConnection): Promise<string> {
@@ -92,6 +160,7 @@ async function resetTables(connection: DatabaseConnection): Promise<void> {
       runner_credentials,
       runner_registration_tokens,
       runner_provisioning_events,
+      agents,
       runners,
       app_metadata,
       users

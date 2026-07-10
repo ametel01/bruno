@@ -33,13 +33,29 @@ export async function listAssignableRunnersForDevelopmentUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
+    const userId = await connection.db.transaction((tx) => getDevelopmentUserId(tx));
+
+    return userId
+      ? await listAssignableRunnersForUser(userId, { createConnection: () => connection })
+      : [];
+  } catch {
+    throw new RunnerAssignmentPersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function listAssignableRunnersForUser(
+  userId: string,
+  dependencies: { createConnection?: () => DatabaseConnection } = {},
+): Promise<AssignableRunnerSummary[]> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
     return await connection.db.transaction(async (tx) => {
-      const userId = await getDevelopmentUserId(tx);
-
-      if (!userId) {
-        return [];
-      }
-
       const rows = await tx
         .select({
           id: runners.id,

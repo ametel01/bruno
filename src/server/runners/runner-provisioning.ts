@@ -122,6 +122,16 @@ export class RunnerProvisioningPersistenceError extends Error {
   }
 }
 
+export type RunnerProvisioningDependencies = {
+  createConnection?: () => DatabaseConnection;
+  provider?: DigitalOceanProvider;
+  readConfig?: () => DigitalOceanProviderConfig | null;
+  createRegistrationToken?: () => GeneratedRunnerSecret;
+  publicEndpointPollAttempts?: number;
+  publicEndpointPollIntervalMs?: number;
+  now?: () => Date;
+};
+
 export function validateCreateRunnerProvisioningPayload(
   payload: unknown,
 ):
@@ -169,15 +179,36 @@ export function validateCreateRunnerProvisioningPayload(
 
 export async function createDigitalOceanRunnerForDevelopmentUser(
   payload: unknown,
-  dependencies: {
-    createConnection?: () => DatabaseConnection;
-    provider?: DigitalOceanProvider;
-    readConfig?: () => DigitalOceanProviderConfig | null;
-    createRegistrationToken?: () => GeneratedRunnerSecret;
-    publicEndpointPollAttempts?: number;
-    publicEndpointPollIntervalMs?: number;
-    now?: () => Date;
-  } = {},
+  dependencies: RunnerProvisioningDependencies = {},
+): Promise<CreateRunnerProvisioningResult> {
+  const validated = validateCreateRunnerProvisioningPayload(payload);
+
+  if (!validated.ok) {
+    logRunnerProvisioning("validation_failed", { issueCount: validated.issues.length });
+    return { ok: false, reason: "validation_failed", issues: validated.issues };
+  }
+
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    const userId = await connection.db.transaction((tx) => getOrCreateDevelopmentUserId(tx));
+
+    return await createDigitalOceanRunnerForUser(userId, validated.value, {
+      ...dependencies,
+      createConnection: () => connection,
+    });
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function createDigitalOceanRunnerForUser(
+  userId: string,
+  payload: unknown,
+  dependencies: RunnerProvisioningDependencies = {},
 ): Promise<CreateRunnerProvisioningResult> {
   const validated = validateCreateRunnerProvisioningPayload(payload);
 
@@ -201,16 +232,16 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
 
   try {
     const duplicate = await connection.db.transaction(async (tx) => {
-      const userId = await getOrCreateDevelopmentUserId(tx);
       await reconcileTimedOutWaitingForRunnerRows(tx, userId, operationStartedAt);
       const duplicateRunner = await findActiveProvisioningRunner(tx, userId);
 
-      return duplicateRunner ? await toRunnerProvisioningDto(tx, duplicateRunner.id) : null;
+      return duplicateRunner ? await toRunnerProvisioningDto(tx, userId, duplicateRunner.id) : null;
     });
 
     if (duplicate) {
       const duplicateStillReusable = await verifyDuplicateRunnerStillReusable({
         connection,
+        userId,
         duplicate,
         getConfig: () => {
           resolvedConfig ??= dependencies.readConfig?.() ?? readDigitalOceanProviderConfig();
@@ -275,7 +306,6 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       dependencies.createRegistrationToken ?? createRunnerRegistrationToken;
 
     const initialized = await connection.db.transaction(async (tx) => {
-      const userId = await getOrCreateDevelopmentUserId(tx);
       await reconcileTimedOutWaitingForRunnerRows(tx, userId, operationStartedAt);
       const duplicateRunner = await findActiveProvisioningRunner(tx, userId);
 
@@ -283,7 +313,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
         logRunnerProvisioning("duplicate_reused_after_lock", { runnerId: duplicateRunner.id });
         return {
           duplicate: true,
-          runner: await toRunnerProvisioningDto(tx, duplicateRunner.id),
+          runner: await toRunnerProvisioningDto(tx, userId, duplicateRunner.id),
         };
       }
 
@@ -340,6 +370,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       }
 
       await recordProvisioningEvent(tx, {
+        userId,
         runnerId: runner.id,
         phase: "pending",
         status: "started",
@@ -359,7 +390,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       return {
         duplicate: false,
         registrationToken: registrationToken.value,
-        runner: await toRunnerProvisioningDto(tx, runner.id),
+        runner: await toRunnerProvisioningDto(tx, userId, runner.id),
       };
     });
 
@@ -385,6 +416,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       });
 
       await failProvisioning(connection, {
+        userId,
         runnerId,
         phase: "creating",
         reason: sshAccess.reason,
@@ -395,7 +427,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       return {
         ok: true,
         duplicate: false,
-        runner: await getRunnerProvisioningDto(connection, runnerId),
+        runner: await getRunnerProvisioningDto(connection, userId, runnerId),
       };
     }
 
@@ -407,6 +439,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
 
     const bootstrap = await buildProvisioningBootstrap({
       connection,
+      userId,
       runnerId,
       runnerName: initialized.runner.name,
       registrationToken: initialized.registrationToken,
@@ -416,6 +449,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       now,
     });
     const resource = await runProviderStep(connection, {
+      userId,
       provider,
       runnerId,
       phase: "creating",
@@ -451,7 +485,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       return {
         ok: true,
         duplicate: false,
-        runner: await getRunnerProvisioningDto(connection, runnerId),
+        runner: await getRunnerProvisioningDto(connection, userId, runnerId),
       };
     }
 
@@ -485,6 +519,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       });
 
       await failProvisioning(connection, {
+        userId,
         runnerId,
         phase: "creating",
         reason: publicEndpoint.reason,
@@ -496,7 +531,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       return {
         ok: true,
         duplicate: false,
-        runner: await getRunnerProvisioningDto(connection, runnerId),
+        runner: await getRunnerProvisioningDto(connection, userId, runnerId),
       };
     }
 
@@ -512,9 +547,10 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
         endpointUrl: publicEndpoint.endpointUrl,
         updatedAt: now(),
       })
-      .where(eq(runners.id, runnerId));
+      .where(and(eq(runners.id, runnerId), eq(runners.userId, userId)));
 
     const tagging = await runProviderStep(connection, {
+      userId,
       provider,
       runnerId,
       phase: "tagging",
@@ -536,6 +572,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
         ok: true,
         duplicate: false,
         runner: await cleanupFailedProvisioningResource(connection, {
+          userId,
           provider,
           runnerId,
           providerResourceId: resource.value.providerResourceId,
@@ -546,7 +583,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       };
     }
 
-    const afterTagging = await getRunnerProvisioningDto(connection, runnerId);
+    const afterTagging = await getRunnerProvisioningDto(connection, userId, runnerId);
 
     if (afterTagging.provisioning.status === "failed") {
       return {
@@ -558,6 +595,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
 
     const firewallName = toRunnerFirewallName(resource.value.providerResourceId);
     const firewall = await runProviderStep(connection, {
+      userId,
       provider,
       runnerId,
       phase: "firewall_configuring",
@@ -585,6 +623,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
         ok: true,
         duplicate: false,
         runner: await cleanupFailedProvisioningResource(connection, {
+          userId,
           provider,
           runnerId,
           providerResourceId: resource.value.providerResourceId,
@@ -595,7 +634,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
       };
     }
 
-    const afterFirewall = await getRunnerProvisioningDto(connection, runnerId);
+    const afterFirewall = await getRunnerProvisioningDto(connection, userId, runnerId);
 
     if (afterFirewall.provisioning.status === "failed") {
       return {
@@ -614,8 +653,9 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
           provisioningStatus: "waiting_for_runner",
           updatedAt: transitionAt,
         })
-        .where(eq(runners.id, runnerId));
+        .where(and(eq(runners.id, runnerId), eq(runners.userId, userId)));
       await recordProvisioningEvent(tx, {
+        userId,
         runnerId,
         phase: "waiting_for_runner",
         status: "started",
@@ -631,7 +671,7 @@ export async function createDigitalOceanRunnerForDevelopmentUser(
     return {
       ok: true,
       duplicate: false,
-      runner: await getRunnerProvisioningDto(connection, runnerId),
+      runner: await getRunnerProvisioningDto(connection, userId, runnerId),
     };
   } catch (error) {
     throw new RunnerProvisioningPersistenceError(error);
@@ -663,6 +703,7 @@ function createConfiguredDigitalOceanProvider(
 async function runProviderStep(
   connection: DatabaseConnection,
   input: {
+    userId: string;
     provider: DigitalOceanProvider;
     runnerId: string;
     phase: Extract<RunnerProvisioningPhase, "creating" | "tagging" | "firewall_configuring">;
@@ -685,8 +726,9 @@ async function runProviderStep(
         provisioningStatus: input.phase,
         updatedAt: startedAt,
       })
-      .where(eq(runners.id, input.runnerId));
+      .where(and(eq(runners.id, input.runnerId), eq(runners.userId, input.userId)));
     await recordProvisioningEvent(tx, {
+      userId: input.userId,
       runnerId: input.runnerId,
       phase: input.phase,
       status: "started",
@@ -716,6 +758,7 @@ async function runProviderStep(
     });
 
     await failProvisioning(connection, {
+      userId: input.userId,
       runnerId: input.runnerId,
       phase: input.phase,
       reason: result.reason,
@@ -737,7 +780,7 @@ async function runProviderStep(
         image: result.value.image,
         updatedAt: completedAt,
       })
-      .where(eq(runners.id, input.runnerId));
+      .where(and(eq(runners.id, input.runnerId), eq(runners.userId, input.userId)));
     const metadata: Record<string, unknown> = {
       provider: result.value.provider,
       providerResourceId: result.value.providerResourceId,
@@ -753,6 +796,7 @@ async function runProviderStep(
     }
 
     await recordProvisioningEvent(tx, {
+      userId: input.userId,
       runnerId: input.runnerId,
       phase: input.phase,
       status: "completed",
@@ -767,6 +811,7 @@ async function runProviderStep(
 
 async function verifyDuplicateRunnerStillReusable(input: {
   connection: DatabaseConnection;
+  userId: string;
   duplicate: RunnerProvisioningDto;
   getConfig: () => DigitalOceanProviderConfig | null;
   getProvider: (config: DigitalOceanProviderConfig) => DigitalOceanProvider;
@@ -795,6 +840,7 @@ async function verifyDuplicateRunnerStillReusable(input: {
   }
 
   await failProvisioning(input.connection, {
+    userId: input.userId,
     runnerId: input.duplicate.id,
     phase: "waiting_for_runner",
     reason: "resource_not_found",
@@ -927,6 +973,7 @@ function normalizeUniqueStrings(values: string[]): string[] {
 
 async function buildProvisioningBootstrap(input: {
   connection: DatabaseConnection;
+  userId: string;
   runnerId: string;
   runnerName: string;
   registrationToken: string;
@@ -945,6 +992,10 @@ async function buildProvisioningBootstrap(input: {
   });
 
   try {
+    await input.connection.db.transaction((tx) =>
+      assertOwnedRunner(tx, input.userId, input.runnerId),
+    );
+
     return await buildCloudRunnerBootstrapForRunner({
       runnerId: input.runnerId,
       appBaseUrl,
@@ -1079,6 +1130,7 @@ function delay(ms: number): Promise<void> {
 async function failProvisioning(
   connection: DatabaseConnection,
   input: {
+    userId: string;
     runnerId: string;
     phase: RunnerProvisioningPhase;
     reason: DigitalOceanProviderErrorReason;
@@ -1096,8 +1148,9 @@ async function failProvisioning(
         provisioningCompletedAt: input.now,
         updatedAt: input.now,
       })
-      .where(eq(runners.id, input.runnerId));
+      .where(and(eq(runners.id, input.runnerId), eq(runners.userId, input.userId)));
     await recordProvisioningEvent(tx, {
+      userId: input.userId,
       runnerId: input.runnerId,
       phase: "failed",
       status: "failed",
@@ -1115,6 +1168,7 @@ async function failProvisioning(
 async function cleanupFailedProvisioningResource(
   connection: DatabaseConnection,
   input: {
+    userId: string;
     provider: DigitalOceanProvider;
     runnerId: string;
     providerResourceId: string;
@@ -1132,8 +1186,9 @@ async function cleanupFailedProvisioningResource(
         provisioningStatus: "cleaning_up",
         updatedAt: cleaningAt,
       })
-      .where(eq(runners.id, input.runnerId));
+      .where(and(eq(runners.id, input.runnerId), eq(runners.userId, input.userId)));
     await recordProvisioningEvent(tx, {
+      userId: input.userId,
       runnerId: input.runnerId,
       phase: "cleaning_up",
       status: "started",
@@ -1171,8 +1226,9 @@ async function cleanupFailedProvisioningResource(
           deletedAt,
           updatedAt: deletedAt,
         })
-        .where(eq(runners.id, input.runnerId));
+        .where(and(eq(runners.id, input.runnerId), eq(runners.userId, input.userId)));
       await recordProvisioningEvent(tx, {
+        userId: input.userId,
         runnerId: input.runnerId,
         phase: "deleted",
         status: "completed",
@@ -1187,7 +1243,7 @@ async function cleanupFailedProvisioningResource(
       });
     });
 
-    return getRunnerProvisioningDto(connection, input.runnerId);
+    return getRunnerProvisioningDto(connection, input.userId, input.runnerId);
   }
 
   const message = manualCleanupMessage(input.providerResourceId);
@@ -1209,8 +1265,9 @@ async function cleanupFailedProvisioningResource(
         provisioningCompletedAt: failedCleanupAt,
         updatedAt: failedCleanupAt,
       })
-      .where(eq(runners.id, input.runnerId));
+      .where(and(eq(runners.id, input.runnerId), eq(runners.userId, input.userId)));
     await recordProvisioningEvent(tx, {
+      userId: input.userId,
       runnerId: input.runnerId,
       phase: "cleaning_up",
       status: "failed",
@@ -1226,7 +1283,7 @@ async function cleanupFailedProvisioningResource(
     });
   });
 
-  return getRunnerProvisioningDto(connection, input.runnerId);
+  return getRunnerProvisioningDto(connection, input.userId, input.runnerId);
 }
 
 function manualCleanupMessage(providerResourceId: string): string {
@@ -1265,9 +1322,26 @@ async function findActiveProvisioningRunner(
   return runner ?? null;
 }
 
+async function assertOwnedRunner(
+  tx: RunnerProvisioningTransaction,
+  userId: string,
+  runnerId: string,
+): Promise<void> {
+  const [runner] = await tx
+    .select({ id: runners.id })
+    .from(runners)
+    .where(and(eq(runners.id, runnerId), eq(runners.userId, userId)))
+    .limit(1);
+
+  if (!runner) {
+    throw new Error("DigitalOcean provisioning runner was not found.");
+  }
+}
+
 async function recordProvisioningEvent(
   tx: RunnerProvisioningTransaction,
   input: {
+    userId: string;
     runnerId: string;
     phase: RunnerProvisioningPhase;
     status: RunnerProvisioningEventStatus;
@@ -1276,6 +1350,8 @@ async function recordProvisioningEvent(
     now: Date;
   },
 ): Promise<void> {
+  await assertOwnedRunner(tx, input.userId, input.runnerId);
+
   await tx.insert(runnerProvisioningEvents).values({
     runnerId: input.runnerId,
     phase: input.phase,
@@ -1288,13 +1364,15 @@ async function recordProvisioningEvent(
 
 async function getRunnerProvisioningDto(
   connection: DatabaseConnection,
+  userId: string,
   runnerId: string,
 ): Promise<RunnerProvisioningDto> {
-  return await connection.db.transaction((tx) => toRunnerProvisioningDto(tx, runnerId));
+  return await connection.db.transaction((tx) => toRunnerProvisioningDto(tx, userId, runnerId));
 }
 
 async function toRunnerProvisioningDto(
   tx: RunnerProvisioningTransaction,
+  userId: string,
   runnerId: string,
 ): Promise<RunnerProvisioningDto> {
   const [runner] = await tx
@@ -1314,7 +1392,7 @@ async function toRunnerProvisioningDto(
       provisioningCompletedAt: runners.provisioningCompletedAt,
     })
     .from(runners)
-    .where(eq(runners.id, runnerId))
+    .where(and(eq(runners.id, runnerId), eq(runners.userId, userId)))
     .limit(1);
 
   if (

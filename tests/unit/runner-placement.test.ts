@@ -6,6 +6,7 @@ import { RUNNER_HEARTBEAT_STALE_THRESHOLD_MS } from "@/src/server/runners/runner
 import {
   normalizeRunnerCapacitySnapshot,
   selectRunnerPlacementForDevelopmentUser,
+  selectRunnerPlacementForUser,
 } from "@/src/server/runners/runner-placement";
 import { DEVELOPMENT_USER_METADATA_KEY } from "@/src/server/users/development-user";
 
@@ -67,6 +68,48 @@ describe.sequential("runner placement contract", () => {
         latestHeartbeatAt: "2026-07-06T04:01:00.000Z",
       },
     });
+  });
+
+  it("selects and reconciles runners only for the explicit user", async () => {
+    const now = new Date("2026-07-06T04:03:00.000Z");
+    const staleObservedAt = new Date(now.getTime() - RUNNER_HEARTBEAT_STALE_THRESHOLD_MS - 1);
+    const [owner, foreignUser] = await connection.db
+      .insert(users)
+      .values([{}, {}])
+      .returning({ id: users.id });
+
+    if (!owner || !foreignUser) {
+      throw new Error("User inserts returned no rows.");
+    }
+
+    const ownedRunner = await seedOnlineRunner(connection, owner.id, {
+      name: "Owned Runner",
+    });
+    const foreignRunner = await seedOnlineRunner(connection, foreignUser.id, {
+      name: "Foreign Stale Runner",
+    });
+    await seedHeartbeat(connection, ownedRunner.id, {
+      observedAt: new Date("2026-07-06T04:02:30.000Z"),
+      metrics: { maxAgents: 2, runningAgents: 0 },
+    });
+    await seedHeartbeat(connection, foreignRunner.id, {
+      observedAt: staleObservedAt,
+      metrics: { maxAgents: 2, runningAgents: 0 },
+    });
+
+    const result = await selectRunnerPlacementForUser(
+      owner.id,
+      {},
+      { createConnection: () => connection, now: () => now },
+    );
+    const [persistedForeignRunner] = await connection.db
+      .select({ status: runners.status })
+      .from(runners)
+      .where(eq(runners.id, foreignRunner.id))
+      .limit(1);
+
+    expect(result).toMatchObject({ ok: true, runner: { id: ownedRunner.id } });
+    expect(persistedForeignRunner?.status).toBe("online");
   });
 
   it("rejects online runners when runner capacity is unavailable", async () => {
