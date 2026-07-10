@@ -38,7 +38,7 @@ import {
   ManualRunnerStatusPersistenceError,
   type AssignedManualRunnerStatusSummary,
 } from "@/src/server/runners/manual-runner-status";
-import { requireOperationalApplicationUser } from "@/src/server/users/operational-application-user";
+import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
 type AgentDetailPageProps = {
   params: Promise<{
@@ -60,7 +60,7 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
   const { agentId } = await params;
   const resolvedSearchParams = await searchParams;
   const decodedAgentId = decodeURIComponent(agentId);
-  const applicationUser = await requireOperationalApplicationUser();
+  const applicationUser = await requireConfiguredApplicationUser();
 
   if (!applicationUser.ok) {
     return (

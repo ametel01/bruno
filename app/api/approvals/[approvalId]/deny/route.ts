@@ -3,9 +3,9 @@ import {
   denyApprovalForUser,
 } from "@/src/server/approvals/agent-approvals";
 import {
-  type OperationalApplicationUserResolution,
-  requireOperationalApplicationUser,
-} from "@/src/server/users/operational-application-user";
+  type ConfiguredApplicationUserResolution,
+  requireConfiguredApplicationUser,
+} from "@/src/server/users/configured-application-user";
 
 type DenyApprovalRouteContext = {
   params: Promise<{
@@ -14,7 +14,7 @@ type DenyApprovalRouteContext = {
 };
 
 type DenyApprovalRouteDependencies = {
-  requireApplicationUser?: typeof requireOperationalApplicationUser;
+  requireApplicationUser?: typeof requireConfiguredApplicationUser;
 };
 
 export const dynamic = "force-dynamic";
@@ -40,7 +40,7 @@ export async function POST(
 
   try {
     const applicationUser = await (
-      dependencies.requireApplicationUser ?? requireOperationalApplicationUser
+      dependencies.requireApplicationUser ?? requireConfiguredApplicationUser
     )();
 
     if (!applicationUser.ok) {
@@ -104,7 +104,7 @@ export async function POST(
 }
 
 function authenticationResponse(
-  result: Exclude<OperationalApplicationUserResolution, { ok: true }>,
+  result: Exclude<ConfiguredApplicationUserResolution, { ok: true }>,
 ) {
   return Response.json(
     {

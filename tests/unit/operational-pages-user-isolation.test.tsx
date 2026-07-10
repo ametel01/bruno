@@ -35,8 +35,8 @@ const requestIdentity = vi.hoisted(() => ({
   userId: "00000000-0000-4000-8000-000000000a11",
 }));
 
-vi.mock("@/src/server/users/operational-application-user", () => ({
-  requireOperationalApplicationUser: async () => ({
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: async () => ({
     ok: true as const,
     userId: requestIdentity.userId,
   }),

@@ -2,9 +2,9 @@ import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { listAgentEventFeedForUser } from "@/src/server/events/agent-events";
 import {
-  type OperationalApplicationUserResolution,
-  requireOperationalApplicationUser,
-} from "@/src/server/users/operational-application-user";
+  type ConfiguredApplicationUserResolution,
+  requireConfiguredApplicationUser,
+} from "@/src/server/users/configured-application-user";
 
 type AgentEventsRouteContext = {
   params: Promise<{
@@ -13,7 +13,7 @@ type AgentEventsRouteContext = {
 };
 
 type AgentEventsRouteDependencies = {
-  requireApplicationUser?: typeof requireOperationalApplicationUser;
+  requireApplicationUser?: typeof requireConfiguredApplicationUser;
 };
 
 type ParsedLimit =
@@ -54,7 +54,7 @@ export async function GET(
   }
 
   const applicationUser = await (
-    dependencies.requireApplicationUser ?? requireOperationalApplicationUser
+    dependencies.requireApplicationUser ?? requireConfiguredApplicationUser
   )();
 
   if (!applicationUser.ok) {
@@ -118,7 +118,7 @@ export async function GET(
 }
 
 function authenticationResponse(
-  result: Exclude<OperationalApplicationUserResolution, { ok: true }>,
+  result: Exclude<ConfiguredApplicationUserResolution, { ok: true }>,
 ) {
   return Response.json(
     {

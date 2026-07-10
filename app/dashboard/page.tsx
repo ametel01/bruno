@@ -40,7 +40,7 @@ import {
   CostEstimatePersistenceError,
   getCostEstimatesForUser,
 } from "@/src/server/costs/cost-estimates";
-import { requireOperationalApplicationUser } from "@/src/server/users/operational-application-user";
+import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
 type DashboardContentProps = {
   routeLabel?: string;
@@ -56,7 +56,7 @@ type DashboardCloudRunnersResult = Awaited<ReturnType<typeof loadDashboardCloudR
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const applicationUser = await requireOperationalApplicationUser();
+  const applicationUser = await requireConfiguredApplicationUser();
 
   if (!applicationUser.ok) {
     return (

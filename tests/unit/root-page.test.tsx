@@ -16,6 +16,13 @@ import type { AgentEventDto } from "@/src/server/events/agent-events";
 import type { ManualRunnerCapacitySummary } from "@/src/server/runners/manual-runner-status";
 
 const APPLICATION_USER_ID = "00000000-0000-4000-8000-000000000101";
+const PAGE_AUTH_FAILURES = [
+  { name: "unauthenticated", result: { ok: false, status: 401, code: "unauthenticated" } },
+  {
+    name: "unsafe auth configuration",
+    result: { ok: false, status: 503, code: "development_auth_not_allowed" },
+  },
+] as const;
 
 const mocks = vi.hoisted(() => ({
   closeDashboardConnection: vi.fn(),
@@ -33,7 +40,7 @@ const mocks = vi.hoisted(() => ({
   listAgentBackupsForUser: vi.fn(),
   listPendingApprovalsForUserAgent: vi.fn(),
   listPendingApprovalsForUser: vi.fn(),
-  requireOperationalApplicationUser: vi.fn(),
+  requireConfiguredApplicationUser: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -132,8 +139,8 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
-vi.mock("@/src/server/users/operational-application-user", () => ({
-  requireOperationalApplicationUser: mocks.requireOperationalApplicationUser,
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
 }));
 
 function capacity(
@@ -224,7 +231,7 @@ function costEstimates(
 
 describe("product shell routes", () => {
   beforeEach(() => {
-    mocks.requireOperationalApplicationUser.mockResolvedValue({
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({
       ok: true,
       userId: APPLICATION_USER_ID,
     });
@@ -274,7 +281,7 @@ describe("product shell routes", () => {
     mocks.listAgentBackupsForUser.mockReset();
     mocks.listPendingApprovalsForUserAgent.mockReset();
     mocks.listPendingApprovalsForUser.mockReset();
-    mocks.requireOperationalApplicationUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
     mocks.notFound.mockClear();
   });
 
@@ -321,6 +328,27 @@ describe("product shell routes", () => {
       APPLICATION_USER_ID,
     );
     expect(mocks.getCostEstimatesForUser).toHaveBeenCalledWith(APPLICATION_USER_ID);
+    expect(mocks.requireConfiguredApplicationUser).toHaveBeenCalledOnce();
+  });
+
+  it.each(PAGE_AUTH_FAILURES)("stops dashboard loading for $name configured-user results", async ({
+    result,
+  }) => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValueOnce(result);
+
+    const html = renderToStaticMarkup(await DashboardPage());
+
+    expect(html).toContain("Authentication required");
+    expect(html).toContain("Authentication is required.");
+    expect(html).not.toContain(result.code);
+    expect(mocks.requireConfiguredApplicationUser).toHaveBeenCalledOnce();
+    expect(mocks.listActiveAgentsForUser).not.toHaveBeenCalled();
+    expect(mocks.listLatestAgentActivityForUser).not.toHaveBeenCalled();
+    expect(mocks.listPendingApprovalsForUser).not.toHaveBeenCalled();
+    expect(mocks.listLatestActiveAgentProcessLogsForUser).not.toHaveBeenCalled();
+    expect(mocks.listManualRunnerStatusSummariesForUser).not.toHaveBeenCalled();
+    expect(mocks.listCloudRunnerProvisioningSummariesForUser).not.toHaveBeenCalled();
+    expect(mocks.getCostEstimatesForUser).not.toHaveBeenCalled();
   });
 
   it("renders accessible daily and monthly infrastructure estimates without DTO internals", () => {
@@ -1096,6 +1124,30 @@ describe("product shell routes", () => {
       limit: 10,
     });
     expect(mocks.closeDashboardConnection).toHaveBeenCalledTimes(2);
+    expect(mocks.requireConfiguredApplicationUser).toHaveBeenCalledOnce();
+  });
+
+  it.each(
+    PAGE_AUTH_FAILURES,
+  )("stops agent detail loading for $name configured-user results", async ({ result }) => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValueOnce(result);
+
+    const html = renderToStaticMarkup(
+      await AgentDetailPage({
+        params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+      }),
+    );
+
+    expect(html).toContain("Authentication required");
+    expect(html).toContain("Authentication is required.");
+    expect(html).not.toContain(result.code);
+    expect(mocks.requireConfiguredApplicationUser).toHaveBeenCalledOnce();
+    expect(mocks.getActiveAgentForUser).not.toHaveBeenCalled();
+    expect(mocks.createDatabaseConnection).not.toHaveBeenCalled();
+    expect(mocks.listPendingApprovalsForUserAgent).not.toHaveBeenCalled();
+    expect(mocks.listAgentBackupsForUser).not.toHaveBeenCalled();
+    expect(mocks.listAgentEventFeedForUser).not.toHaveBeenCalled();
+    expect(mocks.getAssignedManualRunnerStatusForUserAgent).not.toHaveBeenCalled();
   });
 
   it("renders agent backup status and restore controls without artifact internals", async () => {

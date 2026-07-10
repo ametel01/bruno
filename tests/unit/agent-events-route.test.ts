@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   close: vi.fn(),
   createDatabaseConnection: vi.fn(),
   listAgentEventFeedForUser: vi.fn(),
-  requireOperationalApplicationUser: vi.fn(),
+  requireConfiguredApplicationUser: vi.fn(),
   transaction: vi.fn(async (run: (tx: string) => unknown) => await run("tx")),
 }));
 
@@ -19,13 +19,13 @@ vi.mock("@/src/server/events/agent-events", () => ({
   listAgentEventFeedForUser: mocks.listAgentEventFeedForUser,
 }));
 
-vi.mock("@/src/server/users/operational-application-user", () => ({
-  requireOperationalApplicationUser: mocks.requireOperationalApplicationUser,
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
 }));
 
 describe("GET /api/agents/[agentId]/events route", () => {
   beforeEach(() => {
-    mocks.requireOperationalApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
     mocks.createDatabaseConnection.mockReturnValue({
       db: { transaction: mocks.transaction },
       close: mocks.close,
@@ -36,7 +36,7 @@ describe("GET /api/agents/[agentId]/events route", () => {
     mocks.close.mockReset();
     mocks.createDatabaseConnection.mockReset();
     mocks.listAgentEventFeedForUser.mockReset();
-    mocks.requireOperationalApplicationUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
     mocks.transaction.mockClear();
   });
 

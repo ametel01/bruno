@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => {
   return {
     AgentApprovalPersistenceError,
     approvePendingApprovalForUser: vi.fn(),
-    requireOperationalApplicationUser: vi.fn(),
+    requireConfiguredApplicationUser: vi.fn(),
   };
 });
 
@@ -22,18 +22,18 @@ vi.mock("@/src/server/approvals/agent-approvals", () => ({
   approvePendingApprovalForUser: mocks.approvePendingApprovalForUser,
 }));
 
-vi.mock("@/src/server/users/operational-application-user", () => ({
-  requireOperationalApplicationUser: mocks.requireOperationalApplicationUser,
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
 }));
 
 describe("POST /api/approvals/[approvalId]/approve route", () => {
   beforeEach(() => {
-    mocks.requireOperationalApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
   });
 
   afterEach(() => {
     mocks.approvePendingApprovalForUser.mockReset();
-    mocks.requireOperationalApplicationUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
   });
 
   it("returns validation JSON for malformed percent-encoded approval IDs", async () => {

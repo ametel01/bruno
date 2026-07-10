@@ -17,7 +17,7 @@ describe("user operations request boundaries", () => {
     for (const file of ROUTE_FILES) {
       const source = await readFile(join(process.cwd(), file), "utf8");
 
-      expect(source).toContain("requireOperationalApplicationUser");
+      expect(source).toContain("requireConfiguredApplicationUser");
       expect(source).not.toContain("getDevelopmentUserId");
       expect(source).not.toContain("ForDevelopmentUser");
     }
@@ -27,7 +27,7 @@ describe("user operations request boundaries", () => {
     for (const file of OPERATIONAL_PAGE_FILES) {
       const source = await readFile(join(process.cwd(), file), "utf8");
 
-      expect(source).toContain("requireOperationalApplicationUser");
+      expect(source).toContain("requireConfiguredApplicationUser");
       expect(source).not.toContain("getDevelopmentUserId");
       expect(source).not.toContain("ForDevelopmentUser");
     }

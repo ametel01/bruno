@@ -5,9 +5,9 @@ import {
   RestoreBackupPersistenceError,
 } from "@/src/server/backups/restore-backup";
 import {
-  type OperationalApplicationUserResolution,
-  requireOperationalApplicationUser,
-} from "@/src/server/users/operational-application-user";
+  type ConfiguredApplicationUserResolution,
+  requireConfiguredApplicationUser,
+} from "@/src/server/users/configured-application-user";
 
 type ClientBackupResponse = Omit<RestoredBackupResponse["backup"], "storageUri">;
 type ClientRestoredAgentResponse = Pick<
@@ -23,7 +23,7 @@ type RestoreBackupRouteContext = {
 };
 
 type RestoreBackupRouteDependencies = {
-  requireApplicationUser?: typeof requireOperationalApplicationUser;
+  requireApplicationUser?: typeof requireConfiguredApplicationUser;
 };
 
 export const dynamic = "force-dynamic";
@@ -47,7 +47,7 @@ export async function POST(
 
   try {
     const applicationUser = await (
-      dependencies.requireApplicationUser ?? requireOperationalApplicationUser
+      dependencies.requireApplicationUser ?? requireConfiguredApplicationUser
     )();
 
     if (!applicationUser.ok) {
@@ -124,7 +124,7 @@ export async function POST(
 }
 
 function authenticationResponse(
-  result: Exclude<OperationalApplicationUserResolution, { ok: true }>,
+  result: Exclude<ConfiguredApplicationUserResolution, { ok: true }>,
 ) {
   return Response.json(
     {

@@ -6,7 +6,7 @@ const USER_ID = "00000000-0000-4000-8000-000000000466";
 
 const mocks = vi.hoisted(() => ({
   restoreBackupForUser: vi.fn(),
-  requireOperationalApplicationUser: vi.fn(),
+  requireConfiguredApplicationUser: vi.fn(),
 }));
 
 vi.mock("@/src/server/backups/restore-backup", () => ({
@@ -20,18 +20,18 @@ vi.mock("@/src/server/backups/restore-backup", () => ({
   restoreBackupForUser: mocks.restoreBackupForUser,
 }));
 
-vi.mock("@/src/server/users/operational-application-user", () => ({
-  requireOperationalApplicationUser: mocks.requireOperationalApplicationUser,
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
 }));
 
 describe("POST /api/agents/[agentId]/backups/[backupId]/restore route", () => {
   beforeEach(() => {
-    mocks.requireOperationalApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
   });
 
   afterEach(() => {
     mocks.restoreBackupForUser.mockReset();
-    mocks.requireOperationalApplicationUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
   });
 
   it("restores a backup for valid agent and backup ids", async () => {
