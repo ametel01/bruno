@@ -1,0 +1,73 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({ signedIn: true }));
+
+vi.mock("@clerk/nextjs", () => ({
+  ClerkDegraded: ({ children }: { children: React.ReactNode }) =>
+    createElement("div", { "data-auth-state": "degraded" }, children),
+  ClerkFailed: ({ children }: { children: React.ReactNode }) =>
+    createElement("div", { "data-auth-state": "failed" }, children),
+  ClerkLoaded: ({ children }: { children: React.ReactNode }) =>
+    createElement("div", { "data-auth-state": "loaded" }, children),
+  ClerkLoading: ({ children }: { children: React.ReactNode }) =>
+    createElement("div", { "data-auth-state": "loading" }, children),
+  Show: ({ children, fallback }: { children: React.ReactNode; fallback: React.ReactNode }) =>
+    mocks.signedIn ? children : fallback,
+  SignIn: () => createElement("div", { "aria-label": "Clerk sign-in widget" }),
+  SignOutButton: ({ children }: { children: React.ReactNode }) => children,
+  SignUp: () => createElement("div", { "aria-label": "Clerk sign-up widget" }),
+  UserButton: () => createElement("button", { type: "button" }, "Mock current user"),
+}));
+
+import {
+  AccountControls,
+  SignInSurface,
+  SignUpSurface,
+} from "@/app/_components/clerk-auth-surfaces";
+
+describe("Clerk authentication surfaces", () => {
+  beforeEach(() => {
+    mocks.signedIn = true;
+  });
+
+  it("renders accessible loading, failure, degraded, current-user, and sign-out states", () => {
+    const html = renderToStaticMarkup(createElement(AccountControls));
+
+    expect(html).toContain('aria-label="Account controls"');
+    expect(html).toContain('role="status"');
+    expect(html).toContain('aria-live="polite"');
+    expect(html).toContain("Loading account controls");
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("Account controls could not be loaded.");
+    expect(html).toContain("Account controls are temporarily limited.");
+    expect(html).toContain("Current user");
+    expect(html).toContain("Mock current user");
+    expect(html).toContain("Sign out");
+  });
+
+  it("renders explicit sign-in and registration links for a signed-out client state", () => {
+    mocks.signedIn = false;
+
+    const html = renderToStaticMarkup(createElement(AccountControls));
+
+    expect(html).toContain('href="/sign-in"');
+    expect(html).toContain("Sign in");
+    expect(html).toContain('href="/sign-up"');
+    expect(html).toContain("Create account");
+  });
+
+  it.each([
+    [SignInSurface, "Sign in to AgentBay", "Clerk sign-in widget"],
+    [SignUpSurface, "Create your AgentBay account", "Clerk sign-up widget"],
+  ])("renders %s with accessible loading and error states", (Surface, heading, widgetLabel) => {
+    const html = renderToStaticMarkup(createElement(Surface));
+
+    expect(html).toContain(heading);
+    expect(html).toContain("Loading authentication");
+    expect(html).toContain("Authentication could not be loaded. Try again shortly.");
+    expect(html).toContain("Authentication is temporarily limited.");
+    expect(html).toContain(`aria-label="${widgetLabel}"`);
+  });
+});
