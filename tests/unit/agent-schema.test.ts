@@ -68,6 +68,32 @@ describe("Milestone 1 agent persistence schema", () => {
     ]);
   });
 
+  it("keeps internal UUID users and stores only a nullable Clerk identity", () => {
+    const columns = getTableColumns(users);
+
+    expect(Object.keys(columns)).toEqual(["id", "clerkUserId", "createdAt", "updatedAt"]);
+    expect(columns.id.notNull).toBe(true);
+    expect(columns.clerkUserId.notNull).toBe(false);
+    expect(columns.createdAt.notNull).toBe(true);
+    expect(columns.updatedAt.notNull).toBe(true);
+    expect(Object.keys(columns)).not.toEqual(
+      expect.arrayContaining(["email", "displayName", "sessionId", "profile"]),
+    );
+  });
+
+  it("generates an additive nullable unique Clerk identity migration", async () => {
+    const migration = await readFile("drizzle/0014_tiny_abomination.sql", "utf8");
+
+    expect(migration).toContain('ALTER TABLE "users" ADD COLUMN "clerk_user_id" text');
+    expect(migration).toContain(
+      'CREATE UNIQUE INDEX "users_clerk_user_id_idx" ON "users" USING btree ("clerk_user_id")',
+    );
+    expect(migration).not.toContain('"clerk_user_id" text NOT NULL');
+    expect(migration).not.toMatch(/email|display_name|session|profile/i);
+    expect(migration).not.toMatch(/DROP TABLE|DROP COLUMN|ALTER COLUMN|UPDATE /);
+    expect(migration.match(/ALTER TABLE/g)).toHaveLength(1);
+  });
+
   it("defines durable usage periods without secret-bearing fields", () => {
     const columns = getTableColumns(agentUsagePeriods);
 
