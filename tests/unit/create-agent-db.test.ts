@@ -1,11 +1,11 @@
 import { execFile, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import { eq, inArray, sql } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AgentPersistenceError,
   DEFAULT_AGENT_CONFIG,
@@ -3395,153 +3395,288 @@ describe("create agent persistence", () => {
     expect(persistedEvents).toHaveLength(0);
   });
 
-  it("exposes the start route success, validation, not-found, deleted, invalid status, and event behavior", async () => {
-    const [createdUser] = await connection.db
-      .insert(users)
-      .values({})
-      .returning({ userId: users.id });
+  describe("start route real Docker fixture", () => {
+    let activeRouteStart: Promise<Response> | null = null;
+    let cleanupRouteExecutionPromise: Promise<void> | null = null;
+    let routeAgentId: string | null = null;
+    let routeWorkspacePath: string | null = null;
+    let teardownRequested = false;
 
-    expect(createdUser).toBeDefined();
-    const userId = createdUser?.userId ?? "";
-    const [stoppedAgent] = await connection.db
-      .insert(agents)
-      .values({
-        userId,
-        name: "Route Agent",
-        templateKey: "research_agent",
-        status: "stopped",
-      })
-      .returning();
-    const [runningAgent] = await connection.db
-      .insert(agents)
-      .values({
-        userId,
-        name: "Running Route Agent",
-        templateKey: "research_agent",
-        status: "running",
-      })
-      .returning();
-    const [deletedAgent] = await connection.db
-      .insert(agents)
-      .values({
-        userId,
-        name: "Deleted Route Agent",
-        templateKey: "research_agent",
-        status: "stopped",
-        deletedAt: new Date("2026-07-03T06:00:00.000Z"),
-      })
-      .returning();
+    async function cleanupRouteExecution(): Promise<void> {
+      if (cleanupRouteExecutionPromise) {
+        await cleanupRouteExecutionPromise;
+        return;
+      }
 
-    expect(stoppedAgent).toBeDefined();
-    expect(runningAgent).toBeDefined();
-    expect(deletedAgent).toBeDefined();
-    const stoppedAgentId = stoppedAgent?.id ?? "";
-    const runningAgentId = runningAgent?.id ?? "";
-    const deletedAgentId = deletedAgent?.id ?? "";
+      const cleanup = (async () => {
+        const pendingRouteStart = activeRouteStart;
 
-    const { POST } = await import("@/app/api/agents/[agentId]/actions/start/route");
-    const successResponse = await POST(new Request("http://localhost/api/agents/start"), {
-      params: Promise.resolve({ agentId: stoppedAgentId }),
-    });
-    const successBody = await successResponse.json();
+        if (pendingRouteStart) {
+          await pendingRouteStart.catch(() => undefined);
+        }
 
-    expect(successResponse.status).toBe(202);
-    expect(successBody).toMatchObject({
-      ok: true,
-      agent: {
-        id: stoppedAgent?.id,
-        status: "running",
-      },
-      event: {
-        type: START_REQUESTED_EVENT_TYPE,
-      },
-      events: [{ type: START_REQUESTED_EVENT_TYPE }, { type: START_COMPLETED_EVENT_TYPE }],
-    });
+        if (routeAgentId) {
+          await removeDockerContainersForAgent(routeAgentId);
+          routeAgentId = null;
+        }
 
-    const persistedEvents = await connection.db
-      .select()
-      .from(agentEvents)
-      .where(eq(agentEvents.agentId, stoppedAgentId));
-    const persistedContainers = await connection.db
-      .select()
-      .from(dockerRunnerContainers)
-      .where(eq(dockerRunnerContainers.agentId, stoppedAgentId));
+        if (routeWorkspacePath) {
+          await rm(routeWorkspacePath, { recursive: true, force: true });
+          routeWorkspacePath = null;
+        }
+      })();
+      cleanupRouteExecutionPromise = cleanup;
 
-    expect(persistedEvents).toHaveLength(2);
-    expect(persistedContainers).toHaveLength(1);
-    expect(persistedEvents).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          type: START_REQUESTED_EVENT_TYPE,
-          metadata: expect.objectContaining({
-            fromStatus: "stopped",
-            toStatus: "running",
-            dockerRunnerContainerId: persistedContainers[0]?.id,
-            dockerContainerId: persistedContainers[0]?.containerId,
-            dockerContainerName: persistedContainers[0]?.containerName,
-            dockerImage: persistedContainers[0]?.image,
-            dockerObservedStatus: "running",
-          }),
-        }),
-        expect.objectContaining({
-          type: START_COMPLETED_EVENT_TYPE,
-          metadata: expect.objectContaining({
-            fromStatus: "stopped",
-            toStatus: "running",
-            dockerRunnerContainerId: persistedContainers[0]?.id,
-            dockerContainerId: persistedContainers[0]?.containerId,
-            dockerContainerName: persistedContainers[0]?.containerName,
-            dockerImage: persistedContainers[0]?.image,
-            dockerObservedStatus: "running",
-          }),
-        }),
-      ]),
-    );
+      try {
+        await cleanup;
+      } finally {
+        cleanupRouteExecutionPromise = null;
+      }
+    }
 
-    const missingIdResponse = await POST(new Request("http://localhost/api/agents/start"), {
-      params: Promise.resolve({}),
-    });
-    const malformedResponse = await POST(new Request("http://localhost/api/agents/start"), {
-      params: Promise.resolve({ agentId: "not-a-uuid" }),
-    });
-    const missingAgentResponse = await POST(new Request("http://localhost/api/agents/start"), {
-      params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000000" }),
-    });
-    const deletedResponse = await POST(new Request("http://localhost/api/agents/start"), {
-      params: Promise.resolve({ agentId: deletedAgentId }),
-    });
-    const invalidStatusResponse = await POST(new Request("http://localhost/api/agents/start"), {
-      params: Promise.resolve({ agentId: runningAgentId }),
+    beforeAll(async () => {
+      const availability = await detectDockerAvailability();
+      const skipReason = dockerUnavailableSkipReason(availability);
+
+      if (skipReason) {
+        throw new Error(skipReason);
+      }
+
+      const readiness = await ensureDockerFixtureImage(DEFAULT_DOCKER_RUNNER_IMAGE);
+
+      if (!readiness.available) {
+        throw new Error(readiness.reason);
+      }
+
+      console.info("[agentbay] Docker route fixture ready", {
+        sourceImage: DEFAULT_DOCKER_RUNNER_IMAGE,
+        imageInspectMs: readiness.inspectMs,
+        imageAcquisitionMs: readiness.acquisitionMs,
+      });
+    }, 60_000);
+
+    afterEach(async () => {
+      teardownRequested = true;
+      await cleanupRouteExecution();
     });
 
-    expect(missingIdResponse.status).toBe(400);
-    expect(await missingIdResponse.json()).toMatchObject({
-      error: { code: "validation_failed" },
-    });
-    expect(malformedResponse.status).toBe(400);
-    expect(await malformedResponse.json()).toMatchObject({
-      error: { code: "validation_failed" },
-    });
-    expect(missingAgentResponse.status).toBe(404);
-    expect(await missingAgentResponse.json()).toMatchObject({
-      error: { code: "agent_not_found" },
-    });
-    expect(deletedResponse.status).toBe(404);
-    expect(await deletedResponse.json()).toMatchObject({
-      error: { code: "agent_not_found" },
-    });
-    expect(invalidStatusResponse.status).toBe(409);
-    expect(await invalidStatusResponse.json()).toMatchObject({
-      error: { code: "invalid_agent_status", status: "running" },
+    afterAll(async () => {
+      await cleanupRouteExecution();
     });
 
-    const eventCount = await countRows(connection, "agent_events");
+    it("exposes the start route success, validation, not-found, deleted, invalid status, and event behavior", async () => {
+      teardownRequested = false;
 
-    expect(eventCount).toBe(2);
+      try {
+        const [createdUser] = await connection.db
+          .insert(users)
+          .values({})
+          .returning({ userId: users.id });
 
-    const { POST: stopPost } = await import("@/app/api/agents/[agentId]/actions/stop/route");
-    await stopPost(new Request("http://localhost/api/agents/stop"), {
-      params: Promise.resolve({ agentId: stoppedAgentId }),
+        expect(createdUser).toBeDefined();
+        const userId = createdUser?.userId ?? "";
+        const [stoppedAgent] = await connection.db
+          .insert(agents)
+          .values({
+            userId,
+            name: "Route Agent",
+            templateKey: "research_agent",
+            status: "stopped",
+          })
+          .returning();
+        const [runningAgent] = await connection.db
+          .insert(agents)
+          .values({
+            userId,
+            name: "Running Route Agent",
+            templateKey: "research_agent",
+            status: "running",
+          })
+          .returning();
+        const [deletedAgent] = await connection.db
+          .insert(agents)
+          .values({
+            userId,
+            name: "Deleted Route Agent",
+            templateKey: "research_agent",
+            status: "stopped",
+            deletedAt: new Date("2026-07-03T06:00:00.000Z"),
+          })
+          .returning();
+
+        expect(stoppedAgent).toBeDefined();
+        expect(runningAgent).toBeDefined();
+        expect(deletedAgent).toBeDefined();
+        const stoppedAgentId = stoppedAgent?.id ?? "";
+        const runningAgentId = runningAgent?.id ?? "";
+        const deletedAgentId = deletedAgent?.id ?? "";
+        routeAgentId = stoppedAgentId;
+        routeWorkspacePath = resolve(
+          process.env.AGENTBAY_DOCKER_WORKSPACE_ROOT?.trim() ||
+            join(tmpdir(), "agentbay-docker-workspaces"),
+          stoppedAgentId,
+        );
+
+        const { POST } = await import("@/app/api/agents/[agentId]/actions/start/route");
+        const routeStart = POST(new Request("http://localhost/api/agents/start"), {
+          params: Promise.resolve({ agentId: stoppedAgentId }),
+        });
+        activeRouteStart = routeStart;
+        const successResponse = await routeStart.finally(() => {
+          activeRouteStart = null;
+        });
+
+        if (teardownRequested) {
+          throw new Error("Docker route work completed after the test teardown boundary.");
+        }
+
+        const successBody = await successResponse.json();
+
+        expect(successResponse.status).toBe(202);
+        expect(successBody).toMatchObject({
+          ok: true,
+          agent: {
+            id: stoppedAgent?.id,
+            status: "running",
+          },
+          event: {
+            type: START_REQUESTED_EVENT_TYPE,
+          },
+          events: [{ type: START_REQUESTED_EVENT_TYPE }, { type: START_COMPLETED_EVENT_TYPE }],
+        });
+
+        const persistedEvents = await connection.db
+          .select()
+          .from(agentEvents)
+          .where(eq(agentEvents.agentId, stoppedAgentId));
+        const persistedContainers = await connection.db
+          .select()
+          .from(dockerRunnerContainers)
+          .where(eq(dockerRunnerContainers.agentId, stoppedAgentId));
+
+        expect(persistedEvents).toHaveLength(2);
+        expect(persistedContainers).toHaveLength(1);
+        const workspacePath = (
+          persistedContainers[0]?.metadata.mounts as { workspaceSource?: unknown } | undefined
+        )?.workspaceSource;
+        expect(workspacePath).toBe(routeWorkspacePath);
+        expect(basename(String(workspacePath))).toBe(stoppedAgentId);
+        expect(persistedEvents).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              type: START_REQUESTED_EVENT_TYPE,
+              metadata: expect.objectContaining({
+                fromStatus: "stopped",
+                toStatus: "running",
+                dockerRunnerContainerId: persistedContainers[0]?.id,
+                dockerContainerId: persistedContainers[0]?.containerId,
+                dockerContainerName: persistedContainers[0]?.containerName,
+                dockerImage: persistedContainers[0]?.image,
+                dockerObservedStatus: "running",
+              }),
+            }),
+            expect.objectContaining({
+              type: START_COMPLETED_EVENT_TYPE,
+              metadata: expect.objectContaining({
+                fromStatus: "stopped",
+                toStatus: "running",
+                dockerRunnerContainerId: persistedContainers[0]?.id,
+                dockerContainerId: persistedContainers[0]?.containerId,
+                dockerContainerName: persistedContainers[0]?.containerName,
+                dockerImage: persistedContainers[0]?.image,
+                dockerObservedStatus: "running",
+              }),
+            }),
+          ]),
+        );
+
+        const containerId = persistedContainers[0]?.containerId ?? "";
+        const inspected = JSON.parse(
+          (await runDocker(["inspect", "--format", "{{json .}}", containerId])).stdout,
+        );
+        expect(inspected).toMatchObject({
+          Config: {
+            Image: DEFAULT_DOCKER_RUNNER_IMAGE,
+            Labels: {
+              [AGENTBAY_AGENT_ID_LABEL]: stoppedAgentId,
+            },
+          },
+          State: {
+            Status: "running",
+          },
+        });
+
+        const missingIdResponse = await POST(new Request("http://localhost/api/agents/start"), {
+          params: Promise.resolve({}),
+        });
+        const malformedResponse = await POST(new Request("http://localhost/api/agents/start"), {
+          params: Promise.resolve({ agentId: "not-a-uuid" }),
+        });
+        const missingAgentResponse = await POST(new Request("http://localhost/api/agents/start"), {
+          params: Promise.resolve({ agentId: "00000000-0000-4000-8000-000000000000" }),
+        });
+        const deletedResponse = await POST(new Request("http://localhost/api/agents/start"), {
+          params: Promise.resolve({ agentId: deletedAgentId }),
+        });
+        const invalidStatusResponse = await POST(new Request("http://localhost/api/agents/start"), {
+          params: Promise.resolve({ agentId: runningAgentId }),
+        });
+
+        expect(missingIdResponse.status).toBe(400);
+        expect(await missingIdResponse.json()).toMatchObject({
+          error: { code: "validation_failed" },
+        });
+        expect(malformedResponse.status).toBe(400);
+        expect(await malformedResponse.json()).toMatchObject({
+          error: { code: "validation_failed" },
+        });
+        expect(missingAgentResponse.status).toBe(404);
+        expect(await missingAgentResponse.json()).toMatchObject({
+          error: { code: "agent_not_found" },
+        });
+        expect(deletedResponse.status).toBe(404);
+        expect(await deletedResponse.json()).toMatchObject({
+          error: { code: "agent_not_found" },
+        });
+        expect(invalidStatusResponse.status).toBe(409);
+        expect(await invalidStatusResponse.json()).toMatchObject({
+          error: { code: "invalid_agent_status", status: "running" },
+        });
+
+        const eventCount = await countRows(connection, "agent_events");
+
+        expect(eventCount).toBe(2);
+
+        const { POST: stopPost } = await import("@/app/api/agents/[agentId]/actions/stop/route");
+        const stopResponse = await stopPost(new Request("http://localhost/api/agents/stop"), {
+          params: Promise.resolve({ agentId: stoppedAgentId }),
+        });
+        expect(stopResponse.status).toBe(200);
+
+        const cleanupAdapter = new DockerRunnerAdapter({
+          createConnection: () => connection,
+        });
+        await expect(cleanupAdapter.cleanup(stoppedAgentId)).resolves.toMatchObject({
+          ok: true,
+          container: {
+            containerId,
+            observedStatus: "removed",
+          },
+        });
+
+        const [removedContainer] = await connection.db
+          .select()
+          .from(dockerRunnerContainers)
+          .where(eq(dockerRunnerContainers.containerId, containerId));
+        expect(removedContainer).toMatchObject({ observedStatus: "removed" });
+        await expect(listDockerContainerIdsForAgent(stoppedAgentId)).resolves.toEqual([]);
+
+        await rm(routeWorkspacePath, { recursive: true, force: true });
+        routeWorkspacePath = null;
+        await expect(stat(String(workspacePath))).rejects.toMatchObject({ code: "ENOENT" });
+      } finally {
+        await cleanupRouteExecution();
+      }
     });
   });
 
@@ -9168,25 +9303,91 @@ function dockerInspectResult(input: {
 
 async function ensureDockerFixtureImage(
   image: string,
-): Promise<{ available: true } | { available: false; reason: string }> {
+): Promise<
+  | { available: true; acquisitionMs: number; inspectMs: number }
+  | { available: false; reason: string }
+> {
+  const inspectStartedAt = performance.now();
   const inspected = await runDocker(["image", "inspect", image]).then(
     () => true,
     () => false,
   );
+  const inspectMs = performance.now() - inspectStartedAt;
 
   if (inspected) {
-    return { available: true };
+    return { available: true, acquisitionMs: 0, inspectMs };
   }
 
   try {
+    const acquisitionStartedAt = performance.now();
     await runDocker(["pull", image]);
-    return { available: true };
+    return {
+      available: true,
+      acquisitionMs: performance.now() - acquisitionStartedAt,
+      inspectMs,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Docker image pull failed.";
     return {
       available: false,
       reason: `fixture image ${image} is unavailable: ${message}`,
     };
+  }
+}
+
+async function listDockerContainerIdsForAgent(agentId: string): Promise<string[]> {
+  const result = await runDocker([
+    "ps",
+    "--all",
+    "--quiet",
+    "--filter",
+    `label=${AGENTBAY_AGENT_ID_LABEL}=${agentId}`,
+  ]);
+
+  return result.stdout
+    .split("\n")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+async function removeDockerContainersForAgent(agentId: string): Promise<void> {
+  const containerIds = await listDockerContainerIdsForAgent(agentId);
+
+  for (const containerId of containerIds) {
+    const label = await runDocker([
+      "inspect",
+      "--format",
+      `{{index .Config.Labels "${AGENTBAY_AGENT_ID_LABEL}"}}`,
+      containerId,
+    ]);
+
+    if (label.stdout.trim() !== agentId) {
+      throw new Error("Refusing to remove a Docker container with an unexpected agent label.");
+    }
+
+    const workspace = await runDocker([
+      "inspect",
+      "--format",
+      '{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}',
+      containerId,
+    ]);
+    const workspacePath = workspace.stdout.trim();
+
+    if (workspacePath && basename(workspacePath) !== agentId) {
+      throw new Error("Refusing to remove an unexpected Docker workspace path.");
+    }
+
+    await runDocker(["rm", "--force", containerId]);
+
+    if (workspacePath) {
+      await rm(workspacePath, { recursive: true, force: true });
+    }
+  }
+
+  const remainingContainerIds = await listDockerContainerIdsForAgent(agentId);
+
+  if (remainingContainerIds.length > 0) {
+    throw new Error("Docker route fixture cleanup left an owned container behind.");
   }
 }
 
