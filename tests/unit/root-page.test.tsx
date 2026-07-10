@@ -1075,7 +1075,7 @@ describe("product shell routes", () => {
       cursor: null,
       limit: 10,
     });
-    expect(mocks.closeDashboardConnection).toHaveBeenCalledOnce();
+    expect(mocks.closeDashboardConnection).toHaveBeenCalledTimes(2);
   });
 
   it("renders agent backup status and restore controls without artifact internals", async () => {
