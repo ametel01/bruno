@@ -86,6 +86,31 @@ describe("application user resolution", () => {
     expect(await connection.db.select().from(users)).toHaveLength(2);
   });
 
+  it("never auto-claims an unlinked legacy user on first Clerk sign-in", async () => {
+    const legacyUserId = "00000000-0000-4000-8000-000000000239";
+    await connection.db.insert(users).values({ id: legacyUserId });
+
+    const result = await requireApplicationUser("clerk", {
+      createConnection: () => connection,
+      getClerkUserId: async () => "user_new_owner",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("Expected the first Clerk request to resolve an application user.");
+    }
+    expect(result.userId).not.toBe(legacyUserId);
+
+    const persistedUsers = await connection.db.select().from(users);
+    expect(persistedUsers).toHaveLength(2);
+    expect(persistedUsers).toContainEqual(
+      expect.objectContaining({ id: legacyUserId, clerkUserId: null }),
+    );
+    expect(persistedUsers).toContainEqual(
+      expect.objectContaining({ id: result.userId, clerkUserId: "user_new_owner" }),
+    );
+  });
+
   it("coalesces concurrent first requests across separate database connections", async () => {
     const firstConnection = createDatabaseConnection();
     const secondConnection = createDatabaseConnection();

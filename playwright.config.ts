@@ -1,7 +1,19 @@
 import { defineConfig, devices } from "@playwright/test";
+import { resolveAuthMode } from "./src/auth/auth-mode";
 
 const port = Number(process.env.PORT ?? 3000);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${port}`;
+const artifactPolicy = resolvePlaywrightArtifactPolicy(process.env);
+
+export function resolvePlaywrightArtifactPolicy(env: Record<string, string | undefined>) {
+  const authMode = resolveAuthMode(env);
+
+  return {
+    screenshot: "off",
+    trace: authMode.mode === "development" ? "on-first-retry" : "off",
+    video: "off",
+  } as const;
+}
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -10,7 +22,7 @@ export default defineConfig({
   workers: 1,
   use: {
     baseURL,
-    trace: "on-first-retry",
+    ...artifactPolicy,
   },
   webServer: {
     command: `bun run dev --hostname 127.0.0.1 --port ${port}`,

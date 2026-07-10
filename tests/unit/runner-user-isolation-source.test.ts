@@ -16,6 +16,11 @@ const MACHINE_RUNNER_FILES = [
   "app/runner/v1/bootstrap-events/route.ts",
 ] as const;
 
+const MACHINE_LIFECYCLE_FILES = [
+  "src/server/runners/manual-runner-adapter.ts",
+  "src/runner-service/server.ts",
+] as const;
+
 describe("runner user-isolation source boundaries", () => {
   it("requires one configured browser user and excludes development-user services", async () => {
     for (const file of BROWSER_RUNNER_FILES) {
@@ -85,5 +90,28 @@ describe("runner user-isolation source boundaries", () => {
     expect(heartbeatSource).toContain("authorizationHeader");
     expect(heartbeatSource).toContain("recordRunnerHeartbeat");
     expect(bootstrapSource).toContain("recordRunnerBootstrapEvent");
+  });
+
+  it("keeps lifecycle HTTP commands on their separate bearer contract without Clerk", async () => {
+    for (const file of MACHINE_LIFECYCLE_FILES) {
+      const source = await readFile(join(process.cwd(), file), "utf8");
+
+      expect(source).not.toContain("requireConfiguredApplicationUser");
+      expect(source).not.toContain("@clerk");
+      expect(source).toContain("Bearer ${");
+    }
+
+    const adapterSource = await readFile(
+      join(process.cwd(), "src/server/runners/manual-runner-adapter.ts"),
+      "utf8",
+    );
+    const runnerServiceSource = await readFile(
+      join(process.cwd(), "src/runner-service/server.ts"),
+      "utf8",
+    );
+
+    expect(adapterSource).toContain("AGENTBAY_RUNNER_BEARER_TOKEN");
+    expect(adapterSource).toContain("Authorization");
+    expect(runnerServiceSource).toMatch(/authorization !== `Bearer \$\{authToken\}`/);
   });
 });

@@ -2,7 +2,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ signedIn: true }));
+const mocks = vi.hoisted(() => ({
+  signedIn: true,
+  signInProps: undefined as Record<string, unknown> | undefined,
+  signOutRedirectUrl: undefined as string | undefined,
+  signUpProps: undefined as Record<string, unknown> | undefined,
+}));
 
 vi.mock("@clerk/nextjs", () => ({
   ClerkDegraded: ({ children }: { children: React.ReactNode }) =>
@@ -15,9 +20,24 @@ vi.mock("@clerk/nextjs", () => ({
     createElement("div", { "data-auth-state": "loading" }, children),
   Show: ({ children, fallback }: { children: React.ReactNode; fallback: React.ReactNode }) =>
     mocks.signedIn ? children : fallback,
-  SignIn: () => createElement("div", { "aria-label": "Clerk sign-in widget" }),
-  SignOutButton: ({ children }: { children: React.ReactNode }) => children,
-  SignUp: () => createElement("div", { "aria-label": "Clerk sign-up widget" }),
+  SignIn: (props: Record<string, unknown>) => {
+    mocks.signInProps = props;
+    return createElement("div", { "aria-label": "Clerk sign-in widget" });
+  },
+  SignOutButton: ({
+    children,
+    redirectUrl,
+  }: {
+    children: React.ReactNode;
+    redirectUrl?: string;
+  }) => {
+    mocks.signOutRedirectUrl = redirectUrl;
+    return children;
+  },
+  SignUp: (props: Record<string, unknown>) => {
+    mocks.signUpProps = props;
+    return createElement("div", { "aria-label": "Clerk sign-up widget" });
+  },
   UserButton: () => createElement("button", { type: "button" }, "Mock current user"),
 }));
 
@@ -30,6 +50,9 @@ import {
 describe("Clerk authentication surfaces", () => {
   beforeEach(() => {
     mocks.signedIn = true;
+    mocks.signInProps = undefined;
+    mocks.signOutRedirectUrl = undefined;
+    mocks.signUpProps = undefined;
   });
 
   it("renders accessible loading, failure, degraded, current-user, and sign-out states", () => {
@@ -45,6 +68,7 @@ describe("Clerk authentication surfaces", () => {
     expect(html).toContain("Current user");
     expect(html).toContain("Mock current user");
     expect(html).toContain("Sign out");
+    expect(mocks.signOutRedirectUrl).toBe("/sign-in");
   });
 
   it("renders explicit sign-in and registration links for a signed-out client state", () => {
@@ -59,9 +83,31 @@ describe("Clerk authentication surfaces", () => {
   });
 
   it.each([
-    [SignInSurface, "Sign in to AgentBay", "Clerk sign-in widget"],
-    [SignUpSurface, "Create your AgentBay account", "Clerk sign-up widget"],
-  ])("renders %s with accessible loading and error states", (Surface, heading, widgetLabel) => {
+    [
+      SignInSurface,
+      "Sign in to AgentBay",
+      "Clerk sign-in widget",
+      () => mocks.signInProps,
+      {
+        fallbackRedirectUrl: "/dashboard",
+        path: "/sign-in",
+        routing: "path",
+        signUpUrl: "/sign-up",
+      },
+    ],
+    [
+      SignUpSurface,
+      "Create your AgentBay account",
+      "Clerk sign-up widget",
+      () => mocks.signUpProps,
+      {
+        fallbackRedirectUrl: "/dashboard",
+        path: "/sign-up",
+        routing: "path",
+        signInUrl: "/sign-in",
+      },
+    ],
+  ] as const)("renders %s with deterministic routing, loading, and error states", (Surface, heading, widgetLabel, readProps, expectedProps) => {
     const html = renderToStaticMarkup(createElement(Surface));
 
     expect(html).toContain(heading);
@@ -69,5 +115,6 @@ describe("Clerk authentication surfaces", () => {
     expect(html).toContain("Authentication could not be loaded. Try again shortly.");
     expect(html).toContain("Authentication is temporarily limited.");
     expect(html).toContain(`aria-label="${widgetLabel}"`);
+    expect(readProps()).toEqual(expectedProps);
   });
 });
