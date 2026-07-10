@@ -101,7 +101,7 @@ completion evidence.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1. Provision the AgentBay Clerk development instance | #232 | Approval-blocked | None | Not opened | Not collected | Not collected | Requires explicit approval for Clerk/provider writes and the key destination. After approval, create a dedicated AgentBay development app, enable verified email code plus development Google/Apple, and collect sanitized `clerk doctor --json` evidence. |
 | 2. Replace the Basic-auth shell with Clerk-capable routing and UI | #233 | Implemented; checker pending | None | Draft PR #244 | `c46530f` | Locked Clerk 7.5.16; focused auth/operator/runner tests passed (8 files, 105 tests), including a real-SDK synthetic two-key request with no encryption key; isolated full unit passed (66 files, 556 tests); format, lint, typecheck, and build passed; isolated desktop/mobile auth and CI smoke E2E passed (20 tests). No hosted provider evidence was claimed. | Recheck the standard Clerk environment-key path, explicit `AGENTBAY_AUTH_TRANSITION_MODE` seam, single `proxy.ts`, Clerk UI states, Basic barrier, exact runner bypass, and recorded full-E2E baseline gap. Step 3 should consume the same session boundary; Step 7 replaces the temporary mode policy. |
-| 3. Resolve Clerk and development identities to internal users | #234 | Ready | None | Not opened | Not collected | Not collected | Add the nullable unique Clerk identity, request-scoped resolver, concurrency-safe lazy link/create, and explicit dry-run legacy claim. Coordinate the resolver seam with Step 2. |
+| 3. Resolve Clerk and development identities to internal users | #234 | Implemented; checker pending | None | Not opened | `5f43f7d`, `5ab33df` | Migration 0014 adds only nullable unique `users.clerk_user_id`; the request resolver supports shared development identity and typed Clerk `401` results, while the server adapter awaits `auth()` and passes only `userId`. Isolated migration and focused schema/resolver/claim/adapter tests passed (4 files, 44 tests); separate-connection race suites passed five repeated runs (3 files, 16 tests each); full unit passed (69 files, 574 tests); format, lint, typecheck, build, exact CI E2E (14 tests), migration-lineage, diff, and secret checks passed. No production claim or provider/secret mutation occurred. | Checker should verify the additive migration, opaque-ID-only persistence, lazy-link and claim races, dry-run/ambiguity/conflict/idempotency behavior, and the Clerk adapter's independence from the transition policy before PR packaging. |
 | 4. Isolate agent lifecycle and agent data | #235 | Dependency-blocked | Steps 2 and 3 (#233, #234) | Not opened | Not collected | Not collected | After both dependencies merge, scope agent routes, lifecycle, events, logs, usage, and costs to the resolved internal user with cross-user `404` behavior. |
 | 5. Isolate runner provisioning and management | #236 | Dependency-blocked | Steps 2 and 3 (#233, #234) | Not opened | Not collected | Not collected | After both dependencies merge, scope browser runner operations and credentials per user while preserving existing `/runner/v1/*` machine authentication. |
 | 6. Isolate approvals, backups, restores, and activity | #237 | Dependency-blocked | Steps 2 and 3 (#233, #234) | Not opened | Not collected | Not collected | After both dependencies merge, enforce user ownership at database and object-storage boundaries and keep cross-user resources concealed. |
@@ -114,7 +114,8 @@ completion evidence.
 - Step 1 has no GitHub dependency but cannot mutate Clerk, providers, Vercel, or
   secret storage until the required human approval is recorded.
 - Step 2 is implemented on its isolated builder branch and awaits checker evidence;
-  Step 3 remains the next independent authentication implementation stream.
+  Step 3 is implemented on its rebased builder branch and awaits checker and PR
+  evidence.
 - Steps 4-7 wait for the merged routing/session contract from Step 2 and the
   merged internal-user resolver contract from Step 3.
 - Step 8 waits for all four ownership and development-mode slices.
@@ -138,3 +139,8 @@ completion evidence.
   secret. The isolated focused E2E matrix passed 20 tests; the unfiltered suite
   retained the documented unchanged `provider_not_configured` agent-creation
   blocker and therefore is not claimed as green.
+- 2026-07-10: Issue #234 implemented the nullable unique Clerk identity,
+  request-scoped Clerk/development resolver, concurrency-safe lazy link/create,
+  count-only dry-run legacy claim, and narrow awaited Clerk `auth()` adapter.
+  Isolated database and repeated race coverage passed; the branch awaits
+  independent checker and PR evidence and no production claim was executed.
