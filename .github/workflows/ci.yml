@@ -68,9 +68,4 @@ jobs:
         run: bun run build
 
       - name: Run E2E smoke tests
-        run: >-
-          bun run test:e2e --
-          tests/e2e/health-route.spec.ts
-          tests/e2e/root-route.spec.ts:45
-          tests/e2e/root-route.spec.ts:60
-          tests/e2e/root-route.spec.ts:2191
+        run: bun run test:e2e:ci
