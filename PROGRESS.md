@@ -76,7 +76,7 @@ added only for user-facing or operator-facing cost-tracking behavior.
 
 ### In-Progress Evidence
 
-- Step 4 / issue #225: rebased functional commit `48bad41` adds the concurrent
+- Step 4 / issue #225: rebased functional commit `35e843c` adds the concurrent
   server dashboard loader, scoped cost-summary component and styles, focused
   known-price/unavailable/zero-agent/failure/redaction unit coverage, and
   isolated desktop/mobile browser coverage. PR #246 has been reviewed; merge
