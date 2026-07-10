@@ -3,17 +3,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
+  clerkOptions: undefined as unknown,
   clerkInvocations: 0,
   redirectToSignIn: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
-  clerkMiddleware:
-    (handler: (auth: typeof mocks.auth, request: NextRequest) => Promise<Response>) =>
-    async (request: NextRequest) => {
+  clerkMiddleware: (
+    handler: (auth: typeof mocks.auth, request: NextRequest) => Promise<Response>,
+    options: unknown,
+  ) => {
+    mocks.clerkOptions = options;
+
+    return async (request: NextRequest) => {
       mocks.clerkInvocations += 1;
       return handler(mocks.auth, request);
-    },
+    };
+  },
 }));
 
 import { proxy } from "@/proxy";
@@ -48,6 +54,13 @@ describe("Clerk session proxy", () => {
     restoreEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", originalEnv.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
     restoreEnv("VERCEL", originalEnv.VERCEL);
     restoreEnv("VERCEL_ENV", originalEnv.VERCEL_ENV);
+  });
+
+  it("uses standard Clerk environment keys instead of propagating dynamic key options", () => {
+    expect(mocks.clerkOptions).toEqual({
+      signInUrl: "/sign-in",
+      signUpUrl: "/sign-up",
+    });
   });
 
   it("redirects a signed-out browser page to sign-in", async () => {

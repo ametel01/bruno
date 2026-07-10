@@ -100,7 +100,7 @@ completion evidence.
 | Step | Issue | State | Depends on | PR | Commit | Validation or deployment evidence | Blocker and next work |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1. Provision the AgentBay Clerk development instance | #232 | Approval-blocked | None | Not opened | Not collected | Not collected | Requires explicit approval for Clerk/provider writes and the key destination. After approval, create a dedicated AgentBay development app, enable verified email code plus development Google/Apple, and collect sanitized `clerk doctor --json` evidence. |
-| 2. Replace the Basic-auth shell with Clerk-capable routing and UI | #233 | Implemented; checker pending | None | Not opened | `e12ab92` | Locked Clerk 7.5.16; focused auth/operator/runner tests passed (7 files, 103 tests); isolated full unit passed (64 files, 547 tests); format, lint, typecheck, and build passed; isolated desktop/mobile auth and CI smoke E2E passed (20 tests). No hosted provider evidence was claimed. | Check the explicit `AGENTBAY_AUTH_TRANSITION_MODE` seam, single `proxy.ts`, Clerk UI states, Basic barrier, exact runner bypass, and recorded full-E2E baseline gap before opening the PR. Step 3 should consume the same session boundary; Step 7 replaces the temporary mode policy. |
+| 2. Replace the Basic-auth shell with Clerk-capable routing and UI | #233 | Implemented; checker pending | None | Draft PR #244 | `e12ab92` | Locked Clerk 7.5.16; focused auth/operator/runner tests passed (8 files, 105 tests), including a real-SDK synthetic two-key request with no encryption key; isolated full unit passed (66 files, 556 tests); format, lint, typecheck, and build passed; isolated desktop/mobile auth and CI smoke E2E passed (20 tests). No hosted provider evidence was claimed. | Recheck the standard Clerk environment-key path, explicit `AGENTBAY_AUTH_TRANSITION_MODE` seam, single `proxy.ts`, Clerk UI states, Basic barrier, exact runner bypass, and recorded full-E2E baseline gap. Step 3 should consume the same session boundary; Step 7 replaces the temporary mode policy. |
 | 3. Resolve Clerk and development identities to internal users | #234 | Ready | None | Not opened | Not collected | Not collected | Add the nullable unique Clerk identity, request-scoped resolver, concurrency-safe lazy link/create, and explicit dry-run legacy claim. Coordinate the resolver seam with Step 2. |
 | 4. Isolate agent lifecycle and agent data | #235 | Dependency-blocked | Steps 2 and 3 (#233, #234) | Not opened | Not collected | Not collected | After both dependencies merge, scope agent routes, lifecycle, events, logs, usage, and costs to the resolved internal user with cross-user `404` behavior. |
 | 5. Isolate runner provisioning and management | #236 | Dependency-blocked | Steps 2 and 3 (#233, #234) | Not opened | Not collected | Not collected | After both dependencies merge, scope browser runner operations and credentials per user while preserving existing `/runner/v1/*` machine authentication. |
@@ -133,7 +133,8 @@ completion evidence.
 - 2026-07-10: Issue #233 implemented the Clerk-capable shell and proxy matrix
   without provisioning or linking a Clerk instance. Deterministic tests cover
   Clerk loading, failure, user, sign-out, redirect, API `401`, public-route,
-  Basic-barrier, and runner-bypass behavior. The isolated focused E2E matrix
-  passed 20 tests; the unfiltered suite retained the documented unchanged
-  `provider_not_configured` agent-creation blocker and therefore is not claimed
-  as green.
+  Basic-barrier, runner-bypass behavior, and a real Clerk SDK request using the
+  standard publishable/secret environment path without a third encryption
+  secret. The isolated focused E2E matrix passed 20 tests; the unfiltered suite
+  retained the documented unchanged `provider_not_configured` agent-creation
+  blocker and therefore is not claimed as green.

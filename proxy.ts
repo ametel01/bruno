@@ -12,12 +12,10 @@ import { evaluateOperatorAccess, type OperatorAccessDecision } from "@/src/auth/
 
 const AUTHENTICATE_HEADER = 'Basic realm="AgentBay"';
 
-const clerkSessionProxy = clerkMiddleware(handleClerkSessionRequest, () => ({
-  publishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "",
-  secretKey: process.env.CLERK_SECRET_KEY ?? "",
+const clerkSessionProxy = clerkMiddleware(handleClerkSessionRequest, {
   signInUrl: "/sign-in",
   signUpUrl: "/sign-up",
-}));
+});
 
 export async function proxy(request: NextRequest, event: NextFetchEvent): Promise<Response> {
   const pathname = request.nextUrl.pathname;
