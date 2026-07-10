@@ -7,12 +7,16 @@ export type LegacyUserClaimCliOptions = {
 
 export function parseLegacyUserClaimArgs(args: string[]): LegacyUserClaimCliOptions {
   let clerkUserId: string | undefined;
-  let apply = false;
+  let executionMode: "apply" | "dry-run" | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
 
     if (arg === "--clerk-user-id") {
+      if (clerkUserId !== undefined) {
+        throw new Error("--clerk-user-id may only be provided once.");
+      }
+
       const value = args[index + 1];
       if (!value) {
         throw new Error("--clerk-user-id requires a value.");
@@ -25,24 +29,23 @@ export function parseLegacyUserClaimArgs(args: string[]): LegacyUserClaimCliOpti
       continue;
     }
 
-    if (arg === "--apply") {
-      apply = true;
+    if (arg === "--apply" || arg === "--dry-run") {
+      if (executionMode !== undefined) {
+        throw new Error("Execution mode may only be specified once.");
+      }
+
+      executionMode = arg === "--apply" ? "apply" : "dry-run";
       continue;
     }
 
-    if (arg === "--dry-run") {
-      apply = false;
-      continue;
-    }
-
-    throw new Error(`Unknown argument: ${arg ?? ""}`);
+    throw new Error("Unknown argument.");
   }
 
   if (!clerkUserId) {
     throw new Error("--clerk-user-id is required.");
   }
 
-  return { clerkUserId, apply };
+  return { clerkUserId, apply: executionMode === "apply" };
 }
 
 export async function runLegacyUserClaimCli(

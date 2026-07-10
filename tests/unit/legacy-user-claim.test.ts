@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseLegacyUserClaimArgs, runLegacyUserClaimCli } from "@/scripts/claim-legacy-user";
@@ -172,6 +173,118 @@ describe("legacy user claim CLI", () => {
   });
 
   it.each([
+    [
+      "different duplicate identities",
+      [
+        "--clerk-user-id",
+        "user_private_first",
+        "--clerk-user-id",
+        "user_private_second",
+        "--apply",
+      ],
+      "--clerk-user-id may only be provided once.",
+      ["user_private_first", "user_private_second"],
+    ],
+    [
+      "duplicate identity after the execution mode",
+      [
+        "--clerk-user-id",
+        "user_private_first",
+        "--apply",
+        "--clerk-user-id",
+        "user_private_second",
+      ],
+      "--clerk-user-id may only be provided once.",
+      ["user_private_first", "user_private_second"],
+    ],
+    [
+      "same duplicate identity",
+      ["--clerk-user-id", "user_private_same", "--clerk-user-id", "user_private_same"],
+      "--clerk-user-id may only be provided once.",
+      ["user_private_same"],
+    ],
+    [
+      "dry run followed by apply",
+      ["--clerk-user-id", "user_private_mode", "--dry-run", "--apply"],
+      "Execution mode may only be specified once.",
+      ["user_private_mode"],
+    ],
+    [
+      "apply followed by dry run",
+      ["--apply", "--clerk-user-id", "user_private_mode", "--dry-run"],
+      "Execution mode may only be specified once.",
+      ["user_private_mode"],
+    ],
+    [
+      "repeated apply",
+      ["--clerk-user-id", "user_private_mode", "--apply", "--apply"],
+      "Execution mode may only be specified once.",
+      ["user_private_mode"],
+    ],
+    [
+      "repeated dry run before the identity",
+      ["--dry-run", "--dry-run", "--clerk-user-id", "user_private_mode"],
+      "Execution mode may only be specified once.",
+      ["user_private_mode"],
+    ],
+    [
+      "inline identity value",
+      ["--clerk-user-id=user_private_inline", "--apply"],
+      "Unknown argument.",
+      ["user_private_inline"],
+    ],
+    [
+      "inline mode value",
+      ["--clerk-user-id", "user_private_inline_mode", "--apply=true"],
+      "Unknown argument.",
+      ["user_private_inline_mode", "true"],
+    ],
+    [
+      "inline typo value",
+      ["--clerk-user-idd=user_private_typo", "--apply"],
+      "Unknown argument.",
+      ["user_private_typo"],
+    ],
+  ] as const)("rejects %s before claim invocation without echoing supplied values", async (_label, args, expectedMessage, sensitiveValues) => {
+    const claim = createClaimMock();
+
+    const error = await runLegacyUserClaimCli([...args], { claim }).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(expectedMessage);
+    expect(claim).not.toHaveBeenCalled();
+    for (const sensitiveValue of sensitiveValues) {
+      expect((error as Error).message).not.toContain(sensitiveValue);
+    }
+  });
+
+  it.each([
+    [
+      "duplicate identity",
+      ["--clerk-user-id", "user_real_first", "--clerk-user-id", "user_real_second", "--apply"],
+      ["user_real_first", "user_real_second"],
+    ],
+    [
+      "contradictory modes",
+      ["--apply", "--clerk-user-id", "user_real_mode", "--dry-run"],
+      ["user_real_mode"],
+    ],
+    ["inline identity typo", ["--clerk-user-id=user_real_inline", "--apply"], ["user_real_inline"]],
+  ] as const)("fails the real CLI for %s before database access without echoing supplied values", async (_label, args, sensitiveValues) => {
+    const { exitCode, stderr, stdout } = await runRealClaimCli([...args]);
+
+    expect(exitCode).not.toBe(0);
+    expect(stdout).toBe("");
+    expect(stderr).not.toContain("ECONNREFUSED");
+    expect(stderr).not.toContain("127.0.0.1:1");
+    for (const sensitiveValue of sensitiveValues) {
+      expect(stderr).not.toContain(sensitiveValue);
+    }
+  });
+
+  it.each([
     ["missing before apply", ["--clerk-user-id", "--apply"]],
     ["missing before repeated apply", ["--clerk-user-id", "--apply", "--apply"]],
     ["unknown long option", ["--clerk-user-id", "--unknown"]],
@@ -216,6 +329,41 @@ function createClaimMock() {
     dryRun: true,
     candidateCount: 0,
   }));
+}
+
+async function runRealClaimCli(args: string[]): Promise<{
+  exitCode: number | null;
+  stderr: string;
+  stdout: string;
+}> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "bun",
+      ["--conditions", "react-server", "scripts/claim-legacy-user.ts", ...args],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          DATABASE_URL: "postgres://agentbay:agentbay@127.0.0.1:1/agentbay",
+        },
+      },
+    );
+    let stderr = "";
+    let stdout = "";
+
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.on("error", reject);
+    child.on("close", (exitCode) => {
+      resolve({ exitCode, stderr, stdout });
+    });
+  });
 }
 
 async function seedLegacyOwnership(connection: DatabaseConnection): Promise<string> {
