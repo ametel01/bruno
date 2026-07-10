@@ -2,11 +2,15 @@ import { clerkMiddleware, type ClerkMiddlewareAuth } from "@clerk/nextjs/server"
 import type { NextFetchEvent } from "next/server";
 import { NextResponse, type NextRequest } from "next/server";
 import {
+  authModeConfigurationMessage,
+  type AuthModeConfigurationErrorCode,
+  resolveAuthMode,
+} from "@/src/auth/server-auth-mode";
+import {
   isBrowserApiPath,
   isClerkAuthPagePath,
   isPublicInfrastructurePath,
   isRunnerMachineAuthPath,
-  resolveClerkTransition,
 } from "@/src/auth/clerk-transition";
 import { evaluateOperatorAccess, type OperatorAccessDecision } from "@/src/auth/operator-access";
 
@@ -33,14 +37,14 @@ export async function proxy(request: NextRequest, event: NextFetchEvent): Promis
     return NextResponse.next();
   }
 
-  const transition = resolveClerkTransition(process.env);
+  const authMode = resolveAuthMode(process.env);
 
-  if (transition.mode === "operator") {
+  if (authMode.mode === "development") {
     return NextResponse.next();
   }
 
-  if (transition.mode === "invalid") {
-    return authConfigurationResponse(request, transition.code);
+  if (authMode.mode === "invalid") {
+    return authConfigurationResponse(request, authMode.code);
   }
 
   return (await clerkSessionProxy(request, event)) ?? NextResponse.next();
@@ -118,14 +122,8 @@ function operatorAccessResponse(
   return response;
 }
 
-function authConfigurationResponse(
-  request: NextRequest,
-  code: "invalid_auth_transition_mode" | "clerk_auth_not_configured",
-) {
-  const message =
-    code === "clerk_auth_not_configured"
-      ? "Authentication is not configured."
-      : "Authentication mode is not configured safely.";
+function authConfigurationResponse(request: NextRequest, code: AuthModeConfigurationErrorCode) {
+  const message = authModeConfigurationMessage(code);
 
   if (isBrowserApiPath(request.nextUrl.pathname)) {
     return NextResponse.json({ error: { code, message } }, { status: 503 });

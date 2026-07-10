@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { requireValidAuthMode } from "@/src/auth/auth-mode";
 
 type VercelBuildEnvironment = Record<string, string | undefined>;
 
@@ -11,6 +12,7 @@ type RunCommand = (command: VercelBuildCommand) => Promise<void>;
 
 export function planVercelBuildCommands(env: VercelBuildEnvironment): VercelBuildCommand[] {
   const commands: VercelBuildCommand[] = [];
+  requireValidAuthMode(env);
 
   if (env.VERCEL_ENV === "production") {
     if (!env.DATABASE_URL?.trim()) {
