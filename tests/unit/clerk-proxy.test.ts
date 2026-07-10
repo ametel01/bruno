@@ -97,32 +97,55 @@ describe("Clerk session proxy", () => {
     expect(mocks.auth).not.toHaveBeenCalled();
   });
 
-  it("redirects a signed-out browser page to sign-in", async () => {
+  it.each([
+    "/",
+    "/dashboard",
+    "/agents",
+    "/agents/00000000-0000-4000-8000-000000000001",
+    "/settings",
+  ])("redirects the signed-out protected page %s to sign-in", async (pathname) => {
     mocks.auth.mockResolvedValueOnce({
       isAuthenticated: false,
       redirectToSignIn: mocks.redirectToSignIn,
     });
 
     const response = await proxy(
-      new NextRequest("http://localhost/dashboard"),
+      new NextRequest(`http://localhost${pathname}`),
       {} as NextFetchEvent,
     );
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe("http://localhost/sign-in");
     expect(mocks.redirectToSignIn).toHaveBeenCalledWith({
-      returnBackUrl: "http://localhost/dashboard",
+      returnBackUrl: `http://localhost${pathname}`,
     });
   });
 
-  it("returns a safe JSON 401 for a signed-out browser API", async () => {
+  it.each([
+    "/api/agents",
+    "/api/agents/00000000-0000-4000-8000-000000000001",
+    "/api/agents/00000000-0000-4000-8000-000000000001/actions/start",
+    "/api/agents/00000000-0000-4000-8000-000000000001/actions/stop",
+    "/api/agents/00000000-0000-4000-8000-000000000001/actions/restart",
+    "/api/agents/00000000-0000-4000-8000-000000000001/actions/simulate-error",
+    "/api/agents/00000000-0000-4000-8000-000000000001/events",
+    "/api/agents/00000000-0000-4000-8000-000000000001/logs",
+    "/api/agents/00000000-0000-4000-8000-000000000001/backups",
+    "/api/agents/00000000-0000-4000-8000-000000000001/backups/00000000-0000-4000-8000-000000000002/restore",
+    "/api/approvals/00000000-0000-4000-8000-000000000003/approve",
+    "/api/approvals/00000000-0000-4000-8000-000000000003/deny",
+    "/api/runners",
+    "/api/runners/registration-tokens",
+    "/api/runners/00000000-0000-4000-8000-000000000004/credentials/rotate",
+    "/api/runners/00000000-0000-4000-8000-000000000004/credentials/revoke",
+  ])("returns the same safe JSON 401 for signed-out browser API %s", async (pathname) => {
     mocks.auth.mockResolvedValueOnce({
       isAuthenticated: false,
       redirectToSignIn: mocks.redirectToSignIn,
     });
 
     const response = await proxy(
-      new NextRequest("http://localhost/api/agents"),
+      new NextRequest(`http://localhost${pathname}`),
       {} as NextFetchEvent,
     );
 

@@ -8,6 +8,9 @@ lists, placement, provisioning, registration-token creation, and credential rota
 to the resulting internal user ID. A runner owned by another user is indistinguishable from a
 missing runner and cannot trigger provider or credential side effects.
 
+The complete two-user, runner-machine, legacy-claim, and provider-smoke evidence map is maintained
+in [Two-user authentication and isolation acceptance](./TWO_USER_ACCEPTANCE.md).
+
 ## Local development
 
 For a non-Vercel loopback `NEXT_PUBLIC_APP_URL`, an unset mode defaults to `development`:
