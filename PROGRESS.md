@@ -42,8 +42,8 @@ Step 3 server-only cost DTOs. The dashboard now renders directly testable daily
 and monthly estimate sections with runner monthly cost, current running-agent
 counts, per-active-agent allocation, explicit unavailable and zero-agent
 states, and safe loader-failure feedback without client-side cost math. This is
-branch-level implementation evidence with draft PR #246 open; no merge evidence
-exists yet.
+branch-level implementation evidence reviewed in PR #246; no merge evidence exists
+yet.
 
 ### Changelog Status
 
@@ -61,7 +61,7 @@ added only for user-facing or operator-facing cost-tracking behavior.
 - [x] Step 1: Add Provider Price Metadata
 - [x] Step 2: Persist Agent Usage Periods
 - [x] Step 3: Build Daily and Monthly Cost Estimate Service
-- [x] Step 4: Add Dashboard Cost Summary and Views (implemented; draft PR #246 open, merge pending)
+- [x] Step 4: Add Dashboard Cost Summary and Views (implemented and reviewed; merge pending)
 - [ ] Step 5: Add Runner Detail Cost Context
 - [ ] Step 6: Final Acceptance and Milestone Closeout
 
@@ -79,8 +79,8 @@ added only for user-facing or operator-facing cost-tracking behavior.
 - Step 4 / issue #225: rebased functional commit `48bad41` adds the concurrent
   server dashboard loader, scoped cost-summary component and styles, focused
   known-price/unavailable/zero-agent/failure/redaction unit coverage, and
-  isolated desktop/mobile browser coverage. Draft PR #246 is open; merge evidence
-  is intentionally not recorded before it exists.
+  isolated desktop/mobile browser coverage. PR #246 has been reviewed; merge
+  evidence is intentionally not recorded before it exists.
 
 ## Clerk Authentication and User Isolation Rollout
 
