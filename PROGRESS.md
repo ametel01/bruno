@@ -35,6 +35,14 @@ Next implementation work should proceed on Step 3 through issue #224. Steps 4
 and 5 remain dependent on Step 3, and Step 6 remains dependent on Steps 4 and
 5.
 
+Step 4 is implemented for issue #225 on its isolated branch using the merged
+Step 3 server-only cost DTOs. The dashboard now renders directly testable daily
+and monthly estimate sections with runner monthly cost, current running-agent
+counts, per-active-agent allocation, explicit unavailable and zero-agent
+states, and safe loader-failure feedback without client-side cost math. This is
+branch-level implementation evidence only; no pull request or merge evidence
+exists yet.
+
 ### Changelog Status
 
 `CHANGELOG.md` retains the Keep a Changelog structure required by the plan:
@@ -51,7 +59,7 @@ added only for user-facing or operator-facing cost-tracking behavior.
 - [x] Step 1: Add Provider Price Metadata
 - [x] Step 2: Persist Agent Usage Periods
 - [ ] Step 3: Build Daily and Monthly Cost Estimate Service
-- [ ] Step 4: Add Dashboard Cost Summary and Views
+- [x] Step 4: Add Dashboard Cost Summary and Views (implemented; PR and merge pending)
 - [ ] Step 5: Add Runner Detail Cost Context
 - [ ] Step 6: Final Acceptance and Milestone Closeout
 
@@ -62,6 +70,14 @@ added only for user-facing or operator-facing cost-tracking behavior.
 | 0 | #221 | #228 | `147b220` | Tracker and changelog structure guard established. |
 | 1 | #222 | #229 | `bffe8ff` | Provider price metadata and focused price tests merged. |
 | 2 | #223 | #230 | `54f5546` | Usage-period schema, lifecycle persistence, and focused tests merged. |
+
+### In-Progress Evidence
+
+- Step 4 / issue #225: rebased functional commit `472ffdc` adds the concurrent
+  server dashboard loader, scoped cost-summary component and styles, focused
+  known-price/unavailable/zero-agent/failure/redaction unit coverage, and
+  isolated desktop/mobile browser coverage. Pull request and merge evidence are
+  intentionally not recorded before they exist.
 
 ## Clerk Authentication and User Isolation Rollout
 

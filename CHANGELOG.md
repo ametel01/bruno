@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Internal user resolution for Clerk sessions and registration-free development, with opaque unique Clerk links, concurrency-safe lazy creation, and an explicit count-only dry-run legacy claim that refuses ambiguous or conflicting ownership.
 - Deterministic server-side daily and monthly runner infrastructure cost estimates from user-scoped usage periods, including overlapping-uptime unioning, per-agent allocation, supplied-clock windows, and explicit unavailable pricing states.
+- Dashboard now shows server-rendered daily and monthly raw-infrastructure estimates, runner monthly cost, running-agent counts, per-active-agent estimates, and explicit unavailable and safe loader-failure states.
 - Clerk-capable sign-in, registration, current-user, and sign-out surfaces with a Next.js 16 proxy route matrix that preserves the temporary Basic operator barrier and existing runner machine authentication until production cutover.
 - Durable `agent_usage_periods` persistence for reproducible infrastructure usage tracking, with start/stop lifecycle instrumentation, continuous restart semantics, open intervals for missing stops, and no credential-bearing usage metadata.
 - Dedicated runner Docker image artifact that packages the existing runner bootstrap and service runtime without Droplet-side source checkout or GitHub credentials.
