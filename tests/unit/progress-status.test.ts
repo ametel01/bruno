@@ -3,40 +3,62 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("milestone 16 progress status", () => {
-  it("records merged cost foundations and honest in-progress UI evidence", async () => {
+  it("records the complete milestone acceptance ledger without stale pending claims", async () => {
     const progress = await readFile(join(process.cwd(), "PROGRESS.md"), "utf8");
+    const milestone16 = progress.split("## Clerk Authentication and User Isolation Rollout")[0];
 
-    expect(progress).toContain("Milestone 16: Cost Tracking is the active implementation plan.");
-    expect(progress).toContain("- [x] Step 0: Progress and Changelog Tracking Setup");
-    expect(progress).toContain("- [x] Step 1: Add Provider Price Metadata");
-    expect(progress).toContain("- [x] Step 2: Persist Agent Usage Periods");
-    expect(progress).toContain("- [x] Step 3: Build Daily and Monthly Cost Estimate Service");
-    expect(progress).toContain("- [x] Step 4: Add Dashboard Cost Summary and Views");
-    expect(progress).toContain(
-      "- [x] Step 5: Add Runner Detail Cost Context (implemented; review and merge pending)",
-    );
-    expect(progress).toContain("- [ ] Step 6: Final Acceptance and Milestone Closeout");
-    expect(progress).toContain("No changelog entry was added for Step 0");
-    expect(progress).toContain("Step 1 is complete for issue #222");
-    expect(progress).toContain("Step 2 is complete for issue #223");
-    expect(progress).toContain("Step 3 is complete for issue #224 on current `origin/main`");
-    expect(progress).toContain(
+    expect(milestone16).toContain("Milestone 16: Cost Tracking is complete");
+    expect(milestone16).toContain("- [x] Step 0: Progress and Changelog Tracking Setup");
+    expect(milestone16).toContain("- [x] Step 1: Add Provider Price Metadata");
+    expect(milestone16).toContain("- [x] Step 2: Persist Agent Usage Periods");
+    expect(milestone16).toContain("- [x] Step 3: Build Daily and Monthly Cost Estimate Service");
+    expect(milestone16).toContain("- [x] Step 4: Add Dashboard Cost Summary and Views");
+    expect(milestone16).toContain("- [x] Step 5: Add Runner Detail Cost Context");
+    expect(milestone16).toContain("- [x] Step 6: Final Acceptance and Milestone Closeout");
+    expect(milestone16).toContain("No changelog entry was added for Step 0");
+    expect(milestone16).toContain("Step 1 is complete for issue #222");
+    expect(milestone16).toContain("Step 2 is complete for issue #223");
+    expect(milestone16).toContain("Step 3 is complete for issue #224 on current `origin/main`");
+    expect(milestone16).toContain(
       "| 3 | #224 | #243 | `ebea027` | Daily/monthly infrastructure cost estimates, allocation, and unavailable-price coverage merged. |",
     );
-    expect(progress).toContain(
+    expect(milestone16).toContain(
       "| 4 | #225 | #246 | `833bd0c` | Dashboard daily/monthly estimates, allocation, unavailable/zero-agent states, and safe failure handling merged. |",
     );
-    expect(progress).not.toContain("Next implementation work should proceed on Step 3");
-    expect(progress).toContain("Step 5 is implemented for issue #226");
-    expect(progress).toContain("Review and merge remain pending.");
-    expect(progress).not.toContain("draft PR #246");
-    expect(progress).not.toContain("no pull request or merge evidence exists yet");
-    expect(progress).not.toContain("Step 5 is merged");
+    expect(milestone16).toContain(
+      "| 5 | #226 | #250 | `29cc588` | Runner-detail and settings cost context, active-agent allocation, unavailable/failure states, and secret redaction merged. |",
+    );
+    expect(milestone16).toContain("### Final Acceptance Evidence");
+    expect(milestone16).toContain("Acceptance: dashboard displays runner monthly cost.");
+    expect(milestone16).toContain(
+      "Acceptance: dashboard displays estimated cost per running agent.",
+    );
+    expect(milestone16).toContain("Acceptance: daily and monthly views exist.");
+    expect(milestone16).toContain("Acceptance: start and stop times affect estimates.");
+    expect(milestone16).toContain(
+      "Acceptance: users can understand why a plan costs more than raw compute.",
+    );
+    expect(milestone16).toContain("Test: cost calculations cover uptime and multiple agents.");
+    expect(milestone16).toContain("Test: UI covers the cost summary.");
+    expect(milestone16).toContain(
+      "Test: edge cases cover stopped agents, partial days, and missing stop events.",
+    );
+    expect(milestone16).not.toContain("Next implementation work should proceed on Step 3");
+    expect(milestone16).not.toContain("Step 5 is implemented for issue #226");
+    expect(milestone16).not.toContain("review and merge pending");
+    expect(milestone16).not.toContain("isolated branch");
+    expect(milestone16).not.toContain("b67ca44");
+    expect(milestone16).not.toContain("draft PR #246");
+    expect(milestone16).not.toContain("no pull request or merge evidence exists yet");
+    expect(milestone16).not.toContain("Milestone 17");
+    expect(milestone16).not.toContain("Stripe");
+    expect(milestone16).not.toContain("subscription");
+    expect(milestone16).not.toContain("plan enforcement");
   });
 });
 
 describe("authentication progress status", () => {
-  it("records merged foundations and open downstream authentication work", async () => {
+  it("records merged foundations and remaining downstream authentication work", async () => {
     const progress = await readFile(join(process.cwd(), "PROGRESS.md"), "utf8");
     const lines = progress.split("\n");
     const getStepRow = (step: number) => lines.find((line) => line.startsWith(`| ${step}. `)) ?? "";
@@ -62,16 +84,24 @@ describe("authentication progress status", () => {
       expect(row.toLowerCase()).not.toContain("after both dependencies merge");
     }
 
-    expect(step7Row).toContain("Implemented; PR open; cycle-5 tracker/recheck gate pending");
+    expect(step7Row).toContain("| #238 | Merged |");
     expect(step7Row).toContain("merged #233/PR #244 and #234/PR #247");
-    expect(step7Row).toContain("PR #251 (open)");
-    expect(step7Row).toContain("Implementation `d077a83`; prior tracker head `88c058f`");
+    expect(step7Row).toContain("PR #251 (merged)");
+    expect(step7Row).toContain("| `3317b9d` |");
+    expect(step7Row).toContain("Final PR head `9441cc2`");
+    expect(step7Row).toContain("reviewed implementation head `d077a83`");
     expect(step7Row).toContain("9 focused files / 143 tests");
     expect(step7Row).toContain("73 files / 669 unit tests");
-    expect(step7Row).toContain("CI run 29082905252");
-    expect(step7Row).toContain("PR #251 is open and not merged");
+    expect(step7Row).toContain("CI run 29084008081");
+    expect(step7Row).toContain("Complete through merged PR #251");
+    expect(step7Row).toContain("clerk_auth_not_configured");
+    expect(step7Row).toContain("no hosted Clerk/protected-preview/provider success is claimed");
     expect(step7Row).not.toContain("Not opened");
+    expect(step7Row).not.toContain("PR #251 (open)");
+    expect(step7Row).not.toContain("PR #251 is open and not merged");
+    expect(step7Row).not.toContain("tracker/recheck gate pending");
     expect(step7Row).not.toContain("8f47126");
+    expect(step7Row).not.toContain("88c058f");
     expect(step7Row).not.toContain("8 files, 120 tests");
     expect(step7Row).not.toContain("72 files, 642 tests");
     expect(step7Row).not.toContain("checker pending");
@@ -92,5 +122,8 @@ describe("authentication progress status", () => {
     expect(progress).not.toContain(
       "Steps 4-7 wait for the merged routing/session contract from Step 2",
     );
+    expect(progress).toContain("Step 7 is complete through #238/PR #251 at `3317b9d`");
+    expect(progress).toContain("Step 8 waits for the remaining three ownership slices");
+    expect(progress).not.toContain("Steps 4-7 no longer wait on those prerequisites");
   });
 });

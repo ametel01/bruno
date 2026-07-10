@@ -16,7 +16,10 @@ GitHub issue wave:
 
 ### Current Status
 
-Milestone 16: Cost Tracking is the active implementation plan.
+Milestone 16: Cost Tracking is complete at this closeout head. The product
+implementation through Step 5 merged through PR #250 at `29cc588`, which is
+contained in current `origin/main`. The Step 6 acceptance audit for issue #227
+found no undocumented exception or missing product/test criterion.
 
 Step 0 is complete for issue #221. The tracker lists every Milestone 16
 incremental step, records the functional-change-only changelog rule, and
@@ -34,8 +37,8 @@ one continuous running period, and missing stops remain open intervals.
 Step 3 is complete for issue #224 on current `origin/main`. PR #243 merged the
 server-only daily and monthly runner infrastructure cost estimate service at
 `ebea027`, including deterministic uptime, multiple-agent allocation, and
-explicit unavailable-price coverage. Steps 4 and 5 can now consume that merged
-contract, while Step 6 remains dependent on both UI steps.
+explicit unavailable-price coverage. The merged dashboard and runner-detail
+slices consume that contract without duplicating cost math in the browser.
 
 Step 4 is complete for issue #225 on current `origin/main`. PR #246 merged the
 server-rendered dashboard daily and monthly estimate sections at `833bd0c`,
@@ -43,12 +46,17 @@ including runner monthly cost, current running-agent counts, per-active-agent
 allocation, explicit unavailable and zero-agent states, and safe loader-failure
 feedback without client-side cost math.
 
-Step 5 is implemented for issue #226 on its isolated branch using the merged
-Step 3 server-only cost DTOs. Assigned-agent detail and settings runner cards
-show labeled raw-infrastructure estimates and per-active-agent allocation with
+Step 5 is complete for issue #226 on current `origin/main`. PR #250 merged the
+runner-detail and settings cost context at `29cc588`, using the Step 3 DTOs for
+labeled raw-infrastructure estimates and per-active-agent allocation with
 explicit unavailable and safe loader-failure states. Existing runner health,
 capacity, and readiness context remains visible, and no client-side cost math
-or credential-bearing fields are introduced. Review and merge remain pending.
+or credential-bearing fields were introduced.
+
+Step 6 is complete for issue #227 at this closeout head. The final audit below
+maps every Milestone 16 acceptance criterion and test requirement to direct
+merged implementation and test evidence. The audit required no product source
+or changelog change and stays bounded to the cost-tracking milestone.
 
 ### Changelog Status
 
@@ -67,8 +75,8 @@ added only for user-facing or operator-facing cost-tracking behavior.
 - [x] Step 2: Persist Agent Usage Periods
 - [x] Step 3: Build Daily and Monthly Cost Estimate Service
 - [x] Step 4: Add Dashboard Cost Summary and Views
-- [x] Step 5: Add Runner Detail Cost Context (implemented; review and merge pending)
-- [ ] Step 6: Final Acceptance and Milestone Closeout
+- [x] Step 5: Add Runner Detail Cost Context
+- [x] Step 6: Final Acceptance and Milestone Closeout
 
 ### Completed Evidence
 
@@ -79,18 +87,36 @@ added only for user-facing or operator-facing cost-tracking behavior.
 | 2 | #223 | #230 | `54f5546` | Usage-period schema, lifecycle persistence, and focused tests merged. |
 | 3 | #224 | #243 | `ebea027` | Daily/monthly infrastructure cost estimates, allocation, and unavailable-price coverage merged. |
 | 4 | #225 | #246 | `833bd0c` | Dashboard daily/monthly estimates, allocation, unavailable/zero-agent states, and safe failure handling merged. |
+| 5 | #226 | #250 | `29cc588` | Runner-detail and settings cost context, active-agent allocation, unavailable/failure states, and secret redaction merged. |
 
-### In-Progress Evidence
+### Final Acceptance Evidence
 
-- Step 5 / issue #226: rebased functional commit `b67ca44` adds concurrent
-  assigned-runner cost loading, dedicated cost-context components and styles,
-  known-price/unavailable/failure/redaction unit coverage, and isolated
-  desktop/mobile browser coverage. Review and merge evidence are intentionally
-  not recorded before they exist.
-- Step 5 validation on the rebased branch: focused unit coverage passed 41
-  tests, the full unit suite passed 617 tests, the focused desktop browser proof
-  passed, the credential-free CI E2E gate passed 14 desktop/mobile tests, and
-  format, lint, typecheck, and production build all passed.
+No exception is required. Every roadmap criterion and named test requirement
+maps to merged behavior and direct regression evidence:
+
+| Roadmap requirement | Direct merged and test evidence |
+| --- | --- |
+| Acceptance: dashboard displays runner monthly cost. | Dashboard integration merged in PR #246 (`833bd0c`) and runner context merged in PR #250 (`29cc588`); `tests/unit/root-page.test.tsx`, `tests/e2e/root-route.spec.ts`, `tests/unit/runner-cost-context.test.tsx`, and `tests/e2e/runner-cost-context.spec.ts` assert the labeled monthly values. |
+| Acceptance: dashboard displays estimated cost per running agent. | PR #243 (`ebea027`) calculates current running counts and reproducible per-window-active-agent allocation; the dashboard unit/browser suites assert the displayed count and per-agent estimate, while the runner-context suites assert running-now and active-in-window context. |
+| Acceptance: daily and monthly views exist. | PR #246 (`833bd0c`) renders trailing 24-hour and 30-day sections; `tests/unit/root-page.test.tsx` and `tests/e2e/root-route.spec.ts` assert both accessible view headings and their labeled estimates. |
+| Acceptance: start and stop times affect estimates. | PR #230 (`54f5546`) persists lifecycle usage periods; the focused start, stop, and restart cases in `tests/unit/create-agent-db.test.ts` prove successful starts open periods, successful stops close them, and successful restarts preserve one continuous period. `tests/unit/cost-estimates.test.ts` consumes those timestamps deterministically. |
+| Acceptance: users can understand why a plan costs more than raw compute. | The dashboard and runner-detail copy merged in PRs #246/#250 explains orchestration, monitoring, backups, support, and margin; all four focused unit/browser UI suites assert the raw-compute/plan explanation. |
+| Test: cost calculations cover uptime and multiple agents. | `tests/unit/cost-estimates.test.ts` asserts deterministic daily/monthly uptime, overlapping interval union, multiple-agent allocation, and rounding at the DTO boundary. |
+| Test: UI covers the cost summary. | `tests/unit/root-page.test.tsx` and `tests/e2e/root-route.spec.ts` cover the dashboard summary; `tests/unit/runner-cost-context.test.tsx` and `tests/e2e/runner-cost-context.spec.ts` cover assigned-agent and settings runner context, labeled estimates, unavailable-not-zero states, safe failures, and redaction. |
+| Test: edge cases cover stopped agents, partial days, and missing stop events. | `tests/unit/cost-estimates.test.ts` covers stopped historical agents, partial-window clipping, open periods with missing stop times, future-ended intervals, deleted runners, and out-of-window history. |
+
+Validation evidence for the accepted product slices is preserved in green CI
+runs 29057487580 (PR #243), 29063443834 (PR #246), and 29065321307 (PR #250).
+At this closeout head, the non-conflicting focused unit command covering
+`tests/unit/root-page.test.tsx`, `tests/unit/runner-cost-context.test.tsx`, and
+`tests/unit/progress-status.test.ts` passes 42 tests, and the database-free cost
+interval filter passes 2 tests. Format and lint pass across 215 files; typecheck,
+production build, diff, conflict-marker, auth-row preservation, and two-file
+scope checks also pass. Database-backed cost and lifecycle tests plus isolated
+browser coverage remain assigned to the independent checker because #237 owns
+the shared database/Docker/E2E lane. Provider-backed `bun run verify` remains a
+fail-closed capability gate and is not represented as hosted acceptance without
+approved provider resources.
 
 ## Clerk Authentication and User Isolation Rollout
 
@@ -134,7 +160,7 @@ completion evidence.
 | 4. Isolate agent lifecycle and agent data | #235 | Open; prerequisites merged | Steps 2 and 3 (merged #233/PR #244 and #234/PR #247) | No merged PR | Not collected | Not collected | Issue #235 is open with prerequisites merged; scope agent routes, lifecycle, events, logs, usage, and costs to the resolved internal user with cross-user `404` behavior. |
 | 5. Isolate runner provisioning and management | #236 | Open; prerequisites merged | Steps 2 and 3 (merged #233/PR #244 and #234/PR #247) | No merged PR | Not collected | Not collected | Issue #236 is open with prerequisites merged; scope browser runner operations and credentials per user while preserving existing `/runner/v1/*` machine authentication. |
 | 6. Isolate approvals, backups, restores, and activity | #237 | Open; prerequisites merged | Steps 2 and 3 (merged #233/PR #244 and #234/PR #247) | No merged PR | Not collected | Not collected | Issue #237 is open with prerequisites merged; enforce user ownership at database and object-storage boundaries and keep cross-user resources concealed. |
-| 7. Preserve full registration-free development access | #238 | Implemented; PR open; cycle-5 tracker/recheck gate pending | Steps 2 and 3 (merged #233/PR #244 and #234/PR #247) | PR #251 (open) | Implementation `d077a83`; prior tracker head `88c058f` | A server-only `AGENTBAY_AUTH_MODE` policy gives non-Vercel loopback environments registration-free shared-user access, requires complete Clerk configuration for production/custom hosts, permits preview development only with an explicit exact protection attestation, ignores caller-controlled request hosts, preserves the Basic barrier and exact runner-machine bypasses, and validates Vercel builds before spawning commands. At prior tracker head `88c058f`, the independent checker passed 9 focused files / 143 tests and all static/diff checks; exact-head CI run 29082905252 passed migration, 73 files / 669 unit tests, build, and `test:e2e:ci` 14/14, with GitGuardian and Socket checks green. | PR #251 is open and not merged. This cycle-5 tracker correction requires a fresh exact-head checker/CI, refreshed PR evidence, and maintainer re-review before merge. No hosted Vercel protection probe, deployment, env mutation, Clerk/provider operation, secret use, or provider-backed full E2E was performed. |
+| 7. Preserve full registration-free development access | #238 | Merged | Steps 2 and 3 (merged #233/PR #244 and #234/PR #247) | PR #251 (merged) | `3317b9d` | A server-only `AGENTBAY_AUTH_MODE` policy gives non-Vercel loopback environments registration-free shared-user access, requires complete Clerk configuration for production/custom hosts, permits preview development only with an explicit exact protection attestation, ignores caller-controlled request hosts, preserves the Basic barrier and exact runner-machine bypasses, and validates Vercel builds before spawning commands. Final PR head `9441cc2` preserved all 19 product/auth blobs from reviewed implementation head `d077a83`; the independent checker passed 9 focused files / 143 tests and all static/diff checks. Exact-head CI run 29084008081 passed migration, 73 files / 669 unit tests, build, and `test:e2e:ci` 14/14, with GitGuardian and Socket checks green. | Complete through merged PR #251. The optional Vercel preview remained fail-closed as `clerk_auth_not_configured` because #232 provider/key state is unavailable; no hosted Clerk/protected-preview/provider success is claimed, and no provider, environment, secret, deployment, or production state was changed. |
 | 8. Prove authentication, isolation, and runner compatibility | #239 | Dependency-blocked | Steps 4-7 (#235, #236, #237, #238) | Not opened | Not collected | Not collected | Run the two-user acceptance matrix, signed-out and provider flows, legacy-claim tests, secret-safe diagnostics, and runner-token compatibility after every ownership slice merges. |
 | 9. Cut production over and retire Basic auth | #240 | Dependency- and approval-blocked | Steps 1 and 8 (#232, #239) | Not opened | Not collected | Not collected | Requires separate production provider, secret, deployment, legacy-claim, and cutover approval. Retire Basic auth only after hosted Clerk, ownership, runner, rollback, and full-feature evidence passes. |
 
@@ -144,9 +170,11 @@ completion evidence.
   secret storage until the required human approval is recorded.
 - Steps 2 and 3 are merged: #233 through PR #244 and #234 through PR #247.
 - Their routing/session and internal-user resolver contracts are available;
-  Steps 4-7 no longer wait on those prerequisites and continue through their
+  Steps 4-6 no longer wait on those prerequisites and continue through their
   own implementation and review gates.
-- Step 8 waits for all four ownership and development-mode slices.
+- Step 7 is complete through #238/PR #251 at `3317b9d`; its registration-free
+  development and fail-closed hosted policy is available to downstream work.
+- Step 8 waits for the remaining three ownership slices, #235 through #237.
 - Step 9 waits for development-instance evidence and the completed acceptance
   matrix, then requires explicit production-cutover approval.
 - Never record Clerk keys, session values, provider credentials, runner tokens,
@@ -182,4 +210,5 @@ completion evidence.
   configuration, protected-preview bypass is explicit and attested, and request
   hosts cannot select the mode. Focused and full unit gates plus no-key desktop
   and mobile smoke/runner-boundary E2E passed; hosted preview verification and
-  provider-backed full E2E remain unclaimed.
+  provider-backed full E2E remain unclaimed. PR #251 merged the policy at
+  `3317b9d` after exact-head checker, CI, and maintainer approval passed.
