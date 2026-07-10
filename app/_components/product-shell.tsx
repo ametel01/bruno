@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { AccountControls } from "@/app/_components/clerk-auth-surfaces";
-import { resolveClerkTransition } from "@/src/auth/clerk-transition";
+import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 
 type ProductShellProps = {
   active: "dashboard" | "agents" | "settings";
@@ -17,7 +17,7 @@ const navigationItems = [
 ] as const;
 
 export function ProductShell({ active, eyebrow, title, description, children }: ProductShellProps) {
-  const clerkEnabled = resolveClerkTransition(process.env).mode === "clerk";
+  const clerkEnabled = resolveAuthMode(process.env).mode === "clerk";
 
   return (
     <div className="app-shell">
