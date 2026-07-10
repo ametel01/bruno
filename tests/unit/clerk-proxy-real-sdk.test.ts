@@ -64,6 +64,29 @@ describe("real Clerk SDK proxy configuration", () => {
     expect(response.status).toBe(200);
   });
 
+  it("uses complete standard Clerk keys for an unset Vercel preview", async () => {
+    delete process.env.AGENTBAY_AUTH_MODE;
+    process.env.NEXT_PUBLIC_APP_URL = "https://agentbay-git-feature.example.vercel.app";
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = SYNTHETIC_PUBLISHABLE_KEY;
+    process.env.NEXT_PUBLIC_CLERK_TELEMETRY_DISABLED = "1";
+    process.env.CLERK_SECRET_KEY = SYNTHETIC_SECRET_KEY;
+    delete process.env.CLERK_ENCRYPTION_KEY;
+    delete process.env.AGENTBAY_OPERATOR_PASSWORD;
+    process.env.VERCEL = "1";
+    process.env.VERCEL_ENV = "preview";
+    delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    process.env.VERCEL_URL = "agentbay-git-feature.example.vercel.app";
+    vi.resetModules();
+
+    const { proxy } = await import("@/proxy");
+    const response = await proxy(
+      new NextRequest("https://caller-controlled.example/sign-in"),
+      {} as NextFetchEvent,
+    );
+
+    expect(response.status).toBe(200);
+  });
+
   it("serves a local development request without Clerk keys or SDK network work", async () => {
     process.env.AGENTBAY_AUTH_MODE = "development";
     process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";

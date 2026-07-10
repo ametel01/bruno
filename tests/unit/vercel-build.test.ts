@@ -41,15 +41,31 @@ describe("Vercel build workflow", () => {
     ).toThrow("DATABASE_URL is required for production Vercel migrations.");
   });
 
-  it("does not migrate Clerk preview builds without a preview database", () => {
+  it.each([
+    ["explicit", "clerk"],
+    ["unset", undefined],
+  ])("does not migrate an %s Clerk preview build without a preview database", (_label, mode) => {
     expect(
       planVercelBuildCommands({
-        AGENTBAY_AUTH_MODE: "clerk",
+        AGENTBAY_AUTH_MODE: mode,
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "publishable-key-present",
         CLERK_SECRET_KEY: "secret-key-present",
         VERCEL_ENV: "preview",
       }),
     ).toEqual([{ command: "bun", args: ["run", "build"] }]);
+  });
+
+  it.each([
+    ["both keys missing", undefined, undefined],
+    ["secret key missing", "publishable-key-present", undefined],
+  ])("fails an unset preview build closed when %s", (_label, publishableKey, secretKey) => {
+    expect(() =>
+      planVercelBuildCommands({
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: publishableKey,
+        CLERK_SECRET_KEY: secretKey,
+        VERCEL_ENV: "preview",
+      }),
+    ).toThrow("Clerk authentication is not configured.");
   });
 
   it("permits only an explicit attested development preview", () => {
@@ -114,10 +130,31 @@ describe("Vercel build workflow", () => {
     expect(result.stderr).not.toContain(sensitiveValue);
     expect(result.stderr).not.toContain("ENOENT");
   });
+
+  it("fails the real unset-preview build entrypoint closed when Clerk keys are incomplete", async () => {
+    const sensitiveValue = "publishable-value-that-must-not-be-echoed";
+    const result = await runRealVercelBuild({
+      AGENTBAY_AUTH_MODE: undefined,
+      NEXT_PUBLIC_APP_URL: "https://agentbay-git-feature.example.vercel.app",
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: sensitiveValue,
+      VERCEL: "1",
+      VERCEL_ENV: "preview",
+      VERCEL_URL: "agentbay-git-feature.example.vercel.app",
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("Clerk authentication is not configured.");
+    expect(result.stderr).not.toContain(
+      "Development authentication is not allowed in this environment.",
+    );
+    expect(result.stderr).not.toContain(sensitiveValue);
+    expect(result.stderr).not.toContain("ENOENT");
+  });
 });
 
 async function runRealVercelBuild(
-  values: Record<string, string>,
+  values: Record<string, string | undefined>,
 ): Promise<{ exitCode: number | null; stderr: string; stdout: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn("bun", ["scripts/vercel-build.ts"], {

@@ -218,6 +218,58 @@ describe("Clerk session proxy", () => {
     expect(mocks.clerkInvocations).toBe(0);
   });
 
+  it("defaults an unset Vercel preview to Clerk session enforcement", async () => {
+    delete process.env.AGENTBAY_AUTH_MODE;
+    process.env.AGENTBAY_OPERATOR_PASSWORD = "operator-secret";
+    process.env.NEXT_PUBLIC_APP_URL = "https://agentbay-git-feature.example.vercel.app";
+    process.env.VERCEL = "1";
+    process.env.VERCEL_ENV = "preview";
+    process.env.VERCEL_URL = "agentbay-git-feature.example.vercel.app";
+    mocks.auth.mockResolvedValueOnce({
+      isAuthenticated: false,
+      redirectToSignIn: mocks.redirectToSignIn,
+    });
+
+    const response = await proxy(
+      new NextRequest("https://caller-controlled.example/api/agents", {
+        headers: { authorization: basicAuth("agentbay", "operator-secret") },
+      }),
+      {} as NextFetchEvent,
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      error: { code: "clerk_auth_required", message: "Authentication is required." },
+    });
+    expect(mocks.clerkInvocations).toBe(1);
+  });
+
+  it("fails an unset Vercel preview closed before Clerk when keys are incomplete", async () => {
+    delete process.env.AGENTBAY_AUTH_MODE;
+    process.env.AGENTBAY_OPERATOR_PASSWORD = "operator-secret";
+    process.env.NEXT_PUBLIC_APP_URL = "https://agentbay-git-feature.example.vercel.app";
+    process.env.VERCEL = "1";
+    process.env.VERCEL_ENV = "preview";
+    process.env.VERCEL_URL = "agentbay-git-feature.example.vercel.app";
+    delete process.env.CLERK_SECRET_KEY;
+
+    const response = await proxy(
+      new NextRequest("https://caller-controlled.example/api/agents", {
+        headers: { authorization: basicAuth("agentbay", "operator-secret") },
+      }),
+      {} as NextFetchEvent,
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "clerk_auth_not_configured",
+        message: "Clerk authentication is not configured.",
+      },
+    });
+    expect(mocks.clerkInvocations).toBe(0);
+  });
+
   it("fails closed for an unsupported authentication mode", async () => {
     process.env.AGENTBAY_AUTH_MODE = "unexpected";
 

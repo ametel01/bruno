@@ -54,6 +54,6 @@ live project check. Changing Vercel protection, environment variables, or deploy
 separate approval. After an approved preview exists, verify that raw unauthenticated access is
 blocked and that authenticated `vercel curl` reaches the application; keep all output redacted.
 
-Vercel build planning rejects an unset preview mode, an unverified development preview, every
-development production/custom-domain combination, and Clerk mode with incomplete keys before the
-application build starts.
+Vercel build planning resolves an unset preview mode to Clerk and requires both Clerk keys. It
+rejects incomplete Clerk configuration, an unverified development preview, and every development
+production/custom-domain combination before the application build starts.

@@ -73,6 +73,34 @@ describe("authentication mode policy", () => {
     });
   });
 
+  it("defaults an unset Vercel preview to Clerk with complete keys", () => {
+    expect(
+      resolveAuthMode({
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "publishable-key-present",
+        CLERK_SECRET_KEY: "secret-key-present",
+        VERCEL_ENV: "preview",
+      }),
+    ).toEqual({
+      mode: "clerk",
+      publishableKey: "publishable-key-present",
+    });
+  });
+
+  it.each([
+    ["both keys missing", undefined, undefined],
+    ["secret key missing", "publishable-key-present", undefined],
+    ["publishable key missing", undefined, "secret-key-present"],
+    ["blank secret key", "publishable-key-present", " "],
+  ])("fails an unset Vercel preview closed when %s", (_label, publishableKey, secretKey) => {
+    expect(
+      resolveAuthMode({
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: publishableKey,
+        CLERK_SECRET_KEY: secretKey,
+        VERCEL_ENV: "preview",
+      }),
+    ).toEqual({ mode: "invalid", code: "clerk_auth_not_configured" });
+  });
+
   it("permits only an explicit, attested development mode on the current Vercel preview", () => {
     const previewEnv = {
       AGENTBAY_AUTH_MODE: "development",
@@ -88,7 +116,7 @@ describe("authentication mode policy", () => {
 
     expect(resolveAuthMode({ ...previewEnv, AGENTBAY_AUTH_MODE: undefined })).toEqual({
       mode: "invalid",
-      code: "development_auth_not_allowed",
+      code: "clerk_auth_not_configured",
     });
 
     for (const attestation of [undefined, "", " ", "TRUE", "false"]) {

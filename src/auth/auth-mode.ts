@@ -17,6 +17,8 @@ type AuthEnvironment = Record<string, string | undefined>;
 
 export function resolveAuthMode(env: AuthEnvironment): AuthModeDecision {
   const configuredMode = env.AGENTBAY_AUTH_MODE;
+  const isPreview = env.VERCEL_ENV === "preview";
+  const resolvedMode = configuredMode ?? (isPreview ? "clerk" : undefined);
 
   if (
     configuredMode !== undefined &&
@@ -26,7 +28,7 @@ export function resolveAuthMode(env: AuthEnvironment): AuthModeDecision {
     return { mode: "invalid", code: "invalid_auth_mode" };
   }
 
-  if (configuredMode === "clerk") {
+  if (resolvedMode === "clerk") {
     const publishableKey = configuredValue(env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
     const secretKey = configuredValue(env.CLERK_SECRET_KEY);
 
@@ -40,7 +42,6 @@ export function resolveAuthMode(env: AuthEnvironment): AuthModeDecision {
   const appHostname = readUrlHostname(env.NEXT_PUBLIC_APP_URL);
   const currentVercelHostname = readHostname(env.VERCEL_URL);
   const productionVercelHostname = readHostname(env.VERCEL_PROJECT_PRODUCTION_URL);
-  const isPreview = env.VERCEL_ENV === "preview";
   const currentPreviewHostname =
     isPreview && isVercelPreviewHostname(currentVercelHostname) ? currentVercelHostname : null;
 
