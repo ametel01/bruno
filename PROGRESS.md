@@ -37,13 +37,18 @@ server-only daily and monthly runner infrastructure cost estimate service at
 explicit unavailable-price coverage. Steps 4 and 5 can now consume that merged
 contract, while Step 6 remains dependent on both UI steps.
 
-Step 4 is implemented for issue #225 on its isolated branch using the merged
-Step 3 server-only cost DTOs. The dashboard now renders directly testable daily
-and monthly estimate sections with runner monthly cost, current running-agent
-counts, per-active-agent allocation, explicit unavailable and zero-agent
-states, and safe loader-failure feedback without client-side cost math. This is
-branch-level implementation evidence reviewed in PR #246; no merge evidence exists
-yet.
+Step 4 is complete for issue #225 on current `origin/main`. PR #246 merged the
+server-rendered dashboard daily and monthly estimate sections at `833bd0c`,
+including runner monthly cost, current running-agent counts, per-active-agent
+allocation, explicit unavailable and zero-agent states, and safe loader-failure
+feedback without client-side cost math.
+
+Step 5 is implemented for issue #226 on its isolated branch using the merged
+Step 3 server-only cost DTOs. Assigned-agent detail and settings runner cards
+show labeled raw-infrastructure estimates and per-active-agent allocation with
+explicit unavailable and safe loader-failure states. Existing runner health,
+capacity, and readiness context remains visible, and no client-side cost math
+or credential-bearing fields are introduced. Review and merge remain pending.
 
 ### Changelog Status
 
@@ -61,8 +66,8 @@ added only for user-facing or operator-facing cost-tracking behavior.
 - [x] Step 1: Add Provider Price Metadata
 - [x] Step 2: Persist Agent Usage Periods
 - [x] Step 3: Build Daily and Monthly Cost Estimate Service
-- [x] Step 4: Add Dashboard Cost Summary and Views (implemented and reviewed; merge pending)
-- [ ] Step 5: Add Runner Detail Cost Context
+- [x] Step 4: Add Dashboard Cost Summary and Views
+- [x] Step 5: Add Runner Detail Cost Context (implemented; review and merge pending)
 - [ ] Step 6: Final Acceptance and Milestone Closeout
 
 ### Completed Evidence
@@ -73,14 +78,19 @@ added only for user-facing or operator-facing cost-tracking behavior.
 | 1 | #222 | #229 | `bffe8ff` | Provider price metadata and focused price tests merged. |
 | 2 | #223 | #230 | `54f5546` | Usage-period schema, lifecycle persistence, and focused tests merged. |
 | 3 | #224 | #243 | `ebea027` | Daily/monthly infrastructure cost estimates, allocation, and unavailable-price coverage merged. |
+| 4 | #225 | #246 | `833bd0c` | Dashboard daily/monthly estimates, allocation, unavailable/zero-agent states, and safe failure handling merged. |
 
 ### In-Progress Evidence
 
-- Step 4 / issue #225: rebased functional commit `35e843c` adds the concurrent
-  server dashboard loader, scoped cost-summary component and styles, focused
-  known-price/unavailable/zero-agent/failure/redaction unit coverage, and
-  isolated desktop/mobile browser coverage. PR #246 has been reviewed; merge
-  evidence is intentionally not recorded before it exists.
+- Step 5 / issue #226: rebased functional commit `b67ca44` adds concurrent
+  assigned-runner cost loading, dedicated cost-context components and styles,
+  known-price/unavailable/failure/redaction unit coverage, and isolated
+  desktop/mobile browser coverage. Review and merge evidence are intentionally
+  not recorded before they exist.
+- Step 5 validation on the rebased branch: focused unit coverage passed 41
+  tests, the full unit suite passed 617 tests, the focused desktop browser proof
+  passed, the credential-free CI E2E gate passed 14 desktop/mobile tests, and
+  format, lint, typecheck, and production build all passed.
 
 ## Clerk Authentication and User Isolation Rollout
 
