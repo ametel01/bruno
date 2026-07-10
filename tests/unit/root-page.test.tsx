@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   listLatestActiveAgentProcessLogsForUser: vi.fn(),
   listActiveAgentsForUser: vi.fn(),
   listCloudRunnerProvisioningSummariesForUser: vi.fn(),
+  listAssignableRunnersForUser: vi.fn(),
   listManualRunnerStatusSummariesForUser: vi.fn(),
   listSettingsRunnerManagementSummariesForUser: vi.fn(),
   getAssignedManualRunnerStatusForUserAgent: vi.fn(),
@@ -131,6 +132,15 @@ vi.mock("@/src/server/runners/cloud-runner-provisioning", async (importOriginal)
     listCloudRunnerProvisioningSummariesForUser: mocks.listCloudRunnerProvisioningSummariesForUser,
     listCloudRunnerProvisioningSummariesForDevelopmentUser:
       mocks.listCloudRunnerProvisioningSummariesForUser,
+  };
+});
+
+vi.mock("@/src/server/runners/runner-assignment", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/server/runners/runner-assignment")>();
+
+  return {
+    ...actual,
+    listAssignableRunnersForUser: mocks.listAssignableRunnersForUser,
   };
 });
 
@@ -252,6 +262,7 @@ describe("product shell routes", () => {
     mocks.listLatestActiveAgentProcessLogsForUser.mockResolvedValue([]);
     mocks.listManualRunnerStatusSummariesForUser.mockResolvedValue([]);
     mocks.listCloudRunnerProvisioningSummariesForUser.mockResolvedValue([]);
+    mocks.listAssignableRunnersForUser.mockResolvedValue([]);
     mocks.getCostEstimatesForUser.mockResolvedValue(costEstimates());
     mocks.listSettingsRunnerManagementSummariesForUser.mockResolvedValue([]);
     mocks.getAssignedManualRunnerStatusForUserAgent.mockResolvedValue(null);
@@ -277,6 +288,7 @@ describe("product shell routes", () => {
     mocks.listLatestActiveAgentProcessLogsForUser.mockReset();
     mocks.listActiveAgentsForUser.mockReset();
     mocks.listCloudRunnerProvisioningSummariesForUser.mockReset();
+    mocks.listAssignableRunnersForUser.mockReset();
     mocks.listManualRunnerStatusSummariesForUser.mockReset();
     mocks.listSettingsRunnerManagementSummariesForUser.mockReset();
     mocks.getAssignedManualRunnerStatusForUserAgent.mockReset();
@@ -1019,6 +1031,26 @@ describe("product shell routes", () => {
     );
     expect(html).toContain("inbox_triage_agent");
     expect(html).not.toContain("Create agent in Milestone 1");
+    expect(mocks.listActiveAgentsForUser).toHaveBeenCalledWith(APPLICATION_USER_ID);
+    expect(mocks.listAssignableRunnersForUser).toHaveBeenCalledWith(APPLICATION_USER_ID);
+    expect(mocks.listCloudRunnerProvisioningSummariesForUser).toHaveBeenCalledWith(
+      APPLICATION_USER_ID,
+    );
+  });
+
+  it.each(
+    PAGE_AUTH_FAILURES,
+  )("stops agents-page loading for $name configured-user results", async ({ result }) => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValueOnce(result);
+
+    const html = renderToStaticMarkup(await AgentsPage());
+
+    expect(html).toContain("Authentication required");
+    expect(html).toContain("Authentication is required.");
+    expect(html).not.toContain(result.code);
+    expect(mocks.listActiveAgentsForUser).not.toHaveBeenCalled();
+    expect(mocks.listAssignableRunnersForUser).not.toHaveBeenCalled();
+    expect(mocks.listCloudRunnerProvisioningSummariesForUser).not.toHaveBeenCalled();
   });
 
   it("renders persisted agents with stable identity and links", async () => {

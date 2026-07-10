@@ -1,7 +1,11 @@
 import {
   AgentLifecyclePersistenceError,
-  simulateErrorAgentForDevelopmentUser,
+  simulateErrorAgentForUser,
 } from "@/src/server/agents/lifecycle";
+import {
+  type ConfiguredApplicationUserResolution,
+  requireConfiguredApplicationUser,
+} from "@/src/server/users/configured-application-user";
 
 type SimulateErrorAgentRouteContext = {
   params: Promise<{
@@ -9,9 +13,17 @@ type SimulateErrorAgentRouteContext = {
   }>;
 };
 
+type SimulateErrorAgentRouteDependencies = {
+  requireApplicationUser?: typeof requireConfiguredApplicationUser;
+};
+
 export const dynamic = "force-dynamic";
 
-export async function POST(_request: Request, context: SimulateErrorAgentRouteContext) {
+export async function POST(
+  _request: Request,
+  context: SimulateErrorAgentRouteContext,
+  dependencies: SimulateErrorAgentRouteDependencies = {},
+) {
   if (process.env.NODE_ENV === "production") {
     return Response.json(
       {
@@ -40,8 +52,16 @@ export async function POST(_request: Request, context: SimulateErrorAgentRouteCo
     throw error;
   }
 
+  const applicationUser = await (
+    dependencies.requireApplicationUser ?? requireConfiguredApplicationUser
+  )();
+
+  if (!applicationUser.ok) {
+    return authenticationResponse(applicationUser);
+  }
+
   try {
-    const result = await simulateErrorAgentForDevelopmentUser(decodedAgentId);
+    const result = await simulateErrorAgentForUser(applicationUser.userId, decodedAgentId);
 
     if (result.ok) {
       return Response.json(result);
@@ -94,6 +114,23 @@ export async function POST(_request: Request, context: SimulateErrorAgentRouteCo
 
     throw error;
   }
+}
+
+function authenticationResponse(
+  result: Exclude<ConfiguredApplicationUserResolution, { ok: true }>,
+) {
+  return Response.json(
+    {
+      error: {
+        code: result.code,
+        message:
+          result.status === 401
+            ? "Authentication is required."
+            : "Authentication is not configured safely.",
+      },
+    },
+    { status: result.status },
+  );
 }
 
 function validationResponse() {

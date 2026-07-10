@@ -12,12 +12,12 @@ import {
 } from "@/src/server/agents/templates";
 import { recordAgentEventInTransaction } from "@/src/server/events/agent-events";
 import {
-  selectRunnerPlacementForDevelopmentUserInTransaction,
+  selectRunnerPlacementForUserInTransaction,
   type RunnerPlacementResult,
 } from "@/src/server/runners/runner-placement";
 import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
 import {
-  createDigitalOceanRunnerForDevelopmentUser,
+  createDigitalOceanRunnerForUser,
   type CreateRunnerProvisioningResult,
 } from "@/src/server/runners/runner-provisioning";
 import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
@@ -229,114 +229,156 @@ export async function createAgentForDevelopmentUser(
 ): Promise<CreatedAgentResponse> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
-  const insertDefaultAgentConfig =
-    dependencies.insertDefaultAgentConfig ?? insertDefaultConfigForCreatedAgent;
-  const insertCreatedEvent = dependencies.insertCreatedEvent ?? insertDefaultCreatedEvent;
-  const autoProvisionCloudRunner =
-    dependencies.autoProvisionCloudRunner ?? process.env.NODE_ENV !== "test";
-  const ensureCloudRunnerProvisioning =
-    dependencies.ensureCloudRunnerProvisioning ?? ensureDefaultCloudRunnerProvisioning;
 
   try {
-    const result = await connection.db.transaction(async (tx) => {
-      const userId = await getOrCreateDevelopmentUserId(tx);
-      const templateSnapshot = getAgentTemplateSnapshot(input.templateKey);
-      const placement = await selectRunnerPlacementForDevelopmentUserInTransaction(tx, {
-        planMaxAgents: dependencies.planMaxAgents,
-        runnerId: input.runnerId,
-      });
-
-      logAgentCreate("placement_checked", {
-        autoProvisionCloudRunner,
-        requestedRunner: Boolean(input.runnerId),
-        placement: placement.ok ? "online_runner" : placement.reason,
-      });
-
-      if (!placement.ok && input.runnerId && placement.reason === "no_online_runner") {
-        throw new AgentRunnerAssignmentError();
-      }
-
-      if (
-        !placement.ok &&
-        (placement.reason === "plan_limit_reached" ||
-          placement.reason === "runner_capacity_reached")
-      ) {
-        throw new AgentCreateBlockedError(placement);
-      }
-
-      if (!placement.ok && placement.reason === "no_online_runner" && autoProvisionCloudRunner) {
-        logAgentCreate("cloud_runner_needed", {
-          autoProvisionCloudRunner,
-          requestedRunner: Boolean(input.runnerId),
-        });
-        return { status: "needs_cloud_runner" } as const;
-      }
-
-      return {
-        status: "created",
-        response: await insertCreatedAgentInTransaction(tx, {
-          userId,
-          name: input.name,
-          templateKey: input.templateKey,
-          templateSnapshot,
-          runnerId: placement.ok ? placement.runner.id : null,
-          insertDefaultAgentConfig,
-          insertCreatedEvent,
-        }),
-      } as const;
-    });
-
-    if (result.status === "created") {
-      logAgentCreate("created_without_cloud_provisioning", {
-        agentId: result.response.agent.id,
-        assignedRunner: Boolean(result.response.agent.runnerId),
-      });
-      return result.response;
-    }
-
-    logAgentCreate("cloud_runner_provisioning_start", {});
-    const provisionedRunnerId = await ensureProvisionedRunnerId(ensureCloudRunnerProvisioning);
-    logAgentCreate("cloud_runner_provisioning_runner_selected", {
-      runnerId: provisionedRunnerId,
-    });
-
-    return await connection.db.transaction(async (tx) => {
-      const userId = await getOrCreateDevelopmentUserId(tx);
-      await assertActiveAgentPlanAllowsInsert(tx, userId, dependencies.planMaxAgents);
-      await assertProvisioningRunnerAssignableToUser(tx, {
-        userId,
-        runnerId: provisionedRunnerId,
-      });
-
-      return insertCreatedAgentInTransaction(tx, {
-        userId,
-        name: input.name,
-        templateKey: input.templateKey,
-        templateSnapshot: getAgentTemplateSnapshot(input.templateKey),
-        runnerId: provisionedRunnerId,
-        insertDefaultAgentConfig,
-        insertCreatedEvent,
-      });
-    });
+    return await createAgentWithUserResolver(
+      connection,
+      (tx) => getOrCreateDevelopmentUserId(tx),
+      input,
+      dependencies,
+    );
   } catch (error) {
-    if (error instanceof AgentCreateBlockedError) {
-      throw error;
-    }
-
-    if (error instanceof AgentRunnerAssignmentError) {
-      throw error;
-    }
-
-    if (error instanceof AgentRunnerProvisioningError) {
-      throw error;
-    }
-
-    throw new AgentPersistenceError(error);
+    return throwAgentCreateError(error);
   } finally {
     if (ownsConnection) {
       await connection.close();
     }
   }
+}
+
+export async function createAgentForUser(
+  userId: string,
+  input: {
+    name: string;
+    templateKey: SupportedAgentTemplateKey;
+    runnerId?: string | null;
+  },
+  dependencies: CreateAgentDependencies = {},
+): Promise<CreatedAgentResponse> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    return await createAgentWithUserResolver(connection, () => userId, input, dependencies);
+  } catch (error) {
+    return throwAgentCreateError(error);
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+async function createAgentWithUserResolver(
+  connection: DatabaseConnection,
+  resolveUserId: (tx: AgentTransaction) => Promise<string> | string,
+  input: {
+    name: string;
+    templateKey: SupportedAgentTemplateKey;
+    runnerId?: string | null;
+  },
+  dependencies: CreateAgentDependencies,
+): Promise<CreatedAgentResponse> {
+  const insertDefaultAgentConfig =
+    dependencies.insertDefaultAgentConfig ?? insertDefaultConfigForCreatedAgent;
+  const insertCreatedEvent = dependencies.insertCreatedEvent ?? insertDefaultCreatedEvent;
+  const autoProvisionCloudRunner =
+    dependencies.autoProvisionCloudRunner ?? process.env.NODE_ENV !== "test";
+  const initial = await connection.db.transaction(async (tx) => {
+    const userId = await resolveUserId(tx);
+    const templateSnapshot = getAgentTemplateSnapshot(input.templateKey);
+    const placement = await selectRunnerPlacementForUserInTransaction(tx, userId, {
+      planMaxAgents: dependencies.planMaxAgents,
+      runnerId: input.runnerId,
+    });
+
+    logAgentCreate("placement_checked", {
+      autoProvisionCloudRunner,
+      requestedRunner: Boolean(input.runnerId),
+      placement: placement.ok ? "online_runner" : placement.reason,
+    });
+
+    if (!placement.ok && input.runnerId && placement.reason === "no_online_runner") {
+      throw new AgentRunnerAssignmentError();
+    }
+
+    if (
+      !placement.ok &&
+      (placement.reason === "plan_limit_reached" || placement.reason === "runner_capacity_reached")
+    ) {
+      throw new AgentCreateBlockedError(placement);
+    }
+
+    if (!placement.ok && placement.reason === "no_online_runner" && autoProvisionCloudRunner) {
+      logAgentCreate("cloud_runner_needed", {
+        autoProvisionCloudRunner,
+        requestedRunner: Boolean(input.runnerId),
+      });
+      return { status: "needs_cloud_runner", userId } as const;
+    }
+
+    return {
+      status: "created",
+      userId,
+      response: await insertCreatedAgentInTransaction(tx, {
+        userId,
+        name: input.name,
+        templateKey: input.templateKey,
+        templateSnapshot,
+        runnerId: placement.ok ? placement.runner.id : null,
+        insertDefaultAgentConfig,
+        insertCreatedEvent,
+      }),
+    } as const;
+  });
+
+  if (initial.status === "created") {
+    logAgentCreate("created_without_cloud_provisioning", {
+      agentId: initial.response.agent.id,
+      assignedRunner: Boolean(initial.response.agent.runnerId),
+    });
+    return initial.response;
+  }
+
+  const ensureCloudRunnerProvisioning =
+    dependencies.ensureCloudRunnerProvisioning ??
+    (() => ensureDefaultCloudRunnerProvisioning(initial.userId));
+  logAgentCreate("cloud_runner_provisioning_start", {});
+  const provisionedRunnerId = await ensureProvisionedRunnerId(ensureCloudRunnerProvisioning);
+  logAgentCreate("cloud_runner_provisioning_runner_selected", {
+    runnerId: provisionedRunnerId,
+  });
+
+  return await connection.db.transaction(async (tx) => {
+    await assertActiveAgentPlanAllowsInsert(tx, initial.userId, dependencies.planMaxAgents);
+    await assertProvisioningRunnerAssignableToUser(tx, {
+      userId: initial.userId,
+      runnerId: provisionedRunnerId,
+    });
+
+    return insertCreatedAgentInTransaction(tx, {
+      userId: initial.userId,
+      name: input.name,
+      templateKey: input.templateKey,
+      templateSnapshot: getAgentTemplateSnapshot(input.templateKey),
+      runnerId: provisionedRunnerId,
+      insertDefaultAgentConfig,
+      insertCreatedEvent,
+    });
+  });
+}
+
+function throwAgentCreateError(error: unknown): never {
+  if (
+    error instanceof AgentCreateBlockedError ||
+    error instanceof AgentRunnerAssignmentError ||
+    error instanceof AgentRunnerProvisioningError ||
+    error instanceof AgentPersistenceError
+  ) {
+    throw error;
+  }
+
+  throw new AgentPersistenceError(error);
 }
 
 async function insertCreatedAgentInTransaction(
@@ -482,8 +524,10 @@ async function assertProvisioningRunnerAssignableToUser(
   }
 }
 
-function ensureDefaultCloudRunnerProvisioning(): Promise<CreateRunnerProvisioningResult> {
-  return createDigitalOceanRunnerForDevelopmentUser({
+function ensureDefaultCloudRunnerProvisioning(
+  userId: string,
+): Promise<CreateRunnerProvisioningResult> {
+  return createDigitalOceanRunnerForUser(userId, {
     provider: "digitalocean",
     name: "AgentBay Cloud Runner",
   });

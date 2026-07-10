@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  updateAgentConfigForDevelopmentUser: vi.fn(),
+  requireConfiguredApplicationUser: vi.fn(),
+  updateAgentConfigForUser: vi.fn(),
 }));
 
 vi.mock("@/src/server/agents/update-agent-config", async (importOriginal) => {
@@ -9,19 +10,29 @@ vi.mock("@/src/server/agents/update-agent-config", async (importOriginal) => {
 
   return {
     ...actual,
-    updateAgentConfigForDevelopmentUser: mocks.updateAgentConfigForDevelopmentUser,
+    updateAgentConfigForUser: mocks.updateAgentConfigForUser,
   };
 });
 
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
+}));
+
 const AGENT_ID = "3e47bed7-b58f-4394-93c0-01e3d1e51774";
+const USER_ID = "f3fbda50-7269-4534-94d9-4819f1a38da7";
 
 describe("PATCH /api/agents/[agentId] route", () => {
+  beforeEach(() => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
+  });
+
   afterEach(() => {
-    mocks.updateAgentConfigForDevelopmentUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
+    mocks.updateAgentConfigForUser.mockReset();
   });
 
   it("returns safe JSON for a valid config update request", async () => {
-    mocks.updateAgentConfigForDevelopmentUser.mockResolvedValueOnce({
+    mocks.updateAgentConfigForUser.mockResolvedValueOnce({
       ok: true,
       noOp: false,
       agent: {
@@ -82,14 +93,14 @@ describe("PATCH /api/agents/[agentId] route", () => {
       },
     });
     expect(JSON.stringify(body)).not.toContain("postgres://");
-    expect(mocks.updateAgentConfigForDevelopmentUser).toHaveBeenCalledWith(AGENT_ID, {
+    expect(mocks.updateAgentConfigForUser).toHaveBeenCalledWith(USER_ID, AGENT_ID, {
       modelName: "gpt-4.1-mini",
       maxDailySpendCents: 1234,
     });
   });
 
   it("returns stable no-op JSON without changing event shape", async () => {
-    mocks.updateAgentConfigForDevelopmentUser.mockResolvedValueOnce({
+    mocks.updateAgentConfigForUser.mockResolvedValueOnce({
       ok: true,
       noOp: true,
       agent: {
@@ -181,11 +192,11 @@ describe("PATCH /api/agents/[agentId] route", () => {
       },
     });
     expect(JSON.stringify(invalidBody)).not.toContain("sk-live-should-not-appear");
-    expect(mocks.updateAgentConfigForDevelopmentUser).not.toHaveBeenCalled();
+    expect(mocks.updateAgentConfigForUser).not.toHaveBeenCalled();
   });
 
   it("returns validation JSON for malformed, missing, and invalid encoded agent IDs", async () => {
-    mocks.updateAgentConfigForDevelopmentUser
+    mocks.updateAgentConfigForUser
       .mockResolvedValueOnce({ ok: false, reason: "malformed_agent_id" })
       .mockResolvedValueOnce({ ok: false, reason: "missing_agent_id" });
     const { PATCH } = await import("@/app/api/agents/[agentId]/route");
@@ -230,7 +241,7 @@ describe("PATCH /api/agents/[agentId] route", () => {
   });
 
   it("returns not found JSON for missing or soft-deleted agents", async () => {
-    mocks.updateAgentConfigForDevelopmentUser
+    mocks.updateAgentConfigForUser
       .mockResolvedValueOnce({ ok: false, reason: "agent_not_found" })
       .mockResolvedValueOnce({ ok: false, reason: "agent_not_found" });
     const { PATCH } = await import("@/app/api/agents/[agentId]/route");
@@ -269,7 +280,7 @@ describe("PATCH /api/agents/[agentId] route", () => {
       "@/src/server/agents/update-agent-config"
     );
 
-    mocks.updateAgentConfigForDevelopmentUser.mockRejectedValueOnce(
+    mocks.updateAgentConfigForUser.mockRejectedValueOnce(
       new AgentConfigUpdatePersistenceError({
         code: "23514",
         detail: "postgres://agentbay:secret@localhost stack trace token",

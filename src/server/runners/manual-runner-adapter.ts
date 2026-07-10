@@ -171,8 +171,9 @@ export class ManualRunnerAdapter
       const result = await this.callRunner("logs", input.agentId, "GET");
 
       if (result.ok) {
-        const latestCursor = await getLatestManualRunnerLogCursor({
+        const latestCursor = await getLatestManualRunnerLogCursorForUser({
           db: connection.db,
+          userId: this.runner.userId,
           agentId: input.agentId,
           runnerId: this.runner.id,
         });
@@ -180,8 +181,9 @@ export class ManualRunnerAdapter
           shouldPersistRemoteLogLine(line, latestCursor),
         );
 
-        await appendManualRunnerLogLines({
+        await appendManualRunnerLogLinesForUser({
           db: connection.db,
+          userId: this.runner.userId,
           agentId: input.agentId,
           runnerId: this.runner.id,
           lines: remoteLines,
@@ -189,8 +191,9 @@ export class ManualRunnerAdapter
         });
       }
 
-      const logs = await listManualRunnerLogs({
+      const logs = await listManualRunnerLogsForUser({
         db: connection.db,
+        userId: this.runner.userId,
         agentId: input.agentId,
         runnerId: this.runner.id,
         ...(input.after === undefined ? {} : { after: input.after }),
@@ -311,6 +314,21 @@ export async function appendManualRunnerLogLines(input: {
   lines: readonly ManualRunnerLogLineInput[];
   now?: Date;
 }): Promise<{ inserted: number; logs: AgentLogDto[] }> {
+  const userId = await getDevelopmentUserForDatabase(input.db);
+
+  return userId
+    ? appendManualRunnerLogLinesForUser({ ...input, userId })
+    : { inserted: 0, logs: [] };
+}
+
+export async function appendManualRunnerLogLinesForUser(input: {
+  db: ManualRunnerStateDatabase;
+  userId: string;
+  agentId: string;
+  runnerId: string;
+  lines: readonly ManualRunnerLogLineInput[];
+  now?: Date;
+}): Promise<{ inserted: number; logs: AgentLogDto[] }> {
   const validLines = input.lines.filter((line) => isValidManualLogLine(line));
 
   if (validLines.length === 0) {
@@ -318,19 +336,13 @@ export async function appendManualRunnerLogLines(input: {
   }
 
   return input.db.transaction(async (tx) => {
-    const developmentUserId = await getDevelopmentUserId(tx);
-
-    if (!developmentUserId) {
-      return { inserted: 0, logs: [] };
-    }
-
     const [activeAgent] = await tx
       .select({ id: agents.id, runnerId: agents.runnerId })
       .from(agents)
       .where(
         and(
           eq(agents.id, input.agentId),
-          eq(agents.userId, developmentUserId),
+          eq(agents.userId, input.userId),
           eq(agents.runnerId, input.runnerId),
           isNull(agents.deletedAt),
         ),
@@ -377,18 +389,13 @@ export async function appendManualRunnerLogLines(input: {
   });
 }
 
-function getLatestManualRunnerLogCursor(input: {
+export function getLatestManualRunnerLogCursorForUser(input: {
   db: ManualRunnerStateDatabase;
+  userId: string;
   agentId: string;
   runnerId: string;
 }): Promise<{ sequence: number; createdAt: Date } | null> {
   return input.db.transaction(async (tx) => {
-    const developmentUserId = await getDevelopmentUserId(tx);
-
-    if (!developmentUserId) {
-      return null;
-    }
-
     const [latestLog] = await tx
       .select({ sequence: agentLogs.sequence, createdAt: agentLogs.createdAt })
       .from(agentLogs)
@@ -398,7 +405,7 @@ function getLatestManualRunnerLogCursor(input: {
           eq(agentLogs.agentId, input.agentId),
           eq(agentLogs.runnerId, input.runnerId),
           eq(agentLogs.source, MANUAL_RUNNER_LOG_SOURCE),
-          eq(agents.userId, developmentUserId),
+          eq(agents.userId, input.userId),
           eq(agents.runnerId, input.runnerId),
           isNull(agents.deletedAt),
         ),
@@ -410,8 +417,9 @@ function getLatestManualRunnerLogCursor(input: {
   });
 }
 
-function listManualRunnerLogs(input: {
+export function listManualRunnerLogsForUser(input: {
   db: ManualRunnerStateDatabase;
+  userId: string;
   agentId: string;
   runnerId: string;
   after?: number | null;
@@ -423,18 +431,12 @@ function listManualRunnerLogs(input: {
       : 100;
 
   return input.db.transaction(async (tx) => {
-    const developmentUserId = await getDevelopmentUserId(tx);
-
-    if (!developmentUserId) {
-      return [];
-    }
-
     const predicates = [
       eq(agentLogs.agentId, input.agentId),
       eq(agentLogs.runnerId, input.runnerId),
       eq(agentLogs.source, MANUAL_RUNNER_LOG_SOURCE),
       eq(agents.id, input.agentId),
-      eq(agents.userId, developmentUserId),
+      eq(agents.userId, input.userId),
       eq(agents.runnerId, input.runnerId),
       isNull(agents.deletedAt),
     ];
@@ -453,6 +455,10 @@ function listManualRunnerLogs(input: {
 
     return rows.map((row) => mapAgentLogToDto(row));
   });
+}
+
+function getDevelopmentUserForDatabase(db: ManualRunnerStateDatabase): Promise<string | null> {
+  return db.transaction((tx) => getDevelopmentUserId(tx));
 }
 
 const logSelection = {

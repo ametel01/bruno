@@ -1,7 +1,8 @@
+import { AgentLifecyclePersistenceError, restartAgentForUser } from "@/src/server/agents/lifecycle";
 import {
-  AgentLifecyclePersistenceError,
-  restartAgentForDevelopmentUser,
-} from "@/src/server/agents/lifecycle";
+  type ConfiguredApplicationUserResolution,
+  requireConfiguredApplicationUser,
+} from "@/src/server/users/configured-application-user";
 
 type RestartAgentRouteContext = {
   params: Promise<{
@@ -9,9 +10,17 @@ type RestartAgentRouteContext = {
   }>;
 };
 
+type RestartAgentRouteDependencies = {
+  requireApplicationUser?: typeof requireConfiguredApplicationUser;
+};
+
 export const dynamic = "force-dynamic";
 
-export async function POST(_request: Request, context: RestartAgentRouteContext) {
+export async function POST(
+  _request: Request,
+  context: RestartAgentRouteContext,
+  dependencies: RestartAgentRouteDependencies = {},
+) {
   const params = await context.params;
   const agentId = params.agentId ?? "";
   let decodedAgentId: string;
@@ -26,8 +35,16 @@ export async function POST(_request: Request, context: RestartAgentRouteContext)
     throw error;
   }
 
+  const applicationUser = await (
+    dependencies.requireApplicationUser ?? requireConfiguredApplicationUser
+  )();
+
+  if (!applicationUser.ok) {
+    return authenticationResponse(applicationUser);
+  }
+
   try {
-    const result = await restartAgentForDevelopmentUser(decodedAgentId);
+    const result = await restartAgentForUser(applicationUser.userId, decodedAgentId);
 
     if (result.ok) {
       return Response.json(result, {
@@ -96,6 +113,23 @@ export async function POST(_request: Request, context: RestartAgentRouteContext)
 
     throw error;
   }
+}
+
+function authenticationResponse(
+  result: Exclude<ConfiguredApplicationUserResolution, { ok: true }>,
+) {
+  return Response.json(
+    {
+      error: {
+        code: result.code,
+        message:
+          result.status === 401
+            ? "Authentication is required."
+            : "Authentication is not configured safely.",
+      },
+    },
+    { status: result.status },
+  );
 }
 
 function validationResponse() {

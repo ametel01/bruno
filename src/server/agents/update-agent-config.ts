@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, exists, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { AGENT_NAME_MAX_LENGTH } from "@/src/server/agents/create-agent";
@@ -262,6 +262,49 @@ export async function updateAgentConfigForDevelopmentUser(
 ): Promise<UpdateAgentConfigResult> {
   const normalizedAgentId = agentId.trim();
 
+  if (normalizedAgentId.length === 0 || !isValidAgentId(normalizedAgentId)) {
+    return updateAgentConfigForUser("", agentId, input, dependencies);
+  }
+
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    const [agent] = await connection.db
+      .select({ userId: agents.userId })
+      .from(agents)
+      .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
+      .limit(1);
+
+    if (!agent) {
+      return { ok: false, reason: "agent_not_found" };
+    }
+
+    return await updateAgentConfigForUser(agent.userId, normalizedAgentId, input, {
+      ...dependencies,
+      createConnection: () => connection,
+    });
+  } catch (error) {
+    if (error instanceof AgentConfigUpdatePersistenceError) {
+      throw error;
+    }
+
+    throw new AgentConfigUpdatePersistenceError(error);
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function updateAgentConfigForUser(
+  userId: string,
+  agentId: string,
+  input: UpdateAgentConfigInput,
+  dependencies: UpdateAgentConfigDependencies = {},
+): Promise<UpdateAgentConfigResult> {
+  const normalizedAgentId = agentId.trim();
+
   if (normalizedAgentId.length === 0) {
     return { ok: false, reason: "missing_agent_id" };
   }
@@ -285,7 +328,13 @@ export async function updateAgentConfigForDevelopmentUser(
         })
         .from(agents)
         .innerJoin(agentConfigs, eq(agentConfigs.agentId, agents.id))
-        .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
+        .where(
+          and(
+            eq(agents.id, normalizedAgentId),
+            eq(agents.userId, userId),
+            isNull(agents.deletedAt),
+          ),
+        )
         .limit(1);
 
       if (!row) {
@@ -340,7 +389,13 @@ export async function updateAgentConfigForDevelopmentUser(
             name: nextAgent.name,
             updatedAt: now,
           })
-          .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
+          .where(
+            and(
+              eq(agents.id, normalizedAgentId),
+              eq(agents.userId, userId),
+              isNull(agents.deletedAt),
+            ),
+          )
           .returning();
 
         if (!updatedAgent) {
@@ -363,7 +418,23 @@ export async function updateAgentConfigForDevelopmentUser(
             timezone: nextConfig.timezone,
             updatedAt: now,
           })
-          .where(eq(agentConfigs.agentId, normalizedAgentId))
+          .where(
+            and(
+              eq(agentConfigs.agentId, normalizedAgentId),
+              exists(
+                tx
+                  .select({ id: agents.id })
+                  .from(agents)
+                  .where(
+                    and(
+                      eq(agents.id, agentConfigs.agentId),
+                      eq(agents.userId, userId),
+                      isNull(agents.deletedAt),
+                    ),
+                  ),
+              ),
+            ),
+          )
           .returning();
 
         if (!updatedConfig) {

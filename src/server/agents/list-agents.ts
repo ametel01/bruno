@@ -3,7 +3,9 @@ import { isValidAgentId } from "@/src/server/agents/agent-id";
 import {
   type AgentLifecycleStatus,
   reconcileDockerRunnerAgentForDevelopmentUser,
+  reconcileDockerRunnerAgentForUser,
   reconcileDockerRunnerAgentsForDevelopmentUser,
+  reconcileDockerRunnerAgentsForUser,
 } from "@/src/server/agents/lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentConfigs, agents, runners } from "@/src/server/db/schema";
@@ -120,6 +122,8 @@ export async function listActiveAgentsForUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
+    await reconcileDockerRunnerAgentsForUser(userId, { createConnection: () => connection });
+
     const rows = await connection.db
       .select({
         id: agents.id,
@@ -251,6 +255,10 @@ export async function getActiveAgentForUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
+    await reconcileDockerRunnerAgentForUser(userId, agentId, {
+      createConnection: () => connection,
+    });
+
     const [row] = await connection.db
       .select({
         id: agents.id,

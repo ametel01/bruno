@@ -3,7 +3,9 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import {
   type DockerRunnerContainerDto,
   getDockerRunnerContainerForDevelopmentUser,
+  getDockerRunnerContainerForUser,
   recordDockerRunnerContainerForDevelopmentUser,
+  recordDockerRunnerContainerForUser,
 } from "@/src/server/runners/docker-runner-state";
 
 const AGENTBAY_AGENT_ID_LABEL = "agentbay.agent_id";
@@ -38,6 +40,7 @@ export type DockerRunnerMaintenanceAdapterDependencies = {
   createConnection?: () => DatabaseConnection;
   dockerCli?: DockerCliRunner;
   now?: () => Date;
+  userId?: string;
 };
 
 type DockerInspectContainer = {
@@ -65,12 +68,14 @@ export class DockerRunnerMaintenanceAdapter {
   private readonly dockerCli: DockerCliRunner;
   private readonly now: () => Date;
   private readonly ownsConnections: boolean;
+  private readonly userId: string | undefined;
 
   constructor(dependencies: DockerRunnerMaintenanceAdapterDependencies = {}) {
     this.createConnection = dependencies.createConnection ?? createDatabaseConnection;
     this.dockerCli = dependencies.dockerCli ?? runDockerCli;
     this.now = dependencies.now ?? (() => new Date());
     this.ownsConnections = !dependencies.createConnection;
+    this.userId = dependencies.userId;
   }
 
   async status(agentId: string): Promise<DockerRunnerStatusResult> {
@@ -146,10 +151,17 @@ export class DockerRunnerMaintenanceAdapter {
     | { ok: true; target: ResolvedContainerTarget }
     | { ok: false; reason: "no_container" | "docker_inspect_failed" | "label_mismatch" }
   > {
-    const stored = await getDockerRunnerContainerForDevelopmentUser({
+    const containerInput = {
       db: connection.db,
       agentId,
-    });
+    };
+    const stored =
+      this.userId === undefined
+        ? await getDockerRunnerContainerForDevelopmentUser(containerInput)
+        : await getDockerRunnerContainerForUser({
+            ...containerInput,
+            userId: this.userId,
+          });
 
     if (!stored) {
       return { ok: false, reason: "no_container" };
@@ -200,7 +212,7 @@ export class DockerRunnerMaintenanceAdapter {
     inspect: DockerInspectContainer,
     observedStatus = observedStatusFromInspect(inspect),
   ): Promise<DockerRunnerContainerDto | null> {
-    return recordDockerRunnerContainerForDevelopmentUser({
+    const containerInput = {
       db: connection.db,
       agentId: stored.agentId,
       containerId: stored.containerId,
@@ -214,7 +226,11 @@ export class DockerRunnerMaintenanceAdapter {
       observedAt: this.now(),
       startedAt: dockerTimestampToDate(inspect.State?.StartedAt),
       finishedAt: dockerTimestampToDate(inspect.State?.FinishedAt),
-    });
+    };
+
+    return this.userId === undefined
+      ? recordDockerRunnerContainerForDevelopmentUser(containerInput)
+      : recordDockerRunnerContainerForUser({ ...containerInput, userId: this.userId });
   }
 
   private async closeOwnedConnection(connection: DatabaseConnection): Promise<void> {

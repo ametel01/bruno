@@ -137,6 +137,36 @@ export async function listAgentLogs(input: {
   return toAgentLogPage(rows, after);
 }
 
+export async function listAgentLogsForUser(input: {
+  db: AgentLogQueryExecutor;
+  userId: string;
+  agentId: string;
+  after?: number | null;
+  limit?: number;
+}): Promise<AgentLogPage> {
+  const limit = normalizeAgentLogLimit(input.limit);
+  const after = input.after ?? null;
+  const predicates = [
+    eq(agentLogs.agentId, input.agentId),
+    eq(agents.userId, input.userId),
+    isNull(agents.deletedAt),
+  ];
+
+  if (after !== null) {
+    predicates.push(gt(agentLogs.sequence, after));
+  }
+
+  const rows = await input.db
+    .select(logSelection)
+    .from(agentLogs)
+    .innerJoin(agents, eq(agentLogs.agentId, agents.id))
+    .where(and(...predicates))
+    .orderBy(asc(agentLogs.sequence))
+    .limit(limit);
+
+  return toAgentLogPage(rows, after);
+}
+
 export async function listLatestActiveAgentProcessLogs(input: {
   db: AgentLogQueryExecutor;
   limit?: number;
@@ -223,77 +253,120 @@ export async function generateSimulatedRuntimeLogsForRunningAgent(input: {
       return { inserted: 0 };
     }
 
-    const [lockedAgent] = await lockRunningAgentInTransaction(tx, input.agentId, developmentUserId);
-    const runningSegmentStartedAt = lockedAgent ? coerceTimestamp(lockedAgent.updated_at) : null;
-
-    if (!lockedAgent || !runningSegmentStartedAt || now < runningSegmentStartedAt) {
-      return { inserted: 0 };
-    }
-
-    await createFakeApprovalRequestForRunningSegment({
-      tx,
-      agent: lockedAgent,
-      runningSegmentStartedAt,
+    return generateSimulatedRuntimeLogsInTransaction(tx, {
+      ...input,
+      userId: developmentUserId,
       now,
       insertGeneratedApprovalRequest,
       recordApprovalRequestedEvent,
     });
-
-    const [latestGeneratedLog] = await tx
-      .select({
-        createdAt: agentLogs.createdAt,
-      })
-      .from(agentLogs)
-      .where(
-        and(
-          eq(agentLogs.agentId, input.agentId),
-          isNull(agentLogs.runnerId),
-          eq(agentLogs.stream, "stdout"),
-          eq(agentLogs.level, "info"),
-          inArray(agentLogs.message, [...SIMULATED_RUNTIME_LOG_MESSAGES]),
-          gte(agentLogs.createdAt, runningSegmentStartedAt),
-        ),
-      )
-      .orderBy(desc(agentLogs.createdAt), desc(agentLogs.sequence))
-      .limit(1);
-
-    if (
-      latestGeneratedLog &&
-      now.getTime() - latestGeneratedLog.createdAt.getTime() <
-        SIMULATED_RUNTIME_LOG_CYCLE_INTERVAL_MS
-    ) {
-      return { inserted: 0 };
-    }
-
-    const [latestAgentLog] = await tx
-      .select({
-        sequence: agentLogs.sequence,
-      })
-      .from(agentLogs)
-      .where(eq(agentLogs.agentId, input.agentId))
-      .orderBy(desc(agentLogs.sequence))
-      .limit(1);
-
-    const nextSequence = (latestAgentLog?.sequence ?? 0) + 1;
-
-    await tx.insert(agentLogs).values(
-      SIMULATED_RUNTIME_LOG_MESSAGES.map((message, index) => ({
-        agentId: input.agentId,
-        runnerId: null,
-        localRunnerProcessId: null,
-        dockerRunnerContainerId: null,
-        source: "simulator",
-        stream: "stdout",
-        level: "info",
-        message,
-        metadata: {},
-        sequence: nextSequence + index,
-        createdAt: now,
-      })),
-    );
-
-    return { inserted: SIMULATED_RUNTIME_LOG_MESSAGES.length };
   });
+}
+
+export async function generateSimulatedRuntimeLogsForUser(input: {
+  db: AgentLogGenerationExecutor;
+  userId: string;
+  agentId: string;
+  now?: Date;
+  insertGeneratedApprovalRequest?: InsertGeneratedApprovalRequest;
+  recordApprovalRequestedEvent?: RecordApprovalRequestedEvent;
+}): Promise<{ inserted: number }> {
+  const now = input.now ?? new Date();
+  const insertGeneratedApprovalRequest =
+    input.insertGeneratedApprovalRequest ?? insertGeneratedApprovalRequestInTransaction;
+  const recordApprovalRequestedEvent =
+    input.recordApprovalRequestedEvent ?? recordAgentEventInTransaction;
+
+  return input.db.transaction((tx) =>
+    generateSimulatedRuntimeLogsInTransaction(tx, {
+      ...input,
+      now,
+      insertGeneratedApprovalRequest,
+      recordApprovalRequestedEvent,
+    }),
+  );
+}
+
+async function generateSimulatedRuntimeLogsInTransaction(
+  tx: AgentLogTransaction,
+  input: {
+    userId: string;
+    agentId: string;
+    now: Date;
+    insertGeneratedApprovalRequest: InsertGeneratedApprovalRequest;
+    recordApprovalRequestedEvent: RecordApprovalRequestedEvent;
+  },
+): Promise<{ inserted: number }> {
+  const [lockedAgent] = await lockRunningAgentInTransaction(tx, input.agentId, input.userId);
+  const runningSegmentStartedAt = lockedAgent ? coerceTimestamp(lockedAgent.updated_at) : null;
+
+  if (!lockedAgent || !runningSegmentStartedAt || input.now < runningSegmentStartedAt) {
+    return { inserted: 0 };
+  }
+
+  await createFakeApprovalRequestForRunningSegment({
+    tx,
+    agent: lockedAgent,
+    runningSegmentStartedAt,
+    now: input.now,
+    insertGeneratedApprovalRequest: input.insertGeneratedApprovalRequest,
+    recordApprovalRequestedEvent: input.recordApprovalRequestedEvent,
+  });
+
+  const [latestGeneratedLog] = await tx
+    .select({
+      createdAt: agentLogs.createdAt,
+    })
+    .from(agentLogs)
+    .where(
+      and(
+        eq(agentLogs.agentId, input.agentId),
+        isNull(agentLogs.runnerId),
+        eq(agentLogs.stream, "stdout"),
+        eq(agentLogs.level, "info"),
+        inArray(agentLogs.message, [...SIMULATED_RUNTIME_LOG_MESSAGES]),
+        gte(agentLogs.createdAt, runningSegmentStartedAt),
+      ),
+    )
+    .orderBy(desc(agentLogs.createdAt), desc(agentLogs.sequence))
+    .limit(1);
+
+  if (
+    latestGeneratedLog &&
+    input.now.getTime() - latestGeneratedLog.createdAt.getTime() <
+      SIMULATED_RUNTIME_LOG_CYCLE_INTERVAL_MS
+  ) {
+    return { inserted: 0 };
+  }
+
+  const [latestAgentLog] = await tx
+    .select({
+      sequence: agentLogs.sequence,
+    })
+    .from(agentLogs)
+    .where(eq(agentLogs.agentId, input.agentId))
+    .orderBy(desc(agentLogs.sequence))
+    .limit(1);
+
+  const nextSequence = (latestAgentLog?.sequence ?? 0) + 1;
+
+  await tx.insert(agentLogs).values(
+    SIMULATED_RUNTIME_LOG_MESSAGES.map((message, index) => ({
+      agentId: input.agentId,
+      runnerId: null,
+      localRunnerProcessId: null,
+      dockerRunnerContainerId: null,
+      source: "simulator",
+      stream: "stdout",
+      level: "info",
+      message,
+      metadata: {},
+      sequence: nextSequence + index,
+      createdAt: input.now,
+    })),
+  );
+
+  return { inserted: SIMULATED_RUNTIME_LOG_MESSAGES.length };
 }
 
 export function mapAgentLogToDto(log: AgentLogRow): AgentLogDto {
@@ -337,7 +410,7 @@ function normalizeAgentLogLimit(limit: number | undefined): number {
 function lockRunningAgentInTransaction(
   tx: AgentLogTransaction,
   agentId: string,
-  developmentUserId: string,
+  userId: string,
 ): Promise<LockedRunningAgentRow[]> {
   return tx.execute<LockedRunningAgentRow>(sql`
     select ${agents.id} as id,
@@ -346,7 +419,7 @@ function lockRunningAgentInTransaction(
            ${agents.updatedAt} as updated_at
     from ${agents}
     where ${agents.id} = ${agentId}
-      and ${agents.userId} = ${developmentUserId}
+      and ${agents.userId} = ${userId}
       and ${agents.status} = 'running'
       and ${agents.deletedAt} is null
     for update

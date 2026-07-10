@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ACTIVE_AGENT_ID = "00000000-0000-4000-8000-000000000201";
+const USER_ID = "00000000-0000-4000-8000-000000000101";
 
 const mocks = vi.hoisted(() => {
   class AgentDetailPersistenceError extends Error {
@@ -14,13 +15,14 @@ const mocks = vi.hoisted(() => {
     AgentDetailPersistenceError,
     close: vi.fn(),
     createDatabaseConnection: vi.fn(),
-    getActiveAgentForDevelopmentUser: vi.fn(),
-    getAssignedRunnerForActiveAgentDevelopmentUser: vi.fn(),
+    getActiveAgentForUser: vi.fn(),
+    getAssignedRunnerForActiveAgentForUser: vi.fn(),
     getLifecycleManualRunnerAdapter: vi.fn(),
-    getLifecycleRunnerAdapter: vi.fn(),
-    listAgentLogs: vi.fn(),
+    getLifecycleRunnerAdapterForUser: vi.fn(),
+    listAgentLogsForUser: vi.fn(),
     manualStreamLogs: vi.fn(),
     streamLogs: vi.fn(),
+    requireConfiguredApplicationUser: vi.fn(),
   };
 });
 
@@ -30,7 +32,7 @@ vi.mock("@/src/server/db/client", () => ({
 
 vi.mock("@/src/server/agents/list-agents", () => ({
   AgentDetailPersistenceError: mocks.AgentDetailPersistenceError,
-  getActiveAgentForDevelopmentUser: mocks.getActiveAgentForDevelopmentUser,
+  getActiveAgentForUser: mocks.getActiveAgentForUser,
 }));
 
 vi.mock("@/src/server/agents/lifecycle", async (importOriginal) => {
@@ -39,42 +41,50 @@ vi.mock("@/src/server/agents/lifecycle", async (importOriginal) => {
   return {
     ...original,
     getLifecycleManualRunnerAdapter: mocks.getLifecycleManualRunnerAdapter,
-    getLifecycleRunnerAdapter: mocks.getLifecycleRunnerAdapter,
+    getLifecycleRunnerAdapterForUser: mocks.getLifecycleRunnerAdapterForUser,
   };
 });
 
 vi.mock("@/src/server/logs/agent-logs", () => ({
-  listAgentLogs: mocks.listAgentLogs,
+  listAgentLogsForUser: mocks.listAgentLogsForUser,
 }));
 
 vi.mock("@/src/server/runners/manual-runner-persistence", () => ({
   ACTIVE_RUNNER_STATUS: "active",
-  getAssignedRunnerForActiveAgentDevelopmentUser:
-    mocks.getAssignedRunnerForActiveAgentDevelopmentUser,
+  getAssignedRunnerForActiveAgentForUser: mocks.getAssignedRunnerForActiveAgentForUser,
   MANUAL_RUNNER_KIND: "manual_vps",
 }));
 
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
+}));
+
 describe("GET /api/agents/[agentId]/logs route", () => {
+  beforeEach(() => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
+  });
+
   afterEach(() => {
     mocks.close.mockReset();
     mocks.createDatabaseConnection.mockReset();
-    mocks.getActiveAgentForDevelopmentUser.mockReset();
-    mocks.getAssignedRunnerForActiveAgentDevelopmentUser.mockReset();
+    mocks.getActiveAgentForUser.mockReset();
+    mocks.getAssignedRunnerForActiveAgentForUser.mockReset();
     mocks.getLifecycleManualRunnerAdapter.mockReset();
-    mocks.getLifecycleRunnerAdapter.mockReset();
-    mocks.listAgentLogs.mockReset();
+    mocks.getLifecycleRunnerAdapterForUser.mockReset();
+    mocks.listAgentLogsForUser.mockReset();
     mocks.manualStreamLogs.mockReset();
     mocks.streamLogs.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
   });
 
   it("streams running active-agent logs through the lifecycle runner with bounded pagination", async () => {
     mocks.createDatabaseConnection.mockReturnValue({ db: "db", close: mocks.close });
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValue({
+    mocks.getActiveAgentForUser.mockResolvedValue({
       id: ACTIVE_AGENT_ID,
       status: "running",
     });
-    mocks.getAssignedRunnerForActiveAgentDevelopmentUser.mockResolvedValue(null);
-    mocks.getLifecycleRunnerAdapter.mockReturnValue({
+    mocks.getAssignedRunnerForActiveAgentForUser.mockResolvedValue(null);
+    mocks.getLifecycleRunnerAdapterForUser.mockReturnValue({
       streamLogs: mocks.streamLogs,
     });
     mocks.streamLogs.mockResolvedValue({
@@ -96,18 +106,20 @@ describe("GET /api/agents/[agentId]/logs route", () => {
       logs: [publicLogDto(1), publicLogDto(2)],
       nextAfter: 2,
     });
-    expect(mocks.getActiveAgentForDevelopmentUser).toHaveBeenCalledWith(ACTIVE_AGENT_ID, {
+    expect(mocks.getActiveAgentForUser).toHaveBeenCalledWith(USER_ID, ACTIVE_AGENT_ID, {
       createConnection: expect.any(Function),
     });
-    expect(mocks.getLifecycleRunnerAdapter).toHaveBeenCalledOnce();
+    expect(mocks.getLifecycleRunnerAdapterForUser).toHaveBeenCalledWith(USER_ID, {
+      createConnection: expect.any(Function),
+    });
     expect(mocks.getLifecycleManualRunnerAdapter).not.toHaveBeenCalled();
     expect(mocks.streamLogs).toHaveBeenCalledWith({
       agentId: ACTIVE_AGENT_ID,
       after: 0,
       limit: 100,
     });
-    expect(mocks.listAgentLogs).not.toHaveBeenCalled();
-    expect(firstInvocationOrder(mocks.getActiveAgentForDevelopmentUser)).toBeLessThan(
+    expect(mocks.listAgentLogsForUser).not.toHaveBeenCalled();
+    expect(firstInvocationOrder(mocks.getActiveAgentForUser)).toBeLessThan(
       firstInvocationOrder(mocks.streamLogs),
     );
     expect(JSON.stringify(body)).not.toContain("agent_id");
@@ -125,11 +137,11 @@ describe("GET /api/agents/[agentId]/logs route", () => {
 
   it("pulls running assigned manual runner logs and returns the same safe public DTO", async () => {
     mocks.createDatabaseConnection.mockReturnValue({ db: "db", close: mocks.close });
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValue({
+    mocks.getActiveAgentForUser.mockResolvedValue({
       id: ACTIVE_AGENT_ID,
       status: "running",
     });
-    mocks.getAssignedRunnerForActiveAgentDevelopmentUser.mockResolvedValue({
+    mocks.getAssignedRunnerForActiveAgentForUser.mockResolvedValue({
       id: "00000000-0000-4000-8000-000000000777",
       kind: "manual_vps",
       endpointUrl: "https://runner.example.com",
@@ -177,7 +189,8 @@ describe("GET /api/agents/[agentId]/logs route", () => {
       ],
       nextAfter: 2,
     });
-    expect(mocks.getAssignedRunnerForActiveAgentDevelopmentUser).toHaveBeenCalledWith(
+    expect(mocks.getAssignedRunnerForActiveAgentForUser).toHaveBeenCalledWith(
+      USER_ID,
       ACTIVE_AGENT_ID,
       { createConnection: expect.any(Function) },
     );
@@ -185,7 +198,7 @@ describe("GET /api/agents/[agentId]/logs route", () => {
       expect.objectContaining({ endpointUrl: "https://runner.example.com" }),
       { createConnection: expect.any(Function) },
     );
-    expect(mocks.getLifecycleRunnerAdapter).not.toHaveBeenCalled();
+    expect(mocks.getLifecycleRunnerAdapterForUser).not.toHaveBeenCalled();
     expect(mocks.manualStreamLogs).toHaveBeenCalledWith({
       agentId: ACTIVE_AGENT_ID,
       limit: 2,
@@ -198,11 +211,11 @@ describe("GET /api/agents/[agentId]/logs route", () => {
 
   it("returns safe public stdout and stderr log fields in helper order", async () => {
     mocks.createDatabaseConnection.mockReturnValue({ db: "db", close: mocks.close });
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValue({
+    mocks.getActiveAgentForUser.mockResolvedValue({
       id: ACTIVE_AGENT_ID,
       status: "stopped",
     });
-    mocks.listAgentLogs.mockResolvedValue({
+    mocks.listAgentLogsForUser.mockResolvedValue({
       logs: [
         logDto(1, { stream: "stdout", message: "runner stdout line" }),
         logDto(2, {
@@ -258,8 +271,13 @@ describe("GET /api/agents/[agentId]/logs route", () => {
     expect(JSON.stringify(body)).not.toContain("stored-for-downstream");
     expect(JSON.stringify(body)).not.toContain("postgres://");
     expect(JSON.stringify(body)).not.toContain("/app/worker.ts");
-    expect(mocks.getLifecycleRunnerAdapter).not.toHaveBeenCalled();
-    expect(mocks.getAssignedRunnerForActiveAgentDevelopmentUser).not.toHaveBeenCalled();
+    expect(mocks.getLifecycleRunnerAdapterForUser).not.toHaveBeenCalled();
+    expect(mocks.getAssignedRunnerForActiveAgentForUser).not.toHaveBeenCalled();
+    expect(mocks.listAgentLogsForUser).toHaveBeenCalledWith({
+      db: "db",
+      userId: USER_ID,
+      agentId: ACTIVE_AGENT_ID,
+    });
   });
 
   it.each([
@@ -282,7 +300,7 @@ describe("GET /api/agents/[agentId]/logs route", () => {
       },
     });
     expect(mocks.createDatabaseConnection).not.toHaveBeenCalled();
-    expect(mocks.listAgentLogs).not.toHaveBeenCalled();
+    expect(mocks.listAgentLogsForUser).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -367,7 +385,7 @@ describe("GET /api/agents/[agentId]/logs route", () => {
 
   it("returns not found for missing or soft-deleted agents before loading logs", async () => {
     mocks.createDatabaseConnection.mockReturnValue({ db: "db", close: mocks.close });
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValue(null);
+    mocks.getActiveAgentForUser.mockResolvedValue(null);
     const { GET } = await import("@/app/api/agents/[agentId]/logs/route");
 
     const response = await GET(new Request("http://localhost/api/agents/id/logs"), {
@@ -382,19 +400,19 @@ describe("GET /api/agents/[agentId]/logs route", () => {
         message: "Agent could not be found.",
       },
     });
-    expect(mocks.listAgentLogs).not.toHaveBeenCalled();
-    expect(mocks.getLifecycleRunnerAdapter).not.toHaveBeenCalled();
+    expect(mocks.listAgentLogsForUser).not.toHaveBeenCalled();
+    expect(mocks.getLifecycleRunnerAdapterForUser).not.toHaveBeenCalled();
     expect(mocks.close).toHaveBeenCalledOnce();
   });
 
   it("returns safe JSON when lifecycle runner log streaming fails before listing logs", async () => {
     mocks.createDatabaseConnection.mockReturnValue({ db: "db", close: mocks.close });
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValue({
+    mocks.getActiveAgentForUser.mockResolvedValue({
       id: ACTIVE_AGENT_ID,
       status: "running",
     });
-    mocks.getAssignedRunnerForActiveAgentDevelopmentUser.mockResolvedValue(null);
-    mocks.getLifecycleRunnerAdapter.mockReturnValue({
+    mocks.getAssignedRunnerForActiveAgentForUser.mockResolvedValue(null);
+    mocks.getLifecycleRunnerAdapterForUser.mockReturnValue({
       streamLogs: mocks.streamLogs,
     });
     mocks.streamLogs.mockRejectedValue(new Error("postgres://user:pass@localhost/db"));
@@ -413,17 +431,17 @@ describe("GET /api/agents/[agentId]/logs route", () => {
       },
     });
     expect(JSON.stringify(body)).not.toContain("postgres://");
-    expect(mocks.listAgentLogs).not.toHaveBeenCalled();
+    expect(mocks.listAgentLogsForUser).not.toHaveBeenCalled();
     expect(mocks.close).toHaveBeenCalledOnce();
   });
 
   it("returns safe JSON when persistence fails", async () => {
     mocks.createDatabaseConnection.mockReturnValue({ db: "db", close: mocks.close });
-    mocks.getActiveAgentForDevelopmentUser.mockResolvedValue({
+    mocks.getActiveAgentForUser.mockResolvedValue({
       id: ACTIVE_AGENT_ID,
       status: "stopped",
     });
-    mocks.listAgentLogs.mockRejectedValue(new Error("postgres://user:pass@localhost/db"));
+    mocks.listAgentLogsForUser.mockRejectedValue(new Error("postgres://user:pass@localhost/db"));
     const { GET } = await import("@/app/api/agents/[agentId]/logs/route");
 
     const response = await GET(new Request("http://localhost/api/agents/id/logs"), {

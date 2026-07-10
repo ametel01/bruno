@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const USER_ID = "00000000-0000-4000-8000-000000000101";
 
 const mocks = vi.hoisted(() => {
   class AgentLifecyclePersistenceError extends Error {
@@ -10,20 +12,30 @@ const mocks = vi.hoisted(() => {
 
   return {
     AgentLifecyclePersistenceError,
-    simulateErrorAgentForDevelopmentUser: vi.fn(),
+    requireConfiguredApplicationUser: vi.fn(),
+    simulateErrorAgentForUser: vi.fn(),
   };
 });
 
 vi.mock("@/src/server/agents/lifecycle", () => ({
   AgentLifecyclePersistenceError: mocks.AgentLifecyclePersistenceError,
-  simulateErrorAgentForDevelopmentUser: mocks.simulateErrorAgentForDevelopmentUser,
+  simulateErrorAgentForUser: mocks.simulateErrorAgentForUser,
+}));
+
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
 }));
 
 describe("POST /api/agents/[agentId]/actions/simulate-error route", () => {
   const originalNodeEnv = process.env.NODE_ENV;
 
+  beforeEach(() => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
+  });
+
   afterEach(() => {
-    mocks.simulateErrorAgentForDevelopmentUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
+    mocks.simulateErrorAgentForUser.mockReset();
     setNodeEnv(originalNodeEnv);
   });
 
@@ -43,7 +55,7 @@ describe("POST /api/agents/[agentId]/actions/simulate-error route", () => {
         message: "Agent ID must be a valid UUID.",
       },
     });
-    expect(mocks.simulateErrorAgentForDevelopmentUser).not.toHaveBeenCalled();
+    expect(mocks.simulateErrorAgentForUser).not.toHaveBeenCalled();
   });
 
   it("rejects production requests before calling the lifecycle helper", async () => {
@@ -62,12 +74,12 @@ describe("POST /api/agents/[agentId]/actions/simulate-error route", () => {
         message: "Simulated error actions are unavailable in production.",
       },
     });
-    expect(mocks.simulateErrorAgentForDevelopmentUser).not.toHaveBeenCalled();
+    expect(mocks.simulateErrorAgentForUser).not.toHaveBeenCalled();
   });
 
   it("returns a safe persistence error response", async () => {
     setNodeEnv("test");
-    mocks.simulateErrorAgentForDevelopmentUser.mockRejectedValueOnce(
+    mocks.simulateErrorAgentForUser.mockRejectedValueOnce(
       new mocks.AgentLifecyclePersistenceError(),
     );
     const { POST } = await import("@/app/api/agents/[agentId]/actions/simulate-error/route");
@@ -84,6 +96,10 @@ describe("POST /api/agents/[agentId]/actions/simulate-error route", () => {
         message: "Agent error could not be simulated.",
       },
     });
+    expect(mocks.simulateErrorAgentForUser).toHaveBeenCalledWith(
+      USER_ID,
+      "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+    );
     expect(JSON.stringify(body)).not.toContain("postgres://");
   });
 });

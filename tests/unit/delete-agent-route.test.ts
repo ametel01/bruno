@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const USER_ID = "00000000-0000-4000-8000-000000000101";
 
 const mocks = vi.hoisted(() => {
   class AgentLifecyclePersistenceError extends Error {
@@ -10,18 +12,28 @@ const mocks = vi.hoisted(() => {
 
   return {
     AgentLifecyclePersistenceError,
-    deleteAgentForDevelopmentUser: vi.fn(),
+    deleteAgentForUser: vi.fn(),
+    requireConfiguredApplicationUser: vi.fn(),
   };
 });
 
 vi.mock("@/src/server/agents/lifecycle", () => ({
   AgentLifecyclePersistenceError: mocks.AgentLifecyclePersistenceError,
-  deleteAgentForDevelopmentUser: mocks.deleteAgentForDevelopmentUser,
+  deleteAgentForUser: mocks.deleteAgentForUser,
+}));
+
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
 }));
 
 describe("DELETE /api/agents/[agentId] route", () => {
+  beforeEach(() => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
+  });
+
   afterEach(() => {
-    mocks.deleteAgentForDevelopmentUser.mockReset();
+    mocks.deleteAgentForUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
   });
 
   it("returns validation JSON for malformed percent-encoded agent IDs", async () => {
@@ -39,13 +51,11 @@ describe("DELETE /api/agents/[agentId] route", () => {
         message: "Agent ID must be a valid UUID.",
       },
     });
-    expect(mocks.deleteAgentForDevelopmentUser).not.toHaveBeenCalled();
+    expect(mocks.deleteAgentForUser).not.toHaveBeenCalled();
   });
 
   it("returns a safe persistence error response", async () => {
-    mocks.deleteAgentForDevelopmentUser.mockRejectedValueOnce(
-      new mocks.AgentLifecyclePersistenceError(),
-    );
+    mocks.deleteAgentForUser.mockRejectedValueOnce(new mocks.AgentLifecyclePersistenceError());
     const { DELETE } = await import("@/app/api/agents/[agentId]/route");
 
     const response = await DELETE(new Request("http://localhost/api/agents/delete"), {
@@ -60,6 +70,10 @@ describe("DELETE /api/agents/[agentId] route", () => {
         message: "Agent could not be deleted.",
       },
     });
+    expect(mocks.deleteAgentForUser).toHaveBeenCalledWith(
+      USER_ID,
+      "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+    );
     expect(JSON.stringify(body)).not.toContain("postgres://");
   });
 });

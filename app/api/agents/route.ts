@@ -3,13 +3,29 @@ import {
   AgentRunnerAssignmentError,
   AgentRunnerProvisioningError,
   AgentPersistenceError,
-  createAgentForDevelopmentUser,
+  createAgentForUser,
   validateCreateAgentPayload,
 } from "@/src/server/agents/create-agent";
+import {
+  type ConfiguredApplicationUserResolution,
+  requireConfiguredApplicationUser,
+} from "@/src/server/users/configured-application-user";
+
+type CreateAgentRouteDependencies = {
+  requireApplicationUser?: typeof requireConfiguredApplicationUser;
+};
+
+type CreateAgentRouteContext = {
+  params: Promise<unknown>;
+};
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request) {
+export async function POST(
+  request: Request,
+  _context?: CreateAgentRouteContext,
+  dependencies: CreateAgentRouteDependencies = {},
+) {
   let payload: unknown;
 
   try {
@@ -24,8 +40,16 @@ export async function POST(request: Request) {
     return validationResponse(validation.issues);
   }
 
+  const applicationUser = await (
+    dependencies.requireApplicationUser ?? requireConfiguredApplicationUser
+  )();
+
+  if (!applicationUser.ok) {
+    return authenticationResponse(applicationUser);
+  }
+
   try {
-    const body = await createAgentForDevelopmentUser(validation.value);
+    const body = await createAgentForUser(applicationUser.userId, validation.value);
 
     return Response.json(body, {
       status: 201,
@@ -57,6 +81,23 @@ export async function POST(request: Request) {
 
     throw error;
   }
+}
+
+function authenticationResponse(
+  result: Exclude<ConfiguredApplicationUserResolution, { ok: true }>,
+) {
+  return Response.json(
+    {
+      error: {
+        code: result.code,
+        message:
+          result.status === 401
+            ? "Authentication is required."
+            : "Authentication is not configured safely.",
+      },
+    },
+    { status: result.status },
+  );
 }
 
 function runnerProvisioningErrorResponse(error: AgentRunnerProvisioningError) {

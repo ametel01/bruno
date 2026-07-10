@@ -1,12 +1,13 @@
-import {
-  AgentLifecyclePersistenceError,
-  deleteAgentForDevelopmentUser,
-} from "@/src/server/agents/lifecycle";
+import { AgentLifecyclePersistenceError, deleteAgentForUser } from "@/src/server/agents/lifecycle";
 import {
   AgentConfigUpdatePersistenceError,
-  updateAgentConfigForDevelopmentUser,
+  updateAgentConfigForUser,
   validateUpdateAgentConfigPayload,
 } from "@/src/server/agents/update-agent-config";
+import {
+  type ConfiguredApplicationUserResolution,
+  requireConfiguredApplicationUser,
+} from "@/src/server/users/configured-application-user";
 
 type DeleteAgentRouteContext = {
   params: Promise<{
@@ -14,9 +15,17 @@ type DeleteAgentRouteContext = {
   }>;
 };
 
+type AgentRouteDependencies = {
+  requireApplicationUser?: typeof requireConfiguredApplicationUser;
+};
+
 export const dynamic = "force-dynamic";
 
-export async function PATCH(request: Request, context: DeleteAgentRouteContext) {
+export async function PATCH(
+  request: Request,
+  context: DeleteAgentRouteContext,
+  dependencies: AgentRouteDependencies = {},
+) {
   const decodedAgentId = await decodeAgentId(context);
 
   if (!decodedAgentId.ok) {
@@ -39,8 +48,17 @@ export async function PATCH(request: Request, context: DeleteAgentRouteContext) 
     return validationIssuesResponse(validation.issues);
   }
 
+  const applicationUser = await (
+    dependencies.requireApplicationUser ?? requireConfiguredApplicationUser
+  )();
+
+  if (!applicationUser.ok) {
+    return authenticationResponse(applicationUser);
+  }
+
   try {
-    const result = await updateAgentConfigForDevelopmentUser(
+    const result = await updateAgentConfigForUser(
+      applicationUser.userId,
       decodedAgentId.agentId,
       validation.value,
     );
@@ -77,15 +95,27 @@ export async function PATCH(request: Request, context: DeleteAgentRouteContext) 
   }
 }
 
-export async function DELETE(_request: Request, context: DeleteAgentRouteContext) {
+export async function DELETE(
+  _request: Request,
+  context: DeleteAgentRouteContext,
+  dependencies: AgentRouteDependencies = {},
+) {
   const decodedAgentId = await decodeAgentId(context);
 
   if (!decodedAgentId.ok) {
     return validationResponse("Agent ID must be a valid UUID.");
   }
 
+  const applicationUser = await (
+    dependencies.requireApplicationUser ?? requireConfiguredApplicationUser
+  )();
+
+  if (!applicationUser.ok) {
+    return authenticationResponse(applicationUser);
+  }
+
   try {
-    const result = await deleteAgentForDevelopmentUser(decodedAgentId.agentId);
+    const result = await deleteAgentForUser(applicationUser.userId, decodedAgentId.agentId);
 
     if (result.ok) {
       return Response.json(result);
@@ -152,6 +182,23 @@ export async function DELETE(_request: Request, context: DeleteAgentRouteContext
 
     throw error;
   }
+}
+
+function authenticationResponse(
+  result: Exclude<ConfiguredApplicationUserResolution, { ok: true }>,
+) {
+  return Response.json(
+    {
+      error: {
+        code: result.code,
+        message:
+          result.status === 401
+            ? "Authentication is required."
+            : "Authentication is not configured safely.",
+      },
+    },
+    { status: result.status },
+  );
 }
 
 async function decodeAgentId(context: DeleteAgentRouteContext): Promise<

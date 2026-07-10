@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, exists, inArray, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
@@ -56,7 +56,7 @@ import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-prov
 import type { RunnerAdapter as RunnerAdapterContract } from "@/src/server/runners/runner-adapter";
 import {
   lockRunnerPlacementCapacityInTransaction,
-  selectRunnerPlacementForDevelopmentUserInTransaction,
+  selectRunnerPlacementForUserInTransaction,
 } from "@/src/server/runners/runner-placement";
 import { reconcileStaleRunnerHeartbeatsInTransaction } from "@/src/server/runners/runner-heartbeat";
 
@@ -403,6 +403,16 @@ export function getLifecycleRunnerAdapter(): LifecycleRunnerAdapter {
   return lifecycleRunnerAdapter;
 }
 
+export function getLifecycleRunnerAdapterForUser(
+  userId: string,
+  dependencies: Pick<AgentLifecycleDependencies, "createConnection"> = {},
+): LifecycleRunnerAdapter {
+  return new DockerRunnerAdapter({
+    userId,
+    ...(dependencies.createConnection ? { createConnection: dependencies.createConnection } : {}),
+  });
+}
+
 export function getLifecycleLocalRunnerAdapter(): LifecycleRunnerAdapter {
   lifecycleLocalRunnerAdapter ??= new LocalRunnerAdapter({
     onUnexpectedExit: async (event) => {
@@ -411,6 +421,19 @@ export function getLifecycleLocalRunnerAdapter(): LifecycleRunnerAdapter {
   });
 
   return lifecycleLocalRunnerAdapter;
+}
+
+export function getLifecycleLocalRunnerAdapterForUser(
+  userId: string,
+  dependencies: Pick<AgentLifecycleDependencies, "createConnection"> = {},
+): LifecycleRunnerAdapter {
+  return new LocalRunnerAdapter({
+    userId,
+    ...(dependencies.createConnection ? { createConnection: dependencies.createConnection } : {}),
+    onUnexpectedExit: async (event) => {
+      await recordUnexpectedLocalRunnerExitForUser(userId, event, dependencies);
+    },
+  });
 }
 
 export function getLifecycleManualRunnerAdapter(
@@ -446,6 +469,7 @@ export function canDeleteAgentStatus(status: AgentLifecycleStatus): boolean {
 
 async function reserveRunnerForAgentStart(input: {
   agentId: string;
+  userId: string;
   assignedRunnerId: string | null;
   assignedRunner: ManualRunnerRecord | null;
   connection: DatabaseConnection;
@@ -462,6 +486,7 @@ async function reserveRunnerForAgentStart(input: {
 
   return await input.connection.db.transaction(async (tx) => {
     const placement = await selectStartRunnerPlacement(tx, {
+      userId: input.userId,
       assignedRunner: input.assignedRunner,
       now: input.now,
       planMaxAgents: input.planMaxAgents,
@@ -478,7 +503,13 @@ async function reserveRunnerForAgentStart(input: {
     const [runnerRow] = await tx
       .select(assignedRunnerSelection)
       .from(runners)
-      .where(and(eq(runners.id, placement.runnerId), isNull(runners.deletedAt)))
+      .where(
+        and(
+          eq(runners.id, placement.runnerId),
+          eq(runners.userId, input.userId),
+          isNull(runners.deletedAt),
+        ),
+      )
       .limit(1);
     const assignedRunner = toManualRunnerRecordOrNull(runnerRow ?? null);
 
@@ -497,6 +528,7 @@ async function reserveRunnerForAgentStart(input: {
       .where(
         and(
           eq(agents.id, input.agentId),
+          eq(agents.userId, input.userId),
           isNull(agents.deletedAt),
           inArray(agents.status, [...STARTABLE_AGENT_STATUSES]),
         ),
@@ -514,6 +546,7 @@ async function reserveRunnerForAgentStart(input: {
 async function selectStartRunnerPlacement(
   tx: AgentLifecycleTransaction,
   input: {
+    userId: string;
     assignedRunner: ManualRunnerRecord | null;
     now: Date;
     planMaxAgents?: number | null | undefined;
@@ -527,8 +560,9 @@ async function selectStartRunnerPlacement(
 > {
   if (input.assignedRunner) {
     await lockRunnerPlacementCapacityInTransaction(tx, input.assignedRunner.id);
-    const placement = await selectRunnerPlacementForDevelopmentUserInTransaction(
+    const placement = await selectRunnerPlacementForUserInTransaction(
       tx,
+      input.userId,
       {
         planMaxAgents: input.planMaxAgents,
         runnerId: input.assignedRunner.id,
@@ -556,8 +590,9 @@ async function selectStartRunnerPlacement(
     return { ok: false, reason: "no_online_runner" } as const;
   }
 
-  const placement = await selectRunnerPlacementForDevelopmentUserInTransaction(
+  const placement = await selectRunnerPlacementForUserInTransaction(
     tx,
+    input.userId,
     {
       planMaxAgents: input.planMaxAgents,
     },
@@ -566,8 +601,9 @@ async function selectStartRunnerPlacement(
 
   if (placement.ok) {
     await lockRunnerPlacementCapacityInTransaction(tx, placement.runner.id);
-    const confirmedPlacement = await selectRunnerPlacementForDevelopmentUserInTransaction(
+    const confirmedPlacement = await selectRunnerPlacementForUserInTransaction(
       tx,
+      input.userId,
       {
         planMaxAgents: input.planMaxAgents,
         runnerId: placement.runner.id,
@@ -617,6 +653,7 @@ async function selectStartRunnerPlacement(
 
 async function restoreAgentStartReservation(input: {
   agentId: string;
+  userId: string;
   connection: DatabaseConnection;
   previousStatus: AgentLifecycleStatus;
   previousStatusReason: string | null;
@@ -629,11 +666,18 @@ async function restoreAgentStartReservation(input: {
       statusReason: input.previousStatusReason,
       updatedAt: input.now,
     })
-    .where(and(eq(agents.id, input.agentId), eq(agents.status, "starting")));
+    .where(
+      and(
+        eq(agents.id, input.agentId),
+        eq(agents.userId, input.userId),
+        eq(agents.status, "starting"),
+      ),
+    );
 }
 
 async function markAgentStartFinalizationCleanupFailed(input: {
   agentId: string;
+  userId: string;
   connection: DatabaseConnection;
   now: Date;
 }): Promise<void> {
@@ -644,7 +688,9 @@ async function markAgentStartFinalizationCleanupFailed(input: {
       statusReason: START_FINALIZATION_CLEANUP_FAILED_STATUS_REASON,
       updatedAt: input.now,
     })
-    .where(and(eq(agents.id, input.agentId), isNull(agents.deletedAt)));
+    .where(
+      and(eq(agents.id, input.agentId), eq(agents.userId, input.userId), isNull(agents.deletedAt)),
+    );
 }
 
 async function readAgentStartRunnerSnapshot(
@@ -686,7 +732,67 @@ async function readAgentStartRunnerSnapshot(
   };
 }
 
+async function runLegacyAgentLifecycleOperation<Result>(
+  agentId: string,
+  dependencies: AgentLifecycleDependencies,
+  notFound: Result,
+  operation: (
+    userId: string,
+    agentId: string,
+    dependencies: AgentLifecycleDependencies,
+  ) => Promise<Result>,
+): Promise<Result> {
+  const normalizedAgentId = agentId.trim();
+
+  if (normalizedAgentId.length === 0 || !isValidAgentId(normalizedAgentId)) {
+    return operation("", agentId, dependencies);
+  }
+
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    const [agent] = await connection.db
+      .select({ userId: agents.userId })
+      .from(agents)
+      .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
+      .limit(1);
+
+    if (!agent) {
+      return notFound;
+    }
+
+    return await operation(agent.userId, normalizedAgentId, {
+      ...dependencies,
+      createConnection: () => connection,
+    });
+  } catch (error) {
+    if (error instanceof AgentLifecyclePersistenceError) {
+      throw error;
+    }
+
+    throw new AgentLifecyclePersistenceError();
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
 export async function startAgentForDevelopmentUser(
+  agentId: string,
+  dependencies: AgentLifecycleDependencies = {},
+): Promise<StartAgentResult> {
+  return runLegacyAgentLifecycleOperation(
+    agentId,
+    dependencies,
+    { ok: false, reason: "agent_not_found" },
+    startAgentForUser,
+  );
+}
+
+export async function startAgentForUser(
+  userId: string,
   agentId: string,
   dependencies: AgentLifecycleDependencies = {},
 ): Promise<StartAgentResult> {
@@ -706,7 +812,23 @@ export async function startAgentForDevelopmentUser(
 
   try {
     const validation = await connection.db.transaction(async (tx) => {
-      await reconcileStaleRunnerHeartbeatsInTransaction(tx, { now });
+      const [ownedAgent] = await tx
+        .select({ id: agents.id })
+        .from(agents)
+        .where(
+          and(
+            eq(agents.id, normalizedAgentId),
+            eq(agents.userId, userId),
+            isNull(agents.deletedAt),
+          ),
+        )
+        .limit(1);
+
+      if (!ownedAgent) {
+        return { ok: false, reason: "agent_not_found" } as const;
+      }
+
+      await reconcileStaleRunnerHeartbeatsInTransaction(tx, { now, userId });
 
       const [currentAgent] = await tx
         .select({
@@ -724,7 +846,13 @@ export async function startAgentForDevelopmentUser(
             isNull(runners.deletedAt),
           ),
         )
-        .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
+        .where(
+          and(
+            eq(agents.id, normalizedAgentId),
+            eq(agents.userId, userId),
+            isNull(agents.deletedAt),
+          ),
+        )
         .limit(1);
 
       if (!currentAgent) {
@@ -738,7 +866,7 @@ export async function startAgentForDevelopmentUser(
       const assignedRunnerSnapshot = currentAgent.agent.runnerId
         ? await readAgentStartRunnerSnapshot(tx, {
             runnerId: currentAgent.agent.runnerId,
-            userId: currentAgent.agent.userId,
+            userId,
           })
         : null;
 
@@ -769,6 +897,7 @@ export async function startAgentForDevelopmentUser(
 
     const reservation = await reserveRunnerForAgentStart({
       agentId: normalizedAgentId,
+      userId,
       assignedRunnerId: validation.agent.runnerId,
       assignedRunner: validation.assignedRunner,
       connection,
@@ -797,6 +926,7 @@ export async function startAgentForDevelopmentUser(
     });
 
     const runnerAdapter = selectLifecycleRunnerAdapter(reservation.assignedRunner, {
+      userId,
       createConnection: () => connection,
       ...(dependencies.manualRunnerAdapter
         ? { manualRunnerAdapter: dependencies.manualRunnerAdapter }
@@ -815,6 +945,7 @@ export async function startAgentForDevelopmentUser(
       if (reservation.reserved) {
         await restoreAgentStartReservation({
           agentId: normalizedAgentId,
+          userId,
           connection,
           previousStatus: validation.agent.status,
           previousStatusReason: validation.agent.statusReason,
@@ -851,6 +982,7 @@ export async function startAgentForDevelopmentUser(
           .where(
             and(
               eq(agents.id, normalizedAgentId),
+              eq(agents.userId, userId),
               isNull(agents.deletedAt),
               inArray(
                 agents.status,
@@ -876,7 +1008,7 @@ export async function startAgentForDevelopmentUser(
         await recordAgentEventsInTransaction(tx, [
           {
             agentId: startedAgent.id,
-            actorUserId: startedAgent.userId,
+            actorUserId: userId,
             type: START_REQUESTED_EVENT_TYPE,
             message: `Start requested for agent "${startedAgent.name}".`,
             metadata: {
@@ -887,7 +1019,7 @@ export async function startAgentForDevelopmentUser(
           },
           {
             agentId: startedAgent.id,
-            actorUserId: startedAgent.userId,
+            actorUserId: userId,
             type: START_COMPLETED_EVENT_TYPE,
             message: `Start completed for agent "${startedAgent.name}".`,
             metadata: {
@@ -928,6 +1060,7 @@ export async function startAgentForDevelopmentUser(
         if (reservation.reserved) {
           await restoreAgentStartReservation({
             agentId: normalizedAgentId,
+            userId,
             connection,
             previousStatus: validation.agent.status,
             previousStatusReason: validation.agent.statusReason,
@@ -937,6 +1070,7 @@ export async function startAgentForDevelopmentUser(
       } else {
         await markAgentStartFinalizationCleanupFailed({
           agentId: normalizedAgentId,
+          userId,
           connection,
           now,
         }).catch(() => undefined);
@@ -961,6 +1095,19 @@ export async function startAgentForDevelopmentUser(
 }
 
 export async function stopAgentForDevelopmentUser(
+  agentId: string,
+  dependencies: AgentLifecycleDependencies = {},
+): Promise<StopAgentResult> {
+  return runLegacyAgentLifecycleOperation(
+    agentId,
+    dependencies,
+    { ok: false, reason: "agent_not_found" },
+    stopAgentForUser,
+  );
+}
+
+export async function stopAgentForUser(
+  userId: string,
   agentId: string,
   dependencies: AgentLifecycleDependencies = {},
 ): Promise<StopAgentResult> {
@@ -996,7 +1143,13 @@ export async function stopAgentForDevelopmentUser(
             isNull(runners.deletedAt),
           ),
         )
-        .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
+        .where(
+          and(
+            eq(agents.id, normalizedAgentId),
+            eq(agents.userId, userId),
+            isNull(agents.deletedAt),
+          ),
+        )
         .limit(1);
 
       if (!currentAgent) {
@@ -1019,6 +1172,7 @@ export async function stopAgentForDevelopmentUser(
     }
 
     const runnerAdapter = selectLifecycleRunnerAdapter(validation.assignedRunner, {
+      userId,
       createConnection: () => connection,
       ...(dependencies.manualRunnerAdapter
         ? { manualRunnerAdapter: dependencies.manualRunnerAdapter }
@@ -1044,6 +1198,7 @@ export async function stopAgentForDevelopmentUser(
         .where(
           and(
             eq(agents.id, normalizedAgentId),
+            eq(agents.userId, userId),
             isNull(agents.deletedAt),
             inArray(agents.status, [...STOPPABLE_AGENT_STATUSES]),
           ),
@@ -1056,13 +1211,14 @@ export async function stopAgentForDevelopmentUser(
 
       await closeLatestOpenAgentUsagePeriodInTransaction(tx, {
         agentId: stoppedAgent.id,
+        userId,
         stoppedAt: now,
       });
 
       await recordAgentEventsInTransaction(tx, [
         {
           agentId: stoppedAgent.id,
-          actorUserId: stoppedAgent.userId,
+          actorUserId: userId,
           type: STOP_REQUESTED_EVENT_TYPE,
           message: `Stop requested for agent "${stoppedAgent.name}".`,
           metadata: {
@@ -1073,7 +1229,7 @@ export async function stopAgentForDevelopmentUser(
         },
         {
           agentId: stoppedAgent.id,
-          actorUserId: stoppedAgent.userId,
+          actorUserId: userId,
           type: STOP_COMPLETED_EVENT_TYPE,
           message: `Stop completed for agent "${stoppedAgent.name}".`,
           metadata: {
@@ -1110,6 +1266,19 @@ export async function restartAgentForDevelopmentUser(
   agentId: string,
   dependencies: AgentLifecycleDependencies = {},
 ): Promise<RestartAgentResult> {
+  return runLegacyAgentLifecycleOperation(
+    agentId,
+    dependencies,
+    { ok: false, reason: "agent_not_found" },
+    restartAgentForUser,
+  );
+}
+
+export async function restartAgentForUser(
+  userId: string,
+  agentId: string,
+  dependencies: AgentLifecycleDependencies = {},
+): Promise<RestartAgentResult> {
   const normalizedAgentId = agentId.trim();
 
   if (normalizedAgentId.length === 0) {
@@ -1142,7 +1311,13 @@ export async function restartAgentForDevelopmentUser(
             isNull(runners.deletedAt),
           ),
         )
-        .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
+        .where(
+          and(
+            eq(agents.id, normalizedAgentId),
+            eq(agents.userId, userId),
+            isNull(agents.deletedAt),
+          ),
+        )
         .limit(1);
 
       if (!currentAgent) {
@@ -1169,6 +1344,7 @@ export async function restartAgentForDevelopmentUser(
     }
 
     const runnerAdapter = selectLifecycleRunnerAdapter(validation.assignedRunner, {
+      userId,
       createConnection: () => connection,
       ...(dependencies.manualRunnerAdapter
         ? { manualRunnerAdapter: dependencies.manualRunnerAdapter }
@@ -1189,6 +1365,7 @@ export async function restartAgentForDevelopmentUser(
           .where(
             and(
               eq(agents.id, normalizedAgentId),
+              eq(agents.userId, userId),
               isNull(agents.deletedAt),
               inArray(agents.status, [...RESTARTABLE_AGENT_STATUSES]),
             ),
@@ -1211,6 +1388,7 @@ export async function restartAgentForDevelopmentUser(
         .where(
           and(
             eq(agents.id, normalizedAgentId),
+            eq(agents.userId, userId),
             isNull(agents.deletedAt),
             inArray(agents.status, [...RESTARTABLE_AGENT_STATUSES]),
           ),
@@ -1225,7 +1403,7 @@ export async function restartAgentForDevelopmentUser(
       await recordAgentEventsInTransaction(tx, [
         {
           agentId: restartedAgent.id,
-          actorUserId: restartedAgent.userId,
+          actorUserId: userId,
           type: RESTART_REQUESTED_EVENT_TYPE,
           message: `Restart requested for agent "${restartedAgent.name}".`,
           metadata: {
@@ -1236,7 +1414,7 @@ export async function restartAgentForDevelopmentUser(
         },
         {
           agentId: restartedAgent.id,
-          actorUserId: restartedAgent.userId,
+          actorUserId: userId,
           type: RESTART_COMPLETED_EVENT_TYPE,
           message: `Restart completed for agent "${restartedAgent.name}".`,
           metadata: {
@@ -1274,12 +1452,30 @@ export async function restartAgentForDevelopmentUser(
 
 async function closeLatestOpenAgentUsagePeriodInTransaction(
   tx: AgentLifecycleTransaction,
-  input: { agentId: string; stoppedAt: Date },
+  input: { agentId: string; userId: string; stoppedAt: Date },
 ): Promise<void> {
+  const ownedAgentExists = exists(
+    tx
+      .select({ id: agents.id })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.id, agentUsagePeriods.agentId),
+          eq(agents.userId, input.userId),
+          isNull(agents.deletedAt),
+        ),
+      ),
+  );
   const [openPeriod] = await tx
     .select({ id: agentUsagePeriods.id })
     .from(agentUsagePeriods)
-    .where(and(eq(agentUsagePeriods.agentId, input.agentId), isNull(agentUsagePeriods.stoppedAt)))
+    .where(
+      and(
+        eq(agentUsagePeriods.agentId, input.agentId),
+        isNull(agentUsagePeriods.stoppedAt),
+        ownedAgentExists,
+      ),
+    )
     .orderBy(desc(agentUsagePeriods.startedAt), desc(agentUsagePeriods.createdAt))
     .limit(1);
 
@@ -1293,10 +1489,23 @@ async function closeLatestOpenAgentUsagePeriodInTransaction(
       stoppedAt: input.stoppedAt,
       updatedAt: input.stoppedAt,
     })
-    .where(eq(agentUsagePeriods.id, openPeriod.id));
+    .where(and(eq(agentUsagePeriods.id, openPeriod.id), ownedAgentExists));
 }
 
 export async function simulateErrorAgentForDevelopmentUser(
+  agentId: string,
+  dependencies: AgentLifecycleDependencies = {},
+): Promise<SimulateErrorAgentResult> {
+  return runLegacyAgentLifecycleOperation(
+    agentId,
+    dependencies,
+    { ok: false, reason: "agent_not_found" },
+    simulateErrorAgentForUser,
+  );
+}
+
+export async function simulateErrorAgentForUser(
+  userId: string,
   agentId: string,
   dependencies: AgentLifecycleDependencies = {},
 ): Promise<SimulateErrorAgentResult> {
@@ -1319,7 +1528,13 @@ export async function simulateErrorAgentForDevelopmentUser(
       const [currentAgent] = await tx
         .select()
         .from(agents)
-        .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
+        .where(
+          and(
+            eq(agents.id, normalizedAgentId),
+            eq(agents.userId, userId),
+            isNull(agents.deletedAt),
+          ),
+        )
         .limit(1);
 
       if (!currentAgent) {
@@ -1340,6 +1555,7 @@ export async function simulateErrorAgentForDevelopmentUser(
         .where(
           and(
             eq(agents.id, normalizedAgentId),
+            eq(agents.userId, userId),
             isNull(agents.deletedAt),
             inArray(agents.status, [...SIMULATE_ERROR_AGENT_STATUSES]),
           ),
@@ -1352,7 +1568,7 @@ export async function simulateErrorAgentForDevelopmentUser(
 
       await recordAgentEventInTransaction(tx, {
         agentId: erroredAgent.id,
-        actorUserId: erroredAgent.userId,
+        actorUserId: userId,
         type: SIMULATED_ERROR_EVENT_TYPE,
         message: `Simulated error requested for agent "${erroredAgent.name}".`,
         metadata: {
@@ -1383,6 +1599,22 @@ export async function recordUnexpectedLocalRunnerExitForDevelopmentUser(
   event: LocalRunnerUnexpectedExitEvent,
   dependencies: Pick<AgentLifecycleDependencies, "createConnection" | "now"> = {},
 ): Promise<boolean> {
+  return recordUnexpectedLocalRunnerExit(null, event, dependencies);
+}
+
+export async function recordUnexpectedLocalRunnerExitForUser(
+  userId: string,
+  event: LocalRunnerUnexpectedExitEvent,
+  dependencies: Pick<AgentLifecycleDependencies, "createConnection" | "now"> = {},
+): Promise<boolean> {
+  return recordUnexpectedLocalRunnerExit(userId, event, dependencies);
+}
+
+async function recordUnexpectedLocalRunnerExit(
+  userId: string | null,
+  event: LocalRunnerUnexpectedExitEvent,
+  dependencies: Pick<AgentLifecycleDependencies, "createConnection" | "now">,
+): Promise<boolean> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
@@ -1392,7 +1624,13 @@ export async function recordUnexpectedLocalRunnerExitForDevelopmentUser(
       const [currentAgent] = await tx
         .select()
         .from(agents)
-        .where(and(eq(agents.id, event.agentId), isNull(agents.deletedAt)))
+        .where(
+          and(
+            eq(agents.id, event.agentId),
+            isNull(agents.deletedAt),
+            ...(userId === null ? [] : [eq(agents.userId, userId)]),
+          ),
+        )
         .limit(1);
 
       if (!currentAgent || !["starting", "running", "restarting"].includes(currentAgent.status)) {
@@ -1411,6 +1649,7 @@ export async function recordUnexpectedLocalRunnerExitForDevelopmentUser(
             eq(agents.id, event.agentId),
             isNull(agents.deletedAt),
             inArray(agents.status, ["starting", "running", "restarting"]),
+            ...(userId === null ? [] : [eq(agents.userId, userId)]),
           ),
         )
         .returning();
@@ -1421,7 +1660,7 @@ export async function recordUnexpectedLocalRunnerExitForDevelopmentUser(
 
       await recordAgentEventInTransaction(tx, {
         agentId: erroredAgent.id,
-        actorUserId: erroredAgent.userId,
+        actorUserId: userId ?? erroredAgent.userId,
         type: SIMULATED_ERROR_EVENT_TYPE,
         message: `Local runner exited unexpectedly for agent "${erroredAgent.name}".`,
         metadata: {
@@ -1449,6 +1688,20 @@ export async function recordUnexpectedLocalRunnerExitForDevelopmentUser(
 export async function reconcileDockerRunnerAgentsForDevelopmentUser(
   dependencies: DockerRunnerReconciliationDependencies = {},
 ): Promise<number> {
+  return reconcileDockerRunnerAgents(null, dependencies);
+}
+
+export async function reconcileDockerRunnerAgentsForUser(
+  userId: string,
+  dependencies: DockerRunnerReconciliationDependencies = {},
+): Promise<number> {
+  return reconcileDockerRunnerAgents(userId, dependencies);
+}
+
+async function reconcileDockerRunnerAgents(
+  userId: string | null,
+  dependencies: DockerRunnerReconciliationDependencies,
+): Promise<number> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const limit =
@@ -1456,7 +1709,8 @@ export async function reconcileDockerRunnerAgentsForDevelopmentUser(
       ? Math.min(Math.max(dependencies.limit, 1), 25)
       : 10;
   const dockerRunnerAdapter =
-    dependencies.dockerRunnerAdapter ?? (await createDefaultDockerRunnerAdapter(connection));
+    dependencies.dockerRunnerAdapter ??
+    (await createDefaultDockerRunnerAdapter(connection, userId));
 
   try {
     const candidateRows = await connection.db
@@ -1467,6 +1721,7 @@ export async function reconcileDockerRunnerAgentsForDevelopmentUser(
         and(
           isNull(agents.deletedAt),
           inArray(agents.status, [...DOCKER_RECONCILABLE_AGENT_STATUSES]),
+          ...(userId !== null ? [eq(agents.userId, userId)] : []),
         ),
       )
       .orderBy(desc(dockerRunnerContainers.observedAt), desc(dockerRunnerContainers.createdAt))
@@ -1475,7 +1730,7 @@ export async function reconcileDockerRunnerAgentsForDevelopmentUser(
     let reconciled = 0;
 
     for (const candidateAgentId of candidateAgentIds) {
-      const didReconcile = await reconcileDockerRunnerAgentForDevelopmentUser(candidateAgentId, {
+      const didReconcile = await reconcileDockerRunnerAgent(userId, candidateAgentId, {
         createConnection: () => connection,
         dockerRunnerAdapter,
         ...(dependencies.now ? { now: dependencies.now } : {}),
@@ -1500,6 +1755,22 @@ export async function reconcileDockerRunnerAgentForDevelopmentUser(
   agentId: string,
   dependencies: DockerRunnerReconciliationDependencies = {},
 ): Promise<boolean> {
+  return reconcileDockerRunnerAgent(null, agentId, dependencies);
+}
+
+export async function reconcileDockerRunnerAgentForUser(
+  userId: string,
+  agentId: string,
+  dependencies: DockerRunnerReconciliationDependencies = {},
+): Promise<boolean> {
+  return reconcileDockerRunnerAgent(userId, agentId, dependencies);
+}
+
+async function reconcileDockerRunnerAgent(
+  userId: string | null,
+  agentId: string,
+  dependencies: DockerRunnerReconciliationDependencies,
+): Promise<boolean> {
   const normalizedAgentId = agentId.trim();
 
   if (!isValidAgentId(normalizedAgentId)) {
@@ -1509,10 +1780,28 @@ export async function reconcileDockerRunnerAgentForDevelopmentUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
-  const dockerRunnerAdapter =
-    dependencies.dockerRunnerAdapter ?? (await createDefaultDockerRunnerAdapter(connection));
 
   try {
+    const [ownedAgent] = await connection.db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.id, normalizedAgentId),
+          isNull(agents.deletedAt),
+          inArray(agents.status, [...DOCKER_RECONCILABLE_AGENT_STATUSES]),
+          ...(userId !== null ? [eq(agents.userId, userId)] : []),
+        ),
+      )
+      .limit(1);
+
+    if (!ownedAgent) {
+      return false;
+    }
+
+    const dockerRunnerAdapter =
+      dependencies.dockerRunnerAdapter ??
+      (await createDefaultDockerRunnerAdapter(connection, userId));
     const status = await dockerRunnerAdapter.status(normalizedAgentId);
 
     if (!status.ok || !status.container || !isUnexpectedDockerExit(status.container)) {
@@ -1525,7 +1814,13 @@ export async function reconcileDockerRunnerAgentForDevelopmentUser(
       const [currentAgent] = await tx
         .select()
         .from(agents)
-        .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
+        .where(
+          and(
+            eq(agents.id, normalizedAgentId),
+            isNull(agents.deletedAt),
+            ...(userId !== null ? [eq(agents.userId, userId)] : []),
+          ),
+        )
         .limit(1);
 
       if (
@@ -1565,6 +1860,7 @@ export async function reconcileDockerRunnerAgentForDevelopmentUser(
             eq(agents.id, normalizedAgentId),
             isNull(agents.deletedAt),
             inArray(agents.status, [...DOCKER_RECONCILABLE_AGENT_STATUSES]),
+            ...(userId !== null ? [eq(agents.userId, userId)] : []),
           ),
         )
         .returning();
@@ -1597,7 +1893,7 @@ export async function reconcileDockerRunnerAgentForDevelopmentUser(
 
       await recordAgentEventInTransaction(tx, {
         agentId: erroredAgent.id,
-        actorUserId: erroredAgent.userId,
+        actorUserId: userId ?? erroredAgent.userId,
         type: SIMULATED_ERROR_EVENT_TYPE,
         message: `Docker runner container exited unexpectedly for agent "${erroredAgent.name}".`,
         metadata,
@@ -1618,6 +1914,19 @@ export async function deleteAgentForDevelopmentUser(
   agentId: string,
   dependencies: AgentLifecycleDependencies = {},
 ): Promise<DeleteAgentResult> {
+  return runLegacyAgentLifecycleOperation(
+    agentId,
+    dependencies,
+    { ok: false, reason: "agent_not_found" },
+    deleteAgentForUser,
+  );
+}
+
+export async function deleteAgentForUser(
+  userId: string,
+  agentId: string,
+  dependencies: AgentLifecycleDependencies = {},
+): Promise<DeleteAgentResult> {
   const normalizedAgentId = agentId.trim();
 
   if (normalizedAgentId.length === 0) {
@@ -1631,15 +1940,19 @@ export async function deleteAgentForDevelopmentUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
-  const dockerRunnerAdapter =
-    dependencies.dockerRunnerAdapter ?? (await createDefaultDockerRunnerAdapter(connection));
 
   try {
     const validation = await connection.db.transaction(async (tx) => {
       const [currentAgent] = await tx
         .select()
         .from(agents)
-        .where(and(eq(agents.id, normalizedAgentId), isNull(agents.deletedAt)))
+        .where(
+          and(
+            eq(agents.id, normalizedAgentId),
+            eq(agents.userId, userId),
+            isNull(agents.deletedAt),
+          ),
+        )
         .limit(1);
 
       if (!currentAgent) {
@@ -1657,6 +1970,9 @@ export async function deleteAgentForDevelopmentUser(
       return validation;
     }
 
+    const dockerRunnerAdapter =
+      dependencies.dockerRunnerAdapter ??
+      (await createDefaultDockerRunnerAdapter(connection, userId));
     const cleanup = await dockerRunnerAdapter.cleanup(normalizedAgentId);
 
     if (!cleanup.ok) {
@@ -1677,6 +1993,7 @@ export async function deleteAgentForDevelopmentUser(
         .where(
           and(
             eq(agents.id, normalizedAgentId),
+            eq(agents.userId, userId),
             isNull(agents.deletedAt),
             inArray(agents.status, [...DELETABLE_AGENT_STATUSES]),
           ),
@@ -1689,7 +2006,7 @@ export async function deleteAgentForDevelopmentUser(
 
       await recordAgentEventInTransaction(tx, {
         agentId: deletedAgent.id,
-        actorUserId: deletedAgent.userId,
+        actorUserId: userId,
         type: DELETE_EVENT_TYPE,
         message: `Agent "${deletedAgent.name}" deleted from active views.`,
         metadata: {
@@ -1746,6 +2063,7 @@ function isDockerReplacementStartFailure(result: LifecycleRunnerRestartResult): 
 function selectLifecycleRunnerAdapter(
   assignedRunner: ManualRunnerRecord | null,
   dependencies: {
+    userId: string;
     createConnection: () => DatabaseConnection;
     manualRunnerAdapter?: (runner: ManualRunnerRecord) => LifecycleRunnerAdapter;
     runnerAdapter?: LifecycleRunnerAdapter;
@@ -1760,7 +2078,12 @@ function selectLifecycleRunnerAdapter(
     );
   }
 
-  return dependencies.runnerAdapter ?? getLifecycleRunnerAdapter();
+  return (
+    dependencies.runnerAdapter ??
+    getLifecycleRunnerAdapterForUser(dependencies.userId, {
+      createConnection: dependencies.createConnection,
+    })
+  );
 }
 
 function toManualRunnerRecordOrNull(
@@ -2011,8 +2334,10 @@ function shouldRequireOnlineRunnerForStart(): boolean {
 
 async function createDefaultDockerRunnerAdapter(
   connection: DatabaseConnection,
+  userId: string | null,
 ): Promise<DockerRunnerCleanupAdapter & DockerRunnerStatusAdapter> {
   return new DockerRunnerMaintenanceAdapter({
     createConnection: () => connection,
+    ...(userId === null ? {} : { userId }),
   });
 }
