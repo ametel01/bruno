@@ -31,9 +31,11 @@ durable `agent_usage_periods` records: successful starts open periods,
 successful stops close only the latest open period, successful restarts retain
 one continuous running period, and missing stops remain open intervals.
 
-Next implementation work should proceed on Step 3 through issue #224. Steps 4
-and 5 remain dependent on Step 3, and Step 6 remains dependent on Steps 4 and
-5.
+Step 3 is complete for issue #224 on current `origin/main`. PR #243 merged the
+server-only daily and monthly runner infrastructure cost estimate service at
+`ebea027`, including deterministic uptime, multiple-agent allocation, and
+explicit unavailable-price coverage. Steps 4 and 5 can now consume that merged
+contract, while Step 6 remains dependent on both UI steps.
 
 Step 4 is implemented for issue #225 on its isolated branch using the merged
 Step 3 server-only cost DTOs. The dashboard now renders directly testable daily
@@ -58,7 +60,7 @@ added only for user-facing or operator-facing cost-tracking behavior.
 - [x] Step 0: Progress and Changelog Tracking Setup
 - [x] Step 1: Add Provider Price Metadata
 - [x] Step 2: Persist Agent Usage Periods
-- [ ] Step 3: Build Daily and Monthly Cost Estimate Service
+- [x] Step 3: Build Daily and Monthly Cost Estimate Service
 - [x] Step 4: Add Dashboard Cost Summary and Views (implemented; PR and merge pending)
 - [ ] Step 5: Add Runner Detail Cost Context
 - [ ] Step 6: Final Acceptance and Milestone Closeout
@@ -70,6 +72,7 @@ added only for user-facing or operator-facing cost-tracking behavior.
 | 0 | #221 | #228 | `147b220` | Tracker and changelog structure guard established. |
 | 1 | #222 | #229 | `bffe8ff` | Provider price metadata and focused price tests merged. |
 | 2 | #223 | #230 | `54f5546` | Usage-period schema, lifecycle persistence, and focused tests merged. |
+| 3 | #224 | #243 | `ebea027` | Daily/monthly infrastructure cost estimates, allocation, and unavailable-price coverage merged. |
 
 ### In-Progress Evidence
 
