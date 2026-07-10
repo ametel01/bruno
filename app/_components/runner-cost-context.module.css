@@ -1,0 +1,151 @@
+.panel {
+  --cost-accent: #c7f66f;
+  --cost-border: color-mix(in srgb, var(--cost-accent) 42%, transparent);
+  position: relative;
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  overflow: hidden;
+  color: #e9f0e4;
+  background: linear-gradient(135deg, rgb(199 246 111 / 8%), transparent 46%), #101711;
+  border: 1px solid var(--cost-border);
+  border-radius: 0.35rem;
+  box-shadow: inset 3px 0 0 rgb(199 246 111 / 68%);
+}
+
+.panel::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent,
+    transparent 28px,
+    rgb(255 255 255 / 2%) 29px
+  );
+}
+
+.panel[data-availability="unavailable"],
+.panel[data-availability="error"] {
+  --cost-accent: #f0b96d;
+}
+
+.header,
+.allocation,
+.metrics,
+.unavailable,
+.reason,
+.context {
+  position: relative;
+  z-index: 1;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.kicker {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  color: var(--cost-accent);
+  font-size: 0.68rem;
+  font-weight: 760;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.signal {
+  padding: 0.2rem 0.45rem;
+  color: var(--cost-accent);
+  font-size: 0.65rem;
+  font-weight: 740;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid var(--cost-border);
+}
+
+.metrics,
+.allocation {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metrics > div,
+.allocation > div {
+  min-width: 0;
+}
+
+.metrics dt,
+.allocation dt {
+  color: #9aa895;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.metrics dd,
+.allocation dd {
+  margin: 0.25rem 0 0;
+  color: #f7faef;
+  font-variant-numeric: tabular-nums;
+}
+
+.metrics dd {
+  font-size: 0.94rem;
+  font-weight: 700;
+}
+
+.allocation {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding-top: 0.75rem;
+  border-top: 1px solid rgb(255 255 255 / 9%);
+}
+
+.allocation dd {
+  font-size: 1.05rem;
+  font-weight: 760;
+}
+
+.unavailable {
+  display: grid;
+  gap: 0.25rem;
+  color: #f7e5cb;
+}
+
+.unavailable strong {
+  font-size: 0.95rem;
+}
+
+.unavailable span,
+.reason,
+.context {
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.reason {
+  margin: 0;
+  color: #e5c79d;
+}
+
+.context {
+  margin: 0;
+  color: #9aa895;
+}
+
+@media (max-width: 720px) {
+  .metrics {
+    grid-template-columns: 1fr;
+  }
+}

@@ -6,6 +6,11 @@ import {
   RunnerRegistrationTokenControls,
 } from "@/app/settings/_components/runner-management-controls";
 import {
+  CostEstimatePersistenceError,
+  getCostEstimatesForDevelopmentUser,
+  type RunnerCostEstimateDto,
+} from "@/src/server/costs/cost-estimates";
+import {
   CloudRunnerProvisioningPersistenceError,
   listCloudRunnerProvisioningSummariesForDevelopmentUser,
 } from "@/src/server/runners/cloud-runner-provisioning";
@@ -16,12 +21,16 @@ import {
 } from "@/src/server/runners/manual-runner-status";
 
 type SettingsRunnerHealthResult = Awaited<ReturnType<typeof loadSettingsRunnerHealth>>;
+type SettingsRunnerCostResult = { ok: true; runners: RunnerCostEstimateDto[] } | { ok: false };
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const runnerHealthResult = await loadSettingsRunnerHealth();
-  const cloudRunnersResult = await loadSettingsCloudRunners();
+  const [runnerHealthResult, cloudRunnersResult, runnerCostResult] = await Promise.all([
+    loadSettingsRunnerHealth(),
+    loadSettingsCloudRunners(),
+    loadSettingsRunnerCosts(),
+  ]);
 
   return (
     <ProductShell
@@ -44,6 +53,7 @@ export default async function SettingsPage() {
           <p>Hermes, Telegram, provider integrations, and webhooks are not configured here.</p>
         </PlaceholderPanel>
         <CloudRunnerProvisioningPanel
+          costResult={runnerCostResult}
           result={cloudRunnersResult}
           showCreateAction
           title="Cloud runners"
@@ -158,6 +168,25 @@ async function loadSettingsCloudRunners() {
     if (error instanceof CloudRunnerProvisioningPersistenceError) {
       return {
         ok: false as const,
+      };
+    }
+
+    throw error;
+  }
+}
+
+async function loadSettingsRunnerCosts(): Promise<SettingsRunnerCostResult> {
+  try {
+    const estimates = await getCostEstimatesForDevelopmentUser();
+
+    return {
+      ok: true,
+      runners: estimates.monthly.runners,
+    };
+  } catch (error) {
+    if (error instanceof CostEstimatePersistenceError) {
+      return {
+        ok: false,
       };
     }
 
