@@ -36,27 +36,52 @@ describe("milestone 16 progress status", () => {
 });
 
 describe("authentication progress status", () => {
-  it("records the live Step 7 review state and merged prerequisites", async () => {
+  it("records merged foundations and open downstream authentication work", async () => {
     const progress = await readFile(join(process.cwd(), "PROGRESS.md"), "utf8");
-    const step7Row =
-      progress
-        .split("\n")
-        .find((line) =>
-          line.startsWith("| 7. Preserve full registration-free development access"),
-        ) ?? "";
+    const lines = progress.split("\n");
+    const getStepRow = (step: number) => lines.find((line) => line.startsWith(`| ${step}. `)) ?? "";
+    const step2Row = getStepRow(2);
+    const step3Row = getStepRow(3);
+    const step4Row = getStepRow(4);
+    const step5Row = getStepRow(5);
+    const step6Row = getStepRow(6);
+    const step7Row = getStepRow(7);
 
-    expect(step7Row).toContain("Implemented; PR open; tracker review fix pending");
+    expect(step2Row).toContain("| #233 | Merged | None | PR #244 (merged) | `711ee48` |");
+    expect(step3Row).toContain("| #234 | Merged | None | PR #247 (merged) | `e5b09fb` |");
+
+    for (const [row, issue] of [
+      [step4Row, 235],
+      [step5Row, 236],
+      [step6Row, 237],
+    ] as const) {
+      expect(row).toContain(`| #${issue} | Open; prerequisites merged |`);
+      expect(row).toContain("merged #233/PR #244 and #234/PR #247");
+      expect(row).toContain(`Issue #${issue} is open with prerequisites merged`);
+      expect(row).not.toContain("Dependency-blocked");
+      expect(row.toLowerCase()).not.toContain("after both dependencies merge");
+    }
+
+    expect(step7Row).toContain("Implemented; PR open; cycle-5 tracker/recheck gate pending");
     expect(step7Row).toContain("merged #233/PR #244 and #234/PR #247");
     expect(step7Row).toContain("PR #251 (open)");
-    expect(step7Row).toContain("`d077a83` (reviewed implementation head)");
-    expect(step7Row).toContain("8 focused files / 141 tests");
-    expect(step7Row).toContain("73 files / 668 unit tests");
+    expect(step7Row).toContain("Implementation `d077a83`; prior tracker head `88c058f`");
+    expect(step7Row).toContain("9 focused files / 143 tests");
+    expect(step7Row).toContain("73 files / 669 unit tests");
+    expect(step7Row).toContain("CI run 29082905252");
     expect(step7Row).toContain("PR #251 is open and not merged");
     expect(step7Row).not.toContain("Not opened");
     expect(step7Row).not.toContain("8f47126");
     expect(step7Row).not.toContain("8 files, 120 tests");
     expect(step7Row).not.toContain("72 files, 642 tests");
     expect(step7Row).not.toContain("checker pending");
+
+    for (const row of [step2Row, step3Row, step4Row, step5Row, step6Row, step7Row]) {
+      expect(row).not.toBe("");
+      expect(row).not.toContain("checker pending");
+      expect(row).not.toContain("Draft PR #244");
+      expect(row).not.toContain("re-review pending");
+    }
 
     expect(progress).toContain(
       "Steps 2 and 3 are merged: #233 through PR #244 and #234 through PR #247.",
