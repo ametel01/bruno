@@ -1,7 +1,7 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { AuthConfigurationUnavailable } from "@/app/_components/auth-configuration-unavailable";
-import { resolveClerkTransition } from "@/src/auth/clerk-transition";
+import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -14,20 +14,20 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const transition = resolveClerkTransition(process.env);
+  const authMode = resolveAuthMode(process.env);
   let content = children;
 
-  if (transition.mode === "clerk") {
+  if (authMode.mode === "clerk") {
     content = (
       <ClerkProvider
-        publishableKey={transition.publishableKey}
+        publishableKey={authMode.publishableKey}
         signInUrl="/sign-in"
         signUpUrl="/sign-up"
       >
         {children}
       </ClerkProvider>
     );
-  } else if (transition.mode === "invalid") {
+  } else if (authMode.mode === "invalid") {
     content = <AuthConfigurationUnavailable />;
   }
 
