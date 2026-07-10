@@ -2227,6 +2227,91 @@ test("/agents detail returns not found for missing, malformed, and soft-deleted 
   await expect(page.locator("body")).not.toContainText("No record lookup is performed");
 });
 
+test("/dashboard shows accessible daily and monthly cost estimates without infrastructure secrets", async ({
+  page,
+}, testInfo) => {
+  const created = await insertCostAgentFixture(`Cost Summary Agent ${testInfo.project.name}`);
+  createdAgentIds.add(created.id);
+  const runnerName = `dop_v1_secret-looking-cost-runner-${testInfo.project.name}`;
+  const providerResourceId = `do-secret-${randomUUID()}`;
+  const runner = await insertCloudRunnerForAgent(created.id, {
+    name: runnerName,
+    status: "online",
+    providerResourceId,
+    region: "nyc3",
+    sizeSlug: "s-1vcpu-1gb",
+    image: "ubuntu-24-04-x64",
+    provisioningStatus: "ready",
+    provisioningError: null,
+    provisioningStartedAt: new Date(Date.now() - 13 * 60 * 60 * 1_000).toISOString(),
+    provisioningCompletedAt: new Date(Date.now() - 12 * 60 * 60 * 1_000).toISOString(),
+  });
+  createdRunnerIds.add(runner.id);
+
+  try {
+    await startCostUsageFixture(created.id, runner.id);
+    await withPinnedDevelopmentUserForAgent(created.id, async () => {
+      await page.goto("/dashboard");
+
+      const costPanel = page.getByRole("region", { name: "Infrastructure cost estimates" });
+      await expect(costPanel).toBeVisible();
+      await expect(costPanel.getByRole("heading", { name: "Daily estimate" })).toBeVisible();
+      await expect(costPanel.getByRole("heading", { name: "Monthly estimate" })).toBeVisible();
+      await expect(costPanel).toContainText("Estimated runner monthly cost");
+      await expect(costPanel).toContainText("Estimated daily infrastructure cost");
+      await expect(costPanel).toContainText("Estimated monthly infrastructure cost");
+      await expect(costPanel).toContainText("Estimated infrastructure cost per agent");
+      await expect(costPanel).toContainText("1 running");
+      await expect(costPanel.getByText("$6.00", { exact: true })).toHaveCount(2);
+      await expect(costPanel).toContainText("Raw compute estimate only");
+      await expect(costPanel).not.toContainText(created.id);
+      await expect(costPanel).not.toContainText(runner.id);
+      await expect(costPanel).not.toContainText(runnerName);
+      await expect(costPanel).not.toContainText(providerResourceId);
+      await expect(costPanel).not.toContainText("runnerId");
+      await expect(costPanel).not.toContainText("endpointUrl");
+      await expect(costPanel).not.toContainText("credential");
+      await expectPageNotHorizontallyOverflowing(page);
+    });
+  } finally {
+    await stopCostUsageFixture(created.id);
+  }
+});
+
+test("/dashboard keeps manual runner estimates unavailable instead of showing zero", async ({
+  isMobile,
+  page,
+}, testInfo) => {
+  test.skip(isMobile, "manual-price unavailable browser proof runs once on desktop");
+
+  const created = await insertCostAgentFixture(`Manual Cost Agent ${testInfo.project.name}`);
+  createdAgentIds.add(created.id);
+  const runner = await insertManualRunnerForAgent(created.id, {
+    name: `Manual Cost Runner ${testInfo.project.name}`,
+    endpointUrl: `https://user:password@manual-cost-${randomUUID()}.example.com?token=hidden`,
+    status: "online",
+    updatedAt: new Date().toISOString(),
+  });
+  createdRunnerIds.add(runner.id);
+
+  await withPinnedDevelopmentUserForAgent(created.id, async () => {
+    await page.goto("/dashboard");
+
+    const costPanel = page.getByRole("region", { name: "Infrastructure cost estimates" });
+    await expect(costPanel).toContainText("Estimate unavailable");
+    await expect(costPanel).toContainText(
+      "A total is unavailable because at least one runner does not have provider price metadata.",
+    );
+    await expect(costPanel).toContainText(
+      "Manual runners and unknown provider prices remain unavailable until price metadata is configured.",
+    );
+    await expect(costPanel).not.toContainText("$0.00");
+    await expect(costPanel).not.toContainText(runner.id);
+    await expect(costPanel).not.toContainText("password");
+    await expect(costPanel).not.toContainText("token=hidden");
+  });
+});
+
 function trackAgentHref(agentHref: string | null): void {
   const agentId = agentHref?.match(/^\/agents\/([0-9a-f-]+)$/)?.[1];
 
@@ -2715,6 +2800,24 @@ async function createAgent(
   };
 }
 
+async function insertCostAgentFixture(name: string): Promise<{ id: string }> {
+  return await withDatabase(async (sql) => {
+    const [user] = await sql<{ id: string }[]>`
+      insert into users default values
+      returning id
+    `;
+    const [agent] = await sql<{ id: string }[]>`
+      insert into agents (user_id, name, template_key, status)
+      values (${user?.id ?? ""}, ${name}, 'research_agent', 'stopped')
+      returning id
+    `;
+
+    expect(agent?.id).toMatch(/^[0-9a-f-]+$/);
+
+    return { id: agent?.id ?? "" };
+  });
+}
+
 async function markAgentDeleted(agentId: string): Promise<void> {
   await withDatabase(async (sql) => {
     await sql`update agents set deleted_at = now() where id = ${agentId}`;
@@ -3076,6 +3179,41 @@ async function markAgentErrored(agentId: string, statusReason: string): Promise<
   });
 }
 
+async function startCostUsageFixture(agentId: string, runnerId: string): Promise<void> {
+  await withDatabase(async (sql) => {
+    const startedAt = new Date(Date.now() - 12 * 60 * 60 * 1_000).toISOString();
+
+    await sql`
+      update agents
+      set runner_id = ${runnerId},
+          status = 'running',
+          updated_at = now()
+      where id = ${agentId}
+    `;
+    await sql`
+      insert into agent_usage_periods (agent_id, runner_id, source, started_at)
+      values (${agentId}, ${runnerId}, 'lifecycle', ${startedAt})
+    `;
+  });
+}
+
+async function stopCostUsageFixture(agentId: string): Promise<void> {
+  await withDatabase(async (sql) => {
+    await sql`
+      update agent_usage_periods
+      set stopped_at = coalesce(stopped_at, now()),
+          updated_at = now()
+      where agent_id = ${agentId}
+    `;
+    await sql`
+      update agents
+      set status = 'stopped',
+          updated_at = now()
+      where id = ${agentId}
+    `;
+  });
+}
+
 async function insertAgentEvent(
   agentId: string,
   event: {
@@ -3191,6 +3329,7 @@ async function withPinnedDevelopmentUserForAgent<T>(
 
 async function deleteCreatedAgents(agentIds: string[]): Promise<void> {
   await withDatabase(async (sql) => {
+    await sql`delete from agent_usage_periods where agent_id in ${sql(agentIds)}`;
     await sql`delete from backups where agent_id in ${sql(agentIds)}`;
     await sql`delete from agent_approvals where agent_id in ${sql(agentIds)}`;
     await sql`delete from agent_logs where agent_id in ${sql(agentIds)}`;
