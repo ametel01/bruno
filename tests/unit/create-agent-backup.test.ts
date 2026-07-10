@@ -79,7 +79,7 @@ describe("manual agent backup creation", () => {
         agentId: created.agent.id,
         status: "ready",
         storageUri: expect.stringMatching(
-          /^s3:\/\/agentbay-backups\/agents\/.+\/backups\/.+\.json$/,
+          /^s3:\/\/agentbay-backups\/users\/.+\/agents\/.+\/backups\/.+\.json$/,
         ),
       },
       event: { type: BACKUP_CREATED_EVENT_TYPE },
@@ -95,7 +95,7 @@ describe("manual agent backup creation", () => {
       .from(agentEvents)
       .where(eq(agentEvents.type, BACKUP_CREATED_EVENT_TYPE));
     const manifest = persistedBackups[0]?.manifestJson;
-    const artifactKey = `agents/${created.agent.id}/backups/${result.backup.id}.json`;
+    const artifactKey = `users/${created.agent.userId}/agents/${created.agent.id}/backups/${result.backup.id}.json`;
     const artifact = await storage.download({ key: artifactKey });
 
     expect(persistedBackups).toHaveLength(1);

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { isSupportedTemplateKey, type AgentTemplateSnapshot } from "@/src/server/agents/templates";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentConfigs, agents, backups } from "@/src/server/db/schema";
@@ -93,8 +93,8 @@ const RAW_SECRET_TEXT_PATTERNS = [
   /-----BEGIN (?:RSA |EC |OPENSSH |)PRIVATE KEY-----/,
 ] as const;
 
-export async function restoreBackupForDevelopmentUser(
-  input: { agentId: string; backupId: string },
+export async function restoreBackupForUser(
+  input: { agentId: string; backupId: string; userId: string },
   dependencies: RestoreBackupDependencies = {},
 ): Promise<RestoreBackupResult> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
@@ -125,7 +125,7 @@ export async function restoreBackupForDevelopmentUser(
     const storageResult = resolveBackupObjectStorage(dependencies);
 
     if (!storageResult.ok) {
-      const failedBackup = await markBackupFailed(connection, backupContext.id);
+      const failedBackup = await markBackupFailed(connection, input);
 
       return {
         ok: false,
@@ -135,10 +135,11 @@ export async function restoreBackupForDevelopmentUser(
       };
     }
 
-    const artifactKey = parseBackupStorageKey(backupContext.storageUri);
+    const expectedArtifactKey = buildUserBackupArtifactKey(input);
+    const artifactKey = parseBackupStorageKey(backupContext.storageUri, expectedArtifactKey);
 
     if (!artifactKey) {
-      const failedBackup = await markBackupFailed(connection, backupContext.id);
+      const failedBackup = await markBackupFailed(connection, input);
 
       return {
         ok: false,
@@ -151,7 +152,7 @@ export async function restoreBackupForDevelopmentUser(
     const downloadResult = await storageResult.storage.download({ key: artifactKey });
 
     if (!downloadResult.ok) {
-      const failedBackup = await markBackupFailed(connection, backupContext.id);
+      const failedBackup = await markBackupFailed(connection, input);
 
       return {
         ok: false,
@@ -164,7 +165,7 @@ export async function restoreBackupForDevelopmentUser(
     const manifestResult = parseAndValidateDownloadedManifest(downloadResult.body);
 
     if (!manifestResult.ok) {
-      const failedBackup = await markBackupFailed(connection, backupContext.id);
+      const failedBackup = await markBackupFailed(connection, input);
 
       return {
         ok: false,
@@ -176,16 +177,14 @@ export async function restoreBackupForDevelopmentUser(
     }
 
     const restored = await connection.db.transaction(async (tx) => {
-      const userId = await getDevelopmentUserId(tx);
-
-      if (!userId || userId !== backupContext.createdBy) {
-        throw new Error("Development user changed during backup restore.");
+      if (input.userId !== backupContext.createdBy) {
+        throw new Error("Backup ownership changed during restore.");
       }
 
       const [restoredAgent] = await tx
         .insert(agents)
         .values({
-          userId,
+          userId: input.userId,
           runnerId: null,
           name: restoredAgentName(manifestResult.manifest.agent.name),
           templateKey: manifestResult.manifest.agent.templateKey,
@@ -221,7 +220,14 @@ export async function restoreBackupForDevelopmentUser(
           restoredAt,
           manifestJson: manifestResult.manifest,
         })
-        .where(eq(backups.id, backupContext.id))
+        .where(
+          and(
+            eq(backups.id, backupContext.id),
+            eq(backups.agentId, input.agentId),
+            eq(backups.createdBy, input.userId),
+            eq(backups.status, "restoring"),
+          ),
+        )
         .returning();
 
       if (!restoredBackup) {
@@ -230,7 +236,7 @@ export async function restoreBackupForDevelopmentUser(
 
       await recordAgentEventInTransaction(tx, {
         agentId: restoredAgent.id,
-        actorUserId: userId,
+        actorUserId: input.userId,
         type: BACKUP_RESTORED_EVENT_TYPE,
         message: `Restored agent "${restoredAgent.name}" from backup.`,
         metadata: {
@@ -261,28 +267,57 @@ export async function restoreBackupForDevelopmentUser(
   }
 }
 
-async function selectAndMarkBackupRestoring(
-  connection: DatabaseConnection,
+export async function restoreBackupForDevelopmentUser(
   input: { agentId: string; backupId: string },
-): Promise<RestoreStart | null> {
-  return await connection.db.transaction(async (tx) => {
-    const userId = await getDevelopmentUserId(tx);
+  dependencies: RestoreBackupDependencies = {},
+): Promise<RestoreBackupResult> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    const userId = await connection.db.transaction((tx) => getDevelopmentUserId(tx));
 
     if (!userId) {
-      return null;
+      return {
+        ok: false,
+        reason: "backup_not_found",
+        message: "Backup could not be found.",
+      };
     }
 
-    const [backup] = await tx
-      .select()
+    return await restoreBackupForUser(
+      { ...input, userId },
+      { ...dependencies, createConnection: () => connection },
+    );
+  } catch (error) {
+    throw new RestoreBackupPersistenceError(error);
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+async function selectAndMarkBackupRestoring(
+  connection: DatabaseConnection,
+  input: { agentId: string; backupId: string; userId: string },
+): Promise<RestoreStart | null> {
+  return await connection.db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ backup: backups })
       .from(backups)
+      .innerJoin(agents, eq(agents.id, backups.agentId))
       .where(
         and(
           eq(backups.id, input.backupId),
           eq(backups.agentId, input.agentId),
-          eq(backups.createdBy, userId),
+          eq(backups.createdBy, input.userId),
+          eq(agents.userId, input.userId),
+          isNull(agents.deletedAt),
         ),
       )
       .limit(1);
+    const backup = row?.backup;
 
     if (!backup) {
       return null;
@@ -295,14 +330,27 @@ async function selectAndMarkBackupRestoring(
     const [restoringBackup] = await tx
       .update(backups)
       .set({ status: "restoring" })
-      .where(and(eq(backups.id, backup.id), eq(backups.status, "ready")))
+      .where(
+        and(
+          eq(backups.id, backup.id),
+          eq(backups.agentId, input.agentId),
+          eq(backups.createdBy, input.userId),
+          eq(backups.status, "ready"),
+        ),
+      )
       .returning();
 
     if (!restoringBackup) {
       const [currentBackup] = await tx
         .select()
         .from(backups)
-        .where(eq(backups.id, backup.id))
+        .where(
+          and(
+            eq(backups.id, backup.id),
+            eq(backups.agentId, input.agentId),
+            eq(backups.createdBy, input.userId),
+          ),
+        )
         .limit(1);
 
       if (!currentBackup) {
@@ -387,7 +435,7 @@ function toAgentTemplateSnapshot(value: Record<string, unknown>): AgentTemplateS
   };
 }
 
-function parseBackupStorageKey(storageUri: string | null): string | null {
+function parseBackupStorageKey(storageUri: string | null, expectedKey: string): string | null {
   if (!storageUri) {
     return null;
   }
@@ -412,7 +460,15 @@ function parseBackupStorageKey(storageUri: string | null): string | null {
 
   const key = parsed.pathname.startsWith("/") ? parsed.pathname.slice(1) : parsed.pathname;
 
-  return key.trim().length > 0 ? key : null;
+  return key === expectedKey ? key : null;
+}
+
+function buildUserBackupArtifactKey(input: {
+  userId: string;
+  agentId: string;
+  backupId: string;
+}): string {
+  return `users/${input.userId}/agents/${input.agentId}/backups/${input.backupId}.json`;
 }
 
 function resolveBackupObjectStorage(dependencies: RestoreBackupDependencies):
@@ -446,12 +502,19 @@ function resolveBackupObjectStorage(dependencies: RestoreBackupDependencies):
 
 async function markBackupFailed(
   connection: DatabaseConnection,
-  backupId: string,
+  input: { agentId: string; backupId: string; userId: string },
 ): Promise<BackupRow> {
   const [failedBackup] = await connection.db
     .update(backups)
     .set({ status: "failed", restoredAt: null })
-    .where(eq(backups.id, backupId))
+    .where(
+      and(
+        eq(backups.id, input.backupId),
+        eq(backups.agentId, input.agentId),
+        eq(backups.createdBy, input.userId),
+        eq(backups.status, "restoring"),
+      ),
+    )
     .returning();
 
   if (!failedBackup) {

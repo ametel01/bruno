@@ -15,13 +15,15 @@ import type {
 import type { AgentEventDto } from "@/src/server/events/agent-events";
 import type { ManualRunnerCapacitySummary } from "@/src/server/runners/manual-runner-status";
 
+const APPLICATION_USER_ID = "00000000-0000-4000-8000-000000000101";
+
 const mocks = vi.hoisted(() => ({
   closeDashboardConnection: vi.fn(),
   createDatabaseConnection: vi.fn(),
   getActiveAgentForDevelopmentUser: vi.fn(),
   getCostEstimatesForDevelopmentUser: vi.fn(),
   listAgentEventFeed: vi.fn(),
-  listLatestAgentActivity: vi.fn(),
+  listLatestAgentActivityForUser: vi.fn(),
   listLatestActiveAgentProcessLogs: vi.fn(),
   listActiveAgentsForDevelopmentUser: vi.fn(),
   listCloudRunnerProvisioningSummariesForDevelopmentUser: vi.fn(),
@@ -30,7 +32,8 @@ const mocks = vi.hoisted(() => ({
   getAssignedManualRunnerStatusForDevelopmentUserAgent: vi.fn(),
   listAgentBackupsForDevelopmentUser: vi.fn(),
   listPendingApprovalsForDevelopmentUserAgent: vi.fn(),
-  listPendingApprovalsForDevelopmentUser: vi.fn(),
+  listPendingApprovalsForUser: vi.fn(),
+  requireOperationalApplicationUser: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -65,7 +68,7 @@ vi.mock("@/src/server/approvals/agent-approvals", async (importOriginal) => {
   return {
     ...actual,
     listPendingApprovalsForDevelopmentUserAgent: mocks.listPendingApprovalsForDevelopmentUserAgent,
-    listPendingApprovalsForDevelopmentUser: mocks.listPendingApprovalsForDevelopmentUser,
+    listPendingApprovalsForUser: mocks.listPendingApprovalsForUser,
   };
 });
 
@@ -84,7 +87,7 @@ vi.mock("@/src/server/events/agent-events", async (importOriginal) => {
   return {
     ...actual,
     listAgentEventFeed: mocks.listAgentEventFeed,
-    listLatestAgentActivity: mocks.listLatestAgentActivity,
+    listLatestAgentActivityForUser: mocks.listLatestAgentActivityForUser,
   };
 });
 
@@ -127,6 +130,10 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({
     refresh: vi.fn(),
   }),
+}));
+
+vi.mock("@/src/server/users/operational-application-user", () => ({
+  requireOperationalApplicationUser: mocks.requireOperationalApplicationUser,
 }));
 
 function capacity(
@@ -217,12 +224,16 @@ function costEstimates(
 
 describe("product shell routes", () => {
   beforeEach(() => {
+    mocks.requireOperationalApplicationUser.mockResolvedValue({
+      ok: true,
+      userId: APPLICATION_USER_ID,
+    });
     mocks.createDatabaseConnection.mockReturnValue({
       db: {},
       close: mocks.closeDashboardConnection,
     });
     mocks.closeDashboardConnection.mockResolvedValue(undefined);
-    mocks.listLatestAgentActivity.mockResolvedValue({
+    mocks.listLatestAgentActivityForUser.mockResolvedValue({
       ok: true,
       page: {
         events: [],
@@ -236,7 +247,7 @@ describe("product shell routes", () => {
     mocks.listSettingsRunnerManagementSummariesForDevelopmentUser.mockResolvedValue([]);
     mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockResolvedValue(null);
     mocks.listAgentBackupsForDevelopmentUser.mockResolvedValue([]);
-    mocks.listPendingApprovalsForDevelopmentUser.mockResolvedValue([]);
+    mocks.listPendingApprovalsForUser.mockResolvedValue([]);
     mocks.listPendingApprovalsForDevelopmentUserAgent.mockResolvedValue([]);
     mocks.listAgentEventFeed.mockResolvedValue({
       ok: true,
@@ -253,7 +264,7 @@ describe("product shell routes", () => {
     mocks.getActiveAgentForDevelopmentUser.mockReset();
     mocks.getCostEstimatesForDevelopmentUser.mockReset();
     mocks.listAgentEventFeed.mockReset();
-    mocks.listLatestAgentActivity.mockReset();
+    mocks.listLatestAgentActivityForUser.mockReset();
     mocks.listLatestActiveAgentProcessLogs.mockReset();
     mocks.listActiveAgentsForDevelopmentUser.mockReset();
     mocks.listCloudRunnerProvisioningSummariesForDevelopmentUser.mockReset();
@@ -262,7 +273,8 @@ describe("product shell routes", () => {
     mocks.getAssignedManualRunnerStatusForDevelopmentUserAgent.mockReset();
     mocks.listAgentBackupsForDevelopmentUser.mockReset();
     mocks.listPendingApprovalsForDevelopmentUserAgent.mockReset();
-    mocks.listPendingApprovalsForDevelopmentUser.mockReset();
+    mocks.listPendingApprovalsForUser.mockReset();
+    mocks.requireOperationalApplicationUser.mockReset();
     mocks.notFound.mockClear();
   });
 
@@ -447,8 +459,12 @@ describe("product shell routes", () => {
 
     await vi.waitFor(() => {
       expect(mocks.getCostEstimatesForDevelopmentUser).toHaveBeenCalledTimes(1);
-      expect(mocks.listLatestAgentActivity).toHaveBeenCalledTimes(1);
-      expect(mocks.listPendingApprovalsForDevelopmentUser).toHaveBeenCalledTimes(1);
+      expect(mocks.listLatestAgentActivityForUser).toHaveBeenCalledWith({
+        db: {},
+        userId: APPLICATION_USER_ID,
+        limit: 8,
+      });
+      expect(mocks.listPendingApprovalsForUser).toHaveBeenCalledWith(APPLICATION_USER_ID);
       expect(mocks.listLatestActiveAgentProcessLogs).toHaveBeenCalledTimes(1);
       expect(mocks.listManualRunnerStatusSummariesForDevelopmentUser).toHaveBeenCalledTimes(1);
       expect(mocks.listCloudRunnerProvisioningSummariesForDevelopmentUser).toHaveBeenCalledTimes(1);
@@ -844,7 +860,7 @@ describe("product shell routes", () => {
 
   it("renders persisted pending approvals on the dashboard without raw payload details", async () => {
     mocks.listActiveAgentsForDevelopmentUser.mockResolvedValueOnce([]);
-    mocks.listPendingApprovalsForDevelopmentUser.mockResolvedValueOnce([
+    mocks.listPendingApprovalsForUser.mockResolvedValueOnce([
       {
         id: "00000000-0000-4000-8000-000000000511",
         agentId: "00000000-0000-4000-8000-000000000201",
@@ -928,9 +944,7 @@ describe("product shell routes", () => {
         createdAt: "2026-07-03T05:00:00.000Z",
       },
     ]);
-    mocks.listPendingApprovalsForDevelopmentUser.mockRejectedValueOnce(
-      new AgentApprovalPersistenceError(),
-    );
+    mocks.listPendingApprovalsForUser.mockRejectedValueOnce(new AgentApprovalPersistenceError());
 
     const element = await DashboardPage();
     const html = renderToStaticMarkup(element);

@@ -18,11 +18,11 @@ import {
 } from "@/src/server/agents/list-agents";
 import {
   AgentApprovalPersistenceError,
-  listPendingApprovalsForDevelopmentUser,
+  listPendingApprovalsForUser,
   type PendingApprovalDto,
 } from "@/src/server/approvals/agent-approvals";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { listLatestAgentActivity } from "@/src/server/events/agent-events";
+import { listLatestAgentActivityForUser } from "@/src/server/events/agent-events";
 import {
   listLatestActiveAgentProcessLogs,
   type LatestAgentProcessLogDto,
@@ -40,6 +40,7 @@ import {
   CostEstimatePersistenceError,
   getCostEstimatesForDevelopmentUser,
 } from "@/src/server/costs/cost-estimates";
+import { requireOperationalApplicationUser } from "@/src/server/users/operational-application-user";
 
 type DashboardContentProps = {
   routeLabel?: string;
@@ -55,6 +56,23 @@ type DashboardCloudRunnersResult = Awaited<ReturnType<typeof loadDashboardCloudR
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
+  const applicationUser = await requireOperationalApplicationUser();
+
+  if (!applicationUser.ok) {
+    return (
+      <ProductShell
+        active="dashboard"
+        eyebrow="Dashboard"
+        title="Authentication required"
+        description="Sign in to load user-scoped operational data."
+      >
+        <div className="safe-error" role="alert">
+          Authentication is required.
+        </div>
+      </ProductShell>
+    );
+  }
+
   const [
     listResult,
     activityResult,
@@ -65,8 +83,8 @@ export default async function DashboardPage() {
     costResult,
   ] = await Promise.all([
     loadDashboardAgents(),
-    loadDashboardActivity(),
-    loadDashboardApprovals(),
+    loadDashboardActivity(applicationUser.userId),
+    loadDashboardApprovals(applicationUser.userId),
     loadDashboardProcessLogs(),
     loadDashboardManualRunners(),
     loadDashboardCloudRunners(),
@@ -448,14 +466,16 @@ async function loadDashboardAgents() {
 }
 
 async function loadDashboardActivity(
+  userId: string,
   dependencies: { createConnection?: () => DatabaseConnection } = {},
 ) {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
 
   try {
-    const result = await listLatestAgentActivity({
+    const result = await listLatestAgentActivityForUser({
       db: connection.db,
+      userId,
       limit: 8,
     });
 
@@ -480,11 +500,11 @@ async function loadDashboardActivity(
   }
 }
 
-async function loadDashboardApprovals() {
+async function loadDashboardApprovals(userId: string) {
   try {
     return {
       ok: true as const,
-      approvals: await listPendingApprovalsForDevelopmentUser(),
+      approvals: await listPendingApprovalsForUser(userId),
     };
   } catch (error) {
     if (error instanceof AgentApprovalPersistenceError) {

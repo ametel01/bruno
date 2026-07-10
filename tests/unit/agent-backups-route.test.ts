@@ -1,9 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ACTIVE_AGENT_ID = "00000000-0000-4000-8000-000000000165";
+const USER_ID = "00000000-0000-4000-8000-000000000101";
 
 const mocks = vi.hoisted(() => ({
-  createManualBackupForDevelopmentUser: vi.fn(),
+  createManualBackupForUser: vi.fn(),
+  requireOperationalApplicationUser: vi.fn(),
 }));
 
 vi.mock("@/src/server/backups/create-backup", () => ({
@@ -14,16 +16,25 @@ vi.mock("@/src/server/backups/create-backup", () => ({
       this.name = "ManualBackupPersistenceError";
     }
   },
-  createManualBackupForDevelopmentUser: mocks.createManualBackupForDevelopmentUser,
+  createManualBackupForUser: mocks.createManualBackupForUser,
+}));
+
+vi.mock("@/src/server/users/operational-application-user", () => ({
+  requireOperationalApplicationUser: mocks.requireOperationalApplicationUser,
 }));
 
 describe("POST /api/agents/[agentId]/backups route", () => {
+  beforeEach(() => {
+    mocks.requireOperationalApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
+  });
+
   afterEach(() => {
-    mocks.createManualBackupForDevelopmentUser.mockReset();
+    mocks.createManualBackupForUser.mockReset();
+    mocks.requireOperationalApplicationUser.mockReset();
   });
 
   it("creates a manual backup for a valid agent id", async () => {
-    mocks.createManualBackupForDevelopmentUser.mockResolvedValue({
+    mocks.createManualBackupForUser.mockResolvedValue({
       ok: true,
       backup: backupDto("ready"),
       event: { type: "backup.created" },
@@ -48,8 +59,9 @@ describe("POST /api/agents/[agentId]/backups route", () => {
     expect(JSON.stringify(body)).not.toContain("s3://");
     expect(JSON.stringify(body)).not.toContain("agentbay-backups");
     expect(JSON.stringify(body)).not.toContain("manifestJson");
-    expect(mocks.createManualBackupForDevelopmentUser).toHaveBeenCalledWith({
+    expect(mocks.createManualBackupForUser).toHaveBeenCalledWith({
       agentId: ACTIVE_AGENT_ID,
+      userId: USER_ID,
     });
   });
 
@@ -68,11 +80,11 @@ describe("POST /api/agents/[agentId]/backups route", () => {
         message: "Agent ID must be a valid UUID.",
       },
     });
-    expect(mocks.createManualBackupForDevelopmentUser).not.toHaveBeenCalled();
+    expect(mocks.createManualBackupForUser).not.toHaveBeenCalled();
   });
 
   it("maps service failures to safe route errors with the failed backup payload", async () => {
-    mocks.createManualBackupForDevelopmentUser.mockResolvedValue({
+    mocks.createManualBackupForUser.mockResolvedValue({
       ok: false,
       reason: "backup_storage_failed",
       message: "Backup artifact upload failed. Check object storage configuration.",

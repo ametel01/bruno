@@ -1,15 +1,19 @@
-import {
-  AgentDetailPersistenceError,
-  getActiveAgentForDevelopmentUser,
-} from "@/src/server/agents/list-agents";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { listAgentEventFeed } from "@/src/server/events/agent-events";
+import { listAgentEventFeedForUser } from "@/src/server/events/agent-events";
+import {
+  type OperationalApplicationUserResolution,
+  requireOperationalApplicationUser,
+} from "@/src/server/users/operational-application-user";
 
 type AgentEventsRouteContext = {
   params: Promise<{
     agentId?: string;
   }>;
+};
+
+type AgentEventsRouteDependencies = {
+  requireApplicationUser?: typeof requireOperationalApplicationUser;
 };
 
 type ParsedLimit =
@@ -25,7 +29,11 @@ const MAX_ROUTE_EVENT_FEED_LIMIT = 100;
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request, context: AgentEventsRouteContext) {
+export async function GET(
+  request: Request,
+  context: AgentEventsRouteContext,
+  dependencies: AgentEventsRouteDependencies = {},
+) {
   const params = await context.params;
   const decodedAgentId = decodeAgentId(params.agentId ?? "");
 
@@ -45,44 +53,51 @@ export async function GET(request: Request, context: AgentEventsRouteContext) {
     return validationResponse("Limit must be a positive integer.");
   }
 
+  const applicationUser = await (
+    dependencies.requireApplicationUser ?? requireOperationalApplicationUser
+  )();
+
+  if (!applicationUser.ok) {
+    return authenticationResponse(applicationUser);
+  }
+
   let connection: DatabaseConnection | null = null;
 
   try {
     const routeConnection = createDatabaseConnection();
     connection = routeConnection;
 
-    const activeAgent = await getActiveAgentForDevelopmentUser(decodedAgentId.value, {
-      createConnection: () => routeConnection,
-    });
-
-    if (!activeAgent) {
-      return Response.json(
-        {
-          error: {
-            code: "agent_not_found",
-            message: "Agent could not be found.",
-          },
-        },
-        {
-          status: 404,
-        },
-      );
-    }
-
-    const result = await listAgentEventFeed({
-      db: routeConnection.db,
-      agentId: decodedAgentId.value,
-      cursor,
-      ...(parsedLimit.value === undefined ? {} : { limit: parsedLimit.value }),
-    });
+    const result = await routeConnection.db.transaction((tx) =>
+      listAgentEventFeedForUser({
+        db: tx,
+        userId: applicationUser.userId,
+        agentId: decodedAgentId.value,
+        cursor,
+        ...(parsedLimit.value === undefined ? {} : { limit: parsedLimit.value }),
+      }),
+    );
 
     if (!result.ok) {
+      if ("reason" in result && result.reason === "agent_not_found") {
+        return Response.json(
+          {
+            error: {
+              code: "agent_not_found",
+              message: "Agent could not be found.",
+            },
+          },
+          {
+            status: 404,
+          },
+        );
+      }
+
       return validationResponse("Cursor must be a valid event feed cursor.");
     }
 
     return Response.json(result.page);
   } catch (error) {
-    if (error instanceof AgentDetailPersistenceError || error instanceof Error) {
+    if (error instanceof Error) {
       return Response.json(
         {
           error: {
@@ -100,6 +115,23 @@ export async function GET(request: Request, context: AgentEventsRouteContext) {
   } finally {
     await connection?.close();
   }
+}
+
+function authenticationResponse(
+  result: Exclude<OperationalApplicationUserResolution, { ok: true }>,
+) {
+  return Response.json(
+    {
+      error: {
+        code: result.code,
+        message:
+          result.status === 401
+            ? "Authentication is required."
+            : "Authentication is not configured safely.",
+      },
+    },
+    { status: result.status },
+  );
 }
 
 function decodeAgentId(agentId: string):
