@@ -17,6 +17,9 @@ export function parseLegacyUserClaimArgs(args: string[]): LegacyUserClaimCliOpti
       if (!value) {
         throw new Error("--clerk-user-id requires a value.");
       }
+      if (value.startsWith("-")) {
+        throw new Error("--clerk-user-id requires a non-option value.");
+      }
       clerkUserId = value;
       index += 1;
       continue;

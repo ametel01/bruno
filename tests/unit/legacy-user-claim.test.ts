@@ -145,30 +145,78 @@ describe("legacy user claim", () => {
 });
 
 describe("legacy user claim CLI", () => {
-  it("requires an explicit Clerk user ID and defaults to dry run", () => {
+  it("requires an explicit Clerk user ID", () => {
     expect(() => parseLegacyUserClaimArgs([])).toThrow("--clerk-user-id is required.");
-    expect(parseLegacyUserClaimArgs(["--clerk-user-id", "user_cli"])).toEqual({
-      clerkUserId: "user_cli",
-      apply: false,
-    });
+    expect(() => parseLegacyUserClaimArgs(["--clerk-user-id"])).toThrow(
+      "--clerk-user-id requires a value.",
+    );
   });
 
-  it("prints only the count result and never echoes the supplied identity", async () => {
+  it.each([
+    ["missing before apply", ["--clerk-user-id", "--apply"]],
+    ["missing before repeated apply", ["--clerk-user-id", "--apply", "--apply"]],
+    ["unknown long option", ["--clerk-user-id", "--unknown"]],
+    ["short option", ["--clerk-user-id", "-x"]],
+  ])("rejects an option-like Clerk user ID: %s", (_label, args) => {
+    expect(() => parseLegacyUserClaimArgs(args)).toThrow(
+      "--clerk-user-id requires a non-option value.",
+    );
+  });
+
+  it.each([
+    ["dry run by default", ["--clerk-user-id", "user_cli_dry"], "user_cli_dry", false],
+    ["explicit dry run", ["--clerk-user-id", "user_cli_dry", "--dry-run"], "user_cli_dry", false],
+    ["apply", ["--clerk-user-id", "user_cli_apply", "--apply"], "user_cli_apply", true],
+  ] as const)("parses a valid explicit ID in %s mode", (_label, args, clerkUserId, apply) => {
+    expect(parseLegacyUserClaimArgs([...args])).toEqual({ clerkUserId, apply });
+  });
+
+  it.each([
+    ["missing before apply", ["--clerk-user-id", "--apply"]],
+    ["missing before repeated apply", ["--clerk-user-id", "--apply", "--apply"]],
+    ["unknown long option", ["--clerk-user-id", "--unknown"]],
+    ["short option", ["--clerk-user-id", "-x"]],
+  ])("rejects %s before invoking the claim dependency", async (_label, args) => {
+    const claim = createClaimMock();
+
+    await expect(runLegacyUserClaimCli(args, { claim })).rejects.toThrow(
+      "--clerk-user-id requires a non-option value.",
+    );
+    expect(claim).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing Clerk user ID value before invoking the claim dependency", async () => {
+    const claim = createClaimMock();
+
+    await expect(runLegacyUserClaimCli(["--clerk-user-id"], { claim })).rejects.toThrow(
+      "--clerk-user-id requires a value.",
+    );
+    expect(claim).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["dry run", ["--clerk-user-id", "user_private_dry"], "user_private_dry", false],
+    ["apply", ["--clerk-user-id", "user_private_apply", "--apply"], "user_private_apply", true],
+  ] as const)("invokes the claim for a valid explicit ID in %s mode without echoing it", async (_label, args, clerkUserId, apply) => {
     const write = vi.fn();
-    const claim = vi.fn(async () => ({
-      ok: false as const,
-      status: "no_legacy_user" as const,
-      dryRun: true,
-      candidateCount: 0,
-    }));
+    const claim = createClaimMock();
 
-    await runLegacyUserClaimCli(["--clerk-user-id", "user_private_cli"], { claim, write });
+    await runLegacyUserClaimCli([...args], { claim, write });
 
-    expect(claim).toHaveBeenCalledWith({ clerkUserId: "user_private_cli", apply: false });
+    expect(claim).toHaveBeenCalledWith({ clerkUserId, apply });
     expect(write).toHaveBeenCalledOnce();
-    expect(write.mock.calls[0]?.[0]).not.toContain("user_private_cli");
+    expect(write.mock.calls[0]?.[0]).not.toContain(clerkUserId);
   });
 });
+
+function createClaimMock() {
+  return vi.fn(async () => ({
+    ok: false as const,
+    status: "no_legacy_user" as const,
+    dryRun: true,
+    candidateCount: 0,
+  }));
+}
 
 async function seedLegacyOwnership(connection: DatabaseConnection): Promise<string> {
   const [user] = await connection.db.insert(users).values({}).returning({ id: users.id });
