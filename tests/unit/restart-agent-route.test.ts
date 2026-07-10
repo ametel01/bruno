@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const USER_ID = "00000000-0000-4000-8000-000000000101";
 
 const mocks = vi.hoisted(() => {
   class AgentLifecyclePersistenceError extends Error {
@@ -10,18 +12,28 @@ const mocks = vi.hoisted(() => {
 
   return {
     AgentLifecyclePersistenceError,
-    restartAgentForDevelopmentUser: vi.fn(),
+    requireConfiguredApplicationUser: vi.fn(),
+    restartAgentForUser: vi.fn(),
   };
 });
 
 vi.mock("@/src/server/agents/lifecycle", () => ({
   AgentLifecyclePersistenceError: mocks.AgentLifecyclePersistenceError,
-  restartAgentForDevelopmentUser: mocks.restartAgentForDevelopmentUser,
+  restartAgentForUser: mocks.restartAgentForUser,
+}));
+
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
 }));
 
 describe("POST /api/agents/[agentId]/actions/restart route", () => {
+  beforeEach(() => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
+  });
+
   afterEach(() => {
-    mocks.restartAgentForDevelopmentUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
+    mocks.restartAgentForUser.mockReset();
   });
 
   it("returns validation JSON for malformed percent-encoded agent IDs", async () => {
@@ -39,13 +51,11 @@ describe("POST /api/agents/[agentId]/actions/restart route", () => {
         message: "Agent ID must be a valid UUID.",
       },
     });
-    expect(mocks.restartAgentForDevelopmentUser).not.toHaveBeenCalled();
+    expect(mocks.restartAgentForUser).not.toHaveBeenCalled();
   });
 
   it("returns a safe persistence error response", async () => {
-    mocks.restartAgentForDevelopmentUser.mockRejectedValueOnce(
-      new mocks.AgentLifecyclePersistenceError(),
-    );
+    mocks.restartAgentForUser.mockRejectedValueOnce(new mocks.AgentLifecyclePersistenceError());
     const { POST } = await import("@/app/api/agents/[agentId]/actions/restart/route");
 
     const response = await POST(new Request("http://localhost/api/agents/restart"), {
@@ -60,6 +70,10 @@ describe("POST /api/agents/[agentId]/actions/restart route", () => {
         message: "Agent could not be restarted.",
       },
     });
+    expect(mocks.restartAgentForUser).toHaveBeenCalledWith(
+      USER_ID,
+      "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+    );
     expect(JSON.stringify(body)).not.toContain("postgres://");
   });
 });

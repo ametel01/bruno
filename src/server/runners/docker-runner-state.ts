@@ -89,20 +89,32 @@ export async function recordDockerRunnerContainerForDevelopmentUser(input: {
   startedAt?: Date | null;
   finishedAt?: Date | null;
 }): Promise<DockerRunnerContainerDto | null> {
+  const userId = await getDevelopmentUserForDatabase(input.db);
+
+  return userId ? recordDockerRunnerContainerForUser({ ...input, userId }) : null;
+}
+
+export async function recordDockerRunnerContainerForUser(input: {
+  db: DockerRunnerStateDatabase;
+  userId: string;
+  agentId: string;
+  containerId: string;
+  containerName: string;
+  image: string;
+  observedStatus: string;
+  metadata?: Record<string, unknown>;
+  observedAt?: Date;
+  startedAt?: Date | null;
+  finishedAt?: Date | null;
+}): Promise<DockerRunnerContainerDto | null> {
   return input.db.transaction(async (tx) => {
-    const developmentUserId = await getDevelopmentUserId(tx);
-
-    if (!developmentUserId) {
-      return null;
-    }
-
     const [activeAgent] = await tx
       .select({ id: agents.id })
       .from(agents)
       .where(
         and(
           eq(agents.id, input.agentId),
-          eq(agents.userId, developmentUserId),
+          eq(agents.userId, input.userId),
           isNull(agents.deletedAt),
         ),
       )
@@ -171,6 +183,20 @@ export async function appendDockerRunnerLogLines(input: {
   lines: readonly DockerRunnerLogLineInput[];
   now?: Date;
 }): Promise<{ inserted: number; logs: AgentLogDto[] }> {
+  const userId = await getDevelopmentUserForDatabase(input.db);
+
+  return userId
+    ? appendDockerRunnerLogLinesForUser({ ...input, userId })
+    : { inserted: 0, logs: [] };
+}
+
+export async function appendDockerRunnerLogLinesForUser(input: {
+  db: DockerRunnerStateDatabase;
+  userId: string;
+  containerId: string;
+  lines: readonly DockerRunnerLogLineInput[];
+  now?: Date;
+}): Promise<{ inserted: number; logs: AgentLogDto[] }> {
   if (input.lines.length === 0) {
     return { inserted: 0, logs: [] };
   }
@@ -180,16 +206,10 @@ export async function appendDockerRunnerLogLines(input: {
   }
 
   return input.db.transaction(async (tx) => {
-    const developmentUserId = await getDevelopmentUserId(tx);
-
-    if (!developmentUserId) {
-      return { inserted: 0, logs: [] };
-    }
-
     const [containerRow] = await lockActiveDockerContainerInTransaction(
       tx,
       input.containerId,
-      developmentUserId,
+      input.userId,
     );
 
     if (!containerRow) {
@@ -238,17 +258,22 @@ export async function getDockerRunnerContainerForDevelopmentUser(input: {
   agentId: string;
   containerId?: string;
 }): Promise<DockerRunnerContainerDto | null> {
+  const userId = await getDevelopmentUserForDatabase(input.db);
+
+  return userId ? getDockerRunnerContainerForUser({ ...input, userId }) : null;
+}
+
+export async function getDockerRunnerContainerForUser(input: {
+  db: DockerRunnerStateDatabase;
+  userId: string;
+  agentId: string;
+  containerId?: string;
+}): Promise<DockerRunnerContainerDto | null> {
   return input.db.transaction(async (tx) => {
-    const developmentUserId = await getDevelopmentUserId(tx);
-
-    if (!developmentUserId) {
-      return null;
-    }
-
     const predicates = [
       eq(dockerRunnerContainers.agentId, input.agentId),
       eq(agents.id, input.agentId),
-      eq(agents.userId, developmentUserId),
+      eq(agents.userId, input.userId),
       isNull(agents.deletedAt),
     ];
 
@@ -284,13 +309,18 @@ export async function getLatestDockerRunnerLogCursor(input: {
   agentId: string;
   containerId: string;
 }): Promise<{ sequence: number; createdAt: Date } | null> {
+  const userId = await getDevelopmentUserForDatabase(input.db);
+
+  return userId ? getLatestDockerRunnerLogCursorForUser({ ...input, userId }) : null;
+}
+
+export async function getLatestDockerRunnerLogCursorForUser(input: {
+  db: DockerRunnerStateDatabase;
+  userId: string;
+  agentId: string;
+  containerId: string;
+}): Promise<{ sequence: number; createdAt: Date } | null> {
   const [latestLog] = await input.db.transaction(async (tx) => {
-    const developmentUserId = await getDevelopmentUserId(tx);
-
-    if (!developmentUserId) {
-      return [];
-    }
-
     return tx
       .select({
         sequence: agentLogs.sequence,
@@ -308,7 +338,7 @@ export async function getLatestDockerRunnerLogCursor(input: {
           eq(dockerRunnerContainers.agentId, input.agentId),
           eq(dockerRunnerContainers.containerId, input.containerId),
           eq(agents.id, input.agentId),
-          eq(agents.userId, developmentUserId),
+          eq(agents.userId, input.userId),
           isNull(agents.deletedAt),
         ),
       )
@@ -326,23 +356,30 @@ export async function listDockerRunnerContainerLogs(input: {
   after?: number | null;
   limit?: number;
 }): Promise<AgentLogDto[]> {
+  const userId = await getDevelopmentUserForDatabase(input.db);
+
+  return userId ? listDockerRunnerContainerLogsForUser({ ...input, userId }) : [];
+}
+
+export async function listDockerRunnerContainerLogsForUser(input: {
+  db: DockerRunnerStateDatabase;
+  userId: string;
+  agentId: string;
+  containerId: string;
+  after?: number | null;
+  limit?: number;
+}): Promise<AgentLogDto[]> {
   const limit =
     typeof input.limit === "number" && Number.isInteger(input.limit)
       ? Math.min(Math.max(input.limit, 1), 100)
       : 100;
   const rows = await input.db.transaction(async (tx) => {
-    const developmentUserId = await getDevelopmentUserId(tx);
-
-    if (!developmentUserId) {
-      return [];
-    }
-
     const predicates = [
       eq(agentLogs.agentId, input.agentId),
       eq(dockerRunnerContainers.agentId, input.agentId),
       eq(dockerRunnerContainers.containerId, input.containerId),
       eq(agents.id, input.agentId),
-      eq(agents.userId, developmentUserId),
+      eq(agents.userId, input.userId),
       isNull(agents.deletedAt),
     ];
 
@@ -364,6 +401,10 @@ export async function listDockerRunnerContainerLogs(input: {
   });
 
   return rows.map((row) => mapAgentLogToDto(row));
+}
+
+function getDevelopmentUserForDatabase(db: DockerRunnerStateDatabase): Promise<string | null> {
+  return db.transaction((tx) => getDevelopmentUserId(tx));
 }
 
 export function mapDockerRunnerContainerToDto(
@@ -471,7 +512,7 @@ function assertValidDockerLogLine(line: DockerRunnerLogLineInput): void {
 function lockActiveDockerContainerInTransaction(
   tx: DockerRunnerStateTransaction,
   containerId: string,
-  developmentUserId: string,
+  userId: string,
 ): Promise<{ id: string; agent_id: string }[]> {
   return tx.execute<{ id: string; agent_id: string }>(sql`
     select ${dockerRunnerContainers.id} as id,
@@ -480,7 +521,7 @@ function lockActiveDockerContainerInTransaction(
     inner join ${agents}
       on ${agents.id} = ${dockerRunnerContainers.agentId}
     where ${dockerRunnerContainers.containerId} = ${containerId}
-      and ${agents.userId} = ${developmentUserId}
+      and ${agents.userId} = ${userId}
       and ${agents.deletedAt} is null
     for update
   `);

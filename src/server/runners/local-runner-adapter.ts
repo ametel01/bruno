@@ -6,14 +6,23 @@ import {
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   appendLocalRunnerLogLines,
+  appendLocalRunnerLogLinesForUser,
   createLocalRunnerProcessForDevelopmentUser,
+  createLocalRunnerProcessForUser,
   getLatestLocalRunnerProcessForDevelopmentUser,
+  getLatestLocalRunnerProcessForUser,
   listLocalRunnerProcessLogs,
+  listLocalRunnerProcessLogsForUser,
   type LocalRunnerLogLineInput,
   type LocalRunnerProcessDto,
   recordLocalRunnerProcessExit,
+  recordLocalRunnerProcessExitForUser,
 } from "@/src/server/runners/local-runner-state";
-import { listAgentLogs, type AgentLogPage } from "@/src/server/logs/agent-logs";
+import {
+  listAgentLogs,
+  listAgentLogsForUser,
+  type AgentLogPage,
+} from "@/src/server/logs/agent-logs";
 import type {
   RunnerAdapter as RunnerAdapterContract,
   RunnerLogStreamInput,
@@ -84,10 +93,12 @@ export type LocalRunnerAdapterDependencies = {
   onUnexpectedExit?: (event: LocalRunnerUnexpectedExitEvent) => Promise<void>;
   spawnProcess?: LocalRunnerSpawn;
   stopTimeoutMs?: number;
+  userId?: string;
 };
 
 type ManagedChildProcess = {
   agentId: string;
+  userId?: string;
   child: ChildProcessWithoutNullStreams;
   process: LocalRunnerProcessDto;
   stdoutRemainder: string;
@@ -113,6 +124,7 @@ export class LocalRunnerAdapter implements RunnerAdapter {
   private readonly ownsConnections: boolean;
   private readonly spawnProcess: LocalRunnerSpawn;
   private readonly stopTimeoutMs: number;
+  private readonly userId: string | undefined;
   private readonly managedByProcessId = new Map<string, ManagedChildProcess>();
 
   constructor(dependencies: LocalRunnerAdapterDependencies = {}) {
@@ -122,6 +134,7 @@ export class LocalRunnerAdapter implements RunnerAdapter {
     this.ownsConnections = !dependencies.createConnection;
     this.spawnProcess = dependencies.spawnProcess ?? spawnConfiguredChildProcess;
     this.stopTimeoutMs = dependencies.stopTimeoutMs ?? DEFAULT_STOP_TIMEOUT_MS;
+    this.userId = dependencies.userId;
   }
 
   async start(agentId: string): Promise<LocalRunnerStartResult> {
@@ -146,7 +159,7 @@ export class LocalRunnerAdapter implements RunnerAdapter {
         return { ok: false, reason: "spawn_failed" };
       }
 
-      const processRow = await createLocalRunnerProcessForDevelopmentUser({
+      const processInput = {
         db: connection.db,
         agentId,
         pid: child.pid,
@@ -156,8 +169,12 @@ export class LocalRunnerAdapter implements RunnerAdapter {
           ...(this.command.cwd === undefined ? {} : { cwd: this.command.cwd }),
           envKeys: Object.keys(this.command.env ?? {}).sort(),
         },
-        status: "running",
-      });
+        status: "running" as const,
+      };
+      const processRow =
+        this.userId === undefined
+          ? await createLocalRunnerProcessForDevelopmentUser(processInput)
+          : await createLocalRunnerProcessForUser({ ...processInput, userId: this.userId });
 
       if (!processRow) {
         await terminateUntrackedChildProcess(child, this.stopTimeoutMs);
@@ -167,6 +184,7 @@ export class LocalRunnerAdapter implements RunnerAdapter {
 
       const managed: ManagedChildProcess = {
         agentId,
+        ...(this.userId === undefined ? {} : { userId: this.userId }),
         child,
         process: processRow,
         stdoutRemainder: "",
@@ -200,11 +218,18 @@ export class LocalRunnerAdapter implements RunnerAdapter {
     const connection = this.createConnection();
 
     try {
-      const latestProcess = await getLatestLocalRunnerProcessForDevelopmentUser({
+      const processInput = {
         db: connection.db,
         agentId,
         statuses: RUNNING_PROCESS_STATUSES,
-      });
+      };
+      const latestProcess =
+        this.userId === undefined
+          ? await getLatestLocalRunnerProcessForDevelopmentUser(processInput)
+          : await getLatestLocalRunnerProcessForUser({
+              ...processInput,
+              userId: this.userId,
+            });
 
       if (!latestProcess) {
         await this.closeOwnedConnection(connection);
@@ -253,10 +278,17 @@ export class LocalRunnerAdapter implements RunnerAdapter {
     const connection = this.createConnection();
 
     try {
-      const processRow = await getLatestLocalRunnerProcessForDevelopmentUser({
+      const processInput = {
         db: connection.db,
         agentId,
-      });
+      };
+      const processRow =
+        this.userId === undefined
+          ? await getLatestLocalRunnerProcessForDevelopmentUser(processInput)
+          : await getLatestLocalRunnerProcessForUser({
+              ...processInput,
+              userId: this.userId,
+            });
 
       return { ok: true, process: processRow };
     } catch {
@@ -271,12 +303,19 @@ export class LocalRunnerAdapter implements RunnerAdapter {
 
     try {
       if (input.processId) {
-        const logs = await listLocalRunnerProcessLogs({
+        const logInput = {
           db: connection.db,
           agentId: input.agentId,
           processId: input.processId,
           ...(input.limit === undefined ? {} : { limit: input.limit }),
-        });
+        };
+        const logs =
+          this.userId === undefined
+            ? await listLocalRunnerProcessLogs(logInput)
+            : await listLocalRunnerProcessLogsForUser({
+                ...logInput,
+                userId: this.userId,
+              });
 
         return {
           logs,
@@ -284,12 +323,16 @@ export class LocalRunnerAdapter implements RunnerAdapter {
         };
       }
 
-      return listAgentLogs({
+      const logInput = {
         db: connection.db,
         agentId: input.agentId,
         ...(input.after === undefined ? {} : { after: input.after }),
         ...(input.limit === undefined ? {} : { limit: input.limit }),
-      });
+      };
+
+      return this.userId === undefined
+        ? listAgentLogs(logInput)
+        : listAgentLogsForUser({ ...logInput, userId: this.userId });
     } finally {
       await this.closeOwnedConnection(connection);
     }
@@ -394,7 +437,13 @@ function attachProcessCloseRecording(
             : {}),
         };
 
-        const terminalProcess = await recordLocalRunnerProcessExit(exitInput);
+        const terminalProcess =
+          managed.userId === undefined
+            ? await recordLocalRunnerProcessExit(exitInput)
+            : await recordLocalRunnerProcessExitForUser({
+                ...exitInput,
+                userId: managed.userId,
+              });
 
         if (!managed.stopRequested && terminalProcess && onUnexpectedExit) {
           await onUnexpectedExit({
@@ -461,11 +510,17 @@ function enqueueLogLines(
   }
 
   managed.logQueue = managed.logQueue.then(async () => {
-    await appendLocalRunnerLogLines({
+    const logInput = {
       db: connection.db,
       processId: managed.process.id,
       lines: lines.map((message) => ({ stream, message })),
-    });
+    };
+
+    if (managed.userId === undefined) {
+      await appendLocalRunnerLogLines(logInput);
+    } else {
+      await appendLocalRunnerLogLinesForUser({ ...logInput, userId: managed.userId });
+    }
   });
 }
 

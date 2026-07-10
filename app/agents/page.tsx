@@ -9,23 +9,43 @@ import { AGENT_NAME_MAX_LENGTH } from "@/src/server/agents/create-agent";
 import { AGENT_TEMPLATE_OPTIONS } from "@/src/server/agents/templates";
 import {
   AgentListPersistenceError,
-  listActiveAgentsForDevelopmentUser,
+  listActiveAgentsForUser,
 } from "@/src/server/agents/list-agents";
 import {
-  listAssignableRunnersForDevelopmentUser,
+  listAssignableRunnersForUser,
   RunnerAssignmentPersistenceError,
 } from "@/src/server/runners/runner-assignment";
 import {
   CloudRunnerProvisioningPersistenceError,
-  listCloudRunnerProvisioningSummariesForDevelopmentUser,
+  listCloudRunnerProvisioningSummariesForUser,
 } from "@/src/server/runners/cloud-runner-provisioning";
+import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
 export const dynamic = "force-dynamic";
 
 export default async function AgentsPage() {
-  const listResult = await loadAgents();
-  const runnerResult = await loadAssignableRunners();
-  const cloudRunnersResult = await loadCloudRunnerProvisioning();
+  const applicationUser = await requireConfiguredApplicationUser();
+
+  if (!applicationUser.ok) {
+    return (
+      <ProductShell
+        active="agents"
+        eyebrow="Agents"
+        title="Authentication required"
+        description="Sign in to load user-scoped agent data."
+      >
+        <div className="safe-error" role="alert">
+          Authentication is required.
+        </div>
+      </ProductShell>
+    );
+  }
+
+  const [listResult, runnerResult, cloudRunnersResult] = await Promise.all([
+    loadAgents(applicationUser.userId),
+    loadAssignableRunners(applicationUser.userId),
+    loadCloudRunnerProvisioning(applicationUser.userId),
+  ]);
 
   return (
     <ProductShell
@@ -121,11 +141,11 @@ export default async function AgentsPage() {
   );
 }
 
-async function loadAssignableRunners() {
+async function loadAssignableRunners(userId: string) {
   try {
     return {
       ok: true as const,
-      runners: await listAssignableRunnersForDevelopmentUser(),
+      runners: await listAssignableRunnersForUser(userId),
     };
   } catch (error) {
     if (error instanceof RunnerAssignmentPersistenceError) {
@@ -138,11 +158,11 @@ async function loadAssignableRunners() {
   }
 }
 
-async function loadCloudRunnerProvisioning() {
+async function loadCloudRunnerProvisioning(userId: string) {
   try {
     return {
       ok: true as const,
-      runners: await listCloudRunnerProvisioningSummariesForDevelopmentUser(),
+      runners: await listCloudRunnerProvisioningSummariesForUser(userId),
     };
   } catch (error) {
     if (error instanceof CloudRunnerProvisioningPersistenceError) {
@@ -155,11 +175,11 @@ async function loadCloudRunnerProvisioning() {
   }
 }
 
-async function loadAgents() {
+async function loadAgents(userId: string) {
   try {
     return {
       ok: true as const,
-      agents: await listActiveAgentsForDevelopmentUser(),
+      agents: await listActiveAgentsForUser(userId),
     };
   } catch (error) {
     if (error instanceof AgentListPersistenceError) {

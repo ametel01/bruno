@@ -1,21 +1,33 @@
 import {
   AgentDetailPersistenceError,
-  getActiveAgentForDevelopmentUser,
+  getActiveAgentForUser,
 } from "@/src/server/agents/list-agents";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import {
   getLifecycleManualRunnerAdapter,
-  getLifecycleRunnerAdapter,
+  getLifecycleRunnerAdapterForUser,
 } from "@/src/server/agents/lifecycle";
 import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { type AgentLogDto, type AgentLogPage, listAgentLogs } from "@/src/server/logs/agent-logs";
-import { getAssignedRunnerForActiveAgentDevelopmentUser } from "@/src/server/runners/manual-runner-persistence";
+import {
+  type AgentLogDto,
+  type AgentLogPage,
+  listAgentLogsForUser,
+} from "@/src/server/logs/agent-logs";
+import { getAssignedRunnerForActiveAgentForUser } from "@/src/server/runners/manual-runner-persistence";
+import {
+  type ConfiguredApplicationUserResolution,
+  requireConfiguredApplicationUser,
+} from "@/src/server/users/configured-application-user";
 
 type AgentLogsRouteContext = {
   params: Promise<{
     agentId?: string;
   }>;
+};
+
+type AgentLogsRouteDependencies = {
+  requireApplicationUser?: typeof requireConfiguredApplicationUser;
 };
 
 type ParsedIntegerQuery =
@@ -41,7 +53,11 @@ type PublicAgentLogPage = {
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request, context: AgentLogsRouteContext) {
+export async function GET(
+  request: Request,
+  context: AgentLogsRouteContext,
+  dependencies: AgentLogsRouteDependencies = {},
+) {
   const params = await context.params;
   const decodedAgentId = decodeAgentId(params.agentId ?? "");
 
@@ -61,13 +77,21 @@ export async function GET(request: Request, context: AgentLogsRouteContext) {
     return validationResponse("Limit must be a positive integer.");
   }
 
+  const applicationUser = await (
+    dependencies.requireApplicationUser ?? requireConfiguredApplicationUser
+  )();
+
+  if (!applicationUser.ok) {
+    return authenticationResponse(applicationUser);
+  }
+
   let connection: DatabaseConnection | null = null;
 
   try {
     const routeConnection = createDatabaseConnection();
     connection = routeConnection;
 
-    const activeAgent = await getActiveAgentForDevelopmentUser(decodedAgentId.value, {
+    const activeAgent = await getActiveAgentForUser(applicationUser.userId, decodedAgentId.value, {
       createConnection: () => routeConnection,
     });
 
@@ -88,7 +112,8 @@ export async function GET(request: Request, context: AgentLogsRouteContext) {
     let page: AgentLogPage;
 
     if (activeAgent.status === "running") {
-      const assignedRunner = await getAssignedRunnerForActiveAgentDevelopmentUser(
+      const assignedRunner = await getAssignedRunnerForActiveAgentForUser(
+        applicationUser.userId,
         decodedAgentId.value,
         {
           createConnection: () => routeConnection,
@@ -98,7 +123,9 @@ export async function GET(request: Request, context: AgentLogsRouteContext) {
         ? getLifecycleManualRunnerAdapter(assignedRunner, {
             createConnection: () => routeConnection,
           })
-        : getLifecycleRunnerAdapter();
+        : getLifecycleRunnerAdapterForUser(applicationUser.userId, {
+            createConnection: () => routeConnection,
+          });
 
       page = await runnerAdapter.streamLogs({
         agentId: decodedAgentId.value,
@@ -106,8 +133,9 @@ export async function GET(request: Request, context: AgentLogsRouteContext) {
         ...(parsedLimit.value === undefined ? {} : { limit: parsedLimit.value }),
       });
     } else {
-      page = await listAgentLogs({
+      page = await listAgentLogsForUser({
         db: routeConnection.db,
+        userId: applicationUser.userId,
         agentId: decodedAgentId.value,
         ...(parsedAfter.value === undefined ? {} : { after: parsedAfter.value }),
         ...(parsedLimit.value === undefined ? {} : { limit: parsedLimit.value }),
@@ -134,6 +162,23 @@ export async function GET(request: Request, context: AgentLogsRouteContext) {
   } finally {
     await connection?.close();
   }
+}
+
+function authenticationResponse(
+  result: Exclude<ConfiguredApplicationUserResolution, { ok: true }>,
+) {
+  return Response.json(
+    {
+      error: {
+        code: result.code,
+        message:
+          result.status === 401
+            ? "Authentication is required."
+            : "Authentication is not configured safely.",
+      },
+    },
+    { status: result.status },
+  );
 }
 
 function toPublicAgentLogPage(page: AgentLogPage): PublicAgentLogPage {

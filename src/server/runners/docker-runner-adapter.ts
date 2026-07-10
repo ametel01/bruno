@@ -7,12 +7,17 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import type { AgentLogPage } from "@/src/server/logs/agent-logs";
 import {
   appendDockerRunnerLogLines,
+  appendDockerRunnerLogLinesForUser,
   type DockerRunnerContainerDto,
   type DockerRunnerLogLineInput,
   getDockerRunnerContainerForDevelopmentUser,
+  getDockerRunnerContainerForUser,
   getLatestDockerRunnerLogCursor,
+  getLatestDockerRunnerLogCursorForUser,
   listDockerRunnerContainerLogs,
+  listDockerRunnerContainerLogsForUser,
   recordDockerRunnerContainerForDevelopmentUser,
+  recordDockerRunnerContainerForUser,
 } from "@/src/server/runners/docker-runner-state";
 import type {
   RunnerAdapter as RunnerAdapterContract,
@@ -128,6 +133,7 @@ export type DockerRunnerAdapterDependencies = {
   nameSuffix?: () => string;
   now?: () => Date;
   resources?: Partial<DockerRunnerResources>;
+  userId?: string;
 };
 
 type DockerInspectContainer = {
@@ -176,6 +182,7 @@ export class DockerRunnerAdapter
   private readonly now: () => Date;
   private readonly ownsConnections: boolean;
   private readonly resources: DockerRunnerResources;
+  private readonly userId: string | undefined;
 
   constructor(dependencies: DockerRunnerAdapterDependencies = {}) {
     this.command = dependencies.command ?? resolveDockerRunnerCommand();
@@ -194,6 +201,7 @@ export class DockerRunnerAdapter
         dependencies.resources?.memory ??
         resolveDockerTextEnv(DOCKER_RUNNER_MEMORY_LIMIT_ENV, DEFAULT_DOCKER_MEMORY_LIMIT),
     };
+    this.userId = dependencies.userId;
   }
 
   async start(agentId: string): Promise<DockerRunnerStartResult> {
@@ -238,7 +246,7 @@ export class DockerRunnerAdapter
       }
 
       try {
-        const container = await recordDockerRunnerContainerForDevelopmentUser({
+        const containerInput = {
           db: connection.db,
           agentId,
           containerId,
@@ -255,7 +263,14 @@ export class DockerRunnerAdapter
           observedAt: this.now(),
           startedAt: dockerTimestampToDate(inspected.inspect.State?.StartedAt),
           finishedAt: dockerTimestampToDate(inspected.inspect.State?.FinishedAt),
-        });
+        };
+        const container =
+          this.userId === undefined
+            ? await recordDockerRunnerContainerForDevelopmentUser(containerInput)
+            : await recordDockerRunnerContainerForUser({
+                ...containerInput,
+                userId: this.userId,
+              });
 
         if (!container) {
           await this.cleanupStartedContainer(containerId, agentId);
@@ -443,11 +458,18 @@ export class DockerRunnerAdapter
       );
 
       if (target.ok) {
-        const latestCursor = await getLatestDockerRunnerLogCursor({
+        const cursorInput = {
           db: connection.db,
           agentId: input.agentId,
           containerId: target.target.stored.containerId,
-        });
+        };
+        const latestCursor =
+          this.userId === undefined
+            ? await getLatestDockerRunnerLogCursor(cursorInput)
+            : await getLatestDockerRunnerLogCursorForUser({
+                ...cursorInput,
+                userId: this.userId,
+              });
         const dockerLogs = await this.dockerCli([
           "logs",
           "--timestamps",
@@ -458,20 +480,36 @@ export class DockerRunnerAdapter
         );
 
         if (parsedLines.length > 0) {
-          await appendDockerRunnerLogLines({
+          const appendInput = {
             db: connection.db,
             containerId: target.target.stored.containerId,
             lines: parsedLines,
-          });
+          };
+
+          if (this.userId === undefined) {
+            await appendDockerRunnerLogLines(appendInput);
+          } else {
+            await appendDockerRunnerLogLinesForUser({
+              ...appendInput,
+              userId: this.userId,
+            });
+          }
         }
 
-        const logs = await listDockerRunnerContainerLogs({
+        const listInput = {
           db: connection.db,
           agentId: input.agentId,
           containerId: target.target.stored.containerId,
           ...(input.after === undefined ? {} : { after: input.after }),
           ...(input.limit === undefined ? {} : { limit: input.limit }),
-        });
+        };
+        const logs =
+          this.userId === undefined
+            ? await listDockerRunnerContainerLogs(listInput)
+            : await listDockerRunnerContainerLogsForUser({
+                ...listInput,
+                userId: this.userId,
+              });
 
         await this.closeOwnedConnection(connection);
         return {
@@ -502,11 +540,18 @@ export class DockerRunnerAdapter
     | { ok: true; target: ResolvedContainerTarget }
     | { ok: false; reason: "no_container" | "docker_inspect_failed" | "label_mismatch" }
   > {
-    const stored = await getDockerRunnerContainerForDevelopmentUser({
+    const containerInput = {
       db: connection.db,
       agentId,
       ...(containerId === undefined ? {} : { containerId }),
-    });
+    };
+    const stored =
+      this.userId === undefined
+        ? await getDockerRunnerContainerForDevelopmentUser(containerInput)
+        : await getDockerRunnerContainerForUser({
+            ...containerInput,
+            userId: this.userId,
+          });
 
     if (!stored) {
       return { ok: false, reason: "no_container" };
@@ -557,7 +602,7 @@ export class DockerRunnerAdapter
     inspect: DockerInspectContainer,
     observedStatus = observedStatusFromInspect(inspect),
   ): Promise<DockerRunnerContainerDto | null> {
-    return recordDockerRunnerContainerForDevelopmentUser({
+    const containerInput = {
       db: connection.db,
       agentId: stored.agentId,
       containerId: stored.containerId,
@@ -571,7 +616,11 @@ export class DockerRunnerAdapter
       observedAt: this.now(),
       startedAt: dockerTimestampToDate(inspect.State?.StartedAt),
       finishedAt: dockerTimestampToDate(inspect.State?.FinishedAt),
-    });
+    };
+
+    return this.userId === undefined
+      ? recordDockerRunnerContainerForDevelopmentUser(containerInput)
+      : recordDockerRunnerContainerForUser({ ...containerInput, userId: this.userId });
   }
 
   private async cleanupStartedContainer(containerId: string, agentId: string): Promise<void> {

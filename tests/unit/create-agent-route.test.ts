@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AgentCreateBlockedError,
   AgentPersistenceError,
@@ -6,7 +6,8 @@ import {
 } from "@/src/server/agents/create-agent";
 
 const mocks = vi.hoisted(() => ({
-  createAgentForDevelopmentUser: vi.fn(),
+  createAgentForUser: vi.fn(),
+  requireConfiguredApplicationUser: vi.fn(),
 }));
 
 vi.mock("@/src/server/agents/create-agent", async (importOriginal) => {
@@ -14,17 +15,28 @@ vi.mock("@/src/server/agents/create-agent", async (importOriginal) => {
 
   return {
     ...actual,
-    createAgentForDevelopmentUser: mocks.createAgentForDevelopmentUser,
+    createAgentForUser: mocks.createAgentForUser,
   };
 });
 
+vi.mock("@/src/server/users/configured-application-user", () => ({
+  requireConfiguredApplicationUser: mocks.requireConfiguredApplicationUser,
+}));
+
+const USER_ID = "f3fbda50-7269-4534-94d9-4819f1a38da7";
+
 describe("POST /api/agents route", () => {
+  beforeEach(() => {
+    mocks.requireConfiguredApplicationUser.mockResolvedValue({ ok: true, userId: USER_ID });
+  });
+
   afterEach(() => {
-    mocks.createAgentForDevelopmentUser.mockReset();
+    mocks.createAgentForUser.mockReset();
+    mocks.requireConfiguredApplicationUser.mockReset();
   });
 
   it("returns safe 201 JSON for a valid create-agent request", async () => {
-    mocks.createAgentForDevelopmentUser.mockResolvedValueOnce({
+    mocks.createAgentForUser.mockResolvedValueOnce({
       agent: {
         id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
         userId: "f3fbda50-7269-4534-94d9-4819f1a38da7",
@@ -79,7 +91,7 @@ describe("POST /api/agents route", () => {
       },
     });
     expect(JSON.stringify(body)).not.toContain("postgres://");
-    expect(mocks.createAgentForDevelopmentUser).toHaveBeenCalledWith({
+    expect(mocks.createAgentForUser).toHaveBeenCalledWith(USER_ID, {
       name: "Research Agent",
       templateKey: "research_agent",
       runnerId: null,
@@ -106,7 +118,7 @@ describe("POST /api/agents route", () => {
       },
     });
     expect(JSON.stringify(body)).not.toContain("postgres://");
-    expect(mocks.createAgentForDevelopmentUser).not.toHaveBeenCalled();
+    expect(mocks.createAgentForUser).not.toHaveBeenCalled();
   });
 
   it("returns validation JSON and does not create records for malformed JSON", async () => {
@@ -128,11 +140,11 @@ describe("POST /api/agents route", () => {
       },
     });
     expect(JSON.stringify(body)).not.toContain("postgres://");
-    expect(mocks.createAgentForDevelopmentUser).not.toHaveBeenCalled();
+    expect(mocks.createAgentForUser).not.toHaveBeenCalled();
   });
 
   it("returns a safe persistence error response", async () => {
-    mocks.createAgentForDevelopmentUser.mockRejectedValueOnce(new AgentPersistenceError());
+    mocks.createAgentForUser.mockRejectedValueOnce(new AgentPersistenceError());
     const { POST } = await import("@/app/api/agents/route");
 
     const response = await POST(
@@ -154,7 +166,7 @@ describe("POST /api/agents route", () => {
   });
 
   it("returns a safe plan-limit response when creation is blocked", async () => {
-    mocks.createAgentForDevelopmentUser.mockRejectedValueOnce(
+    mocks.createAgentForUser.mockRejectedValueOnce(
       new AgentCreateBlockedError({
         ok: false,
         reason: "plan_limit_reached",
@@ -185,7 +197,7 @@ describe("POST /api/agents route", () => {
   });
 
   it("returns a safe runner-capacity response when creation is blocked", async () => {
-    mocks.createAgentForDevelopmentUser.mockRejectedValueOnce(
+    mocks.createAgentForUser.mockRejectedValueOnce(
       new AgentCreateBlockedError({
         ok: false,
         reason: "runner_capacity_reached",
@@ -227,7 +239,7 @@ describe("POST /api/agents route", () => {
   });
 
   it("returns an actionable response when automatic runner provisioning is not configured", async () => {
-    mocks.createAgentForDevelopmentUser.mockRejectedValueOnce(
+    mocks.createAgentForUser.mockRejectedValueOnce(
       new AgentRunnerProvisioningError("provider_not_configured"),
     );
     const { POST } = await import("@/app/api/agents/route");
@@ -252,7 +264,7 @@ describe("POST /api/agents route", () => {
   });
 
   it("returns a safe database unavailable response when Postgres cannot be reached", async () => {
-    mocks.createAgentForDevelopmentUser.mockRejectedValueOnce(
+    mocks.createAgentForUser.mockRejectedValueOnce(
       new AgentPersistenceError({ code: "ECONNREFUSED" }),
     );
     const { POST } = await import("@/app/api/agents/route");
@@ -277,9 +289,7 @@ describe("POST /api/agents route", () => {
   });
 
   it("returns a safe schema missing response when migrations have not run", async () => {
-    mocks.createAgentForDevelopmentUser.mockRejectedValueOnce(
-      new AgentPersistenceError({ code: "42P01" }),
-    );
+    mocks.createAgentForUser.mockRejectedValueOnce(new AgentPersistenceError({ code: "42P01" }));
     const { POST } = await import("@/app/api/agents/route");
 
     const response = await POST(

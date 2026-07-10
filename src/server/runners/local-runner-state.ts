@@ -96,20 +96,28 @@ export async function createLocalRunnerProcessForDevelopmentUser(input: {
   status?: Extract<LocalRunnerProcessStatus, "starting" | "running">;
   startedAt?: Date;
 }): Promise<LocalRunnerProcessDto | null> {
+  const userId = await getDevelopmentUserForDatabase(input.db);
+
+  return userId ? createLocalRunnerProcessForUser({ ...input, userId }) : null;
+}
+
+export async function createLocalRunnerProcessForUser(input: {
+  db: LocalRunnerStateDatabase;
+  userId: string;
+  agentId: string;
+  pid: number;
+  commandMetadata: LocalRunnerCommandMetadata;
+  status?: Extract<LocalRunnerProcessStatus, "starting" | "running">;
+  startedAt?: Date;
+}): Promise<LocalRunnerProcessDto | null> {
   return input.db.transaction(async (tx) => {
-    const developmentUserId = await getDevelopmentUserId(tx);
-
-    if (!developmentUserId) {
-      return null;
-    }
-
     const [activeAgent] = await tx
       .select({ id: agents.id })
       .from(agents)
       .where(
         and(
           eq(agents.id, input.agentId),
-          eq(agents.userId, developmentUserId),
+          eq(agents.userId, input.userId),
           isNull(agents.deletedAt),
         ),
       )
@@ -146,17 +154,22 @@ export async function getLatestLocalRunnerProcessForDevelopmentUser(input: {
   agentId: string;
   statuses?: readonly LocalRunnerProcessStatus[];
 }): Promise<LocalRunnerProcessDto | null> {
+  const userId = await getDevelopmentUserForDatabase(input.db);
+
+  return userId ? getLatestLocalRunnerProcessForUser({ ...input, userId }) : null;
+}
+
+export async function getLatestLocalRunnerProcessForUser(input: {
+  db: LocalRunnerStateDatabase;
+  userId: string;
+  agentId: string;
+  statuses?: readonly LocalRunnerProcessStatus[];
+}): Promise<LocalRunnerProcessDto | null> {
   return input.db.transaction(async (tx) => {
-    const developmentUserId = await getDevelopmentUserId(tx);
-
-    if (!developmentUserId) {
-      return null;
-    }
-
     const predicates = [
       eq(localRunnerProcesses.agentId, input.agentId),
       eq(agents.id, input.agentId),
-      eq(agents.userId, developmentUserId),
+      eq(agents.userId, input.userId),
       isNull(agents.deletedAt),
     ];
 
@@ -213,8 +226,86 @@ export async function recordLocalRunnerProcessExit(input: {
   });
 }
 
+export async function recordLocalRunnerProcessExitForUser(input: {
+  db: LocalRunnerStateDatabase;
+  userId: string;
+  processId: string;
+  status?: Extract<LocalRunnerProcessStatus, "stopped" | "exited" | "failed">;
+  stoppedAt?: Date;
+  exitCode?: number | null;
+  signal?: string | null;
+  lastError?: unknown;
+}): Promise<LocalRunnerProcessDto | null> {
+  return input.db.transaction(async (tx) => {
+    const [ownedProcess] = await tx
+      .select({ agentId: localRunnerProcesses.agentId })
+      .from(localRunnerProcesses)
+      .innerJoin(agents, eq(agents.id, localRunnerProcesses.agentId))
+      .where(
+        and(
+          eq(localRunnerProcesses.id, input.processId),
+          eq(agents.userId, input.userId),
+          isNull(agents.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    if (!ownedProcess) {
+      return null;
+    }
+
+    const stoppedAt = input.stoppedAt ?? new Date();
+    const signal = normalizeOptionalText(input.signal);
+    const lastError = sanitizeLocalRunnerLastError(input.lastError);
+    const [processRow] = await tx
+      .update(localRunnerProcesses)
+      .set({
+        status: normalizeTerminalStatus({
+          ...(input.status === undefined ? {} : { requestedStatus: input.status }),
+          exitCode: input.exitCode,
+          signal,
+          lastError,
+        }),
+        stoppedAt,
+        exitCode: input.exitCode ?? null,
+        signal,
+        lastError,
+        updatedAt: stoppedAt,
+      })
+      .where(
+        and(
+          eq(localRunnerProcesses.id, input.processId),
+          eq(localRunnerProcesses.agentId, ownedProcess.agentId),
+        ),
+      )
+      .returning(localRunnerProcessSelection);
+
+    return processRow ? mapLocalRunnerProcessToDto(processRow) : null;
+  });
+}
+
 export async function appendLocalRunnerLogLines(input: {
   db: LocalRunnerStateDatabase;
+  processId: string;
+  lines: readonly LocalRunnerLogLineInput[];
+  now?: Date;
+}): Promise<{ inserted: number; logs: AgentLogDto[] }> {
+  return appendLocalRunnerLogLinesInternal(input);
+}
+
+export async function appendLocalRunnerLogLinesForUser(input: {
+  db: LocalRunnerStateDatabase;
+  userId: string;
+  processId: string;
+  lines: readonly LocalRunnerLogLineInput[];
+  now?: Date;
+}): Promise<{ inserted: number; logs: AgentLogDto[] }> {
+  return appendLocalRunnerLogLinesInternal(input);
+}
+
+async function appendLocalRunnerLogLinesInternal(input: {
+  db: LocalRunnerStateDatabase;
+  userId?: string;
   processId: string;
   lines: readonly LocalRunnerLogLineInput[];
   now?: Date;
@@ -228,7 +319,9 @@ export async function appendLocalRunnerLogLines(input: {
   }
 
   return input.db.transaction(async (tx) => {
-    const [processRow] = await lockLocalRunnerProcessInTransaction(tx, input.processId);
+    const [processRow] = await (input.userId === undefined
+      ? lockLocalRunnerProcessInTransaction(tx, input.processId)
+      : lockLocalRunnerProcessForUserInTransaction(tx, input.processId, input.userId));
 
     if (!processRow) {
       return { inserted: 0, logs: [] };
@@ -277,17 +370,23 @@ export async function listLocalRunnerProcessLogs(input: {
   processId: string;
   limit?: number;
 }): Promise<AgentLogDto[]> {
+  const userId = await getDevelopmentUserForDatabase(input.db);
+
+  return userId ? listLocalRunnerProcessLogsForUser({ ...input, userId }) : [];
+}
+
+export async function listLocalRunnerProcessLogsForUser(input: {
+  db: LocalRunnerStateDatabase;
+  userId: string;
+  agentId: string;
+  processId: string;
+  limit?: number;
+}): Promise<AgentLogDto[]> {
   const limit =
     typeof input.limit === "number" && Number.isInteger(input.limit)
       ? Math.min(Math.max(input.limit, 1), 100)
       : 100;
   const rows = await input.db.transaction(async (tx) => {
-    const developmentUserId = await getDevelopmentUserId(tx);
-
-    if (!developmentUserId) {
-      return [];
-    }
-
     return tx
       .select(processLogSelection)
       .from(agentLogs)
@@ -300,7 +399,7 @@ export async function listLocalRunnerProcessLogs(input: {
           eq(localRunnerProcesses.id, input.processId),
           eq(localRunnerProcesses.agentId, input.agentId),
           eq(agents.id, input.agentId),
-          eq(agents.userId, developmentUserId),
+          eq(agents.userId, input.userId),
           isNull(agents.deletedAt),
         ),
       )
@@ -445,6 +544,10 @@ function assertValidLogLine(line: LocalRunnerLogLineInput): void {
   }
 }
 
+function getDevelopmentUserForDatabase(db: LocalRunnerStateDatabase): Promise<string | null> {
+  return db.transaction((tx) => getDevelopmentUserId(tx));
+}
+
 function lockLocalRunnerProcessInTransaction(
   tx: LocalRunnerStateTransaction,
   processId: string,
@@ -455,6 +558,23 @@ function lockLocalRunnerProcessInTransaction(
     from ${localRunnerProcesses}
     where ${localRunnerProcesses.id} = ${processId}
     for update
+  `);
+}
+
+function lockLocalRunnerProcessForUserInTransaction(
+  tx: LocalRunnerStateTransaction,
+  processId: string,
+  userId: string,
+): Promise<{ id: string; agent_id: string }[]> {
+  return tx.execute<{ id: string; agent_id: string }>(sql`
+    select ${localRunnerProcesses.id} as id,
+           ${localRunnerProcesses.agentId} as agent_id
+    from ${localRunnerProcesses}
+    inner join ${agents} on ${agents.id} = ${localRunnerProcesses.agentId}
+    where ${localRunnerProcesses.id} = ${processId}
+      and ${agents.userId} = ${userId}
+      and ${agents.deletedAt} is null
+    for update of ${localRunnerProcesses}
   `);
 }
 
