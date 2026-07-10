@@ -34,3 +34,38 @@ describe("milestone 16 progress status", () => {
     expect(progress).not.toContain("Step 5 is merged");
   });
 });
+
+describe("authentication progress status", () => {
+  it("records the live Step 7 review state and merged prerequisites", async () => {
+    const progress = await readFile(join(process.cwd(), "PROGRESS.md"), "utf8");
+    const step7Row =
+      progress
+        .split("\n")
+        .find((line) =>
+          line.startsWith("| 7. Preserve full registration-free development access"),
+        ) ?? "";
+
+    expect(step7Row).toContain("Implemented; PR open; tracker review fix pending");
+    expect(step7Row).toContain("merged #233/PR #244 and #234/PR #247");
+    expect(step7Row).toContain("PR #251 (open)");
+    expect(step7Row).toContain("`d077a83` (reviewed implementation head)");
+    expect(step7Row).toContain("8 focused files / 141 tests");
+    expect(step7Row).toContain("73 files / 668 unit tests");
+    expect(step7Row).toContain("PR #251 is open and not merged");
+    expect(step7Row).not.toContain("Not opened");
+    expect(step7Row).not.toContain("8f47126");
+    expect(step7Row).not.toContain("8 files, 120 tests");
+    expect(step7Row).not.toContain("72 files, 642 tests");
+    expect(step7Row).not.toContain("checker pending");
+
+    expect(progress).toContain(
+      "Steps 2 and 3 are merged: #233 through PR #244 and #234 through PR #247.",
+    );
+    expect(progress).not.toContain(
+      "Step 2 is implemented on its isolated builder branch and awaits checker evidence",
+    );
+    expect(progress).not.toContain(
+      "Steps 4-7 wait for the merged routing/session contract from Step 2",
+    );
+  });
+});
