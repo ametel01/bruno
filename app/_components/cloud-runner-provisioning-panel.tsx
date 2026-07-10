@@ -1,4 +1,9 @@
 import { CreateCloudRunnerControls } from "@/app/settings/_components/runner-management-controls";
+import {
+  RunnerCostContext,
+  type RunnerCostContextResult,
+} from "@/app/_components/runner-cost-context";
+import type { RunnerCostEstimateDto } from "@/src/server/costs/cost-estimates";
 import type { CloudRunnerProvisioningSummary } from "@/src/server/runners/cloud-runner-provisioning";
 
 type CloudRunnerProvisioningResult =
@@ -11,6 +16,14 @@ type CloudRunnerProvisioningResult =
     };
 
 type CloudRunnerProvisioningPanelProps = {
+  costResult?:
+    | {
+        ok: true;
+        runners: RunnerCostEstimateDto[];
+      }
+    | {
+        ok: false;
+      };
   result: CloudRunnerProvisioningResult;
   title: string;
   titleId: string;
@@ -18,11 +31,16 @@ type CloudRunnerProvisioningPanelProps = {
 };
 
 export function CloudRunnerProvisioningPanel({
+  costResult,
   result,
   showCreateAction = false,
   title,
   titleId,
 }: CloudRunnerProvisioningPanelProps) {
+  const costByRunnerId = costResult?.ok
+    ? new Map(costResult.runners.map((runner) => [runner.runnerId, runner]))
+    : null;
+
   return (
     <section className="manual-runner-panel cloud-runner-panel" aria-labelledby={titleId}>
       <div className="section-heading">
@@ -34,7 +52,17 @@ export function CloudRunnerProvisioningPanel({
         result.runners.length > 0 ? (
           <ol className="manual-runner-list" aria-label="Cloud runner provisioning status">
             {result.runners.map((runner) => (
-              <CloudRunnerProvisioningItem key={runner.id} runner={runner} />
+              <CloudRunnerProvisioningItem
+                costResult={
+                  costResult
+                    ? costResult.ok
+                      ? { ok: true, estimate: costByRunnerId?.get(runner.id) ?? null }
+                      : { ok: false }
+                    : undefined
+                }
+                key={runner.id}
+                runner={runner}
+              />
             ))}
           </ol>
         ) : (
@@ -52,7 +80,13 @@ export function CloudRunnerProvisioningPanel({
   );
 }
 
-function CloudRunnerProvisioningItem({ runner }: { runner: CloudRunnerProvisioningSummary }) {
+function CloudRunnerProvisioningItem({
+  costResult,
+  runner,
+}: {
+  costResult?: RunnerCostContextResult | undefined;
+  runner: CloudRunnerProvisioningSummary;
+}) {
   return (
     <li className="manual-runner-item cloud-runner-item" data-status={runner.readinessStatus}>
       <div className="manual-runner-header">
@@ -128,6 +162,7 @@ function CloudRunnerProvisioningItem({ runner }: { runner: CloudRunnerProvisioni
           </li>
         ))}
       </ol>
+      {costResult ? <RunnerCostContext result={costResult} /> : null}
       {runner.provisioning.error ? (
         <p className="manual-runner-alert safe-error" role="alert">
           {runner.provisioning.error} Next step: check the provider configuration and create a new

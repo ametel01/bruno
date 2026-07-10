@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Assigned-runner detail and cloud-runner cards now show labeled raw-infrastructure estimates and active-agent allocation with explicit unavailable and failure states while preserving health and capacity context.
 - Internal user resolution for Clerk sessions and registration-free development, with opaque unique Clerk links, concurrency-safe lazy creation, and an explicit count-only dry-run legacy claim that refuses ambiguous or conflicting ownership.
 - Deterministic server-side daily and monthly runner infrastructure cost estimates from user-scoped usage periods, including overlapping-uptime unioning, per-agent allocation, supplied-clock windows, and explicit unavailable pricing states.
 - Dashboard now shows server-rendered daily and monthly raw-infrastructure estimates, runner monthly cost, running-agent counts, per-active-agent estimates, and explicit unavailable and safe loader-failure states.

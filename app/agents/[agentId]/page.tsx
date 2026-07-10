@@ -4,8 +4,8 @@ import { ActivityFeedPanel } from "@/app/_components/activity-feed";
 import { ApprovalDecisionControls } from "@/app/_components/approval-decision-controls";
 import { PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
 import { AgentBackupControls } from "@/app/agents/_components/agent-backup-controls";
-import { RunnerCapacityDefinitionItems } from "@/app/_components/runner-capacity-details";
 import { AgentConfigEditor } from "@/app/agents/_components/agent-config-editor";
+import { AssignedRunnerPanel } from "@/app/agents/_components/assigned-runner-panel";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { AgentRuntimeLogPanel } from "@/app/agents/_components/agent-runtime-log-panel";
 import { AGENT_NAME_MAX_LENGTH } from "@/src/server/agents/create-agent";
@@ -30,6 +30,10 @@ import {
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { listAgentEventFeed } from "@/src/server/events/agent-events";
 import {
+  getMonthlyRunnerCostForDevelopmentUserAgent,
+  RunnerCostContextPersistenceError,
+} from "@/src/server/costs/runner-cost-context";
+import {
   getAssignedManualRunnerStatusForDevelopmentUserAgent,
   ManualRunnerStatusPersistenceError,
   type AssignedManualRunnerStatusSummary,
@@ -45,7 +49,6 @@ type AgentDetailPageProps = {
 };
 
 type AgentApprovalsResult = Awaited<ReturnType<typeof loadAgentApprovals>>;
-type AssignedRunnerResult = Awaited<ReturnType<typeof loadAssignedManualRunner>>;
 type AgentBackupsResult = Awaited<ReturnType<typeof loadAgentBackups>>;
 
 export const dynamic = "force-dynamic";
@@ -80,12 +83,25 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
   }
 
   const activityCursor = parseActivityCursor(resolvedSearchParams?.activityCursor);
-  const activityResult =
+  const activityPromise =
     activityCursor === false
-      ? {
+      ? Promise.resolve({
           ok: false as const,
-        }
-      : await loadAgentActivity(agent.id, activityCursor);
+        })
+      : loadAgentActivity(agent.id, activityCursor);
+  const [
+    activityResult,
+    approvalsResult,
+    backupsResult,
+    assignedRunnerResult,
+    assignedRunnerCostResult,
+  ] = await Promise.all([
+    activityPromise,
+    loadAgentApprovals(agent.id),
+    loadAgentBackups(agent.id),
+    loadAssignedManualRunner(agent.id),
+    loadAssignedRunnerCost(agent.id),
+  ]);
   const activityEvents = activityResult.ok ? activityResult.events : [];
   const olderActivityHref =
     activityResult.ok && activityResult.nextCursor
@@ -96,9 +112,6 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
   const emptyActivityDescription = activityCursor
     ? "There are no older persisted events for this agent."
     : "Create or update this agent to show persisted activity here.";
-  const approvalsResult = await loadAgentApprovals(agent.id);
-  const backupsResult = await loadAgentBackups(agent.id);
-  const assignedRunnerResult = await loadAssignedManualRunner(agent.id);
   const assignedRunner = assignedRunnerResult.ok ? assignedRunnerResult.runner : null;
   const operationalAlerts = buildAgentOperationalAlerts({
     agent,
@@ -233,7 +246,7 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
           alerts={operationalAlerts.alerts}
           runnerStateNotice={operationalAlerts.runnerStateNotice}
         />
-        <AssignedRunnerPanel result={assignedRunnerResult} />
+        <AssignedRunnerPanel costResult={assignedRunnerCostResult} result={assignedRunnerResult} />
         <AgentRuntimeLogPanel agentId={agent.id} status={agent.status} />
         <AgentApprovalsPanel result={approvalsResult} />
         <ActivityFeedPanel
@@ -273,81 +286,6 @@ function AgentBackupsPanel({ agentId, result }: { agentId: string; result: Agent
         </div>
       )}
     </section>
-  );
-}
-
-function AssignedRunnerPanel({ result }: { result: AssignedRunnerResult }) {
-  return (
-    <section className="manual-runner-panel" aria-labelledby="agent-assigned-runner-title">
-      <div className="section-heading">
-        <h2 id="agent-assigned-runner-title">Assigned runner</h2>
-        {result.ok ? <span>{result.runner ? result.runner.status : "none"}</span> : null}
-      </div>
-      {result.ok ? (
-        result.runner ? (
-          <AssignedRunnerStatus runner={result.runner} />
-        ) : (
-          <div className="activity-empty-state">
-            <h3>No runner assigned</h3>
-            <p>This agent is not assigned to the manual VPS runner.</p>
-          </div>
-        )
-      ) : (
-        <div className="safe-error" role="alert">
-          Assigned runner status could not be loaded.
-        </div>
-      )}
-    </section>
-  );
-}
-
-function AssignedRunnerStatus({ runner }: { runner: AssignedManualRunnerStatusSummary }) {
-  return (
-    <div className="manual-runner-item" data-status={runner.status}>
-      <div className="manual-runner-header">
-        <div>
-          <h3>{runner.name}</h3>
-          <p>{runner.assignmentNotice}</p>
-        </div>
-        <span className="status-pill">{runner.status}</span>
-      </div>
-      <dl className="definition-list compact-definition-list">
-        <div>
-          <dt>Kind</dt>
-          <dd>{runner.kind}</dd>
-        </div>
-        <div>
-          <dt>Endpoint host</dt>
-          <dd>{runner.endpointHost}</dd>
-        </div>
-        <RunnerCapacityDefinitionItems capacity={runner.capacity} />
-        <div>
-          <dt>Version</dt>
-          <dd>{runner.version ?? "Not reported"}</dd>
-        </div>
-        <div>
-          <dt>Last seen</dt>
-          <dd>
-            {runner.lastSeenAt ? (
-              <time dateTime={runner.lastSeenAt}>{runner.lastSeenAt}</time>
-            ) : (
-              "No heartbeat yet"
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt>Updated</dt>
-          <dd>
-            <time dateTime={runner.updatedAt}>{runner.updatedAt}</time>
-          </dd>
-        </div>
-      </dl>
-      {runner.alertMessage ? (
-        <div className="safe-error manual-runner-alert" role="alert">
-          {runner.alertMessage}
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -554,6 +492,23 @@ async function loadAssignedManualRunner(agentId: string) {
     };
   } catch (error) {
     if (error instanceof ManualRunnerStatusPersistenceError) {
+      return {
+        ok: false as const,
+      };
+    }
+
+    throw error;
+  }
+}
+
+async function loadAssignedRunnerCost(agentId: string) {
+  try {
+    return {
+      ok: true as const,
+      estimate: await getMonthlyRunnerCostForDevelopmentUserAgent(agentId),
+    };
+  } catch (error) {
+    if (error instanceof RunnerCostContextPersistenceError) {
       return {
         ok: false as const,
       };
