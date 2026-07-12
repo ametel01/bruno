@@ -10,10 +10,13 @@ Clerk application, verified email-code sign-in, development Google and Apple con
 explicit CLI link, and development test keys written only to this repository's ignored local
 `.env.local` file.
 
-The approved work is currently **host-auth-blocked**: the stored Clerk CLI session expired before
-inventory or provisioning could complete. A human must finish `clerk auth login` on the host, then
-the operator can resume at the inventory step below. Do not copy the transient login URL, OAuth
-state, account email, session material, or raw CLI response into an issue, PR, log, or artifact.
+The approved issue #232 development setup is complete: the dedicated AgentBay development
+application is explicitly linked, verified email-code sign-in and development Google/Apple provider
+configuration are enabled, required local `.env.local` variable names are present, and a sanitized
+`clerk doctor --json` gate passed for that linked development app. This is setup, link, provider
+configuration, local-key presence, and doctor evidence only. It does not claim hosted browser
+email-code, Google, Apple, current-user, or sign-out flow success; those issue #239 smoke checks
+still require a supported browser backend and isolated synthetic identities.
 
 The approval does not include Ask Siargao, any production instance, Vercel configuration,
 deployment, billing, destructive deletion, or issue #240. Stop and obtain a new durable approval
@@ -71,18 +74,19 @@ blocker to the coordinator.
 
 ## Required completion evidence
 
-Issue #232 can be closed only when the operator supplies all of the following without secret or PII
-values:
+Issue #232 is closed complete because the operator supplied all of the following without secret or
+PII values:
 
 - dedicated app name plus opaque application-ID fingerprint and development-environment status;
 - explicit CLI-link confirmation that excludes every unrelated app;
-- enabled-and-exercised status for verified email code, Google, and Apple;
+- enabled configuration status for verified email code, development Google, and development Apple;
 - `.env.local` ignored-file and required-variable-presence checks;
 - a passing sanitized `clerk doctor --json` result; and
-- repository quality-gate results and the provider-backed smoke handoff to issue #239.
+- repository quality-gate results and the hosted browser/provider smoke handoff to issue #239.
 
 An approval record, app creation, provider toggle, local component test, or failed doctor result is
-intermediate evidence only.
+intermediate evidence only. The completed #232 setup still does not prove hosted email-code,
+Google, Apple, current-user, sign-out, or full provider-backed `bun run verify` success.
 
 ## Production Google prerequisites
 

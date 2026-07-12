@@ -71,17 +71,17 @@ describe("authentication progress status", () => {
     const step7Row = getStepRow(7);
     const step8Row = getStepRow(8);
 
-    expect(step1Row).toContain("| #232 | Approved; host-auth-blocked | None |");
-    expect(step1Row).toContain("PR #257 (draft, non-closing)");
-    expect(step1Row).toContain("| PR head |");
-    expect(step1Row).toContain("repository runbook and deterministic documentation contract tests");
+    expect(step1Row).toContain("| #232 | Closed; development setup complete | None |");
+    expect(step1Row).toContain("PR #257 (merged, non-closing)");
+    expect(step1Row).toContain("| `d518f0b` |");
+    expect(step1Row).toContain("dedicated app/link/provider configuration passed");
     expect(step1Row).not.toContain("Not opened");
     expect(step1Row).not.toContain("Not collected");
-    expect(step1Row).not.toContain("(merged)");
+    expect(step1Row).toContain("merged");
     expect(step1Row).toContain("de322ae8-c258-440e-a679-b74bafb61048");
     expect(step1Row).toContain("ignored local `.env.local`");
-    expect(step1Row).toContain("no external success is claimed");
-    expect(step1Row).toContain("expired Clerk CLI session");
+    expect(step1Row).toContain("sanitized `clerk doctor --json` gate green");
+    expect(step1Row).toContain("not hosted browser email-code");
 
     expect(step2Row).toContain("| #233 | Merged | None | PR #244 (merged) | `711ee48` |");
     expect(step3Row).toContain("| #234 | Merged | None | PR #247 (merged) | `e5b09fb` |");
@@ -121,9 +121,11 @@ describe("authentication progress status", () => {
     expect(step7Row).not.toContain("checker pending");
 
     expect(step8Row).toContain("| #239 | Repository proof merged; hosted acceptance blocked |");
+    expect(step8Row).toContain("completed development setup Step 1");
     expect(step8Row).toContain("PR #256 (merged, non-closing)");
     expect(step8Row).toContain("| `10c246d` |");
     expect(step8Row).toContain("776 unit and 14 E2E tests");
+    expect(step8Row).toContain("sanitized doctor gate from #232 are complete");
     expect(step8Row).toContain("Issue #239 remains open");
 
     for (const row of [step2Row, step3Row, step4Row, step5Row, step6Row, step7Row]) {
@@ -144,7 +146,8 @@ describe("authentication progress status", () => {
     );
     expect(progress).toContain("Step 7 is complete through #238/PR #251 at `3317b9d`");
     expect(progress).toContain("Step 8's credential-free repository slice is complete");
-    expect(progress).toContain("Hosted provider acceptance waits for Step 1");
+    expect(progress).toContain("Hosted browser/provider smoke still waits");
+    expect(progress).toContain("safely isolated runner-backed");
     expect(progress).not.toContain("Steps 4-7 no longer wait on those prerequisites");
   });
 });
