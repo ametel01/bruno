@@ -154,27 +154,30 @@ completion evidence.
 
 | Step | Issue | State | Depends on | PR | Commit | Validation or deployment evidence | Blocker and next work |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1. Provision the AgentBay Clerk development instance | #232 | Approval-blocked | None | Not opened | Not collected | Not collected | Requires explicit approval for Clerk/provider writes and the key destination. After approval, create a dedicated AgentBay development app, enable verified email code plus development Google/Apple, and collect sanitized `clerk doctor --json` evidence. |
+| 1. Provision the AgentBay Clerk development instance | #232 | Approved; host-auth-blocked | None | PR #257 (draft, non-closing) | PR head | Approval `de322ae8-c258-440e-a679-b74bafb61048` permits one dedicated AgentBay development app, verified email code, development Google/Apple, explicit linking, and keys only in ignored local `.env.local`. The repository runbook and deterministic documentation contract tests are collected on the draft PR head. The pre-provisioning doctor correctly reported an unlinked project and no local environment; no external success is claimed. | Reauthenticate the expired Clerk CLI session on the host, then inventory/create, link, configure, pull development keys only to `.env.local`, run sanitized doctor, and complete hosted smoke. Production, Vercel, Ask Siargao, billing, deployment, deletion, and #240 remain excluded. |
 | 2. Replace the Basic-auth shell with Clerk-capable routing and UI | #233 | Merged | None | PR #244 (merged) | `711ee48` | Locked Clerk 7.5.16; focused auth/operator/runner tests passed (8 files, 105 tests), including a real-SDK synthetic two-key request with no encryption key; isolated full unit passed (66 files, 556 tests); format, lint, typecheck, build, and isolated desktop/mobile auth and CI smoke E2E passed. No hosted provider evidence was claimed. | Complete through merged PR #244. Steps 4-7 consume the merged routing/session contract; no Step 2 review action remains. |
 | 3. Resolve Clerk and development identities to internal users | #234 | Merged | None | PR #247 (merged) | `e5b09fb` | Migration 0014 adds only nullable unique `users.clerk_user_id`; the request resolver supports shared development identity and typed Clerk `401` results, while the server adapter awaits `auth()` and passes only `userId`. The operator claim CLI rejects ambiguous arguments before database access without echo. Isolated migration, focused schema/resolver/claim/adapter/CLI, concurrency, full-unit, format, lint, typecheck, build, `test:e2e:ci`, migration-lineage, diff, and secret checks passed. No production claim or provider/secret mutation occurred. | Complete through merged PR #247. Production legacy claim remains separately approval-gated; no Step 3 review action remains. |
-| 4. Isolate agent lifecycle and agent data | #235 | Open; prerequisites merged | Steps 2 and 3 (merged #233/PR #244 and #234/PR #247) | No merged PR | Not collected | Not collected | Issue #235 is open with prerequisites merged; scope agent routes, lifecycle, events, logs, usage, and costs to the resolved internal user with cross-user `404` behavior. |
-| 5. Isolate runner provisioning and management | #236 | Open; prerequisites merged | Steps 2 and 3 (merged #233/PR #244 and #234/PR #247) | No merged PR | Not collected | Not collected | Issue #236 is open with prerequisites merged; scope browser runner operations and credentials per user while preserving existing `/runner/v1/*` machine authentication. |
-| 6. Isolate approvals, backups, restores, and activity | #237 | Open; prerequisites merged | Steps 2 and 3 (merged #233/PR #244 and #234/PR #247) | No merged PR | Not collected | Not collected | Issue #237 is open with prerequisites merged; enforce user ownership at database and object-storage boundaries and keep cross-user resources concealed. |
+| 4. Isolate agent lifecycle and agent data | #235 | Merged | Steps 2 and 3 (merged #233/PR #244 and #234/PR #247) | PR #255 (merged) | `b93a70f` | User ownership is enforced across agents, lifecycle, events, logs, usage, costs, and configuration; exact-head checker, CI, security, and maintainer-agent review passed. | Complete through merged PR #255; no Step 4 review action remains. |
+| 5. Isolate runner provisioning and management | #236 | Merged | Steps 2 and 3 (merged #233/PR #244 and #234/PR #247) | PR #254 (merged) | `ecc1d57` | Browser runner reads, placement, provisioning, registration, and credential operations are user-scoped while machine authentication remains separate; exact-head checker, CI, security, and maintainer-agent review passed. | Complete through merged PR #254; no Step 5 review action remains. |
+| 6. Isolate approvals, backups, restores, and activity | #237 | Merged | Steps 2 and 3 (merged #233/PR #244 and #234/PR #247) | PR #253 (merged) | `4a9b70a` | Approval decisions, backups, restores, activity, and object-storage boundaries are user-scoped with concealed foreign resources; exact-head checker, CI, security, and maintainer-agent review passed. | Complete through merged PR #253; no Step 6 review action remains. |
 | 7. Preserve full registration-free development access | #238 | Merged | Steps 2 and 3 (merged #233/PR #244 and #234/PR #247) | PR #251 (merged) | `3317b9d` | A server-only `AGENTBAY_AUTH_MODE` policy gives non-Vercel loopback environments registration-free shared-user access, requires complete Clerk configuration for production/custom hosts, permits preview development only with an explicit exact protection attestation, ignores caller-controlled request hosts, preserves the Basic barrier and exact runner-machine bypasses, and validates Vercel builds before spawning commands. Final PR head `9441cc2` preserved all 19 product/auth blobs from reviewed implementation head `d077a83`; the independent checker passed 9 focused files / 143 tests and all static/diff checks. Exact-head CI run 29084008081 passed migration, 73 files / 669 unit tests, build, and `test:e2e:ci` 14/14, with GitGuardian and Socket checks green. | Complete through merged PR #251. The optional Vercel preview remained fail-closed as `clerk_auth_not_configured` because #232 provider/key state is unavailable; no hosted Clerk/protected-preview/provider success is claimed, and no provider, environment, secret, deployment, or production state was changed. |
-| 8. Prove authentication, isolation, and runner compatibility | #239 | Dependency-blocked | Steps 4-7 (#235, #236, #237, #238) | Not opened | Not collected | Not collected | Run the two-user acceptance matrix, signed-out and provider flows, legacy-claim tests, secret-safe diagnostics, and runner-token compatibility after every ownership slice merges. |
+| 8. Prove authentication, isolation, and runner compatibility | #239 | Repository proof merged; hosted acceptance blocked | Steps 4-7 (#235, #236, #237, #238; merged) and hosted Step 1 (#232) | PR #256 (merged, non-closing) | `10c246d` | Credential-free two-user ownership, machine-token, legacy-claim, signed-out, auth-surface, and artifact-redaction evidence passed checker cycle 2, exact-head CI (776 unit and 14 E2E tests), security review, and maintainer-agent approval. | Issue #239 remains open for provider-backed email-code, Google, Apple, current-user, sign-out, doctor, and full verify evidence after #232 completes. |
 | 9. Cut production over and retire Basic auth | #240 | Dependency- and approval-blocked | Steps 1 and 8 (#232, #239) | Not opened | Not collected | Not collected | Requires separate production provider, secret, deployment, legacy-claim, and cutover approval. Retire Basic auth only after hosted Clerk, ownership, runner, rollback, and full-feature evidence passes. |
 
 ### Current Blockers and Next Work
 
-- Step 1 has no GitHub dependency but cannot mutate Clerk, providers, Vercel, or
-  secret storage until the required human approval is recorded.
+- Step 1 development-only setup is approved under
+  `de322ae8-c258-440e-a679-b74bafb61048`, with ignored local `.env.local` as
+  the only key destination. Its stored Clerk CLI session expired, so host
+  reauthentication is the current blocker; no external provisioning or provider
+  success is claimed.
 - Steps 2 and 3 are merged: #233 through PR #244 and #234 through PR #247.
 - Their routing/session and internal-user resolver contracts are available;
-  Steps 4-6 no longer wait on those prerequisites and continue through their
-  own implementation and review gates.
+  Steps 4-6 are complete through merged PRs #255, #254, and #253.
 - Step 7 is complete through #238/PR #251 at `3317b9d`; its registration-free
   development and fail-closed hosted policy is available to downstream work.
-- Step 8 waits for the remaining three ownership slices, #235 through #237.
+- Step 8's credential-free repository slice is complete through merged,
+  non-closing PR #256. Hosted provider acceptance waits for Step 1.
 - Step 9 waits for development-instance evidence and the completed acceptance
   matrix, then requires explicit production-cutover approval.
 - Never record Clerk keys, session values, provider credentials, runner tokens,
@@ -212,3 +215,8 @@ completion evidence.
   and mobile smoke/runner-boundary E2E passed; hosted preview verification and
   provider-backed full E2E remain unclaimed. PR #251 merged the policy at
   `3317b9d` after exact-head checker, CI, and maintainer approval passed.
+- 2026-07-12: Issues #235, #236, and #237 completed the user-ownership slices
+  through PRs #255, #254, and #253. PR #256 merged the credential-free #239
+  acceptance matrix without closing the issue. Development-only #232 setup is
+  approved with `.env.local` as the sole key destination, but the expired Clerk
+  CLI session requires host reauthentication before external work continues.

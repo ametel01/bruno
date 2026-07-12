@@ -11,6 +11,9 @@ missing runner and cannot trigger provider or credential side effects.
 The complete two-user, runner-machine, legacy-claim, and provider-smoke evidence map is maintained
 in [Two-user authentication and isolation acceptance](./TWO_USER_ACCEPTANCE.md).
 
+The approved development-instance procedure and production Google/Apple credential prerequisites
+are maintained in [Clerk development instance and production provider prerequisites](./CLERK_DEVELOPMENT.md).
+
 ## Local development
 
 For a non-Vercel loopback `NEXT_PUBLIC_APP_URL`, an unset mode defaults to `development`:

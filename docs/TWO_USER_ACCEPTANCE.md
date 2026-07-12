@@ -59,8 +59,12 @@ flow cannot be claimed from those component tests.
 
 Email-code, Google, Apple, current-user, and sign-out browser success remain part of issue #232's
 approved development-instance smoke. They require a dedicated AgentBay development Clerk app,
-test-only keys, a `CLERK_TESTING_TOKEN`, and configured provider state. Do not reuse another app,
-commit keys, create provider state, or pull an environment file without durable approval.
+test-only keys, a `CLERK_TESTING_TOKEN`, and configured provider state. Approval
+`de322ae8-c258-440e-a679-b74bafb61048` permits that development-only setup with local
+`.env.local` as the sole key destination. The stored Clerk CLI session is currently expired, so
+external inventory, provisioning, provider success, and a passing doctor remain host-auth-blocked.
+Follow the [development-instance runbook](./CLERK_DEVELOPMENT.md); never reuse another app or treat
+the approval itself as provider evidence.
 
 After that approval, the smoke run must:
 
@@ -102,7 +106,9 @@ clerk doctor --json
 `bun run test:e2e` is the provider-backed final step of `bun run verify`; its sanitized capability
 gate is expected to stop before Playwright when approved provider credentials are absent.
 
-On 2026-07-10, a read-only `clerk doctor --json` run found the CLI authenticated but the repository
-unlinked, with no local Clerk environment and application checks skipped. The command returned its
-sanitized `doctor_failed` envelope. Linking, pulling keys, and successful hosted provider smoke are
-therefore #232 approval-gated; this document does not claim they passed.
+On 2026-07-10, a read-only `clerk doctor --json` run found the repository unlinked, with no local
+Clerk environment and application checks skipped. The command returned its sanitized
+`doctor_failed` envelope. Development setup was subsequently approved, but a read-only inventory
+attempt found the stored Clerk session expired. Host reauthentication is required before linking,
+local-only key retrieval, doctor, or hosted provider smoke can continue; this document does not
+claim any of them passed.
