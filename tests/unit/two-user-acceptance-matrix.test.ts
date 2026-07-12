@@ -63,8 +63,9 @@ describe("two-user acceptance evidence matrix", () => {
     expect(matrix).toContain(
       "Email-code, Google, Apple, current-user, and sign-out browser success",
     );
-    expect(matrix).toContain("#232 approval-gated");
-    expect(matrix).toContain("does not claim they passed");
+    expect(matrix).toContain("permits that development-only setup");
+    expect(matrix).toContain("host-auth-blocked");
+    expect(matrix).toMatch(/does not\s+claim any of them passed/);
     expect(matrix).not.toMatch(/(?:pk_test|sk_test|agb_reg|agb_run)_[A-Za-z0-9_-]{16,}/);
     expect(matrix).not.toMatch(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
   });

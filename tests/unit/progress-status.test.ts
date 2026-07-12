@@ -62,26 +62,34 @@ describe("authentication progress status", () => {
     const progress = await readFile(join(process.cwd(), "PROGRESS.md"), "utf8");
     const lines = progress.split("\n");
     const getStepRow = (step: number) => lines.find((line) => line.startsWith(`| ${step}. `)) ?? "";
+    const step1Row = getStepRow(1);
     const step2Row = getStepRow(2);
     const step3Row = getStepRow(3);
     const step4Row = getStepRow(4);
     const step5Row = getStepRow(5);
     const step6Row = getStepRow(6);
     const step7Row = getStepRow(7);
+    const step8Row = getStepRow(8);
+
+    expect(step1Row).toContain("| #232 | Approved; host-auth-blocked | None |");
+    expect(step1Row).toContain("de322ae8-c258-440e-a679-b74bafb61048");
+    expect(step1Row).toContain("ignored local `.env.local`");
+    expect(step1Row).toContain("no external success is claimed");
+    expect(step1Row).toContain("expired Clerk CLI session");
 
     expect(step2Row).toContain("| #233 | Merged | None | PR #244 (merged) | `711ee48` |");
     expect(step3Row).toContain("| #234 | Merged | None | PR #247 (merged) | `e5b09fb` |");
 
-    for (const [row, issue] of [
-      [step4Row, 235],
-      [step5Row, 236],
-      [step6Row, 237],
+    for (const [row, issue, pullRequest, commit] of [
+      [step4Row, 235, 255, "b93a70f"],
+      [step5Row, 236, 254, "ecc1d57"],
+      [step6Row, 237, 253, "4a9b70a"],
     ] as const) {
-      expect(row).toContain(`| #${issue} | Open; prerequisites merged |`);
+      expect(row).toContain(`| #${issue} | Merged |`);
       expect(row).toContain("merged #233/PR #244 and #234/PR #247");
-      expect(row).toContain(`Issue #${issue} is open with prerequisites merged`);
-      expect(row).not.toContain("Dependency-blocked");
-      expect(row.toLowerCase()).not.toContain("after both dependencies merge");
+      expect(row).toContain(`PR #${pullRequest} (merged)`);
+      expect(row).toContain(`\`${commit}\``);
+      expect(row).toContain(`Complete through merged PR #${pullRequest}`);
     }
 
     expect(step7Row).toContain("| #238 | Merged |");
@@ -106,6 +114,12 @@ describe("authentication progress status", () => {
     expect(step7Row).not.toContain("72 files, 642 tests");
     expect(step7Row).not.toContain("checker pending");
 
+    expect(step8Row).toContain("| #239 | Repository proof merged; hosted acceptance blocked |");
+    expect(step8Row).toContain("PR #256 (merged, non-closing)");
+    expect(step8Row).toContain("| `10c246d` |");
+    expect(step8Row).toContain("776 unit and 14 E2E tests");
+    expect(step8Row).toContain("Issue #239 remains open");
+
     for (const row of [step2Row, step3Row, step4Row, step5Row, step6Row, step7Row]) {
       expect(row).not.toBe("");
       expect(row).not.toContain("checker pending");
@@ -123,7 +137,8 @@ describe("authentication progress status", () => {
       "Steps 4-7 wait for the merged routing/session contract from Step 2",
     );
     expect(progress).toContain("Step 7 is complete through #238/PR #251 at `3317b9d`");
-    expect(progress).toContain("Step 8 waits for the remaining three ownership slices");
+    expect(progress).toContain("Step 8's credential-free repository slice is complete");
+    expect(progress).toContain("Hosted provider acceptance waits for Step 1");
     expect(progress).not.toContain("Steps 4-7 no longer wait on those prerequisites");
   });
 });
