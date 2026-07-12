@@ -2,6 +2,12 @@ import { defineConfig, devices } from "@playwright/test";
 
 const port = Number(process.env.PORT ?? 3200);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${port}`;
+const operatorUsername = process.env.AGENTBAY_OPERATOR_USERNAME?.trim();
+const operatorPassword = process.env.AGENTBAY_OPERATOR_PASSWORD;
+const httpCredentials =
+  operatorUsername && operatorPassword
+    ? { username: operatorUsername, password: operatorPassword, origin: new URL(baseURL).origin }
+    : undefined;
 
 export default defineConfig({
   testDir: "./tests/e2e-hosted",
@@ -10,12 +16,17 @@ export default defineConfig({
   workers: 1,
   use: {
     baseURL,
+    httpCredentials,
     screenshot: "off",
     trace: "off",
     video: "off",
   },
   webServer: {
-    command: `bun run dev --hostname 127.0.0.1 --port ${port}`,
+    command: `bun run dev --hostname localhost --port ${port}`,
+    env: {
+      ...process.env,
+      NEXT_PUBLIC_APP_URL: baseURL,
+    },
     url: baseURL,
     reuseExistingServer: process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === "1",
     timeout: 120_000,

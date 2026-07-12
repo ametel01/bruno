@@ -73,10 +73,12 @@ The repository now provides an opt-in `bun run test:e2e:clerk` command backed by
 `CLERK_PUBLISHABLE_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, and `CLERK_SECRET_KEY` (an optional
 `CLERK_TESTING_TOKEN` may be supplied to reuse a testing token), plus two approved `+clerk_test` development identities in
 `E2E_CLERK_TEST_USER_A_EMAIL` and `E2E_CLERK_TEST_USER_B_EMAIL`. Missing capability names fail
-before app or browser startup; the identities must be distinct and the hosted test compares each
-context's resolved primary email in memory without retaining the values. Screenshots, traces,
-videos, cookies, and storage state are not retained. This harness is repeatable repository wiring,
-not hosted success evidence until it runs against the linked development instance.
+before app or browser startup. Because the Basic shell remains enabled until production cutover,
+the local operator username/password are also required and are supplied only as in-memory HTTP
+credentials. The identities must be distinct and the hosted test compares each context's resolved
+primary email in memory without retaining the values. Screenshots, traces, videos, cookies, and
+storage state are not retained. This harness is repeatable repository wiring, not hosted success
+evidence until it runs against the linked development instance.
 
 For that remaining hosted smoke, the run must:
 

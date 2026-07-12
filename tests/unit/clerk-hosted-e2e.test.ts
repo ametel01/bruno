@@ -11,9 +11,13 @@ const COMPLETE_ENV = {
   CLERK_PUBLISHABLE_KEY: "publishable-value-must-not-print",
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "publishable-value-must-not-print",
   CLERK_SECRET_KEY: "secret-value-must-not-print",
+  AGENTBAY_OPERATOR_USERNAME: "operator-user-must-not-print",
+  AGENTBAY_OPERATOR_PASSWORD: "operator-password-must-not-print",
   E2E_CLERK_TEST_USER_A_EMAIL: "user-a+clerk_test@example.invalid",
   E2E_CLERK_TEST_USER_B_EMAIL: "user-b+clerk_test@example.invalid",
 };
+const PORT_EXPANSION = ["$", "{PORT:-3200}"].join("");
+const CONFIG_PORT = ["$", "{port}"].join("");
 
 describe("optional hosted Clerk E2E gate", () => {
   it("fails before launching Playwright when capability values are missing", async () => {
@@ -138,7 +142,17 @@ describe("optional hosted Clerk E2E gate", () => {
     expect(packageScripts["test:e2e:clerk"]).toContain("run-clerk-e2e.ts");
     expect(packageScripts["test:e2e"]).toContain("run-e2e.ts full");
     expect(packageScripts["test:e2e"]).not.toContain("clerk");
+    expect(packageScripts["test:e2e:clerk"]).toContain(
+      `NEXT_PUBLIC_APP_URL=http://localhost:${PORT_EXPANSION}`,
+    );
+    expect(packageScripts["test:e2e:clerk"]).toContain(
+      `PLAYWRIGHT_BASE_URL=http://localhost:${PORT_EXPANSION}`,
+    );
     expect(config).toContain('testDir: "./tests/e2e-hosted"');
+    expect(config).toContain(`http://localhost:${CONFIG_PORT}`);
+    expect(config).toContain("NEXT_PUBLIC_APP_URL: baseURL");
+    expect(config).toContain("httpCredentials");
+    expect(config).toContain("origin: new URL(baseURL).origin");
     expect(config).toContain('screenshot: "off"');
     expect(config).toContain('trace: "off"');
     expect(config).toContain('video: "off"');
@@ -146,6 +160,7 @@ describe("optional hosted Clerk E2E gate", () => {
     expect(config).not.toContain('name: "clerk setup"');
     expect(await readFile("scripts/run-clerk-e2e.ts", "utf8")).toContain("clerkSetup");
     expect(spec).toContain('strategy: "email_code"');
+    expect(spec).toContain('page.goto("/sign-in", { waitUntil: "domcontentloaded" })');
     expect(spec).toContain("primaryEmailAddress");
     expect(spec).toContain("Current user");
     expect(spec).toContain('name: "Sign out"');

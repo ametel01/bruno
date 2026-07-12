@@ -33,7 +33,11 @@ export async function proxy(request: NextRequest, event: NextFetchEvent): Promis
     return operatorAccessResponse(request, operatorDecision);
   }
 
-  if (isRunnerMachineAuthPath(pathname) || isPublicInfrastructurePath(pathname)) {
+  if (
+    isRunnerMachineAuthPath(pathname) ||
+    isPublicInfrastructurePath(pathname) ||
+    isClerkAuthPagePath(pathname)
+  ) {
     return NextResponse.next();
   }
 
@@ -54,13 +58,13 @@ export default proxy;
 
 export async function handleClerkSessionRequest(auth: ClerkMiddlewareAuth, request: NextRequest) {
   if (isClerkAuthPagePath(request.nextUrl.pathname)) {
-    return NextResponse.next();
+    return;
   }
 
   const authState = await auth();
 
   if (authState.isAuthenticated) {
-    return NextResponse.next();
+    return;
   }
 
   if (isBrowserApiPath(request.nextUrl.pathname)) {

@@ -35,12 +35,20 @@ The optional gate requires these capability names, supplied only through the loc
 - `CLERK_PUBLISHABLE_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`;
 - `CLERK_SECRET_KEY` for the app and Clerk setup; an optional pre-created
   `CLERK_TESTING_TOKEN` may be supplied to reuse a testing token; and
+- `AGENTBAY_OPERATOR_USERNAME` and `AGENTBAY_OPERATOR_PASSWORD` for the
+  development Basic-auth shell, which remains enabled until production cutover; and
 - `E2E_CLERK_TEST_USER_A_EMAIL` and `E2E_CLERK_TEST_USER_B_EMAIL`, both approved development
   `+clerk_test` identities.
 
 Its sanitized preflight reports missing capability names and exits before starting the app or
-browser. Screenshots, traces, and videos are disabled; browser contexts are closed in the test;
-raw keys, testing tokens, emails, cookies, OAuth state, and storage state must never be retained.
+browser. Playwright supplies the operator credentials only as in-memory HTTP credentials scoped
+to the local AgentBay origin, so the test can reach the protected development pages without
+sending Basic credentials to Clerk's cross-origin requests; they are never printed or persisted.
+The package script pins both Playwright and Next.js to the same `localhost` port because Next.js
+16's development render proxy resolves that hostname internally; keep the script's loopback
+hostname alignment when overriding the port.
+Screenshots, traces, and videos are disabled; browser contexts are closed in the test; raw keys,
+testing tokens, emails, cookies, OAuth state, and storage state must never be retained.
 Google and Apple are not silently marked successful: the current official helper does not provide
 deterministic OAuth automation for those providers, so their hosted evidence remains operator-run.
 This optional gate does not replace the provider/runner-backed `bun run verify` requirement.

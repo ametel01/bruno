@@ -1,4 +1,4 @@
-import { clerk, setupClerkTestingToken } from "@clerk/testing/playwright";
+import { clerk } from "@clerk/testing/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 const userAEmail = process.env.E2E_CLERK_TEST_USER_A_EMAIL;
@@ -45,8 +45,7 @@ test("two email-code identities keep independent browser sessions", async ({ bro
 });
 
 async function signInWithEmailCode(page: Page, identifier: string): Promise<void> {
-  await page.goto("/");
-  await setupClerkTestingToken({ page });
+  await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
   await clerk.signIn({
     page,
     signInParams: {

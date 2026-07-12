@@ -182,7 +182,7 @@ describe("Clerk session proxy", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("x-middleware-next")).toBe("1");
-    expect(mocks.clerkInvocations).toBe(1);
+    expect(mocks.clerkInvocations).toBe(0);
     expect(mocks.auth).not.toHaveBeenCalled();
   });
 

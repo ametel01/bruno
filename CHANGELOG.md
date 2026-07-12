@@ -102,6 +102,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The hosted Clerk launcher now bootstraps testing state before Playwright workers start and
   rejects duplicate/non-`+clerk_test` identities while binding each browser context to its
   resolved primary email without retaining PII.
+- The opt-in hosted Clerk harness now supplies the existing development Basic-auth credentials
+  only as in-memory Playwright HTTP credentials, allowing it to reach the Clerk-protected app
+  while production cutover remains intentionally deferred.
+- The hosted Clerk Playwright server now binds to the same `localhost` hostname used by Next.js
+  16's internal development render proxy, preventing authenticated dashboard requests from
+  failing with a misleading socket reset.
 - Authentication progress and acceptance docs now correctly separate completed #232 development
   Clerk setup/doctor evidence from the still-open #239 hosted browser/provider smoke and
   runner-backed full-E2E gates.
