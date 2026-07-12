@@ -32,9 +32,10 @@ tracing, record the terminal, or redirect raw CLI output into a tracked file.
    with `clerk apps create "AgentBay Development"`.
 3. Capture the selected opaque application ID privately and run `clerk link --app <app-id>`.
    Confirm the linked-project check locally with `clerk doctor --json`; the doctor command may
-   still report the expected missing-environment failure at this point. `clerk whoami` confirms
-   only the authenticated account, not the linked application. Evidence may state only that the
-   name, application-ID fingerprint, and development environment matched.
+   still report the expected missing-environment failure at this point. `clerk whoami` shows the
+   authenticated user and linked application, so use it only for the local confirmation. Do not
+   publish the account email or raw application ID. Evidence may state only the sanitized
+   linked-app confirmation, application-ID fingerprint, and matched development environment.
 4. In the linked development instance, require email address verification by email code. Enable
    Google and Apple as development social connections using Clerk's development credentials. Do
    not add custom production OAuth credentials during this step.

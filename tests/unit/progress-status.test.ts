@@ -72,6 +72,12 @@ describe("authentication progress status", () => {
     const step8Row = getStepRow(8);
 
     expect(step1Row).toContain("| #232 | Approved; host-auth-blocked | None |");
+    expect(step1Row).toContain("PR #257 (draft, non-closing)");
+    expect(step1Row).toContain("| PR head |");
+    expect(step1Row).toContain("repository runbook and deterministic documentation contract tests");
+    expect(step1Row).not.toContain("Not opened");
+    expect(step1Row).not.toContain("Not collected");
+    expect(step1Row).not.toContain("(merged)");
     expect(step1Row).toContain("de322ae8-c258-440e-a679-b74bafb61048");
     expect(step1Row).toContain("ignored local `.env.local`");
     expect(step1Row).toContain("no external success is claimed");

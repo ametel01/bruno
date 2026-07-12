@@ -7,6 +7,7 @@ const RUNBOOK_PATH = "docs/CLERK_DEVELOPMENT.md";
 describe("Clerk development runbook", () => {
   it("pins the approved local-only development workflow and evidence boundary", async () => {
     const runbook = await readFile(join(process.cwd(), RUNBOOK_PATH), "utf8");
+    const normalizedProse = runbook.replace(/\s+/g, " ");
 
     for (const requiredText of [
       "de322ae8-c258-440e-a679-b74bafb61048",
@@ -32,8 +33,14 @@ describe("Clerk development runbook", () => {
     expect(runbook).toContain("Vercel configuration");
     expect(runbook).toContain("issue #240");
     expect(runbook).toContain("intermediate evidence only");
-    expect(runbook).toContain("`clerk whoami` confirms");
-    expect(runbook).toContain("not the linked application");
+    expect(normalizedProse).toContain(
+      "`clerk whoami` shows the authenticated user and linked application",
+    );
+    expect(normalizedProse).toContain("Do not publish the account email or raw application ID");
+    expect(normalizedProse).toContain(
+      "sanitized linked-app confirmation, application-ID fingerprint",
+    );
+    expect(normalizedProse).not.toContain("not the linked application");
     expect(runbook.indexOf("chmod 600 .env.local")).toBeLessThan(
       runbook.indexOf("clerk env pull --instance dev --file .env.local"),
     );
