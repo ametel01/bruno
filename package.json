@@ -26,6 +26,7 @@
     "test": "DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} vitest run --no-file-parallelism",
     "test:e2e": "PORT=${PORT:-3100} DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:${PORT:-3100}} bun --conditions react-server scripts/run-e2e.ts full",
     "test:e2e:ci": "PORT=${PORT:-3100} DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:${PORT:-3100}} bun --conditions react-server scripts/run-e2e.ts ci",
+    "test:e2e:clerk": "PORT=${PORT:-3200} AGENTBAY_AUTH_MODE=clerk DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/agentbay} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:${PORT:-3200}} bun --conditions react-server scripts/run-clerk-e2e.ts",
     "typecheck": "tsc --noEmit",
     "verify": "bun run format:check && bun run lint && bun run typecheck && bun run test && bun run build && bun run test:e2e",
     "vercel-build": "bun scripts/vercel-build.ts"
@@ -43,6 +44,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.2",
+    "@clerk/testing": "^2.2.7",
     "@playwright/test": "1.61.1",
     "@types/node": "26.1.0",
     "@types/react": "19.2.17",

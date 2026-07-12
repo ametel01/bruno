@@ -14,6 +14,35 @@ This is the repository-owned GitHub CI command. It runs only the health route, s
 
 The command still requires the normal test database and application URL. Package defaults target the local PostgreSQL service on port `54329` and the Next.js test server on port `3100`; parallel runs should override `DATABASE_URL`, `NEXT_PUBLIC_APP_URL`, and `PORT` with isolated values.
 
+## Optional hosted Clerk development smoke
+
+Run this separately from the credential-free and runner-backed gates:
+
+```bash
+bun run test:e2e:clerk
+```
+
+The command uses the project-based `@clerk/testing/playwright` setup and an isolated
+`tests/e2e-hosted` suite. It exercises the deterministic development email-code path with two
+pre-created `+clerk_test` identities, verifies the current-user and sign-out surfaces, and proves
+that signing out one browser context does not sign out the other. Clerk's supported test OTP is
+used by the helper; no real email delivery is expected.
+
+The optional gate requires these capability names, supplied only through the local environment:
+
+- `CLERK_PUBLISHABLE_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`;
+- `CLERK_SECRET_KEY` for the app and Clerk setup; an optional pre-created
+  `CLERK_TESTING_TOKEN` may be supplied to reuse a testing token; and
+- `E2E_CLERK_TEST_USER_A_EMAIL` and `E2E_CLERK_TEST_USER_B_EMAIL`, both approved development
+  `+clerk_test` identities.
+
+Its sanitized preflight reports missing capability names and exits before starting the app or
+browser. Screenshots, traces, and videos are disabled; browser contexts are closed in the test;
+raw keys, testing tokens, emails, cookies, OAuth state, and storage state must never be retained.
+Google and Apple are not silently marked successful: the current official helper does not provide
+deterministic OAuth automation for those providers, so their hosted evidence remains operator-run.
+This optional gate does not replace the provider/runner-backed `bun run verify` requirement.
+
 ## Full provider-backed gate
 
 Run:
