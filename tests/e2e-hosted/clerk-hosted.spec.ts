@@ -55,6 +55,31 @@ async function signInWithEmailCode(page: Page, identifier: string): Promise<void
     },
   });
   await page.goto("/dashboard");
+  await expectResolvedIdentity(page, identifier);
+}
+
+async function expectResolvedIdentity(page: Page, expectedIdentity: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate((expected) => {
+          const clerk = (
+            window as unknown as {
+              Clerk?: {
+                user?: {
+                  primaryEmailAddress?: { emailAddress?: string | null } | null;
+                } | null;
+              };
+            }
+          ).Clerk;
+
+          return (
+            clerk?.user?.primaryEmailAddress?.emailAddress?.toLowerCase() === expected.toLowerCase()
+          );
+        }, expectedIdentity),
+      { timeout: 15_000 },
+    )
+    .toBe(true);
 }
 
 function requireTestIdentity(value: string | undefined): string {

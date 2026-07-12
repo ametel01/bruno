@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
   CLERK_HOSTED_CAPABILITY_MESSAGE,
+  CLERK_HOSTED_SETUP_FAILURE_MESSAGE,
   planClerkHostedCommand,
   runClerkHostedE2E,
 } from "@/scripts/run-clerk-e2e";
@@ -44,6 +45,76 @@ describe("optional hosted Clerk E2E gate", () => {
     expect(errors.join(" ")).not.toContain("must-not-print");
   });
 
+  it("rejects duplicate or non-test identities without echoing them", async () => {
+    const errors: string[] = [];
+
+    await expect(
+      runClerkHostedE2E(
+        {
+          ...COMPLETE_ENV,
+          E2E_CLERK_TEST_USER_B_EMAIL: COMPLETE_ENV.E2E_CLERK_TEST_USER_A_EMAIL,
+        },
+        { writeError: (message) => errors.push(message) },
+      ),
+    ).resolves.toBe(1);
+
+    await expect(
+      runClerkHostedE2E(
+        {
+          ...COMPLETE_ENV,
+          E2E_CLERK_TEST_USER_B_EMAIL: "real-user@example.invalid",
+        },
+        { writeError: (message) => errors.push(message) },
+      ),
+    ).resolves.toBe(1);
+
+    expect(errors).toHaveLength(2);
+    expect(errors.every((message) => message.includes("distinct +clerk_test identities"))).toBe(
+      true,
+    );
+    expect(errors.join(" ")).not.toContain("real-user@example.invalid");
+  });
+
+  it("bootstraps Clerk before launching Playwright", async () => {
+    const events: string[] = [];
+
+    await expect(
+      runClerkHostedE2E(COMPLETE_ENV, {
+        setupClerk: async () => {
+          events.push("setup");
+        },
+        runCommand: async () => {
+          events.push("playwright");
+          return 0;
+        },
+      }),
+    ).resolves.toBe(0);
+
+    expect(events).toEqual(["setup", "playwright"]);
+  });
+
+  it("suppresses raw Clerk setup failures and does not launch Playwright", async () => {
+    const commands: unknown[] = [];
+    const errors: string[] = [];
+
+    await expect(
+      runClerkHostedE2E(COMPLETE_ENV, {
+        setupClerk: async () => {
+          throw new Error("secret-value-must-not-print");
+        },
+        runCommand: async (command) => {
+          commands.push(command);
+          return 0;
+        },
+        writeError: (message) => errors.push(message),
+      }),
+    ).resolves.toBe(1);
+
+    expect(commands).toEqual([]);
+    expect(errors).toEqual([CLERK_HOSTED_SETUP_FAILURE_MESSAGE]);
+    expect(errors.join(" ")).not.toContain("secret-value-must-not-print");
+  });
+
   it("plans only the dedicated hosted config when capability is present", () => {
     expect(planClerkHostedCommand(COMPLETE_ENV, { cwd: "/repo", platform: "linux" })).toEqual({
       ok: true,
@@ -71,8 +142,11 @@ describe("optional hosted Clerk E2E gate", () => {
     expect(config).toContain('screenshot: "off"');
     expect(config).toContain('trace: "off"');
     expect(config).toContain('video: "off"');
-    expect(config).toContain('dependencies: ["clerk setup"]');
+    expect(config).not.toContain('dependencies: ["clerk setup"]');
+    expect(config).not.toContain('name: "clerk setup"');
+    expect(await readFile("scripts/run-clerk-e2e.ts", "utf8")).toContain("clerkSetup");
     expect(spec).toContain('strategy: "email_code"');
+    expect(spec).toContain("primaryEmailAddress");
     expect(spec).toContain("Current user");
     expect(spec).toContain('name: "Sign out"');
     expect(docs).toContain("bun run test:e2e:clerk");

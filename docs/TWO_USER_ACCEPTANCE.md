@@ -69,13 +69,14 @@ another app or treat approval, setup, provider toggles, or a passing doctor as p
 evidence.
 
 The repository now provides an opt-in `bun run test:e2e:clerk` command backed by the official
-`@clerk/testing/playwright` package. Its project-based setup and sanitized preflight require
+`@clerk/testing/playwright` package. Its launcher-level setup and sanitized preflight require
 `CLERK_PUBLISHABLE_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, and `CLERK_SECRET_KEY` (an optional
 `CLERK_TESTING_TOKEN` may be supplied to reuse a testing token), plus two approved `+clerk_test` development identities in
 `E2E_CLERK_TEST_USER_A_EMAIL` and `E2E_CLERK_TEST_USER_B_EMAIL`. Missing capability names fail
-before app or browser startup; screenshots, traces, videos, cookies, and storage state are not
-retained. This harness is repeatable repository wiring, not hosted success evidence until it runs
-against the linked development instance.
+before app or browser startup; the identities must be distinct and the hosted test compares each
+context's resolved primary email in memory without retaining the values. Screenshots, traces,
+videos, cookies, and storage state are not retained. This harness is repeatable repository wiring,
+not hosted success evidence until it runs against the linked development instance.
 
 For that remaining hosted smoke, the run must:
 
