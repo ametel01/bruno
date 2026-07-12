@@ -68,6 +68,15 @@ provider state. Follow the [development-instance runbook](./CLERK_DEVELOPMENT.md
 another app or treat approval, setup, provider toggles, or a passing doctor as provider-flow
 evidence.
 
+The repository now provides an opt-in `bun run test:e2e:clerk` command backed by the official
+`@clerk/testing/playwright` package. Its project-based setup and sanitized preflight require
+`CLERK_PUBLISHABLE_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, and `CLERK_SECRET_KEY` (an optional
+`CLERK_TESTING_TOKEN` may be supplied to reuse a testing token), plus two approved `+clerk_test` development identities in
+`E2E_CLERK_TEST_USER_A_EMAIL` and `E2E_CLERK_TEST_USER_B_EMAIL`. Missing capability names fail
+before app or browser startup; screenshots, traces, videos, cookies, and storage state are not
+retained. This harness is repeatable repository wiring, not hosted success evidence until it runs
+against the linked development instance.
+
 For that remaining hosted smoke, the run must:
 
 1. Use Clerk's Playwright helpers with a fresh browser context and isolated storage state for each
@@ -109,9 +118,10 @@ clerk doctor --json
 gate is expected to stop before Playwright when approved provider credentials are absent.
 
 On 2026-07-12, the dedicated AgentBay development Clerk setup from issue #232 is complete and its
-sanitized `clerk doctor --json` gate passes. Issue #239 remains open because hosted browser
-email-code, Google, Apple, current-user, and sign-out smoke could not run without a supported
-browser backend and approved isolated development identities. The canonical full `bun run verify`
-also remains outstanding because the final runner-backed E2E capability needs an authorized
-isolated local runner or explicit cloud-provider authority. This document does not claim hosted
-provider-flow success, full provider-backed verify success, or issue closure.
+sanitized `clerk doctor --json` gate passes. The optional repository harness is implemented but
+has not run against the linked development instance. Issue #239 remains open because hosted browser
+email-code, Google, Apple, current-user, and sign-out smoke still need approved isolated identities
+and provider reachability. The canonical full `bun run verify` also remains outstanding because the
+final runner-backed E2E capability needs an authorized isolated local runner or explicit
+cloud-provider authority. This document does not claim hosted provider-flow success, full
+provider-backed verify success, or issue closure.

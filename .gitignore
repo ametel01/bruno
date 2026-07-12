@@ -9,6 +9,7 @@ out/
 coverage/
 playwright-report/
 test-results/
+playwright/.clerk/
 tsconfig.tsbuildinfo
 
 # Local environment
