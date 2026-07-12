@@ -63,9 +63,10 @@ describe("two-user acceptance evidence matrix", () => {
     expect(matrix).toContain(
       "Email-code, Google, Apple, current-user, and sign-out browser success",
     );
-    expect(matrix).toContain("permits that development-only setup");
-    expect(matrix).toContain("host-auth-blocked");
-    expect(matrix).toMatch(/does not\s+claim any of them passed/);
+    expect(matrix).toContain("completed the prerequisite development setup");
+    expect(matrix).toContain("sanitized `clerk doctor --json` gate passed");
+    expect(matrix).toContain("Hosted smoke still requires a supported browser");
+    expect(matrix).toContain("not hosted provider-flow success");
     expect(matrix).not.toMatch(/(?:pk_test|sk_test|agb_reg|agb_run)_[A-Za-z0-9_-]{16,}/);
     expect(matrix).not.toMatch(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
   });

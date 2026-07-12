@@ -12,7 +12,8 @@ describe("Clerk development runbook", () => {
     for (const requiredText of [
       "de322ae8-c258-440e-a679-b74bafb61048",
       "AgentBay development",
-      "host-auth-blocked",
+      "development setup is complete",
+      "does not claim hosted browser",
       "clerk auth login",
       "clerk apps list",
       'clerk apps create "AgentBay Development"',
@@ -33,6 +34,8 @@ describe("Clerk development runbook", () => {
     expect(runbook).toContain("Vercel configuration");
     expect(runbook).toContain("issue #240");
     expect(runbook).toContain("intermediate evidence only");
+    expect(runbook).toContain("passing sanitized `clerk doctor --json` result");
+    expect(runbook).toContain("does not prove hosted email-code");
     expect(normalizedProse).toContain(
       "`clerk whoami` shows the authenticated user and linked application",
     );

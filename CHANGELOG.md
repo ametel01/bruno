@@ -96,6 +96,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Authentication progress and acceptance docs now correctly separate completed #232 development
+  Clerk setup/doctor evidence from the still-open #239 hosted browser/provider smoke and
+  runner-backed full-E2E gates.
 - Production Vercel builds now apply pending Drizzle migrations before compiling, and successful remote runner starts compensate failed lifecycle finalization instead of leaving agents permanently `starting`.
 - DigitalOcean cloud runner bootstrap now validates and reloads the generated Caddy reverse-proxy config after writing it, so fresh Droplets serve the runner endpoint instead of the package default site.
 - Stale runner heartbeats now reconcile runners to `offline` before status summaries, cloud provisioning summaries, and placement decisions read them.

@@ -57,16 +57,18 @@ The repository deterministically proves the sign-in/sign-up widgets, current-use
 sign-out redirect configuration in `tests/unit/clerk-auth-surfaces.test.tsx`. A successful hosted
 flow cannot be claimed from those component tests.
 
-Email-code, Google, Apple, current-user, and sign-out browser success remain part of issue #232's
-approved development-instance smoke. They require a dedicated AgentBay development Clerk app,
-test-only keys, a `CLERK_TESTING_TOKEN`, and configured provider state. Approval
-`de322ae8-c258-440e-a679-b74bafb61048` permits that development-only setup with local
-`.env.local` as the sole key destination. The stored Clerk CLI session is currently expired, so
-external inventory, provisioning, provider success, and a passing doctor remain host-auth-blocked.
-Follow the [development-instance runbook](./CLERK_DEVELOPMENT.md); never reuse another app or treat
-the approval itself as provider evidence.
+Email-code, Google, Apple, current-user, and sign-out browser success remain part of issue #239's
+hosted development acceptance. Issue #232 completed the prerequisite development setup: a dedicated
+AgentBay development Clerk app is explicitly linked, verified email-code and development
+Google/Apple provider configuration are enabled, required local `.env.local` variable names are
+present, and the sanitized `clerk doctor --json` gate passed for that linked development app. That
+setup evidence is not hosted provider-flow success. Hosted smoke still requires a supported browser
+backend, isolated synthetic identities, test-only keys, a `CLERK_TESTING_TOKEN`, and reachable
+provider state. Follow the [development-instance runbook](./CLERK_DEVELOPMENT.md); never reuse
+another app or treat approval, setup, provider toggles, or a passing doctor as provider-flow
+evidence.
 
-After that approval, the smoke run must:
+For that remaining hosted smoke, the run must:
 
 1. Use Clerk's Playwright helpers with a fresh browser context and isolated storage state for each
    synthetic user.
@@ -106,9 +108,10 @@ clerk doctor --json
 `bun run test:e2e` is the provider-backed final step of `bun run verify`; its sanitized capability
 gate is expected to stop before Playwright when approved provider credentials are absent.
 
-On 2026-07-10, a read-only `clerk doctor --json` run found the repository unlinked, with no local
-Clerk environment and application checks skipped. The command returned its sanitized
-`doctor_failed` envelope. Development setup was subsequently approved, but a read-only inventory
-attempt found the stored Clerk session expired. Host reauthentication is required before linking,
-local-only key retrieval, doctor, or hosted provider smoke can continue; this document does not
-claim any of them passed.
+On 2026-07-12, the dedicated AgentBay development Clerk setup from issue #232 is complete and its
+sanitized `clerk doctor --json` gate passes. Issue #239 remains open because hosted browser
+email-code, Google, Apple, current-user, and sign-out smoke could not run without a supported
+browser backend and approved isolated development identities. The canonical full `bun run verify`
+also remains outstanding because the final runner-backed E2E capability needs an authorized
+isolated local runner or explicit cloud-provider authority. This document does not claim hosted
+provider-flow success, full provider-backed verify success, or issue closure.
