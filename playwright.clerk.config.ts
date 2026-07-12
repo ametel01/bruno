@@ -22,12 +22,7 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "clerk setup",
-      testMatch: /clerk-setup\.ts/,
-    },
-    {
       name: "clerk hosted",
-      dependencies: ["clerk setup"],
       testMatch: /clerk-hosted\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
     },

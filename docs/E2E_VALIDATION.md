@@ -22,11 +22,13 @@ Run this separately from the credential-free and runner-backed gates:
 bun run test:e2e:clerk
 ```
 
-The command uses the project-based `@clerk/testing/playwright` setup and an isolated
-`tests/e2e-hosted` suite. It exercises the deterministic development email-code path with two
-pre-created `+clerk_test` identities, verifies the current-user and sign-out surfaces, and proves
-that signing out one browser context does not sign out the other. Clerk's supported test OTP is
-used by the helper; no real email delivery is expected.
+The launcher bootstraps `clerkSetup()` in its own process before spawning Playwright, so the
+Clerk testing environment is inherited by the browser worker. The isolated `tests/e2e-hosted`
+suite exercises the deterministic development email-code path with two distinct, pre-created
+`+clerk_test` identities, verifies each context's resolved current-user identity in memory, checks
+the current-user and sign-out surfaces, and proves that signing out one browser context does not
+sign out the other. Clerk's supported test OTP is used by the helper; no real email delivery is
+expected.
 
 The optional gate requires these capability names, supplied only through the local environment:
 

@@ -99,6 +99,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added an opt-in, secret-safe Clerk Playwright development smoke harness for deterministic
   email-code, current-user, sign-out, and isolated-context checks without changing credential-free
   CI or claiming Google/Apple provider success.
+- The hosted Clerk launcher now bootstraps testing state before Playwright workers start and
+  rejects duplicate/non-`+clerk_test` identities while binding each browser context to its
+  resolved primary email without retaining PII.
 - Authentication progress and acceptance docs now correctly separate completed #232 development
   Clerk setup/doctor evidence from the still-open #239 hosted browser/provider smoke and
   runner-backed full-E2E gates.
