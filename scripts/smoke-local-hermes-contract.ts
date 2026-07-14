@@ -14,6 +14,7 @@ import {
 } from "@/src/runner-service/constants";
 import { ManualRunnerDocker, type RunnerLogLine } from "@/src/runner-service/docker";
 import {
+  prepareHermesState,
   projectHermesHome,
   type HermesProjectionResult,
 } from "@/src/runner-service/hermes-projection";
@@ -90,6 +91,17 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
       },
       projection: {
         project: async (launchSpec) => {
+          const state = await prepareHermesState(launchSpec.agent.id, { stateRoot });
+          await writeFile(
+            join(state.hermesHome, "config.yaml"),
+            'model:\n  provider: "openrouter"\n  model: "openai/gpt-4.1-mini"\n',
+            "utf8",
+          );
+          await writeFile(
+            join(state.hermesHome, ".env"),
+            'OPENROUTER_API_KEY="sk-or-v1-contract-smoke-local-fake-model-key"\n',
+            "utf8",
+          );
           const projected = await projectHermesHome(launchSpec, {
             stateRoot,
           });
@@ -202,8 +214,8 @@ function buildSmokeLaunchSpec(input: {
       ref: input.fakeModelImage || DEFAULT_HERMES_WORKLOAD_IMAGE,
     },
     model: {
-      provider: "openrouter",
-      model: "openai/gpt-4.1-mini",
+      provider: "hermes",
+      model: "configured-by-hermes",
     },
     schedule: {
       mode: "manual",
@@ -226,9 +238,6 @@ function buildSmokeLaunchSpec(input: {
     },
     secrets: {
       kind: "inline",
-      openrouterApiKey: "sk-or-v1-contract-smoke-local-fake-model-key",
-      telegramBotToken: "123456:abcdefghijklmnopqrstuvwxyz",
-      telegramAllowedUsers: "123456789",
       apiServerKey: `agb_agent_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`,
     },
   };
@@ -261,11 +270,7 @@ platforms:
 `,
     "utf8",
   );
-  await writeFile(
-    input.projection.envPath,
-    env.replace(/^TELEGRAM_BOT_TOKEN=.*$/m, 'TELEGRAM_BOT_TOKEN=""'),
-    "utf8",
-  );
+  await writeFile(input.projection.envPath, env, "utf8");
 }
 
 async function startFakeModelServer(input: {

@@ -2,9 +2,37 @@ import { createRunnerService } from "@/src/runner-service/server";
 
 type BunServerRuntime = {
   serve(input: {
-    fetch(request: Request): Response | Promise<Response>;
+    fetch(
+      request: Request,
+      server: {
+        upgrade(
+          request: Request,
+          options: { data: { setupSessionId: string }; headers: Record<string, string> },
+        ): boolean;
+      },
+    ): Response | Promise<Response | undefined> | undefined;
     hostname?: string;
     port: number;
+    websocket: {
+      open(socket: {
+        data: { setupSessionId: string };
+        send(data: string): number;
+        close(code?: number, reason?: string): void;
+      }): void;
+      message(
+        socket: {
+          data: { setupSessionId: string };
+          send(data: string): number;
+          close(code?: number, reason?: string): void;
+        },
+        message: string | Buffer,
+      ): void;
+      close(socket: {
+        data: { setupSessionId: string };
+        send(data: string): number;
+        close(code?: number, reason?: string): void;
+      }): void;
+    };
   }): {
     hostname: string;
     port: number;
@@ -27,6 +55,7 @@ const server = Bun.serve({
   hostname: process.env[RUNNER_HOST_ENV]?.trim() || "127.0.0.1",
   port: parsePort(process.env[RUNNER_PORT_ENV]),
   fetch: service.fetch,
+  websocket: service.websocket,
 });
 
 console.log(

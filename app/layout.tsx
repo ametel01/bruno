@@ -2,6 +2,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { AuthConfigurationUnavailable } from "@/app/_components/auth-configuration-unavailable";
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
+import "@xterm/xterm/css/xterm.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

@@ -1,4 +1,4 @@
-export const AGENT_LAUNCH_SPEC_VERSION = "agentbay.hermes.launch.v1";
+export const AGENT_LAUNCH_SPEC_VERSION = "agentbay.hermes.launch.v2";
 export const AGENT_LAUNCH_SPEC_MAX_BYTES = 64 * 1024;
 
 export type AgentLaunchSpec = {
@@ -15,8 +15,8 @@ export type AgentLaunchSpec = {
     ref: string;
   };
   model: {
-    provider: "openrouter";
-    model: string;
+    provider: "hermes";
+    model: "configured-by-hermes";
   };
   schedule: {
     mode: "manual" | "cron";
@@ -39,9 +39,6 @@ export type AgentLaunchSpec = {
   };
   secrets: {
     kind: "inline";
-    openrouterApiKey: string;
-    telegramBotToken: string;
-    telegramAllowedUsers: string;
     apiServerKey: string;
   };
 };
@@ -75,13 +72,7 @@ const RUNTIME_KEYS = [
   "unattendedLoopLimit",
 ] as const;
 const TOOLS_KEYS = ["enabled", "disabled"] as const;
-const SECRETS_KEYS = [
-  "kind",
-  "openrouterApiKey",
-  "telegramBotToken",
-  "telegramAllowedUsers",
-  "apiServerKey",
-] as const;
+const SECRETS_KEYS = ["kind", "apiServerKey"] as const;
 const SECRET_REPLACEMENT = "[secret]";
 
 export function parseAgentLaunchSpec(value: unknown): AgentLaunchSpecParseResult {
@@ -145,10 +136,10 @@ export function parseAgentLaunchSpec(value: unknown): AgentLaunchSpecParseResult
       ref: image ? readBoundedString(image, "ref", issues, { min: 1, max: 512 }, "$.image") : "",
     },
     model: {
-      provider: model
-        ? readLiteral(model, "provider", "openrouter", issues, "$.model")
-        : "openrouter",
-      model: model ? readModelName(model, "model", issues, "$.model") : "",
+      provider: model ? readLiteral(model, "provider", "hermes", issues, "$.model") : "hermes",
+      model: model
+        ? readLiteral(model, "model", "configured-by-hermes", issues, "$.model")
+        : "configured-by-hermes",
     },
     schedule: {
       mode: schedule ? readScheduleMode(schedule, "mode", issues, "$.schedule") : "manual",
@@ -201,15 +192,6 @@ export function parseAgentLaunchSpec(value: unknown): AgentLaunchSpecParseResult
     },
     secrets: {
       kind: secrets ? readLiteral(secrets, "kind", "inline", issues, "$.secrets") : "inline",
-      openrouterApiKey: secrets
-        ? readOpenRouterApiKey(secrets, "openrouterApiKey", issues, "$.secrets")
-        : "",
-      telegramBotToken: secrets
-        ? readTelegramBotToken(secrets, "telegramBotToken", issues, "$.secrets")
-        : "",
-      telegramAllowedUsers: secrets
-        ? readTelegramAllowedUsers(secrets, "telegramAllowedUsers", issues, "$.secrets")
-        : "",
       apiServerKey: secrets ? readApiServerKey(secrets, "apiServerKey", issues, "$.secrets") : "",
     },
   } satisfies AgentLaunchSpec;
@@ -240,9 +222,6 @@ export function redactAgentLaunchSpec(spec: AgentLaunchSpec): AgentLaunchSpec {
     ...spec,
     secrets: {
       kind: "inline",
-      openrouterApiKey: SECRET_REPLACEMENT,
-      telegramBotToken: SECRET_REPLACEMENT,
-      telegramAllowedUsers: SECRET_REPLACEMENT,
       apiServerKey: SECRET_REPLACEMENT,
     },
   };
@@ -395,21 +374,6 @@ function readUuid(
   return uuid;
 }
 
-function readModelName(
-  value: Record<string, unknown>,
-  key: string,
-  issues: Array<{ path: string; message: string }>,
-  basePath: string,
-): string {
-  const model = readBoundedString(value, key, issues, { min: 3, max: 160 }, basePath);
-
-  if (!/^[A-Za-z0-9._/-]+$/.test(model) || model === "not_configured") {
-    issues.push({ path: `${basePath}.${key}`, message: "OpenRouter model is invalid." });
-  }
-
-  return model;
-}
-
 function readScheduleMode(
   value: Record<string, unknown>,
   key: string,
@@ -462,51 +426,6 @@ function readStringTuple<T extends readonly string[]>(
   }
 
   return expected;
-}
-
-function readOpenRouterApiKey(
-  value: Record<string, unknown>,
-  key: string,
-  issues: Array<{ path: string; message: string }>,
-  basePath: string,
-): string {
-  const secret = readBoundedString(value, key, issues, { min: 20, max: 400 }, basePath);
-
-  if (!/^sk-or-v1-[A-Za-z0-9_-]{20,}$/.test(secret)) {
-    issues.push({ path: `${basePath}.${key}`, message: "OpenRouter API key is invalid." });
-  }
-
-  return secret;
-}
-
-function readTelegramBotToken(
-  value: Record<string, unknown>,
-  key: string,
-  issues: Array<{ path: string; message: string }>,
-  basePath: string,
-): string {
-  const secret = readBoundedString(value, key, issues, { min: 20, max: 300 }, basePath);
-
-  if (!/^\d{6,}:[A-Za-z0-9_-]{20,}$/.test(secret)) {
-    issues.push({ path: `${basePath}.${key}`, message: "Telegram bot token is invalid." });
-  }
-
-  return secret;
-}
-
-function readTelegramAllowedUsers(
-  value: Record<string, unknown>,
-  key: string,
-  issues: Array<{ path: string; message: string }>,
-  basePath: string,
-): string {
-  const users = readBoundedString(value, key, issues, { min: 1, max: 512 }, basePath);
-
-  if (!/^\d{1,20}(,\d{1,20})*$/.test(users)) {
-    issues.push({ path: `${basePath}.${key}`, message: "Telegram allowed users are invalid." });
-  }
-
-  return users;
 }
 
 function readApiServerKey(

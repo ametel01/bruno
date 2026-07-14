@@ -41,11 +41,8 @@ type AgentLaunchConfigRow = {
 };
 
 const REQUIRED_SECRET_MESSAGES = {
-  openrouter_api_key: "Configure OpenRouter API key before starting this Hermes agent.",
-  telegram_bot_token: "Configure Telegram bot token before starting this Hermes agent.",
-  telegram_allowed_users: "Configure Telegram allowed users before starting this Hermes agent.",
-  api_server_key: "Configure Agent API server key before starting this Hermes agent.",
-} as const satisfies Record<AgentSecretKind, string>;
+  api_server_key: "Run Hermes setup before starting this agent.",
+} as const satisfies Partial<Record<AgentSecretKind, string>>;
 
 export async function buildHermesAgentLaunchSpecForUser(
   userId: string,
@@ -88,25 +85,10 @@ export async function buildHermesAgentLaunchSpecForUser(
       };
     }
 
-    if (row.config.modelProvider !== "openrouter") {
-      return {
-        ok: false,
-        reason: "hermes_setup_incomplete",
-        message: "Select OpenRouter as the model provider before starting this Hermes agent.",
-      };
-    }
-
-    if (!isConfiguredModel(row.config.modelName)) {
-      return {
-        ok: false,
-        reason: "hermes_setup_incomplete",
-        message: "Select an OpenRouter model before starting this Hermes agent.",
-      };
-    }
-
     const decrypted = await readDecryptedActiveAgentSecretsForUser(userId, normalizedAgentId, {
       createConnection: () => connection,
       ...(dependencies.env ? { env: dependencies.env } : {}),
+      kind: "api_server_key",
     });
 
     if (!decrypted.ok) {
@@ -117,7 +99,9 @@ export async function buildHermesAgentLaunchSpecForUser(
       };
     }
 
-    for (const kind of Object.keys(REQUIRED_SECRET_MESSAGES) as AgentSecretKind[]) {
+    for (const kind of Object.keys(REQUIRED_SECRET_MESSAGES) as Array<
+      keyof typeof REQUIRED_SECRET_MESSAGES
+    >) {
       if (!decrypted.secrets[kind]) {
         return {
           ok: false,
@@ -141,8 +125,8 @@ export async function buildHermesAgentLaunchSpecForUser(
         ref: dependencies.hermesWorkloadImage?.trim() || DEFAULT_HERMES_WORKLOAD_IMAGE,
       },
       model: {
-        provider: "openrouter",
-        model: row.config.modelName.trim(),
+        provider: "hermes",
+        model: "configured-by-hermes",
       },
       schedule: {
         mode: row.config.scheduleMode,
@@ -165,9 +149,6 @@ export async function buildHermesAgentLaunchSpecForUser(
       },
       secrets: {
         kind: "inline",
-        openrouterApiKey: decrypted.secrets.openrouter_api_key ?? "",
-        telegramBotToken: decrypted.secrets.telegram_bot_token ?? "",
-        telegramAllowedUsers: decrypted.secrets.telegram_allowed_users ?? "",
         apiServerKey: decrypted.secrets.api_server_key ?? "",
       },
     } satisfies AgentLaunchSpec;
@@ -205,10 +186,4 @@ async function readAgentLaunchConfig(
     .limit(1);
 
   return row ?? null;
-}
-
-function isConfiguredModel(modelName: string): boolean {
-  const normalized = modelName.trim();
-
-  return normalized.length > 0 && normalized !== "not_configured";
 }

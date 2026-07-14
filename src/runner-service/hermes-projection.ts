@@ -1,4 +1,4 @@
-import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import { DEFAULT_HERMES_STATE_ROOT } from "@/src/runner-service/constants";
@@ -21,40 +21,37 @@ export type HermesProjectionOptions = {
   };
 };
 
-const MANAGED_FILES = ["config.yaml", ".env", "SOUL.md", "agentbay-config-revision.json"] as const;
+export type HermesStatePaths = Pick<
+  HermesProjectionResult,
+  "agentRoot" | "hermesHome" | "workspace"
+>;
+
+const GUARDED_FILES = ["config.yaml", ".env", "SOUL.md", "agentbay-config-revision.json"] as const;
 
 export async function projectHermesHome(
   spec: AgentLaunchSpec,
   options: HermesProjectionOptions = {},
 ): Promise<HermesProjectionResult> {
-  const stateRoot = resolve(
-    options.stateRoot ?? process.env.AGENTBAY_HERMES_STATE_ROOT ?? DEFAULT_HERMES_STATE_ROOT,
-  );
-  const agentRoot = resolve(stateRoot, spec.agent.id);
-  const hermesHome = resolve(agentRoot, "hermes");
-  const workspace = resolve(agentRoot, "workspace");
-
-  assertChildPath(stateRoot, agentRoot);
-  assertChildPath(agentRoot, hermesHome);
-  assertChildPath(agentRoot, workspace);
-  await rejectSymlinkIfExists(stateRoot);
-  await rejectSymlinkIfExists(agentRoot);
-  await mkdir(hermesHome, { recursive: true, mode: 0o700 });
-  await mkdir(workspace, { recursive: true, mode: 0o700 });
-  await rejectSymlinkIfExists(hermesHome);
-  await rejectSymlinkIfExists(workspace);
+  const state = await prepareHermesState(spec.agent.id, options);
+  const { hermesHome } = state;
 
   const configPath = resolve(hermesHome, "config.yaml");
   const envPath = resolve(hermesHome, ".env");
   const soulPath = resolve(hermesHome, "SOUL.md");
   const revisionPath = resolve(hermesHome, "agentbay-config-revision.json");
 
-  for (const fileName of MANAGED_FILES) {
+  for (const fileName of GUARDED_FILES) {
     await rejectSymlinkIfExists(resolve(hermesHome, fileName));
   }
 
-  await atomicWrite(configPath, renderHermesConfig(spec), 0o644, options.ownership);
-  await atomicWrite(envPath, renderHermesEnv(spec), 0o600, options.ownership);
+  const config = await readExistingFile(configPath);
+
+  if (!config?.trim()) {
+    throw new HermesSetupRequiredError();
+  }
+
+  const existingEnv = (await readExistingFile(envPath)) ?? "";
+  await atomicWrite(envPath, mergeHermesEnv(existingEnv, spec), 0o600, options.ownership);
   await atomicWrite(soulPath, `${spec.prompt.soul.trim()}\n`, 0o644, options.ownership);
   await atomicWrite(
     revisionPath,
@@ -75,9 +72,7 @@ export async function projectHermesHome(
   await pruneObsoleteManagedTemps(hermesHome);
 
   return {
-    agentRoot,
-    hermesHome,
-    workspace,
+    ...state,
     configPath,
     envPath,
     soulPath,
@@ -85,58 +80,68 @@ export async function projectHermesHome(
   };
 }
 
-export function renderHermesConfig(spec: AgentLaunchSpec): string {
-  return [
-    "model:",
-    `  provider: ${yamlScalar(spec.model.provider)}`,
-    `  model: ${yamlScalar(spec.model.model)}`,
-    "terminal:",
-    `  cwd: ${yamlScalar(spec.runtime.terminalCwd)}`,
-    "tools:",
-    "  enabled:",
-    ...spec.tools.enabled.map((tool) => `    - ${yamlScalar(tool)}`),
-    "  disabled:",
-    ...spec.tools.disabled.map((tool) => `    - ${yamlScalar(tool)}`),
-    "browser:",
-    `  enabled: ${spec.runtime.browserEnabled ? "true" : "false"}`,
-    "unattended:",
-    `  loop_limit: ${spec.runtime.unattendedLoopLimit}`,
-    "schedule:",
-    `  mode: ${yamlScalar(spec.schedule.mode)}`,
-    `  cron: ${spec.schedule.cron ? yamlScalar(spec.schedule.cron) : "null"}`,
-    `  timezone: ${yamlScalar(spec.schedule.timezone)}`,
-    "api_server:",
-    "  enabled: true",
-    "  auth:",
-    "    env: API_SERVER_KEY",
-    "messaging:",
-    "  telegram:",
-    "    enabled: true",
-    "    polling: true",
-    "    token_env: TELEGRAM_BOT_TOKEN",
-    "    allowed_users_env: TELEGRAM_ALLOWED_USERS",
-    "providers:",
-    "  openrouter:",
-    "    api_key_env: OPENROUTER_API_KEY",
-    "",
-  ].join("\n");
+export async function prepareHermesState(
+  agentId: string,
+  options: HermesProjectionOptions = {},
+): Promise<HermesStatePaths> {
+  const stateRoot = resolve(
+    options.stateRoot ?? process.env.AGENTBAY_HERMES_STATE_ROOT ?? DEFAULT_HERMES_STATE_ROOT,
+  );
+  const agentRoot = resolve(stateRoot, agentId);
+  const hermesHome = resolve(agentRoot, "hermes");
+  const workspace = resolve(agentRoot, "workspace");
+
+  assertChildPath(stateRoot, agentRoot);
+  assertChildPath(agentRoot, hermesHome);
+  assertChildPath(agentRoot, workspace);
+  await rejectSymlinkIfExists(stateRoot);
+  await rejectSymlinkIfExists(agentRoot);
+  await mkdir(hermesHome, { recursive: true, mode: 0o700 });
+  await mkdir(workspace, { recursive: true, mode: 0o700 });
+  await rejectSymlinkIfExists(hermesHome);
+  await rejectSymlinkIfExists(workspace);
+
+  return {
+    agentRoot,
+    hermesHome,
+    workspace,
+  };
 }
 
-export function renderHermesEnv(spec: AgentLaunchSpec): string {
+function renderHermesEnv(spec: AgentLaunchSpec): string {
   return [
-    `OPENROUTER_API_KEY=${envValue(spec.secrets.openrouterApiKey)}`,
-    `TELEGRAM_BOT_TOKEN=${envValue(spec.secrets.telegramBotToken)}`,
-    `TELEGRAM_ALLOWED_USERS=${envValue(spec.secrets.telegramAllowedUsers)}`,
+    "API_SERVER_ENABLED=true",
+    "API_SERVER_HOST=0.0.0.0",
     `API_SERVER_KEY=${envValue(spec.secrets.apiServerKey)}`,
     "",
   ].join("\n");
 }
 
-function envValue(value: string): string {
-  return JSON.stringify(value);
+export function mergeHermesEnv(existing: string, spec: AgentLaunchSpec): string {
+  const managedKeys = new Set(["API_SERVER_ENABLED", "API_SERVER_HOST", "API_SERVER_KEY"]);
+  const preserved = existing
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter((line) => {
+      const match = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(line);
+      return !match?.[1] || !managedKeys.has(match[1]);
+    });
+
+  while (preserved.at(-1) === "") {
+    preserved.pop();
+  }
+
+  return `${preserved.length > 0 ? `${preserved.join("\n")}\n` : ""}${renderHermesEnv(spec)}`;
 }
 
-function yamlScalar(value: string): string {
+export class HermesSetupRequiredError extends Error {
+  constructor() {
+    super("Hermes setup is required.");
+    this.name = "HermesSetupRequiredError";
+  }
+}
+
+function envValue(value: string): string {
   return JSON.stringify(value);
 }
 
@@ -167,6 +172,18 @@ async function atomicWrite(
   }
 }
 
+async function readExistingFile(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
 async function writeFileOwnership(
   path: string,
   ownership: NonNullable<HermesProjectionOptions["ownership"]>,
@@ -177,7 +194,7 @@ async function writeFileOwnership(
 }
 
 async function pruneObsoleteManagedTemps(hermesHome: string): Promise<void> {
-  for (const fileName of MANAGED_FILES) {
+  for (const fileName of GUARDED_FILES) {
     await rm(resolve(hermesHome, `${fileName}.tmp`), { force: true }).catch(() => undefined);
   }
 }

@@ -481,12 +481,7 @@ function inspectContainsSecretValue(
   inspect: DockerInspectContainer,
   launchSpec: AgentLaunchSpec,
 ): boolean {
-  const secrets = [
-    launchSpec.secrets.apiServerKey,
-    launchSpec.secrets.openrouterApiKey,
-    launchSpec.secrets.telegramAllowedUsers,
-    launchSpec.secrets.telegramBotToken,
-  ].filter((secret) => secret.trim().length > 0);
+  const secrets = [launchSpec.secrets.apiServerKey].filter((secret) => secret.trim().length > 0);
   const inspectText = JSON.stringify({
     Args: inspect.Args,
     Cmd: inspect.Config?.Cmd,

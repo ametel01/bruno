@@ -38,6 +38,8 @@
     "@clerk/nextjs": "7.5.16",
     "@digitalocean/dots": "^1.17.0",
     "@microsoft/kiota-http-fetchlibrary": "^1.0.0-preview.103",
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0",
     "drizzle-orm": "^0.45.2",
     "next": "16.2.10",
     "postgres": "^3.4.9",

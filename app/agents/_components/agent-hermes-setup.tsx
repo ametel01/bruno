@@ -1,347 +1,284 @@
 "use client";
 
+import type { FitAddon as XtermFitAddon } from "@xterm/addon-fit";
+import type { Terminal as XtermTerminal } from "@xterm/xterm";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useState } from "react";
-import type { AgentSecretStatus, AgentSecretKind } from "@/src/server/agents/agent-secrets";
-import type {
-  HermesSetupReadiness,
-  OPENROUTER_MODEL_OPTIONS,
-} from "@/src/server/agents/hermes-readiness";
-
-type OpenRouterModelOption = (typeof OPENROUTER_MODEL_OPTIONS)[number];
+import { useEffect, useRef, useState } from "react";
+import type { HermesSetupReadiness } from "@/src/server/agents/hermes-readiness";
 
 type AgentHermesSetupProps = {
   agentId: string;
-  modelProvider: string;
-  modelName: string;
-  modelOptions: readonly OpenRouterModelOption[];
   readiness: HermesSetupReadiness;
-  secrets: AgentSecretStatus[];
 };
 
-type FormState =
+type SetupState =
   | { status: "idle" }
-  | { status: "submitting" }
-  | { status: "success"; message: string }
+  | { status: "creating" }
+  | { status: "connecting" }
+  | { status: "running" }
+  | { status: "completed" }
   | { status: "error"; message: string };
 
-type SecretDrafts = {
-  openrouter_api_key: string;
-  telegram_bot_token: string;
-  telegram_allowed_users: string;
+type SetupSessionResponse = {
+  ok: true;
+  session: {
+    websocketUrl: string;
+    websocketProtocol: string;
+    expiresAt: string;
+  };
 };
 
-const USER_SECRET_FIELDS = [
-  {
-    kind: "openrouter_api_key",
-    label: "OpenRouter API key",
-    inputType: "password",
-    autoComplete: "off",
-    placeholder: "sk-or-v1-...",
-  },
-  {
-    kind: "telegram_bot_token",
-    label: "Telegram bot token",
-    inputType: "password",
-    autoComplete: "off",
-    placeholder: "123456:ABC...",
-  },
-  {
-    kind: "telegram_allowed_users",
-    label: "Telegram allowed users",
-    inputType: "text",
-    autoComplete: "off",
-    placeholder: "123456789,987654321",
-  },
-] as const;
-
-export function AgentHermesSetup({
-  agentId,
-  modelProvider,
-  modelName,
-  modelOptions,
-  readiness,
-  secrets,
-}: AgentHermesSetupProps) {
+export function AgentHermesSetup({ agentId, readiness }: AgentHermesSetupProps) {
   const router = useRouter();
-  const [selectedModel, setSelectedModel] = useState(modelName);
-  const [secretDrafts, setSecretDrafts] = useState<SecretDrafts>({
-    openrouter_api_key: "",
-    telegram_bot_token: "",
-    telegram_allowed_users: "",
-  });
-  const [state, setState] = useState<FormState>({ status: "idle" });
-  const secretsByKind = new Map(secrets.map((secret) => [secret.kind, secret]));
-  const configuredCount = readiness.requirements.filter(
-    (requirement) => requirement.status === "ready",
-  ).length;
+  const terminalHostRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<XtermTerminal | null>(null);
+  const fitAddonRef = useRef<XtermFitAddon | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
+  const [state, setState] = useState<SetupState>({ status: "idle" });
+  const sessionActive = ["creating", "connecting", "running"].includes(state.status);
 
-  async function saveModel(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  useEffect(() => {
+    return () => {
+      socketRef.current?.close(1000, "Setup view closed.");
+      terminalRef.current?.dispose();
+    };
+  }, []);
 
-    if (!selectedModel.trim()) {
-      setState({ status: "error", message: "Select an OpenRouter model." });
+  useEffect(() => {
+    if (!sessionActive || !terminalHostRef.current || !fitAddonRef.current) {
       return;
     }
 
-    setState({ status: "submitting" });
+    const resizeTerminal = () => {
+      fitAddonRef.current?.fit();
+      const terminal = terminalRef.current;
+      const socket = socketRef.current;
+
+      if (terminal && socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "resize", cols: terminal.cols, rows: terminal.rows }));
+      }
+    };
+    const observer = new ResizeObserver(resizeTerminal);
+    observer.observe(terminalHostRef.current);
+    resizeTerminal();
+
+    return () => observer.disconnect();
+  }, [sessionActive]);
+
+  async function openSetup() {
+    closeCurrentSession();
+    setState({ status: "creating" });
 
     try {
-      const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          modelProvider: "openrouter",
-          modelName: selectedModel.trim(),
-        }),
-      });
+      const response = await fetch(
+        `/api/agents/${encodeURIComponent(agentId)}/hermes-setup-session`,
+        { method: "POST", headers: { Accept: "application/json" } },
+      );
 
       if (!response.ok) {
         setState({ status: "error", message: await safeFailureMessage(response) });
         return;
       }
 
-      setState({ status: "success", message: "Hermes model saved." });
-      router.refresh();
-    } catch {
-      setState({ status: "error", message: "Hermes model could not be saved." });
-    }
-  }
+      const body: unknown = await response.json();
 
-  async function saveSecret(kind: keyof SecretDrafts) {
-    const value = secretDrafts[kind].trim();
-
-    if (!value) {
-      setState({ status: "error", message: "Enter a value before saving this secret." });
-      return;
-    }
-
-    setState({ status: "submitting" });
-
-    try {
-      const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}/secrets`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, value }),
-      });
-
-      if (!response.ok) {
-        setState({ status: "error", message: await safeFailureMessage(response) });
+      if (!isSetupSessionResponse(body)) {
+        setState({ status: "error", message: "Hermes setup returned an invalid response." });
         return;
       }
 
-      setSecretDrafts((current) => ({ ...current, [kind]: "" }));
-      setState({ status: "success", message: "Secret status updated." });
-      router.refresh();
+      setState({ status: "connecting" });
+      await connectTerminal(body.session);
     } catch {
-      setState({ status: "error", message: "Secret status could not be updated." });
+      setState({ status: "error", message: "Hermes setup could not be opened." });
     }
   }
 
-  async function revokeSecret(kind: AgentSecretKind) {
-    setState({ status: "submitting" });
+  async function connectTerminal(session: SetupSessionResponse["session"]) {
+    const [{ Terminal }, { FitAddon }] = await Promise.all([
+      import("@xterm/xterm"),
+      import("@xterm/addon-fit"),
+    ]);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const host = terminalHostRef.current;
 
-    try {
-      const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}/secrets`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind }),
-      });
+    if (!host) {
+      throw new Error("Terminal host is unavailable.");
+    }
 
-      if (!response.ok) {
-        setState({ status: "error", message: await safeFailureMessage(response) });
-        return;
+    const terminal = new Terminal({
+      convertEol: true,
+      cursorBlink: true,
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+      fontSize: 13,
+      scrollback: 4_000,
+      theme: {
+        background: "#111310",
+        foreground: "#f0f2ed",
+        cursor: "#e5ff6f",
+        selectionBackground: "#495141",
+      },
+    });
+    const fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
+    terminal.open(host);
+    fitAddon.fit();
+    terminal.focus();
+    terminalRef.current = terminal;
+    fitAddonRef.current = fitAddon;
+
+    const socket = new WebSocket(session.websocketUrl, [session.websocketProtocol]);
+    socketRef.current = socket;
+
+    terminal.onData((data) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "input", data }));
       }
+    });
 
-      setState({ status: "success", message: "Secret revoked." });
-      router.refresh();
-    } catch {
-      setState({ status: "error", message: "Secret could not be revoked." });
-    }
-  }
+    socket.addEventListener("open", () => {
+      setState({ status: "running" });
+      socket.send(JSON.stringify({ type: "resize", cols: terminal.cols, rows: terminal.rows }));
+    });
+    socket.addEventListener("message", (event) => {
+      const message = parseSocketMessage(event.data);
 
-  async function generateApiServerKey() {
-    setState({ status: "submitting" });
-
-    try {
-      const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}/secrets`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: "api_server_key", generate: true }),
-      });
-
-      if (!response.ok) {
-        setState({ status: "error", message: await safeFailureMessage(response) });
-        return;
+      if (message?.type === "output") {
+        terminal.write(Uint8Array.from(atob(message.data), (character) => character.charCodeAt(0)));
+      } else if (message?.type === "status" && message.status === "completed") {
+        setState({ status: "completed" });
+        router.refresh();
+      } else if (message?.type === "status" && message.status === "failed") {
+        setState({ status: "error", message: "Hermes setup did not complete." });
       }
-
-      setState({ status: "success", message: "Agent API server key generated." });
-      router.refresh();
-    } catch {
-      setState({ status: "error", message: "Agent API server key could not be generated." });
-    }
+    });
+    socket.addEventListener("error", () => {
+      setState({ status: "error", message: "The Hermes setup connection failed." });
+    });
+    socket.addEventListener("close", (event) => {
+      if (event.code !== 1000 && state.status !== "completed") {
+        setState({ status: "error", message: "The Hermes setup session closed early." });
+      }
+    });
   }
 
-  const submitting = state.status === "submitting";
-  const apiServerKey = secretsByKind.get("api_server_key");
+  function closeCurrentSession() {
+    socketRef.current?.close(1000, "Setup restarted.");
+    socketRef.current = null;
+    terminalRef.current?.dispose();
+    terminalRef.current = null;
+    fitAddonRef.current = null;
+
+    if (terminalHostRef.current) {
+      terminalHostRef.current.replaceChildren();
+    }
+  }
 
   return (
     <section className="hermes-setup-panel" aria-labelledby="hermes-setup-title">
       <div className="section-heading">
         <h2 id="hermes-setup-title">Hermes setup</h2>
-        <span>
-          {configuredCount}/{readiness.requirements.length} ready
-        </span>
+        <span>{readiness.runnerReady ? "Runner ready" : "Runner unavailable"}</span>
       </div>
-      <div className="hermes-readiness-grid">
-        <ol className="hermes-readiness-list" aria-label="Hermes start readiness">
-          {readiness.requirements.map((requirement) => (
-            <li data-status={requirement.status} key={requirement.id}>
-              <span aria-hidden="true" />
-              <div>
-                <strong>{requirement.label}</strong>
-                <p>{requirement.message}</p>
-                {requirement.updatedAt ? (
-                  <time dateTime={requirement.updatedAt}>{requirement.updatedAt}</time>
-                ) : null}
-              </div>
-            </li>
-          ))}
-        </ol>
-        <div className="hermes-setup-actions">
-          <form className="agent-form hermes-model-form" onSubmit={saveModel}>
-            <div className="field-group">
-              <label htmlFor="hermes-model">OpenRouter model</label>
-              <select
-                id="hermes-model"
-                value={selectedModel === "not_configured" ? "" : selectedModel}
-                onChange={(event) => setSelectedModel(event.currentTarget.value)}
-              >
-                <option value="">Select a model</option>
-                {modelOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label} · {option.context}
-                  </option>
-                ))}
-              </select>
-              <p className="field-hint">
-                Saved provider: {modelProvider === "openrouter" ? "OpenRouter" : "not configured"}
-              </p>
-            </div>
-            <button className="secondary-button" disabled={submitting} type="submit">
-              Save model
-            </button>
-          </form>
-          <div className="hermes-secret-list">
-            {USER_SECRET_FIELDS.map((field) => {
-              const secret = secretsByKind.get(field.kind);
-              const configured = secret?.configured === true;
-
-              return (
-                <div className="hermes-secret-row" key={field.kind}>
-                  <div>
-                    <strong>{field.label}</strong>
-                    <p>
-                      {configured
-                        ? `Configured${secret.updatedAt ? ` ${secret.updatedAt}` : ""}`
-                        : "Missing"}
-                    </p>
-                  </div>
-                  <div className="hermes-secret-controls">
-                    <input
-                      aria-label={field.label}
-                      autoComplete={field.autoComplete}
-                      placeholder={field.placeholder}
-                      type={field.inputType}
-                      value={secretDrafts[field.kind]}
-                      onChange={(event) =>
-                        setSecretDrafts((current) => ({
-                          ...current,
-                          [field.kind]: event.currentTarget.value,
-                        }))
-                      }
-                    />
-                    <button
-                      className="secondary-button"
-                      disabled={submitting}
-                      type="button"
-                      onClick={() => saveSecret(field.kind)}
-                    >
-                      {configured ? "Replace" : "Save"}
-                    </button>
-                    {configured ? (
-                      <button
-                        className="secondary-button danger"
-                        disabled={submitting}
-                        type="button"
-                        onClick={() => revokeSecret(field.kind)}
-                      >
-                        Revoke
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })}
-            <div className="hermes-secret-row">
-              <div>
-                <strong>Agent API server key</strong>
-                <p>
-                  {apiServerKey?.configured
-                    ? `Generated${apiServerKey.updatedAt ? ` ${apiServerKey.updatedAt}` : ""}`
-                    : "Missing"}
-                </p>
-              </div>
-              <button
-                className="secondary-button"
-                disabled={submitting}
-                type="button"
-                onClick={generateApiServerKey}
-              >
-                {apiServerKey?.configured ? "Rotate" : "Generate"}
-              </button>
-            </div>
-          </div>
-          {state.status === "error" || state.status === "success" ? (
-            <p className={`form-message ${state.status}`} role="status">
+      <div className="hermes-native-setup">
+        <div className="hermes-native-setup-toolbar">
+          <button
+            className="secondary-button"
+            disabled={!readiness.runnerReady || sessionActive}
+            type="button"
+            onClick={openSetup}
+          >
+            {sessionActive ? "Setup active" : "Open Hermes setup"}
+          </button>
+          {state.status === "completed" ? (
+            <span className="form-message success" role="status">
+              Hermes setup completed.
+            </span>
+          ) : null}
+          {state.status === "error" ? (
+            <span className="form-message error" role="alert">
               {state.message}
-            </p>
+            </span>
           ) : null}
         </div>
+        {sessionActive || state.status === "completed" || state.status === "error" ? (
+          <div
+            className="hermes-setup-terminal"
+            ref={terminalHostRef}
+            role="application"
+            aria-label="Hermes setup terminal"
+          />
+        ) : null}
       </div>
     </section>
   );
 }
 
-async function safeFailureMessage(response: Response): Promise<string> {
+function isSetupSessionResponse(value: unknown): value is SetupSessionResponse {
+  if (!isRecord(value) || value.ok !== true || !isRecord(value.session)) {
+    return false;
+  }
+
+  return (
+    typeof value.session.websocketUrl === "string" &&
+    /^wss?:\/\//.test(value.session.websocketUrl) &&
+    typeof value.session.websocketProtocol === "string" &&
+    value.session.websocketProtocol.startsWith("agentbay.hermes.setup.") &&
+    typeof value.session.expiresAt === "string"
+  );
+}
+
+function parseSocketMessage(
+  value: unknown,
+): { type: "output"; data: string } | { type: "status"; status: string } | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
   try {
-    const body = (await response.json()) as {
-      error?: {
-        code?: unknown;
-        message?: unknown;
-        issues?: Array<{ message?: unknown }>;
-      };
-    };
+    const parsed: unknown = JSON.parse(value);
 
-    if (body.error?.code === "validation_failed") {
-      const messages =
-        body.error.issues
-          ?.map((issue) => (typeof issue.message === "string" ? issue.message : null))
-          .filter((message) => message !== null && !looksUnsafe(message)) ?? [];
-
-      return messages.length > 0 ? messages.join(" ") : "Check the setup fields and try again.";
+    if (!isRecord(parsed) || typeof parsed.type !== "string") {
+      return null;
     }
 
-    if (typeof body.error?.message === "string" && !looksUnsafe(body.error.message)) {
+    if (parsed.type === "output" && typeof parsed.data === "string") {
+      return { type: "output", data: parsed.data };
+    }
+
+    if (parsed.type === "status" && typeof parsed.status === "string") {
+      return { type: "status", status: parsed.status };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+async function safeFailureMessage(response: Response): Promise<string> {
+  try {
+    const body: unknown = await response.json();
+
+    if (
+      isRecord(body) &&
+      isRecord(body.error) &&
+      typeof body.error.message === "string" &&
+      !looksUnsafe(body.error.message)
+    ) {
       return body.error.message;
     }
   } catch {
-    // Keep failures generic when the response body is malformed or not safe JSON.
+    // Keep malformed or unsafe failures generic.
   }
 
-  return "Hermes setup could not be saved.";
+  return "Hermes setup could not be opened.";
 }
 
 function looksUnsafe(message: string): boolean {
-  return /(sk-|token=|postgres:\/\/|authorization|bearer|\d{6,}:[A-Za-z0-9_-]{10,})/i.test(message);
+  return /(sk-|token=|authorization|bearer|agentbay\.hermes\.setup\.)/i.test(message);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

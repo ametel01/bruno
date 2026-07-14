@@ -60,7 +60,7 @@ describe("Hermes lifecycle readiness", () => {
     expect(result).toEqual({
       ok: false,
       reason: "hermes_setup_incomplete",
-      message: "Select OpenRouter as the model provider before starting this Hermes agent.",
+      message: "Run Hermes setup before starting this agent.",
     });
     expect(calls).toEqual([]);
   });
@@ -183,7 +183,7 @@ describe("Hermes lifecycle readiness", () => {
     expect(result).toEqual({
       ok: false,
       reason: "hermes_setup_incomplete",
-      message: "Configure Telegram bot token before starting this Hermes agent.",
+      message: "Run Hermes setup before starting this agent.",
     });
     expect(calls).toEqual([]);
   });

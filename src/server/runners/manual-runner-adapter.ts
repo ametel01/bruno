@@ -77,6 +77,7 @@ export type ManualRunnerFailureReason =
   | "runner_request_failed"
   | "runner_response_invalid"
   | "runner_not_running"
+  | "hermes_setup_incomplete"
   | "runner_readiness_failed";
 
 export type ManualRunnerAdapterDependencies = {
@@ -305,7 +306,9 @@ export class ManualRunnerAdapter
           reason:
             responseErrorCode === "hermes_readiness_failed"
               ? "runner_readiness_failed"
-              : "runner_request_failed",
+              : responseErrorCode === "hermes_setup_incomplete"
+                ? "hermes_setup_incomplete"
+                : "runner_request_failed",
         };
       }
 

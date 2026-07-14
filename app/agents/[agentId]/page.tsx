@@ -17,17 +17,13 @@ import {
 } from "@/src/server/alerts/operational-summaries";
 import {
   AgentDetailPersistenceError,
-  type AgentDetailConfig,
   getActiveAgentForUser,
 } from "@/src/server/agents/list-agents";
 import {
   AgentSecretPersistenceError,
   listAgentSecretStatusesForUser,
 } from "@/src/server/agents/agent-secrets";
-import {
-  buildHermesSetupReadiness,
-  OPENROUTER_MODEL_OPTIONS,
-} from "@/src/server/agents/hermes-readiness";
+import { buildHermesSetupReadiness } from "@/src/server/agents/hermes-readiness";
 import {
   AgentApprovalPersistenceError,
   listPendingApprovalsForUserAgent,
@@ -286,7 +282,6 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
         </PlaceholderPanel>
         <AgentHermesSetupPanel
           agentId={agent.id}
-          config={agent.config}
           readiness={hermesReadiness}
           result={secretsResult}
         />
@@ -322,24 +317,15 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
 
 function AgentHermesSetupPanel({
   agentId,
-  config,
   readiness,
   result,
 }: {
   agentId: string;
-  config: AgentDetailConfig;
   readiness: ReturnType<typeof buildHermesSetupReadiness>;
   result: AgentSecretsResult;
 }) {
   return result.ok ? (
-    <AgentHermesSetup
-      agentId={agentId}
-      modelName={config.modelName}
-      modelOptions={OPENROUTER_MODEL_OPTIONS}
-      modelProvider={config.modelProvider}
-      readiness={readiness}
-      secrets={result.secrets}
-    />
+    <AgentHermesSetup agentId={agentId} readiness={readiness} />
   ) : (
     <section className="hermes-setup-panel" aria-labelledby="hermes-setup-title">
       <div className="section-heading">

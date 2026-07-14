@@ -279,8 +279,7 @@ describe("manual runner service HTTP contract", () => {
     );
     expect(calls).not.toContainEqual(expect.arrayContaining(["-p"]));
     expect(calls).not.toContainEqual(expect.arrayContaining(["--publish"]));
-    expect(JSON.stringify(calls)).not.toContain(sampleLaunchSpec().secrets.openrouterApiKey);
-    expect(JSON.stringify(calls)).not.toContain(sampleLaunchSpec().secrets.telegramBotToken);
+    expect(JSON.stringify(calls)).not.toContain(sampleLaunchSpec().secrets.apiServerKey);
   });
 
   it("fails closed when inspect reports a Docker socket mount for Hermes", async () => {

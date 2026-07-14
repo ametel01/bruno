@@ -248,23 +248,23 @@ completion evidence.
 
 Source plan: `PLAN.md`
 
-This ledger tracks the OpenRouter plus Telegram plus Hermes path from the
-Milestone 18 implementation plan. It preserves prior Milestone 16 and Clerk
+This ledger tracks the native Hermes subscription setup plus Telegram path from
+the Milestone 18 implementation plan. It preserves prior Milestone 16 and Clerk
 history above and is the active progress record for the current `/goal`.
 
 ### Current Status
 
-Step 8 is complete. AgentBay now has a credential-free local Hermes contract
-smoke that launches the pinned workload image, uses a local OpenAI-compatible
-fake model provider, verifies private API auth and no public gateway port,
-ingests durable Hermes logs, proves restart state persistence, exercises
-managed-state backup/restore safety, and cleans up its exact local smoke
-resources without claiming external Telegram network behavior.
+Step 9 is complete. The agent detail page now opens the pinned image's real
+`hermes setup` wizard in a short-lived runner PTY. Hermes owns subscription
+OAuth, model selection, optional messaging configuration, and persisted
+`/opt/data` state; AgentBay does not collect a provider API key. One-time
+WebSocket authorization, owner-scoped placement, stopped-workload gating, and
+Hermes-state-preserving launch projection protect the setup path.
 
-Next executable step: Step 9, run live Telegram acceptance and controlled
-rollout after the user approves only the basic `$4` DigitalOcean Droplet tier
-and the project has a subscription-backed model access path that does not
-require provider API keys, plus Telegram bot and Telegram test-user credentials.
+Next executable step: Step 10, run live Telegram acceptance after the user
+authorizes only the basic `$4` DigitalOcean Droplet tier, the reviewed workload
+image is published/scanned, Telegram smoke access is available, and the user can
+interactively complete their subscription OAuth in Hermes.
 
 ### Changelog Policy
 
@@ -291,7 +291,8 @@ in `CHANGELOG.md`.
 - [x] Step 6: Replace BusyBox with the Real Private Hermes Lifecycle
 - [x] Step 7: Integrate Durable Logs, Failure Diagnostics, and State Cleanup
 - [x] Step 8: Prove the Local End-to-End Hermes Contract
-- [ ] Step 9: Run Live Telegram Acceptance and Controlled Rollout
+- [x] Step 9: Expose Native Hermes Subscription Setup
+- [ ] Step 10: Run Live Telegram Acceptance and Controlled Rollout
 
 ### Step Ledger
 
@@ -305,8 +306,9 @@ in `CHANGELOG.md`.
 | 5. Add the Versioned Launch Contract and Hermes Home Projection | Complete | Steps 2, 3, and 4 | This commit | Focused Step 5 tests passed 152 tests across launch schema/redaction, server-side builder/decryption, Hermes projection/path safety, manual-runner JSON transport, runner-service contract, and affected lifecycle coverage; containerized `hermes doctor` against the projected fake fixture exited 0 with expected setup warnings; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 93 files / 841 tests; `bun run build`; `bun run test tests/unit/progress-status.test.ts` passed 2 tests; `git diff --check`. | Complete; Step 6 is next. |
 | 6. Replace BusyBox with the Real Private Hermes Lifecycle | Complete | Steps 1, 2, and 5 | This commit | Focused Step 6 tests passed 150 tests across runner-service Docker argv/inspect/readiness, manual-runner adapter mapping, lifecycle readiness failure handling, and existing create-agent coverage; local private-network smoke launched `agentbay-hermes:local` with `gateway run`, `networkMode=agentbay-hermes`, `portBindings={}`, `hostPort8642Listening=false`, `/opt/data` and `/workspace` bind mounts, `no-new-privileges`, `capDrop=["ALL"]`, minimal `CAP_CHOWN`, `CAP_DAC_OVERRIDE`, `CAP_FOWNER`, `CAP_SETGID`, and `CAP_SETUID`, `pidsLimit=256`, `memory=1610612736`, and `nanoCpus=1000000000`; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 93 files / 845 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `bun run test tests/unit/progress-status.test.ts` passed 2 tests; `git diff --check`. | Complete; Step 7 is next. |
 | 7. Integrate Durable Logs, Failure Diagnostics, and State Cleanup | Complete | Step 6 | This commit | Focused Step 7 tests passed 29 tests across runner-service log parsing, redaction, dedupe, cleanup idempotency, symlink-safety, manual-runner app-side redaction/persistence, assigned-runner delete cleanup, and progress guards; local restart persistence smoke launched the real `agentbay-hermes:local` image twice with the same mounts and verified `firstStatus=running`, `secondStatus=running`, workspace sentinel retained, gateway log sentinel retained, and `hostPort8642Listening=false`; generated artifact scan found no fixed raw Step 7 canaries (`sk-or-v1-contract`, `123456:abcdefghijklmnopqrstuvwxyz`, or `agb_agent_secret123456789`); `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 93 files / 849 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `bun run test tests/unit/progress-status.test.ts` passed 2 tests; `git diff --check`. | Complete; Step 8 is next. |
-| 8. Prove the Local End-to-End Hermes Contract | Complete | Step 7 | This commit | `bun run agent:hermes:contract-smoke` passed with image `agentbay-hermes:local`, config revision `cfg-1784003380225`, private API auth enforced, no public `8642`, model response `agentbay fake model response provider=openai-compatible model=openai/gpt-4.1-mini`, log sources `container_bootstrap` and `hermes_gateway`, state persistence, backup/restore safety, exact agent-root cleanup, and Telegram boundary `local-smoke-disabled`; `AGENTBAY_LOCAL_CLOUD_SMOKE_TIMEOUT_MS=480000 bun run local:cloud:smoke` passed with `startResult=blocked_by_hermes_setup`; local Trivy command was unavailable (`trivy_not_installed`) so the Step 1 scanned publish workflow remains the defined image scan path; `docker compose up -d postgres && bun run db:migrate`; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 96 files / 852 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `bun run test tests/unit/progress-status.test.ts`; `git diff --check`; labeled local smoke containers and Hermes smoke networks were removed. | Complete; Step 9 is externally blocked pending approved live credentials and billable provider work. |
-| 9. Run Live Telegram Acceptance and Controlled Rollout | Blocked until subscription-backed model access is designed/implemented | Step 8, published image workflow, authorized basic `$4` DigitalOcean, subscription-backed model access with no provider API key, Telegram bot, and Telegram test-user credentials | Not collected | Not collected | Requires approved basic `$4` DigitalOcean Droplet use, a no-API-key model access path backed by the user's current subscription, Telegram bot credentials, and a Telegram test user before final live acceptance. |
+| 8. Prove the Local End-to-End Hermes Contract | Complete | Step 7 | This commit | `bun run agent:hermes:contract-smoke` passed with image `agentbay-hermes:local`, config revision `cfg-1784003380225`, private API auth enforced, no public `8642`, model response `agentbay fake model response provider=openai-compatible model=openai/gpt-4.1-mini`, log sources `container_bootstrap` and `hermes_gateway`, state persistence, backup/restore safety, exact agent-root cleanup, and Telegram boundary `local-smoke-disabled`; `AGENTBAY_LOCAL_CLOUD_SMOKE_TIMEOUT_MS=480000 bun run local:cloud:smoke` passed with `startResult=blocked_by_hermes_setup`; local Trivy command was unavailable (`trivy_not_installed`) so the Step 1 scanned publish workflow remains the defined image scan path; `docker compose up -d postgres && bun run db:migrate`; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 96 files / 852 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `bun run test tests/unit/progress-status.test.ts`; `git diff --check`; labeled local smoke containers and Hermes smoke networks were removed. | Complete; Step 9 is next. |
+| 9. Expose Native Hermes Subscription Setup | Complete | Step 8 | This commit | Official quickstart/provider/remote-host/Docker contracts reviewed; the pinned official image reached its native Quick Setup, Full Setup, and Blank Slate menu in a local PTY; focused setup-session, route, launch/projection, readiness/lifecycle, and UI coverage passed 9 files / 40 tests; `bun run format:check`; `bun run lint`; `bun run typecheck`; the full suite passed 210 suites / 859 tests; `bun run build`; `bun run test:e2e:ci` passed 14 desktop/mobile tests; `bun run test tests/unit/progress-status.test.ts`; `git diff --check`. | Complete; Step 10 is externally blocked pending approved basic `$4` live work, published/scanned image, Telegram smoke access, and interactive Hermes subscription OAuth. |
+| 10. Run Live Telegram Acceptance and Controlled Rollout | Blocked on external live acceptance prerequisites | Step 9, published image workflow, authorized basic `$4` DigitalOcean, user's interactive Hermes subscription OAuth, Telegram bot, and Telegram test-user access | Not collected | Not collected | Requires approved basic `$4` DigitalOcean Droplet use, the scanned/published GHCR image digest, Telegram smoke access, and the user to complete subscription OAuth in Hermes. AgentBay does not request a provider API key. |
 
 ### Completed Evidence
 
@@ -322,10 +324,11 @@ in `CHANGELOG.md`.
   `agentbay-hermes@sha256:281344814c90ee6e91b40b5dab91526f3da04325e4c31834019f422e1551da6b`,
   added `bun run agent:image:smoke`, and added a separate scanned
   `publish-agent-image` GHCR workflow.
-- 2026-07-14: Step 2 changed the default DigitalOcean size to
-  `s-1vcpu-2gb`, added `$12.00/month` provider-price metadata for that tier,
-  added server-only Hermes image/state/network/readiness/capacity settings,
-  generated cloud-init that prepares `/var/lib/agentbay/agents` plus the
+- 2026-07-14: Step 2 initially changed the default DigitalOcean size to
+  `s-1vcpu-2gb`; the later requirement correction restored the live/default tier
+  to basic `$4` `s-1vcpu-512mb-10gb`. Step 2 also added server-only Hermes
+  image/state/network/readiness/capacity settings and generated cloud-init that
+  prepares `/var/lib/agentbay/agents` plus the
   `agentbay-hermes` private Docker network, pre-pulls the pinned Hermes image,
   mounts the state root into `agentbay-runner`, and sets
   `AGENTBAY_RUNNER_MAX_AGENTS=1`.
@@ -368,20 +371,33 @@ in `CHANGELOG.md`.
   Docker-socket simulation, packaged the runner-service runtime imports in the
   runner image, and extended the runner Docker CLI timeout to cover the bounded
   Hermes stop grace.
-- 2026-07-14: After Step 8, the live Step 9 acceptance constraint changed to
-  basic `$4` DigitalOcean Droplets only. The server-side DigitalOcean default is
-  `s-1vcpu-512mb-10gb`; live validation must not provision the prior 2 GB
-  default. The user also clarified that model access must use the user's current
-  subscription only, with no provider API key requirement.
+- 2026-07-14: After Step 8, the then-live Step 9 acceptance constraint (now Step
+  10) changed to basic `$4` DigitalOcean Droplets only. The server-side
+  DigitalOcean default is `s-1vcpu-512mb-10gb`; live validation must not
+  provision the prior 2 GB default. The user also clarified that model access
+  must use the user's current subscription only, with no provider API key
+  requirement.
+- 2026-07-14: Step 9 replaced the AgentBay-owned OpenRouter/Telegram form with
+  the real interactive `hermes setup` wizard. The owner-scoped app route assigns
+  an eligible runner and creates a short-lived PTY session; the runner launches
+  the pinned image with persistent `/opt/data` and `/workspace`, private
+  networking, no published port or Docker socket, one-time WebSocket-subprotocol
+  authorization, stopped-workload/single-session gating, and no terminal-output
+  persistence. The launch contract now carries only AgentBay metadata and its
+  generated private API-server key, while projection preserves Hermes-owned
+  `config.yaml`, `.env`, `auth.json`, subscription, provider, model, and messaging
+  state. A local PTY reached the official Quick Setup, Full Setup, and Blank
+  Slate menu without a provider API key. Focused coverage passed 9 files / 40
+  tests; format, lint, and typecheck passed; the full suite passed 210 suites /
+  859 tests; the production build passed; and credential-free desktop/mobile
+  Playwright passed 14 tests.
 
 ### Current Blockers and Next Work
 
-- Step 9 is externally blocked until the user authorizes billable DigitalOcean
+- Step 10 is externally blocked until the user authorizes billable DigitalOcean
   work on only the basic `$4` `s-1vcpu-512mb-10gb` Droplet tier and supplies or
-  approves Telegram smoke credentials.
-- The current normal product setup path is OpenRouter-specific and requires an
-  `openrouter_api_key`. That path no longer satisfies the live requirement. Step
-  9 needs a subscription-backed model access design and implementation that does
-  not collect or require provider API keys before live acceptance can run.
-- Step 9 also needs the scanned/published GHCR image digest from the
+  approves Telegram smoke access. The user must also complete their own
+  subscription OAuth interactively inside native Hermes setup; AgentBay does not
+  request or receive a provider API key.
+- Step 10 also needs the scanned/published GHCR image digest from the
   `publish-agent-image` workflow before live rollout evidence can be closed.

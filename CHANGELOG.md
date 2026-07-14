@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Durable Hermes gateway log ingestion from the runner-managed `/opt/data` log stream, with source classification for gateway output versus container bootstrap diagnostics.
 - Safe Hermes runtime diagnostics for runner log transport, app-side log persistence, and assigned-runner cleanup.
 - Authenticated private Hermes readiness polling for runner-managed gateway launches, including config-revision and Telegram readiness checks before start/restart completion.
-- Versioned Hermes launch specs, server-side launch-spec building with just-in-time decrypted secrets, authenticated runner JSON transport, and managed per-agent Hermes home projection for config, environment, prompt, and workspace state.
-- Hermes setup on the agent detail page with OpenRouter model selection, masked OpenRouter and Telegram secret status, generated agent API-server keys, readiness checks, and start/restart blocking until required Hermes setup is complete.
+- Versioned Hermes launch specs, server-side launch-spec building with only the generated private API-server key, authenticated runner JSON transport, and managed per-agent Hermes prompt, revision, and workspace projection that preserves Hermes-owned provider state.
+- Native `hermes setup` on the agent detail page through a short-lived interactive terminal, letting users choose a Hermes-supported subscription OAuth path, model, and optional messaging configuration without AgentBay collecting provider API keys.
 - Encrypted per-agent secret storage, owner-scoped secret status/update/revoke APIs, generated agent API keys, and secret-free backup/restore/delete handling for the Hermes setup path.
 - Pinned Hermes workload image artifact, local smoke verification, and a separate scanned GHCR publication workflow for the first real AgentBay-managed Hermes runtime.
 - Server-only `AGENTBAY_AUTH_MODE` policy for registration-free loopback development, fail-closed Clerk production/custom-domain access, explicitly protected preview opt-in, and request-scoped shared-user resolution without changing runner-machine authentication.
@@ -95,6 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Hermes launch now preserves the wizard-owned `/opt/data/config.yaml`, `.env`, `auth.json`, subscription, provider, model, and messaging state while AgentBay merges only private API-server values and its prompt/revision files.
 - DigitalOcean cloud runners now default back to the basic `$4` `s-1vcpu-512mb-10gb` tier for live Hermes validation, relying on the existing low-memory swap bootstrap instead of the previous 2 GB default.
 - Assigned-runner delete cleanup now calls the runner cleanup path before soft-delete, and runner cleanup removes the selected container plus the exact per-agent Hermes state root idempotently.
 - Runner-managed Hermes starts now launch the pinned workload image with `gateway run` on a private Docker network, projected `/opt/data` and `/workspace` mounts, bounded CPU/memory/PID limits, no published gateway port, label ownership, bounded graceful stops, and inspect validation before readiness.
@@ -150,4 +151,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Hermes setup terminals use owner-scoped runner placement, stopped-workload and single-session gating, a 15-minute one-time WebSocket-subprotocol token stored only as a digest, bounded PTY messages, private no-port/no-Docker-socket containers, and no terminal-output logging or persistence.
 - Runner and app log ingestion now apply a shared defense-in-depth redaction corpus for OpenRouter keys, Telegram tokens, AgentBay bearer/API tokens, secret-bearing environment assignments, sensitive URL query values, and fixed test canaries.

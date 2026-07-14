@@ -2,35 +2,10 @@ import type { AgentDetailConfig } from "@/src/server/agents/list-agents";
 import type { AgentSecretStatus } from "@/src/server/agents/agent-secrets";
 import type { AssignedManualRunnerStatusSummary } from "@/src/server/runners/manual-runner-status";
 
-export const OPENROUTER_MODEL_OPTIONS = [
-  {
-    value: "openai/gpt-4.1-mini",
-    label: "OpenAI GPT-4.1 Mini",
-    context: "1M context",
-  },
-  {
-    value: "anthropic/claude-sonnet-4",
-    label: "Claude Sonnet 4",
-    context: "200K context",
-  },
-  {
-    value: "google/gemini-2.5-flash",
-    label: "Gemini 2.5 Flash",
-    context: "1M context",
-  },
-] as const;
-
 export type HermesReadinessRequirementStatus = "ready" | "missing" | "blocked";
 
 export type HermesReadinessRequirement = {
-  id:
-    | "model_provider"
-    | "model_name"
-    | "openrouter_api_key"
-    | "telegram_bot_token"
-    | "telegram_allowed_users"
-    | "api_server_key"
-    | "runner";
+  id: "api_server_key" | "runner";
   label: string;
   status: HermesReadinessRequirementStatus;
   message: string;
@@ -46,19 +21,8 @@ export type HermesSetupReadiness = {
   requirements: HermesReadinessRequirement[];
 };
 
-const REQUIRED_SECRET_LABELS = {
-  openrouter_api_key: "OpenRouter API key",
-  telegram_bot_token: "Telegram bot token",
-  telegram_allowed_users: "Telegram allowed users",
-  api_server_key: "Agent API server key",
-} as const;
-
-const REQUIRED_SECRET_KINDS = [
-  "openrouter_api_key",
-  "telegram_bot_token",
-  "telegram_allowed_users",
-  "api_server_key",
-] as const;
+const REQUIRED_SECRET_LABELS = { api_server_key: "Agent API server key" } as const;
+const REQUIRED_SECRET_KINDS = ["api_server_key"] as const;
 
 export function buildHermesSetupReadiness(input: {
   config: AgentDetailConfig;
@@ -66,8 +30,6 @@ export function buildHermesSetupReadiness(input: {
   assignedRunner: AssignedManualRunnerStatusSummary | null;
 }): HermesSetupReadiness {
   const requirements: HermesReadinessRequirement[] = [
-    modelProviderRequirement(input.config),
-    modelNameRequirement(input.config),
     ...secretRequirements(input.secretStatuses),
     runnerRequirement(input.assignedRunner),
   ];
@@ -86,7 +48,7 @@ export function buildHermesSetupReadiness(input: {
     startReady,
     startDisabledReason: startReady
       ? null
-      : (firstBlocker?.message ?? "Complete Hermes setup before starting this agent."),
+      : (firstBlocker?.message ?? "Run Hermes setup before starting this agent."),
     requirements,
   };
 }
@@ -96,49 +58,13 @@ export function hermesConfigurationBlocker(input: {
   modelName: string;
   secretKinds: Set<string>;
 }): string | null {
-  if (input.modelProvider !== "openrouter") {
-    return "Select OpenRouter as the model provider before starting this Hermes agent.";
-  }
-
-  if (!isConfiguredModelName(input.modelName)) {
-    return "Select an OpenRouter model before starting this Hermes agent.";
-  }
-
   for (const kind of REQUIRED_SECRET_KINDS) {
     if (!input.secretKinds.has(kind)) {
-      return `Configure ${REQUIRED_SECRET_LABELS[kind]} before starting this Hermes agent.`;
+      return "Run Hermes setup before starting this agent.";
     }
   }
 
   return null;
-}
-
-function modelProviderRequirement(config: AgentDetailConfig): HermesReadinessRequirement {
-  const ready = config.modelProvider === "openrouter";
-
-  return {
-    id: "model_provider",
-    label: "Model provider",
-    status: ready ? "ready" : "missing",
-    message: ready
-      ? "OpenRouter is selected."
-      : "Select OpenRouter as the model provider before starting this Hermes agent.",
-    updatedAt: config.updatedAt,
-  };
-}
-
-function modelNameRequirement(config: AgentDetailConfig): HermesReadinessRequirement {
-  const ready = isConfiguredModelName(config.modelName);
-
-  return {
-    id: "model_name",
-    label: "OpenRouter model",
-    status: ready ? "ready" : "missing",
-    message: ready
-      ? `Model ${config.modelName} is selected.`
-      : "Select an OpenRouter model before starting this Hermes agent.",
-    updatedAt: config.updatedAt,
-  };
 }
 
 function secretRequirements(secretStatuses: AgentSecretStatus[]): HermesReadinessRequirement[] {
@@ -154,7 +80,7 @@ function secretRequirements(secretStatuses: AgentSecretStatus[]): HermesReadines
       status: configured ? "ready" : "missing",
       message: configured
         ? `${REQUIRED_SECRET_LABELS[kind]} is configured.`
-        : `Configure ${REQUIRED_SECRET_LABELS[kind]} before starting this Hermes agent.`,
+        : "Run Hermes setup before starting this agent.",
       updatedAt: configured ? (secret.updatedAt ?? null) : null,
     };
   });
@@ -185,10 +111,4 @@ function runnerRequirement(
     message: ready ? "Assigned runner is ready." : "Assigned runner is not fully ready yet.",
     updatedAt: runner.lastSeenAt ?? runner.updatedAt,
   };
-}
-
-function isConfiguredModelName(modelName: string): boolean {
-  const normalized = modelName.trim();
-
-  return normalized.length > 0 && normalized !== "not_configured";
 }

@@ -1044,6 +1044,25 @@ export async function startAgentForUser(
     const runnerStart = await runnerAdapter.start(normalizedAgentId, launchSpec.spec);
 
     if (!runnerStart.ok) {
+      if (isHermesSetupRunnerFailure(runnerStart)) {
+        if (reservation.reserved) {
+          await restoreAgentStartReservation({
+            agentId: normalizedAgentId,
+            userId,
+            connection,
+            previousStatus: validation.agent.status,
+            previousStatusReason: validation.agent.statusReason,
+            now,
+          });
+        }
+
+        return {
+          ok: false,
+          reason: "hermes_setup_incomplete",
+          message: "Run Hermes setup before starting this agent.",
+        } as const;
+      }
+
       if (isHermesReadinessRunnerFailure(runnerStart)) {
         await recordHermesReadinessFailure({
           agentId: normalizedAgentId,
@@ -1506,6 +1525,14 @@ export async function restartAgentForUser(
     const runnerRestart = await runnerAdapter.restart(normalizedAgentId, launchSpec.spec);
 
     if (!runnerRestart.ok) {
+      if (isHermesSetupRunnerFailure(runnerRestart)) {
+        return {
+          ok: false,
+          reason: "hermes_setup_incomplete",
+          message: "Run Hermes setup before restarting this agent.",
+        } as const;
+      }
+
       if (isHermesReadinessRunnerFailure(runnerRestart)) {
         await recordHermesReadinessFailure({
           agentId: normalizedAgentId,
@@ -2299,6 +2326,15 @@ function isHermesReadinessRunnerFailure(
   reason: "runner_readiness_failed";
 } {
   return !result.ok && "reason" in result && result.reason === "runner_readiness_failed";
+}
+
+function isHermesSetupRunnerFailure(
+  result: LifecycleRunnerStartResult | LifecycleRunnerRestartResult,
+): result is (LifecycleRunnerStartResult | LifecycleRunnerRestartResult) & {
+  ok: false;
+  reason: "hermes_setup_incomplete";
+} {
+  return !result.ok && "reason" in result && result.reason === "hermes_setup_incomplete";
 }
 
 async function recordHermesReadinessFailure(input: {

@@ -234,7 +234,9 @@ export async function listAgentSecretStatusesForUser(
 export async function readDecryptedActiveAgentSecretsForUser(
   userId: string,
   agentId: string,
-  dependencies: Pick<AgentSecretDependencies, "createConnection" | "env"> = {},
+  dependencies: Pick<AgentSecretDependencies, "createConnection" | "env"> & {
+    kind?: AgentSecretKind;
+  } = {},
 ): Promise<DecryptedAgentSecretsResult> {
   const agentIdValidation = validateAgentId(agentId);
 
@@ -257,7 +259,7 @@ export async function readDecryptedActiveAgentSecretsForUser(
         return { ok: false, reason: "agent_not_found" } as const;
       }
 
-      const rows = await selectActiveSecretRows(tx, agentIdValidation.agentId);
+      const rows = await selectActiveSecretRows(tx, agentIdValidation.agentId, dependencies.kind);
       const secrets: Partial<Record<AgentSecretKind, string>> = {};
 
       for (const row of rows) {

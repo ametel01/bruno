@@ -6,6 +6,12 @@ import {
 } from "@/src/server/agents/agent-launch-spec";
 import { ManualRunnerDocker } from "@/src/runner-service/docker";
 import { HermesReadinessError } from "@/src/runner-service/docker";
+import {
+  HermesSetupSessionError,
+  HermesSetupSessionManager,
+  type HermesSetupWebSocketData,
+} from "@/src/runner-service/hermes-setup-sessions";
+import { HermesSetupRequiredError } from "@/src/runner-service/hermes-projection";
 
 const RUNNER_TOKEN_ENV = "AGENTBAY_RUNNER_BEARER_TOKEN";
 
@@ -15,6 +21,28 @@ export type RunnerServiceOptions = {
   authToken?: string;
   docker?: Pick<ManualRunnerDocker, RunnerAction>;
   heartbeat?: RunnerHeartbeatLoopOptions;
+  setupSessions?: HermesSetupSessionManager;
+};
+
+type RunnerUpgradeServer = {
+  upgrade(
+    request: Request,
+    options: {
+      data: HermesSetupWebSocketData;
+      headers: Record<string, string>;
+    },
+  ): boolean;
+};
+
+type RunnerWebSocket = {
+  data: HermesSetupWebSocketData;
+  send(data: string): number;
+  close(code?: number, reason?: string): void;
+};
+
+type RunnerFetch = {
+  (request: Request): Promise<Response>;
+  (request: Request, upgradeServer: RunnerUpgradeServer): Promise<Response | undefined>;
 };
 
 export type RunnerHeartbeatLoopOptions = {
@@ -32,63 +60,131 @@ const DEFAULT_RUNNER_MAX_AGENTS = 3;
 
 export function createRunnerService(options: RunnerServiceOptions = {}) {
   const docker = options.docker ?? new ManualRunnerDocker();
+  const setupSessions = options.setupSessions ?? new HermesSetupSessionManager();
   const authToken = options.authToken ?? process.env[RUNNER_TOKEN_ENV]?.trim();
   const heartbeatLoop = options.heartbeat ? startRunnerHeartbeatLoop(options.heartbeat) : null;
 
-  return {
-    heartbeatLoop,
-    fetch: async (request: Request): Promise<Response> => {
-      const authFailure = authenticateRequest(request, authToken);
+  const handleFetch = async (
+    request: Request,
+    upgradeServer?: RunnerUpgradeServer,
+  ): Promise<Response | undefined> => {
+    if (isSetupWebSocketRequest(request)) {
+      const authorization = setupSessions.authorizeUpgrade(request);
 
-      if (authFailure) {
-        return authFailure;
+      if (
+        !authorization.ok ||
+        !upgradeServer?.upgrade(request, {
+          data: authorization.data,
+          headers: { "Sec-WebSocket-Protocol": authorization.protocol },
+        })
+      ) {
+        return jsonError(401, "unauthorized", "Unauthorized.");
       }
 
-      const readinessResponse = handleReadinessRequest(request);
+      return undefined;
+    }
 
-      if (readinessResponse) {
-        return readinessResponse;
-      }
+    const authFailure = authenticateRequest(request, authToken);
 
-      const route = parseRunnerRoute(request);
+    if (authFailure) {
+      return authFailure;
+    }
 
-      if (!route) {
-        return jsonError(404, "not_found", "Runner route was not found.");
-      }
+    const readinessResponse = handleReadinessRequest(request);
 
-      if (!isValidAgentId(route.agentId)) {
+    if (readinessResponse) {
+      return readinessResponse;
+    }
+
+    const setupRoute = parseSetupSessionCreateRoute(request);
+
+    if (setupRoute) {
+      if (!isValidAgentId(setupRoute.agentId)) {
         return jsonError(400, "invalid_agent_id", "Agent id must be a UUID.");
       }
 
-      const methodFailure = validateMethod(request.method, route.action);
-
-      if (methodFailure) {
-        return methodFailure;
+      if (request.method !== "POST") {
+        return jsonError(405, "method_not_allowed", "setup-sessions requires POST.", {
+          Allow: "POST",
+        });
       }
 
       try {
-        const launchSpecResult = await readLaunchSpec(request, route.action);
-
-        if (!launchSpecResult.ok) {
-          return launchSpecResult.response;
-        }
-
-        return Response.json(
-          {
-            ok: true,
-            agentId: route.agentId,
-            action: route.action,
-            ...(await callDockerAction(docker, route, launchSpecResult.launchSpec)),
-          },
-          { status: 200 },
-        );
+        const session = await setupSessions.create(setupRoute.agentId);
+        return Response.json({ ok: true, agentId: setupRoute.agentId, session }, { status: 201 });
       } catch (error) {
-        if (error instanceof HermesReadinessError) {
-          return jsonError(502, "hermes_readiness_failed", "Hermes readiness failed.");
+        if (error instanceof HermesSetupSessionError) {
+          return jsonError(
+            409,
+            error.reason,
+            error.reason === "agent_running"
+              ? "Stop the agent before running Hermes setup."
+              : "A Hermes setup session is already active.",
+          );
         }
 
-        return jsonError(502, "docker_command_failed", "Runner Docker command failed.");
+        return jsonError(502, "setup_session_failed", "Hermes setup could not be prepared.");
       }
+    }
+
+    const route = parseRunnerRoute(request);
+
+    if (!route) {
+      return jsonError(404, "not_found", "Runner route was not found.");
+    }
+
+    if (!isValidAgentId(route.agentId)) {
+      return jsonError(400, "invalid_agent_id", "Agent id must be a UUID.");
+    }
+
+    const methodFailure = validateMethod(request.method, route.action);
+
+    if (methodFailure) {
+      return methodFailure;
+    }
+
+    try {
+      const launchSpecResult = await readLaunchSpec(request, route.action);
+
+      if (!launchSpecResult.ok) {
+        return launchSpecResult.response;
+      }
+
+      return Response.json(
+        {
+          ok: true,
+          agentId: route.agentId,
+          action: route.action,
+          ...(await callDockerAction(docker, route, launchSpecResult.launchSpec)),
+        },
+        { status: 200 },
+      );
+    } catch (error) {
+      if (error instanceof HermesSetupRequiredError) {
+        return jsonError(409, "hermes_setup_incomplete", "Run Hermes setup before starting.");
+      }
+
+      if (error instanceof HermesReadinessError) {
+        return jsonError(502, "hermes_readiness_failed", "Hermes readiness failed.");
+      }
+
+      return jsonError(502, "docker_command_failed", "Runner Docker command failed.");
+    }
+  };
+
+  return {
+    heartbeatLoop,
+    fetch: handleFetch as RunnerFetch,
+    websocket: {
+      open(socket: RunnerWebSocket) {
+        setupSessions.open(socket.data.setupSessionId, socket);
+      },
+      message(socket: RunnerWebSocket, message: string | Buffer) {
+        setupSessions.message(socket.data.setupSessionId, message);
+      },
+      close(socket: RunnerWebSocket) {
+        setupSessions.close(socket.data.setupSessionId);
+      },
     },
   };
 }
@@ -163,6 +259,22 @@ function handleReadinessRequest(request: Request): Response | null {
   }
 
   return Response.json({ ok: true, status: "ready" }, { status: 200 });
+}
+
+function isSetupWebSocketRequest(request: Request): boolean {
+  const { pathname } = new URL(request.url);
+
+  return (
+    request.headers.get("upgrade")?.toLowerCase() === "websocket" &&
+    /^\/runner\/v1\/hermes-setup-sessions\/[0-9a-f-]+$/i.test(pathname)
+  );
+}
+
+function parseSetupSessionCreateRoute(request: Request): { agentId: string } | null {
+  const { pathname } = new URL(request.url);
+  const match = /^\/runner\/v1\/agents\/([^/]+)\/setup-sessions$/.exec(pathname);
+
+  return match?.[1] ? { agentId: decodeURIComponent(match[1]) } : null;
 }
 
 export function startRunnerHeartbeatLoop(options: RunnerHeartbeatLoopOptions): { stop(): void } {
