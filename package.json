@@ -16,6 +16,7 @@
     "local:cloud:up": "AGENTBAY_POSTGRES_HOST_PORT=${AGENTBAY_POSTGRES_HOST_PORT:-55432} docker compose --profile local-cloud up --build dashboard",
     "local:down": "docker compose down --remove-orphans",
     "local:up": "docker compose up -d postgres && bun run db:migrate && AGENTBAY_AUTH_MODE=development bun run dev",
+    "agent:hermes:contract-smoke": "bun scripts/smoke-local-hermes-contract.ts",
     "agent:image:smoke": "bun scripts/smoke-hermes-agent-image.ts",
     "repro:cloud-runner": "bun --conditions react-server scripts/repro-cloud-runner-bootstrap.ts",
     "runners:reconcile-provider": "bun --conditions react-server scripts/reconcile-cloud-runners.ts",

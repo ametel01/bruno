@@ -20,13 +20,14 @@ const startedAt = Date.now();
 await waitForDashboard();
 const { agentId, runnerId } = await createAgent();
 await waitForRunnerService(agentId, runnerId);
-await startAgent(agentId);
+const startResult = await startAgent(agentId);
 
 console.log(
   JSON.stringify({
     event: "local_cloud_smoke_passed",
     agentId,
     runnerId,
+    startResult,
     elapsedMs: Date.now() - startedAt,
   }),
 );
@@ -125,7 +126,7 @@ async function waitForRunnerService(agentId: string, runnerId: string | null): P
   throw new Error(`Runner service did not become ready at ${runnerUrl} before timeout.`);
 }
 
-async function startAgent(agentId: string): Promise<void> {
+async function startAgent(agentId: string): Promise<"started" | "blocked_by_hermes_setup"> {
   let attempt = 0;
 
   while (Date.now() - startedAt < timeoutMs) {
@@ -148,7 +149,19 @@ async function startAgent(agentId: string): Promise<void> {
           attempt,
         }),
       );
-      return;
+      return "started";
+    }
+
+    if (response.status === 409 && text.includes("hermes_setup_incomplete")) {
+      console.log(
+        JSON.stringify({
+          event: "local_cloud_smoke_agent_start_blocked_by_hermes_setup",
+          agentId,
+          attempt,
+          httpStatus: response.status,
+        }),
+      );
+      return "blocked_by_hermes_setup";
     }
 
     if (

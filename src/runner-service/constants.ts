@@ -10,4 +10,4 @@ export const DEFAULT_HERMES_PRIVATE_NETWORK = "agentbay-hermes";
 export const DEFAULT_HERMES_READINESS_TIMEOUT_MS = 180_000;
 export const DEFAULT_HERMES_RUNNER_MAX_AGENTS = 1;
 export const DEFAULT_HERMES_STATE_ROOT = "/var/lib/agentbay/agents";
-export const DOCKER_CLI_TIMEOUT_MS = 15_000;
+export const DOCKER_CLI_TIMEOUT_MS = 30_000;

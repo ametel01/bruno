@@ -254,12 +254,17 @@ history above and is the active progress record for the current `/goal`.
 
 ### Current Status
 
-Step 7 is complete. AgentBay now ingests durable Hermes gateway logs from the
-persisted runner state, redacts them in both the runner and app persistence
-layers, keeps bootstrap diagnostics classified separately, and exposes an
-idempotent symlink-safe runner cleanup path for selected Hermes agents.
+Step 8 is complete. AgentBay now has a credential-free local Hermes contract
+smoke that launches the pinned workload image, uses a local OpenAI-compatible
+fake model provider, verifies private API auth and no public gateway port,
+ingests durable Hermes logs, proves restart state persistence, exercises
+managed-state backup/restore safety, and cleans up its exact local smoke
+resources without claiming external Telegram network behavior.
 
-Next executable step: Step 8, prove the local end-to-end Hermes contract.
+Next executable step: Step 9, run live Telegram acceptance and controlled
+rollout after the user approves billable DigitalOcean work and supplies or
+approves dedicated OpenRouter, Telegram bot, and Telegram test-user
+credentials.
 
 ### Changelog Policy
 
@@ -285,7 +290,7 @@ in `CHANGELOG.md`.
 - [x] Step 5: Add the Versioned Launch Contract and Hermes Home Projection
 - [x] Step 6: Replace BusyBox with the Real Private Hermes Lifecycle
 - [x] Step 7: Integrate Durable Logs, Failure Diagnostics, and State Cleanup
-- [ ] Step 8: Prove the Local End-to-End Hermes Contract
+- [x] Step 8: Prove the Local End-to-End Hermes Contract
 - [ ] Step 9: Run Live Telegram Acceptance and Controlled Rollout
 
 ### Step Ledger
@@ -300,8 +305,8 @@ in `CHANGELOG.md`.
 | 5. Add the Versioned Launch Contract and Hermes Home Projection | Complete | Steps 2, 3, and 4 | This commit | Focused Step 5 tests passed 152 tests across launch schema/redaction, server-side builder/decryption, Hermes projection/path safety, manual-runner JSON transport, runner-service contract, and affected lifecycle coverage; containerized `hermes doctor` against the projected fake fixture exited 0 with expected setup warnings; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 93 files / 841 tests; `bun run build`; `bun run test tests/unit/progress-status.test.ts` passed 2 tests; `git diff --check`. | Complete; Step 6 is next. |
 | 6. Replace BusyBox with the Real Private Hermes Lifecycle | Complete | Steps 1, 2, and 5 | This commit | Focused Step 6 tests passed 150 tests across runner-service Docker argv/inspect/readiness, manual-runner adapter mapping, lifecycle readiness failure handling, and existing create-agent coverage; local private-network smoke launched `agentbay-hermes:local` with `gateway run`, `networkMode=agentbay-hermes`, `portBindings={}`, `hostPort8642Listening=false`, `/opt/data` and `/workspace` bind mounts, `no-new-privileges`, `capDrop=["ALL"]`, minimal `CAP_CHOWN`, `CAP_DAC_OVERRIDE`, `CAP_FOWNER`, `CAP_SETGID`, and `CAP_SETUID`, `pidsLimit=256`, `memory=1610612736`, and `nanoCpus=1000000000`; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 93 files / 845 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `bun run test tests/unit/progress-status.test.ts` passed 2 tests; `git diff --check`. | Complete; Step 7 is next. |
 | 7. Integrate Durable Logs, Failure Diagnostics, and State Cleanup | Complete | Step 6 | This commit | Focused Step 7 tests passed 29 tests across runner-service log parsing, redaction, dedupe, cleanup idempotency, symlink-safety, manual-runner app-side redaction/persistence, assigned-runner delete cleanup, and progress guards; local restart persistence smoke launched the real `agentbay-hermes:local` image twice with the same mounts and verified `firstStatus=running`, `secondStatus=running`, workspace sentinel retained, gateway log sentinel retained, and `hostPort8642Listening=false`; generated artifact scan found no fixed raw Step 7 canaries (`sk-or-v1-contract`, `123456:abcdefghijklmnopqrstuvwxyz`, or `agb_agent_secret123456789`); `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 93 files / 849 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `bun run test tests/unit/progress-status.test.ts` passed 2 tests; `git diff --check`. | Complete; Step 8 is next. |
-| 8. Prove the Local End-to-End Hermes Contract | Not started | Step 7 | Not collected | Not collected | Add the credential-free real-image local smoke and run the full local gate. |
-| 9. Run Live Telegram Acceptance and Controlled Rollout | Blocked until Step 8 and external credentials/approval | Step 8, published image workflow, and authorized DigitalOcean/OpenRouter/Telegram credentials | Not collected | Not collected | Requires approved billable DigitalOcean, OpenRouter, Telegram bot, and Telegram test-user credentials before final live acceptance. |
+| 8. Prove the Local End-to-End Hermes Contract | Complete | Step 7 | This commit | `bun run agent:hermes:contract-smoke` passed with image `agentbay-hermes:local`, config revision `cfg-1784003380225`, private API auth enforced, no public `8642`, model response `agentbay fake model response provider=openai-compatible model=openai/gpt-4.1-mini`, log sources `container_bootstrap` and `hermes_gateway`, state persistence, backup/restore safety, exact agent-root cleanup, and Telegram boundary `local-smoke-disabled`; `AGENTBAY_LOCAL_CLOUD_SMOKE_TIMEOUT_MS=480000 bun run local:cloud:smoke` passed with `startResult=blocked_by_hermes_setup`; local Trivy command was unavailable (`trivy_not_installed`) so the Step 1 scanned publish workflow remains the defined image scan path; `docker compose up -d postgres && bun run db:migrate`; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 96 files / 852 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `bun run test tests/unit/progress-status.test.ts`; `git diff --check`; labeled local smoke containers and Hermes smoke networks were removed. | Complete; Step 9 is externally blocked pending approved live credentials and billable provider work. |
+| 9. Run Live Telegram Acceptance and Controlled Rollout | Blocked until external credentials/approval | Step 8, published image workflow, and authorized DigitalOcean/OpenRouter/Telegram credentials | Not collected | Not collected | Requires approved billable DigitalOcean, OpenRouter, Telegram bot, and Telegram test-user credentials before final live acceptance. |
 
 ### Completed Evidence
 
@@ -352,11 +357,22 @@ in `CHANGELOG.md`.
   containers plus exact non-symlink agent roots, assigned-runner delete cleanup,
   and a local restart smoke proving workspace and gateway-log sentinels survive
   container replacement.
+- 2026-07-14: Step 8 added the credential-free real-image Hermes contract
+  smoke with a local OpenAI-compatible fake model provider, private authenticated
+  API checks, no public gateway port, config revision evidence
+  `cfg-1784003380225`, durable `container_bootstrap` and `hermes_gateway` log
+  ingestion, restart state persistence, managed-state backup/restore safety,
+  exact cleanup assertions, and the explicit `local-smoke-disabled` Telegram
+  boundary. It also made the local cloud smoke accept fresh Hermes setup
+  blocking as a safe setup-gate result, bridged the local runner env file for
+  Docker-socket simulation, packaged the runner-service runtime imports in the
+  runner image, and extended the runner Docker CLI timeout to cover the bounded
+  Hermes stop grace.
 
 ### Current Blockers and Next Work
 
-- Step 8 is unblocked locally after the Step 7 commit.
 - Step 9 is externally blocked until the user authorizes billable DigitalOcean
   work and supplies or approves dedicated OpenRouter and Telegram smoke
-  credentials. This blocker does not prevent completing and committing the
-  credential-free local implementation steps first.
+  credentials.
+- Step 9 also needs the scanned/published GHCR image digest from the
+  `publish-agent-image` workflow before live rollout evidence can be closed.

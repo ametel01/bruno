@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Credential-free local Hermes contract smoke command (`agent:hermes:contract-smoke`) that launches the pinned workload image with a fake OpenAI-compatible provider, private API auth checks, durable log ingestion, restart/state persistence, managed-state backup/restore, and cleanup without claiming external Telegram network behavior.
 - Durable Hermes gateway log ingestion from the runner-managed `/opt/data` log stream, with source classification for gateway output versus container bootstrap diagnostics.
 - Safe Hermes runtime diagnostics for runner log transport, app-side log persistence, and assigned-runner cleanup.
 - Authenticated private Hermes readiness polling for runner-managed gateway launches, including config-revision and Telegram readiness checks before start/restart completion.
@@ -106,6 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Local Docker cloud-runner smoke now treats fresh Hermes setup blocking as a safe control-flow result, bridges the runner env file through a host-visible path for Docker-socket simulation, and packages all runner-service runtime imports in the runner image.
 - Hermes readiness failures now record `agent.error`, avoid premature start/restart completion events, and leave a safe actionable lifecycle reason; the Docker capability set now keeps only the minimal capabilities the Hermes supervisor needs after dropping all others.
 - Cloud runner bootstrap now persists exchanged credentials in the host-mounted environment file,
   safely recovers an interrupted unexpired DigitalOcean registration, and recognizes the exact
