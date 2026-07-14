@@ -181,7 +181,7 @@ async function runRealVercelBuild(
   values: Record<string, string | undefined>,
 ): Promise<{ exitCode: number | null; stderr: string; stdout: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn("bun", ["scripts/vercel-build.ts"], {
+    const child = spawn("bun", ["--no-env-file", "scripts/vercel-build.ts"], {
       cwd: process.cwd(),
       env: {
         ...process.env,
