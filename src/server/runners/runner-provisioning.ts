@@ -5,6 +5,13 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { DigitalOceanProviderConfig } from "@/src/server/env";
 import { getServerEnv, readDigitalOceanProviderConfig } from "@/src/server/env";
+import {
+  DEFAULT_HERMES_PRIVATE_NETWORK,
+  DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+  DEFAULT_HERMES_RUNNER_MAX_AGENTS,
+  DEFAULT_HERMES_STATE_ROOT,
+  DEFAULT_HERMES_WORKLOAD_IMAGE,
+} from "@/src/runner-service/constants";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   runnerProvisioningEvents,
@@ -284,11 +291,18 @@ export async function createDigitalOceanRunnerForUser(
       return { ok: false, reason: "provider_not_configured" };
     }
 
+    const hermesConfig = resolveHermesDeploymentConfig(config);
+
     logRunnerProvisioning("provider_config_loaded", {
       region: config.region,
       sizeSlug: config.sizeSlug,
       image: config.image,
       runnerImage: config.runnerImage,
+      hermesWorkloadImage: hermesConfig.hermesWorkloadImage,
+      hermesStateRoot: hermesConfig.hermesStateRoot,
+      hermesPrivateNetwork: hermesConfig.hermesPrivateNetwork,
+      hermesReadinessTimeoutMs: hermesConfig.hermesReadinessTimeoutMs,
+      runnerMaxAgents: hermesConfig.runnerMaxAgents,
       tagCount: config.tags.length,
       hasRunnerBearerToken: Boolean(config.runnerBearerToken),
       runnerBearerTokenFingerprint: fingerprintRunnerSecret(config.runnerBearerToken),
@@ -346,6 +360,8 @@ export async function createDigitalOceanRunnerForUser(
         sizeSlug: config.sizeSlug,
         image: config.image,
         runnerImage: config.runnerImage,
+        hermesWorkloadImage: hermesConfig.hermesWorkloadImage,
+        runnerMaxAgents: hermesConfig.runnerMaxAgents,
       });
 
       const registrationToken = createRegistrationTokenDependency();
@@ -381,6 +397,9 @@ export async function createDigitalOceanRunnerForUser(
           sizeSlug: config.sizeSlug,
           image: config.image,
           runnerImage: config.runnerImage,
+          hermesWorkloadImage: hermesConfig.hermesWorkloadImage,
+          hermesPrivateNetwork: hermesConfig.hermesPrivateNetwork,
+          runnerMaxAgents: hermesConfig.runnerMaxAgents,
           tags: config.tags,
           firewallNamePrefix,
         },
@@ -445,6 +464,11 @@ export async function createDigitalOceanRunnerForUser(
       registrationToken: initialized.registrationToken,
       commandBearerToken: config.runnerBearerToken,
       runnerImage: config.runnerImage,
+      hermesWorkloadImage: hermesConfig.hermesWorkloadImage,
+      hermesStateRoot: hermesConfig.hermesStateRoot,
+      hermesPrivateNetwork: hermesConfig.hermesPrivateNetwork,
+      hermesReadinessTimeoutMs: hermesConfig.hermesReadinessTimeoutMs,
+      runnerMaxAgents: hermesConfig.runnerMaxAgents,
       sizeSlug: initialized.runner.sizeSlug,
       now,
     });
@@ -460,6 +484,8 @@ export async function createDigitalOceanRunnerForUser(
       failureReason: "create_failed",
       startedMetadata: {
         runnerImage: config.runnerImage,
+        hermesWorkloadImage: hermesConfig.hermesWorkloadImage,
+        runnerMaxAgents: hermesConfig.runnerMaxAgents,
         sshKeyCount: sshAccess.sshKeyIds.length,
       },
       now,
@@ -967,6 +993,23 @@ function resolveSshSourceAddresses(config: DigitalOceanProviderConfig): string[]
   return normalizeUniqueStrings(config.sshSourceAddresses ?? ["0.0.0.0/0", "::/0"]);
 }
 
+function resolveHermesDeploymentConfig(config: DigitalOceanProviderConfig): {
+  hermesWorkloadImage: string;
+  hermesStateRoot: string;
+  hermesPrivateNetwork: string;
+  hermesReadinessTimeoutMs: number;
+  runnerMaxAgents: number;
+} {
+  return {
+    hermesWorkloadImage: config.hermesWorkloadImage ?? DEFAULT_HERMES_WORKLOAD_IMAGE,
+    hermesStateRoot: config.hermesStateRoot ?? DEFAULT_HERMES_STATE_ROOT,
+    hermesPrivateNetwork: config.hermesPrivateNetwork ?? DEFAULT_HERMES_PRIVATE_NETWORK,
+    hermesReadinessTimeoutMs:
+      config.hermesReadinessTimeoutMs ?? DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+    runnerMaxAgents: config.runnerMaxAgents ?? DEFAULT_HERMES_RUNNER_MAX_AGENTS,
+  };
+}
+
 function normalizeUniqueStrings(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort();
 }
@@ -979,6 +1022,11 @@ async function buildProvisioningBootstrap(input: {
   registrationToken: string;
   commandBearerToken: string;
   runnerImage: string;
+  hermesWorkloadImage?: string;
+  hermesStateRoot?: string;
+  hermesPrivateNetwork?: string;
+  hermesReadinessTimeoutMs?: number;
+  runnerMaxAgents?: number;
   sizeSlug: string;
   now: () => Date;
 }): Promise<CloudRunnerBootstrapContent> {
@@ -1002,6 +1050,13 @@ async function buildProvisioningBootstrap(input: {
       registrationToken: input.registrationToken,
       commandBearerToken: input.commandBearerToken,
       runnerImage: input.runnerImage,
+      ...(input.hermesWorkloadImage ? { hermesWorkloadImage: input.hermesWorkloadImage } : {}),
+      ...(input.hermesStateRoot ? { hermesStateRoot: input.hermesStateRoot } : {}),
+      ...(input.hermesPrivateNetwork ? { hermesPrivateNetwork: input.hermesPrivateNetwork } : {}),
+      ...(input.hermesReadinessTimeoutMs === undefined
+        ? {}
+        : { hermesReadinessTimeoutMs: input.hermesReadinessTimeoutMs }),
+      ...(input.runnerMaxAgents === undefined ? {} : { runnerMaxAgents: input.runnerMaxAgents }),
       endpointDiscovery: { type: "digitalocean_metadata" },
       enableSwap: LOW_MEMORY_DIGITALOCEAN_SIZE_SLUGS.has(input.sizeSlug),
       runnerName: input.runnerName,

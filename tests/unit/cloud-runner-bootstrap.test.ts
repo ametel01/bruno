@@ -8,7 +8,14 @@ import {
   buildCloudRunnerBootstrapForRunner,
   redactCloudRunnerBootstrapOutput,
 } from "@/src/server/runners/cloud-runner-bootstrap";
-import { DEFAULT_MANUAL_RUNNER_IMAGE } from "@/src/runner-service/constants";
+import {
+  DEFAULT_HERMES_PRIVATE_NETWORK,
+  DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+  DEFAULT_HERMES_RUNNER_MAX_AGENTS,
+  DEFAULT_HERMES_STATE_ROOT,
+  DEFAULT_HERMES_WORKLOAD_IMAGE,
+  DEFAULT_MANUAL_RUNNER_IMAGE,
+} from "@/src/runner-service/constants";
 import { DEFAULT_AGENTBAY_RUNNER_IMAGE } from "@/src/server/env";
 
 const LEGACY_HOST_BOOTSTRAP_TOKENS = [
@@ -75,6 +82,19 @@ describe.sequential("cloud runner bootstrap content", () => {
       `AGENTBAY_DOCKER_RUNNER_IMAGE=${DEFAULT_MANUAL_RUNNER_IMAGE}`,
     );
     expect(content.userData).toContain(
+      `AGENTBAY_HERMES_WORKLOAD_IMAGE=${DEFAULT_HERMES_WORKLOAD_IMAGE}`,
+    );
+    expect(content.userData).toContain(`AGENTBAY_HERMES_STATE_ROOT=${DEFAULT_HERMES_STATE_ROOT}`);
+    expect(content.userData).toContain(
+      `AGENTBAY_HERMES_PRIVATE_NETWORK=${DEFAULT_HERMES_PRIVATE_NETWORK}`,
+    );
+    expect(content.userData).toContain(
+      `AGENTBAY_HERMES_READINESS_TIMEOUT_MS=${DEFAULT_HERMES_READINESS_TIMEOUT_MS}`,
+    );
+    expect(content.userData).toContain(
+      `AGENTBAY_RUNNER_MAX_AGENTS=${DEFAULT_HERMES_RUNNER_MAX_AGENTS}`,
+    );
+    expect(content.userData).toContain(
       "          AGENTBAY_APP_URL=https://app.agentbay.test\n" +
         "          AGENTBAY_RUNNER_REGISTRATION_TOKEN=",
     );
@@ -88,9 +108,14 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).not.toContain(". '/etc/agentbay/runner.env'");
     expect(content.userData).toContain("docker pull 'ghcr.io/ametel01/agentbay-runner:sha-123'");
     expect(content.userData).toContain(`docker pull '${DEFAULT_MANUAL_RUNNER_IMAGE}'`);
+    expect(content.userData).toContain(`docker pull '${DEFAULT_HERMES_WORKLOAD_IMAGE}'`);
+    expect(content.userData).toContain(`install -m 0710 -d '${DEFAULT_HERMES_STATE_ROOT}'`);
+    expect(content.userData).toContain(
+      `docker network inspect '${DEFAULT_HERMES_PRIVATE_NETWORK}' >/dev/null 2>&1 || docker network create '${DEFAULT_HERMES_PRIVATE_NETWORK}'`,
+    );
     expect(content.userData).toContain("docker rm --force 'agentbay-runner' || true");
     expect(content.userData).toContain(
-      "docker run --detach --name 'agentbay-runner' --restart always --env-file '/etc/agentbay/runner.env' -v '/etc/agentbay/runner.env:/etc/agentbay/runner.env' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' 'ghcr.io/ametel01/agentbay-runner:sha-123'",
+      "docker run --detach --name 'agentbay-runner' --restart always --network 'agentbay-hermes' --env-file '/etc/agentbay/runner.env' -v '/etc/agentbay/runner.env:/etc/agentbay/runner.env' -v '/var/lib/agentbay/agents:/var/lib/agentbay/agents' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' 'ghcr.io/ametel01/agentbay-runner:sha-123'",
     );
     expect(content.userData).toContain("/runner/v1/bootstrap-events");
     for (const token of LEGACY_HOST_BOOTSTRAP_TOKENS) {
@@ -101,6 +126,11 @@ describe.sequential("cloud runner bootstrap content", () => {
       runnerEndpointUrl: "https://runner.agentbay.test",
       runnerName: "Cloud Runner 1",
       runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
+      hermesWorkloadImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
+      hermesStateRoot: DEFAULT_HERMES_STATE_ROOT,
+      hermesPrivateNetwork: DEFAULT_HERMES_PRIVATE_NETWORK,
+      hermesReadinessTimeoutMs: DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+      runnerMaxAgents: DEFAULT_HERMES_RUNNER_MAX_AGENTS,
       registrationToken: BOOTSTRAP_REDACTION,
     });
     expect(JSON.stringify(content.safeSummary)).not.toContain(registrationToken);
@@ -118,7 +148,48 @@ describe.sequential("cloud runner bootstrap content", () => {
     });
 
     expect(content.safeSummary.runnerImage).toBe(DEFAULT_AGENTBAY_RUNNER_IMAGE);
+    expect(content.safeSummary.hermesWorkloadImage).toBe(DEFAULT_HERMES_WORKLOAD_IMAGE);
+    expect(content.safeSummary.hermesStateRoot).toBe(DEFAULT_HERMES_STATE_ROOT);
+    expect(content.safeSummary.hermesPrivateNetwork).toBe(DEFAULT_HERMES_PRIVATE_NETWORK);
+    expect(content.safeSummary.hermesReadinessTimeoutMs).toBe(DEFAULT_HERMES_READINESS_TIMEOUT_MS);
+    expect(content.safeSummary.runnerMaxAgents).toBe(DEFAULT_HERMES_RUNNER_MAX_AGENTS);
     expect(content.userData).toContain(`AGENTBAY_RUNNER_IMAGE=${DEFAULT_AGENTBAY_RUNNER_IMAGE}`);
+  });
+
+  it("uses custom safe Hermes deployment settings without exposing secrets", () => {
+    const content = buildCloudRunnerBootstrapContent({
+      appBaseUrl: "https://app.agentbay.test",
+      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      runnerEndpointUrl: "https://runner.agentbay.test",
+      runnerName: "Cloud Runner 1",
+      hermesWorkloadImage: "ghcr.io/ametel01/agentbay-hermes:sha-123",
+      hermesStateRoot: "/var/lib/agentbay/custom-agents",
+      hermesPrivateNetwork: "agentbay-custom-hermes",
+      hermesReadinessTimeoutMs: 240_000,
+      runnerMaxAgents: 1,
+    });
+
+    expect(content.userData).toContain(
+      "AGENTBAY_HERMES_WORKLOAD_IMAGE=ghcr.io/ametel01/agentbay-hermes:sha-123",
+    );
+    expect(content.userData).toContain(
+      "AGENTBAY_HERMES_STATE_ROOT=/var/lib/agentbay/custom-agents",
+    );
+    expect(content.userData).toContain("AGENTBAY_HERMES_PRIVATE_NETWORK=agentbay-custom-hermes");
+    expect(content.userData).toContain("AGENTBAY_HERMES_READINESS_TIMEOUT_MS=240000");
+    expect(content.userData).toContain("AGENTBAY_RUNNER_MAX_AGENTS=1");
+    expect(content.userData).toContain("docker pull 'ghcr.io/ametel01/agentbay-hermes:sha-123'");
+    expect(content.userData).toContain("docker network create 'agentbay-custom-hermes'");
+    expect(content.userData).toContain(
+      "-v '/var/lib/agentbay/custom-agents:/var/lib/agentbay/custom-agents'",
+    );
+    expect(content.safeSummary).toMatchObject({
+      hermesWorkloadImage: "ghcr.io/ametel01/agentbay-hermes:sha-123",
+      hermesStateRoot: "/var/lib/agentbay/custom-agents",
+      hermesPrivateNetwork: "agentbay-custom-hermes",
+      hermesReadinessTimeoutMs: 240_000,
+      runnerMaxAgents: 1,
+    });
   });
 
   it("rejects loopback runner endpoint URLs for cloud bootstrap registration", () => {

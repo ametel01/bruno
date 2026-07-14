@@ -1,6 +1,13 @@
 import "server-only";
 
-import { DEFAULT_MANUAL_RUNNER_IMAGE } from "@/src/runner-service/constants";
+import {
+  DEFAULT_HERMES_PRIVATE_NETWORK,
+  DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+  DEFAULT_HERMES_RUNNER_MAX_AGENTS,
+  DEFAULT_HERMES_STATE_ROOT,
+  DEFAULT_HERMES_WORKLOAD_IMAGE,
+  DEFAULT_MANUAL_RUNNER_IMAGE,
+} from "@/src/runner-service/constants";
 import { DEFAULT_AGENTBAY_RUNNER_IMAGE } from "@/src/server/env";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { DIGITALOCEAN_PROVIDER } from "@/src/server/runners/digitalocean-provider";
@@ -27,6 +34,11 @@ type CloudRunnerBootstrapInput = {
   enableSwap?: boolean;
   runnerName?: string;
   runnerImage?: string;
+  hermesWorkloadImage?: string;
+  hermesStateRoot?: string;
+  hermesPrivateNetwork?: string;
+  hermesReadinessTimeoutMs?: number;
+  runnerMaxAgents?: number;
   envFilePath?: string;
   runnerHost?: string;
   runnerPort?: number;
@@ -39,6 +51,11 @@ export type CloudRunnerBootstrapContent = {
     runnerEndpointUrl: string;
     runnerName: string;
     runnerImage: string;
+    hermesWorkloadImage: string;
+    hermesStateRoot: string;
+    hermesPrivateNetwork: string;
+    hermesReadinessTimeoutMs: number;
+    runnerMaxAgents: number;
     envFilePath: string;
     registrationToken: typeof BOOTSTRAP_REDACTION;
   };
@@ -66,6 +83,11 @@ export async function buildCloudRunnerBootstrapForRunner(
           appBaseUrl: content.safeSummary.appBaseUrl,
           runnerEndpointUrl: content.safeSummary.runnerEndpointUrl,
           runnerImage: content.safeSummary.runnerImage,
+          hermesWorkloadImage: content.safeSummary.hermesWorkloadImage,
+          hermesStateRoot: content.safeSummary.hermesStateRoot,
+          hermesPrivateNetwork: content.safeSummary.hermesPrivateNetwork,
+          hermesReadinessTimeoutMs: content.safeSummary.hermesReadinessTimeoutMs,
+          runnerMaxAgents: content.safeSummary.runnerMaxAgents,
         },
       }),
     );
@@ -92,7 +114,12 @@ export function buildCloudRunnerBootstrapContent(
     `AGENTBAY_RUNNER_NAME=${escapeDockerEnvHereDocValue(config.runnerName)}`,
     `AGENTBAY_RUNNER_IMAGE=${escapeDockerEnvHereDocValue(config.runnerImage)}`,
     `AGENTBAY_DOCKER_RUNNER_IMAGE=${escapeDockerEnvHereDocValue(config.agentImage)}`,
+    `AGENTBAY_HERMES_WORKLOAD_IMAGE=${escapeDockerEnvHereDocValue(config.hermesWorkloadImage)}`,
+    `AGENTBAY_HERMES_STATE_ROOT=${escapeDockerEnvHereDocValue(config.hermesStateRoot)}`,
+    `AGENTBAY_HERMES_PRIVATE_NETWORK=${escapeDockerEnvHereDocValue(config.hermesPrivateNetwork)}`,
+    `AGENTBAY_HERMES_READINESS_TIMEOUT_MS=${config.hermesReadinessTimeoutMs}`,
     `AGENTBAY_RUNNER_ENV_FILE=${escapeDockerEnvHereDocValue(config.containerEnvFilePath)}`,
+    `AGENTBAY_RUNNER_MAX_AGENTS=${config.runnerMaxAgents}`,
     ...(config.commandBearerToken
       ? [`AGENTBAY_RUNNER_BEARER_TOKEN=${escapeDockerEnvHereDocValue(config.commandBearerToken)}`]
       : []),
@@ -170,14 +197,34 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
     - -lc
     - |
       set -euxo pipefail
+      AGENTBAY_BOOTSTRAP_STEP=hermes_state_root
+      trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
+      install -m 0710 -d ${shellQuote(config.hermesStateRoot)}
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Hermes state root was prepared." hermes_state_root
+  -
+    - bash
+    - -lc
+    - |
+      set -euxo pipefail
+      AGENTBAY_BOOTSTRAP_STEP=hermes_private_network
+      trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true; docker network inspect ${shellQuote(config.hermesPrivateNetwork)} 2>&1 || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
+      docker network inspect ${shellQuote(config.hermesPrivateNetwork)} >/dev/null 2>&1 || docker network create ${shellQuote(config.hermesPrivateNetwork)}
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Hermes private network was prepared." hermes_private_network
+  -
+    - bash
+    - -lc
+    - |
+      set -euxo pipefail
       AGENTBAY_BOOTSTRAP_STEP=docker_container_start
       trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true; docker logs --tail 80 ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} 2>&1 || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
       /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling cloud runner image." docker_pull
       docker pull ${shellQuote(config.runnerImage)}
       /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling default agent container image." agent_image_pull
       docker pull ${shellQuote(config.agentImage)}
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling Hermes workload image." hermes_image_pull
+      docker pull ${shellQuote(config.hermesWorkloadImage)}
       docker rm --force ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} || true
-      docker run --detach --name ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} --restart always --env-file ${shellQuote(config.envFilePath)} -v ${shellQuote(`${config.envFilePath}:${config.containerEnvFilePath}`)} -v ${shellQuote(`${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}:${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}`)} -p ${shellQuote(`${config.runnerHost}:${config.runnerPort}:${config.runnerPort}`)} ${shellQuote(config.runnerImage)}
+      docker run --detach --name ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} --restart always --network ${shellQuote(config.hermesPrivateNetwork)} --env-file ${shellQuote(config.envFilePath)} -v ${shellQuote(`${config.envFilePath}:${config.containerEnvFilePath}`)} -v ${shellQuote(`${config.hermesStateRoot}:${config.hermesStateRoot}`)} -v ${shellQuote(`${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}:${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}`)} -p ${shellQuote(`${config.runnerHost}:${config.runnerPort}:${config.runnerPort}`)} ${shellQuote(config.runnerImage)}
       /usr/local/bin/agentbay-bootstrap-event waiting_for_runner started "Runner container started; waiting for registration and heartbeat." docker_container_started
 `;
 
@@ -188,6 +235,11 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
       runnerEndpointUrl: endpoint.safeSummary,
       runnerName: config.runnerName,
       runnerImage: config.runnerImage,
+      hermesWorkloadImage: config.hermesWorkloadImage,
+      hermesStateRoot: config.hermesStateRoot,
+      hermesPrivateNetwork: config.hermesPrivateNetwork,
+      hermesReadinessTimeoutMs: config.hermesReadinessTimeoutMs,
+      runnerMaxAgents: config.runnerMaxAgents,
       envFilePath: config.envFilePath,
       registrationToken: BOOTSTRAP_REDACTION,
     },
@@ -218,6 +270,26 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
     runnerName: input.runnerName?.trim() || DEFAULT_CLOUD_RUNNER_NAME,
     runnerImage: input.runnerImage?.trim() || DEFAULT_AGENTBAY_RUNNER_IMAGE,
     agentImage: DEFAULT_MANUAL_RUNNER_IMAGE,
+    hermesWorkloadImage: normalizeContainerImage(
+      input.hermesWorkloadImage?.trim() || DEFAULT_HERMES_WORKLOAD_IMAGE,
+      "hermesWorkloadImage",
+    ),
+    hermesStateRoot: normalizeRuntimePath(
+      input.hermesStateRoot?.trim() || DEFAULT_HERMES_STATE_ROOT,
+      "hermesStateRoot",
+    ),
+    hermesPrivateNetwork: normalizeDockerNetworkName(
+      input.hermesPrivateNetwork?.trim() || DEFAULT_HERMES_PRIVATE_NETWORK,
+      "hermesPrivateNetwork",
+    ),
+    hermesReadinessTimeoutMs: normalizePositiveInteger(
+      input.hermesReadinessTimeoutMs ?? DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+      "hermesReadinessTimeoutMs",
+    ),
+    runnerMaxAgents: normalizePositiveInteger(
+      input.runnerMaxAgents ?? DEFAULT_HERMES_RUNNER_MAX_AGENTS,
+      "runnerMaxAgents",
+    ),
     envFilePath: input.envFilePath?.trim() || DEFAULT_CLOUD_RUNNER_ENV_FILE,
     containerEnvFilePath: input.envFilePath?.trim() || DEFAULT_CLOUD_RUNNER_ENV_FILE,
     runnerHost: input.runnerHost?.trim() || DEFAULT_CLOUD_RUNNER_HOST,
@@ -234,6 +306,38 @@ function normalizeUrl(value: string, field: string): string {
   } catch {
     throw new Error(`${field} must be a valid URL.`);
   }
+}
+
+function normalizeContainerImage(value: string, field: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,254}$/.test(value)) {
+    throw new Error(`${field} must be a valid container image reference.`);
+  }
+
+  return value;
+}
+
+function normalizeRuntimePath(value: string, field: string): string {
+  if (!value.startsWith("/") || value.includes("..") || /[\s"'`$;&|<>\\]/.test(value)) {
+    throw new Error(`${field} must be an absolute runtime path without unsafe characters.`);
+  }
+
+  return value.replace(/\/+$/, "") || "/";
+}
+
+function normalizeDockerNetworkName(value: string, field: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/.test(value)) {
+    throw new Error(`${field} must be a valid Docker network name.`);
+  }
+
+  return value;
+}
+
+function normalizePositiveInteger(value: number, field: string): number {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${field} must be a positive integer.`);
+  }
+
+  return value;
 }
 
 function buildSwapCommands(): string {

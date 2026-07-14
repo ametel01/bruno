@@ -45,6 +45,19 @@ describe("DigitalOcean runner price metadata", () => {
         hourlyEstimate: "$0.03/hour est.",
       },
     });
+    expect(getDigitalOceanRunnerPriceMetadata("s-1vcpu-2gb")).toMatchObject({
+      available: true,
+      provider: "digitalocean",
+      sizeSlug: "s-1vcpu-2gb",
+      monthlyCents: 1200,
+      dailyEstimateCents: 40,
+      hourlyEstimateCents: 2,
+      display: {
+        monthly: "$12.00/month",
+        dailyEstimate: "$0.40/day est.",
+        hourlyEstimate: "$0.02/hour est.",
+      },
+    });
   });
 
   it("lists only the supported DigitalOcean runner prices", () => {
@@ -60,6 +73,12 @@ describe("DigitalOcean runner price metadata", () => {
         provider: "digitalocean",
         sizeSlug: "s-1vcpu-1gb",
         monthlyCents: 600,
+      }),
+      expect.objectContaining({
+        available: true,
+        provider: "digitalocean",
+        sizeSlug: "s-1vcpu-2gb",
+        monthlyCents: 1200,
       }),
       expect.objectContaining({
         available: true,

@@ -149,13 +149,27 @@ describe.sequential("runner provisioning service", () => {
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
     ).toContain(
-      "docker run --detach --name 'agentbay-runner' --restart always --env-file '/etc/agentbay/runner.env' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' 'ghcr.io/ametel01/agentbay-runner:sha-123'",
+      "docker pull 'nousresearch/hermes-agent:v2026.7.7.2@sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973'",
+    );
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
+    ).toContain("AGENTBAY_RUNNER_MAX_AGENTS=1");
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
+    ).toContain(
+      "docker run --detach --name 'agentbay-runner' --restart always --network 'agentbay-hermes' --env-file '/etc/agentbay/runner.env' -v '/etc/agentbay/runner.env:/etc/agentbay/runner.env' -v '/var/lib/agentbay/agents:/var/lib/agentbay/agents' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' 'ghcr.io/ametel01/agentbay-runner:sha-123'",
     );
     expect(
       result.runner.provisioning.phases.find((event) => event.phase === "pending")?.metadata,
     ).toMatchObject({
       provider: "digitalocean",
       runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
+      hermesWorkloadImage:
+        "nousresearch/hermes-agent:v2026.7.7.2@sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973",
+      hermesPrivateNetwork: "agentbay-hermes",
+      runnerMaxAgents: 1,
     });
     expect(
       result.runner.provisioning.phases.find((event) => event.phase === "bootstrapping")?.metadata,

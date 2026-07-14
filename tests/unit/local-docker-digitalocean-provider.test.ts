@@ -92,12 +92,20 @@ describe("local Docker DigitalOcean provider", () => {
     );
     expect(bootstrapScript).toContain("docker run --detach --name");
     expect(bootstrapScript).toContain("agentbay-runner");
-    expect(bootstrapScript).toContain("--restart always --env-file");
+    expect(bootstrapScript).toContain("--restart always --network");
+    expect(bootstrapScript).toContain("--env-file");
     expect(bootstrapScript).toContain("/etc/agentbay/runner.env");
+    expect(bootstrapScript).toContain("AGENTBAY_RUNNER_MAX_AGENTS=1");
+    expect(bootstrapScript).toContain("docker network create");
+    expect(bootstrapScript).toContain("hermes_image_pull");
+    expect(bootstrapScript).toContain(
+      "AGENTBAY_HERMES_WORKLOAD_IMAGE=nousresearch/hermes-agent:v2026.7.7.2@sha256",
+    );
+    expect(bootstrapScript).toContain("/var/lib/agentbay/agents:/var/lib/agentbay/agents");
     expect(bootstrapScript).toContain("/var/run/docker.sock:/var/run/docker.sock");
     expect(bootstrapScript).toContain("127.0.0.1:3045:3045");
     expect(bootstrapScript).toContain("agentbay-runner:local");
-    expect(bootstrapScript).toContain("AGENTBAY_RUNNER_ENV_FILE=/tmp/agentbay-runner.env");
+    expect(bootstrapScript).toContain("AGENTBAY_RUNNER_ENV_FILE=/etc/agentbay/runner.env");
     expect(bootstrapScript).toContain("bash -lc");
     expect(dockerCalls[2]).not.toContain("agentbay-runner:local");
   });

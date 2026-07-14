@@ -6,6 +6,13 @@ import {
   validateManualRunnerEndpointUrl,
   validateRequiredEnv,
 } from "@/src/env/validation";
+import {
+  DEFAULT_HERMES_PRIVATE_NETWORK,
+  DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+  DEFAULT_HERMES_RUNNER_MAX_AGENTS,
+  DEFAULT_HERMES_STATE_ROOT,
+  DEFAULT_HERMES_WORKLOAD_IMAGE,
+} from "@/src/runner-service/constants";
 
 export const DEFAULT_AGENTBAY_RUNNER_IMAGE = "ghcr.io/ametel01/agentbay-runner:main";
 
@@ -14,6 +21,11 @@ export type DigitalOceanProviderConfig = {
   providerMode?: "digitalocean" | "local_docker";
   runnerBearerToken: string;
   runnerImage: string;
+  hermesWorkloadImage?: string;
+  hermesStateRoot?: string;
+  hermesPrivateNetwork?: string;
+  hermesReadinessTimeoutMs?: number;
+  runnerMaxAgents?: number;
   region: string;
   sizeSlug: string;
   image: string;
@@ -84,13 +96,33 @@ export function readDigitalOceanProviderConfig(
       envName: "AGENTBAY_RUNNER_IMAGE",
       defaultValue: DEFAULT_AGENTBAY_RUNNER_IMAGE,
     }),
+    hermesWorkloadImage: readRunnerImage(input.AGENTBAY_HERMES_WORKLOAD_IMAGE, {
+      envName: "AGENTBAY_HERMES_WORKLOAD_IMAGE",
+      defaultValue: DEFAULT_HERMES_WORKLOAD_IMAGE,
+    }),
+    hermesStateRoot: readAbsoluteRuntimePath(input.AGENTBAY_HERMES_STATE_ROOT, {
+      envName: "AGENTBAY_HERMES_STATE_ROOT",
+      defaultValue: DEFAULT_HERMES_STATE_ROOT,
+    }),
+    hermesPrivateNetwork: readDockerNetworkName(input.AGENTBAY_HERMES_PRIVATE_NETWORK, {
+      envName: "AGENTBAY_HERMES_PRIVATE_NETWORK",
+      defaultValue: DEFAULT_HERMES_PRIVATE_NETWORK,
+    }),
+    hermesReadinessTimeoutMs: readPositiveInteger(input.AGENTBAY_HERMES_READINESS_TIMEOUT_MS, {
+      envName: "AGENTBAY_HERMES_READINESS_TIMEOUT_MS",
+      defaultValue: DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+    }),
+    runnerMaxAgents: readPositiveInteger(input.AGENTBAY_RUNNER_MAX_AGENTS, {
+      envName: "AGENTBAY_RUNNER_MAX_AGENTS",
+      defaultValue: DEFAULT_HERMES_RUNNER_MAX_AGENTS,
+    }),
     region: readDigitalOceanSlug(input.AGENTBAY_DIGITALOCEAN_REGION, {
       envName: "AGENTBAY_DIGITALOCEAN_REGION",
       defaultValue: "sfo3",
     }),
     sizeSlug: readDigitalOceanSlug(input.AGENTBAY_DIGITALOCEAN_SIZE_SLUG, {
       envName: "AGENTBAY_DIGITALOCEAN_SIZE_SLUG",
-      defaultValue: "s-1vcpu-512mb-10gb",
+      defaultValue: "s-1vcpu-2gb",
     }),
     image: readDigitalOceanSlug(input.AGENTBAY_DIGITALOCEAN_IMAGE, {
       envName: "AGENTBAY_DIGITALOCEAN_IMAGE",
@@ -150,6 +182,40 @@ function readRunnerImage(
   if (!/^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,254}$/.test(normalizedValue)) {
     throw new EnvValidationError([
       `${options.envName} must be a valid container image reference without whitespace or shell-control characters.`,
+    ]);
+  }
+
+  return normalizedValue;
+}
+
+function readAbsoluteRuntimePath(
+  value: string | undefined,
+  options: { envName: string; defaultValue: string },
+): string {
+  const normalizedValue = readNonEmptyProviderSetting(value, options);
+
+  if (
+    !normalizedValue.startsWith("/") ||
+    normalizedValue.includes("..") ||
+    /[\s"'`$;&|<>\\]/.test(normalizedValue)
+  ) {
+    throw new EnvValidationError([
+      `${options.envName} must be an absolute runtime path without traversal, whitespace, or shell-control characters.`,
+    ]);
+  }
+
+  return normalizedValue.replace(/\/+$/, "") || "/";
+}
+
+function readDockerNetworkName(
+  value: string | undefined,
+  options: { envName: string; defaultValue: string },
+): string {
+  const normalizedValue = readNonEmptyProviderSetting(value, options);
+
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/.test(normalizedValue)) {
+    throw new EnvValidationError([
+      `${options.envName} must be a Docker network name without whitespace or shell-control characters.`,
     ]);
   }
 
@@ -360,6 +426,29 @@ function readNonNegativeInteger(
 
   if (!Number.isInteger(parsed) || parsed < 0 || String(parsed) !== normalizedValue) {
     throw new EnvValidationError([`${options.envName} must be a non-negative integer.`]);
+  }
+
+  return parsed;
+}
+
+function readPositiveInteger(
+  value: string | undefined,
+  options: { envName: string; defaultValue: number },
+): number {
+  if (value === undefined) {
+    return options.defaultValue;
+  }
+
+  const normalizedValue = value.trim();
+
+  if (!normalizedValue) {
+    throw new EnvValidationError([`${options.envName} cannot be blank when set.`]);
+  }
+
+  const parsed = Number.parseInt(normalizedValue, 10);
+
+  if (!Number.isInteger(parsed) || parsed <= 0 || String(parsed) !== normalizedValue) {
+    throw new EnvValidationError([`${options.envName} must be a positive integer.`]);
   }
 
   return parsed;

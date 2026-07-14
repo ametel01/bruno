@@ -15,6 +15,9 @@ const DIGITALOCEAN_RUNNER_PRICES = {
   "s-1vcpu-1gb": {
     monthlyCents: 600,
   },
+  "s-1vcpu-2gb": {
+    monthlyCents: 1200,
+  },
   "s-2vcpu-2gb": {
     monthlyCents: 1800,
   },

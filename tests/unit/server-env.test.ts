@@ -2,6 +2,13 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { EnvValidationError } from "@/src/env/validation";
+import {
+  DEFAULT_HERMES_PRIVATE_NETWORK,
+  DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+  DEFAULT_HERMES_RUNNER_MAX_AGENTS,
+  DEFAULT_HERMES_STATE_ROOT,
+  DEFAULT_HERMES_WORKLOAD_IMAGE,
+} from "@/src/runner-service/constants";
 import { DEFAULT_AGENTBAY_RUNNER_IMAGE, readDigitalOceanProviderConfig } from "@/src/server/env";
 
 describe("server-only provider environment validation", () => {
@@ -18,8 +25,13 @@ describe("server-only provider environment validation", () => {
     ).toMatchObject({
       runnerBearerToken: "runner-command-token",
       runnerImage: DEFAULT_AGENTBAY_RUNNER_IMAGE,
+      hermesWorkloadImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
+      hermesStateRoot: DEFAULT_HERMES_STATE_ROOT,
+      hermesPrivateNetwork: DEFAULT_HERMES_PRIVATE_NETWORK,
+      hermesReadinessTimeoutMs: DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+      runnerMaxAgents: DEFAULT_HERMES_RUNNER_MAX_AGENTS,
       region: "sfo3",
-      sizeSlug: "s-1vcpu-512mb-10gb",
+      sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "agentbay-runner"],
       sshSourceAddresses: [],
@@ -32,6 +44,11 @@ describe("server-only provider environment validation", () => {
       AGENTBAY_DIGITALOCEAN_SIZE_SLUG: " s-2vcpu-2gb ",
       AGENTBAY_DIGITALOCEAN_IMAGE: " ubuntu-24-04-x64 ",
       AGENTBAY_RUNNER_IMAGE: " ghcr.io/ametel01/agentbay-runner:sha-123 ",
+      AGENTBAY_HERMES_WORKLOAD_IMAGE: " ghcr.io/ametel01/agentbay-hermes:sha-123 ",
+      AGENTBAY_HERMES_STATE_ROOT: " /var/lib/agentbay/custom-agents ",
+      AGENTBAY_HERMES_PRIVATE_NETWORK: " agentbay-custom-hermes ",
+      AGENTBAY_HERMES_READINESS_TIMEOUT_MS: "240000",
+      AGENTBAY_RUNNER_MAX_AGENTS: "1",
       AGENTBAY_DIGITALOCEAN_TAGS: "runner, agentbay, runner",
       AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS: "203.0.113.5, 2001:db8::/64",
     });
@@ -41,6 +58,11 @@ describe("server-only provider environment validation", () => {
       providerMode: "digitalocean",
       runnerBearerToken: "runner-command-token",
       runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
+      hermesWorkloadImage: "ghcr.io/ametel01/agentbay-hermes:sha-123",
+      hermesStateRoot: "/var/lib/agentbay/custom-agents",
+      hermesPrivateNetwork: "agentbay-custom-hermes",
+      hermesReadinessTimeoutMs: 240_000,
+      runnerMaxAgents: 1,
       region: "nyc3",
       sizeSlug: "s-2vcpu-2gb",
       image: "ubuntu-24-04-x64",
@@ -136,6 +158,38 @@ describe("server-only provider environment validation", () => {
         AGENTBAY_RUNNER_IMAGE: invalidRunnerImage,
       }),
     ).toThrow("AGENTBAY_RUNNER_IMAGE must be a valid container image reference");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_HERMES_WORKLOAD_IMAGE: "ghcr.io/ametel01/agentbay-hermes:latest;rm",
+      }),
+    ).toThrow("AGENTBAY_HERMES_WORKLOAD_IMAGE must be a valid container image reference");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_HERMES_STATE_ROOT: "../agentbay",
+      }),
+    ).toThrow("AGENTBAY_HERMES_STATE_ROOT must be an absolute runtime path");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_HERMES_PRIVATE_NETWORK: "agentbay hermes",
+      }),
+    ).toThrow("AGENTBAY_HERMES_PRIVATE_NETWORK must be a Docker network name");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_HERMES_READINESS_TIMEOUT_MS: "0",
+      }),
+    ).toThrow("AGENTBAY_HERMES_READINESS_TIMEOUT_MS must be a positive integer");
 
     try {
       readDigitalOceanProviderConfig({
