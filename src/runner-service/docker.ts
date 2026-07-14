@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import {
   AGENTBAY_AGENT_ID_LABEL,
+  DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_MANUAL_RUNNER_IMAGE,
   DOCKER_CLI_TIMEOUT_MS,
 } from "@/src/runner-service/constants";
@@ -16,6 +17,13 @@ export { AGENTBAY_AGENT_ID_LABEL, DEFAULT_MANUAL_RUNNER_IMAGE, DOCKER_CLI_TIMEOU
 const DOCKER_RUNNER_IMAGE_ENV = "AGENTBAY_DOCKER_RUNNER_IMAGE";
 const DOCKER_RUNNER_ARGS_ENV = "AGENTBAY_DOCKER_RUNNER_ARGS_JSON";
 const DOCKER_EXECUTABLE_ENV = "AGENTBAY_RUNNER_DOCKER_EXECUTABLE";
+const HERMES_PRIVATE_NETWORK_ENV = "AGENTBAY_HERMES_PRIVATE_NETWORK";
+const HERMES_DOCKER_CPUS_ENV = "AGENTBAY_HERMES_DOCKER_CPUS";
+const HERMES_DOCKER_MEMORY_ENV = "AGENTBAY_HERMES_DOCKER_MEMORY";
+const HERMES_DOCKER_PIDS_LIMIT_ENV = "AGENTBAY_HERMES_DOCKER_PIDS_LIMIT";
+const HERMES_READINESS_PORT_ENV = "AGENTBAY_HERMES_READINESS_PORT";
+const AGENTBAY_CONFIG_REVISION_LABEL = "agentbay.config_revision";
+const AGENTBAY_LAUNCH_SPEC_VERSION_LABEL = "agentbay.launch_spec_version";
 const DUMMY_DOCKER_RUNNER_ARGS = [
   "sh",
   "-c",
@@ -41,12 +49,31 @@ export type ManualRunnerDockerOptions = {
   command?: DockerRunnerCommand;
   docker?: DockerExecutableRunner;
   dockerExecutable?: string;
+  hermes?: Partial<HermesDockerRuntimeOptions>;
   nameSuffix?: () => string;
   projection?: {
     project?: (spec: AgentLaunchSpec) => Promise<HermesProjectionResult>;
     options?: HermesProjectionOptions;
   };
+  readiness?: {
+    wait?: HermesReadinessWaiter;
+  };
 };
+
+export type HermesDockerRuntimeOptions = {
+  cpus: string;
+  memory: string;
+  network: string;
+  pidsLimit: string;
+  readinessPort: number;
+};
+
+export type HermesReadinessWaiter = (input: {
+  agentId: string;
+  apiServerKey: string;
+  configRevision: string;
+  containerName: string;
+}) => Promise<{ ok: true } | { ok: false; reason: string }>;
 
 export type DockerExecutableRunner = (
   executable: string,
@@ -68,12 +95,46 @@ export type RunnerLogLine = {
   createdAt: string | null;
 };
 
+export class HermesReadinessError extends Error {
+  constructor() {
+    super("Hermes readiness check failed.");
+    this.name = "HermesReadinessError";
+  }
+}
+
 type DockerInspectContainer = {
   Id?: string;
+  Args?: string[];
+  Mounts?: Array<{
+    Destination?: string;
+    Source?: string;
+    Type?: string;
+  }>;
   Name?: string;
   Config?: {
+    Cmd?: string[];
+    Entrypoint?: string[];
+    Env?: string[];
+    Healthcheck?: {
+      Test?: string[];
+    };
     Image?: string;
     Labels?: Record<string, string> | null;
+  };
+  HostConfig?: {
+    CapAdd?: string[] | null;
+    Binds?: string[] | null;
+    CapDrop?: string[] | null;
+    Memory?: number;
+    NanoCpus?: number;
+    NetworkMode?: string;
+    PidsLimit?: number;
+    PortBindings?: Record<string, Array<{ HostPort?: string }> | null> | null;
+    SecurityOpt?: string[] | null;
+  };
+  NetworkSettings?: {
+    Networks?: Record<string, unknown>;
+    Ports?: Record<string, Array<{ HostPort?: string }> | null> | null;
   };
   State?: {
     Status?: string;
@@ -90,18 +151,22 @@ export class ManualRunnerDocker {
   private readonly command: DockerRunnerCommand;
   private readonly docker: DockerExecutableRunner;
   private readonly dockerExecutable: string;
+  private readonly hermes: HermesDockerRuntimeOptions;
   private readonly nameSuffix: () => string;
   private readonly project: (spec: AgentLaunchSpec) => Promise<HermesProjectionResult>;
+  private readonly waitForReadiness: HermesReadinessWaiter;
 
   constructor(options: ManualRunnerDockerOptions = {}) {
     this.command = options.command ?? resolveManualRunnerCommand();
     this.docker = options.docker ?? runDockerExecutable;
     this.dockerExecutable =
       options.dockerExecutable ?? process.env[DOCKER_EXECUTABLE_ENV]?.trim() ?? "docker";
+    this.hermes = resolveHermesDockerRuntimeOptions(options.hermes);
     this.nameSuffix = options.nameSuffix ?? (() => randomUUID().replaceAll("-", "").slice(0, 12));
     this.project =
       options.projection?.project ??
       ((spec) => projectHermesHome(spec, options.projection?.options));
+    this.waitForReadiness = options.readiness?.wait ?? createHermesReadinessWaiter(this.hermes);
   }
 
   async start(
@@ -112,28 +177,45 @@ export class ManualRunnerDocker {
 
     await this.removeSelectedContainers(agentId);
     const containerName = dockerContainerName(agentId, this.nameSuffix());
-    const runResult = await this.runDocker([
-      "run",
-      "--detach",
-      "--name",
-      containerName,
-      "--label",
-      `${AGENTBAY_AGENT_ID_LABEL}=${agentId}`,
-      "--env",
-      `AGENTBAY_AGENT_ID=${agentId}`,
-      this.command.image,
-      ...this.command.args,
-    ]);
+    const runResult = await this.runDocker(
+      launchSpec && projection
+        ? buildHermesDockerRunArgs({
+            agentId,
+            containerName,
+            launchSpec,
+            projection,
+            runtime: this.hermes,
+          })
+        : buildLegacyDockerRunArgs({
+            agentId,
+            command: this.command,
+            containerName,
+          }),
+    );
     const containerId = runResult.stdout.trim();
 
     if (!containerId) {
       throw new Error("Docker did not return a container id.");
     }
 
-    return {
-      container: await this.inspectSelectedContainer(containerId, agentId),
-      projection,
-    };
+    const hermesInspect =
+      launchSpec && projection ? { launchSpec, projection, runtime: this.hermes } : null;
+    const container = await this.inspectSelectedContainer(containerId, agentId, hermesInspect);
+
+    if (launchSpec) {
+      const readiness = await this.waitForReadiness({
+        agentId,
+        apiServerKey: launchSpec.secrets.apiServerKey,
+        configRevision: launchSpec.agent.configRevision,
+        containerName,
+      });
+
+      if (!readiness.ok) {
+        throw new HermesReadinessError();
+      }
+    }
+
+    return { container, projection };
   }
 
   async stop(agentId: string): Promise<{ containers: RunnerContainer[] }> {
@@ -142,7 +224,7 @@ export class ManualRunnerDocker {
 
     for (const container of containers) {
       if (container.status === "running") {
-        await this.runDocker(["stop", container.id]);
+        await this.runDocker(["stop", "--time", "20", container.id]);
       }
       stopped.push(await this.inspectSelectedContainer(container.id, agentId));
     }
@@ -212,12 +294,21 @@ export class ManualRunnerDocker {
   private async inspectSelectedContainer(
     containerId: string,
     agentId: string,
+    hermes: {
+      launchSpec: AgentLaunchSpec;
+      projection: HermesProjectionResult;
+      runtime: HermesDockerRuntimeOptions;
+    } | null = null,
   ): Promise<RunnerContainer> {
     const result = await this.runDocker(["inspect", "--format", "{{json .}}", containerId]);
     const inspect = parseDockerInspect(result.stdout);
 
     if (inspect.Config?.Labels?.[AGENTBAY_AGENT_ID_LABEL] !== agentId) {
       throw new Error("Docker container label mismatch.");
+    }
+
+    if (hermes) {
+      assertHermesInspectMatchesRuntime(inspect, hermes);
     }
 
     return {
@@ -233,6 +324,375 @@ export class ManualRunnerDocker {
   private runDocker(args: readonly string[]): Promise<DockerCliResult> {
     return this.docker(this.dockerExecutable, args);
   }
+}
+
+function assertHermesInspectMatchesRuntime(
+  inspect: DockerInspectContainer,
+  input: {
+    launchSpec: AgentLaunchSpec;
+    projection: HermesProjectionResult;
+    runtime: HermesDockerRuntimeOptions;
+  },
+): void {
+  if (inspect.Config?.Image !== input.launchSpec.image.ref) {
+    throw new Error("Docker container image mismatch.");
+  }
+
+  if (
+    inspect.Config?.Labels?.[AGENTBAY_CONFIG_REVISION_LABEL] !==
+    input.launchSpec.agent.configRevision
+  ) {
+    throw new Error("Docker container config revision mismatch.");
+  }
+
+  if (inspect.Config?.Labels?.[AGENTBAY_LAUNCH_SPEC_VERSION_LABEL] !== input.launchSpec.version) {
+    throw new Error("Docker container launch spec version mismatch.");
+  }
+
+  assertMount(inspect, input.projection.hermesHome, "/opt/data");
+  assertMount(inspect, input.projection.workspace, "/workspace");
+
+  if (!inspect.HostConfig || inspect.HostConfig.NetworkMode !== input.runtime.network) {
+    throw new Error("Docker container network mismatch.");
+  }
+
+  if (
+    !inspect.NetworkSettings?.Networks ||
+    !(input.runtime.network in inspect.NetworkSettings.Networks)
+  ) {
+    throw new Error("Docker container private network missing.");
+  }
+
+  if (
+    hasPublishedPort(inspect.HostConfig.PortBindings) ||
+    hasPublishedPort(inspect.NetworkSettings.Ports)
+  ) {
+    throw new Error("Docker container unexpectedly publishes ports.");
+  }
+
+  if (!inspect.HostConfig.SecurityOpt?.includes("no-new-privileges")) {
+    throw new Error("Docker container security options mismatch.");
+  }
+
+  if (!inspect.HostConfig.CapDrop?.includes("ALL")) {
+    throw new Error("Docker container capability set mismatch.");
+  }
+
+  for (const capability of ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]) {
+    if (!hasDockerCapability(inspect.HostConfig.CapAdd, capability)) {
+      throw new Error("Docker container capability set mismatch.");
+    }
+  }
+
+  if (inspect.HostConfig.PidsLimit !== Number.parseInt(input.runtime.pidsLimit, 10)) {
+    throw new Error("Docker container PID limit mismatch.");
+  }
+
+  const expectedNanoCpus = parseDockerCpusToNanoCpus(input.runtime.cpus);
+
+  if (inspect.HostConfig.NanoCpus !== expectedNanoCpus) {
+    throw new Error("Docker container CPU limit mismatch.");
+  }
+
+  const expectedMemory = parseDockerMemoryBytes(input.runtime.memory);
+
+  if (inspect.HostConfig.Memory !== expectedMemory) {
+    throw new Error("Docker container memory limit mismatch.");
+  }
+
+  if (inspectContainsDockerSocket(inspect)) {
+    throw new Error("Docker container unexpectedly mounts the Docker socket.");
+  }
+
+  if (inspectContainsSecretValue(inspect, input.launchSpec)) {
+    throw new Error("Docker container inspect exposes launch secrets.");
+  }
+}
+
+function assertMount(
+  inspect: DockerInspectContainer,
+  expectedSource: string,
+  expectedDestination: string,
+): void {
+  const hasMount = inspect.Mounts?.some(
+    (mount) =>
+      mount.Type === "bind" &&
+      mount.Source === expectedSource &&
+      mount.Destination === expectedDestination,
+  );
+
+  if (!hasMount) {
+    throw new Error(`Docker container missing ${expectedDestination} bind mount.`);
+  }
+}
+
+function hasPublishedPort(
+  ports: Record<string, Array<{ HostPort?: string }> | null> | null | undefined,
+): boolean {
+  return Object.values(ports ?? {}).some((bindings) =>
+    (bindings ?? []).some((binding) => Boolean(binding.HostPort?.trim())),
+  );
+}
+
+function inspectContainsDockerSocket(inspect: DockerInspectContainer): boolean {
+  const values = [
+    ...(inspect.Mounts ?? []).flatMap((mount) => [mount.Source, mount.Destination]),
+    ...(inspect.HostConfig?.Binds ?? []),
+  ];
+
+  return values.some((value) => value?.includes("/var/run/docker.sock"));
+}
+
+function hasDockerCapability(
+  capabilities: string[] | null | undefined,
+  capability: string,
+): boolean {
+  return (capabilities ?? []).some(
+    (value) => value === capability || value === `CAP_${capability}`,
+  );
+}
+
+function inspectContainsSecretValue(
+  inspect: DockerInspectContainer,
+  launchSpec: AgentLaunchSpec,
+): boolean {
+  const secrets = [
+    launchSpec.secrets.apiServerKey,
+    launchSpec.secrets.openrouterApiKey,
+    launchSpec.secrets.telegramAllowedUsers,
+    launchSpec.secrets.telegramBotToken,
+  ].filter((secret) => secret.trim().length > 0);
+  const inspectText = JSON.stringify({
+    Args: inspect.Args,
+    Cmd: inspect.Config?.Cmd,
+    Entrypoint: inspect.Config?.Entrypoint,
+    Env: inspect.Config?.Env,
+    Healthcheck: inspect.Config?.Healthcheck,
+    Labels: inspect.Config?.Labels,
+    Name: inspect.Name,
+  });
+
+  return secrets.some((secret) => inspectText.includes(secret));
+}
+
+function parseDockerCpusToNanoCpus(value: string): number {
+  const cpus = Number.parseFloat(value);
+
+  if (!Number.isFinite(cpus) || cpus <= 0) {
+    throw new Error("Hermes Docker CPU limit must be positive.");
+  }
+
+  return Math.round(cpus * 1_000_000_000);
+}
+
+function parseDockerMemoryBytes(value: string): number {
+  const match = /^(\d+)([bkmg])?$/i.exec(value.trim());
+
+  if (!match?.[1]) {
+    throw new Error("Hermes Docker memory limit must be a Docker byte value.");
+  }
+
+  const units: Record<string, number> = {
+    b: 1,
+    k: 1024,
+    m: 1024 * 1024,
+    g: 1024 * 1024 * 1024,
+  };
+  const unit = match[2]?.toLowerCase() ?? "b";
+
+  return Number.parseInt(match[1], 10) * (units[unit] ?? 1);
+}
+
+export function buildHermesDockerRunArgs(input: {
+  agentId: string;
+  containerName: string;
+  launchSpec: AgentLaunchSpec;
+  projection: HermesProjectionResult;
+  runtime: HermesDockerRuntimeOptions;
+}): string[] {
+  return [
+    "run",
+    "--detach",
+    "--name",
+    input.containerName,
+    "--label",
+    `${AGENTBAY_AGENT_ID_LABEL}=${input.agentId}`,
+    "--label",
+    `${AGENTBAY_CONFIG_REVISION_LABEL}=${input.launchSpec.agent.configRevision}`,
+    "--label",
+    `${AGENTBAY_LAUNCH_SPEC_VERSION_LABEL}=${input.launchSpec.version}`,
+    "--network",
+    input.runtime.network,
+    "--mount",
+    `type=bind,source=${input.projection.hermesHome},target=/opt/data`,
+    "--mount",
+    `type=bind,source=${input.projection.workspace},target=/workspace`,
+    "--cpus",
+    input.runtime.cpus,
+    "--memory",
+    input.runtime.memory,
+    "--pids-limit",
+    input.runtime.pidsLimit,
+    "--security-opt",
+    "no-new-privileges",
+    "--cap-drop",
+    "ALL",
+    "--cap-add",
+    "CHOWN",
+    "--cap-add",
+    "DAC_OVERRIDE",
+    "--cap-add",
+    "FOWNER",
+    "--cap-add",
+    "SETGID",
+    "--cap-add",
+    "SETUID",
+    input.launchSpec.image.ref,
+    "gateway",
+    "run",
+  ];
+}
+
+function buildLegacyDockerRunArgs(input: {
+  agentId: string;
+  command: DockerRunnerCommand;
+  containerName: string;
+}): string[] {
+  return [
+    "run",
+    "--detach",
+    "--name",
+    input.containerName,
+    "--label",
+    `${AGENTBAY_AGENT_ID_LABEL}=${input.agentId}`,
+    "--env",
+    `AGENTBAY_AGENT_ID=${input.agentId}`,
+    input.command.image,
+    ...input.command.args,
+  ];
+}
+
+function resolveHermesDockerRuntimeOptions(
+  overrides: Partial<HermesDockerRuntimeOptions> | undefined,
+): HermesDockerRuntimeOptions {
+  return {
+    cpus: overrides?.cpus ?? process.env[HERMES_DOCKER_CPUS_ENV]?.trim() ?? "1",
+    memory: overrides?.memory ?? process.env[HERMES_DOCKER_MEMORY_ENV]?.trim() ?? "1536m",
+    network:
+      overrides?.network ??
+      process.env[HERMES_PRIVATE_NETWORK_ENV]?.trim() ??
+      DEFAULT_HERMES_PRIVATE_NETWORK,
+    pidsLimit: overrides?.pidsLimit ?? process.env[HERMES_DOCKER_PIDS_LIMIT_ENV]?.trim() ?? "256",
+    readinessPort: readPositiveInteger(
+      process.env[HERMES_READINESS_PORT_ENV],
+      overrides?.readinessPort ?? 8642,
+    ),
+  };
+}
+
+function createHermesReadinessWaiter(runtime: HermesDockerRuntimeOptions): HermesReadinessWaiter {
+  return async (input) => {
+    const deadline = Date.now() + 180_000;
+    const url = `http://${input.containerName}:${runtime.readinessPort}/health/detailed`;
+
+    while (Date.now() < deadline) {
+      try {
+        const response = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${input.apiServerKey}`,
+            Accept: "application/json",
+          },
+        });
+
+        if (response.ok) {
+          const body: unknown = await response.json();
+
+          if (isHermesReadyResponse(body, input.configRevision)) {
+            return { ok: true };
+          }
+        }
+      } catch {
+        // Hermes may still be booting or the private network route may not be ready yet.
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+
+    return { ok: false, reason: "timeout" };
+  };
+}
+
+export function isHermesReadyResponse(value: unknown, configRevision: string): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const status = value.status;
+  const revision = value.configRevision ?? value.config_revision;
+
+  return (
+    (isReadyStatus(status) || value.ok === true) &&
+    revision === configRevision &&
+    isTelegramReady(value)
+  );
+}
+
+function isTelegramReady(value: Record<string, unknown>): boolean {
+  const candidates = [
+    value.telegram,
+    readNestedRecord(value, ["messaging", "telegram"]),
+    readNestedRecord(value, ["platforms", "telegram"]),
+    readNestedRecord(value, ["checks", "telegram"]),
+    readNestedRecord(value, ["services", "telegram"]),
+    readNestedRecord(value, ["integrations", "telegram"]),
+  ];
+
+  return candidates.some((candidate) => {
+    if (!isRecord(candidate)) {
+      return false;
+    }
+
+    return (
+      candidate.ready === true ||
+      candidate.ok === true ||
+      candidate.connected === true ||
+      candidate.enabled === true ||
+      isReadyStatus(candidate.status) ||
+      isReadyStatus(candidate.state) ||
+      isReadyStatus(candidate.connection) ||
+      isReadyStatus(candidate.connectionStatus)
+    );
+  });
+}
+
+function isReadyStatus(value: unknown): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  return ["connected", "enabled", "healthy", "ok", "online", "ready", "running"].includes(
+    value.trim().toLowerCase(),
+  );
+}
+
+function readNestedRecord(value: Record<string, unknown>, path: readonly string[]): unknown {
+  let current: unknown = value;
+
+  for (const key of path) {
+    if (!isRecord(current)) {
+      return null;
+    }
+
+    current = current[key];
+  }
+
+  return current;
+}
+
+function readPositiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 export function resolveManualRunnerCommand(

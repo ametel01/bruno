@@ -68,7 +68,8 @@ export type ManualRunnerFailureReason =
   | "runner_endpoint_invalid"
   | "runner_request_failed"
   | "runner_response_invalid"
-  | "runner_not_running";
+  | "runner_not_running"
+  | "runner_readiness_failed";
 
 export type ManualRunnerAdapterDependencies = {
   createConnection?: () => DatabaseConnection;
@@ -264,6 +265,7 @@ export class ManualRunnerAdapter
       });
 
       if (!response.ok) {
+        const responseErrorCode = await readResponseErrorCode(response);
         logManualRunnerRequest("request_failed", {
           action,
           agentId,
@@ -272,11 +274,17 @@ export class ManualRunnerAdapter
           endpointHost: safeEndpointHost(endpointUrl),
           method,
           responseStatus: response.status,
-          responseErrorCode: await readResponseErrorCode(response),
+          responseErrorCode,
           runnerBearerTokenFingerprint: tokenFingerprint,
           durationMs: Date.now() - startedAt,
         });
-        return { ok: false, reason: "runner_request_failed" };
+        return {
+          ok: false,
+          reason:
+            responseErrorCode === "hermes_readiness_failed"
+              ? "runner_readiness_failed"
+              : "runner_request_failed",
+        };
       }
 
       const parsed: unknown = await response.json();

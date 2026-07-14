@@ -97,6 +97,8 @@ export const FAKE_RUNNER_START_DELAY_MS = 400;
 const RUNNING_STATUS_REASON = "Docker runner container is running.";
 const START_FINALIZATION_CLEANUP_FAILED_STATUS_REASON =
   "Runner start succeeded, but lifecycle finalization and runner cleanup failed.";
+const HERMES_READINESS_FAILED_STATUS_REASON =
+  "Hermes container started, but readiness did not complete. Check captured runner logs for details.";
 const DOCKER_RECONCILABLE_AGENT_STATUSES = ["starting", "running", "restarting"] as const;
 const DOCKER_TERMINAL_CONTAINER_STATUSES = ["dead", "exited"] as const;
 export const LOCAL_RUNNER_UNEXPECTED_EXIT_STATUS_REASON =
@@ -1042,6 +1044,24 @@ export async function startAgentForUser(
     const runnerStart = await runnerAdapter.start(normalizedAgentId, launchSpec.spec);
 
     if (!runnerStart.ok) {
+      if (isHermesReadinessRunnerFailure(runnerStart)) {
+        await recordHermesReadinessFailure({
+          agentId: normalizedAgentId,
+          userId,
+          connection,
+          now,
+        });
+
+        logAgentStart("runner_start_failed", {
+          agentId: normalizedAgentId,
+          reason: runnerStart.reason,
+          assignedRunnerId: reservation.assignedRunner?.id ?? null,
+          assignedRunnerKind: reservation.assignedRunner?.kind ?? null,
+        });
+
+        return { ok: false, reason: "runner_start_failed" } as const;
+      }
+
       if (reservation.reserved) {
         await restoreAgentStartReservation({
           agentId: normalizedAgentId,
@@ -1486,6 +1506,17 @@ export async function restartAgentForUser(
     const runnerRestart = await runnerAdapter.restart(normalizedAgentId, launchSpec.spec);
 
     if (!runnerRestart.ok) {
+      if (isHermesReadinessRunnerFailure(runnerRestart)) {
+        await recordHermesReadinessFailure({
+          agentId: normalizedAgentId,
+          userId,
+          connection,
+          now,
+        });
+
+        return { ok: false, reason: "runner_restart_failed" } as const;
+      }
+
       if (isDockerReplacementStartFailure(runnerRestart)) {
         await connection.db
           .update(agents)
@@ -2192,6 +2223,54 @@ function isDockerReplacementStartFailure(result: LifecycleRunnerRestartResult): 
   replacementStartFailed: true;
 } {
   return !result.ok && "replacementStartFailed" in result && result.replacementStartFailed === true;
+}
+
+function isHermesReadinessRunnerFailure(
+  result: LifecycleRunnerStartResult | LifecycleRunnerRestartResult,
+): result is (LifecycleRunnerStartResult | LifecycleRunnerRestartResult) & {
+  ok: false;
+  reason: "runner_readiness_failed";
+} {
+  return !result.ok && "reason" in result && result.reason === "runner_readiness_failed";
+}
+
+async function recordHermesReadinessFailure(input: {
+  agentId: string;
+  userId: string;
+  connection: DatabaseConnection;
+  now: Date;
+}): Promise<void> {
+  await input.connection.db.transaction(async (tx) => {
+    const [agent] = await tx
+      .update(agents)
+      .set({
+        status: "error",
+        statusReason: HERMES_READINESS_FAILED_STATUS_REASON,
+        updatedAt: input.now,
+      })
+      .where(
+        and(
+          eq(agents.id, input.agentId),
+          eq(agents.userId, input.userId),
+          isNull(agents.deletedAt),
+        ),
+      )
+      .returning();
+
+    if (!agent) {
+      throw new Error("Hermes readiness failure update returned no rows.");
+    }
+
+    await recordAgentEventInTransaction(tx, {
+      agentId: input.agentId,
+      actorUserId: input.userId,
+      type: SIMULATED_ERROR_EVENT_TYPE,
+      message: "Hermes readiness failed before the agent was marked running.",
+      metadata: {
+        reason: "hermes_readiness_failed",
+      },
+    });
+  });
 }
 
 function selectLifecycleRunnerAdapter(

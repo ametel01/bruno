@@ -11,7 +11,13 @@ import {
   startAgentForDevelopmentUser,
 } from "@/src/server/agents/lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agentConfigs, agents, runnerHeartbeats, runners } from "@/src/server/db/schema";
+import {
+  agentConfigs,
+  agentEvents,
+  agents,
+  runnerHeartbeats,
+  runners,
+} from "@/src/server/db/schema";
 import type { ManualRunnerRecord } from "@/src/server/runners/manual-runner-persistence";
 
 const KEYRING_ENV = {
@@ -88,6 +94,52 @@ describe("Hermes lifecycle readiness", () => {
       },
     });
     expect(calls).toEqual([`start:${created.agent.id}`, `logs:${created.agent.id}`]);
+  });
+
+  it("records agent.error when Hermes readiness fails after container start", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Readiness Failure Hermes Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const runnerId = await insertReadyCloudRunner(connection, created.agent.userId);
+    const calls: string[] = [];
+
+    await assignRunner(connection, created.agent.id, runnerId);
+    await configureHermesAgent(connection, created.agent.userId, created.agent.id);
+
+    const result = await startAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+      launchSpec: {
+        env: KEYRING_ENV,
+        requestId: () => "hermes-readiness-failure-request",
+      },
+      manualRunnerAdapter: () => readinessFailingRunnerStub(calls),
+      runnerAdapter: lifecycleRunnerStub(calls),
+      now: () => new Date("2026-07-14T02:05:00.000Z"),
+    });
+    const [persistedAgent] = await connection.db
+      .select({ status: agents.status, statusReason: agents.statusReason })
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+    const events = await connection.db
+      .select({ type: agentEvents.type, metadata: agentEvents.metadata })
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, created.agent.id));
+
+    expect(result).toEqual({ ok: false, reason: "runner_start_failed" });
+    expect(persistedAgent).toEqual({
+      status: "error",
+      statusReason:
+        "Hermes container started, but readiness did not complete. Check captured runner logs for details.",
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "agent.error",
+        metadata: { reason: "hermes_readiness_failed" },
+      }),
+    );
+    expect(calls).toEqual([`start:${created.agent.id}`]);
   });
 
   it("blocks assigned DigitalOcean restarts when a required Hermes secret is missing", async () => {
@@ -291,6 +343,18 @@ function lifecycleRunnerStub(
     streamLogs: vi.fn(async (input: { agentId: string }) => {
       calls.push(`logs:${input.agentId}`);
       return { logs: [], nextAfter: null };
+    }),
+  };
+}
+
+function readinessFailingRunnerStub(
+  calls: string[],
+): NonNullable<AgentLifecycleDependencies["runnerAdapter"]> {
+  return {
+    ...lifecycleRunnerStub(calls),
+    start: vi.fn(async (agentId: string) => {
+      calls.push(`start:${agentId}`);
+      return { ok: false as const, reason: "runner_readiness_failed" as const };
     }),
   };
 }

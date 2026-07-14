@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Authenticated private Hermes readiness polling for runner-managed gateway launches, including config-revision and Telegram readiness checks before start/restart completion.
 - Versioned Hermes launch specs, server-side launch-spec building with just-in-time decrypted secrets, authenticated runner JSON transport, and managed per-agent Hermes home projection for config, environment, prompt, and workspace state.
 - Hermes setup on the agent detail page with OpenRouter model selection, masked OpenRouter and Telegram secret status, generated agent API-server keys, readiness checks, and start/restart blocking until required Hermes setup is complete.
 - Encrypted per-agent secret storage, owner-scoped secret status/update/revoke APIs, generated agent API keys, and secret-free backup/restore/delete handling for the Hermes setup path.
@@ -91,6 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Runner-managed Hermes starts now launch the pinned workload image with `gateway run` on a private Docker network, projected `/opt/data` and `/workspace` mounts, bounded CPU/memory/PID limits, no published gateway port, label ownership, bounded graceful stops, and inspect validation before readiness.
 - DigitalOcean cloud runners now default to the Hermes-ready 2 GB one-agent tier, inject one-agent heartbeat capacity, prepare a private Hermes Docker network and managed state root, and pre-pull the pinned Hermes workload image during bootstrap.
 - Browser runner settings, provisioning, placement, capacity, registration-token creation, and credential management now use explicit internal user ownership, while runner registration, heartbeat, bootstrap callbacks, and lifecycle bearer authentication remain machine-token based.
 - Hosted app pages and app-side API routes now require operator access, while runner token endpoints remain credential-based.
@@ -101,6 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Hermes readiness failures now record `agent.error`, avoid premature start/restart completion events, and leave a safe actionable lifecycle reason; the Docker capability set now keeps only the minimal capabilities the Hermes supervisor needs after dropping all others.
 - Cloud runner bootstrap now persists exchanged credentials in the host-mounted environment file,
   safely recovers an interrupted unexpired DigitalOcean registration, and recognizes the exact
   authenticated not-found response from older runner images whose readiness route is unavailable.

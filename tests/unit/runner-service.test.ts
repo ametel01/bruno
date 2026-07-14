@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AGENTBAY_AGENT_ID_LABEL,
+  isHermesReadyResponse,
   ManualRunnerDocker,
   type DockerExecutableRunner,
 } from "@/src/runner-service/docker";
@@ -192,6 +193,11 @@ describe("manual runner service HTTP contract", () => {
   it("validates and projects launch specs for start before Docker runs", async () => {
     const calls: string[][] = [];
     const projected: string[] = [];
+    const readiness: Array<{
+      apiServerKey: string;
+      configRevision: string;
+      containerName: string;
+    }> = [];
     const service = createRunnerService({
       authToken: "test-token",
       docker: new ManualRunnerDocker({
@@ -210,6 +216,16 @@ describe("manual runner service HTTP contract", () => {
               soulPath: "/var/lib/agentbay/agents/test/hermes/SOUL.md",
               revisionPath: "/var/lib/agentbay/agents/test/hermes/agentbay-config-revision.json",
             };
+          },
+        },
+        readiness: {
+          wait: async (input) => {
+            readiness.push({
+              apiServerKey: input.apiServerKey,
+              configRevision: input.configRevision,
+              containerName: input.containerName,
+            });
+            return { ok: true };
           },
         },
       }),
@@ -237,7 +253,108 @@ describe("manual runner service HTTP contract", () => {
 
     expect(valid.status).toBe(200);
     expect(projected).toEqual([AGENT_ID]);
+    expect(readiness).toEqual([
+      {
+        apiServerKey: sampleLaunchSpec().secrets.apiServerKey,
+        configRevision: sampleLaunchSpec().agent.configRevision,
+        containerName: expect.stringContaining(`agentbay-runner-${AGENT_ID}`),
+      },
+    ]);
     expect(calls).toContainEqual(expect.arrayContaining(["run", "--detach"]));
+    expect(calls).toContainEqual(
+      expect.arrayContaining([
+        "--network",
+        "agentbay-hermes",
+        "--mount",
+        "type=bind,source=/var/lib/agentbay/agents/test/hermes,target=/opt/data",
+        "--mount",
+        "type=bind,source=/var/lib/agentbay/agents/test/workspace,target=/workspace",
+        sampleLaunchSpec().image.ref,
+        "gateway",
+        "run",
+      ]),
+    );
+    expect(calls).not.toContainEqual(expect.arrayContaining(["-p"]));
+    expect(calls).not.toContainEqual(expect.arrayContaining(["--publish"]));
+    expect(JSON.stringify(calls)).not.toContain(sampleLaunchSpec().secrets.openrouterApiKey);
+    expect(JSON.stringify(calls)).not.toContain(sampleLaunchSpec().secrets.telegramBotToken);
+  });
+
+  it("fails closed when inspect reports a Docker socket mount for Hermes", async () => {
+    const service = createRunnerService({
+      authToken: "test-token",
+      docker: new ManualRunnerDocker({
+        command: testCommand(),
+        docker: createMockDocker({ injectDockerSocket: true }),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: async () => ({
+            agentRoot: "/var/lib/agentbay/agents/test",
+            hermesHome: "/var/lib/agentbay/agents/test/hermes",
+            workspace: "/var/lib/agentbay/agents/test/workspace",
+            configPath: "/var/lib/agentbay/agents/test/hermes/config.yaml",
+            envPath: "/var/lib/agentbay/agents/test/hermes/.env",
+            soulPath: "/var/lib/agentbay/agents/test/hermes/SOUL.md",
+            revisionPath: "/var/lib/agentbay/agents/test/hermes/agentbay-config-revision.json",
+          }),
+        },
+        readiness: {
+          wait: async () => ({ ok: true }),
+        },
+      }),
+    });
+    const response = await service.fetch(
+      authorizedJsonRequest(
+        `/runner/v1/agents/${AGENT_ID}/start`,
+        sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } }),
+      ),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "docker_command_failed" },
+    });
+  });
+
+  it("returns a safe typed failure when Hermes readiness fails", async () => {
+    const service = createRunnerService({
+      authToken: "test-token",
+      docker: new ManualRunnerDocker({
+        command: testCommand(),
+        docker: createMockDocker(),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: async () => ({
+            agentRoot: "/var/lib/agentbay/agents/test",
+            hermesHome: "/var/lib/agentbay/agents/test/hermes",
+            workspace: "/var/lib/agentbay/agents/test/workspace",
+            configPath: "/var/lib/agentbay/agents/test/hermes/config.yaml",
+            envPath: "/var/lib/agentbay/agents/test/hermes/.env",
+            soulPath: "/var/lib/agentbay/agents/test/hermes/SOUL.md",
+            revisionPath: "/var/lib/agentbay/agents/test/hermes/agentbay-config-revision.json",
+          }),
+        },
+        readiness: {
+          wait: async () => ({ ok: false, reason: "timeout" }),
+        },
+      }),
+    });
+    const response = await service.fetch(
+      authorizedJsonRequest(
+        `/runner/v1/agents/${AGENT_ID}/start`,
+        sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } }),
+      ),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "hermes_readiness_failed",
+        message: "Hermes readiness failed.",
+      },
+    });
   });
 
   it("uses the required route methods", async () => {
@@ -277,7 +394,7 @@ describe("manual runner Docker command contract", () => {
       "selected-running",
       "selected-exited",
     ]);
-    expect(calls).toContainEqual(["stop", "selected-running"]);
+    expect(calls).toContainEqual(["stop", "--time", "20", "selected-running"]);
     expect(calls).not.toContainEqual(["stop", "selected-exited"]);
     expect(calls).not.toContainEqual(["stop", "other-running"]);
   });
@@ -313,6 +430,53 @@ describe("manual runner Docker command contract", () => {
     });
     expect(calls).toContainEqual(["rm", "--force", "old-selected"]);
     expect(calls).toContainEqual(expect.arrayContaining(["run", "--detach"]));
+  });
+});
+
+describe("Hermes detailed readiness contract", () => {
+  it("requires matching config and Telegram readiness evidence", () => {
+    expect(
+      isHermesReadyResponse(
+        {
+          status: "ready",
+          configRevision: "cfg-1",
+          telegram: { status: "connected" },
+        },
+        "cfg-1",
+      ),
+    ).toBe(true);
+    expect(
+      isHermesReadyResponse(
+        {
+          status: "ready",
+          configRevision: "cfg-2",
+          telegram: { status: "connected" },
+        },
+        "cfg-1",
+      ),
+    ).toBe(false);
+    expect(
+      isHermesReadyResponse(
+        {
+          status: "ready",
+          configRevision: "cfg-1",
+          telegram: { status: "disconnected" },
+        },
+        "cfg-1",
+      ),
+    ).toBe(false);
+    expect(isHermesReadyResponse({ status: "ready", configRevision: "cfg-1" }, "cfg-1")).toBe(
+      false,
+    );
+    expect(
+      isHermesReadyResponse(
+        {
+          status: "ready",
+          telegram: { status: "connected" },
+        },
+        "cfg-1",
+      ),
+    ).toBe(false);
   });
 });
 
@@ -357,7 +521,15 @@ function testCommand() {
 function createMockDocker(
   input: {
     calls?: string[][];
-    containers?: { agentId: string; id: string; status: string }[];
+    containers?: {
+      agentId: string;
+      id: string;
+      image?: string;
+      labels?: Record<string, string>;
+      runArgs?: readonly string[];
+      status: string;
+    }[];
+    injectDockerSocket?: boolean;
     psIds?: string[];
   } = {},
 ): DockerExecutableRunner {
@@ -386,6 +558,9 @@ function createMockDocker(
       containers.set("container-001", {
         id: "container-001",
         agentId: readLabelAgentId(args),
+        image: readRunImage(args),
+        labels: readRunLabels(args),
+        runArgs: args,
         status: "running",
       });
 
@@ -403,13 +578,32 @@ function createMockDocker(
       return {
         stdout: JSON.stringify({
           Id: container.id,
+          Args: readContainerCommandArgs(container.runArgs),
+          Mounts: [
+            ...readRunMounts(container.runArgs),
+            ...(input.injectDockerSocket
+              ? [
+                  {
+                    Type: "bind",
+                    Source: "/var/run/docker.sock",
+                    Destination: "/var/run/docker.sock",
+                  },
+                ]
+              : []),
+          ],
           Name: `/${container.id}`,
           Config: {
-            Image: "agentbay/runner:test",
+            Cmd: readContainerCommandArgs(container.runArgs),
+            Entrypoint: null,
+            Env: [],
+            Image: container.image ?? "agentbay/runner:test",
             Labels: {
               [AGENTBAY_AGENT_ID_LABEL]: container.agentId,
+              ...(container.labels ?? {}),
             },
           },
+          HostConfig: readRunHostConfig(container.runArgs),
+          NetworkSettings: readRunNetworkSettings(container.runArgs),
           State: {
             Status: container.status,
             StartedAt: "2026-07-05T00:00:00.000Z",
@@ -451,4 +645,133 @@ function readLabelAgentId(args: readonly string[]): string {
   const label = String(args[args.indexOf("--label") + 1]);
 
   return label.split(`${AGENTBAY_AGENT_ID_LABEL}=`)[1] ?? "";
+}
+
+function readRunImage(args: readonly string[]): string {
+  if (args.at(-2) === "gateway" && args.at(-1) === "run") {
+    return String(args.at(-3));
+  }
+
+  return "agentbay/runner:test";
+}
+
+function readRunLabels(args: readonly string[]): Record<string, string> {
+  const labels: Record<string, string> = {};
+
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] !== "--label") {
+      continue;
+    }
+
+    const [key, value] = String(args[index + 1] ?? "").split("=");
+
+    if (key && value) {
+      labels[key] = value;
+    }
+  }
+
+  return labels;
+}
+
+function readRunMounts(args: readonly string[] | undefined) {
+  const mounts: Array<{ Type: string; Source: string; Destination: string }> = [];
+
+  if (!args) {
+    return mounts;
+  }
+
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] !== "--mount") {
+      continue;
+    }
+
+    const spec = Object.fromEntries(
+      String(args[index + 1] ?? "")
+        .split(",")
+        .map((part) => part.split("=")),
+    );
+
+    mounts.push({
+      Type: String(spec.type ?? ""),
+      Source: String(spec.source ?? ""),
+      Destination: String(spec.target ?? ""),
+    });
+  }
+
+  return mounts;
+}
+
+function readRunHostConfig(args: readonly string[] | undefined) {
+  const cpus = readArgValue(args, "--cpus");
+  const memory = readArgValue(args, "--memory");
+  const pidsLimit = readArgValue(args, "--pids-limit");
+
+  return {
+    Binds: [],
+    CapDrop: readRepeatedArgValues(args, "--cap-drop"),
+    CapAdd: readRepeatedArgValues(args, "--cap-add"),
+    Memory: memory ? parseDockerMemoryBytesForTest(memory) : 0,
+    NanoCpus: cpus ? Math.round(Number.parseFloat(cpus) * 1_000_000_000) : 0,
+    NetworkMode: readArgValue(args, "--network") ?? "bridge",
+    PidsLimit: pidsLimit ? Number.parseInt(pidsLimit, 10) : 0,
+    PortBindings: {},
+    SecurityOpt: readRepeatedArgValues(args, "--security-opt"),
+  };
+}
+
+function readRunNetworkSettings(args: readonly string[] | undefined) {
+  const network = readArgValue(args, "--network") ?? "bridge";
+
+  return {
+    Networks: { [network]: {} },
+    Ports: { "8642/tcp": null },
+  };
+}
+
+function readContainerCommandArgs(args: readonly string[] | undefined): string[] {
+  if (args?.at(-2) === "gateway" && args.at(-1) === "run") {
+    return ["gateway", "run"];
+  }
+
+  return testCommand().args;
+}
+
+function readArgValue(args: readonly string[] | undefined, flag: string): string | null {
+  const index = args?.indexOf(flag) ?? -1;
+
+  return index >= 0 ? String(args?.[index + 1] ?? "") : null;
+}
+
+function readRepeatedArgValues(args: readonly string[] | undefined, flag: string): string[] {
+  const values: string[] = [];
+
+  if (!args) {
+    return values;
+  }
+
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === flag) {
+      values.push(String(args[index + 1] ?? ""));
+    }
+  }
+
+  return values;
+}
+
+function parseDockerMemoryBytesForTest(value: string): number {
+  const match = /^(\d+)([bkmg])?$/i.exec(value.trim());
+
+  if (!match?.[1]) {
+    return 0;
+  }
+
+  const units: Record<string, number> = {
+    b: 1,
+    k: 1024,
+    m: 1024 * 1024,
+    g: 1024 * 1024 * 1024,
+  };
+  const unit = match[2]?.toLowerCase() ?? "b";
+
+  return Number.parseInt(match[1], 10) * (units[unit] ?? 1);
 }

@@ -5,6 +5,7 @@ import {
   type AgentLaunchSpec,
 } from "@/src/server/agents/agent-launch-spec";
 import { ManualRunnerDocker } from "@/src/runner-service/docker";
+import { HermesReadinessError } from "@/src/runner-service/docker";
 
 const RUNNER_TOKEN_ENV = "AGENTBAY_RUNNER_BEARER_TOKEN";
 
@@ -81,7 +82,11 @@ export function createRunnerService(options: RunnerServiceOptions = {}) {
           },
           { status: 200 },
         );
-      } catch {
+      } catch (error) {
+        if (error instanceof HermesReadinessError) {
+          return jsonError(502, "hermes_readiness_failed", "Hermes readiness failed.");
+        }
+
         return jsonError(502, "docker_command_failed", "Runner Docker command failed.");
       }
     },
