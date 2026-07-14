@@ -42,14 +42,14 @@ import {
 } from "@/src/server/runners/runner-auth-secrets";
 import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
 
-const DEFAULT_CLOUD_RUNNER_NAME = "AgentBay Cloud Runner";
+const DEFAULT_CLOUD_RUNNER_NAME = "plingpling Cloud Runner";
 const DEFAULT_FIREWALL_NAME = "agentbay-runners";
 const CLOUD_REGISTRATION_TOKEN_TTL_MS = 60 * 60 * 1000;
 const PUBLIC_ENDPOINT_POLL_ATTEMPTS = 20;
 const PUBLIC_ENDPOINT_POLL_INTERVAL_MS = 3_000;
 const LOW_MEMORY_DIGITALOCEAN_SIZE_SLUGS = new Set(["s-1vcpu-512mb-10gb"]);
 const MAX_RUNNER_NAME_LENGTH = 80;
-const MANAGED_SSH_KEY_NAME = "AgentBay managed runner key";
+const MANAGED_SSH_KEY_NAME = "plingpling managed runner key";
 
 type RunnerProvisioningTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -882,7 +882,7 @@ function missingProviderResourceMessage(providerResourceId: string): string {
     ? providerResourceId
     : "the recorded provider resource";
 
-  return `DigitalOcean Droplet ${safeResourceId} is no longer available for runner registration. AgentBay marked the stale runner failed and will create a new runner.`;
+  return `DigitalOcean Droplet ${safeResourceId} is no longer available for runner registration. plingpling marked the stale runner failed and will create a new runner.`;
 }
 
 async function resolveDigitalOceanSshAccess(
@@ -942,7 +942,7 @@ async function resolveDigitalOceanSshAccess(
         ok: false,
         reason: "ssh_key_create_failed",
         message:
-          "AgentBay could not create a DigitalOcean SSH key for Droplet login. Confirm the provider token has SSH key create permission, then retry Create runner.",
+          "plingpling could not create a DigitalOcean SSH key for Droplet login. Confirm the provider token has SSH key create permission, then retry Create runner.",
       };
     }
 
@@ -1346,7 +1346,7 @@ function manualCleanupMessage(providerResourceId: string): string {
     ? providerResourceId
     : "the recorded provider resource";
 
-  return `Automatic cleanup could not confirm deletion for DigitalOcean Droplet ${safeResourceId}. In DigitalOcean, delete only that Droplet after confirming it has the AgentBay runner tags, then create a new runner.`;
+  return `Automatic cleanup could not confirm deletion for DigitalOcean Droplet ${safeResourceId}. In DigitalOcean, delete only that Droplet after confirming it has the plingpling runner tags, then create a new runner.`;
 }
 
 async function findActiveProvisioningRunner(

@@ -317,7 +317,7 @@ describe("product shell routes", () => {
   it("renders the root product dashboard shell", () => {
     const html = renderToStaticMarkup(createElement(Home));
 
-    expect(html).toContain("AgentBay");
+    expect(html).toContain("plingpling");
     expect(html).toContain('href="/dashboard"');
     expect(html).toContain("Operational dashboard");
     expect(html).toContain("No agent records");

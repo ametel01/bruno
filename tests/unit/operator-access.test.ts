@@ -196,7 +196,7 @@ describe("operator access proxy responses", () => {
         const body = await response.json();
 
         expect(response.status).toBe(401);
-        expect(response.headers.get("WWW-Authenticate")).toBe('Basic realm="AgentBay"');
+        expect(response.headers.get("WWW-Authenticate")).toBe('Basic realm="plingpling"');
         expect(body).toEqual({
           error: {
             code: "operator_auth_required",
@@ -218,7 +218,7 @@ describe("operator access proxy responses", () => {
         );
 
         expect(response.status).toBe(401);
-        expect(response.headers.get("WWW-Authenticate")).toBe('Basic realm="AgentBay"');
+        expect(response.headers.get("WWW-Authenticate")).toBe('Basic realm="plingpling"');
         expect(await response.text()).toBe("Operator credentials are required.");
       },
     );

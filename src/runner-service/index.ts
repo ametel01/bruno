@@ -59,7 +59,7 @@ const server = Bun.serve({
 });
 
 console.log(
-  `AgentBay runner service listening on ${server.url?.href ?? `${server.hostname}:${server.port}`}`,
+  `plingpling runner service listening on ${server.url?.href ?? `${server.hostname}:${server.port}`}`,
 );
 
 function parsePort(value: string | undefined): number {

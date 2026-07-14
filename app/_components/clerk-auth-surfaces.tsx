@@ -57,8 +57,8 @@ export function AccountControls() {
 export function SignInSurface() {
   return (
     <AuthSurface
-      description="Use your AgentBay account to continue to the operator dashboard."
-      title="Sign in to AgentBay"
+      description="Use your plingpling account to continue to the operator dashboard."
+      title="Sign in to plingpling"
     >
       <SignIn
         fallbackRedirectUrl="/dashboard"
@@ -73,8 +73,8 @@ export function SignInSurface() {
 export function SignUpSurface() {
   return (
     <AuthSurface
-      description="Create an AgentBay account to start using the managed agent control plane."
-      title="Create your AgentBay account"
+      description="Create a plingpling account to start using the managed agent control plane."
+      title="Create your plingpling account"
     >
       <SignUp
         fallbackRedirectUrl="/dashboard"
@@ -99,10 +99,10 @@ function AuthSurface({
     <main className="auth-page">
       <section className="auth-card" aria-labelledby="auth-page-title">
         <div className="auth-copy">
-          <Link className="brand-mark" href="/" aria-label="AgentBay home">
-            AB
+          <Link className="brand-mark" href="/" aria-label="plingpling home">
+            PP
           </Link>
-          <p className="eyebrow">AgentBay account</p>
+          <p className="eyebrow">plingpling account</p>
           <h1 id="auth-page-title">{title}</h1>
           <p>{description}</p>
         </div>

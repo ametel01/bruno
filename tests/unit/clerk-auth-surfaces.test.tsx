@@ -85,7 +85,7 @@ describe("Clerk authentication surfaces", () => {
   it.each([
     [
       SignInSurface,
-      "Sign in to AgentBay",
+      "Sign in to plingpling",
       "Clerk sign-in widget",
       () => mocks.signInProps,
       {
@@ -97,7 +97,7 @@ describe("Clerk authentication surfaces", () => {
     ],
     [
       SignUpSurface,
-      "Create your AgentBay account",
+      "Create your plingpling account",
       "Clerk sign-up widget",
       () => mocks.signUpProps,
       {

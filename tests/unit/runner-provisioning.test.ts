@@ -319,7 +319,7 @@ describe.sequential("runner provisioning service", () => {
     expect(provider.calls[0]).toMatchObject({
       step: "createSshKey",
       input: {
-        name: "AgentBay managed runner key",
+        name: "plingpling managed runner key",
         publicKey: expect.stringMatching(/^ssh-ed25519 [A-Za-z0-9+/=]+ agentbay-managed-runner$/),
       },
     });
@@ -571,7 +571,7 @@ describe.sequential("runner provisioning service", () => {
       status: "provision_failed",
       provisioningStatus: "failed",
       provisioningError:
-        "DigitalOcean Droplet deleted-droplet-1 is no longer available for runner registration. AgentBay marked the stale runner failed and will create a new runner.",
+        "DigitalOcean Droplet deleted-droplet-1 is no longer available for runner registration. plingpling marked the stale runner failed and will create a new runner.",
     });
   });
 
@@ -720,7 +720,7 @@ describe.sequential("runner provisioning service", () => {
         provisioning: {
           status: "failed",
           error:
-            "Automatic cleanup could not confirm deletion for DigitalOcean Droplet manual-cleanup-1. In DigitalOcean, delete only that Droplet after confirming it has the AgentBay runner tags, then create a new runner.",
+            "Automatic cleanup could not confirm deletion for DigitalOcean Droplet manual-cleanup-1. In DigitalOcean, delete only that Droplet after confirming it has the plingpling runner tags, then create a new runner.",
           completedAt: expect.any(String),
         },
       },

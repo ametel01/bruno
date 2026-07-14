@@ -14,7 +14,7 @@ describe("fake DigitalOcean provider", () => {
     });
 
     const created = await provider.createRunner({
-      name: "AgentBay Cloud Runner",
+      name: "plingpling Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-1gb",
       image: "ubuntu-24-04-x64",
@@ -28,7 +28,7 @@ describe("fake DigitalOcean provider", () => {
         provider: DIGITALOCEAN_PROVIDER,
         providerResourceId: "droplet-1",
         publicIpv4: "203.0.113.10",
-        name: "AgentBay Cloud Runner",
+        name: "plingpling Cloud Runner",
         region: "sfo3",
         sizeSlug: "s-1vcpu-1gb",
         image: "ubuntu-24-04-x64",
@@ -86,7 +86,7 @@ describe("fake DigitalOcean provider", () => {
 
     await expect(
       createFailure.createRunner({
-        name: "AgentBay Cloud Runner",
+        name: "plingpling Cloud Runner",
         region: "sfo3",
         sizeSlug: "s-1vcpu-1gb",
         image: "ubuntu-24-04-x64",
@@ -166,7 +166,7 @@ describe("DigitalOcean API provider", () => {
             post: async () => ({
               ssh_key: {
                 id: 52830700,
-                name: "AgentBay managed runner key",
+                name: "plingpling managed runner key",
                 fingerprint: "b4:78:1a:93:8c:33:49:15:a1:44:a9:dc:b2:4f:30:cc",
               },
             }),
@@ -197,7 +197,7 @@ describe("DigitalOcean API provider", () => {
     });
 
     const created = await provider.createRunner({
-      name: "AgentBay Cloud Runner",
+      name: "plingpling Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
@@ -255,7 +255,7 @@ describe("DigitalOcean API provider", () => {
       "droplets.delete",
     ]);
     expect(calls[0]?.body).toMatchObject({
-      name: "agentbay-cloud-runner",
+      name: "plingpling-cloud-runner",
       region: "sfo3",
       size: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
@@ -308,7 +308,7 @@ describe("DigitalOcean API provider", () => {
                 return {
                   ssh_key: {
                     id: 52830700,
-                    name: "AgentBay managed runner key",
+                    name: "plingpling managed runner key",
                     fingerprint: "b4:78:1a:93:8c:33:49:15:a1:44:a9:dc:b2:4f:30:cc",
                   },
                 };
@@ -326,7 +326,7 @@ describe("DigitalOcean API provider", () => {
     });
 
     const result = await provider.createSshKey({
-      name: "AgentBay managed runner key",
+      name: "plingpling managed runner key",
       publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKey agentbay-managed-runner",
     });
 
@@ -334,7 +334,7 @@ describe("DigitalOcean API provider", () => {
       ok: true,
       value: {
         id: "52830700",
-        name: "AgentBay managed runner key",
+        name: "plingpling managed runner key",
         fingerprint: "b4:78:1a:93:8c:33:49:15:a1:44:a9:dc:b2:4f:30:cc",
       },
     });
@@ -342,7 +342,7 @@ describe("DigitalOcean API provider", () => {
       {
         step: "account.keys.post",
         body: {
-          name: "AgentBay managed runner key",
+          name: "plingpling managed runner key",
           publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKey agentbay-managed-runner",
         },
       },
@@ -380,7 +380,7 @@ describe("DigitalOcean API provider", () => {
     });
 
     const result = await provider.createRunner({
-      name: "AgentBay Cloud Runner",
+      name: "plingpling Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-1gb",
       image: "ubuntu-24-04-x64",
@@ -456,7 +456,7 @@ describe("DigitalOcean API provider", () => {
     });
 
     const created = await provider.createRunner({
-      name: "AgentBay Cloud Runner",
+      name: "plingpling Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",

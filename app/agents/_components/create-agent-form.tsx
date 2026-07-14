@@ -308,8 +308,8 @@ function AgentSetupTrace({
         </div>
       ) : (
         <p>
-          AgentBay stopped while checking runner capacity or cloud provisioning. The error below has
-          the next action.
+          plingpling stopped while checking runner capacity or cloud provisioning. The error below
+          has the next action.
         </p>
       )}
       <ol className="agent-setup-stage-list">

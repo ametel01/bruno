@@ -695,7 +695,7 @@ function ensureDefaultCloudRunnerProvisioning(
 ): Promise<CreateRunnerProvisioningResult> {
   return createDigitalOceanRunnerForUser(userId, {
     provider: "digitalocean",
-    name: "AgentBay Cloud Runner",
+    name: "plingpling Cloud Runner",
   });
 }
 

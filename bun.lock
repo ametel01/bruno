@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "agentbay",
+      "name": "plingpling",
       "dependencies": {
         "@clerk/nextjs": "7.5.16",
         "@digitalocean/dots": "^1.17.0",

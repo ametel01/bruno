@@ -14,7 +14,7 @@ import {
 } from "@/src/auth/clerk-transition";
 import { evaluateOperatorAccess, type OperatorAccessDecision } from "@/src/auth/operator-access";
 
-const AUTHENTICATE_HEADER = 'Basic realm="AgentBay"';
+const AUTHENTICATE_HEADER = 'Basic realm="plingpling"';
 
 const clerkSessionProxy = clerkMiddleware(handleClerkSessionRequest, {
   signInUrl: "/sign-in",

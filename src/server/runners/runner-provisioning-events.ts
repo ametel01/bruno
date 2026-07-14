@@ -191,7 +191,7 @@ export async function markCloudRunnerExternallyDeleted(
     runnerId: input.runnerId,
     phase: "deleted",
     status: "completed",
-    message: "DigitalOcean Droplet was deleted outside AgentBay.",
+    message: "DigitalOcean Droplet was deleted outside plingpling.",
     metadata: {
       provider: DIGITALOCEAN_PROVIDER,
       deletionSource: "provider_reconciliation",

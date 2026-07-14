@@ -20,11 +20,11 @@ describe("local Docker DigitalOcean provider", () => {
       commandBearerToken: "runner-command-token",
       endpointDiscovery: { type: "digitalocean_metadata" },
       runnerImage: "agentbay-runner:local",
-      runnerName: "AgentBay Cloud Runner",
+      runnerName: "plingpling Cloud Runner",
     });
 
     const created = await provider.createRunner({
-      name: "AgentBay Cloud Runner",
+      name: "plingpling Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
@@ -122,7 +122,7 @@ describe("local Docker DigitalOcean provider", () => {
     });
 
     await provider.createRunner({
-      name: "AgentBay Cloud Runner",
+      name: "plingpling Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
