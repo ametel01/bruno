@@ -254,12 +254,13 @@ history above and is the active progress record for the current `/goal`.
 
 ### Current Status
 
-Step 0 is complete for tracking setup. The Milestone 18 ledger lists every
-incremental step, records dependencies and evidence fields, confirms the
-functional-change-only changelog rule, and keeps `CHANGELOG.md` unchanged
-because this step changes tracking only.
+Step 1 is complete. The repository now has a pinned Hermes workload Dockerfile,
+an operator-facing local image smoke command, focused tests for the artifact and
+publication contract, and a separate GHCR workflow for scanned workload image
+publication.
 
-Next executable step: Step 1, add the pinned Hermes workload artifact.
+Next executable step: Step 2, make cloud capacity and bootstrap
+Hermes-aware.
 
 ### Changelog Policy
 
@@ -278,7 +279,7 @@ in `CHANGELOG.md`.
 ### Step Checklist
 
 - [x] Step 0: Initialize Milestone 18 Tracking
-- [ ] Step 1: Add the Pinned Hermes Workload Artifact
+- [x] Step 1: Add the Pinned Hermes Workload Artifact
 - [ ] Step 2: Make Cloud Capacity and Bootstrap Hermes-Aware
 - [ ] Step 3: Add Encrypted Per-Agent Secret Storage
 - [ ] Step 4: Add Hermes and Telegram Setup UX
@@ -292,8 +293,8 @@ in `CHANGELOG.md`.
 
 | Step | State | Depends on | Commit | Validation or deployment evidence | Blocker and next work |
 | --- | --- | --- | --- | --- | --- |
-| 0. Initialize Milestone 18 Tracking | Complete | None | `docs: track milestone 18 Hermes work` | `test -f PROGRESS.md && test -f CHANGELOG.md`; `rg "Milestone 18|Real Hermes|Step 0|Step 9" PROGRESS.md`; `rg "^# Changelog$|^## \[Unreleased\]$" CHANGELOG.md`; `git diff --check`. | Complete; Step 1 is next. |
-| 1. Add the Pinned Hermes Workload Artifact | Not started | Step 0 | Not collected | Not collected | Re-verify the upstream Hermes release and add the pinned workload image, smoke check, and publication workflow. |
+| 0. Initialize Milestone 18 Tracking | Complete | None | `9d6f6e1` | `test -f PROGRESS.md && test -f CHANGELOG.md`; `rg "Milestone 18|Real Hermes|Step 0|Step 9" PROGRESS.md`; `rg "^# Changelog$|^## \[Unreleased\]$" CHANGELOG.md`; `bun run test tests/unit/progress-status.test.ts`; `git diff --check`. | Complete. |
+| 1. Add the Pinned Hermes Workload Artifact | Complete | Step 0 | `build: add pinned Hermes workload image` | Upstream index `sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973`; AMD64 manifest `sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a`; local image `agentbay-hermes@sha256:281344814c90ee6e91b40b5dab91526f3da04325e4c31834019f422e1551da6b`; `docker buildx build --platform linux/amd64 --load -f Dockerfile.agent -t agentbay-hermes:local .`; `bun run agent:image:smoke`; `docker history --no-trunc agentbay-hermes:local`; `bun run test tests/unit/hermes-agent-image.test.ts`; `bun run format:check`; `bun run lint`; `bun run typecheck`; `git diff --check`. | Complete; Step 2 is next. |
 | 2. Make Cloud Capacity and Bootstrap Hermes-Aware | Not started | Step 1 | Not collected | Not collected | Provision the Hermes-ready 2 GB runner tier, one-agent capacity, private network, state root, and image pre-pull. |
 | 3. Add Encrypted Per-Agent Secret Storage | Not started | Step 0 | Not collected | Not collected | Add the additive secret schema, crypto service, owner-scoped secret routes, and backup/restore/delete protections. |
 | 4. Add Hermes and Telegram Setup UX | Not started | Step 3 | Not collected | Not collected | Add setup UI, masked secret status, model selection, readiness DTO, and lifecycle blocking. |
@@ -308,10 +309,19 @@ in `CHANGELOG.md`.
 - 2026-07-14: Step 0 appended this Milestone 18 ledger, confirmed
   `CHANGELOG.md` keeps the required structure, and deliberately added no
   changelog entry because tracking setup is not a functional product change.
+- 2026-07-14: Step 1 added `Dockerfile.agent` pinned to Hermes Agent
+  `v2026.7.7.2`, confirmed upstream index digest
+  `sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973`,
+  confirmed Linux AMD64 manifest
+  `sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a`,
+  built local image
+  `agentbay-hermes@sha256:281344814c90ee6e91b40b5dab91526f3da04325e4c31834019f422e1551da6b`,
+  added `bun run agent:image:smoke`, and added a separate scanned
+  `publish-agent-image` GHCR workflow.
 
 ### Current Blockers and Next Work
 
-- Step 1 is unblocked locally.
+- Step 2 is unblocked locally.
 - Step 9 is externally blocked until the user authorizes billable DigitalOcean
   work and supplies or approves dedicated OpenRouter and Telegram smoke
   credentials. This blocker does not prevent completing and committing the

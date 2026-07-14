@@ -1,0 +1,103 @@
+name: Publish Hermes workload image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile.agent
+      - .github/workflows/publish-agent-image.yml
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+  security-events: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ametel01/agentbay-hermes
+  LOCAL_IMAGE: agentbay-hermes:ci
+  UPSTREAM_IMAGE: nousresearch/hermes-agent:v2026.7.7.2
+  UPSTREAM_INDEX_DIGEST: sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973
+
+jobs:
+  publish:
+    name: Build, scan, and publish Hermes workload image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Verify upstream Hermes digest
+        run: |
+          set -euo pipefail
+          DIGEST="$(docker buildx imagetools inspect "${UPSTREAM_IMAGE}" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          test "${DIGEST}" = "${UPSTREAM_INDEX_DIGEST}"
+
+      - name: Build local workload image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.agent
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.LOCAL_IMAGE }}
+
+      - name: Smoke local workload image
+        env:
+          AGENTBAY_HERMES_IMAGE: ${{ env.LOCAL_IMAGE }}
+        run: bun scripts/smoke-hermes-agent-image.ts
+
+      - name: Scan critical fixable vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.LOCAL_IMAGE }}
+          format: sarif
+          output: trivy-agent-image.sarif
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Upload scan report
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-agent-image.sarif
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push workload image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.agent
+          platforms: linux/amd64
+          push: true
+          sbom: true
+          provenance: mode=max
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:hermes-v2026.7.7.2
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Digest verification
+        run: |
+          set -euo pipefail
+          IMAGE="${REGISTRY}/${IMAGE_NAME}@${{ steps.push.outputs.digest }}"
+          docker buildx imagetools inspect "${IMAGE}"
+          echo "published_digest=${{ steps.push.outputs.digest }}" >> "${GITHUB_STEP_SUMMARY}"
