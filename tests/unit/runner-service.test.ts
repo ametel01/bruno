@@ -5,6 +5,7 @@ import {
   type DockerExecutableRunner,
 } from "@/src/runner-service/docker";
 import { createRunnerService } from "@/src/runner-service/server";
+import { sampleLaunchSpec } from "@/tests/helpers/agent-launch-spec";
 
 const AGENT_ID = "00000000-0000-4000-8000-000000000123";
 const OTHER_AGENT_ID = "00000000-0000-4000-8000-000000000456";
@@ -188,6 +189,57 @@ describe("manual runner service HTTP contract", () => {
     ]);
   });
 
+  it("validates and projects launch specs for start before Docker runs", async () => {
+    const calls: string[][] = [];
+    const projected: string[] = [];
+    const service = createRunnerService({
+      authToken: "test-token",
+      docker: new ManualRunnerDocker({
+        command: testCommand(),
+        docker: createMockDocker({ calls }),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: async (spec) => {
+            projected.push(spec.agent.id);
+            return {
+              agentRoot: "/var/lib/agentbay/agents/test",
+              hermesHome: "/var/lib/agentbay/agents/test/hermes",
+              workspace: "/var/lib/agentbay/agents/test/workspace",
+              configPath: "/var/lib/agentbay/agents/test/hermes/config.yaml",
+              envPath: "/var/lib/agentbay/agents/test/hermes/.env",
+              soulPath: "/var/lib/agentbay/agents/test/hermes/SOUL.md",
+              revisionPath: "/var/lib/agentbay/agents/test/hermes/agentbay-config-revision.json",
+            };
+          },
+        },
+      }),
+    });
+    const invalid = await service.fetch(
+      authorizedJsonRequest(`/runner/v1/agents/${AGENT_ID}/start`, {
+        ...sampleLaunchSpec(),
+        version: "agentbay.hermes.launch.v0",
+      }),
+    );
+
+    expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "launch_spec_invalid" },
+    });
+    expect(calls).toEqual([]);
+
+    const valid = await service.fetch(
+      authorizedJsonRequest(
+        `/runner/v1/agents/${AGENT_ID}/start`,
+        sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } }),
+      ),
+    );
+
+    expect(valid.status).toBe(200);
+    expect(projected).toEqual([AGENT_ID]);
+    expect(calls).toContainEqual(expect.arrayContaining(["run", "--detach"]));
+  });
+
   it("uses the required route methods", async () => {
     const service = createTestService();
     const response = await service.fetch(authorizedRequest(`/runner/v1/agents/${AGENT_ID}/start`));
@@ -281,6 +333,17 @@ function authorizedRequest(path: string, method = "GET"): Request {
     headers: {
       Authorization: "Bearer test-token",
     },
+  });
+}
+
+function authorizedJsonRequest(path: string, body: unknown): Request {
+  return new Request(`http://runner.test${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer test-token",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
   });
 }
 

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Versioned Hermes launch specs, server-side launch-spec building with just-in-time decrypted secrets, authenticated runner JSON transport, and managed per-agent Hermes home projection for config, environment, prompt, and workspace state.
 - Hermes setup on the agent detail page with OpenRouter model selection, masked OpenRouter and Telegram secret status, generated agent API-server keys, readiness checks, and start/restart blocking until required Hermes setup is complete.
 - Encrypted per-agent secret storage, owner-scoped secret status/update/revoke APIs, generated agent API keys, and secret-free backup/restore/delete handling for the Hermes setup path.
 - Pinned Hermes workload image artifact, local smoke verification, and a separate scanned GHCR publication workflow for the first real AgentBay-managed Hermes runtime.

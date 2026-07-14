@@ -1,4 +1,9 @@
 import { isValidAgentId } from "@/src/server/agents/agent-id";
+import {
+  AGENT_LAUNCH_SPEC_MAX_BYTES,
+  parseAgentLaunchSpecJson,
+  type AgentLaunchSpec,
+} from "@/src/server/agents/agent-launch-spec";
 import { ManualRunnerDocker } from "@/src/runner-service/docker";
 
 const RUNNER_TOKEN_ENV = "AGENTBAY_RUNNER_BEARER_TOKEN";
@@ -61,12 +66,18 @@ export function createRunnerService(options: RunnerServiceOptions = {}) {
       }
 
       try {
+        const launchSpecResult = await readLaunchSpec(request, route.action);
+
+        if (!launchSpecResult.ok) {
+          return launchSpecResult.response;
+        }
+
         return Response.json(
           {
             ok: true,
             agentId: route.agentId,
             action: route.action,
-            ...(await docker[route.action](route.agentId)),
+            ...(await callDockerAction(docker, route, launchSpecResult.launchSpec)),
           },
           { status: 200 },
         );
@@ -75,6 +86,62 @@ export function createRunnerService(options: RunnerServiceOptions = {}) {
       }
     },
   };
+}
+
+async function callDockerAction(
+  docker: Pick<ManualRunnerDocker, RunnerAction>,
+  route: { agentId: string; action: RunnerAction },
+  launchSpec: AgentLaunchSpec | null,
+) {
+  if (route.action === "start" || route.action === "restart") {
+    return await docker[route.action](route.agentId, launchSpec);
+  }
+
+  return await docker[route.action](route.agentId);
+}
+
+async function readLaunchSpec(
+  request: Request,
+  action: RunnerAction,
+): Promise<{ ok: true; launchSpec: AgentLaunchSpec | null } | { ok: false; response: Response }> {
+  if (action !== "start" && action !== "restart") {
+    return { ok: true, launchSpec: null };
+  }
+
+  const body = await request.text();
+
+  if (!body.trim()) {
+    return { ok: true, launchSpec: null };
+  }
+
+  const contentType = request.headers.get("content-type") ?? "";
+
+  if (!contentType.toLowerCase().startsWith("application/json")) {
+    return {
+      ok: false,
+      response: jsonError(415, "unsupported_media_type", "Launch spec requires JSON.", {
+        Accept: "application/json",
+      }),
+    };
+  }
+
+  if (Buffer.byteLength(body, "utf8") > AGENT_LAUNCH_SPEC_MAX_BYTES) {
+    return {
+      ok: false,
+      response: jsonError(413, "launch_spec_too_large", "Launch spec body is too large."),
+    };
+  }
+
+  const parsed = parseAgentLaunchSpecJson(body);
+
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      response: jsonError(400, "launch_spec_invalid", "Launch spec is invalid."),
+    };
+  }
+
+  return { ok: true, launchSpec: parsed.spec };
 }
 
 function handleReadinessRequest(request: Request): Response | null {

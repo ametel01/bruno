@@ -4,6 +4,7 @@ import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import type { AgentLogPage } from "@/src/server/logs/agent-logs";
 import {
   appendDockerRunnerLogLines,
@@ -204,7 +205,10 @@ export class DockerRunnerAdapter
     this.userId = dependencies.userId;
   }
 
-  async start(agentId: string): Promise<DockerRunnerStartResult> {
+  async start(
+    agentId: string,
+    _launchSpec: AgentLaunchSpec | null = null,
+  ): Promise<DockerRunnerStartResult> {
     const connection = this.createConnection();
     const plan = buildDockerRunPlan({
       agentId,
@@ -369,14 +373,17 @@ export class DockerRunnerAdapter
     }
   }
 
-  async restart(agentId: string): Promise<DockerRunnerRestartResult> {
+  async restart(
+    agentId: string,
+    launchSpec: AgentLaunchSpec | null = null,
+  ): Promise<DockerRunnerRestartResult> {
     const stopResult = await this.stop(agentId);
 
     if (!stopResult.ok && stopResult.reason !== "no_container") {
       return stopResult;
     }
 
-    const startResult = await this.start(agentId);
+    const startResult = await this.start(agentId, launchSpec);
 
     return startResult.ok ? startResult : { ...startResult, replacementStartFailed: true };
   }

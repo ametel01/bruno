@@ -1,6 +1,11 @@
 import { and, desc, eq, exists, inArray, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
+import {
+  buildHermesAgentLaunchSpecForUser,
+  type AgentLaunchSpecBuilderDependencies,
+} from "@/src/server/agents/agent-launch-builder";
+import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import { revokeActiveAgentSecretsInTransaction } from "@/src/server/agents/agent-secrets";
 import { hermesConfigurationBlocker } from "@/src/server/agents/hermes-readiness";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
@@ -178,6 +183,10 @@ type AgentStartRunnerSnapshot = {
 export type AgentLifecycleDependencies = {
   createConnection?: () => DatabaseConnection;
   dockerRunnerAdapter?: DockerRunnerCleanupAdapter;
+  launchSpec?: Pick<
+    AgentLaunchSpecBuilderDependencies,
+    "env" | "hermesWorkloadImage" | "requestId"
+  >;
   manualRunnerAdapter?: (runner: ManualRunnerRecord) => LifecycleRunnerAdapter;
   now?: LifecycleClock;
   planMaxAgents?: number | null;
@@ -776,6 +785,24 @@ function isHermesLifecycleReadyRunnerSnapshot(
   );
 }
 
+async function buildLifecycleHermesLaunchSpec(input: {
+  agentId: string;
+  userId: string;
+  connection: DatabaseConnection;
+  dependencies: AgentLifecycleDependencies;
+}): Promise<{ ok: true; spec: AgentLaunchSpec } | { ok: false; message: string }> {
+  const result = await buildHermesAgentLaunchSpecForUser(input.userId, input.agentId, {
+    createConnection: () => input.connection,
+    ...(input.dependencies.launchSpec ?? {}),
+  });
+
+  if (!result.ok) {
+    return { ok: false, message: result.message };
+  }
+
+  return result;
+}
+
 async function runLegacyAgentLifecycleOperation<Result>(
   agentId: string,
   dependencies: AgentLifecycleDependencies,
@@ -930,6 +957,7 @@ export async function startAgentForUser(
         agent: currentAgent.agent,
         assignedRunner: toManualRunnerRecordOrNull(currentAgent.runner),
         assignedRunnerSnapshot,
+        requiresHermesLaunchSpec: isHermesLifecycleReadyRunnerSnapshot(assignedRunnerSnapshot),
       } as const;
     });
 
@@ -994,7 +1022,24 @@ export async function startAgentForUser(
       assignedRunnerKind: reservation.assignedRunner?.kind ?? null,
       assignedRunnerStatus: reservation.assignedRunner?.status ?? null,
     });
-    const runnerStart = await runnerAdapter.start(normalizedAgentId);
+    const launchSpec = validation.requiresHermesLaunchSpec
+      ? await buildLifecycleHermesLaunchSpec({
+          agentId: normalizedAgentId,
+          userId,
+          connection,
+          dependencies,
+        })
+      : ({ ok: true, spec: null } as const);
+
+    if (!launchSpec.ok) {
+      return {
+        ok: false,
+        reason: "hermes_setup_incomplete",
+        message: launchSpec.message,
+      } as const;
+    }
+
+    const runnerStart = await runnerAdapter.start(normalizedAgentId, launchSpec.spec);
 
     if (!runnerStart.ok) {
       if (reservation.reserved) {
@@ -1219,6 +1264,7 @@ export async function stopAgentForUser(
         ok: true,
         agent: currentAgent.agent,
         assignedRunner: toManualRunnerRecordOrNull(currentAgent.runner),
+        requiresHermesLaunchSpec: currentAgent.runner?.kind === DIGITALOCEAN_RUNNER_KIND,
       } as const;
     });
 
@@ -1419,7 +1465,25 @@ export async function restartAgentForUser(
         : {}),
       ...(dependencies.runnerAdapter ? { runnerAdapter: dependencies.runnerAdapter } : {}),
     });
-    const runnerRestart = await runnerAdapter.restart(normalizedAgentId);
+    const launchSpec =
+      "requiresHermesLaunchSpec" in validation && validation.requiresHermesLaunchSpec
+        ? await buildLifecycleHermesLaunchSpec({
+            agentId: normalizedAgentId,
+            userId,
+            connection,
+            dependencies,
+          })
+        : ({ ok: true, spec: null } as const);
+
+    if (!launchSpec.ok) {
+      return {
+        ok: false,
+        reason: "hermes_setup_incomplete",
+        message: launchSpec.message,
+      } as const;
+    }
+
+    const runnerRestart = await runnerAdapter.restart(normalizedAgentId, launchSpec.spec);
 
     if (!runnerRestart.ok) {
       if (isDockerReplacementStartFailure(runnerRestart)) {

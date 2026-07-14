@@ -64,6 +64,16 @@ export type AgentSecretListResult =
       reason: "missing_agent_id" | "malformed_agent_id" | "agent_not_found";
     };
 
+export type DecryptedAgentSecretsResult =
+  | {
+      ok: true;
+      secrets: Partial<Record<AgentSecretKind, string>>;
+    }
+  | {
+      ok: false;
+      reason: "missing_agent_id" | "malformed_agent_id" | "agent_not_found";
+    };
+
 type AgentSecretsTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
 >[0];
@@ -213,6 +223,54 @@ export async function listAgentSecretStatusesForUser(
       return { ok: true, secrets: buildSecretStatuses(rows) } as const;
     });
   } catch (error) {
+    throw new AgentSecretPersistenceError(error);
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function readDecryptedActiveAgentSecretsForUser(
+  userId: string,
+  agentId: string,
+  dependencies: Pick<AgentSecretDependencies, "createConnection" | "env"> = {},
+): Promise<DecryptedAgentSecretsResult> {
+  const agentIdValidation = validateAgentId(agentId);
+
+  if (!agentIdValidation.ok) {
+    return agentIdValidation;
+  }
+
+  const keyring = parseAgentSecretKeyring(dependencies.env);
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    return await connection.db.transaction(async (tx) => {
+      const agentExists = await selectOwnedActiveAgent(tx, {
+        agentId: agentIdValidation.agentId,
+        userId,
+      });
+
+      if (!agentExists) {
+        return { ok: false, reason: "agent_not_found" } as const;
+      }
+
+      const rows = await selectActiveSecretRows(tx, agentIdValidation.agentId);
+      const secrets: Partial<Record<AgentSecretKind, string>> = {};
+
+      for (const row of rows) {
+        secrets[row.kind] = decryptAgentSecretValue(row, keyring);
+      }
+
+      return { ok: true, secrets } as const;
+    });
+  } catch (error) {
+    if (error instanceof AgentSecretKeyringError || error instanceof AgentSecretDecryptionError) {
+      throw error;
+    }
+
     throw new AgentSecretPersistenceError(error);
   } finally {
     if (ownsConnection) {

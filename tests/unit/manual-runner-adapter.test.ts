@@ -8,6 +8,7 @@ import {
   ManualRunnerAdapter,
   RUNNER_BEARER_TOKEN_ENV,
 } from "@/src/server/runners/manual-runner-adapter";
+import { sampleLaunchSpec } from "@/tests/helpers/agent-launch-spec";
 import { DOCKER_CLI_TIMEOUT_MS } from "@/src/runner-service/constants";
 import {
   assignRunnerToActiveAgentForDevelopmentUser,
@@ -35,7 +36,16 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
       { createConnection: () => connection },
     );
     const runner = await createAssignedRunner(created.agent.id, "http://127.0.0.1:9080");
-    const requests: Array<{ authorization: string | null; method: string; pathname: string }> = [];
+    const launchSpec = sampleLaunchSpec({
+      agent: { ...sampleLaunchSpec().agent, id: created.agent.id },
+    });
+    const requests: Array<{
+      authorization: string | null;
+      body: string | null;
+      contentType: string | null;
+      method: string;
+      pathname: string;
+    }> = [];
     const adapter = new ManualRunnerAdapter(runner, {
       createConnection: () => connection,
       env: { [RUNNER_BEARER_TOKEN_ENV]: "contract-token" },
@@ -43,6 +53,8 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
         const url = new URL(String(input));
         requests.push({
           authorization: new Headers(init?.headers).get("authorization"),
+          body: typeof init?.body === "string" ? init.body : null,
+          contentType: new Headers(init?.headers).get("content-type"),
           method: init?.method ?? "GET",
           pathname: url.pathname,
         });
@@ -94,7 +106,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
       timeoutMs: 250,
     });
 
-    await expect(adapter.start(created.agent.id)).resolves.toMatchObject({
+    await expect(adapter.start(created.agent.id, launchSpec)).resolves.toMatchObject({
       ok: true,
       container: { id: "manual-container-001", status: "running" },
     });
@@ -118,7 +130,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
       ok: true,
       containers: [{ id: "manual-container-001", status: "exited" }],
     });
-    await expect(adapter.restart(created.agent.id)).resolves.toMatchObject({
+    await expect(adapter.restart(created.agent.id, launchSpec)).resolves.toMatchObject({
       ok: true,
       container: { id: "manual-container-001", status: "running" },
     });
@@ -126,21 +138,29 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
     expect(requests).toEqual([
       {
         authorization: "Bearer contract-token",
+        body: JSON.stringify(launchSpec),
+        contentType: "application/json",
         method: "POST",
         pathname: `/runner/v1/agents/${created.agent.id}/start`,
       },
       {
         authorization: "Bearer contract-token",
+        body: null,
+        contentType: null,
         method: "GET",
         pathname: `/runner/v1/agents/${created.agent.id}/logs`,
       },
       {
         authorization: "Bearer contract-token",
+        body: null,
+        contentType: null,
         method: "POST",
         pathname: `/runner/v1/agents/${created.agent.id}/stop`,
       },
       {
         authorization: "Bearer contract-token",
+        body: JSON.stringify(launchSpec),
+        contentType: "application/json",
         method: "POST",
         pathname: `/runner/v1/agents/${created.agent.id}/restart`,
       },

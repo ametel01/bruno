@@ -259,7 +259,7 @@ storage for the Hermes setup path, owner-scoped secret status/update/revoke
 routes, generated agent API-server keys, safe backup secret references, restore
 behavior that requires fresh credentials, and delete-time secret revocation.
 
-Next executable step: Step 5, add the versioned launch contract and Hermes home projection.
+Next executable step: Step 6, replace BusyBox with the real private Hermes lifecycle.
 
 ### Changelog Policy
 
@@ -282,7 +282,7 @@ in `CHANGELOG.md`.
 - [x] Step 2: Make Cloud Capacity and Bootstrap Hermes-Aware
 - [x] Step 3: Add Encrypted Per-Agent Secret Storage
 - [x] Step 4: Add Hermes and Telegram Setup UX
-- [ ] Step 5: Add the Versioned Launch Contract and Hermes Home Projection
+- [x] Step 5: Add the Versioned Launch Contract and Hermes Home Projection
 - [ ] Step 6: Replace BusyBox with the Real Private Hermes Lifecycle
 - [ ] Step 7: Integrate Durable Logs, Failure Diagnostics, and State Cleanup
 - [ ] Step 8: Prove the Local End-to-End Hermes Contract
@@ -297,7 +297,7 @@ in `CHANGELOG.md`.
 | 2. Make Cloud Capacity and Bootstrap Hermes-Aware | Complete | Step 1 | `c0b376f` | Focused Step 2 tests passed across server env, cloud bootstrap, cost prices, runner provisioning, cloud provisioning summaries, placement, heartbeat, runner service, and local Docker DigitalOcean provider; `bun run local:cloud:prepare` returned `local_cloud_prepare_skipped` with `provider_mode_not_local_docker`; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 85 files / 815 tests; `bun run build`; `git diff --check`. | Complete. |
 | 3. Add Encrypted Per-Agent Secret Storage | Complete | Step 0 | `cf111a7` | `bun run db:generate`; `bun run db:migrate`; focused non-DB route/schema tests passed 39 tests; focused DB-backed secret/backup/restore/lifecycle tests passed 139 tests; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 87 files / 824 tests; `bun run build`; `git diff --check`; `bun run test tests/unit/progress-status.test.ts` passed 2 tests; credential-free browser smoke passed 14 tests with `PLAYWRIGHT_REUSE_EXISTING_SERVER=1 PORT=3001` because a Next dev server was already running for this repo. | Complete. |
 | 4. Add Hermes and Telegram Setup UX | Complete | Step 3 | This commit | Focused Step 4 tests passed 17 tests across readiness DTO, setup component, lifecycle DB blocking, and start/restart route mapping; existing lifecycle/detail-page regression set passed 187 tests; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 90 files / 834 tests; `bun run build`; `bun run test tests/unit/progress-status.test.ts` passed 2 tests; `git diff --check`; credential-free browser smoke passed 14 tests with `PLAYWRIGHT_REUSE_EXISTING_SERVER=1 PORT=3001` because a Next dev server was already running for this repo. | Complete; Step 5 is next. |
-| 5. Add the Versioned Launch Contract and Hermes Home Projection | Not started | Steps 2, 3, and 4 | Not collected | Not collected | Build the bounded launch spec, just-in-time secret use, and symlink-safe Hermes home projection. |
+| 5. Add the Versioned Launch Contract and Hermes Home Projection | Complete | Steps 2, 3, and 4 | This commit | Focused Step 5 tests passed 152 tests across launch schema/redaction, server-side builder/decryption, Hermes projection/path safety, manual-runner JSON transport, runner-service contract, and affected lifecycle coverage; containerized `hermes doctor` against the projected fake fixture exited 0 with expected setup warnings; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 93 files / 841 tests; `bun run build`; `bun run test tests/unit/progress-status.test.ts` passed 2 tests; `git diff --check`. | Complete; Step 6 is next. |
 | 6. Replace BusyBox with the Real Private Hermes Lifecycle | Not started | Steps 1, 2, and 5 | Not collected | Not collected | Launch the pinned Hermes gateway, private readiness polling, graceful stop/restart, and safe lifecycle failures. |
 | 7. Integrate Durable Logs, Failure Diagnostics, and State Cleanup | Not started | Step 6 | Not collected | Not collected | Persist/redact Hermes logs, map typed failures, prove restart persistence, and make delete cleanup symlink-safe. |
 | 8. Prove the Local End-to-End Hermes Contract | Not started | Step 7 | Not collected | Not collected | Add the credential-free real-image local smoke and run the full local gate. |
@@ -335,10 +335,15 @@ in `CHANGELOG.md`.
   states, replacement and revocation controls, generated agent API-server keys,
   server-derived readiness requirements, and Start/Restart blocking for ready
   assigned DigitalOcean Hermes runners until required setup is complete.
+- 2026-07-14: Step 5 added the bounded versioned Hermes launch-spec contract,
+  server-side owner-scoped launch-spec building with just-in-time decrypted
+  secrets, authenticated runner JSON transport for start/restart, and
+  symlink-checked managed projection of config, `.env`, `SOUL.md`, revision
+  marker, and workspace directories under the Hermes state root.
 
 ### Current Blockers and Next Work
 
-- Step 5 is unblocked locally after the Step 4 commit.
+- Step 6 is unblocked locally after the Step 5 commit.
 - Step 9 is externally blocked until the user authorizes billable DigitalOcean
   work and supplies or approves dedicated OpenRouter and Telegram smoke
   credentials. This blocker does not prevent completing and committing the

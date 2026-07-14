@@ -71,6 +71,10 @@ describe("Hermes lifecycle readiness", () => {
 
     const result = await startAgentForDevelopmentUser(created.agent.id, {
       createConnection: () => connection,
+      launchSpec: {
+        env: KEYRING_ENV,
+        requestId: () => "hermes-start-request",
+      },
       manualRunnerAdapter: (runner) => lifecycleRunnerStub(calls, runner),
       runnerAdapter: lifecycleRunnerStub(calls),
       now: () => new Date("2026-07-14T02:00:00.000Z"),

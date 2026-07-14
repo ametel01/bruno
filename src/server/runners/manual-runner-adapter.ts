@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { validateManualRunnerEndpointUrl } from "@/src/env/validation";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import { agentLogs, agents } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
 import {
@@ -104,8 +105,11 @@ export class ManualRunnerAdapter
     this.timeoutMs = normalizeTimeoutMs(dependencies.timeoutMs);
   }
 
-  async start(agentId: string): Promise<ManualRunnerStartResult> {
-    const result = await this.callRunner("start", agentId, "POST");
+  async start(
+    agentId: string,
+    launchSpec: AgentLaunchSpec | null = null,
+  ): Promise<ManualRunnerStartResult> {
+    const result = await this.callRunner("start", agentId, "POST", launchSpec);
 
     if (!result.ok) {
       return result;
@@ -134,8 +138,11 @@ export class ManualRunnerAdapter
     };
   }
 
-  async restart(agentId: string): Promise<ManualRunnerRestartResult> {
-    const result = await this.callRunner("restart", agentId, "POST");
+  async restart(
+    agentId: string,
+    launchSpec: AgentLaunchSpec | null = null,
+  ): Promise<ManualRunnerRestartResult> {
+    const result = await this.callRunner("restart", agentId, "POST", launchSpec);
 
     if (!result.ok) {
       return result;
@@ -216,6 +223,7 @@ export class ManualRunnerAdapter
     action: ManualRunnerAction,
     agentId: string,
     method: "GET" | "POST",
+    launchSpec: AgentLaunchSpec | null = null,
   ): Promise<
     { ok: true; body: Record<string, unknown> } | { ok: false; reason: ManualRunnerFailureReason }
   > {
@@ -243,12 +251,15 @@ export class ManualRunnerAdapter
     const startedAt = Date.now();
 
     try {
+      const body = launchSpec ? JSON.stringify(launchSpec) : undefined;
       const response = await this.fetch(requestUrl, {
         method,
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: "application/json",
+          ...(body ? { "Content-Type": "application/json" } : {}),
         },
+        ...(body ? { body } : {}),
         signal: controller.signal,
       });
 

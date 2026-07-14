@@ -1,10 +1,16 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import {
   AGENTBAY_AGENT_ID_LABEL,
   DEFAULT_MANUAL_RUNNER_IMAGE,
   DOCKER_CLI_TIMEOUT_MS,
 } from "@/src/runner-service/constants";
+import {
+  projectHermesHome,
+  type HermesProjectionOptions,
+  type HermesProjectionResult,
+} from "@/src/runner-service/hermes-projection";
 
 export { AGENTBAY_AGENT_ID_LABEL, DEFAULT_MANUAL_RUNNER_IMAGE, DOCKER_CLI_TIMEOUT_MS };
 const DOCKER_RUNNER_IMAGE_ENV = "AGENTBAY_DOCKER_RUNNER_IMAGE";
@@ -36,6 +42,10 @@ export type ManualRunnerDockerOptions = {
   docker?: DockerExecutableRunner;
   dockerExecutable?: string;
   nameSuffix?: () => string;
+  projection?: {
+    project?: (spec: AgentLaunchSpec) => Promise<HermesProjectionResult>;
+    options?: HermesProjectionOptions;
+  };
 };
 
 export type DockerExecutableRunner = (
@@ -81,6 +91,7 @@ export class ManualRunnerDocker {
   private readonly docker: DockerExecutableRunner;
   private readonly dockerExecutable: string;
   private readonly nameSuffix: () => string;
+  private readonly project: (spec: AgentLaunchSpec) => Promise<HermesProjectionResult>;
 
   constructor(options: ManualRunnerDockerOptions = {}) {
     this.command = options.command ?? resolveManualRunnerCommand();
@@ -88,9 +99,17 @@ export class ManualRunnerDocker {
     this.dockerExecutable =
       options.dockerExecutable ?? process.env[DOCKER_EXECUTABLE_ENV]?.trim() ?? "docker";
     this.nameSuffix = options.nameSuffix ?? (() => randomUUID().replaceAll("-", "").slice(0, 12));
+    this.project =
+      options.projection?.project ??
+      ((spec) => projectHermesHome(spec, options.projection?.options));
   }
 
-  async start(agentId: string): Promise<{ container: RunnerContainer }> {
+  async start(
+    agentId: string,
+    launchSpec: AgentLaunchSpec | null = null,
+  ): Promise<{ container: RunnerContainer; projection: HermesProjectionResult | null }> {
+    const projection = launchSpec ? await this.project(launchSpec) : null;
+
     await this.removeSelectedContainers(agentId);
     const containerName = dockerContainerName(agentId, this.nameSuffix());
     const runResult = await this.runDocker([
@@ -113,6 +132,7 @@ export class ManualRunnerDocker {
 
     return {
       container: await this.inspectSelectedContainer(containerId, agentId),
+      projection,
     };
   }
 
@@ -130,9 +150,12 @@ export class ManualRunnerDocker {
     return { containers: stopped };
   }
 
-  async restart(agentId: string): Promise<{ container: RunnerContainer }> {
+  async restart(
+    agentId: string,
+    launchSpec: AgentLaunchSpec | null = null,
+  ): Promise<{ container: RunnerContainer; projection: HermesProjectionResult | null }> {
     await this.removeSelectedContainers(agentId);
-    return await this.start(agentId);
+    return await this.start(agentId, launchSpec);
   }
 
   async status(agentId: string): Promise<{ containers: RunnerContainer[] }> {

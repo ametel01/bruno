@@ -1054,6 +1054,10 @@ describe("create agent persistence", () => {
     await configureHermesSetupForTest(connection, created.agent.userId, created.agent.id);
     const started = await startAgentForDevelopmentUser(created.agent.id, {
       createConnection: () => connection,
+      launchSpec: {
+        env: HERMES_KEYRING_ENV,
+        requestId: () => "cloud-runner-start-request",
+      },
       manualRunnerAdapter: (runner) => {
         expect(runner).toMatchObject({
           id: cloudRunner?.id,

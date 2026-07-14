@@ -23,6 +23,7 @@ import {
   listAgentLogsForUser,
   type AgentLogPage,
 } from "@/src/server/logs/agent-logs";
+import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import type {
   RunnerAdapter as RunnerAdapterContract,
   RunnerLogStreamInput,
@@ -137,7 +138,10 @@ export class LocalRunnerAdapter implements RunnerAdapter {
     this.userId = dependencies.userId;
   }
 
-  async start(agentId: string): Promise<LocalRunnerStartResult> {
+  async start(
+    agentId: string,
+    _launchSpec: AgentLaunchSpec | null = null,
+  ): Promise<LocalRunnerStartResult> {
     const connection = this.createConnection();
     let child: ChildProcessWithoutNullStreams | null = null;
 
@@ -264,14 +268,17 @@ export class LocalRunnerAdapter implements RunnerAdapter {
     }
   }
 
-  async restart(agentId: string): Promise<LocalRunnerRestartResult> {
+  async restart(
+    agentId: string,
+    launchSpec: AgentLaunchSpec | null = null,
+  ): Promise<LocalRunnerRestartResult> {
     const stopResult = await this.stop(agentId);
 
     if (!stopResult.ok && stopResult.reason !== "no_process") {
       return stopResult;
     }
 
-    return this.start(agentId);
+    return this.start(agentId, launchSpec);
   }
 
   async status(agentId: string): Promise<LocalRunnerStatusResult> {
