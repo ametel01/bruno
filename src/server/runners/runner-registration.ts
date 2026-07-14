@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { EnvValidationError, validateManualRunnerEndpointUrl } from "@/src/env/validation";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
@@ -231,6 +231,8 @@ export async function exchangeRunnerRegistrationTokenForCredential(
 
   try {
     return await connection.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${tokenHash}))`);
+
       const [claimedToken] = await tx
         .update(runnerRegistrationTokens)
         .set({ updatedAt: now })
@@ -248,6 +250,18 @@ export async function exchangeRunnerRegistrationTokenForCredential(
         });
 
       if (!claimedToken) {
+        const recovered = await recoverUsedCloudRegistrationToken(tx, {
+          tokenHash,
+          endpointUrl: input.endpointUrl,
+          name: input.name,
+          credential,
+          now,
+        });
+
+        if (recovered) {
+          return recovered;
+        }
+
         return await classifyUnclaimedRegistrationToken(tx, tokenHash, now);
       }
 
@@ -308,6 +322,101 @@ export async function exchangeRunnerRegistrationTokenForCredential(
       await connection.close();
     }
   }
+}
+
+async function recoverUsedCloudRegistrationToken(
+  tx: RunnerRegistrationTransaction,
+  input: {
+    tokenHash: string;
+    endpointUrl: string;
+    name: string;
+    credential: ReturnType<typeof createRunnerCredential>;
+    now: Date;
+  },
+): Promise<ExchangeRunnerRegistrationTokenResult | null> {
+  const [token] = await tx
+    .select({
+      id: runnerRegistrationTokens.id,
+      userId: runnerRegistrationTokens.userId,
+      runnerId: runnerRegistrationTokens.runnerId,
+      status: runnerRegistrationTokens.status,
+      expiresAt: runnerRegistrationTokens.expiresAt,
+    })
+    .from(runnerRegistrationTokens)
+    .where(eq(runnerRegistrationTokens.tokenHash, input.tokenHash))
+    .limit(1);
+
+  if (token?.status !== "used" || token.expiresAt <= input.now || !token.runnerId) {
+    return null;
+  }
+
+  const [runner] = await tx
+    .select({
+      id: runners.id,
+      endpointUrl: runners.endpointUrl,
+      kind: runners.kind,
+      provider: runners.provider,
+      provisioningStatus: runners.provisioningStatus,
+    })
+    .from(runners)
+    .where(
+      and(
+        eq(runners.id, token.runnerId),
+        eq(runners.userId, token.userId),
+        isNull(runners.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (
+    !runner ||
+    runner.kind !== DIGITALOCEAN_RUNNER_KIND ||
+    runner.provider !== "digitalocean" ||
+    runner.provisioningStatus !== "waiting_for_runner" ||
+    runner.endpointUrl !== input.endpointUrl
+  ) {
+    return null;
+  }
+
+  await tx
+    .update(runnerCredentials)
+    .set({ status: "revoked", revokedAt: input.now, updatedAt: input.now })
+    .where(and(eq(runnerCredentials.runnerId, runner.id), eq(runnerCredentials.status, "active")));
+
+  const [createdCredential] = await tx
+    .insert(runnerCredentials)
+    .values({
+      runnerId: runner.id,
+      credentialHash: input.credential.hash,
+      credentialPrefix: input.credential.prefix,
+      status: "active",
+      createdAt: input.now,
+      updatedAt: input.now,
+    })
+    .returning({ id: runnerCredentials.id });
+
+  if (!createdCredential) {
+    throw new Error("Recovered runner credential insert returned no rows.");
+  }
+
+  await tx
+    .update(runners)
+    .set({ name: input.name, status: "registering", updatedAt: input.now })
+    .where(eq(runners.id, runner.id));
+
+  await tx
+    .update(runnerRegistrationTokens)
+    .set({ usedAt: input.now, updatedAt: input.now })
+    .where(eq(runnerRegistrationTokens.id, token.id));
+
+  return {
+    ok: true,
+    runner: { id: runner.id },
+    credential: {
+      token: input.credential.value,
+      prefix: input.credential.prefix,
+    },
+  };
 }
 
 function classifyRegistrationTokenShape(registrationToken: string):

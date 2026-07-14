@@ -117,7 +117,7 @@ export type ConfirmCloudRunnerReadinessResult =
     };
 
 export type ProbeRunnerEndpointReadinessResult =
-  | { ok: true }
+  | { ok: true; protocol: "readiness_endpoint" | "legacy_authenticated_not_found" }
   | {
       ok: false;
       reason:
@@ -349,6 +349,10 @@ export async function probeRunnerEndpointReadiness(input: {
     clearTimeout(timeout);
   }
 
+  if (response.status === 404 && (await isLegacyAuthenticatedNotFoundResponse(response))) {
+    return { ok: true, protocol: "legacy_authenticated_not_found" };
+  }
+
   if (!response.ok) {
     return { ok: false, reason: "endpoint_rejected" };
   }
@@ -361,7 +365,33 @@ export async function probeRunnerEndpointReadiness(input: {
     return { ok: false, reason: "response_invalid" };
   }
 
-  return isReadinessResponse(payload) ? { ok: true } : { ok: false, reason: "response_invalid" };
+  return isReadinessResponse(payload)
+    ? { ok: true, protocol: "readiness_endpoint" }
+    : { ok: false, reason: "response_invalid" };
+}
+
+async function isLegacyAuthenticatedNotFoundResponse(response: Response): Promise<boolean> {
+  let payload: unknown;
+
+  try {
+    payload = await response.json();
+  } catch {
+    return false;
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+
+  const body = payload as Record<string, unknown>;
+  const error =
+    body.error && typeof body.error === "object" ? (body.error as Record<string, unknown>) : null;
+
+  return (
+    body.ok === false &&
+    error?.code === "not_found" &&
+    error.message === "Runner route was not found."
+  );
 }
 
 function toReadinessProbeUrl(

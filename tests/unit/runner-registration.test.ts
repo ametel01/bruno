@@ -326,15 +326,83 @@ describe.sequential("runner registration service", () => {
     ).not.toContain(result.credential.token);
   });
 
+  it("recovers an interrupted unexpired cloud registration for the same waiting runner", async () => {
+    const token = createRunnerRegistrationToken({
+      randomBytes: (size) => Buffer.alloc(size, 10),
+    });
+    const cloudRunner = await seedCloudRunnerWithRegistrationToken(connection, {
+      token,
+      now: new Date("2026-07-06T03:00:00.000Z"),
+    });
+    const payload = {
+      registrationToken: token.value,
+      endpointUrl: "https://recovering-cloud-runner.example.com",
+      name: "Recovering Cloud Runner",
+    };
+    const first = await exchangeRunnerRegistrationTokenForCredential(payload, {
+      createConnection: () => connection,
+      now: () => new Date("2026-07-06T03:01:00.000Z"),
+    });
+    const recovered = await exchangeRunnerRegistrationTokenForCredential(payload, {
+      createConnection: () => connection,
+      now: () => new Date("2026-07-06T03:02:00.000Z"),
+    });
+
+    expect(first.ok).toBe(true);
+    expect(recovered).toMatchObject({ ok: true, runner: { id: cloudRunner.id } });
+
+    if (!first.ok || !recovered.ok) {
+      throw new Error("Expected interrupted cloud registration recovery to succeed.");
+    }
+
+    expect(recovered.credential.token).not.toBe(first.credential.token);
+    const credentials = await connection.db
+      .select()
+      .from(runnerCredentials)
+      .where(eq(runnerCredentials.runnerId, cloudRunner.id));
+    expect(credentials).toHaveLength(2);
+    expect(credentials.filter((credential) => credential.status === "active")).toHaveLength(1);
+    expect(credentials.filter((credential) => credential.status === "revoked")).toHaveLength(1);
+  });
+
+  it("does not recover a used cloud token for a different endpoint", async () => {
+    const token = createRunnerRegistrationToken({
+      randomBytes: (size) => Buffer.alloc(size, 11),
+    });
+    await seedCloudRunnerWithRegistrationToken(connection, {
+      token,
+      now: new Date("2026-07-06T04:00:00.000Z"),
+    });
+    await exchangeRunnerRegistrationTokenForCredential(
+      {
+        registrationToken: token.value,
+        endpointUrl: "https://expected-cloud-runner.example.com",
+        name: "Expected Cloud Runner",
+      },
+      {
+        createConnection: () => connection,
+        now: () => new Date("2026-07-06T04:01:00.000Z"),
+      },
+    );
+
+    await expectExchangeReason(
+      token.value,
+      "used_registration_token",
+      new Date("2026-07-06T04:02:00.000Z"),
+      "https://other-cloud-runner.example.com",
+    );
+  });
+
   async function expectExchangeReason(
     registrationToken: string,
     reason: ExchangeFailureReason,
     now = new Date("2026-07-05T08:01:00.000Z"),
+    endpointUrl = "http://127.0.0.1:8789",
   ) {
     const result = await exchangeRunnerRegistrationTokenForCredential(
       {
         registrationToken,
-        endpointUrl: "http://127.0.0.1:8789",
+        endpointUrl,
         name: "Rejected Runner",
       },
       {

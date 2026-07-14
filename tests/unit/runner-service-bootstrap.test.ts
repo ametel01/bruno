@@ -78,6 +78,7 @@ describe("runner service bootstrap registration", () => {
         AGENTBAY_RUNNER_ENDPOINT_URL: "https://runner.agentbay.test",
         AGENTBAY_RUNNER_NAME: "Cloud Runner 1",
         AGENTBAY_RUNNER_ENV_FILE: "/etc/agentbay/runner.env",
+        AGENTBAY_DOCKER_RUNNER_IMAGE: "ghcr.io/ametel01/agentbay-agent:main",
       },
       fetch: async (url) => {
         if (String(url).endsWith("/runner/v1/register")) {
@@ -120,6 +121,10 @@ describe("runner service bootstrap registration", () => {
     expect(writes[0]?.content).toContain(
       'AGENTBAY_RUNNER_CREDENTIAL="agb_run_1234567890123456789012345678901234567890123"',
     );
+    expect(writes[0]?.content).toContain(
+      'AGENTBAY_DOCKER_RUNNER_IMAGE="ghcr.io/ametel01/agentbay-agent:main"',
+    );
+    expect(writes[0]?.content).not.toContain("AGENTBAY_RUNNER_REGISTRATION_TOKEN");
   });
 
   it("uses existing runner credentials when already registered", async () => {

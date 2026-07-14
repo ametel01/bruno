@@ -10,6 +10,7 @@ import {
 } from "@/src/server/db/schema";
 import {
   confirmCloudRunnerReadiness,
+  probeRunnerEndpointReadiness,
   recordRunnerHeartbeat,
   reconcileStaleRunnerHeartbeats,
   RUNNER_HEARTBEAT_STALE_THRESHOLD_MS,
@@ -398,6 +399,40 @@ describe("runner heartbeat persistence", () => {
       }),
     ).resolves.toEqual({ outcome: "pending", reason: "endpoint_invalid" });
     expect(fetchCalls).toBe(0);
+  });
+
+  it("accepts only the exact authenticated not-found response from a legacy runner image", async () => {
+    const common = {
+      endpointUrl: "https://legacy-cloud-runner.example.com",
+      runnerBearerToken: "runner-command-token",
+    };
+
+    await expect(
+      probeRunnerEndpointReadiness({
+        ...common,
+        fetch: async () =>
+          Response.json(
+            {
+              ok: false,
+              error: { code: "not_found", message: "Runner route was not found." },
+            },
+            { status: 404 },
+          ),
+      }),
+    ).resolves.toEqual({ ok: true, protocol: "legacy_authenticated_not_found" });
+    await expect(
+      probeRunnerEndpointReadiness({
+        ...common,
+        fetch: async () =>
+          Response.json({ ok: false, error: { code: "unauthorized" } }, { status: 401 }),
+      }),
+    ).resolves.toEqual({ ok: false, reason: "endpoint_rejected" });
+    await expect(
+      probeRunnerEndpointReadiness({
+        ...common,
+        fetch: async () => Response.json({ ok: false }, { status: 404 }),
+      }),
+    ).resolves.toEqual({ ok: false, reason: "endpoint_rejected" });
   });
 
   it("allows insecure loopback readiness only for the explicit local Docker mode", async () => {

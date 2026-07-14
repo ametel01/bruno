@@ -78,7 +78,7 @@ describe.sequential("cloud runner bootstrap content", () => {
       "          AGENTBAY_APP_URL=https://app.agentbay.test\n" +
         "          AGENTBAY_RUNNER_REGISTRATION_TOKEN=",
     );
-    expect(content.userData).toContain("AGENTBAY_RUNNER_ENV_FILE=/tmp/agentbay-runner.env");
+    expect(content.userData).toContain("AGENTBAY_RUNNER_ENV_FILE=/etc/agentbay/runner.env");
     expect(content.userData).toContain("AGENTBAY_RUNNER_HOST=0.0.0.0");
     expect(content.userData).not.toContain("AGENTBAY_RUNNER_HOST=127.0.0.1");
     expect(content.userData).not.toContain('AGENTBAY_APP_URL="https://app.agentbay.test"');
@@ -90,7 +90,7 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain(`docker pull '${DEFAULT_MANUAL_RUNNER_IMAGE}'`);
     expect(content.userData).toContain("docker rm --force 'agentbay-runner' || true");
     expect(content.userData).toContain(
-      "docker run --detach --name 'agentbay-runner' --restart always --env-file '/etc/agentbay/runner.env' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' 'ghcr.io/ametel01/agentbay-runner:sha-123'",
+      "docker run --detach --name 'agentbay-runner' --restart always --env-file '/etc/agentbay/runner.env' -v '/etc/agentbay/runner.env:/etc/agentbay/runner.env' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' 'ghcr.io/ametel01/agentbay-runner:sha-123'",
     );
     expect(content.userData).toContain("/runner/v1/bootstrap-events");
     for (const token of LEGACY_HOST_BOOTSTRAP_TOKENS) {

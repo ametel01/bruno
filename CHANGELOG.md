@@ -96,6 +96,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Cloud runner bootstrap now persists exchanged credentials in the host-mounted environment file,
+  safely recovers an interrupted unexpired DigitalOcean registration, and recognizes the exact
+  authenticated not-found response from older runner images whose readiness route is unavailable.
 - Runner placement now excludes cloud runners until authenticated readiness, verifies the live
   DigitalOcean resource and runner endpoint before assignment, tombstones externally deleted
   Droplets, and revalidates the candidate transactionally before creating an agent.

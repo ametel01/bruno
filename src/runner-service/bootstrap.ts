@@ -11,6 +11,7 @@ type RunnerBootstrapEnv = {
   AGENTBAY_RUNNER_HOST?: string;
   AGENTBAY_RUNNER_PORT?: string;
   AGENTBAY_RUNNER_BEARER_TOKEN?: string;
+  AGENTBAY_DOCKER_RUNNER_IMAGE?: string;
 };
 
 type WriteRunnerEnvFile = (
@@ -146,6 +147,7 @@ function buildPersistedRunnerEnv(input: {
     "AGENTBAY_RUNNER_HOST",
     "AGENTBAY_RUNNER_PORT",
     "AGENTBAY_RUNNER_BEARER_TOKEN",
+    "AGENTBAY_DOCKER_RUNNER_IMAGE",
   ] as const) {
     const value = input.env[key]?.trim();
 

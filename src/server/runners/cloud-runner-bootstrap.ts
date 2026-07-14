@@ -7,7 +7,6 @@ import { DIGITALOCEAN_PROVIDER } from "@/src/server/runners/digitalocean-provide
 import { markCloudRunnerBootstrapInjected } from "@/src/server/runners/runner-provisioning-events";
 
 export const DEFAULT_CLOUD_RUNNER_ENV_FILE = "/etc/agentbay/runner.env";
-export const DEFAULT_CLOUD_RUNNER_CONTAINER_ENV_FILE = "/tmp/agentbay-runner.env";
 export const DEFAULT_CLOUD_RUNNER_HOST = "127.0.0.1";
 export const DEFAULT_CLOUD_RUNNER_CONTAINER_HOST = "0.0.0.0";
 export const DEFAULT_CLOUD_RUNNER_PORT = 3045;
@@ -178,7 +177,7 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
       /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling default agent container image." agent_image_pull
       docker pull ${shellQuote(config.agentImage)}
       docker rm --force ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} || true
-      docker run --detach --name ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} --restart always --env-file ${shellQuote(config.envFilePath)} -v ${shellQuote(`${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}:${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}`)} -p ${shellQuote(`${config.runnerHost}:${config.runnerPort}:${config.runnerPort}`)} ${shellQuote(config.runnerImage)}
+      docker run --detach --name ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} --restart always --env-file ${shellQuote(config.envFilePath)} -v ${shellQuote(`${config.envFilePath}:${config.containerEnvFilePath}`)} -v ${shellQuote(`${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}:${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}`)} -p ${shellQuote(`${config.runnerHost}:${config.runnerPort}:${config.runnerPort}`)} ${shellQuote(config.runnerImage)}
       /usr/local/bin/agentbay-bootstrap-event waiting_for_runner started "Runner container started; waiting for registration and heartbeat." docker_container_started
 `;
 
@@ -220,7 +219,7 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
     runnerImage: input.runnerImage?.trim() || DEFAULT_AGENTBAY_RUNNER_IMAGE,
     agentImage: DEFAULT_MANUAL_RUNNER_IMAGE,
     envFilePath: input.envFilePath?.trim() || DEFAULT_CLOUD_RUNNER_ENV_FILE,
-    containerEnvFilePath: DEFAULT_CLOUD_RUNNER_CONTAINER_ENV_FILE,
+    containerEnvFilePath: input.envFilePath?.trim() || DEFAULT_CLOUD_RUNNER_ENV_FILE,
     runnerHost: input.runnerHost?.trim() || DEFAULT_CLOUD_RUNNER_HOST,
     runnerContainerHost: DEFAULT_CLOUD_RUNNER_CONTAINER_HOST,
     runnerPort: input.runnerPort ?? DEFAULT_CLOUD_RUNNER_PORT,
