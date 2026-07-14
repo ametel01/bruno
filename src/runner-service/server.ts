@@ -9,7 +9,7 @@ import { HermesReadinessError } from "@/src/runner-service/docker";
 
 const RUNNER_TOKEN_ENV = "AGENTBAY_RUNNER_BEARER_TOKEN";
 
-type RunnerAction = "start" | "stop" | "restart" | "status" | "logs";
+type RunnerAction = "start" | "stop" | "restart" | "status" | "logs" | "cleanup";
 
 export type RunnerServiceOptions = {
   authToken?: string;
@@ -236,7 +236,9 @@ function authenticateRequest(request: Request, authToken: string | undefined): R
 
 function parseRunnerRoute(request: Request): { agentId: string; action: RunnerAction } | null {
   const { pathname } = new URL(request.url);
-  const match = /^\/runner\/v1\/agents\/([^/]+)\/(start|stop|restart|status|logs)$/.exec(pathname);
+  const match = /^\/runner\/v1\/agents\/([^/]+)\/(start|stop|restart|status|logs|cleanup)$/.exec(
+    pathname,
+  );
 
   if (!match?.[1] || !match[2]) {
     return null;

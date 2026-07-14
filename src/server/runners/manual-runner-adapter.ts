@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { validateManualRunnerEndpointUrl } from "@/src/env/validation";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
@@ -18,12 +18,15 @@ import type {
   RunnerLogStreamInput,
 } from "@/src/server/runners/runner-adapter";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
+import { redactSecretText } from "@/src/shared/secret-redaction";
 
 export const MANUAL_RUNNER_LOG_SOURCE = "manual_runner";
+export const HERMES_GATEWAY_LOG_SOURCE = "hermes_gateway";
+export const MANUAL_RUNNER_BOOTSTRAP_LOG_SOURCE = "manual_runner_bootstrap";
 export const RUNNER_BEARER_TOKEN_ENV = "AGENTBAY_RUNNER_BEARER_TOKEN";
 export const DEFAULT_MANUAL_RUNNER_TIMEOUT_MS = DOCKER_CLI_TIMEOUT_MS + 5_000;
 
-type ManualRunnerAction = "start" | "stop" | "restart" | "status" | "logs";
+type ManualRunnerAction = "start" | "stop" | "restart" | "status" | "logs" | "cleanup";
 type ManualRunnerFetch = typeof fetch;
 type ManualRunnerStateDatabase = Pick<PostgresJsDatabase<typeof schema>, "transaction">;
 type ManualRunnerStateTransaction = Parameters<
@@ -33,6 +36,7 @@ type ManualRunnerStateTransaction = Parameters<
 export type ManualRunnerLogLineInput = {
   stream: "stdout" | "stderr";
   message: string;
+  source?: string;
   level?: string;
   metadata?: Record<string, unknown>;
   createdAt?: Date;
@@ -60,6 +64,10 @@ export type ManualRunnerRestartResult =
   | { ok: false; reason: ManualRunnerFailureReason };
 
 export type ManualRunnerStatusResult =
+  | { ok: true; runner: ManualRunnerRecord; containers: ManualRunnerRemoteContainer[] }
+  | { ok: false; reason: ManualRunnerFailureReason };
+
+export type ManualRunnerCleanupResult =
   | { ok: true; runner: ManualRunnerRecord; containers: ManualRunnerRemoteContainer[] }
   | { ok: false; reason: ManualRunnerFailureReason };
 
@@ -160,6 +168,20 @@ export class ManualRunnerAdapter
 
   async status(agentId: string): Promise<ManualRunnerStatusResult> {
     const result = await this.callRunner("status", agentId, "GET");
+
+    if (!result.ok) {
+      return result;
+    }
+
+    return {
+      ok: true,
+      runner: this.runner,
+      containers: parseContainers(result.body.containers),
+    };
+  }
+
+  async cleanup(agentId: string): Promise<ManualRunnerCleanupResult> {
+    const result = await this.callRunner("cleanup", agentId, "POST");
 
     if (!result.ok) {
       return result;
@@ -390,10 +412,10 @@ export async function appendManualRunnerLogLinesForUser(input: {
           runnerId: input.runnerId,
           localRunnerProcessId: null,
           dockerRunnerContainerId: null,
-          source: MANUAL_RUNNER_LOG_SOURCE,
+          source: normalizeManualLogSource(line.source),
           stream: line.stream,
           level: line.level ?? defaultLevelForStream(line.stream),
-          message: line.message.trim(),
+          message: redactSecretText(line.message.trim()),
           metadata: normalizeManualRunnerMetadata(line.metadata ?? {}),
           sequence: firstSequence + index,
           createdAt: line.createdAt ?? now,
@@ -423,7 +445,11 @@ export function getLatestManualRunnerLogCursorForUser(input: {
         and(
           eq(agentLogs.agentId, input.agentId),
           eq(agentLogs.runnerId, input.runnerId),
-          eq(agentLogs.source, MANUAL_RUNNER_LOG_SOURCE),
+          inArray(agentLogs.source, [
+            MANUAL_RUNNER_LOG_SOURCE,
+            HERMES_GATEWAY_LOG_SOURCE,
+            MANUAL_RUNNER_BOOTSTRAP_LOG_SOURCE,
+          ]),
           eq(agents.userId, input.userId),
           eq(agents.runnerId, input.runnerId),
           isNull(agents.deletedAt),
@@ -453,7 +479,11 @@ export function listManualRunnerLogsForUser(input: {
     const predicates = [
       eq(agentLogs.agentId, input.agentId),
       eq(agentLogs.runnerId, input.runnerId),
-      eq(agentLogs.source, MANUAL_RUNNER_LOG_SOURCE),
+      inArray(agentLogs.source, [
+        MANUAL_RUNNER_LOG_SOURCE,
+        HERMES_GATEWAY_LOG_SOURCE,
+        MANUAL_RUNNER_BOOTSTRAP_LOG_SOURCE,
+      ]),
       eq(agents.id, input.agentId),
       eq(agents.userId, input.userId),
       eq(agents.runnerId, input.runnerId),
@@ -515,9 +545,21 @@ function parseRemoteLogLines(value: unknown): ManualRunnerLogLineInput[] {
     }
 
     const createdAt = parseOptionalDate(line.createdAt);
+    const source = normalizeManualLogSource(
+      typeof line.source === "string"
+        ? line.source
+        : isRecord(line.metadata) && typeof line.metadata.logSource === "string"
+          ? line.metadata.logSource
+          : null,
+    );
     parsedLines.push({
       stream,
-      message,
+      message: redactSecretText(message),
+      source,
+      metadata: {
+        ...(isRecord(line.metadata) ? line.metadata : {}),
+        logSource: source,
+      },
       ...(createdAt ? { createdAt } : {}),
     });
   }
@@ -620,6 +662,18 @@ function logManualRunnerRequest(event: string, metadata: Record<string, unknown>
 
 function isValidManualLogLine(line: ManualRunnerLogLineInput): boolean {
   return (line.stream === "stdout" || line.stream === "stderr") && line.message.trim().length > 0;
+}
+
+function normalizeManualLogSource(value: unknown): string {
+  if (value === HERMES_GATEWAY_LOG_SOURCE) {
+    return HERMES_GATEWAY_LOG_SOURCE;
+  }
+
+  if (value === "container_bootstrap" || value === MANUAL_RUNNER_BOOTSTRAP_LOG_SOURCE) {
+    return MANUAL_RUNNER_BOOTSTRAP_LOG_SOURCE;
+  }
+
+  return MANUAL_RUNNER_LOG_SOURCE;
 }
 
 function defaultLevelForStream(stream: ManualRunnerLogLineInput["stream"]): string {

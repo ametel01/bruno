@@ -70,14 +70,18 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
             },
             logs: [
               {
+                source: "hermes_gateway",
                 stream: "stdout",
-                message: "contract ready",
+                message: "contract ready OPENROUTER_API_KEY=sk-or-v1-contract",
                 createdAt: "2026-07-05T04:00:01.000Z",
+                metadata: { logSource: "hermes_gateway" },
               },
               {
+                source: "container_bootstrap",
                 stream: "stderr",
-                message: "contract warn",
+                message: "contract warn 123456:abcdefghijklmnopqrstuvwxyz",
                 createdAt: "2026-07-05T04:00:02.000Z",
+                metadata: { logSource: "container_bootstrap" },
               },
             ],
           });
@@ -113,15 +117,15 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
     await expect(adapter.streamLogs({ agentId: created.agent.id })).resolves.toMatchObject({
       logs: [
         expect.objectContaining({
-          source: "manual_runner",
+          source: "hermes_gateway",
           stream: "stdout",
-          message: "contract ready",
+          message: "contract ready OPENROUTER_API_KEY=[redacted-env-value]",
         }),
         expect.objectContaining({
-          source: "manual_runner",
+          source: "manual_runner_bootstrap",
           stream: "stderr",
           level: "error",
-          message: "contract warn",
+          message: "contract warn [redacted-telegram-token]",
         }),
       ],
       nextAfter: 2,
@@ -174,21 +178,23 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
     expect(persistedLogs).toEqual([
       expect.objectContaining({
         runnerId: runner.id,
-        source: "manual_runner",
+        source: "hermes_gateway",
         stream: "stdout",
-        message: "contract ready",
+        message: "contract ready OPENROUTER_API_KEY=[redacted-env-value]",
         sequence: 1,
       }),
       expect.objectContaining({
         runnerId: runner.id,
-        source: "manual_runner",
+        source: "manual_runner_bootstrap",
         stream: "stderr",
         level: "error",
-        message: "contract warn",
+        message: "contract warn [redacted-telegram-token]",
         sequence: 2,
       }),
     ]);
     expect(JSON.stringify(persistedLogs)).not.toContain("contract-token");
+    expect(JSON.stringify(persistedLogs)).not.toContain("sk-or-v1-contract");
+    expect(JSON.stringify(persistedLogs)).not.toContain("123456:abcdefghijklmnopqrstuvwxyz");
   });
 
   it("requires HTTPS for non-loopback endpoints and fails safely without sending a request", async () => {

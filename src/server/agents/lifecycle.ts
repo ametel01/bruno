@@ -2146,6 +2146,30 @@ export async function deleteAgentForUser(
       };
     }
 
+    const assignedRunner = validation.agent.runnerId
+      ? await readDeleteCleanupRunner(connection, {
+          runnerId: validation.agent.runnerId,
+          userId,
+        })
+      : null;
+
+    if (assignedRunner) {
+      const manualCleanup = await cleanupAssignedManualRunnerAgent({
+        agentId: normalizedAgentId,
+        runner: assignedRunner,
+        connection,
+        dependencies,
+      });
+
+      if (!manualCleanup.ok) {
+        return {
+          ok: false,
+          reason: "runner_cleanup_failed",
+          status: validation.agent.status,
+        };
+      }
+    }
+
     return await connection.db.transaction(async (tx) => {
       const [deletedAgent] = await tx
         .update(agents)
@@ -2223,6 +2247,49 @@ function isDockerReplacementStartFailure(result: LifecycleRunnerRestartResult): 
   replacementStartFailed: true;
 } {
   return !result.ok && "replacementStartFailed" in result && result.replacementStartFailed === true;
+}
+
+async function readDeleteCleanupRunner(
+  connection: DatabaseConnection,
+  input: { runnerId: string; userId: string },
+): Promise<ManualRunnerRecord | null> {
+  const [runner] = await connection.db
+    .select(assignedRunnerSelection)
+    .from(runners)
+    .where(
+      and(
+        eq(runners.id, input.runnerId),
+        eq(runners.userId, input.userId),
+        inArray(runners.kind, [...ASSIGNABLE_LIFECYCLE_RUNNER_KINDS]),
+        inArray(runners.status, [...ASSIGNABLE_LIFECYCLE_RUNNER_STATUSES]),
+        isNull(runners.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  return toManualRunnerRecordOrNull(runner ?? null);
+}
+
+async function cleanupAssignedManualRunnerAgent(input: {
+  agentId: string;
+  runner: ManualRunnerRecord;
+  connection: DatabaseConnection;
+  dependencies: AgentLifecycleDependencies;
+}): Promise<{ ok: true } | { ok: false }> {
+  const adapter = selectLifecycleRunnerAdapter(input.runner, {
+    userId: input.runner.userId,
+    createConnection: () => input.connection,
+    ...(input.dependencies.manualRunnerAdapter
+      ? { manualRunnerAdapter: input.dependencies.manualRunnerAdapter }
+      : {}),
+  }) as LifecycleRunnerAdapter & {
+    cleanup?: (agentId: string) => Promise<{ ok: boolean }>;
+  };
+  const cleanup = adapter.cleanup
+    ? await adapter.cleanup(input.agentId)
+    : await adapter.stop(input.agentId);
+
+  return cleanup.ok ? { ok: true } : { ok: false };
 }
 
 function isHermesReadinessRunnerFailure(

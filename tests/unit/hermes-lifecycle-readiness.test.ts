@@ -7,6 +7,7 @@ import {
 } from "@/src/server/agents/agent-secrets";
 import {
   type AgentLifecycleDependencies,
+  deleteAgentForDevelopmentUser,
   restartAgentForDevelopmentUser,
   startAgentForDevelopmentUser,
 } from "@/src/server/agents/lifecycle";
@@ -186,6 +187,32 @@ describe("Hermes lifecycle readiness", () => {
     });
     expect(calls).toEqual([]);
   });
+
+  it("cleans assigned Hermes runner state before deleting the agent", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Delete Hermes Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const runnerId = await insertReadyCloudRunner(connection, created.agent.userId);
+    const calls: string[] = [];
+
+    await assignRunner(connection, created.agent.id, runnerId);
+
+    const result = await deleteAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: () => cleanupCapableRunnerStub(calls),
+      runnerAdapter: lifecycleRunnerStub(calls),
+      now: () => new Date("2026-07-14T02:10:00.000Z"),
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      agent: {
+        id: created.agent.id,
+      },
+    });
+    expect(calls).toEqual([`cleanup:${created.agent.id}`]);
+  });
 });
 
 async function insertReadyCloudRunner(
@@ -357,6 +384,25 @@ function readinessFailingRunnerStub(
       return { ok: false as const, reason: "runner_readiness_failed" as const };
     }),
   };
+}
+
+function cleanupCapableRunnerStub(calls: string[]): NonNullable<
+  AgentLifecycleDependencies["runnerAdapter"]
+> & {
+  cleanup(agentId: string): Promise<{ ok: true }>;
+} {
+  const adapter = lifecycleRunnerStub(calls) as NonNullable<
+    AgentLifecycleDependencies["runnerAdapter"]
+  > & {
+    cleanup(agentId: string): Promise<{ ok: true }>;
+  };
+
+  adapter.cleanup = vi.fn(async (agentId: string) => {
+    calls.push(`cleanup:${agentId}`);
+    return { ok: true as const };
+  });
+
+  return adapter;
 }
 
 async function resetHermesLifecycleTables(connection: DatabaseConnection): Promise<void> {

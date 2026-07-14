@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Durable Hermes gateway log ingestion from the runner-managed `/opt/data` log stream, with source classification for gateway output versus container bootstrap diagnostics.
+- Safe Hermes runtime diagnostics for runner log transport, app-side log persistence, and assigned-runner cleanup.
 - Authenticated private Hermes readiness polling for runner-managed gateway launches, including config-revision and Telegram readiness checks before start/restart completion.
 - Versioned Hermes launch specs, server-side launch-spec building with just-in-time decrypted secrets, authenticated runner JSON transport, and managed per-agent Hermes home projection for config, environment, prompt, and workspace state.
 - Hermes setup on the agent detail page with OpenRouter model selection, masked OpenRouter and Telegram secret status, generated agent API-server keys, readiness checks, and start/restart blocking until required Hermes setup is complete.
@@ -92,6 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Assigned-runner delete cleanup now calls the runner cleanup path before soft-delete, and runner cleanup removes the selected container plus the exact per-agent Hermes state root idempotently.
 - Runner-managed Hermes starts now launch the pinned workload image with `gateway run` on a private Docker network, projected `/opt/data` and `/workspace` mounts, bounded CPU/memory/PID limits, no published gateway port, label ownership, bounded graceful stops, and inspect validation before readiness.
 - DigitalOcean cloud runners now default to the Hermes-ready 2 GB one-agent tier, inject one-agent heartbeat capacity, prepare a private Hermes Docker network and managed state root, and pre-pull the pinned Hermes workload image during bootstrap.
 - Browser runner settings, provisioning, placement, capacity, registration-token creation, and credential management now use explicit internal user ownership, while runner registration, heartbeat, bootstrap callbacks, and lifecycle bearer authentication remain machine-token based.
@@ -141,3 +144,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Restart controls now clear their local busy state when the local runner restart returns directly to `running`.
 - Dashboard persisted-agent controls remain available on phone widths by using the mobile agent status card list when the desktop table is hidden, with hardened wrapping and focus states for combined mobile agent, approval, log, and alert controls.
 - Create-agent failures now return safe actionable database setup errors when Postgres is unavailable or migrations are missing, and the create form prevents pre-hydration no-op submissions.
+
+### Security
+
+- Runner and app log ingestion now apply a shared defense-in-depth redaction corpus for OpenRouter keys, Telegram tokens, AgentBay bearer/API tokens, secret-bearing environment assignments, sensitive URL query values, and fixed test canaries.

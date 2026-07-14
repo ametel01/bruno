@@ -1,9 +1,12 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { lstat, readdir, readFile, rm, stat } from "node:fs/promises";
+import { basename, relative, resolve, sep } from "node:path";
 import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import {
   AGENTBAY_AGENT_ID_LABEL,
   DEFAULT_HERMES_PRIVATE_NETWORK,
+  DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_MANUAL_RUNNER_IMAGE,
   DOCKER_CLI_TIMEOUT_MS,
 } from "@/src/runner-service/constants";
@@ -12,6 +15,7 @@ import {
   type HermesProjectionOptions,
   type HermesProjectionResult,
 } from "@/src/runner-service/hermes-projection";
+import { redactSecretText } from "@/src/shared/secret-redaction";
 
 export { AGENTBAY_AGENT_ID_LABEL, DEFAULT_MANUAL_RUNNER_IMAGE, DOCKER_CLI_TIMEOUT_MS };
 const DOCKER_RUNNER_IMAGE_ENV = "AGENTBAY_DOCKER_RUNNER_IMAGE";
@@ -22,8 +26,11 @@ const HERMES_DOCKER_CPUS_ENV = "AGENTBAY_HERMES_DOCKER_CPUS";
 const HERMES_DOCKER_MEMORY_ENV = "AGENTBAY_HERMES_DOCKER_MEMORY";
 const HERMES_DOCKER_PIDS_LIMIT_ENV = "AGENTBAY_HERMES_DOCKER_PIDS_LIMIT";
 const HERMES_READINESS_PORT_ENV = "AGENTBAY_HERMES_READINESS_PORT";
+const HERMES_STATE_ROOT_ENV = "AGENTBAY_HERMES_STATE_ROOT";
 const AGENTBAY_CONFIG_REVISION_LABEL = "agentbay.config_revision";
 const AGENTBAY_LAUNCH_SPEC_VERSION_LABEL = "agentbay.launch_spec_version";
+const MAX_HERMES_LOG_BYTES_PER_FILE = 64 * 1024;
+const MAX_HERMES_LOG_LINES = 500;
 const DUMMY_DOCKER_RUNNER_ARGS = [
   "sh",
   "-c",
@@ -92,6 +99,8 @@ export type RunnerContainer = {
 export type RunnerLogLine = {
   stream: "stdout" | "stderr";
   message: string;
+  source?: "container_bootstrap" | "hermes_gateway";
+  metadata?: Record<string, unknown>;
   createdAt: string | null;
 };
 
@@ -232,6 +241,21 @@ export class ManualRunnerDocker {
     return { containers: stopped };
   }
 
+  async cleanup(
+    agentId: string,
+  ): Promise<{ containers: RunnerContainer[]; removedAgentRoot: boolean }> {
+    const containers = await this.listSelectedContainers(agentId);
+
+    for (const container of containers) {
+      await this.runDocker(["rm", "--force", container.id]);
+    }
+
+    return {
+      containers,
+      removedAgentRoot: await removeHermesAgentRoot(agentId),
+    };
+  }
+
   async restart(
     agentId: string,
     launchSpec: AgentLaunchSpec | null = null,
@@ -248,16 +272,17 @@ export class ManualRunnerDocker {
     agentId: string,
   ): Promise<{ container: RunnerContainer | null; logs: RunnerLogLine[] }> {
     const [container] = await this.listSelectedContainers(agentId);
+    const gatewayLogs = await readHermesGatewayLogLines(agentId);
 
     if (!container) {
-      return { container: null, logs: [] };
+      return { container: null, logs: gatewayLogs };
     }
 
     const result = await this.runDocker(["logs", "--timestamps", container.id]);
 
     return {
       container,
-      logs: parseDockerLogOutput(result),
+      logs: mergeRunnerLogLines(gatewayLogs, parseDockerLogOutput(result)),
     };
   }
 
@@ -775,7 +800,9 @@ function parseDockerLogLine(stream: RunnerLogLine["stream"], line: string): Runn
   if (!match) {
     return {
       stream,
-      message: line,
+      source: "container_bootstrap",
+      message: redactSecretText(line),
+      metadata: { logSource: "container_bootstrap" },
       createdAt: null,
     };
   }
@@ -790,16 +817,193 @@ function parseDockerLogLine(stream: RunnerLogLine["stream"], line: string): Runn
   if (Number.isNaN(timestamp.getTime())) {
     return {
       stream,
-      message: line,
+      source: "container_bootstrap",
+      message: redactSecretText(line),
+      metadata: { logSource: "container_bootstrap" },
       createdAt: null,
     };
   }
 
   return {
     stream,
-    message,
+    source: "container_bootstrap",
+    message: redactSecretText(message),
+    metadata: { logSource: "container_bootstrap" },
     createdAt: timestamp.toISOString(),
   };
+}
+
+async function readHermesGatewayLogLines(agentId: string): Promise<RunnerLogLine[]> {
+  const logDirectory = resolveHermesGatewayLogDirectory(agentId);
+
+  try {
+    await rejectSymlinkPath(resolveHermesStateRoot());
+    await rejectSymlinkPath(resolve(resolveHermesStateRoot(), agentId));
+    await rejectSymlinkPath(logDirectory);
+  } catch {
+    return [];
+  }
+
+  let entries: Array<{ name: string; mtimeMs: number }> = [];
+
+  try {
+    entries = await Promise.all(
+      (await readdir(logDirectory))
+        .filter((name) => name === "current" || name.startsWith("current."))
+        .map(async (name) => ({
+          name,
+          mtimeMs: (await stat(resolve(logDirectory, name))).mtimeMs,
+        })),
+    );
+  } catch {
+    return [];
+  }
+
+  const files = entries
+    .sort((left, right) => left.mtimeMs - right.mtimeMs || left.name.localeCompare(right.name))
+    .map((entry) => resolve(logDirectory, entry.name));
+  const lines: RunnerLogLine[] = [];
+
+  for (const file of files) {
+    lines.push(...(await readHermesGatewayLogFile(file, logDirectory)));
+  }
+
+  return lines.slice(-MAX_HERMES_LOG_LINES);
+}
+
+async function readHermesGatewayLogFile(
+  filePath: string,
+  logDirectory: string,
+): Promise<RunnerLogLine[]> {
+  const relativePath = relative(logDirectory, filePath);
+
+  if (relativePath.startsWith("..") || relativePath.includes(sep)) {
+    return [];
+  }
+
+  try {
+    await rejectSymlinkPath(filePath);
+    const content = await readFile(filePath, { encoding: "utf8" });
+    const tail =
+      Buffer.byteLength(content, "utf8") > MAX_HERMES_LOG_BYTES_PER_FILE
+        ? content.slice(-MAX_HERMES_LOG_BYTES_PER_FILE)
+        : content;
+
+    return tail
+      .split(/\r?\n/)
+      .map((line) => parseHermesGatewayLogLine(line, basename(filePath)))
+      .filter((line): line is RunnerLogLine => line !== null);
+  } catch {
+    return [];
+  }
+}
+
+function parseHermesGatewayLogLine(line: string, fileName: string): RunnerLogLine | null {
+  const trimmed = line.trimEnd();
+
+  if (!trimmed.trim()) {
+    return null;
+  }
+
+  const dockerTimestamp = /^(\S+)\s(.*)$/.exec(trimmed);
+  const bracketTimestamp = /^\[([^\]]+)\]\s*(.*)$/.exec(trimmed);
+  const timestampText = dockerTimestamp?.[1] ?? bracketTimestamp?.[1] ?? "";
+  const parsedTimestamp = timestampText ? new Date(timestampText) : null;
+  const message = dockerTimestamp?.[2] ?? bracketTimestamp?.[2] ?? trimmed;
+
+  return {
+    stream: "stdout",
+    source: "hermes_gateway",
+    message: redactSecretText(message.trimEnd()),
+    metadata: {
+      logSource: "hermes_gateway",
+      logFile: fileName,
+    },
+    createdAt:
+      parsedTimestamp && !Number.isNaN(parsedTimestamp.getTime())
+        ? parsedTimestamp.toISOString()
+        : null,
+  };
+}
+
+function mergeRunnerLogLines(
+  gatewayLogs: RunnerLogLine[],
+  bootstrapLogs: RunnerLogLine[],
+): RunnerLogLine[] {
+  const gatewayKeys = new Set(gatewayLogs.map(logDeduplicationKey));
+
+  return [
+    ...gatewayLogs,
+    ...bootstrapLogs.filter((line) => !gatewayKeys.has(logDeduplicationKey(line))),
+  ]
+    .sort((left, right) => {
+      const leftTime = left.createdAt ? new Date(left.createdAt).getTime() : 0;
+      const rightTime = right.createdAt ? new Date(right.createdAt).getTime() : 0;
+
+      return leftTime - rightTime || sourceOrder(left) - sourceOrder(right);
+    })
+    .slice(-MAX_HERMES_LOG_LINES);
+}
+
+function logDeduplicationKey(line: RunnerLogLine): string {
+  return `${line.createdAt ?? ""}:${line.message}`;
+}
+
+function sourceOrder(line: RunnerLogLine): number {
+  return line.source === "hermes_gateway" ? 0 : 1;
+}
+
+async function removeHermesAgentRoot(agentId: string): Promise<boolean> {
+  const stateRoot = resolveHermesStateRoot();
+  const agentRoot = resolve(stateRoot, agentId);
+  assertChildPath(stateRoot, agentRoot);
+
+  try {
+    await rejectSymlinkPath(stateRoot);
+    await rejectSymlinkPath(agentRoot);
+    await rm(agentRoot, { force: true, recursive: true });
+    return true;
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+function resolveHermesGatewayLogDirectory(agentId: string): string {
+  const stateRoot = resolveHermesStateRoot();
+  const agentRoot = resolve(stateRoot, agentId);
+  const logDirectory = resolve(agentRoot, "hermes", "logs", "gateways", "default");
+  assertChildPath(stateRoot, agentRoot);
+  assertChildPath(agentRoot, logDirectory);
+
+  return logDirectory;
+}
+
+function resolveHermesStateRoot(): string {
+  return resolve(process.env[HERMES_STATE_ROOT_ENV]?.trim() || DEFAULT_HERMES_STATE_ROOT);
+}
+
+async function rejectSymlinkPath(path: string): Promise<void> {
+  const info = await lstat(path);
+
+  if (info.isSymbolicLink()) {
+    throw new Error("Hermes runner path must not be a symbolic link.");
+  }
+}
+
+function assertChildPath(parent: string, child: string): void {
+  const relativePath = relative(parent, child);
+
+  if (relativePath === "" || relativePath.startsWith("..") || relativePath.includes(`..${sep}`)) {
+    throw new Error("Hermes runner path escaped the managed root.");
+  }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return isRecord(error) && error.code === "ENOENT";
 }
 
 function parseManualRunnerArgs(value: string | undefined): string[] {

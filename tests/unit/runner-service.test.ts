@@ -1,3 +1,6 @@
+import { access, lstat, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   AGENTBAY_AGENT_ID_LABEL,
@@ -357,6 +360,151 @@ describe("manual runner service HTTP contract", () => {
     });
   });
 
+  it("returns redacted durable Hermes gateway logs before bootstrap diagnostics", async () => {
+    const previousStateRoot = process.env.AGENTBAY_HERMES_STATE_ROOT;
+    const stateRoot = join(tmpdir(), `agentbay-runner-logs-${Date.now()}`);
+    const logDir = join(stateRoot, AGENT_ID, "hermes", "logs", "gateways", "default");
+
+    await mkdir(logDir, { recursive: true });
+    await writeFile(
+      join(logDir, "current.1"),
+      [
+        "2026-07-05T00:00:00.000Z rotated OPENROUTER_API_KEY=sk-or-v1-secret",
+        "2026-07-05T00:00:01.000Z ready",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(logDir, "current"),
+      [
+        "2026-07-05T00:00:03.000Z telegram 123456:abcdefghijklmnopqrstuvwxyz",
+        "2026-07-05T00:00:04.000Z authorization: Bearer agb_agent_secret123456789",
+        "",
+      ].join("\n"),
+    );
+
+    try {
+      process.env.AGENTBAY_HERMES_STATE_ROOT = stateRoot;
+      const service = createTestService({
+        docker: createMockDocker({
+          containers: [{ id: "container-001", agentId: AGENT_ID, status: "running" }],
+          logs: {
+            stdout:
+              "2026-07-05T00:00:01.000000000Z ready\n2026-07-05T00:00:02.000000000Z bootstrap sk-or-v1-bootstrap\n",
+            stderr: "",
+          },
+        }),
+      });
+      const response = await service.fetch(authorizedRequest(`/runner/v1/agents/${AGENT_ID}/logs`));
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(JSON.stringify(body)).not.toContain("sk-or-v1-secret");
+      expect(JSON.stringify(body)).not.toContain("sk-or-v1-bootstrap");
+      expect(JSON.stringify(body)).not.toContain("123456:abcdefghijklmnopqrstuvwxyz");
+      expect(JSON.stringify(body)).not.toContain("agb_agent_secret123456789");
+      expect(body.logs).toEqual([
+        expect.objectContaining({
+          source: "hermes_gateway",
+          message: "rotated OPENROUTER_API_KEY=[redacted-env-value]",
+        }),
+        expect.objectContaining({
+          source: "hermes_gateway",
+          message: "ready",
+        }),
+        expect.objectContaining({
+          source: "container_bootstrap",
+          message: "bootstrap [redacted-openrouter-key]",
+        }),
+        expect.objectContaining({
+          source: "hermes_gateway",
+          message: "telegram [redacted-telegram-token]",
+        }),
+        expect.objectContaining({
+          source: "hermes_gateway",
+          message: "authorization: Bearer [redacted-bearer-token]",
+        }),
+      ]);
+    } finally {
+      if (previousStateRoot === undefined) {
+        delete process.env.AGENTBAY_HERMES_STATE_ROOT;
+      } else {
+        process.env.AGENTBAY_HERMES_STATE_ROOT = previousStateRoot;
+      }
+      await rm(stateRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("cleans selected containers and the exact Hermes agent root idempotently", async () => {
+    const previousStateRoot = process.env.AGENTBAY_HERMES_STATE_ROOT;
+    const stateRoot = join(tmpdir(), `agentbay-runner-cleanup-${Date.now()}`);
+    const agentRoot = join(stateRoot, AGENT_ID);
+    const calls: string[][] = [];
+
+    await mkdir(join(agentRoot, "workspace"), { recursive: true });
+
+    try {
+      process.env.AGENTBAY_HERMES_STATE_ROOT = stateRoot;
+      const service = createTestService({
+        docker: createMockDocker({
+          calls,
+          containers: [{ id: "container-001", agentId: AGENT_ID, status: "running" }],
+        }),
+      });
+      const first = await service.fetch(
+        authorizedRequest(`/runner/v1/agents/${AGENT_ID}/cleanup`, "POST"),
+      );
+      const second = await service.fetch(
+        authorizedRequest(`/runner/v1/agents/${AGENT_ID}/cleanup`, "POST"),
+      );
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      await expect(access(agentRoot)).rejects.toThrow();
+      expect(calls).toContainEqual(["rm", "--force", "container-001"]);
+    } finally {
+      if (previousStateRoot === undefined) {
+        delete process.env.AGENTBAY_HERMES_STATE_ROOT;
+      } else {
+        process.env.AGENTBAY_HERMES_STATE_ROOT = previousStateRoot;
+      }
+      await rm(stateRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("fails cleanup closed when the managed agent root is a symlink", async () => {
+    const previousStateRoot = process.env.AGENTBAY_HERMES_STATE_ROOT;
+    const stateRoot = join(tmpdir(), `agentbay-runner-symlink-${Date.now()}`);
+    const targetRoot = join(tmpdir(), `agentbay-runner-symlink-target-${Date.now()}`);
+
+    await mkdir(stateRoot, { recursive: true });
+    await mkdir(targetRoot, { recursive: true });
+    await symlink(targetRoot, join(stateRoot, AGENT_ID));
+
+    try {
+      process.env.AGENTBAY_HERMES_STATE_ROOT = stateRoot;
+      const service = createTestService({ docker: createMockDocker() });
+      const response = await service.fetch(
+        authorizedRequest(`/runner/v1/agents/${AGENT_ID}/cleanup`, "POST"),
+      );
+
+      expect(response.status).toBe(502);
+      await expect(response.json()).resolves.toMatchObject({
+        ok: false,
+        error: { code: "docker_command_failed" },
+      });
+      await expect(lstat(join(stateRoot, AGENT_ID))).resolves.toMatchObject({});
+    } finally {
+      if (previousStateRoot === undefined) {
+        delete process.env.AGENTBAY_HERMES_STATE_ROOT;
+      } else {
+        process.env.AGENTBAY_HERMES_STATE_ROOT = previousStateRoot;
+      }
+      await rm(stateRoot, { force: true, recursive: true });
+      await rm(targetRoot, { force: true, recursive: true });
+    }
+  });
+
   it("uses the required route methods", async () => {
     const service = createTestService();
     const response = await service.fetch(authorizedRequest(`/runner/v1/agents/${AGENT_ID}/start`));
@@ -530,6 +678,7 @@ function createMockDocker(
       status: string;
     }[];
     injectDockerSocket?: boolean;
+    logs?: { stderr: string; stdout: string };
     psIds?: string[];
   } = {},
 ): DockerExecutableRunner {
@@ -632,8 +781,8 @@ function createMockDocker(
 
     if (args[0] === "logs") {
       return {
-        stdout: "2026-07-05T00:00:01.000000000Z ready\n",
-        stderr: "2026-07-05T00:00:02.000000000Z warn\n",
+        stdout: input.logs?.stdout ?? "2026-07-05T00:00:01.000000000Z ready\n",
+        stderr: input.logs?.stderr ?? "2026-07-05T00:00:02.000000000Z warn\n",
       };
     }
 
