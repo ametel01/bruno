@@ -243,3 +243,76 @@ completion evidence.
   worker processes inherit the testing environment, added distinct `+clerk_test`
   preflight validation, and bound each context to its resolved primary email without
   retaining PII. Hosted execution remains unrun and approval-gated.
+
+## Milestone 18: Real Hermes Integration
+
+Source plan: `PLAN.md`
+
+This ledger tracks the OpenRouter plus Telegram plus Hermes path from the
+Milestone 18 implementation plan. It preserves prior Milestone 16 and Clerk
+history above and is the active progress record for the current `/goal`.
+
+### Current Status
+
+Step 0 is complete for tracking setup. The Milestone 18 ledger lists every
+incremental step, records dependencies and evidence fields, confirms the
+functional-change-only changelog rule, and keeps `CHANGELOG.md` unchanged
+because this step changes tracking only.
+
+Next executable step: Step 1, add the pinned Hermes workload artifact.
+
+### Changelog Policy
+
+`CHANGELOG.md` retains the required Keep a Changelog structure with
+`# Changelog` and `## [Unreleased]`. Milestone 18 changelog entries are added
+only for validated user-facing or operator-facing functional changes under the
+appropriate `Added`, `Changed`, `Fixed`, or `Security` category. Tracking-only,
+tests-only, CI-only, formatting, validation-only, and non-functional refactor
+work do not receive changelog entries.
+
+Never record credential values, encrypted blobs, nonces, auth tags, master-key
+material, raw Hermes errors, raw provider responses, Droplet IPs, private
+endpoint details, or other secret-bearing diagnostic output in this ledger or
+in `CHANGELOG.md`.
+
+### Step Checklist
+
+- [x] Step 0: Initialize Milestone 18 Tracking
+- [ ] Step 1: Add the Pinned Hermes Workload Artifact
+- [ ] Step 2: Make Cloud Capacity and Bootstrap Hermes-Aware
+- [ ] Step 3: Add Encrypted Per-Agent Secret Storage
+- [ ] Step 4: Add Hermes and Telegram Setup UX
+- [ ] Step 5: Add the Versioned Launch Contract and Hermes Home Projection
+- [ ] Step 6: Replace BusyBox with the Real Private Hermes Lifecycle
+- [ ] Step 7: Integrate Durable Logs, Failure Diagnostics, and State Cleanup
+- [ ] Step 8: Prove the Local End-to-End Hermes Contract
+- [ ] Step 9: Run Live Telegram Acceptance and Controlled Rollout
+
+### Step Ledger
+
+| Step | State | Depends on | Commit | Validation or deployment evidence | Blocker and next work |
+| --- | --- | --- | --- | --- | --- |
+| 0. Initialize Milestone 18 Tracking | Complete | None | `docs: track milestone 18 Hermes work` | `test -f PROGRESS.md && test -f CHANGELOG.md`; `rg "Milestone 18|Real Hermes|Step 0|Step 9" PROGRESS.md`; `rg "^# Changelog$|^## \[Unreleased\]$" CHANGELOG.md`; `git diff --check`. | Complete; Step 1 is next. |
+| 1. Add the Pinned Hermes Workload Artifact | Not started | Step 0 | Not collected | Not collected | Re-verify the upstream Hermes release and add the pinned workload image, smoke check, and publication workflow. |
+| 2. Make Cloud Capacity and Bootstrap Hermes-Aware | Not started | Step 1 | Not collected | Not collected | Provision the Hermes-ready 2 GB runner tier, one-agent capacity, private network, state root, and image pre-pull. |
+| 3. Add Encrypted Per-Agent Secret Storage | Not started | Step 0 | Not collected | Not collected | Add the additive secret schema, crypto service, owner-scoped secret routes, and backup/restore/delete protections. |
+| 4. Add Hermes and Telegram Setup UX | Not started | Step 3 | Not collected | Not collected | Add setup UI, masked secret status, model selection, readiness DTO, and lifecycle blocking. |
+| 5. Add the Versioned Launch Contract and Hermes Home Projection | Not started | Steps 2, 3, and 4 | Not collected | Not collected | Build the bounded launch spec, just-in-time secret use, and symlink-safe Hermes home projection. |
+| 6. Replace BusyBox with the Real Private Hermes Lifecycle | Not started | Steps 1, 2, and 5 | Not collected | Not collected | Launch the pinned Hermes gateway, private readiness polling, graceful stop/restart, and safe lifecycle failures. |
+| 7. Integrate Durable Logs, Failure Diagnostics, and State Cleanup | Not started | Step 6 | Not collected | Not collected | Persist/redact Hermes logs, map typed failures, prove restart persistence, and make delete cleanup symlink-safe. |
+| 8. Prove the Local End-to-End Hermes Contract | Not started | Step 7 | Not collected | Not collected | Add the credential-free real-image local smoke and run the full local gate. |
+| 9. Run Live Telegram Acceptance and Controlled Rollout | Blocked until Step 8 and external credentials/approval | Step 8, published image workflow, and authorized DigitalOcean/OpenRouter/Telegram credentials | Not collected | Not collected | Requires approved billable DigitalOcean, OpenRouter, Telegram bot, and Telegram test-user credentials before final live acceptance. |
+
+### Completed Evidence
+
+- 2026-07-14: Step 0 appended this Milestone 18 ledger, confirmed
+  `CHANGELOG.md` keeps the required structure, and deliberately added no
+  changelog entry because tracking setup is not a functional product change.
+
+### Current Blockers and Next Work
+
+- Step 1 is unblocked locally.
+- Step 9 is externally blocked until the user authorizes billable DigitalOcean
+  work and supplies or approves dedicated OpenRouter and Telegram smoke
+  credentials. This blocker does not prevent completing and committing the
+  credential-free local implementation steps first.
