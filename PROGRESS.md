@@ -259,7 +259,7 @@ storage for the Hermes setup path, owner-scoped secret status/update/revoke
 routes, generated agent API-server keys, safe backup secret references, restore
 behavior that requires fresh credentials, and delete-time secret revocation.
 
-Next executable step: Step 4, add Hermes and Telegram setup UX.
+Next executable step: Step 5, add the versioned launch contract and Hermes home projection.
 
 ### Changelog Policy
 
@@ -281,7 +281,7 @@ in `CHANGELOG.md`.
 - [x] Step 1: Add the Pinned Hermes Workload Artifact
 - [x] Step 2: Make Cloud Capacity and Bootstrap Hermes-Aware
 - [x] Step 3: Add Encrypted Per-Agent Secret Storage
-- [ ] Step 4: Add Hermes and Telegram Setup UX
+- [x] Step 4: Add Hermes and Telegram Setup UX
 - [ ] Step 5: Add the Versioned Launch Contract and Hermes Home Projection
 - [ ] Step 6: Replace BusyBox with the Real Private Hermes Lifecycle
 - [ ] Step 7: Integrate Durable Logs, Failure Diagnostics, and State Cleanup
@@ -295,8 +295,8 @@ in `CHANGELOG.md`.
 | 0. Initialize Milestone 18 Tracking | Complete | None | `9d6f6e1` | `test -f PROGRESS.md && test -f CHANGELOG.md`; `rg "Milestone 18|Real Hermes|Step 0|Step 9" PROGRESS.md`; `rg "^# Changelog$|^## \[Unreleased\]$" CHANGELOG.md`; `bun run test tests/unit/progress-status.test.ts`; `git diff --check`. | Complete. |
 | 1. Add the Pinned Hermes Workload Artifact | Complete | Step 0 | `c2f27d5` | Upstream index `sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973`; AMD64 manifest `sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a`; local image `agentbay-hermes@sha256:281344814c90ee6e91b40b5dab91526f3da04325e4c31834019f422e1551da6b`; `docker buildx build --platform linux/amd64 --load -f Dockerfile.agent -t agentbay-hermes:local .`; `bun run agent:image:smoke`; `docker history --no-trunc agentbay-hermes:local`; `bun run test tests/unit/hermes-agent-image.test.ts`; `bun run format:check`; `bun run lint`; `bun run typecheck`; `git diff --check`. | Complete. |
 | 2. Make Cloud Capacity and Bootstrap Hermes-Aware | Complete | Step 1 | `c0b376f` | Focused Step 2 tests passed across server env, cloud bootstrap, cost prices, runner provisioning, cloud provisioning summaries, placement, heartbeat, runner service, and local Docker DigitalOcean provider; `bun run local:cloud:prepare` returned `local_cloud_prepare_skipped` with `provider_mode_not_local_docker`; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 85 files / 815 tests; `bun run build`; `git diff --check`. | Complete. |
-| 3. Add Encrypted Per-Agent Secret Storage | Complete | Step 0 | Pending current-step commit | `bun run db:generate`; `bun run db:migrate`; focused non-DB route/schema tests passed 39 tests; focused DB-backed secret/backup/restore/lifecycle tests passed 139 tests; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 87 files / 824 tests; `bun run build`; `git diff --check`; `bun run test tests/unit/progress-status.test.ts` passed 2 tests; credential-free browser smoke passed 14 tests with `PLAYWRIGHT_REUSE_EXISTING_SERVER=1 PORT=3001` because a Next dev server was already running for this repo. | Complete; Step 4 is next. |
-| 4. Add Hermes and Telegram Setup UX | Not started | Step 3 | Not collected | Not collected | Add setup UI, masked secret status, model selection, readiness DTO, and lifecycle blocking. |
+| 3. Add Encrypted Per-Agent Secret Storage | Complete | Step 0 | `cf111a7` | `bun run db:generate`; `bun run db:migrate`; focused non-DB route/schema tests passed 39 tests; focused DB-backed secret/backup/restore/lifecycle tests passed 139 tests; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 87 files / 824 tests; `bun run build`; `git diff --check`; `bun run test tests/unit/progress-status.test.ts` passed 2 tests; credential-free browser smoke passed 14 tests with `PLAYWRIGHT_REUSE_EXISTING_SERVER=1 PORT=3001` because a Next dev server was already running for this repo. | Complete. |
+| 4. Add Hermes and Telegram Setup UX | Complete | Step 3 | This commit | Focused Step 4 tests passed 17 tests across readiness DTO, setup component, lifecycle DB blocking, and start/restart route mapping; existing lifecycle/detail-page regression set passed 187 tests; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 90 files / 834 tests; `bun run build`; `bun run test tests/unit/progress-status.test.ts` passed 2 tests; `git diff --check`; credential-free browser smoke passed 14 tests with `PLAYWRIGHT_REUSE_EXISTING_SERVER=1 PORT=3001` because a Next dev server was already running for this repo. | Complete; Step 5 is next. |
 | 5. Add the Versioned Launch Contract and Hermes Home Projection | Not started | Steps 2, 3, and 4 | Not collected | Not collected | Build the bounded launch spec, just-in-time secret use, and symlink-safe Hermes home projection. |
 | 6. Replace BusyBox with the Real Private Hermes Lifecycle | Not started | Steps 1, 2, and 5 | Not collected | Not collected | Launch the pinned Hermes gateway, private readiness polling, graceful stop/restart, and safe lifecycle failures. |
 | 7. Integrate Durable Logs, Failure Diagnostics, and State Cleanup | Not started | Step 6 | Not collected | Not collected | Persist/redact Hermes logs, map typed failures, prove restart persistence, and make delete cleanup symlink-safe. |
@@ -330,10 +330,15 @@ in `CHANGELOG.md`.
   APIs, server-generated agent API-server keys, safe backup vault references,
   restore behavior that does not copy credentials, and delete-time active
   secret revocation.
+- 2026-07-14: Step 4 added the agent-detail Hermes setup panel with OpenRouter
+  model selection, masked OpenRouter and Telegram secret configured/missing
+  states, replacement and revocation controls, generated agent API-server keys,
+  server-derived readiness requirements, and Start/Restart blocking for ready
+  assigned DigitalOcean Hermes runners until required setup is complete.
 
 ### Current Blockers and Next Work
 
-- Step 4 is unblocked locally after the Step 3 commit.
+- Step 5 is unblocked locally after the Step 4 commit.
 - Step 9 is externally blocked until the user authorizes billable DigitalOcean
   work and supplies or approves dedicated OpenRouter and Telegram smoke
   credentials. This blocker does not prevent completing and committing the

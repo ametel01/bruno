@@ -5,6 +5,7 @@ import { ApprovalDecisionControls } from "@/app/_components/approval-decision-co
 import { PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
 import { AgentBackupControls } from "@/app/agents/_components/agent-backup-controls";
 import { AgentConfigEditor } from "@/app/agents/_components/agent-config-editor";
+import { AgentHermesSetup } from "@/app/agents/_components/agent-hermes-setup";
 import { AssignedRunnerPanel } from "@/app/agents/_components/assigned-runner-panel";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { AgentRuntimeLogPanel } from "@/app/agents/_components/agent-runtime-log-panel";
@@ -16,8 +17,17 @@ import {
 } from "@/src/server/alerts/operational-summaries";
 import {
   AgentDetailPersistenceError,
+  type AgentDetailConfig,
   getActiveAgentForUser,
 } from "@/src/server/agents/list-agents";
+import {
+  AgentSecretPersistenceError,
+  listAgentSecretStatusesForUser,
+} from "@/src/server/agents/agent-secrets";
+import {
+  buildHermesSetupReadiness,
+  OPENROUTER_MODEL_OPTIONS,
+} from "@/src/server/agents/hermes-readiness";
 import {
   AgentApprovalPersistenceError,
   listPendingApprovalsForUserAgent,
@@ -51,6 +61,7 @@ type AgentDetailPageProps = {
 
 type AgentApprovalsResult = Awaited<ReturnType<typeof loadAgentApprovals>>;
 type AgentBackupsResult = Awaited<ReturnType<typeof loadAgentBackups>>;
+type AgentSecretsResult = Awaited<ReturnType<typeof loadAgentSecrets>>;
 
 export const dynamic = "force-dynamic";
 
@@ -113,12 +124,14 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
     backupsResult,
     assignedRunnerResult,
     assignedRunnerCostResult,
+    secretsResult,
   ] = await Promise.all([
     activityPromise,
     loadAgentApprovals(applicationUser.userId, agent.id),
     loadAgentBackups(applicationUser.userId, agent.id),
     loadAssignedManualRunner(applicationUser.userId, agent.id),
     loadAssignedRunnerCost(applicationUser.userId, agent.id),
+    loadAgentSecrets(applicationUser.userId, agent.id),
   ]);
   const activityEvents = activityResult.ok ? activityResult.events : [];
   const olderActivityHref =
@@ -131,6 +144,15 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
     ? "There are no older persisted events for this agent."
     : "Create or update this agent to show persisted activity here.";
   const assignedRunner = assignedRunnerResult.ok ? assignedRunnerResult.runner : null;
+  const hermesReadiness = buildHermesSetupReadiness({
+    config: agent.config,
+    secretStatuses: secretsResult.ok ? secretsResult.secrets : [],
+    assignedRunner,
+  });
+  const hermesLifecycleDisabledReason =
+    assignedRunner?.kind === "digitalocean" ? hermesReadiness.startDisabledReason : null;
+  const runnerStartDisabledReason = startDisabledReason(assignedRunner);
+  const startBlocker = hermesLifecycleDisabledReason ?? runnerStartDisabledReason;
   const operationalAlerts = buildAgentOperationalAlerts({
     agent,
     approvals: approvalsResult.ok ? approvalsResult.approvals : [],
@@ -172,7 +194,10 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
               <dd>
                 <AgentLifecycleControls
                   agentId={agent.id}
-                  startDisabledReason={startDisabledReason(assignedRunner)}
+                  restartDisabledReason={
+                    agent.status === "running" ? hermesLifecycleDisabledReason : null
+                  }
+                  startDisabledReason={startBlocker}
                   status={agent.status}
                 />
               </dd>
@@ -259,6 +284,12 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
             }}
           />
         </PlaceholderPanel>
+        <AgentHermesSetupPanel
+          agentId={agent.id}
+          config={agent.config}
+          readiness={hermesReadiness}
+          result={secretsResult}
+        />
         <AgentBackupsPanel agentId={agent.id} result={backupsResult} />
         <AgentOperationalAlertsPanel
           alerts={operationalAlerts.alerts}
@@ -286,6 +317,38 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
         />
       </div>
     </ProductShell>
+  );
+}
+
+function AgentHermesSetupPanel({
+  agentId,
+  config,
+  readiness,
+  result,
+}: {
+  agentId: string;
+  config: AgentDetailConfig;
+  readiness: ReturnType<typeof buildHermesSetupReadiness>;
+  result: AgentSecretsResult;
+}) {
+  return result.ok ? (
+    <AgentHermesSetup
+      agentId={agentId}
+      modelName={config.modelName}
+      modelOptions={OPENROUTER_MODEL_OPTIONS}
+      modelProvider={config.modelProvider}
+      readiness={readiness}
+      secrets={result.secrets}
+    />
+  ) : (
+    <section className="hermes-setup-panel" aria-labelledby="hermes-setup-title">
+      <div className="section-heading">
+        <h2 id="hermes-setup-title">Hermes setup</h2>
+      </div>
+      <div className="safe-error" role="alert">
+        Hermes setup status could not be loaded.
+      </div>
+    </section>
   );
 }
 
@@ -495,6 +558,31 @@ async function loadAgentBackups(userId: string, agentId: string) {
     };
   } catch (error) {
     if (error instanceof AgentBackupListPersistenceError) {
+      return {
+        ok: false as const,
+      };
+    }
+
+    throw error;
+  }
+}
+
+async function loadAgentSecrets(userId: string, agentId: string) {
+  try {
+    const result = await listAgentSecretStatusesForUser(userId, agentId);
+
+    if (!result.ok) {
+      return {
+        ok: false as const,
+      };
+    }
+
+    return {
+      ok: true as const,
+      secrets: result.secrets,
+    };
+  } catch (error) {
+    if (error instanceof AgentSecretPersistenceError) {
       return {
         ok: false as const,
       };

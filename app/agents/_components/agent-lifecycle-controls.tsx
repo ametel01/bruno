@@ -9,18 +9,24 @@ type AgentLifecycleControlsProps = {
   agentId: string;
   status: AgentLifecycleStatus;
   startDisabledReason?: string | null;
+  restartDisabledReason?: string | null;
 };
 
 export function AgentLifecycleControls({
   agentId,
   status,
   startDisabledReason = null,
+  restartDisabledReason = null,
 }: AgentLifecycleControlsProps) {
   return (
     <div className="agent-lifecycle-actions">
       <StartAgentButton agentId={agentId} disabledReason={startDisabledReason} status={status} />
       {status === "running" ? <StopAgentButton agentId={agentId} status={status} /> : null}
-      <RestartAgentButton agentId={agentId} status={status} />
+      <RestartAgentButton
+        agentId={agentId}
+        disabledReason={restartDisabledReason}
+        status={status}
+      />
       {process.env.NODE_ENV !== "production" ? (
         <SimulateErrorAgentButton agentId={agentId} status={status} />
       ) : null}

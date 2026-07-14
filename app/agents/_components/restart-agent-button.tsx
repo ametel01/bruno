@@ -7,6 +7,7 @@ import type { AgentLifecycleStatus } from "@/src/server/agents/lifecycle";
 type RestartAgentButtonProps = {
   agentId: string;
   status: AgentLifecycleStatus;
+  disabledReason?: string | null;
 };
 
 type RestartState =
@@ -17,7 +18,11 @@ type RestartState =
 
 const RESTART_SETTLE_FALLBACK_MS = 500;
 
-export function RestartAgentButton({ agentId, status }: RestartAgentButtonProps) {
+export function RestartAgentButton({
+  agentId,
+  status,
+  disabledReason = null,
+}: RestartAgentButtonProps) {
   const router = useRouter();
   const [state, setState] = useState<RestartState>({ status: "idle" });
   const observedRestartingRef = useRef(false);
@@ -100,6 +105,7 @@ export function RestartAgentButton({ agentId, status }: RestartAgentButtonProps)
 
   const busy =
     state.status === "requesting" || state.status === "polling" || status === "restarting";
+  const disabled = Boolean(disabledReason) || busy;
 
   if (status !== "running" && !busy && state.status !== "error") {
     return null;
@@ -108,13 +114,22 @@ export function RestartAgentButton({ agentId, status }: RestartAgentButtonProps)
   return (
     <div className="start-agent-action">
       {status === "running" || status === "restarting" ? (
-        <button className="secondary-button" type="button" disabled={busy} onClick={handleRestart}>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={disabled}
+          onClick={handleRestart}
+        >
           {busy ? "Restarting" : "Restart"}
         </button>
       ) : null}
       {state.status === "polling" || state.status === "error" ? (
         <span className={`action-message ${state.status}`} role="status">
           {state.message}
+        </span>
+      ) : disabledReason ? (
+        <span className="action-message" role="status">
+          {disabledReason}
         </span>
       ) : null}
     </div>
@@ -126,8 +141,15 @@ async function safeFailureMessage(response: Response): Promise<string> {
     const body = (await response.json()) as {
       error?: {
         code?: unknown;
+        message?: unknown;
       };
     };
+
+    if (body.error?.code === "hermes_setup_incomplete") {
+      return typeof body.error.message === "string"
+        ? body.error.message
+        : "Complete Hermes setup before restarting this agent.";
+    }
 
     if (body.error?.code === "invalid_agent_status") {
       return "Agent cannot be restarted from its current status.";

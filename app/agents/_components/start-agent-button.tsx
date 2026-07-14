@@ -131,8 +131,15 @@ async function safeFailureMessage(
     const body = (await response.json()) as {
       error?: {
         code?: unknown;
+        message?: unknown;
       };
     };
+
+    if (body.error?.code === "hermes_setup_incomplete") {
+      return typeof body.error.message === "string"
+        ? body.error.message
+        : "Complete Hermes setup before starting this agent.";
+    }
 
     if (body.error?.code === "invalid_agent_status") {
       return invalidStatusMessage;

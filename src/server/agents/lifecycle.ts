@@ -2,9 +2,12 @@ import { and, desc, eq, exists, inArray, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { revokeActiveAgentSecretsInTransaction } from "@/src/server/agents/agent-secrets";
+import { hermesConfigurationBlocker } from "@/src/server/agents/hermes-readiness";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
+  agentConfigs,
   agentLogs,
+  agentSecrets,
   agentUsagePeriods,
   agents,
   dockerRunnerContainers,
@@ -214,8 +217,10 @@ export type StartAgentResult =
         | "plan_limit_reached"
         | "runner_capacity_reached"
         | "no_online_runner"
+        | "hermes_setup_incomplete"
         | "runner_start_failed";
       status?: AgentLifecycleStatus;
+      message?: string;
       currentAgents?: number;
       maxAgents?: number;
     };
@@ -291,8 +296,10 @@ export type RestartAgentResult =
         | "malformed_agent_id"
         | "agent_not_found"
         | "invalid_status"
+        | "hermes_setup_incomplete"
         | "runner_restart_failed";
       status?: AgentLifecycleStatus;
+      message?: string;
     };
 
 export type RestartedAgent = {
@@ -733,6 +740,42 @@ async function readAgentStartRunnerSnapshot(
   };
 }
 
+async function readHermesConfigurationBlocker(
+  tx: AgentLifecycleTransaction,
+  agentId: string,
+): Promise<string | null> {
+  const [config] = await tx
+    .select({
+      modelProvider: agentConfigs.modelProvider,
+      modelName: agentConfigs.modelName,
+    })
+    .from(agentConfigs)
+    .where(eq(agentConfigs.agentId, agentId))
+    .limit(1);
+  const activeSecretRows = await tx
+    .select({ kind: agentSecrets.kind })
+    .from(agentSecrets)
+    .where(and(eq(agentSecrets.agentId, agentId), eq(agentSecrets.status, "active")));
+
+  return hermesConfigurationBlocker({
+    modelProvider: config?.modelProvider ?? "not_configured",
+    modelName: config?.modelName ?? "not_configured",
+    secretKinds: new Set(activeSecretRows.map((secret) => secret.kind)),
+  });
+}
+
+function isHermesLifecycleReadyRunnerSnapshot(
+  runner: AgentStartRunnerSnapshot | null,
+): runner is AgentStartRunnerSnapshot {
+  return (
+    runner?.kind === DIGITALOCEAN_RUNNER_KIND &&
+    runner.status === "online" &&
+    runner.provisioningStatus === "ready" &&
+    runner.hasEndpointUrl &&
+    !runner.deleted
+  );
+}
+
 async function runLegacyAgentLifecycleOperation<Result>(
   agentId: string,
   dependencies: AgentLifecycleDependencies,
@@ -870,6 +913,17 @@ export async function startAgentForUser(
             userId,
           })
         : null;
+      const setupBlocker = isHermesLifecycleReadyRunnerSnapshot(assignedRunnerSnapshot)
+        ? await readHermesConfigurationBlocker(tx, currentAgent.agent.id)
+        : null;
+
+      if (setupBlocker) {
+        return {
+          ok: false,
+          reason: "hermes_setup_incomplete",
+          message: setupBlocker,
+        } as const;
+      }
 
       return {
         ok: true,
@@ -1330,6 +1384,19 @@ export async function restartAgentForUser(
           ok: false,
           reason: "invalid_status",
           status: currentAgent.agent.status,
+        } as const;
+      }
+
+      const setupBlocker =
+        currentAgent.runner?.kind === DIGITALOCEAN_RUNNER_KIND
+          ? await readHermesConfigurationBlocker(tx, currentAgent.agent.id)
+          : null;
+
+      if (setupBlocker) {
+        return {
+          ok: false,
+          reason: "hermes_setup_incomplete",
+          message: setupBlocker,
         } as const;
       }
 

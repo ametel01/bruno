@@ -11,6 +11,10 @@ import {
   DEFAULT_AGENT_CONFIG,
   createAgentForDevelopmentUser,
 } from "@/src/server/agents/create-agent";
+import {
+  generateApiServerKeyForUser,
+  replaceAgentSecretForUser,
+} from "@/src/server/agents/agent-secrets";
 import type { AgentCreateBlockedError } from "@/src/server/agents/create-agent";
 import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
 import {
@@ -134,6 +138,13 @@ import {
   detectDockerAvailability,
   dockerUnavailableSkipReason,
 } from "@/tests/helpers/docker-availability";
+
+const HERMES_KEYRING_ENV = {
+  AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
+  AGENTBAY_AGENT_SECRET_KEYS_JSON: JSON.stringify({
+    v1: Buffer.alloc(32, 29).toString("base64url"),
+  }),
+};
 
 describe("create agent persistence", () => {
   let connection: DatabaseConnection;
@@ -1040,6 +1051,7 @@ describe("create agent persistence", () => {
     const assignedRunner = await getAssignedRunnerForActiveAgentDevelopmentUser(created.agent.id, {
       createConnection: () => connection,
     });
+    await configureHermesSetupForTest(connection, created.agent.userId, created.agent.id);
     const started = await startAgentForDevelopmentUser(created.agent.id, {
       createConnection: () => connection,
       manualRunnerAdapter: (runner) => {
@@ -9298,6 +9310,57 @@ async function createTestApproval(
     },
     { createConnection: () => connection },
   );
+}
+
+async function configureHermesSetupForTest(
+  connection: DatabaseConnection,
+  userId: string,
+  agentId: string,
+): Promise<void> {
+  await connection.db
+    .update(agentConfigs)
+    .set({
+      modelProvider: "openrouter",
+      modelName: "openai/gpt-4.1-mini",
+      updatedAt: new Date("2026-07-06T01:08:00.000Z"),
+    })
+    .where(eq(agentConfigs.agentId, agentId));
+
+  await replaceAgentSecretForUser(
+    userId,
+    agentId,
+    { kind: "openrouter_api_key", value: "sk-or-v1-1234567890abcdefghijklmnopqrstuvwxyz" },
+    {
+      createConnection: () => connection,
+      env: HERMES_KEYRING_ENV,
+      randomBytes: (size) => Buffer.alloc(size, 1),
+    },
+  );
+  await replaceAgentSecretForUser(
+    userId,
+    agentId,
+    { kind: "telegram_bot_token", value: "123456:abcdefghijklmnopqrstuvwxyz" },
+    {
+      createConnection: () => connection,
+      env: HERMES_KEYRING_ENV,
+      randomBytes: (size) => Buffer.alloc(size, 2),
+    },
+  );
+  await replaceAgentSecretForUser(
+    userId,
+    agentId,
+    { kind: "telegram_allowed_users", value: "123456789,987654321" },
+    {
+      createConnection: () => connection,
+      env: HERMES_KEYRING_ENV,
+      randomBytes: (size) => Buffer.alloc(size, 3),
+    },
+  );
+  await generateApiServerKeyForUser(userId, agentId, {
+    createConnection: () => connection,
+    env: HERMES_KEYRING_ENV,
+    randomBytes: (size) => Buffer.alloc(size, 4),
+  });
 }
 
 async function expectTableCount(

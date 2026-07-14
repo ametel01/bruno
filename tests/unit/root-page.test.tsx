@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
   listManualRunnerStatusSummariesForUser: vi.fn(),
   listSettingsRunnerManagementSummariesForUser: vi.fn(),
   getAssignedManualRunnerStatusForUserAgent: vi.fn(),
+  listAgentSecretStatusesForUser: vi.fn(),
   listAgentBackupsForUser: vi.fn(),
   listPendingApprovalsForUserAgent: vi.fn(),
   listPendingApprovalsForUser: vi.fn(),
@@ -64,6 +65,15 @@ vi.mock("@/src/server/agents/list-agents", async (importOriginal) => {
     getActiveAgentForUser: mocks.getActiveAgentForUser,
     listActiveAgentsForUser: mocks.listActiveAgentsForUser,
     listActiveAgentsForDevelopmentUser: mocks.listActiveAgentsForUser,
+  };
+});
+
+vi.mock("@/src/server/agents/agent-secrets", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/server/agents/agent-secrets")>();
+
+  return {
+    ...actual,
+    listAgentSecretStatusesForUser: mocks.listAgentSecretStatusesForUser,
   };
 });
 
@@ -266,6 +276,10 @@ describe("product shell routes", () => {
     mocks.getCostEstimatesForUser.mockResolvedValue(costEstimates());
     mocks.listSettingsRunnerManagementSummariesForUser.mockResolvedValue([]);
     mocks.getAssignedManualRunnerStatusForUserAgent.mockResolvedValue(null);
+    mocks.listAgentSecretStatusesForUser.mockResolvedValue({
+      ok: true,
+      secrets: [],
+    });
     mocks.listAgentBackupsForUser.mockResolvedValue([]);
     mocks.listPendingApprovalsForUser.mockResolvedValue([]);
     mocks.listPendingApprovalsForUserAgent.mockResolvedValue([]);
@@ -292,6 +306,7 @@ describe("product shell routes", () => {
     mocks.listManualRunnerStatusSummariesForUser.mockReset();
     mocks.listSettingsRunnerManagementSummariesForUser.mockReset();
     mocks.getAssignedManualRunnerStatusForUserAgent.mockReset();
+    mocks.listAgentSecretStatusesForUser.mockReset();
     mocks.listAgentBackupsForUser.mockReset();
     mocks.listPendingApprovalsForUserAgent.mockReset();
     mocks.listPendingApprovalsForUser.mockReset();
@@ -1150,6 +1165,10 @@ describe("product shell routes", () => {
       APPLICATION_USER_ID,
       "3e47bed7-b58f-4394-93c0-01e3d1e51774",
     );
+    expect(mocks.listAgentSecretStatusesForUser).toHaveBeenCalledWith(
+      APPLICATION_USER_ID,
+      "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+    );
     expect(mocks.listAgentEventFeedForUser).toHaveBeenCalledWith({
       db: {},
       userId: APPLICATION_USER_ID,
@@ -1226,7 +1245,7 @@ describe("product shell routes", () => {
     expect(html).not.toContain("manifestJson");
     expect(html).not.toContain("storageUri");
     expect(html).not.toContain("secretReferences");
-    expect(html).not.toContain("sk-");
+    expect(html).not.toContain("sk-or-v1-backup-secret");
     expect(mocks.listAgentBackupsForUser).toHaveBeenCalledWith(
       APPLICATION_USER_ID,
       "3e47bed7-b58f-4394-93c0-01e3d1e51774",
@@ -1443,7 +1462,7 @@ describe("product shell routes", () => {
     expect(html).toContain("2026-07-04T08:15:00.000Z");
     expect(html).toContain("2026-07-04T09:15:00.000Z");
     expect(html).not.toContain("payload_json");
-    expect(html).not.toContain("token");
+    expect(html).not.toContain("approval-secret-token");
     expect(html).not.toContain("postgres://");
   });
 

@@ -128,6 +128,20 @@ export async function POST(
       );
     }
 
+    if (result.reason === "hermes_setup_incomplete") {
+      return Response.json(
+        {
+          error: {
+            code: "hermes_setup_incomplete",
+            message: result.message ?? "Complete Hermes setup before starting this agent.",
+          },
+        },
+        {
+          status: 409,
+        },
+      );
+    }
+
     return Response.json(
       {
         error: {

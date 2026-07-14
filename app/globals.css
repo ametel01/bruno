@@ -1201,6 +1201,113 @@ h2 {
   gap: 10px;
 }
 
+.hermes-setup-panel {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 18px;
+}
+
+.hermes-readiness-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.85fr) minmax(0, 1.4fr);
+  gap: 18px;
+}
+
+.hermes-readiness-list {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.hermes-readiness-list li {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 1px solid var(--line);
+  background: var(--background);
+  padding: 12px;
+}
+
+.hermes-readiness-list li > span {
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.hermes-readiness-list li[data-status="ready"] > span {
+  background: #0f766e;
+}
+
+.hermes-readiness-list li[data-status="missing"] > span,
+.hermes-readiness-list li[data-status="blocked"] > span {
+  background: #b45309;
+}
+
+.hermes-readiness-list strong,
+.hermes-secret-row strong {
+  display: block;
+  color: var(--foreground);
+  font-size: 0.9rem;
+}
+
+.hermes-readiness-list p,
+.hermes-secret-row p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.hermes-readiness-list time {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.hermes-setup-actions {
+  display: grid;
+  gap: 18px;
+}
+
+.hermes-model-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.hermes-secret-list {
+  display: grid;
+  gap: 10px;
+}
+
+.hermes-secret-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  background: var(--background);
+  padding: 12px;
+}
+
+.hermes-secret-controls {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.secondary-button.danger {
+  border-color: #b91c1c;
+  color: #991b1b;
+}
+
 .primary-button,
 .secondary-button {
   min-height: 42px;
@@ -1831,6 +1938,13 @@ h2 {
 
 @media (max-width: 720px) {
   .config-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hermes-readiness-grid,
+  .hermes-model-form,
+  .hermes-secret-row,
+  .hermes-secret-controls {
     grid-template-columns: 1fr;
   }
 

@@ -121,6 +121,30 @@ describe("POST /api/agents/[agentId]/actions/start route", () => {
     expect(JSON.stringify(body)).not.toContain("postgres://");
   });
 
+  it("returns a safe Hermes setup response when start is blocked", async () => {
+    mocks.startAgentForUser.mockResolvedValueOnce({
+      ok: false,
+      reason: "hermes_setup_incomplete",
+      message: "Configure Telegram bot token before starting this Hermes agent.",
+    });
+    const { POST } = await import("@/app/api/agents/[agentId]/actions/start/route");
+
+    const response = await POST(new Request("http://localhost/api/agents/start"), {
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body).toEqual({
+      error: {
+        code: "hermes_setup_incomplete",
+        message: "Configure Telegram bot token before starting this Hermes agent.",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("postgres://");
+    expect(JSON.stringify(body)).not.toContain("sk-or-v1");
+  });
+
   it("returns a safe plan-limit response when start is blocked", async () => {
     mocks.startAgentForUser.mockResolvedValueOnce({
       ok: false,
