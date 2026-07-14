@@ -15,7 +15,7 @@
     "local:cloud:smoke": "bun scripts/smoke-local-cloud.ts",
     "local:cloud:up": "AGENTBAY_POSTGRES_HOST_PORT=${AGENTBAY_POSTGRES_HOST_PORT:-55432} docker compose --profile local-cloud up --build dashboard",
     "local:down": "docker compose down --remove-orphans",
-    "local:up": "docker compose up -d postgres && bun run db:migrate && bun run dev",
+    "local:up": "docker compose up -d postgres && bun run db:migrate && AGENTBAY_AUTH_MODE=development bun run dev",
     "repro:cloud-runner": "bun --conditions react-server scripts/repro-cloud-runner-bootstrap.ts",
     "format": "biome format --write app src scripts tests app/globals.css *.ts *.json",
     "format:check": "biome ci --linter-enabled=false --assist-enabled=false app src scripts tests app/globals.css *.ts *.json",

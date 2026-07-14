@@ -16,6 +16,7 @@ describe("authentication mode policy", () => {
   it.each([
     "http://localhost:3000",
     "http://agentbay.localhost:3000",
+    "http://host.docker.internal:3000",
     "http://127.0.0.1:3000",
     "http://127.42.0.8:3000",
     "http://[::1]:3000",
@@ -32,12 +33,34 @@ describe("authentication mode policy", () => {
     ).toEqual({ mode: "development" });
   });
 
+  it("accepts explicit operator mode only with the Basic-auth password", () => {
+    expect(
+      resolveAuthMode({
+        AGENTBAY_AUTH_MODE: "operator",
+        AGENTBAY_OPERATOR_PASSWORD: "operator-password-present",
+        NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+        VERCEL_ENV: "production",
+      }),
+    ).toEqual({ mode: "operator" });
+
+    for (const password of [undefined, "", " "]) {
+      expect(
+        resolveAuthMode({
+          AGENTBAY_AUTH_MODE: "operator",
+          AGENTBAY_OPERATOR_PASSWORD: password,
+          NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+          VERCEL_ENV: "production",
+        }),
+      ).toEqual({ mode: "invalid", code: "operator_auth_not_configured" });
+    }
+  });
+
   it.each([
     "",
     " ",
     "DEVELOPMENT",
     "development ",
-    "operator",
+    "OPERATOR",
     "unknown",
   ])("fails closed for invalid mode %j", (mode) => {
     expect(
@@ -240,6 +263,22 @@ describe("authentication mode policy", () => {
     } catch (error) {
       expect((error as Error).message).not.toContain(secret);
     }
+  });
+
+  it("reports every supported explicit auth mode without reflecting configuration values", () => {
+    expect(() =>
+      requireValidAuthMode({
+        AGENTBAY_AUTH_MODE: "operator",
+        AGENTBAY_OPERATOR_PASSWORD: " ",
+      }),
+    ).toThrow("Operator authentication is not configured.");
+
+    expect(() =>
+      requireValidAuthMode({
+        AGENTBAY_AUTH_MODE: "unexpected",
+        AGENTBAY_OPERATOR_PASSWORD: "secret-value-that-must-not-appear",
+      }),
+    ).toThrow("Authentication mode must be development, operator, or clerk.");
   });
 
   it("keeps request host input and the retired transition variable outside the policy", () => {

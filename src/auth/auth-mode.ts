@@ -1,16 +1,18 @@
 const PRODUCTION_HOSTNAME = "plingpling.xyz";
 
-export type AuthMode = "clerk" | "development";
+export type AuthMode = "clerk" | "development" | "operator";
 
 export type AuthModeConfigurationErrorCode =
   | "clerk_auth_not_configured"
   | "development_auth_not_allowed"
   | "invalid_auth_mode"
+  | "operator_auth_not_configured"
   | "preview_protection_not_verified";
 
 export type AuthModeDecision =
   | { mode: "clerk"; publishableKey: string }
   | { mode: "development" }
+  | { mode: "operator" }
   | { mode: "invalid"; code: AuthModeConfigurationErrorCode };
 
 type AuthEnvironment = Record<string, string | undefined>;
@@ -23,7 +25,8 @@ export function resolveAuthMode(env: AuthEnvironment): AuthModeDecision {
   if (
     configuredMode !== undefined &&
     configuredMode !== "development" &&
-    configuredMode !== "clerk"
+    configuredMode !== "clerk" &&
+    configuredMode !== "operator"
   ) {
     return { mode: "invalid", code: "invalid_auth_mode" };
   }
@@ -37,6 +40,14 @@ export function resolveAuthMode(env: AuthEnvironment): AuthModeDecision {
     }
 
     return { mode: "clerk", publishableKey };
+  }
+
+  if (resolvedMode === "operator") {
+    if (!configuredValue(env.AGENTBAY_OPERATOR_PASSWORD)) {
+      return { mode: "invalid", code: "operator_auth_not_configured" };
+    }
+
+    return { mode: "operator" };
   }
 
   const appHostname = readUrlHostname(env.NEXT_PUBLIC_APP_URL);
@@ -106,7 +117,9 @@ export function authModeConfigurationMessage(code: AuthModeConfigurationErrorCod
     case "development_auth_not_allowed":
       return "Development authentication is not allowed in this environment.";
     case "invalid_auth_mode":
-      return "Authentication mode must be development or clerk.";
+      return "Authentication mode must be development, operator, or clerk.";
+    case "operator_auth_not_configured":
+      return "Operator authentication is not configured.";
     case "preview_protection_not_verified":
       return "Preview development authentication requires verified deployment protection.";
   }
@@ -158,6 +171,7 @@ function isLoopbackHostname(hostname: string | null): boolean {
 
   if (
     hostname === "localhost" ||
+    hostname === "host.docker.internal" ||
     hostname.endsWith(".localhost") ||
     hostname === "::1" ||
     hostname === "[::1]"

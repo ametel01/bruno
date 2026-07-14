@@ -26,6 +26,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      AGENTBAY_AUTH_MODE: development
       DATABASE_URL: postgres://agentbay:agentbay@postgres:5432/agentbay
       NEXT_PUBLIC_APP_URL: http://host.docker.internal:3000
       AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: local_docker

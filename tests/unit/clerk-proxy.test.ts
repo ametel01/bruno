@@ -302,7 +302,9 @@ describe("Clerk session proxy", () => {
     );
 
     expect(response.status).toBe(503);
-    expect(await response.text()).toBe("Authentication mode must be development or clerk.");
+    expect(await response.text()).toBe(
+      "Authentication mode must be development, operator, or clerk.",
+    );
     expect(mocks.clerkInvocations).toBe(0);
   });
 

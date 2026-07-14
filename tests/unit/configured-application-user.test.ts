@@ -18,6 +18,27 @@ describe("configured application user adapter", () => {
     expect(getClerkUserId).not.toHaveBeenCalled();
   });
 
+  it("uses the shared user path behind explicit operator auth without consulting Clerk", async () => {
+    const getClerkUserId = vi.fn(async () => "user_not_expected");
+    const requireUser = vi.fn(async () => ({ ok: true as const, userId: "operator-user-id" }));
+
+    await expect(
+      requireConfiguredApplicationUser({
+        env: {
+          AGENTBAY_AUTH_MODE: "operator",
+          AGENTBAY_OPERATOR_PASSWORD: "operator-password-present",
+          NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+          VERCEL_ENV: "production",
+        },
+        getClerkUserId,
+        requireUser,
+      }),
+    ).resolves.toEqual({ ok: true, userId: "operator-user-id" });
+
+    expect(requireUser).toHaveBeenCalledWith("operator", {});
+    expect(getClerkUserId).not.toHaveBeenCalled();
+  });
+
   it("passes only the request Clerk identity provider in Clerk mode", async () => {
     const getClerkUserId = vi.fn(async () => "user_opaque");
     const requireUser = vi.fn(async () => ({ ok: true as const, userId: "internal-user-id" }));

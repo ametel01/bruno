@@ -23,21 +23,38 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
 No Clerk keys or registration are needed. Browser pages and APIs use the shared internal
-development user. The existing Basic operator password, when configured, remains an independent
-barrier until the production cutover issue removes it. The three runner-machine endpoints keep
-their registration-token or runner-credential contracts and never use Clerk:
+development user. The three runner-machine endpoints keep their registration-token or
+runner-credential contracts and never use Clerk:
 
 - `/runner/v1/register`
 - `/runner/v1/heartbeat`
 - `/runner/v1/bootstrap-events`
 
 Set `AGENTBAY_AUTH_MODE=development` when an explicit local mode is preferable. Blank, whitespace,
-case-variant, or unknown values fail closed.
+case-variant, or unknown values fail closed. Explicit development mode on a non-Vercel loopback or
+`host.docker.internal` URL does not activate the Basic-auth prompt even when a production operator
+password is present in a local ignored environment file. `bun run local:up` and the local cloud
+Docker stack set this mode automatically.
+
+## Operator mode
+
+Until the production Clerk cutover is complete, an existing production deployment can retain the
+shared internal user only behind the Basic-auth operator gate:
+
+```dotenv
+AGENTBAY_AUTH_MODE=operator
+AGENTBAY_OPERATOR_PASSWORD=replace-with-strong-operator-password
+```
+
+Operator mode is explicit and fails closed when the password is absent or blank. It does not enable
+Clerk pages, sessions, or automatic legacy-user claiming. The production cutover replaces this mode
+with `clerk`; the operator password and Basic-auth code are removed only after hosted Clerk and
+ownership acceptance passes.
 
 ## Clerk mode
 
-Production, `plingpling.xyz`, Vercel production, and any current custom application hostname must
-use:
+Production, `plingpling.xyz`, Vercel production, and any current custom application hostname use
+the temporary `operator` mode above or, after cutover:
 
 ```dotenv
 AGENTBAY_AUTH_MODE=clerk
@@ -66,5 +83,6 @@ separate approval. After an approved preview exists, verify that raw unauthentic
 blocked and that authenticated `vercel curl` reaches the application; keep all output redacted.
 
 Vercel build planning resolves an unset preview mode to Clerk and requires both Clerk keys. It
-rejects incomplete Clerk configuration, an unverified development preview, and every development
-production/custom-domain combination before the application build starts.
+rejects incomplete Clerk configuration, operator mode without its Basic-auth password, an
+unverified development preview, and every development production/custom-domain combination before
+the application build starts.

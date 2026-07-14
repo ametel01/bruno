@@ -5,7 +5,7 @@ import type * as schema from "@/src/server/db/schema";
 import { users } from "@/src/server/db/schema";
 import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
 
-export type ApplicationUserMode = "clerk" | "development";
+export type ApplicationUserMode = "clerk" | "development" | "operator";
 
 export type ApplicationUserResolution =
   | {
@@ -48,7 +48,7 @@ export async function requireApplicationUser(
 
   try {
     const userId = await connection.db.transaction(async (tx) => {
-      if (mode === "development") {
+      if (mode === "development" || mode === "operator") {
         return await getOrCreateDevelopmentUserId(tx);
       }
 
@@ -117,7 +117,7 @@ async function resolveRequestClerkUserId(
   mode: ApplicationUserMode,
   getClerkUserId: ClerkRequestIdentityProvider | undefined,
 ): Promise<string | null> {
-  if (mode === "development") {
+  if (mode === "development" || mode === "operator") {
     return null;
   }
 

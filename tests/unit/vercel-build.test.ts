@@ -30,6 +30,30 @@ describe("Vercel build workflow", () => {
     ]);
   });
 
+  it("migrates and builds a pre-cutover operator-protected production deployment", () => {
+    expect(
+      planVercelBuildCommands({
+        AGENTBAY_AUTH_MODE: "operator",
+        AGENTBAY_OPERATOR_PASSWORD: "operator-password-present",
+        VERCEL_ENV: "production",
+        DATABASE_URL: "postgres://production.example/agentbay",
+      }),
+    ).toEqual([
+      { command: "bun", args: ["run", "db:migrate"] },
+      { command: "bun", args: ["run", "build"] },
+    ]);
+  });
+
+  it("fails an operator production build closed when Basic auth is not configured", () => {
+    expect(() =>
+      planVercelBuildCommands({
+        AGENTBAY_AUTH_MODE: "operator",
+        VERCEL_ENV: "production",
+        DATABASE_URL: "postgres://production.example/agentbay",
+      }),
+    ).toThrow("Operator authentication is not configured.");
+  });
+
   it("fails closed when a production build has no database URL", () => {
     expect(() =>
       planVercelBuildCommands({

@@ -3,6 +3,7 @@ import {
   isPublicInfrastructurePath,
   isRunnerMachineAuthPath,
 } from "@/src/auth/clerk-transition";
+import { resolveAuthMode } from "@/src/auth/auth-mode";
 
 const DEFAULT_OPERATOR_USERNAME = "agentbay";
 
@@ -20,6 +21,10 @@ export function evaluateOperatorAccess(input: {
   env: Record<string, string | undefined>;
 }): OperatorAccessDecision {
   if (!isOperatorProtectedPath(input.pathname)) {
+    return { ok: true };
+  }
+
+  if (resolveAuthMode(input.env).mode === "development") {
     return { ok: true };
   }
 

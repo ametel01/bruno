@@ -52,6 +52,54 @@ describe("evaluateOperatorAccess", () => {
     ).toEqual({ ok: true });
   });
 
+  it("does not prompt for a stored operator password in explicit local development mode", () => {
+    expect(
+      evaluateOperatorAccess({
+        pathname: "/dashboard",
+        authorizationHeader: null,
+        env: {
+          AGENTBAY_AUTH_MODE: "development",
+          AGENTBAY_OPERATOR_PASSWORD: "stored-production-password",
+          NEXT_PUBLIC_APP_URL: "http://localhost:3000",
+          NODE_ENV: "development",
+        },
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it("does not prompt for a stored password in the local Docker production build", () => {
+    expect(
+      evaluateOperatorAccess({
+        pathname: "/dashboard",
+        authorizationHeader: null,
+        env: {
+          AGENTBAY_AUTH_MODE: "development",
+          AGENTBAY_OPERATOR_PASSWORD: "stored-production-password",
+          NEXT_PUBLIC_APP_URL: "http://host.docker.internal:3000",
+          NODE_ENV: "production",
+        },
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it("does not bypass the operator gate when development mode is set on Vercel", () => {
+    expect(
+      evaluateOperatorAccess({
+        pathname: "/dashboard",
+        authorizationHeader: null,
+        env: {
+          AGENTBAY_AUTH_MODE: "development",
+          AGENTBAY_OPERATOR_PASSWORD: "stored-production-password",
+          VERCEL: "1",
+        },
+      }),
+    ).toEqual({
+      ok: false,
+      status: 401,
+      code: "operator_auth_required",
+    });
+  });
+
   it("allows test runs with no operator password configured", () => {
     expect(
       evaluateOperatorAccess({
@@ -194,6 +242,27 @@ describe("operator access proxy responses", () => {
       });
     });
   });
+
+  it("passes authenticated operator-mode requests to the shared application", async () => {
+    await withOperatorEnv(
+      {
+        AGENTBAY_AUTH_MODE: "operator",
+        AGENTBAY_OPERATOR_PASSWORD: "test-password",
+        VERCEL: "1",
+      },
+      async () => {
+        const response = await proxy(
+          new NextRequest("http://localhost/dashboard", {
+            headers: { authorization: basicAuth("agentbay", "test-password") },
+          }),
+          {} as NextFetchEvent,
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.headers.get("x-middleware-next")).toBe("1");
+      },
+    );
+  });
 });
 
 function basicAuth(username: string, password: string): string {
@@ -202,28 +271,35 @@ function basicAuth(username: string, password: string): string {
 
 async function withOperatorEnv(
   values: {
+    AGENTBAY_AUTH_MODE?: string | undefined;
     AGENTBAY_OPERATOR_PASSWORD?: string | undefined;
     VERCEL?: string | undefined;
   },
   callback: () => Promise<void>,
 ) {
   const original = {
+    AGENTBAY_AUTH_MODE: process.env.AGENTBAY_AUTH_MODE,
     AGENTBAY_OPERATOR_PASSWORD: process.env.AGENTBAY_OPERATOR_PASSWORD,
     VERCEL: process.env.VERCEL,
   };
 
+  setOptionalEnv("AGENTBAY_AUTH_MODE", values.AGENTBAY_AUTH_MODE);
   setOptionalEnv("AGENTBAY_OPERATOR_PASSWORD", values.AGENTBAY_OPERATOR_PASSWORD);
   setOptionalEnv("VERCEL", values.VERCEL);
 
   try {
     await callback();
   } finally {
+    setOptionalEnv("AGENTBAY_AUTH_MODE", original.AGENTBAY_AUTH_MODE);
     setOptionalEnv("AGENTBAY_OPERATOR_PASSWORD", original.AGENTBAY_OPERATOR_PASSWORD);
     setOptionalEnv("VERCEL", original.VERCEL);
   }
 }
 
-function setOptionalEnv(name: "AGENTBAY_OPERATOR_PASSWORD" | "VERCEL", value: string | undefined) {
+function setOptionalEnv(
+  name: "AGENTBAY_AUTH_MODE" | "AGENTBAY_OPERATOR_PASSWORD" | "VERCEL",
+  value: string | undefined,
+) {
   if (value === undefined) {
     delete process.env[name];
     return;

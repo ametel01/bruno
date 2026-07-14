@@ -43,7 +43,7 @@ export async function proxy(request: NextRequest, event: NextFetchEvent): Promis
 
   const authMode = resolveAuthMode(process.env);
 
-  if (authMode.mode === "development") {
+  if (authMode.mode === "development" || authMode.mode === "operator") {
     return NextResponse.next();
   }
 

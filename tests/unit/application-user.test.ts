@@ -17,13 +17,16 @@ describe("application user resolution", () => {
     await connection.close();
   });
 
-  it("reuses the shared development user without consulting Clerk", async () => {
+  it.each([
+    "development",
+    "operator",
+  ] as const)("reuses the shared user in %s mode without consulting Clerk", async (mode) => {
     const getClerkUserId = vi.fn(async () => "user_should_not_be_read");
-    const first = await requireApplicationUser("development", {
+    const first = await requireApplicationUser(mode, {
       createConnection: () => connection,
       getClerkUserId,
     });
-    const second = await requireApplicationUser("development", {
+    const second = await requireApplicationUser(mode, {
       createConnection: () => connection,
       getClerkUserId,
     });
