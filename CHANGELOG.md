@@ -95,9 +95,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- DigitalOcean cloud runners now default back to the basic `$4` `s-1vcpu-512mb-10gb` tier for live Hermes validation, relying on the existing low-memory swap bootstrap instead of the previous 2 GB default.
 - Assigned-runner delete cleanup now calls the runner cleanup path before soft-delete, and runner cleanup removes the selected container plus the exact per-agent Hermes state root idempotently.
 - Runner-managed Hermes starts now launch the pinned workload image with `gateway run` on a private Docker network, projected `/opt/data` and `/workspace` mounts, bounded CPU/memory/PID limits, no published gateway port, label ownership, bounded graceful stops, and inspect validation before readiness.
-- DigitalOcean cloud runners now default to the Hermes-ready 2 GB one-agent tier, inject one-agent heartbeat capacity, prepare a private Hermes Docker network and managed state root, and pre-pull the pinned Hermes workload image during bootstrap.
+- DigitalOcean cloud runners inject one-agent heartbeat capacity, prepare a private Hermes Docker network and managed state root, and pre-pull the pinned Hermes workload image during bootstrap.
 - Browser runner settings, provisioning, placement, capacity, registration-token creation, and credential management now use explicit internal user ownership, while runner registration, heartbeat, bootstrap callbacks, and lifecycle bearer authentication remain machine-token based.
 - Hosted app pages and app-side API routes now require operator access, while runner token endpoints remain credential-based.
 - DigitalOcean cloud runner bootstrap now pulls and runs the selected runner image with Docker instead of depending on Droplet-side source checkout or host Bun setup.

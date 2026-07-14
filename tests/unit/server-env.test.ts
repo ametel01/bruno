@@ -31,7 +31,7 @@ describe("server-only provider environment validation", () => {
       hermesReadinessTimeoutMs: DEFAULT_HERMES_READINESS_TIMEOUT_MS,
       runnerMaxAgents: DEFAULT_HERMES_RUNNER_MAX_AGENTS,
       region: "sfo3",
-      sizeSlug: "s-1vcpu-2gb",
+      sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "agentbay-runner"],
       sshSourceAddresses: [],

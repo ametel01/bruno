@@ -262,9 +262,9 @@ managed-state backup/restore safety, and cleans up its exact local smoke
 resources without claiming external Telegram network behavior.
 
 Next executable step: Step 9, run live Telegram acceptance and controlled
-rollout after the user approves billable DigitalOcean work and supplies or
-approves dedicated OpenRouter, Telegram bot, and Telegram test-user
-credentials.
+rollout after the user approves only the basic `$4` DigitalOcean Droplet tier
+and the project has a subscription-backed model access path that does not
+require provider API keys, plus Telegram bot and Telegram test-user credentials.
 
 ### Changelog Policy
 
@@ -306,7 +306,7 @@ in `CHANGELOG.md`.
 | 6. Replace BusyBox with the Real Private Hermes Lifecycle | Complete | Steps 1, 2, and 5 | This commit | Focused Step 6 tests passed 150 tests across runner-service Docker argv/inspect/readiness, manual-runner adapter mapping, lifecycle readiness failure handling, and existing create-agent coverage; local private-network smoke launched `agentbay-hermes:local` with `gateway run`, `networkMode=agentbay-hermes`, `portBindings={}`, `hostPort8642Listening=false`, `/opt/data` and `/workspace` bind mounts, `no-new-privileges`, `capDrop=["ALL"]`, minimal `CAP_CHOWN`, `CAP_DAC_OVERRIDE`, `CAP_FOWNER`, `CAP_SETGID`, and `CAP_SETUID`, `pidsLimit=256`, `memory=1610612736`, and `nanoCpus=1000000000`; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 93 files / 845 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `bun run test tests/unit/progress-status.test.ts` passed 2 tests; `git diff --check`. | Complete; Step 7 is next. |
 | 7. Integrate Durable Logs, Failure Diagnostics, and State Cleanup | Complete | Step 6 | This commit | Focused Step 7 tests passed 29 tests across runner-service log parsing, redaction, dedupe, cleanup idempotency, symlink-safety, manual-runner app-side redaction/persistence, assigned-runner delete cleanup, and progress guards; local restart persistence smoke launched the real `agentbay-hermes:local` image twice with the same mounts and verified `firstStatus=running`, `secondStatus=running`, workspace sentinel retained, gateway log sentinel retained, and `hostPort8642Listening=false`; generated artifact scan found no fixed raw Step 7 canaries (`sk-or-v1-contract`, `123456:abcdefghijklmnopqrstuvwxyz`, or `agb_agent_secret123456789`); `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 93 files / 849 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `bun run test tests/unit/progress-status.test.ts` passed 2 tests; `git diff --check`. | Complete; Step 8 is next. |
 | 8. Prove the Local End-to-End Hermes Contract | Complete | Step 7 | This commit | `bun run agent:hermes:contract-smoke` passed with image `agentbay-hermes:local`, config revision `cfg-1784003380225`, private API auth enforced, no public `8642`, model response `agentbay fake model response provider=openai-compatible model=openai/gpt-4.1-mini`, log sources `container_bootstrap` and `hermes_gateway`, state persistence, backup/restore safety, exact agent-root cleanup, and Telegram boundary `local-smoke-disabled`; `AGENTBAY_LOCAL_CLOUD_SMOKE_TIMEOUT_MS=480000 bun run local:cloud:smoke` passed with `startResult=blocked_by_hermes_setup`; local Trivy command was unavailable (`trivy_not_installed`) so the Step 1 scanned publish workflow remains the defined image scan path; `docker compose up -d postgres && bun run db:migrate`; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 96 files / 852 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `bun run test tests/unit/progress-status.test.ts`; `git diff --check`; labeled local smoke containers and Hermes smoke networks were removed. | Complete; Step 9 is externally blocked pending approved live credentials and billable provider work. |
-| 9. Run Live Telegram Acceptance and Controlled Rollout | Blocked until external credentials/approval | Step 8, published image workflow, and authorized DigitalOcean/OpenRouter/Telegram credentials | Not collected | Not collected | Requires approved billable DigitalOcean, OpenRouter, Telegram bot, and Telegram test-user credentials before final live acceptance. |
+| 9. Run Live Telegram Acceptance and Controlled Rollout | Blocked until subscription-backed model access is designed/implemented | Step 8, published image workflow, authorized basic `$4` DigitalOcean, subscription-backed model access with no provider API key, Telegram bot, and Telegram test-user credentials | Not collected | Not collected | Requires approved basic `$4` DigitalOcean Droplet use, a no-API-key model access path backed by the user's current subscription, Telegram bot credentials, and a Telegram test user before final live acceptance. |
 
 ### Completed Evidence
 
@@ -368,11 +368,20 @@ in `CHANGELOG.md`.
   Docker-socket simulation, packaged the runner-service runtime imports in the
   runner image, and extended the runner Docker CLI timeout to cover the bounded
   Hermes stop grace.
+- 2026-07-14: After Step 8, the live Step 9 acceptance constraint changed to
+  basic `$4` DigitalOcean Droplets only. The server-side DigitalOcean default is
+  `s-1vcpu-512mb-10gb`; live validation must not provision the prior 2 GB
+  default. The user also clarified that model access must use the user's current
+  subscription only, with no provider API key requirement.
 
 ### Current Blockers and Next Work
 
 - Step 9 is externally blocked until the user authorizes billable DigitalOcean
-  work and supplies or approves dedicated OpenRouter and Telegram smoke
-  credentials.
+  work on only the basic `$4` `s-1vcpu-512mb-10gb` Droplet tier and supplies or
+  approves Telegram smoke credentials.
+- The current normal product setup path is OpenRouter-specific and requires an
+  `openrouter_api_key`. That path no longer satisfies the live requirement. Step
+  9 needs a subscription-backed model access design and implementation that does
+  not collect or require provider API keys before live acceptance can run.
 - Step 9 also needs the scanned/published GHCR image digest from the
   `publish-agent-image` workflow before live rollout evidence can be closed.
