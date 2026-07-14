@@ -5,6 +5,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "@/src/server/db/schema";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentConfigs, agentLogs, agents, backups } from "@/src/server/db/schema";
+import { listActiveAgentSecretReferencesInTransaction } from "@/src/server/agents/agent-secrets";
 import { recordAgentEventInTransaction } from "@/src/server/events/agent-events";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
 import {
@@ -26,6 +27,7 @@ type BackupTransaction = Parameters<
 
 type AgentBackupRow = typeof agents.$inferSelect & {
   config: typeof agentConfigs.$inferSelect;
+  secretReferences: BackupManifest["config"]["secretReferences"];
 };
 
 type BackupRow = typeof backups.$inferSelect;
@@ -328,6 +330,7 @@ async function selectAgentForBackup(
   return {
     ...row.agent,
     config: row.config,
+    secretReferences: await listActiveAgentSecretReferencesInTransaction(tx, row.agent.id),
   };
 }
 
@@ -352,6 +355,9 @@ function buildBackupManifest(agent: AgentBackupRow, logs: AgentLogRow[]): Backup
       timezone: sanitizeNonEmptyText(agent.config.timezone, "UTC"),
       maxDailySpendCents: agent.config.maxDailySpendCents,
       scheduleCron: sanitizeText(agent.config.scheduleCron),
+      ...(agent.secretReferences && Object.keys(agent.secretReferences).length > 0
+        ? { secretReferences: agent.secretReferences }
+        : {}),
     },
     templateSnapshot: sanitizedTemplateSnapshot,
     systemPrompt: sanitizeNonEmptyText(agent.config.systemPrompt, "System prompt redacted."),

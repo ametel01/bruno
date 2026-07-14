@@ -40,6 +40,15 @@ export const agentApprovalStatusEnum = pgEnum("agent_approval_status", [
   "cancelled",
 ]);
 
+export const agentSecretKindEnum = pgEnum("agent_secret_kind", [
+  "openrouter_api_key",
+  "telegram_bot_token",
+  "telegram_allowed_users",
+  "api_server_key",
+]);
+
+export const agentSecretStatusEnum = pgEnum("agent_secret_status", ["active", "revoked"]);
+
 export const localRunnerProcessStatusEnum = pgEnum("local_runner_process_status", [
   "starting",
   "running",
@@ -389,6 +398,42 @@ export const agentConfigs = pgTable(
       "agent_configs_schedule_cron_mode_check",
       sql`(${table.scheduleMode} = 'manual' AND ${table.scheduleCron} IS NULL) OR (${table.scheduleMode} = 'cron' AND ${table.scheduleCron} IS NOT NULL)`,
     ),
+  ],
+);
+
+export const agentSecrets = pgTable(
+  "agent_secrets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id")
+      .notNull()
+      .references(() => agents.id),
+    kind: agentSecretKindEnum("kind").notNull(),
+    ciphertext: text("ciphertext").notNull(),
+    iv: text("iv").notNull(),
+    authTag: text("auth_tag").notNull(),
+    keyVersion: text("key_version").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    status: agentSecretStatusEnum("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    rotatedAt: timestamp("rotated_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    check("agent_secrets_ciphertext_not_empty_check", sql`length(trim(${table.ciphertext})) > 0`),
+    check("agent_secrets_iv_not_empty_check", sql`length(trim(${table.iv})) > 0`),
+    check("agent_secrets_auth_tag_not_empty_check", sql`length(trim(${table.authTag})) > 0`),
+    check("agent_secrets_key_version_not_empty_check", sql`length(trim(${table.keyVersion})) > 0`),
+    check("agent_secrets_fingerprint_check", sql`${table.fingerprint} ~ '^[0-9a-f]{16}$'`),
+    check(
+      "agent_secrets_revoked_status_check",
+      sql`(${table.status} = 'revoked' AND ${table.revokedAt} IS NOT NULL) OR (${table.status} <> 'revoked' AND ${table.revokedAt} IS NULL)`,
+    ),
+    uniqueIndex("agent_secrets_active_agent_kind_idx")
+      .on(table.agentId, table.kind)
+      .where(sql`${table.status} = 'active'`),
+    index("agent_secrets_agent_status_idx").on(table.agentId, table.status),
   ],
 );
 

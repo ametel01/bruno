@@ -1,6 +1,7 @@
 import { and, desc, eq, exists, inArray, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
+import { revokeActiveAgentSecretsInTransaction } from "@/src/server/agents/agent-secrets";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   agentLogs,
@@ -2003,6 +2004,8 @@ export async function deleteAgentForUser(
       if (!deletedAgent) {
         throw new Error("Agent delete update returned no rows.");
       }
+
+      await revokeActiveAgentSecretsInTransaction(tx, { agentId: deletedAgent.id, now });
 
       await recordAgentEventInTransaction(tx, {
         agentId: deletedAgent.id,

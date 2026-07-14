@@ -8,6 +8,9 @@ import {
   agentEvents,
   agentLogs,
   agentScheduleModeEnum,
+  agentSecretKindEnum,
+  agentSecrets,
+  agentSecretStatusEnum,
   agentUsagePeriods,
   agents,
   agentStatusEnum,
@@ -31,6 +34,7 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(getTableName(agents)).toBe("agents");
     expect(getTableName(backups)).toBe("backups");
     expect(getTableName(agentConfigs)).toBe("agent_configs");
+    expect(getTableName(agentSecrets)).toBe("agent_secrets");
     expect(getTableName(agentUsagePeriods)).toBe("agent_usage_periods");
     expect(getTableName(agentApprovals)).toBe("agent_approvals");
     expect(getTableName(agentEvents)).toBe("agent_events");
@@ -59,6 +63,13 @@ describe("Milestone 1 agent persistence schema", () => {
       "expired",
       "cancelled",
     ]);
+    expect(agentSecretKindEnum.enumValues).toEqual([
+      "openrouter_api_key",
+      "telegram_bot_token",
+      "telegram_allowed_users",
+      "api_server_key",
+    ]);
+    expect(agentSecretStatusEnum.enumValues).toEqual(["active", "revoked"]);
     expect(localRunnerProcessStatusEnum.enumValues).toEqual([
       "starting",
       "running",
@@ -122,6 +133,59 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(Object.keys(columns)).not.toContain("providerToken");
     expect(Object.keys(columns)).not.toContain("bearerToken");
     expect(Object.keys(columns)).not.toContain("storageUri");
+  });
+
+  it("defines encrypted agent secret rows with one active value per agent and no plaintext column", () => {
+    const columns = getTableColumns(agentSecrets);
+
+    expect(Object.keys(columns)).toEqual([
+      "id",
+      "agentId",
+      "kind",
+      "ciphertext",
+      "iv",
+      "authTag",
+      "keyVersion",
+      "fingerprint",
+      "status",
+      "createdAt",
+      "updatedAt",
+      "rotatedAt",
+      "revokedAt",
+    ]);
+    expect(columns.agentId.notNull).toBe(true);
+    expect(columns.kind.notNull).toBe(true);
+    expect(columns.ciphertext.notNull).toBe(true);
+    expect(columns.iv.notNull).toBe(true);
+    expect(columns.authTag.notNull).toBe(true);
+    expect(columns.keyVersion.notNull).toBe(true);
+    expect(columns.fingerprint.notNull).toBe(true);
+    expect(columns.status.notNull).toBe(true);
+    expect(columns.status.default).toBe("active");
+    expect(columns.createdAt.notNull).toBe(true);
+    expect(columns.updatedAt.notNull).toBe(true);
+    expect(columns.rotatedAt.notNull).toBe(false);
+    expect(columns.revokedAt.notNull).toBe(false);
+    expect(Object.keys(columns)).not.toContain("plaintext");
+    expect(Object.keys(columns)).not.toContain("value");
+    expect(Object.keys(columns)).not.toContain("secret");
+  });
+
+  it("generates an additive encrypted agent secret migration without plaintext fields", async () => {
+    const migration = await readFile("drizzle/0015_dear_leader.sql", "utf8");
+
+    expect(migration).toContain('CREATE TYPE "public"."agent_secret_kind"');
+    expect(migration).toContain('CREATE TYPE "public"."agent_secret_status"');
+    expect(migration).toContain('CREATE TABLE "agent_secrets"');
+    expect(migration).toContain('"ciphertext" text NOT NULL');
+    expect(migration).toContain('"iv" text NOT NULL');
+    expect(migration).toContain('"auth_tag" text NOT NULL');
+    expect(migration).toContain('"key_version" text NOT NULL');
+    expect(migration).toContain('"fingerprint" text NOT NULL');
+    expect(migration).toContain('CREATE UNIQUE INDEX "agent_secrets_active_agent_kind_idx"');
+    expect(migration).toContain('WHERE "agent_secrets"."status" = \'active\'');
+    expect(migration).not.toMatch(/plaintext| raw_| value text|secret_value/i);
+    expect(migration).not.toMatch(/DROP TABLE|DROP COLUMN|ALTER COLUMN|(?:^|\n)UPDATE /);
   });
 
   it("generates a durable usage-period migration with interval constraints and no secret columns", async () => {

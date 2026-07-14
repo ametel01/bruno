@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createAgentForDevelopmentUser } from "@/src/server/agents/create-agent";
+import { replaceAgentSecretForUser } from "@/src/server/agents/agent-secrets";
 import {
   BACKUP_CREATED_EVENT_TYPE,
   createManualBackupForDevelopmentUser,
@@ -15,6 +16,13 @@ import type {
 import { FakeBackupObjectStorage, backupStorageFailure } from "@/src/server/backups/backup-storage";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentConfigs, agentEvents, agentLogs, backups } from "@/src/server/db/schema";
+
+const KEYRING_ENV = {
+  AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
+  AGENTBAY_AGENT_SECRET_KEYS_JSON: JSON.stringify({
+    v1: Buffer.alloc(32, 23).toString("base64url"),
+  }),
+};
 
 describe("manual agent backup creation", () => {
   let connection: DatabaseConnection;
@@ -67,6 +75,12 @@ describe("manual agent backup creation", () => {
         message: "error details",
       }),
     ]);
+    await replaceAgentSecretForUser(
+      created.agent.userId,
+      created.agent.id,
+      { kind: "openrouter_api_key", value: "sk-or-v1-abcdefghijklmnopqrstuvwxyz1234567890" },
+      { createConnection: () => connection, env: KEYRING_ENV },
+    );
 
     const result = await createManualBackupForDevelopmentUser(
       { agentId: created.agent.id },
@@ -127,6 +141,12 @@ describe("manual agent backup creation", () => {
         modelProvider: "openai",
         modelName: "gpt-5",
         scheduleMode: "manual",
+        secretReferences: {
+          openrouter_api_key: {
+            kind: "vault",
+            ref: expect.stringMatching(/^agent-secret:openrouter_api_key:[0-9a-f]{16}$/),
+          },
+        },
       },
       systemPrompt: "Use [redacted] only through configured references.",
       skills: { folderPath: ".agent/skills", files: [] },
@@ -168,6 +188,7 @@ describe("manual agent backup creation", () => {
 
     expect(new TextDecoder().decode(artifact.body)).toContain('"schemaVersion": 1');
     expect(new TextDecoder().decode(artifact.body)).not.toContain("sk-secret");
+    expect(new TextDecoder().decode(artifact.body)).not.toContain("sk-or-v1");
   });
 
   it("returns not found without creating a backup for a missing agent", async () => {
@@ -241,7 +262,7 @@ class FailingBackupObjectStorage implements BackupObjectStorage {
 }
 
 async function resetBackupTables(connection: DatabaseConnection): Promise<void> {
-  await connection.client`truncate table backups, agent_approvals, agent_configs, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runner_heartbeats, runners, app_metadata, users restart identity cascade`;
+  await connection.client`truncate table agent_secrets, backups, agent_approvals, agent_configs, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runner_heartbeats, runners, app_metadata, users restart identity cascade`;
 }
 
 function backupLog(

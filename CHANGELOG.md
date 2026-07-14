@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Encrypted per-agent secret storage, owner-scoped secret status/update/revoke APIs, generated agent API keys, and secret-free backup/restore/delete handling for the Hermes setup path.
 - Pinned Hermes workload image artifact, local smoke verification, and a separate scanned GHCR publication workflow for the first real AgentBay-managed Hermes runtime.
 - Server-only `AGENTBAY_AUTH_MODE` policy for registration-free loopback development, fail-closed Clerk production/custom-domain access, explicitly protected preview opt-in, and request-scoped shared-user resolution without changing runner-machine authentication.
 - Assigned-runner detail and cloud-runner cards now show labeled raw-infrastructure estimates and active-agent allocation with explicit unavailable and failure states while preserving health and capacity context.

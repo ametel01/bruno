@@ -9,7 +9,7 @@ import {
 import type { BackupManifest } from "@/src/server/backups/backup-manifest";
 import { FakeBackupObjectStorage } from "@/src/server/backups/backup-storage";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agentConfigs, agentEvents, agents, backups } from "@/src/server/db/schema";
+import { agentConfigs, agentEvents, agents, agentSecrets, backups } from "@/src/server/db/schema";
 
 describe("backup restore creation", () => {
   let connection: DatabaseConnection;
@@ -47,6 +47,12 @@ describe("backup restore creation", () => {
         scheduleCron: "0 8 * * *",
         timezone: "Asia/Manila",
         maxDailySpendCents: 1234,
+        secretReferences: {
+          openrouter_api_key: {
+            kind: "vault",
+            ref: "agent-secret:openrouter_api_key:0123456789abcdef",
+          },
+        },
       },
       systemPrompt: "Restored system prompt.",
     });
@@ -99,6 +105,10 @@ describe("backup restore creation", () => {
       .select()
       .from(agentEvents)
       .where(eq(agentEvents.type, BACKUP_RESTORED_EVENT_TYPE));
+    const restoredSecrets = await connection.db
+      .select()
+      .from(agentSecrets)
+      .where(eq(agentSecrets.agentId, result.restoredAgent.id));
     const nonOriginalAgents = await connection.db
       .select()
       .from(agents)
@@ -115,6 +125,7 @@ describe("backup restore creation", () => {
       timezone: "Asia/Manila",
       maxDailySpendCents: 1234,
     });
+    expect(restoredSecrets).toHaveLength(0);
     expect(restoredBackup).toMatchObject({
       id: backup.id,
       status: "restored",
@@ -408,7 +419,7 @@ describe("backup restore creation", () => {
 });
 
 async function resetRestoreTables(connection: DatabaseConnection): Promise<void> {
-  await connection.client`truncate table backups, agent_approvals, agent_configs, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runner_heartbeats, runners, app_metadata, users restart identity cascade`;
+  await connection.client`truncate table agent_secrets, backups, agent_approvals, agent_configs, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runner_heartbeats, runners, app_metadata, users restart identity cascade`;
 }
 
 async function seedReadyBackup(input: {
