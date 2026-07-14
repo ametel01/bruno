@@ -151,3 +151,54 @@ export async function markCloudRunnerReadyAfterAuthenticatedProbe(
 
   return true;
 }
+
+export async function markCloudRunnerExternallyDeleted(
+  tx: RunnerProvisioningTransaction,
+  input: {
+    runnerId: string;
+    userId: string;
+    providerResourceId: string;
+    now: Date;
+  },
+): Promise<boolean> {
+  const transitionedRows = await tx
+    .update(runners)
+    .set({
+      status: "deleted",
+      provisioningStatus: "deleted",
+      provisioningError: null,
+      provisioningCompletedAt: input.now,
+      deletedAt: input.now,
+      updatedAt: input.now,
+    })
+    .where(
+      and(
+        eq(runners.id, input.runnerId),
+        eq(runners.userId, input.userId),
+        eq(runners.kind, "digitalocean"),
+        eq(runners.provider, DIGITALOCEAN_PROVIDER),
+        eq(runners.providerResourceId, input.providerResourceId),
+        isNull(runners.deletedAt),
+      ),
+    )
+    .returning({ id: runners.id });
+
+  if (transitionedRows.length === 0) {
+    return false;
+  }
+
+  await recordRunnerProvisioningEvent(tx, {
+    runnerId: input.runnerId,
+    phase: "deleted",
+    status: "completed",
+    message: "DigitalOcean Droplet was deleted outside AgentBay.",
+    metadata: {
+      provider: DIGITALOCEAN_PROVIDER,
+      deletionSource: "provider_reconciliation",
+      providerResourceId: input.providerResourceId,
+    },
+    now: input.now,
+  });
+
+  return true;
+}

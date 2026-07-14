@@ -96,6 +96,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Runner placement now excludes cloud runners until authenticated readiness, verifies the live
+  DigitalOcean resource and runner endpoint before assignment, tombstones externally deleted
+  Droplets, and revalidates the candidate transactionally before creating an agent.
 - Added an opt-in, secret-safe Clerk Playwright development smoke harness for deterministic
   email-code, current-user, sign-out, and isolated-context checks without changing credential-free
   CI or claiming Google/Apple provider success.

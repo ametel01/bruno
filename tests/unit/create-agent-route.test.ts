@@ -3,6 +3,7 @@ import {
   AgentCreateBlockedError,
   AgentPersistenceError,
   AgentRunnerProvisioningError,
+  AgentRunnerVerificationError,
 } from "@/src/server/agents/create-agent";
 
 const mocks = vi.hoisted(() => ({
@@ -261,6 +262,28 @@ describe("POST /api/agents route", () => {
       },
     });
     expect(JSON.stringify(body)).not.toContain("dop_v1");
+  });
+
+  it("fails closed when live runner eligibility cannot be verified", async () => {
+    mocks.createAgentForUser.mockRejectedValueOnce(
+      new AgentRunnerVerificationError("provider_check_failed"),
+    );
+    const { POST } = await import("@/app/api/agents/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/agents", {
+        method: "POST",
+        body: JSON.stringify({ name: "Research Agent", templateKey: "research_agent" }),
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "runner_verification_unavailable",
+        message: "Runner availability could not be verified safely. Try again shortly.",
+      },
+    });
   });
 
   it("returns a safe database unavailable response when Postgres cannot be reached", async () => {

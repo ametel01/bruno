@@ -15,6 +15,10 @@ import {
   selectRunnerPlacementForUserInTransaction,
   type RunnerPlacementResult,
 } from "@/src/server/runners/runner-placement";
+import {
+  verifyRunnerPlacementCandidate,
+  type RunnerPlacementVerificationResult,
+} from "@/src/server/runners/runner-placement-verification";
 import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
 import {
   createDigitalOceanRunnerForUser,
@@ -102,12 +106,19 @@ type InsertDefaultAgentConfig = (
 ) => Promise<void>;
 
 type EnsureCloudRunnerProvisioning = () => Promise<CreateRunnerProvisioningResult>;
+type VerifyRunnerPlacement = (
+  connection: DatabaseConnection,
+  input: { runnerId: string; userId: string },
+) => Promise<RunnerPlacementVerificationResult>;
+
+const MAX_RUNNER_PLACEMENT_VERIFICATION_ATTEMPTS = 5;
 
 export type CreateAgentDependencies = {
   createConnection?: () => DatabaseConnection;
   insertDefaultAgentConfig?: InsertDefaultAgentConfig;
   insertCreatedEvent?: InsertCreatedEvent;
   ensureCloudRunnerProvisioning?: EnsureCloudRunnerProvisioning;
+  verifyRunnerPlacement?: VerifyRunnerPlacement;
   autoProvisionCloudRunner?: boolean;
   planMaxAgents?: number | null;
 };
@@ -157,6 +168,16 @@ export class AgentRunnerProvisioningError extends Error {
     this.name = "AgentRunnerProvisioningError";
     this.reason = reason;
     this.cause = cause;
+  }
+}
+
+export class AgentRunnerVerificationError extends Error {
+  readonly reason: "provider_check_failed" | "provider_not_configured" | "verification_churn";
+
+  constructor(reason: "provider_check_failed" | "provider_not_configured" | "verification_churn") {
+    super("Runner eligibility could not be verified safely.");
+    this.name = "AgentRunnerVerificationError";
+    this.reason = reason;
   }
 }
 
@@ -284,65 +305,209 @@ async function createAgentWithUserResolver(
   const insertCreatedEvent = dependencies.insertCreatedEvent ?? insertDefaultCreatedEvent;
   const autoProvisionCloudRunner =
     dependencies.autoProvisionCloudRunner ?? process.env.NODE_ENV !== "test";
+  const verifyRunnerPlacement =
+    dependencies.verifyRunnerPlacement ?? verifyRunnerPlacementCandidate;
+  const templateSnapshot = getAgentTemplateSnapshot(input.templateKey);
   const initial = await connection.db.transaction(async (tx) => {
     const userId = await resolveUserId(tx);
-    const templateSnapshot = getAgentTemplateSnapshot(input.templateKey);
     const placement = await selectRunnerPlacementForUserInTransaction(tx, userId, {
       planMaxAgents: dependencies.planMaxAgents,
       runnerId: input.runnerId,
     });
 
-    logAgentCreate("placement_checked", {
-      autoProvisionCloudRunner,
-      requestedRunner: Boolean(input.runnerId),
-      placement: placement.ok ? "online_runner" : placement.reason,
-    });
-
-    if (!placement.ok && input.runnerId && placement.reason === "no_online_runner") {
-      throw new AgentRunnerAssignmentError();
-    }
-
     if (
       !placement.ok &&
-      (placement.reason === "plan_limit_reached" || placement.reason === "runner_capacity_reached")
+      placement.reason === "no_online_runner" &&
+      !autoProvisionCloudRunner &&
+      !input.runnerId
     ) {
-      throw new AgentCreateBlockedError(placement);
+      return {
+        status: "created" as const,
+        response: await insertCreatedAgentInTransaction(tx, {
+          userId,
+          name: input.name,
+          templateKey: input.templateKey,
+          templateSnapshot,
+          runnerId: null,
+          insertDefaultAgentConfig,
+          insertCreatedEvent,
+        }),
+      };
     }
 
-    if (!placement.ok && placement.reason === "no_online_runner" && autoProvisionCloudRunner) {
-      logAgentCreate("cloud_runner_needed", {
-        autoProvisionCloudRunner,
-        requestedRunner: Boolean(input.runnerId),
-      });
-      return { status: "needs_cloud_runner", userId } as const;
-    }
-
-    return {
-      status: "created",
-      userId,
-      response: await insertCreatedAgentInTransaction(tx, {
-        userId,
-        name: input.name,
-        templateKey: input.templateKey,
-        templateSnapshot,
-        runnerId: placement.ok ? placement.runner.id : null,
-        insertDefaultAgentConfig,
-        insertCreatedEvent,
-      }),
-    } as const;
+    return { status: "placement_pending" as const, userId, placement };
   });
 
   if (initial.status === "created") {
-    logAgentCreate("created_without_cloud_provisioning", {
-      agentId: initial.response.agent.id,
-      assignedRunner: Boolean(initial.response.agent.runnerId),
-    });
+    logAgentCreate("created_without_runner", { agentId: initial.response.agent.id });
     return initial.response;
   }
 
+  const { userId } = initial;
+
+  for (let attempt = 1; attempt <= MAX_RUNNER_PLACEMENT_VERIFICATION_ATTEMPTS; attempt += 1) {
+    const placement =
+      attempt === 1
+        ? initial.placement
+        : await connection.db.transaction((tx) =>
+            selectRunnerPlacementForUserInTransaction(tx, userId, {
+              planMaxAgents: dependencies.planMaxAgents,
+              runnerId: input.runnerId,
+            }),
+          );
+
+    logAgentCreate("placement_checked", {
+      attempt,
+      autoProvisionCloudRunner,
+      requestedRunner: Boolean(input.runnerId),
+      placement: placement.ok ? "online_runner" : placement.reason,
+      ...(placement.ok ? { runnerId: placement.runner.id, runnerKind: placement.runner.kind } : {}),
+    });
+
+    if (!placement.ok) {
+      if (input.runnerId && placement.reason === "no_online_runner") {
+        throw new AgentRunnerAssignmentError();
+      }
+
+      if (
+        placement.reason === "plan_limit_reached" ||
+        placement.reason === "runner_capacity_reached"
+      ) {
+        throw new AgentCreateBlockedError(placement);
+      }
+
+      if (autoProvisionCloudRunner) {
+        logAgentCreate("cloud_runner_needed", {
+          autoProvisionCloudRunner,
+          requestedRunner: Boolean(input.runnerId),
+        });
+        return createAgentWithProvisionedRunner(connection, {
+          userId,
+          name: input.name,
+          templateKey: input.templateKey,
+          templateSnapshot,
+          insertDefaultAgentConfig,
+          insertCreatedEvent,
+          dependencies,
+        });
+      }
+
+      const response = await connection.db.transaction(async (tx) => {
+        await assertActiveAgentPlanAllowsInsert(tx, userId, dependencies.planMaxAgents);
+        return insertCreatedAgentInTransaction(tx, {
+          userId,
+          name: input.name,
+          templateKey: input.templateKey,
+          templateSnapshot,
+          runnerId: null,
+          insertDefaultAgentConfig,
+          insertCreatedEvent,
+        });
+      });
+
+      logAgentCreate("created_without_runner", { agentId: response.agent.id });
+      return response;
+    }
+
+    const verification = await verifyRunnerPlacement(connection, {
+      runnerId: placement.runner.id,
+      userId,
+    });
+
+    if (!verification.ok) {
+      logAgentCreate("runner_candidate_rejected", {
+        action: verification.action,
+        attempt,
+        reason: verification.reason,
+        runnerId: placement.runner.id,
+        transitioned: verification.transitioned,
+      });
+
+      if (verification.action === "fail_closed") {
+        throw new AgentRunnerVerificationError(verification.reason);
+      }
+
+      if (input.runnerId) {
+        throw new AgentRunnerAssignmentError();
+      }
+
+      continue;
+    }
+
+    const created = await connection.db.transaction(async (tx) => {
+      const finalPlacement = await selectRunnerPlacementForUserInTransaction(tx, userId, {
+        planMaxAgents: dependencies.planMaxAgents,
+        runnerId: placement.runner.id,
+      });
+
+      if (!finalPlacement.ok) {
+        return { ok: false, placement: finalPlacement } as const;
+      }
+
+      return {
+        ok: true,
+        response: await insertCreatedAgentInTransaction(tx, {
+          userId,
+          name: input.name,
+          templateKey: input.templateKey,
+          templateSnapshot,
+          runnerId: finalPlacement.runner.id,
+          insertDefaultAgentConfig,
+          insertCreatedEvent,
+        }),
+      } as const;
+    });
+
+    if (!created.ok) {
+      logAgentCreate("runner_candidate_changed_before_insert", {
+        attempt,
+        reason: created.placement.reason,
+        runnerId: placement.runner.id,
+      });
+
+      if (
+        created.placement.reason === "plan_limit_reached" ||
+        created.placement.reason === "runner_capacity_reached"
+      ) {
+        throw new AgentCreateBlockedError(created.placement);
+      }
+
+      if (input.runnerId) {
+        throw new AgentRunnerAssignmentError();
+      }
+
+      continue;
+    }
+
+    logAgentCreate("created_with_existing_runner", {
+      agentId: created.response.agent.id,
+      runnerId: verification.runner.id,
+      runnerKind: verification.runner.kind,
+      provisioningStatus: verification.runner.provisioningStatus,
+    });
+    return created.response;
+  }
+
+  throw new AgentRunnerVerificationError("verification_churn");
+}
+
+async function createAgentWithProvisionedRunner(
+  connection: DatabaseConnection,
+  input: {
+    userId: string;
+    name: string;
+    templateKey: SupportedAgentTemplateKey;
+    templateSnapshot: AgentTemplateSnapshot;
+    insertDefaultAgentConfig: InsertDefaultAgentConfig;
+    insertCreatedEvent: InsertCreatedEvent;
+    dependencies: CreateAgentDependencies;
+  },
+): Promise<CreatedAgentResponse> {
+  const { dependencies } = input;
+
   const ensureCloudRunnerProvisioning =
     dependencies.ensureCloudRunnerProvisioning ??
-    (() => ensureDefaultCloudRunnerProvisioning(initial.userId));
+    (() => ensureDefaultCloudRunnerProvisioning(input.userId));
   logAgentCreate("cloud_runner_provisioning_start", {});
   const provisionedRunnerId = await ensureProvisionedRunnerId(ensureCloudRunnerProvisioning);
   logAgentCreate("cloud_runner_provisioning_runner_selected", {
@@ -350,20 +515,20 @@ async function createAgentWithUserResolver(
   });
 
   return await connection.db.transaction(async (tx) => {
-    await assertActiveAgentPlanAllowsInsert(tx, initial.userId, dependencies.planMaxAgents);
+    await assertActiveAgentPlanAllowsInsert(tx, input.userId, dependencies.planMaxAgents);
     await assertProvisioningRunnerAssignableToUser(tx, {
-      userId: initial.userId,
+      userId: input.userId,
       runnerId: provisionedRunnerId,
     });
 
     return insertCreatedAgentInTransaction(tx, {
-      userId: initial.userId,
+      userId: input.userId,
       name: input.name,
       templateKey: input.templateKey,
-      templateSnapshot: getAgentTemplateSnapshot(input.templateKey),
+      templateSnapshot: input.templateSnapshot,
       runnerId: provisionedRunnerId,
-      insertDefaultAgentConfig,
-      insertCreatedEvent,
+      insertDefaultAgentConfig: input.insertDefaultAgentConfig,
+      insertCreatedEvent: input.insertCreatedEvent,
     });
   });
 }
@@ -373,6 +538,7 @@ function throwAgentCreateError(error: unknown): never {
     error instanceof AgentCreateBlockedError ||
     error instanceof AgentRunnerAssignmentError ||
     error instanceof AgentRunnerProvisioningError ||
+    error instanceof AgentRunnerVerificationError ||
     error instanceof AgentPersistenceError
   ) {
     throw error;

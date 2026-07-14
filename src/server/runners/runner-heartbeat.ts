@@ -116,6 +116,18 @@ export type ConfirmCloudRunnerReadinessResult =
       reason: "already_ready" | "runner_not_eligible";
     };
 
+export type ProbeRunnerEndpointReadinessResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        | "endpoint_invalid"
+        | "endpoint_rejected"
+        | "network_error"
+        | "response_invalid"
+        | "token_not_configured";
+    };
+
 export class RunnerHeartbeatPersistenceError extends Error {
   constructor(cause?: unknown) {
     super("Runner heartbeat failed.");
@@ -260,62 +272,24 @@ export async function confirmCloudRunnerReadiness(
       return { outcome: "not_applicable", reason: "runner_not_eligible" };
     }
 
-    const runnerBearerToken = (
+    const runnerBearerToken =
       dependencies.runnerBearerToken === undefined
         ? process.env[RUNNER_BEARER_TOKEN_ENV]
-        : dependencies.runnerBearerToken
-    )?.trim();
-
-    if (!runnerBearerToken) {
-      return { outcome: "pending", reason: "token_not_configured" };
-    }
+        : dependencies.runnerBearerToken;
 
     const allowInsecureLoopback =
       dependencies.allowInsecureLoopback ??
       process.env[DIGITALOCEAN_PROVIDER_MODE_ENV] === "local_docker";
-    const readinessUrl = toReadinessProbeUrl(runner.endpointUrl, allowInsecureLoopback);
+    const probe = await probeRunnerEndpointReadiness({
+      endpointUrl: runner.endpointUrl,
+      runnerBearerToken,
+      allowInsecureLoopback,
+      ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+      ...(dependencies.timeoutMs === undefined ? {} : { timeoutMs: dependencies.timeoutMs }),
+    });
 
-    if (!readinessUrl) {
-      return { outcome: "pending", reason: "endpoint_invalid" };
-    }
-
-    const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      dependencies.timeoutMs ?? RUNNER_READINESS_PROBE_TIMEOUT_MS,
-    );
-    let response: Response;
-
-    try {
-      response = await (dependencies.fetch ?? fetch)(readinessUrl, {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${runnerBearerToken}`,
-        },
-        redirect: "error",
-        signal: controller.signal,
-      });
-    } catch {
-      return { outcome: "pending", reason: "network_error" };
-    } finally {
-      clearTimeout(timeout);
-    }
-
-    if (!response.ok) {
-      return { outcome: "pending", reason: "endpoint_rejected" };
-    }
-
-    let payload: unknown;
-
-    try {
-      payload = await response.json();
-    } catch {
-      return { outcome: "pending", reason: "response_invalid" };
-    }
-
-    if (!isReadinessResponse(payload)) {
-      return { outcome: "pending", reason: "response_invalid" };
+    if (!probe.ok) {
+      return { outcome: "pending", reason: probe.reason };
     }
 
     const now = dependencies.now?.() ?? new Date();
@@ -331,6 +305,63 @@ export async function confirmCloudRunnerReadiness(
       await connection.close();
     }
   }
+}
+
+export async function probeRunnerEndpointReadiness(input: {
+  endpointUrl: string | null;
+  runnerBearerToken: string | null | undefined;
+  allowInsecureLoopback?: boolean;
+  fetch?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<ProbeRunnerEndpointReadinessResult> {
+  const runnerBearerToken = input.runnerBearerToken?.trim();
+
+  if (!runnerBearerToken) {
+    return { ok: false, reason: "token_not_configured" };
+  }
+
+  const readinessUrl = toReadinessProbeUrl(input.endpointUrl, input.allowInsecureLoopback ?? false);
+
+  if (!readinessUrl) {
+    return { ok: false, reason: "endpoint_invalid" };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    input.timeoutMs ?? RUNNER_READINESS_PROBE_TIMEOUT_MS,
+  );
+  let response: Response;
+
+  try {
+    response = await (input.fetch ?? fetch)(readinessUrl, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${runnerBearerToken}`,
+      },
+      redirect: "error",
+      signal: controller.signal,
+    });
+  } catch {
+    return { ok: false, reason: "network_error" };
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    return { ok: false, reason: "endpoint_rejected" };
+  }
+
+  let payload: unknown;
+
+  try {
+    payload = await response.json();
+  } catch {
+    return { ok: false, reason: "response_invalid" };
+  }
+
+  return isReadinessResponse(payload) ? { ok: true } : { ok: false, reason: "response_invalid" };
 }
 
 function toReadinessProbeUrl(

@@ -202,6 +202,85 @@ describe.sequential("runner placement contract", () => {
     ).resolves.toEqual({ ok: false, reason: "no_online_runner" });
   });
 
+  it("excludes online DigitalOcean runners until authenticated readiness is complete", async () => {
+    const now = new Date("2026-07-06T04:02:00.000Z");
+    const userId = await seedDevelopmentUser(connection);
+    const [runner] = await connection.db
+      .insert(runners)
+      .values({
+        userId,
+        name: "Registering Cloud Runner",
+        kind: "digitalocean",
+        endpointUrl: "https://registering-runner.example.com",
+        status: "online",
+        provider: "digitalocean",
+        providerResourceId: "droplet-registering",
+        region: "sfo3",
+        sizeSlug: "s-1vcpu-512mb-10gb",
+        image: "ubuntu-24-04-x64",
+        provisioningStatus: "waiting_for_runner",
+        provisioningStartedAt: new Date("2026-07-06T04:00:00.000Z"),
+      })
+      .returning({ id: runners.id });
+
+    if (!runner) {
+      throw new Error("Runner insert returned no rows.");
+    }
+
+    await seedHeartbeat(connection, runner.id, {
+      observedAt: new Date("2026-07-06T04:01:00.000Z"),
+      metrics: { maxAgents: 1, runningAgents: 0 },
+    });
+
+    await expect(
+      selectRunnerPlacementForUser(
+        userId,
+        {},
+        { createConnection: () => connection, now: () => now },
+      ),
+    ).resolves.toEqual({ ok: false, reason: "no_online_runner" });
+  });
+
+  it("selects an online DigitalOcean runner only after it is ready", async () => {
+    const now = new Date("2026-07-06T04:02:00.000Z");
+    const userId = await seedDevelopmentUser(connection);
+    const [runner] = await connection.db
+      .insert(runners)
+      .values({
+        userId,
+        name: "Ready Cloud Runner",
+        kind: "digitalocean",
+        endpointUrl: "https://ready-runner.example.com",
+        status: "online",
+        provider: "digitalocean",
+        providerResourceId: "droplet-ready",
+        region: "sfo3",
+        sizeSlug: "s-1vcpu-512mb-10gb",
+        image: "ubuntu-24-04-x64",
+        provisioningStatus: "ready",
+        provisioningStartedAt: new Date("2026-07-06T04:00:00.000Z"),
+        provisioningCompletedAt: new Date("2026-07-06T04:01:00.000Z"),
+      })
+      .returning({ id: runners.id });
+
+    if (!runner) {
+      throw new Error("Runner insert returned no rows.");
+    }
+
+    await seedHeartbeat(connection, runner.id, {
+      observedAt: new Date("2026-07-06T04:01:00.000Z"),
+      metrics: { maxAgents: 1, runningAgents: 0 },
+    });
+
+    await expect(
+      selectRunnerPlacementForUser(
+        userId,
+        {},
+        { createConnection: () => connection, now: () => now },
+      ),
+    ).resolves.toMatchObject({ ok: true, runner: { id: runner.id, kind: "digitalocean" } });
+  });
+
   it("marks stale online runners offline before placement selection", async () => {
     const now = new Date("2026-07-06T04:03:00.000Z");
     const staleObservedAt = new Date(now.getTime() - RUNNER_HEARTBEAT_STALE_THRESHOLD_MS - 1);

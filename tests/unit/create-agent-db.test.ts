@@ -102,6 +102,8 @@ import {
   getAssignedRunnerForActiveAgentDevelopmentUser,
 } from "@/src/server/runners/manual-runner-persistence";
 import { RUNNER_HEARTBEAT_STALE_THRESHOLD_MS } from "@/src/server/runners/runner-heartbeat";
+import { FakeDigitalOceanProvider } from "@/src/server/runners/digitalocean-provider";
+import { verifyRunnerPlacementCandidate } from "@/src/server/runners/runner-placement-verification";
 import type { CreateRunnerProvisioningResult } from "@/src/server/runners/runner-provisioning";
 import {
   AGENTBAY_AGENT_ID_LABEL,
@@ -310,6 +312,126 @@ describe("create agent persistence", () => {
     expect(provisionedRunnerId).toEqual(expect.any(String));
     expect(created.agent.runnerId).toBe(provisionedRunnerId);
     expect(persistedAgent?.runnerId).toBe(provisionedRunnerId);
+  });
+
+  it("rejects a destroyed online Droplet and provisions a replacement runner", async () => {
+    const userId = await ensureDevelopmentUser(connection);
+    const now = new Date();
+    const [destroyedRunner] = await connection.db
+      .insert(runners)
+      .values({
+        userId,
+        name: "Destroyed Cloud Runner",
+        kind: "digitalocean",
+        endpointUrl: "https://destroyed-runner.example.com",
+        status: "online",
+        provider: "digitalocean",
+        providerResourceId: "destroyed-droplet",
+        region: "sfo3",
+        sizeSlug: "s-1vcpu-512mb-10gb",
+        image: "ubuntu-24-04-x64",
+        provisioningStatus: "ready",
+        provisioningStartedAt: now,
+        provisioningCompletedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: runners.id });
+
+    if (!destroyedRunner) {
+      throw new Error("Destroyed runner insert returned no rows.");
+    }
+
+    await connection.db.insert(runnerHeartbeats).values({
+      runnerId: destroyedRunner.id,
+      status: "online",
+      metadata: { metrics: { maxAgents: 1, runningAgents: 0 } },
+      observedAt: now,
+      createdAt: now,
+    });
+
+    const ensureCloudRunnerProvisioning = vi.fn(
+      async (): Promise<CreateRunnerProvisioningResult> => {
+        const [replacement] = await connection.db
+          .insert(runners)
+          .values({
+            userId,
+            name: "Replacement Cloud Runner",
+            kind: "digitalocean",
+            status: "provisioning",
+            provider: "digitalocean",
+            region: "sfo3",
+            sizeSlug: "s-1vcpu-512mb-10gb",
+            image: "ubuntu-24-04-x64",
+            provisioningStatus: "pending",
+            provisioningStartedAt: now,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
+
+        if (!replacement) {
+          throw new Error("Replacement runner insert returned no rows.");
+        }
+
+        return {
+          ok: true,
+          duplicate: false,
+          runner: {
+            id: replacement.id,
+            name: replacement.name,
+            kind: "digitalocean",
+            status: "provisioning",
+            provider: "digitalocean",
+            providerResourceId: null,
+            region: "sfo3",
+            sizeSlug: "s-1vcpu-512mb-10gb",
+            image: "ubuntu-24-04-x64",
+            provisioning: {
+              status: "pending",
+              error: null,
+              startedAt: now.toISOString(),
+              completedAt: null,
+              phases: [],
+            },
+          },
+        };
+      },
+    );
+
+    const created = await createAgentForDevelopmentUser(
+      { name: "Replacement Agent", templateKey: "research_agent" },
+      {
+        autoProvisionCloudRunner: true,
+        createConnection: () => connection,
+        ensureCloudRunnerProvisioning,
+        verifyRunnerPlacement: (candidateConnection, input) =>
+          verifyRunnerPlacementCandidate(candidateConnection, input, {
+            provider: new FakeDigitalOceanProvider(),
+            readConfig: () => ({
+              token: "digitalocean-test-token",
+              runnerBearerToken: "runner-command-token",
+              runnerImage: "ghcr.io/ametel01/agentbay-runner:test",
+              region: "sfo3",
+              sizeSlug: "s-1vcpu-512mb-10gb",
+              image: "ubuntu-24-04-x64",
+              tags: ["agentbay"],
+            }),
+          }),
+      },
+    );
+    const [persistedDestroyedRunner] = await connection.db
+      .select({ status: runners.status, deletedAt: runners.deletedAt })
+      .from(runners)
+      .where(eq(runners.id, destroyedRunner.id));
+
+    expect(ensureCloudRunnerProvisioning).toHaveBeenCalledTimes(1);
+    expect(created.agent.runnerId).not.toBe(destroyedRunner.id);
+    expect(created.agent.runnerId).toEqual(expect.any(String));
+    expect(persistedDestroyedRunner).toMatchObject({
+      status: "deleted",
+      deletedAt: expect.any(Date),
+    });
   });
 
   it("creates agents with no assigned runner by default and preserves no-runner lifecycle behavior", async () => {

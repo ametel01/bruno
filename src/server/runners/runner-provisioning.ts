@@ -682,7 +682,7 @@ export async function createDigitalOceanRunnerForUser(
   }
 }
 
-function createConfiguredDigitalOceanProvider(
+export function createConfiguredDigitalOceanProvider(
   config: DigitalOceanProviderConfig,
 ): DigitalOceanProvider {
   if (config.providerMode === "local_docker") {

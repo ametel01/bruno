@@ -2,6 +2,7 @@ import {
   AgentCreateBlockedError,
   AgentRunnerAssignmentError,
   AgentRunnerProvisioningError,
+  AgentRunnerVerificationError,
   AgentPersistenceError,
   createAgentForUser,
   validateCreateAgentPayload,
@@ -73,6 +74,18 @@ export async function POST(
 
     if (error instanceof AgentRunnerProvisioningError) {
       return runnerProvisioningErrorResponse(error);
+    }
+
+    if (error instanceof AgentRunnerVerificationError) {
+      return Response.json(
+        {
+          error: {
+            code: "runner_verification_unavailable",
+            message: "Runner availability could not be verified safely. Try again shortly.",
+          },
+        },
+        { status: 503 },
+      );
     }
 
     if (error instanceof AgentPersistenceError) {

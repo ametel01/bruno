@@ -1,8 +1,12 @@
-import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agents, runnerHeartbeats, runners } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
+import {
+  DIGITALOCEAN_RUNNER_KIND,
+  DIGITALOCEAN_PROVIDER,
+} from "@/src/server/runners/digitalocean-provider";
 import { reconcileStaleRunnerHeartbeatsInTransaction } from "@/src/server/runners/runner-heartbeat";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
@@ -182,6 +186,14 @@ export async function selectRunnerPlacementForUserInTransaction(
     eq(runners.status, "online"),
     isNotNull(runners.endpointUrl),
     isNull(runners.deletedAt),
+    or(
+      eq(runners.kind, "manual_vps"),
+      and(
+        eq(runners.kind, DIGITALOCEAN_RUNNER_KIND),
+        eq(runners.provider, DIGITALOCEAN_PROVIDER),
+        eq(runners.provisioningStatus, "ready"),
+      ),
+    ),
   ];
 
   if (input.runnerId) {
