@@ -483,7 +483,7 @@ describe.sequential("runner provisioning service", () => {
       status: "provision_failed",
       provisioningStatus: "failed",
       provisioningError: expect.stringContaining(
-        "Cloud runner bootstrap did not register before the timeout.",
+        "Cloud runner did not become ready before the timeout.",
       ),
     });
   });

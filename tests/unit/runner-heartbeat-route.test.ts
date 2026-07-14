@@ -9,18 +9,21 @@ const mocks = vi.hoisted(() => {
   }
 
   return {
+    confirmCloudRunnerReadiness: vi.fn(),
     recordRunnerHeartbeat: vi.fn(),
     RunnerHeartbeatPersistenceError,
   };
 });
 
 vi.mock("@/src/server/runners/runner-heartbeat", () => ({
+  confirmCloudRunnerReadiness: mocks.confirmCloudRunnerReadiness,
   recordRunnerHeartbeat: mocks.recordRunnerHeartbeat,
   RunnerHeartbeatPersistenceError: mocks.RunnerHeartbeatPersistenceError,
 }));
 
 describe("POST /runner/v1/heartbeat route", () => {
   afterEach(() => {
+    mocks.confirmCloudRunnerReadiness.mockReset();
     mocks.recordRunnerHeartbeat.mockReset();
     vi.restoreAllMocks();
   });
@@ -35,6 +38,10 @@ describe("POST /runner/v1/heartbeat route", () => {
         status: "online",
         observedAt: "2026-07-05T08:00:00.000Z",
       },
+    });
+    mocks.confirmCloudRunnerReadiness.mockResolvedValueOnce({
+      outcome: "pending",
+      reason: "network_error",
     });
     const { POST } = await import("@/app/runner/v1/heartbeat/route");
 
@@ -63,11 +70,23 @@ describe("POST /runner/v1/heartbeat route", () => {
       authorizationHeader: "Bearer agb_run_secret",
       payload: { runnerId: "00000000-0000-4000-8000-000000000130" },
     });
+    expect(mocks.confirmCloudRunnerReadiness).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000130",
+    );
     expect(ingressLogs).toContainEqual(
       expect.objectContaining({
         endpoint: "heartbeat",
         event: "request_received",
         runnerId: "00000000-0000-4000-8000-000000000130",
+      }),
+    );
+    expect(ingressLogs).toContainEqual(
+      expect.objectContaining({
+        endpoint: "heartbeat",
+        event: "readiness_probe_completed",
+        runnerId: "00000000-0000-4000-8000-000000000130",
+        outcome: "pending",
+        reason: "network_error",
       }),
     );
     expect(ingressLogs).toContainEqual(

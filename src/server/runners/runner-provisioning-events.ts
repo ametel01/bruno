@@ -1,6 +1,6 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { runnerProvisioningEvents, runners } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
@@ -105,33 +105,49 @@ export async function markCloudRunnerRegistered(
   });
 }
 
-export async function markCloudRunnerReadyAfterFirstHeartbeat(
+export async function markCloudRunnerReadyAfterAuthenticatedProbe(
   tx: RunnerProvisioningTransaction,
   input: {
     runnerId: string;
     now: Date;
-    heartbeatStatus: "online" | "degraded";
   },
-): Promise<void> {
-  await tx
+): Promise<boolean> {
+  const transitionedRows = await tx
     .update(runners)
     .set({
-      status: input.heartbeatStatus,
+      status: "online",
       provisioningStatus: "ready",
       provisioningCompletedAt: input.now,
       updatedAt: input.now,
     })
-    .where(eq(runners.id, input.runnerId));
+    .where(
+      and(
+        eq(runners.id, input.runnerId),
+        eq(runners.kind, "digitalocean"),
+        eq(runners.provider, DIGITALOCEAN_PROVIDER),
+        eq(runners.status, "online"),
+        eq(runners.provisioningStatus, "waiting_for_runner"),
+        isNull(runners.deletedAt),
+      ),
+    )
+    .returning({ id: runners.id });
+
+  if (transitionedRows.length === 0) {
+    return false;
+  }
 
   await recordRunnerProvisioningEvent(tx, {
     runnerId: input.runnerId,
     phase: "ready",
     status: "completed",
-    message: "First cloud runner heartbeat was observed.",
+    message: "Authenticated runner readiness probe succeeded.",
     metadata: {
       provider: DIGITALOCEAN_PROVIDER,
-      heartbeatStatus: input.heartbeatStatus,
+      heartbeatStatus: "online",
+      readinessProbe: "authenticated_endpoint",
     },
     now: input.now,
   });
+
+  return true;
 }

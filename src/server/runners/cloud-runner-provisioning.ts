@@ -268,7 +268,7 @@ export async function reconcileTimedOutWaitingForRunnerRows(
         eq(runners.kind, DIGITALOCEAN_RUNNER_KIND),
         eq(runners.provider, DIGITALOCEAN_PROVIDER),
         eq(runners.provisioningStatus, "waiting_for_runner"),
-        lt(runners.updatedAt, cutoff),
+        lt(runners.provisioningStartedAt, cutoff),
         isNull(runners.deletedAt),
       ),
     )
@@ -313,7 +313,7 @@ export async function reconcileTimedOutWaitingForRunnerRows(
 function timedOutWaitingForRunnerMessage(providerResourceId: string | null): string {
   const resource = safeProviderResourceIdForMessage(providerResourceId);
 
-  return `Cloud runner bootstrap did not register before the timeout. Check Droplet cloud-init logs, confirm SSH/HTTP ports are reachable, then delete the Droplet ${resource} if it is not needed and create a new runner.`;
+  return `Cloud runner did not become ready before the timeout. Check Droplet cloud-init and runner logs, then confirm its heartbeat and authenticated HTTPS readiness endpoint are reachable. Delete the Droplet ${resource} if it is not needed before creating a replacement.`;
 }
 
 function safeProviderResourceIdForMessage(value: string | null): string {

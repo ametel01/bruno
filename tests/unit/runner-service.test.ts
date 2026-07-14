@@ -26,6 +26,22 @@ describe("manual runner service HTTP contract", () => {
     });
   });
 
+  it("exposes authenticated readiness without invoking Docker", async () => {
+    const calls: string[][] = [];
+    const service = createTestService({ docker: createMockDocker({ calls }) });
+
+    const unauthorized = await service.fetch(new Request("http://runner.test/runner/v1/readiness"));
+    const ready = await service.fetch(authorizedRequest("/runner/v1/readiness"));
+    const wrongMethod = await service.fetch(authorizedRequest("/runner/v1/readiness", "POST"));
+
+    expect(unauthorized.status).toBe(401);
+    expect(ready.status).toBe(200);
+    await expect(ready.json()).resolves.toEqual({ ok: true, status: "ready" });
+    expect(wrongMethod.status).toBe(405);
+    expect(wrongMethod.headers.get("allow")).toBe("GET");
+    expect(calls).toEqual([]);
+  });
+
   it("starts a continuous heartbeat loop when configured with runner identity", () => {
     const starts: Array<{ runnerId: string; credential: string; appBaseUrl: string }> = [];
 

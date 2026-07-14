@@ -175,7 +175,7 @@ describe.sequential("cloud runner provisioning stale bootstrap reconciliation", 
     await connection.close();
   });
 
-  it("marks stale waiting_for_runner rows failed when summaries are read", async () => {
+  it("times out readiness from provisioning start even while fresh heartbeats arrive", async () => {
     const [user] = await connection.db.insert(users).values({}).returning({ id: users.id });
 
     if (!user) {
@@ -193,7 +193,7 @@ describe.sequential("cloud runner provisioning stale bootstrap reconciliation", 
         name: "Stale Cloud Runner",
         kind: "digitalocean",
         endpointUrl: "https://203-0-113-10.sslip.io",
-        status: "registering",
+        status: "online",
         provider: "digitalocean",
         providerResourceId: "do-droplet-154",
         region: "sfo3",
@@ -202,9 +202,21 @@ describe.sequential("cloud runner provisioning stale bootstrap reconciliation", 
         provisioningStatus: "waiting_for_runner",
         provisioningStartedAt: new Date("2026-07-06T01:00:00.000Z"),
         createdAt: new Date("2026-07-06T01:00:00.000Z"),
-        updatedAt: new Date("2026-07-06T01:05:00.000Z"),
+        updatedAt: new Date("2026-07-06T02:29:00.000Z"),
       })
       .returning({ id: runners.id });
+
+    if (!runner) {
+      throw new Error("Runner insert returned no rows.");
+    }
+
+    await connection.db.insert(runnerHeartbeats).values({
+      runnerId: runner.id,
+      status: "online",
+      metadata: {},
+      observedAt: new Date("2026-07-06T02:29:00.000Z"),
+      createdAt: new Date("2026-07-06T02:29:00.000Z"),
+    });
 
     const summaries = await listCloudRunnerProvisioningSummariesForDevelopmentUser({
       createConnection: () => connection,
@@ -227,16 +239,14 @@ describe.sequential("cloud runner provisioning stale bootstrap reconciliation", 
       readinessStatus: "failed",
       provisioning: {
         status: "failed",
-        error: expect.stringContaining(
-          "Cloud runner bootstrap did not register before the timeout.",
-        ),
+        error: expect.stringContaining("Cloud runner did not become ready before the timeout."),
       },
     });
     expect(persistedRunner).toEqual({
       status: "provision_failed",
       provisioningStatus: "failed",
       provisioningError:
-        "Cloud runner bootstrap did not register before the timeout. Check Droplet cloud-init logs, confirm SSH/HTTP ports are reachable, then delete the Droplet do-droplet-154 if it is not needed and create a new runner.",
+        "Cloud runner did not become ready before the timeout. Check Droplet cloud-init and runner logs, then confirm its heartbeat and authenticated HTTPS readiness endpoint are reachable. Delete the Droplet do-droplet-154 if it is not needed before creating a replacement.",
     });
     expect(events).toContainEqual(
       expect.objectContaining({
@@ -244,7 +254,7 @@ describe.sequential("cloud runner provisioning stale bootstrap reconciliation", 
         phase: "failed",
         status: "failed",
         message:
-          "Cloud runner bootstrap did not register before the timeout. Check Droplet cloud-init logs, confirm SSH/HTTP ports are reachable, then delete the Droplet do-droplet-154 if it is not needed and create a new runner.",
+          "Cloud runner did not become ready before the timeout. Check Droplet cloud-init and runner logs, then confirm its heartbeat and authenticated HTTPS readiness endpoint are reachable. Delete the Droplet do-droplet-154 if it is not needed before creating a replacement.",
       }),
     );
   });

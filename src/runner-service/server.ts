@@ -38,6 +38,12 @@ export function createRunnerService(options: RunnerServiceOptions = {}) {
         return authFailure;
       }
 
+      const readinessResponse = handleReadinessRequest(request);
+
+      if (readinessResponse) {
+        return readinessResponse;
+      }
+
       const route = parseRunnerRoute(request);
 
       if (!route) {
@@ -69,6 +75,22 @@ export function createRunnerService(options: RunnerServiceOptions = {}) {
       }
     },
   };
+}
+
+function handleReadinessRequest(request: Request): Response | null {
+  const { pathname } = new URL(request.url);
+
+  if (pathname !== "/runner/v1/readiness") {
+    return null;
+  }
+
+  if (request.method !== "GET") {
+    return jsonError(405, "method_not_allowed", "readiness requires GET.", {
+      Allow: "GET",
+    });
+  }
+
+  return Response.json({ ok: true, status: "ready" }, { status: 200 });
 }
 
 export function startRunnerHeartbeatLoop(options: RunnerHeartbeatLoopOptions): { stop(): void } {

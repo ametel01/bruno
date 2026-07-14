@@ -9,6 +9,7 @@ import {
   users,
 } from "@/src/server/db/schema";
 import {
+  confirmCloudRunnerReadiness,
   recordRunnerHeartbeat,
   reconcileStaleRunnerHeartbeats,
   RUNNER_HEARTBEAT_STALE_THRESHOLD_MS,
@@ -238,7 +239,7 @@ describe("runner heartbeat persistence", () => {
     );
   });
 
-  it("marks a cloud runner ready through the first online heartbeat", async () => {
+  it("keeps a cloud runner blocked until its authenticated readiness endpoint succeeds", async () => {
     const now = new Date("2026-07-06T02:02:00.000Z");
     const credential = createRunnerCredential({
       randomBytes: (size) => Buffer.alloc(size, 8),
@@ -264,12 +265,12 @@ describe("runner heartbeat persistence", () => {
       { createConnection: () => connection, now: () => now },
     );
 
-    const [persistedRunner] = await connection.db
+    const [heartbeatOnlyRunner] = await connection.db
       .select()
       .from(runners)
       .where(eq(runners.id, runner.id))
       .limit(1);
-    const events = await connection.db
+    const heartbeatOnlyEvents = await connection.db
       .select()
       .from(runnerProvisioningEvents)
       .where(eq(runnerProvisioningEvents.runnerId, runner.id));
@@ -282,6 +283,73 @@ describe("runner heartbeat persistence", () => {
         observedAt: "2026-07-06T02:02:00.000Z",
       },
     });
+    expect(heartbeatOnlyRunner).toMatchObject({
+      status: "online",
+      provisioningStatus: "waiting_for_runner",
+      provisioningCompletedAt: null,
+    });
+    expect(heartbeatOnlyEvents).toEqual([]);
+
+    const failedProbe = await confirmCloudRunnerReadiness(runner.id, {
+      createConnection: () => connection,
+      fetch: async () => {
+        throw new Error("TLS certificate is not ready");
+      },
+      now: () => now,
+      runnerBearerToken: "runner-command-token",
+    });
+    const [runnerAfterFailedProbe] = await connection.db
+      .select()
+      .from(runners)
+      .where(eq(runners.id, runner.id))
+      .limit(1);
+
+    expect(failedProbe).toEqual({ outcome: "pending", reason: "network_error" });
+    expect(runnerAfterFailedProbe).toMatchObject({
+      status: "online",
+      provisioningStatus: "waiting_for_runner",
+      provisioningCompletedAt: null,
+    });
+
+    const requests: Array<{ url: string; authorization: string | null }> = [];
+    const successfulProbe = await confirmCloudRunnerReadiness(runner.id, {
+      createConnection: () => connection,
+      fetch: async (input, init) => {
+        requests.push({
+          url: String(input),
+          authorization: new Headers(init?.headers).get("authorization"),
+        });
+        return Response.json({ ok: true, status: "ready" });
+      },
+      now: () => now,
+      runnerBearerToken: "runner-command-token",
+    });
+    const duplicateProbe = await confirmCloudRunnerReadiness(runner.id, {
+      createConnection: () => connection,
+      fetch: async () => {
+        throw new Error("Ready runners must not be probed again.");
+      },
+      now: () => now,
+      runnerBearerToken: "runner-command-token",
+    });
+    const [persistedRunner] = await connection.db
+      .select()
+      .from(runners)
+      .where(eq(runners.id, runner.id))
+      .limit(1);
+    const events = await connection.db
+      .select()
+      .from(runnerProvisioningEvents)
+      .where(eq(runnerProvisioningEvents.runnerId, runner.id));
+
+    expect(successfulProbe).toEqual({ outcome: "ready", transitioned: true });
+    expect(duplicateProbe).toEqual({ outcome: "not_applicable", reason: "already_ready" });
+    expect(requests).toEqual([
+      {
+        url: "https://cloud-runner.example.com/runner/v1/readiness",
+        authorization: "Bearer runner-command-token",
+      },
+    ]);
     expect(persistedRunner).toMatchObject({
       status: "online",
       provisioningStatus: "ready",
@@ -291,14 +359,68 @@ describe("runner heartbeat persistence", () => {
       expect.objectContaining({
         phase: "ready",
         status: "completed",
-        message: "First cloud runner heartbeat was observed.",
+        message: "Authenticated runner readiness probe succeeded.",
         metadata: {
           provider: "digitalocean",
           heartbeatStatus: "online",
+          readinessProbe: "authenticated_endpoint",
         },
       }),
     ]);
     expect(JSON.stringify([persistedRunner, events])).not.toContain(credential.value);
+  });
+
+  it("fails closed when readiness authentication or endpoint configuration is invalid", async () => {
+    const runner = await seedRunner(connection, {
+      endpointUrl: "http://public-runner.example.com",
+      status: "online",
+      kind: "digitalocean",
+      provisioningStatus: "waiting_for_runner",
+    });
+    let fetchCalls = 0;
+    const fetchImplementation: typeof fetch = async () => {
+      fetchCalls += 1;
+      return Response.json({ ok: true, status: "ready" });
+    };
+
+    await expect(
+      confirmCloudRunnerReadiness(runner.id, {
+        createConnection: () => connection,
+        fetch: fetchImplementation,
+        runnerBearerToken: null,
+      }),
+    ).resolves.toEqual({ outcome: "pending", reason: "token_not_configured" });
+    await expect(
+      confirmCloudRunnerReadiness(runner.id, {
+        createConnection: () => connection,
+        fetch: fetchImplementation,
+        runnerBearerToken: "runner-command-token",
+      }),
+    ).resolves.toEqual({ outcome: "pending", reason: "endpoint_invalid" });
+    expect(fetchCalls).toBe(0);
+  });
+
+  it("allows insecure loopback readiness only for the explicit local Docker mode", async () => {
+    const runner = await seedRunner(connection, {
+      endpointUrl: "http://host.docker.internal:3045",
+      status: "online",
+      kind: "digitalocean",
+      provisioningStatus: "waiting_for_runner",
+    });
+    const requests: string[] = [];
+
+    const result = await confirmCloudRunnerReadiness(runner.id, {
+      allowInsecureLoopback: true,
+      createConnection: () => connection,
+      fetch: async (input) => {
+        requests.push(String(input));
+        return Response.json({ ok: true, status: "ready" });
+      },
+      runnerBearerToken: "local-runner-command-token",
+    });
+
+    expect(result).toEqual({ outcome: "ready", transitioned: true });
+    expect(requests).toEqual(["http://host.docker.internal:3045/runner/v1/readiness"]);
   });
 
   it("does not mark a cloud runner ready from a degraded bootstrap heartbeat", async () => {

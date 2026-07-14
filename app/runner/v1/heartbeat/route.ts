@@ -1,4 +1,5 @@
 import {
+  confirmCloudRunnerReadiness,
   recordRunnerHeartbeat,
   RunnerHeartbeatPersistenceError,
 } from "@/src/server/runners/runner-heartbeat";
@@ -78,6 +79,16 @@ export async function POST(request: Request) {
       runnerId: result.runner.id,
       runnerStatus: result.runner.status,
       observedAt: result.runner.observedAt,
+    });
+
+    const readiness = await confirmCloudRunnerReadiness(result.runner.id);
+
+    logRunnerIngress("heartbeat", "readiness_probe_completed", {
+      runnerId: result.runner.id,
+      outcome: readiness.outcome,
+      ...(readiness.outcome === "ready"
+        ? { transitioned: readiness.transitioned }
+        : { reason: readiness.reason }),
     });
 
     return Response.json({

@@ -3,14 +3,21 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { runnerCredentials, runnerHeartbeats, runners } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
-import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
+import {
+  DIGITALOCEAN_PROVIDER,
+  DIGITALOCEAN_RUNNER_KIND,
+} from "@/src/server/runners/digitalocean-provider";
 import { hashRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
-import { markCloudRunnerReadyAfterFirstHeartbeat } from "@/src/server/runners/runner-provisioning-events";
+import { markCloudRunnerReadyAfterAuthenticatedProbe } from "@/src/server/runners/runner-provisioning-events";
 
 export const RUNNER_HEARTBEAT_ONLINE_STATUS = "online";
 export const RUNNER_HEARTBEAT_DEGRADED_STATUS = "degraded";
 export const RUNNER_HEARTBEAT_OFFLINE_STATUS = "offline";
 export const RUNNER_HEARTBEAT_STALE_THRESHOLD_MS = 90_000;
+export const RUNNER_READINESS_PROBE_TIMEOUT_MS = 5_000;
+
+const RUNNER_BEARER_TOKEN_ENV = "AGENTBAY_RUNNER_BEARER_TOKEN";
+const DIGITALOCEAN_PROVIDER_MODE_ENV = "AGENTBAY_DIGITALOCEAN_PROVIDER_MODE";
 
 const MAX_VERSION_LENGTH = 80;
 const METRIC_LIMITS = {
@@ -89,6 +96,26 @@ export type RecordRunnerHeartbeatResult =
       issues?: Array<{ field: string; message: string }>;
     };
 
+export type ConfirmCloudRunnerReadinessResult =
+  | {
+      outcome: "ready";
+      transitioned: boolean;
+    }
+  | {
+      outcome: "pending";
+      reason:
+        | "endpoint_invalid"
+        | "endpoint_rejected"
+        | "network_error"
+        | "persistence_error"
+        | "response_invalid"
+        | "token_not_configured";
+    }
+  | {
+      outcome: "not_applicable";
+      reason: "already_ready" | "runner_not_eligible";
+    };
+
 export class RunnerHeartbeatPersistenceError extends Error {
   constructor(cause?: unknown) {
     super("Runner heartbeat failed.");
@@ -133,8 +160,6 @@ export async function recordRunnerHeartbeat(
           credentialStatus: runnerCredentials.status,
           expiresAt: runnerCredentials.expiresAt,
           runnerId: runners.id,
-          runnerKind: runners.kind,
-          provisioningStatus: runners.provisioningStatus,
         })
         .from(runnerCredentials)
         .innerJoin(runners, eq(runners.id, runnerCredentials.runnerId))
@@ -168,25 +193,13 @@ export async function recordRunnerHeartbeat(
         })
         .where(eq(runnerCredentials.id, row.credentialId));
 
-      if (
-        row.runnerKind === DIGITALOCEAN_RUNNER_KIND &&
-        payload.value.status === RUNNER_HEARTBEAT_ONLINE_STATUS &&
-        row.provisioningStatus !== "ready"
-      ) {
-        await markCloudRunnerReadyAfterFirstHeartbeat(tx, {
-          runnerId: payload.value.runnerId,
-          now,
-          heartbeatStatus: payload.value.status,
-        });
-      } else {
-        await tx
-          .update(runners)
-          .set({
-            status: payload.value.status,
-            updatedAt: now,
-          })
-          .where(eq(runners.id, payload.value.runnerId));
-      }
+      await tx
+        .update(runners)
+        .set({
+          status: payload.value.status,
+          updatedAt: now,
+        })
+        .where(eq(runners.id, payload.value.runnerId));
 
       return {
         ok: true,
@@ -204,6 +217,168 @@ export async function recordRunnerHeartbeat(
       await connection.close();
     }
   }
+}
+
+export async function confirmCloudRunnerReadiness(
+  runnerId: string,
+  dependencies: {
+    allowInsecureLoopback?: boolean;
+    createConnection?: () => DatabaseConnection;
+    fetch?: typeof fetch;
+    now?: () => Date;
+    runnerBearerToken?: string | null;
+    timeoutMs?: number;
+  } = {},
+): Promise<ConfirmCloudRunnerReadinessResult> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    const [runner] = await connection.db
+      .select({
+        endpointUrl: runners.endpointUrl,
+        kind: runners.kind,
+        provider: runners.provider,
+        provisioningStatus: runners.provisioningStatus,
+        status: runners.status,
+      })
+      .from(runners)
+      .where(and(eq(runners.id, runnerId), isNull(runners.deletedAt)))
+      .limit(1);
+
+    if (runner?.provisioningStatus === "ready") {
+      return { outcome: "not_applicable", reason: "already_ready" };
+    }
+
+    if (
+      !runner ||
+      runner.kind !== DIGITALOCEAN_RUNNER_KIND ||
+      runner.provider !== DIGITALOCEAN_PROVIDER ||
+      runner.status !== RUNNER_HEARTBEAT_ONLINE_STATUS ||
+      runner.provisioningStatus !== "waiting_for_runner"
+    ) {
+      return { outcome: "not_applicable", reason: "runner_not_eligible" };
+    }
+
+    const runnerBearerToken = (
+      dependencies.runnerBearerToken === undefined
+        ? process.env[RUNNER_BEARER_TOKEN_ENV]
+        : dependencies.runnerBearerToken
+    )?.trim();
+
+    if (!runnerBearerToken) {
+      return { outcome: "pending", reason: "token_not_configured" };
+    }
+
+    const allowInsecureLoopback =
+      dependencies.allowInsecureLoopback ??
+      process.env[DIGITALOCEAN_PROVIDER_MODE_ENV] === "local_docker";
+    const readinessUrl = toReadinessProbeUrl(runner.endpointUrl, allowInsecureLoopback);
+
+    if (!readinessUrl) {
+      return { outcome: "pending", reason: "endpoint_invalid" };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      dependencies.timeoutMs ?? RUNNER_READINESS_PROBE_TIMEOUT_MS,
+    );
+    let response: Response;
+
+    try {
+      response = await (dependencies.fetch ?? fetch)(readinessUrl, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${runnerBearerToken}`,
+        },
+        redirect: "error",
+        signal: controller.signal,
+      });
+    } catch {
+      return { outcome: "pending", reason: "network_error" };
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (!response.ok) {
+      return { outcome: "pending", reason: "endpoint_rejected" };
+    }
+
+    let payload: unknown;
+
+    try {
+      payload = await response.json();
+    } catch {
+      return { outcome: "pending", reason: "response_invalid" };
+    }
+
+    if (!isReadinessResponse(payload)) {
+      return { outcome: "pending", reason: "response_invalid" };
+    }
+
+    const now = dependencies.now?.() ?? new Date();
+    const transitioned = await connection.db.transaction((tx) =>
+      markCloudRunnerReadyAfterAuthenticatedProbe(tx, { runnerId, now }),
+    );
+
+    return { outcome: "ready", transitioned };
+  } catch {
+    return { outcome: "pending", reason: "persistence_error" };
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+function toReadinessProbeUrl(
+  endpointUrl: string | null,
+  allowInsecureLoopback: boolean,
+): URL | null {
+  if (!endpointUrl) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(endpointUrl);
+    const isAllowedLoopback =
+      allowInsecureLoopback && parsed.protocol === "http:" && isLoopbackHostname(parsed.hostname);
+
+    if (
+      (parsed.protocol !== "https:" && !isAllowedLoopback) ||
+      parsed.username ||
+      parsed.password
+    ) {
+      return null;
+    }
+
+    return new URL("/runner/v1/readiness", parsed.origin);
+  } catch {
+    return null;
+  }
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "host.docker.internal" ||
+    normalized === "::1" ||
+    normalized.endsWith(".localhost")
+  );
+}
+
+function isReadinessResponse(value: unknown): value is { ok: true; status: "ready" } {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as Record<string, unknown>).ok === true &&
+      (value as Record<string, unknown>).status === "ready",
+  );
 }
 
 export async function reconcileStaleRunnerHeartbeats(

@@ -151,6 +151,7 @@ Runner-facing APIs should be versioned separately:
 ```txt
 POST /runner/v1/register
 POST /runner/v1/heartbeat
+GET  /runner/v1/readiness
 POST /runner/v1/agents/:agentId/start
 POST /runner/v1/agents/:agentId/stop
 POST /runner/v1/agents/:agentId/restart
@@ -668,7 +669,7 @@ Goal: Automatically create a DigitalOcean runner without exposing cloud setup to
   - applies firewall rules
   - injects cloud-init to install Docker and runner service
   - runner registers itself with AgentBay
-  - dashboard marks runner ready after heartbeat
+  - dashboard marks runner ready only after an online heartbeat and an authenticated probe through the runner's public endpoint
 - Persist every provisioning phase so refreshes show progress.
 - Add rollback or cleanup for failed provisioning where safe.
 - Keep cloud provider secrets server-side only.
