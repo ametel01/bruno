@@ -2489,6 +2489,326 @@ h2 {
   font-size: 0.92rem;
 }
 
+.settings-page {
+  display: grid;
+  gap: 18px;
+}
+
+.settings-fleet-overview,
+.settings-runner-workspace,
+.settings-configuration-notes {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 10px 28px rgb(23 26 31 / 6%);
+}
+
+.settings-fleet-overview {
+  overflow: hidden;
+  border-top: 4px solid var(--accent);
+}
+
+.settings-fleet-heading,
+.settings-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.settings-fleet-heading {
+  padding: 16px 20px 14px;
+}
+
+.settings-fleet-heading p,
+.settings-section-heading p {
+  margin: 0 0 3px;
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.settings-fleet-heading h2,
+.settings-section-heading h2 {
+  margin: 0;
+  font-size: 1.08rem;
+}
+
+.settings-fleet-heading > span,
+.settings-section-heading > span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.settings-fleet-overview dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  background: #f2f7f4;
+  margin: 0;
+}
+
+.settings-fleet-overview dl > div {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  border-left: 1px solid var(--line);
+  padding: 14px 18px 14px 38px;
+}
+
+.settings-fleet-overview dl > div:first-child {
+  border-left: 0;
+}
+
+.settings-fleet-overview dl > div::before {
+  position: absolute;
+  top: 20px;
+  left: 18px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #79817a;
+  content: "";
+}
+
+.settings-fleet-overview dl > div[data-state="active"]::before,
+.settings-fleet-overview dl > div[data-state="clear"]::before {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgb(31 111 104 / 12%);
+}
+
+.settings-fleet-overview dl > div[data-state="attention"]::before {
+  background: #b97923;
+  box-shadow: 0 0 0 4px rgb(185 121 35 / 12%);
+}
+
+.settings-fleet-overview dt {
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settings-fleet-overview dd {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0;
+}
+
+.settings-fleet-overview dd strong {
+  font-size: 1.28rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.settings-fleet-overview dd span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.settings-runner-workspace {
+  overflow: hidden;
+}
+
+.settings-section-heading {
+  padding: 18px 20px 16px;
+}
+
+.settings-runner-inventory {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  border-top: 1px solid var(--line);
+  background: #f2f4ef;
+  padding: 16px;
+}
+
+.settings-runner-inventory > .manual-runner-panel {
+  max-height: 900px;
+  overflow: auto;
+  padding: 0;
+  box-shadow: none;
+}
+
+.settings-runner-inventory > .manual-runner-panel > .section-heading {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  padding: 16px 18px;
+}
+
+.settings-runner-inventory > .manual-runner-panel > .runner-management-block {
+  margin: 0 18px;
+  padding: 14px 0;
+}
+
+.settings-runner-inventory > .manual-runner-panel > .manual-runner-list {
+  padding: 0 18px 18px;
+}
+
+.settings-runner-inventory > .manual-runner-panel > :where(.activity-empty-state, .safe-error) {
+  margin: 18px;
+}
+
+.settings-runner-inventory .manual-runner-list .manual-runner-item,
+.settings-runner-inventory .manual-runner-list .manual-runner-item:first-child {
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-subtle);
+  padding: 15px;
+}
+
+.settings-runner-inventory .manual-runner-list .manual-runner-item + .manual-runner-item {
+  margin-top: 12px;
+}
+
+.settings-runner-inventory :where(.compact-definition-list) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+}
+
+.settings-runner-inventory :where(.compact-definition-list) > div {
+  padding-top: 9px;
+}
+
+.settings-runner-inventory :where(.compact-definition-list) > div:nth-child(-n + 2) {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.settings-runner-inventory .definition-list dt {
+  font-size: 0.74rem;
+}
+
+.settings-runner-inventory .definition-list dd {
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.settings-runner-inventory .manual-runner-header p {
+  font-size: 0.8rem;
+}
+
+.settings-runner-inventory .provisioning-phase-list {
+  gap: 6px;
+}
+
+.settings-runner-inventory .provisioning-phase-list li {
+  min-height: 24px;
+  font-size: 0.68rem;
+  padding: 3px 7px;
+}
+
+.settings-runner-inventory .cloud-runner-item > [data-availability] {
+  gap: 0.7rem;
+  margin-top: 0;
+  padding: 0.8rem;
+}
+
+.settings-runner-inventory .runner-credential-controls {
+  padding-top: 12px;
+}
+
+.settings-runner-inventory .runner-management-header p {
+  font-size: 0.78rem;
+}
+
+.settings-configuration-notes {
+  padding: 18px 20px;
+}
+
+.settings-configuration-notes summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-configuration-notes summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-configuration-notes summary > span:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.settings-configuration-notes summary strong {
+  font-size: 1rem;
+}
+
+.settings-configuration-notes summary small,
+.settings-configuration-notes summary > span:last-child {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.settings-configuration-notes summary > span:last-child::after {
+  content: " +";
+}
+
+.settings-configuration-notes[open] summary > span:last-child::after {
+  content: " −";
+}
+
+.settings-configuration-notes[open] summary {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+}
+
+.settings-configuration-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settings-configuration-grid section {
+  min-width: 0;
+  border-left: 2px solid var(--line-strong);
+  padding-left: 12px;
+}
+
+.settings-configuration-grid span {
+  color: var(--accent-strong);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.settings-configuration-grid h3 {
+  margin: 5px 0 6px;
+  font-size: 0.88rem;
+}
+
+.settings-configuration-grid p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 @media (max-width: 1120px) {
   .dashboard-workbench {
     grid-template-columns: 1fr;
@@ -2505,6 +2825,18 @@ h2 {
 
   .dashboard-infrastructure-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-runner-inventory {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-runner-inventory > .manual-runner-panel {
+    max-height: 760px;
+  }
+
+  .settings-configuration-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -2627,6 +2959,50 @@ h2 {
 
   .dashboard-infrastructure {
     padding: 16px;
+  }
+
+  .settings-fleet-overview dl,
+  .settings-configuration-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-fleet-overview dl > div,
+  .settings-fleet-overview dl > div:first-child {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .settings-fleet-overview dl > div:first-child {
+    border-top: 0;
+  }
+
+  .settings-section-heading {
+    padding: 16px;
+  }
+
+  .settings-runner-inventory {
+    padding: 10px;
+  }
+
+  .settings-runner-inventory > .manual-runner-panel {
+    max-height: none;
+  }
+
+  .settings-runner-inventory :where(.compact-definition-list) {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-runner-inventory :where(.compact-definition-list) > div:nth-child(2) {
+    border-top: 1px solid var(--line);
+    padding-top: 9px;
+  }
+
+  .settings-runner-inventory .runner-management-header {
+    display: grid;
+  }
+
+  .settings-runner-inventory .runner-management-header .primary-button {
+    width: 100%;
   }
 
   .agent-overview-header {
