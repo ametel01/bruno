@@ -151,3 +151,53 @@ describe("authentication progress status", () => {
     expect(progress).not.toContain("Steps 4-7 no longer wait on those prerequisites");
   });
 });
+
+describe("automatic Hermes Telegram progress status", () => {
+  it("records the automatic-ready ledger without rewriting historical progress", async () => {
+    const progress = await readFile(join(process.cwd(), "PROGRESS.md"), "utf8");
+    const automaticLedger =
+      progress.split("## Automatic Ready Hermes + Telegram Creation")[1] ?? "";
+    const changelog = await readFile(join(process.cwd(), "CHANGELOG.md"), "utf8");
+
+    expect(automaticLedger).toContain("Source plan: `PLAN.md`");
+    expect(automaticLedger).toContain(
+      "supersedes the earlier native-only Milestone 18 product decision",
+    );
+    expect(automaticLedger).toContain("OpenRouter is the first supported provider");
+    expect(automaticLedger).toContain("dedicated staging Telegram bot/user");
+    expect(automaticLedger).toContain("Step 0 is complete.");
+    expect(automaticLedger).toContain("- [x] Step 0: Progress and Changelog Tracking Setup");
+    expect(automaticLedger).toContain("- [ ] Step 1: Quality Gates Setup and Baseline Evidence");
+    expect(automaticLedger).toContain(
+      "- [ ] Step 2: Align Readiness With the Pinned Hermes Contract",
+    );
+    expect(automaticLedger).toContain(
+      "- [ ] Step 3: Persist Desired State and Deployment Operations",
+    );
+    expect(automaticLedger).toContain(
+      "- [ ] Step 4: Add Managed Creation Configuration and Encrypted Credentials",
+    );
+    expect(automaticLedger).toContain(
+      "- [ ] Step 5: Project a Complete Managed Hermes Configuration",
+    );
+    expect(automaticLedger).toContain(
+      "- [ ] Step 6: Split Runner Launch Acceptance From Observed Readiness",
+    );
+    expect(automaticLedger).toContain("- [ ] Step 7: Reconcile Creation Through Ready");
+    expect(automaticLedger).toContain(
+      "- [ ] Step 8: Add One-Click Creation and Persisted Progress UI",
+    );
+    expect(automaticLedger).toContain("- [ ] Step 9: Make Desired-Running Gateways Durable");
+    expect(automaticLedger).toContain(
+      "- [ ] Step 10: Final Acceptance, Documentation, and Controlled Rollout",
+    );
+    expect(automaticLedger).toContain("| 0. Progress and Changelog Tracking Setup | Complete |");
+    expect(automaticLedger).toContain("Step validation commands and results.");
+    expect(automaticLedger).toContain("Safe blocker codes, missing capabilities, and next action.");
+    expect(automaticLedger).toContain("No blocker remains for Step 0.");
+    expect(automaticLedger).toContain("Step 1 must establish `bun run verify:hermes:staging`");
+    expect(changelog).toContain("# Changelog");
+    expect(changelog).toContain("Keep a Changelog");
+    expect(changelog).toContain("## [Unreleased]");
+  });
+});

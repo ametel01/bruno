@@ -401,3 +401,104 @@ in `CHANGELOG.md`.
   request or receive a provider API key.
 - Step 10 also needs the scanned/published GHCR image digest from the
   `publish-agent-image` workflow before live rollout evidence can be closed.
+
+## Automatic Ready Hermes + Telegram Creation
+
+Source plan: `PLAN.md`
+
+This execution ledger tracks the automatic-ready Hermes deployment plan. It
+preserves the prior Milestone 16, Clerk, and native Hermes setup ledgers above.
+The new plan supersedes the earlier native-only Milestone 18 product decision
+only for the opt-in automatic-ready path.
+
+### Source Documents
+
+- `/Users/alexmetelli/.codex/attachments/35e0153c-dd3a-4cae-9e45-6382c1ef17af/pasted-text.txt`
+  is the primary implementation brief for automatic Hermes gateway creation,
+  verified model readiness, and connected Telegram.
+- `docs/MILESTONES.md` supplies the Milestone 18 acceptance constraints for a
+  narrow Hermes plus Telegram path with safe secret handling and live reply
+  evidence.
+- `docs/PRD.md` supplies the product constraint that a user should get a working
+  Telegram-connected agent without founder help.
+- The existing Milestone 18 ledger above records the native `hermes setup` path
+  that remains available as advanced and recovery flow.
+
+### Assumptions and Conflicts
+
+- The automatic-ready path collects or references OpenRouter BYOK credentials
+  and a Telegram bot token before creation, which supersedes the prior
+  native-OAuth-only decision only for this new opt-in path.
+- OpenRouter is the first supported provider for automatic readiness. If
+  subscription-only OAuth remains mandatory, implementation must stop before
+  Step 4 for a separate approved design.
+- Each automatically running agent requires a unique Telegram bot token and at
+  least one numeric allowed-user ID.
+- Live acceptance requires an approved scanned/published workload image,
+  authorized DigitalOcean test budget, dedicated staging Telegram bot/user, and
+  valid funded OpenRouter key. Missing capabilities are blockers, not success.
+- The plan must not provision billable infrastructure, mutate hosted secrets,
+  publish images, or contact a real Telegram user until the relevant step and
+  explicit authorization prerequisites are satisfied.
+
+### Changelog Policy
+
+`CHANGELOG.md` retains the required Keep a Changelog structure: `# Changelog`,
+the standard preamble, and top-level `## [Unreleased]`. Step 0 deliberately
+adds no changelog entry because it changes tracking only. Later steps update
+`CHANGELOG.md` only when they ship validated functional product behavior, using
+the existing `Added`, `Changed`, `Fixed`, or `Security` sections as applicable.
+
+### Current Status
+
+Step 0 is complete. The automatic-ready execution ledger is initialized with
+the full Step 0-10 checklist, conflict assumptions, evidence fields, blockers,
+status, and next action. Step 1 is next: add the fail-closed live Hermes staging
+acceptance gate and record pre-implementation baseline evidence.
+
+### Step Checklist
+
+- [x] Step 0: Progress and Changelog Tracking Setup
+- [ ] Step 1: Quality Gates Setup and Baseline Evidence
+- [ ] Step 2: Align Readiness With the Pinned Hermes Contract
+- [ ] Step 3: Persist Desired State and Deployment Operations
+- [ ] Step 4: Add Managed Creation Configuration and Encrypted Credentials
+- [ ] Step 5: Project a Complete Managed Hermes Configuration
+- [ ] Step 6: Split Runner Launch Acceptance From Observed Readiness
+- [ ] Step 7: Reconcile Creation Through Ready
+- [ ] Step 8: Add One-Click Creation and Persisted Progress UI
+- [ ] Step 9: Make Desired-Running Gateways Durable
+- [ ] Step 10: Final Acceptance, Documentation, and Controlled Rollout
+
+### Step Ledger
+
+| Step | State | Depends on | Commit | Validation or deployment evidence | Blocker and next work |
+| --- | --- | --- | --- | --- | --- |
+| 0. Progress and Changelog Tracking Setup | Complete | None | This commit | `bun run format:check` passed after formatting the new progress guard; `bun run lint` passed; `bun run typecheck` passed; `bun run test` passed 98 files / 863 tests; `bun run build` passed; `bun run test:e2e:ci` passed 14 tests; `git diff --check` passed; changelog structure verified without a tracking-only entry. | Complete; Step 1 is next. |
+| 1. Quality Gates Setup and Baseline Evidence | Not started | Step 0 | Not collected | Not collected | Add `verify:hermes:staging`, safe capability preflight, docs, tests, and baseline evidence. |
+| 2. Align Readiness With the Pinned Hermes Contract | Not started | Steps 0-1 | Not collected | Not collected | Requires Step 1 gate setup. |
+| 3. Persist Desired State and Deployment Operations | Not started | Steps 0-2 | Not collected | Not collected | Requires readiness contract alignment. |
+| 4. Add Managed Creation Configuration and Encrypted Credentials | Not started | Steps 0-3 | Not collected | Not collected | Stop here if OpenRouter BYOK is not approved for automatic-ready mode. |
+| 5. Project a Complete Managed Hermes Configuration | Not started | Steps 0-4 | Not collected | Not collected | Requires server-side desired config and encrypted secret contract. |
+| 6. Split Runner Launch Acceptance From Observed Readiness | Not started | Steps 0-5 | Not collected | Not collected | Requires managed launch spec and projection. |
+| 7. Reconcile Creation Through Ready | Not started | Steps 0-6 | Not collected | Not collected | Requires durable deployment records and runner acceptance. |
+| 8. Add One-Click Creation and Persisted Progress UI | Not started | Steps 0-7 | Not collected | Not collected | Requires reconciler and readiness snapshot. |
+| 9. Make Desired-Running Gateways Durable | Not started | Steps 0-8 | Not collected | Not collected | Requires verified ready/failed state handling. |
+| 10. Final Acceptance, Documentation, and Controlled Rollout | Not started | Steps 0-9, published image, authorized DigitalOcean budget, staging Telegram bot/user, funded OpenRouter key | Not collected | Not collected | External live acceptance prerequisites must be explicit before contacting external services. |
+
+### Evidence Fields
+
+- Step validation commands and results.
+- Focused test or smoke names and result summaries.
+- Migration commands and database fixture notes for schema steps.
+- Commit reference or `This commit` for the just-completed step.
+- Safe blocker codes, missing capabilities, and next action.
+- Live acceptance artifacts with only safe fingerprints and no raw credentials,
+  provider responses, Telegram tokens, user identifiers, private endpoints,
+  Droplet IPs, or secret-bearing diagnostics.
+
+### Current Blockers and Next Work
+
+- No blocker remains for Step 0.
+- Step 1 must establish `bun run verify:hermes:staging` as a fail-closed,
+  no-side-effect command before product implementation begins.
