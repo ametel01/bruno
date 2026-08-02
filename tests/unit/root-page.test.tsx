@@ -1116,6 +1116,17 @@ describe("product shell routes", () => {
 
     expect(html).toContain("Research Agent");
     expect(html).toContain("stopped");
+    expect(html).toContain('class="agent-detail-page"');
+    expect(html).toContain('class="placeholder-panel agent-overview-panel"');
+    expect(html).toContain('class="agent-readiness-track"');
+    expect(html).toContain("Agent run readiness</legend>");
+    expect(html).toContain('class="agent-detail-workspace"');
+    expect(html).toContain('class="agent-detail-primary"');
+    expect(html).toContain('class="agent-detail-rail"');
+    expect(html).toContain('class="agent-detail-live-grid"');
+    expect(html).toContain('class="agent-detail-activity"');
+    expect(html.indexOf("Hermes setup")).toBeLessThan(html.indexOf("Configuration"));
+    expect(html.indexOf("Configuration")).toBeLessThan(html.indexOf("Assigned runner"));
     expect(html).toContain("research_agent");
     expect(html).toContain("Template version");
     expect(html).toContain("Template settings");

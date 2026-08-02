@@ -149,6 +149,9 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
     assignedRunner?.kind === "digitalocean" ? hermesReadiness.startDisabledReason : null;
   const runnerStartDisabledReason = startDisabledReason(assignedRunner);
   const startBlocker = hermesLifecycleDisabledReason ?? runnerStartDisabledReason;
+  const runnerReadiness = hermesReadiness.requirements.find(
+    (requirement) => requirement.id === "runner",
+  );
   const operationalAlerts = buildAgentOperationalAlerts({
     agent,
     approvals: approvalsResult.ok ? approvalsResult.approvals : [],
@@ -174,39 +177,66 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
       active="agents"
       eyebrow="Agent detail"
       title={agent.name}
-      description="This detail view reads the current persisted lifecycle status, editable local-development config, scoped runtime logs, and audit activity for an active agent."
+      description="Configure, prepare, and operate this agent from one workspace."
     >
-      <div className="content-grid">
-        <PlaceholderPanel title="Agent record">
-          <dl className="definition-list">
-            <div>
-              <dt>Status</dt>
-              <dd>
+      <div className="agent-detail-page">
+        <section
+          className="placeholder-panel agent-overview-panel"
+          aria-labelledby="agent-record-title"
+        >
+          <div className="agent-overview-header">
+            <div className="agent-overview-heading">
+              <p className="agent-overview-kicker">Agent record</p>
+              <h2 id="agent-record-title">Run readiness</h2>
+              <p>
+                {agent.templateSnapshot.name} <code>{agent.templateKey}</code>
+              </p>
+            </div>
+            <div className="agent-overview-actions">
+              <span>Actions</span>
+              <AgentLifecycleControls
+                agentId={agent.id}
+                restartDisabledReason={
+                  agent.status === "running" ? hermesLifecycleDisabledReason : null
+                }
+                startDisabledReason={startBlocker}
+                status={agent.status}
+              />
+            </div>
+          </div>
+          <fieldset className="agent-readiness-track">
+            <legend className="visually-hidden">Agent run readiness</legend>
+            <div data-state={agent.status === "running" ? "ready" : "neutral"}>
+              <span>Agent state</span>
+              <strong>
                 <span className="status-pill">{agent.status}</span>
-              </dd>
+              </strong>
             </div>
-            <div>
-              <dt>Actions</dt>
-              <dd>
-                <AgentLifecycleControls
-                  agentId={agent.id}
-                  restartDisabledReason={
-                    agent.status === "running" ? hermesLifecycleDisabledReason : null
-                  }
-                  startDisabledReason={startBlocker}
-                  status={agent.status}
-                />
-              </dd>
+            <div data-state={hermesReadiness.configurationReady ? "ready" : "attention"}>
+              <span>Hermes</span>
+              <strong>
+                {hermesReadiness.configurationReady ? "Configured" : "Setup required"}
+              </strong>
             </div>
+            <div data-state={runnerReadiness?.status === "ready" ? "ready" : "attention"}>
+              <span>Runner</span>
+              <strong>{runnerReadiness?.status === "ready" ? "Ready" : "Unavailable"}</strong>
+            </div>
+          </fieldset>
+          <dl className="agent-overview-metadata">
             <div>
               <dt>Template</dt>
-              <dd>
-                {agent.templateSnapshot.name} <code>{agent.templateKey}</code>
-              </dd>
+              <dd>{agent.templateSnapshot.name}</dd>
             </div>
             <div>
               <dt>Template version</dt>
               <dd>{agent.templateVersion}</dd>
+            </div>
+            <div>
+              <dt>Agent ID</dt>
+              <dd>
+                <code>{agent.id}</code>
+              </dd>
             </div>
             <div>
               <dt>Created</dt>
@@ -221,7 +251,7 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
               </dd>
             </div>
             {agent.statusReason ? (
-              <div>
+              <div className="agent-overview-status-reason">
                 <dt>Status reason</dt>
                 <dd>
                   {summarizeOperationalText(agent.statusReason, "Status reason unavailable.")}
@@ -229,87 +259,100 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
               </div>
             ) : null}
           </dl>
-        </PlaceholderPanel>
-        <PlaceholderPanel title="Identity">
-          <dl className="definition-list">
-            <div>
-              <dt>Agent ID</dt>
-              <dd>
-                <code>{agent.id}</code>
-              </dd>
+        </section>
+
+        <div className="agent-detail-workspace">
+          <main className="agent-detail-primary">
+            <AgentHermesSetupPanel
+              agentId={agent.id}
+              readiness={hermesReadiness}
+              result={secretsResult}
+            />
+            <PlaceholderPanel title="Configuration">
+              <AgentConfigEditor
+                agentId={agent.id}
+                maxNameLength={AGENT_NAME_MAX_LENGTH}
+                persisted={{
+                  name: agent.name,
+                  config: agent.config,
+                }}
+              />
+            </PlaceholderPanel>
+            <div className="agent-detail-live-grid">
+              <AgentRuntimeLogPanel agentId={agent.id} status={agent.status} />
+              <AgentApprovalsPanel result={approvalsResult} />
             </div>
-          </dl>
-        </PlaceholderPanel>
-        <PlaceholderPanel title="Template settings">
-          <dl className="definition-list">
-            <div>
-              <dt>Description</dt>
-              <dd>{agent.templateSnapshot.description}</dd>
-            </div>
-            <div>
-              <dt>Default tools</dt>
-              <dd>{agent.templateSnapshot.defaultTools.join(", ")}</dd>
-            </div>
-            <div>
-              <dt>Schedule</dt>
-              <dd>{agent.templateSnapshot.defaultSchedule}</dd>
-            </div>
-            <div>
-              <dt>Required integrations</dt>
-              <dd>
-                {agent.templateSnapshot.requiredIntegrations.length > 0
-                  ? agent.templateSnapshot.requiredIntegrations.join(", ")
-                  : "None"}
-              </dd>
-            </div>
-            <div>
-              <dt>Default prompt</dt>
-              <dd className="template-default-prompt">
-                <p>{agent.templateSnapshot.defaultSystemPrompt}</p>
-              </dd>
-            </div>
-          </dl>
-        </PlaceholderPanel>
-        <PlaceholderPanel title="Configuration">
-          <AgentConfigEditor
-            agentId={agent.id}
-            maxNameLength={AGENT_NAME_MAX_LENGTH}
-            persisted={{
-              name: agent.name,
-              config: agent.config,
-            }}
+          </main>
+
+          <aside className="agent-detail-rail" aria-label="Agent operations">
+            <AssignedRunnerPanel
+              costResult={assignedRunnerCostResult}
+              result={assignedRunnerResult}
+            />
+            <AgentOperationalAlertsPanel
+              alerts={operationalAlerts.alerts}
+              runnerStateNotice={operationalAlerts.runnerStateNotice}
+            />
+            <AgentBackupsPanel agentId={agent.id} result={backupsResult} />
+            <details className="placeholder-panel agent-template-panel">
+              <summary>
+                <span>
+                  <strong>Template settings</strong>
+                  <small>{agent.templateSnapshot.name}</small>
+                </span>
+                <span aria-hidden="true">Details</span>
+              </summary>
+              <dl className="definition-list">
+                <div>
+                  <dt>Description</dt>
+                  <dd>{agent.templateSnapshot.description}</dd>
+                </div>
+                <div>
+                  <dt>Default tools</dt>
+                  <dd>{agent.templateSnapshot.defaultTools.join(", ")}</dd>
+                </div>
+                <div>
+                  <dt>Schedule</dt>
+                  <dd>{agent.templateSnapshot.defaultSchedule}</dd>
+                </div>
+                <div>
+                  <dt>Required integrations</dt>
+                  <dd>
+                    {agent.templateSnapshot.requiredIntegrations.length > 0
+                      ? agent.templateSnapshot.requiredIntegrations.join(", ")
+                      : "None"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Default prompt</dt>
+                  <dd className="template-default-prompt">
+                    <p>{agent.templateSnapshot.defaultSystemPrompt}</p>
+                  </dd>
+                </div>
+              </dl>
+            </details>
+          </aside>
+        </div>
+
+        <div className="agent-detail-activity">
+          <ActivityFeedPanel
+            context={{ kind: "detail", agentLabel: agent.name }}
+            countLabel={
+              activityCursor
+                ? `${activityEvents.length} older shown`
+                : `${activityEvents.length} shown`
+            }
+            emptyDescription={emptyActivityDescription}
+            emptyTitle={emptyActivityTitle}
+            errorMessage="Agent activity could not be loaded."
+            events={activityEvents}
+            hasError={!activityResult.ok}
+            newerHref={newestActivityHref}
+            olderHref={olderActivityHref}
+            title="Activity"
+            titleId="agent-activity-title"
           />
-        </PlaceholderPanel>
-        <AgentHermesSetupPanel
-          agentId={agent.id}
-          readiness={hermesReadiness}
-          result={secretsResult}
-        />
-        <AgentBackupsPanel agentId={agent.id} result={backupsResult} />
-        <AgentOperationalAlertsPanel
-          alerts={operationalAlerts.alerts}
-          runnerStateNotice={operationalAlerts.runnerStateNotice}
-        />
-        <AssignedRunnerPanel costResult={assignedRunnerCostResult} result={assignedRunnerResult} />
-        <AgentRuntimeLogPanel agentId={agent.id} status={agent.status} />
-        <AgentApprovalsPanel result={approvalsResult} />
-        <ActivityFeedPanel
-          context={{ kind: "detail", agentLabel: agent.name }}
-          countLabel={
-            activityCursor
-              ? `${activityEvents.length} older shown`
-              : `${activityEvents.length} shown`
-          }
-          emptyDescription={emptyActivityDescription}
-          emptyTitle={emptyActivityTitle}
-          errorMessage="Agent activity could not be loaded."
-          events={activityEvents}
-          hasError={!activityResult.ok}
-          newerHref={newestActivityHref}
-          olderHref={olderActivityHref}
-          title="Activity"
-          titleId="agent-activity-title"
-        />
+        </div>
       </div>
     </ProductShell>
   );
