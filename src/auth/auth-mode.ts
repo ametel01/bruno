@@ -57,6 +57,15 @@ export function resolveAuthMode(env: AuthEnvironment): AuthModeDecision {
     isPreview && isVercelPreviewHostname(currentVercelHostname) ? currentVercelHostname : null;
 
   if (
+    configuredMode === "development" &&
+    env.AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT === "true" &&
+    env.VERCEL_ENV === "production" &&
+    appHostname !== null
+  ) {
+    return { mode: "development" };
+  }
+
+  if (
     env.VERCEL_ENV === "production" ||
     isProductionHostname(appHostname, productionVercelHostname) ||
     isCustomHostname(appHostname, currentPreviewHostname)

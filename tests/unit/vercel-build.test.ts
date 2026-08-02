@@ -44,6 +44,21 @@ describe("Vercel build workflow", () => {
     ]);
   });
 
+  it("migrates and builds an explicitly public development production deployment", () => {
+    expect(
+      planVercelBuildCommands({
+        AGENTBAY_AUTH_MODE: "development",
+        AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: "true",
+        NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+        VERCEL_ENV: "production",
+        DATABASE_URL: "postgres://production.example/agentbay",
+      }),
+    ).toEqual([
+      { command: "bun", args: ["run", "db:migrate"] },
+      { command: "bun", args: ["run", "build"] },
+    ]);
+  });
+
   it("fails an operator production build closed when Basic auth is not configured", () => {
     expect(() =>
       planVercelBuildCommands({

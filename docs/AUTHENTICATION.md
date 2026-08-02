@@ -36,6 +36,27 @@ case-variant, or unknown values fail closed. Explicit development mode on a non-
 password is present in a local ignored environment file. `bun run local:up` and the local cloud
 Docker stack set this mode automatically.
 
+## Public hosted development
+
+A Vercel production deployment may temporarily use the shared development user without browser
+authentication only when both settings are explicit:
+
+```dotenv
+AGENTBAY_AUTH_MODE=development
+AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT=true
+```
+
+This exception is accepted only when `VERCEL_ENV=production` and `NEXT_PUBLIC_APP_URL` is a valid
+absolute URL. The opt-in must be exactly `true`; missing, blank, case-variant, or false values keep
+production fail-closed. It does not weaken runner registration, heartbeat, bootstrap-event, or
+runner lifecycle credentials.
+
+Public development exposes every browser page and app-side API—including agent lifecycle,
+runner provisioning, credential rotation, backups, and approval controls—to anyone who can reach
+the deployment. Use it only for a temporary development environment. Remove
+`AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT` and switch back to `operator` or `clerk` before sharing the
+deployment or using production data and cloud credentials.
+
 ## Operator mode
 
 Until the production Clerk cutover is complete, an existing production deployment can retain the
@@ -84,5 +105,5 @@ blocked and that authenticated `vercel curl` reaches the application; keep all o
 
 Vercel build planning resolves an unset preview mode to Clerk and requires both Clerk keys. It
 rejects incomplete Clerk configuration, operator mode without its Basic-auth password, an
-unverified development preview, and every development production/custom-domain combination before
-the application build starts.
+unverified development preview, and every development production/custom-domain combination except
+the explicit public-production development opt-in before the application build starts.

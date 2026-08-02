@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Exact `AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT=true` opt-in for temporarily exposing a Vercel production-target deployment with the shared development user while keeping hosted development fail-closed by default and preserving runner-machine authentication.
 - Renamed the user-facing application and local package/database defaults from AgentBay to plingpling while retaining the established `AGENTBAY_*` runtime compatibility namespace.
 - Credential-free local Hermes contract smoke command (`agent:hermes:contract-smoke`) that launches the pinned workload image with a fake OpenAI-compatible provider, private API auth checks, durable log ingestion, restart/state persistence, managed-state backup/restore, and cleanup without claiming external Telegram network behavior.
 - Durable Hermes gateway log ingestion from the runner-managed `/opt/data` log stream, with source classification for gateway output versus container bootstrap diagnostics.

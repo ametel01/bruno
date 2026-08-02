@@ -33,6 +33,28 @@ describe("authentication mode policy", () => {
     ).toEqual({ mode: "development" });
   });
 
+  it("allows an explicitly opted-in public development production deployment", () => {
+    expect(
+      resolveAuthMode({
+        AGENTBAY_AUTH_MODE: "development",
+        AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: "true",
+        NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+        VERCEL_ENV: "production",
+      }),
+    ).toEqual({ mode: "development" });
+
+    for (const optIn of [undefined, "", " ", "TRUE", "false"]) {
+      expect(
+        resolveAuthMode({
+          AGENTBAY_AUTH_MODE: "development",
+          AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: optIn,
+          NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+          VERCEL_ENV: "production",
+        }),
+      ).toEqual({ mode: "invalid", code: "development_auth_not_allowed" });
+    }
+  });
+
   it("accepts explicit operator mode only with the Basic-auth password", () => {
     expect(
       resolveAuthMode({

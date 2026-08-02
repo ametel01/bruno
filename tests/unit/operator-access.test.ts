@@ -100,6 +100,22 @@ describe("evaluateOperatorAccess", () => {
     });
   });
 
+  it("bypasses the operator gate for explicit public development testing", () => {
+    expect(
+      evaluateOperatorAccess({
+        pathname: "/dashboard",
+        authorizationHeader: null,
+        env: {
+          AGENTBAY_AUTH_MODE: "development",
+          AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: "true",
+          NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+          VERCEL: "1",
+          VERCEL_ENV: "production",
+        },
+      }),
+    ).toEqual({ ok: true });
+  });
+
   it("allows test runs with no operator password configured", () => {
     expect(
       evaluateOperatorAccess({
