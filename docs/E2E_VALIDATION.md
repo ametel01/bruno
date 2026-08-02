@@ -51,7 +51,7 @@ Screenshots, traces, and videos are disabled; browser contexts are closed in the
 testing tokens, emails, cookies, OAuth state, and storage state must never be retained.
 Google and Apple are not silently marked successful: the current official helper does not provide
 deterministic OAuth automation for those providers, so their hosted evidence remains operator-run.
-This optional gate does not replace the provider/runner-backed `bun run verify` requirement.
+This optional gate does not replace the provider/runner-backed `bun run verify:e2e` requirement.
 
 ## Full provider-backed gate
 
@@ -61,7 +61,19 @@ Run:
 bun run test:e2e
 ```
 
-This remains the canonical, unfiltered Playwright suite. `bun run verify` ends with this full gate. Before Playwright starts, the launcher validates the same configuration contract used by `readDigitalOceanProviderConfig`. At minimum, both `AGENTBAY_DIGITALOCEAN_TOKEN` and `AGENTBAY_RUNNER_BEARER_TOKEN` must be nonblank; any optional provider settings must also be valid. The preflight reports only capability and variable names, never configured values.
+Run the complete repository verification plus this suite with:
+
+```bash
+bun run verify:e2e
+```
+
+`bun run verify` deliberately stops after the production build and remains suitable for normal
+local verification. `test:e2e` remains the canonical, unfiltered Playwright suite, while
+`verify:e2e` runs the base gate before it. Before Playwright starts, the launcher validates the
+same configuration contract used by `readDigitalOceanProviderConfig`. At minimum, both
+`AGENTBAY_DIGITALOCEAN_TOKEN` and `AGENTBAY_RUNNER_BEARER_TOKEN` must be nonblank; any optional
+provider settings must also be valid. The preflight reports only capability and variable names,
+never configured values.
 
 With the default `digitalocean` mode, the full suite may create and delete billable provider resources. Use an approved development account with usable network, image, SSH, and runner prerequisites. Do not use synthetic values for a real full-suite run.
 

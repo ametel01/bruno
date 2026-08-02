@@ -86,7 +86,7 @@ PII values:
 
 An approval record, app creation, provider toggle, local component test, or failed doctor result is
 intermediate evidence only. The completed #232 setup still does not prove hosted email-code,
-Google, Apple, current-user, sign-out, or full provider-backed `bun run verify` success.
+Google, Apple, current-user, sign-out, or full provider-backed `bun run verify:e2e` success.
 
 ## Production Google prerequisites
 

@@ -117,14 +117,15 @@ bun run test:e2e
 clerk doctor --json
 ```
 
-`bun run test:e2e` is the provider-backed final step of `bun run verify`; its sanitized capability
-gate is expected to stop before Playwright when approved provider credentials are absent.
+`bun run test:e2e` is the provider-backed final step of `bun run verify:e2e`; its sanitized
+capability gate is expected to stop before Playwright when approved provider credentials are
+absent. Base `bun run verify` deliberately excludes provider-backed E2E.
 
 On 2026-07-12, the dedicated AgentBay development Clerk setup from issue #232 is complete and its
 sanitized `clerk doctor --json` gate passes. The optional repository harness is implemented but
 has not run against the linked development instance. Issue #239 remains open because hosted browser
 email-code, Google, Apple, current-user, and sign-out smoke still need approved isolated identities
-and provider reachability. The canonical full `bun run verify` also remains outstanding because the
-final runner-backed E2E capability needs an authorized isolated local runner or explicit
+and provider reachability. The canonical full `bun run verify:e2e` also remains outstanding because
+the final runner-backed E2E capability needs an authorized isolated local runner or explicit
 cloud-provider authority. This document does not claim hosted provider-flow success, full
 provider-backed verify success, or issue closure.

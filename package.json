@@ -31,7 +31,8 @@
     "test:e2e:ci": "PORT=${PORT:-3100} DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:${PORT:-3100}} bun --conditions react-server scripts/run-e2e.ts ci",
     "test:e2e:clerk": "PORT=${PORT:-3200} AGENTBAY_AUTH_MODE=clerk DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=http://localhost:${PORT:-3200} PLAYWRIGHT_BASE_URL=http://localhost:${PORT:-3200} bun --conditions react-server scripts/run-clerk-e2e.ts",
     "typecheck": "tsc --noEmit",
-    "verify": "bun run format:check && bun run lint && bun run typecheck && bun run test && bun run build && bun run test:e2e",
+    "verify": "bun run format:check && bun run lint && bun run typecheck && bun run test && bun run build",
+    "verify:e2e": "bun run verify && bun run test:e2e",
     "vercel-build": "bun scripts/vercel-build.ts"
   },
   "dependencies": {

@@ -25,6 +25,8 @@ describe("E2E capability gates", () => {
     expect(CI_E2E_SELECTORS).toEqual(EXPECTED_CI_SELECTORS);
     expect(packageJson.scripts["test:e2e:ci"]).toContain("scripts/run-e2e.ts ci");
     expect(packageJson.scripts["test:e2e"]).toContain("scripts/run-e2e.ts full");
+    expect(packageJson.scripts.verify).not.toContain("test:e2e");
+    expect(packageJson.scripts["verify:e2e"]).toBe("bun run verify && bun run test:e2e");
     expect(workflow).toContain("run: bun run test:e2e:ci");
 
     for (const selector of EXPECTED_CI_SELECTORS) {

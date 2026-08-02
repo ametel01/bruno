@@ -257,20 +257,21 @@ closed without both Clerk keys; do not bypass that policy by copying production 
 
 ### 4. Validate before deployment
 
-The credential-free CI-equivalent checks are:
+Run the deterministic local verification gate with:
 
 ```sh
-bun run format:check
-bun run lint
-bun run typecheck
-bun run test
-bun run build
+bun run verify
+```
+
+GitHub CI additionally runs the credential-free browser smoke surface:
+
+```sh
 bun run test:e2e:ci
 ```
 
-`bun run verify` finishes with the full provider-backed E2E suite. It requires approved runner or
-DigitalOcean credentials and may create and delete billable resources; do not use it as a casual
-local check.
+Use `bun run verify:e2e` when full provider-backed acceptance is explicitly required. It runs the
+base verification gate and then the complete E2E suite. This requires approved runner or
+DigitalOcean credentials and may create and delete billable resources.
 
 ### 5. Deploy production
 
@@ -319,7 +320,8 @@ available.
 | `bun run test:e2e:ci` | Run the credential-free Playwright smoke surface. |
 | `bun run test:e2e` | Run the full provider-backed Playwright suite. |
 | `bun run test:e2e:clerk` | Run the opt-in hosted Clerk development smoke. |
-| `bun run verify` | Run every repository gate, ending with provider-backed E2E. |
+| `bun run verify` | Run formatting, lint, type checking, unit tests, and the production build. |
+| `bun run verify:e2e` | Run the base verification gate followed by provider-backed E2E. |
 | `bun run deploy:prod` | Deploy production to the configured Vercel scope. |
 
 See [E2E validation](./docs/E2E_VALIDATION.md) for capability gates and safe test modes.
