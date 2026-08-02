@@ -1050,6 +1050,20 @@ describe("product shell routes", () => {
     const html = renderToStaticMarkup(element);
 
     expect(html).toContain("No agent records");
+    expect(html).toContain('class="agents-page"');
+    expect(html).toContain('class="agents-workspace-overview"');
+    expect(html).toContain("Agent workspace");
+    expect(html).toContain('class="agent-creation-panel"');
+    expect(html).toContain('class="agent-creation-fields"');
+    expect(html).toContain('class="agent-template-workspace"');
+    expect(html).toContain('class="template-catalogue"');
+    expect(html).toContain('class="agent-creation-actions"');
+    expect(html).toContain('class="agents-cloud-status"');
+    expect(html.indexOf("agents-workspace-title")).toBeLessThan(html.indexOf("agent-list-title"));
+    expect(html.indexOf("agent-list-title")).toBeLessThan(html.indexOf("create-agent-title"));
+    expect(html.indexOf("create-agent-title")).toBeLessThan(
+      html.indexOf("agents-cloud-runner-title"),
+    );
     expect(html).toContain("Create agent");
     expect(html).toContain("Research Agent");
     expect(html).toContain("Inbox Triage Agent");

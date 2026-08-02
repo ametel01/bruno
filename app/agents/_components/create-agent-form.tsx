@@ -166,97 +166,107 @@ export function CreateAgentForm({ maxNameLength, runners, templates }: CreateAge
 
   return (
     <form className="agent-form" onSubmit={handleSubmit}>
-      <div className="field-group">
-        <label htmlFor="agent-name">Name</label>
-        <input
-          id="agent-name"
-          name="name"
-          type="text"
-          required
-          maxLength={maxNameLength}
-          autoComplete="off"
-          placeholder="Research Agent"
-        />
-      </div>
-      <div className="field-group">
-        <label htmlFor="agent-template">Template</label>
-        <select
-          id="agent-template"
-          name="templateKey"
-          onChange={handleTemplateChange}
-          value={selectedTemplateKey}
-        >
-          {templates.map((template) => (
-            <option key={template.key} value={template.key}>
-              {template.name}
-            </option>
-          ))}
-        </select>
-      </div>
-      {runners.length > 0 ? (
+      <div className="agent-creation-fields">
         <div className="field-group">
-          <label htmlFor="agent-runner">Runner</label>
-          <select id="agent-runner" name="runnerId" defaultValue="">
-            <option value="">No runner</option>
-            {runners.map((runner) => (
-              <option key={runner.id} value={runner.id}>
-                {runner.name} / {runner.kind} / {runner.status} / {runner.detail}
+          <label htmlFor="agent-name">Name</label>
+          <input
+            id="agent-name"
+            name="name"
+            type="text"
+            required
+            maxLength={maxNameLength}
+            autoComplete="off"
+            placeholder="Research Agent"
+          />
+        </div>
+        <div className="field-group">
+          <label htmlFor="agent-template">Template</label>
+          <select
+            id="agent-template"
+            name="templateKey"
+            onChange={handleTemplateChange}
+            value={selectedTemplateKey}
+          >
+            {templates.map((template) => (
+              <option key={template.key} value={template.key}>
+                {template.name}
               </option>
             ))}
           </select>
         </div>
-      ) : null}
-      {selectedTemplate ? (
-        <div className="selected-template-summary" aria-live="polite">
-          <h3>{selectedTemplate.name}</h3>
-          <p>{selectedTemplate.description}</p>
-          <dl className="template-metadata-list">
-            <div>
-              <dt>Version</dt>
-              <dd>{selectedTemplate.version}</dd>
-            </div>
-            <div>
-              <dt>Schedule</dt>
-              <dd>{selectedTemplate.defaultSchedule}</dd>
-            </div>
-            <div>
-              <dt>Required integrations</dt>
-              <dd>{formatList(selectedTemplate.requiredIntegrations)}</dd>
-            </div>
-            <div>
-              <dt>Default prompt</dt>
-              <dd className="template-default-prompt">
-                <p>{selectedTemplate.defaultSystemPrompt}</p>
-              </dd>
-            </div>
-          </dl>
-          <TemplateToolList tools={selectedTemplate.defaultTools} />
-        </div>
-      ) : null}
-      <div className="template-option-list">
-        {templates.map((template) => (
-          <article
-            className="template-option-card"
-            data-selected={template.key === selectedTemplateKey}
-            key={template.key}
-          >
-            <div>
-              <h3>{template.name}</h3>
-              <p>{template.description}</p>
-            </div>
-            <dl className="template-metadata-list">
+        {runners.length > 0 ? (
+          <div className="field-group">
+            <label htmlFor="agent-runner">Runner</label>
+            <select id="agent-runner" name="runnerId" defaultValue="">
+              <option value="">No runner</option>
+              {runners.map((runner) => (
+                <option key={runner.id} value={runner.id}>
+                  {runner.name} / {runner.kind} / {runner.status} / {runner.detail}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="agent-template-workspace">
+        {selectedTemplate ? (
+          <section className="selected-template-summary" aria-live="polite">
+            <div className="selected-template-heading">
               <div>
-                <dt>Tools</dt>
-                <dd>{formatList(template.defaultTools)}</dd>
+                <p>Selected template</p>
+                <h3>{selectedTemplate.name}</h3>
               </div>
+              <span>{selectedTemplate.version}</span>
+            </div>
+            <p>{selectedTemplate.description}</p>
+            <dl className="template-metadata-list selected-template-metadata">
               <div>
                 <dt>Schedule</dt>
-                <dd>{template.defaultSchedule}</dd>
+                <dd>{selectedTemplate.defaultSchedule}</dd>
+              </div>
+              <div>
+                <dt>Required integrations</dt>
+                <dd>{formatList(selectedTemplate.requiredIntegrations)}</dd>
               </div>
             </dl>
-          </article>
-        ))}
+            <TemplateToolList tools={selectedTemplate.defaultTools} />
+            <details className="template-prompt-details">
+              <summary>Default prompt</summary>
+              <p>{selectedTemplate.defaultSystemPrompt}</p>
+            </details>
+          </section>
+        ) : null}
+
+        <fieldset className="template-catalogue">
+          <legend>Template catalogue</legend>
+          <div className="template-option-list">
+            {templates.map((template) => (
+              <article
+                className="template-option-card"
+                data-selected={template.key === selectedTemplateKey}
+                key={template.key}
+              >
+                <div>
+                  <h3>{template.name}</h3>
+                  <p>{template.description}</p>
+                </div>
+                <dl className="template-metadata-list">
+                  <div>
+                    <dt>Tools</dt>
+                    <dd>{formatList(template.defaultTools)}</dd>
+                  </div>
+                  <div>
+                    <dt>Schedule</dt>
+                    <dd>{template.defaultSchedule}</dd>
+                  </div>
+                </dl>
+              </article>
+            ))}
+          </div>
+        </fieldset>
       </div>
+
       {showSetupTrace ? (
         <AgentSetupTrace
           activeStageIndex={state.status === "submitting" ? state.stageIndex : null}
@@ -264,14 +274,16 @@ export function CreateAgentForm({ maxNameLength, runners, templates }: CreateAge
           traceRef={setupTraceRef}
         />
       ) : null}
-      <button className="primary-button" type="submit" disabled={disabled}>
-        {submitting ? "Creating" : "Create agent"}
-      </button>
-      {state.status === "error" || state.status === "success" ? (
-        <p className={`form-message ${state.status}`} role="status">
-          {state.message}
-        </p>
-      ) : null}
+      <div className="agent-creation-actions">
+        <button className="primary-button" type="submit" disabled={disabled}>
+          {submitting ? "Creating" : "Create agent"}
+        </button>
+        {state.status === "error" || state.status === "success" ? (
+          <p className={`form-message ${state.status}`} role="status">
+            {state.message}
+          </p>
+        ) : null}
+      </div>
     </form>
   );
 }

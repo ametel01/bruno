@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { CloudRunnerProvisioningPanel } from "@/app/_components/cloud-runner-provisioning-panel";
-import { EmptyState, PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
+import { EmptyState, ProductShell } from "@/app/_components/product-shell";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { listedAgentStartDisabledReason } from "@/app/agents/_components/agent-start-readiness";
 import { CreateAgentForm } from "@/app/agents/_components/create-agent-form";
@@ -46,18 +46,76 @@ export default async function AgentsPage() {
     loadAssignableRunners(applicationUser.userId),
     loadCloudRunnerProvisioning(applicationUser.userId),
   ]);
+  const agentCount = listResult.ok ? listResult.agents.length : null;
+  const assignableRunnerCount = runnerResult.ok ? runnerResult.runners.length : null;
+  const cloudRunnerCount = cloudRunnersResult.ok ? cloudRunnersResult.runners.length : null;
+  const readyCloudRunnerCount = cloudRunnersResult.ok
+    ? cloudRunnersResult.runners.filter((runner) => runner.readinessStatus === "online").length
+    : null;
 
   return (
     <ProductShell
       active="agents"
       eyebrow="Agents"
       title="Agent inventory"
-      description="Create persistent agents, exercise local runner lifecycle controls, and confirm active records remain visible after refresh."
+      description="Create persistent agents, choose their operating template, and manage active records from one workspace."
     >
-      <div className="content-grid">
+      <div className="agents-page">
+        <section className="agents-workspace-overview" aria-labelledby="agents-workspace-title">
+          <div className="agents-workspace-heading">
+            <div>
+              <p>Creation readiness</p>
+              <h2 id="agents-workspace-title">Agent workspace</h2>
+            </div>
+            <span>Persisted state</span>
+          </div>
+          <dl>
+            <div data-state={agentCount !== null && agentCount > 0 ? "active" : "neutral"}>
+              <dt>Agents</dt>
+              <dd>
+                <strong>{agentCount ?? "—"}</strong>
+                <span>persisted records</span>
+              </dd>
+            </div>
+            <div data-state="active">
+              <dt>Templates</dt>
+              <dd>
+                <strong>{AGENT_TEMPLATE_OPTIONS.length}</strong>
+                <span>available profiles</span>
+              </dd>
+            </div>
+            <div
+              data-state={
+                assignableRunnerCount !== null && assignableRunnerCount > 0 ? "clear" : "neutral"
+              }
+            >
+              <dt>Assignable runners</dt>
+              <dd>
+                <strong>{assignableRunnerCount ?? "—"}</strong>
+                <span>online now</span>
+              </dd>
+            </div>
+            <div
+              data-state={
+                cloudRunnerCount !== null && cloudRunnerCount > 0 && readyCloudRunnerCount === 0
+                  ? "attention"
+                  : "clear"
+              }
+            >
+              <dt>Cloud ready</dt>
+              <dd>
+                <strong>
+                  {readyCloudRunnerCount ?? "—"}/{cloudRunnerCount ?? "—"}
+                </strong>
+                <span>online and tracked</span>
+              </dd>
+            </div>
+          </dl>
+        </section>
+
         <section className="agent-list-panel" aria-labelledby="agent-list-title">
           <div className="section-heading">
-            <h2 id="agent-list-title">Agents</h2>
+            <h2 id="agent-list-title">Existing agents</h2>
             {listResult.ok ? <span>{listResult.agents.length} persisted</span> : null}
           </div>
           {listResult.ok ? (
@@ -122,20 +180,40 @@ export default async function AgentsPage() {
             </div>
           )}
         </section>
-        <div className="create-agent-stack">
-          <PlaceholderPanel title="Create agent">
+
+        <section className="agent-creation-panel" aria-labelledby="create-agent-title">
+          <div className="agent-creation-heading">
+            <div>
+              <p>New persistent record</p>
+              <h2 id="create-agent-title">Create agent</h2>
+            </div>
+            <span>Choose one template</span>
+          </div>
+          <div className="agent-creation-body">
             <CreateAgentForm
               maxNameLength={AGENT_NAME_MAX_LENGTH}
               runners={runnerResult.ok ? runnerResult.runners : []}
               templates={AGENT_TEMPLATE_OPTIONS}
             />
-          </PlaceholderPanel>
+          </div>
+        </section>
+
+        <details className="agents-cloud-status">
+          <summary>
+            <span>
+              <strong>Cloud setup status</strong>
+              <small>Provisioning and runner readiness details</small>
+            </span>
+            <span>
+              {cloudRunnerCount ?? "—"} tracked / {readyCloudRunnerCount ?? "—"} ready
+            </span>
+          </summary>
           <CloudRunnerProvisioningPanel
             result={cloudRunnersResult}
             title="Cloud setup status"
             titleId="agents-cloud-runner-title"
           />
-        </div>
+        </details>
       </div>
     </ProductShell>
   );
