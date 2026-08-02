@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ActivityFeedPanel } from "@/app/_components/activity-feed";
 import { ApprovalDecisionControls } from "@/app/_components/approval-decision-controls";
 import { CloudRunnerProvisioningPanel } from "@/app/_components/cloud-runner-provisioning-panel";
-import { EmptyState, PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
+import { EmptyState, ProductShell } from "@/app/_components/product-shell";
 import { RunnerCapacityDefinitionItems } from "@/app/_components/runner-capacity-details";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { listedAgentStartDisabledReason } from "@/app/agents/_components/agent-start-readiness";
@@ -122,15 +122,82 @@ export function DashboardContent({
   processLogsResult?: DashboardProcessLogsResult;
   listResult?: DashboardAgentResult;
 }) {
+  const activeAgentCount = listResult.ok ? listResult.agents.length : null;
+  const runningAgentCount = listResult.ok
+    ? listResult.agents.filter((agent) =>
+        ["running", "starting", "restarting"].includes(agent.status),
+      ).length
+    : null;
+  const pendingApprovalCount = approvalsResult.ok ? approvalsResult.approvals.length : null;
+  const knownRunnerCount =
+    manualRunnersResult.ok && cloudRunnersResult.ok
+      ? manualRunnersResult.runners.length + cloudRunnersResult.runners.length
+      : null;
+  const onlineRunnerCount =
+    manualRunnersResult.ok && cloudRunnersResult.ok
+      ? manualRunnersResult.runners.filter((runner) => runner.status === "online").length +
+        cloudRunnersResult.runners.filter((runner) => runner.readinessStatus === "online").length
+      : null;
+  const recentActivityCount = activityResult.ok ? activityResult.events.length : null;
+
   return (
     <ProductShell
       active="dashboard"
       eyebrow={routeLabel}
       title="Operational dashboard"
-      description="A control surface for persisted agent records, pending approval requests, local runner lifecycle status, and local development activity."
+      description="Triage agent work, approvals, runner health, and recent changes from one workspace."
     >
-      <div className="content-grid">
-        {costResult ? <DashboardCostSummary result={costResult} /> : null}
+      <div className="dashboard-page">
+        <section className="dashboard-fleet-pulse" aria-labelledby="dashboard-fleet-pulse-title">
+          <div className="dashboard-fleet-pulse-heading">
+            <div>
+              <p>Live operations</p>
+              <h2 id="dashboard-fleet-pulse-title">Fleet pulse</h2>
+            </div>
+            <span>Persisted state</span>
+          </div>
+          <dl>
+            <div data-state={runningAgentCount && runningAgentCount > 0 ? "active" : "neutral"}>
+              <dt>Agents</dt>
+              <dd>
+                <strong>{activeAgentCount ?? "—"}</strong>
+                <span>{runningAgentCount ?? "—"} running now</span>
+              </dd>
+            </div>
+            <div
+              data-state={pendingApprovalCount && pendingApprovalCount > 0 ? "attention" : "clear"}
+            >
+              <dt>Approvals</dt>
+              <dd>
+                <strong>{pendingApprovalCount ?? "—"}</strong>
+                <span>{pendingApprovalCount === 1 ? "request waiting" : "requests waiting"}</span>
+              </dd>
+            </div>
+            <div
+              data-state={
+                knownRunnerCount !== null && knownRunnerCount > 0 && onlineRunnerCount === 0
+                  ? "attention"
+                  : "clear"
+              }
+            >
+              <dt>Runners</dt>
+              <dd>
+                <strong>
+                  {onlineRunnerCount ?? "—"}/{knownRunnerCount ?? "—"}
+                </strong>
+                <span>online and known</span>
+              </dd>
+            </div>
+            <div data-state={recentActivityCount && recentActivityCount > 0 ? "active" : "neutral"}>
+              <dt>Recent changes</dt>
+              <dd>
+                <strong>{recentActivityCount ?? "—"}</strong>
+                <span>events in view</span>
+              </dd>
+            </div>
+          </dl>
+        </section>
+
         <section className="agent-list-panel" aria-labelledby="dashboard-agents-title">
           <div className="section-heading">
             <h2 id="dashboard-agents-title">Persisted agents</h2>
@@ -189,54 +256,96 @@ export function DashboardContent({
             </div>
           )}
         </section>
-        <ActivityFeedPanel
-          context={{ kind: "dashboard" }}
-          emptyDescription="Create or update an agent to show the newest persisted activity here."
-          emptyTitle="No activity yet"
-          errorMessage="Latest activity could not be loaded."
-          events={activityResult.ok ? activityResult.events : []}
-          hasError={!activityResult.ok}
-          title="Latest activity"
-          titleId="dashboard-activity-title"
-        />
-        <PendingApprovalsPanel result={approvalsResult} />
-        <DashboardManualRunnerPanel result={manualRunnersResult} />
-        <CloudRunnerProvisioningPanel
-          result={cloudRunnersResult}
-          title="Cloud provisioning"
-          titleId="dashboard-cloud-runner-title"
-        />
-        <DashboardProcessLogsPanel result={processLogsResult} />
-        <PlaceholderPanel title="Readiness">
-          <dl className="definition-list">
+
+        <div className="dashboard-workbench">
+          <div className="dashboard-work-queue">
+            <PendingApprovalsPanel result={approvalsResult} />
+            <DashboardProcessLogsPanel result={processLogsResult} />
+          </div>
+          <div className="dashboard-activity-column">
+            <ActivityFeedPanel
+              context={{ kind: "dashboard" }}
+              emptyDescription="Create or update an agent to show the newest persisted activity here."
+              emptyTitle="No activity yet"
+              errorMessage="Latest activity could not be loaded."
+              events={activityResult.ok ? activityResult.events : []}
+              hasError={!activityResult.ok}
+              title="Latest activity"
+              titleId="dashboard-activity-title"
+            />
+          </div>
+        </div>
+
+        <section
+          className="dashboard-infrastructure"
+          aria-labelledby="dashboard-infrastructure-title"
+        >
+          <div className="dashboard-section-heading">
             <div>
-              <dt>Product routes</dt>
-              <dd>Dashboard, agents, settings, and health routes are present.</dd>
+              <p>Capacity and provisioning</p>
+              <h2 id="dashboard-infrastructure-title">Infrastructure</h2>
             </div>
-            <div>
-              <dt>Database check</dt>
-              <dd>The `/health` endpoint remains the operator source for database reachability.</dd>
-            </div>
-            <div>
-              <dt>Agent data</dt>
-              <dd>Active persisted records are read from the database.</dd>
-            </div>
-          </dl>
-        </PlaceholderPanel>
-        <PlaceholderPanel title="Upcoming surfaces">
-          <ul className="plain-list">
-            <li>Start, Stop, and Restart use the Docker runner adapter and existing controls.</li>
-            <li>
-              Full per-agent log streams and local-development config editing are present on agent
-              detail pages.
-            </li>
-            <li>Cloud runner provisioning status is visible from persisted runner records.</li>
-            <li>
-              Approval decisions are available from the queue; production runners, billing, and
-              secret storage wait for later milestones.
-            </li>
-          </ul>
-        </PlaceholderPanel>
+            <span>{knownRunnerCount ?? "—"} tracked</span>
+          </div>
+          <div className="dashboard-infrastructure-grid">
+            <DashboardManualRunnerPanel result={manualRunnersResult} />
+            <CloudRunnerProvisioningPanel
+              result={cloudRunnersResult}
+              title="Cloud provisioning"
+              titleId="dashboard-cloud-runner-title"
+            />
+          </div>
+        </section>
+
+        {costResult ? <DashboardCostSummary result={costResult} /> : null}
+
+        <details className="dashboard-system-notes">
+          <summary>
+            <span>
+              <strong>System notes</strong>
+              <small>Routes, readiness, and implementation status</small>
+            </span>
+            <span aria-hidden="true">Details</span>
+          </summary>
+          <div className="dashboard-system-notes-grid">
+            <section aria-labelledby="dashboard-readiness-title">
+              <h3 id="dashboard-readiness-title">Readiness</h3>
+              <dl className="definition-list">
+                <div>
+                  <dt>Product routes</dt>
+                  <dd>Dashboard, agents, settings, and health routes are present.</dd>
+                </div>
+                <div>
+                  <dt>Database check</dt>
+                  <dd>
+                    The `/health` endpoint remains the operator source for database reachability.
+                  </dd>
+                </div>
+                <div>
+                  <dt>Agent data</dt>
+                  <dd>Active persisted records are read from the database.</dd>
+                </div>
+              </dl>
+            </section>
+            <section aria-labelledby="dashboard-upcoming-title">
+              <h3 id="dashboard-upcoming-title">Upcoming surfaces</h3>
+              <ul className="plain-list">
+                <li>
+                  Start, Stop, and Restart use the Docker runner adapter and existing controls.
+                </li>
+                <li>
+                  Full per-agent log streams and local-development config editing are present on
+                  agent detail pages.
+                </li>
+                <li>Cloud runner provisioning status is visible from persisted runner records.</li>
+                <li>
+                  Approval decisions are available from the queue; production runners, billing, and
+                  secret storage wait for later milestones.
+                </li>
+              </ul>
+            </section>
+          </div>
+        </details>
       </div>
     </ProductShell>
   );

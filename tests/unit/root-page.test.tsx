@@ -333,6 +333,24 @@ describe("product shell routes", () => {
     expect(html).toContain("No pending approvals");
     expect(html).toContain("Cloud provisioning");
     expect(html).toContain("No cloud runners");
+    expect(html).toContain('class="dashboard-page"');
+    expect(html).toContain('class="dashboard-fleet-pulse"');
+    expect(html).toContain("Fleet pulse");
+    expect(html).toContain('class="dashboard-workbench"');
+    expect(html).toContain('class="dashboard-work-queue"');
+    expect(html).toContain('class="dashboard-activity-column"');
+    expect(html).toContain('class="dashboard-infrastructure"');
+    expect(html).toContain('class="dashboard-infrastructure-grid"');
+    expect(html).toContain('class="dashboard-system-notes"');
+    expect(html.indexOf("dashboard-fleet-pulse-title")).toBeLessThan(
+      html.indexOf("dashboard-agents-title"),
+    );
+    expect(html.indexOf("dashboard-agents-title")).toBeLessThan(
+      html.indexOf("dashboard-activity-title"),
+    );
+    expect(html.indexOf("dashboard-infrastructure-title")).toBeLessThan(
+      html.indexOf("dashboard-cost-summary-title"),
+    );
     expect(html).toContain("Active persisted records are read from the database.");
     expect(html).toContain(
       "Start, Stop, and Restart use the Docker runner adapter and existing controls.",

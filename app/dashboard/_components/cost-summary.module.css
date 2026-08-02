@@ -15,7 +15,7 @@
   gap: 20px;
   border-bottom: 1px solid var(--line);
   background: linear-gradient(90deg, rgb(31 111 104 / 10%), transparent 45%), var(--panel-subtle);
-  padding: 20px 22px;
+  padding: 16px 18px;
 }
 
 .heading h2,
@@ -42,7 +42,7 @@
 }
 
 .eyebrow {
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .badge {
@@ -62,7 +62,7 @@
   color: var(--muted);
   font-size: 0.84rem;
   line-height: 1.55;
-  padding: 14px 22px;
+  padding: 11px 18px;
 }
 
 .intro {
@@ -76,7 +76,7 @@
 
 .window {
   min-width: 0;
-  padding: 22px;
+  padding: 16px 18px;
 }
 
 .window + .window {
@@ -88,7 +88,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 18px;
+  margin-bottom: 10px;
 }
 
 .windowHeading h3 {
@@ -104,21 +104,25 @@
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: 1fr;
   margin: 0;
 }
 
 .metric {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(120px, 0.85fr);
   min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel-subtle);
-  padding: 14px;
+  align-items: start;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding: 10px 0;
+}
+
+.metric:first-child {
+  border-top: 0;
 }
 
 .metric dt {
-  min-height: 2.5em;
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 800;
@@ -127,23 +131,29 @@
 
 .metric dd {
   display: grid;
-  gap: 4px;
-  margin: 9px 0 0;
+  justify-items: end;
+  gap: 2px;
+  margin: 0;
+  text-align: right;
 }
 
 .value {
   overflow-wrap: anywhere;
   color: var(--foreground);
-  font-size: clamp(1.05rem, 2vw, 1.42rem);
+  font-size: 1rem;
   font-variant-numeric: tabular-nums;
   font-weight: 900;
   line-height: 1.1;
 }
 
 .detail {
+  display: -webkit-box;
+  overflow: hidden;
   color: var(--muted);
   font-size: 0.7rem;
   line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .unavailable {
@@ -155,7 +165,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  margin-top: 14px;
+  margin-top: 9px;
   color: var(--muted);
   font-size: 0.68rem;
   line-height: 1.4;
@@ -211,11 +221,12 @@
     border-left: 0;
   }
 
-  .metrics {
+  .metric {
     grid-template-columns: 1fr;
   }
 
-  .metric dt {
-    min-height: auto;
+  .metric dd {
+    justify-items: start;
+    text-align: left;
   }
 }
