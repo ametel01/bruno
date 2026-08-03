@@ -6,11 +6,11 @@
   owner: coordinator
   branch: `main`
   worktree: `/Users/alexmetelli/source/plingpling`
-  phase: builder green; preparing product commit and independent check
+  phase: checker cycle 1 ALL GREEN at `798cbf3`; ready for Step 8 assignment
   cycle: 1/5
   contract: `STATUS.archive.md` → `Step 7 Completion Contract (pre-spec)`
   blocker: none in the required Step 7 gate set.
-  next-action: Commit `feat: reconcile agents automatically to ready`, then run independent checker cycle 1 at the exact commit before Step 8.
+  next-action: Coordinator may start Step 8. Do not perform Step 10 live/provider/model/Telegram work without explicit authorization and prerequisites.
 
 ## Completion Contract
 
@@ -28,12 +28,12 @@
 
 ## Current Handoff
 
-- from: builder-step-7 repair streams
+- from: checker-step-7
   to: coordinator
   timestamp: 2026-08-03
-  request: Integrate the repaired reconciler, persistence/routes, provider, cancellation, and smoke slices; commit only after the complete required gate set passes.
-  evidence: Focused 22 files / 311 tests and full 116 files / 1,065 tests passed; migrations, local duplicate-trigger cloud smoke, real local Hermes controller smoke, build, 14 CI E2E, and fail-closed staging are green.
-  stop-condition: Run an independent checker at the exact Step 7 commit before Step 8; do not perform Step 10 live/provider/infrastructure work.
+  request: Proceed to Step 8 from exact Step 7 commit `798cbf3`.
+  evidence: Independent checker cycle 1 is ALL GREEN. Semantic audit covered lease/action budget, retry/cron/triggers, provisioning operation-key recovery, canary exactly-once ambiguity, cancellation precedence, final usage/event boundary, migration invariants, and redaction surfaces. Command gates passed: `bun install --frozen-lockfile`; `bun run db:generate`; `bun run db:migrate` twice; changed-unit suite 21 files / 306 tests; full suite 116 files / 1,065 tests; `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run build`; `bun run test:e2e:ci` 14/14; `bun run local:cloud:smoke`; `bun run agent:hermes:contract-smoke`; expected fail-closed `bun run verify:hermes:staging` with `capability_unavailable` and `sideEffectsAttempted:false`; `git diff --check`; product tree clean before this status update.
+  stop-condition: Step 7 is accepted. Keep external/live acceptance blocked until Step 10 authorization.
 
 ## Gates
 
@@ -46,11 +46,11 @@
 - Step 5 `d50cc4e`: cycle 2 builder green but checker cycle 2 found safe YAML punctuation and filesystem matrix gaps.
 - Step 5 `4f8312d`: independently green after cycle 3 — 17 files / 102 focused tests, local Hermes contract smoke with fake model and fake Telegram boundary, 107 files / 961 tests, build, 14 E2E, and fail-closed staging with no effects.
 - Step 6 `4e2897a` + `fa677fb`: independently green after cycle 2 — credential-file matrix, focused 4 files / 77 tests, local fake-boundary smoke, 108 files / 996 tests, build, 14 E2E, and fail-closed staging with no effects.
-- Step 7 candidate: builder green — focused 22 files / 311 tests, full 116 files / 1,065 tests, clean/upgrade/idempotent migrations, local duplicate-trigger cloud smoke through ready, real local Hermes controller smoke, build, 14 CI E2E, and fail-closed staging with no effects.
+- Step 7 `798cbf3`: independently green after checker cycle 1 — `db:generate` no drift, `db:migrate` twice, focused changed-unit 21 files / 306 tests, full 116 files / 1,065 tests, local duplicate-trigger cloud smoke through ready, real local Hermes controller smoke, build, 14 CI E2E, and fail-closed staging with no effects.
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling` — branch `main`; sole active worktree; Step 7 builder gates are green and external actions remain prohibited.
+- `/Users/alexmetelli/source/plingpling` — branch `main`; sole active worktree; Step 7 checker cycle 1 is green and its tracker evidence is ready to commit; external actions remain prohibited.
 
 ## Decisions And Lessons
 
@@ -68,4 +68,4 @@
 - Step 4 — `d942270` + `546b9df` — ready-mode encrypted creation, bounded Telegram validation, active-bot uniqueness/backfill, atomic deployment persistence, and independently accepted security/concurrency gates.
 - Step 5 — `fe13ab9` + `d50cc4e` + `4f8312d` — independently accepted managed launch-spec v3, owner-scoped secret launch building, hardened strict YAML/env/filesystem projection, v2/manual compatibility, and fake-provider/Telegram local smoke coverage.
 - Step 6 — `4e2897a` + `fa677fb` — independently accepted asynchronous runner launch/status/canary behavior, cancellation, lifecycle evidence, and nonblocking credential reads.
-- Step 7 — This commit — builder-green durable automatic create-to-ready reconciliation; independent checker pending.
+- Step 7 — `798cbf3` — independently accepted durable automatic create-to-ready reconciliation, safe retry/cron/triggers, provider idempotency, one canary, final ready/usage boundary, and local-only smoke coverage.

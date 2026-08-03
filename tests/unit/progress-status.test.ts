@@ -165,9 +165,7 @@ describe("automatic Hermes Telegram progress status", () => {
     );
     expect(automaticLedger).toContain("OpenRouter is the first supported provider");
     expect(automaticLedger).toContain("dedicated staging Telegram bot/user");
-    expect(automaticLedger).toContain(
-      "Step 7 is complete in this commit and locally green, pending independent checker",
-    );
+    expect(automaticLedger).toContain("Step 7 is independently accepted at `798cbf3`");
     expect(automaticLedger).toContain("- [x] Step 0: Progress and Changelog Tracking Setup");
     expect(automaticLedger).toContain("- [x] Step 1: Quality Gates Setup and Baseline Evidence");
     expect(automaticLedger).toContain(
@@ -213,7 +211,7 @@ describe("automatic Hermes Telegram progress status", () => {
       "| 6. Split Runner Launch Acceptance From Observed Readiness | Complete and independently accepted after cycle 2 |",
     );
     expect(automaticLedger).toContain(
-      "| 7. Reconcile Creation Through Ready | Complete; pending independent checker |",
+      "| 7. Reconcile Creation Through Ready | Complete and independently accepted after cycle 1 |",
     );
     expect(automaticLedger).toContain("launch-spec v3 parsing/redaction/serialization");
     expect(automaticLedger).toContain("explicit/custom YAML tags and anchors");
@@ -249,9 +247,11 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain("Full gates passed");
     expect(automaticLedger).toContain("Step validation commands and results.");
     expect(automaticLedger).toContain("Safe blocker codes, missing capabilities, and next action.");
-    expect(automaticLedger).toContain("No builder blocker remains for Step 7");
     expect(automaticLedger).toContain(
-      "Step 8 should add one-click creation and persisted progress UI only after",
+      "Step 7 is independently accepted at `798cbf3`; no Step 7 blocker remains",
+    );
+    expect(automaticLedger).toContain(
+      "Step 8 should add one-click creation and persisted progress UI against the",
     );
     expect(automaticLedger).not.toContain("No blocker remains for Step 3.");
     expect(automaticLedger).not.toContain("Step 4 should add managed creation configuration");
