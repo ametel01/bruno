@@ -2,24 +2,24 @@
 
 ## Active Work
 
-- plan: `PLAN.md` Step 6 — Split Runner Launch Acceptance From Observed Readiness
-  owner: coordinator
+- plan: `PLAN.md` Step 7 — Reconcile Creation Through Ready
+  owner: builder-step-7
   branch: `main`
   worktree: `/Users/alexmetelli/source/plingpling`
-  phase: cycle-2 FIFO repair validated; committing for independent recheck
-  cycle: 2/5
-  contract: `STATUS.archive.md` → `Step 6 Completion Contract (pre-spec)`
-  blocker: none in implementation; independent checker cycle 2 is required.
-  next-action: Commit the FIFO repair separately, then recheck exact HEAD before Step 7.
+  phase: dependency accepted; assigning builder
+  cycle: 1/5
+  contract: `STATUS.archive.md` → `Step 7 Completion Contract (pre-spec)`
+  blocker: none; Step 6 is independently accepted through `fa677fb`.
+  next-action: Implement the archived Step 7 contract only, run all gates, update changelog/progress, and commit `feat: reconcile agents automatically to ready`.
 
 ## Completion Contract
 
-- outcome: Make runner start/restart return bounded HTTP 202 launch acceptance without readiness polling, converge retries to exactly one selected container, and expose a truthful redacted status snapshot for later reconciliation.
-- acceptance criteria: Exact launch/status v2 DTOs, operation labels, one 30-second acceptance budget, per-agent serialization, deterministic reuse/replacement, one-shot authenticated private readiness observation, canary caching, safe cancellation, and no premature control-plane `running` transition are in the archived Step 6 contract.
-- non-goals: No deployment reconciler or leases, create-progress UI, restart policy/reboot recovery, live Telegram reply, infrastructure provisioning, hosted-secret mutation, image publication, or Step 7+ behavior.
-- required gates: focused runner/Docker/status/probe/canary/manual-adapter/lifecycle/auth/redaction tests; local contract smoke; full format/lint/typecheck/test/build/E2E, fail-closed staging, and diff check.
-- risks: duplicate containers, unbounded Vercel waits, stale reuse, cross-agent mutation, unsafe status leakage, canary replay/cost, stop/start races, and false `running` transitions.
-- do-not-touch: Accepted Step 0–5 semantics; deployment reconciler/UI/restart policy; external resources; prior changelog/progress entries.
+- outcome: Durably reconcile a ready-mode deployment through bounded provisioning, launch, observed readiness, one canary, Telegram connection, and one atomic running/usage completion.
+- acceptance criteria: Lease-safe idempotent stages, one bounded side effect per call, opportunistic/heartbeat/cron triggers, safe retry/backoff, stale-lease recovery, exact Step 6 status/canary correlation, and one final running transition are in the archived Step 7 contract.
+- non-goals: No Step 8 creation/progress UI, Step 9 restart policy/reboot durability, Step 10 live Telegram/provider/infrastructure acceptance, hosted-secret mutation, or image publication.
+- required gates: focused reconciler/lease/transition/retry/provisioning/lifecycle/canary/Telegram/event/usage/isolation tests; local-cloud and Hermes contract smokes; full format/lint/typecheck/test/build/E2E, fail-closed staging, migrations, and diff check.
+- risks: duplicated side effects or paid canaries, stale leases, false ready, early usage, unsafe errors, cross-user claims, browser-lifetime work, and cleanup ownership ambiguity.
+- do-not-touch: Accepted Step 0–6 semantics; Step 8 UI, Step 9 restart policy, Step 10 external resources, prior historical ledger/archive content.
 
 ## Dependency Graph
 
@@ -28,12 +28,12 @@
 
 ## Current Handoff
 
-- from: step6-runtime-repair
-  to: coordinator
+- from: coordinator
+  to: builder-step-7
   timestamp: 2026-08-03
-  request: Integrate and commit the nonblocking no-follow FIFO repair, then hand exact HEAD to checker cycle 2.
-  evidence: Pre/post file identity validation and nonblocking open added; FIFO status/canary remain under one second with safe typed outcomes, zero probe calls, repeated bounded status, and regular-file recovery; focused Step 5/6 tests passed 4 files / 61 tests; full tests passed 108 files / 996 tests; local smoke, build, 14 E2E tests, lint, typecheck, fail-closed staging, and diff-check passed.
-  stop-condition: Stop before Step 7 reconciliation/database-stage progression or any real provider/Telegram/infrastructure effect.
+  request: Implement the archived Step 7 contract only; reconcile persisted ready-mode deployments to verified ready/failed state and commit `feat: reconcile agents automatically to ready` after all gates.
+  evidence: Step 6 product `4e2897a` plus FIFO repair `fa677fb` are independently green: credential-file matrix, 4 files / 77 focused tests, 108 files / 996 full tests, local smoke, build, 14 E2E tests, and fail-closed staging.
+  stop-condition: Stop before Step 8 UI, Step 9 restart policy, Step 10 live/provider/infrastructure work, or any real paid/external effect.
 
 ## Gates
 
@@ -45,7 +45,7 @@
 - Step 5 `fe13ab9`: builder green but checker cycle 1 found YAML/env/filesystem/Docker inspect gaps.
 - Step 5 `d50cc4e`: cycle 2 builder green but checker cycle 2 found safe YAML punctuation and filesystem matrix gaps.
 - Step 5 `4f8312d`: independently green after cycle 3 — 17 files / 102 focused tests, local Hermes contract smoke with fake model and fake Telegram boundary, 107 files / 961 tests, build, 14 E2E, and fail-closed staging with no effects.
-- Step 6 `4e2897a` plus pending cycle-2 repair: FIFO `.env` credential reads are now nonblocking and identity-checked; focused 4 files / 61 tests pass, with checker revalidation pending.
+- Step 6 `4e2897a` + `fa677fb`: independently green after cycle 2 — credential-file matrix, focused 4 files / 77 tests, local fake-boundary smoke, 108 files / 996 tests, build, 14 E2E, and fail-closed staging with no effects.
 
 ## Worktrees
 
@@ -66,4 +66,4 @@
 - Step 3 — `7024bc2` — desired state, durable deployment operations, leases, migration, and concealed read API; checker evidence `ba8c969`.
 - Step 4 — `d942270` + `546b9df` — ready-mode encrypted creation, bounded Telegram validation, active-bot uniqueness/backfill, atomic deployment persistence, and independently accepted security/concurrency gates.
 - Step 5 — `fe13ab9` + `d50cc4e` + `4f8312d` — independently accepted managed launch-spec v3, owner-scoped secret launch building, hardened strict YAML/env/filesystem projection, v2/manual compatibility, and fake-provider/Telegram local smoke coverage.
-- Step 6 — `4e2897a` plus pending cycle-2 repair commit — asynchronous runner launch/status/canary behavior and FIFO credential-read hardening are implemented; checker cycle 2 remains.
+- Step 6 — `4e2897a` + `fa677fb` — independently accepted asynchronous runner launch/status/canary behavior, cancellation, lifecycle evidence, and nonblocking credential reads.
