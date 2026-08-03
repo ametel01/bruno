@@ -1,8 +1,10 @@
 import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 
 export const RUNNER_LAUNCH_CONTRACT_VERSION = "agentbay.runner.launch.v2" as const;
-export const RUNNER_STATUS_CONTRACT_VERSION = "agentbay.runner.status.v2" as const;
+export const LEGACY_RUNNER_STATUS_CONTRACT_VERSION = "agentbay.runner.status.v2" as const;
+export const RUNNER_STATUS_CONTRACT_VERSION = "agentbay.runner.status.v3" as const;
 export const RUNNER_CANARY_CONTRACT_VERSION = "agentbay.runner.canary.v1" as const;
+export const MAX_RUNNER_RESTART_COUNT = 2_147_483_647;
 
 export type RunnerLaunchAction = "start" | "restart";
 export type RunnerLaunchDisposition = "created" | "reused" | "replaced";
@@ -29,8 +31,13 @@ export type RunnerPlatformState =
   | "connecting"
   | "connected"
   | "disconnected"
+  | "retrying"
+  | "fatal"
+  | "paused"
   | "failed"
   | "disabled";
+export type RunnerTelegramState = Exclude<RunnerPlatformState, "failed">;
+export type RunnerRestartPolicyName = "no" | "always" | "unless-stopped" | "on-failure" | "unknown";
 export type RunnerGatewayState = "unknown" | "starting" | "running" | "failed" | "stopped";
 export type RunnerRevisionState = "match" | "mismatch" | "missing" | "unreadable" | "unknown";
 export type RunnerReadinessReason =
@@ -51,6 +58,9 @@ export type RunnerReadinessReason =
   | "gateway_failed"
   | "api_server_not_connected"
   | "telegram_not_connected"
+  | "telegram_retrying"
+  | "telegram_fatal"
+  | "telegram_paused"
   | "readiness_timeout";
 
 export type RunnerOperationTarget = {
@@ -103,6 +113,22 @@ export type RunnerAgentStatusSnapshot = {
   observedAt: string;
 };
 
+export type RunnerDurableStatusSnapshot = Omit<
+  RunnerAgentStatusSnapshot,
+  "container" | "telegram"
+> & {
+  container: RunnerAgentStatusSnapshot["container"] & {
+    restartPolicy: {
+      name: RunnerRestartPolicyName;
+      maximumRetryCount: number | null;
+    };
+    restartCount: number | null;
+  };
+  telegram: Omit<RunnerAgentStatusSnapshot["telegram"], "state"> & {
+    state: RunnerTelegramState;
+  };
+};
+
 export type RunnerLaunchAcceptedResponse = {
   ok: true;
   contractVersion: typeof RUNNER_LAUNCH_CONTRACT_VERSION;
@@ -123,7 +149,13 @@ export type RunnerStatusResponse = {
   contractVersion: typeof RUNNER_STATUS_CONTRACT_VERSION;
   agentId: string;
   action: "status";
-  snapshot: RunnerAgentStatusSnapshot;
+  snapshot: RunnerDurableStatusSnapshot;
+};
+
+export type ParsedRunnerStatusResponse = Omit<RunnerStatusResponse, "contractVersion"> & {
+  contractVersion:
+    | typeof RUNNER_STATUS_CONTRACT_VERSION
+    | typeof LEGACY_RUNNER_STATUS_CONTRACT_VERSION;
 };
 
 export type RunnerCanaryObservation = {
@@ -275,19 +307,56 @@ export function parseRunnerLaunchAccepted(
 
 export function parseRunnerStatus(
   value: unknown,
-): { ok: true; response: RunnerStatusResponse } | { ok: false } {
+): { ok: true; response: ParsedRunnerStatusResponse } | { ok: false } {
   if (
     !isExactRecord(value, ["action", "agentId", "contractVersion", "ok", "snapshot"]) ||
     value.ok !== true ||
-    value.contractVersion !== RUNNER_STATUS_CONTRACT_VERSION ||
     value.action !== "status" ||
-    !isRunnerUuid(value.agentId) ||
+    !isRunnerUuid(value.agentId)
+  ) {
+    return { ok: false };
+  }
+
+  if (
+    value.contractVersion === RUNNER_STATUS_CONTRACT_VERSION &&
+    isRunnerDurableStatusSnapshot(value.snapshot)
+  ) {
+    return { ok: true, response: value as RunnerStatusResponse };
+  }
+
+  if (
+    value.contractVersion !== LEGACY_RUNNER_STATUS_CONTRACT_VERSION ||
     !isRunnerStatusSnapshot(value.snapshot)
   ) {
     return { ok: false };
   }
 
-  return { ok: true, response: value as RunnerStatusResponse };
+  return {
+    ok: true,
+    response: {
+      ok: true,
+      contractVersion: LEGACY_RUNNER_STATUS_CONTRACT_VERSION,
+      agentId: value.agentId,
+      action: "status",
+      snapshot: normalizeLegacyStatusSnapshot(value.snapshot),
+    },
+  };
+}
+
+export function hasExactRunnerDurabilityEvidence(snapshot: RunnerDurableStatusSnapshot): boolean {
+  return (
+    snapshot.container.restartPolicy.name === "unless-stopped" &&
+    snapshot.container.restartPolicy.maximumRetryCount === 0 &&
+    snapshot.container.restartCount !== null
+  );
+}
+
+export function isRunnerStatusExactReady(response: ParsedRunnerStatusResponse): boolean {
+  return (
+    response.contractVersion === RUNNER_STATUS_CONTRACT_VERSION &&
+    response.snapshot.phase === "ready" &&
+    hasExactRunnerDurabilityEvidence(response.snapshot)
+  );
 }
 
 export function parseRunnerCanary(
@@ -422,6 +491,96 @@ export function isRunnerStatusSnapshot(value: unknown): value is RunnerAgentStat
   );
 }
 
+export function isRunnerDurableStatusSnapshot(
+  value: unknown,
+): value is RunnerDurableStatusSnapshot {
+  if (
+    !isRecord(value) ||
+    !isExactRecord(value.container, [
+      "finishedAt",
+      "id",
+      "image",
+      "name",
+      "observedAt",
+      "restartCount",
+      "restartPolicy",
+      "startedAt",
+      "state",
+    ]) ||
+    !isExactRecord(value.container.restartPolicy, ["maximumRetryCount", "name"]) ||
+    !isExactRecord(value.telegram, ["observedAt", "required", "state"])
+  ) {
+    return false;
+  }
+
+  const {
+    restartCount: _restartCount,
+    restartPolicy: _restartPolicy,
+    ...legacyContainer
+  } = value.container;
+  const legacyShape = {
+    ...value,
+    container: legacyContainer,
+    telegram: {
+      ...value.telegram,
+      state:
+        value.telegram.state === "retrying" ||
+        value.telegram.state === "fatal" ||
+        value.telegram.state === "paused"
+          ? "failed"
+          : value.telegram.state,
+    },
+  };
+
+  return (
+    isRunnerStatusSnapshot(legacyShape) &&
+    isRunnerRestartPolicyName(value.container.restartPolicy.name) &&
+    isNullableBoundedRestartCount(value.container.restartPolicy.maximumRetryCount) &&
+    isNullableBoundedRestartCount(value.container.restartCount) &&
+    [
+      "unknown",
+      "connecting",
+      "connected",
+      "disconnected",
+      "retrying",
+      "fatal",
+      "paused",
+      "disabled",
+    ].includes(String(value.telegram.state))
+  );
+}
+
+function normalizeLegacyStatusSnapshot(
+  snapshot: RunnerAgentStatusSnapshot,
+): RunnerDurableStatusSnapshot {
+  return {
+    ...snapshot,
+    container: {
+      ...snapshot.container,
+      restartPolicy: { name: "unknown", maximumRetryCount: null },
+      restartCount: null,
+    },
+    telegram: {
+      ...snapshot.telegram,
+      state: snapshot.telegram.state === "failed" ? "unknown" : snapshot.telegram.state,
+    },
+  };
+}
+
+function isRunnerRestartPolicyName(value: unknown): value is RunnerRestartPolicyName {
+  return ["no", "always", "unless-stopped", "on-failure", "unknown"].includes(value as never);
+}
+
+function isNullableBoundedRestartCount(value: unknown): value is number | null {
+  return (
+    value === null ||
+    (typeof value === "number" &&
+      Number.isSafeInteger(value) &&
+      value >= 0 &&
+      value <= MAX_RUNNER_RESTART_COUNT)
+  );
+}
+
 function isRunnerOperation(value: unknown): value is RunnerOperation {
   return (
     isExactRecord(value, ["acceptedAt", "action", "id", "target"]) &&
@@ -535,6 +694,9 @@ function isNullableReadinessReason(value: unknown): value is RunnerReadinessReas
     "gateway_failed",
     "api_server_not_connected",
     "telegram_not_connected",
+    "telegram_retrying",
+    "telegram_fatal",
+    "telegram_paused",
     "readiness_timeout",
   ].includes(value as never);
 }

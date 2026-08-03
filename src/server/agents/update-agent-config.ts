@@ -2,6 +2,8 @@ import { and, eq, exists, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { AGENT_NAME_MAX_LENGTH } from "@/src/server/agents/create-agent";
+import { reviseManagedRuntimeConfiguration } from "@/src/server/agents/agent-runtime-lifecycle";
+import { scheduleAgentRuntimeReconcileAfterResponse } from "@/src/server/agents/agent-runtime-triggers";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
 import { agentConfigs, agents } from "@/src/server/db/schema";
@@ -146,6 +148,7 @@ export type UpdateAgentConfigDependencies = {
   createConnection?: () => DatabaseConnection;
   now?: () => Date;
   recordConfigUpdatedEvent?: RecordConfigUpdatedEvent;
+  scheduleRuntimeReconcile?: typeof scheduleAgentRuntimeReconcileAfterResponse;
 };
 
 export class AgentConfigUpdatePersistenceError extends Error {
@@ -318,9 +321,10 @@ export async function updateAgentConfigForUser(
   const now = dependencies.now?.() ?? new Date();
   const recordConfigUpdatedEvent =
     dependencies.recordConfigUpdatedEvent ?? recordDefaultConfigUpdatedEvent;
+  let scheduleRuntimeReconcile = false;
 
   try {
-    return await connection.db.transaction(async (tx) => {
+    const result: UpdateAgentConfigResult = await connection.db.transaction(async (tx) => {
       const [row] = await tx
         .select({
           agent: agents,
@@ -449,6 +453,15 @@ export async function updateAgentConfigForUser(
         changedFields,
       });
 
+      if (changedFields.some((change) => change.field !== "maxDailySpend")) {
+        const runtime = await reviseManagedRuntimeConfiguration(tx, {
+          agentId: normalizedAgentId,
+          userId,
+          now,
+        });
+        scheduleRuntimeReconcile = runtime.schedule;
+      }
+
       return toUpdateAgentConfigSuccess({
         agent: persistedAgent,
         config: persistedConfig,
@@ -458,6 +471,14 @@ export async function updateAgentConfigForUser(
         },
       });
     });
+
+    if (scheduleRuntimeReconcile) {
+      (dependencies.scheduleRuntimeReconcile ?? scheduleAgentRuntimeReconcileAfterResponse)(
+        normalizedAgentId,
+      );
+    }
+
+    return result;
   } catch (error) {
     throw new AgentConfigUpdatePersistenceError(error);
   } finally {

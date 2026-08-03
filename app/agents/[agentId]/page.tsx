@@ -10,6 +10,7 @@ import { AgentHermesSetup } from "@/app/agents/_components/agent-hermes-setup";
 import { AssignedRunnerPanel } from "@/app/agents/_components/assigned-runner-panel";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { AgentRuntimeLogPanel } from "@/app/agents/_components/agent-runtime-log-panel";
+import { AgentRuntimeStatus } from "@/app/agents/_components/agent-runtime-status";
 import { AGENT_NAME_MAX_LENGTH } from "@/src/server/agents/create-agent";
 import {
   buildAgentOperationalAlerts,
@@ -199,8 +200,9 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
               <AgentLifecycleControls
                 agentId={agent.id}
                 deployment={latestDeployment}
-                detailHref={`${agent.href}#deployment-progress-title`}
+                detailHref={`${agent.href}#${agent.runtime ? "runtime-status-title" : "deployment-progress-title"}`}
                 desiredStatus={desiredStatus}
+                runtime={agent.runtime}
                 restartDisabledReason={
                   agent.status === "running" ? hermesLifecycleDisabledReason : null
                 }
@@ -211,10 +213,19 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
           </div>
           <fieldset className="agent-readiness-track">
             <legend className="visually-hidden">Agent run readiness</legend>
-            <div data-state={agent.status === "running" ? "ready" : "neutral"}>
+            <div
+              data-state={
+                agent.runtime?.kind === "healthy" || (!agent.runtime && agent.status === "running")
+                  ? "ready"
+                  : agent.runtime?.kind === "attention_required" ||
+                      agent.runtime?.kind === "unavailable"
+                    ? "attention"
+                    : "neutral"
+              }
+            >
               <span>Agent state</span>
               <strong>
-                <span className="status-pill">{agent.status}</span>
+                <span className="status-pill">{agent.runtime?.label ?? agent.status}</span>
               </strong>
             </div>
             <div data-state={hermesReadiness.configurationReady ? "ready" : "attention"}>
@@ -274,6 +285,9 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
               initialDeployment={latestDeployment}
               observedStatus={agent.status}
             />
+            {agent.runtime ? (
+              <AgentRuntimeStatus agentId={agent.id} initialRuntime={agent.runtime} />
+            ) : null}
             <AdvancedHermesSetupPanel
               agentId={agent.id}
               managed={latestDeployment !== null}

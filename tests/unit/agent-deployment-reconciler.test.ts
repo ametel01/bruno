@@ -14,6 +14,7 @@ import {
   agentDeployments,
   agentEvents,
   agentLogs,
+  agentRuntimeReconciliations,
   agents,
   agentUsagePeriods,
   runnerHeartbeats,
@@ -1284,6 +1285,7 @@ async function resetTables(connection: DatabaseConnection) {
   await connection.db.delete(agentLogs);
   await connection.db.delete(agentEvents);
   await connection.db.delete(agentUsagePeriods);
+  await connection.db.delete(agentRuntimeReconciliations);
   await connection.db.delete(agentDeployments);
   await connection.db.delete(agentConfigs);
   await connection.db.delete(agents);

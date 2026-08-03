@@ -2900,6 +2900,7 @@ describe("create agent persistence", () => {
         status: "stopped",
         desiredStatus: "stopped",
         latestDeployment: null,
+        runtime: null,
         assignedRunnerKind: null,
         assignedRunnerStatus: null,
         assignedRunnerProvisioningStatus: null,
@@ -2915,6 +2916,7 @@ describe("create agent persistence", () => {
         status: "stopped",
         desiredStatus: "stopped",
         latestDeployment: null,
+        runtime: null,
         assignedRunnerKind: null,
         assignedRunnerStatus: null,
         assignedRunnerProvisioningStatus: null,
@@ -3108,6 +3110,7 @@ describe("create agent persistence", () => {
       status: "stopped",
       desiredStatus: "stopped",
       latestDeployment: null,
+      runtime: null,
       statusReason: "Waiting for issue selection.",
       href: `/agents/${createdAgent?.id}`,
       createdAt: "2026-07-03T04:00:00.000Z",
@@ -3676,7 +3679,7 @@ describe("create agent persistence", () => {
 
         const successBody = await successResponse.json();
 
-        expect(successResponse.status).toBe(202);
+        expect(successResponse.status).toBe(200);
         expect(successBody).toMatchObject({
           ok: true,
           agent: {
@@ -4475,7 +4478,7 @@ describe("create agent persistence", () => {
       params: Promise.resolve({ agentId: runningAgentId }),
     });
 
-    expect(startResponse.status).toBe(202);
+    expect(startResponse.status).toBe(200);
 
     const { POST } = await import("@/app/api/agents/[agentId]/actions/restart/route");
     const successResponse = await POST(new Request("http://localhost/api/agents/restart"), {
@@ -4483,7 +4486,7 @@ describe("create agent persistence", () => {
     });
     const successBody = await successResponse.json();
 
-    expect(successResponse.status).toBe(202);
+    expect(successResponse.status).toBe(200);
     expect(successBody).toMatchObject({
       ok: true,
       agent: {
@@ -5854,7 +5857,7 @@ describe("create agent persistence", () => {
       params: Promise.resolve({ agentId: runningAgentId }),
     });
 
-    expect(startResponse.status).toBe(202);
+    expect(startResponse.status).toBe(200);
 
     const { POST } = await import("@/app/api/agents/[agentId]/actions/stop/route");
     const successResponse = await POST(new Request("http://localhost/api/agents/stop"), {

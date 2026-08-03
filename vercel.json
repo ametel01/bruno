@@ -5,6 +5,10 @@
     {
       "path": "/api/internal/agent-deployments/reconcile",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/internal/agent-runtime/reconcile",
+      "schedule": "* * * * *"
     }
   ]
 }

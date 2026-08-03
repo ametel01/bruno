@@ -18,13 +18,14 @@ export function MobileAgentList({ agents }: MobileAgentListProps) {
               <Link href={agent.href}>{agent.name}</Link>
               <span className="mobile-agent-template">{agent.templateLabel}</span>
             </div>
-            <span className="status-pill">{agent.status}</span>
+            <span className="status-pill">{agent.runtime?.label ?? agent.status}</span>
           </div>
           <DeploymentStatusLabel
             deployment={agent.latestDeployment}
             desiredStatus={agent.desiredStatus}
-            href={`${agent.href}#deployment-progress-title`}
+            href={`${agent.href}#${agent.runtime ? "runtime-status-title" : "deployment-progress-title"}`}
             observedStatus={agent.status}
+            runtime={agent.runtime}
           />
           <dl className="mobile-agent-metadata">
             <div>
@@ -57,8 +58,9 @@ function MobileAgentActions({ agent }: { agent: ListedAgentUi }) {
       <AgentLifecycleControls
         agentId={agent.id}
         deployment={agent.latestDeployment}
-        detailHref={`${agent.href}#deployment-progress-title`}
+        detailHref={`${agent.href}#${agent.runtime ? "runtime-status-title" : "deployment-progress-title"}`}
         desiredStatus={agent.desiredStatus}
+        runtime={agent.runtime}
         startDisabledReason={listedAgentStartDisabledReason(agent)}
         status={agent.status}
       />

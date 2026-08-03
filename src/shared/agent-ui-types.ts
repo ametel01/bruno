@@ -1,4 +1,5 @@
 import type { PublicAgentDeployment } from "@/src/shared/agent-deployment-presentation";
+import type { PublicAgentRuntimePresentation } from "@/src/shared/agent-runtime-presentation";
 
 export type AgentUiLifecycleStatus =
   | "idle"
@@ -18,6 +19,7 @@ export type ListedAgentUi = {
   status: AgentUiLifecycleStatus;
   desiredStatus: "stopped" | "running";
   latestDeployment: PublicAgentDeployment | null;
+  runtime: PublicAgentRuntimePresentation | null;
   assignedRunnerKind?: string | null;
   assignedRunnerStatus?: string | null;
   assignedRunnerProvisioningStatus?: string | null;

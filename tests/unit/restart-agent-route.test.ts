@@ -84,6 +84,23 @@ describe("POST /api/agents/[agentId]/actions/restart route", () => {
     await expect(response.json()).resolves.toEqual(accepted);
   });
 
+  it("preserves truthful synchronous 200 compatibility for a ready manual restart", async () => {
+    mocks.restartAgentForUser.mockResolvedValueOnce({
+      ok: true,
+      state: "ready",
+      agent: { id: "3e47bed7-b58f-4394-93c0-01e3d1e51774", status: "running" },
+      event: { type: "agent.restart_requested" },
+      events: [{ type: "agent.restart_requested" }, { type: "agent.restart_completed" }],
+    });
+    const { POST } = await import("@/app/api/agents/[agentId]/actions/restart/route");
+
+    const response = await POST(new Request("http://localhost/api/agents/restart"), {
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+    });
+
+    expect(response.status).toBe(200);
+  });
+
   it("returns a safe persistence error response", async () => {
     mocks.restartAgentForUser.mockRejectedValueOnce(new mocks.AgentLifecyclePersistenceError());
     const { POST } = await import("@/app/api/agents/[agentId]/actions/restart/route");

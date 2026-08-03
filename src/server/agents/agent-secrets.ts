@@ -11,8 +11,14 @@ import {
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
+import {
+  openManagedRuntimeSecretCircuit,
+  reviseManagedRuntimeConfiguration,
+} from "@/src/server/agents/agent-runtime-lifecycle";
+import { scheduleAgentRuntimeReconcileAfterResponse } from "@/src/server/agents/agent-runtime-triggers";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentSecrets, agents } from "@/src/server/db/schema";
+import { recordAgentEventInTransaction } from "@/src/server/events/agent-events";
 import {
   type TelegramBotMetadata,
   validateTelegramBotTokenWithGetMe,
@@ -31,6 +37,7 @@ export const USER_MANAGED_AGENT_SECRET_KINDS = [
   "telegram_bot_token",
   "telegram_allowed_users",
 ] as const;
+export const AGENT_CREDENTIALS_UPDATED_EVENT_TYPE = "agent.credentials_updated";
 
 export type AgentSecretKind = (typeof AGENT_SECRET_KINDS)[number];
 export type UserManagedAgentSecretKind = (typeof USER_MANAGED_AGENT_SECRET_KINDS)[number];
@@ -123,6 +130,7 @@ type AgentSecretDependencies = {
   now?: () => Date;
   randomBytes?: (size: number) => Buffer;
   telegramBotValidator?: (token: string) => Promise<TelegramBotValidationForSecrets>;
+  scheduleRuntimeReconcile?: typeof scheduleAgentRuntimeReconcileAfterResponse;
 };
 
 export type TelegramBotValidationForSecrets =
@@ -524,9 +532,10 @@ export async function replaceAgentSecretForUser(
     telegramBot: telegramBot?.ok ? telegramBot.bot : null,
     randomBytes: dependencies.randomBytes ?? randomBytes,
   });
+  let scheduleRuntimeReconcile = false;
 
   try {
-    return await connection.db.transaction(async (tx) => {
+    const result = await connection.db.transaction(async (tx) => {
       const agentExists = await selectOwnedActiveAgent(tx, {
         agentId: agentIdValidation.agentId,
         userId,
@@ -551,8 +560,32 @@ export async function replaceAgentSecretForUser(
         throw new Error("Agent secret insert returned no rows.");
       }
 
+      const runtime = await reviseManagedRuntimeConfiguration(tx, {
+        agentId: agentIdValidation.agentId,
+        userId,
+        now,
+      });
+      scheduleRuntimeReconcile = runtime.schedule;
+      if (runtime.changed) {
+        await recordAgentEventInTransaction(tx, {
+          agentId: agentIdValidation.agentId,
+          actorUserId: userId,
+          type: AGENT_CREDENTIALS_UPDATED_EVENT_TYPE,
+          message: "Agent credentials changed.",
+          createdAt: now,
+        });
+      }
+
       return { ok: true, secret: toSecretStatus(created) } as const;
     });
+
+    if (scheduleRuntimeReconcile) {
+      (dependencies.scheduleRuntimeReconcile ?? scheduleAgentRuntimeReconcileAfterResponse)(
+        agentIdValidation.agentId,
+      );
+    }
+
+    return result;
   } catch (error) {
     if (isTelegramUniquenessViolation(error)) {
       throw new AgentSecretTelegramConflictError(error);
@@ -596,9 +629,10 @@ export async function revokeAgentSecretForUser(
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
+  let scheduleRuntimeReconcile = false;
 
   try {
-    return await connection.db.transaction(async (tx) => {
+    const result = await connection.db.transaction(async (tx) => {
       const agentExists = await selectOwnedActiveAgent(tx, {
         agentId: agentIdValidation.agentId,
         userId,
@@ -614,8 +648,31 @@ export async function revokeAgentSecretForUser(
         now,
       });
 
+      scheduleRuntimeReconcile = await openManagedRuntimeSecretCircuit(tx, {
+        agentId: agentIdValidation.agentId,
+        userId,
+        now,
+      });
+      if (scheduleRuntimeReconcile) {
+        await recordAgentEventInTransaction(tx, {
+          agentId: agentIdValidation.agentId,
+          actorUserId: userId,
+          type: AGENT_CREDENTIALS_UPDATED_EVENT_TYPE,
+          message: "Agent credentials changed.",
+          createdAt: now,
+        });
+      }
+
       return { ok: true, secret: emptySecretStatus(input.kind) } as const;
     });
+
+    if (scheduleRuntimeReconcile) {
+      (dependencies.scheduleRuntimeReconcile ?? scheduleAgentRuntimeReconcileAfterResponse)(
+        agentIdValidation.agentId,
+      );
+    }
+
+    return result;
   } catch (error) {
     throw new AgentSecretPersistenceError(error);
   } finally {

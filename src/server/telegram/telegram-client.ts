@@ -19,6 +19,8 @@ export type TelegramBotValidationResult =
         | "telegram_validation_invalid_response";
     };
 
+export type TelegramWebhookDiagnosticResult = "empty" | "nonempty" | "uncertain";
+
 export type TelegramClientDependencies = {
   fetch?: typeof fetch;
   createAbortController?: () => AbortController;
@@ -26,11 +28,66 @@ export type TelegramClientDependencies = {
   clearTimeout?: typeof clearTimeout;
 };
 
+export type TelegramWebhookDiagnosticDependencies = TelegramClientDependencies & {
+  parseJson?: (text: string) => unknown;
+};
+
 export const TELEGRAM_GET_ME_TIMEOUT_MS = 5_000;
 export const TELEGRAM_GET_ME_MAX_BYTES = 16 * 1024;
+export const TELEGRAM_WEBHOOK_DIAGNOSTIC_TIMEOUT_MS = TELEGRAM_GET_ME_TIMEOUT_MS;
+export const TELEGRAM_WEBHOOK_DIAGNOSTIC_MAX_BYTES = TELEGRAM_GET_ME_MAX_BYTES;
 
 const TELEGRAM_BOT_TOKEN_PATTERN = /^([1-9][0-9]{5,19}):[A-Za-z0-9_-]{20,}$/;
 const TELEGRAM_USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{4,31}$/;
+
+export async function diagnoseTelegramWebhook(
+  token: string,
+  dependencies: TelegramWebhookDiagnosticDependencies = {},
+): Promise<TelegramWebhookDiagnosticResult> {
+  if (!TELEGRAM_BOT_TOKEN_PATTERN.test(token)) {
+    return "uncertain";
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    const abortController = dependencies.createAbortController?.() ?? new AbortController();
+    const setTimer = dependencies.setTimeout ?? setTimeout;
+    const clearTimer = dependencies.clearTimeout ?? clearTimeout;
+
+    timeout = setTimer(() => abortController.abort(), TELEGRAM_WEBHOOK_DIAGNOSTIC_TIMEOUT_MS);
+
+    try {
+      const response = await (dependencies.fetch ?? fetch)(
+        `https://api.telegram.org/bot${encodeURIComponent(token)}/getWebhookInfo`,
+        {
+          method: "POST",
+          headers: { Accept: "application/json" },
+          redirect: "error",
+          signal: abortController.signal,
+        },
+      );
+
+      if (!response.ok) {
+        return "uncertain";
+      }
+
+      const body = await readBoundedBody(response);
+
+      if (!body.ok) {
+        return "uncertain";
+      }
+
+      return parseTelegramWebhookInfoResponse(body.text, dependencies.parseJson ?? JSON.parse);
+    } finally {
+      if (timeout !== undefined) {
+        clearTimer(timeout);
+      }
+    }
+  } catch {
+    return "uncertain";
+  }
+}
 
 export async function validateTelegramBotTokenWithGetMe(
   token: string,
@@ -199,6 +256,67 @@ function parseTelegramGetMeResponse(text: string, tokenBotId: string): TelegramB
       username: typeof username === "string" ? username : null,
     },
   };
+}
+
+function parseTelegramWebhookInfoResponse(
+  text: string,
+  parseJson: (text: string) => unknown,
+): TelegramWebhookDiagnosticResult {
+  let parsed: unknown;
+
+  try {
+    parsed = parseJson(text);
+  } catch {
+    return "uncertain";
+  }
+
+  if (!isStrictPlainRecord(parsed)) {
+    return "uncertain";
+  }
+
+  const ok = readOwnDataProperty(parsed, "ok");
+  const result = readOwnDataProperty(parsed, "result");
+
+  if (ok !== true || !isStrictPlainRecord(result)) {
+    return "uncertain";
+  }
+
+  const url = readOwnDataProperty(result, "url");
+
+  if (typeof url !== "string") {
+    return "uncertain";
+  }
+
+  return url.length === 0 ? "empty" : "nonempty";
+}
+
+function isStrictPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  try {
+    const prototype = Object.getPrototypeOf(value);
+
+    if (prototype !== Object.prototype && prototype !== null) {
+      return false;
+    }
+
+    return Object.values(Object.getOwnPropertyDescriptors(value)).every(
+      (descriptor) => "value" in descriptor,
+    );
+  } catch {
+    return false;
+  }
+}
+
+function readOwnDataProperty(record: Record<string, unknown>, key: string): unknown {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(record, key);
+    return descriptor && "value" in descriptor ? descriptor.value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

@@ -14,6 +14,7 @@ const EXPECTED_CI_SELECTORS = [
   "tests/e2e/root-route.spec.ts:60",
   "tests/e2e/root-route.spec.ts:2191",
   "tests/e2e/automatic-ready.spec.ts",
+  "tests/e2e/runtime-presentation.spec.ts",
 ];
 
 describe("E2E capability gates", () => {

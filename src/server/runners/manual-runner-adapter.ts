@@ -22,6 +22,7 @@ import {
   type RunnerCanaryRequest,
   type RunnerCanaryResponse,
   type RunnerAgentStatusSnapshot,
+  type RunnerDurableStatusSnapshot,
   type RunnerLaunchAcceptedResponse,
   type RunnerOperation,
 } from "@/src/runner-service/runner-contracts";
@@ -107,7 +108,7 @@ export type ManualRunnerRestartResult =
 
 export type ManualRunnerStatusResult =
   | { ok: true; runner: ManualRunnerRecord; containers: ManualRunnerRemoteContainer[] }
-  | { ok: true; runner: ManualRunnerRecord; snapshot: RunnerAgentStatusSnapshot }
+  | { ok: true; runner: ManualRunnerRecord; snapshot: RunnerDurableStatusSnapshot }
   | { ok: false; reason: ManualRunnerFailureReason };
 
 export type ManualRunnerCleanupResult =

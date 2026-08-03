@@ -45,6 +45,16 @@ export const agentDeploymentStageEnum = pgEnum("agent_deployment_stage", [
   "failed",
 ]);
 
+export const agentRuntimeReconciliationStateEnum = pgEnum("agent_runtime_reconciliation_state", [
+  "observing",
+  "recovering_stop",
+  "recovering_start",
+  "verifying",
+  "stopping",
+  "stopped",
+  "circuit_open",
+]);
+
 export const agentScheduleModeEnum = pgEnum("agent_schedule_mode", ["manual", "cron"]);
 
 export const agentApprovalStatusEnum = pgEnum("agent_approval_status", [
@@ -473,6 +483,121 @@ export const agentDeployments = pgTable(
     index("agent_deployments_claim_idx")
       .on(table.nextAttemptAt, table.leaseExpiresAt, table.createdAt)
       .where(sql`${table.stage} NOT IN ('ready', 'failed')`),
+  ],
+);
+
+export const agentRuntimeReconciliations = pgTable(
+  "agent_runtime_reconciliations",
+  {
+    agentId: uuid("agent_id").primaryKey(),
+    userId: uuid("user_id").notNull(),
+    state: agentRuntimeReconciliationStateEnum("state").notNull(),
+    generation: integer("generation").notNull().default(0),
+    configRevision: text("config_revision").notNull(),
+    operationId: uuid("operation_id"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    recoveryCount: integer("recovery_count").notNull().default(0),
+    recoveryWindowStartedAt: timestamp("recovery_window_started_at", { withTimezone: true }),
+    stableSince: timestamp("stable_since", { withTimezone: true }),
+    telegramNonConnectedSince: timestamp("telegram_non_connected_since", {
+      withTimezone: true,
+    }),
+    lastRestartCount: integer("last_restart_count"),
+    lastObservedAt: timestamp("last_observed_at", { withTimezone: true }),
+    lastReadyAt: timestamp("last_ready_at", { withTimezone: true }),
+    errorCode: text("error_code"),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    circuitOpenedAt: timestamp("circuit_opened_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "agent_runtime_reconciliations_agent_owner_fk",
+      columns: [table.agentId, table.userId],
+      foreignColumns: [agents.id, agents.userId],
+    }),
+    check("agent_runtime_reconciliations_generation_check", sql`${table.generation} >= 0`),
+    check("agent_runtime_reconciliations_attempt_count_check", sql`${table.attemptCount} >= 0`),
+    check("agent_runtime_reconciliations_recovery_count_check", sql`${table.recoveryCount} >= 0`),
+    check(
+      "agent_runtime_reconciliations_restart_count_check",
+      sql`${table.lastRestartCount} IS NULL OR ${table.lastRestartCount} >= 0`,
+    ),
+    check(
+      "agent_runtime_reconciliations_config_revision_check",
+      sql`trim(${table.configRevision}) = ${table.configRevision} AND ${table.configRevision} ~ '^[A-Za-z0-9_.:-]{1,80}$'`,
+    ),
+    check(
+      "agent_runtime_reconciliations_error_code_check",
+      sql`${table.errorCode} IS NULL OR ${table.errorCode} IN ('runtime_runner_unavailable', 'runtime_container_absent', 'runtime_container_terminal', 'runtime_revision_mismatch', 'runtime_restart_policy_mismatch', 'runtime_gateway_unhealthy', 'runtime_api_server_unhealthy', 'runtime_telegram_unhealthy', 'telegram_webhook_conflict', 'telegram_polling_conflict_or_unavailable', 'runtime_secret_unavailable', 'runtime_capacity_blocked', 'runtime_recovery_exhausted', 'runtime_stop_unconfirmed', 'runtime_internal_failure')`,
+    ),
+    check(
+      "agent_runtime_reconciliations_lease_owner_check",
+      sql`${table.leaseOwner} IS NULL OR ${table.leaseOwner} ~ '^reconcile:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'`,
+    ),
+    check(
+      "agent_runtime_reconciliations_lease_pair_check",
+      sql`(${table.leaseOwner} IS NULL AND ${table.leaseExpiresAt} IS NULL) OR (${table.leaseOwner} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL)`,
+    ),
+    check(
+      "agent_runtime_reconciliations_operation_state_check",
+      sql`${table.operationId} IS NULL OR ${table.state} IN ('verifying', 'observing')`,
+    ),
+    check(
+      "agent_runtime_reconciliations_terminal_work_check",
+      sql`${table.state} NOT IN ('stopped', 'circuit_open') OR (${table.nextAttemptAt} IS NULL AND ${table.leaseOwner} IS NULL AND ${table.leaseExpiresAt} IS NULL)`,
+    ),
+    check(
+      "agent_runtime_reconciliations_circuit_check",
+      sql`${table.state} <> 'circuit_open' OR (${table.circuitOpenedAt} IS NOT NULL AND ${table.errorCode} IS NOT NULL)`,
+    ),
+    check(
+      "agent_runtime_reconciliations_stopped_check",
+      sql`${table.state} <> 'stopped' OR (${table.operationId} IS NULL AND ${table.errorCode} IS NULL AND ${table.circuitOpenedAt} IS NULL AND ${table.nextAttemptAt} IS NULL AND ${table.leaseOwner} IS NULL AND ${table.leaseExpiresAt} IS NULL)`,
+    ),
+    check(
+      "agent_runtime_reconciliations_updated_after_created_check",
+      sql`${table.updatedAt} >= ${table.createdAt}`,
+    ),
+    check(
+      "agent_runtime_reconciliations_last_ready_observed_check",
+      sql`${table.lastReadyAt} IS NULL OR (${table.lastObservedAt} IS NOT NULL AND ${table.lastReadyAt} <= ${table.lastObservedAt})`,
+    ),
+    check(
+      "agent_runtime_reconciliations_recovery_window_updated_check",
+      sql`${table.recoveryWindowStartedAt} IS NULL OR ${table.recoveryWindowStartedAt} <= ${table.updatedAt}`,
+    ),
+    check(
+      "agent_runtime_reconciliations_stable_ready_check",
+      sql`${table.stableSince} IS NULL OR (${table.lastReadyAt} IS NOT NULL AND ${table.stableSince} <= ${table.lastReadyAt})`,
+    ),
+    check(
+      "agent_runtime_reconciliations_stable_updated_check",
+      sql`${table.stableSince} IS NULL OR ${table.stableSince} <= ${table.updatedAt}`,
+    ),
+    check(
+      "agent_runtime_reconciliations_telegram_observed_check",
+      sql`${table.telegramNonConnectedSince} IS NULL OR (${table.lastObservedAt} IS NOT NULL AND ${table.telegramNonConnectedSince} <= ${table.lastObservedAt})`,
+    ),
+    check(
+      "agent_runtime_reconciliations_observed_updated_check",
+      sql`${table.lastObservedAt} IS NULL OR ${table.lastObservedAt} <= ${table.updatedAt}`,
+    ),
+    check(
+      "agent_runtime_reconciliations_ready_updated_check",
+      sql`${table.lastReadyAt} IS NULL OR ${table.lastReadyAt} <= ${table.updatedAt}`,
+    ),
+    check(
+      "agent_runtime_reconciliations_circuit_updated_check",
+      sql`${table.circuitOpenedAt} IS NULL OR ${table.circuitOpenedAt} <= ${table.updatedAt}`,
+    ),
+    index("agent_runtime_reconciliations_owner_agent_idx").on(table.userId, table.agentId),
+    index("agent_runtime_reconciliations_claim_idx")
+      .on(table.nextAttemptAt, table.leaseExpiresAt, table.updatedAt)
+      .where(sql`${table.state} NOT IN ('stopped', 'circuit_open')`),
   ],
 );
 

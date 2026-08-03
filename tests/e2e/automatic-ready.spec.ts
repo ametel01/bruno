@@ -249,7 +249,7 @@ test("automatic submission follows persisted progress to ready across refresh, r
         await requestImmediatePoll(secondPage);
         await expectCurrentStage(secondPage, "Ready");
         await expect(secondPage.locator(".agent-overview-panel .status-pill")).toContainText(
-          "running",
+          "Ready",
         );
         await expect(secondPage.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
         await expect(
@@ -601,7 +601,7 @@ function installPageEvidence(page: Page, evidence: BrowserEvidence): void {
 }
 
 async function expectCurrentStage(page: Page, label: string): Promise<void> {
-  await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible();
+  await expect(page.locator("#deployment-progress-title")).toHaveText(label);
   await expect(
     page
       .getByRole("list", { name: "Persisted deployment stages" })
@@ -782,6 +782,7 @@ async function updateDeploymentStage(
 ): Promise<void> {
   const changedAt = new Date().toISOString();
   const needsRunnerOperation = stageNeedsRunnerOperation(stage);
+  const runnerOperationId = needsRunnerOperation ? randomUUID() : null;
   const canaryPassed = stage === "connecting_telegram" || stage === "ready";
   await withDatabase(async (sql) => {
     await sql`
@@ -789,7 +790,7 @@ async function updateDeploymentStage(
       set stage = ${stage},
           error_code = null,
           error_detail = null,
-          runner_operation_id = ${needsRunnerOperation ? randomUUID() : null},
+          runner_operation_id = ${runnerOperationId},
           runner_accepted_at = ${needsRunnerOperation ? changedAt : null},
           canary_state = ${canaryPassed ? "passed" : "not_started"},
           canary_attempted_at = ${canaryPassed ? changedAt : null},
@@ -804,6 +805,22 @@ async function updateDeploymentStage(
       await sql`
         update agents set status = 'running', desired_status = 'running', updated_at = ${changedAt}
         where id = ${agentId}
+      `;
+      await sql`
+        insert into agent_runtime_reconciliations (
+          agent_id, user_id, state, config_revision, operation_id, stable_since,
+          last_observed_at, last_ready_at, next_attempt_at, created_at, updated_at
+        )
+        select id, user_id, 'observing', ${CONFIG_REVISION}, ${runnerOperationId}, ${changedAt},
+               ${changedAt}, ${changedAt}, ${new Date(Date.parse(changedAt) + 60_000).toISOString()},
+               ${changedAt}, ${changedAt}
+        from agents where id = ${agentId}
+        on conflict (agent_id) do update
+        set state = 'observing', config_revision = excluded.config_revision,
+            operation_id = excluded.operation_id, stable_since = excluded.stable_since,
+            last_observed_at = excluded.last_observed_at,
+            last_ready_at = excluded.last_ready_at, next_attempt_at = excluded.next_attempt_at,
+            error_code = null, circuit_opened_at = null, updated_at = excluded.updated_at
       `;
     }
   });
@@ -890,6 +907,7 @@ async function deleteFixture(fixture: Fixture): Promise<void> {
   const agentIds = [...fixture.agentIds];
   await withDatabase(async (sql) => {
     if (agentIds.length > 0) {
+      await sql`delete from agent_runtime_reconciliations where agent_id in ${sql(agentIds)}`;
       await sql`delete from agent_usage_periods where agent_id in ${sql(agentIds)}`;
       await sql`delete from agent_events where agent_id in ${sql(agentIds)}`;
       await sql`delete from agent_secrets where agent_id in ${sql(agentIds)}`;

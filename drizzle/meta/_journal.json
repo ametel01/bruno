@@ -134,6 +134,13 @@
       "when": 1785736389897,
       "tag": "0018_first_polaris",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785749806303,
+      "tag": "0019_tough_tinkerer",
+      "breakpoints": true
     }
   ]
 }

@@ -8,12 +8,14 @@ import {
   readPayloadRunnerId,
   validationIssueSummary,
 } from "@/src/server/runners/runner-ingress-logging";
-import { scheduleRunnerDeploymentReconcileAfterResponse } from "@/src/server/agents/agent-deployment-triggers";
+import { scheduleRunnerReconciliationsAfterResponse } from "@/src/server/agents/agent-runtime-triggers";
 
 export const dynamic = "force-dynamic";
 
 type HeartbeatRouteDependencies = {
-  scheduleDeploymentReconcile?: typeof scheduleRunnerDeploymentReconcileAfterResponse;
+  scheduleReconciliations?: typeof scheduleRunnerReconciliationsAfterResponse;
+  /** @deprecated Test/backward-compatible injection name; schedules the combined ordered kick. */
+  scheduleDeploymentReconcile?: typeof scheduleRunnerReconciliationsAfterResponse;
 };
 
 export async function POST(
@@ -100,9 +102,11 @@ export async function POST(
         : { reason: readiness.reason }),
     });
 
-    (dependencies.scheduleDeploymentReconcile ?? scheduleRunnerDeploymentReconcileAfterResponse)(
-      result.runner.id,
-    );
+    (
+      dependencies.scheduleReconciliations ??
+      dependencies.scheduleDeploymentReconcile ??
+      scheduleRunnerReconciliationsAfterResponse
+    )(result.runner.id);
 
     return Response.json({
       ok: true,

@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import type { RunnerAgentStatusSnapshot } from "@/src/runner-service/runner-contracts";
 import { buildHermesAgentLaunchSpecForUser } from "@/src/server/agents/agent-launch-builder";
+import { initializeAgentRuntimeAfterDeploymentReady } from "@/src/server/agents/agent-runtime-store";
+import { scheduleAgentRuntimeReconcileAfterResponse } from "@/src/server/agents/agent-runtime-triggers";
 import {
   type AgentDeploymentStage,
   normalizeDeploymentErrorDetail,
@@ -1373,7 +1375,7 @@ async function finalizeReady(
   work: ClaimedDeploymentWork,
   now: Date,
 ): Promise<boolean> {
-  return connection.db.transaction(async (tx) => {
+  const finalized = await connection.db.transaction(async (tx) => {
     const [ownedAgent] = await tx
       .select({ id: agents.id, runnerId: agents.runnerId })
       .from(agents)
@@ -1427,6 +1429,20 @@ async function finalizeReady(
       throw new LostDeploymentLeaseError();
     }
 
+    if (!work.runnerOperationId) {
+      throw new LostDeploymentLeaseError();
+    }
+
+    await initializeAgentRuntimeAfterDeploymentReady({
+      db: tx,
+      deploymentId: work.id,
+      agentId: work.agentId,
+      userId: work.userId,
+      configRevision: work.configRevision,
+      operationId: work.runnerOperationId,
+      now,
+    });
+
     await tx
       .insert(agentUsagePeriods)
       .values({
@@ -1447,6 +1463,12 @@ async function finalizeReady(
     });
     return true;
   });
+
+  if (finalized) {
+    scheduleAgentRuntimeReconcileAfterResponse(work.agentId);
+  }
+
+  return finalized;
 }
 
 async function terminallyFailDeployment(

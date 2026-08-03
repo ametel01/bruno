@@ -11,6 +11,7 @@ import {
 type RestartAgentButtonProps = {
   agentId: string;
   status: AgentLifecycleStatus;
+  allowRuntimeRestart?: boolean;
   disabledReason?: string | null;
 };
 
@@ -25,6 +26,7 @@ const RESTART_SETTLE_FALLBACK_MS = 500;
 export function RestartAgentButton({
   agentId,
   status,
+  allowRuntimeRestart = false,
   disabledReason = null,
 }: RestartAgentButtonProps) {
   const router = useRouter();
@@ -85,7 +87,10 @@ export function RestartAgentButton({
   }, [state.status, status]);
 
   async function handleRestart() {
-    if (status !== "running" || !acquireAgentActionRequestLatch(requestLatchRef)) {
+    if (
+      (status !== "running" && !allowRuntimeRestart) ||
+      !acquireAgentActionRequestLatch(requestLatchRef)
+    ) {
       return;
     }
 
@@ -117,13 +122,13 @@ export function RestartAgentButton({
     state.status === "requesting" || state.status === "polling" || status === "restarting";
   const disabled = Boolean(disabledReason) || busy;
 
-  if (status !== "running" && !busy && state.status !== "error") {
+  if (status !== "running" && !allowRuntimeRestart && !busy && state.status !== "error") {
     return null;
   }
 
   return (
     <div className="start-agent-action">
-      {status === "running" || status === "restarting" ? (
+      {status === "running" || status === "restarting" || allowRuntimeRestart ? (
         <button
           className="secondary-button"
           type="button"

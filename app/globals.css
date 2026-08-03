@@ -3703,6 +3703,85 @@ h2 {
   padding: 18px;
 }
 
+.agent-runtime-status-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 18px;
+}
+
+.agent-runtime-status-card > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-runtime-status-header {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.agent-runtime-status-header > div {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.agent-runtime-status-header p {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+  margin: 0 0 4px;
+  text-transform: uppercase;
+}
+
+.agent-runtime-status-header h2 {
+  font-size: 1.18rem;
+  margin: 0;
+}
+
+.runtime-status-pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 800;
+  max-width: 100%;
+  min-height: 32px;
+  overflow-wrap: anywhere;
+  padding: 7px 10px;
+}
+
+.runtime-status-pill[data-kind="healthy"] {
+  background: #eefbf3;
+  border-color: #b8e8c8;
+  color: #196b3a;
+}
+
+.runtime-status-pill[data-kind="recovering"],
+.runtime-status-pill[data-kind="stopping"] {
+  background: #eef6ff;
+  border-color: #b7d6ff;
+  color: #1f5f9f;
+}
+
+.runtime-status-pill[data-kind="attention_required"] {
+  background: #fff1f1;
+  border-color: #ffc9c9;
+  color: #9b1c1c;
+}
+
+.runtime-status-pill[data-kind="intentionally_stopped"],
+.runtime-status-pill[data-kind="unavailable"] {
+  background: var(--panel-subtle);
+  color: var(--muted);
+}
+
 .agent-deployment-progress-card > p {
   overflow-wrap: anywhere;
 }
@@ -3831,7 +3910,8 @@ h2 {
 
   .agent-create-mode-fieldset,
   .ready-credential-fieldset,
-  .agent-deployment-progress-card {
+  .agent-deployment-progress-card,
+  .agent-runtime-status-card {
     padding: 12px;
   }
 

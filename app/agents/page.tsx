@@ -152,20 +152,24 @@ export default async function AgentsPage() {
                           </td>
                           <td>{agent.templateLabel}</td>
                           <td>
-                            <span className="status-pill">{agent.status}</span>
+                            <span className="status-pill">
+                              {agent.runtime?.label ?? agent.status}
+                            </span>
                             <DeploymentStatusLabel
                               deployment={agent.latestDeployment}
                               desiredStatus={agent.desiredStatus}
-                              href={`${agent.href}#deployment-progress-title`}
+                              href={`${agent.href}#${agent.runtime ? "runtime-status-title" : "deployment-progress-title"}`}
                               observedStatus={agent.status}
+                              runtime={agent.runtime}
                             />
                           </td>
                           <td>
                             <AgentLifecycleControls
                               agentId={agent.id}
                               deployment={agent.latestDeployment}
-                              detailHref={`${agent.href}#deployment-progress-title`}
+                              detailHref={`${agent.href}#${agent.runtime ? "runtime-status-title" : "deployment-progress-title"}`}
                               desiredStatus={agent.desiredStatus}
+                              runtime={agent.runtime}
                               startDisabledReason={listedAgentStartDisabledReason(agent)}
                               status={agent.status}
                             />

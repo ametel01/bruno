@@ -181,6 +181,33 @@ describe("Hermes launch spec builder", () => {
       },
     });
     expect(JSON.stringify(result)).not.toContain(firstRevision);
+
+    const runtimeRevision = await buildHermesAgentLaunchSpecForUser(
+      created.agent.userId,
+      created.agent.id,
+      {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        requestId: () => "managed-runtime-launch-0001",
+        trustedConfigRevision: "cfg-runtime-4-1785742800000",
+      },
+    );
+    expect(runtimeRevision).toMatchObject({
+      ok: true,
+      spec: { agent: { configRevision: "cfg-runtime-4-1785742800000" } },
+    });
+
+    await expect(
+      buildHermesAgentLaunchSpecForUser(created.agent.userId, created.agent.id, {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        trustedConfigRevision: " unsafe runtime revision ",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "managed_configuration_invalid",
+      message: "Managed Hermes configuration is invalid.",
+    });
   });
 
   it("keeps deployment-backed non-OpenRouter agents on the native v2 path", async () => {

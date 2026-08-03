@@ -165,7 +165,9 @@ describe("automatic Hermes Telegram progress status", () => {
     );
     expect(automaticLedger).toContain("OpenRouter is the first supported provider");
     expect(automaticLedger).toContain("dedicated staging Telegram bot/user");
-    expect(automaticLedger).toContain("Step 8 is independently accepted after checker cycle 2");
+    expect(automaticLedger).toContain(
+      "Step 9 implementation is complete and its coordinator gates are green",
+    );
     expect(automaticLedger).toContain("- [x] Step 0: Progress and Changelog Tracking Setup");
     expect(automaticLedger).toContain("- [x] Step 1: Quality Gates Setup and Baseline Evidence");
     expect(automaticLedger).toContain(
@@ -187,7 +189,7 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain(
       "- [x] Step 8: Add One-Click Creation and Persisted Progress UI",
     );
-    expect(automaticLedger).toContain("- [ ] Step 9: Make Desired-Running Gateways Durable");
+    expect(automaticLedger).toContain("- [x] Step 9: Make Desired-Running Gateways Durable");
     expect(automaticLedger).toContain(
       "- [ ] Step 10: Final Acceptance, Documentation, and Controlled Rollout",
     );
@@ -215,6 +217,9 @@ describe("automatic Hermes Telegram progress status", () => {
     );
     expect(automaticLedger).toContain(
       "| 8. Add One-Click Creation and Persisted Progress UI | Complete and independently accepted after cycle 2 |",
+    );
+    expect(automaticLedger).toContain(
+      "| 9. Make Desired-Running Gateways Durable | Complete; independent acceptance pending |",
     );
     expect(automaticLedger).toContain("launch-spec v3 parsing/redaction/serialization");
     expect(automaticLedger).toContain("explicit/custom YAML tags and anchors");
@@ -250,12 +255,11 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain("Full gates passed");
     expect(automaticLedger).toContain("Step validation commands and results.");
     expect(automaticLedger).toContain("Safe blocker codes, missing capabilities, and next action.");
-    expect(automaticLedger).toContain(
-      "Step 8 is independently accepted at `ef9b7fc` plus `bc38dd0`",
-    );
-    expect(automaticLedger).toContain(
-      "Step 9 should add durable desired-running runtime reconciliation",
-    );
+    expect(automaticLedger).toContain("Step 9 coordinator gates are green");
+    expect(automaticLedger).toContain("137 files / 1,297 tests");
+    expect(automaticLedger).toContain("26 desktop/mobile tests");
+    expect(automaticLedger).toContain("intentional Stop remaining non-active");
+    expect(automaticLedger).toContain("No live or provider-backed action is authorized yet");
     expect(automaticLedger).not.toContain("No blocker remains for Step 3.");
     expect(automaticLedger).not.toContain("Step 4 should add managed creation configuration");
     expect(changelog).toContain("# Changelog");
@@ -269,5 +273,7 @@ describe("automatic Hermes Telegram progress status", () => {
     );
     expect(changelog).toContain("Credential-complete one-click ready agent creation");
     expect(changelog).toContain("manual Hermes setup is secondary advanced recovery");
+    expect(changelog).toContain("Managed desired-running Hermes gateways now recover");
+    expect(changelog).toContain("Intentional Stop now remains authoritative");
   });
 });

@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { validateManualRunnerEndpointUrl } from "@/src/env/validation";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
+import { classifyManagedRuntimeForUpdate } from "@/src/server/agents/agent-runtime-lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agents, runners } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
@@ -154,6 +155,39 @@ export async function assignRunnerToActiveAgentForDevelopmentUser(
         .limit(1);
 
       if (!runner) {
+        return { ok: false, reason: "runner_not_found" } as const;
+      }
+
+      const [currentAgent] = await tx
+        .select({ id: agents.id, runnerId: agents.runnerId })
+        .from(agents)
+        .where(
+          and(
+            eq(agents.id, normalizedAgentId),
+            eq(agents.userId, userId),
+            isNull(agents.deletedAt),
+          ),
+        )
+        .limit(1)
+        .for("update");
+
+      if (!currentAgent) {
+        return { ok: false, reason: "agent_not_found" } as const;
+      }
+
+      if (currentAgent.runnerId === runner.id) {
+        return { ok: true, agent: { id: currentAgent.id, runnerId: runner.id } } as const;
+      }
+
+      const runtimeClassification = await classifyManagedRuntimeForUpdate(tx, {
+        agentId: normalizedAgentId,
+        userId,
+      });
+
+      if (
+        runtimeClassification.kind === "managed_ready" ||
+        runtimeClassification.kind === "managed_unavailable"
+      ) {
         return { ok: false, reason: "runner_not_found" } as const;
       }
 

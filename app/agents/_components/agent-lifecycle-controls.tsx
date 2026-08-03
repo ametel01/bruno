@@ -6,6 +6,7 @@ import {
   type PublicAgentDeployment,
   type PublicAgentDesiredStatus,
 } from "@/src/shared/agent-deployment-presentation";
+import type { PublicAgentRuntimePresentation } from "@/src/shared/agent-runtime-presentation";
 import { DeleteAgentButton } from "./delete-agent-button";
 import { RestartAgentButton } from "./restart-agent-button";
 import { SimulateErrorAgentButton } from "./simulate-error-agent-button";
@@ -17,6 +18,7 @@ type AgentLifecycleControlsProps = {
   status: AgentLifecycleStatus;
   desiredStatus?: PublicAgentDesiredStatus;
   deployment?: PublicAgentDeployment | null;
+  runtime?: PublicAgentRuntimePresentation | null;
   detailHref?: string;
   startDisabledReason?: string | null;
   restartDisabledReason?: string | null;
@@ -43,6 +45,7 @@ const SETUP_CANCELLABLE_STATUSES = new Set<AgentLifecycleStatus>([
 export function AgentLifecycleControls({
   agentId,
   deployment = null,
+  runtime = null,
   desiredStatus = "stopped",
   detailHref,
   status,
@@ -55,8 +58,10 @@ export function AgentLifecycleControls({
     observedStatus: status,
   });
   const actions = buildAgentLifecycleActionPlan({
+    desiredStatus,
     hasDeployment: deployment !== null,
     presentation,
+    runtime,
     status,
   });
 
@@ -81,6 +86,7 @@ export function AgentLifecycleControls({
       {actions.showStart ? (
         <StartAgentButton
           agentId={agentId}
+          allowRuntimeStart={runtime?.kind === "intentionally_stopped"}
           busyLabel={actions.startBusyLabel}
           disabledReason={startDisabledReason}
           label={actions.startLabel}
@@ -88,10 +94,13 @@ export function AgentLifecycleControls({
           status={status}
         />
       ) : null}
-      {actions.showStop ? <StopAgentButton agentId={agentId} status={status} /> : null}
+      {actions.showStop ? (
+        <StopAgentButton agentId={agentId} allowRuntimeStop={runtime !== null} status={status} />
+      ) : null}
       {actions.showRestart ? (
         <RestartAgentButton
           agentId={agentId}
+          allowRuntimeRestart={runtime !== null && actions.showRestart}
           disabledReason={restartDisabledReason}
           status={status}
         />
@@ -105,11 +114,13 @@ export function AgentLifecycleControls({
 }
 
 export function buildAgentLifecycleActionPlan(input: {
+  desiredStatus?: PublicAgentDesiredStatus;
   hasDeployment: boolean;
   presentation: DeploymentPresentation;
+  runtime?: PublicAgentRuntimePresentation | null;
   status: AgentLifecycleStatus;
 }): AgentLifecycleActionPlan {
-  const { hasDeployment, presentation, status } = input;
+  const { desiredStatus = "stopped", hasDeployment, presentation, runtime = null, status } = input;
   const resume = presentation.kind === "stopped" && hasDeployment;
   const base = {
     showDelete: status !== "deleting",
@@ -122,6 +133,33 @@ export function buildAgentLifecycleActionPlan(input: {
     startLabel: resume ? ("Resume" as const) : ("Start" as const),
     startRequestedMessage: resume ? ("Resume requested." as const) : ("Start requested." as const),
   };
+
+  if (status === "deleting") {
+    return base;
+  }
+
+  if (runtime !== null) {
+    switch (runtime.kind) {
+      case "healthy":
+        return { ...base, showRestart: true, showStop: true };
+      case "recovering":
+        return { ...base, showStop: true };
+      case "stopping":
+        return base;
+      case "intentionally_stopped":
+        return {
+          ...base,
+          showStart: true,
+          startBusyLabel: "Resuming",
+          startLabel: "Resume",
+          startRequestedMessage: "Resume requested.",
+        };
+      case "attention_required":
+        return { ...base, showRestart: true, showStop: true };
+      case "unavailable":
+        return desiredStatus === "running" ? { ...base, showStop: true } : base;
+    }
+  }
 
   if (presentation.kind === "progress" || presentation.kind === "updating") {
     return {

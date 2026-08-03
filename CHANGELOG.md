@@ -102,6 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Managed desired-running Hermes gateways now recover through a durable, leased runtime reconciler with bounded observation, restart backoff, Telegram diagnostics, usage segmentation, and a circuit breaker across runner and Docker restarts.
 - Agent lifecycle controls now follow persisted desired and deployment state: managed setup can be stopped or retried, ready agents need no Start action, and manual Hermes setup is secondary advanced recovery.
 - Managed Hermes runner start/restart now return asynchronous launch acceptance with typed observed status and canary contracts, so the control plane no longer treats Docker launch as application readiness.
 - Native/manual Hermes agents retain the launch-spec v2 compatibility path and still require existing Hermes setup state, while managed OpenRouter deployments bypass that setup gate and reapply plingpling-owned provider, Telegram, API-server, terminal, browser, safety, and prompt settings on start/restart.
@@ -122,6 +123,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Intentional Stop now remains authoritative across runner and Docker restarts, while agent inventory, detail, dashboard, and the runtime endpoint report current managed gateway and Telegram truth instead of stale deployment readiness.
 - Projected Hermes credential reads now reject FIFO and other nonregular `.env` substitutions without blocking runner status or canary requests.
 - Managed Hermes projection now preserves safe unrelated YAML scalar text containing punctuation such as `!`, `*`, and `&` while still rejecting actual YAML tags, anchors, aliases, and merge keys.
 - Managed Hermes projection now rejects explicit YAML tags, secret-like null/map/array/non-placeholder values, shell-default env references, nonregular target files, and Docker inspect exposure of Telegram allowlist values.

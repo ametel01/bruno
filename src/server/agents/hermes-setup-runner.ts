@@ -1,5 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { DatabaseConnection } from "@/src/server/db/client";
+import { classifyManagedRuntimeForUpdate } from "@/src/server/agents/agent-runtime-lifecycle";
 import { agents } from "@/src/server/db/schema";
 import {
   lockRunnerPlacementCapacityInTransaction,
@@ -36,6 +37,15 @@ export async function assignRunnerForHermesSetup(
 
     if (agent.runnerId) {
       return { ok: true, runnerId: agent.runnerId } as const;
+    }
+
+    const runtimeClassification = await classifyManagedRuntimeForUpdate(tx, input);
+
+    if (
+      runtimeClassification.kind === "managed_ready" ||
+      runtimeClassification.kind === "managed_unavailable"
+    ) {
+      return { ok: false, reason: "agent_not_found" } as const;
     }
 
     const placement = await selectRunnerPlacementForUserInTransaction(tx, input.userId);

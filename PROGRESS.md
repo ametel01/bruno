@@ -451,19 +451,19 @@ the existing `Added`, `Changed`, `Fixed`, or `Security` sections as applicable.
 
 ### Current Status
 
-Step 8 is independently accepted after checker cycle 2 at `ef9b7fc` plus
-`bc38dd0`. Ready-mode creation is now the compact primary path when the exact
-rollout flag is enabled. It clears credentials after submission, preserves one logical
-idempotency key across safe retries, redirects to the agent detail page, and
-renders the same owner-scoped persisted deployment snapshot on inventory,
-detail, and dashboard surfaces without row-level polling.
+Step 9 implementation is complete and its coordinator gates are green. Managed
+v3 gateways now persist a separate desired-runtime ledger and converge through
+one leased effect at a time. Strict runner evidence, bounded recovery and
+circuit behavior, DB-first lifecycle intent, Telegram webhook diagnostics,
+usage segmentation, and passive owner-scoped runtime presentation preserve an
+intentional Stop across runner and Docker restarts without reopening terminal
+deployment history.
 
-The detail page uses bounded single-flight polling with foreground-only timeout
-accounting, safe retry/stop controls, exact persisted stages, and fail-closed
-presentation. Desktop and mobile fake-only browser acceptance covers refresh,
-reopen, a second context, failure/retry recovery, intentional stop, manual
-fallback, 320px layout, credential redaction, and zero external requests. Step
-9 is now the active implementation step.
+Clean and upgrade migrations, focused database and controller coverage, the
+full unit suite, production build, 26 desktop/mobile browser tests, fake-cloud
+recovery smoke, and the local pinned-image restart contract are green. Step 10
+is next, but its provider-backed rollout remains blocked until its external
+capabilities are explicitly authorized and supplied.
 
 ### Step Checklist
 
@@ -476,7 +476,7 @@ fallback, 320px layout, credential redaction, and zero external requests. Step
 - [x] Step 6: Split Runner Launch Acceptance From Observed Readiness
 - [x] Step 7: Reconcile Creation Through Ready
 - [x] Step 8: Add One-Click Creation and Persisted Progress UI
-- [ ] Step 9: Make Desired-Running Gateways Durable
+- [x] Step 9: Make Desired-Running Gateways Durable
 - [ ] Step 10: Final Acceptance, Documentation, and Controlled Rollout
 
 ### Step Ledger
@@ -492,7 +492,7 @@ fallback, 320px layout, credential redaction, and zero external requests. Step
 | 6. Split Runner Launch Acceptance From Observed Readiness | Complete and independently accepted after cycle 2 | Steps 0-5 | `4e2897a`, `fa677fb` | Product commit added strict runner launch/status/canary contracts; one request-scoped 30-second launch budget; cancellation-safe cleanup; deterministic exact reuse/replacement; bounded private health/canary seams; stopped/cancelled snapshots; accepted/ready compatibility DTOs; and stale-result lifecycle guards. Initial combined focused coverage passed 11 files / 216 tests. Checker cycle 1 reproduced a FIFO `.env` blocking open. Cycle 2 added pre/post file identity validation plus nonblocking no-follow reads and a bounded FIFO status/canary regression. Independent acceptance verified missing/FIFO/symlink/hardlink/oversize/malformed/regular credential files, 4 files / 77 focused tests, 108 files / 996 full tests, local fake-boundary smoke, build, 14 E2E tests, and fail-closed staging with no external effects. | Complete; Step 7 remains active. |
 | 7. Reconcile Creation Through Ready | Complete and independently accepted after cycle 1 | Steps 0-6 | `798cbf3` | Added migration `0018_first_polaris` with runner-operation/canary evidence, exact provisioning keys, strong stage checks, and fail-closed one-open-usage uniqueness. Added a 90-second leased, 45-second abort-bounded one-item reconciler; owner-safe provisioning discovery/adoption; exact runner/canary correlation; deterministic backoff and attempt-64 failure; post-response create/heartbeat triggers; exact-secret cron; owner-concealed idempotent retry; stop/delete cancellation precedence; redacted failure logs and cleanup ownership; and atomic ready/running/usage/events. Focused Step 7 gates passed 22 files / 311 tests, including clean/upgrade migrations and real separate-connection claim/retry/cancellation/finalization/capacity races. Full tests passed 116 files / 1,065 tests. Independent checker cycle 1 passed a 21-file / 306-test changed-unit suite, the 116-file / 1,065-test full suite, repeated migrations, format, lint, typecheck, build, 14 CI E2E tests, both local smokes, and fail-closed staging with no external effects. `bun run local:cloud:smoke` passed and proved simultaneous create-kick/heartbeat/cron/manual triggers produce exactly one fake resource, container, canary, running transition, and open usage period. `bun run agent:hermes:contract-smoke` passed persisted controller finalization against the local pinned image with private API auth, no public Hermes port, backup/restore, cleanup, and `telegramBoundary: "local-fake-platform-state"`. | Complete; Step 8 is active. |
 | 8. Add One-Click Creation and Persisted Progress UI | Complete and independently accepted after cycle 2 | Steps 0-7 | `ef9b7fc`, `bc38dd0` | Added credential-complete ready/manual creation, server-owned rollout/model boundaries, synchronous duplicate-submit latches, safe ambiguous retry semantics, owner-scoped bounded latest-deployment reads, code-only public errors, exact persisted-stage presentation, detail-only single-flight polling, deployment-aware lifecycle controls, and secondary advanced Hermes recovery. Focused coverage passed 34 create/poll/presentation tests, 31 lifecycle/route tests, 107 server/UI isolation and projection tests, and 22 responsive/accessibility CSS tests. Checker cycle 1 reproduced all automated gates and found one same-turn progress-card Retry race; cycle 2 accepted the pre-UUID/pre-fetch synchronous latch and duplicate-activation regression with 4 focused files / 66 tests, format, lint, typecheck, 123 test files / 1,144 tests, production build, and 24/24 desktop/mobile CI E2E. Credential-free staging exited with `capability_unavailable` and `sideEffectsAttempted: false`; provider-backed `verify:e2e` was not run without an authorized provider-safe environment. | Complete; Step 9 is active. |
-| 9. Make Desired-Running Gateways Durable | Not started | Steps 0-8 | Not collected | Not collected | Requires verified ready/failed state handling. |
+| 9. Make Desired-Running Gateways Durable | Complete; independent acceptance pending | Steps 0-8 | This commit | Added generated migration `0019_tough_tinkerer` and a separate leased runtime ledger; exact managed-v3 `unless-stopped` runner evidence; bounded one-effect recovery, restart backoff, circuit, Telegram diagnostic, usage, and event handling; DB-first Start/Restart/Stop/Delete intent; post-commit runtime triggers; and passive owner-scoped runtime UI/API projection. Clean and upgrade migrations passed and reran idempotently; `bun run db:generate` reported no drift; focused DB coverage passed 8 files / 38 tests; focused controller, runner, lifecycle, Telegram, and UI coverage passed 11 files / 177 tests; `bun run test` passed 137 files / 1,297 tests; `bun run build` passed; `bun run test:e2e:ci` passed 26 desktop/mobile tests. `bun run local:cloud:smoke` proved bounded fault recovery, circuit opening, Docker-daemon restart observation, usage segmentation, event dedupe, and durable public Stop. `bun run agent:hermes:contract-smoke` proved exact restart policy, unexpected process-death recovery, runner rediscovery, selected-container replacement without duplication, and intentional Stop remaining non-active after runner restart against the local pinned image. | Coordinator gates are complete; independent checker acceptance is next. Step 10 external work remains authorization- and capability-blocked. |
 | 10. Final Acceptance, Documentation, and Controlled Rollout | Not started | Steps 0-9, published image, authorized DigitalOcean budget, staging Telegram bot/user, funded OpenRouter key | Not collected | Not collected | External live acceptance prerequisites must be explicit before contacting external services. |
 
 ### Evidence Fields
@@ -508,6 +508,8 @@ fallback, 320px layout, credential redaction, and zero external requests. Step
 
 ### Current Blockers and Next Work
 
-- Step 8 is independently accepted at `ef9b7fc` plus `bc38dd0`; no Step 8 blocker remains.
-- Step 9 should add durable desired-running runtime reconciliation against the
-  accepted managed runner, deployment, lifecycle, and UI contracts.
+- Step 9 coordinator gates are green; independent read-only acceptance remains
+  before its evidence is finalized.
+- Step 10 requires an approved published image, explicitly authorized
+  DigitalOcean budget, a dedicated staging Telegram bot/user, and a funded
+  OpenRouter key. No live or provider-backed action is authorized yet.

@@ -3,14 +3,14 @@
 ## Active Work
 
 - plan: `PLAN.md` Step 9 — Make Desired-Running Gateways Durable
-  owner: coordinator with staged Step 9 builder streams
+  owner: coordinator; implementation complete, checker next
   branch: `main`
   worktree: `/Users/alexmetelli/source/plingpling`
-  phase: Step 8 independently accepted; Step 9 persistence and runner-boundary implementation ready to start
-  cycle: builder 1/5
+  phase: Step 9 coordinator gates green; preparing exact product commit and independent acceptance
+  cycle: builder complete; checker 0/5
   contract: `STATUS.archive.md` → `Step 9 Completion Contract (pre-spec)`
-  blocker: no Step 9 repository blocker; external/live capabilities remain prohibited and unnecessary.
-  next-action: Build the additive runtime ledger/state machine and strict runner durability evidence in parallel, then integrate lifecycle/triggers/presentation/smokes.
+  blocker: no Step 9 repository blocker; Step 10 external/live capabilities remain prohibited and unavailable.
+  next-action: Commit the complete Step 9 slice, then run independent read-only acceptance against the exact commit.
 
 ## Completion Contract
 
@@ -28,12 +28,12 @@
 
 ## Current Handoff
 
-- from: Step 8 checker cycle 2
-  to: Step 9 persistence/controller and runner-boundary builders
+- from: Step 9 coordinator
+  to: independent Step 9 checker
   timestamp: 2026-08-03
-  request: Implement the Step 9 foundations without weakening immutable deployment, desired-state, runner, Telegram, usage, or UI authority boundaries.
-  evidence: Step 8 checker cycle 2 accepted `ef9b7fc` + `bc38dd0`: 4 focused files / 66 tests, 123 files / 1,144 full tests, migration, format, lint, typecheck, build, 24 CI E2E, and fail-closed staging.
-  stop-condition: Return with migration/state and runner-contract focused gates green; no lifecycle integration before durable helpers exist, no external request, no tracker/changelog edit, and no commit.
+  request: Audit the exact Step 9 commit for runtime durability semantics and reproduce its repository-local gates without edits or external requests.
+  evidence: Coordinator gates passed clean/upgrade migrations, 8 files / 38 focused DB tests, 11 files / 177 focused controller/runner/UI tests, 137 files / 1,297 full tests, production build, 26/26 CI E2E, fake-cloud recovery/circuit smoke, and local pinned-image restart/Stop durability smoke.
+  stop-condition: Accept only if desired Stop precedence, one-effect CAS, restart/circuit bounds, strict managed-v3 evidence, usage/event idempotency, Telegram safety, passive UI reads, and all local gates remain green.
 
 ## Gates
 
@@ -50,6 +50,8 @@
 - Step 8 candidate: builder/coordinator gates green — focused create/poll/presentation 34 tests, lifecycle/routes 31, server/UI 107, responsive/accessibility 22, full 123 files / 1,142 tests, production build, 24/24 fake-only desktop/mobile CI E2E with exact 320px layout, redaction, and zero external requests, plus fail-closed staging with `sideEffectsAttempted: false`; independent checker pending.
 - Step 8 `ef9b7fc`: checker cycle 1 reproduced every automated gate but found one semantic Retry latch race in the progress card. The cycle 2 repair adds a pre-UUID/pre-fetch synchronous latch plus same-turn regression; 44 focused tests, 123 files / 1,144 full tests, build, 24/24 CI E2E, and fail-closed staging are green.
 - Step 8 `ef9b7fc` + `bc38dd0`: independently green after checker cycle 2 — 4 focused files / 66 tests, 123 files / 1,144 full tests, migration, build, 24/24 desktop/mobile CI E2E, and fail-closed staging with no side effects.
+- Step 9 foundations: 8 files / 143 focused tests green — generated `0019_tough_tinkerer`, conservative backfill and claim/CAS store, pure bounded state policy, strict runner status-v3/`unless-stopped` evidence, and fake-only Telegram webhook diagnostic; format, lint, typecheck, and diff checks pass.
+- Step 9 candidate: coordinator gates green — migration clean/upgrade/idempotency and no drift; focused DB 8 files / 38 tests; focused controller/runner/UI 11 files / 177 tests; full 137 files / 1,297 tests; production build; 26/26 desktop/mobile CI E2E; fake-cloud recovery/circuit/usage/Stop smoke; pinned-image process-death, Docker/runner restart, no-duplicate, and Stop-durability smoke. Independent checker pending.
 
 ## Worktrees
 

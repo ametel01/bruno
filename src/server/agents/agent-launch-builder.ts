@@ -12,6 +12,7 @@ import {
   type AgentLaunchSpec,
   parseAgentLaunchSpec,
 } from "@/src/server/agents/agent-launch-spec";
+import { validateDeploymentConfigRevision } from "@/src/server/agents/deployment-state";
 import { getApprovedOpenRouterModel } from "@/src/server/agents/openrouter-models";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentConfigs, agentDeployments, agents } from "@/src/server/db/schema";
@@ -42,6 +43,8 @@ export type AgentLaunchSpecBuilderDependencies = {
   env?: Record<string, string | undefined>;
   hermesWorkloadImage?: string;
   requestId?: () => string;
+  /** Trusted runtime-controller override; never accepted from an HTTP payload. */
+  trustedConfigRevision?: string;
 };
 
 type AgentLaunchTransaction = Parameters<Parameters<DatabaseConnection["db"]["transaction"]>[0]>[0];
@@ -236,6 +239,21 @@ async function buildManagedLaunchSpec(input: {
     };
   }
 
+  const configRevision =
+    input.dependencies.trustedConfigRevision === undefined
+      ? input.row.deployment.configRevision
+      : validateDeploymentConfigRevision(input.dependencies.trustedConfigRevision)
+        ? input.dependencies.trustedConfigRevision
+        : null;
+
+  if (!configRevision) {
+    return {
+      ok: false,
+      reason: "managed_configuration_invalid",
+      message: "Managed Hermes configuration is invalid.",
+    };
+  }
+
   const decrypted = await readRequiredDecryptedActiveAgentSecretsInTransaction(input.tx, {
     userId: input.userId,
     agentId: input.row.agent.id,
@@ -260,7 +278,7 @@ async function buildManagedLaunchSpec(input: {
       name: input.row.agent.name,
       templateKey: input.row.agent.templateKey,
       templateVersion: input.row.agent.templateVersion,
-      configRevision: input.row.deployment.configRevision,
+      configRevision,
     },
     image: {
       ref: input.dependencies.hermesWorkloadImage?.trim() || DEFAULT_HERMES_WORKLOAD_IMAGE,

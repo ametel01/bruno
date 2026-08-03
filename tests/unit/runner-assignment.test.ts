@@ -1,12 +1,22 @@
 import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agents, appMetadata, runners, users } from "@/src/server/db/schema";
+import {
+  agentDeployments,
+  agentRuntimeReconciliations,
+  agents,
+  appMetadata,
+  runners,
+  users,
+} from "@/src/server/db/schema";
 import {
   listAssignableRunnersForDevelopmentUser,
   listAssignableRunnersForUser,
 } from "@/src/server/runners/runner-assignment";
-import { getAssignedRunnerForActiveAgentForUser } from "@/src/server/runners/manual-runner-persistence";
+import {
+  assignRunnerToActiveAgentForDevelopmentUser,
+  getAssignedRunnerForActiveAgentForUser,
+} from "@/src/server/runners/manual-runner-persistence";
 import { DEVELOPMENT_USER_METADATA_KEY } from "@/src/server/users/development-user";
 
 describe.sequential("runner assignment list", () => {
@@ -135,6 +145,80 @@ describe.sequential("runner assignment list", () => {
     expect(assignable.map((runner) => runner.id)).toEqual([ownedRunner.id]);
     expect(assigned).toMatchObject({ id: ownedRunner.id, userId: owner.id });
     expect(foreignRead).toBeNull();
+  });
+
+  it("fails closed instead of reassigning a managed-ready runtime", async () => {
+    const userId = await seedDevelopmentUser(connection);
+    const [currentRunner, replacementRunner] = await connection.db
+      .insert(runners)
+      .values([
+        {
+          userId,
+          name: "Current Runner",
+          kind: "manual_vps",
+          status: "online",
+          endpointUrl: "https://current-runner.example.com",
+        },
+        {
+          userId,
+          name: "Replacement Runner",
+          kind: "manual_vps",
+          status: "online",
+          endpointUrl: "https://replacement-runner.example.com",
+        },
+      ])
+      .returning({ id: runners.id });
+    const [agent] = await connection.db
+      .insert(agents)
+      .values({
+        userId,
+        runnerId: currentRunner?.id,
+        name: "Managed Ready Agent",
+        templateKey: "research_agent",
+        status: "running",
+        desiredStatus: "running",
+      })
+      .returning({ id: agents.id });
+    const operationId = "00000000-0000-4000-8000-000000000931";
+    const now = new Date("2026-08-03T14:00:00.000Z");
+    await connection.db.insert(agentDeployments).values({
+      agentId: agent?.id ?? "",
+      userId,
+      stage: "ready",
+      configRevision: "cfg-runner-assignment-0",
+      idempotencyKey: "Managed-Runner-Assignment-001",
+      runnerOperationId: operationId,
+      runnerAcceptedAt: now,
+      canaryState: "passed",
+      canaryAttemptedAt: now,
+      canaryCompletedAt: now,
+      completedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await connection.db.insert(agentRuntimeReconciliations).values({
+      agentId: agent?.id ?? "",
+      userId,
+      state: "observing",
+      configRevision: "cfg-runner-assignment-0",
+      operationId,
+      lastObservedAt: now,
+      lastReadyAt: now,
+      nextAttemptAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const result = await assignRunnerToActiveAgentForDevelopmentUser(
+      { agentId: agent?.id ?? "", runnerId: replacementRunner?.id ?? "" },
+      { createConnection: () => connection, now: () => now },
+    );
+
+    expect(result).toEqual({ ok: false, reason: "runner_not_found" });
+    const [persistedAgent] = await connection.db.select().from(agents);
+    const [runtime] = await connection.db.select().from(agentRuntimeReconciliations);
+    expect(persistedAgent?.runnerId).toBe(currentRunner?.id);
+    expect(runtime).toMatchObject({ generation: 0, configRevision: "cfg-runner-assignment-0" });
   });
 });
 

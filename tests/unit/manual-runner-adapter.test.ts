@@ -362,7 +362,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
     });
   });
 
-  it("returns only a strict typed status snapshot", async () => {
+  it("normalizes old v2 status to explicit unknown durability evidence", async () => {
     const agentId = "00000000-0000-4000-8000-000000000123";
     const accepted = acceptedLaunchResponse(agentId, "start");
     const adapter = new ManualRunnerAdapter(manualRunner("https://runner.example.com"), {
@@ -381,7 +381,51 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
     await expect(adapter.status(agentId)).resolves.toEqual({
       ok: true,
       runner: manualRunner("https://runner.example.com"),
-      snapshot: accepted.snapshot,
+      snapshot: {
+        ...accepted.snapshot,
+        container: {
+          ...accepted.snapshot.container,
+          restartPolicy: { name: "unknown", maximumRetryCount: null },
+          restartCount: null,
+        },
+      },
+    });
+  });
+
+  it("retains strict v3 policy, restart-count, and Telegram evidence", async () => {
+    const agentId = "00000000-0000-4000-8000-000000000123";
+    const accepted = acceptedLaunchResponse(agentId, "start");
+    const snapshot = {
+      ...accepted.snapshot,
+      phase: "starting",
+      container: {
+        ...accepted.snapshot.container,
+        restartPolicy: { name: "unless-stopped", maximumRetryCount: 0 },
+        restartCount: 2,
+      },
+      telegram: {
+        ...accepted.snapshot.telegram,
+        state: "retrying",
+      },
+      readinessReason: "telegram_retrying",
+    };
+    const adapter = new ManualRunnerAdapter(manualRunner("https://runner.example.com"), {
+      env: { [RUNNER_BEARER_TOKEN_ENV]: "contract-token" },
+      fetch: async () =>
+        Response.json({
+          ok: true,
+          contractVersion: "agentbay.runner.status.v3",
+          agentId,
+          action: "status",
+          snapshot,
+        }),
+      timeoutMs: 250,
+    });
+
+    await expect(adapter.status(agentId)).resolves.toEqual({
+      ok: true,
+      runner: manualRunner("https://runner.example.com"),
+      snapshot,
     });
   });
 

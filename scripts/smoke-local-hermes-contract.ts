@@ -31,6 +31,7 @@ import {
   agentConfigs,
   agentDeployments,
   agentEvents,
+  agentRuntimeReconciliations,
   agents,
   agentUsagePeriods,
   runnerHeartbeats,
@@ -40,6 +41,7 @@ import {
 
 const FAKE_MODEL_ALIAS = "openai/gpt-4.1-mini";
 const SMOKE_IMAGE = process.env.AGENTBAY_HERMES_IMAGE?.trim() || DEFAULT_LOCAL_HERMES_IMAGE;
+const LOCAL_DOCKER_PID_HELPER_IMAGE = "busybox:1.36";
 const TIMEOUT_MS = readPositiveInteger(process.env.AGENTBAY_HERMES_CONTRACT_TIMEOUT_MS, 240_000);
 const POLL_MS = readPositiveInteger(process.env.AGENTBAY_HERMES_CONTRACT_POLL_MS, 1_000);
 
@@ -63,6 +65,7 @@ export type LocalHermesContractSmokeSummary = {
   controllerFinalized: true;
   controllerStages: string[];
   duplicateLaunchReused: true;
+  dockerPolicyRecovery: true;
   elapsedMs: number;
   fakeModelContainer: string;
   image: string;
@@ -70,10 +73,14 @@ export type LocalHermesContractSmokeSummary = {
   modelResponse: string;
   network: string;
   noPublicHermesPort: true;
+  noSelectedContainerDuplicates: true;
   openUsagePeriods: 1;
   privateApiAuth: true;
   removedAgentRoot: true;
   restartReused: true;
+  runnerProcessRestartObserved: true;
+  selectedAbsenceRecovered: true;
+  stoppedAcrossRunnerRestart: true;
   runningTransitions: 1;
   statePersistence: true;
   statusProgression: ["accepted", "starting", "ready"];
@@ -101,6 +108,7 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
 
   try {
     await docker(["image", "inspect", SMOKE_IMAGE]);
+    await docker(["image", "inspect", LOCAL_DOCKER_PID_HELPER_IMAGE]);
     await docker(["network", "create", network]);
     networkCreated = true;
     await startFakeModelServer({ containerName: fakeModelContainer, image: SMOKE_IMAGE, network });
@@ -134,79 +142,81 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
         };
       },
     });
-    const runner = new ManualRunnerDocker({
-      hermes: hermesRuntime,
-      probe: {
-        requestCanary: async (input) => {
-          const response = await requestHermes(input.containerName, {
-            apiServerKey: input.apiServerKey,
-            body: {
-              model: input.model,
-              messages: [
-                {
-                  role: "user",
-                  content: "Reply with ok.",
-                },
-              ],
-              tools: [],
-              stream: false,
-              max_tokens: 16,
-            },
-            method: "POST",
-            path: "/v1/chat/completions",
-          }).catch(() => null);
-
-          return {
-            ok: response?.status === 200,
-            status: response?.status ?? 0,
-            body: response?.body ?? null,
-          };
-        },
-        requestHealth: async (input) => {
-          runnerHealthObservations += 1;
-          if (runnerHealthObservations === 1) {
-            return {
-              ok: true,
+    const createRunner = () =>
+      new ManualRunnerDocker({
+        hermes: hermesRuntime,
+        probe: {
+          requestCanary: async (input) => {
+            const response = await requestHermes(input.containerName, {
+              apiServerKey: input.apiServerKey,
               body: {
-                status: "ok",
-                gateway_state: "starting",
-                platforms: {
-                  api_server: { state: "connecting" },
-                  telegram: { state: "connecting" },
-                },
+                model: input.model,
+                messages: [
+                  {
+                    role: "user",
+                    content: "Reply with ok.",
+                  },
+                ],
+                tools: [],
+                stream: false,
+                max_tokens: 16,
               },
+              method: "POST",
+              path: "/v1/chat/completions",
+            }).catch(() => null);
+
+            return {
+              ok: response?.status === 200,
+              status: response?.status ?? 0,
+              body: response?.body ?? null,
             };
-          }
+          },
+          requestHealth: async (input) => {
+            runnerHealthObservations += 1;
+            if (runnerHealthObservations === 1) {
+              return {
+                ok: true,
+                body: {
+                  status: "ok",
+                  gateway_state: "starting",
+                  platforms: {
+                    api_server: { state: "connecting" },
+                    telegram: { state: "connecting" },
+                  },
+                },
+              };
+            }
 
-          const response = await requestHermes(input.containerName, {
-            apiServerKey: input.apiServerKey,
-            path: "/health/detailed",
-          }).catch(() => null);
+            const response = await requestHermes(input.containerName, {
+              apiServerKey: input.apiServerKey,
+              path: "/health/detailed",
+            }).catch(() => null);
 
-          return {
-            ok: response?.status === 200,
-            body: response?.status === 200 ? withLocalFakeTelegramHealth(response.body) : null,
-          };
+            return {
+              ok: response?.status === 200,
+              body: response?.status === 200 ? withLocalFakeTelegramHealth(response.body) : null,
+            };
+          },
         },
-      },
-      projection: {
-        project: async (launchSpec) => {
-          const projected = await projectHermesHome(launchSpec, {
-            stateRoot,
-          });
-          await applyLocalSmokeOverrides({
-            fakeModelBaseUrl: `http://${fakeModelContainer}:8080/v1`,
-            projection: projected,
-          });
-          projection = projected;
-          projectionRoot = projected.agentRoot;
-          return projected;
+        projection: {
+          project: async (launchSpec) => {
+            const projected = await projectHermesHome(launchSpec, {
+              stateRoot,
+            });
+            await applyLocalSmokeOverrides({
+              fakeModelBaseUrl: `http://${fakeModelContainer}:8080/v1`,
+              projection: projected,
+            });
+            projection = projected;
+            projectionRoot = projected.agentRoot;
+            return projected;
+          },
         },
-      },
-      readiness: {
-        wait: waitForLocalHermesReadiness,
-      },
-    });
+        readiness: {
+          wait: waitForLocalHermesReadiness,
+        },
+      });
+    const runner = createRunner();
 
     const started = await runner.start(agentId, spec);
     const launchAcceptedAt = Date.now();
@@ -271,23 +281,68 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
       throw new Error("Hermes runner status did not report a ready operation after readiness.");
     }
 
-    const reusedRestart = await runner.restart(agentId, spec);
+    assertExactManagedRestartPolicy(status.snapshot);
+    const restartedRunnerService = createRunner();
+    const afterRunnerProcessRestart = await restartedRunnerService.status(agentId);
+    if (
+      afterRunnerProcessRestart.snapshot.phase !== "ready" ||
+      afterRunnerProcessRestart.snapshot.operation?.id !== status.snapshot.operation.id ||
+      afterRunnerProcessRestart.snapshot.container.id !== status.snapshot.container.id
+    ) {
+      throw new Error("A fresh runner-service process did not rediscover the exact workload.");
+    }
+    assertExactManagedRestartPolicy(afterRunnerProcessRestart.snapshot);
+
+    const restartBaseline = afterRunnerProcessRestart.snapshot.container.restartCount;
+    if (restartBaseline === null) {
+      throw new Error("Hermes Docker restart-count evidence was unavailable.");
+    }
+    const selectedContainerId = await assertOneSelectedContainer(agentId);
+    if (selectedContainerId !== afterRunnerProcessRestart.snapshot.container.id) {
+      throw new Error("Hermes process-death probe did not resolve the exact selected container.");
+    }
+    await killSelectedContainerProcessFromDockerHost(selectedContainerId);
+    const afterPolicyRecovery = await waitForDockerPolicyRecovery({
+      agentId,
+      baselineRestartCount: restartBaseline,
+      runner: restartedRunnerService,
+    });
+    assertExactManagedRestartPolicy(afterPolicyRecovery.snapshot);
+
+    const policyRecoveredContainerId = afterPolicyRecovery.snapshot.container.id;
+    if (!policyRecoveredContainerId) {
+      throw new Error("Docker policy recovery did not retain a selected container ID.");
+    }
+    await docker(["rm", "--force", policyRecoveredContainerId]);
+    const absent = await restartedRunnerService.status(agentId);
+    if (absent.snapshot.phase !== "idle" || absent.snapshot.container.state !== "absent") {
+      throw new Error("Hermes selected-container absence was not observed truthfully.");
+    }
+    const absenceRecovery = await restartedRunnerService.start(agentId, spec);
+    if (!("snapshot" in absenceRecovery) || !absenceRecovery.snapshot.container.name) {
+      throw new Error("Hermes selected-container absence did not accept one replacement.");
+    }
+    await waitForExactHermesReady(restartedRunnerService, agentId);
+    await assertOneSelectedContainer(agentId);
+
+    const recoveredStatus = await restartedRunnerService.status(agentId);
+    const reusedRestart = await restartedRunnerService.restart(agentId, spec);
     if (
       !("snapshot" in reusedRestart) ||
       reusedRestart.operation.disposition !== "reused" ||
-      reusedRestart.operation.id !== status.snapshot.operation.id ||
-      reusedRestart.snapshot.container.id !== status.snapshot.container.id
+      reusedRestart.operation.id !== recoveredStatus.snapshot.operation?.id ||
+      reusedRestart.snapshot.container.id !== recoveredStatus.snapshot.container.id
     ) {
       throw new Error("Hermes restart did not reuse the exact running operation and container.");
     }
     const sentinelPath = join(activeProjection.workspace, "agentbay-contract-sentinel.txt");
 
     await writeFile(sentinelPath, "agentbay local hermes contract persisted\n", "utf8");
-    const firstLogs = await waitForHermesGatewayLogs(runner, agentId);
+    const firstLogs = await waitForHermesGatewayLogs(restartedRunnerService, agentId);
 
-    const stopped = await runner.stop(agentId);
+    const stopped = await restartedRunnerService.stop(agentId);
     if (
-      stopped.cancelledOperationId !== status.snapshot.operation.id ||
+      stopped.cancelledOperationId !== recoveredStatus.snapshot.operation?.id ||
       stopped.snapshot.phase !== "stopped"
     ) {
       throw new Error("Hermes stop did not return exact cancellation evidence.");
@@ -296,7 +351,7 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
     await rm(activeProjection.agentRoot, { force: true, recursive: true });
     await cp(backupRoot, activeProjection.agentRoot, { recursive: true });
 
-    const restarted = await runner.restart(agentId, spec);
+    const restarted = await restartedRunnerService.restart(agentId, spec);
     const sentinel = await readFile(sentinelPath, "utf8");
 
     if (!sentinel.includes("agentbay local hermes contract persisted")) {
@@ -308,7 +363,18 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
     }
 
     await assertPrivateApiAuth(restarted.snapshot.container.name, spec.secrets.apiServerKey);
-    const cleaned = await runner.cleanup(agentId);
+    const intentionalStop = await restartedRunnerService.stop(agentId);
+    if (intentionalStop.snapshot.phase !== "stopped") {
+      throw new Error("Hermes intentional Stop was not observed as stopped.");
+    }
+    await sleep(Math.max(POLL_MS, 2_000));
+    const afterStoppedRunnerRestart = await createRunner().status(agentId);
+    if (
+      !["absent", "exited", "dead"].includes(afterStoppedRunnerRestart.snapshot.container.state)
+    ) {
+      throw new Error("Hermes intentional Stop resurrected after runner-process restart.");
+    }
+    const cleaned = await restartedRunnerService.cleanup(agentId);
     if (!cleaned.cancelledOperationId || cleaned.snapshot.phase !== "cancelled") {
       throw new Error("Hermes cleanup did not return exact cancellation evidence.");
     }
@@ -323,6 +389,7 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
       controllerFinalized: true,
       controllerStages: controller.stages,
       duplicateLaunchReused: true,
+      dockerPolicyRecovery: true,
       elapsedMs: Date.now() - startedAt,
       fakeModelContainer,
       image: SMOKE_IMAGE,
@@ -330,10 +397,14 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
       modelResponse,
       network,
       noPublicHermesPort: true,
+      noSelectedContainerDuplicates: true,
       openUsagePeriods: 1,
       privateApiAuth: true,
       removedAgentRoot: true,
       restartReused: true,
+      runnerProcessRestartObserved: true,
+      selectedAbsenceRecovered: true,
+      stoppedAcrossRunnerRestart: true,
       runningTransitions: 1,
       statePersistence: true,
       statusProgression: ["accepted", "starting", "ready"],
@@ -530,6 +601,9 @@ async function drivePersistedHermesController(input: {
     await connection.db
       .delete(agentUsagePeriods)
       .where(eq(agentUsagePeriods.agentId, input.agentId));
+    await connection.db
+      .delete(agentRuntimeReconciliations)
+      .where(eq(agentRuntimeReconciliations.agentId, input.agentId));
     await connection.db.delete(agentDeployments).where(eq(agentDeployments.id, deploymentId));
     await connection.db.delete(agentConfigs).where(eq(agentConfigs.agentId, input.agentId));
     await connection.db.delete(agents).where(eq(agents.id, input.agentId));
@@ -821,6 +895,112 @@ async function assertNoPublicHermesPort(containerId: string): Promise<void> {
   if (portResult.stdout.trim()) {
     throw new Error(`Hermes API port is publicly published: ${portResult.stdout.trim()}`);
   }
+}
+
+function assertExactManagedRestartPolicy(
+  snapshot: Awaited<ReturnType<ManualRunnerDocker["status"]>>["snapshot"],
+): void {
+  if (
+    snapshot.container.restartPolicy.name !== "unless-stopped" ||
+    snapshot.container.restartPolicy.maximumRetryCount !== 0 ||
+    snapshot.container.restartCount === null
+  ) {
+    throw new Error("Hermes selected workload does not expose exact unless-stopped evidence.");
+  }
+}
+
+async function waitForDockerPolicyRecovery(input: {
+  agentId: string;
+  baselineRestartCount: number;
+  runner: ManualRunnerDocker;
+}): Promise<Awaited<ReturnType<ManualRunnerDocker["status"]>>> {
+  const deadline = Date.now() + TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    const status = await input.runner.status(input.agentId);
+    if (
+      status.snapshot.phase === "ready" &&
+      status.snapshot.container.restartCount !== null &&
+      status.snapshot.container.restartCount > input.baselineRestartCount
+    ) {
+      return status;
+    }
+    await sleep(POLL_MS);
+  }
+
+  throw new Error("Docker unless-stopped policy did not recover the killed Hermes process.");
+}
+
+async function waitForExactHermesReady(runner: ManualRunnerDocker, agentId: string): Promise<void> {
+  const deadline = Date.now() + TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    const status = await runner.status(agentId);
+    if (status.snapshot.phase === "ready") {
+      assertExactManagedRestartPolicy(status.snapshot);
+      return;
+    }
+    await sleep(POLL_MS);
+  }
+
+  throw new Error("Hermes absence recovery did not return to exact ready state.");
+}
+
+async function assertOneSelectedContainer(agentId: string): Promise<string> {
+  const result = await docker([
+    "ps",
+    "--all",
+    "--no-trunc",
+    "--filter",
+    `label=agentbay.agent_id=${agentId}`,
+    "--format",
+    "{{.ID}}",
+  ]);
+  const ids = result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const [containerId] = ids;
+  if (ids.length !== 1 || !containerId) {
+    throw new Error("Hermes recovery did not converge to exactly one selected container.");
+  }
+
+  return containerId;
+}
+
+async function killSelectedContainerProcessFromDockerHost(containerId: string): Promise<void> {
+  const inspected = await docker(["inspect", "--format", "{{.State.Pid}}", containerId]);
+  const rawPid = inspected.stdout.trim();
+
+  if (!/^[1-9][0-9]{0,9}$/.test(rawPid)) {
+    throw new Error("Hermes selected container did not expose a valid host PID.");
+  }
+  const pid = Number(rawPid);
+  if (!Number.isSafeInteger(pid) || pid <= 1) {
+    throw new Error("Hermes selected container exposed an unsafe host PID.");
+  }
+
+  await docker([
+    "run",
+    "--rm",
+    "--pid",
+    "host",
+    "--network",
+    "none",
+    "--read-only",
+    "--cap-drop",
+    "ALL",
+    "--cap-add",
+    "KILL",
+    "--security-opt",
+    "no-new-privileges",
+    "--entrypoint",
+    "/bin/kill",
+    LOCAL_DOCKER_PID_HELPER_IMAGE,
+    "-9",
+    String(pid),
+  ]);
 }
 
 async function assertNoSelectedContainers(agentId: string): Promise<void> {

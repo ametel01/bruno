@@ -12,6 +12,7 @@ type StopAgentButtonProps = {
   agentId: string;
   status: AgentLifecycleStatus;
   allowSetupCancel?: boolean;
+  allowRuntimeStop?: boolean;
   label?: string;
   requireConfirmation?: boolean;
 };
@@ -32,6 +33,7 @@ const SETUP_CANCELLABLE_STATUSES = new Set<AgentLifecycleStatus>([
 
 export function StopAgentButton({
   allowSetupCancel = false,
+  allowRuntimeStop = false,
   agentId,
   label = "Stop",
   status,
@@ -41,7 +43,9 @@ export function StopAgentButton({
   const [state, setState] = useState<StopState>({ status: "idle" });
   const requestLatchRef = useRef(false);
   const canStop =
-    status === "running" || (allowSetupCancel && SETUP_CANCELLABLE_STATUSES.has(status));
+    status === "running" ||
+    (allowSetupCancel && SETUP_CANCELLABLE_STATUSES.has(status)) ||
+    (allowRuntimeStop && status !== "deleting");
 
   async function handleStop() {
     if (!canStop) {

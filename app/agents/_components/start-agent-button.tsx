@@ -11,6 +11,7 @@ import {
 type StartAgentButtonProps = {
   agentId: string;
   status: AgentLifecycleStatus;
+  allowRuntimeStart?: boolean;
   label?: string;
   busyLabel?: string;
   requestedMessage?: string;
@@ -30,6 +31,7 @@ const STARTABLE_STATUSES = new Set<AgentLifecycleStatus>(["idle", "stopped", "er
 export function StartAgentButton({
   agentId,
   status,
+  allowRuntimeStart = false,
   label = "Start",
   busyLabel = "Starting",
   requestedMessage = "Start requested.",
@@ -42,7 +44,7 @@ export function StartAgentButton({
   const requestLatchRef = useRef(false);
 
   useEffect(() => {
-    if (status === "running") {
+    if (status === "running" && !allowRuntimeStart) {
       releaseAgentActionRequestLatch(requestLatchRef);
       setState({ status: "idle" });
       return;
@@ -59,10 +61,13 @@ export function StartAgentButton({
     return () => {
       window.clearInterval(refreshInterval);
     };
-  }, [router, state.status, status]);
+  }, [allowRuntimeStart, router, state.status, status]);
 
   async function handleStart() {
-    if (!STARTABLE_STATUSES.has(status) || !acquireAgentActionRequestLatch(requestLatchRef)) {
+    if (
+      (!STARTABLE_STATUSES.has(status) && !allowRuntimeStart) ||
+      !acquireAgentActionRequestLatch(requestLatchRef)
+    ) {
       return;
     }
 
@@ -91,10 +96,15 @@ export function StartAgentButton({
     }
   }
 
-  const startable = STARTABLE_STATUSES.has(status);
+  const startable = STARTABLE_STATUSES.has(status) || allowRuntimeStart;
   const busy = state.status === "requesting" || state.status === "polling" || status === "starting";
   const disabled = Boolean(disabledReason) || !startable || busy;
-  const buttonLabel = getButtonLabel(status, state.status, label, busyLabel);
+  const buttonLabel = getButtonLabel(
+    allowRuntimeStart && status === "running" ? "stopped" : status,
+    state.status,
+    label,
+    busyLabel,
+  );
 
   return (
     <div className="start-agent-action">

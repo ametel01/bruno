@@ -176,7 +176,7 @@ describe("manual runner service HTTP contract", () => {
     });
     expect(await status.json()).toMatchObject({
       ok: true,
-      contractVersion: "agentbay.runner.status.v2",
+      contractVersion: "agentbay.runner.status.v3",
       snapshot: {
         container: { id: "container-001", state: "running" },
         phase: "failed",
@@ -204,6 +204,7 @@ describe("manual runner service HTTP contract", () => {
       "agentbay-runner",
       "--serve",
     ]);
+    expect(calls.find((args) => args[0] === "run")).not.toContain("--restart");
   });
 
   it("validates and projects launch specs for start before Docker runs", async () => {
@@ -277,6 +278,11 @@ describe("manual runner service HTTP contract", () => {
       "target",
     ]);
     expect(calls).toContainEqual(expect.arrayContaining(["run", "--detach"]));
+    const managedRun = calls.find((args) => args[0] === "run");
+    expect(managedRun?.filter((argument) => argument === "--restart")).toHaveLength(1);
+    expect(
+      managedRun?.slice(managedRun.indexOf("--restart"), managedRun.indexOf("--restart") + 2),
+    ).toEqual(["--restart", "unless-stopped"]);
     expect(calls).toContainEqual(
       expect.arrayContaining([
         "--network",
@@ -417,7 +423,7 @@ describe("manual runner service HTTP contract", () => {
     expect(response.status).toBe(202);
     await expect(status.json()).resolves.toMatchObject({
       ok: true,
-      contractVersion: "agentbay.runner.status.v2",
+      contractVersion: "agentbay.runner.status.v3",
       snapshot: { container: { id: "container-001", state: "running" } },
     });
     expect(calls).not.toContainEqual(["rm", "--force", "container-001"]);
@@ -487,6 +493,52 @@ describe("manual runner service HTTP contract", () => {
       });
       expect(calls.filter((args) => args[0] === "run")).toHaveLength(1);
       expect(calls).not.toContainEqual(["rm", "--force", "container-001"]);
+    });
+  });
+
+  it.each([
+    ["no", { Name: "no", MaximumRetryCount: 0 }],
+    ["always", { Name: "always", MaximumRetryCount: 0 }],
+    ["on-failure", { Name: "on-failure", MaximumRetryCount: 3 }],
+    ["nonzero unless-stopped retry count", { Name: "unless-stopped", MaximumRetryCount: 1 }],
+    ["missing", null],
+    ["unknown", { Name: "sometimes", MaximumRetryCount: 0 }],
+    ["negative maximum retry count", { Name: "unless-stopped", MaximumRetryCount: -1 }],
+  ])("replaces one managed container with %s restart policy evidence", async (_name, policy) => {
+    const calls: string[][] = [];
+    let exposeStalePolicy = false;
+    await withHermesStateRootForTest(async () => {
+      const docker = new ManualRunnerDocker({
+        docker: createMockDocker({
+          calls,
+          inspectRestartPolicy: () => (exposeStalePolicy ? policy : undefined),
+          removed: () => {
+            exposeStalePolicy = false;
+          },
+        }),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: (spec) =>
+            createHermesProjectionForTest(spec, { apiServerKey: spec.secrets.apiServerKey }),
+        },
+      });
+      const spec = sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } });
+
+      await expect(docker.start(AGENT_ID, spec)).resolves.toMatchObject({
+        operation: { disposition: "created" },
+      });
+      exposeStalePolicy = true;
+      await expect(docker.start(AGENT_ID, spec)).resolves.toMatchObject({
+        operation: { disposition: "replaced" },
+      });
+
+      expect(calls.filter((args) => args[0] === "run")).toHaveLength(2);
+      expect(calls.filter((args) => args[0] === "stop")).toEqual([
+        ["stop", "--time", "20", "container-001"],
+      ]);
+      expect(calls.filter((args) => args[0] === "rm")).toEqual([
+        ["rm", "--force", "container-001"],
+      ]);
     });
   });
 
@@ -744,10 +796,14 @@ describe("manual runner service HTTP contract", () => {
       const status = await docker.status(AGENT_ID);
 
       expect(status).toMatchObject({
-        contractVersion: "agentbay.runner.status.v2",
+        contractVersion: "agentbay.runner.status.v3",
         snapshot: {
           phase: "ready",
           readinessReason: null,
+          container: {
+            restartPolicy: { name: "unless-stopped", maximumRetryCount: 0 },
+            restartCount: 0,
+          },
           gateway: { state: "running" },
           apiServer: { state: "connected" },
           telegram: { state: "connected" },
@@ -761,6 +817,68 @@ describe("manual runner service HTTP contract", () => {
       ]);
       expect(JSON.stringify(status)).not.toContain(spec.secrets.apiServerKey);
       expect(JSON.stringify(status)).not.toContain("sk-or-v1-upstream");
+    });
+  });
+
+  it("normalizes malformed Docker restart counts to unknown status evidence", async () => {
+    let restartCount: unknown = 0;
+    await withHermesStateRootForTest(async () => {
+      const docker = new ManualRunnerDocker({
+        docker: createMockDocker({ inspectRestartCount: () => restartCount }),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: (spec) =>
+            createHermesProjectionForTest(spec, { apiServerKey: spec.secrets.apiServerKey }),
+        },
+        probe: { requestHealth: async () => ({ ok: true, body: pinnedHermesHealth() }) },
+      });
+      const spec = sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } });
+      await docker.start(AGENT_ID, spec);
+
+      for (const invalid of [undefined, null, -1, 2_147_483_648, 1.5, "3"]) {
+        restartCount = invalid;
+        await expect(docker.status(AGENT_ID)).resolves.toMatchObject({
+          snapshot: { container: { restartCount: null } },
+        });
+      }
+    });
+  });
+
+  it.each([
+    ["connecting", "starting", "telegram_not_connected"],
+    ["connected", "ready", null],
+    ["disconnected", "starting", "telegram_not_connected"],
+    ["retrying", "starting", "telegram_retrying"],
+    ["fatal", "failed", "telegram_fatal"],
+    ["paused", "failed", "telegram_paused"],
+    ["disabled", "starting", "telegram_not_connected"],
+    ["unknown", "starting", "telegram_not_connected"],
+  ] as const)("retains exact Telegram %s health state", async (state, phase, reason) => {
+    await withHermesStateRootForTest(async () => {
+      const docker = new ManualRunnerDocker({
+        docker: createMockDocker(),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: (spec) =>
+            createHermesProjectionForTest(spec, { apiServerKey: spec.secrets.apiServerKey }),
+        },
+        probe: {
+          requestHealth: async () => ({
+            ok: true,
+            body: pinnedHermesHealth({ platforms: { telegram: { state } } }),
+          }),
+        },
+      });
+      const spec = sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } });
+      await docker.start(AGENT_ID, spec);
+
+      await expect(docker.status(AGENT_ID)).resolves.toMatchObject({
+        snapshot: {
+          phase,
+          readinessReason: reason,
+          telegram: { state },
+        },
+      });
     });
   });
 
@@ -1185,7 +1303,7 @@ describe("manual runner service HTTP contract", () => {
       reason: "revision_mismatch",
     });
     await expect(docker.status(AGENT_ID)).resolves.toMatchObject({
-      contractVersion: "agentbay.runner.status.v2",
+      contractVersion: "agentbay.runner.status.v3",
       snapshot: { phase: "idle", readinessReason: "container_absent" },
     });
     await expect(docker.status(OTHER_AGENT_ID)).resolves.toMatchObject({
@@ -1735,14 +1853,19 @@ function createMockDocker(
       id: string;
       image?: string;
       labels?: Record<string, string>;
+      restartCount?: unknown;
+      restartPolicy?: { MaximumRetryCount?: unknown; Name?: unknown } | null;
       runArgs?: readonly string[];
       status: string;
     }[];
     failRemoveIds?: string[];
     inspectEnv?: string[];
+    inspectRestartCount?: () => unknown;
+    inspectRestartPolicy?: () => { MaximumRetryCount?: unknown; Name?: unknown } | null | undefined;
     injectDockerSocket?: boolean;
     logs?: { stderr: string; stdout: string };
     psIds?: string[];
+    removed?: (containerId: string) => void;
   } = {},
 ): DockerExecutableRunner {
   const containers = new Map(
@@ -1772,6 +1895,7 @@ function createMockDocker(
         agentId: readLabelAgentId(args),
         image: readRunImage(args),
         labels: readRunLabels(args),
+        restartCount: 0,
         runArgs: args,
         status: "running",
       });
@@ -1786,10 +1910,16 @@ function createMockDocker(
       if (!container) {
         throw new Error(`missing container ${id}`);
       }
+      const inspectedRestartPolicy = input.inspectRestartPolicy
+        ? input.inspectRestartPolicy()
+        : container.restartPolicy;
 
       return {
         stdout: JSON.stringify({
           Id: container.id,
+          RestartCount: input.inspectRestartCount
+            ? input.inspectRestartCount()
+            : container.restartCount,
           Args: readContainerCommandArgs(container.runArgs),
           Mounts: [
             ...readRunMounts(container.runArgs),
@@ -1814,7 +1944,14 @@ function createMockDocker(
               ...(container.labels ?? {}),
             },
           },
-          HostConfig: readRunHostConfig(container.runArgs),
+          HostConfig: {
+            ...readRunHostConfig(container.runArgs),
+            ...(inspectedRestartPolicy === null
+              ? { RestartPolicy: undefined }
+              : inspectedRestartPolicy
+                ? { RestartPolicy: inspectedRestartPolicy }
+                : {}),
+          },
           NetworkSettings: readRunNetworkSettings(container.runArgs),
           State: {
             Status: container.status,
@@ -1848,6 +1985,7 @@ function createMockDocker(
       }
 
       containers.delete(targetId);
+      input.removed?.(targetId);
 
       return { stdout: "", stderr: "" };
     }
@@ -1927,6 +2065,7 @@ function readRunHostConfig(args: readonly string[] | undefined) {
   const cpus = readArgValue(args, "--cpus");
   const memory = readArgValue(args, "--memory");
   const pidsLimit = readArgValue(args, "--pids-limit");
+  const restartPolicy = readArgValue(args, "--restart");
 
   return {
     Binds: [],
@@ -1937,6 +2076,7 @@ function readRunHostConfig(args: readonly string[] | undefined) {
     NetworkMode: readArgValue(args, "--network") ?? "bridge",
     PidsLimit: pidsLimit ? Number.parseInt(pidsLimit, 10) : 0,
     PortBindings: {},
+    RestartPolicy: restartPolicy ? { Name: restartPolicy, MaximumRetryCount: 0 } : undefined,
     SecurityOpt: readRepeatedArgValues(args, "--security-opt"),
   };
 }

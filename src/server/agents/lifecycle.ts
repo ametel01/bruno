@@ -1,36 +1,54 @@
-import { and, desc, eq, exists, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, exists, gte, inArray, isNull, lt, not, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import type { HermesReadinessReason } from "@/src/runner-service/docker";
+import type {
+  RunnerAgentStatusSnapshot,
+  RunnerOperation,
+} from "@/src/runner-service/runner-contracts";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import {
-  buildHermesAgentLaunchSpecForUser,
   type AgentLaunchSpecBuilderDependencies,
+  buildHermesAgentLaunchSpecForUser,
 } from "@/src/server/agents/agent-launch-builder";
 import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
+import {
+  classifyManagedRuntimeForUpdate,
+  persistManagedRuntimeOwnerIntent,
+} from "@/src/server/agents/agent-runtime-lifecycle";
+import { scheduleAgentRuntimeReconcileAfterResponse } from "@/src/server/agents/agent-runtime-triggers";
 import { revokeActiveAgentSecretsInTransaction } from "@/src/server/agents/agent-secrets";
 import { hermesConfigurationBlocker } from "@/src/server/agents/hermes-readiness";
 import { getApprovedOpenRouterModel } from "@/src/server/agents/openrouter-models";
-import type { HermesReadinessReason } from "@/src/runner-service/docker";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
 import {
   agentConfigs,
   agentDeployments,
   agentLogs,
+  agentRuntimeReconciliations,
   agentSecrets,
-  agentUsagePeriods,
+  type agentStatusEnum,
   agents,
+  agentUsagePeriods,
   dockerRunnerContainers,
   runnerHeartbeats,
   runners,
-  type agentStatusEnum,
 } from "@/src/server/db/schema";
-import type * as schema from "@/src/server/db/schema";
 import {
   recordAgentEventInTransaction,
   recordAgentEventsInTransaction,
 } from "@/src/server/events/agent-events";
+import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
 import {
-  DockerRunnerMaintenanceAdapter,
+  DockerRunnerAdapter,
+  type DockerRunnerStatusResult as DockerRunnerLifecycleStatusResult,
+  type DockerRunnerRestartResult,
+  type DockerRunnerStartResult,
+  type DockerRunnerStopResult,
+} from "@/src/server/runners/docker-runner-adapter";
+import {
   type DockerRunnerCleanupResult,
+  DockerRunnerMaintenanceAdapter,
   type DockerRunnerStatusResult as DockerRunnerMaintenanceStatusResult,
 } from "@/src/server/runners/docker-runner-maintenance";
 import {
@@ -46,35 +64,23 @@ import {
   type LocalRunnerUnexpectedExitEvent,
 } from "@/src/server/runners/local-runner-adapter";
 import {
-  DockerRunnerAdapter,
-  type DockerRunnerRestartResult,
-  type DockerRunnerStartResult,
-  type DockerRunnerStatusResult as DockerRunnerLifecycleStatusResult,
-  type DockerRunnerStopResult,
-} from "@/src/server/runners/docker-runner-adapter";
-import {
   ManualRunnerAdapter,
   type ManualRunnerRestartResult,
   type ManualRunnerStartResult,
   type ManualRunnerStatusResult,
   type ManualRunnerStopResult,
 } from "@/src/server/runners/manual-runner-adapter";
-import type {
-  RunnerAgentStatusSnapshot,
-  RunnerOperation,
-} from "@/src/runner-service/runner-contracts";
 import {
   ACTIVE_RUNNER_STATUS,
   MANUAL_RUNNER_KIND,
   type ManualRunnerRecord,
 } from "@/src/server/runners/manual-runner-persistence";
-import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
 import type { RunnerAdapter as RunnerAdapterContract } from "@/src/server/runners/runner-adapter";
+import { reconcileStaleRunnerHeartbeatsInTransaction } from "@/src/server/runners/runner-heartbeat";
 import {
   lockRunnerPlacementCapacityInTransaction,
   selectRunnerPlacementForUserInTransaction,
 } from "@/src/server/runners/runner-placement";
-import { reconcileStaleRunnerHeartbeatsInTransaction } from "@/src/server/runners/runner-heartbeat";
 
 export type AgentLifecycleStatus = (typeof agentStatusEnum.enumValues)[number];
 
@@ -210,6 +216,7 @@ export type AgentLifecycleDependencies = {
   now?: LifecycleClock;
   planMaxAgents?: number | null;
   runnerAdapter?: LifecycleRunnerAdapter;
+  scheduleRuntimeReconcile?: typeof scheduleAgentRuntimeReconcileAfterResponse;
 };
 
 export type DockerRunnerReconciliationDependencies = {
@@ -237,8 +244,8 @@ export type StartAgentResult =
       agent: StartedAgent;
       event: { type: typeof START_REQUESTED_EVENT_TYPE };
       events: [{ type: typeof START_REQUESTED_EVENT_TYPE }];
-      operation: RunnerOperation;
-      snapshot: RunnerAgentStatusSnapshot;
+      operation?: RunnerOperation;
+      snapshot?: RunnerAgentStatusSnapshot;
     }
   | {
       ok: false;
@@ -273,15 +280,10 @@ export type StartedAgent = {
 export type StopAgentResult =
   | {
       ok: true;
-      agent: StoppedAgent;
-      events: [
-        {
-          type: typeof STOP_REQUESTED_EVENT_TYPE;
-        },
-        {
-          type: typeof STOP_COMPLETED_EVENT_TYPE;
-        },
-      ];
+      agent: StoppedAgent | StoppingAgent;
+      events: Array<
+        { type: typeof STOP_REQUESTED_EVENT_TYPE } | { type: typeof STOP_COMPLETED_EVENT_TYPE }
+      >;
     }
   | {
       ok: false;
@@ -306,6 +308,11 @@ export type StoppedAgent = {
   deletedAt: null;
 };
 
+export type StoppingAgent = Omit<StoppedAgent, "status" | "statusReason"> & {
+  status: "restarting";
+  statusReason: string;
+};
+
 export type RestartAgentResult =
   | {
       ok: true;
@@ -325,8 +332,8 @@ export type RestartAgentResult =
       agent: RestartedAgent;
       event: { type: typeof RESTART_REQUESTED_EVENT_TYPE };
       events: [{ type: typeof RESTART_REQUESTED_EVENT_TYPE }];
-      operation: RunnerOperation;
-      snapshot: RunnerAgentStatusSnapshot;
+      operation?: RunnerOperation;
+      snapshot?: RunnerAgentStatusSnapshot;
     }
   | {
       ok: false;
@@ -1028,6 +1035,68 @@ export async function startAgentForUser(
         return { ok: false, reason: "invalid_status", status: currentAgent.agent.status } as const;
       }
 
+      const runtimeClassification = await classifyManagedRuntimeForUpdate(tx, {
+        agentId: normalizedAgentId,
+        userId,
+      });
+
+      if (
+        runtimeClassification.kind === "latest_failed" ||
+        runtimeClassification.kind === "managed_unavailable"
+      ) {
+        return { ok: false, reason: "invalid_status", status: currentAgent.agent.status } as const;
+      }
+
+      if (runtimeClassification.kind === "managed_ready") {
+        const generation = await persistManagedRuntimeOwnerIntent(tx, {
+          agentId: normalizedAgentId,
+          userId,
+          expectedGeneration: runtimeClassification.runtime.generation,
+          intent: "start",
+          now,
+        });
+
+        if (generation === null) {
+          throw new Error("Managed start lost its runtime generation fence.");
+        }
+
+        const [startedAgent] = await tx
+          .update(agents)
+          .set({
+            desiredStatus: "running",
+            status: "starting",
+            statusReason: "Start requested; runtime convergence scheduled.",
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(agents.id, normalizedAgentId),
+              eq(agents.userId, userId),
+              isNull(agents.deletedAt),
+              eq(agents.status, currentAgent.agent.status),
+              agentUpdatedAtMatches(currentAgent.agent.updatedAt),
+            ),
+          )
+          .returning();
+
+        if (!startedAgent) {
+          throw new Error("Managed start lost its agent fence.");
+        }
+
+        await recordAgentEventInTransaction(tx, {
+          agentId: normalizedAgentId,
+          actorUserId: userId,
+          type: START_REQUESTED_EVENT_TYPE,
+          message: `Start requested for agent "${startedAgent.name}".`,
+          metadata: {
+            fromStatus: currentAgent.agent.status,
+            toStatus: "starting",
+          },
+        });
+
+        return { ok: true, managed: true, agent: startedAgent } as const;
+      }
+
       const assignedRunnerSnapshot = currentAgent.agent.runnerId
         ? await readAgentStartRunnerSnapshot(tx, {
             runnerId: currentAgent.agent.runnerId,
@@ -1062,6 +1131,19 @@ export async function startAgentForUser(
         status: "status" in validation ? validation.status : undefined,
       });
       return validation;
+    }
+
+    if ("managed" in validation && validation.managed) {
+      (dependencies.scheduleRuntimeReconcile ?? scheduleAgentRuntimeReconcileAfterResponse)(
+        normalizedAgentId,
+      );
+      return {
+        ok: true,
+        state: "accepted",
+        agent: toStartedAgent(validation.agent),
+        event: { type: START_REQUESTED_EVENT_TYPE },
+        events: [{ type: START_REQUESTED_EVENT_TYPE }],
+      };
     }
 
     logAgentStart("agent_loaded", {
@@ -1436,6 +1518,107 @@ export async function stopAgentForUser(
         });
       }
 
+      const runtimeClassification = activeDeployment
+        ? ({ kind: "active_deployment" } as const)
+        : await classifyManagedRuntimeForUpdate(tx, {
+            agentId: normalizedAgentId,
+            userId,
+          });
+
+      if (runtimeClassification.kind === "managed_ready") {
+        const generation = await persistManagedRuntimeOwnerIntent(tx, {
+          agentId: normalizedAgentId,
+          userId,
+          expectedGeneration: runtimeClassification.runtime.generation,
+          intent: "stop",
+          now,
+        });
+
+        if (generation === null) {
+          throw new Error("Managed stop lost its runtime generation fence.");
+        }
+
+        const [stoppingAgent] = await tx
+          .update(agents)
+          .set({
+            desiredStatus: "stopped",
+            status: "restarting",
+            statusReason: "Stop requested; waiting for runner confirmation.",
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(agents.id, normalizedAgentId),
+              eq(agents.userId, userId),
+              isNull(agents.deletedAt),
+              eq(agents.status, currentAgent.agent.status),
+              agentUpdatedAtMatches(currentAgent.agent.updatedAt),
+            ),
+          )
+          .returning();
+
+        if (!stoppingAgent) {
+          throw new Error("Managed stop lost its agent fence.");
+        }
+
+        await recordAgentEventInTransaction(tx, {
+          agentId: normalizedAgentId,
+          actorUserId: userId,
+          type: STOP_REQUESTED_EVENT_TYPE,
+          message: `Stop requested for agent "${stoppingAgent.name}".`,
+          metadata: { fromStatus: currentAgent.agent.status, toStatus: "restarting" },
+        });
+
+        return {
+          ok: true,
+          managed: true,
+          scheduleRuntime: true,
+          agent: stoppingAgent,
+          assignedRunner: toManualRunnerRecordOrNull(currentAgent.runner),
+        } as const;
+      }
+
+      if (runtimeClassification.kind === "managed_unavailable") {
+        const [stoppingAgent] = await tx
+          .update(agents)
+          .set({
+            desiredStatus: "stopped",
+            status: "restarting",
+            statusReason: "Stop requested; runtime controller state is unavailable.",
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(agents.id, normalizedAgentId),
+              eq(agents.userId, userId),
+              isNull(agents.deletedAt),
+              eq(agents.status, currentAgent.agent.status),
+              agentUpdatedAtMatches(currentAgent.agent.updatedAt),
+            ),
+          )
+          .returning();
+
+        if (!stoppingAgent) {
+          throw new Error("Managed-unavailable stop lost its agent fence.");
+        }
+
+        await recordAgentEventInTransaction(tx, {
+          agentId: normalizedAgentId,
+          actorUserId: userId,
+          type: STOP_REQUESTED_EVENT_TYPE,
+          message: `Stop requested for agent "${stoppingAgent.name}".`,
+          metadata: { fromStatus: currentAgent.agent.status, toStatus: "restarting" },
+        });
+
+        return {
+          ok: true,
+          managed: true,
+          scheduleRuntime: false,
+          agent: stoppingAgent,
+          assignedRunner: toManualRunnerRecordOrNull(currentAgent.runner),
+        } as const;
+      }
+
       return {
         ok: true,
         agent: currentAgent.agent,
@@ -1447,6 +1630,39 @@ export async function stopAgentForUser(
 
     if (!validation.ok) {
       return validation;
+    }
+
+    if ("managed" in validation && validation.managed) {
+      if (validation.scheduleRuntime) {
+        (dependencies.scheduleRuntimeReconcile ?? scheduleAgentRuntimeReconcileAfterResponse)(
+          normalizedAgentId,
+        );
+      }
+
+      if (!validation.assignedRunner) {
+        return { ok: false, reason: "runner_stop_failed" };
+      }
+
+      const runnerAdapter = selectLifecycleRunnerAdapter(validation.assignedRunner, {
+        userId,
+        createConnection: () => connection,
+        ...(dependencies.manualRunnerAdapter
+          ? { manualRunnerAdapter: dependencies.manualRunnerAdapter }
+          : {}),
+        ...(dependencies.runnerAdapter ? { runnerAdapter: dependencies.runnerAdapter } : {}),
+      });
+      const runnerStop = await runnerAdapter.stop(normalizedAgentId);
+
+      if (!runnerStop.ok) {
+        return { ok: false, reason: "runner_stop_failed" };
+      }
+
+      await captureLifecycleRunnerLogs(runnerAdapter, normalizedAgentId);
+      return {
+        ok: true,
+        agent: toStoppingAgent(validation.agent),
+        events: [{ type: STOP_REQUESTED_EVENT_TYPE }],
+      };
     }
 
     const runnerAdapter = selectLifecycleRunnerAdapter(validation.assignedRunner, {
@@ -1608,12 +1824,78 @@ export async function restartAgentForUser(
         return { ok: false, reason: "agent_not_found" } as const;
       }
 
-      if (!canRestartAgentStatus(currentAgent.agent.status)) {
+      const runtimeClassification = await classifyManagedRuntimeForUpdate(tx, {
+        agentId: normalizedAgentId,
+        userId,
+      });
+      const managedRestartable =
+        runtimeClassification.kind === "managed_ready" &&
+        (currentAgent.agent.status === "running" || currentAgent.agent.status === "error");
+
+      if (!managedRestartable && !canRestartAgentStatus(currentAgent.agent.status)) {
         return {
           ok: false,
           reason: "invalid_status",
           status: currentAgent.agent.status,
         } as const;
+      }
+
+      if (
+        runtimeClassification.kind === "latest_failed" ||
+        runtimeClassification.kind === "managed_unavailable"
+      ) {
+        return {
+          ok: false,
+          reason: "invalid_status",
+          status: currentAgent.agent.status,
+        } as const;
+      }
+
+      if (runtimeClassification.kind === "managed_ready") {
+        const generation = await persistManagedRuntimeOwnerIntent(tx, {
+          agentId: normalizedAgentId,
+          userId,
+          expectedGeneration: runtimeClassification.runtime.generation,
+          intent: "restart",
+          now,
+        });
+
+        if (generation === null) {
+          throw new Error("Managed restart lost its runtime generation fence.");
+        }
+
+        const [restartingAgent] = await tx
+          .update(agents)
+          .set({
+            desiredStatus: "running",
+            status: "restarting",
+            statusReason: "Restart requested; runtime convergence scheduled.",
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(agents.id, normalizedAgentId),
+              eq(agents.userId, userId),
+              isNull(agents.deletedAt),
+              eq(agents.status, currentAgent.agent.status),
+              agentUpdatedAtMatches(currentAgent.agent.updatedAt),
+            ),
+          )
+          .returning();
+
+        if (!restartingAgent) {
+          throw new Error("Managed restart lost its agent fence.");
+        }
+
+        await recordAgentEventInTransaction(tx, {
+          agentId: normalizedAgentId,
+          actorUserId: userId,
+          type: RESTART_REQUESTED_EVENT_TYPE,
+          message: `Restart requested for agent "${restartingAgent.name}".`,
+          metadata: { fromStatus: currentAgent.agent.status, toStatus: "restarting" },
+        });
+
+        return { ok: true, managed: true, agent: restartingAgent } as const;
       }
 
       const assignedRunnerSnapshot = currentAgent.agent.runnerId
@@ -1645,6 +1927,19 @@ export async function restartAgentForUser(
 
     if (!validation.ok) {
       return validation;
+    }
+
+    if ("managed" in validation && validation.managed) {
+      (dependencies.scheduleRuntimeReconcile ?? scheduleAgentRuntimeReconcileAfterResponse)(
+        normalizedAgentId,
+      );
+      return {
+        ok: true,
+        state: "accepted",
+        agent: toRestartedAgent(validation.agent),
+        event: { type: RESTART_REQUESTED_EVENT_TYPE },
+        events: [{ type: RESTART_REQUESTED_EVENT_TYPE }],
+      };
     }
 
     const [restartReservation] = await connection.db
@@ -2034,6 +2329,22 @@ async function recordUnexpectedLocalRunnerExit(
           and(
             eq(agents.id, event.agentId),
             isNull(agents.deletedAt),
+            not(
+              exists(
+                tx
+                  .select({ agentId: agentRuntimeReconciliations.agentId })
+                  .from(agentRuntimeReconciliations)
+                  .where(eq(agentRuntimeReconciliations.agentId, agents.id)),
+              ),
+            ),
+            not(
+              exists(
+                tx
+                  .select({ agentId: agentDeployments.agentId })
+                  .from(agentDeployments)
+                  .where(eq(agentDeployments.agentId, agents.id)),
+              ),
+            ),
             ...(userId === null ? [] : [eq(agents.userId, userId)]),
           ),
         )
@@ -2055,6 +2366,22 @@ async function recordUnexpectedLocalRunnerExit(
             eq(agents.id, event.agentId),
             isNull(agents.deletedAt),
             inArray(agents.status, ["starting", "running", "restarting"]),
+            not(
+              exists(
+                tx
+                  .select({ agentId: agentRuntimeReconciliations.agentId })
+                  .from(agentRuntimeReconciliations)
+                  .where(eq(agentRuntimeReconciliations.agentId, agents.id)),
+              ),
+            ),
+            not(
+              exists(
+                tx
+                  .select({ agentId: agentDeployments.agentId })
+                  .from(agentDeployments)
+                  .where(eq(agentDeployments.agentId, agents.id)),
+              ),
+            ),
             ...(userId === null ? [] : [eq(agents.userId, userId)]),
           ),
         )
@@ -2127,6 +2454,22 @@ async function reconcileDockerRunnerAgents(
         and(
           isNull(agents.deletedAt),
           inArray(agents.status, [...DOCKER_RECONCILABLE_AGENT_STATUSES]),
+          not(
+            exists(
+              connection.db
+                .select({ agentId: agentRuntimeReconciliations.agentId })
+                .from(agentRuntimeReconciliations)
+                .where(eq(agentRuntimeReconciliations.agentId, agents.id)),
+            ),
+          ),
+          not(
+            exists(
+              connection.db
+                .select({ agentId: agentDeployments.agentId })
+                .from(agentDeployments)
+                .where(eq(agentDeployments.agentId, agents.id)),
+            ),
+          ),
           ...(userId !== null ? [eq(agents.userId, userId)] : []),
         ),
       )
@@ -2196,6 +2539,22 @@ async function reconcileDockerRunnerAgent(
           eq(agents.id, normalizedAgentId),
           isNull(agents.deletedAt),
           inArray(agents.status, [...DOCKER_RECONCILABLE_AGENT_STATUSES]),
+          not(
+            exists(
+              connection.db
+                .select({ agentId: agentRuntimeReconciliations.agentId })
+                .from(agentRuntimeReconciliations)
+                .where(eq(agentRuntimeReconciliations.agentId, agents.id)),
+            ),
+          ),
+          not(
+            exists(
+              connection.db
+                .select({ agentId: agentDeployments.agentId })
+                .from(agentDeployments)
+                .where(eq(agentDeployments.agentId, agents.id)),
+            ),
+          ),
           ...(userId !== null ? [eq(agents.userId, userId)] : []),
         ),
       )
@@ -2224,6 +2583,22 @@ async function reconcileDockerRunnerAgent(
           and(
             eq(agents.id, normalizedAgentId),
             isNull(agents.deletedAt),
+            not(
+              exists(
+                tx
+                  .select({ agentId: agentRuntimeReconciliations.agentId })
+                  .from(agentRuntimeReconciliations)
+                  .where(eq(agentRuntimeReconciliations.agentId, agents.id)),
+              ),
+            ),
+            not(
+              exists(
+                tx
+                  .select({ agentId: agentDeployments.agentId })
+                  .from(agentDeployments)
+                  .where(eq(agentDeployments.agentId, agents.id)),
+              ),
+            ),
             ...(userId !== null ? [eq(agents.userId, userId)] : []),
           ),
         )
@@ -2266,6 +2641,22 @@ async function reconcileDockerRunnerAgent(
             eq(agents.id, normalizedAgentId),
             isNull(agents.deletedAt),
             inArray(agents.status, [...DOCKER_RECONCILABLE_AGENT_STATUSES]),
+            not(
+              exists(
+                tx
+                  .select({ agentId: agentRuntimeReconciliations.agentId })
+                  .from(agentRuntimeReconciliations)
+                  .where(eq(agentRuntimeReconciliations.agentId, agents.id)),
+              ),
+            ),
+            not(
+              exists(
+                tx
+                  .select({ agentId: agentDeployments.agentId })
+                  .from(agentDeployments)
+                  .where(eq(agentDeployments.agentId, agents.id)),
+              ),
+            ),
             ...(userId !== null ? [eq(agents.userId, userId)] : []),
           ),
         )
@@ -2386,6 +2777,97 @@ export async function deleteAgentForUser(
         });
       }
 
+      const runtimeClassification = activeDeployment
+        ? ({ kind: "active_deployment" } as const)
+        : await classifyManagedRuntimeForUpdate(tx, {
+            agentId: normalizedAgentId,
+            userId,
+          });
+
+      if (runtimeClassification.kind === "managed_ready") {
+        const generation = await persistManagedRuntimeOwnerIntent(tx, {
+          agentId: normalizedAgentId,
+          userId,
+          expectedGeneration: runtimeClassification.runtime.generation,
+          intent: "delete",
+          now,
+        });
+
+        if (generation === null) {
+          throw new Error("Managed delete lost its runtime generation fence.");
+        }
+
+        await closeLatestOpenAgentUsagePeriodInTransaction(tx, {
+          agentId: normalizedAgentId,
+          userId,
+          stoppedAt: now,
+        });
+
+        const [deletedAgent] = await tx
+          .update(agents)
+          .set({ desiredStatus: "stopped", updatedAt: now, deletedAt: now })
+          .where(
+            and(
+              eq(agents.id, normalizedAgentId),
+              eq(agents.userId, userId),
+              isNull(agents.deletedAt),
+              eq(agents.status, currentAgent.status),
+              agentUpdatedAtMatches(currentAgent.updatedAt),
+            ),
+          )
+          .returning();
+
+        if (!deletedAgent) {
+          throw new Error("Managed delete lost its agent fence.");
+        }
+
+        await revokeActiveAgentSecretsInTransaction(tx, { agentId: deletedAgent.id, now });
+        await recordAgentEventInTransaction(tx, {
+          agentId: deletedAgent.id,
+          actorUserId: userId,
+          type: DELETE_EVENT_TYPE,
+          message: `Agent "${deletedAgent.name}" deleted from active views.`,
+          metadata: { fromStatus: currentAgent.status, toStatus: "deleted" },
+        });
+
+        return { ok: true, managed: true, agent: deletedAgent } as const;
+      }
+
+      if (runtimeClassification.kind === "managed_unavailable") {
+        await closeLatestOpenAgentUsagePeriodInTransaction(tx, {
+          agentId: normalizedAgentId,
+          userId,
+          stoppedAt: now,
+        });
+        const [deletedAgent] = await tx
+          .update(agents)
+          .set({ desiredStatus: "stopped", updatedAt: now, deletedAt: now })
+          .where(
+            and(
+              eq(agents.id, normalizedAgentId),
+              eq(agents.userId, userId),
+              isNull(agents.deletedAt),
+              eq(agents.status, currentAgent.status),
+              agentUpdatedAtMatches(currentAgent.updatedAt),
+            ),
+          )
+          .returning();
+
+        if (!deletedAgent) {
+          throw new Error("Managed-unavailable delete lost its agent fence.");
+        }
+
+        await revokeActiveAgentSecretsInTransaction(tx, { agentId: deletedAgent.id, now });
+        await recordAgentEventInTransaction(tx, {
+          agentId: deletedAgent.id,
+          actorUserId: userId,
+          type: DELETE_EVENT_TYPE,
+          message: `Agent "${deletedAgent.name}" deleted from active views.`,
+          metadata: { fromStatus: currentAgent.status, toStatus: "deleted" },
+        });
+        return { ok: true, managed: true, agent: deletedAgent } as const;
+      }
+
       return { ok: true, agent: currentAgent } as const;
     });
 
@@ -2428,6 +2910,14 @@ export async function deleteAgentForUser(
           status: validation.agent.status,
         };
       }
+    }
+
+    if ("managed" in validation && validation.managed) {
+      return {
+        ok: true,
+        agent: toDeletedAgent(validation.agent),
+        event: { type: DELETE_EVENT_TYPE },
+      };
     }
 
     return await connection.db.transaction(async (tx) => {
@@ -2825,6 +3315,20 @@ function toStoppedAgent(agent: typeof agents.$inferSelect): StoppedAgent {
     templateKey: agent.templateKey,
     status: "stopped",
     statusReason: null,
+    createdAt: agent.createdAt.toISOString(),
+    updatedAt: agent.updatedAt.toISOString(),
+    deletedAt: null,
+  };
+}
+
+function toStoppingAgent(agent: typeof agents.$inferSelect): StoppingAgent {
+  return {
+    id: agent.id,
+    userId: agent.userId,
+    name: agent.name,
+    templateKey: agent.templateKey,
+    status: "restarting",
+    statusReason: agent.statusReason ?? "Stop requested; waiting for runner confirmation.",
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
     deletedAt: null,

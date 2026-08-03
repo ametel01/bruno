@@ -48,7 +48,7 @@ export async function POST(
 
     if (result.ok) {
       return Response.json(result, {
-        status: 202,
+        status: result.state === "accepted" ? 202 : 200,
       });
     }
 

@@ -18,6 +18,7 @@ import {
   type HermesProjectionResult,
 } from "@/src/runner-service/hermes-projection";
 import {
+  MAX_RUNNER_RESTART_COUNT,
   RUNNER_CANARY_CONTRACT_VERSION,
   RUNNER_LAUNCH_CONTRACT_VERSION,
   RUNNER_STATUS_CONTRACT_VERSION,
@@ -27,6 +28,7 @@ import {
   type RunnerCanaryRequest,
   type RunnerCanaryResponse,
   type RunnerContainerState,
+  type RunnerDurableStatusSnapshot,
   type RunnerGatewayState,
   type RunnerLaunchAcceptedResponse,
   type RunnerLaunchAction,
@@ -34,6 +36,8 @@ import {
   type RunnerOperation,
   type RunnerPlatformState,
   type RunnerReadinessReason,
+  type RunnerRestartPolicyName,
+  type RunnerTelegramState,
   type RunnerCleanupResponsePayload,
   type RunnerStatusResponse,
   type RunnerStopResponsePayload,
@@ -209,8 +213,14 @@ class HermesRevisionEvidenceError extends Error {
   }
 }
 
+type DockerRestartPolicyInspect = {
+  MaximumRetryCount?: unknown;
+  Name?: unknown;
+};
+
 type DockerInspectContainer = {
   Id?: string;
+  RestartCount?: unknown;
   Args?: string[];
   Mounts?: Array<{
     Destination?: string;
@@ -237,6 +247,7 @@ type DockerInspectContainer = {
     NetworkMode?: string;
     PidsLimit?: number;
     PortBindings?: Record<string, Array<{ HostPort?: string }> | null> | null;
+    RestartPolicy?: DockerRestartPolicyInspect;
     SecurityOpt?: string[] | null;
   };
   NetworkSettings?: {
@@ -637,12 +648,12 @@ export class ManualRunnerDocker {
     };
   }
 
-  private async observeStatus(agentId: string): Promise<RunnerAgentStatusSnapshot> {
+  private async observeStatus(agentId: string): Promise<RunnerDurableStatusSnapshot> {
     const details = await this.listSelectedContainerDetails(agentId);
     const observedAt = this.now().toISOString();
 
     if (details.length === 0) {
-      return emptyStatusSnapshot("idle", "container_absent", observedAt);
+      return emptyDurableStatusSnapshot("idle", "container_absent", observedAt);
     }
 
     const selected = chooseStatusContainer(details);
@@ -700,7 +711,7 @@ export class ManualRunnerDocker {
     });
     apiServerKey = null;
     const probeObservedAt = this.now().toISOString();
-    const withObservation: RunnerAgentStatusSnapshot = {
+    const withObservation: RunnerDurableStatusSnapshot = {
       ...base,
       gateway: { state: observation.gateway, observedAt: probeObservedAt },
       apiServer: { required: true, state: observation.apiServer, observedAt: probeObservedAt },
@@ -733,7 +744,7 @@ export class ManualRunnerDocker {
     gateway: RunnerGatewayState;
     immediateFailure: boolean;
     reason: Exclude<RunnerReadinessReason, null>;
-    telegram: RunnerPlatformState;
+    telegram: RunnerTelegramState;
   }> {
     if (!isSafePrivateContainerName(input.containerName)) {
       return {
@@ -869,6 +880,10 @@ export class ManualRunnerDocker {
   ): Promise<void> {
     for (const container of containers) {
       this.throwIfLaunchTerminated(token);
+      if (container.status === "running" || container.status === "restarting") {
+        await this.runLaunchDocker(token, ["stop", "--time", "20", container.id]);
+        this.throwIfLaunchTerminated(token);
+      }
       await this.runLaunchDocker(token, ["rm", "--force", container.id]);
       this.throwIfLaunchTerminated(token);
     }
@@ -1263,7 +1278,7 @@ function buildStatusSnapshotBase(
     projectionMarkerRevision: string | null;
     revisionState: RunnerAgentStatusSnapshot["revision"]["state"];
   },
-): RunnerAgentStatusSnapshot {
+): RunnerDurableStatusSnapshot {
   return {
     phase: "starting",
     operation,
@@ -1272,6 +1287,8 @@ function buildStatusSnapshotBase(
       name: container.name,
       image: container.image,
       state: normalizeContainerState(container.status),
+      restartPolicy: normalizeDockerRestartPolicy(container.inspect.HostConfig?.RestartPolicy),
+      restartCount: normalizeDockerRestartCount(container.inspect.RestartCount),
       startedAt: container.startedAt,
       finishedAt: container.finishedAt,
       observedAt,
@@ -1320,6 +1337,24 @@ function emptyStatusSnapshot(
     telegram: { required: true, state: "unknown", observedAt: null },
     readinessReason: reason,
     observedAt,
+  };
+}
+
+function emptyDurableStatusSnapshot(
+  phase: RunnerDurableStatusSnapshot["phase"],
+  reason: Exclude<RunnerReadinessReason, null>,
+  observedAt: string,
+): RunnerDurableStatusSnapshot {
+  const snapshot = emptyStatusSnapshot(phase, reason, observedAt);
+
+  return {
+    ...snapshot,
+    container: {
+      ...snapshot.container,
+      restartPolicy: { name: "unknown", maximumRetryCount: null },
+      restartCount: null,
+    },
+    telegram: { ...snapshot.telegram, state: "unknown" },
   };
 }
 
@@ -1559,6 +1594,7 @@ function hasExactStatusRuntimeEvidence(
     ),
     hostPorts: !hasPublishedPort(inspect.HostConfig?.PortBindings),
     networkPorts: !hasPublishedPort(inspect.NetworkSettings?.Ports),
+    restartPolicy: hasExactManagedRestartPolicy(inspect),
     security: inspect.HostConfig?.SecurityOpt?.includes("no-new-privileges") === true,
     capDrop: inspect.HostConfig?.CapDrop?.includes("ALL") === true,
     capAdd: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"].every((capability) =>
@@ -1574,6 +1610,38 @@ function hasExactStatusRuntimeEvidence(
   return !failed;
 }
 
+function normalizeDockerRestartPolicy(value: DockerRestartPolicyInspect | undefined): {
+  name: RunnerRestartPolicyName;
+  maximumRetryCount: number | null;
+} {
+  const name = value?.Name;
+  const maximumRetryCount = normalizeDockerRestartCount(value?.MaximumRetryCount);
+
+  if (
+    (name !== "no" && name !== "always" && name !== "unless-stopped" && name !== "on-failure") ||
+    maximumRetryCount === null
+  ) {
+    return { name: "unknown", maximumRetryCount: null };
+  }
+
+  return { name, maximumRetryCount };
+}
+
+function normalizeDockerRestartCount(value: unknown): number | null {
+  return typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= MAX_RUNNER_RESTART_COUNT
+    ? value
+    : null;
+}
+
+function hasExactManagedRestartPolicy(inspect: DockerInspectContainer): boolean {
+  const policy = normalizeDockerRestartPolicy(inspect.HostConfig?.RestartPolicy);
+
+  return policy.name === "unless-stopped" && policy.maximumRetryCount === 0;
+}
+
 function hasExactMount(
   inspect: DockerInspectContainer,
   source: string,
@@ -1587,13 +1655,19 @@ function hasExactMount(
   );
 }
 
-function applyReadinessWindow(
-  snapshot: RunnerAgentStatusSnapshot,
+function applyReadinessWindow<
+  T extends {
+    phase: RunnerAgentStatusSnapshot["phase"];
+    readinessReason: RunnerReadinessReason;
+    observedAt: string;
+  },
+>(
+  snapshot: T,
   operation: RunnerOperation,
   reason: Exclude<RunnerReadinessReason, null>,
   observedAt: string,
   immediateFailure = false,
-): RunnerAgentStatusSnapshot {
+): T {
   const timedOut =
     Date.parse(observedAt) - Date.parse(operation.acceptedAt) >=
     DEFAULT_HERMES_READINESS_TIMEOUT_MS;
@@ -1614,7 +1688,7 @@ function parseHermesHealthObservation(value: unknown):
         gateway: RunnerGatewayState;
         immediateFailure: boolean;
         reason: Exclude<RunnerReadinessReason, null>;
-        telegram: RunnerPlatformState;
+        telegram: RunnerTelegramState;
       };
     }
   | { ok: false } {
@@ -1625,7 +1699,7 @@ function parseHermesHealthObservation(value: unknown):
   const status = safeOwnValue(value, "status");
   const gateway = normalizeGatewayState(safeOwnValue(value, "gateway_state"));
   const apiServer = normalizePlatformState(readPlatformState(value, "api_server"));
-  const telegram = normalizePlatformState(readPlatformState(value, "telegram"));
+  const telegram = normalizeTelegramState(readPlatformState(value, "telegram"));
   let reason: Exclude<RunnerReadinessReason, null> = "gateway_starting";
   let immediateFailure = false;
 
@@ -1640,6 +1714,14 @@ function parseHermesHealthObservation(value: unknown):
     reason = "gateway_starting";
   } else if (apiServer !== "connected") {
     reason = "api_server_not_connected";
+  } else if (telegram === "retrying") {
+    reason = "telegram_retrying";
+  } else if (telegram === "fatal") {
+    reason = "telegram_fatal";
+    immediateFailure = true;
+  } else if (telegram === "paused") {
+    reason = "telegram_paused";
+    immediateFailure = true;
   } else if (telegram !== "connected") {
     reason = "telegram_not_connected";
   }
@@ -1670,6 +1752,22 @@ function normalizePlatformState(value: unknown): RunnerPlatformState {
     value === "connected" ||
     value === "disconnected" ||
     value === "failed" ||
+    value === "disabled"
+  ) {
+    return value;
+  }
+
+  return "unknown";
+}
+
+function normalizeTelegramState(value: unknown): RunnerTelegramState {
+  if (
+    value === "connecting" ||
+    value === "connected" ||
+    value === "disconnected" ||
+    value === "retrying" ||
+    value === "fatal" ||
+    value === "paused" ||
     value === "disabled"
   ) {
     return value;
@@ -1770,6 +1868,10 @@ async function assertHermesInspectMatchesRuntime(
   await assertProjectedRevisionMatchesLaunchSpec(input.projection, input.launchSpec);
 
   if (!inspect.HostConfig || inspect.HostConfig.NetworkMode !== input.runtime.network) {
+    throw new HermesRevisionEvidenceError();
+  }
+
+  if (!hasExactManagedRestartPolicy(inspect)) {
     throw new HermesRevisionEvidenceError();
   }
 
@@ -2004,6 +2106,8 @@ export function buildHermesDockerRunArgs(input: {
   return [
     "run",
     "--detach",
+    "--restart",
+    "unless-stopped",
     "--name",
     input.containerName,
     "--label",

@@ -124,6 +124,7 @@ describe("POST /runner/v1/register route", () => {
 
   it("returns runner identity and one visible-once credential for a valid exchange", async () => {
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const scheduleReconciliations = vi.fn();
 
     mocks.exchangeRunnerRegistrationTokenForCredential.mockResolvedValueOnce({
       ok: true,
@@ -146,6 +147,8 @@ describe("POST /runner/v1/register route", () => {
           name: "Registered Runner",
         }),
       }),
+      undefined,
+      { scheduleReconciliations },
     );
     const body = await response.json();
     const ingressLogs = infoSpy.mock.calls
@@ -168,6 +171,7 @@ describe("POST /runner/v1/register route", () => {
       endpointUrl: "http://127.0.0.1:8787",
       name: "Registered Runner",
     });
+    expect(scheduleReconciliations).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000201");
     expect(ingressLogs).toContainEqual(
       expect.objectContaining({
         endpoint: "register",

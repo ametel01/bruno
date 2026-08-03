@@ -1,17 +1,21 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import {
+  buildSafeRuntimePresentation,
+  type RuntimePresentationRow,
+} from "@/src/server/agents/agent-runtime-read";
+import {
   mapAgentDeploymentRowToDto,
   type AgentDeploymentRowForDto,
 } from "@/src/server/agents/deployment-dto";
-import {
-  reconcileDockerRunnerAgentForDevelopmentUser,
-  reconcileDockerRunnerAgentForUser,
-  reconcileDockerRunnerAgentsForDevelopmentUser,
-  reconcileDockerRunnerAgentsForUser,
-} from "@/src/server/agents/lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agentConfigs, agentDeployments, agents, runners } from "@/src/server/db/schema";
+import {
+  agentConfigs,
+  agentDeployments,
+  agentRuntimeReconciliations,
+  agents,
+  runners,
+} from "@/src/server/db/schema";
 import {
   getAgentTemplateLabel,
   getAgentTemplateSnapshot,
@@ -50,6 +54,53 @@ export class AgentDetailPersistenceError extends Error {
   }
 }
 
+const runtimeListSelection = {
+  runtimeState: agentRuntimeReconciliations.state,
+  runtimeConfigRevision: agentRuntimeReconciliations.configRevision,
+  runtimeOperationId: agentRuntimeReconciliations.operationId,
+  runtimeGeneration: agentRuntimeReconciliations.generation,
+  runtimeAttemptCount: agentRuntimeReconciliations.attemptCount,
+  runtimeRecoveryCount: agentRuntimeReconciliations.recoveryCount,
+  runtimeRecoveryWindowStartedAt: agentRuntimeReconciliations.recoveryWindowStartedAt,
+  runtimeStableSince: agentRuntimeReconciliations.stableSince,
+  runtimeTelegramNonConnectedSince: agentRuntimeReconciliations.telegramNonConnectedSince,
+  runtimeLastRestartCount: agentRuntimeReconciliations.lastRestartCount,
+  runtimeLastObservedAt: agentRuntimeReconciliations.lastObservedAt,
+  runtimeLastReadyAt: agentRuntimeReconciliations.lastReadyAt,
+  runtimeErrorCode: agentRuntimeReconciliations.errorCode,
+  runtimeCircuitOpenedAt: agentRuntimeReconciliations.circuitOpenedAt,
+};
+
+type RuntimeJoinedRow = {
+  desiredStatus: ListedAgentUi["desiredStatus"];
+  runtimeState: unknown;
+  runtimeConfigRevision: unknown;
+  runtimeOperationId: unknown;
+  runtimeGeneration: unknown;
+  runtimeAttemptCount: unknown;
+  runtimeRecoveryCount: unknown;
+  runtimeRecoveryWindowStartedAt: Date | string | null;
+  runtimeStableSince: Date | string | null;
+  runtimeTelegramNonConnectedSince: Date | string | null;
+  runtimeLastRestartCount: unknown;
+  runtimeLastObservedAt: Date | string | null;
+  runtimeLastReadyAt: Date | string | null;
+  runtimeErrorCode: unknown;
+  runtimeCircuitOpenedAt: Date | string | null;
+};
+
+type AgentRowWithRuntime = RuntimeJoinedRow & {
+  id: string;
+  name: string;
+  templateKey: string;
+  templateVersion: string;
+  status: ListedAgentUi["status"];
+  assignedRunnerKind: string | null;
+  assignedRunnerStatus: string | null;
+  assignedRunnerProvisioningStatus: string | null;
+  createdAt: Date;
+};
+
 export async function listActiveAgentsForDevelopmentUser(
   dependencies: ListAgentsDependencies = {},
 ): Promise<ListedAgent[]> {
@@ -57,8 +108,6 @@ export async function listActiveAgentsForDevelopmentUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
-    await reconcileDockerRunnerAgentsForDevelopmentUser({ createConnection: () => connection });
-
     const rows = await connection.db
       .select({
         id: agents.id,
@@ -71,9 +120,17 @@ export async function listActiveAgentsForDevelopmentUser(
         assignedRunnerStatus: runners.status,
         assignedRunnerProvisioningStatus: runners.provisioningStatus,
         createdAt: agents.createdAt,
+        ...runtimeListSelection,
       })
       .from(agents)
       .leftJoin(runners, eq(runners.id, agents.runnerId))
+      .leftJoin(
+        agentRuntimeReconciliations,
+        and(
+          eq(agentRuntimeReconciliations.agentId, agents.id),
+          eq(agentRuntimeReconciliations.userId, agents.userId),
+        ),
+      )
       .where(isNull(agents.deletedAt))
       .orderBy(desc(agents.createdAt), desc(agents.id));
 
@@ -83,21 +140,7 @@ export async function listActiveAgentsForDevelopmentUser(
       agentIds: rows.map((row) => row.id),
     });
 
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      templateKey: row.templateKey,
-      templateVersion: row.templateVersion,
-      templateLabel: getAgentTemplateLabel(row.templateKey),
-      status: row.status,
-      desiredStatus: row.desiredStatus,
-      latestDeployment: deployments.get(row.id) ?? null,
-      assignedRunnerKind: row.assignedRunnerKind,
-      assignedRunnerStatus: row.assignedRunnerStatus,
-      assignedRunnerProvisioningStatus: row.assignedRunnerProvisioningStatus,
-      href: `/agents/${row.id}`,
-      createdAt: row.createdAt.toISOString(),
-    }));
+    return rows.map((row) => mapListedAgent(row, deployments.get(row.id) ?? null));
   } catch {
     throw new AgentListPersistenceError();
   } finally {
@@ -115,8 +158,6 @@ export async function listActiveAgentsForUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
-    await reconcileDockerRunnerAgentsForUser(userId, { createConnection: () => connection });
-
     const rows = await connection.db
       .select({
         id: agents.id,
@@ -129,9 +170,17 @@ export async function listActiveAgentsForUser(
         assignedRunnerStatus: runners.status,
         assignedRunnerProvisioningStatus: runners.provisioningStatus,
         createdAt: agents.createdAt,
+        ...runtimeListSelection,
       })
       .from(agents)
       .leftJoin(runners, and(eq(runners.id, agents.runnerId), eq(runners.userId, userId)))
+      .leftJoin(
+        agentRuntimeReconciliations,
+        and(
+          eq(agentRuntimeReconciliations.agentId, agents.id),
+          eq(agentRuntimeReconciliations.userId, userId),
+        ),
+      )
       .where(and(eq(agents.userId, userId), isNull(agents.deletedAt)))
       .orderBy(desc(agents.createdAt), desc(agents.id));
 
@@ -141,21 +190,7 @@ export async function listActiveAgentsForUser(
       agentIds: rows.map((row) => row.id),
     });
 
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      templateKey: row.templateKey,
-      templateVersion: row.templateVersion,
-      templateLabel: getAgentTemplateLabel(row.templateKey),
-      status: row.status,
-      desiredStatus: row.desiredStatus,
-      latestDeployment: deployments.get(row.id) ?? null,
-      assignedRunnerKind: row.assignedRunnerKind,
-      assignedRunnerStatus: row.assignedRunnerStatus,
-      assignedRunnerProvisioningStatus: row.assignedRunnerProvisioningStatus,
-      href: `/agents/${row.id}`,
-      createdAt: row.createdAt.toISOString(),
-    }));
+    return rows.map((row) => mapListedAgent(row, deployments.get(row.id) ?? null));
   } catch {
     throw new AgentListPersistenceError();
   } finally {
@@ -177,10 +212,6 @@ export async function getActiveAgentForDevelopmentUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
-    await reconcileDockerRunnerAgentForDevelopmentUser(agentId, {
-      createConnection: () => connection,
-    });
-
     const [row] = await connection.db
       .select({
         id: agents.id,
@@ -201,9 +232,17 @@ export async function getActiveAgentForDevelopmentUser(
         configScheduleCron: agentConfigs.scheduleCron,
         configTimezone: agentConfigs.timezone,
         configUpdatedAt: agentConfigs.updatedAt,
+        ...runtimeListSelection,
       })
       .from(agents)
       .innerJoin(agentConfigs, eq(agentConfigs.agentId, agents.id))
+      .leftJoin(
+        agentRuntimeReconciliations,
+        and(
+          eq(agentRuntimeReconciliations.agentId, agents.id),
+          eq(agentRuntimeReconciliations.userId, agents.userId),
+        ),
+      )
       .where(and(eq(agents.id, agentId), isNull(agents.deletedAt)))
       .limit(1);
 
@@ -213,6 +252,12 @@ export async function getActiveAgentForDevelopmentUser(
 
     const templateSnapshot = normalizeTemplateSnapshot(row.templateKey, row.templateSnapshotJson);
 
+    const latestDeployment = await loadLatestDeploymentForAgent({
+      db: connection.db,
+      userId: null,
+      agentId: row.id,
+    });
+
     return {
       id: row.id,
       name: row.name,
@@ -221,11 +266,8 @@ export async function getActiveAgentForDevelopmentUser(
       templateLabel: getAgentTemplateLabel(row.templateKey),
       status: row.status,
       desiredStatus: row.desiredStatus,
-      latestDeployment: await loadLatestDeploymentForAgent({
-        db: connection.db,
-        userId: null,
-        agentId: row.id,
-      }),
+      latestDeployment,
+      runtime: buildRuntimeForAgent(row, latestDeployment),
       statusReason: row.statusReason,
       href: `/agents/${row.id}`,
       createdAt: row.createdAt.toISOString(),
@@ -264,10 +306,6 @@ export async function getActiveAgentForUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
-    await reconcileDockerRunnerAgentForUser(userId, agentId, {
-      createConnection: () => connection,
-    });
-
     const [row] = await connection.db
       .select({
         id: agents.id,
@@ -288,9 +326,17 @@ export async function getActiveAgentForUser(
         configScheduleCron: agentConfigs.scheduleCron,
         configTimezone: agentConfigs.timezone,
         configUpdatedAt: agentConfigs.updatedAt,
+        ...runtimeListSelection,
       })
       .from(agents)
       .innerJoin(agentConfigs, eq(agentConfigs.agentId, agents.id))
+      .leftJoin(
+        agentRuntimeReconciliations,
+        and(
+          eq(agentRuntimeReconciliations.agentId, agents.id),
+          eq(agentRuntimeReconciliations.userId, userId),
+        ),
+      )
       .where(and(eq(agents.id, agentId), eq(agents.userId, userId), isNull(agents.deletedAt)))
       .limit(1);
 
@@ -300,6 +346,12 @@ export async function getActiveAgentForUser(
 
     const templateSnapshot = normalizeTemplateSnapshot(row.templateKey, row.templateSnapshotJson);
 
+    const latestDeployment = await loadLatestDeploymentForAgent({
+      db: connection.db,
+      userId,
+      agentId: row.id,
+    });
+
     return {
       id: row.id,
       name: row.name,
@@ -308,11 +360,8 @@ export async function getActiveAgentForUser(
       templateLabel: getAgentTemplateLabel(row.templateKey),
       status: row.status,
       desiredStatus: row.desiredStatus,
-      latestDeployment: await loadLatestDeploymentForAgent({
-        db: connection.db,
-        userId,
-        agentId: row.id,
-      }),
+      latestDeployment,
+      runtime: buildRuntimeForAgent(row, latestDeployment),
       statusReason: row.statusReason,
       href: `/agents/${row.id}`,
       createdAt: row.createdAt.toISOString(),
@@ -357,6 +406,62 @@ function normalizeTemplateSnapshot(
   return {
     ...templateSnapshot,
     defaultSystemPrompt: getAgentTemplateSnapshot(templateKey).defaultSystemPrompt,
+  };
+}
+
+function mapListedAgent(
+  row: AgentRowWithRuntime,
+  latestDeployment: PublicAgentDeployment | null,
+): ListedAgentUi {
+  return {
+    id: row.id,
+    name: row.name,
+    templateKey: row.templateKey,
+    templateVersion: row.templateVersion,
+    templateLabel: getAgentTemplateLabel(row.templateKey),
+    status: row.status,
+    desiredStatus: row.desiredStatus,
+    latestDeployment,
+    runtime: buildRuntimeForAgent(row, latestDeployment),
+    assignedRunnerKind: row.assignedRunnerKind,
+    assignedRunnerStatus: row.assignedRunnerStatus,
+    assignedRunnerProvisioningStatus: row.assignedRunnerProvisioningStatus,
+    href: `/agents/${row.id}`,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function buildRuntimeForAgent(
+  row: RuntimeJoinedRow,
+  latestDeployment: PublicAgentDeployment | null,
+) {
+  return buildSafeRuntimePresentation({
+    desiredStatus: row.desiredStatus,
+    latestDeploymentStage: latestDeployment?.stage ?? null,
+    runtime: runtimeRowFromAgent(row),
+  });
+}
+
+function runtimeRowFromAgent(row: RuntimeJoinedRow): RuntimePresentationRow | null {
+  if (row.runtimeState === null) {
+    return null;
+  }
+
+  return {
+    state: row.runtimeState,
+    configRevision: row.runtimeConfigRevision,
+    operationId: row.runtimeOperationId,
+    generation: row.runtimeGeneration,
+    attemptCount: row.runtimeAttemptCount,
+    recoveryCount: row.runtimeRecoveryCount,
+    recoveryWindowStartedAt: row.runtimeRecoveryWindowStartedAt,
+    stableSince: row.runtimeStableSince,
+    telegramNonConnectedSince: row.runtimeTelegramNonConnectedSince,
+    lastRestartCount: row.runtimeLastRestartCount,
+    lastObservedAt: row.runtimeLastObservedAt,
+    lastReadyAt: row.runtimeLastReadyAt,
+    errorCode: row.runtimeErrorCode,
+    circuitOpenedAt: row.runtimeCircuitOpenedAt,
   };
 }
 

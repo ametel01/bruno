@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { eq } from "drizzle-orm";
 import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
-import type { RunnerAgentStatusSnapshot } from "@/src/runner-service/runner-contracts";
+import type { RunnerDurableStatusSnapshot } from "@/src/runner-service/runner-contracts";
 import {
   reconcileNextAgentDeployment,
   reconcileTargetAgentDeployment,
@@ -12,12 +12,20 @@ import {
   type AgentLaunchSpec,
   MANAGED_AGENT_LAUNCH_SPEC_VERSION,
 } from "@/src/server/agents/agent-launch-spec";
+import {
+  type AgentRuntimeReconcilerDependencies,
+  reconcileNextAgentRuntime,
+  reconcileTargetAgentRuntime,
+  reconcileTargetRunnerRuntime,
+} from "@/src/server/agents/agent-runtime-reconciler";
+import { startAgentForUser, stopAgentForUser } from "@/src/server/agents/lifecycle";
 import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   agentConfigs,
   agentDeployments,
   agentEvents,
+  agentRuntimeReconciliations,
   agents,
   agentUsagePeriods,
   runnerHeartbeats,
@@ -34,19 +42,41 @@ export type LocalCloudSmokeSummary = {
   browserClosedAfter202: true;
   canaryCalls: 1;
   cleanupDeterministic: true;
+  dockerDaemonRestartObserved: true;
   fakeContainers: 1;
   fakeProvisioningResources: 1;
   openUsagePeriods: 1;
+  runtimeCircuitEvents: 1;
+  runtimeFaultsRecovered: ["missing", "exited", "revision", "restart-policy"];
+  runtimeRecoveryEvents: 1;
+  runtimeUsageSegments: 5;
+  stoppedAfterRunnerReturn: true;
+  telegramBoundary: "injected-webhook-conflict";
   runningTransitions: 1;
   simultaneousTriggers: ["create-kick", "heartbeat", "cron", "manual"];
   stages: string[];
 };
+
+type RuntimeFault =
+  | "healthy"
+  | "starting"
+  | "docker-daemon-restart"
+  | "absent"
+  | "exited"
+  | "revision"
+  | "restart-policy"
+  | "telegram-fatal";
 
 export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
   process.env.DATABASE_URL ??= "postgres://agentbay:agentbay@127.0.0.1:54329/plingpling";
   process.env.NEXT_PUBLIC_APP_URL ??= "http://127.0.0.1:3000";
   const connections = Array.from({ length: 4 }, () => createDatabaseConnection());
   const inspection = createDatabaseConnection();
+  const runtimeConnection = (index: number): DatabaseConnection => {
+    const connection = connections[index % connections.length];
+    if (!connection) throw new Error("Local cloud runtime connection pool is unavailable.");
+    return connection;
+  };
   const userId = randomUUID();
   const agentId = randomUUID();
   const deploymentId = randomUUID();
@@ -62,6 +92,11 @@ export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
   let canaryCalls = 0;
   let fakeContainers = 0;
   let heartbeatCommitted = false;
+  let runtimeFault: RuntimeFault = "healthy";
+  let runtimeOperationId = operationId;
+  let runtimeStarts = 0;
+  let runtimeStops = 0;
+  let telegramDiagnostics = 0;
 
   const adapterFactory = (runner: {
     id: string;
@@ -77,25 +112,28 @@ export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
     start: async () => {
       startCalls += 1;
       fakeContainers = 1;
+      if (startCalls > 1) {
+        runtimeStarts += 1;
+        runtimeOperationId = randomUUID();
+      }
+      runtimeFault = "starting";
       return {
         ok: true as const,
         state: "accepted" as const,
         runner,
-        operation: operationEvidence(operationId, configRevision, logicalNow),
-        snapshot: fakeSnapshot("starting", operationId, configRevision, logicalNow),
+        operation: operationEvidence(runtimeOperationId, configRevision, logicalNow),
+        snapshot: fakeSnapshot("starting", runtimeOperationId, configRevision, logicalNow),
       };
     },
     status: async () => {
       statusCalls += 1;
+      if (runtimeFault === "starting" && statusCalls > 1) {
+        runtimeFault = "healthy";
+      }
       return {
         ok: true as const,
         runner,
-        snapshot: fakeSnapshot(
-          statusCalls === 1 ? "starting" : "ready",
-          operationId,
-          configRevision,
-          logicalNow,
-        ),
+        snapshot: fakeRuntimeSnapshot(runtimeFault, runtimeOperationId, configRevision, logicalNow),
       };
     },
     canary: async () => {
@@ -108,7 +146,7 @@ export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
           contractVersion: "agentbay.runner.canary.v1" as const,
           agentId,
           action: "canary" as const,
-          operationId,
+          operationId: runtimeOperationId,
           configRevision,
           observation: {
             state: "passed" as const,
@@ -119,7 +157,12 @@ export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
         },
       };
     },
-    stop: async () => ({ ok: true as const, runner, containers: [] }),
+    stop: async () => {
+      runtimeStops += 1;
+      runtimeFault = "absent";
+      fakeContainers = 0;
+      return { ok: true as const, runner, containers: [] };
+    },
     streamLogs: async () => ({ logs: [], nextAfter: null }),
   });
   const common = {
@@ -260,12 +303,221 @@ export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
         )}`,
       );
     }
+    const runtimeRunnerId = runnerId;
+    if (!runtimeRunnerId) {
+      throw new Error("Local cloud runtime lost its verified runner assignment.");
+    }
+
+    const runtimeDependencies = (
+      connection: DatabaseConnection,
+    ): AgentRuntimeReconcilerDependencies => ({
+      createConnection: () => connection,
+      now: () => logicalNow,
+      launchSpec: async () => ({ ok: true as const, spec: launchSpec }),
+      manualRunnerAdapter: (runner) => adapterFactory(runner as never) as never,
+      telegramWebhookDiagnostic: async () => {
+        telegramDiagnostics += 1;
+        return "nonempty";
+      },
+    });
+    const advanceRuntime = async (milliseconds = 61_000) => {
+      logicalNow = new Date(logicalNow.getTime() + milliseconds);
+      await inspection.db
+        .update(runnerHeartbeats)
+        .set({ status: "online", observedAt: logicalNow })
+        .where(eq(runnerHeartbeats.runnerId, runtimeRunnerId));
+      await inspection.db
+        .update(agentRuntimeReconciliations)
+        .set({ nextAttemptAt: logicalNow, updatedAt: logicalNow })
+        .where(eq(agentRuntimeReconciliations.agentId, agentId));
+    };
+    const reconcileRuntimeUntilHealthy = async () => {
+      for (let wave = 0; wave < 5; wave += 1) {
+        await advanceRuntime();
+        await reconcileTargetAgentRuntime(agentId, runtimeDependencies(runtimeConnection(wave)));
+        const [runtime] = await inspection.db
+          .select()
+          .from(agentRuntimeReconciliations)
+          .where(eq(agentRuntimeReconciliations.agentId, agentId));
+        if (runtime?.state === "observing" && runtime.errorCode === null) {
+          return;
+        }
+      }
+      throw new Error("Local cloud runtime recovery did not return to exact healthy observation.");
+    };
+
+    // Simulate a runner-service process restart and simultaneous heartbeat,
+    // cron, and manual kicks. The durable lease permits one observation only.
+    await advanceRuntime();
+    const statusBeforeRuntimeCollision = statusCalls;
+    const runtimeCollision = await Promise.all([
+      reconcileTargetAgentRuntime(agentId, runtimeDependencies(runtimeConnection(0))),
+      reconcileTargetRunnerRuntime(runtimeRunnerId, runtimeDependencies(runtimeConnection(1))),
+      reconcileNextAgentRuntime(runtimeDependencies(runtimeConnection(2))),
+      reconcileNextAgentRuntime(runtimeDependencies(runtimeConnection(3))),
+    ]);
+    if (
+      runtimeCollision.filter((result) => result.processed === 1).length !== 1 ||
+      statusCalls !== statusBeforeRuntimeCollision + 1
+    ) {
+      throw new Error("Local cloud runtime collision did not collapse to one observation.");
+    }
+
+    // A Docker-daemon restart is distinct from a runner-service restart: the
+    // exact unless-stopped workload survives, so observation must not start a
+    // new container or segment the open usage period.
+    const startsBeforeDockerDaemonRestart = runtimeStarts;
+    runtimeFault = "docker-daemon-restart";
+    await advanceRuntime();
+    await reconcileTargetAgentRuntime(agentId, runtimeDependencies(runtimeConnection(0)));
+    const usageAfterDockerDaemonRestart = await inspection.db
+      .select()
+      .from(agentUsagePeriods)
+      .where(eq(agentUsagePeriods.agentId, agentId));
+    if (
+      runtimeStarts !== startsBeforeDockerDaemonRestart ||
+      usageAfterDockerDaemonRestart.length !== 1 ||
+      usageAfterDockerDaemonRestart[0]?.stoppedAt !== null
+    ) {
+      throw new Error("Docker-daemon restart simulation duplicated work or segmented usage.");
+    }
+
+    // Heartbeat loss closes the observed-ready usage interval without invoking
+    // the runner. A returned heartbeat then permits level-triggered recovery.
+    logicalNow = new Date(logicalNow.getTime() + 91_000);
+    await inspection.db
+      .update(agentRuntimeReconciliations)
+      .set({ nextAttemptAt: logicalNow, updatedAt: logicalNow })
+      .where(eq(agentRuntimeReconciliations.agentId, agentId));
+    const callsBeforeStaleHeartbeat = statusCalls + startCalls + runtimeStops;
+    await reconcileTargetAgentRuntime(agentId, runtimeDependencies(runtimeConnection(0)));
+    if (statusCalls + startCalls + runtimeStops !== callsBeforeStaleHeartbeat) {
+      throw new Error("Stale heartbeat reconciliation contacted the fake runner.");
+    }
+
+    const recoveredFaults: RuntimeFault[] = [];
+    for (const fault of ["absent", "exited", "revision", "restart-policy"] as const) {
+      runtimeFault = fault;
+      fakeContainers = fault === "absent" ? 0 : 1;
+      await advanceRuntime();
+      await reconcileTargetAgentRuntime(agentId, runtimeDependencies(runtimeConnection(0)));
+      await reconcileRuntimeUntilHealthy();
+      recoveredFaults.push(fault);
+
+      // A full stability window resets the automatic recovery budget without
+      // segmenting the continuously healthy interval.
+      await advanceRuntime(15 * 60_000 + 1);
+      await reconcileTargetAgentRuntime(agentId, runtimeDependencies(runtimeConnection(1)));
+    }
+
+    // Fatal Telegram state is immediately non-ready. The injected, boolean-
+    // only webhook diagnostic proves a conflict and opens a cleanup circuit;
+    // no real Telegram request is possible from this smoke.
+    runtimeFault = "telegram-fatal";
+    await advanceRuntime();
+    await reconcileTargetAgentRuntime(agentId, runtimeDependencies(runtimeConnection(0)));
+    await advanceRuntime();
+    await reconcileTargetAgentRuntime(agentId, runtimeDependencies(runtimeConnection(1)));
+    await advanceRuntime();
+    await reconcileTargetAgentRuntime(agentId, runtimeDependencies(runtimeConnection(2)));
+
+    const [circuitRuntime] = await inspection.db
+      .select()
+      .from(agentRuntimeReconciliations)
+      .where(eq(agentRuntimeReconciliations.agentId, agentId));
+    const circuitAgent = (
+      await inspection.db.select().from(agents).where(eq(agents.id, agentId))
+    )[0];
+    if (
+      circuitRuntime?.state !== "circuit_open" ||
+      circuitRuntime.errorCode !== "telegram_webhook_conflict" ||
+      circuitAgent?.status !== "error" ||
+      telegramDiagnostics !== 1
+    ) {
+      throw new Error("Local cloud Telegram regression did not become a truthful bounded circuit.");
+    }
+
+    // Owner Stop is durable before any runner work. It remains authoritative
+    // after another simulated runner process/heartbeat return and duplicate kicks.
+    logicalNow = new Date(logicalNow.getTime() + 1_000);
+    const publicCircuitReset = await startAgentForUser(userId, agentId, {
+      createConnection: () => inspection,
+      now: () => logicalNow,
+      scheduleRuntimeReconcile: () => undefined,
+    });
+    if (!publicCircuitReset.ok || publicCircuitReset.state !== "accepted") {
+      const outcome = publicCircuitReset.ok ? publicCircuitReset.state : publicCircuitReset.reason;
+      throw new Error(`Public managed Start did not reset the runtime circuit: ${outcome}.`);
+    }
+    const publicStop = await stopAgentForUser(userId, agentId, {
+      createConnection: () => inspection,
+      now: () => logicalNow,
+      manualRunnerAdapter: (runner) => adapterFactory(runner as never) as never,
+      scheduleRuntimeReconcile: () => undefined,
+    });
+    if (!publicStop.ok || publicStop.agent.status !== "restarting") {
+      const outcome = publicStop.ok ? publicStop.agent.status : publicStop.reason;
+      throw new Error(`Public managed Stop did not return durable stopping intent: ${outcome}.`);
+    }
+    await reconcileTargetAgentRuntime(agentId, runtimeDependencies(runtimeConnection(0)));
+    const startsBeforeStoppedCollision = runtimeStarts;
+    const stoppedCollision = await Promise.all([
+      reconcileTargetRunnerRuntime(runtimeRunnerId, runtimeDependencies(runtimeConnection(0))),
+      reconcileNextAgentRuntime(runtimeDependencies(runtimeConnection(1))),
+      reconcileNextAgentRuntime(runtimeDependencies(runtimeConnection(2))),
+    ]);
+    const [stoppedRuntime] = await inspection.db
+      .select()
+      .from(agentRuntimeReconciliations)
+      .where(eq(agentRuntimeReconciliations.agentId, agentId));
+    const stoppedAgent = (
+      await inspection.db.select().from(agents).where(eq(agents.id, agentId))
+    )[0];
+    if (
+      stoppedRuntime?.state !== "stopped" ||
+      stoppedAgent?.desiredStatus !== "stopped" ||
+      stoppedAgent.status !== "stopped" ||
+      runtimeStarts !== startsBeforeStoppedCollision ||
+      stoppedCollision.some((result) => result.processed !== 0)
+    ) {
+      throw new Error("Intentional Stop did not remain durable across duplicate runner returns.");
+    }
+
+    const runtimeUsage = await inspection.db
+      .select()
+      .from(agentUsagePeriods)
+      .where(eq(agentUsagePeriods.agentId, agentId));
+    const runtimeEvents = await inspection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, agentId));
+    const runtimeRecoveryEvents = runtimeEvents.filter(
+      (event) => event.type === "agent.runtime_recovered",
+    );
+    const runtimeCircuitEvents = runtimeEvents.filter(
+      (event) => event.type === "agent.runtime_circuit_opened",
+    );
+    if (
+      recoveredFaults.join(",") !== "absent,exited,revision,restart-policy" ||
+      runtimeUsage.length !== 5 ||
+      runtimeUsage.some((period) => period.stoppedAt === null) ||
+      runtimeRecoveryEvents.length !== 1 ||
+      runtimeCircuitEvents.length !== 1 ||
+      runtimeStarts !== 4 ||
+      runtimeStops !== 5 ||
+      fakeContainers !== 0
+    ) {
+      throw new Error("Local cloud runtime usage/events or selected-container count duplicated.");
+    }
 
     const resource = [...provider.resources.values()][0];
     if (!resource) throw new Error("Local fake provider resource disappeared before cleanup.");
     await provider.cleanupResource({ providerResourceId: resource.providerResourceId });
     await inspection.db.delete(agentEvents).where(eq(agentEvents.agentId, agentId));
     await inspection.db.delete(agentUsagePeriods).where(eq(agentUsagePeriods.agentId, agentId));
+    await inspection.db
+      .delete(agentRuntimeReconciliations)
+      .where(eq(agentRuntimeReconciliations.agentId, agentId));
     await inspection.db.delete(agentDeployments).where(eq(agentDeployments.id, deploymentId));
     await inspection.db.delete(agentConfigs).where(eq(agentConfigs.agentId, agentId));
     await inspection.db.delete(agents).where(eq(agents.id, agentId));
@@ -295,9 +547,16 @@ export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
       browserClosedAfter202: true,
       canaryCalls: 1,
       cleanupDeterministic: true,
+      dockerDaemonRestartObserved: true,
       fakeContainers: 1,
       fakeProvisioningResources: 1,
       openUsagePeriods: 1,
+      runtimeCircuitEvents: 1,
+      runtimeFaultsRecovered: ["missing", "exited", "revision", "restart-policy"],
+      runtimeRecoveryEvents: 1,
+      runtimeUsageSegments: 5,
+      stoppedAfterRunnerReturn: true,
+      telegramBoundary: "injected-webhook-conflict",
       runningTransitions: 1,
       simultaneousTriggers: ["create-kick", "heartbeat", "cron", "manual"],
       stages,
@@ -309,6 +568,9 @@ export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
     }
     await inspection.db.delete(agentEvents).where(eq(agentEvents.agentId, agentId));
     await inspection.db.delete(agentUsagePeriods).where(eq(agentUsagePeriods.agentId, agentId));
+    await inspection.db
+      .delete(agentRuntimeReconciliations)
+      .where(eq(agentRuntimeReconciliations.agentId, agentId));
     await inspection.db.delete(agentDeployments).where(eq(agentDeployments.id, deploymentId));
     await inspection.db.delete(agentConfigs).where(eq(agentConfigs.agentId, agentId));
     await inspection.db.delete(agents).where(eq(agents.id, agentId));
@@ -461,7 +723,7 @@ function fakeSnapshot(
   operationId: string,
   configRevision: string,
   now: Date,
-): RunnerAgentStatusSnapshot {
+): RunnerDurableStatusSnapshot {
   const ready = phase === "ready";
   return {
     phase,
@@ -474,6 +736,8 @@ function fakeSnapshot(
       startedAt: now.toISOString(),
       finishedAt: null,
       observedAt: now.toISOString(),
+      restartPolicy: { name: "unless-stopped", maximumRetryCount: 0 },
+      restartCount: 0,
     },
     revision: {
       state: "match",
@@ -495,6 +759,82 @@ function fakeSnapshot(
     },
     readinessReason: ready ? null : "gateway_starting",
     observedAt: now.toISOString(),
+  };
+}
+
+function fakeRuntimeSnapshot(
+  fault: RuntimeFault,
+  operationId: string,
+  configRevision: string,
+  now: Date,
+): RunnerDurableStatusSnapshot {
+  if (fault === "starting" || fault === "healthy" || fault === "docker-daemon-restart") {
+    return fakeSnapshot(
+      fault === "starting" ? "starting" : "ready",
+      operationId,
+      configRevision,
+      now,
+    );
+  }
+
+  const healthy = fakeSnapshot("ready", operationId, configRevision, now);
+  if (fault === "absent") {
+    return {
+      ...healthy,
+      phase: "idle",
+      operation: null,
+      container: {
+        ...healthy.container,
+        id: null,
+        name: null,
+        image: null,
+        state: "absent",
+        startedAt: null,
+      },
+      gateway: { state: "unknown", observedAt: now.toISOString() },
+      apiServer: { required: true, state: "unknown", observedAt: now.toISOString() },
+      telegram: { required: true, state: "unknown", observedAt: now.toISOString() },
+      readinessReason: "container_absent",
+    };
+  }
+  if (fault === "exited") {
+    return {
+      ...healthy,
+      phase: "failed",
+      container: {
+        ...healthy.container,
+        state: "exited",
+        finishedAt: now.toISOString(),
+      },
+      gateway: { state: "stopped", observedAt: now.toISOString() },
+      readinessReason: "container_terminal",
+    };
+  }
+  if (fault === "revision") {
+    return {
+      ...healthy,
+      revision: {
+        ...healthy.revision,
+        state: "mismatch",
+        projectionMarker: `${configRevision}-stale`,
+      },
+      readinessReason: "revision_mismatch",
+    };
+  }
+  if (fault === "restart-policy") {
+    return {
+      ...healthy,
+      container: {
+        ...healthy.container,
+        restartPolicy: { name: "always", maximumRetryCount: 0 },
+      },
+      readinessReason: null,
+    };
+  }
+  return {
+    ...healthy,
+    telegram: { required: true, state: "fatal", observedAt: now.toISOString() },
+    readinessReason: "telegram_fatal",
   };
 }
 

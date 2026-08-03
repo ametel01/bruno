@@ -8,10 +8,19 @@ import {
   safeHostname,
   validationIssueSummary,
 } from "@/src/server/runners/runner-ingress-logging";
+import { scheduleRunnerReconciliationsAfterResponse } from "@/src/server/agents/agent-runtime-triggers";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request) {
+type RegisterRouteDependencies = {
+  scheduleReconciliations?: typeof scheduleRunnerReconciliationsAfterResponse;
+};
+
+export async function POST(
+  request: Request,
+  _context?: unknown,
+  dependencies: RegisterRouteDependencies = {},
+) {
   let payload: unknown;
 
   try {
@@ -43,6 +52,10 @@ export async function POST(request: Request) {
         runnerId: result.runner.id,
         endpointHostname: safeHostname(validation.value.endpointUrl),
       });
+
+      (dependencies.scheduleReconciliations ?? scheduleRunnerReconciliationsAfterResponse)(
+        result.runner.id,
+      );
 
       return Response.json(result, {
         status: 201,

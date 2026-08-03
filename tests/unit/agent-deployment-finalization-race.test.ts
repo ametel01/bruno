@@ -6,6 +6,7 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import {
   agentDeployments,
   agentEvents,
+  agentRuntimeReconciliations,
   agentUsagePeriods,
   agents,
   runners,
@@ -82,11 +83,21 @@ describe("automatic deployment finalization race", () => {
       const [deployment] = await connection.db.select().from(agentDeployments);
       const [agent] = await connection.db.select().from(agents).where(eq(agents.id, AGENT_ID));
       const usage = await connection.db.select().from(agentUsagePeriods);
+      const runtime = await connection.db.select().from(agentRuntimeReconciliations);
       const events = await connection.db.select().from(agentEvents);
       expect(deployment).toMatchObject({ stage: "ready", completedAt: NOW });
       expect(agent).toMatchObject({ status: "running", desiredStatus: "running" });
       expect(usage).toHaveLength(1);
       expect(usage[0]).toMatchObject({ agentId: AGENT_ID, runnerId: RUNNER_ID, startedAt: NOW });
+      expect(runtime).toHaveLength(1);
+      expect(runtime[0]).toMatchObject({
+        agentId: AGENT_ID,
+        userId: USER_ID,
+        state: "observing",
+        generation: 0,
+        configRevision: CONFIG_REVISION,
+        operationId: OPERATION_ID,
+      });
       expect(events.filter((event) => event.type === "agent.start_completed")).toHaveLength(1);
       expect(
         events.filter((event) => event.type === "agent.deployment_stage_changed"),

@@ -53,6 +53,7 @@ describe("Step 8 no-JavaScript deployment snapshots", () => {
             status: observedStatus,
             desiredStatus: "running",
             latestDeployment: deployment,
+            runtime: null,
             href: `/agents/${AGENT_ID}`,
             createdAt: "2026-08-03T11:00:00.000Z",
           },
