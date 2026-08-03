@@ -165,7 +165,7 @@ describe("automatic Hermes Telegram progress status", () => {
     );
     expect(automaticLedger).toContain("OpenRouter is the first supported provider");
     expect(automaticLedger).toContain("dedicated staging Telegram bot/user");
-    expect(automaticLedger).toContain("Step 5 is complete.");
+    expect(automaticLedger).toContain("Step 5 cycle 2 is complete locally.");
     expect(automaticLedger).toContain("- [x] Step 0: Progress and Changelog Tracking Setup");
     expect(automaticLedger).toContain("- [x] Step 1: Quality Gates Setup and Baseline Evidence");
     expect(automaticLedger).toContain(
@@ -205,12 +205,14 @@ describe("automatic Hermes Telegram progress status", () => {
       "| 4. Add Managed Creation Configuration and Encrypted Credentials | Complete |",
     );
     expect(automaticLedger).toContain(
-      "| 5. Project a Complete Managed Hermes Configuration | Complete |",
+      "| 5. Project a Complete Managed Hermes Configuration | Complete after cycle 2 repair |",
     );
-    expect(automaticLedger).toContain("exact managed Hermes launch-spec");
-    expect(automaticLedger).toContain("owner-scoped repeatable-read transaction");
-    expect(automaticLedger).toContain("fresh managed Hermes roots");
-    expect(automaticLedger).toContain("Focused Step 5 tests passed 4 files / 38 tests");
+    expect(automaticLedger).toContain("launch-spec v3 parsing/redaction/serialization");
+    expect(automaticLedger).toContain("explicit/custom YAML tags and anchors");
+    expect(automaticLedger).toContain("secret-like null/map/array/boolean/number values");
+    expect(automaticLedger).toContain("Docker inspect Telegram allowlist leaks");
+    expect(automaticLedger).toContain("Focused repair tests passed 17 files / 95 tests");
+    expect(automaticLedger).toContain("107 files / 955 tests");
     expect(automaticLedger).toContain('`telegramBoundary: "local-fake-platform-state"`');
     expect(automaticLedger).toContain("`drizzle/0017_ambitious_tyrannus.sql`");
     expect(automaticLedger).toContain("three nullable Telegram secret metadata columns");
@@ -226,7 +228,8 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain("Full gates passed");
     expect(automaticLedger).toContain("Step validation commands and results.");
     expect(automaticLedger).toContain("Safe blocker codes, missing capabilities, and next action.");
-    expect(automaticLedger).toContain("No blocker remains for Step 5.");
+    expect(automaticLedger).toContain("No blocker remains for Step 5 cycle 2.");
+    expect(automaticLedger).toContain("independent Step 5 cycle-2 acceptance");
     expect(automaticLedger).toContain("Step 6 should split runner launch acceptance");
     expect(automaticLedger).not.toContain("No blocker remains for Step 3.");
     expect(automaticLedger).not.toContain("Step 4 should add managed creation configuration");

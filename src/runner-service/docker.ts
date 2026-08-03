@@ -568,7 +568,7 @@ function inspectContainsSecretValue(
   inspect: DockerInspectContainer,
   launchSpec: AgentLaunchSpec,
 ): boolean {
-  const secrets =
+  const highEntropySecrets =
     launchSpec.version === "agentbay.hermes.launch.v3"
       ? [
           launchSpec.secrets.openrouterApiKey,
@@ -576,7 +576,7 @@ function inspectContainsSecretValue(
           launchSpec.secrets.apiServerKey,
         ]
       : [launchSpec.secrets.apiServerKey];
-  const inspectText = JSON.stringify({
+  const inspectSurface = {
     Args: inspect.Args,
     Cmd: inspect.Config?.Cmd,
     Entrypoint: inspect.Config?.Entrypoint,
@@ -584,9 +584,56 @@ function inspectContainsSecretValue(
     Healthcheck: inspect.Config?.Healthcheck,
     Labels: inspect.Config?.Labels,
     Name: inspect.Name,
-  });
+  };
+  const inspectStrings = collectInspectStrings(inspectSurface);
 
-  return secrets.some((secret) => secret.trim().length > 0 && inspectText.includes(secret));
+  if (
+    highEntropySecrets.some((secret) =>
+      inspectStrings.some((value) => secret.trim().length > 0 && value.includes(secret)),
+    )
+  ) {
+    return true;
+  }
+
+  return (
+    launchSpec.version === "agentbay.hermes.launch.v3" &&
+    launchSpec.secrets.telegramAllowedUsers.some((telegramId) =>
+      inspectStrings.some((value) => stringExposesTelegramAllowedUser(value, telegramId)),
+    )
+  );
+}
+
+function collectInspectStrings(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectInspectStrings(entry));
+  }
+
+  if (isRecord(value)) {
+    return Object.entries(value).flatMap(([key, entry]) => [key, ...collectInspectStrings(entry)]);
+  }
+
+  return [];
+}
+
+function stringExposesTelegramAllowedUser(value: string, telegramId: string): boolean {
+  if (value === telegramId) {
+    return true;
+  }
+
+  const assignment = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(value);
+
+  if (!assignment?.[1] || assignment[1] !== "TELEGRAM_ALLOWED_USERS" || !assignment[2]) {
+    return false;
+  }
+
+  return assignment[2]
+    .split(",")
+    .map((part) => part.trim().replace(/^"|"$/g, ""))
+    .includes(telegramId);
 }
 
 function parseDockerCpusToNanoCpus(value: string): number {

@@ -244,6 +244,37 @@ describe("Hermes launch spec builder", () => {
     });
     expect(JSON.stringify(result)).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZ12");
   });
+
+  it("fails managed builds closed when required active secret metadata cannot decrypt", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Managed Broken Secret", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+
+    await configureManagedHermes(connection, created.agent.userId, created.agent.id);
+    await connection.db
+      .update(agentSecrets)
+      .set({ keyVersion: "missing-key-version" })
+      .where(
+        and(
+          eq(agentSecrets.agentId, created.agent.id),
+          eq(agentSecrets.kind, "openrouter_api_key"),
+        ),
+      );
+
+    const result = await buildHermesAgentLaunchSpecForUser(created.agent.userId, created.agent.id, {
+      createConnection: () => connection,
+      env: KEYRING_ENV,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "secret_decryption_failed",
+      message: "Managed Hermes secrets could not be loaded.",
+      kind: "openrouter_api_key",
+    });
+    expect(JSON.stringify(result)).not.toContain("sk-or-v1-managedopenrouterkey1234567890");
+  });
 });
 
 async function configureHermes(

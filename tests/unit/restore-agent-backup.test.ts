@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq, ne } from "drizzle-orm";
+import { buildHermesAgentLaunchSpecForUser } from "@/src/server/agents/agent-launch-builder";
 import { createAgentForDevelopmentUser } from "@/src/server/agents/create-agent";
 import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
 import {
@@ -9,7 +10,21 @@ import {
 import type { BackupManifest } from "@/src/server/backups/backup-manifest";
 import { FakeBackupObjectStorage } from "@/src/server/backups/backup-storage";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agentConfigs, agentEvents, agents, agentSecrets, backups } from "@/src/server/db/schema";
+import {
+  agentConfigs,
+  agentDeployments,
+  agentEvents,
+  agents,
+  agentSecrets,
+  backups,
+} from "@/src/server/db/schema";
+
+const KEYRING_ENV = {
+  AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
+  AGENTBAY_AGENT_SECRET_KEYS_JSON: JSON.stringify({
+    v1: Buffer.alloc(32, 31).toString("base64url"),
+  }),
+};
 
 describe("backup restore creation", () => {
   let connection: DatabaseConnection;
@@ -109,6 +124,10 @@ describe("backup restore creation", () => {
       .select()
       .from(agentSecrets)
       .where(eq(agentSecrets.agentId, result.restoredAgent.id));
+    const restoredDeployments = await connection.db
+      .select()
+      .from(agentDeployments)
+      .where(eq(agentDeployments.agentId, result.restoredAgent.id));
     const nonOriginalAgents = await connection.db
       .select()
       .from(agents)
@@ -126,6 +145,17 @@ describe("backup restore creation", () => {
       maxDailySpendCents: 1234,
     });
     expect(restoredSecrets).toHaveLength(0);
+    expect(restoredDeployments).toHaveLength(0);
+    await expect(
+      buildHermesAgentLaunchSpecForUser(original.agent.userId, result.restoredAgent.id, {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "hermes_setup_incomplete",
+      message: "Run Hermes setup before starting this agent.",
+    });
     expect(restoredBackup).toMatchObject({
       id: backup.id,
       status: "restored",

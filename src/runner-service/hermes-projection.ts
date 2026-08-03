@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { chmod, lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
-import { parseAllDocuments, stringify } from "yaml";
+import { parseAllDocuments, stringify, visit, type Document, type Node } from "yaml";
 import {
   MANAGED_AGENT_LAUNCH_SPEC_VERSION,
   type AgentLaunchSpec,
@@ -67,7 +67,7 @@ const MAX_NESTING_DEPTH = 64;
 const DANGEROUS_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const SECRET_KEY_PATTERN =
   /(^|_|\b)(token|password|credential|authorization|private[_-]?key|api[_-]?key|secret)(_|$|\b)/i;
-const ENV_REFERENCE_PATTERN = /^(?:\$\{[A-Z_][A-Z0-9_]*(?::-[^}\r\n]*)?\}|env:[A-Z_][A-Z0-9_]*)$/;
+const ENV_REFERENCE_PATTERN = /^(?:\$\{[A-Z_][A-Z0-9_]*\}|env:[A-Z_][A-Z0-9_]*)$/;
 const OPENROUTER_KEY_PATTERN = /^sk-or-v1-[A-Za-z0-9_-]{20,}$/;
 const TELEGRAM_BOT_TOKEN_PATTERN = /^[1-9][0-9]{5,19}:[A-Za-z0-9_-]{20,}$/;
 const API_SERVER_KEY_PATTERN = /^agb_agent_[A-Za-z0-9_-]{32,}$/;
@@ -103,7 +103,7 @@ async function projectHermesHomeUnchecked(
   const revisionPath = resolveManagedPath(hermesHome, "agentbay-config-revision.json");
 
   for (const fileName of GUARDED_FILES) {
-    await rejectSymlinkIfExists(resolveManagedPath(hermesHome, fileName));
+    await assertSafeExistingTarget(resolveManagedPath(hermesHome, fileName));
   }
 
   const existingConfig = await readExistingRegularFile(configPath, MAX_CONFIG_YAML_BYTES);
@@ -143,10 +143,12 @@ async function projectHermesHomeUnchecked(
 
     for (const entry of staged) {
       await assertRealDirectory(hermesHome);
+      await assertSafeExistingTarget(entry.path);
       await rename(entry.tempPath, entry.path);
     }
 
     await assertRealDirectory(hermesHome);
+    await assertSafeExistingTarget(revisionStage.path);
     await rename(revisionStage.tempPath, revisionStage.path);
     await fsyncDirectory(hermesHome);
     await pruneObsoleteManagedTemps(hermesHome);
@@ -271,6 +273,7 @@ export function mergeHermesEnv(existing: string, spec: AgentLaunchSpec): string 
     .replace(/\r\n/g, "\n")
     .split("\n")
     .filter((line) => {
+      rejectUnsupportedEnvLine(line);
       const parsed = parseEnvAssignment(line);
 
       if (!parsed) {
@@ -314,7 +317,7 @@ function parseHermesYaml(input: string): PlainYamlRecord {
   if (
     /(^|\n)\s*%/.test(input) ||
     /(^|\n)\s*(?:---|\.\.\.)\s*(?:\n|$)/.test(input) ||
-    /(^|\s)[&*!][A-Za-z0-9_-]/.test(input) ||
+    /(^|[\s[{,])(?:&[A-Za-z0-9_-]+|\*[A-Za-z0-9_-]+|![^\s\]}:,]+)/.test(input) ||
     /(^|\n)\s*<<\s*:/.test(input)
   ) {
     throw new Error("Hermes config uses unsafe YAML syntax.");
@@ -338,6 +341,7 @@ function parseHermesYaml(input: string): PlainYamlRecord {
     throw new Error("Hermes config is invalid.");
   }
 
+  assertYamlAstSafe(document);
   const jsValue = document.toJS({ mapAsMap: true, maxAliasCount: 0 });
 
   if (!(jsValue instanceof Map)) {
@@ -400,6 +404,36 @@ function rejectTooManyYamlEntries(counter: { entries: number }) {
   }
 }
 
+function assertYamlAstSafe(document: Document<Node, true>): void {
+  let unsafe = false;
+
+  visit(document, {
+    Alias() {
+      unsafe = true;
+      return visit.BREAK;
+    },
+    Node(_key, node) {
+      if (isYamlNodeMetadataRecord(node)) {
+        if (typeof node.tag === "string" && node.tag.length > 0) {
+          unsafe = true;
+          return visit.BREAK;
+        }
+
+        if (typeof node.anchor === "string" && node.anchor.length > 0) {
+          unsafe = true;
+          return visit.BREAK;
+        }
+      }
+
+      return undefined;
+    },
+  });
+
+  if (unsafe) {
+    throw new Error("Hermes config uses unsafe YAML syntax.");
+  }
+}
+
 function removeManagedLegacySecretPaths(config: PlainYamlRecord): void {
   for (const path of [
     ["model", "api_key"],
@@ -417,6 +451,16 @@ function removeManagedLegacySecretPaths(config: PlainYamlRecord): void {
 }
 
 function rejectSecretBearingYaml(value: PlainYamlValue, keyPath: string[] = []): void {
+  const lastKey = keyPath.at(-1) ?? "";
+
+  if (SECRET_KEY_PATTERN.test(lastKey)) {
+    if (typeof value !== "string" || !ENV_REFERENCE_PATTERN.test(value.trim())) {
+      throw new Error("Hermes config contains unsafe secret configuration.");
+    }
+
+    return;
+  }
+
   if (Array.isArray(value)) {
     for (const entry of value) {
       rejectSecretBearingYaml(entry, keyPath);
@@ -431,8 +475,6 @@ function rejectSecretBearingYaml(value: PlainYamlValue, keyPath: string[] = []):
     return;
   }
 
-  const lastKey = keyPath.at(-1) ?? "";
-
   if (typeof value === "string") {
     if (
       OPENROUTER_KEY_PATTERN.test(value.trim()) ||
@@ -441,12 +483,6 @@ function rejectSecretBearingYaml(value: PlainYamlValue, keyPath: string[] = []):
     ) {
       throw new Error("Hermes config contains secret material.");
     }
-
-    if (SECRET_KEY_PATTERN.test(lastKey) && !ENV_REFERENCE_PATTERN.test(value.trim())) {
-      throw new Error("Hermes config contains unsafe secret configuration.");
-    }
-  } else if (SECRET_KEY_PATTERN.test(lastKey) && value !== null) {
-    throw new Error("Hermes config contains unsafe secret configuration.");
   }
 }
 
@@ -506,15 +542,17 @@ function parseEnvAssignment(line: string): { key: string } | null {
   return match?.[1] ? { key: match[1] } : null;
 }
 
+function rejectUnsupportedEnvLine(line: string): void {
+  if (/\\\s*$/.test(line)) {
+    throw new Error("Hermes env contains unsupported multiline syntax.");
+  }
+}
+
 function rejectMalformedManagedEnvLine(line: string): void {
   for (const key of MANAGED_ENV_KEYS) {
     if (new RegExp(`^\\s*(?:export\\s+)?${key}\\b`).test(line)) {
       throw new Error("Hermes env contains malformed managed assignment.");
     }
-  }
-
-  if (/\\\s*$/.test(line)) {
-    throw new Error("Hermes env contains unsupported multiline syntax.");
   }
 }
 
@@ -580,7 +618,7 @@ async function stageAtomicWrite(
 
 async function readExistingRegularFile(path: string, maxBytes: number): Promise<string | null> {
   try {
-    await rejectSymlinkIfExists(path);
+    await assertSafeExistingTarget(path, maxBytes);
     const handle = await open(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
 
     try {
@@ -608,6 +646,27 @@ async function assertRegularOwnedFile(path: string): Promise<void> {
 
   if (!stats.isFile() || stats.nlink > 1) {
     throw new Error("Hermes projection path must be a regular file.");
+  }
+}
+
+async function assertSafeExistingTarget(path: string, maxBytes?: number): Promise<void> {
+  try {
+    const stats = await lstat(path);
+
+    if (
+      stats.isSymbolicLink() ||
+      !stats.isFile() ||
+      stats.nlink > 1 ||
+      (maxBytes !== undefined && stats.size > maxBytes)
+    ) {
+      throw new Error("Hermes projection path must be a safe regular file.");
+    }
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return;
+    }
+
+    throw error;
   }
 }
 
@@ -703,4 +762,11 @@ function isMissingPathError(error: unknown): boolean {
     "code" in error &&
     (error as { code?: unknown }).code === "ENOENT"
   );
+}
+
+function isYamlNodeMetadataRecord(value: unknown): value is {
+  anchor?: unknown;
+  tag?: unknown;
+} {
+  return typeof value === "object" && value !== null;
 }

@@ -13,7 +13,7 @@ import {
 } from "@/src/runner-service/docker";
 import { createRunnerService } from "@/src/runner-service/server";
 import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
-import { sampleLaunchSpec } from "@/tests/helpers/agent-launch-spec";
+import { sampleLaunchSpec, sampleManagedLaunchSpec } from "@/tests/helpers/agent-launch-spec";
 
 const AGENT_ID = "00000000-0000-4000-8000-000000000123";
 const OTHER_AGENT_ID = "00000000-0000-4000-8000-000000000456";
@@ -305,6 +305,40 @@ describe("manual runner service HTTP contract", () => {
       ok: false,
       error: { code: "docker_command_failed" },
     });
+  });
+
+  it("fails closed when Docker inspect exposes managed Telegram allowlist values", async () => {
+    const calls: string[][] = [];
+    const service = createRunnerService({
+      authToken: "test-token",
+      docker: new ManualRunnerDocker({
+        command: testCommand(),
+        docker: createMockDocker({
+          calls,
+          inspectEnv: ["TELEGRAM_ALLOWED_USERS=1,222222"],
+        }),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: createHermesProjectionForTest,
+        },
+        readiness: {
+          wait: async () => ({ ok: true }),
+        },
+      }),
+    });
+    const response = await service.fetch(
+      authorizedJsonRequest(
+        `/runner/v1/agents/${AGENT_ID}/start`,
+        sampleManagedLaunchSpec({ agent: { ...sampleManagedLaunchSpec().agent, id: AGENT_ID } }),
+      ),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "docker_command_failed" },
+    });
+    expect(calls).toContainEqual(["rm", "--force", "container-001"]);
   });
 
   it("returns a safe typed failure when Hermes readiness fails", async () => {
@@ -939,6 +973,7 @@ function createMockDocker(
       status: string;
     }[];
     failRemoveIds?: string[];
+    inspectEnv?: string[];
     injectDockerSocket?: boolean;
     logs?: { stderr: string; stdout: string };
     psIds?: string[];
@@ -1006,7 +1041,7 @@ function createMockDocker(
           Config: {
             Cmd: readContainerCommandArgs(container.runArgs),
             Entrypoint: null,
-            Env: [],
+            Env: input.inspectEnv ?? [],
             Image: container.image ?? "agentbay/runner:test",
             Labels: {
               [AGENTBAY_AGENT_ID_LABEL]: container.agentId,
