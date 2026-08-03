@@ -6,11 +6,11 @@
   owner: coordinator; user authorization/capabilities required for live work
   branch: `main`
   worktree: `/Users/alexmetelli/source/plingpling`
-  phase: Step 9 independently accepted; Step 10 live acceptance not authorized
+  phase: Step 9 independently accepted; Step 10 docs prepared, executor architecture and live acceptance blocked
   cycle: Step 10 preflight 0/5
   contract: `PLAN.md` → `Step 10: Final Acceptance, Documentation, and Controlled Rollout`
-  blocker: Step 10 requires explicit live/provider authorization, published image evidence, DigitalOcean budget, dedicated Telegram bot/user, and funded OpenRouter key.
-  next-action: Request the missing authorization and capabilities before any hosted mutation, image publication, provider request, or real-user contact.
+  blocker: Step 10 needs a user choice between automated MTProto and interactive-human Telegram proof, a scoped durable image-attestation/Droplet+firewall cleanup operation, explicit live/provider authorization, and all staging capabilities.
+  next-action: Obtain the Telegram-proof design choice and authorization for the scoped staging operation before implementing the live executor or making any external request.
 
 ## Completion Contract
 
@@ -53,6 +53,7 @@
 - Step 9 foundations: 8 files / 143 focused tests green — generated `0019_tough_tinkerer`, conservative backfill and claim/CAS store, pure bounded state policy, strict runner status-v3/`unless-stopped` evidence, and fake-only Telegram webhook diagnostic; format, lint, typecheck, and diff checks pass.
 - Step 9 candidate gates were green before commit — migration clean/upgrade/idempotency and no drift; focused DB 8 files / 38 tests; focused controller/runner/UI 11 files / 177 tests; full 137 files / 1,297 tests; production build; 26/26 desktop/mobile CI E2E; fake-cloud recovery/circuit/usage/Stop smoke; pinned-image process-death, Docker/runner restart, no-duplicate, and Stop-durability smoke.
 - Step 9 `b41e969`: independently green after checker cycle 1 — migration/no drift; 8 files / 162 focused DB tests; 17 files / 209 focused runtime/runner/UI/Telegram tests; 137 files / 1,297 full tests; format/lint/typecheck/build; 26/26 CI E2E; both local smokes; fail-closed staging; manual secret and cleanup review; no image pull or external request.
+- Step 10 docs `abe1208`: ready-mode/keyring/cron, BotFather/allowlist, state, retry/canary cost, restart/Stop, rollback, evidence, and cleanup runbook prepared; typecheck, 7 files / 65 focused tests, format, lint, and diff checks green. Live executor remains fail-closed and no external acceptance is claimed.
 
 ## Worktrees
 
@@ -64,6 +65,8 @@
 - 2026-08-03: Live or billable work remains prohibited until Step 10 prerequisites and explicit authorization are present.
 - 2026-08-03: Telegram token uniqueness requires a stable server-only digest; preserve the existing encryption-version-dependent fingerprint only for compatibility.
 - 2026-08-03: Keep `STATUS.md` under 200 lines. Full contracts, checker logs, historical handoffs, and completed evidence live in `STATUS.archive.md`.
+- 2026-08-03: Bot API credentials cannot generate allowed-user traffic. Automated live proof requires a dedicated MTProto test-user session; a manual path requires explicit acceptance of human-attested evidence.
+- 2026-08-03: Step 10 cleanup must be durable and cover the exact agent workload, Droplet, firewall, and runner row; process-local `finally` cleanup is insufficient.
 
 ## Completed
 
