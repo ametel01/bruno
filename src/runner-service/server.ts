@@ -5,7 +5,16 @@ import {
   type AgentLaunchSpec,
 } from "@/src/server/agents/agent-launch-spec";
 import { ManualRunnerDocker } from "@/src/runner-service/docker";
-import { HermesReadinessError } from "@/src/runner-service/docker";
+import {
+  HermesReadinessError,
+  RunnerCanaryNotReadyError,
+  RunnerLaunchAcceptanceTimeoutError,
+  RunnerLaunchCancelledError,
+} from "@/src/runner-service/docker";
+import {
+  parseRunnerCanaryRequest,
+  type RunnerCanaryRequest,
+} from "@/src/runner-service/runner-contracts";
 import {
   HermesSetupSessionError,
   HermesSetupSessionManager,
@@ -18,11 +27,11 @@ import {
 
 const RUNNER_TOKEN_ENV = "AGENTBAY_RUNNER_BEARER_TOKEN";
 
-type RunnerAction = "start" | "stop" | "restart" | "status" | "logs" | "cleanup";
+type RunnerAction = "start" | "stop" | "restart" | "status" | "logs" | "cleanup" | "canary";
 
 export type RunnerServiceOptions = {
   authToken?: string;
-  docker?: Pick<ManualRunnerDocker, RunnerAction>;
+  docker?: RunnerServiceDocker;
   heartbeat?: RunnerHeartbeatLoopOptions;
   setupSessions?: HermesSetupSessionManager;
 };
@@ -35,6 +44,16 @@ type RunnerUpgradeServer = {
       headers: Record<string, string>;
     },
   ): boolean;
+};
+
+type RunnerServiceDocker = {
+  start(agentId: string, launchSpec: AgentLaunchSpec | null): Promise<object>;
+  stop(agentId: string): Promise<object>;
+  restart(agentId: string, launchSpec: AgentLaunchSpec | null): Promise<object>;
+  status(agentId: string): Promise<object>;
+  logs(agentId: string): Promise<object>;
+  cleanup(agentId: string): Promise<object>;
+  canary?(agentId: string, request: RunnerCanaryRequest): Promise<object>;
 };
 
 type RunnerWebSocket = {
@@ -152,15 +171,31 @@ export function createRunnerService(options: RunnerServiceOptions = {}) {
       if (!launchSpecResult.ok) {
         return launchSpecResult.response;
       }
+      const canaryResult = await readCanaryRequest(request, route.action);
 
+      if (!canaryResult.ok) {
+        return canaryResult.response;
+      }
+      const dockerResult = await callDockerAction(
+        docker,
+        route,
+        launchSpecResult.launchSpec,
+        canaryResult.request,
+      );
+      const status =
+        route.action === "start" || route.action === "restart"
+          ? "contractVersion" in dockerResult && "operation" in dockerResult
+            ? 202
+            : 200
+          : 200;
       return Response.json(
         {
           ok: true,
           agentId: route.agentId,
           action: route.action,
-          ...(await callDockerAction(docker, route, launchSpecResult.launchSpec)),
+          ...dockerResult,
         },
-        { status: 200 },
+        { status },
       );
     } catch (error) {
       if (error instanceof HermesSetupRequiredError) {
@@ -175,6 +210,22 @@ export function createRunnerService(options: RunnerServiceOptions = {}) {
 
       if (error instanceof HermesProjectionInvalidError) {
         return jsonError(409, "hermes_projection_invalid", "Hermes projection is invalid.");
+      }
+
+      if (error instanceof RunnerCanaryNotReadyError) {
+        return jsonError(409, "canary_not_ready", "Runner canary requires a ready operation.");
+      }
+
+      if (error instanceof RunnerLaunchCancelledError) {
+        return jsonError(409, "launch_cancelled", "Runner launch was cancelled.");
+      }
+
+      if (error instanceof RunnerLaunchAcceptanceTimeoutError) {
+        return jsonError(504, "launch_acceptance_timeout", "Runner launch acceptance timed out.");
+      }
+
+      if (route.action === "status") {
+        return jsonError(502, "runner_status_failed", "Runner status observation failed.");
       }
 
       return jsonError(502, "docker_command_failed", "Runner Docker command failed.");
@@ -199,12 +250,21 @@ export function createRunnerService(options: RunnerServiceOptions = {}) {
 }
 
 async function callDockerAction(
-  docker: Pick<ManualRunnerDocker, RunnerAction>,
+  docker: RunnerServiceDocker,
   route: { agentId: string; action: RunnerAction },
   launchSpec: AgentLaunchSpec | null,
+  canaryRequest: RunnerCanaryRequest | null,
 ) {
   if (route.action === "start" || route.action === "restart") {
     return await docker[route.action](route.agentId, launchSpec);
+  }
+
+  if (route.action === "canary") {
+    if (!canaryRequest || !docker.canary) {
+      throw new RunnerCanaryNotReadyError();
+    }
+
+    return await docker.canary(route.agentId, canaryRequest);
   }
 
   return await docker[route.action](route.agentId);
@@ -218,7 +278,15 @@ async function readLaunchSpec(
     return { ok: true, launchSpec: null };
   }
 
-  const body = await request.text();
+  const bodyResult = await readBoundedRequestText(request, AGENT_LAUNCH_SPEC_MAX_BYTES);
+
+  if (!bodyResult.ok) {
+    return {
+      ok: false,
+      response: jsonError(413, "launch_spec_too_large", "Launch spec body is too large."),
+    };
+  }
+  const body = bodyResult.text;
 
   if (!body.trim()) {
     return { ok: true, launchSpec: null };
@@ -226,19 +294,12 @@ async function readLaunchSpec(
 
   const contentType = request.headers.get("content-type") ?? "";
 
-  if (!contentType.toLowerCase().startsWith("application/json")) {
+  if (!isJsonContentType(contentType)) {
     return {
       ok: false,
       response: jsonError(415, "unsupported_media_type", "Launch spec requires JSON.", {
         Accept: "application/json",
       }),
-    };
-  }
-
-  if (Buffer.byteLength(body, "utf8") > AGENT_LAUNCH_SPEC_MAX_BYTES) {
-    return {
-      ok: false,
-      response: jsonError(413, "launch_spec_too_large", "Launch spec body is too large."),
     };
   }
 
@@ -252,6 +313,58 @@ async function readLaunchSpec(
   }
 
   return { ok: true, launchSpec: parsed.spec };
+}
+
+async function readCanaryRequest(
+  request: Request,
+  action: RunnerAction,
+): Promise<{ ok: true; request: RunnerCanaryRequest | null } | { ok: false; response: Response }> {
+  if (action !== "canary") {
+    return { ok: true, request: null };
+  }
+
+  const contentType = request.headers.get("content-type") ?? "";
+
+  if (!isJsonContentType(contentType)) {
+    return {
+      ok: false,
+      response: jsonError(415, "unsupported_media_type", "Canary requires JSON.", {
+        Accept: "application/json",
+      }),
+    };
+  }
+
+  const bodyResult = await readBoundedRequestText(request, 64 * 1024);
+
+  if (!bodyResult.ok) {
+    return {
+      ok: false,
+      response: jsonError(413, "canary_invalid", "Canary request is invalid."),
+    };
+  }
+  const body = bodyResult.text;
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return {
+      ok: false,
+      response: jsonError(400, "canary_invalid", "Canary request is invalid."),
+    };
+  }
+
+  const result = parseRunnerCanaryRequest(parsed);
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      response: jsonError(400, "canary_invalid", "Canary request is invalid."),
+    };
+  }
+
+  return { ok: true, request: result.request };
 }
 
 function handleReadinessRequest(request: Request): Response | null {
@@ -283,7 +396,15 @@ function parseSetupSessionCreateRoute(request: Request): { agentId: string } | n
   const { pathname } = new URL(request.url);
   const match = /^\/runner\/v1\/agents\/([^/]+)\/setup-sessions$/.exec(pathname);
 
-  return match?.[1] ? { agentId: decodeURIComponent(match[1]) } : null;
+  if (!match?.[1]) {
+    return null;
+  }
+
+  try {
+    return { agentId: decodeURIComponent(match[1]) };
+  } catch {
+    return null;
+  }
 }
 
 export function startRunnerHeartbeatLoop(options: RunnerHeartbeatLoopOptions): { stop(): void } {
@@ -357,18 +478,23 @@ function authenticateRequest(request: Request, authToken: string | undefined): R
 
 function parseRunnerRoute(request: Request): { agentId: string; action: RunnerAction } | null {
   const { pathname } = new URL(request.url);
-  const match = /^\/runner\/v1\/agents\/([^/]+)\/(start|stop|restart|status|logs|cleanup)$/.exec(
-    pathname,
-  );
+  const match =
+    /^\/runner\/v1\/agents\/([^/]+)\/(start|stop|restart|status|logs|cleanup|canary)$/.exec(
+      pathname,
+    );
 
   if (!match?.[1] || !match[2]) {
     return null;
   }
 
-  return {
-    agentId: decodeURIComponent(match[1]),
-    action: match[2] as RunnerAction,
-  };
+  try {
+    return {
+      agentId: decodeURIComponent(match[1]),
+      action: match[2] as RunnerAction,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function validateMethod(method: string, action: RunnerAction): Response | null {
@@ -412,4 +538,49 @@ function normalizeBaseUrl(value: string): string {
 
 function normalizePositiveInteger(value: number | undefined, fallback: number): number {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function isJsonContentType(value: string): boolean {
+  return /^\s*application\/json(?:\s*;|\s*$)/i.test(value);
+}
+
+async function readBoundedRequestText(
+  request: Request,
+  maxBytes: number,
+): Promise<{ ok: true; text: string } | { ok: false }> {
+  const declaredLength = Number.parseInt(request.headers.get("content-length") ?? "", 10);
+
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    return { ok: false };
+  }
+
+  if (!request.body) {
+    return { ok: true, text: "" };
+  }
+
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let totalBytes = 0;
+  let text = "";
+
+  try {
+    while (true) {
+      const chunk = await reader.read();
+
+      if (chunk.done) {
+        break;
+      }
+
+      totalBytes += chunk.value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return { ok: false };
+      }
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+
+    return { ok: true, text: text + decoder.decode() };
+  } catch {
+    return { ok: false };
+  }
 }

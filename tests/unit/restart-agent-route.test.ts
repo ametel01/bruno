@@ -54,6 +54,36 @@ describe("POST /api/agents/[agentId]/actions/restart route", () => {
     expect(mocks.restartAgentForUser).not.toHaveBeenCalled();
   });
 
+  it("returns the accepted operation and snapshot in the authenticated 202 DTO", async () => {
+    const accepted = {
+      ok: true,
+      state: "accepted",
+      agent: { id: "3e47bed7-b58f-4394-93c0-01e3d1e51774", status: "restarting" },
+      event: { type: "agent.restart_requested" },
+      events: [{ type: "agent.restart_requested" }],
+      operation: {
+        id: "11111111-1111-4111-8111-111111111111",
+        action: "restart",
+        target: {
+          image: "hermes@example",
+          launchSpecVersion: "agentbay.hermes.launch.v3",
+          configRevision: "cfg-route",
+        },
+        acceptedAt: "2026-08-03T05:00:00.000Z",
+      },
+      snapshot: { phase: "accepted", readinessReason: "launch_accepted" },
+    };
+    mocks.restartAgentForUser.mockResolvedValueOnce(accepted);
+    const { POST } = await import("@/app/api/agents/[agentId]/actions/restart/route");
+
+    const response = await POST(new Request("http://localhost/api/agents/restart"), {
+      params: Promise.resolve({ agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774" }),
+    });
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual(accepted);
+  });
+
   it("returns a safe persistence error response", async () => {
     mocks.restartAgentForUser.mockRejectedValueOnce(new mocks.AgentLifecyclePersistenceError());
     const { POST } = await import("@/app/api/agents/[agentId]/actions/restart/route");

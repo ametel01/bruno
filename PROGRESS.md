@@ -451,15 +451,12 @@ the existing `Added`, `Changed`, `Fixed`, or `Security` sections as applicable.
 
 ### Current Status
 
-Step 5 is complete and independently accepted through cycle 3. The latest
-repair preserves safe YAML scalar punctuation in unrelated managed config values while still rejecting real
-YAML tags, anchors, aliases, and merge keys. It also adds injected filesystem
-transaction seam coverage for temp collisions, ownership, write/chmod/chown/
-fsync/rename failures, marker-last recovery, temp cleanup, nonregular targets,
-and workspace preservation. The server still builds v3 from the newest
-persisted deployment and four active encrypted secrets while preserving v2
-native/manual compatibility. Step 6 is now active: split runner launch
-acceptance from observed readiness.
+Step 6 is complete and ready for independent checker review. Managed Hermes
+runner launch now accepts start/restart asynchronously with strict v2 launch and
+status contracts, one-shot private readiness observation, a bounded private
+model canary contract, and lifecycle handling that keeps accepted agents in
+`starting` or `restarting` until later reconciliation proves readiness. Step 7 is
+next: reconcile accepted deployments through verified ready or failed states.
 
 ### Step Checklist
 
@@ -469,7 +466,7 @@ acceptance from observed readiness.
 - [x] Step 3: Persist Desired State and Deployment Operations
 - [x] Step 4: Add Managed Creation Configuration and Encrypted Credentials
 - [x] Step 5: Project a Complete Managed Hermes Configuration
-- [ ] Step 6: Split Runner Launch Acceptance From Observed Readiness
+- [x] Step 6: Split Runner Launch Acceptance From Observed Readiness
 - [ ] Step 7: Reconcile Creation Through Ready
 - [ ] Step 8: Add One-Click Creation and Persisted Progress UI
 - [ ] Step 9: Make Desired-Running Gateways Durable
@@ -485,7 +482,7 @@ acceptance from observed readiness.
 | 3. Persist Desired State and Deployment Operations | Complete | Steps 0-2 | This commit | Generated `drizzle/0016_motionless_fantastic_four.sql` plus snapshot/journal with `agent_desired_status`, `agents.desired_status DEFAULT 'stopped'`, `agent_deployment_stage`, owner-bound `agent_deployments`, composite owner FK, idempotency/active/owner/claim indexes, and check constraints; reordered generated SQL only so the referenced agent-owner unique key exists before the FK while leaving generated metadata untouched. Focused Step 3 tests passed 7 files / 72 tests across schema/migration source assertions, state/DTO invariants, real separate-connection idempotency/active-operation/lease/expiry/release/renewal/CAS concurrency, owner-concealed route behavior, request-user boundaries, two-user route isolation, and clean/upgrade disposable loopback migration fixtures through `0015_dear_leader`. Migration gates passed: `bun run db:generate` reported no drift after generation; `bun run db:migrate` passed and reran idempotently on local loopback Postgres. Full gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 103 files / 905 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `git diff --check`. | Complete; Step 4 is next. |
 | 4. Add Managed Creation Configuration and Encrypted Credentials | Complete | Steps 0-3 | This commit | Generated `drizzle/0017_ambitious_tyrannus.sql` plus snapshot/journal with three nullable Telegram secret metadata columns, metadata checks, and two active-Telegram partial unique indexes. Clean disposable loopback migration passed; upgrade `bun run db:migrate` passed and reran idempotently; `bun run db:generate` reported no schema drift. Focused Step 4 tests passed 8 files / 78 tests across model catalog, Telegram client, create validation/route, ready-create DB transaction/replay/rollback/runner-precheck, secret uniqueness/backfill, schema, and flag parsing. Full gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 106 files / 927 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; credential-free `bun run verify:hermes:staging` exited nonzero with `capability_unavailable` and `sideEffectsAttempted: false`; `git diff --check`. | Complete; Step 5 is next. |
 | 5. Project a Complete Managed Hermes Configuration | Complete and independently accepted after cycle 3 | Steps 0-4 | `fe13ab9`, `d50cc4e`, `4f8312d` | Added exact launch-spec v3 parsing/redaction/serialization with strict key and secret validation; owner-scoped newest-deployment launch building with required active OpenRouter, Telegram, allowlist, and API-server secrets; strict YAML 1.2 managed projection with no-follow/path-escape defenses, marker-last atomic writes, `0600` env handling, v2/manual compatibility, fresh managed setup bypass, and local fake Telegram/model contract smoke coverage. Cycle 2 rejects explicit/custom YAML tags and anchors, secret-like null/map/array/boolean/number values, non-exact env references such as shell defaults, malformed multiline env constructs, all four hard-linked/nonregular projected targets, broken active secret metadata, restored-agent auto-managed conversion, and Docker inspect Telegram allowlist leaks without false positives from unrelated `=1` env. Cycle 3 preserves safe YAML scalar punctuation while rejecting real YAML tags, anchors, aliases, and merge keys; the injected filesystem transaction seam covers temp collision/symlink handling, UID/GID ownership calls, write/chmod/chown/fsync/rename failures, marker-last repair, temp cleanup, exact modes, no workspace deletion, and nonregular FIFO/socket projected targets. Independent acceptance passed 17 files / 102 focused tests; `bun run agent:hermes:contract-smoke` passed with local fake model, private API auth, state persistence, backup/restore, no public Hermes port, cleanup, and `telegramBoundary: "local-fake-platform-state"`. Full gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 107 files / 961 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; credential-free `bun run verify:hermes:staging` exited nonzero with `capability_unavailable` and `sideEffectsAttempted: false`; `git diff --check`. | Complete; Step 6 is active. |
-| 6. Split Runner Launch Acceptance From Observed Readiness | Not started | Steps 0-5 | Not collected | Not collected | Requires managed launch spec and projection. |
+| 6. Split Runner Launch Acceptance From Observed Readiness | Complete | Steps 0-5 | This commit | Added strict runner launch/status/canary contracts; one request-scoped 30-second launch budget across lock, projection, and Docker barriers; cancellation-safe token cleanup; deterministic exact reuse/replacement; bounded no-follow private health/canary seams; and stopped/cancelled snapshots. Manual-runner compatibility distinguishes new `202` accepted from legacy `200` ready, while lifecycle and action DTOs preserve operation/snapshot evidence, remain `starting`/`restarting`, avoid premature completion/usage, and use compare-and-set guards so stop/delete wins stale results. Combined focused coverage passed 11 files / 216 tests across runner contracts/service, adapter, lifecycle, routes, isolation, and local-smoke guards; runtime Step 5/6 compatibility coverage passed 4 files / 60 tests; `bun run test` passed 108 files / 995 tests. `bun run agent:hermes:contract-smoke` passed in 40,558 ms with duplicate and restart reuse, accepted/starting/ready progression, matching revision evidence, fixed local canary, private API auth, no public port, state backup/restore, safe stop/cleanup, root removal, and `telegramBoundary: "local-fake-platform-state"`. Full gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run build`; `bun run test:e2e:ci` passed 14 tests; credential-free `bun run verify:hermes:staging` exited nonzero with `capability_unavailable` and `sideEffectsAttempted: false`; `git diff --check`. | Complete; independent checker review is next, then Step 7. |
 | 7. Reconcile Creation Through Ready | Not started | Steps 0-6 | Not collected | Not collected | Requires durable deployment records and runner acceptance. |
 | 8. Add One-Click Creation and Persisted Progress UI | Not started | Steps 0-7 | Not collected | Not collected | Requires reconciler and readiness snapshot. |
 | 9. Make Desired-Running Gateways Durable | Not started | Steps 0-8 | Not collected | Not collected | Requires verified ready/failed state handling. |
@@ -504,5 +501,5 @@ acceptance from observed readiness.
 
 ### Current Blockers and Next Work
 
-- No blocker remains for Step 5; cycle 3 is independently accepted at `4f8312d`.
-- Step 6 should split runner launch acceptance from observed readiness.
+- No blocker remains for Step 6; checker review is next.
+- Step 7 should reconcile accepted deployments through verified ready or failed states.

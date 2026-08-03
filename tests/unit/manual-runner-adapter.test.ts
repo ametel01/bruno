@@ -112,6 +112,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
 
     await expect(adapter.start(created.agent.id, launchSpec)).resolves.toMatchObject({
       ok: true,
+      state: "ready",
       container: { id: "manual-container-001", status: "running" },
     });
     await expect(adapter.streamLogs({ agentId: created.agent.id })).resolves.toMatchObject({
@@ -136,6 +137,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
     });
     await expect(adapter.restart(created.agent.id, launchSpec)).resolves.toMatchObject({
       ok: true,
+      state: "ready",
       container: { id: "manual-container-001", status: "running" },
     });
 
@@ -195,6 +197,192 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
     expect(JSON.stringify(persistedLogs)).not.toContain("contract-token");
     expect(JSON.stringify(persistedLogs)).not.toContain("sk-or-v1-contract");
     expect(JSON.stringify(persistedLogs)).not.toContain("123456:abcdefghijklmnopqrstuvwxyz");
+  });
+
+  it("maps 202 launch acceptance responses without requiring a legacy running container", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Manual Accepted Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const runner = await createAssignedRunner(created.agent.id, "http://127.0.0.1:9080");
+    const launchSpec = sampleLaunchSpec({
+      agent: { ...sampleLaunchSpec().agent, id: created.agent.id },
+    });
+    const operationId = "11111111-1111-4111-8111-111111111111";
+    const acceptedAt = "2026-08-03T04:30:00.000Z";
+    const target = {
+      image: launchSpec.image.ref,
+      launchSpecVersion: launchSpec.version,
+      configRevision: launchSpec.agent.configRevision,
+    };
+    const adapter = new ManualRunnerAdapter(runner, {
+      createConnection: () => connection,
+      env: { [RUNNER_BEARER_TOKEN_ENV]: "contract-token" },
+      fetch: async () =>
+        Response.json(
+          {
+            ok: true,
+            contractVersion: "agentbay.runner.launch.v2",
+            agentId: created.agent.id,
+            action: "start",
+            operation: {
+              id: operationId,
+              state: "accepted",
+              disposition: "created",
+              target,
+              acceptedAt,
+            },
+            snapshot: {
+              phase: "accepted",
+              operation: {
+                id: operationId,
+                action: "start",
+                target,
+                acceptedAt,
+              },
+              container: {
+                id: "manual-container-accepted",
+                name: "agentbay-runner",
+                image: launchSpec.image.ref,
+                state: "running",
+                startedAt: acceptedAt,
+                finishedAt: null,
+                observedAt: acceptedAt,
+              },
+              revision: {
+                state: "match",
+                requested: launchSpec.agent.configRevision,
+                containerLabel: launchSpec.agent.configRevision,
+                projectionMarker: launchSpec.agent.configRevision,
+                observedAt: acceptedAt,
+              },
+              gateway: { state: "unknown", observedAt: null },
+              apiServer: { required: true, state: "unknown", observedAt: null },
+              telegram: { required: true, state: "unknown", observedAt: null },
+              readinessReason: "launch_accepted",
+              observedAt: acceptedAt,
+            },
+          },
+          { status: 202 },
+        ),
+      timeoutMs: 250,
+    });
+
+    await expect(adapter.start(created.agent.id, launchSpec)).resolves.toMatchObject({
+      ok: true,
+      state: "accepted",
+      operation: { id: operationId, target },
+      snapshot: {
+        phase: "accepted",
+        readinessReason: "launch_accepted",
+        container: { id: "manual-container-accepted" },
+      },
+    });
+  });
+
+  it.each([
+    {
+      name: "a 200 accepted response",
+      status: 200,
+      response: acceptedLaunchResponse("00000000-0000-4000-8000-000000000123", "start"),
+    },
+    {
+      name: "a 202 legacy-ready response",
+      status: 202,
+      response: {
+        ok: true,
+        agentId: "00000000-0000-4000-8000-000000000123",
+        action: "start",
+        container: { id: "legacy-container", status: "running" },
+      },
+    },
+    {
+      name: "an accepted response for another action",
+      status: 202,
+      response: acceptedLaunchResponse("00000000-0000-4000-8000-000000000123", "restart"),
+    },
+    {
+      name: "an accepted response for another agent",
+      status: 202,
+      response: acceptedLaunchResponse("00000000-0000-4000-8000-000000000999", "start"),
+    },
+    {
+      name: "inconsistent operation evidence",
+      status: 202,
+      response: {
+        ...acceptedLaunchResponse("00000000-0000-4000-8000-000000000123", "start"),
+        snapshot: {
+          ...acceptedLaunchResponse("00000000-0000-4000-8000-000000000123", "start").snapshot,
+          operation: {
+            ...acceptedLaunchResponse("00000000-0000-4000-8000-000000000123", "start").snapshot
+              .operation,
+            id: "22222222-2222-4222-8222-222222222222",
+          },
+        },
+      },
+    },
+    {
+      name: "ready platform evidence disguised as acceptance",
+      status: 202,
+      response: {
+        ...acceptedLaunchResponse("00000000-0000-4000-8000-000000000123", "start"),
+        snapshot: {
+          ...acceptedLaunchResponse("00000000-0000-4000-8000-000000000123", "start").snapshot,
+          gateway: { state: "running", observedAt: "2026-08-03T04:30:00.000Z" },
+        },
+      },
+    },
+  ])("rejects $name", async ({ response, status }) => {
+    const adapter = new ManualRunnerAdapter(manualRunner("https://runner.example.com"), {
+      env: { [RUNNER_BEARER_TOKEN_ENV]: "contract-token" },
+      fetch: async () => Response.json(response, { status }),
+      timeoutMs: 250,
+    });
+
+    await expect(adapter.start("00000000-0000-4000-8000-000000000123")).resolves.toEqual({
+      ok: false,
+      reason: "runner_response_invalid",
+    });
+  });
+
+  it("rejects accepted target evidence that differs from the requested launch spec", async () => {
+    const agentId = "00000000-0000-4000-8000-000000000123";
+    const launchSpec = sampleLaunchSpec({
+      agent: { ...sampleLaunchSpec().agent, id: agentId },
+    });
+    const adapter = new ManualRunnerAdapter(manualRunner("https://runner.example.com"), {
+      env: { [RUNNER_BEARER_TOKEN_ENV]: "contract-token" },
+      fetch: async () => Response.json(acceptedLaunchResponse(agentId, "start"), { status: 202 }),
+      timeoutMs: 250,
+    });
+
+    await expect(adapter.start(agentId, launchSpec)).resolves.toEqual({
+      ok: false,
+      reason: "runner_response_invalid",
+    });
+  });
+
+  it("returns only a strict typed status snapshot", async () => {
+    const agentId = "00000000-0000-4000-8000-000000000123";
+    const accepted = acceptedLaunchResponse(agentId, "start");
+    const adapter = new ManualRunnerAdapter(manualRunner("https://runner.example.com"), {
+      env: { [RUNNER_BEARER_TOKEN_ENV]: "contract-token" },
+      fetch: async () =>
+        Response.json({
+          ok: true,
+          contractVersion: "agentbay.runner.status.v2",
+          agentId,
+          action: "status",
+          snapshot: accepted.snapshot,
+        }),
+      timeoutMs: 250,
+    });
+
+    await expect(adapter.status(agentId)).resolves.toEqual({
+      ok: true,
+      runner: manualRunner("https://runner.example.com"),
+      snapshot: accepted.snapshot,
+    });
   });
 
   it("requires HTTPS for non-loopback endpoints and fails safely without sending a request", async () => {
@@ -265,6 +453,35 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
       }),
     );
     expect(JSON.stringify(info.mock.calls)).not.toContain("contract-token");
+    info.mockRestore();
+  });
+
+  it("allowlists thrown error names and never logs hostile transport details", async () => {
+    const hostile = "filesystem /private/agent OPENROUTER_API_KEY=sk-hostile";
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const adapter = new ManualRunnerAdapter(manualRunner("https://runner.example.com"), {
+      env: { [RUNNER_BEARER_TOKEN_ENV]: "contract-token" },
+      fetch: async () => {
+        const error = new Error(hostile);
+        error.name = hostile;
+        throw error;
+      },
+      timeoutMs: 250,
+    });
+
+    await expect(adapter.start("00000000-0000-4000-8000-000000000123")).resolves.toEqual({
+      ok: false,
+      reason: "runner_request_failed",
+    });
+    expect(info).toHaveBeenCalledWith(
+      "[agentbay] manual_runner.request",
+      expect.objectContaining({
+        event: "request_error",
+        errorName: "Error",
+        timedOut: false,
+      }),
+    );
+    expect(JSON.stringify(info.mock.calls)).not.toContain(hostile);
     info.mockRestore();
   });
 
@@ -378,6 +595,55 @@ function manualRunner(endpointUrl: string): ManualRunnerRecord {
     createdAt: "2026-07-05T04:00:00.000Z",
     updatedAt: "2026-07-05T04:00:00.000Z",
     deletedAt: null,
+  };
+}
+
+function acceptedLaunchResponse(agentId: string, action: "start" | "restart") {
+  const acceptedAt = "2026-08-03T04:30:00.000Z";
+  const operationId = "11111111-1111-4111-8111-111111111111";
+  const target = {
+    image: "nousresearch/hermes-agent:test@sha256:abc",
+    launchSpecVersion: "agentbay.hermes.launch.v3",
+    configRevision: "cfg-accepted",
+  };
+
+  return {
+    ok: true,
+    contractVersion: "agentbay.runner.launch.v2",
+    agentId,
+    action,
+    operation: {
+      id: operationId,
+      state: "accepted",
+      disposition: "created",
+      target,
+      acceptedAt,
+    },
+    snapshot: {
+      phase: "accepted",
+      operation: { id: operationId, action, target, acceptedAt },
+      container: {
+        id: "manual-container-accepted",
+        name: "agentbay-runner",
+        image: target.image,
+        state: "running",
+        startedAt: acceptedAt,
+        finishedAt: null,
+        observedAt: acceptedAt,
+      },
+      revision: {
+        state: "match",
+        requested: target.configRevision,
+        containerLabel: target.configRevision,
+        projectionMarker: target.configRevision,
+        observedAt: acceptedAt,
+      },
+      gateway: { state: "unknown", observedAt: null },
+      apiServer: { required: true, state: "unknown", observedAt: null },
+      telegram: { required: true, state: "unknown", observedAt: null },
+      readinessReason: "launch_accepted",
+      observedAt: acceptedAt,
+    },
   };
 }
 

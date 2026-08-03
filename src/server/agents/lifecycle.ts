@@ -1,4 +1,4 @@
-import { and, desc, eq, exists, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, exists, gte, inArray, isNull, lt } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import {
@@ -59,6 +59,10 @@ import {
   type ManualRunnerStatusResult,
   type ManualRunnerStopResult,
 } from "@/src/server/runners/manual-runner-adapter";
+import type {
+  RunnerAgentStatusSnapshot,
+  RunnerOperation,
+} from "@/src/runner-service/runner-contracts";
 import {
   ACTIVE_RUNNER_STATUS,
   MANUAL_RUNNER_KIND,
@@ -75,7 +79,7 @@ import { reconcileStaleRunnerHeartbeatsInTransaction } from "@/src/server/runner
 export type AgentLifecycleStatus = (typeof agentStatusEnum.enumValues)[number];
 
 export const STARTABLE_AGENT_STATUSES = ["idle", "stopped", "error"] as const;
-export const STOPPABLE_AGENT_STATUSES = ["running"] as const;
+export const STOPPABLE_AGENT_STATUSES = ["starting", "running", "restarting"] as const;
 export const RESTARTABLE_AGENT_STATUSES = ["running"] as const;
 export const SIMULATE_ERROR_AGENT_STATUSES = [
   "idle",
@@ -84,7 +88,14 @@ export const SIMULATE_ERROR_AGENT_STATUSES = [
   "running",
   "restarting",
 ] as const;
-export const DELETABLE_AGENT_STATUSES = ["idle", "running", "stopped", "error"] as const;
+export const DELETABLE_AGENT_STATUSES = [
+  "idle",
+  "starting",
+  "running",
+  "restarting",
+  "stopped",
+  "error",
+] as const;
 const ASSIGNABLE_LIFECYCLE_RUNNER_KINDS = [MANUAL_RUNNER_KIND, DIGITALOCEAN_RUNNER_KIND] as const;
 const ASSIGNABLE_LIFECYCLE_RUNNER_STATUSES = [ACTIVE_RUNNER_STATUS, "online"] as const;
 export const START_REQUESTED_EVENT_TYPE = "agent.start_requested";
@@ -208,18 +219,23 @@ export type DockerRunnerReconciliationDependencies = {
 export type StartAgentResult =
   | {
       ok: true;
+      state: "ready";
       agent: StartedAgent;
       event: {
         type: typeof START_REQUESTED_EVENT_TYPE;
       };
-      events: [
-        {
-          type: typeof START_REQUESTED_EVENT_TYPE;
-        },
-        {
-          type: typeof START_COMPLETED_EVENT_TYPE;
-        },
-      ];
+      events: Array<
+        { type: typeof START_REQUESTED_EVENT_TYPE } | { type: typeof START_COMPLETED_EVENT_TYPE }
+      >;
+    }
+  | {
+      ok: true;
+      state: "accepted";
+      agent: StartedAgent;
+      event: { type: typeof START_REQUESTED_EVENT_TYPE };
+      events: [{ type: typeof START_REQUESTED_EVENT_TYPE }];
+      operation: RunnerOperation;
+      snapshot: RunnerAgentStatusSnapshot;
     }
   | {
       ok: false;
@@ -244,7 +260,7 @@ export type StartedAgent = {
   userId: string;
   name: string;
   templateKey: string;
-  status: "running";
+  status: "starting" | "running";
   statusReason: string;
   createdAt: string;
   updatedAt: string;
@@ -290,18 +306,24 @@ export type StoppedAgent = {
 export type RestartAgentResult =
   | {
       ok: true;
+      state: "ready";
       agent: RestartedAgent;
       event: {
         type: typeof RESTART_REQUESTED_EVENT_TYPE;
       };
-      events: [
-        {
-          type: typeof RESTART_REQUESTED_EVENT_TYPE;
-        },
-        {
-          type: typeof RESTART_COMPLETED_EVENT_TYPE;
-        },
-      ];
+      events: Array<
+        | { type: typeof RESTART_REQUESTED_EVENT_TYPE }
+        | { type: typeof RESTART_COMPLETED_EVENT_TYPE }
+      >;
+    }
+  | {
+      ok: true;
+      state: "accepted";
+      agent: RestartedAgent;
+      event: { type: typeof RESTART_REQUESTED_EVENT_TYPE };
+      events: [{ type: typeof RESTART_REQUESTED_EVENT_TYPE }];
+      operation: RunnerOperation;
+      snapshot: RunnerAgentStatusSnapshot;
     }
   | {
       ok: false;
@@ -321,7 +343,7 @@ export type RestartedAgent = {
   userId: string;
   name: string;
   templateKey: string;
-  status: "running";
+  status: "restarting" | "running";
   statusReason: string;
   createdAt: string;
   updatedAt: string;
@@ -680,6 +702,7 @@ async function restoreAgentStartReservation(input: {
   previousStatus: AgentLifecycleStatus;
   previousStatusReason: string | null;
   now: Date;
+  expectedUpdatedAt: Date;
 }): Promise<void> {
   await input.connection.db
     .update(agents)
@@ -693,6 +716,7 @@ async function restoreAgentStartReservation(input: {
         eq(agents.id, input.agentId),
         eq(agents.userId, input.userId),
         eq(agents.status, "starting"),
+        agentUpdatedAtMatches(input.expectedUpdatedAt),
       ),
     );
 }
@@ -702,6 +726,8 @@ async function markAgentStartFinalizationCleanupFailed(input: {
   userId: string;
   connection: DatabaseConnection;
   now: Date;
+  expectedStatus: AgentLifecycleStatus;
+  expectedUpdatedAt: Date;
 }): Promise<void> {
   await input.connection.db
     .update(agents)
@@ -711,7 +737,38 @@ async function markAgentStartFinalizationCleanupFailed(input: {
       updatedAt: input.now,
     })
     .where(
-      and(eq(agents.id, input.agentId), eq(agents.userId, input.userId), isNull(agents.deletedAt)),
+      and(
+        eq(agents.id, input.agentId),
+        eq(agents.userId, input.userId),
+        eq(agents.status, input.expectedStatus),
+        agentUpdatedAtMatches(input.expectedUpdatedAt),
+        isNull(agents.deletedAt),
+      ),
+    );
+}
+
+async function restoreAgentRestartReservation(input: {
+  agentId: string;
+  userId: string;
+  connection: DatabaseConnection;
+  previousStatusReason: string | null;
+  expectedUpdatedAt: Date;
+}): Promise<void> {
+  await input.connection.db
+    .update(agents)
+    .set({
+      status: "running",
+      statusReason: input.previousStatusReason,
+      updatedAt: input.expectedUpdatedAt,
+    })
+    .where(
+      and(
+        eq(agents.id, input.agentId),
+        eq(agents.userId, input.userId),
+        eq(agents.status, "restarting"),
+        agentUpdatedAtMatches(input.expectedUpdatedAt),
+        isNull(agents.deletedAt),
+      ),
     );
 }
 
@@ -1085,6 +1142,7 @@ export async function startAgentForUser(
             previousStatus: validation.agent.status,
             previousStatusReason: validation.agent.statusReason,
             now,
+            expectedUpdatedAt: now,
           });
         }
 
@@ -1101,6 +1159,8 @@ export async function startAgentForUser(
           userId,
           connection,
           now,
+          expectedStatus: reservation.reserved ? "starting" : validation.agent.status,
+          expectedUpdatedAt: reservation.reserved ? now : validation.agent.updatedAt,
           ...(runnerStart.readinessReason ? { readinessReason: runnerStart.readinessReason } : {}),
         });
 
@@ -1122,6 +1182,7 @@ export async function startAgentForUser(
           previousStatus: validation.agent.status,
           previousStatusReason: validation.agent.statusReason,
           now,
+          expectedUpdatedAt: now,
         });
       }
 
@@ -1144,11 +1205,14 @@ export async function startAgentForUser(
 
     try {
       return await connection.db.transaction(async (tx) => {
+        const accepted = isAcceptedRunnerSuccess(runnerStart);
+        const targetStatus = accepted ? "starting" : "running";
+        const statusReason = accepted ? "Start accepted by runner." : RUNNING_STATUS_REASON;
         const [startedAgent] = await tx
           .update(agents)
           .set({
-            status: "running",
-            statusReason: RUNNING_STATUS_REASON,
+            status: targetStatus,
+            statusReason,
             updatedAt: now,
           })
           .where(
@@ -1160,6 +1224,7 @@ export async function startAgentForUser(
                 agents.status,
                 reservation.reserved ? ["starting"] : [...STARTABLE_AGENT_STATUSES],
               ),
+              agentUpdatedAtMatches(reservation.reserved ? now : validation.agent.updatedAt),
             ),
           )
           .returning();
@@ -1168,16 +1233,18 @@ export async function startAgentForUser(
           throw new Error("Agent start update returned no rows.");
         }
 
-        await tx.insert(agentUsagePeriods).values({
-          agentId: startedAgent.id,
-          runnerId: startedAgent.runnerId,
-          source: "lifecycle",
-          startedAt: now,
-          createdAt: now,
-          updatedAt: now,
-        });
+        if (!accepted) {
+          await tx.insert(agentUsagePeriods).values({
+            agentId: startedAgent.id,
+            runnerId: startedAgent.runnerId,
+            source: "lifecycle",
+            startedAt: now,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
 
-        await recordAgentEventsInTransaction(tx, [
+        const eventsToRecord = [
           {
             agentId: startedAgent.id,
             actorUserId: userId,
@@ -1185,11 +1252,14 @@ export async function startAgentForUser(
             message: `Start requested for agent "${startedAgent.name}".`,
             metadata: {
               fromStatus: validation.agent.status,
-              toStatus: "running",
+              toStatus: targetStatus,
               ...runnerLifecycleEventMetadata(runnerStart),
             },
           },
-          {
+        ];
+
+        if (!accepted) {
+          eventsToRecord.push({
             agentId: startedAgent.id,
             actorUserId: userId,
             type: START_COMPLETED_EVENT_TYPE,
@@ -1199,30 +1269,38 @@ export async function startAgentForUser(
               toStatus: "running",
               ...runnerLifecycleEventMetadata(runnerStart),
             },
-          },
-        ]);
+          });
+        }
 
-        logAgentStart("start_completed", {
+        await recordAgentEventsInTransaction(tx, eventsToRecord);
+
+        logAgentStart(accepted ? "start_accepted" : "start_completed", {
           agentId: normalizedAgentId,
           fromStatus: validation.agent.status,
-          toStatus: "running",
+          toStatus: targetStatus,
           ...runnerLifecycleEventMetadata(runnerStart),
         });
 
+        const agent = toStartedAgent(startedAgent);
+
+        if (accepted) {
+          return {
+            ok: true,
+            state: "accepted",
+            agent,
+            event: { type: START_REQUESTED_EVENT_TYPE },
+            events: [{ type: START_REQUESTED_EVENT_TYPE }],
+            operation: runnerStart.operation,
+            snapshot: runnerStart.snapshot,
+          };
+        }
+
         return {
           ok: true,
-          agent: toStartedAgent(startedAgent),
-          event: {
-            type: START_REQUESTED_EVENT_TYPE,
-          },
-          events: [
-            {
-              type: START_REQUESTED_EVENT_TYPE,
-            },
-            {
-              type: START_COMPLETED_EVENT_TYPE,
-            },
-          ],
+          state: "ready",
+          agent,
+          event: { type: START_REQUESTED_EVENT_TYPE },
+          events: [{ type: START_REQUESTED_EVENT_TYPE }, { type: START_COMPLETED_EVENT_TYPE }],
         };
       });
     } catch (error) {
@@ -1237,6 +1315,7 @@ export async function startAgentForUser(
             previousStatus: validation.agent.status,
             previousStatusReason: validation.agent.statusReason,
             now,
+            expectedUpdatedAt: now,
           });
         }
       } else {
@@ -1245,6 +1324,8 @@ export async function startAgentForUser(
           userId,
           connection,
           now,
+          expectedStatus: reservation.reserved ? "starting" : validation.agent.status,
+          expectedUpdatedAt: reservation.reserved ? now : validation.agent.updatedAt,
         }).catch(() => undefined);
       }
 
@@ -1505,10 +1586,16 @@ export async function restartAgentForUser(
         } as const;
       }
 
-      const setupBlocker =
-        currentAgent.runner?.kind === DIGITALOCEAN_RUNNER_KIND
-          ? await readHermesConfigurationBlocker(tx, currentAgent.agent.id)
-          : null;
+      const assignedRunnerSnapshot = currentAgent.agent.runnerId
+        ? await readAgentStartRunnerSnapshot(tx, {
+            runnerId: currentAgent.agent.runnerId,
+            userId,
+          })
+        : null;
+      const requiresHermesLaunchSpec = isHermesLifecycleReadyRunnerSnapshot(assignedRunnerSnapshot);
+      const setupBlocker = requiresHermesLaunchSpec
+        ? await readHermesConfigurationBlocker(tx, currentAgent.agent.id)
+        : null;
 
       if (setupBlocker) {
         return {
@@ -1522,11 +1609,34 @@ export async function restartAgentForUser(
         ok: true,
         agent: currentAgent.agent,
         assignedRunner: toManualRunnerRecordOrNull(currentAgent.runner),
+        requiresHermesLaunchSpec,
       } as const;
     });
 
     if (!validation.ok) {
       return validation;
+    }
+
+    const [restartReservation] = await connection.db
+      .update(agents)
+      .set({
+        status: "restarting",
+        statusReason: "Restart requested.",
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(agents.id, normalizedAgentId),
+          eq(agents.userId, userId),
+          eq(agents.status, "running"),
+          agentUpdatedAtMatches(validation.agent.updatedAt),
+          isNull(agents.deletedAt),
+        ),
+      )
+      .returning({ id: agents.id });
+
+    if (!restartReservation) {
+      return { ok: false, reason: "invalid_status", status: "restarting" } as const;
     }
 
     const runnerAdapter = selectLifecycleRunnerAdapter(validation.assignedRunner, {
@@ -1548,6 +1658,13 @@ export async function restartAgentForUser(
         : ({ ok: true, spec: null } as const);
 
     if (!launchSpec.ok) {
+      await restoreAgentRestartReservation({
+        agentId: normalizedAgentId,
+        userId,
+        connection,
+        previousStatusReason: validation.agent.statusReason,
+        expectedUpdatedAt: now,
+      });
       return {
         ok: false,
         reason: "hermes_setup_incomplete",
@@ -1559,6 +1676,13 @@ export async function restartAgentForUser(
 
     if (!runnerRestart.ok) {
       if (isHermesSetupRunnerFailure(runnerRestart)) {
+        await restoreAgentRestartReservation({
+          agentId: normalizedAgentId,
+          userId,
+          connection,
+          previousStatusReason: validation.agent.statusReason,
+          expectedUpdatedAt: now,
+        });
         return {
           ok: false,
           reason: "hermes_setup_incomplete",
@@ -1572,6 +1696,8 @@ export async function restartAgentForUser(
           userId,
           connection,
           now,
+          expectedStatus: "restarting",
+          expectedUpdatedAt: now,
           ...(runnerRestart.readinessReason
             ? { readinessReason: runnerRestart.readinessReason }
             : {}),
@@ -1593,9 +1719,18 @@ export async function restartAgentForUser(
               eq(agents.id, normalizedAgentId),
               eq(agents.userId, userId),
               isNull(agents.deletedAt),
-              inArray(agents.status, [...RESTARTABLE_AGENT_STATUSES]),
+              eq(agents.status, "restarting"),
+              agentUpdatedAtMatches(now),
             ),
           );
+      } else {
+        await restoreAgentRestartReservation({
+          agentId: normalizedAgentId,
+          userId,
+          connection,
+          previousStatusReason: validation.agent.statusReason,
+          expectedUpdatedAt: now,
+        });
       }
 
       return { ok: false, reason: "runner_restart_failed" } as const;
@@ -1604,11 +1739,14 @@ export async function restartAgentForUser(
     await captureLifecycleRunnerLogs(runnerAdapter, normalizedAgentId);
 
     return await connection.db.transaction(async (tx) => {
+      const accepted = isAcceptedRunnerSuccess(runnerRestart);
+      const targetStatus = accepted ? "restarting" : "running";
+      const statusReason = accepted ? "Restart accepted by runner." : RUNNING_STATUS_REASON;
       const [restartedAgent] = await tx
         .update(agents)
         .set({
-          status: "running",
-          statusReason: RUNNING_STATUS_REASON,
+          status: targetStatus,
+          statusReason,
           updatedAt: now,
         })
         .where(
@@ -1616,7 +1754,8 @@ export async function restartAgentForUser(
             eq(agents.id, normalizedAgentId),
             eq(agents.userId, userId),
             isNull(agents.deletedAt),
-            inArray(agents.status, [...RESTARTABLE_AGENT_STATUSES]),
+            eq(agents.status, "restarting"),
+            agentUpdatedAtMatches(now),
           ),
         )
         .returning();
@@ -1626,7 +1765,7 @@ export async function restartAgentForUser(
         throw new Error("Agent restart update returned no rows.");
       }
 
-      await recordAgentEventsInTransaction(tx, [
+      const eventsToRecord = [
         {
           agentId: restartedAgent.id,
           actorUserId: userId,
@@ -1634,11 +1773,14 @@ export async function restartAgentForUser(
           message: `Restart requested for agent "${restartedAgent.name}".`,
           metadata: {
             fromStatus: validation.agent.status,
-            toStatus: "running",
+            toStatus: targetStatus,
             ...runnerLifecycleEventMetadata(runnerRestart),
           },
         },
-        {
+      ];
+
+      if (!accepted) {
+        eventsToRecord.push({
           agentId: restartedAgent.id,
           actorUserId: userId,
           type: RESTART_COMPLETED_EVENT_TYPE,
@@ -1648,23 +1790,31 @@ export async function restartAgentForUser(
             toStatus: "running",
             ...runnerLifecycleEventMetadata(runnerRestart),
           },
-        },
-      ]);
+        });
+      }
+
+      await recordAgentEventsInTransaction(tx, eventsToRecord);
+
+      const agent = toRestartedAgent(restartedAgent);
+
+      if (accepted) {
+        return {
+          ok: true,
+          state: "accepted",
+          agent,
+          event: { type: RESTART_REQUESTED_EVENT_TYPE },
+          events: [{ type: RESTART_REQUESTED_EVENT_TYPE }],
+          operation: runnerRestart.operation,
+          snapshot: runnerRestart.snapshot,
+        };
+      }
 
       return {
         ok: true,
-        agent: toRestartedAgent(restartedAgent),
-        event: {
-          type: RESTART_REQUESTED_EVENT_TYPE,
-        },
-        events: [
-          {
-            type: RESTART_REQUESTED_EVENT_TYPE,
-          },
-          {
-            type: RESTART_COMPLETED_EVENT_TYPE,
-          },
-        ],
+        state: "ready",
+        agent,
+        event: { type: RESTART_REQUESTED_EVENT_TYPE },
+        events: [{ type: RESTART_REQUESTED_EVENT_TYPE }, { type: RESTART_COMPLETED_EVENT_TYPE }],
       };
     });
   } catch {
@@ -2234,6 +2384,12 @@ export async function deleteAgentForUser(
     }
 
     return await connection.db.transaction(async (tx) => {
+      await closeLatestOpenAgentUsagePeriodInTransaction(tx, {
+        agentId: normalizedAgentId,
+        userId,
+        stoppedAt: now,
+      });
+
       const [deletedAgent] = await tx
         .update(agents)
         .set({
@@ -2374,11 +2530,29 @@ function isHermesSetupRunnerFailure(
   return !result.ok && "reason" in result && result.reason === "hermes_setup_incomplete";
 }
 
+function isAcceptedRunnerSuccess(
+  result: LifecycleRunnerStartResult | LifecycleRunnerRestartResult,
+): result is Extract<
+  ManualRunnerStartResult | ManualRunnerRestartResult,
+  { ok: true; state: "accepted" }
+> {
+  return result.ok && "state" in result && result.state === "accepted";
+}
+
+function agentUpdatedAtMatches(expected: Date) {
+  return and(
+    gte(agents.updatedAt, expected),
+    lt(agents.updatedAt, new Date(expected.getTime() + 1)),
+  );
+}
+
 async function recordHermesReadinessFailure(input: {
   agentId: string;
   userId: string;
   connection: DatabaseConnection;
   now: Date;
+  expectedStatus: AgentLifecycleStatus;
+  expectedUpdatedAt: Date;
   readinessReason?: HermesReadinessReason;
 }): Promise<void> {
   await input.connection.db.transaction(async (tx) => {
@@ -2394,12 +2568,14 @@ async function recordHermesReadinessFailure(input: {
           eq(agents.id, input.agentId),
           eq(agents.userId, input.userId),
           isNull(agents.deletedAt),
+          eq(agents.status, input.expectedStatus),
+          agentUpdatedAtMatches(input.expectedUpdatedAt),
         ),
       )
       .returning();
 
     if (!agent) {
-      throw new Error("Hermes readiness failure update returned no rows.");
+      return;
     }
 
     await recordAgentEventInTransaction(tx, {
@@ -2498,8 +2674,10 @@ function toStartedAgent(agent: typeof agents.$inferSelect): StartedAgent {
     userId: agent.userId,
     name: agent.name,
     templateKey: agent.templateKey,
-    status: "running",
-    statusReason: RUNNING_STATUS_REASON,
+    status: agent.status === "starting" ? "starting" : "running",
+    statusReason:
+      agent.statusReason ??
+      (agent.status === "starting" ? "Start accepted by runner." : RUNNING_STATUS_REASON),
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
     deletedAt: null,
@@ -2526,8 +2704,10 @@ function toRestartedAgent(agent: typeof agents.$inferSelect): RestartedAgent {
     userId: agent.userId,
     name: agent.name,
     templateKey: agent.templateKey,
-    status: "running",
-    statusReason: RUNNING_STATUS_REASON,
+    status: agent.status === "restarting" ? "restarting" : "running",
+    statusReason:
+      agent.statusReason ??
+      (agent.status === "restarting" ? "Restart accepted by runner." : RUNNING_STATUS_REASON),
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
     deletedAt: null,

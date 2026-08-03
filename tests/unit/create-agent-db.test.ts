@@ -5038,7 +5038,7 @@ describe("create agent persistence", () => {
     }
   });
 
-  it("rejects transitional deletes without fake-settling them first", async () => {
+  it("deletes transitional agents without fake-settling them first", async () => {
     const [createdUser] = await connection.db
       .insert(users)
       .values({})
@@ -5094,16 +5094,15 @@ describe("create agent persistence", () => {
       .from(agentEvents)
       .orderBy(agentEvents.type);
 
-    expect(result).toEqual({
-      ok: false,
-      reason: "invalid_status",
-      status: "starting",
+    expect(result).toMatchObject({
+      ok: true,
+      agent: { id: startingAgent?.id, status: "starting", deletedAt: now.toISOString() },
     });
     expect(persistedStartingAgent).toMatchObject({
       status: "starting",
       statusReason: "Start requested.",
-      updatedAt: dueAt,
-      deletedAt: null,
+      updatedAt: now,
+      deletedAt: now,
     });
     expect(persistedRestartingAgent).toMatchObject({
       status: "restarting",
@@ -5111,10 +5110,12 @@ describe("create agent persistence", () => {
       updatedAt: dueAt,
       deletedAt: null,
     });
-    expect(persistedEvents).toHaveLength(0);
+    expect(persistedEvents).toEqual([
+      expect.objectContaining({ agentId: startingAgent?.id, type: DELETE_EVENT_TYPE }),
+    ]);
   });
 
-  it("rejects malformed, missing, absent, soft-deleted, transitioning, and deleting deletes without mutation or delete events", async () => {
+  it("rejects malformed, missing, absent, soft-deleted, and deleting deletes without mutation or delete events", async () => {
     const [createdUser] = await connection.db
       .insert(users)
       .values({})
@@ -5123,8 +5124,7 @@ describe("create agent persistence", () => {
     expect(createdUser).toBeDefined();
     const userId = createdUser?.userId ?? "";
     const now = new Date("2026-07-03T06:00:00.000Z");
-    const pendingTransitionAt = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS + 1);
-    const invalidStatuses: AgentLifecycleStatus[] = ["starting", "restarting", "deleting"];
+    const invalidStatuses: AgentLifecycleStatus[] = ["deleting"];
     const invalidAgents: { id: string; status: AgentLifecycleStatus }[] = [];
 
     for (const status of invalidStatuses) {
@@ -5137,7 +5137,7 @@ describe("create agent persistence", () => {
           status,
           statusReason: `${status} preserved reason.`,
           createdAt: new Date("2026-07-03T05:00:00.000Z"),
-          updatedAt: status === "deleting" ? now : pendingTransitionAt,
+          updatedAt: now,
         })
         .returning({ id: agents.id, status: agents.status });
 
@@ -5220,13 +5220,13 @@ describe("create agent persistence", () => {
         status: "stopped",
       })
       .returning();
-    const [transitioningAgent] = await connection.db
+    const [deletingAgent] = await connection.db
       .insert(agents)
       .values({
         userId,
-        name: "Transitioning Delete Agent",
+        name: "Deleting Delete Agent",
         templateKey: "research_agent",
-        status: "starting",
+        status: "deleting",
         updatedAt: new Date("2099-07-03T06:00:00.000Z"),
       })
       .returning();
@@ -5242,10 +5242,10 @@ describe("create agent persistence", () => {
       .returning();
 
     expect(stoppedAgent).toBeDefined();
-    expect(transitioningAgent).toBeDefined();
+    expect(deletingAgent).toBeDefined();
     expect(deletedAgent).toBeDefined();
     const stoppedAgentId = stoppedAgent?.id ?? "";
-    const transitioningAgentId = transitioningAgent?.id ?? "";
+    const deletingAgentId = deletingAgent?.id ?? "";
     const deletedAgentId = deletedAgent?.id ?? "";
 
     const { DELETE } = await import("@/app/api/agents/[agentId]/route");
@@ -5291,7 +5291,7 @@ describe("create agent persistence", () => {
       params: Promise.resolve({ agentId: deletedAgentId }),
     });
     const invalidStatusResponse = await DELETE(new Request("http://localhost/api/agents/delete"), {
-      params: Promise.resolve({ agentId: transitioningAgentId }),
+      params: Promise.resolve({ agentId: deletingAgentId }),
     });
 
     expect(missingIdResponse.status).toBe(400);
@@ -5312,7 +5312,7 @@ describe("create agent persistence", () => {
     });
     expect(invalidStatusResponse.status).toBe(409);
     expect(await invalidStatusResponse.json()).toMatchObject({
-      error: { code: "invalid_agent_status", status: "starting" },
+      error: { code: "invalid_agent_status", status: "deleting" },
     });
 
     const eventCount = await countRows(connection, "agent_events");
@@ -5652,7 +5652,7 @@ describe("create agent persistence", () => {
     expect(afterSecondStop).toEqual(afterFirstStop);
   });
 
-  it("rejects transitional stop requests without fake-settling them first", async () => {
+  it("stops transitional agents without fake-settling them first", async () => {
     const [createdUser] = await connection.db
       .insert(users)
       .values({})
@@ -5679,6 +5679,7 @@ describe("create agent persistence", () => {
     const result = await stopAgentForDevelopmentUser(startingAgent?.id ?? "", {
       createConnection: () => connection,
       now: () => now,
+      runnerAdapter: createLifecycleRunnerStub(),
     });
 
     const [persistedAgent] = await connection.db
@@ -5691,17 +5692,19 @@ describe("create agent persistence", () => {
       .from(agentEvents)
       .where(eq(agentEvents.agentId, startingAgent?.id ?? ""));
 
-    expect(result).toEqual({
-      ok: false,
-      reason: "invalid_status",
-      status: "starting",
+    expect(result).toMatchObject({
+      ok: true,
+      agent: { id: startingAgent?.id, status: "stopped" },
     });
     expect(persistedAgent).toMatchObject({
-      status: "starting",
-      statusReason: "Start requested.",
-      updatedAt: dueStartingAt,
+      status: "stopped",
+      statusReason: null,
+      updatedAt: now,
     });
-    expect(persistedEvents).toHaveLength(0);
+    expect(persistedEvents.map((event) => event.type)).toEqual([
+      STOP_REQUESTED_EVENT_TYPE,
+      STOP_COMPLETED_EVENT_TYPE,
+    ]);
   });
 
   it("rejects malformed, missing, absent, soft-deleted, and non-running stops without mutation or events", async () => {
@@ -5714,14 +5717,7 @@ describe("create agent persistence", () => {
     const userId = createdUser?.userId ?? "";
     const now = new Date("2026-07-03T06:00:00.000Z");
     const pendingStartingAt = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS + 1);
-    const invalidStatuses: AgentLifecycleStatus[] = [
-      "idle",
-      "stopped",
-      "starting",
-      "restarting",
-      "error",
-      "deleting",
-    ];
+    const invalidStatuses: AgentLifecycleStatus[] = ["idle", "stopped", "error", "deleting"];
     const invalidAgents: { id: string; status: AgentLifecycleStatus }[] = [];
 
     for (const status of invalidStatuses) {

@@ -3,14 +3,14 @@
 ## Active Work
 
 - plan: `PLAN.md` Step 6 — Split Runner Launch Acceptance From Observed Readiness
-  owner: builder-step-6
+  owner: coordinator
   branch: `main`
   worktree: `/Users/alexmetelli/source/plingpling`
-  phase: ready for implementation
+  phase: integrated and validated; committing for independent checker review
   cycle: 1/5
   contract: `STATUS.archive.md` → `Step 6 Completion Contract (pre-spec)`
   blocker: none; Step 5 is independently accepted through `4f8312d`.
-  next-action: Builder implements the exact Step 6 asynchronous launch-acceptance and truthful observed-status contract, validates it, updates trackers, and commits the prescribed change.
+  next-action: Commit `refactor: make Hermes runner launches asynchronous`, then checker verifies exact HEAD before Step 7 begins.
 
 ## Completion Contract
 
@@ -28,11 +28,11 @@
 
 ## Current Handoff
 
-- from: coordinator
-  to: builder-step-6
+- from: Step 6 runtime/control builders
+  to: coordinator
   timestamp: 2026-08-03
-  request: Implement the archived Step 6 contract only; split bounded launch acceptance from one-shot observed readiness, validate locally, update changelog/progress, and commit `refactor: make Hermes runner launches asynchronous`.
-  evidence: Step 5 commits `fe13ab9`, `d50cc4e`, and `4f8312d`; checker cycle 3 independently green at 17 files / 102 focused tests, 107 files / 961 full tests, build, 14 E2E, local fake-boundary smoke, and fail-closed staging.
+  request: Integrate the completed runtime and control-plane repairs, run combined gates, commit `refactor: make Hermes runner launches asynchronous`, and hand the exact commit to an independent checker.
+  evidence: Combined focused coverage passed 11 files / 216 tests; runtime compatibility coverage passed 4 files / 60 tests; local smoke passed accepted/starting/ready, deterministic reuse, fixed canary, cancellation, persistence, and cleanup; full repository gates passed 108 files / 995 tests, build, 14 E2E, and fail-closed staging.
   stop-condition: Stop before Step 7 reconciliation/database-stage progression or any real provider/Telegram/infrastructure effect.
 
 ## Gates
@@ -45,10 +45,11 @@
 - Step 5 `fe13ab9`: builder green but checker cycle 1 found YAML/env/filesystem/Docker inspect gaps.
 - Step 5 `d50cc4e`: cycle 2 builder green but checker cycle 2 found safe YAML punctuation and filesystem matrix gaps.
 - Step 5 `4f8312d`: independently green after cycle 3 — 17 files / 102 focused tests, local Hermes contract smoke with fake model and fake Telegram boundary, 107 files / 961 tests, build, 14 E2E, and fail-closed staging with no effects.
+- Step 6 current commit: integrated builder green — strict launch/status/canary contracts, one total 30-second budget, deterministic reuse/replacement, cancellation snapshots and cleanup, accepted/ready lifecycle DTOs with stale-result guards, combined focused 11 files / 216 tests, local fake-boundary smoke, 108 files / 995 tests, build, 14 E2E, and fail-closed staging with no effects.
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling` — branch `main`; sole active worktree; Step 6 ready for implementation; no stashes. Archived Steps 6–10 contracts are committed and external actions remain prohibited.
+- `/Users/alexmetelli/source/plingpling` — branch `main`; sole active worktree; Step 6 validated and pending checker review after commit; no stashes. Archived Steps 7–10 contracts are committed and external actions remain prohibited.
 
 ## Decisions And Lessons
 
@@ -65,3 +66,4 @@
 - Step 3 — `7024bc2` — desired state, durable deployment operations, leases, migration, and concealed read API; checker evidence `ba8c969`.
 - Step 4 — `d942270` + `546b9df` — ready-mode encrypted creation, bounded Telegram validation, active-bot uniqueness/backfill, atomic deployment persistence, and independently accepted security/concurrency gates.
 - Step 5 — `fe13ab9` + `d50cc4e` + `4f8312d` — independently accepted managed launch-spec v3, owner-scoped secret launch building, hardened strict YAML/env/filesystem projection, v2/manual compatibility, and fake-provider/Telegram local smoke coverage.
+- Step 6 — current commit — asynchronous Hermes runner launch acceptance, strict observed status/canary contracts, private readiness probing, manual-runner 202 mapping, and transitional lifecycle semantics for checker review.

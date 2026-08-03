@@ -15,6 +15,13 @@ import {
 } from "@/src/server/logs/agent-logs";
 import { DOCKER_CLI_TIMEOUT_MS } from "@/src/runner-service/constants";
 import { isHermesReadinessReason, type HermesReadinessReason } from "@/src/runner-service/docker";
+import {
+  parseRunnerLaunchAccepted,
+  parseRunnerStatus,
+  type RunnerAgentStatusSnapshot,
+  type RunnerLaunchAcceptedResponse,
+  type RunnerOperation,
+} from "@/src/runner-service/runner-contracts";
 import type { ManualRunnerRecord } from "@/src/server/runners/manual-runner-persistence";
 import { fingerprintRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
 import type {
@@ -57,6 +64,19 @@ export type ManualRunnerRemoteContainer = {
 
 export type ManualRunnerStartResult =
   | { ok: true; runner: ManualRunnerRecord; container: ManualRunnerRemoteContainer | null }
+  | {
+      ok: true;
+      state: "ready";
+      runner: ManualRunnerRecord;
+      container: ManualRunnerRemoteContainer | null;
+    }
+  | {
+      ok: true;
+      state: "accepted";
+      runner: ManualRunnerRecord;
+      operation: RunnerOperation;
+      snapshot: RunnerAgentStatusSnapshot;
+    }
   | ManualRunnerFailureResult;
 
 export type ManualRunnerStopResult =
@@ -65,10 +85,24 @@ export type ManualRunnerStopResult =
 
 export type ManualRunnerRestartResult =
   | { ok: true; runner: ManualRunnerRecord; container: ManualRunnerRemoteContainer | null }
+  | {
+      ok: true;
+      state: "ready";
+      runner: ManualRunnerRecord;
+      container: ManualRunnerRemoteContainer | null;
+    }
+  | {
+      ok: true;
+      state: "accepted";
+      runner: ManualRunnerRecord;
+      operation: RunnerOperation;
+      snapshot: RunnerAgentStatusSnapshot;
+    }
   | ManualRunnerFailureResult;
 
 export type ManualRunnerStatusResult =
   | { ok: true; runner: ManualRunnerRecord; containers: ManualRunnerRemoteContainer[] }
+  | { ok: true; runner: ManualRunnerRecord; snapshot: RunnerAgentStatusSnapshot }
   | { ok: false; reason: ManualRunnerFailureReason };
 
 export type ManualRunnerCleanupResult =
@@ -135,13 +169,29 @@ export class ManualRunnerAdapter
       return result;
     }
 
+    const accepted = parseAcceptedLaunchResponse(result, agentId, "start", launchSpec);
+
+    if (accepted) {
+      return {
+        ok: true,
+        state: "accepted",
+        runner: this.runner,
+        operation: accepted.snapshot.operation,
+        snapshot: accepted.snapshot,
+      };
+    }
+
+    if (!isLegacyReadyResponse(result, agentId, "start")) {
+      return { ok: false, reason: "runner_response_invalid" };
+    }
+
     const container = parseContainer(result.body.container);
 
     if (container?.status !== "running") {
       return { ok: false, reason: "runner_not_running" };
     }
 
-    return { ok: true, runner: this.runner, container };
+    return { ok: true, state: "ready", runner: this.runner, container };
   }
 
   async stop(agentId: string): Promise<ManualRunnerStopResult> {
@@ -168,13 +218,29 @@ export class ManualRunnerAdapter
       return result;
     }
 
+    const accepted = parseAcceptedLaunchResponse(result, agentId, "restart", launchSpec);
+
+    if (accepted) {
+      return {
+        ok: true,
+        state: "accepted",
+        runner: this.runner,
+        operation: accepted.snapshot.operation,
+        snapshot: accepted.snapshot,
+      };
+    }
+
+    if (!isLegacyReadyResponse(result, agentId, "restart")) {
+      return { ok: false, reason: "runner_response_invalid" };
+    }
+
     const container = parseContainer(result.body.container);
 
     if (container?.status !== "running") {
       return { ok: false, reason: "runner_not_running" };
     }
 
-    return { ok: true, runner: this.runner, container };
+    return { ok: true, state: "ready", runner: this.runner, container };
   }
 
   async status(agentId: string): Promise<ManualRunnerStatusResult> {
@@ -184,10 +250,16 @@ export class ManualRunnerAdapter
       return result;
     }
 
+    const status = parseRunnerStatus(result.body);
+
+    if (!status.ok || result.status !== 200 || status.response.agentId !== agentId) {
+      return { ok: false, reason: "runner_response_invalid" };
+    }
+
     return {
       ok: true,
       runner: this.runner,
-      containers: parseContainers(result.body.containers),
+      snapshot: status.response.snapshot,
     };
   }
 
@@ -258,7 +330,9 @@ export class ManualRunnerAdapter
     agentId: string,
     method: "GET" | "POST",
     launchSpec: AgentLaunchSpec | null = null,
-  ): Promise<{ ok: true; body: Record<string, unknown> } | ManualRunnerFailureResult> {
+  ): Promise<
+    { ok: true; body: Record<string, unknown>; status: number } | ManualRunnerFailureResult
+  > {
     let endpointUrl: string;
 
     try {
@@ -344,7 +418,7 @@ export class ManualRunnerAdapter
         return { ok: false, reason: "runner_response_invalid" };
       }
 
-      return { ok: true, body: parsed };
+      return { ok: true, body: parsed, status: response.status };
     } catch (error) {
       logManualRunnerRequest("request_error", {
         action,
@@ -353,8 +427,7 @@ export class ManualRunnerAdapter
         runnerKind: this.runner.kind,
         endpointHost: safeEndpointHost(endpointUrl),
         method,
-        errorName: error instanceof Error ? error.name : "UnknownError",
-        errorMessage: safeErrorMessage(error),
+        errorName: safeErrorName(error),
         timedOut: controller.signal.aborted,
         runnerBearerTokenFingerprint: tokenFingerprint,
         durationMs: Date.now() - startedAt,
@@ -632,6 +705,92 @@ function parseContainers(value: unknown): ManualRunnerRemoteContainer[] {
   });
 }
 
+type ManualRunnerCallSuccess = {
+  ok: true;
+  body: Record<string, unknown>;
+  status: number;
+};
+
+type ValidatedRunnerLaunchAcceptedResponse = RunnerLaunchAcceptedResponse & {
+  snapshot: RunnerAgentStatusSnapshot & { operation: RunnerOperation };
+};
+
+function parseAcceptedLaunchResponse(
+  result: ManualRunnerCallSuccess,
+  agentId: string,
+  action: "start" | "restart",
+  launchSpec: AgentLaunchSpec | null,
+): ValidatedRunnerLaunchAcceptedResponse | null {
+  if (result.status !== 202) {
+    return null;
+  }
+
+  const parsed = parseRunnerLaunchAccepted(result.body);
+
+  if (
+    !parsed.ok ||
+    parsed.response.agentId !== agentId ||
+    parsed.response.action !== action ||
+    parsed.response.snapshot.phase !== "accepted" ||
+    parsed.response.snapshot.readinessReason !== "launch_accepted" ||
+    parsed.response.snapshot.gateway.state !== "unknown" ||
+    parsed.response.snapshot.gateway.observedAt !== null ||
+    parsed.response.snapshot.apiServer.state !== "unknown" ||
+    parsed.response.snapshot.apiServer.observedAt !== null ||
+    parsed.response.snapshot.telegram.state !== "unknown" ||
+    parsed.response.snapshot.telegram.observedAt !== null ||
+    !acceptedTargetMatchesLaunchSpec(parsed.response, launchSpec) ||
+    !acceptedOperationMatchesSnapshot(parsed.response)
+  ) {
+    return null;
+  }
+
+  return parsed.response as ValidatedRunnerLaunchAcceptedResponse;
+}
+
+function acceptedTargetMatchesLaunchSpec(
+  response: RunnerLaunchAcceptedResponse,
+  launchSpec: AgentLaunchSpec | null,
+): boolean {
+  if (!launchSpec) {
+    return true;
+  }
+
+  return (
+    response.operation.target.image === launchSpec.image.ref &&
+    response.operation.target.launchSpecVersion === launchSpec.version &&
+    response.operation.target.configRevision === launchSpec.agent.configRevision
+  );
+}
+
+function acceptedOperationMatchesSnapshot(response: RunnerLaunchAcceptedResponse): boolean {
+  const operation = response.operation;
+  const snapshotOperation = response.snapshot.operation;
+
+  return (
+    snapshotOperation !== null &&
+    snapshotOperation.id === operation.id &&
+    snapshotOperation.action === response.action &&
+    snapshotOperation.acceptedAt === operation.acceptedAt &&
+    snapshotOperation.target.image === operation.target.image &&
+    snapshotOperation.target.launchSpecVersion === operation.target.launchSpecVersion &&
+    snapshotOperation.target.configRevision === operation.target.configRevision
+  );
+}
+
+function isLegacyReadyResponse(
+  result: ManualRunnerCallSuccess,
+  agentId: string,
+  action: "start" | "restart",
+): boolean {
+  return (
+    result.status === 200 &&
+    result.body.agentId === agentId &&
+    result.body.action === action &&
+    parseContainer(result.body.container)?.status === "running"
+  );
+}
+
 function normalizeBaseEndpoint(endpointUrl: string): string {
   return endpointUrl.endsWith("/") ? endpointUrl : `${endpointUrl}/`;
 }
@@ -654,15 +813,39 @@ async function readResponseError(
       return { code: null };
     }
 
+    const code = normalizeRunnerErrorCode(parsed.error.code);
     const reason = normalizeHermesReadinessReason(parsed.error.reason);
 
     return {
-      code: parsed.error.code.slice(0, 80),
+      code,
       ...(reason ? { reason } : {}),
     };
   } catch {
     return { code: null };
   }
+}
+
+function normalizeRunnerErrorCode(value: string): string | null {
+  return [
+    "unauthorized",
+    "invalid_agent_id",
+    "method_not_allowed",
+    "setup_session_failed",
+    "hermes_readiness_failed",
+    "hermes_projection_invalid",
+    "launch_cancelled",
+    "launch_acceptance_timeout",
+    "runner_status_failed",
+    "docker_command_failed",
+    "launch_spec_too_large",
+    "unsupported_media_type",
+    "launch_spec_invalid",
+    "canary_invalid",
+    "canary_not_ready",
+    "hermes_setup_incomplete",
+  ].includes(value)
+    ? value
+    : null;
 }
 
 function normalizeHermesReadinessReason(value: unknown): HermesReadinessReason | null {
@@ -677,12 +860,20 @@ function safeEndpointHost(endpointUrl: string): string | null {
   }
 }
 
-function safeErrorMessage(error: unknown): string {
+function safeErrorName(error: unknown): string {
   if (!(error instanceof Error)) {
-    return "Unknown runner request error.";
+    return "UnknownError";
   }
 
-  return error.message.replace(/\s+/g, " ").trim().slice(0, 200);
+  if (error.name === "AbortError" || error.name === "TimeoutError") {
+    return error.name;
+  }
+
+  if (error.name === "TypeError") {
+    return "TypeError";
+  }
+
+  return "Error";
 }
 
 function logManualRunnerRequest(event: string, metadata: Record<string, unknown>): void {

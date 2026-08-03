@@ -100,6 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Managed Hermes runner start/restart now return asynchronous launch acceptance with typed observed status and canary contracts, so the control plane no longer treats Docker launch as application readiness.
 - Native/manual Hermes agents retain the launch-spec v2 compatibility path and still require existing Hermes setup state, while managed OpenRouter deployments bypass that setup gate and reapply plingpling-owned provider, Telegram, API-server, terminal, browser, safety, and prompt settings on start/restart.
 - Agent records now persist explicit stopped/running desired state, and owners can read the latest deployment operation through `GET /api/agents/:agentId/deployment` without exposing leases, idempotency keys, or ownership internals.
 - Split deterministic local verification from provider-backed acceptance: `bun run verify` now ends after the production build, while `bun run verify:e2e` adds the full E2E suite.

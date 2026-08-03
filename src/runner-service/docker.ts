@@ -1,10 +1,12 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { lstat, readdir, readFile, rm, stat } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { lstat, open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { basename, relative, resolve, sep } from "node:path";
 import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import {
   AGENTBAY_AGENT_ID_LABEL,
+  DEFAULT_HERMES_READINESS_TIMEOUT_MS,
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_MANUAL_RUNNER_IMAGE,
@@ -15,6 +17,27 @@ import {
   type HermesProjectionOptions,
   type HermesProjectionResult,
 } from "@/src/runner-service/hermes-projection";
+import {
+  RUNNER_CANARY_CONTRACT_VERSION,
+  RUNNER_LAUNCH_CONTRACT_VERSION,
+  RUNNER_STATUS_CONTRACT_VERSION,
+  runnerTargetFromLaunchSpec,
+  type RunnerAgentStatusSnapshot,
+  type RunnerCanaryObservation,
+  type RunnerCanaryRequest,
+  type RunnerCanaryResponse,
+  type RunnerContainerState,
+  type RunnerGatewayState,
+  type RunnerLaunchAcceptedResponse,
+  type RunnerLaunchAction,
+  type RunnerLaunchDisposition,
+  type RunnerOperation,
+  type RunnerPlatformState,
+  type RunnerReadinessReason,
+  type RunnerCleanupResponsePayload,
+  type RunnerStatusResponse,
+  type RunnerStopResponsePayload,
+} from "@/src/runner-service/runner-contracts";
 import { redactSecretText } from "@/src/shared/secret-redaction";
 
 export { AGENTBAY_AGENT_ID_LABEL, DEFAULT_MANUAL_RUNNER_IMAGE, DOCKER_CLI_TIMEOUT_MS };
@@ -29,10 +52,16 @@ const HERMES_READINESS_PORT_ENV = "AGENTBAY_HERMES_READINESS_PORT";
 const HERMES_STATE_ROOT_ENV = "AGENTBAY_HERMES_STATE_ROOT";
 const AGENTBAY_CONFIG_REVISION_LABEL = "agentbay.config_revision";
 const AGENTBAY_LAUNCH_SPEC_VERSION_LABEL = "agentbay.launch_spec_version";
+const AGENTBAY_OPERATION_ID_LABEL = "agentbay.operation_id";
+const AGENTBAY_OPERATION_ACTION_LABEL = "agentbay.operation_action";
+const AGENTBAY_OPERATION_ACCEPTED_AT_LABEL = "agentbay.operation_accepted_at";
 const HERMES_WORKLOAD_UID = 10000;
 const HERMES_WORKLOAD_GID = 10000;
 const MAX_HERMES_LOG_BYTES_PER_FILE = 64 * 1024;
 const MAX_HERMES_LOG_LINES = 500;
+const STATUS_PROBE_TIMEOUT_MS = 2_000;
+const CANARY_TIMEOUT_MS = 15_000;
+const MAX_PROBE_RESPONSE_BYTES = 64 * 1024;
 const DUMMY_DOCKER_RUNNER_ARGS = [
   "sh",
   "-c",
@@ -60,8 +89,16 @@ export type ManualRunnerDockerOptions = {
   dockerExecutable?: string;
   hermes?: Partial<HermesDockerRuntimeOptions>;
   nameSuffix?: () => string;
+  now?: () => Date;
+  probe?: {
+    requestHealth?: HermesHealthTransport;
+    requestCanary?: HermesCanaryTransport;
+  };
   projection?: {
-    project?: (spec: AgentLaunchSpec) => Promise<HermesProjectionResult>;
+    project?: (
+      spec: AgentLaunchSpec,
+      context?: { signal: AbortSignal },
+    ) => Promise<HermesProjectionResult>;
     options?: HermesProjectionOptions;
   };
   readiness?: {
@@ -104,17 +141,34 @@ export type HermesReadinessEvaluation = { ok: true } | { ok: false; reason: Herm
 export type HermesHealthTransportResult = {
   ok: boolean;
   body: unknown;
+  status?: number;
 };
 
 export type HermesHealthTransport = (input: {
   apiServerKey: string;
   containerName: string;
   readinessPort: number;
+  signal?: AbortSignal;
 }) => Promise<HermesHealthTransportResult>;
+
+export type HermesCanaryTransportResult = {
+  ok: boolean;
+  status: number;
+  body: unknown;
+};
+
+export type HermesCanaryTransport = (input: {
+  apiServerKey: string;
+  containerName: string;
+  model: string;
+  readinessPort: number;
+  signal?: AbortSignal;
+}) => Promise<HermesCanaryTransportResult>;
 
 export type DockerExecutableRunner = (
   executable: string,
   args: readonly string[],
+  options?: { signal?: AbortSignal; timeoutMs?: number },
 ) => Promise<DockerCliResult>;
 
 export type RunnerContainer = {
@@ -200,14 +254,36 @@ type DockerPsLine = {
   ID?: string;
 };
 
+type InspectedRunnerContainer = RunnerContainer & {
+  inspect: DockerInspectContainer;
+};
+
+type LaunchToken = {
+  acceptedAt: string;
+  action: RunnerLaunchAction;
+  controller: AbortController;
+  createdContainerId: string | null;
+  deadlineAt: number;
+  operationId: string;
+  target: RunnerOperation["target"];
+  terminalReason: "cancelled" | "timeout" | null;
+};
+
 export class ManualRunnerDocker {
   private readonly command: DockerRunnerCommand;
   private readonly docker: DockerExecutableRunner;
   private readonly dockerExecutable: string;
   private readonly hermes: HermesDockerRuntimeOptions;
   private readonly nameSuffix: () => string;
-  private readonly project: (spec: AgentLaunchSpec) => Promise<HermesProjectionResult>;
-  private readonly waitForReadiness: HermesReadinessWaiter;
+  private readonly now: () => Date;
+  private readonly project: (
+    spec: AgentLaunchSpec,
+    context?: { signal: AbortSignal },
+  ) => Promise<HermesProjectionResult>;
+  private readonly requestCanary: HermesCanaryTransport;
+  private readonly requestHealth: HermesHealthTransport;
+  private readonly agentLocks = new Map<string, Promise<unknown>>();
+  private readonly launchTokens = new Map<string, Set<LaunchToken>>();
 
   constructor(options: ManualRunnerDockerOptions = {}) {
     this.command = options.command ?? resolveManualRunnerCommand();
@@ -216,6 +292,7 @@ export class ManualRunnerDocker {
       options.dockerExecutable ?? process.env[DOCKER_EXECUTABLE_ENV]?.trim() ?? "docker";
     this.hermes = resolveHermesDockerRuntimeOptions(options.hermes);
     this.nameSuffix = options.nameSuffix ?? (() => randomUUID().replaceAll("-", "").slice(0, 12));
+    this.now = options.now ?? (() => new Date());
     this.project =
       options.projection?.project ??
       ((spec) =>
@@ -223,111 +300,141 @@ export class ManualRunnerDocker {
           ownership: { uid: HERMES_WORKLOAD_UID, gid: HERMES_WORKLOAD_GID },
           ...(options.projection?.options ?? {}),
         }));
-    this.waitForReadiness = options.readiness?.wait ?? createHermesReadinessWaiter(this.hermes);
+    this.requestHealth = options.probe?.requestHealth ?? fetchHermesHealth;
+    this.requestCanary = options.probe?.requestCanary ?? fetchHermesCanary;
   }
 
   async start(
     agentId: string,
     launchSpec: AgentLaunchSpec | null = null,
-  ): Promise<{ container: RunnerContainer; projection: HermesProjectionResult | null }> {
-    const projection = launchSpec ? await this.project(launchSpec) : null;
-
-    await this.removeSelectedContainers(agentId);
-    const containerName = dockerContainerName(agentId, this.nameSuffix());
-    const runResult = await this.runDocker(
-      launchSpec && projection
-        ? buildHermesDockerRunArgs({
-            agentId,
-            containerName,
-            launchSpec,
-            projection,
-            runtime: this.hermes,
-          })
-        : buildLegacyDockerRunArgs({
-            agentId,
-            command: this.command,
-            containerName,
-          }),
-    );
-    const containerId = runResult.stdout.trim();
-
-    if (!containerId) {
-      throw new Error("Docker did not return a container id.");
+  ): Promise<
+    | { container: RunnerContainer; projection: HermesProjectionResult | null }
+    | Omit<RunnerLaunchAcceptedResponse, "ok" | "agentId" | "action">
+  > {
+    if (!launchSpec) {
+      return await this.startLegacy(agentId);
     }
 
-    try {
-      const hermesInspect =
-        launchSpec && projection ? { launchSpec, projection, runtime: this.hermes } : null;
-      const container = await this.inspectSelectedContainer(containerId, agentId, hermesInspect);
+    return await this.launchManaged(agentId, "start", launchSpec);
+  }
 
-      if (launchSpec) {
-        const readiness = await this.waitForReadiness({
-          agentId,
-          apiServerKey: launchSpec.secrets.apiServerKey,
-          configRevision: launchSpec.agent.configRevision,
-          containerName,
-        });
+  async stop(agentId: string): Promise<RunnerStopResponsePayload> {
+    const inFlightOperationId = this.cancelActiveLaunches(agentId);
 
-        if (!readiness.ok) {
-          throw new HermesReadinessError(readiness.reason);
+    return await this.withAgentLock(agentId, async () => {
+      const details = await this.listSelectedContainerDetails(agentId);
+      const runningOperationId = details
+        .filter((container) => container.status === "running" || container.status === "restarting")
+        .map((container) => readOperationFromInspect(container.inspect)?.id ?? null)
+        .find((operationId): operationId is string => operationId !== null);
+      const stopped: RunnerContainer[] = [];
+
+      for (const container of details) {
+        if (container.status === "running" || container.status === "restarting") {
+          await this.runDocker(["stop", "--time", "20", container.id]);
         }
+        stopped.push(await this.inspectSelectedContainer(container.id, agentId));
       }
 
-      return { container, projection };
-    } catch (error) {
-      if (launchSpec) {
-        await this.runDocker(["rm", "--force", containerId]).catch(() => {
-          // Preserve the primary readiness/revision error for the control plane.
-        });
-      }
+      const stoppedDetails = await this.listSelectedContainerDetails(agentId);
+      const selected = stoppedDetails.length > 0 ? chooseStatusContainer(stoppedDetails) : null;
+      const observedAt = this.now().toISOString();
 
-      if (error instanceof HermesRevisionEvidenceError) {
-        throw new HermesReadinessError("revision_mismatch");
-      }
-
-      throw error;
-    }
+      return {
+        cancelledOperationId: inFlightOperationId ?? runningOperationId ?? null,
+        containers: stopped,
+        snapshot: buildTerminalSnapshot("stopped", selected, observedAt),
+      };
+    });
   }
 
-  async stop(agentId: string): Promise<{ containers: RunnerContainer[] }> {
-    const containers = await this.listSelectedContainers(agentId);
-    const stopped: RunnerContainer[] = [];
+  async cleanup(agentId: string): Promise<RunnerCleanupResponsePayload> {
+    const inFlightOperationId = this.cancelActiveLaunches(agentId);
 
-    for (const container of containers) {
-      if (container.status === "running") {
-        await this.runDocker(["stop", "--time", "20", container.id]);
+    return await this.withAgentLock(agentId, async () => {
+      const details = await this.listSelectedContainerDetails(agentId);
+      const selected = details.length > 0 ? chooseStatusContainer(details) : null;
+      const selectedOperationId = selected ? readOperationFromInspect(selected.inspect)?.id : null;
+      const containers = details.map(({ inspect: _inspect, ...container }) => container);
+
+      for (const container of containers) {
+        await this.runDocker(["rm", "--force", container.id]);
       }
-      stopped.push(await this.inspectSelectedContainer(container.id, agentId));
-    }
 
-    return { containers: stopped };
-  }
+      const observedAt = this.now().toISOString();
 
-  async cleanup(
-    agentId: string,
-  ): Promise<{ containers: RunnerContainer[]; removedAgentRoot: boolean }> {
-    const containers = await this.listSelectedContainers(agentId);
-
-    for (const container of containers) {
-      await this.runDocker(["rm", "--force", container.id]);
-    }
-
-    return {
-      containers,
-      removedAgentRoot: await removeHermesAgentRoot(agentId),
-    };
+      return {
+        cancelledOperationId: inFlightOperationId ?? selectedOperationId ?? null,
+        containers,
+        removedAgentRoot: await removeHermesAgentRoot(agentId),
+        snapshot: buildTerminalSnapshot("cancelled", selected, observedAt, true),
+      };
+    });
   }
 
   async restart(
     agentId: string,
     launchSpec: AgentLaunchSpec | null = null,
-  ): Promise<{ container: RunnerContainer; projection: HermesProjectionResult | null }> {
-    await this.removeSelectedContainers(agentId);
-    return await this.start(agentId, launchSpec);
+  ): Promise<
+    | { container: RunnerContainer; projection: HermesProjectionResult | null }
+    | Omit<RunnerLaunchAcceptedResponse, "ok" | "agentId" | "action">
+  > {
+    if (!launchSpec) {
+      await this.removeSelectedContainers(agentId);
+      return await this.startLegacy(agentId);
+    }
+
+    return await this.launchManaged(agentId, "restart", launchSpec);
   }
 
-  async status(agentId: string): Promise<{ containers: RunnerContainer[] }> {
-    return { containers: await this.listSelectedContainers(agentId) };
+  async status(agentId: string): Promise<Omit<RunnerStatusResponse, "ok" | "agentId" | "action">> {
+    const snapshot = await this.observeStatus(agentId);
+
+    return {
+      contractVersion: RUNNER_STATUS_CONTRACT_VERSION,
+      snapshot,
+    };
+  }
+
+  async canary(
+    agentId: string,
+    request: RunnerCanaryRequest,
+  ): Promise<Omit<RunnerCanaryResponse, "ok" | "agentId" | "action">> {
+    const snapshot = await this.observeStatus(agentId);
+
+    if (
+      snapshot.phase !== "ready" ||
+      snapshot.operation?.id !== request.operationId ||
+      snapshot.operation.target.configRevision !== request.configRevision
+    ) {
+      throw new RunnerCanaryNotReadyError();
+    }
+
+    let apiServerKey = await readProjectedApiServerKey(agentId);
+    const containerName = snapshot.container.name;
+
+    if (!apiServerKey || !containerName) {
+      throw new RunnerCanaryNotReadyError();
+    }
+
+    const startedAt = Date.now();
+    const observation = await this.callCanaryTransport({
+      apiServerKey,
+      containerName,
+      model: request.model,
+    });
+    apiServerKey = null;
+
+    return {
+      contractVersion: RUNNER_CANARY_CONTRACT_VERSION,
+      operationId: request.operationId,
+      configRevision: request.configRevision,
+      observation: {
+        ...observation,
+        observedAt: this.now().toISOString(),
+        latencyMs: Math.max(0, Date.now() - startedAt),
+      },
+    };
   }
 
   async logs(
@@ -348,25 +455,610 @@ export class ManualRunnerDocker {
     };
   }
 
+  private async startLegacy(
+    agentId: string,
+  ): Promise<{ container: RunnerContainer; projection: HermesProjectionResult | null }> {
+    await this.removeSelectedContainers(agentId);
+    const containerName = dockerContainerName(agentId, this.nameSuffix());
+    const runResult = await this.runDocker(
+      buildLegacyDockerRunArgs({
+        agentId,
+        command: this.command,
+        containerName,
+      }),
+    );
+    const containerId = runResult.stdout.trim();
+
+    if (!containerId) {
+      throw new Error("Docker did not return a container id.");
+    }
+
+    return {
+      container: await this.inspectSelectedContainer(containerId, agentId),
+      projection: null,
+    };
+  }
+
+  private async launchManaged(
+    agentId: string,
+    action: RunnerLaunchAction,
+    launchSpec: AgentLaunchSpec,
+  ): Promise<Omit<RunnerLaunchAcceptedResponse, "ok" | "agentId" | "action">> {
+    const token: LaunchToken = {
+      acceptedAt: this.now().toISOString(),
+      action,
+      controller: new AbortController(),
+      createdContainerId: null,
+      deadlineAt: Date.now() + DOCKER_CLI_TIMEOUT_MS,
+      operationId: randomUUID(),
+      target: runnerTargetFromLaunchSpec(launchSpec),
+      terminalReason: null,
+    };
+    this.registerLaunchToken(agentId, token);
+
+    try {
+      return await this.withAgentLock(
+        agentId,
+        async () => {
+          try {
+            return await this.acceptHermesLaunch(agentId, launchSpec, token);
+          } catch (error) {
+            await this.cleanupKnownCreatedContainer(token);
+            throw error;
+          }
+        },
+        token,
+      );
+    } catch (error) {
+      await this.cleanupKnownCreatedContainer(token);
+
+      if (token.terminalReason === "cancelled") {
+        throw new RunnerLaunchCancelledError();
+      }
+
+      if (token.terminalReason === "timeout" || isAbortLikeError(error)) {
+        throw new RunnerLaunchAcceptanceTimeoutError();
+      }
+
+      throw error;
+    } finally {
+      this.unregisterLaunchToken(agentId, token);
+    }
+  }
+
+  private async acceptHermesLaunch(
+    agentId: string,
+    launchSpec: AgentLaunchSpec,
+    token: LaunchToken,
+  ): Promise<Omit<RunnerLaunchAcceptedResponse, "ok" | "agentId" | "action">> {
+    this.throwIfLaunchTerminated(token);
+    const projection = await this.runLaunchStep(token, () =>
+      this.project(launchSpec, { signal: token.controller.signal }),
+    );
+    this.throwIfLaunchTerminated(token);
+
+    const details = await this.listSelectedContainerDetails(agentId, token);
+    this.throwIfLaunchTerminated(token);
+    const winner = await this.runLaunchStep(token, () =>
+      this.findExactRunningWinner(details, launchSpec, projection),
+    );
+    let disposition: RunnerLaunchDisposition = "created";
+    let selected: InspectedRunnerContainer | null = null;
+
+    if (winner) {
+      disposition = "reused";
+      selected = winner;
+      await this.removeSurplusContainers(
+        details.filter((detail) => detail.id !== winner.id),
+        token,
+      );
+    } else {
+      disposition = details.length > 0 ? "replaced" : "created";
+      await this.removeSurplusContainers(details, token);
+      this.throwIfLaunchTerminated(token);
+      const containerName = dockerContainerName(agentId, this.nameSuffix());
+      token.createdContainerId = containerName;
+      const runResult = await this.runLaunchDocker(
+        token,
+        buildHermesDockerRunArgs({
+          agentId,
+          containerName,
+          launchSpec,
+          projection,
+          runtime: this.hermes,
+          operation: {
+            id: token.operationId,
+            action: token.action,
+            target: token.target,
+            acceptedAt: token.acceptedAt,
+          },
+        }),
+      );
+      const containerId = runResult.stdout.trim();
+
+      if (!containerId) {
+        throw new Error("Docker did not return a container id.");
+      }
+      token.createdContainerId = containerId;
+      this.throwIfLaunchTerminated(token);
+
+      try {
+        const container = await this.inspectSelectedContainer(
+          containerId,
+          agentId,
+          { launchSpec, projection, runtime: this.hermes },
+          token,
+        );
+        selected = {
+          ...container,
+          inspect: await this.inspectSelectedContainerRaw(container.id, agentId, token),
+        };
+        this.throwIfLaunchTerminated(token);
+      } catch (error) {
+        await this.runDocker(["rm", "--force", containerId]).catch(() => undefined);
+        token.createdContainerId = null;
+
+        if (error instanceof HermesRevisionEvidenceError) {
+          throw new HermesReadinessError("revision_mismatch");
+        }
+
+        throw error;
+      }
+      token.createdContainerId = null;
+    }
+
+    if (!selected) {
+      throw new Error("No selected Hermes container after launch acceptance.");
+    }
+
+    this.throwIfLaunchTerminated(token);
+
+    const operation = readOperationFromInspect(selected.inspect) ?? {
+      id: token.operationId,
+      action: token.action,
+      target: token.target,
+      acceptedAt: token.acceptedAt,
+    };
+    const snapshot = buildAcceptedSnapshot(selected, operation, this.now().toISOString(), {
+      requestedRevision: token.target.configRevision,
+      projectionMarkerRevision: launchSpec.agent.configRevision,
+    });
+
+    return {
+      contractVersion: RUNNER_LAUNCH_CONTRACT_VERSION,
+      operation: {
+        id: operation.id,
+        state: "accepted",
+        disposition,
+        target: operation.target,
+        acceptedAt: operation.acceptedAt,
+      },
+      snapshot,
+    };
+  }
+
+  private async observeStatus(agentId: string): Promise<RunnerAgentStatusSnapshot> {
+    const details = await this.listSelectedContainerDetails(agentId);
+    const observedAt = this.now().toISOString();
+
+    if (details.length === 0) {
+      return emptyStatusSnapshot("idle", "container_absent", observedAt);
+    }
+
+    const selected = chooseStatusContainer(details);
+    const operation = readOperationFromInspect(selected.inspect);
+    const revision = await readProjectedRevision(agentId);
+    const requestedRevision =
+      operation?.target.configRevision ??
+      selected.inspect.Config?.Labels?.[AGENTBAY_CONFIG_REVISION_LABEL] ??
+      null;
+    const revisionState = classifyRevisionState({
+      requested: requestedRevision,
+      containerLabel: selected.inspect.Config?.Labels?.[AGENTBAY_CONFIG_REVISION_LABEL] ?? null,
+      marker: revision,
+    });
+    const base = buildStatusSnapshotBase(selected, operation, observedAt, {
+      requestedRevision,
+      projectionMarkerRevision: revision.configRevision,
+      revisionState,
+    });
+
+    if (!operation) {
+      return { ...base, phase: "failed", readinessReason: "revision_missing" };
+    }
+
+    if (revisionState !== "match") {
+      return { ...base, phase: "failed", readinessReason: "revision_mismatch" };
+    }
+
+    if (
+      !hasExactStatusRuntimeEvidence(selected.inspect, agentId, operation, this.hermes, revision)
+    ) {
+      return { ...base, phase: "failed", readinessReason: "revision_mismatch" };
+    }
+
+    if (selected.status !== "running") {
+      return {
+        ...base,
+        phase: selected.status === "exited" || selected.status === "dead" ? "failed" : "starting",
+        readinessReason:
+          selected.status === "exited" || selected.status === "dead"
+            ? "container_terminal"
+            : "container_not_running",
+      };
+    }
+
+    let apiServerKey = await readProjectedApiServerKey(agentId);
+
+    if (!apiServerKey) {
+      return applyReadinessWindow(base, operation, "probe_credential_unavailable", observedAt);
+    }
+
+    const observation = await this.observeHermesHealth({
+      apiServerKey,
+      containerName: selected.name,
+    });
+    apiServerKey = null;
+    const probeObservedAt = this.now().toISOString();
+    const withObservation: RunnerAgentStatusSnapshot = {
+      ...base,
+      gateway: { state: observation.gateway, observedAt: probeObservedAt },
+      apiServer: { required: true, state: observation.apiServer, observedAt: probeObservedAt },
+      telegram: { required: true, state: observation.telegram, observedAt: probeObservedAt },
+      observedAt: probeObservedAt,
+    };
+
+    if (
+      observation.gateway === "running" &&
+      observation.apiServer === "connected" &&
+      observation.telegram === "connected"
+    ) {
+      return { ...withObservation, phase: "ready", readinessReason: null };
+    }
+
+    return applyReadinessWindow(
+      withObservation,
+      operation,
+      observation.reason,
+      probeObservedAt,
+      observation.immediateFailure,
+    );
+  }
+
+  private async observeHermesHealth(input: {
+    apiServerKey: string;
+    containerName: string;
+  }): Promise<{
+    apiServer: RunnerPlatformState;
+    gateway: RunnerGatewayState;
+    immediateFailure: boolean;
+    reason: Exclude<RunnerReadinessReason, null>;
+    telegram: RunnerPlatformState;
+  }> {
+    if (!isSafePrivateContainerName(input.containerName)) {
+      return {
+        apiServer: "unknown",
+        gateway: "unknown",
+        immediateFailure: false,
+        reason: "health_invalid",
+        telegram: "unknown",
+      };
+    }
+
+    try {
+      const response = await withProbeTimeout(STATUS_PROBE_TIMEOUT_MS, (signal) =>
+        this.requestHealth({
+          apiServerKey: input.apiServerKey,
+          containerName: input.containerName,
+          readinessPort: this.hermes.readinessPort,
+          signal,
+        }),
+      );
+
+      if (!response.ok) {
+        return {
+          apiServer: "unknown",
+          gateway: "unknown",
+          immediateFailure: false,
+          reason:
+            response.status === 401 || response.status === 403
+              ? "health_unauthorized"
+              : "health_unreachable",
+          telegram: "unknown",
+        };
+      }
+
+      const parsed = parseHermesHealthObservation(response.body);
+
+      if (!parsed.ok) {
+        return {
+          apiServer: "unknown",
+          gateway: "unknown",
+          immediateFailure: false,
+          reason: "health_invalid",
+          telegram: "unknown",
+        };
+      }
+
+      return parsed.observation;
+    } catch (error) {
+      return {
+        apiServer: "unknown",
+        gateway: "unknown",
+        immediateFailure: false,
+        reason: error instanceof ProbeTimeoutError ? "health_timeout" : "health_unreachable",
+        telegram: "unknown",
+      };
+    }
+  }
+
+  private async callCanaryTransport(input: {
+    apiServerKey: string;
+    containerName: string;
+    model: string;
+  }): Promise<Omit<RunnerCanaryObservation, "observedAt" | "latencyMs">> {
+    if (!isSafePrivateContainerName(input.containerName)) {
+      return { state: "failed", reason: "canary_unreachable" };
+    }
+
+    try {
+      const response = await withProbeTimeout(CANARY_TIMEOUT_MS, (signal) =>
+        this.requestCanary({
+          apiServerKey: input.apiServerKey,
+          containerName: input.containerName,
+          model: input.model,
+          readinessPort: this.hermes.readinessPort,
+          signal,
+        }),
+      );
+
+      if (response.status === 401 || response.status === 403) {
+        return { state: "failed", reason: "canary_unauthorized" };
+      }
+
+      if (!response.ok) {
+        return { state: "failed", reason: "canary_model_failed" };
+      }
+
+      if (!isValidCanaryCompletion(response.body)) {
+        return { state: "failed", reason: "canary_invalid_response" };
+      }
+
+      return { state: "passed", reason: null };
+    } catch (error) {
+      return {
+        state: "failed",
+        reason: error instanceof ProbeTimeoutError ? "canary_timeout" : "canary_unreachable",
+      };
+    }
+  }
+
+  private async findExactRunningWinner(
+    details: readonly InspectedRunnerContainer[],
+    launchSpec: AgentLaunchSpec,
+    projection: HermesProjectionResult,
+  ): Promise<InspectedRunnerContainer | null> {
+    const exact: InspectedRunnerContainer[] = [];
+
+    for (const detail of details) {
+      if (detail.status !== "running") {
+        continue;
+      }
+
+      try {
+        await assertHermesInspectMatchesRuntime(detail.inspect, {
+          launchSpec,
+          projection,
+          runtime: this.hermes,
+        });
+
+        if (readOperationFromInspect(detail.inspect)) {
+          exact.push(detail);
+        }
+      } catch {
+        // Stale and mismatched selected containers are replaced below.
+      }
+    }
+
+    return exact.sort(compareOperationWinner)[0] ?? null;
+  }
+
+  private async removeSurplusContainers(
+    containers: readonly InspectedRunnerContainer[],
+    token: LaunchToken,
+  ): Promise<void> {
+    for (const container of containers) {
+      this.throwIfLaunchTerminated(token);
+      await this.runLaunchDocker(token, ["rm", "--force", container.id]);
+      this.throwIfLaunchTerminated(token);
+    }
+  }
+
+  private registerLaunchToken(agentId: string, token: LaunchToken): void {
+    const tokens = this.launchTokens.get(agentId) ?? new Set<LaunchToken>();
+    tokens.add(token);
+    this.launchTokens.set(agentId, tokens);
+  }
+
+  private unregisterLaunchToken(agentId: string, token: LaunchToken): void {
+    const tokens = this.launchTokens.get(agentId);
+
+    if (!tokens) {
+      return;
+    }
+
+    tokens.delete(token);
+    if (tokens.size === 0) {
+      this.launchTokens.delete(agentId);
+    }
+  }
+
+  private cancelActiveLaunches(agentId: string): string | null {
+    const tokens = [...(this.launchTokens.get(agentId) ?? [])];
+
+    for (const token of tokens) {
+      token.terminalReason = "cancelled";
+      token.controller.abort();
+    }
+
+    return (
+      tokens.sort((left, right) => left.acceptedAt.localeCompare(right.acceptedAt))[0]
+        ?.operationId ?? null
+    );
+  }
+
+  private throwIfLaunchTerminated(token: LaunchToken): void {
+    if (token.terminalReason === "cancelled") {
+      throw new RunnerLaunchCancelledError();
+    }
+
+    if (token.terminalReason === "timeout" || Date.now() >= token.deadlineAt) {
+      token.terminalReason = "timeout";
+      token.controller.abort();
+      throw new RunnerLaunchAcceptanceTimeoutError();
+    }
+  }
+
+  private async withLaunchDeadline<T>(token: LaunchToken, operation: () => Promise<T>): Promise<T> {
+    const remainingMs = token.deadlineAt - Date.now();
+
+    if (remainingMs <= 0) {
+      token.terminalReason = "timeout";
+      token.controller.abort();
+      throw new RunnerLaunchAcceptanceTimeoutError();
+    }
+
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        token.terminalReason = "timeout";
+        token.controller.abort();
+        reject(new RunnerLaunchAcceptanceTimeoutError());
+      }, remainingMs);
+    });
+
+    try {
+      return await Promise.race([operation(), deadline]);
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
+  }
+
+  private async runLaunchStep<T>(token: LaunchToken, operation: () => Promise<T>): Promise<T> {
+    this.throwIfLaunchTerminated(token);
+    const result = await this.withLaunchDeadline(token, operation);
+    this.throwIfLaunchTerminated(token);
+    return result;
+  }
+
+  private async runLaunchDocker(
+    token: LaunchToken,
+    args: readonly string[],
+  ): Promise<DockerCliResult> {
+    return await this.runLaunchStep(token, () => {
+      const remainingMs = Math.max(1, token.deadlineAt - Date.now());
+      return this.runDocker(args, { signal: token.controller.signal, timeoutMs: remainingMs });
+    });
+  }
+
+  private async cleanupKnownCreatedContainer(token: LaunchToken): Promise<void> {
+    const containerId = token.createdContainerId;
+
+    if (!containerId) {
+      return;
+    }
+    token.createdContainerId = null;
+    const cleanup = this.runDocker(["rm", "--force", containerId], {
+      timeoutMs: Math.max(1, token.deadlineAt - Date.now()),
+    }).catch(() => undefined);
+    const remainingMs = token.deadlineAt - Date.now();
+
+    if (remainingMs <= 0) {
+      void cleanup;
+      return;
+    }
+
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        cleanup,
+        new Promise<void>((resolveTimeout) => {
+          timeout = setTimeout(resolveTimeout, remainingMs);
+        }),
+      ]);
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
+  }
+
+  private async withAgentLock<T>(
+    agentId: string,
+    operation: () => Promise<T>,
+    token?: LaunchToken,
+  ): Promise<T> {
+    const previous = this.agentLocks.get(agentId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolveLock) => {
+      release = resolveLock;
+    });
+    const chained = previous.then(() => current);
+    this.agentLocks.set(agentId, chained);
+
+    try {
+      if (token) {
+        await this.runLaunchStep(token, () => previous.then(() => undefined));
+      } else {
+        await previous.catch(() => undefined);
+      }
+      return await operation();
+    } finally {
+      release();
+      if (this.agentLocks.get(agentId) === chained) {
+        this.agentLocks.delete(agentId);
+      }
+    }
+  }
+
   private async listSelectedContainers(agentId: string): Promise<RunnerContainer[]> {
-    const result = await this.runDocker([
+    return (await this.listSelectedContainerDetails(agentId)).map(
+      ({ inspect: _inspect, ...container }) => container,
+    );
+  }
+
+  private async listSelectedContainerDetails(
+    agentId: string,
+    token?: LaunchToken,
+  ): Promise<InspectedRunnerContainer[]> {
+    const args = [
       "ps",
       "--all",
       "--filter",
       `label=${AGENTBAY_AGENT_ID_LABEL}=${agentId}`,
       "--format",
       "{{json .}}",
-    ]);
+    ];
+    const result = token ? await this.runLaunchDocker(token, args) : await this.runDocker(args);
     const ids = result.stdout
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => parseDockerPsLine(line).ID)
       .filter((id): id is string => Boolean(id?.trim()));
-    const containers: RunnerContainer[] = [];
+    const containers: InspectedRunnerContainer[] = [];
 
     for (const id of ids) {
-      containers.push(await this.inspectSelectedContainer(id, agentId));
+      if (token) {
+        this.throwIfLaunchTerminated(token);
+      }
+      const inspect = await this.inspectSelectedContainerRaw(id, agentId, token);
+      containers.push({
+        ...containerFromInspect(inspect, id),
+        inspect,
+      });
     }
 
     return containers;
@@ -386,8 +1078,10 @@ export class ManualRunnerDocker {
       projection: HermesProjectionResult;
       runtime: HermesDockerRuntimeOptions;
     } | null = null,
+    token?: LaunchToken,
   ): Promise<RunnerContainer> {
-    const result = await this.runDocker(["inspect", "--format", "{{json .}}", containerId]);
+    const args = ["inspect", "--format", "{{json .}}", containerId];
+    const result = token ? await this.runLaunchDocker(token, args) : await this.runDocker(args);
     const inspect = parseDockerInspect(result.stdout);
 
     if (inspect.Config?.Labels?.[AGENTBAY_AGENT_ID_LABEL] !== agentId) {
@@ -398,19 +1092,639 @@ export class ManualRunnerDocker {
       await assertHermesInspectMatchesRuntime(inspect, hermes);
     }
 
-    return {
-      id: inspect.Id || containerId,
-      name: inspect.Name?.replace(/^\//, "") || "",
-      image: inspect.Config?.Image || "",
-      status: inspect.State?.Status || "unknown",
-      startedAt: normalizeDockerTimestamp(inspect.State?.StartedAt),
-      finishedAt: normalizeDockerTimestamp(inspect.State?.FinishedAt),
-    };
+    return containerFromInspect(inspect, containerId);
   }
 
-  private runDocker(args: readonly string[]): Promise<DockerCliResult> {
-    return this.docker(this.dockerExecutable, args);
+  private async inspectSelectedContainerRaw(
+    containerId: string,
+    agentId: string,
+    token?: LaunchToken,
+  ): Promise<DockerInspectContainer> {
+    const args = ["inspect", "--format", "{{json .}}", containerId];
+    const result = token ? await this.runLaunchDocker(token, args) : await this.runDocker(args);
+    const inspect = parseDockerInspect(result.stdout);
+
+    if (inspect.Config?.Labels?.[AGENTBAY_AGENT_ID_LABEL] !== agentId) {
+      throw new Error("Docker container label mismatch.");
+    }
+
+    return inspect;
   }
+
+  private runDocker(
+    args: readonly string[],
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+  ): Promise<DockerCliResult> {
+    return this.docker(this.dockerExecutable, args, options);
+  }
+}
+
+export class RunnerLaunchCancelledError extends Error {
+  constructor() {
+    super("Runner launch was cancelled.");
+    this.name = "RunnerLaunchCancelledError";
+  }
+}
+
+export class RunnerCanaryNotReadyError extends Error {
+  constructor() {
+    super("Runner canary requires a ready matching operation.");
+    this.name = "RunnerCanaryNotReadyError";
+  }
+}
+
+export class RunnerLaunchAcceptanceTimeoutError extends Error {
+  constructor() {
+    super("Runner launch acceptance timed out.");
+    this.name = "RunnerLaunchAcceptanceTimeoutError";
+  }
+}
+
+function containerFromInspect(
+  inspect: DockerInspectContainer,
+  fallbackId: string,
+): RunnerContainer {
+  return {
+    id: inspect.Id || fallbackId,
+    name: inspect.Name?.replace(/^\//, "") || "",
+    image: inspect.Config?.Image || "",
+    status: inspect.State?.Status || "unknown",
+    startedAt: normalizeDockerTimestamp(inspect.State?.StartedAt),
+    finishedAt: normalizeDockerTimestamp(inspect.State?.FinishedAt),
+  };
+}
+
+function readOperationFromInspect(inspect: DockerInspectContainer): RunnerOperation | null {
+  const labels = inspect.Config?.Labels ?? {};
+  const id = labels[AGENTBAY_OPERATION_ID_LABEL];
+  const action = labels[AGENTBAY_OPERATION_ACTION_LABEL];
+  const acceptedAt = labels[AGENTBAY_OPERATION_ACCEPTED_AT_LABEL];
+  const image = inspect.Config?.Image;
+  const launchSpecVersion = labels[AGENTBAY_LAUNCH_SPEC_VERSION_LABEL];
+  const configRevision = labels[AGENTBAY_CONFIG_REVISION_LABEL];
+  const parsedAcceptedAt = acceptedAt ? Date.parse(acceptedAt) : NaN;
+
+  if (
+    !id ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ||
+    (action !== "start" && action !== "restart") ||
+    !acceptedAt ||
+    !Number.isFinite(parsedAcceptedAt) ||
+    new Date(parsedAcceptedAt).toISOString() !== acceptedAt ||
+    !image ||
+    !launchSpecVersion ||
+    !configRevision
+  ) {
+    return null;
+  }
+
+  return {
+    id,
+    action,
+    target: { image, launchSpecVersion, configRevision },
+    acceptedAt,
+  };
+}
+
+function compareOperationWinner(
+  left: InspectedRunnerContainer,
+  right: InspectedRunnerContainer,
+): number {
+  const leftOperation = readOperationFromInspect(left.inspect);
+  const rightOperation = readOperationFromInspect(right.inspect);
+  const leftAcceptedAt = leftOperation?.acceptedAt ?? "";
+  const rightAcceptedAt = rightOperation?.acceptedAt ?? "";
+
+  return leftAcceptedAt.localeCompare(rightAcceptedAt) || left.id.localeCompare(right.id);
+}
+
+function chooseStatusContainer(
+  containers: readonly InspectedRunnerContainer[],
+): InspectedRunnerContainer {
+  return [...containers].sort((left, right) => {
+    const leftOperation = readOperationFromInspect(left.inspect);
+    const rightOperation = readOperationFromInspect(right.inspect);
+
+    if (leftOperation && rightOperation) {
+      return compareOperationWinner(left, right);
+    }
+
+    if (leftOperation) {
+      return -1;
+    }
+
+    if (rightOperation) {
+      return 1;
+    }
+
+    return left.id.localeCompare(right.id);
+  })[0] as InspectedRunnerContainer;
+}
+
+function buildAcceptedSnapshot(
+  container: InspectedRunnerContainer,
+  operation: RunnerOperation,
+  observedAt: string,
+  revision: { requestedRevision: string | null; projectionMarkerRevision: string | null },
+): RunnerAgentStatusSnapshot {
+  return {
+    phase: "accepted",
+    operation,
+    container: {
+      id: container.id,
+      name: container.name,
+      image: container.image,
+      state: normalizeContainerState(container.status),
+      startedAt: container.startedAt,
+      finishedAt: container.finishedAt,
+      observedAt,
+    },
+    revision: {
+      state: "match",
+      requested: revision.requestedRevision,
+      containerLabel: operation.target.configRevision,
+      projectionMarker: revision.projectionMarkerRevision,
+      observedAt,
+    },
+    gateway: { state: "unknown", observedAt: null },
+    apiServer: { required: true, state: "unknown", observedAt: null },
+    telegram: { required: true, state: "unknown", observedAt: null },
+    readinessReason: "launch_accepted",
+    observedAt,
+  };
+}
+
+function buildStatusSnapshotBase(
+  container: InspectedRunnerContainer,
+  operation: RunnerOperation | null,
+  observedAt: string,
+  revision: {
+    requestedRevision: string | null;
+    projectionMarkerRevision: string | null;
+    revisionState: RunnerAgentStatusSnapshot["revision"]["state"];
+  },
+): RunnerAgentStatusSnapshot {
+  return {
+    phase: "starting",
+    operation,
+    container: {
+      id: container.id,
+      name: container.name,
+      image: container.image,
+      state: normalizeContainerState(container.status),
+      startedAt: container.startedAt,
+      finishedAt: container.finishedAt,
+      observedAt,
+    },
+    revision: {
+      state: revision.revisionState,
+      requested: revision.requestedRevision,
+      containerLabel: container.inspect.Config?.Labels?.[AGENTBAY_CONFIG_REVISION_LABEL] ?? null,
+      projectionMarker: revision.projectionMarkerRevision,
+      observedAt,
+    },
+    gateway: { state: "unknown", observedAt: null },
+    apiServer: { required: true, state: "unknown", observedAt: null },
+    telegram: { required: true, state: "unknown", observedAt: null },
+    readinessReason: "launch_accepted",
+    observedAt,
+  };
+}
+
+function emptyStatusSnapshot(
+  phase: RunnerAgentStatusSnapshot["phase"],
+  reason: Exclude<RunnerReadinessReason, null>,
+  observedAt: string,
+): RunnerAgentStatusSnapshot {
+  return {
+    phase,
+    operation: null,
+    container: {
+      id: null,
+      name: null,
+      image: null,
+      state: "absent",
+      startedAt: null,
+      finishedAt: null,
+      observedAt,
+    },
+    revision: {
+      state: "unknown",
+      requested: null,
+      containerLabel: null,
+      projectionMarker: null,
+      observedAt,
+    },
+    gateway: { state: "unknown", observedAt: null },
+    apiServer: { required: true, state: "unknown", observedAt: null },
+    telegram: { required: true, state: "unknown", observedAt: null },
+    readinessReason: reason,
+    observedAt,
+  };
+}
+
+function buildTerminalSnapshot(
+  phase: "stopped" | "cancelled",
+  selected: InspectedRunnerContainer | null,
+  observedAt: string,
+  containerRemoved = false,
+): RunnerAgentStatusSnapshot {
+  if (!selected) {
+    return emptyStatusSnapshot(phase, "launch_cancelled", observedAt);
+  }
+
+  const operation = readOperationFromInspect(selected.inspect);
+
+  return {
+    phase,
+    operation,
+    container: {
+      id: containerRemoved ? null : selected.id,
+      name: containerRemoved ? null : selected.name,
+      image: containerRemoved ? null : selected.image,
+      state: containerRemoved ? "absent" : normalizeContainerState(selected.status),
+      startedAt: containerRemoved ? null : selected.startedAt,
+      finishedAt: containerRemoved ? null : selected.finishedAt,
+      observedAt,
+    },
+    revision: {
+      state: operation ? "unknown" : "missing",
+      requested: operation?.target.configRevision ?? null,
+      containerLabel: containerRemoved
+        ? null
+        : (selected.inspect.Config?.Labels?.[AGENTBAY_CONFIG_REVISION_LABEL] ?? null),
+      projectionMarker: null,
+      observedAt,
+    },
+    gateway: { state: phase === "stopped" ? "stopped" : "unknown", observedAt },
+    apiServer: { required: true, state: "unknown", observedAt: null },
+    telegram: { required: true, state: "unknown", observedAt: null },
+    readinessReason: "launch_cancelled",
+    observedAt,
+  };
+}
+
+function normalizeContainerState(value: string): RunnerContainerState {
+  return ["created", "running", "restarting", "paused", "exited", "dead", "removing"].includes(
+    value,
+  )
+    ? (value as RunnerContainerState)
+    : "unknown";
+}
+
+async function readProjectedRevision(agentId: string): Promise<{
+  agentId: string | null;
+  configRevision: string | null;
+  configuredStateRoot: string | null;
+  image: string | null;
+  state: "missing" | "unreadable" | "read";
+  stateRoot: string | null;
+  version: string | null;
+}> {
+  const revisionPath = resolve(
+    resolveHermesStateRoot(),
+    agentId,
+    "hermes",
+    "agentbay-config-revision.json",
+  );
+
+  try {
+    await rejectSymlinkPath(resolveHermesStateRoot());
+    await rejectSymlinkPath(resolve(resolveHermesStateRoot(), agentId));
+    await rejectSymlinkPath(resolve(resolveHermesStateRoot(), agentId, "hermes"));
+    const parsed: unknown = JSON.parse(
+      await readSafeRegularFile(revisionPath, MAX_PROBE_RESPONSE_BYTES),
+    );
+
+    return {
+      agentId: isRecord(parsed) && typeof parsed.agentId === "string" ? parsed.agentId : null,
+      configRevision:
+        isRecord(parsed) && typeof parsed.configRevision === "string"
+          ? parsed.configRevision
+          : null,
+      configuredStateRoot: resolveHermesStateRoot(),
+      image: isRecord(parsed) && typeof parsed.image === "string" ? parsed.image : null,
+      state: "read",
+      stateRoot: await realpath(resolveHermesStateRoot()),
+      version: isRecord(parsed) && typeof parsed.version === "string" ? parsed.version : null,
+    };
+  } catch (error) {
+    return {
+      agentId: null,
+      configRevision: null,
+      configuredStateRoot: null,
+      image: null,
+      state: isMissingPathError(error) ? "missing" : "unreadable",
+      stateRoot: null,
+      version: null,
+    };
+  }
+}
+
+async function readProjectedApiServerKey(agentId: string): Promise<string | null> {
+  const envPath = resolve(resolveHermesStateRoot(), agentId, "hermes", ".env");
+
+  try {
+    await rejectSymlinkPath(resolveHermesStateRoot());
+    await rejectSymlinkPath(resolve(resolveHermesStateRoot(), agentId));
+    await rejectSymlinkPath(resolve(resolveHermesStateRoot(), agentId, "hermes"));
+    const content = await readSafeRegularFile(envPath, MAX_PROBE_RESPONSE_BYTES);
+
+    const assignments = content
+      .split(/\r?\n/)
+      .map((line) => /^API_SERVER_KEY=(.*)$/.exec(line))
+      .filter((match): match is RegExpExecArray => match !== null);
+
+    if (assignments.length !== 1) {
+      return null;
+    }
+
+    const assignment = assignments[0]?.[1] ?? "";
+    let value = assignment;
+
+    if (assignment.startsWith('"') || assignment.endsWith('"')) {
+      if (!(assignment.startsWith('"') && assignment.endsWith('"'))) {
+        return null;
+      }
+
+      const parsed: unknown = JSON.parse(assignment);
+      if (typeof parsed !== "string") {
+        return null;
+      }
+      value = parsed;
+    }
+
+    return /^agb_agent_[A-Za-z0-9_-]{32,247}$/.test(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readSafeRegularFile(path: string, maxBytes: number): Promise<string> {
+  const handle = await open(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+
+  try {
+    const info = await handle.stat();
+
+    if (!info.isFile() || info.nlink !== 1 || info.size > maxBytes) {
+      throw new Error("Hermes projected file is not a safe bounded regular file.");
+    }
+
+    const content = await handle.readFile("utf8");
+
+    if (Buffer.byteLength(content, "utf8") > maxBytes) {
+      throw new Error("Hermes projected file exceeds the allowed size.");
+    }
+
+    return content;
+  } finally {
+    await handle.close();
+  }
+}
+
+function classifyRevisionState(input: {
+  requested: string | null;
+  containerLabel: string | null;
+  marker: { configRevision: string | null; state: "missing" | "unreadable" | "read" };
+}): RunnerAgentStatusSnapshot["revision"]["state"] {
+  if (input.marker.state === "missing") {
+    return "missing";
+  }
+
+  if (input.marker.state === "unreadable") {
+    return "unreadable";
+  }
+
+  if (!input.requested || !input.containerLabel || !input.marker.configRevision) {
+    return "missing";
+  }
+
+  return input.requested === input.containerLabel && input.requested === input.marker.configRevision
+    ? "match"
+    : "mismatch";
+}
+
+function hasExactStatusRuntimeEvidence(
+  inspect: DockerInspectContainer,
+  agentId: string,
+  operation: RunnerOperation,
+  runtime: HermesDockerRuntimeOptions,
+  marker: {
+    agentId: string | null;
+    configRevision: string | null;
+    configuredStateRoot: string | null;
+    image: string | null;
+    stateRoot: string | null;
+    version: string | null;
+  },
+): boolean {
+  const stateRoots = [
+    ...new Set([marker.configuredStateRoot, marker.stateRoot].filter(Boolean)),
+  ] as string[];
+  const labels = inspect.Config?.Labels;
+  const checks = {
+    image: inspect.Config?.Image === operation.target.image,
+    agentLabel: labels?.[AGENTBAY_AGENT_ID_LABEL] === agentId,
+    versionLabel:
+      labels?.[AGENTBAY_LAUNCH_SPEC_VERSION_LABEL] === operation.target.launchSpecVersion,
+    revisionLabel: labels?.[AGENTBAY_CONFIG_REVISION_LABEL] === operation.target.configRevision,
+    markerAgent: marker.agentId === agentId,
+    markerRevision: marker.configRevision === operation.target.configRevision,
+    markerImage: marker.image === operation.target.image,
+    markerVersion: marker.version === operation.target.launchSpecVersion,
+    homeMount: stateRoots.some((stateRoot) =>
+      hasExactMount(inspect, resolve(stateRoot, agentId, "hermes"), "/opt/data"),
+    ),
+    workspaceMount: stateRoots.some((stateRoot) =>
+      hasExactMount(inspect, resolve(stateRoot, agentId, "workspace"), "/workspace"),
+    ),
+    networkMode: inspect.HostConfig?.NetworkMode === runtime.network,
+    networkAttachment: Boolean(
+      inspect.NetworkSettings?.Networks && runtime.network in inspect.NetworkSettings.Networks,
+    ),
+    hostPorts: !hasPublishedPort(inspect.HostConfig?.PortBindings),
+    networkPorts: !hasPublishedPort(inspect.NetworkSettings?.Ports),
+    security: inspect.HostConfig?.SecurityOpt?.includes("no-new-privileges") === true,
+    capDrop: inspect.HostConfig?.CapDrop?.includes("ALL") === true,
+    capAdd: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"].every((capability) =>
+      hasDockerCapability(inspect.HostConfig?.CapAdd, capability),
+    ),
+    pids: inspect.HostConfig?.PidsLimit === Number.parseInt(runtime.pidsLimit, 10),
+    cpus: inspect.HostConfig?.NanoCpus === parseDockerCpusToNanoCpus(runtime.cpus),
+    memory: inspect.HostConfig?.Memory === parseDockerMemoryBytes(runtime.memory),
+    socket: !inspectContainsDockerSocket(inspect),
+  };
+  const failed = Object.entries(checks).find(([, passed]) => !passed)?.[0];
+
+  return !failed;
+}
+
+function hasExactMount(
+  inspect: DockerInspectContainer,
+  source: string,
+  destination: string,
+): boolean {
+  return (
+    inspect.Mounts?.some(
+      (mount) =>
+        mount.Type === "bind" && mount.Source === source && mount.Destination === destination,
+    ) ?? false
+  );
+}
+
+function applyReadinessWindow(
+  snapshot: RunnerAgentStatusSnapshot,
+  operation: RunnerOperation,
+  reason: Exclude<RunnerReadinessReason, null>,
+  observedAt: string,
+  immediateFailure = false,
+): RunnerAgentStatusSnapshot {
+  const timedOut =
+    Date.parse(observedAt) - Date.parse(operation.acceptedAt) >=
+    DEFAULT_HERMES_READINESS_TIMEOUT_MS;
+
+  return {
+    ...snapshot,
+    phase: timedOut || immediateFailure ? "failed" : "starting",
+    readinessReason: timedOut ? "readiness_timeout" : reason,
+    observedAt,
+  };
+}
+
+function parseHermesHealthObservation(value: unknown):
+  | {
+      ok: true;
+      observation: {
+        apiServer: RunnerPlatformState;
+        gateway: RunnerGatewayState;
+        immediateFailure: boolean;
+        reason: Exclude<RunnerReadinessReason, null>;
+        telegram: RunnerPlatformState;
+      };
+    }
+  | { ok: false } {
+  if (!isSafePlainRecord(value)) {
+    return { ok: false };
+  }
+
+  const status = safeOwnValue(value, "status");
+  const gateway = normalizeGatewayState(safeOwnValue(value, "gateway_state"));
+  const apiServer = normalizePlatformState(readPlatformState(value, "api_server"));
+  const telegram = normalizePlatformState(readPlatformState(value, "telegram"));
+  let reason: Exclude<RunnerReadinessReason, null> = "gateway_starting";
+  let immediateFailure = false;
+
+  if (status !== "ok" && status !== "error") {
+    return { ok: false };
+  }
+
+  if (gateway === "failed" || status === "error") {
+    reason = "gateway_failed";
+    immediateFailure = true;
+  } else if (gateway !== "running") {
+    reason = "gateway_starting";
+  } else if (apiServer !== "connected") {
+    reason = "api_server_not_connected";
+  } else if (telegram !== "connected") {
+    reason = "telegram_not_connected";
+  }
+
+  return {
+    ok: true,
+    observation: {
+      apiServer,
+      gateway,
+      immediateFailure,
+      reason,
+      telegram,
+    },
+  };
+}
+
+function normalizeGatewayState(value: unknown): RunnerGatewayState {
+  if (value === "running" || value === "starting" || value === "failed" || value === "stopped") {
+    return value;
+  }
+
+  return "unknown";
+}
+
+function normalizePlatformState(value: unknown): RunnerPlatformState {
+  if (
+    value === "connecting" ||
+    value === "connected" ||
+    value === "disconnected" ||
+    value === "failed" ||
+    value === "disabled"
+  ) {
+    return value;
+  }
+
+  return "unknown";
+}
+
+function isSafePrivateContainerName(value: string): boolean {
+  return /^agentbay-runner-[A-Za-z0-9][A-Za-z0-9_.-]{0,103}$/.test(value);
+}
+
+function isValidCanaryCompletion(value: unknown): boolean {
+  if (!isSafePlainRecord(value)) {
+    return false;
+  }
+
+  const choices = safeOwnValue(value, "choices");
+
+  if (!Array.isArray(choices) || choices.length < 1) {
+    return false;
+  }
+
+  const choice = choices[0];
+  if (!isSafePlainRecord(choice)) {
+    return false;
+  }
+
+  const message = safeOwnValue(choice, "message");
+  return (
+    isSafePlainRecord(message) &&
+    safeOwnValue(message, "role") === "assistant" &&
+    typeof safeOwnValue(message, "content") === "string"
+  );
+}
+
+class ProbeTimeoutError extends Error {
+  constructor() {
+    super("Private runner probe timed out.");
+    this.name = "ProbeTimeoutError";
+  }
+}
+
+async function withProbeTimeout<T>(
+  timeoutMs: number,
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort();
+      reject(new ProbeTimeoutError());
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([operation(controller.signal), deadline]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+function isAbortLikeError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "AbortError" || error.name === "TimeoutError" || error.name === "ABORT_ERR")
+  );
 }
 
 async function assertHermesInspectMatchesRuntime(
@@ -668,6 +1982,7 @@ export function buildHermesDockerRunArgs(input: {
   agentId: string;
   containerName: string;
   launchSpec: AgentLaunchSpec;
+  operation: RunnerOperation;
   projection: HermesProjectionResult;
   runtime: HermesDockerRuntimeOptions;
 }): string[] {
@@ -682,6 +1997,12 @@ export function buildHermesDockerRunArgs(input: {
     `${AGENTBAY_CONFIG_REVISION_LABEL}=${input.launchSpec.agent.configRevision}`,
     "--label",
     `${AGENTBAY_LAUNCH_SPEC_VERSION_LABEL}=${input.launchSpec.version}`,
+    "--label",
+    `${AGENTBAY_OPERATION_ID_LABEL}=${input.operation.id}`,
+    "--label",
+    `${AGENTBAY_OPERATION_ACTION_LABEL}=${input.operation.action}`,
+    "--label",
+    `${AGENTBAY_OPERATION_ACCEPTED_AT_LABEL}=${input.operation.acceptedAt}`,
     "--network",
     input.runtime.network,
     "--mount",
@@ -804,21 +2125,158 @@ async function fetchHermesHealth(input: {
   apiServerKey: string;
   containerName: string;
   readinessPort: number;
+  signal?: AbortSignal;
 }): Promise<HermesHealthTransportResult> {
-  const response = await fetch(
-    `http://${input.containerName}:${input.readinessPort}/health/detailed`,
-    {
-      headers: {
-        Authorization: `Bearer ${input.apiServerKey}`,
-        Accept: "application/json",
-      },
-    },
-  );
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), STATUS_PROBE_TIMEOUT_MS);
+  const abort = () => controller.abort();
+  input.signal?.addEventListener("abort", abort, { once: true });
+  if (input.signal?.aborted) {
+    controller.abort();
+  }
 
-  return {
-    ok: response.ok,
-    body: response.ok ? await response.json() : null,
-  };
+  try {
+    const response = await fetch(
+      `http://${input.containerName}:${input.readinessPort}/health/detailed`,
+      {
+        headers: {
+          Authorization: `Bearer ${input.apiServerKey}`,
+          Accept: "application/json",
+        },
+        signal: controller.signal,
+      },
+    );
+
+    if (!response.ok) {
+      return { ok: false, body: null, status: response.status };
+    }
+
+    const text = await readBoundedResponseText(response, MAX_PROBE_RESPONSE_BYTES, controller);
+
+    try {
+      return {
+        ok: true,
+        body: JSON.parse(text),
+        status: response.status,
+      };
+    } catch {
+      return { ok: true, body: null, status: response.status };
+    }
+  } finally {
+    clearTimeout(timeout);
+    input.signal?.removeEventListener("abort", abort);
+  }
+}
+
+async function fetchHermesCanary(input: {
+  apiServerKey: string;
+  containerName: string;
+  model: string;
+  readinessPort: number;
+  signal?: AbortSignal;
+}): Promise<HermesCanaryTransportResult> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CANARY_TIMEOUT_MS);
+  const abort = () => controller.abort();
+  input.signal?.addEventListener("abort", abort, { once: true });
+  if (input.signal?.aborted) {
+    controller.abort();
+  }
+
+  try {
+    const response = await fetch(
+      `http://${input.containerName}:${input.readinessPort}/v1/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${input.apiServerKey}`,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: input.model,
+          messages: [
+            {
+              role: "user",
+              content: "Reply with ok.",
+            },
+          ],
+          tools: [],
+          stream: false,
+          max_tokens: 16,
+        }),
+        signal: controller.signal,
+      },
+    );
+
+    if (!response.ok) {
+      return { ok: false, status: response.status, body: null };
+    }
+
+    const text = await readBoundedResponseText(response, MAX_PROBE_RESPONSE_BYTES, controller);
+
+    let body: unknown = null;
+
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = null;
+    }
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      body,
+    };
+  } finally {
+    clearTimeout(timeout);
+    input.signal?.removeEventListener("abort", abort);
+  }
+}
+
+async function readBoundedResponseText(
+  response: Response,
+  maxBytes: number,
+  controller: AbortController,
+): Promise<string> {
+  const declaredLength = Number.parseInt(response.headers.get("content-length") ?? "", 10);
+
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    controller.abort();
+    return "";
+  }
+
+  if (!response.body) {
+    return "";
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let totalBytes = 0;
+  let text = "";
+
+  try {
+    while (true) {
+      const chunk = await reader.read();
+
+      if (chunk.done) {
+        break;
+      }
+
+      totalBytes += chunk.value.byteLength;
+      if (totalBytes > maxBytes) {
+        controller.abort();
+        return "";
+      }
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+
+    return text + decoder.decode();
+  } catch {
+    return "";
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
 }
 
 export function isHermesReadyResponse(
@@ -852,15 +2310,15 @@ export function evaluateHermesReadyResponse(
 }
 
 function readPlatformState(value: Record<string, unknown>, platformName: string): unknown {
-  const platforms = value.platforms;
+  const platforms = safeOwnValue(value, "platforms");
 
-  if (!isRecord(platforms)) {
+  if (!isSafePlainRecord(platforms)) {
     return null;
   }
 
-  const platform = platforms[platformName];
+  const platform = safeOwnValue(platforms, platformName);
 
-  return isRecord(platform) ? platform.state : null;
+  return isSafePlainRecord(platform) ? safeOwnValue(platform, "state") : null;
 }
 
 function readPositiveInteger(value: string | undefined, fallback: number): number {
@@ -881,6 +2339,7 @@ export function resolveManualRunnerCommand(
 function runDockerExecutable(
   executable: string,
   args: readonly string[],
+  options: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<DockerCliResult> {
   return new Promise((resolvePromise, reject) => {
     execFile(
@@ -888,7 +2347,8 @@ function runDockerExecutable(
       [...args],
       {
         encoding: "utf8",
-        timeout: DOCKER_CLI_TIMEOUT_MS,
+        timeout: options.timeoutMs ?? DOCKER_CLI_TIMEOUT_MS,
+        ...(options.signal ? { signal: options.signal } : {}),
       },
       (error, stdout, stderr) => {
         if (error) {
@@ -1184,5 +2644,25 @@ function dockerContainerName(agentId: string, suffix: string): string {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isSafePlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    return false;
+  }
+
+  return Object.values(Object.getOwnPropertyDescriptors(value)).every(
+    (descriptor) => "value" in descriptor,
+  );
+}
+
+function safeOwnValue(value: Record<string, unknown>, key: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  return descriptor && "value" in descriptor ? descriptor.value : undefined;
 }

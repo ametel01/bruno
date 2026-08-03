@@ -24,7 +24,7 @@ import {
 } from "@/src/runner-service/hermes-projection";
 import { DEFAULT_LOCAL_HERMES_IMAGE } from "@/scripts/smoke-hermes-agent-image";
 
-const FAKE_MODEL_ALIAS = "agentbay-local-fake-model";
+const FAKE_MODEL_ALIAS = "agentbay/local-fake-model";
 const SMOKE_IMAGE = process.env.AGENTBAY_HERMES_IMAGE?.trim() || DEFAULT_LOCAL_HERMES_IMAGE;
 const TIMEOUT_MS = readPositiveInteger(process.env.AGENTBAY_HERMES_CONTRACT_TIMEOUT_MS, 240_000);
 const POLL_MS = readPositiveInteger(process.env.AGENTBAY_HERMES_CONTRACT_POLL_MS, 1_000);
@@ -44,7 +44,9 @@ type HermesHttpResult = {
 export type LocalHermesContractSmokeSummary = {
   agentId: string;
   backupRestored: true;
+  canaryPassed: true;
   configRevision: string;
+  duplicateLaunchReused: true;
   elapsedMs: number;
   fakeModelContainer: string;
   image: string;
@@ -54,7 +56,9 @@ export type LocalHermesContractSmokeSummary = {
   noPublicHermesPort: true;
   privateApiAuth: true;
   removedAgentRoot: true;
+  restartReused: true;
   statePersistence: true;
+  statusProgression: ["accepted", "starting", "ready"];
   telegramBoundary: "local-fake-platform-state";
 };
 
@@ -71,6 +75,7 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
   const previousStateRoot = process.env.AGENTBAY_HERMES_STATE_ROOT;
   let networkCreated = false;
   let projection: HermesProjectionResult | null = null;
+  let projectionRoot: string | null = null;
 
   process.env.AGENTBAY_HERMES_STATE_ROOT = stateRoot;
 
@@ -92,6 +97,7 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
       pidsLimit: "256",
       readinessPort: 8642,
     };
+    let runnerHealthObservations = 0;
     const waitForLocalHermesReadiness = createHermesReadinessWaiter(hermesRuntime, {
       pollMs: POLL_MS,
       requireTelegram: true,
@@ -110,6 +116,59 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
     });
     const runner = new ManualRunnerDocker({
       hermes: hermesRuntime,
+      probe: {
+        requestCanary: async (input) => {
+          const response = await requestHermes(input.containerName, {
+            apiServerKey: input.apiServerKey,
+            body: {
+              model: input.model,
+              messages: [
+                {
+                  role: "user",
+                  content: "Reply with ok.",
+                },
+              ],
+              tools: [],
+              stream: false,
+              max_tokens: 16,
+            },
+            method: "POST",
+            path: "/v1/chat/completions",
+          }).catch(() => null);
+
+          return {
+            ok: response?.status === 200,
+            status: response?.status ?? 0,
+            body: response?.body ?? null,
+          };
+        },
+        requestHealth: async (input) => {
+          runnerHealthObservations += 1;
+          if (runnerHealthObservations === 1) {
+            return {
+              ok: true,
+              body: {
+                status: "ok",
+                gateway_state: "starting",
+                platforms: {
+                  api_server: { state: "connecting" },
+                  telegram: { state: "connecting" },
+                },
+              },
+            };
+          }
+
+          const response = await requestHermes(input.containerName, {
+            apiServerKey: input.apiServerKey,
+            path: "/health/detailed",
+          }).catch(() => null);
+
+          return {
+            ok: response?.status === 200,
+            body: response?.status === 200 ? withLocalFakeTelegramHealth(response.body) : null,
+          };
+        },
+      },
       projection: {
         project: async (launchSpec) => {
           const projected = await projectHermesHome(launchSpec, {
@@ -119,6 +178,8 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
             fakeModelBaseUrl: `http://${fakeModelContainer}:8080/v1`,
             projection: projected,
           });
+          projection = projected;
+          projectionRoot = projected.agentRoot;
           return projected;
         },
       },
@@ -128,28 +189,102 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
     });
 
     const started = await runner.start(agentId, spec);
-    projection = started.projection;
+    const launchAcceptedAt = Date.now();
 
     if (!projection) {
       throw new Error("Hermes projection was not returned by the runner.");
     }
+    const activeProjection: HermesProjectionResult = projection;
 
-    await assertProjectedConfigRevision(projection, spec.agent.configRevision);
-    await assertNoPublicHermesPort(started.container.id);
-    await assertPrivateApiAuth(started.container.name, spec.secrets.apiServerKey);
+    if (
+      !("snapshot" in started) ||
+      !started.snapshot.container.id ||
+      !started.snapshot.container.name
+    ) {
+      throw new Error("Hermes runner did not return an accepted launch snapshot.");
+    }
+
+    await assertProjectedConfigRevision(activeProjection, spec.agent.configRevision);
+    await assertNoPublicHermesPort(started.snapshot.container.id);
+    if (launchAcceptedAt - startedAt >= 30_000) {
+      throw new Error("Hermes launch acceptance exceeded the 30-second runner budget.");
+    }
+
+    const duplicate = await runner.start(agentId, spec);
+    if (
+      !("snapshot" in duplicate) ||
+      duplicate.operation.disposition !== "reused" ||
+      duplicate.operation.id !== started.operation.id ||
+      duplicate.snapshot.container.id !== started.snapshot.container.id
+    ) {
+      throw new Error("Duplicate Hermes launch did not reuse one exact operation and container.");
+    }
+
+    const startingStatus = await runner.status(agentId);
+    if (startingStatus.snapshot.phase !== "starting") {
+      throw new Error(
+        `Hermes runner did not expose starting after asynchronous acceptance: ${startingStatus.snapshot.phase}/${startingStatus.snapshot.readinessReason}/${startingStatus.snapshot.revision.state}`,
+      );
+    }
+
+    const readiness = await waitForLocalHermesReadiness({
+      agentId,
+      apiServerKey: spec.secrets.apiServerKey,
+      configRevision: spec.agent.configRevision,
+      containerName: started.snapshot.container.name,
+    });
+
+    if (!readiness.ok) {
+      throw new Error(
+        `Hermes readiness did not complete after launch acceptance: ${readiness.reason}`,
+      );
+    }
+
+    await assertPrivateApiAuth(started.snapshot.container.name, spec.secrets.apiServerKey);
     const modelResponse = await runHermesModelTurn(
-      started.container.name,
+      started.snapshot.container.name,
       spec.secrets.apiServerKey,
     );
-    const sentinelPath = join(projection.workspace, "agentbay-contract-sentinel.txt");
+    const status = await runner.status(agentId);
+
+    if (status.snapshot.phase !== "ready" || !status.snapshot.operation) {
+      throw new Error("Hermes runner status did not report a ready operation after readiness.");
+    }
+
+    const canary = await runner.canary(agentId, {
+      operationId: status.snapshot.operation.id,
+      configRevision: spec.agent.configRevision,
+      model: spec.model.model,
+    });
+
+    if (canary.observation.state !== "passed") {
+      throw new Error("Hermes runner canary did not pass through the private API seam.");
+    }
+
+    const reusedRestart = await runner.restart(agentId, spec);
+    if (
+      !("snapshot" in reusedRestart) ||
+      reusedRestart.operation.disposition !== "reused" ||
+      reusedRestart.operation.id !== status.snapshot.operation.id ||
+      reusedRestart.snapshot.container.id !== status.snapshot.container.id
+    ) {
+      throw new Error("Hermes restart did not reuse the exact running operation and container.");
+    }
+    const sentinelPath = join(activeProjection.workspace, "agentbay-contract-sentinel.txt");
 
     await writeFile(sentinelPath, "agentbay local hermes contract persisted\n", "utf8");
     const firstLogs = await waitForHermesGatewayLogs(runner, agentId);
 
-    await runner.stop(agentId);
-    await cp(projection.agentRoot, backupRoot, { recursive: true });
-    await rm(projection.agentRoot, { force: true, recursive: true });
-    await cp(backupRoot, projection.agentRoot, { recursive: true });
+    const stopped = await runner.stop(agentId);
+    if (
+      stopped.cancelledOperationId !== status.snapshot.operation.id ||
+      stopped.snapshot.phase !== "stopped"
+    ) {
+      throw new Error("Hermes stop did not return exact cancellation evidence.");
+    }
+    await cp(activeProjection.agentRoot, backupRoot, { recursive: true });
+    await rm(activeProjection.agentRoot, { force: true, recursive: true });
+    await cp(backupRoot, activeProjection.agentRoot, { recursive: true });
 
     const restarted = await runner.restart(agentId, spec);
     const sentinel = await readFile(sentinelPath, "utf8");
@@ -158,15 +293,24 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
       throw new Error("Hermes workspace state did not survive backup/restore and restart.");
     }
 
-    await assertPrivateApiAuth(restarted.container.name, spec.secrets.apiServerKey);
-    await runner.cleanup(agentId);
-    await assertPathRemoved(projection.agentRoot, "Hermes agent root");
+    if (!("snapshot" in restarted) || !restarted.snapshot.container.name) {
+      throw new Error("Hermes runner did not return an accepted restart snapshot.");
+    }
+
+    await assertPrivateApiAuth(restarted.snapshot.container.name, spec.secrets.apiServerKey);
+    const cleaned = await runner.cleanup(agentId);
+    if (!cleaned.cancelledOperationId || cleaned.snapshot.phase !== "cancelled") {
+      throw new Error("Hermes cleanup did not return exact cancellation evidence.");
+    }
+    await assertPathRemoved(activeProjection.agentRoot, "Hermes agent root");
     await assertNoSelectedContainers(agentId);
 
     return {
       agentId,
       backupRestored: true,
+      canaryPassed: true,
       configRevision: spec.agent.configRevision,
+      duplicateLaunchReused: true,
       elapsedMs: Date.now() - startedAt,
       fakeModelContainer,
       image: SMOKE_IMAGE,
@@ -176,14 +320,16 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
       noPublicHermesPort: true,
       privateApiAuth: true,
       removedAgentRoot: true,
+      restartReused: true,
       statePersistence: true,
+      statusProgression: ["accepted", "starting", "ready"],
       telegramBoundary: "local-fake-platform-state",
     };
   } finally {
     await removeLabeledAgentContainers(agentId);
     await docker(["rm", "--force", fakeModelContainer], { allowFailure: true });
-    if (projection) {
-      await rm(projection.agentRoot, { force: true, recursive: true }).catch(() => undefined);
+    if (projectionRoot) {
+      await rm(projectionRoot, { force: true, recursive: true }).catch(() => undefined);
     }
     await rm(backupRoot, { force: true, recursive: true }).catch(() => undefined);
     await rm(stateRoot, { force: true, recursive: true }).catch(() => undefined);
@@ -218,7 +364,7 @@ function buildSmokeLaunchSpec(input: {
     },
     model: {
       provider: "openrouter",
-      model: "openai/gpt-4.1-mini",
+      model: FAKE_MODEL_ALIAS,
     },
     platforms: {
       required: ["api_server", "telegram"],
@@ -293,7 +439,7 @@ async function applyLocalSmokeOverrides(input: {
 
   telegram.enabled = false;
   routes[FAKE_MODEL_ALIAS] = {
-    model: "openai/gpt-4.1-mini",
+    model: FAKE_MODEL_ALIAS,
     provider: "openrouter",
     base_url: input.fakeModelBaseUrl,
   };
@@ -382,23 +528,32 @@ async function startFakeModelServer(input: {
 }
 
 async function assertPrivateApiAuth(containerName: string, apiServerKey: string): Promise<void> {
-  const unauthorized = await requestHermes(containerName, {
-    apiServerKey: "wrong-local-smoke-key",
-    path: "/health/detailed",
-  });
+  const deadline = Date.now() + TIMEOUT_MS;
 
-  if (unauthorized.status !== 401) {
-    throw new Error(`Hermes private API accepted an invalid bearer token: ${unauthorized.status}`);
+  while (Date.now() < deadline) {
+    const unauthorized = await requestHermes(containerName, {
+      apiServerKey: "wrong-local-smoke-key",
+      path: "/health/detailed",
+    }).catch(() => null);
+
+    if (unauthorized?.status !== 401) {
+      await sleep(POLL_MS);
+      continue;
+    }
+
+    const authorized = await requestHermes(containerName, {
+      apiServerKey,
+      path: "/health/detailed",
+    }).catch(() => null);
+
+    if (authorized?.status === 200 && isRecord(authorized.body)) {
+      return;
+    }
+
+    await sleep(POLL_MS);
   }
 
-  const authorized = await requestHermes(containerName, {
-    apiServerKey,
-    path: "/health/detailed",
-  });
-
-  if (authorized.status !== 200 || !isRecord(authorized.body)) {
-    throw new Error(`Hermes private API did not accept the configured bearer token.`);
-  }
+  throw new Error("Hermes private API auth boundary did not stabilize.");
 }
 
 async function assertProjectedConfigRevision(

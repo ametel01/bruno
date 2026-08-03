@@ -1,13 +1,14 @@
 import { access, lstat, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   AGENTBAY_AGENT_ID_LABEL,
   createHermesReadinessWaiter,
   evaluateHermesReadyResponse,
   isHermesReadyResponse,
   ManualRunnerDocker,
+  RunnerLaunchCancelledError,
   type DockerExecutableRunner,
   type HermesReadinessReason,
 } from "@/src/runner-service/docker";
@@ -172,7 +173,12 @@ describe("manual runner service HTTP contract", () => {
     });
     expect(await status.json()).toMatchObject({
       ok: true,
-      containers: [{ id: "container-001", status: "running" }],
+      contractVersion: "agentbay.runner.status.v2",
+      snapshot: {
+        container: { id: "container-001", state: "running" },
+        phase: "failed",
+        readinessReason: "revision_missing",
+      },
     });
     expect(await logs.json()).toMatchObject({
       ok: true,
@@ -250,14 +256,22 @@ describe("manual runner service HTTP contract", () => {
       ),
     );
 
-    expect(valid.status).toBe(200);
+    expect(valid.status).toBe(202);
     expect(projected).toEqual([AGENT_ID]);
-    expect(readiness).toEqual([
-      {
-        apiServerKey: sampleLaunchSpec().secrets.apiServerKey,
-        configRevision: sampleLaunchSpec().agent.configRevision,
-        containerName: expect.stringContaining(`agentbay-runner-${AGENT_ID}`),
-      },
+    expect(readiness).toEqual([]);
+    const validBody = await valid.json();
+    expect(validBody).toMatchObject({
+      ok: true,
+      contractVersion: "agentbay.runner.launch.v2",
+      operation: { state: "accepted", disposition: "created" },
+      snapshot: { phase: "accepted", readinessReason: "launch_accepted" },
+    });
+    expect(Object.keys(validBody.operation).sort()).toEqual([
+      "acceptedAt",
+      "disposition",
+      "id",
+      "state",
+      "target",
     ]);
     expect(calls).toContainEqual(expect.arrayContaining(["run", "--detach"]));
     expect(calls).toContainEqual(
@@ -341,7 +355,8 @@ describe("manual runner service HTTP contract", () => {
     expect(calls).toContainEqual(["rm", "--force", "container-001"]);
   });
 
-  it("returns a safe typed failure when Hermes readiness fails", async () => {
+  it("does not poll Hermes readiness during launch acceptance", async () => {
+    const readiness = vi.fn(async () => ({ ok: false as const, reason: "timeout" as const }));
     const service = createRunnerService({
       authToken: "test-token",
       docker: new ManualRunnerDocker({
@@ -352,7 +367,7 @@ describe("manual runner service HTTP contract", () => {
           project: createHermesProjectionForTest,
         },
         readiness: {
-          wait: async () => ({ ok: false, reason: "timeout" }),
+          wait: readiness,
         },
       }),
     });
@@ -363,18 +378,16 @@ describe("manual runner service HTTP contract", () => {
       ),
     );
 
-    expect(response.status).toBe(502);
-    await expect(response.json()).resolves.toEqual({
-      ok: false,
-      error: {
-        code: "hermes_readiness_failed",
-        message: "Hermes readiness failed.",
-        reason: "timeout",
-      },
+    expect(response.status).toBe(202);
+    expect(readiness).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      contractVersion: "agentbay.runner.launch.v2",
+      snapshot: { phase: "accepted", readinessReason: "launch_accepted" },
     });
   });
 
-  it("removes the just-created Hermes container when readiness fails", async () => {
+  it("retains the accepted container when later health would still be unready", async () => {
     const calls: string[][] = [];
     const service = createRunnerService({
       authToken: "test-token",
@@ -398,21 +411,16 @@ describe("manual runner service HTTP contract", () => {
     );
     const status = await service.fetch(authorizedRequest(`/runner/v1/agents/${AGENT_ID}/status`));
 
-    expect(response.status).toBe(502);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "hermes_readiness_failed",
-        reason: "telegram_not_connected",
-      },
-    });
+    expect(response.status).toBe(202);
     await expect(status.json()).resolves.toMatchObject({
       ok: true,
-      containers: [],
+      contractVersion: "agentbay.runner.status.v2",
+      snapshot: { container: { id: "container-001", state: "running" } },
     });
-    expect(calls).toContainEqual(["rm", "--force", "container-001"]);
+    expect(calls).not.toContainEqual(["rm", "--force", "container-001"]);
   });
 
-  it("keeps the primary readiness reason when failed-launch cleanup fails", async () => {
+  it("does not run failed-launch readiness cleanup during async acceptance", async () => {
     const calls: string[][] = [];
     const service = createRunnerService({
       authToken: "test-token",
@@ -435,16 +443,578 @@ describe("manual runner service HTTP contract", () => {
       ),
     );
 
-    expect(response.status).toBe(502);
-    await expect(response.json()).resolves.toEqual({
-      ok: false,
-      error: {
-        code: "hermes_readiness_failed",
-        message: "Hermes readiness failed.",
-        reason: "api_server_not_connected",
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      snapshot: { phase: "accepted" },
+    });
+    expect(calls).not.toContainEqual(["rm", "--force", "container-001"]);
+  });
+
+  it("serializes duplicate managed starts and reuses the exact accepted container", async () => {
+    const calls: string[][] = [];
+    await withHermesStateRootForTest(async () => {
+      const docker = new ManualRunnerDocker({
+        command: testCommand(),
+        docker: createMockDocker({ calls }),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: (spec) =>
+            createHermesProjectionForTest(spec, {
+              apiServerKey: spec.secrets.apiServerKey,
+            }),
+        },
+      });
+      const spec = sampleLaunchSpec({
+        agent: { ...sampleLaunchSpec().agent, id: AGENT_ID },
+      });
+
+      const [first, second] = await Promise.all([
+        docker.start(AGENT_ID, spec),
+        docker.start(AGENT_ID, spec),
+      ]);
+
+      expect(first).toMatchObject({
+        operation: { disposition: "created" },
+        snapshot: { container: { id: "container-001" }, phase: "accepted" },
+      });
+      expect(second).toMatchObject({
+        operation: { disposition: "reused" },
+        snapshot: { container: { id: "container-001" }, phase: "accepted" },
+      });
+      expect(calls.filter((args) => args[0] === "run")).toHaveLength(1);
+      expect(calls).not.toContainEqual(["rm", "--force", "container-001"]);
+    });
+  });
+
+  it("replaces stale selected containers while preserving unrelated agent containers", async () => {
+    const calls: string[][] = [];
+    const docker = new ManualRunnerDocker({
+      command: testCommand(),
+      docker: createMockDocker({
+        calls,
+        containers: [
+          {
+            id: "stale-selected",
+            agentId: AGENT_ID,
+            image: sampleLaunchSpec().image.ref,
+            status: "running",
+          },
+          { id: "other-selected", agentId: OTHER_AGENT_ID, status: "running" },
+        ],
+      }),
+      nameSuffix: () => "unit001",
+      projection: {
+        project: (spec) =>
+          createHermesProjectionForTest(spec, {
+            apiServerKey: spec.secrets.apiServerKey,
+          }),
       },
     });
-    expect(calls).toContainEqual(["rm", "--force", "container-001"]);
+
+    await expect(
+      docker.start(
+        AGENT_ID,
+        sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } }),
+      ),
+    ).resolves.toMatchObject({
+      operation: { disposition: "replaced" },
+      snapshot: { container: { id: "container-001" } },
+    });
+    expect(calls).toContainEqual(["rm", "--force", "stale-selected"]);
+    expect(calls).not.toContainEqual(["rm", "--force", "other-selected"]);
+    expect(calls.filter((args) => args[0] === "run")).toHaveLength(1);
+  });
+
+  it("cancels an in-progress launch before Docker run when stop wins the race", async () => {
+    const calls: string[][] = [];
+    let releaseProjection!: () => void;
+    const projectionStarted = new Promise<void>((resolveStarted) => {
+      releaseProjection = resolveStarted;
+    });
+    const docker = new ManualRunnerDocker({
+      command: testCommand(),
+      docker: createMockDocker({ calls }),
+      nameSuffix: () => "unit001",
+      projection: {
+        project: async (spec) => {
+          await createHermesProjectionForTest(spec, {
+            apiServerKey: spec.secrets.apiServerKey,
+          });
+          await projectionStarted;
+          return await createHermesProjectionForTest(spec, {
+            apiServerKey: spec.secrets.apiServerKey,
+          });
+        },
+      },
+    });
+    const start = docker.start(
+      AGENT_ID,
+      sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const stop = docker.stop(AGENT_ID);
+    releaseProjection();
+
+    await expect(start).rejects.toBeInstanceOf(RunnerLaunchCancelledError);
+    await expect(stop).resolves.toMatchObject({
+      cancelledOperationId: expect.any(String),
+      containers: [],
+      snapshot: { phase: "stopped", readinessReason: "launch_cancelled" },
+    });
+    expect(calls.filter((args) => args[0] === "run")).toEqual([]);
+
+    const recovered = await docker.start(
+      AGENT_ID,
+      sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } }),
+    );
+    if (!("operation" in recovered)) {
+      throw new Error("managed launch did not recover after cancellation");
+    }
+    await expect(docker.stop(AGENT_ID)).resolves.toMatchObject({
+      cancelledOperationId: recovered.operation.id,
+      snapshot: { phase: "stopped" },
+    });
+    await expect(docker.stop(AGENT_ID)).resolves.toMatchObject({
+      cancelledOperationId: null,
+      snapshot: { phase: "stopped" },
+    });
+  });
+
+  it("aborts Docker run on cancellation and removes the known created container", async () => {
+    const calls: string[][] = [];
+    const baseDocker = createMockDocker({ calls });
+    let markRunStarted!: () => void;
+    const runStarted = new Promise<void>((resolveStarted) => {
+      markRunStarted = resolveStarted;
+    });
+    const dockerRunner: DockerExecutableRunner = async (executable, args, options) => {
+      if (args[0] !== "run") {
+        return await baseDocker(executable, args, options);
+      }
+
+      const result = await baseDocker(executable, args, options);
+      markRunStarted();
+      await new Promise<void>((_resolveResult, reject) => {
+        options?.signal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("Aborted", "AbortError")),
+          { once: true },
+        );
+        if (options?.signal?.aborted) {
+          reject(new DOMException("Aborted", "AbortError"));
+          return;
+        }
+      });
+      return result;
+    };
+    const docker = new ManualRunnerDocker({
+      docker: dockerRunner,
+      nameSuffix: () => "unit001",
+      projection: { project: createHermesProjectionForTest },
+    });
+    const start = docker.start(
+      AGENT_ID,
+      sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } }),
+    );
+    await runStarted;
+    const stopped = docker.stop(AGENT_ID);
+
+    await expect(start).rejects.toBeInstanceOf(RunnerLaunchCancelledError);
+    await expect(stopped).resolves.toMatchObject({
+      cancelledOperationId: expect.any(String),
+      containers: [],
+      snapshot: { phase: "stopped" },
+    });
+    expect(calls).toContainEqual(["rm", "--force", `agentbay-runner-${AGENT_ID}-unit001`]);
+    await expect(docker.status(AGENT_ID)).resolves.toMatchObject({
+      snapshot: { phase: "idle", container: { state: "absent" } },
+    });
+  });
+
+  it("enforces one 30-second launch budget even when projection never resolves", async () => {
+    vi.useFakeTimers();
+    const calls: string[][] = [];
+
+    try {
+      const service = createRunnerService({
+        authToken: "test-token",
+        docker: new ManualRunnerDocker({
+          docker: createMockDocker({ calls }),
+          projection: {
+            project: async () => await new Promise(() => undefined),
+          },
+        }),
+      });
+      const responsePromise = service.fetch(
+        authorizedJsonRequest(
+          `/runner/v1/agents/${AGENT_ID}/start`,
+          sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } }),
+        ),
+      );
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      const response = await responsePromise;
+
+      expect(response.status).toBe(504);
+      await expect(response.json()).resolves.toEqual({
+        ok: false,
+        error: {
+          code: "launch_acceptance_timeout",
+          message: "Runner launch acceptance timed out.",
+        },
+      });
+      expect(calls).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps different agents independent while one launch is blocked", async () => {
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolveStarted) => {
+      markFirstStarted = resolveStarted;
+    });
+    const firstGate = new Promise<void>((resolveGate) => {
+      releaseFirst = resolveGate;
+    });
+    const docker = new ManualRunnerDocker({
+      docker: createMockDocker(),
+      nameSuffix: () => "unit001",
+      projection: {
+        project: async (spec) => {
+          if (spec.agent.id === AGENT_ID) {
+            markFirstStarted();
+            await firstGate;
+          }
+          return await createHermesProjectionForTest(spec);
+        },
+      },
+    });
+    const first = docker.start(
+      AGENT_ID,
+      sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } }),
+    );
+    await firstStarted;
+
+    await expect(
+      docker.start(
+        OTHER_AGENT_ID,
+        sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: OTHER_AGENT_ID } }),
+      ),
+    ).resolves.toMatchObject({ snapshot: { phase: "accepted" } });
+
+    releaseFirst();
+    await expect(first).resolves.toMatchObject({ snapshot: { phase: "accepted" } });
+  });
+
+  it("observes ready status with the projected API key and never exposes probe bodies", async () => {
+    const probeCalls: Array<{ apiServerKey: string; containerName: string }> = [];
+    await withHermesStateRootForTest(async () => {
+      const docker = new ManualRunnerDocker({
+        command: testCommand(),
+        docker: createMockDocker(),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: (spec) =>
+            createHermesProjectionForTest(spec, {
+              apiServerKey: spec.secrets.apiServerKey,
+            }),
+        },
+        probe: {
+          requestHealth: async (input) => {
+            probeCalls.push({
+              apiServerKey: input.apiServerKey,
+              containerName: input.containerName,
+            });
+            return {
+              ok: true,
+              body: { ...pinnedHermesHealth(), raw: "OPENROUTER_API_KEY=sk-or-v1-upstream" },
+            };
+          },
+        },
+      });
+      const spec = sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } });
+
+      await docker.start(AGENT_ID, spec);
+      const status = await docker.status(AGENT_ID);
+
+      expect(status).toMatchObject({
+        contractVersion: "agentbay.runner.status.v2",
+        snapshot: {
+          phase: "ready",
+          readinessReason: null,
+          gateway: { state: "running" },
+          apiServer: { state: "connected" },
+          telegram: { state: "connected" },
+        },
+      });
+      expect(probeCalls).toEqual([
+        {
+          apiServerKey: spec.secrets.apiServerKey,
+          containerName: `agentbay-runner-${AGENT_ID}-unit001`,
+        },
+      ]);
+      expect(JSON.stringify(status)).not.toContain(spec.secrets.apiServerKey);
+      expect(JSON.stringify(status)).not.toContain("sk-or-v1-upstream");
+    });
+  });
+
+  it("bounds one status probe at two seconds and maps timeout without leaking errors", async () => {
+    vi.useFakeTimers();
+    let markProbeStarted!: () => void;
+    const probeStarted = new Promise<void>((resolveStarted) => {
+      markProbeStarted = resolveStarted;
+    });
+
+    try {
+      await withHermesStateRootForTest(async () => {
+        const docker = new ManualRunnerDocker({
+          docker: createMockDocker(),
+          nameSuffix: () => "unit001",
+          projection: {
+            project: (spec) =>
+              createHermesProjectionForTest(spec, { apiServerKey: spec.secrets.apiServerKey }),
+          },
+          probe: {
+            requestHealth: async () => {
+              markProbeStarted();
+              return await new Promise(() => undefined);
+            },
+          },
+        });
+        const spec = sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } });
+        await docker.start(AGENT_ID, spec);
+        const statusPromise = docker.status(AGENT_ID);
+        await probeStarted;
+
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        await expect(statusPromise).resolves.toMatchObject({
+          snapshot: { phase: "starting", readinessReason: "health_timeout" },
+        });
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects accessor health fixtures and duplicate projected API keys safely", async () => {
+    await withHermesStateRootForTest(async () => {
+      const probe = vi.fn(async () => {
+        const body = Object.create(null) as Record<string, unknown>;
+        Object.defineProperty(body, "status", {
+          enumerable: true,
+          get() {
+            throw new Error("API_SERVER_KEY=agb_agent_hostile_probe_secret");
+          },
+        });
+        return { ok: true, body };
+      });
+      const docker = new ManualRunnerDocker({
+        docker: createMockDocker(),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: (spec) =>
+            createHermesProjectionForTest(spec, { apiServerKey: spec.secrets.apiServerKey }),
+        },
+        probe: { requestHealth: probe },
+      });
+      const spec = sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } });
+      await docker.start(AGENT_ID, spec);
+
+      const hostile = await docker.status(AGENT_ID);
+      expect(hostile.snapshot).toMatchObject({
+        phase: "starting",
+        readinessReason: "health_invalid",
+      });
+      expect(JSON.stringify(hostile)).not.toContain("hostile_probe_secret");
+
+      const envPath = join(
+        String(process.env.AGENTBAY_HERMES_STATE_ROOT),
+        AGENT_ID,
+        "hermes",
+        ".env",
+      );
+      await writeFile(
+        envPath,
+        `API_SERVER_KEY="${spec.secrets.apiServerKey}"\nAPI_SERVER_KEY="${spec.secrets.apiServerKey}"\n`,
+      );
+      const duplicate = await docker.status(AGENT_ID);
+
+      expect(duplicate.snapshot).toMatchObject({
+        phase: "starting",
+        readinessReason: "probe_credential_unavailable",
+      });
+      expect(probe).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("fails transient readiness exactly at the 180-second boundary", async () => {
+    let now = new Date("2026-08-03T05:20:00.000Z");
+    await withHermesStateRootForTest(async () => {
+      const docker = new ManualRunnerDocker({
+        docker: createMockDocker(),
+        nameSuffix: () => "unit001",
+        now: () => now,
+        projection: {
+          project: (spec) =>
+            createHermesProjectionForTest(spec, { apiServerKey: spec.secrets.apiServerKey }),
+        },
+        probe: {
+          requestHealth: async () => ({
+            ok: true,
+            body: {
+              status: "ok",
+              gateway_state: "starting",
+              platforms: {
+                api_server: { state: "connecting" },
+                telegram: { state: "connecting" },
+              },
+            },
+          }),
+        },
+      });
+      const spec = sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } });
+      await docker.start(AGENT_ID, spec);
+      now = new Date(now.getTime() + 180_000);
+
+      await expect(docker.status(AGENT_ID)).resolves.toMatchObject({
+        snapshot: { phase: "failed", readinessReason: "readiness_timeout" },
+      });
+    });
+  });
+
+  it("fails canary until status is ready and runs ready canaries through the private API key", async () => {
+    const spec = sampleManagedLaunchSpec({
+      agent: { ...sampleManagedLaunchSpec().agent, id: AGENT_ID },
+    });
+    const canaryCalls: Array<{ apiServerKey: string; model: string }> = [];
+    await withHermesStateRootForTest(async () => {
+      const service = createRunnerService({
+        authToken: "test-token",
+        docker: new ManualRunnerDocker({
+          command: testCommand(),
+          docker: createMockDocker(),
+          nameSuffix: () => "unit001",
+          projection: {
+            project: (launchSpec) =>
+              createHermesProjectionForTest(launchSpec, {
+                apiServerKey: launchSpec.secrets.apiServerKey,
+              }),
+          },
+          probe: {
+            requestHealth: async () => ({ ok: true, body: pinnedHermesHealth() }),
+            requestCanary: async (input) => {
+              canaryCalls.push({ apiServerKey: input.apiServerKey, model: input.model });
+              return {
+                ok: true,
+                status: 200,
+                body: {
+                  choices: [
+                    {
+                      message: {
+                        role: "assistant",
+                        content: "OPENROUTER_API_KEY=sk-or-v1-upstream",
+                      },
+                    },
+                  ],
+                },
+              };
+            },
+          },
+        }),
+      });
+      const accepted = await service.fetch(
+        authorizedJsonRequest(`/runner/v1/agents/${AGENT_ID}/start`, spec),
+      );
+      const acceptedBody = await accepted.json();
+
+      const ready = await service.fetch(
+        authorizedJsonRequest(`/runner/v1/agents/${AGENT_ID}/canary`, {
+          operationId: acceptedBody.operation.id,
+          configRevision: spec.agent.configRevision,
+          model: spec.model.model,
+        }),
+      );
+      const stale = await service.fetch(
+        authorizedJsonRequest(`/runner/v1/agents/${AGENT_ID}/canary`, {
+          operationId: "00000000-0000-4000-8000-000000000999",
+          configRevision: spec.agent.configRevision,
+          model: spec.model.model,
+        }),
+      );
+
+      expect(ready.status).toBe(200);
+      const readyBody = await ready.json();
+      expect(readyBody).toMatchObject({
+        ok: true,
+        contractVersion: "agentbay.runner.canary.v1",
+        observation: { state: "passed", reason: null },
+      });
+      expect(stale.status).toBe(409);
+      expect(canaryCalls).toEqual([
+        { apiServerKey: spec.secrets.apiServerKey, model: spec.model.model },
+      ]);
+      expect(JSON.stringify(readyBody)).not.toContain("sk-or-v1-upstream");
+    });
+  });
+
+  it("sends only the fixed no-tools canary request through the private container boundary", async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ input: string; init: RequestInit | undefined }> = [];
+
+    try {
+      globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        requests.push({ input: String(input), init });
+        return Response.json({
+          choices: [{ message: { role: "assistant", content: "hostile provider output" } }],
+        });
+      }) as typeof fetch;
+
+      await withHermesStateRootForTest(async () => {
+        const docker = new ManualRunnerDocker({
+          docker: createMockDocker(),
+          nameSuffix: () => "unit001",
+          projection: {
+            project: (spec) =>
+              createHermesProjectionForTest(spec, { apiServerKey: spec.secrets.apiServerKey }),
+          },
+          probe: { requestHealth: async () => ({ ok: true, body: pinnedHermesHealth() }) },
+        });
+        const spec = sampleManagedLaunchSpec({
+          agent: { ...sampleManagedLaunchSpec().agent, id: AGENT_ID },
+        });
+        const accepted = await docker.start(AGENT_ID, spec);
+
+        if (!("operation" in accepted)) {
+          throw new Error("managed launch did not return an accepted operation");
+        }
+
+        const canary = await docker.canary(AGENT_ID, {
+          operationId: accepted.operation.id,
+          configRevision: spec.agent.configRevision,
+          model: spec.model.model,
+        });
+
+        expect(canary.observation).toMatchObject({ state: "passed", reason: null });
+        expect(JSON.stringify(canary)).not.toContain("hostile provider output");
+        expect(requests).toHaveLength(1);
+        expect(requests[0]?.input).toBe(
+          `http://agentbay-runner-${AGENT_ID}-unit001:8642/v1/chat/completions`,
+        );
+        expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
+          model: spec.model.model,
+          messages: [{ role: "user", content: "Reply with ok." }],
+          tools: [],
+          stream: false,
+          max_tokens: 16,
+        });
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("keeps the primary revision reason when failed-launch cleanup fails", async () => {
@@ -511,9 +1081,12 @@ describe("manual runner service HTTP contract", () => {
     await expect(docker.restart(AGENT_ID, sampleLaunchSpec())).rejects.toMatchObject({
       reason: "revision_mismatch",
     });
-    await expect(docker.status(AGENT_ID)).resolves.toEqual({ containers: [] });
+    await expect(docker.status(AGENT_ID)).resolves.toMatchObject({
+      contractVersion: "agentbay.runner.status.v2",
+      snapshot: { phase: "idle", readinessReason: "container_absent" },
+    });
     await expect(docker.status(OTHER_AGENT_ID)).resolves.toMatchObject({
-      containers: [{ id: "other-selected", status: "running" }],
+      snapshot: { container: { id: "other-selected", state: "running" } },
     });
     expect(calls).toContainEqual(["rm", "--force", "old-selected"]);
     expect(calls).toContainEqual(["rm", "--force", "container-001"]);
@@ -678,6 +1251,63 @@ describe("manual runner service HTTP contract", () => {
       },
     });
   });
+
+  it("enforces strict canary bodies, bounded JSON, and safe status failures", async () => {
+    const canary = vi.fn(async () => ({}));
+    const failingDocker = {
+      start: async () => ({}),
+      stop: async () => ({}),
+      restart: async () => ({}),
+      status: async () => {
+        throw new Error("DOCKER_STDERR=sk-or-v1-hostile-status-secret");
+      },
+      logs: async () => ({}),
+      cleanup: async () => ({}),
+      canary,
+    };
+    const service = createRunnerService({ authToken: "test-token", docker: failingDocker });
+    const invalidContentType = await service.fetch(
+      new Request(`http://runner.test/runner/v1/agents/${AGENT_ID}/canary`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer test-token",
+          "Content-Type": "application/jsonp",
+        },
+        body: "{}",
+      }),
+    );
+    const extraKey = await service.fetch(
+      authorizedJsonRequest(`/runner/v1/agents/${AGENT_ID}/canary`, {
+        operationId: "11111111-1111-4111-8111-111111111111",
+        configRevision: "cfg-1",
+        model: "openrouter/auto",
+        prompt: "hostile override",
+      }),
+    );
+    const oversized = await service.fetch(
+      new Request(`http://runner.test/runner/v1/agents/${AGENT_ID}/canary`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer test-token",
+          "Content-Type": "application/json",
+        },
+        body: "x".repeat(64 * 1024 + 1),
+      }),
+    );
+    const status = await service.fetch(authorizedRequest(`/runner/v1/agents/${AGENT_ID}/status`));
+
+    expect(invalidContentType.status).toBe(415);
+    expect(extraKey.status).toBe(400);
+    expect(oversized.status).toBe(413);
+    expect(canary).not.toHaveBeenCalled();
+    expect(status.status).toBe(502);
+    const statusBody = await status.json();
+    expect(statusBody).toEqual({
+      ok: false,
+      error: { code: "runner_status_failed", message: "Runner status observation failed." },
+    });
+    expect(JSON.stringify(statusBody)).not.toContain("hostile-status-secret");
+  });
 });
 
 describe("manual runner Docker command contract", () => {
@@ -732,6 +1362,10 @@ describe("manual runner Docker command contract", () => {
 
     const result = await docker.restart(AGENT_ID);
 
+    expect("container" in result).toBe(true);
+    if (!("container" in result)) {
+      throw new Error("legacy restart did not return a container");
+    }
     expect(result.container).toMatchObject({
       id: "container-001",
       status: "running",
@@ -867,9 +1501,18 @@ describe("Hermes detailed readiness contract", () => {
 
 async function createHermesProjectionForTest(
   spec: AgentLaunchSpec,
-  options: { marker?: Record<string, unknown> } = {},
+  options: {
+    apiServerKey?: string;
+    marker?: Record<string, unknown>;
+    signal?: AbortSignal;
+  } = {},
 ) {
-  const agentRoot = join(tmpdir(), `agentbay-runner-projection-${Date.now()}-${Math.random()}`);
+  if (options.signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
+  const agentRoot = process.env.AGENTBAY_HERMES_STATE_ROOT
+    ? join(process.env.AGENTBAY_HERMES_STATE_ROOT, spec.agent.id)
+    : join(tmpdir(), `agentbay-runner-projection-${Date.now()}-${Math.random()}`);
   const hermesHome = join(agentRoot, "hermes");
   const workspace = join(agentRoot, "workspace");
   const revisionPath = join(hermesHome, "agentbay-config-revision.json");
@@ -887,6 +1530,9 @@ async function createHermesProjectionForTest(
       ...(options.marker ?? {}),
     }),
   );
+  if (options.apiServerKey) {
+    await writeFile(join(hermesHome, ".env"), `API_SERVER_KEY="${options.apiServerKey}"\n`);
+  }
 
   return {
     agentRoot,
@@ -897,6 +1543,23 @@ async function createHermesProjectionForTest(
     soulPath: join(hermesHome, "SOUL.md"),
     revisionPath,
   };
+}
+
+async function withHermesStateRootForTest<T>(run: () => Promise<T>): Promise<T> {
+  const previousStateRoot = process.env.AGENTBAY_HERMES_STATE_ROOT;
+  const stateRoot = join(tmpdir(), `agentbay-runner-state-${Date.now()}-${Math.random()}`);
+
+  try {
+    process.env.AGENTBAY_HERMES_STATE_ROOT = stateRoot;
+    return await run();
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.AGENTBAY_HERMES_STATE_ROOT;
+    } else {
+      process.env.AGENTBAY_HERMES_STATE_ROOT = previousStateRoot;
+    }
+    await rm(stateRoot, { force: true, recursive: true });
+  }
 }
 
 function pinnedHermesHealth(
@@ -1037,7 +1700,7 @@ function createMockDocker(
                 ]
               : []),
           ],
-          Name: `/${container.id}`,
+          Name: `/${readArgValue(container.runArgs, "--name") ?? container.id}`,
           Config: {
             Cmd: readContainerCommandArgs(container.runArgs),
             Entrypoint: null,
@@ -1061,7 +1724,7 @@ function createMockDocker(
     }
 
     if (args[0] === "stop") {
-      const container = containers.get(String(args[1]));
+      const container = containers.get(String(args.at(-1)));
 
       if (container) {
         container.status = "exited";
@@ -1071,11 +1734,17 @@ function createMockDocker(
     }
 
     if (args[0] === "rm") {
-      if (input.failRemoveIds?.includes(String(args.at(-1)))) {
+      const target = String(args.at(-1));
+      const targetId =
+        [...containers.values()].find(
+          (container) => readArgValue(container.runArgs, "--name") === target,
+        )?.id ?? target;
+
+      if (input.failRemoveIds?.includes(targetId)) {
         throw new Error("cleanup failed");
       }
 
-      containers.delete(String(args.at(-1)));
+      containers.delete(targetId);
 
       return { stdout: "", stderr: "" };
     }
