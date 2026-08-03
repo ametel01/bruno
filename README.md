@@ -159,7 +159,7 @@ See [Authentication modes](./docs/AUTHENTICATION.md) and the
 | `AGENTBAY_DIGITALOCEAN_TOKEN` | Automated cloud runners | DigitalOcean API token. If omitted, cloud provisioning is unavailable. |
 | `AGENTBAY_RUNNER_BEARER_TOKEN` | DigitalOcean or manual runner control | Shared server-side command token used between the control plane and runner service. |
 | `AGENTBAY_RUNNER_IMAGE` | No | Runner image; defaults to `ghcr.io/ametel01/agentbay-runner:main`. |
-| `AGENTBAY_HERMES_WORKLOAD_IMAGE` | No | Hermes workload image; defaults to the source-pinned Hermes image and digest. |
+| `AGENTBAY_HERMES_WORKLOAD_IMAGE` | No | Exact Hermes workload image used by deployment and runtime reconciliation; defaults to the source-pinned image and digest. Controlled staging requires the attested untagged GHCR amd64 manifest digest. |
 | `AGENTBAY_RUNNER_MAX_AGENTS` | No | Positive per-runner agent capacity; defaults to `1`. |
 | `AGENTBAY_DIGITALOCEAN_REGION` | No | Droplet region; defaults to `sfo3`. |
 | `AGENTBAY_DIGITALOCEAN_SIZE_SLUG` | No | Droplet size; defaults to `s-1vcpu-512mb-10gb`. |
@@ -170,6 +170,13 @@ See [Authentication modes](./docs/AUTHENTICATION.md) and the
 | `AGENTBAY_AGENT_SECRET_KEYS_JSON` | Hermes BYOK setup | JSON object mapping key versions to 32-byte base64url keys. Keep old keys during rotation so existing secrets remain decryptable. |
 | `AGENTBAY_READY_AGENT_CREATION_ENABLED` | Controlled ready-mode rollout | Must be exactly `true` to offer automatic-ready creation. Unset, blank, or `false` keeps stopped/manual creation; any other value fails closed. |
 | `CRON_SECRET` | Hosted reconciliation | A 32–256 character bearer-safe secret used by Vercel to authorize both deployment and runtime reconciliation routes. |
+
+The default-disabled staging acceptance controller additionally requires the
+15 exact capabilities documented in [E2E validation](./docs/E2E_VALIDATION.md),
+including its dedicated bearer authority, published-image provenance, explicit
+DigitalOcean budget and live-effect sentinels, and isolated Telegram/OpenRouter
+credentials. Disabling the acceptance flag prevents forward work while cron
+continues durable cleanup for an existing run.
 
 Additional validated tuning variables are documented inline in `.env.example` and
 `src/server/env.ts`. Production runner bootstrap pulls the configured runner and Hermes images;
@@ -393,7 +400,7 @@ enable ready mode by treating mock or local evidence as live acceptance.
 | `bun run verify:e2e` | Run the base verification gate followed by provider-backed E2E. |
 | `bun run agent:image:smoke` | Verify the selected Hermes image contract locally. |
 | `bun run agent:hermes:contract-smoke` | Exercise the pinned Hermes runner/readiness/restart contract locally. |
-| `bun run verify:hermes:staging` | Run the fail-closed capability gate for the explicitly authorized live Hermes/Telegram acceptance. |
+| `bun run verify:hermes:staging` | Run the capability-gated, interactive-human-attested live Hermes/Telegram acceptance and durable cleanup workflow. |
 | `bun run deploy:prod` | Deploy production to the configured Vercel scope. |
 
 See [E2E validation](./docs/E2E_VALIDATION.md) for capability gates and safe test modes.

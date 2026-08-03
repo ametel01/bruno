@@ -20,7 +20,11 @@ import {
   agentUsagePeriods,
   runners,
 } from "@/src/server/db/schema";
-import { type DigitalOceanProviderConfig, readDigitalOceanProviderConfig } from "@/src/server/env";
+import {
+  type DigitalOceanProviderConfig,
+  readDigitalOceanProviderConfig,
+  readHermesWorkloadImage,
+} from "@/src/server/env";
 import { recordAgentEventsInTransaction } from "@/src/server/events/agent-events";
 import type { DigitalOceanProvider } from "@/src/server/runners/digitalocean-provider";
 import {
@@ -89,6 +93,7 @@ export type DeploymentActionContext = {
 export type AgentDeploymentReconcilerDependencies = {
   createConnection?: () => DatabaseConnection;
   now?: () => Date;
+  readHermesWorkloadImage?: () => string;
   launchSpec?: typeof buildHermesAgentLaunchSpecForUser;
   manualRunnerAdapter?: (
     runner: ManualRunnerRecord,
@@ -181,6 +186,7 @@ async function reconcileOne(
   target: ReconcileTarget,
   dependencies: AgentDeploymentReconcilerDependencies,
 ): Promise<AgentDeploymentReconcileResult> {
+  const hermesWorkloadImage = (dependencies.readHermesWorkloadImage ?? readHermesWorkloadImage)();
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now ?? (() => new Date());
@@ -209,7 +215,7 @@ async function reconcileOne(
 
     return {
       processed: 1,
-      outcome: await runClaimedStage(connection, claimed, dependencies, now),
+      outcome: await runClaimedStage(connection, claimed, dependencies, hermesWorkloadImage, now),
     };
   } finally {
     if (ownsConnection) {
@@ -222,6 +228,7 @@ async function runClaimedStage(
   connection: DatabaseConnection,
   work: ClaimedDeploymentWork,
   dependencies: AgentDeploymentReconcilerDependencies,
+  hermesWorkloadImage: string,
   now: () => Date,
 ): Promise<AgentDeploymentReconcileOutcome> {
   const actionDeadlineAt = new Date(now().getTime() + DEPLOYMENT_RECONCILE_ACTION_DEADLINE_MS);
@@ -251,9 +258,23 @@ async function runClaimedStage(
       case "provisioning_runner":
         return reconcileProvisioningRunner(connection, work, dependencies, now, context);
       case "configuring_hermes":
-        return reconcileConfiguringHermes(connection, work, dependencies, now, context);
+        return reconcileConfiguringHermes(
+          connection,
+          work,
+          dependencies,
+          hermesWorkloadImage,
+          now,
+          context,
+        );
       case "starting_gateway":
-        return reconcileStartingGateway(connection, work, dependencies, now, context);
+        return reconcileStartingGateway(
+          connection,
+          work,
+          dependencies,
+          hermesWorkloadImage,
+          now,
+          context,
+        );
       case "verifying_model":
         return reconcileVerifyingModel(connection, work, dependencies, now, context);
       case "connecting_telegram":
@@ -488,12 +509,14 @@ async function reconcileConfiguringHermes(
   connection: DatabaseConnection,
   work: ClaimedDeploymentWork,
   dependencies: AgentDeploymentReconcilerDependencies,
+  hermesWorkloadImage: string,
   now: () => Date,
   context: DeploymentActionContext,
 ): Promise<AgentDeploymentReconcileOutcome> {
   const launch = await (dependencies.launchSpec ?? buildHermesAgentLaunchSpecForUser)(
     work.userId,
     work.agentId,
+    { hermesWorkloadImage },
   );
 
   if (!launch.ok) {
@@ -600,6 +623,7 @@ async function reconcileStartingGateway(
   connection: DatabaseConnection,
   work: ClaimedDeploymentWork,
   dependencies: AgentDeploymentReconcilerDependencies,
+  hermesWorkloadImage: string,
   now: () => Date,
   context: DeploymentActionContext,
 ): Promise<AgentDeploymentReconcileOutcome> {
@@ -618,7 +642,15 @@ async function reconcileStartingGateway(
   const status = await adapter.status(work.agentId);
 
   if (!status.ok || !("snapshot" in status)) {
-    return retryStartConvergence(connection, work, dependencies, now, context, runner);
+    return retryStartConvergence(
+      connection,
+      work,
+      dependencies,
+      hermesWorkloadImage,
+      now,
+      context,
+      runner,
+    );
   }
 
   if (isReadySnapshot(status.snapshot, work)) {
@@ -628,20 +660,37 @@ async function reconcileStartingGateway(
   }
 
   if (requiresStartConvergence(status.snapshot, work)) {
-    return retryStartConvergence(connection, work, dependencies, now, context, runner);
+    return retryStartConvergence(
+      connection,
+      work,
+      dependencies,
+      hermesWorkloadImage,
+      now,
+      context,
+      runner,
+    );
   }
 
   if (isRetryableSnapshot(status.snapshot)) {
     return scheduleRetry(connection, work, "gateway_starting", now());
   }
 
-  return retryStartConvergence(connection, work, dependencies, now, context, runner);
+  return retryStartConvergence(
+    connection,
+    work,
+    dependencies,
+    hermesWorkloadImage,
+    now,
+    context,
+    runner,
+  );
 }
 
 async function retryStartConvergence(
   connection: DatabaseConnection,
   work: ClaimedDeploymentWork,
   dependencies: AgentDeploymentReconcilerDependencies,
+  hermesWorkloadImage: string,
   now: () => Date,
   context: DeploymentActionContext,
   runner: ManualRunnerRecord,
@@ -649,6 +698,7 @@ async function retryStartConvergence(
   const launch = await (dependencies.launchSpec ?? buildHermesAgentLaunchSpecForUser)(
     work.userId,
     work.agentId,
+    { hermesWorkloadImage },
   );
 
   if (!launch.ok || launch.spec.agent.configRevision !== work.configRevision) {

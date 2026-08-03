@@ -25,6 +25,8 @@ const AGENT_ID = "00000000-0000-4000-8000-000000009201";
 const DEPLOYMENT_ID = "00000000-0000-4000-8000-000000009301";
 const OPERATION_ID = "00000000-0000-4000-8000-000000009401";
 const REVISION = "cfg-runtime-9";
+const CUSTOM_HERMES_IMAGE =
+  "ghcr.io/ametel01/agentbay-hermes@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 const runner: ManualRunnerRecord = {
   id: RUNNER_ID,
@@ -127,6 +129,7 @@ function harness(input: {
   start?: ReturnType<typeof vi.fn>;
   diagnostic?: NonNullable<AgentRuntimeReconcilerDependencies["telegramWebhookDiagnostic"]>;
   launch?: NonNullable<AgentRuntimeReconcilerDependencies["launchSpec"]>;
+  workloadImage?: string;
 }) {
   const transition = vi.fn(
     async (
@@ -146,11 +149,13 @@ function harness(input: {
     stop: stop as RuntimeRunnerAdapter["stop"],
     start: start as RuntimeRunnerAdapter["start"],
   }));
+  const readHermesWorkloadImage = vi.fn(() => input.workloadImage ?? DEFAULT_HERMES_WORKLOAD_IMAGE);
 
   const dependencies: AgentRuntimeReconcilerDependencies = {
     createConnection: () => connection,
     now: () => NOW,
     randomUUID: () => "22222222-2222-4222-8222-222222222222",
+    readHermesWorkloadImage,
     claimRuntime: vi.fn(async () => input.claim),
     loadContext: vi.fn(async () => input.context ?? loaded()),
     persistTransition: transition,
@@ -165,17 +170,18 @@ function harness(input: {
     stop,
     start,
     manualRunnerAdapter,
+    readHermesWorkloadImage,
     dependencies,
   };
 }
 
-function managedLaunch(): AgentLaunchSpecBuildResult {
+function managedLaunch(image = DEFAULT_HERMES_WORKLOAD_IMAGE): AgentLaunchSpecBuildResult {
   return {
     ok: true,
     spec: {
       version: MANAGED_AGENT_LAUNCH_SPEC_VERSION,
       agent: { id: AGENT_ID, configRevision: REVISION },
-      image: { ref: DEFAULT_HERMES_WORKLOAD_IMAGE },
+      image: { ref: image },
       secrets: { telegramBotToken: "123456:abcdefghijklmnopqrstuvwxyz" },
     },
   } as unknown as AgentLaunchSpecBuildResult;
@@ -241,6 +247,37 @@ describe("agent runtime reconciler", () => {
     expect(JSON.stringify(persisted)).not.toContain(DEFAULT_HERMES_WORKLOAD_IMAGE);
   });
 
+  it("uses the configured workload image for live status observations", async () => {
+    const base = snapshot();
+
+    if (!base.operation) {
+      throw new Error("Expected an operation in the strict runtime fixture.");
+    }
+
+    const customSnapshot = snapshot({
+      operation: {
+        ...base.operation,
+        target: { ...base.operation.target, image: CUSTOM_HERMES_IMAGE },
+      },
+      container: { ...base.container, image: CUSTOM_HERMES_IMAGE },
+    });
+    const test = harness({
+      claim: claim(),
+      status: vi.fn(async () => ({ ok: true, runner, snapshot: customSnapshot })),
+      workloadImage: CUSTOM_HERMES_IMAGE,
+    });
+
+    await expect(reconcileNextAgentRuntime(test.dependencies)).resolves.toEqual({
+      processed: 1,
+      outcome: "observed",
+    });
+
+    expect(test.readHermesWorkloadImage).toHaveBeenCalledOnce();
+    expect(test.transition.mock.calls[0]?.[2]).toMatchObject({
+      mutation: { state: "observing", lastReadyAt: NOW },
+    });
+  });
+
   it("fences a newly observed desired Stop before making any runner request", async () => {
     const test = harness({ claim: claim({ desiredStatus: "stopped" }) });
 
@@ -282,7 +319,7 @@ describe("agent runtime reconciler", () => {
 
   it("uses a webhook diagnostic as its own effect before Telegram-driven Stop", async () => {
     const diagnostic = vi.fn(async () => "empty" as const);
-    const launch = vi.fn(async () => managedLaunch());
+    const launch = vi.fn(async () => managedLaunch(CUSTOM_HERMES_IMAGE));
     const test = harness({
       claim: claim({
         state: "recovering_stop",
@@ -293,6 +330,7 @@ describe("agent runtime reconciler", () => {
       }),
       diagnostic,
       launch,
+      workloadImage: CUSTOM_HERMES_IMAGE,
     });
 
     await expect(reconcileNextAgentRuntime(test.dependencies)).resolves.toEqual({
@@ -300,6 +338,11 @@ describe("agent runtime reconciler", () => {
       outcome: "recovering",
     });
     expect(diagnostic).toHaveBeenCalledOnce();
+    expect(launch).toHaveBeenCalledWith(USER_ID, AGENT_ID, {
+      createConnection: expect.any(Function),
+      hermesWorkloadImage: CUSTOM_HERMES_IMAGE,
+      trustedConfigRevision: REVISION,
+    });
     expect(test.stop).not.toHaveBeenCalled();
     expect(test.start).not.toHaveBeenCalled();
     expect(test.transition.mock.calls[0]?.[2]).toMatchObject({
@@ -334,6 +377,7 @@ describe("agent runtime reconciler", () => {
     });
 
     const acceptedOperationId = "00000000-0000-4000-8000-000000009499";
+    const launch = vi.fn(async () => managedLaunch(CUSTOM_HERMES_IMAGE));
     const start = vi.fn(async () => ({
       ok: true,
       state: "accepted" as const,
@@ -342,7 +386,7 @@ describe("agent runtime reconciler", () => {
         id: acceptedOperationId,
         action: "start" as const,
         target: {
-          image: DEFAULT_HERMES_WORKLOAD_IMAGE,
+          image: CUSTOM_HERMES_IMAGE,
           launchSpecVersion: MANAGED_AGENT_LAUNCH_SPEC_VERSION,
           configRevision: REVISION,
         },
@@ -353,11 +397,22 @@ describe("agent runtime reconciler", () => {
     const startClaim = harness({
       claim: claim({ state: "recovering_start", operationId: null }),
       start,
-      launch: vi.fn(async () => managedLaunch()),
+      launch,
+      workloadImage: CUSTOM_HERMES_IMAGE,
     });
 
     await reconcileNextAgentRuntime(startClaim.dependencies);
     expect(start).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledWith(
+      AGENT_ID,
+      expect.objectContaining({ image: { ref: CUSTOM_HERMES_IMAGE } }),
+    );
+    expect(startClaim.readHermesWorkloadImage).toHaveBeenCalledOnce();
+    expect(launch).toHaveBeenCalledWith(USER_ID, AGENT_ID, {
+      createConnection: expect.any(Function),
+      hermesWorkloadImage: CUSTOM_HERMES_IMAGE,
+      trustedConfigRevision: REVISION,
+    });
     expect(startClaim.stop).not.toHaveBeenCalled();
     expect(startClaim.status).not.toHaveBeenCalled();
     expect(startClaim.transition.mock.calls[0]?.[2]).toMatchObject({
@@ -521,8 +576,33 @@ describe("agent runtime reconciler", () => {
 });
 
 describe("runtime observation mapping", () => {
+  it("matches the exact configured workload image instead of the source-image default", () => {
+    const base = snapshot();
+
+    if (!base.operation) {
+      throw new Error("Expected an operation in the strict runtime fixture.");
+    }
+
+    const customSnapshot = snapshot({
+      operation: {
+        ...base.operation,
+        target: { ...base.operation.target, image: CUSTOM_HERMES_IMAGE },
+      },
+      container: { ...base.container, image: CUSTOM_HERMES_IMAGE },
+    });
+
+    expect(
+      mapRunnerSnapshotToRuntimeObservation(customSnapshot, claim(), CUSTOM_HERMES_IMAGE),
+    ).toEqual({ kind: "exact_ready", restartCount: 0 });
+    expect(mapRunnerSnapshotToRuntimeObservation(snapshot(), claim(), CUSTOM_HERMES_IMAGE)).toEqual(
+      { kind: "revision_mismatch" },
+    );
+  });
+
   it("requires operation, revision, durability policy, API, and Telegram evidence", () => {
-    expect(mapRunnerSnapshotToRuntimeObservation(snapshot(), claim())).toEqual({
+    expect(
+      mapRunnerSnapshotToRuntimeObservation(snapshot(), claim(), DEFAULT_HERMES_WORKLOAD_IMAGE),
+    ).toEqual({
       kind: "exact_ready",
       restartCount: 0,
     });
@@ -557,7 +637,9 @@ describe("runtime observation mapping", () => {
     ];
 
     for (const [value, kind] of cases) {
-      expect(mapRunnerSnapshotToRuntimeObservation(value, claim()).kind).toBe(kind);
+      expect(
+        mapRunnerSnapshotToRuntimeObservation(value, claim(), DEFAULT_HERMES_WORKLOAD_IMAGE).kind,
+      ).toBe(kind);
     }
 
     expect(
@@ -566,16 +648,21 @@ describe("runtime observation mapping", () => {
           telegram: { required: true, state: "fatal", observedAt: NOW.toISOString() },
         }),
         claim(),
+        DEFAULT_HERMES_WORKLOAD_IMAGE,
       ),
     ).toEqual({ kind: "telegram_unhealthy", telegramState: "fatal" });
   });
 
   it("permits rolling compatibility correlation only after strict v3 durability evidence", () => {
     expect(
-      mapRunnerSnapshotToRuntimeObservation(snapshot(), {
-        configRevision: REVISION,
-        operationId: null,
-      }),
+      mapRunnerSnapshotToRuntimeObservation(
+        snapshot(),
+        {
+          configRevision: REVISION,
+          operationId: null,
+        },
+        DEFAULT_HERMES_WORKLOAD_IMAGE,
+      ),
     ).toEqual({ kind: "exact_ready", restartCount: 0 });
 
     expect(
@@ -588,6 +675,7 @@ describe("runtime observation mapping", () => {
           },
         }),
         { configRevision: REVISION, operationId: null },
+        DEFAULT_HERMES_WORKLOAD_IMAGE,
       ),
     ).toEqual({ kind: "restart_policy_mismatch" });
   });

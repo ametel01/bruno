@@ -25,6 +25,7 @@ import {
   type RunnerDurableStatusSnapshot,
   type RunnerLaunchAcceptedResponse,
   type RunnerOperation,
+  type ParsedRunnerStatusResponse,
 } from "@/src/runner-service/runner-contracts";
 import type { ManualRunnerRecord } from "@/src/server/runners/manual-runner-persistence";
 import { fingerprintRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
@@ -108,7 +109,12 @@ export type ManualRunnerRestartResult =
 
 export type ManualRunnerStatusResult =
   | { ok: true; runner: ManualRunnerRecord; containers: ManualRunnerRemoteContainer[] }
-  | { ok: true; runner: ManualRunnerRecord; snapshot: RunnerDurableStatusSnapshot }
+  | {
+      ok: true;
+      runner: ManualRunnerRecord;
+      contractVersion: ParsedRunnerStatusResponse["contractVersion"];
+      snapshot: RunnerDurableStatusSnapshot;
+    }
   | { ok: false; reason: ManualRunnerFailureReason };
 
 export type ManualRunnerCleanupResult =
@@ -297,6 +303,7 @@ export class ManualRunnerAdapter
     return {
       ok: true,
       runner: this.runner,
+      contractVersion: status.response.contractVersion,
       snapshot: status.response.snapshot,
     };
   }

@@ -53,6 +53,20 @@ export function createDigitalOceanSdkClient(token, apiBaseUrl) {
       firewalls: {
         post: (body, context) =>
           sendJson(adapter, client.v2.firewalls.toPostRequestInformation(body), context),
+        byFirewall_id: (id) => ({
+          get: (context) =>
+            sendJson(
+              adapter,
+              client.v2.firewalls.byFirewall_id(id).toGetRequestInformation(),
+              context,
+            ),
+          delete: (context) =>
+            sendNoContent(
+              adapter,
+              client.v2.firewalls.byFirewall_id(id).toDeleteRequestInformation(),
+              context,
+            ),
+        }),
       },
       tags: {
         byTag_id: (tag) => ({
@@ -105,6 +119,7 @@ function buildUrl(requestInfo) {
   let url = requestInfo.urlTemplate
     .replace("{+baseurl}", String(pathParameters.baseurl ?? "https://api.digitalocean.com"))
     .replace("{droplet_id}", encodeURIComponent(String(pathParameters.droplet_id ?? "")))
+    .replace("{firewall_id}", encodeURIComponent(String(pathParameters.firewall_id ?? "")))
     .replace("{tag_id}", encodeURIComponent(String(pathParameters.tag_id ?? "")))
     .replace(/\{\?[^}]+\}/g, "");
 

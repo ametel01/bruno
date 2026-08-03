@@ -90,18 +90,33 @@ bun run verify:hermes:staging
 ```
 
 This command is the single entrypoint for the final live Hermes plus Telegram
-acceptance smoke. The current command is still a fail-closed capability
-preflight: it performs no network, Docker, browser, database, provider, Droplet,
-or Telegram-send side effects, and exits nonzero even when every capability is
-configured. Therefore a current nonzero result is expected safety evidence, not
-live acceptance. The provider-backed executor and its first authorized run have
-not yet been completed.
+acceptance smoke. It fails before any network, database, provider, Droplet, or
+Telegram effect unless all 15 capabilities validate and the process has an
+interactive TTY. Once authorized, it drives a durable hosted saga one bounded
+effect at a time. A crash, timeout, duplicate command, or disabled acceptance
+flag resumes cleanup from the database ledger rather than relying on a local
+`finally` block. The first authorized live run has not yet been completed.
 
 The preflight requires these capability names:
 
 - `AGENTBAY_HERMES_STAGING_PUBLISHED_IMAGE_REF`: scanned GHCR release-candidate
-  Hermes workload image with an immutable `@sha256:` digest. This must be the
-  published/scanned artifact, not the upstream Nous source image digest.
+  Hermes workload image as the exact untagged
+  `ghcr.io/ametel01/agentbay-hermes@sha256:...` linux/amd64 manifest. This must
+  be the published artifact, not the upstream source-pinned digest or an OCI
+  index.
+- `AGENTBAY_HERMES_WORKLOAD_IMAGE`: the exact same untagged digest. Deployment
+  and runtime reconciliation use this configured image.
+- `AGENTBAY_HERMES_STAGING_IMAGE_SOURCE_REVISION`: lowercase 40-hex source
+  revision embedded in the image config.
+- `AGENTBAY_HERMES_STAGING_PUBLISH_WORKFLOW_RUN_ID`: positive safe-integer ID of
+  the successful completed main-branch publish workflow run.
+- `AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED`: exact value `true` during the
+  authorized window. `false` or unset prevents forward work but does not stop
+  cleanup reconciliation for an existing run.
+- `AGENTBAY_HERMES_STAGING_ACCEPTANCE_BASE_URL`: exact HTTPS origin ending in
+  `/`, with no credentials, path, query, or fragment.
+- `AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET`: dedicated 32–256 character
+  bearer-safe secret distinct from cron, runner, and operator authorities.
 - `AGENTBAY_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION`: exact value
   `authorize-basic-4usd-digitalocean-staging`.
 - `AGENTBAY_DIGITALOCEAN_TOKEN`: DigitalOcean staging token for the approved
@@ -119,11 +134,12 @@ The preflight requires these capability names:
   `send-telegram-and-spend-digitalocean-staging`.
 
 The command reports only capability names, configured/missing/malformed state,
-safe reason codes, and `sideEffectsAttempted: false`. It must never print raw
-credentials, Telegram tokens, Telegram user or chat IDs, private endpoints,
-provider responses, or serialized environment objects. A missing, blank,
-placeholder, malformed, or non-exact sentinel value is a blocker, not a passing
-smoke.
+safe reason codes, stages, Boolean evidence, and cleanup states. Before the
+effect boundary it reports `sideEffectsAttempted: false`. It must never print
+raw credentials, Telegram tokens, Telegram user or chat IDs, raw replies,
+private endpoints, provider responses, internal resource IDs, or serialized
+environment objects. A missing, blank, placeholder, malformed, or non-exact
+sentinel value is a blocker, not a passing smoke.
 
 ### Prepare the dedicated bot and allowlist
 
@@ -148,23 +164,32 @@ smoke.
 
 ### Run the authorized workflow
 
-Do not run the live workflow until the command has a reviewed provider-backed
-executor and an operator has approved the exact basic DigitalOcean budget plus
-Telegram send. Supply all nine capabilities out of band, then run exactly:
+Do not run the live workflow until an operator has approved the exact basic
+DigitalOcean budget plus Telegram contact and all 15 capabilities have been
+installed out of band. Run it from an interactive terminal exactly:
 
 ```bash
 bun run verify:hermes:staging
 ```
 
-The executor must create only one staging canary agent for the immutable image
-revision. Observe the persisted deployment sequence `pending` →
+The executor creates only one staging canary agent for the immutable image
+revision. It independently attests the GHCR bytes, config labels, amd64 digest,
+and exact successful publish run, then observes the persisted deployment
+sequence `pending` →
 `provisioning_runner` → `configuring_hermes` → `starting_gateway` →
-`verifying_model` → `connecting_telegram` → `ready`. Then send a unique message
-from the allowed user, correlate one Hermes reply without recording message or
-identity content, restart and re-verify readiness, Stop the agent, and verify it
-remains stopped after runner-process and Docker restart. Managed containers use
-`unless-stopped`; AgentBay persists `desiredStatus=stopped` before workload
-cleanup so restart policy cannot override an intentional Stop.
+`verifying_model` → `connecting_telegram` → `ready`.
+
+At each `operator_telegram` checkpoint, the command prints an exact one-time
+challenge. The allowlisted human sends that text to the dedicated bot and
+confirms that the correlated Hermes reply arrived by typing
+`reply-confirmed`; the operator must not paste the reply. This is explicitly
+`interactive_human_attested` evidence, not an automated Telegram-user or
+MTProto claim. The command repeats the proof after Restart, audits redaction,
+persists Stop before transport, observes a continuous stopped window, verifies
+the stopped/manual rollback path, and cleans the exact workload, secrets,
+firewall, Droplet, and runner in that order. Managed containers use
+`unless-stopped`, so database-first Stop prevents restart policy from
+resurrecting an intentionally stopped agent.
 
 If setup fails, retain only its safe error code and stage. Reconciliation uses
 persisted retries and backoff; terminal setup failures offer an explicit retry
@@ -178,10 +203,12 @@ Record only sanitized timestamps, command/CI references, immutable image digest,
 stage names, safe reason codes, and yes/no assertions for reply, restart, Stop,
 and cleanup. Never retain credentials, bot/user/chat IDs, message text, private
 runner endpoints, raw upstream responses, environment dumps, browser storage,
-or secret-bearing logs. Delete the staging agent and authorized Droplet, verify
-the provider resource is gone, revoke or rotate temporary credentials as
-planned, and remove local artifacts. A failed cleanup is a blocker and must be
-reported without exposing identifiers.
+or secret-bearing logs. The durable controller must independently prove
+agent/workload, secret, firewall, Droplet, and runner absence. Revoke or rotate
+temporary credentials as planned after it finishes. A cleanup deadline or
+ambiguous owned set is a blocker and must be reported without exposing
+identifiers; never manually delete an uncertain resource merely to make the
+report green.
 
 Only after this live run passes may the controlled environment set
 `AGENTBAY_READY_AGENT_CREATION_ENABLED=true`. Roll back by setting it to `false`

@@ -197,7 +197,10 @@ describe.sequential("runner provisioning service", () => {
 
     const persistedTokens = await connection.db.select().from(runnerRegistrationTokens);
     const [persistedRunner] = await connection.db
-      .select({ endpointUrl: runners.endpointUrl })
+      .select({
+        endpointUrl: runners.endpointUrl,
+        providerFirewallId: runners.providerFirewallId,
+      })
       .from(runners)
       .limit(1);
     const persistedEvents = await connection.db.select().from(runnerProvisioningEvents);
@@ -206,6 +209,7 @@ describe.sequential("runner provisioning service", () => {
 
     expect(persistedTokens).toHaveLength(1);
     expect(persistedRunner?.endpointUrl).toBe("https://203-0-113-10.sslip.io");
+    expect(persistedRunner?.providerFirewallId).toBe("droplet-firewall-1");
     expect(persistedTokens[0]).toMatchObject({
       runnerId: result.runner.id,
       tokenHash: generatedRegistrationToken.hash,

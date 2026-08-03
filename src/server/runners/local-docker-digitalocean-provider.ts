@@ -91,6 +91,7 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
     const resource = {
       provider: DIGITALOCEAN_PROVIDER,
       providerResourceId: LOCAL_DOCKER_DIGITALOCEAN_RESOURCE_ID,
+      providerFirewallId: null,
       publicIpv4: null,
       publicEndpointUrl: this.#endpointUrl,
       name: input.name,
@@ -175,6 +176,7 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
     }
 
     resource.firewallApplied = true;
+    resource.providerFirewallId = "local-docker-firewall";
 
     return { ok: true, value: cloneResource(resource) };
   }

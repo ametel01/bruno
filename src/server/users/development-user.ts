@@ -4,6 +4,7 @@ import type * as schema from "@/src/server/db/schema";
 import { appMetadata, users } from "@/src/server/db/schema";
 
 export const DEVELOPMENT_USER_METADATA_KEY = "local_development_user_id";
+export const HERMES_STAGING_OWNER_METADATA_KEY = "hermes_staging_acceptance_owner_user_id:v1";
 
 type DevelopmentUserTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -31,6 +32,12 @@ export async function getDevelopmentUserId(tx: DevelopmentUserTransaction): Prom
   const [existingUser] = await tx
     .select({ id: users.id })
     .from(users)
+    .where(sql`not exists (
+      select 1
+      from ${appMetadata}
+      where ${appMetadata.key} = ${HERMES_STAGING_OWNER_METADATA_KEY}
+        and ${appMetadata.value} = ${users.id}::text
+    )`)
     .orderBy(asc(users.createdAt))
     .limit(1);
 

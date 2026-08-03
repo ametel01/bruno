@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -55,6 +56,107 @@ export const agentRuntimeReconciliationStateEnum = pgEnum("agent_runtime_reconci
   "circuit_open",
 ]);
 
+export const hermesStagingAcceptanceDesiredOutcomeEnum = pgEnum(
+  "hermes_staging_acceptance_desired_outcome",
+  ["acceptance", "cleanup"],
+);
+
+export const hermesStagingAcceptancePhaseEnum = pgEnum("hermes_staging_acceptance_phase", [
+  "preflight",
+  "attesting_image",
+  "creating_ready_agent",
+  "observing_deployment",
+  "verifying_host_image",
+  "awaiting_initial_human_proof",
+  "restarting",
+  "reverifying_runtime",
+  "awaiting_post_restart_human_proof",
+  "auditing_diagnostics",
+  "stopping_agent",
+  "observing_stop_stability",
+  "checking_rollback",
+  "cleaning_workload",
+  "cleaning_secrets",
+  "cleaning_firewall",
+  "cleaning_droplet",
+  "cleaning_runner",
+  "complete",
+]);
+
+export const hermesStagingAcceptanceStateEnum = pgEnum("hermes_staging_acceptance_state", [
+  "pending",
+  "executing",
+  "waiting",
+  "blocked",
+  "complete",
+]);
+
+export const hermesStagingAcceptanceTerminalOutcomeEnum = pgEnum(
+  "hermes_staging_acceptance_terminal_outcome",
+  ["succeeded", "failed", "cancelled"],
+);
+
+export const hermesStagingAcceptancePendingEffectEnum = pgEnum(
+  "hermes_staging_acceptance_pending_effect",
+  [
+    "preflight",
+    "attest_published_image",
+    "create_ready_agent",
+    "observe_agent_creation",
+    "observe_next_deployment_stage",
+    "verify_strict_host_image",
+    "issue_initial_human_challenge",
+    "observe_initial_human_challenge",
+    "restart_agent",
+    "observe_agent_restart",
+    "verify_restarted_image_and_telegram",
+    "issue_post_restart_human_challenge",
+    "observe_post_restart_human_challenge",
+    "audit_safe_diagnostics",
+    "stop_agent_db_first",
+    "observe_stop_intent",
+    "observe_stop_stability",
+    "verify_manual_rollback",
+    "cleanup_workload",
+    "observe_workload_absence",
+    "cleanup_secrets",
+    "observe_secrets_absence",
+    "cleanup_firewall",
+    "observe_firewall_absence",
+    "cleanup_droplet",
+    "observe_droplet_absence",
+    "cleanup_runner",
+    "observe_runner_absence",
+  ],
+);
+
+export const hermesStagingAcceptanceErrorCodeEnum = pgEnum("hermes_staging_acceptance_error_code", [
+  "invalid_begin",
+  "preflight_failed",
+  "image_attestation_failed",
+  "agent_creation_failed",
+  "deployment_failed",
+  "deployment_stage_invalid",
+  "host_image_unverified",
+  "initial_human_proof_failed",
+  "post_restart_human_proof_failed",
+  "human_proof_expired",
+  "restart_failed",
+  "runtime_reverification_failed",
+  "diagnostics_unsafe",
+  "stop_failed",
+  "rollback_failed",
+  "acceptance_deadline_exceeded",
+  "acceptance_cancelled",
+  "cleanup_failed",
+  "internal_state_invalid",
+]);
+
+export const hermesStagingAcceptanceChallengePurposeEnum = pgEnum(
+  "hermes_staging_acceptance_challenge_purpose",
+  ["initial", "post_restart"],
+);
+
 export const agentScheduleModeEnum = pgEnum("agent_schedule_mode", ["manual", "cron"]);
 
 export const agentApprovalStatusEnum = pgEnum("agent_approval_status", [
@@ -106,6 +208,7 @@ export const runners = pgTable(
     status: text("status").notNull().default("active"),
     provider: text("provider"),
     providerResourceId: text("provider_resource_id"),
+    providerFirewallId: text("provider_firewall_id"),
     region: text("region"),
     sizeSlug: text("size_slug"),
     image: text("image"),
@@ -142,6 +245,10 @@ export const runners = pgTable(
       sql`${table.providerResourceId} IS NULL OR length(trim(${table.providerResourceId})) > 0`,
     ),
     check(
+      "runners_provider_firewall_id_not_empty_check",
+      sql`${table.providerFirewallId} IS NULL OR length(trim(${table.providerFirewallId})) > 0`,
+    ),
+    check(
       "runners_region_not_empty_check",
       sql`${table.region} IS NULL OR length(trim(${table.region})) > 0`,
     ),
@@ -159,7 +266,7 @@ export const runners = pgTable(
     ),
     check(
       "runners_digitalocean_provider_fields_check",
-      sql`(${table.kind} = 'manual_vps' AND ${table.provider} IS NULL AND ${table.providerResourceId} IS NULL AND ${table.region} IS NULL AND ${table.sizeSlug} IS NULL AND ${table.image} IS NULL AND ${table.provisioningStatus} IS NULL AND ${table.provisioningError} IS NULL AND ${table.provisioningStartedAt} IS NULL AND ${table.provisioningCompletedAt} IS NULL) OR (${table.kind} = 'digitalocean' AND ${table.provider} = 'digitalocean' AND ${table.region} IS NOT NULL AND ${table.sizeSlug} IS NOT NULL AND ${table.image} IS NOT NULL AND ${table.provisioningStatus} IS NOT NULL)`,
+      sql`(${table.kind} = 'manual_vps' AND ${table.provider} IS NULL AND ${table.providerResourceId} IS NULL AND ${table.providerFirewallId} IS NULL AND ${table.region} IS NULL AND ${table.sizeSlug} IS NULL AND ${table.image} IS NULL AND ${table.provisioningStatus} IS NULL AND ${table.provisioningError} IS NULL AND ${table.provisioningStartedAt} IS NULL AND ${table.provisioningCompletedAt} IS NULL) OR (${table.kind} = 'digitalocean' AND ${table.provider} = 'digitalocean' AND ${table.region} IS NOT NULL AND ${table.sizeSlug} IS NOT NULL AND ${table.image} IS NOT NULL AND ${table.provisioningStatus} IS NOT NULL)`,
     ),
     check(
       "runners_provisioning_completed_after_started_check",
@@ -171,6 +278,9 @@ export const runners = pgTable(
     ),
     index("runners_user_status_idx").on(table.userId, table.status),
     index("runners_provider_resource_idx").on(table.provider, table.providerResourceId),
+    uniqueIndex("runners_provider_firewall_idx")
+      .on(table.providerFirewallId)
+      .where(sql`${table.providerFirewallId} IS NOT NULL`),
     uniqueIndex("runners_provisioning_operation_key_idx")
       .on(table.provisioningOperationKey)
       .where(sql`${table.provisioningOperationKey} IS NOT NULL`),
@@ -598,6 +708,288 @@ export const agentRuntimeReconciliations = pgTable(
     index("agent_runtime_reconciliations_claim_idx")
       .on(table.nextAttemptAt, table.leaseExpiresAt, table.updatedAt)
       .where(sql`${table.state} NOT IN ('stopped', 'circuit_open')`),
+  ],
+);
+
+export const hermesStagingAcceptanceRuns = pgTable(
+  "hermes_staging_acceptance_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    scopeKey: text("scope_key").notNull().default("global"),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => users.id),
+    idempotencyKey: text("idempotency_key").notNull(),
+    desiredOutcome: hermesStagingAcceptanceDesiredOutcomeEnum("desired_outcome")
+      .notNull()
+      .default("acceptance"),
+    phase: hermesStagingAcceptancePhaseEnum("phase").notNull().default("preflight"),
+    state: hermesStagingAcceptanceStateEnum("state").notNull().default("pending"),
+    terminalOutcome: hermesStagingAcceptanceTerminalOutcomeEnum("terminal_outcome"),
+    generation: integer("generation").notNull().default(0),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    leaseAttempt: integer("lease_attempt").notNull().default(0),
+    pendingEffect: hermesStagingAcceptancePendingEffectEnum("pending_effect"),
+    deploymentStageIndex: integer("deployment_stage_index").notNull().default(-1),
+    errorCode: hermesStagingAcceptanceErrorCodeEnum("error_code"),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    deadlineAt: timestamp("deadline_at", { withTimezone: true }).notNull(),
+    cleanupDeadlineAt: timestamp("cleanup_deadline_at", { withTimezone: true }).notNull(),
+    expectedSourceRevision: text("expected_source_revision").notNull(),
+    expectedPublishWorkflowRunId: text("expected_publish_workflow_run_id").notNull(),
+    expectedImageDigest: text("expected_image_digest").notNull(),
+    observedImageDigest: text("observed_image_digest"),
+    agentId: uuid("agent_id"),
+    deploymentId: uuid("deployment_id"),
+    runnerId: uuid("runner_id"),
+    providerResourceId: text("provider_resource_id"),
+    providerFirewallId: text("provider_firewall_id"),
+    challengePurpose: hermesStagingAcceptanceChallengePurposeEnum("challenge_purpose"),
+    initialChallengeDigest: text("initial_challenge_digest"),
+    initialChallengeExpiresAt: timestamp("initial_challenge_expires_at", { withTimezone: true }),
+    initialAttestationDigest: text("initial_attestation_digest"),
+    initialChallengeAttestedAt: timestamp("initial_challenge_attested_at", {
+      withTimezone: true,
+    }),
+    postRestartChallengeDigest: text("post_restart_challenge_digest"),
+    postRestartChallengeExpiresAt: timestamp("post_restart_challenge_expires_at", {
+      withTimezone: true,
+    }),
+    postRestartAttestationDigest: text("post_restart_attestation_digest"),
+    postRestartChallengeAttestedAt: timestamp("post_restart_challenge_attested_at", {
+      withTimezone: true,
+    }),
+    stopStableSince: timestamp("stop_stable_since", { withTimezone: true }),
+    publishedImageVerified: boolean("published_image_verified").notNull().default(false),
+    publishedImageVerifiedAt: timestamp("published_image_verified_at", { withTimezone: true }),
+    hostImageVerified: boolean("host_image_verified").notNull().default(false),
+    hostImageVerifiedAt: timestamp("host_image_verified_at", { withTimezone: true }),
+    agentReadyVerified: boolean("agent_ready_verified").notNull().default(false),
+    agentReadyVerifiedAt: timestamp("agent_ready_verified_at", { withTimezone: true }),
+    initialHumanProofVerified: boolean("initial_human_proof_verified").notNull().default(false),
+    restartRequested: boolean("restart_requested").notNull().default(false),
+    restartRequestedAt: timestamp("restart_requested_at", { withTimezone: true }),
+    restartVerified: boolean("restart_verified").notNull().default(false),
+    restartVerifiedAt: timestamp("restart_verified_at", { withTimezone: true }),
+    restartedRuntimeVerified: boolean("restarted_runtime_verified").notNull().default(false),
+    restartedRuntimeVerifiedAt: timestamp("restarted_runtime_verified_at", {
+      withTimezone: true,
+    }),
+    postRestartHumanProofVerified: boolean("post_restart_human_proof_verified")
+      .notNull()
+      .default(false),
+    diagnosticsRedactedConfirmed: boolean("diagnostics_redacted_confirmed")
+      .notNull()
+      .default(false),
+    diagnosticsRedactedConfirmedAt: timestamp("diagnostics_redacted_confirmed_at", {
+      withTimezone: true,
+    }),
+    stopVerified: boolean("stop_verified").notNull().default(false),
+    stopVerifiedAt: timestamp("stop_verified_at", { withTimezone: true }),
+    rollbackVerified: boolean("rollback_verified").notNull().default(false),
+    rollbackVerifiedAt: timestamp("rollback_verified_at", { withTimezone: true }),
+    workloadCleanupConfirmed: boolean("workload_cleanup_confirmed").notNull().default(false),
+    workloadCleanupConfirmedAt: timestamp("workload_cleanup_confirmed_at", {
+      withTimezone: true,
+    }),
+    secretsCleanupConfirmed: boolean("secrets_cleanup_confirmed").notNull().default(false),
+    secretsCleanupConfirmedAt: timestamp("secrets_cleanup_confirmed_at", {
+      withTimezone: true,
+    }),
+    firewallCleanupConfirmed: boolean("firewall_cleanup_confirmed").notNull().default(false),
+    firewallCleanupConfirmedAt: timestamp("firewall_cleanup_confirmed_at", {
+      withTimezone: true,
+    }),
+    dropletCleanupConfirmed: boolean("droplet_cleanup_confirmed").notNull().default(false),
+    dropletCleanupConfirmedAt: timestamp("droplet_cleanup_confirmed_at", {
+      withTimezone: true,
+    }),
+    runnerCleanupConfirmed: boolean("runner_cleanup_confirmed").notNull().default(false),
+    runnerCleanupConfirmedAt: timestamp("runner_cleanup_confirmed_at", {
+      withTimezone: true,
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    check("hermes_staging_acceptance_runs_scope_check", sql`${table.scopeKey} = 'global'`),
+    check(
+      "hermes_staging_acceptance_runs_idempotency_key_check",
+      sql`trim(${table.idempotencyKey}) = ${table.idempotencyKey} AND ${table.idempotencyKey} ~ '^[A-Za-z0-9_.:-]{8,128}$'`,
+    ),
+    check("hermes_staging_acceptance_runs_generation_check", sql`${table.generation} >= 0`),
+    check("hermes_staging_acceptance_runs_attempt_count_check", sql`${table.attemptCount} >= 0`),
+    check("hermes_staging_acceptance_runs_lease_attempt_check", sql`${table.leaseAttempt} >= 0`),
+    check(
+      "hermes_staging_acceptance_runs_deployment_stage_index_check",
+      sql`${table.deploymentStageIndex} BETWEEN -1 AND 6`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_lease_owner_check",
+      sql`${table.leaseOwner} IS NULL OR ${table.leaseOwner} ~ '^staging-acceptance:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_lease_pair_check",
+      sql`(${table.leaseOwner} IS NULL AND ${table.leaseExpiresAt} IS NULL) OR (${table.leaseOwner} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_execution_lease_check",
+      sql`(${table.state} = 'executing' AND ${table.leaseOwner} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL) OR (${table.state} <> 'executing' AND ${table.leaseOwner} IS NULL AND ${table.leaseExpiresAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_scheduled_work_check",
+      sql`(${table.state} IN ('pending', 'executing', 'waiting') AND ${table.nextAttemptAt} IS NOT NULL) OR (${table.state} IN ('blocked', 'complete') AND ${table.nextAttemptAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_image_digest_check",
+      sql`${table.expectedImageDigest} ~ '^sha256:[0-9a-f]{64}$' AND (${table.observedImageDigest} IS NULL OR ${table.observedImageDigest} ~ '^sha256:[0-9a-f]{64}$')`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_source_revision_check",
+      sql`${table.expectedSourceRevision} ~ '^[0-9a-f]{40}$'`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_workflow_run_id_check",
+      sql`${table.expectedPublishWorkflowRunId} ~ '^[1-9][0-9]{0,19}$'`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_provider_resource_id_check",
+      sql`${table.providerResourceId} IS NULL OR ${table.providerResourceId} ~ '^[A-Za-z0-9_.:-]{1,120}$'`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_provider_firewall_id_check",
+      sql`${table.providerFirewallId} IS NULL OR ${table.providerFirewallId} ~ '^[A-Za-z0-9_.:-]{1,120}$'`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_challenge_digest_check",
+      sql`(${table.initialChallengeDigest} IS NULL OR ${table.initialChallengeDigest} ~ '^sha256:[0-9a-f]{64}$') AND (${table.initialAttestationDigest} IS NULL OR ${table.initialAttestationDigest} ~ '^sha256:[0-9a-f]{64}$') AND (${table.postRestartChallengeDigest} IS NULL OR ${table.postRestartChallengeDigest} ~ '^sha256:[0-9a-f]{64}$') AND (${table.postRestartAttestationDigest} IS NULL OR ${table.postRestartAttestationDigest} ~ '^sha256:[0-9a-f]{64}$')`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_initial_challenge_check",
+      sql`(${table.initialChallengeDigest} IS NULL AND ${table.initialChallengeExpiresAt} IS NULL AND ${table.initialAttestationDigest} IS NULL AND ${table.initialChallengeAttestedAt} IS NULL AND NOT ${table.initialHumanProofVerified}) OR (${table.initialChallengeDigest} IS NOT NULL AND ${table.initialChallengeExpiresAt} IS NOT NULL AND ((${table.initialAttestationDigest} IS NULL AND ${table.initialChallengeAttestedAt} IS NULL AND NOT ${table.initialHumanProofVerified}) OR (${table.initialAttestationDigest} IS NOT NULL AND ${table.initialChallengeAttestedAt} IS NOT NULL AND ${table.initialHumanProofVerified} AND ${table.initialAttestationDigest} <> ${table.initialChallengeDigest})))`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_post_restart_challenge_check",
+      sql`(${table.postRestartChallengeDigest} IS NULL AND ${table.postRestartChallengeExpiresAt} IS NULL AND ${table.postRestartAttestationDigest} IS NULL AND ${table.postRestartChallengeAttestedAt} IS NULL AND NOT ${table.postRestartHumanProofVerified}) OR (${table.postRestartChallengeDigest} IS NOT NULL AND ${table.postRestartChallengeExpiresAt} IS NOT NULL AND ${table.initialChallengeDigest} IS NOT NULL AND ${table.postRestartChallengeDigest} <> ${table.initialChallengeDigest} AND ((${table.postRestartAttestationDigest} IS NULL AND ${table.postRestartChallengeAttestedAt} IS NULL AND NOT ${table.postRestartHumanProofVerified}) OR (${table.postRestartAttestationDigest} IS NOT NULL AND ${table.postRestartChallengeAttestedAt} IS NOT NULL AND ${table.postRestartHumanProofVerified} AND ${table.initialAttestationDigest} IS NOT NULL AND ${table.postRestartAttestationDigest} <> ${table.postRestartChallengeDigest} AND ${table.postRestartAttestationDigest} <> ${table.initialAttestationDigest})))`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_challenge_purpose_check",
+      sql`(${table.phase} = 'awaiting_initial_human_proof' AND ((${table.initialChallengeDigest} IS NULL AND ${table.initialChallengeExpiresAt} IS NULL AND ${table.challengePurpose} IS NULL AND ${table.pendingEffect} IN ('issue_initial_human_challenge', 'observe_initial_human_challenge')) OR (${table.initialChallengeDigest} IS NOT NULL AND ${table.initialChallengeExpiresAt} IS NOT NULL AND ${table.challengePurpose} = 'initial'))) OR (${table.phase} = 'awaiting_post_restart_human_proof' AND ((${table.postRestartChallengeDigest} IS NULL AND ${table.postRestartChallengeExpiresAt} IS NULL AND ${table.challengePurpose} IS NULL AND ${table.pendingEffect} IN ('issue_post_restart_human_challenge', 'observe_post_restart_human_challenge')) OR (${table.postRestartChallengeDigest} IS NOT NULL AND ${table.postRestartChallengeExpiresAt} IS NOT NULL AND ${table.challengePurpose} = 'post_restart'))) OR (${table.phase} NOT IN ('awaiting_initial_human_proof', 'awaiting_post_restart_human_proof') AND ${table.challengePurpose} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_challenge_time_check",
+      sql`(${table.initialChallengeExpiresAt} IS NULL OR (${table.initialChallengeExpiresAt} > ${table.createdAt} AND ${table.initialChallengeExpiresAt} <= ${table.deadlineAt} AND (${table.initialChallengeAttestedAt} IS NULL OR (${table.initialChallengeAttestedAt} >= ${table.createdAt} AND ${table.initialChallengeAttestedAt} <= ${table.initialChallengeExpiresAt} AND ${table.initialChallengeAttestedAt} <= ${table.updatedAt})))) AND (${table.postRestartChallengeExpiresAt} IS NULL OR (${table.postRestartChallengeExpiresAt} > ${table.createdAt} AND ${table.postRestartChallengeExpiresAt} <= ${table.deadlineAt} AND (${table.postRestartChallengeAttestedAt} IS NULL OR (${table.postRestartChallengeAttestedAt} >= ${table.createdAt} AND ${table.postRestartChallengeAttestedAt} <= ${table.postRestartChallengeExpiresAt} AND ${table.postRestartChallengeAttestedAt} <= ${table.updatedAt}))))`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_published_image_evidence_check",
+      sql`(${table.publishedImageVerified} AND ${table.publishedImageVerifiedAt} IS NOT NULL) OR (NOT ${table.publishedImageVerified} AND ${table.publishedImageVerifiedAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_host_image_evidence_check",
+      sql`(${table.hostImageVerified} AND ${table.hostImageVerifiedAt} IS NOT NULL AND ${table.observedImageDigest} IS NOT NULL AND ${table.observedImageDigest} = ${table.expectedImageDigest}) OR (NOT ${table.hostImageVerified} AND ${table.hostImageVerifiedAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_ready_evidence_check",
+      sql`(${table.agentReadyVerified} AND ${table.agentReadyVerifiedAt} IS NOT NULL) OR (NOT ${table.agentReadyVerified} AND ${table.agentReadyVerifiedAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_restart_requested_evidence_check",
+      sql`(${table.restartRequested} AND ${table.restartRequestedAt} IS NOT NULL) OR (NOT ${table.restartRequested} AND ${table.restartRequestedAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_restart_evidence_check",
+      sql`(${table.restartVerified} AND ${table.restartVerifiedAt} IS NOT NULL) OR (NOT ${table.restartVerified} AND ${table.restartVerifiedAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_restarted_runtime_evidence_check",
+      sql`(${table.restartedRuntimeVerified} AND ${table.restartedRuntimeVerifiedAt} IS NOT NULL AND ${table.observedImageDigest} IS NOT NULL AND ${table.observedImageDigest} = ${table.expectedImageDigest}) OR (NOT ${table.restartedRuntimeVerified} AND ${table.restartedRuntimeVerifiedAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_diagnostics_evidence_check",
+      sql`(${table.diagnosticsRedactedConfirmed} AND ${table.diagnosticsRedactedConfirmedAt} IS NOT NULL) OR (NOT ${table.diagnosticsRedactedConfirmed} AND ${table.diagnosticsRedactedConfirmedAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_stop_evidence_check",
+      sql`(${table.stopVerified} AND ${table.stopVerifiedAt} IS NOT NULL) OR (NOT ${table.stopVerified} AND ${table.stopVerifiedAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_rollback_evidence_check",
+      sql`(${table.rollbackVerified} AND ${table.rollbackVerifiedAt} IS NOT NULL) OR (NOT ${table.rollbackVerified} AND ${table.rollbackVerifiedAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_workload_cleanup_check",
+      sql`(${table.workloadCleanupConfirmed} AND ${table.workloadCleanupConfirmedAt} IS NOT NULL) OR (NOT ${table.workloadCleanupConfirmed} AND ${table.workloadCleanupConfirmedAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_secrets_cleanup_check",
+      sql`(${table.secretsCleanupConfirmed} AND ${table.secretsCleanupConfirmedAt} IS NOT NULL) OR (NOT ${table.secretsCleanupConfirmed} AND ${table.secretsCleanupConfirmedAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_firewall_cleanup_check",
+      sql`(${table.firewallCleanupConfirmed} AND ${table.firewallCleanupConfirmedAt} IS NOT NULL) OR (NOT ${table.firewallCleanupConfirmed} AND ${table.firewallCleanupConfirmedAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_droplet_cleanup_check",
+      sql`(${table.dropletCleanupConfirmed} AND ${table.dropletCleanupConfirmedAt} IS NOT NULL) OR (NOT ${table.dropletCleanupConfirmed} AND ${table.dropletCleanupConfirmedAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_runner_cleanup_check",
+      sql`(${table.runnerCleanupConfirmed} AND ${table.runnerCleanupConfirmedAt} IS NOT NULL) OR (NOT ${table.runnerCleanupConfirmed} AND ${table.runnerCleanupConfirmedAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_cleanup_intent_check",
+      sql`${table.phase} NOT IN ('cleaning_workload', 'cleaning_secrets', 'cleaning_firewall', 'cleaning_droplet', 'cleaning_runner', 'complete') OR ${table.desiredOutcome} = 'cleanup'`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_terminal_check",
+      sql`(${table.state} = 'complete' AND ${table.phase} = 'complete' AND ${table.desiredOutcome} = 'cleanup' AND ${table.terminalOutcome} IS NOT NULL AND ${table.completedAt} IS NOT NULL AND ${table.nextAttemptAt} IS NULL AND ${table.pendingEffect} IS NULL AND ${table.leaseOwner} IS NULL AND ${table.leaseExpiresAt} IS NULL AND ${table.workloadCleanupConfirmed} AND ${table.secretsCleanupConfirmed} AND ${table.firewallCleanupConfirmed} AND ${table.dropletCleanupConfirmed} AND ${table.runnerCleanupConfirmed}) OR (${table.state} <> 'complete' AND ${table.phase} <> 'complete' AND ${table.completedAt} IS NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_terminal_outcome_check",
+      sql`(${table.terminalOutcome} IS NULL AND ${table.state} <> 'complete') OR (${table.terminalOutcome} = 'succeeded' AND ${table.errorCode} IS NULL) OR (${table.terminalOutcome} IN ('failed', 'cancelled') AND ${table.errorCode} IS NOT NULL)`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_success_evidence_check",
+      sql`${table.terminalOutcome} <> 'succeeded' OR (${table.publishedImageVerified} AND ${table.hostImageVerified} AND ${table.agentReadyVerified} AND ${table.initialHumanProofVerified} AND ${table.restartRequested} AND ${table.restartVerified} AND ${table.restartedRuntimeVerified} AND ${table.postRestartHumanProofVerified} AND ${table.diagnosticsRedactedConfirmed} AND ${table.stopVerified} AND ${table.rollbackVerified})`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_cleanup_deadline_check",
+      sql`${table.deadlineAt} > ${table.createdAt} AND ${table.deadlineAt} <= ${table.createdAt} + interval '2 hours' AND ${table.cleanupDeadlineAt} > ${table.deadlineAt} AND ${table.cleanupDeadlineAt} <= ${table.deadlineAt} + interval '2 hours'`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_updated_after_created_check",
+      sql`${table.updatedAt} >= ${table.createdAt}`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_lease_after_updated_check",
+      sql`${table.leaseExpiresAt} IS NULL OR ${table.leaseExpiresAt} > ${table.updatedAt}`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_evidence_time_check",
+      sql`(${table.publishedImageVerifiedAt} IS NULL OR (${table.publishedImageVerifiedAt} >= ${table.createdAt} AND ${table.publishedImageVerifiedAt} <= ${table.updatedAt})) AND (${table.hostImageVerifiedAt} IS NULL OR (${table.hostImageVerifiedAt} >= ${table.createdAt} AND ${table.hostImageVerifiedAt} <= ${table.updatedAt})) AND (${table.agentReadyVerifiedAt} IS NULL OR (${table.agentReadyVerifiedAt} >= ${table.createdAt} AND ${table.agentReadyVerifiedAt} <= ${table.updatedAt})) AND (${table.restartRequestedAt} IS NULL OR (${table.restartRequestedAt} >= ${table.createdAt} AND ${table.restartRequestedAt} <= ${table.updatedAt})) AND (${table.restartVerifiedAt} IS NULL OR (${table.restartVerifiedAt} >= ${table.createdAt} AND ${table.restartVerifiedAt} <= ${table.updatedAt})) AND (${table.restartedRuntimeVerifiedAt} IS NULL OR (${table.restartedRuntimeVerifiedAt} >= ${table.createdAt} AND ${table.restartedRuntimeVerifiedAt} <= ${table.updatedAt})) AND (${table.diagnosticsRedactedConfirmedAt} IS NULL OR (${table.diagnosticsRedactedConfirmedAt} >= ${table.createdAt} AND ${table.diagnosticsRedactedConfirmedAt} <= ${table.updatedAt})) AND (${table.stopVerifiedAt} IS NULL OR (${table.stopVerifiedAt} >= ${table.createdAt} AND ${table.stopVerifiedAt} <= ${table.updatedAt})) AND (${table.rollbackVerifiedAt} IS NULL OR (${table.rollbackVerifiedAt} >= ${table.createdAt} AND ${table.rollbackVerifiedAt} <= ${table.updatedAt})) AND (${table.stopStableSince} IS NULL OR (${table.stopStableSince} >= ${table.createdAt} AND ${table.stopStableSince} <= ${table.updatedAt}))`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_cleanup_time_check",
+      sql`(${table.workloadCleanupConfirmedAt} IS NULL OR (${table.workloadCleanupConfirmedAt} >= ${table.createdAt} AND ${table.workloadCleanupConfirmedAt} <= ${table.updatedAt})) AND (${table.secretsCleanupConfirmedAt} IS NULL OR (${table.secretsCleanupConfirmedAt} >= ${table.createdAt} AND ${table.secretsCleanupConfirmedAt} <= ${table.updatedAt})) AND (${table.firewallCleanupConfirmedAt} IS NULL OR (${table.firewallCleanupConfirmedAt} >= ${table.createdAt} AND ${table.firewallCleanupConfirmedAt} <= ${table.updatedAt})) AND (${table.dropletCleanupConfirmedAt} IS NULL OR (${table.dropletCleanupConfirmedAt} >= ${table.createdAt} AND ${table.dropletCleanupConfirmedAt} <= ${table.updatedAt})) AND (${table.runnerCleanupConfirmedAt} IS NULL OR (${table.runnerCleanupConfirmedAt} >= ${table.createdAt} AND ${table.runnerCleanupConfirmedAt} <= ${table.updatedAt}))`,
+    ),
+    check(
+      "hermes_staging_acceptance_runs_completed_after_created_check",
+      sql`${table.completedAt} IS NULL OR (${table.completedAt} >= ${table.createdAt} AND ${table.completedAt} <= ${table.updatedAt})`,
+    ),
+    uniqueIndex("hermes_staging_acceptance_runs_idempotency_idx").on(table.idempotencyKey),
+    index("hermes_staging_acceptance_runs_owner_created_idx").on(
+      table.ownerUserId,
+      table.createdAt,
+    ),
+    uniqueIndex("hermes_staging_acceptance_runs_one_active_idx")
+      .on(table.scopeKey)
+      .where(sql`${table.state} <> 'complete'`),
+    index("hermes_staging_acceptance_runs_claim_idx")
+      .on(table.nextAttemptAt, table.leaseExpiresAt, table.createdAt)
+      .where(sql`${table.state} IN ('pending', 'executing', 'waiting')`),
   ],
 );
 

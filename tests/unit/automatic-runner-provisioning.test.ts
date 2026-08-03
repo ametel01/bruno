@@ -67,6 +67,7 @@ describe("automatic DigitalOcean runner provisioning", () => {
     expect(afterFirewall).toMatchObject({
       provisioningStatus: "waiting_for_runner",
       status: "registering",
+      providerFirewallId: "automatic-firewall-1",
     });
   });
 

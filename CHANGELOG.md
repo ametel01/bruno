@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Default-disabled durable Hermes staging acceptance with exact published-image provenance, isolated ownership, one-effect reconciliation, two interactive-human Telegram reply attestations, restart/Stop/rollback evidence, and ordered workload, secret, firewall, Droplet, and runner cleanup.
 - Credential-complete one-click ready agent creation with masked OpenRouter and Telegram inputs, normalized Telegram allowlists, idempotent submission, and persisted deployment progress across inventory, detail, dashboard, refreshes, and browser contexts.
 - Automatic ready-mode deployments now reconcile durably from creation to verified running state with bounded leases, post-response/heartbeat/cron triggers, one canary, Telegram-ready confirmation, usage-period completion, and a safe owner-scoped retry API.
 - Managed Hermes launch-spec v3 now carries approved OpenRouter model configuration plus server-only OpenRouter, Telegram, Telegram allowlist, and private API credentials from persisted deployment state.
@@ -123,6 +124,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Deployment and runtime reconciliation now use the exact configured `AGENTBAY_HERMES_WORKLOAD_IMAGE` instead of falling back to the source-pinned default during launch and observation.
 - Intentional Stop now remains authoritative across runner and Docker restarts, while agent inventory, detail, dashboard, and the runtime endpoint report current managed gateway and Telegram truth instead of stale deployment readiness.
 - Projected Hermes credential reads now reject FIFO and other nonregular `.env` substitutions without blocking runner status or canary requests.
 - Managed Hermes projection now preserves safe unrelated YAML scalar text containing punctuation such as `!`, `*`, and `&` while still rejecting actual YAML tags, anchors, aliases, and merge keys.

@@ -2,21 +2,21 @@ import { readFile } from "node:fs/promises";
 import { getTableColumns, getTableName } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import {
-  agentConfigs,
-  agentDeployments,
-  agentDeploymentStageEnum,
-  agentDesiredStatusEnum,
-  agentApprovals,
   agentApprovalStatusEnum,
+  agentApprovals,
+  agentConfigs,
+  agentDeploymentStageEnum,
+  agentDeployments,
+  agentDesiredStatusEnum,
   agentEvents,
   agentLogs,
   agentScheduleModeEnum,
   agentSecretKindEnum,
-  agentSecrets,
   agentSecretStatusEnum,
-  agentUsagePeriods,
-  agents,
+  agentSecrets,
   agentStatusEnum,
+  agents,
+  agentUsagePeriods,
   appMetadata,
   backups,
   dockerRunnerContainers,
@@ -388,6 +388,7 @@ describe("Milestone 1 agent persistence schema", () => {
       "status",
       "provider",
       "providerResourceId",
+      "providerFirewallId",
       "region",
       "sizeSlug",
       "image",
@@ -410,6 +411,7 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.status.default).toBe("active");
     expect(columns.provider.notNull).toBe(false);
     expect(columns.providerResourceId.notNull).toBe(false);
+    expect(columns.providerFirewallId.notNull).toBe(false);
     expect(columns.region.notNull).toBe(false);
     expect(columns.sizeSlug.notNull).toBe(false);
     expect(columns.image.notNull).toBe(false);

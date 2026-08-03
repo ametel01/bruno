@@ -6,11 +6,11 @@
   owner: coordinator; user authorization/capabilities required for live work
   branch: `main`
   worktree: `/Users/alexmetelli/source/plingpling`
-  phase: Step 9 independently accepted; Step 10 docs prepared, executor architecture and live acceptance blocked
-  cycle: Step 10 preflight 0/5
+  phase: Step 10 default-disabled repository executor independently green; live acceptance pending
+  cycle: Step 10 repository checker cycle 1 accepted
   contract: `PLAN.md` → `Step 10: Final Acceptance, Documentation, and Controlled Rollout`
-  blocker: Step 10 needs a user choice between automated MTProto and interactive-human Telegram proof, a scoped durable image-attestation/Droplet+firewall cleanup operation, explicit live/provider authorization, and all staging capabilities.
-  next-action: Obtain the Telegram-proof design choice and authorization for the scoped staging operation before implementing the live executor or making any external request.
+  blocker: Live completion still needs image publication, provider-safe gates, explicit live/provider authorization, all 15 staging capabilities, a real interactive-human Telegram proof, cleanup evidence, and controlled flag enablement.
+  next-action: Commit the default-disabled implementation; then obtain authorization/capabilities for the live-only gates.
 
 ## Completion Contract
 
@@ -24,15 +24,15 @@
 ## Dependency Graph
 
 - Step 0 → Step 1 → Step 2 → Step 3 → Step 4 → Step 5 → Step 6 → Step 7 → Step 8 → Step 9 → Step 10.
-- Step 9 is unblocked by independently accepted Steps 4–8; Step 10 remains blocked on Step 9 plus explicit external prerequisites.
+- Step 9 is independently accepted. Step 10 repository implementation is independently green; live completion remains blocked on explicit external prerequisites.
 
 ## Current Handoff
 
-- from: independent Step 9 checker
-  to: coordinator and user for Step 10 authorization
+- from: independent Step 10 checker
+  to: coordinator and user for live authorization
   timestamp: 2026-08-03
-  request: Supply explicit authorization and the isolated Step 10 capabilities before any live/provider action.
-  evidence: Step 9 `b41e969` independently passed migrations/no drift, 162 focused DB tests, 209 focused runtime/runner/UI/Telegram tests, 1,297 full tests, static/build, 26/26 CI E2E, both local smokes, manual secret review, cleanup inspection, and fail-closed staging with no effects.
+  request: Commit the accepted default-disabled executor; then supply explicit authorization and the isolated Step 10 capabilities before live/provider action.
+  evidence: Step 10 coordinator gates passed no-drift plus clean/upgrade/idempotent migration fixtures, 67 focused staging tests, 1,424 full tests, static/build, 26/26 isolated CI E2E, both local smokes, and 15-capability fail-closed staging with no effects; independent checker passed 106 focused tests and found no semantic/secret blocker.
   stop-condition: Do not publish, provision, mutate hosted secrets, contact providers or a real Telegram user, or enable ready mode until every Step 10 prerequisite is explicit.
 
 ## Gates
@@ -54,10 +54,11 @@
 - Step 9 candidate gates were green before commit — migration clean/upgrade/idempotency and no drift; focused DB 8 files / 38 tests; focused controller/runner/UI 11 files / 177 tests; full 137 files / 1,297 tests; production build; 26/26 desktop/mobile CI E2E; fake-cloud recovery/circuit/usage/Stop smoke; pinned-image process-death, Docker/runner restart, no-duplicate, and Stop-durability smoke.
 - Step 9 `b41e969`: independently green after checker cycle 1 — migration/no drift; 8 files / 162 focused DB tests; 17 files / 209 focused runtime/runner/UI/Telegram tests; 137 files / 1,297 full tests; format/lint/typecheck/build; 26/26 CI E2E; both local smokes; fail-closed staging; manual secret and cleanup review; no image pull or external request.
 - Step 10 docs `abe1208`: ready-mode/keyring/cron, BotFather/allowlist, state, retry/canary cost, restart/Stop, rollback, evidence, and cleanup runbook prepared; typecheck, 7 files / 65 focused tests, format, lint, and diff checks green. Live executor remains fail-closed and no external acceptance is claimed.
+- Step 10 repository candidate: migration `0020`, dedicated owner, immutable acceptance ledger, 90-second lease/generation CAS, 45-second one-effect controller, production effects, exact image/runner/provider attestation, two interactive-human proofs, cleanup-only disabled cron, ordered durable cleanup, and interactive CLI. Coordinator gates passed 9 focused files / 67 tests, 148 files / 1,424 full tests, format/lint/typecheck/build, isolated 26/26 CI E2E, both local smokes, no drift, and credential-free staging with no effects. Independent checker passed 9 files / 106 focused tests, full units/static/build/diff, fail-closed staging, semantic and secret review, and accepted the isolated browser rerun. No live success is claimed.
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling` — branch `main`; Step 9 accepted; Step 10 external actions remain prohibited pending explicit authorization.
+- `/Users/alexmetelli/source/plingpling` — branch `main`; Step 10 repository candidate independently accepted; external actions remain prohibited pending explicit authorization.
 
 ## Decisions And Lessons
 
@@ -67,6 +68,7 @@
 - 2026-08-03: Keep `STATUS.md` under 200 lines. Full contracts, checker logs, historical handoffs, and completed evidence live in `STATUS.archive.md`.
 - 2026-08-03: Bot API credentials cannot generate allowed-user traffic. Automated live proof requires a dedicated MTProto test-user session; a manual path requires explicit acceptance of human-attested evidence.
 - 2026-08-03: Step 10 cleanup must be durable and cover the exact agent workload, Droplet, firewall, and runner row; process-local `finally` cleanup is insufficient.
+- 2026-08-03: Step 10 uses explicit interactive-human-attested Telegram challenges before and after Restart; it does not automate or retain an MTProto user session.
 
 ## Completed
 

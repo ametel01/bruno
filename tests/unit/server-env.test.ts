@@ -12,8 +12,11 @@ import {
 import {
   DEFAULT_AGENTBAY_RUNNER_IMAGE,
   isAuthorizedCronRequest,
+  isAuthorizedHermesStagingAcceptanceRequest,
   readCronSecretConfig,
   readDigitalOceanProviderConfig,
+  readHermesStagingAcceptanceConfig,
+  readHermesWorkloadImage,
   readReadyAgentCreationFlag,
 } from "@/src/server/env";
 
@@ -100,6 +103,125 @@ describe("server-only provider environment validation", () => {
     });
   });
 
+  it("keeps staging acceptance exactly default-off with a dedicated HTTPS transport", () => {
+    const bearerSecret = "staging_acceptance_abcdefghijklmnopqrstuvwxyz012345";
+    const configured = {
+      AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED: "true",
+      AGENTBAY_HERMES_STAGING_ACCEPTANCE_BASE_URL: "https://staging.example.test/",
+      AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: bearerSecret,
+    };
+
+    expect(readHermesStagingAcceptanceConfig({})).toEqual({ ok: true, enabled: false });
+    expect(
+      readHermesStagingAcceptanceConfig({
+        AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED: "false",
+      }),
+    ).toEqual({ ok: true, enabled: false });
+    expect(readHermesStagingAcceptanceConfig(configured)).toEqual({
+      ok: true,
+      enabled: true,
+      baseUrl: "https://staging.example.test",
+      bearerSecret,
+    });
+
+    for (const enabled of ["", "TRUE", " true ", "1"]) {
+      expect(
+        readHermesStagingAcceptanceConfig({
+          ...configured,
+          AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED: enabled,
+        }),
+      ).toEqual({
+        ok: false,
+        reason: "hermes_staging_acceptance_configuration_invalid",
+      });
+    }
+
+    for (const baseUrl of [
+      "http://staging.example.test",
+      " https://staging.example.test",
+      "https://user:password@staging.example.test",
+      "https://staging.example.test/internal",
+      "https://staging.example.test/?private=true",
+      "https://staging.example.test/#private",
+    ]) {
+      expect(
+        readHermesStagingAcceptanceConfig({
+          ...configured,
+          AGENTBAY_HERMES_STAGING_ACCEPTANCE_BASE_URL: baseUrl,
+        }),
+      ).toEqual({
+        ok: false,
+        reason: "hermes_staging_acceptance_configuration_invalid",
+      });
+    }
+  });
+
+  it("requires a distinct 32-256 character staging bearer and compares it in constant time", () => {
+    const bearerSecret = "staging_acceptance_abcdefghijklmnopqrstuvwxyz012345";
+    const configured = {
+      AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED: "true",
+      AGENTBAY_HERMES_STAGING_ACCEPTANCE_BASE_URL: "https://staging.example.test",
+      AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: bearerSecret,
+    };
+
+    for (const conflictingName of [
+      "CRON_SECRET",
+      "AGENTBAY_RUNNER_BEARER_TOKEN",
+      "AGENTBAY_OPERATOR_PASSWORD",
+    ] as const) {
+      expect(
+        readHermesStagingAcceptanceConfig({
+          ...configured,
+          [conflictingName]: bearerSecret,
+        }),
+      ).toEqual({
+        ok: false,
+        reason: "hermes_staging_acceptance_configuration_invalid",
+      });
+    }
+
+    for (const invalidSecret of ["a".repeat(31), "a".repeat(257), ` ${"a".repeat(32)}`]) {
+      expect(
+        readHermesStagingAcceptanceConfig({
+          ...configured,
+          AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: invalidSecret,
+        }),
+      ).toEqual({
+        ok: false,
+        reason: "hermes_staging_acceptance_configuration_invalid",
+      });
+    }
+
+    for (const boundarySecret of ["a".repeat(32), "a".repeat(256)]) {
+      expect(
+        readHermesStagingAcceptanceConfig({
+          ...configured,
+          AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: boundarySecret,
+        }),
+      ).toMatchObject({ ok: true, enabled: true, bearerSecret: boundarySecret });
+    }
+
+    expect(
+      isAuthorizedHermesStagingAcceptanceRequest({
+        authorizationHeader: `Bearer ${bearerSecret}`,
+        bearerSecret,
+      }),
+    ).toBe(true);
+    for (const authorizationHeader of [
+      null,
+      `bearer ${bearerSecret}`,
+      `Bearer ${bearerSecret} extra`,
+      `Bearer ${bearerSecret.slice(0, -1)}x`,
+    ]) {
+      expect(
+        isAuthorizedHermesStagingAcceptanceRequest({
+          authorizationHeader,
+          bearerSecret,
+        }),
+      ).toBe(false);
+    }
+  });
+
   it("keeps the ready creation flag parser server-owned", async () => {
     const source = await readFile("src/server/env.ts", "utf8");
     const sharedFiles = await readdir("src/shared");
@@ -111,6 +233,22 @@ describe("server-only provider environment validation", () => {
 
   it("returns null when DigitalOcean provisioning is not configured", () => {
     expect(readDigitalOceanProviderConfig({})).toBeNull();
+  });
+
+  it("reads the same validated Hermes workload image independently of provider credentials", () => {
+    const customImage =
+      "ghcr.io/ametel01/agentbay-hermes@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    expect(readHermesWorkloadImage({})).toBe(DEFAULT_HERMES_WORKLOAD_IMAGE);
+    expect(readHermesWorkloadImage({ AGENTBAY_HERMES_WORKLOAD_IMAGE: ` ${customImage} ` })).toBe(
+      customImage,
+    );
+
+    for (const value of ["", " ", "image with spaces", "image;docker pull attacker/image"]) {
+      expect(() => readHermesWorkloadImage({ AGENTBAY_HERMES_WORKLOAD_IMAGE: value })).toThrow(
+        /AGENTBAY_HERMES_WORKLOAD_IMAGE/,
+      );
+    }
   });
 
   it("validates DigitalOcean token and non-secret provisioning defaults on the server path", () => {

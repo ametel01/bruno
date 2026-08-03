@@ -9,6 +9,10 @@
     {
       "path": "/api/internal/agent-runtime/reconcile",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/internal/hermes-staging/reconcile",
+      "schedule": "* * * * *"
     }
   ]
 }

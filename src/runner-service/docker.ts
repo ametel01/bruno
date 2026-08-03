@@ -18,6 +18,8 @@ import {
   type HermesProjectionResult,
 } from "@/src/runner-service/hermes-projection";
 import {
+  MAX_RUNNER_IMAGE_IDENTITY_DIGESTS,
+  MAX_RUNNER_IMAGE_REFERENCE_LENGTH,
   MAX_RUNNER_RESTART_COUNT,
   RUNNER_CANARY_CONTRACT_VERSION,
   RUNNER_LAUNCH_CONTRACT_VERSION,
@@ -28,14 +30,15 @@ import {
   type RunnerCanaryRequest,
   type RunnerCanaryResponse,
   type RunnerContainerState,
-  type RunnerDurableStatusSnapshot,
   type RunnerGatewayState,
+  type RunnerImageIdentity,
   type RunnerLaunchAcceptedResponse,
   type RunnerLaunchAction,
   type RunnerLaunchDisposition,
   type RunnerOperation,
   type RunnerPlatformState,
   type RunnerReadinessReason,
+  type RunnerReportedDurableStatusSnapshot,
   type RunnerRestartPolicyName,
   type RunnerTelegramState,
   type RunnerCleanupResponsePayload,
@@ -66,6 +69,8 @@ const MAX_HERMES_LOG_LINES = 500;
 const STATUS_PROBE_TIMEOUT_MS = 2_000;
 const CANARY_TIMEOUT_MS = 15_000;
 const MAX_PROBE_RESPONSE_BYTES = 64 * 1024;
+const MAX_DOCKER_IMAGE_IDENTITY_BYTES = 16 * 1024;
+const DOCKER_IMAGE_IDENTITY_FORMAT = '{"imageId":{{json .Id}},"repoDigests":{{json .RepoDigests}}}';
 const DUMMY_DOCKER_RUNNER_ARGS = [
   "sh",
   "-c",
@@ -220,6 +225,7 @@ type DockerRestartPolicyInspect = {
 
 type DockerInspectContainer = {
   Id?: string;
+  Image?: unknown;
   RestartCount?: unknown;
   Args?: string[];
   Mounts?: Array<{
@@ -648,7 +654,7 @@ export class ManualRunnerDocker {
     };
   }
 
-  private async observeStatus(agentId: string): Promise<RunnerDurableStatusSnapshot> {
+  private async observeStatus(agentId: string): Promise<RunnerReportedDurableStatusSnapshot> {
     const details = await this.listSelectedContainerDetails(agentId);
     const observedAt = this.now().toISOString();
 
@@ -657,6 +663,7 @@ export class ManualRunnerDocker {
     }
 
     const selected = chooseStatusContainer(details);
+    const imageIdentity = await this.observeImageIdentity(selected.inspect);
     const operation = readOperationFromInspect(selected.inspect);
     const revision = await readProjectedRevision(agentId);
     const requestedRevision =
@@ -668,11 +675,17 @@ export class ManualRunnerDocker {
       containerLabel: selected.inspect.Config?.Labels?.[AGENTBAY_CONFIG_REVISION_LABEL] ?? null,
       marker: revision,
     });
-    const base = buildStatusSnapshotBase(selected, operation, observedAt, {
-      requestedRevision,
-      projectionMarkerRevision: revision.configRevision,
-      revisionState,
-    });
+    const base = buildStatusSnapshotBase(
+      selected,
+      operation,
+      observedAt,
+      {
+        requestedRevision,
+        projectionMarkerRevision: revision.configRevision,
+        revisionState,
+      },
+      imageIdentity,
+    );
 
     if (!operation) {
       return { ...base, phase: "failed", readinessReason: "revision_missing" };
@@ -711,7 +724,7 @@ export class ManualRunnerDocker {
     });
     apiServerKey = null;
     const probeObservedAt = this.now().toISOString();
-    const withObservation: RunnerDurableStatusSnapshot = {
+    const withObservation: RunnerReportedDurableStatusSnapshot = {
       ...base,
       gateway: { state: observation.gateway, observedAt: probeObservedAt },
       apiServer: { required: true, state: observation.apiServer, observedAt: probeObservedAt },
@@ -800,6 +813,27 @@ export class ManualRunnerDocker {
         reason: error instanceof ProbeTimeoutError ? "health_timeout" : "health_unreachable",
         telegram: "unknown",
       };
+    }
+  }
+
+  private async observeImageIdentity(
+    inspect: DockerInspectContainer,
+  ): Promise<RunnerImageIdentity | null> {
+    const containerImageId = normalizeDockerImageId(inspect.Image);
+
+    if (!containerImageId) {
+      return null;
+    }
+
+    try {
+      const result = await this.runDocker(
+        ["image", "inspect", "--format", DOCKER_IMAGE_IDENTITY_FORMAT, containerImageId],
+        { timeoutMs: STATUS_PROBE_TIMEOUT_MS },
+      );
+
+      return parseDockerImageIdentity(result.stdout, containerImageId);
+    } catch {
+      return null;
     }
   }
 
@@ -1278,7 +1312,8 @@ function buildStatusSnapshotBase(
     projectionMarkerRevision: string | null;
     revisionState: RunnerAgentStatusSnapshot["revision"]["state"];
   },
-): RunnerDurableStatusSnapshot {
+  imageIdentity: RunnerImageIdentity | null,
+): RunnerReportedDurableStatusSnapshot {
   return {
     phase: "starting",
     operation,
@@ -1286,6 +1321,7 @@ function buildStatusSnapshotBase(
       id: container.id,
       name: container.name,
       image: container.image,
+      imageIdentity,
       state: normalizeContainerState(container.status),
       restartPolicy: normalizeDockerRestartPolicy(container.inspect.HostConfig?.RestartPolicy),
       restartCount: normalizeDockerRestartCount(container.inspect.RestartCount),
@@ -1341,16 +1377,17 @@ function emptyStatusSnapshot(
 }
 
 function emptyDurableStatusSnapshot(
-  phase: RunnerDurableStatusSnapshot["phase"],
+  phase: RunnerReportedDurableStatusSnapshot["phase"],
   reason: Exclude<RunnerReadinessReason, null>,
   observedAt: string,
-): RunnerDurableStatusSnapshot {
+): RunnerReportedDurableStatusSnapshot {
   const snapshot = emptyStatusSnapshot(phase, reason, observedAt);
 
   return {
     ...snapshot,
     container: {
       ...snapshot.container,
+      imageIdentity: null,
       restartPolicy: { name: "unknown", maximumRetryCount: null },
       restartCount: null,
     },
@@ -1634,6 +1671,58 @@ function normalizeDockerRestartCount(value: unknown): number | null {
     value <= MAX_RUNNER_RESTART_COUNT
     ? value
     : null;
+}
+
+function parseDockerImageIdentity(
+  stdout: string,
+  expectedImageId: string,
+): RunnerImageIdentity | null {
+  if (Buffer.byteLength(stdout, "utf8") > MAX_DOCKER_IMAGE_IDENTITY_BYTES) {
+    return null;
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(stdout.trim());
+  } catch {
+    return null;
+  }
+
+  if (
+    !isExactSafeRecord(parsed, ["imageId", "repoDigests"]) ||
+    parsed.imageId !== expectedImageId ||
+    !normalizeDockerImageId(parsed.imageId) ||
+    !Array.isArray(parsed.repoDigests) ||
+    parsed.repoDigests.length > MAX_RUNNER_IMAGE_IDENTITY_DIGESTS
+  ) {
+    return null;
+  }
+
+  const repoDigests: string[] = [];
+
+  for (const value of parsed.repoDigests) {
+    if (!isDockerRepoDigest(value)) {
+      return null;
+    }
+    repoDigests.push(value);
+  }
+
+  return { imageId: expectedImageId, repoDigests: [...new Set(repoDigests)].sort() };
+}
+
+function normalizeDockerImageId(value: unknown): string | null {
+  return typeof value === "string" && /^sha256:[0-9a-f]{64}$/.test(value) ? value : null;
+}
+
+function isDockerRepoDigest(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= MAX_RUNNER_IMAGE_REFERENCE_LENGTH &&
+    /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]{1,5})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*@sha256:[0-9a-f]{64}$/.test(
+      value,
+    )
+  );
 }
 
 function hasExactManagedRestartPolicy(inspect: DockerInspectContainer): boolean {
@@ -2778,6 +2867,23 @@ function isSafePlainRecord(value: unknown): value is Record<string, unknown> {
 
   return Object.values(Object.getOwnPropertyDescriptors(value)).every(
     (descriptor) => "value" in descriptor,
+  );
+}
+
+function isExactSafeRecord(
+  value: unknown,
+  expectedKeys: readonly string[],
+): value is Record<string, unknown> {
+  if (!isSafePlainRecord(value)) {
+    return false;
+  }
+
+  const actualKeys = Object.keys(value).sort();
+  const sortedExpectedKeys = [...expectedKeys].sort();
+
+  return (
+    actualKeys.length === sortedExpectedKeys.length &&
+    actualKeys.every((key, index) => key === sortedExpectedKeys[index])
   );
 }
 

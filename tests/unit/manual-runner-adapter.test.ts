@@ -381,10 +381,12 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
     await expect(adapter.status(agentId)).resolves.toEqual({
       ok: true,
       runner: manualRunner("https://runner.example.com"),
+      contractVersion: "agentbay.runner.status.v2",
       snapshot: {
         ...accepted.snapshot,
         container: {
           ...accepted.snapshot.container,
+          imageIdentity: null,
           restartPolicy: { name: "unknown", maximumRetryCount: null },
           restartCount: null,
         },
@@ -425,6 +427,49 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
     await expect(adapter.status(agentId)).resolves.toEqual({
       ok: true,
       runner: manualRunner("https://runner.example.com"),
+      contractVersion: "agentbay.runner.status.v3",
+      snapshot: {
+        ...snapshot,
+        container: { ...snapshot.container, imageIdentity: null },
+      },
+    });
+  });
+
+  it("preserves only bounded v3 image identity evidence for staging attestation", async () => {
+    const agentId = "00000000-0000-4000-8000-000000000123";
+    const accepted = acceptedLaunchResponse(agentId, "start");
+    const imageIdentity = {
+      imageId: `sha256:${"c".repeat(64)}`,
+      repoDigests: [`nousresearch/hermes-agent@sha256:${"a".repeat(64)}`],
+    };
+    const snapshot = {
+      ...accepted.snapshot,
+      phase: "starting",
+      container: {
+        ...accepted.snapshot.container,
+        imageIdentity,
+        restartPolicy: { name: "unless-stopped", maximumRetryCount: 0 },
+        restartCount: 2,
+      },
+      readinessReason: "gateway_starting",
+    };
+    const adapter = new ManualRunnerAdapter(manualRunner("https://runner.example.com"), {
+      env: { [RUNNER_BEARER_TOKEN_ENV]: "contract-token" },
+      fetch: async () =>
+        Response.json({
+          ok: true,
+          contractVersion: "agentbay.runner.status.v3",
+          agentId,
+          action: "status",
+          snapshot,
+        }),
+      timeoutMs: 250,
+    });
+
+    await expect(adapter.status(agentId)).resolves.toEqual({
+      ok: true,
+      runner: manualRunner("https://runner.example.com"),
+      contractVersion: "agentbay.runner.status.v3",
       snapshot,
     });
   });

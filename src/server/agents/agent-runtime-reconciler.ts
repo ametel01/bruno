@@ -2,7 +2,6 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, inArray, isNull, ne } from "drizzle-orm";
-import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
 import type { RunnerDurableStatusSnapshot } from "@/src/runner-service/runner-contracts";
 import { MANAGED_AGENT_LAUNCH_SPEC_VERSION } from "@/src/server/agents/agent-launch-spec";
 import {
@@ -35,6 +34,7 @@ import {
   runnerHeartbeats,
   runners,
 } from "@/src/server/db/schema";
+import { readHermesWorkloadImage } from "@/src/server/env";
 import { recordAgentEventInTransaction } from "@/src/server/events/agent-events";
 import {
   ManualRunnerAdapter,
@@ -96,13 +96,18 @@ export type RuntimeLoadedContext = {
 type RuntimeLaunchSpecBuilder = (
   userId: string,
   agentId: string,
-  dependencies?: { createConnection?: () => DatabaseConnection; trustedConfigRevision?: string },
+  dependencies?: {
+    createConnection?: () => DatabaseConnection;
+    hermesWorkloadImage?: string;
+    trustedConfigRevision?: string;
+  },
 ) => Promise<AgentLaunchSpecBuildResult>;
 
 export type AgentRuntimeReconcilerDependencies = {
   createConnection?: () => DatabaseConnection;
   now?: () => Date;
   randomUUID?: () => string;
+  readHermesWorkloadImage?: () => string;
   loadContext?: (
     connection: DatabaseConnection,
     claim: ClaimedAgentRuntimeReconciliation,
@@ -178,6 +183,7 @@ async function reconcileOne(
   target: AgentRuntimeClaimTarget,
   dependencies: AgentRuntimeReconcilerDependencies,
 ): Promise<AgentRuntimeReconcileResult> {
+  const hermesWorkloadImage = (dependencies.readHermesWorkloadImage ?? readHermesWorkloadImage)();
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now ?? (() => new Date());
@@ -207,6 +213,7 @@ async function reconcileOne(
         context,
         action,
         dependencies,
+        hermesWorkloadImage,
         now,
       );
       await (dependencies.persistTransition ?? persistRuntimeTransition)(
@@ -261,6 +268,7 @@ async function runClaimedRuntime(
   context: RuntimeLoadedContext,
   action: RuntimeActionContext,
   dependencies: AgentRuntimeReconcilerDependencies,
+  hermesWorkloadImage: string,
   now: () => Date,
 ): Promise<RuntimeTransition> {
   const policy = policyFromClaim(claim);
@@ -299,7 +307,7 @@ async function runClaimedRuntime(
   });
 
   if (plan.effect === "observe") {
-    return observeRuntime(claim, context, adapter, now);
+    return observeRuntime(claim, context, adapter, hermesWorkloadImage, now);
   }
 
   if (plan.effect === "stop") {
@@ -315,19 +323,30 @@ async function runClaimedRuntime(
         plan.policy,
         action,
         dependencies,
+        hermesWorkloadImage,
         now,
       );
     }
     return stopRuntime(claim, adapter, plan.policy, now);
   }
 
-  return startRuntime(connection, claim, context, adapter, plan.policy, dependencies, now);
+  return startRuntime(
+    connection,
+    claim,
+    context,
+    adapter,
+    plan.policy,
+    dependencies,
+    hermesWorkloadImage,
+    now,
+  );
 }
 
 async function observeRuntime(
   claim: ClaimedAgentRuntimeReconciliation,
   context: RuntimeLoadedContext,
   adapter: RuntimeRunnerAdapter,
+  hermesWorkloadImage: string,
   now: () => Date,
 ): Promise<RuntimeTransition> {
   let result: ManualRunnerStatusResult;
@@ -340,7 +359,7 @@ async function observeRuntime(
   const observedAt = now();
   const observation =
     result.ok && "snapshot" in result
-      ? mapRunnerSnapshotToRuntimeObservation(result.snapshot, claim)
+      ? mapRunnerSnapshotToRuntimeObservation(result.snapshot, claim, hermesWorkloadImage)
       : !result.ok && result.reason === "runner_request_failed"
         ? ({ kind: "runner_unavailable", heartbeatStale: false } as const)
         : ({ kind: "unknown" } as const);
@@ -441,12 +460,17 @@ async function startRuntime(
   adapter: RuntimeRunnerAdapter,
   policy: RuntimePolicyState,
   dependencies: AgentRuntimeReconcilerDependencies,
+  hermesWorkloadImage: string,
   now: () => Date,
 ): Promise<RuntimeTransition> {
   const launch = await (dependencies.launchSpec ?? buildHermesAgentLaunchSpecForUser)(
     claim.userId,
     claim.agentId,
-    { createConnection: () => connection, trustedConfigRevision: claim.configRevision },
+    {
+      createConnection: () => connection,
+      hermesWorkloadImage,
+      trustedConfigRevision: claim.configRevision,
+    },
   );
 
   if (
@@ -538,12 +562,17 @@ async function diagnoseTelegramBeforeRecovery(
   policy: RuntimePolicyState,
   action: RuntimeActionContext,
   dependencies: AgentRuntimeReconcilerDependencies,
+  hermesWorkloadImage: string,
   now: () => Date,
 ): Promise<RuntimeTransition> {
   const launch = await (dependencies.launchSpec ?? buildHermesAgentLaunchSpecForUser)(
     claim.userId,
     claim.agentId,
-    { createConnection: () => connection, trustedConfigRevision: claim.configRevision },
+    {
+      createConnection: () => connection,
+      hermesWorkloadImage,
+      trustedConfigRevision: claim.configRevision,
+    },
   );
   if (
     !launch.ok ||
@@ -744,6 +773,7 @@ function mutationFromPolicy(
 export function mapRunnerSnapshotToRuntimeObservation(
   snapshot: RunnerDurableStatusSnapshot,
   expected: Pick<ClaimedAgentRuntimeReconciliation, "configRevision" | "operationId">,
+  expectedImage: string,
 ): RuntimeObservation {
   if (snapshot.container.state === "absent" || snapshot.phase === "idle") {
     return { kind: "container_absent" };
@@ -759,7 +789,7 @@ export function mapRunnerSnapshotToRuntimeObservation(
     (expected.operationId !== null && snapshot.operation.id !== expected.operationId) ||
     snapshot.operation.target.configRevision !== expected.configRevision ||
     snapshot.operation.target.launchSpecVersion !== MANAGED_AGENT_LAUNCH_SPEC_VERSION ||
-    snapshot.operation.target.image !== DEFAULT_HERMES_WORKLOAD_IMAGE ||
+    snapshot.operation.target.image !== expectedImage ||
     snapshot.container.image !== snapshot.operation.target.image ||
     snapshot.revision.state !== "match" ||
     snapshot.revision.requested !== expected.configRevision ||

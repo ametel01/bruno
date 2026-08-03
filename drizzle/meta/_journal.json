@@ -141,6 +141,13 @@
       "when": 1785749806303,
       "tag": "0019_tough_tinkerer",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1785757746775,
+      "tag": "0020_serious_sauron",
+      "breakpoints": true
     }
   ]
 }

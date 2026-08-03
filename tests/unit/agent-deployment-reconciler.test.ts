@@ -38,6 +38,8 @@ const DEPLOYMENT_ID = "00000000-0000-4000-8000-00000000a731";
 const OPERATION_ID = "00000000-0000-4000-8000-00000000a741";
 const NOW = new Date("2026-08-03T08:00:00.000Z");
 const CONFIG_REVISION = "cfg-1784000000000";
+const CUSTOM_HERMES_IMAGE =
+  "ghcr.io/ametel01/agentbay-hermes@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 describe("agent deployment reconciler", () => {
   let connection: DatabaseConnection;
@@ -216,7 +218,10 @@ describe("agent deployment reconciler", () => {
     await seedDeployment(connection, { stage: "configuring_hermes" });
     const launchSpec = sampleManagedLaunchSpec({
       agent: { ...sampleManagedLaunchSpec().agent, id: AGENT_ID, configRevision: CONFIG_REVISION },
+      image: { ref: CUSTOM_HERMES_IMAGE },
     });
+    const launchSpecBuilder = vi.fn(async () => ({ ok: true as const, spec: launchSpec }));
+    const readHermesWorkloadImage = vi.fn(() => CUSTOM_HERMES_IMAGE);
     const adapter = fakeRunnerAdapter({
       start: vi.fn(async () => ({
         ok: true,
@@ -240,13 +245,19 @@ describe("agent deployment reconciler", () => {
       reconcileNextAgentDeployment({
         createConnection: () => connection,
         now: () => NOW,
-        launchSpec: async () => ({ ok: true, spec: launchSpec }),
+        readHermesWorkloadImage,
+        launchSpec: launchSpecBuilder,
         manualRunnerAdapter: () => adapter as never,
       }),
     ).resolves.toEqual({ processed: 1, outcome: "advanced" });
 
     expect(adapter.start).toHaveBeenCalledTimes(1);
+    expect(adapter.start).toHaveBeenCalledWith(AGENT_ID, launchSpec);
     expect(adapter.status).not.toHaveBeenCalled();
+    expect(readHermesWorkloadImage).toHaveBeenCalledOnce();
+    expect(launchSpecBuilder).toHaveBeenCalledWith(USER_ID, AGENT_ID, {
+      hermesWorkloadImage: CUSTOM_HERMES_IMAGE,
+    });
     const [deployment] = await connection.db
       .select()
       .from(agentDeployments)
@@ -496,7 +507,9 @@ describe("agent deployment reconciler", () => {
       runnerOperationId: OPERATION_ID,
       runnerAcceptedAt: NOW,
     });
-    const launchSpec = managedLaunchSpec();
+    const launchSpec = managedLaunchSpec({ image: { ref: CUSTOM_HERMES_IMAGE } });
+    const launchSpecBuilder = vi.fn(async () => ({ ok: true as const, spec: launchSpec }));
+    const readHermesWorkloadImage = vi.fn(() => CUSTOM_HERMES_IMAGE);
     const replacementOperationId = "00000000-0000-4000-8000-00000000a742";
     const adapter = fakeRunnerAdapter({
       status: vi.fn(async () => ({ ok: true, runner: manualRunner(), snapshot })),
@@ -507,13 +520,18 @@ describe("agent deployment reconciler", () => {
       reconcileNextAgentDeployment({
         createConnection: () => connection,
         now: () => NOW,
-        launchSpec: async () => ({ ok: true, spec: launchSpec }),
+        readHermesWorkloadImage,
+        launchSpec: launchSpecBuilder,
         manualRunnerAdapter: () => adapter as never,
       }),
     ).resolves.toEqual({ processed: 1, outcome: "advanced" });
 
     expect(adapter.status).toHaveBeenCalledTimes(1);
     expect(adapter.start).toHaveBeenCalledTimes(1);
+    expect(readHermesWorkloadImage).toHaveBeenCalledOnce();
+    expect(launchSpecBuilder).toHaveBeenCalledWith(USER_ID, AGENT_ID, {
+      hermesWorkloadImage: CUSTOM_HERMES_IMAGE,
+    });
     expect(adapter.canary).not.toHaveBeenCalled();
     const [deployment] = await connection.db
       .select()
@@ -1193,9 +1211,10 @@ function readySnapshot(): RunnerAgentStatusSnapshot {
   };
 }
 
-function managedLaunchSpec() {
+function managedLaunchSpec(overrides: Partial<ReturnType<typeof sampleManagedLaunchSpec>> = {}) {
   return sampleManagedLaunchSpec({
     agent: { ...sampleManagedLaunchSpec().agent, id: AGENT_ID, configRevision: CONFIG_REVISION },
+    ...overrides,
   });
 }
 

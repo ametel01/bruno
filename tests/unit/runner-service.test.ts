@@ -20,6 +20,9 @@ import { sampleLaunchSpec, sampleManagedLaunchSpec } from "@/tests/helpers/agent
 
 const AGENT_ID = "00000000-0000-4000-8000-000000000123";
 const OTHER_AGENT_ID = "00000000-0000-4000-8000-000000000456";
+const MOCK_IMAGE_ID = `sha256:${"c".repeat(64)}`;
+const MOCK_REPO_DIGEST =
+  "nousresearch/hermes-agent@sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973";
 const execFileAsync = promisify(execFile);
 
 describe("manual runner service HTTP contract", () => {
@@ -766,10 +769,11 @@ describe("manual runner service HTTP contract", () => {
 
   it("observes ready status with the projected API key and never exposes probe bodies", async () => {
     const probeCalls: Array<{ apiServerKey: string; containerName: string }> = [];
+    const dockerCalls: string[][] = [];
     await withHermesStateRootForTest(async () => {
       const docker = new ManualRunnerDocker({
         command: testCommand(),
-        docker: createMockDocker(),
+        docker: createMockDocker({ calls: dockerCalls }),
         nameSuffix: () => "unit001",
         projection: {
           project: (spec) =>
@@ -801,6 +805,10 @@ describe("manual runner service HTTP contract", () => {
           phase: "ready",
           readinessReason: null,
           container: {
+            imageIdentity: {
+              imageId: MOCK_IMAGE_ID,
+              repoDigests: [MOCK_REPO_DIGEST],
+            },
             restartPolicy: { name: "unless-stopped", maximumRetryCount: 0 },
             restartCount: 0,
           },
@@ -815,8 +823,80 @@ describe("manual runner service HTTP contract", () => {
           containerName: `agentbay-runner-${AGENT_ID}-unit001`,
         },
       ]);
+      expect(dockerCalls).toContainEqual([
+        "image",
+        "inspect",
+        "--format",
+        '{"imageId":{{json .Id}},"repoDigests":{{json .RepoDigests}}}',
+        MOCK_IMAGE_ID,
+      ]);
       expect(JSON.stringify(status)).not.toContain(spec.secrets.apiServerKey);
       expect(JSON.stringify(status)).not.toContain("sk-or-v1-upstream");
+    });
+  });
+
+  it("keeps bounded image identity stable while Docker restart observations advance", async () => {
+    let restartCount = 0;
+
+    await withHermesStateRootForTest(async () => {
+      const docker = new ManualRunnerDocker({
+        docker: createMockDocker({ inspectRestartCount: () => restartCount }),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: (spec) =>
+            createHermesProjectionForTest(spec, { apiServerKey: spec.secrets.apiServerKey }),
+        },
+        probe: { requestHealth: async () => ({ ok: true, body: pinnedHermesHealth() }) },
+      });
+      const spec = sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } });
+      await docker.start(AGENT_ID, spec);
+
+      const before = await docker.status(AGENT_ID);
+      restartCount = 1;
+      const after = await docker.status(AGENT_ID);
+
+      expect(before.snapshot.container).toMatchObject({
+        imageIdentity: { imageId: MOCK_IMAGE_ID, repoDigests: [MOCK_REPO_DIGEST] },
+        restartCount: 0,
+      });
+      expect(after.snapshot.container).toMatchObject({
+        imageIdentity: before.snapshot.container.imageIdentity,
+        restartCount: 1,
+      });
+    });
+  });
+
+  it.each([
+    [
+      "mismatched image ID",
+      JSON.stringify({ imageId: `sha256:${"d".repeat(64)}`, repoDigests: [MOCK_REPO_DIGEST] }),
+    ],
+    [
+      "malformed projection",
+      JSON.stringify({ imageId: MOCK_IMAGE_ID, repoDigests: [MOCK_REPO_DIGEST], rawInspect: {} }),
+    ],
+    ["oversized projection", "x".repeat(16 * 1024 + 1)],
+  ])("fails image identity evidence closed for %s without changing runtime readiness", async (_case, imageInspectStdout) => {
+    await withHermesStateRootForTest(async () => {
+      const docker = new ManualRunnerDocker({
+        docker: createMockDocker({ imageInspectStdout: () => imageInspectStdout }),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: (spec) =>
+            createHermesProjectionForTest(spec, { apiServerKey: spec.secrets.apiServerKey }),
+        },
+        probe: { requestHealth: async () => ({ ok: true, body: pinnedHermesHealth() }) },
+      });
+      const spec = sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } });
+      await docker.start(AGENT_ID, spec);
+
+      const status = await docker.status(AGENT_ID);
+
+      expect(status.snapshot).toMatchObject({
+        phase: "ready",
+        container: { imageIdentity: null },
+      });
+      expect(JSON.stringify(status)).not.toContain("rawInspect");
     });
   });
 
@@ -1860,6 +1940,7 @@ function createMockDocker(
     }[];
     failRemoveIds?: string[];
     inspectEnv?: string[];
+    imageInspectStdout?: () => string;
     inspectRestartCount?: () => unknown;
     inspectRestartPolicy?: () => { MaximumRetryCount?: unknown; Name?: unknown } | null | undefined;
     injectDockerSocket?: boolean;
@@ -1903,6 +1984,15 @@ function createMockDocker(
       return { stdout: "container-001\n", stderr: "" };
     }
 
+    if (args[0] === "image" && args[1] === "inspect") {
+      return {
+        stdout:
+          input.imageInspectStdout?.() ??
+          JSON.stringify({ imageId: MOCK_IMAGE_ID, repoDigests: [MOCK_REPO_DIGEST] }),
+        stderr: "",
+      };
+    }
+
     if (args[0] === "inspect") {
       const id = String(args.at(-1));
       const container = containers.get(id);
@@ -1917,6 +2007,7 @@ function createMockDocker(
       return {
         stdout: JSON.stringify({
           Id: container.id,
+          Image: MOCK_IMAGE_ID,
           RestartCount: input.inspectRestartCount
             ? input.inspectRestartCount()
             : container.restartCount,

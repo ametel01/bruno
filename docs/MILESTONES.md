@@ -869,9 +869,11 @@ boundary without external provider or Telegram side effects.
 Milestone 18 is not accepted for hosted rollout yet. A scanned/published release-candidate image,
 authorized DigitalOcean budget, funded OpenRouter key, and dedicated Telegram bot/user are still
 required for the real message/reply, restart, durable Stop, redaction, and cleanup acceptance. The
-current `bun run verify:hermes:staging` entrypoint fails closed at capability preflight; it has not
-produced live acceptance evidence. Native provider OAuth remains deferred; the implemented narrow
-path is OpenRouter BYOK.
+default-disabled `bun run verify:hermes:staging` workflow now has a durable hosted ledger, exact
+published-image and owned-resource attestation, bounded reconciliation, interactive-human Telegram
+proof before and after Restart, and ordered cleanup. It still fails closed without all 15 explicit
+capabilities and has not produced live acceptance evidence. Native provider OAuth remains deferred;
+the implemented narrow path is OpenRouter BYOK.
 
 ### Technical implementation
 

@@ -34,6 +34,7 @@ export type DigitalOceanRunnerSpec = {
 export type DigitalOceanResource = {
   provider: DigitalOceanProviderName;
   providerResourceId: string;
+  providerFirewallId: string | null;
   publicIpv4: string | null;
   publicEndpointUrl?: string;
   name: string;
@@ -62,6 +63,56 @@ export type DigitalOceanProviderErrorReason =
   | "resource_not_found"
   | "ssh_key_lookup_failed"
   | "ssh_key_create_failed";
+
+export type DigitalOceanOwnedSetExpectation = {
+  operationTag: string;
+  providerResourceId: string;
+  providerFirewallId: string;
+  expectedName: string;
+  expectedRegion: string;
+  expectedSizeSlug: string;
+  expectedFirewallName: string;
+};
+
+export type DigitalOceanOwnedSetObservation = {
+  state: "owned" | "absent";
+  droplet: "present" | "absent";
+  firewall: "present" | "absent";
+};
+
+export type DigitalOceanOwnedSetFailureReason =
+  | "observation_unknown"
+  | "ownership_ambiguous"
+  | "cleanup_order_violation"
+  | "delete_outcome_unknown";
+
+export type DigitalOceanOwnedSetResult<T> =
+  | { ok: true; value: T }
+  | {
+      ok: false;
+      reason: DigitalOceanOwnedSetFailureReason;
+      retryable: boolean;
+      message: string;
+    };
+
+export type DigitalOceanOwnedSetDeleteResult = {
+  state: "absent";
+};
+
+export interface DigitalOceanOwnedSetProvider {
+  observeOwnedSet(
+    input: DigitalOceanOwnedSetExpectation,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanOwnedSetResult<DigitalOceanOwnedSetObservation>>;
+  deleteFirewall(
+    input: DigitalOceanOwnedSetExpectation,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanOwnedSetResult<DigitalOceanOwnedSetDeleteResult>>;
+  deleteDroplet(
+    input: DigitalOceanOwnedSetExpectation,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanOwnedSetResult<DigitalOceanOwnedSetDeleteResult>>;
+}
 
 export type DigitalOceanProviderResult<T> =
   | {
@@ -199,6 +250,12 @@ export type DigitalOceanSdkClient = {
         body: DigitalOceanFirewallBody,
         context?: DigitalOceanProviderRequestContext,
       ): Promise<DigitalOceanFirewallCreateResponse | undefined>;
+      byFirewall_id?(id: string): {
+        get(
+          context?: DigitalOceanProviderRequestContext,
+        ): Promise<DigitalOceanFirewallReadResponse | undefined>;
+        delete(context?: DigitalOceanProviderRequestContext): Promise<void>;
+      };
     };
     tags: {
       byTag_id(tag: string): {
@@ -255,7 +312,18 @@ type DigitalOceanApiSshKey = {
 };
 
 type DigitalOceanFirewallCreateResponse = {
-  firewall?: { id?: string | null } | null;
+  firewall?: DigitalOceanApiFirewall | null;
+};
+
+type DigitalOceanFirewallReadResponse = {
+  firewall?: DigitalOceanApiFirewall | null;
+};
+
+type DigitalOceanApiFirewall = {
+  id?: string | null;
+  name?: string | null;
+  dropletIds?: number[] | null;
+  droplet_ids?: number[] | null;
 };
 
 type DigitalOceanApiDroplet = {
@@ -300,7 +368,7 @@ type DigitalOceanTagResourceBody = {
   resources?: Array<{ resourceId?: string | null; resourceType?: string | null }> | null;
 };
 
-export class DigitalOceanApiProvider implements DigitalOceanProvider {
+export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOceanOwnedSetProvider {
   readonly #client: DigitalOceanSdkClient;
   readonly #now: () => Date;
   readonly #resources = new Map<string, DigitalOceanResource>();
@@ -465,11 +533,10 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
     input: DigitalOceanTagInput,
     context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
-    const resource = this.#resources.get(input.providerResourceId);
+    const resourceResult = await this.#resolveResource(input.providerResourceId, context);
 
-    if (!resource) {
-      return missingResource();
-    }
+    if (!resourceResult.ok) return resourceResult;
+    const resource = resourceResult.value;
 
     for (const tag of [...new Set(input.tags)].sort()) {
       const response = await runSdkStep(
@@ -538,6 +605,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
             sizeSlug: fallback.sizeSlug,
             image: fallback.image,
             tags: fallback.tags,
+            providerFirewallId: fallback.providerFirewallId,
           }
         : null,
       this.#now,
@@ -556,11 +624,10 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
     input: DigitalOceanFirewallInput,
     context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
-    const resource = this.#resources.get(input.providerResourceId);
+    const resourceResult = await this.#resolveResource(input.providerResourceId, context);
 
-    if (!resource) {
-      return missingResource();
-    }
+    if (!resourceResult.ok) return resourceResult;
+    const resource = resourceResult.value;
 
     const dropletId = Number(input.providerResourceId);
 
@@ -595,9 +662,156 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
       return response;
     }
 
+    const providerFirewallId = response.value?.firewall?.id?.trim() ?? "";
+
+    if (!providerFirewallId) {
+      return {
+        ok: false,
+        reason: "firewall_failed",
+        message: "DigitalOcean firewall response was missing required fields.",
+      };
+    }
+
     resource.firewallApplied = true;
+    resource.providerFirewallId = providerFirewallId;
 
     return { ok: true, value: cloneResource(resource) };
+  }
+
+  async observeOwnedSet(
+    input: DigitalOceanOwnedSetExpectation,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanOwnedSetResult<DigitalOceanOwnedSetObservation>> {
+    const dropletId = parseDigitalOceanDropletId(input.providerResourceId);
+    const firewallId = input.providerFirewallId.trim();
+
+    if (!dropletId || !firewallId || !hasCompleteOwnedSetExpectation(input)) {
+      return ambiguousOwnedSet();
+    }
+
+    const firewallResource = this.#client.v2.firewalls.byFirewall_id?.(firewallId);
+    const dropletResource = this.#client.v2.droplets.byDroplet_id(dropletId);
+    const discoverDroplets = this.#client.v2.droplets.get;
+
+    if (!firewallResource?.get || !dropletResource.get || !discoverDroplets) {
+      return unknownOwnedSetObservation();
+    }
+
+    const [droplet, firewall, discovered] = await Promise.all([
+      observeSdkResource(() => {
+        if (!dropletResource.get) throw new Error("DigitalOcean Droplet read is unavailable.");
+        return dropletResource.get(context);
+      }, context),
+      observeSdkResource(() => {
+        if (!firewallResource.get) throw new Error("DigitalOcean firewall read is unavailable.");
+        return firewallResource.get(context);
+      }, context),
+      observeSdkResource(
+        () => discoverDroplets({ tagName: input.operationTag, perPage: 200 }, context),
+        context,
+      ),
+    ]);
+
+    if (
+      droplet.state === "unknown" ||
+      firewall.state === "unknown" ||
+      discovered.state === "unknown"
+    ) {
+      return unknownOwnedSetObservation();
+    }
+
+    const apiDroplet = droplet.state === "present" ? droplet.value?.droplet : null;
+    const apiFirewall = firewall.state === "present" ? firewall.value?.firewall : null;
+    const taggedDroplets =
+      discovered.state === "present" && Array.isArray(discovered.value?.droplets)
+        ? discovered.value.droplets
+        : null;
+
+    if (
+      !taggedDroplets ||
+      !taggedDropletsMatchOwnedSet(taggedDroplets, input, droplet.state) ||
+      (droplet.state === "present" && !apiDropletMatchesOwnedSet(apiDroplet, input)) ||
+      (firewall.state === "present" &&
+        !apiFirewallMatchesOwnedSet(apiFirewall, input, dropletId)) ||
+      (droplet.state === "absent" && firewall.state === "present")
+    ) {
+      return ambiguousOwnedSet();
+    }
+
+    const dropletState = droplet.state === "present" ? "present" : "absent";
+    const firewallState = firewall.state === "present" ? "present" : "absent";
+
+    return {
+      ok: true,
+      value: {
+        state: dropletState === "absent" && firewallState === "absent" ? "absent" : "owned",
+        droplet: dropletState,
+        firewall: firewallState,
+      },
+    };
+  }
+
+  async deleteFirewall(
+    input: DigitalOceanOwnedSetExpectation,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanOwnedSetResult<DigitalOceanOwnedSetDeleteResult>> {
+    const observed = await this.observeOwnedSet(input, context);
+
+    if (!observed.ok) return observed;
+    if (observed.value.firewall === "absent") return ownedSetDeleted();
+
+    const firewallResource = this.#client.v2.firewalls.byFirewall_id?.(
+      input.providerFirewallId.trim(),
+    );
+
+    if (!firewallResource) return unknownOwnedSetDelete();
+
+    try {
+      await firewallResource.delete(context);
+    } catch {
+      // The provider may have completed the deletion before the response failed. The
+      // authoritative follow-up observation below decides the outcome.
+    }
+
+    const verified = await this.observeOwnedSet(input, context);
+
+    return verified.ok && verified.value.firewall === "absent"
+      ? ownedSetDeleted()
+      : unknownOwnedSetDelete();
+  }
+
+  async deleteDroplet(
+    input: DigitalOceanOwnedSetExpectation,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanOwnedSetResult<DigitalOceanOwnedSetDeleteResult>> {
+    const observed = await this.observeOwnedSet(input, context);
+
+    if (!observed.ok) return observed;
+    if (observed.value.firewall === "present") {
+      return {
+        ok: false,
+        reason: "cleanup_order_violation",
+        retryable: true,
+        message: "DigitalOcean firewall absence must be confirmed before Droplet deletion.",
+      };
+    }
+    if (observed.value.droplet === "absent") return ownedSetDeleted();
+
+    const dropletId = parseDigitalOceanDropletId(input.providerResourceId);
+
+    if (!dropletId) return ambiguousOwnedSet();
+
+    try {
+      await this.#client.v2.droplets.byDroplet_id(dropletId).delete(context);
+    } catch {
+      // A timeout after the provider accepted deletion is resolved by the independent read.
+    }
+
+    const verified = await this.observeOwnedSet(input, context);
+
+    return verified.ok && verified.value.state === "absent"
+      ? ownedSetDeleted()
+      : unknownOwnedSetDelete();
   }
 
   async cleanupResource(
@@ -624,10 +838,29 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
 
     return { ok: true, value: cloneResource(resource) };
   }
+
+  async #resolveResource(
+    providerResourceId: string,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
+    const cached = this.#resources.get(providerResourceId);
+    if (cached) return { ok: true, value: cached };
+
+    const read = await this.readResource({ providerResourceId }, context);
+    if (!read.ok) return read;
+
+    return {
+      ok: true,
+      value: this.#resources.get(providerResourceId) ?? read.value,
+    };
+  }
 }
 
-export class FakeDigitalOceanProvider implements DigitalOceanProvider {
+export class FakeDigitalOceanProvider
+  implements DigitalOceanProvider, DigitalOceanOwnedSetProvider
+{
   readonly resources = new Map<string, DigitalOceanResource>();
+  readonly firewalls = new Map<string, { name: string; providerResourceId: string }>();
   readonly calls: Array<
     | { step: "createSshKey"; input: DigitalOceanCreateSshKeyInput }
     | { step: "create"; input: DigitalOceanRunnerSpec }
@@ -635,6 +868,9 @@ export class FakeDigitalOceanProvider implements DigitalOceanProvider {
     | { step: "firewall"; input: DigitalOceanFirewallInput }
     | { step: "cleanup"; input: DigitalOceanCleanupInput }
     | { step: "discover"; input: DigitalOceanDiscoverByTagInput }
+    | { step: "observeOwnedSet"; input: DigitalOceanOwnedSetExpectation }
+    | { step: "deleteFirewall"; input: DigitalOceanOwnedSetExpectation }
+    | { step: "deleteDroplet"; input: DigitalOceanOwnedSetExpectation }
   > = [];
 
   #counter = 0;
@@ -712,6 +948,7 @@ export class FakeDigitalOceanProvider implements DigitalOceanProvider {
     const resource: DigitalOceanResource = {
       provider: DIGITALOCEAN_PROVIDER,
       providerResourceId: `${this.#idPrefix}-${this.#counter}`,
+      providerFirewallId: null,
       publicIpv4: this.#publicIpv4,
       name: input.name,
       region: input.region,
@@ -812,8 +1049,104 @@ export class FakeDigitalOceanProvider implements DigitalOceanProvider {
     }
 
     resource.firewallApplied = true;
+    const providerFirewallId = `${this.#idPrefix}-firewall-${this.#counter}`;
+    resource.providerFirewallId = providerFirewallId;
+    this.firewalls.set(providerFirewallId, {
+      name: input.firewallName,
+      providerResourceId: input.providerResourceId,
+    });
 
     return { ok: true, value: cloneResource(resource) };
+  }
+
+  async observeOwnedSet(
+    input: DigitalOceanOwnedSetExpectation,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanOwnedSetResult<DigitalOceanOwnedSetObservation>> {
+    if (context?.signal.aborted) return unknownOwnedSetObservation();
+    this.calls.push({ step: "observeOwnedSet", input });
+    if (!hasCompleteOwnedSetExpectation(input)) return ambiguousOwnedSet();
+
+    const resource = this.resources.get(input.providerResourceId);
+    const droplet = resource?.deletedAt === null ? resource : null;
+    const firewall = this.firewalls.get(input.providerFirewallId);
+    const taggedResources = [...this.resources.values()].filter(
+      (candidate) => candidate.deletedAt === null && candidate.tags.includes(input.operationTag),
+    );
+
+    if (
+      taggedResources.length > 1 ||
+      (taggedResources.length === 1 &&
+        taggedResources[0]?.providerResourceId !== input.providerResourceId) ||
+      Boolean(droplet) !== (taggedResources.length === 1) ||
+      (droplet &&
+        (droplet.name !== input.expectedName ||
+          droplet.region !== input.expectedRegion ||
+          droplet.sizeSlug !== input.expectedSizeSlug ||
+          !droplet.tags.includes(input.operationTag))) ||
+      (firewall &&
+        (firewall.name !== input.expectedFirewallName ||
+          firewall.providerResourceId !== input.providerResourceId)) ||
+      (!droplet && firewall)
+    ) {
+      return ambiguousOwnedSet();
+    }
+
+    const dropletState = droplet ? "present" : "absent";
+    const firewallState = firewall ? "present" : "absent";
+
+    return {
+      ok: true,
+      value: {
+        state: dropletState === "absent" && firewallState === "absent" ? "absent" : "owned",
+        droplet: dropletState,
+        firewall: firewallState,
+      },
+    };
+  }
+
+  async deleteFirewall(
+    input: DigitalOceanOwnedSetExpectation,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanOwnedSetResult<DigitalOceanOwnedSetDeleteResult>> {
+    this.calls.push({ step: "deleteFirewall", input });
+    const observed = await this.observeOwnedSet(input, context);
+    if (!observed.ok) return observed;
+    if (observed.value.firewall === "absent") return ownedSetDeleted();
+
+    this.firewalls.delete(input.providerFirewallId);
+    const resource = this.resources.get(input.providerResourceId);
+    if (resource) resource.providerFirewallId = null;
+
+    const verified = await this.observeOwnedSet(input, context);
+    return verified.ok && verified.value.firewall === "absent"
+      ? ownedSetDeleted()
+      : unknownOwnedSetDelete();
+  }
+
+  async deleteDroplet(
+    input: DigitalOceanOwnedSetExpectation,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanOwnedSetResult<DigitalOceanOwnedSetDeleteResult>> {
+    this.calls.push({ step: "deleteDroplet", input });
+    const observed = await this.observeOwnedSet(input, context);
+    if (!observed.ok) return observed;
+    if (observed.value.firewall === "present") {
+      return {
+        ok: false,
+        reason: "cleanup_order_violation",
+        retryable: true,
+        message: "DigitalOcean firewall absence must be confirmed before Droplet deletion.",
+      };
+    }
+
+    const resource = this.resources.get(input.providerResourceId);
+    if (resource) resource.deletedAt = this.#now().toISOString();
+
+    const verified = await this.observeOwnedSet(input, context);
+    return verified.ok && verified.value.state === "absent"
+      ? ownedSetDeleted()
+      : unknownOwnedSetDelete();
   }
 
   async cleanupResource(
@@ -875,7 +1208,11 @@ function apiSshKeyToSshKey(
 
 function apiDropletToResource(
   droplet: DigitalOceanApiDroplet | null | undefined,
-  fallback: Pick<DigitalOceanRunnerSpec, "image" | "name" | "region" | "sizeSlug" | "tags"> | null,
+  fallback:
+    | (Pick<DigitalOceanRunnerSpec, "image" | "name" | "region" | "sizeSlug" | "tags"> & {
+        providerFirewallId?: string | null;
+      })
+    | null,
   now: () => Date,
 ): DigitalOceanResource | null {
   if (!droplet?.id) {
@@ -885,6 +1222,7 @@ function apiDropletToResource(
   return {
     provider: DIGITALOCEAN_PROVIDER,
     providerResourceId: String(droplet.id),
+    providerFirewallId: fallback?.providerFirewallId ?? null,
     publicIpv4: readApiPublicIpv4(droplet),
     name: droplet.name ?? fallback?.name ?? "agentbay-runner",
     region: readApiSlug(droplet.region) ?? fallback?.region ?? "unknown",
@@ -895,6 +1233,124 @@ function apiDropletToResource(
     createdAt: readApiDate(droplet.createdAt ?? droplet.created_at) ?? now().toISOString(),
     deletedAt: null,
   };
+}
+
+type SdkResourceObservation<T> =
+  | { state: "present"; value: T }
+  | { state: "absent" }
+  | { state: "unknown" };
+
+async function observeSdkResource<T>(
+  execute: () => Promise<T>,
+  context?: DigitalOceanProviderRequestContext,
+): Promise<SdkResourceObservation<T>> {
+  if (context?.signal.aborted) return { state: "unknown" };
+
+  try {
+    return { state: "present", value: await execute() };
+  } catch (error) {
+    return readSdkStatus(error) === 404 ? { state: "absent" } : { state: "unknown" };
+  }
+}
+
+function apiDropletMatchesOwnedSet(
+  droplet: DigitalOceanApiDroplet | null | undefined,
+  input: DigitalOceanOwnedSetExpectation,
+): boolean {
+  return (
+    String(droplet?.id ?? "") === input.providerResourceId &&
+    droplet?.name === input.expectedName &&
+    readApiSlug(droplet.region) === input.expectedRegion &&
+    (droplet.sizeSlug ?? droplet.size_slug) === input.expectedSizeSlug &&
+    Array.isArray(droplet.tags) &&
+    droplet.tags.includes(input.operationTag)
+  );
+}
+
+function apiFirewallMatchesOwnedSet(
+  firewall: DigitalOceanApiFirewall | null | undefined,
+  input: DigitalOceanOwnedSetExpectation,
+  dropletId: number,
+): boolean {
+  const attachedDropletIds = firewall?.dropletIds ?? firewall?.droplet_ids;
+
+  return (
+    firewall?.id?.trim() === input.providerFirewallId &&
+    firewall.name === input.expectedFirewallName &&
+    Array.isArray(attachedDropletIds) &&
+    attachedDropletIds.length === 1 &&
+    attachedDropletIds[0] === dropletId
+  );
+}
+
+function taggedDropletsMatchOwnedSet(
+  droplets: DigitalOceanApiDroplet[],
+  input: DigitalOceanOwnedSetExpectation,
+  exactDropletState: "present" | "absent",
+): boolean {
+  if (
+    droplets.some(
+      (droplet) => !Array.isArray(droplet.tags) || !droplet.tags.includes(input.operationTag),
+    )
+  ) {
+    return false;
+  }
+
+  if (exactDropletState === "absent") return droplets.length === 0;
+
+  return (
+    droplets.length === 1 &&
+    String(droplets[0]?.id ?? "") === input.providerResourceId &&
+    apiDropletMatchesOwnedSet(droplets[0], input)
+  );
+}
+
+function parseDigitalOceanDropletId(value: string): number | null {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function hasCompleteOwnedSetExpectation(input: DigitalOceanOwnedSetExpectation): boolean {
+  return [
+    input.operationTag,
+    input.providerResourceId,
+    input.providerFirewallId,
+    input.expectedName,
+    input.expectedRegion,
+    input.expectedSizeSlug,
+    input.expectedFirewallName,
+  ].every((value) => value.trim().length > 0);
+}
+
+function ambiguousOwnedSet<T>(): DigitalOceanOwnedSetResult<T> {
+  return {
+    ok: false,
+    reason: "ownership_ambiguous",
+    retryable: false,
+    message: "DigitalOcean resource ownership was ambiguous; no deletion was attempted.",
+  };
+}
+
+function unknownOwnedSetObservation<T>(): DigitalOceanOwnedSetResult<T> {
+  return {
+    ok: false,
+    reason: "observation_unknown",
+    retryable: true,
+    message: "DigitalOcean resource ownership could not be observed; retry before deleting.",
+  };
+}
+
+function unknownOwnedSetDelete<T>(): DigitalOceanOwnedSetResult<T> {
+  return {
+    ok: false,
+    reason: "delete_outcome_unknown",
+    retryable: true,
+    message: "DigitalOcean deletion outcome could not be confirmed; retry observation.",
+  };
+}
+
+function ownedSetDeleted(): DigitalOceanOwnedSetResult<DigitalOceanOwnedSetDeleteResult> {
+  return { ok: true, value: { state: "absent" } };
 }
 
 async function runSdkStep<T>(
@@ -932,15 +1388,19 @@ function abortedProviderResult<T>(
 }
 
 function readSdkStatusSuffix(error: unknown): string {
-  if (!error || typeof error !== "object") {
-    return "";
-  }
+  const status = readSdkStatus(error);
+
+  return typeof status === "number" ? ` with status ${status}` : "";
+}
+
+function readSdkStatus(error: unknown): number | null {
+  if (!error || typeof error !== "object") return null;
 
   const statusCode = "statusCode" in error ? error.statusCode : null;
   const responseStatus = "responseStatusCode" in error ? error.responseStatusCode : null;
   const status = typeof statusCode === "number" ? statusCode : responseStatus;
 
-  return typeof status === "number" ? ` with status ${status}` : "";
+  return typeof status === "number" ? status : null;
 }
 
 function readApiSlug(value: { slug?: string | null } | string | null | undefined): string | null {

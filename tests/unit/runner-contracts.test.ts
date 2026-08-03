@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  attestManagedHermesImageIdentity,
   hasExactRunnerDurabilityEvidence,
   isRunnerStatusExactReady,
   parseRunnerCanary,
@@ -13,6 +14,11 @@ import {
 const AGENT_ID = "00000000-0000-4000-8000-000000000123";
 const OPERATION_ID = "11111111-1111-4111-8111-111111111111";
 const OBSERVED_AT = "2026-08-03T04:30:00.000Z";
+const IMAGE_DIGEST = `sha256:${"a".repeat(64)}`;
+const OTHER_IMAGE_DIGEST = `sha256:${"b".repeat(64)}`;
+const IMAGE_REF = `ghcr.io/ametel01/agentbay-hermes:staging@${IMAGE_DIGEST}`;
+const IMAGE_REPO_DIGEST = `ghcr.io/ametel01/agentbay-hermes@${IMAGE_DIGEST}`;
+const IMAGE_ID = `sha256:${"c".repeat(64)}`;
 
 describe("runner contract parsers", () => {
   it("accepts exact launch/status/canary contracts", () => {
@@ -199,6 +205,7 @@ describe("runner contract parsers", () => {
           ...snapshot("ready", null),
           container: {
             ...snapshot("ready", null).container,
+            imageIdentity: null,
             restartPolicy: { name: "unknown", maximumRetryCount: null },
             restartCount: null,
           },
@@ -241,6 +248,141 @@ describe("runner contract parsers", () => {
       throw new Error("exact status should parse");
     }
     expect(isRunnerStatusExactReady(exact.response)).toBe(true);
+  });
+
+  it("attests a ready managed image from exact bounded v3 identity evidence", () => {
+    const status = attestedStatus();
+
+    expect(parseRunnerStatus(status).ok).toBe(true);
+    expect(attestManagedHermesImageIdentity(status, IMAGE_REF)).toEqual({
+      ok: true,
+      digest: IMAGE_DIGEST,
+    });
+    expect(JSON.stringify(attestManagedHermesImageIdentity(status, IMAGE_REF))).not.toContain(
+      "container-001",
+    );
+  });
+
+  it("fails staging attestation closed for old v3 while retaining normal ready compatibility", () => {
+    const oldV3 = {
+      ok: true,
+      contractVersion: "agentbay.runner.status.v3",
+      agentId: AGENT_ID,
+      action: "status",
+      snapshot: durableSnapshot("ready", null),
+    };
+    const parsed = parseRunnerStatus(oldV3);
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      throw new Error("rolling v3 status should remain parseable");
+    }
+    expect(parsed.response.snapshot.container.imageIdentity).toBeNull();
+    expect(isRunnerStatusExactReady(parsed.response)).toBe(true);
+    expect(attestManagedHermesImageIdentity(oldV3, IMAGE_REF)).toEqual({
+      ok: false,
+      reason: "image_identity_unavailable",
+    });
+  });
+
+  it("reports only safe image mismatch codes", () => {
+    const status = attestedStatus();
+    const otherRef = `ghcr.io/ametel01/agentbay-hermes:staging@${OTHER_IMAGE_DIGEST}`;
+    const wrongRepo = attestedStatus();
+    wrongRepo.snapshot.container.imageIdentity = {
+      imageId: IMAGE_ID,
+      repoDigests: [`ghcr.io/ametel01/other@${IMAGE_DIGEST}`],
+    };
+
+    expect(attestManagedHermesImageIdentity(status, otherRef)).toEqual({
+      ok: false,
+      reason: "configured_image_mismatch",
+    });
+    expect(attestManagedHermesImageIdentity(wrongRepo, IMAGE_REF)).toEqual({
+      ok: false,
+      reason: "repo_digest_mismatch",
+    });
+    expect(attestManagedHermesImageIdentity(status, "not-a-digest-ref")).toEqual({
+      ok: false,
+      reason: "expected_image_invalid",
+    });
+  });
+
+  it("rejects malformed, oversized, and accessor image identity evidence", () => {
+    const extra = attestedStatus() as unknown as Record<string, unknown>;
+    const extraContainer = (extra.snapshot as Record<string, unknown>).container as Record<
+      string,
+      unknown
+    >;
+    extraContainer.imageIdentity = {
+      imageId: IMAGE_ID,
+      repoDigests: [IMAGE_REPO_DIGEST],
+      rawInspect: { privateEndpoint: "http://10.0.0.1" },
+    };
+
+    const oversized = attestedStatus() as unknown as Record<string, unknown>;
+    const oversizedContainer = (oversized.snapshot as Record<string, unknown>).container as Record<
+      string,
+      unknown
+    >;
+    oversizedContainer.imageIdentity = {
+      imageId: IMAGE_ID,
+      repoDigests: Array.from({ length: 17 }, () => IMAGE_REPO_DIGEST),
+    };
+
+    const duplicate = attestedStatus() as unknown as Record<string, unknown>;
+    const duplicateContainer = (duplicate.snapshot as Record<string, unknown>).container as Record<
+      string,
+      unknown
+    >;
+    duplicateContainer.imageIdentity = {
+      imageId: IMAGE_ID,
+      repoDigests: [IMAGE_REPO_DIGEST, IMAGE_REPO_DIGEST],
+    };
+
+    const accessorIdentity = Object.create(null) as Record<string, unknown>;
+    Object.defineProperty(accessorIdentity, "imageId", {
+      enumerable: true,
+      get() {
+        throw new Error("must not execute image identity accessors");
+      },
+    });
+    Object.defineProperty(accessorIdentity, "repoDigests", {
+      enumerable: true,
+      value: [IMAGE_REPO_DIGEST],
+    });
+    const accessor = attestedStatus() as unknown as Record<string, unknown>;
+    const accessorContainer = (accessor.snapshot as Record<string, unknown>).container as Record<
+      string,
+      unknown
+    >;
+    accessorContainer.imageIdentity = accessorIdentity;
+
+    const prototypeIdentity = Object.create({ privateEndpoint: "http://10.0.0.1" }) as Record<
+      string,
+      unknown
+    >;
+    Object.defineProperties(prototypeIdentity, {
+      imageId: { enumerable: true, value: IMAGE_ID },
+      repoDigests: { enumerable: true, value: [IMAGE_REPO_DIGEST] },
+    });
+    const prototype = attestedStatus() as unknown as Record<string, unknown>;
+    const prototypeContainer = (prototype.snapshot as Record<string, unknown>).container as Record<
+      string,
+      unknown
+    >;
+    prototypeContainer.imageIdentity = prototypeIdentity;
+
+    expect(parseRunnerStatus(extra).ok).toBe(false);
+    expect(parseRunnerStatus(oversized).ok).toBe(false);
+    expect(parseRunnerStatus(duplicate).ok).toBe(false);
+    expect(() => parseRunnerStatus(accessor)).not.toThrow();
+    expect(parseRunnerStatus(accessor).ok).toBe(false);
+    expect(parseRunnerStatus(prototype).ok).toBe(false);
+    expect(attestManagedHermesImageIdentity(attestedStatus(), "x".repeat(513))).toEqual({
+      ok: false,
+      reason: "expected_image_invalid",
+    });
   });
 
   it.each([
@@ -364,5 +506,32 @@ function durableSnapshot(
       ...base.telegram,
       state: base.telegram.state === "failed" ? "unknown" : base.telegram.state,
     },
+  };
+}
+
+function attestedStatus() {
+  const value = durableSnapshot("ready", null);
+  value.operation = {
+    id: OPERATION_ID,
+    action: "start",
+    target: {
+      image: IMAGE_REF,
+      launchSpecVersion: "agentbay.hermes.launch.v3",
+      configRevision: "cfg-1",
+    },
+    acceptedAt: OBSERVED_AT,
+  };
+  value.container.image = IMAGE_REF;
+  value.container.imageIdentity = {
+    imageId: IMAGE_ID,
+    repoDigests: [IMAGE_REPO_DIGEST],
+  };
+
+  return {
+    ok: true as const,
+    contractVersion: "agentbay.runner.status.v3" as const,
+    agentId: AGENT_ID,
+    action: "status" as const,
+    snapshot: value,
   };
 }

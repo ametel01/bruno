@@ -58,6 +58,22 @@ export type CronSecretConfig =
       reason: "cron_configuration_invalid";
     };
 
+export type HermesStagingAcceptanceConfig =
+  | {
+      ok: true;
+      enabled: false;
+    }
+  | {
+      ok: true;
+      enabled: true;
+      baseUrl: string;
+      bearerSecret: string;
+    }
+  | {
+      ok: false;
+      reason: "hermes_staging_acceptance_configuration_invalid";
+    };
+
 export function getServerEnv(input = process.env) {
   return validateRequiredEnv(input);
 }
@@ -126,6 +142,89 @@ export function isAuthorizedCronRequest(input: {
   return timingSafeEqual(expected, actual);
 }
 
+export function readHermesStagingAcceptanceConfig(
+  input: Record<string, string | undefined> = process.env,
+): HermesStagingAcceptanceConfig {
+  const enabled = input.AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED;
+
+  if (enabled === undefined || enabled === "false") {
+    return { ok: true, enabled: false };
+  }
+
+  if (enabled !== "true") {
+    return { ok: false, reason: "hermes_staging_acceptance_configuration_invalid" };
+  }
+
+  const bearerSecret = input.AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET;
+  const baseUrl = parseHermesStagingAcceptanceBaseUrl(
+    input.AGENTBAY_HERMES_STAGING_ACCEPTANCE_BASE_URL,
+  );
+
+  if (
+    bearerSecret === undefined ||
+    !isValidDedicatedBearerSecret(bearerSecret) ||
+    !baseUrl ||
+    [input.CRON_SECRET, input.AGENTBAY_RUNNER_BEARER_TOKEN, input.AGENTBAY_OPERATOR_PASSWORD].some(
+      (otherSecret) => otherSecret !== undefined && otherSecret === bearerSecret,
+    )
+  ) {
+    return { ok: false, reason: "hermes_staging_acceptance_configuration_invalid" };
+  }
+
+  return { ok: true, enabled: true, baseUrl, bearerSecret };
+}
+
+export function isAuthorizedHermesStagingAcceptanceRequest(input: {
+  authorizationHeader: string | null;
+  bearerSecret: string;
+}): boolean {
+  const header = input.authorizationHeader;
+
+  if (!header?.startsWith("Bearer ")) {
+    return false;
+  }
+
+  const credential = header.slice("Bearer ".length);
+
+  if (!isValidDedicatedBearerSecret(credential)) {
+    return false;
+  }
+
+  const expected = createHash("sha256").update(input.bearerSecret).digest();
+  const actual = createHash("sha256").update(credential).digest();
+
+  return timingSafeEqual(expected, actual);
+}
+
+function isValidDedicatedBearerSecret(value: string): boolean {
+  return /^[A-Za-z0-9._~+/=-]{32,256}$/.test(value);
+}
+
+function parseHermesStagingAcceptanceBaseUrl(value: string | undefined): string | null {
+  if (value === undefined || value.trim() !== value || value.length === 0) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+
+    if (
+      url.protocol !== "https:" ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.pathname !== "/" ||
+      url.search !== "" ||
+      url.hash !== ""
+    ) {
+      return null;
+    }
+
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
 export function readDigitalOceanProviderConfig(
   input: Record<string, string | undefined> = process.env,
 ): DigitalOceanProviderConfig | null {
@@ -181,10 +280,7 @@ export function readDigitalOceanProviderConfig(
       envName: "AGENTBAY_RUNNER_IMAGE",
       defaultValue: DEFAULT_AGENTBAY_RUNNER_IMAGE,
     }),
-    hermesWorkloadImage: readRunnerImage(input.AGENTBAY_HERMES_WORKLOAD_IMAGE, {
-      envName: "AGENTBAY_HERMES_WORKLOAD_IMAGE",
-      defaultValue: DEFAULT_HERMES_WORKLOAD_IMAGE,
-    }),
+    hermesWorkloadImage: readHermesWorkloadImage(input),
     hermesStateRoot: readAbsoluteRuntimePath(input.AGENTBAY_HERMES_STATE_ROOT, {
       envName: "AGENTBAY_HERMES_STATE_ROOT",
       defaultValue: DEFAULT_HERMES_STATE_ROOT,
@@ -223,6 +319,15 @@ export function readDigitalOceanProviderConfig(
     ...(localRunnerContainerName ? { localRunnerContainerName } : {}),
     ...(localRunnerStartDelayMs === undefined ? {} : { localRunnerStartDelayMs }),
   };
+}
+
+export function readHermesWorkloadImage(
+  input: Record<string, string | undefined> = process.env,
+): string {
+  return readRunnerImage(input.AGENTBAY_HERMES_WORKLOAD_IMAGE, {
+    envName: "AGENTBAY_HERMES_WORKLOAD_IMAGE",
+    defaultValue: DEFAULT_HERMES_WORKLOAD_IMAGE,
+  });
 }
 
 function readDigitalOceanProviderMode(value: string | undefined): "digitalocean" | "local_docker" {

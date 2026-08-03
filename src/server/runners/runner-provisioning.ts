@@ -360,7 +360,7 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     const firewalled = await input.provider.applyFirewall(
       {
         providerResourceId: runner.providerResourceId,
-        firewallName: toRunnerFirewallName(runner.providerResourceId),
+        firewallName: digitalOceanRunnerFirewallName(runner.providerResourceId),
         sshSourceAddresses: resolveSshSourceAddresses(input.config),
       },
       input.context,
@@ -375,11 +375,21 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
       };
     }
 
+    if (!firewalled.value.providerFirewallId) {
+      await markAutomaticProvisioningFailed(input, runner.providerResourceId);
+      return {
+        ok: false,
+        cleanupRequired: true,
+        terminalCode: "runner_provisioning_unavailable",
+      };
+    }
+
     const endpointUrl = endpointForProviderResource(firewalled.value);
     await setAutomaticProvisioningPhase(
       input,
       endpointUrl ? "waiting_for_runner" : "bootstrapping",
       endpointUrl,
+      firewalled.value.providerFirewallId,
     );
     return { ok: true, state: "pending" };
   }
@@ -896,7 +906,7 @@ export async function createDigitalOceanRunnerForUser(
       };
     }
 
-    const firewallName = toRunnerFirewallName(resource.value.providerResourceId);
+    const firewallName = digitalOceanRunnerFirewallName(resource.value.providerResourceId);
     const firewall = await runProviderStep(connection, {
       userId,
       provider,
@@ -1072,12 +1082,32 @@ async function runProviderStep(
     return result;
   }
 
+  if (input.phase === "firewall_configuring" && !result.value.providerFirewallId) {
+    const invalidResult: DigitalOceanProviderResult<DigitalOceanResource> = {
+      ok: false,
+      reason: "firewall_failed",
+      message: input.safeFailureMessage,
+    };
+
+    await failProvisioning(connection, {
+      userId: input.userId,
+      runnerId: input.runnerId,
+      phase: input.phase,
+      reason: invalidResult.reason,
+      message: input.safeFailureMessage,
+      now: input.now(),
+    });
+
+    return invalidResult;
+  }
+
   await connection.db.transaction(async (tx) => {
     const completedAt = input.now();
     await tx
       .update(runners)
       .set({
         providerResourceId: result.value.providerResourceId,
+        providerFirewallId: result.value.providerFirewallId,
         region: result.value.region,
         sizeSlug: result.value.sizeSlug,
         image: result.value.image,
@@ -1424,7 +1454,7 @@ function endpointForProviderResource(resource: DigitalOceanResource): string | n
   return publicIpv4 ? publicIpv4ToSslipEndpoint(publicIpv4) : null;
 }
 
-function toRunnerFirewallName(providerResourceId: string): string {
+export function digitalOceanRunnerFirewallName(providerResourceId: string): string {
   const suffix = providerResourceId
     .trim()
     .toLowerCase()
@@ -1480,6 +1510,7 @@ async function persistAutomaticProviderResource(
       .update(runners)
       .set({
         providerResourceId: resource.providerResourceId,
+        providerFirewallId: resource.providerFirewallId,
         endpointUrl: endpointForProviderResource(resource),
         provisioningStatus: phase,
         updatedAt: now,
@@ -1512,6 +1543,7 @@ async function setAutomaticProvisioningPhase(
   input: Parameters<typeof advanceAutomaticDigitalOceanRunnerProvisioning>[0],
   phase: RunnerProvisioningPhase,
   endpointUrl?: string | null,
+  providerFirewallId?: string | null,
 ): Promise<void> {
   const now = input.now();
   await input.connection.db.transaction(async (tx) => {
@@ -1520,6 +1552,7 @@ async function setAutomaticProvisioningPhase(
       .set({
         provisioningStatus: phase,
         ...(endpointUrl ? { endpointUrl } : {}),
+        ...(providerFirewallId ? { providerFirewallId } : {}),
         ...(phase === "waiting_for_runner" ? { status: "registering" } : {}),
         updatedAt: now,
       })

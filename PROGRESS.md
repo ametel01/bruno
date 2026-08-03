@@ -451,20 +451,25 @@ the existing `Added`, `Changed`, `Fixed`, or `Security` sections as applicable.
 
 ### Current Status
 
-Step 9 is independently accepted after checker cycle 1 at `b41e969`. Managed v3
-gateways now persist a separate desired-runtime ledger and converge through one
-leased effect at a time. Strict runner evidence, bounded recovery and circuit
-behavior, DB-first lifecycle intent, Telegram webhook diagnostics, usage
-segmentation, and passive owner-scoped runtime presentation preserve an
-intentional Stop across runner and Docker restarts without reopening terminal
-deployment history.
+Step 9 is independently accepted after checker cycle 1 at `b41e969`. The
+default-disabled Step 10 repository executor is now implemented: a dedicated
+staging owner and 90-second leased ledger fence one 45-second effect per
+invocation; exact GHCR source/workflow/amd64 and runner-host evidence gates
+progress; two explicit interactive-human Telegram reply attestations surround
+Restart; and Stop, rollback, redaction, plus workload → secret → firewall →
+Droplet → runner cleanup are durably observed. Disabling the acceptance flag
+prevents forward work while cron continues compensation.
 
-Clean and upgrade migrations, focused database and controller coverage, the
-full unit suite, production build, 26 desktop/mobile browser tests, fake-cloud
-recovery smoke, and the local pinned-image restart contract are green. Step 10
-operator documentation is prepared at `abe1208`, but provider-backed rollout
-remains blocked on an explicit Telegram-driver design, durable staging resource
-cleanup/image attestation, and external authorization and capabilities.
+Migration clean/upgrade/idempotency and no-drift gates, 67 focused staging
+tests, 148 files / 1,424 full tests, production build, 26/26 desktop/mobile CI
+E2E, fake-cloud recovery, local pinned-image restart/Stop, and credential-free
+15-capability fail-closed staging are green. An independent checker found no
+repository blocker and reproduced the static/build, 106 focused, full-unit,
+fail-closed, semantic, redaction, and diff gates; the isolated browser rerun
+cleared its only shared-database coverage gap. Step 10 remains incomplete until
+authorized image publication and provider-safe E2E/image smoke, the real hosted
+Telegram acceptance, final cleanup evidence, controlled flag enablement, and
+the exact final commit pass.
 
 ### Step Checklist
 
@@ -494,7 +499,7 @@ cleanup/image attestation, and external authorization and capabilities.
 | 7. Reconcile Creation Through Ready | Complete and independently accepted after cycle 1 | Steps 0-6 | `798cbf3` | Added migration `0018_first_polaris` with runner-operation/canary evidence, exact provisioning keys, strong stage checks, and fail-closed one-open-usage uniqueness. Added a 90-second leased, 45-second abort-bounded one-item reconciler; owner-safe provisioning discovery/adoption; exact runner/canary correlation; deterministic backoff and attempt-64 failure; post-response create/heartbeat triggers; exact-secret cron; owner-concealed idempotent retry; stop/delete cancellation precedence; redacted failure logs and cleanup ownership; and atomic ready/running/usage/events. Focused Step 7 gates passed 22 files / 311 tests, including clean/upgrade migrations and real separate-connection claim/retry/cancellation/finalization/capacity races. Full tests passed 116 files / 1,065 tests. Independent checker cycle 1 passed a 21-file / 306-test changed-unit suite, the 116-file / 1,065-test full suite, repeated migrations, format, lint, typecheck, build, 14 CI E2E tests, both local smokes, and fail-closed staging with no external effects. `bun run local:cloud:smoke` passed and proved simultaneous create-kick/heartbeat/cron/manual triggers produce exactly one fake resource, container, canary, running transition, and open usage period. `bun run agent:hermes:contract-smoke` passed persisted controller finalization against the local pinned image with private API auth, no public Hermes port, backup/restore, cleanup, and `telegramBoundary: "local-fake-platform-state"`. | Complete; Step 8 is active. |
 | 8. Add One-Click Creation and Persisted Progress UI | Complete and independently accepted after cycle 2 | Steps 0-7 | `ef9b7fc`, `bc38dd0` | Added credential-complete ready/manual creation, server-owned rollout/model boundaries, synchronous duplicate-submit latches, safe ambiguous retry semantics, owner-scoped bounded latest-deployment reads, code-only public errors, exact persisted-stage presentation, detail-only single-flight polling, deployment-aware lifecycle controls, and secondary advanced Hermes recovery. Focused coverage passed 34 create/poll/presentation tests, 31 lifecycle/route tests, 107 server/UI isolation and projection tests, and 22 responsive/accessibility CSS tests. Checker cycle 1 reproduced all automated gates and found one same-turn progress-card Retry race; cycle 2 accepted the pre-UUID/pre-fetch synchronous latch and duplicate-activation regression with 4 focused files / 66 tests, format, lint, typecheck, 123 test files / 1,144 tests, production build, and 24/24 desktop/mobile CI E2E. Credential-free staging exited with `capability_unavailable` and `sideEffectsAttempted: false`; provider-backed `verify:e2e` was not run without an authorized provider-safe environment. | Complete; Step 9 is active. |
 | 9. Make Desired-Running Gateways Durable | Complete and independently accepted after cycle 1 | Steps 0-8 | `b41e969` | Added generated migration `0019_tough_tinkerer` and a separate leased runtime ledger; exact managed-v3 `unless-stopped` runner evidence; bounded one-effect recovery, restart backoff, circuit, Telegram diagnostic, usage, and event handling; DB-first Start/Restart/Stop/Delete intent; post-commit runtime triggers; and passive owner-scoped runtime UI/API projection. Coordinator gates passed clean and upgrade migrations, no drift, 8 files / 38 focused DB tests, 11 files / 177 focused controller/runner/UI tests, 137 files / 1,297 full tests, production build, 26 desktop/mobile CI E2E tests, fake-cloud recovery/circuit smoke, pinned-image restart/Stop smoke, and fail-closed staging. The read-only checker independently passed clean/idempotent migration and no-drift gates; 8 files / 162 focused DB tests; 17 files / 209 focused runtime, runner, UI, and Telegram tests; 137 files / 1,297 full tests; format, lint, typecheck, build, 26/26 CI E2E, both local smokes, diff and manual secret review, and credential-free staging with `capability_unavailable` and `sideEffectsAttempted: false`. No external request or image pull occurred, and smoke resources were cleaned up. | Complete; Step 10 is next and remains authorization- and capability-blocked for live/provider work. |
-| 10. Final Acceptance, Documentation, and Controlled Rollout | Preparation complete; live executor and acceptance blocked | Steps 0-9, published image, authorized DigitalOcean budget, staging Telegram bot/user, funded OpenRouter key | `abe1208` (preparatory docs) | Updated `.env.example`, `README.md`, `docs/E2E_VALIDATION.md`, and `docs/MILESTONES.md` with ready-mode/keyring/cron variables, BotFather and allowlist requirements, persisted state meanings, bounded retry/canary cost, restart/Stop behavior, rollback, redacted evidence, and cleanup. Documentation gates passed typecheck, 7 focused files / 65 tests, format, lint, and diff checks. No live success is claimed. Executor design review found the current nine capabilities cannot safely automate a user-originated Telegram message, attest the hosted image digest, or durably compensate the exact Droplet/firewall after interruption. | User must choose automated MTProto or explicitly accepted interactive-human Telegram proof and authorize a scoped durable staging acceptance/cleanup resource plus the external capabilities. No live/provider action is authorized. |
+| 10. Final Acceptance, Documentation, and Controlled Rollout | Default-disabled repository implementation independently accepted; live acceptance pending | Steps 0-9, published image, authorized DigitalOcean budget, staging Telegram bot/user, funded OpenRouter key | `abe1208` (preparatory docs), `This commit` (durable executor) | Added migration `0020_serious_sauron`, a dedicated staging owner, immutable provenance/evidence ledger, SKIP LOCKED leases and generation/attempt CAS, production effects, exact runner image identity, GHCR/GitHub publication attestation, exact DigitalOcean owned-set/firewall cleanup, cleanup-only disabled cron, dedicated bearer routes, 15-capability preflight, and an interactive-human-attested CLI with cleanup on failure/interruption. Clean/upgrade/idempotent migration and no drift passed; focused coordinator staging passed 9 files / 67 tests; full tests passed 148 files / 1,424 tests plus build; CI E2E passed 26/26; fake-cloud and local Hermes restart/Stop smokes passed; credential-free staging failed closed with all 15 capabilities missing and `sideEffectsAttempted: false`. The independent checker found no semantic or secret blocker and passed 9 files / 106 focused tests, full units, format/lint/typecheck/build/diff, fail-closed staging, and accepted the isolated 26/26 browser rerun. No live/provider action occurred and no live success is claimed. | Explicit authorization and all capabilities are required for published-image/provider-safe gates, the real hosted two-reply acceptance, cleanup proof, controlled flag enablement, and final Step 10 commit. |
 
 ### Evidence Fields
 
@@ -509,11 +514,12 @@ cleanup/image attestation, and external authorization and capabilities.
 
 ### Current Blockers and Next Work
 
-- Step 9 is independently accepted at `b41e969`; no repository blocker remains.
-- Step 10 requires an approved published image, explicitly authorized
+- Step 9 is independently accepted at `b41e969`; the default-disabled Step 10
+  repository implementation is independently green and ready to commit.
+- Step 10 live completion requires an approved published image, explicitly authorized
   DigitalOcean budget, a dedicated staging Telegram bot/user, and a funded
   OpenRouter key. No live or provider-backed action is authorized yet.
-- Step 10 also needs a design choice: automated proof requires a dedicated
-  Telegram-user MTProto session; interactive proof requires explicit acceptance
-  of human-attested message/reply evidence. Either path still needs a scoped,
-  durable staging operation for image attestation and Droplet/firewall cleanup.
+- The implemented proof is explicitly interactive-human-attested. It does not
+  automate or retain an MTProto user session. Exact image attestation and
+  workload/secret/firewall/Droplet/runner cleanup are durable and fail closed;
+  they still require an authorized hosted run to produce acceptance evidence.

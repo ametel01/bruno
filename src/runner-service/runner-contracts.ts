@@ -5,6 +5,8 @@ export const LEGACY_RUNNER_STATUS_CONTRACT_VERSION = "agentbay.runner.status.v2"
 export const RUNNER_STATUS_CONTRACT_VERSION = "agentbay.runner.status.v3" as const;
 export const RUNNER_CANARY_CONTRACT_VERSION = "agentbay.runner.canary.v1" as const;
 export const MAX_RUNNER_RESTART_COUNT = 2_147_483_647;
+export const MAX_RUNNER_IMAGE_IDENTITY_DIGESTS = 16;
+export const MAX_RUNNER_IMAGE_REFERENCE_LENGTH = 512;
 
 export type RunnerLaunchAction = "start" | "restart";
 export type RunnerLaunchDisposition = "created" | "reused" | "replaced";
@@ -38,6 +40,10 @@ export type RunnerPlatformState =
   | "disabled";
 export type RunnerTelegramState = Exclude<RunnerPlatformState, "failed">;
 export type RunnerRestartPolicyName = "no" | "always" | "unless-stopped" | "on-failure" | "unknown";
+export type RunnerImageIdentity = {
+  imageId: string;
+  repoDigests: string[];
+};
 export type RunnerGatewayState = "unknown" | "starting" | "running" | "failed" | "stopped";
 export type RunnerRevisionState = "match" | "mismatch" | "missing" | "unreadable" | "unknown";
 export type RunnerReadinessReason =
@@ -118,6 +124,7 @@ export type RunnerDurableStatusSnapshot = Omit<
   "container" | "telegram"
 > & {
   container: RunnerAgentStatusSnapshot["container"] & {
+    imageIdentity?: RunnerImageIdentity | null;
     restartPolicy: {
       name: RunnerRestartPolicyName;
       maximumRetryCount: number | null;
@@ -126,6 +133,12 @@ export type RunnerDurableStatusSnapshot = Omit<
   };
   telegram: Omit<RunnerAgentStatusSnapshot["telegram"], "state"> & {
     state: RunnerTelegramState;
+  };
+};
+
+export type RunnerReportedDurableStatusSnapshot = Omit<RunnerDurableStatusSnapshot, "container"> & {
+  container: Omit<RunnerDurableStatusSnapshot["container"], "imageIdentity"> & {
+    imageIdentity: RunnerImageIdentity | null;
   };
 };
 
@@ -149,14 +162,31 @@ export type RunnerStatusResponse = {
   contractVersion: typeof RUNNER_STATUS_CONTRACT_VERSION;
   agentId: string;
   action: "status";
-  snapshot: RunnerDurableStatusSnapshot;
+  snapshot: RunnerReportedDurableStatusSnapshot;
 };
 
-export type ParsedRunnerStatusResponse = Omit<RunnerStatusResponse, "contractVersion"> & {
+export type ParsedRunnerStatusResponse = Omit<
+  RunnerStatusResponse,
+  "contractVersion" | "snapshot"
+> & {
   contractVersion:
     | typeof RUNNER_STATUS_CONTRACT_VERSION
     | typeof LEGACY_RUNNER_STATUS_CONTRACT_VERSION;
+  snapshot: RunnerDurableStatusSnapshot;
 };
+
+export type RunnerImageAttestationResult =
+  | { ok: true; digest: string }
+  | {
+      ok: false;
+      reason:
+        | "status_invalid"
+        | "status_not_ready"
+        | "expected_image_invalid"
+        | "image_identity_unavailable"
+        | "configured_image_mismatch"
+        | "repo_digest_mismatch";
+    };
 
 export type RunnerCanaryObservation = {
   state: "passed" | "failed";
@@ -325,6 +355,22 @@ export function parseRunnerStatus(
   }
 
   if (
+    value.contractVersion === RUNNER_STATUS_CONTRACT_VERSION &&
+    isRunnerDurableStatusSnapshotWithoutImageIdentity(value.snapshot)
+  ) {
+    return {
+      ok: true,
+      response: {
+        ok: true,
+        contractVersion: RUNNER_STATUS_CONTRACT_VERSION,
+        agentId: value.agentId,
+        action: "status",
+        snapshot: normalizeUnattestedV3StatusSnapshot(value.snapshot),
+      },
+    };
+  }
+
+  if (
     value.contractVersion !== LEGACY_RUNNER_STATUS_CONTRACT_VERSION ||
     !isRunnerStatusSnapshot(value.snapshot)
   ) {
@@ -349,6 +395,52 @@ export function hasExactRunnerDurabilityEvidence(snapshot: RunnerDurableStatusSn
     snapshot.container.restartPolicy.maximumRetryCount === 0 &&
     snapshot.container.restartCount !== null
   );
+}
+
+/**
+ * Produces the deliberately small image-attestation result used by controlled staging rollout.
+ * Normal runtime readiness remains compatible with pre-attestation status-v3 runners, but this
+ * proof fails closed until a new runner reports bounded Docker image identity evidence.
+ */
+export function attestManagedHermesImageIdentity(
+  value: unknown,
+  expectedDigestRef: unknown,
+): RunnerImageAttestationResult {
+  const parsed = parseRunnerStatus(value);
+
+  if (!parsed.ok) {
+    return { ok: false, reason: "status_invalid" };
+  }
+
+  if (!isRunnerStatusExactReady(parsed.response)) {
+    return { ok: false, reason: "status_not_ready" };
+  }
+
+  const expected = parseDigestQualifiedImageReference(expectedDigestRef);
+
+  if (!expected) {
+    return { ok: false, reason: "expected_image_invalid" };
+  }
+
+  const snapshot = parsed.response.snapshot;
+  const identity = snapshot.container.imageIdentity;
+
+  if (!identity) {
+    return { ok: false, reason: "image_identity_unavailable" };
+  }
+
+  if (
+    snapshot.container.image !== expected.ref ||
+    snapshot.operation?.target.image !== expected.ref
+  ) {
+    return { ok: false, reason: "configured_image_mismatch" };
+  }
+
+  if (!identity.repoDigests.includes(expected.repoDigest)) {
+    return { ok: false, reason: "repo_digest_mismatch" };
+  }
+
+  return { ok: true, digest: expected.digest };
 }
 
 export function isRunnerStatusExactReady(response: ParsedRunnerStatusResponse): boolean {
@@ -493,13 +585,14 @@ export function isRunnerStatusSnapshot(value: unknown): value is RunnerAgentStat
 
 export function isRunnerDurableStatusSnapshot(
   value: unknown,
-): value is RunnerDurableStatusSnapshot {
+): value is RunnerReportedDurableStatusSnapshot {
   if (
     !isRecord(value) ||
     !isExactRecord(value.container, [
       "finishedAt",
       "id",
       "image",
+      "imageIdentity",
       "name",
       "observedAt",
       "restartCount",
@@ -507,6 +600,7 @@ export function isRunnerDurableStatusSnapshot(
       "startedAt",
       "state",
     ]) ||
+    !isNullableRunnerImageIdentity(value.container.imageIdentity) ||
     !isExactRecord(value.container.restartPolicy, ["maximumRetryCount", "name"]) ||
     !isExactRecord(value.telegram, ["observedAt", "required", "state"])
   ) {
@@ -514,6 +608,7 @@ export function isRunnerDurableStatusSnapshot(
   }
 
   const {
+    imageIdentity: _imageIdentity,
     restartCount: _restartCount,
     restartPolicy: _restartPolicy,
     ...legacyContainer
@@ -557,6 +652,7 @@ function normalizeLegacyStatusSnapshot(
     ...snapshot,
     container: {
       ...snapshot.container,
+      imageIdentity: null,
       restartPolicy: { name: "unknown", maximumRetryCount: null },
       restartCount: null,
     },
@@ -565,6 +661,125 @@ function normalizeLegacyStatusSnapshot(
       state: snapshot.telegram.state === "failed" ? "unknown" : snapshot.telegram.state,
     },
   };
+}
+
+function normalizeUnattestedV3StatusSnapshot(
+  snapshot: RunnerDurableStatusSnapshotWithoutImageIdentity,
+): RunnerDurableStatusSnapshot {
+  return {
+    ...snapshot,
+    container: {
+      ...snapshot.container,
+      imageIdentity: null,
+    },
+  };
+}
+
+type RunnerDurableStatusSnapshotWithoutImageIdentity = Omit<
+  RunnerDurableStatusSnapshot,
+  "container"
+> & {
+  container: Omit<RunnerDurableStatusSnapshot["container"], "imageIdentity">;
+};
+
+function isRunnerDurableStatusSnapshotWithoutImageIdentity(
+  value: unknown,
+): value is RunnerDurableStatusSnapshotWithoutImageIdentity {
+  if (
+    !isRecord(value) ||
+    !isExactRecord(value.container, [
+      "finishedAt",
+      "id",
+      "image",
+      "name",
+      "observedAt",
+      "restartCount",
+      "restartPolicy",
+      "startedAt",
+      "state",
+    ])
+  ) {
+    return false;
+  }
+
+  return isRunnerDurableStatusSnapshot({
+    ...value,
+    container: { ...value.container, imageIdentity: null },
+  });
+}
+
+function isNullableRunnerImageIdentity(value: unknown): value is RunnerImageIdentity | null {
+  if (value === null) {
+    return true;
+  }
+
+  if (
+    !isExactRecord(value, ["imageId", "repoDigests"]) ||
+    !isDockerContentDigest(value.imageId) ||
+    !Array.isArray(value.repoDigests) ||
+    value.repoDigests.length > MAX_RUNNER_IMAGE_IDENTITY_DIGESTS
+  ) {
+    return false;
+  }
+
+  const repoDigests = value.repoDigests;
+
+  return repoDigests.every((digest, index) => {
+    const previous = repoDigests[index - 1];
+
+    return (
+      typeof digest === "string" &&
+      digest.length <= MAX_RUNNER_IMAGE_REFERENCE_LENGTH &&
+      parseDigestQualifiedImageReference(digest)?.repoDigest === digest &&
+      (previous === undefined || (typeof previous === "string" && previous < digest))
+    );
+  });
+}
+
+function parseDigestQualifiedImageReference(
+  value: unknown,
+): { ref: string; repository: string; repoDigest: string; digest: string } | null {
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > MAX_RUNNER_IMAGE_REFERENCE_LENGTH ||
+    containsUnsafeText(value)
+  ) {
+    return null;
+  }
+
+  const match = /^([^@]+)@(sha256:[0-9a-f]{64})$/.exec(value);
+
+  if (!match?.[1] || !match[2]) {
+    return null;
+  }
+
+  const namedReference = match[1];
+  const finalSlash = namedReference.lastIndexOf("/");
+  const finalColon = namedReference.lastIndexOf(":");
+  const repository = finalColon > finalSlash ? namedReference.slice(0, finalColon) : namedReference;
+
+  if (
+    repository.length < 1 ||
+    !/^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]{1,5})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$/.test(
+      repository,
+    ) ||
+    (namedReference !== repository &&
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(namedReference.slice(finalColon + 1)))
+  ) {
+    return null;
+  }
+
+  return {
+    ref: value,
+    repository,
+    repoDigest: `${repository}@${match[2]}`,
+    digest: match[2],
+  };
+}
+
+function isDockerContentDigest(value: unknown): value is string {
+  return typeof value === "string" && /^sha256:[0-9a-f]{64}$/.test(value);
 }
 
 function isRunnerRestartPolicyName(value: unknown): value is RunnerRestartPolicyName {
