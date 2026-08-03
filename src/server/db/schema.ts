@@ -101,6 +101,7 @@ export const runners = pgTable(
     image: text("image"),
     provisioningStatus: text("provisioning_status"),
     provisioningError: text("provisioning_error"),
+    provisioningOperationKey: text("provisioning_operation_key"),
     provisioningStartedAt: timestamp("provisioning_started_at", { withTimezone: true }),
     provisioningCompletedAt: timestamp("provisioning_completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -154,8 +155,15 @@ export const runners = pgTable(
       "runners_provisioning_completed_after_started_check",
       sql`${table.provisioningCompletedAt} IS NULL OR ${table.provisioningStartedAt} IS NULL OR ${table.provisioningCompletedAt} >= ${table.provisioningStartedAt}`,
     ),
+    check(
+      "runners_provisioning_operation_key_check",
+      sql`${table.provisioningOperationKey} IS NULL OR (${table.kind} = 'digitalocean' AND ${table.provisioningOperationKey} ~ '^agentbay-deploy-[0-9a-f]{32}$')`,
+    ),
     index("runners_user_status_idx").on(table.userId, table.status),
     index("runners_provider_resource_idx").on(table.provider, table.providerResourceId),
+    uniqueIndex("runners_provisioning_operation_key_idx")
+      .on(table.provisioningOperationKey)
+      .where(sql`${table.provisioningOperationKey} IS NOT NULL`),
     uniqueIndex("runners_active_user_endpoint_idx")
       .on(table.userId, table.endpointUrl)
       .where(sql`${table.deletedAt} IS NULL AND ${table.endpointUrl} IS NOT NULL`),
@@ -347,6 +355,11 @@ export const agentDeployments = pgTable(
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    runnerOperationId: uuid("runner_operation_id"),
+    runnerAcceptedAt: timestamp("runner_accepted_at", { withTimezone: true }),
+    canaryState: text("canary_state").notNull().default("not_started"),
+    canaryAttemptedAt: timestamp("canary_attempted_at", { withTimezone: true }),
+    canaryCompletedAt: timestamp("canary_completed_at", { withTimezone: true }),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     failedAt: timestamp("failed_at", { withTimezone: true }),
@@ -387,6 +400,38 @@ export const agentDeployments = pgTable(
     check(
       "agent_deployments_lease_pair_check",
       sql`(${table.leaseOwner} IS NULL AND ${table.leaseExpiresAt} IS NULL) OR (${table.leaseOwner} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL)`,
+    ),
+    check(
+      "agent_deployments_runner_operation_pair_check",
+      sql`(${table.runnerOperationId} IS NULL AND ${table.runnerAcceptedAt} IS NULL) OR (${table.runnerOperationId} IS NOT NULL AND ${table.runnerAcceptedAt} IS NOT NULL)`,
+    ),
+    check(
+      "agent_deployments_stage_runner_operation_check",
+      sql`${table.stage} NOT IN ('starting_gateway', 'verifying_model', 'connecting_telegram', 'ready') OR (${table.runnerOperationId} IS NOT NULL AND ${table.runnerAcceptedAt} IS NOT NULL)`,
+    ),
+    check(
+      "agent_deployments_canary_state_check",
+      sql`${table.canaryState} IN ('not_started', 'started', 'passed', 'failed', 'outcome_unknown')`,
+    ),
+    check(
+      "agent_deployments_canary_stage_check",
+      sql`${table.canaryState} = 'not_started' OR ${table.stage} IN ('verifying_model', 'connecting_telegram', 'ready', 'failed')`,
+    ),
+    check(
+      "agent_deployments_canary_started_check",
+      sql`${table.canaryState} <> 'started' OR (${table.canaryAttemptedAt} IS NOT NULL AND ${table.canaryCompletedAt} IS NULL)`,
+    ),
+    check(
+      "agent_deployments_canary_terminal_check",
+      sql`${table.canaryState} NOT IN ('passed', 'failed') OR (${table.canaryAttemptedAt} IS NOT NULL AND ${table.canaryCompletedAt} IS NOT NULL AND ${table.canaryCompletedAt} >= ${table.canaryAttemptedAt})`,
+    ),
+    check(
+      "agent_deployments_canary_unknown_check",
+      sql`${table.canaryState} <> 'outcome_unknown' OR (${table.canaryAttemptedAt} IS NOT NULL AND ${table.canaryCompletedAt} IS NULL)`,
+    ),
+    check(
+      "agent_deployments_telegram_ready_canary_check",
+      sql`${table.stage} NOT IN ('connecting_telegram', 'ready') OR ${table.canaryState} = 'passed'`,
     ),
     check(
       "agent_deployments_completed_stage_check",
@@ -451,6 +496,9 @@ export const agentUsagePeriods = pgTable(
       "agent_usage_periods_stopped_after_started_check",
       sql`${table.stoppedAt} IS NULL OR ${table.stoppedAt} >= ${table.startedAt}`,
     ),
+    uniqueIndex("agent_usage_periods_one_open_agent_idx")
+      .on(table.agentId)
+      .where(sql`${table.stoppedAt} IS NULL`),
     index("agent_usage_periods_agent_started_idx").on(table.agentId, table.startedAt),
     index("agent_usage_periods_runner_started_idx").on(table.runnerId, table.startedAt),
     index("agent_usage_periods_agent_stopped_idx").on(table.agentId, table.stoppedAt),

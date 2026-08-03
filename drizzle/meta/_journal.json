@@ -127,6 +127,13 @@
       "when": 1785722421640,
       "tag": "0017_ambitious_tyrannus",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785736389897,
+      "tag": "0018_first_polaris",
+      "breakpoints": true
     }
   ]
 }

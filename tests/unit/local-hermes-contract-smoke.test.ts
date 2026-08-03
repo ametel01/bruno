@@ -13,7 +13,7 @@ describe("local Hermes contract smoke", () => {
     };
 
     expect(packageJson.scripts["agent:hermes:contract-smoke"]).toBe(
-      "bun scripts/smoke-local-hermes-contract.ts",
+      "bun --conditions react-server scripts/smoke-local-hermes-contract.ts",
     );
     expect(smokeScript).toContain("FAKE_MODEL_ALIAS");
     expect(smokeScript).toContain("model_routes");
@@ -28,6 +28,11 @@ describe("local Hermes contract smoke", () => {
     expect(smokeScript).toContain("backupRestored");
     expect(smokeScript).toContain("runner.restart");
     expect(smokeScript).toContain("runner.cleanup");
+    expect(smokeScript).toContain("drivePersistedHermesController");
+    expect(smokeScript).toContain("reconcileNextAgentDeployment");
+    expect(smokeScript).toContain('deployment?.stage !== "ready"');
+    expect(smokeScript).toContain('deployment.canaryState !== "passed"');
+    expect(smokeScript).toContain("runningTransitions.length !== 1");
     expect(smokeScript).toContain('telegramBoundary: "local-fake-platform-state"');
   });
 });

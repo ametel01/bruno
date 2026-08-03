@@ -128,7 +128,8 @@ describe("POST /api/agents route", () => {
   });
 
   it("returns exact 202 JSON for a ready create-agent response", async () => {
-    mocks.createAgentForUser.mockResolvedValueOnce({
+    const scheduleDeploymentReconcile = vi.fn();
+    const readyResponse = {
       agent: {
         id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
         userId: USER_ID,
@@ -174,6 +175,10 @@ describe("POST /api/agents route", () => {
         createdAt: "2026-08-03T05:00:00.000Z",
         updatedAt: "2026-08-03T05:00:00.000Z",
       },
+    };
+    mocks.createAgentForUser.mockImplementationOnce(async (_userId, _input, dependencies) => {
+      dependencies?.onReadyDeploymentCommitted?.(readyResponse.deployment.id);
+      return readyResponse;
     });
     const { POST } = await import("@/app/api/agents/route");
 
@@ -187,6 +192,10 @@ describe("POST /api/agents route", () => {
           idempotencyKey: "Ready-Key_01",
         }),
       }),
+      undefined,
+      {
+        scheduleDeploymentReconcile,
+      },
     );
     const body = await response.json();
 
@@ -203,17 +212,25 @@ describe("POST /api/agents route", () => {
     });
     expect(body).not.toHaveProperty("event");
     expect(JSON.stringify(body)).not.toContain("sk-or-v1");
-    expect(mocks.createAgentForUser).toHaveBeenCalledWith(USER_ID, {
-      name: "Ready Agent",
-      templateKey: "research_agent",
-      runnerId: null,
-      launchMode: "ready",
-      idempotencyKey: "Ready-Key_01",
-      openrouterModel: undefined,
-      openrouterApiKey: undefined,
-      telegramBotToken: undefined,
-      telegramAllowedUserIds: undefined,
-    });
+    expect(mocks.createAgentForUser).toHaveBeenCalledWith(
+      USER_ID,
+      {
+        name: "Ready Agent",
+        templateKey: "research_agent",
+        runnerId: null,
+        launchMode: "ready",
+        idempotencyKey: "Ready-Key_01",
+        openrouterModel: undefined,
+        openrouterApiKey: undefined,
+        telegramBotToken: undefined,
+        telegramAllowedUserIds: undefined,
+      },
+      { onReadyDeploymentCommitted: scheduleDeploymentReconcile },
+    );
+    expect(scheduleDeploymentReconcile).toHaveBeenCalledOnce();
+    expect(scheduleDeploymentReconcile).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000171",
+    );
   });
 
   it("returns validation JSON and does not create records for malformed JSON", async () => {

@@ -57,6 +57,11 @@ describe("agent deployment migration fixtures", () => {
         "failed_at",
         "created_at",
         "updated_at",
+        "runner_operation_id",
+        "runner_accepted_at",
+        "canary_state",
+        "canary_attempted_at",
+        "canary_completed_at",
       ]);
       await expect(readAgentsDesiredDefault(sql)).resolves.toEqual({
         column_default: "'stopped'::agent_desired_status",
@@ -85,8 +90,59 @@ describe("agent deployment migration fixtures", () => {
           "agent_deployments_config_revision_check",
           "agent_deployments_idempotency_key_check",
           "agent_deployments_lease_pair_check",
+          "agent_deployments_runner_operation_pair_check",
+          "agent_deployments_canary_state_check",
+          "agent_deployments_telegram_ready_canary_check",
           "agent_deployments_terminal_clear_work_check",
         ]),
+      );
+      await expect(
+        readIndexDefinition(sql, "agent_usage_periods_one_open_agent_idx"),
+      ).resolves.toContain("UNIQUE INDEX");
+      await expect(
+        readIndexDefinition(sql, "runners_provisioning_operation_key_idx"),
+      ).resolves.toContain("UNIQUE INDEX");
+
+      const [owner] = await sql<{ id: string }[]>`insert into users default values returning id`;
+
+      if (!owner) {
+        throw new Error("Migration fixture owner insert returned no row.");
+      }
+
+      await expect(sql`
+        insert into runners (
+          user_id, name, kind, endpoint_url, provisioning_operation_key
+        ) values (
+          ${owner.id}, 'manual-key-blocked', 'manual_vps', 'http://127.0.0.1:3045',
+          'agentbay-deploy-11111111111141118111111111111111'
+        )
+      `).rejects.toMatchObject({ constraint_name: "runners_provisioning_operation_key_check" });
+      await expect(sql`
+        insert into runners (
+          user_id, name, kind, provider, region, size_slug, image,
+          provisioning_status, provisioning_operation_key
+        ) values (
+          ${owner.id}, 'automatic-cloud-runner', 'digitalocean', 'digitalocean', 'sfo3',
+          's-1vcpu-512mb-10gb', 'ubuntu-24-04-x64', 'pending',
+          'agentbay-deploy-11111111111141118111111111111111'
+        )
+      `).resolves.toBeDefined();
+    } finally {
+      await sql.end();
+    }
+  });
+
+  it("fails closed instead of mutating duplicate open usage periods during upgrade", async () => {
+    const database = await createDisposableDatabase("duplicate_usage");
+    const databaseUrl = databaseUrlFor(database);
+    const sql = postgres(databaseUrl, { max: 1 });
+
+    try {
+      await applyMigrationsThrough0017(sql);
+      await seedDuplicateOpenUsagePeriods(sql);
+
+      await expect(applyMigrationFile(sql, "drizzle/0018_first_polaris.sql")).rejects.toThrow(
+        /agent_usage_periods_open_duplicate_blocker/,
       );
     } finally {
       await sql.end();
@@ -157,17 +213,35 @@ async function cleanupCreatedDatabases(): Promise<void> {
 }
 
 async function runDbMigrate(databaseUrl: string): Promise<void> {
-  await execFileAsync("bun", ["run", "db:migrate"], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      DATABASE_URL: databaseUrl,
-    },
-    timeout: 30_000,
-  });
+  try {
+    await execFileAsync("bun", ["run", "db:migrate"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        DATABASE_URL: databaseUrl,
+      },
+      timeout: 30_000,
+    });
+  } catch (error) {
+    if (error && typeof error === "object") {
+      const stdout = "stdout" in error && typeof error.stdout === "string" ? error.stdout : "";
+      const stderr = "stderr" in error && typeof error.stderr === "string" ? error.stderr : "";
+      throw new Error(`${stdout}\n${stderr}`.trim());
+    }
+
+    throw error;
+  }
 }
 
 async function applyMigrationsThrough0015(sql: postgres.Sql): Promise<void> {
+  await applyMigrationsThrough(sql, 15);
+}
+
+async function applyMigrationsThrough0017(sql: postgres.Sql): Promise<void> {
+  await applyMigrationsThrough(sql, 17);
+}
+
+async function applyMigrationsThrough(sql: postgres.Sql, lastIndex: number): Promise<void> {
   await sql`create schema if not exists drizzle`;
   await sql`
     create table if not exists drizzle.__drizzle_migrations (
@@ -183,7 +257,7 @@ async function applyMigrationsThrough0015(sql: postgres.Sql): Promise<void> {
   const migrationFiles = (await readdir("drizzle"))
     .filter((file) => /^00\d{2}_.+\.sql$/.test(file))
     .sort()
-    .filter((file) => Number(file.slice(0, 4)) <= 15);
+    .filter((file) => Number(file.slice(0, 4)) <= lastIndex);
 
   for (const migrationFile of migrationFiles) {
     const migrationSql = await readFile(`drizzle/${migrationFile}`, "utf8");
@@ -204,6 +278,14 @@ async function applyMigrationsThrough0015(sql: postgres.Sql): Promise<void> {
       insert into drizzle.__drizzle_migrations (hash, created_at)
       values (${createHash("sha256").update(migrationSql).digest("hex")}, ${entry.when})
     `;
+  }
+}
+
+async function applyMigrationFile(sql: postgres.Sql, migrationFile: string): Promise<void> {
+  const migrationSql = await readFile(migrationFile, "utf8");
+
+  for (const statement of splitMigrationStatements(migrationSql)) {
+    await sql.unsafe(statement);
   }
 }
 
@@ -288,6 +370,45 @@ async function seedHistoricalAgents(sql: postgres.Sql): Promise<void> {
         '2026-08-03T01:03:01Z',
         '2026-08-03T01:04:00Z'
       )
+  `;
+}
+
+async function seedDuplicateOpenUsagePeriods(sql: postgres.Sql): Promise<void> {
+  await sql`
+    insert into users (id, created_at, updated_at)
+    values ('00000000-0000-4000-8000-00000000e001', '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z')
+  `;
+  await sql`
+    insert into agents (
+      id,
+      user_id,
+      name,
+      template_key,
+      template_version,
+      template_snapshot_json,
+      status,
+      desired_status,
+      created_at,
+      updated_at
+    )
+    values (
+      '00000000-0000-4000-8000-00000000e101',
+      '00000000-0000-4000-8000-00000000e001',
+      'duplicate usage sentinel',
+      'research_agent',
+      '1.0.0',
+      '{"key":"research_agent","version":"1.0.0","name":"Research Agent","description":"sentinel","defaultTools":[],"defaultSchedule":"Manual","defaultSystemPrompt":"sentinel","requiredIntegrations":[]}'::jsonb,
+      'running',
+      'running',
+      '2026-08-03T00:00:00Z',
+      '2026-08-03T00:00:00Z'
+    )
+  `;
+  await sql`
+    insert into agent_usage_periods (agent_id, source, started_at, stopped_at, created_at, updated_at)
+    values
+      ('00000000-0000-4000-8000-00000000e101', 'lifecycle', '2026-08-03T00:00:00Z', null, '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'),
+      ('00000000-0000-4000-8000-00000000e101', 'lifecycle', '2026-08-03T00:01:00Z', null, '2026-08-03T00:01:00Z', '2026-08-03T00:01:00Z')
   `;
 }
 

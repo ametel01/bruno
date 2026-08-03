@@ -8,10 +8,19 @@ import {
   readPayloadRunnerId,
   validationIssueSummary,
 } from "@/src/server/runners/runner-ingress-logging";
+import { scheduleRunnerDeploymentReconcileAfterResponse } from "@/src/server/agents/agent-deployment-triggers";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request) {
+type HeartbeatRouteDependencies = {
+  scheduleDeploymentReconcile?: typeof scheduleRunnerDeploymentReconcileAfterResponse;
+};
+
+export async function POST(
+  request: Request,
+  _context?: unknown,
+  dependencies: HeartbeatRouteDependencies = {},
+) {
   const authorizationHeader = request.headers.get("authorization");
 
   if (!hasBearerCredentialShape(authorizationHeader)) {
@@ -90,6 +99,10 @@ export async function POST(request: Request) {
         ? { transitioned: readiness.transitioned }
         : { reason: readiness.reason }),
     });
+
+    (dependencies.scheduleDeploymentReconcile ?? scheduleRunnerDeploymentReconcileAfterResponse)(
+      result.runner.id,
+    );
 
     return Response.json({
       ok: true,

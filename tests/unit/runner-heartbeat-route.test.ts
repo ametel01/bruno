@@ -30,6 +30,7 @@ describe("POST /runner/v1/heartbeat route", () => {
 
   it("returns safe JSON for accepted authenticated heartbeats", async () => {
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const scheduleDeploymentReconcile = vi.fn();
 
     mocks.recordRunnerHeartbeat.mockResolvedValueOnce({
       ok: true,
@@ -51,6 +52,8 @@ describe("POST /runner/v1/heartbeat route", () => {
         headers: { authorization: "Bearer agb_run_secret" },
         body: JSON.stringify({ runnerId: "00000000-0000-4000-8000-000000000130" }),
       }),
+      undefined,
+      { scheduleDeploymentReconcile },
     );
     const body = await response.json();
     const ingressLogs = infoSpy.mock.calls
@@ -71,6 +74,10 @@ describe("POST /runner/v1/heartbeat route", () => {
       payload: { runnerId: "00000000-0000-4000-8000-000000000130" },
     });
     expect(mocks.confirmCloudRunnerReadiness).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000130",
+    );
+    expect(scheduleDeploymentReconcile).toHaveBeenCalledOnce();
+    expect(scheduleDeploymentReconcile).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000130",
     );
     expect(ingressLogs).toContainEqual(

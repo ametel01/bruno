@@ -17,6 +17,9 @@ const AGENT_A_ID = "00000000-0000-4000-8000-000000000d11";
 const AGENT_B_ID = "00000000-0000-4000-8000-000000000d12";
 const NOW = new Date("2026-08-03T04:00:00.000Z");
 const LEASE_MS = 60_000;
+const LEASE_OWNER_A = "reconcile:11111111-1111-4111-8111-111111111111";
+const LEASE_OWNER_B = "reconcile:22222222-2222-4222-8222-222222222222";
+const LEASE_OWNER_C = "reconcile:33333333-3333-4333-8333-333333333333";
 
 describe("agent deployment persistence and leases", () => {
   let connection: DatabaseConnection;
@@ -118,7 +121,11 @@ describe("agent deployment persistence and leases", () => {
     if (reusedByA.ok) {
       await connection.db
         .update(agentDeployments)
-        .set({ stage: "ready", completedAt: new Date(NOW.getTime() + 1_000) })
+        .set({
+          stage: "failed",
+          failedAt: new Date(NOW.getTime() + 1_000),
+          errorCode: "runner_unavailable",
+        })
         .where(eq(agentDeployments.id, reusedByA.deployment.id));
     }
 
@@ -158,7 +165,7 @@ describe("agent deployment persistence and leases", () => {
         runAfterBarrier(barrier, () =>
           claimNextAgentDeployment({
             db: first.db,
-            leaseOwner: "worker-a",
+            leaseOwner: LEASE_OWNER_A,
             leaseDurationMs: LEASE_MS,
             now: NOW,
           }),
@@ -166,7 +173,7 @@ describe("agent deployment persistence and leases", () => {
         runAfterBarrier(barrier, () =>
           claimNextAgentDeployment({
             db: second.db,
-            leaseOwner: "worker-b",
+            leaseOwner: LEASE_OWNER_B,
             leaseDurationMs: LEASE_MS,
             now: NOW,
           }),
@@ -179,7 +186,7 @@ describe("agent deployment persistence and leases", () => {
 
       const [row] = await connection.db.select().from(agentDeployments);
       expect(row?.attemptCount).toBe(1);
-      expect(row?.leaseOwner).toMatch(/^worker-[ab]$/);
+      expect([LEASE_OWNER_A, LEASE_OWNER_B]).toContain(row?.leaseOwner);
     } finally {
       await Promise.all([first.close(), second.close()]);
     }
@@ -189,7 +196,7 @@ describe("agent deployment persistence and leases", () => {
     await insertDeployment("expiry-key");
     const claimed = await claimNextAgentDeployment({
       db: connection.db,
-      leaseOwner: "original-worker",
+      leaseOwner: LEASE_OWNER_A,
       leaseDurationMs: LEASE_MS,
       now: NOW,
     });
@@ -205,7 +212,7 @@ describe("agent deployment persistence and leases", () => {
         runAfterBarrier(barrier, () =>
           claimNextAgentDeployment({
             db: first.db,
-            leaseOwner: "takeover-a",
+            leaseOwner: LEASE_OWNER_B,
             leaseDurationMs: LEASE_MS,
             now: expiry,
           }),
@@ -213,7 +220,7 @@ describe("agent deployment persistence and leases", () => {
         runAfterBarrier(barrier, () =>
           claimNextAgentDeployment({
             db: second.db,
-            leaseOwner: "takeover-b",
+            leaseOwner: LEASE_OWNER_C,
             leaseDurationMs: LEASE_MS,
             now: expiry,
           }),
@@ -226,7 +233,7 @@ describe("agent deployment persistence and leases", () => {
 
       const [row] = await connection.db.select().from(agentDeployments);
       expect(row?.attemptCount).toBe(2);
-      expect(row?.leaseOwner).toMatch(/^takeover-[ab]$/);
+      expect([LEASE_OWNER_B, LEASE_OWNER_C]).toContain(row?.leaseOwner);
     } finally {
       await Promise.all([first.close(), second.close()]);
     }
@@ -236,7 +243,7 @@ describe("agent deployment persistence and leases", () => {
     const deployment = await insertDeployment("release-key");
     const claimed = await claimNextAgentDeployment({
       db: connection.db,
-      leaseOwner: "release-owner",
+      leaseOwner: LEASE_OWNER_A,
       leaseDurationMs: LEASE_MS,
       now: NOW,
     });
@@ -246,7 +253,7 @@ describe("agent deployment persistence and leases", () => {
       renewAgentDeploymentLease({
         db: connection.db,
         deploymentId: deployment.id,
-        leaseOwner: "stale-owner",
+        leaseOwner: LEASE_OWNER_B,
         leaseDurationMs: LEASE_MS,
         now: new Date(NOW.getTime() + 1_000),
       }),
@@ -255,7 +262,7 @@ describe("agent deployment persistence and leases", () => {
       releaseAgentDeploymentLease({
         db: connection.db,
         deploymentId: deployment.id,
-        leaseOwner: "release-owner",
+        leaseOwner: LEASE_OWNER_A,
         now: new Date(NOW.getTime() + 1_000),
         nextAttemptAt: NOW,
       }),
@@ -264,7 +271,7 @@ describe("agent deployment persistence and leases", () => {
     const renewed = await renewAgentDeploymentLease({
       db: connection.db,
       deploymentId: deployment.id,
-      leaseOwner: "release-owner",
+      leaseOwner: LEASE_OWNER_A,
       leaseDurationMs: LEASE_MS,
       now: new Date(NOW.getTime() + 1_000),
     });
@@ -273,7 +280,7 @@ describe("agent deployment persistence and leases", () => {
     const released = await releaseAgentDeploymentLease({
       db: connection.db,
       deploymentId: deployment.id,
-      leaseOwner: "release-owner",
+      leaseOwner: LEASE_OWNER_A,
       now: new Date(NOW.getTime() + 2_000),
       nextAttemptAt: new Date(NOW.getTime() + 30_000),
     });
@@ -293,7 +300,7 @@ describe("agent deployment persistence and leases", () => {
     const deployment = await insertDeployment("transition-key");
     const claimed = await claimNextAgentDeployment({
       db: connection.db,
-      leaseOwner: "transition-owner",
+      leaseOwner: LEASE_OWNER_A,
       leaseDurationMs: LEASE_MS,
       now: NOW,
     });
@@ -309,7 +316,7 @@ describe("agent deployment persistence and leases", () => {
           transitionAgentDeploymentStage({
             db: first.db,
             deploymentId: deployment.id,
-            leaseOwner: "transition-owner",
+            leaseOwner: LEASE_OWNER_A,
             expectedStage: "pending",
             nextStage: "provisioning_runner",
             now: new Date(NOW.getTime() + 1_000),
@@ -319,7 +326,7 @@ describe("agent deployment persistence and leases", () => {
           transitionAgentDeploymentStage({
             db: second.db,
             deploymentId: deployment.id,
-            leaseOwner: "transition-owner",
+            leaseOwner: LEASE_OWNER_A,
             expectedStage: "pending",
             nextStage: "provisioning_runner",
             now: new Date(NOW.getTime() + 1_000),
@@ -339,7 +346,7 @@ describe("agent deployment persistence and leases", () => {
     const sameStageNoLease = await transitionAgentDeploymentStage({
       db: connection.db,
       deploymentId: deployment.id,
-      leaseOwner: "transition-owner",
+      leaseOwner: LEASE_OWNER_A,
       expectedStage: "provisioning_runner",
       nextStage: "provisioning_runner",
       now: new Date(NOW.getTime() + 2_000),
@@ -361,7 +368,7 @@ describe("agent deployment persistence and leases", () => {
       transitionAgentDeploymentStage({
         db: connection.db,
         deploymentId: deployment.id,
-        leaseOwner: "transition-owner",
+        leaseOwner: LEASE_OWNER_A,
         expectedStage: "failed",
         nextStage: "failed",
         now: new Date(NOW.getTime() + 4_000),

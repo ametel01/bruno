@@ -17,7 +17,10 @@ import { DOCKER_CLI_TIMEOUT_MS } from "@/src/runner-service/constants";
 import { isHermesReadinessReason, type HermesReadinessReason } from "@/src/runner-service/docker";
 import {
   parseRunnerLaunchAccepted,
+  parseRunnerCanary,
   parseRunnerStatus,
+  type RunnerCanaryRequest,
+  type RunnerCanaryResponse,
   type RunnerAgentStatusSnapshot,
   type RunnerLaunchAcceptedResponse,
   type RunnerOperation,
@@ -37,7 +40,7 @@ export const MANUAL_RUNNER_BOOTSTRAP_LOG_SOURCE = "manual_runner_bootstrap";
 export const RUNNER_BEARER_TOKEN_ENV = "AGENTBAY_RUNNER_BEARER_TOKEN";
 export const DEFAULT_MANUAL_RUNNER_TIMEOUT_MS = DOCKER_CLI_TIMEOUT_MS + 5_000;
 
-type ManualRunnerAction = "start" | "stop" | "restart" | "status" | "logs" | "cleanup";
+type ManualRunnerAction = "start" | "stop" | "restart" | "status" | "logs" | "cleanup" | "canary";
 type ManualRunnerFetch = typeof fetch;
 type ManualRunnerStateDatabase = Pick<PostgresJsDatabase<typeof schema>, "transaction">;
 type ManualRunnerStateTransaction = Parameters<
@@ -69,6 +72,7 @@ export type ManualRunnerStartResult =
       state: "ready";
       runner: ManualRunnerRecord;
       container: ManualRunnerRemoteContainer | null;
+      target?: RunnerOperation["target"] | null;
     }
   | {
       ok: true;
@@ -90,6 +94,7 @@ export type ManualRunnerRestartResult =
       state: "ready";
       runner: ManualRunnerRecord;
       container: ManualRunnerRemoteContainer | null;
+      target?: RunnerOperation["target"] | null;
     }
   | {
       ok: true;
@@ -109,7 +114,12 @@ export type ManualRunnerCleanupResult =
   | { ok: true; runner: ManualRunnerRecord; containers: ManualRunnerRemoteContainer[] }
   | { ok: false; reason: ManualRunnerFailureReason };
 
+export type ManualRunnerCanaryResult =
+  | { ok: true; runner: ManualRunnerRecord; response: RunnerCanaryResponse }
+  | { ok: false; reason: ManualRunnerFailureReason | "canary_not_ready" };
+
 export type ManualRunnerFailureReason =
+  | "canary_not_dispatched"
   | "runner_token_not_configured"
   | "runner_endpoint_invalid"
   | "runner_request_failed"
@@ -129,6 +139,7 @@ export type ManualRunnerAdapterDependencies = {
   env?: Record<string, string | undefined>;
   fetch?: ManualRunnerFetch;
   now?: () => Date;
+  signal?: AbortSignal;
   timeoutMs?: number;
 };
 
@@ -147,6 +158,7 @@ export class ManualRunnerAdapter
   private readonly now: () => Date;
   private readonly ownsConnections: boolean;
   private readonly runner: ManualRunnerRecord;
+  private readonly signal: AbortSignal | undefined;
   private readonly timeoutMs: number;
 
   constructor(runner: ManualRunnerRecord, dependencies: ManualRunnerAdapterDependencies = {}) {
@@ -156,6 +168,7 @@ export class ManualRunnerAdapter
     this.now = dependencies.now ?? (() => new Date());
     this.ownsConnections = !dependencies.createConnection;
     this.runner = runner;
+    this.signal = dependencies.signal;
     this.timeoutMs = normalizeTimeoutMs(dependencies.timeoutMs);
   }
 
@@ -191,7 +204,19 @@ export class ManualRunnerAdapter
       return { ok: false, reason: "runner_not_running" };
     }
 
-    return { ok: true, state: "ready", runner: this.runner, container };
+    return {
+      ok: true,
+      state: "ready",
+      runner: this.runner,
+      container,
+      target: launchSpec
+        ? {
+            image: launchSpec.image.ref,
+            launchSpecVersion: launchSpec.version,
+            configRevision: launchSpec.agent.configRevision,
+          }
+        : null,
+    };
   }
 
   async stop(agentId: string): Promise<ManualRunnerStopResult> {
@@ -240,7 +265,19 @@ export class ManualRunnerAdapter
       return { ok: false, reason: "runner_not_running" };
     }
 
-    return { ok: true, state: "ready", runner: this.runner, container };
+    return {
+      ok: true,
+      state: "ready",
+      runner: this.runner,
+      container,
+      target: launchSpec
+        ? {
+            image: launchSpec.image.ref,
+            launchSpecVersion: launchSpec.version,
+            configRevision: launchSpec.agent.configRevision,
+          }
+        : null,
+    };
   }
 
   async status(agentId: string): Promise<ManualRunnerStatusResult> {
@@ -274,6 +311,42 @@ export class ManualRunnerAdapter
       ok: true,
       runner: this.runner,
       containers: parseContainers(result.body.containers),
+    };
+  }
+
+  async canary(agentId: string, request: RunnerCanaryRequest): Promise<ManualRunnerCanaryResult> {
+    const result = await this.callRunner("canary", agentId, "POST", request);
+
+    if (!result.ok) {
+      if (result.reason === "canary_not_dispatched") {
+        return result;
+      }
+
+      return result.reason === "runner_request_failed"
+        ? result
+        : {
+            ok: false,
+            reason:
+              result.reason === "runner_response_invalid" ? "canary_not_ready" : result.reason,
+          };
+    }
+
+    const parsed = parseRunnerCanary(result.body);
+
+    if (
+      result.status !== 200 ||
+      !parsed.ok ||
+      parsed.response.agentId !== agentId ||
+      parsed.response.operationId !== request.operationId ||
+      parsed.response.configRevision !== request.configRevision
+    ) {
+      return { ok: false, reason: "runner_response_invalid" };
+    }
+
+    return {
+      ok: true,
+      runner: this.runner,
+      response: parsed.response,
     };
   }
 
@@ -329,7 +402,7 @@ export class ManualRunnerAdapter
     action: ManualRunnerAction,
     agentId: string,
     method: "GET" | "POST",
-    launchSpec: AgentLaunchSpec | null = null,
+    payload: AgentLaunchSpec | RunnerCanaryRequest | null = null,
   ): Promise<
     { ok: true; body: Record<string, unknown>; status: number } | ManualRunnerFailureResult
   > {
@@ -354,10 +427,21 @@ export class ManualRunnerAdapter
     );
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const abortFromParent = () => controller.abort(this.signal?.reason);
+    this.signal?.addEventListener("abort", abortFromParent, { once: true });
+
+    if (this.signal?.aborted) {
+      controller.abort(this.signal.reason);
+    }
     const startedAt = Date.now();
 
     try {
-      const body = launchSpec ? serializeAgentLaunchSpec(launchSpec) : undefined;
+      const body =
+        payload && (action === "start" || action === "restart")
+          ? serializeAgentLaunchSpec(payload as AgentLaunchSpec)
+          : payload
+            ? JSON.stringify(payload)
+            : undefined;
       const response = await this.fetch(requestUrl, {
         method,
         headers: {
@@ -390,6 +474,14 @@ export class ManualRunnerAdapter
             reason: "runner_readiness_failed",
             ...(responseError.reason ? { readinessReason: responseError.reason } : {}),
           };
+        }
+
+        if (
+          action === "canary" &&
+          response.status === 409 &&
+          responseError.code === "canary_not_ready"
+        ) {
+          return { ok: false, reason: "canary_not_dispatched" };
         }
 
         return {
@@ -435,6 +527,7 @@ export class ManualRunnerAdapter
       return { ok: false, reason: "runner_request_failed" };
     } finally {
       clearTimeout(timeout);
+      this.signal?.removeEventListener("abort", abortFromParent);
     }
   }
 }

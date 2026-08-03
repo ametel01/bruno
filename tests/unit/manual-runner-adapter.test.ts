@@ -561,6 +561,69 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
     info.mockRestore();
   });
 
+  it("distinguishes exact canary 409 no-dispatch proof from ambiguous transport failure", async () => {
+    const request = {
+      operationId: "11111111-1111-4111-8111-111111111111",
+      configRevision: "cfg-canary",
+      model: "openai/gpt-4.1-mini",
+    };
+    const noDispatch = new ManualRunnerAdapter(manualRunner("https://runner.example.com"), {
+      env: { [RUNNER_BEARER_TOKEN_ENV]: "contract-token" },
+      fetch: async () =>
+        Response.json(
+          { ok: false, error: { code: "canary_not_ready", message: "Canary is not ready." } },
+          { status: 409 },
+        ),
+      timeoutMs: 250,
+    });
+    const ambiguous = new ManualRunnerAdapter(manualRunner("https://runner.example.com"), {
+      env: { [RUNNER_BEARER_TOKEN_ENV]: "contract-token" },
+      fetch: async () => {
+        throw new TypeError("ambiguous network failure");
+      },
+      timeoutMs: 250,
+    });
+
+    await expect(
+      noDispatch.canary("00000000-0000-4000-8000-000000000123", request),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "canary_not_dispatched",
+    });
+    await expect(
+      ambiguous.canary("00000000-0000-4000-8000-000000000123", request),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "runner_request_failed",
+    });
+  });
+
+  it("propagates a parent abort signal into the active runner fetch", async () => {
+    const controller = new AbortController();
+    let observedSignal: AbortSignal | null = null;
+    const adapter = new ManualRunnerAdapter(manualRunner("https://runner.example.com"), {
+      env: { [RUNNER_BEARER_TOKEN_ENV]: "contract-token" },
+      signal: controller.signal,
+      fetch: async (_input, init) => {
+        observedSignal = init?.signal ?? null;
+        return await new Promise<Response>((_resolve, reject) => {
+          observedSignal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      },
+      timeoutMs: 10_000,
+    });
+    const status = adapter.status("00000000-0000-4000-8000-000000000123");
+    await vi.waitFor(() => expect(observedSignal).not.toBeNull());
+    controller.abort();
+
+    await expect(status).resolves.toEqual({ ok: false, reason: "runner_request_failed" });
+    expect(controller.signal.aborted).toBe(true);
+  });
+
   async function createAssignedRunner(agentId: string, endpointUrl: string) {
     const runner = await bootstrapManualRunnerForDevelopmentUser({
       createConnection: () => connection,

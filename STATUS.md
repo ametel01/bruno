@@ -3,14 +3,14 @@
 ## Active Work
 
 - plan: `PLAN.md` Step 7 — Reconcile Creation Through Ready
-  owner: builder-step-7
+  owner: coordinator
   branch: `main`
   worktree: `/Users/alexmetelli/source/plingpling`
-  phase: dependency accepted; assigning builder
+  phase: builder green; preparing product commit and independent check
   cycle: 1/5
   contract: `STATUS.archive.md` → `Step 7 Completion Contract (pre-spec)`
-  blocker: none; Step 6 is independently accepted through `fa677fb`.
-  next-action: Implement the archived Step 7 contract only, run all gates, update changelog/progress, and commit `feat: reconcile agents automatically to ready`.
+  blocker: none in the required Step 7 gate set.
+  next-action: Commit `feat: reconcile agents automatically to ready`, then run independent checker cycle 1 at the exact commit before Step 8.
 
 ## Completion Contract
 
@@ -28,12 +28,12 @@
 
 ## Current Handoff
 
-- from: coordinator
-  to: builder-step-7
+- from: builder-step-7 repair streams
+  to: coordinator
   timestamp: 2026-08-03
-  request: Implement the archived Step 7 contract only; reconcile persisted ready-mode deployments to verified ready/failed state and commit `feat: reconcile agents automatically to ready` after all gates.
-  evidence: Step 6 product `4e2897a` plus FIFO repair `fa677fb` are independently green: credential-file matrix, 4 files / 77 focused tests, 108 files / 996 full tests, local smoke, build, 14 E2E tests, and fail-closed staging.
-  stop-condition: Stop before Step 8 UI, Step 9 restart policy, Step 10 live/provider/infrastructure work, or any real paid/external effect.
+  request: Integrate the repaired reconciler, persistence/routes, provider, cancellation, and smoke slices; commit only after the complete required gate set passes.
+  evidence: Focused 22 files / 311 tests and full 116 files / 1,065 tests passed; migrations, local duplicate-trigger cloud smoke, real local Hermes controller smoke, build, 14 CI E2E, and fail-closed staging are green.
+  stop-condition: Run an independent checker at the exact Step 7 commit before Step 8; do not perform Step 10 live/provider/infrastructure work.
 
 ## Gates
 
@@ -46,10 +46,11 @@
 - Step 5 `d50cc4e`: cycle 2 builder green but checker cycle 2 found safe YAML punctuation and filesystem matrix gaps.
 - Step 5 `4f8312d`: independently green after cycle 3 — 17 files / 102 focused tests, local Hermes contract smoke with fake model and fake Telegram boundary, 107 files / 961 tests, build, 14 E2E, and fail-closed staging with no effects.
 - Step 6 `4e2897a` + `fa677fb`: independently green after cycle 2 — credential-file matrix, focused 4 files / 77 tests, local fake-boundary smoke, 108 files / 996 tests, build, 14 E2E, and fail-closed staging with no effects.
+- Step 7 candidate: builder green — focused 22 files / 311 tests, full 116 files / 1,065 tests, clean/upgrade/idempotent migrations, local duplicate-trigger cloud smoke through ready, real local Hermes controller smoke, build, 14 CI E2E, and fail-closed staging with no effects.
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling` — branch `main`; sole active worktree; Step 6 validated and pending checker review after commit; no stashes. Archived Steps 7–10 contracts are committed and external actions remain prohibited.
+- `/Users/alexmetelli/source/plingpling` — branch `main`; sole active worktree; Step 7 builder gates are green and external actions remain prohibited.
 
 ## Decisions And Lessons
 
@@ -67,3 +68,4 @@
 - Step 4 — `d942270` + `546b9df` — ready-mode encrypted creation, bounded Telegram validation, active-bot uniqueness/backfill, atomic deployment persistence, and independently accepted security/concurrency gates.
 - Step 5 — `fe13ab9` + `d50cc4e` + `4f8312d` — independently accepted managed launch-spec v3, owner-scoped secret launch building, hardened strict YAML/env/filesystem projection, v2/manual compatibility, and fake-provider/Telegram local smoke coverage.
 - Step 6 — `4e2897a` + `fa677fb` — independently accepted asynchronous runner launch/status/canary behavior, cancellation, lifecycle evidence, and nonblocking credential reads.
+- Step 7 — This commit — builder-green durable automatic create-to-ready reconciliation; independent checker pending.

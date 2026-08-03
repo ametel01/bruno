@@ -1,4 +1,4 @@
-import { and, desc, eq, exists, gte, inArray, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, exists, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import {
@@ -120,6 +120,9 @@ export const LOCAL_RUNNER_UNEXPECTED_EXIT_STATUS_REASON =
 export const DOCKER_RUNNER_UNEXPECTED_EXIT_STATUS_REASON =
   "Docker runner container exited unexpectedly. Check captured Docker logs for details.";
 export const SIMULATED_ERROR_STATUS_REASON = "Simulated error requested for development testing.";
+const DEPLOYMENT_CANCELLED_ERROR_DETAIL = "Automatic deployment was cancelled.";
+const AGENT_DELETED_DEPLOYMENT_ERROR_DETAIL =
+  "Automatic deployment was cancelled because the agent was deleted.";
 
 type LifecycleClock = () => Date;
 type LifecycleRunnerStartResult =
@@ -1409,8 +1412,28 @@ export async function stopAgentForUser(
         return { ok: false, reason: "agent_not_found" } as const;
       }
 
-      if (!canStopAgentStatus(currentAgent.agent.status)) {
+      const activeDeployment = await lockActiveAutomaticDeploymentInTransaction(
+        tx,
+        normalizedAgentId,
+        userId,
+      );
+
+      if (
+        !canStopAgentStatus(currentAgent.agent.status) &&
+        !(activeDeployment && currentAgent.agent.status === "stopped")
+      ) {
         return { ok: false, reason: "invalid_status", status: currentAgent.agent.status } as const;
+      }
+
+      if (activeDeployment) {
+        await cancelActiveAutomaticDeploymentInTransaction(tx, {
+          agentId: normalizedAgentId,
+          userId,
+          deployment: activeDeployment,
+          code: "deployment_cancelled",
+          detail: DEPLOYMENT_CANCELLED_ERROR_DETAIL,
+          now,
+        });
       }
 
       return {
@@ -1418,6 +1441,7 @@ export async function stopAgentForUser(
         agent: currentAgent.agent,
         assignedRunner: toManualRunnerRecordOrNull(currentAgent.runner),
         requiresHermesLaunchSpec: currentAgent.runner?.kind === DIGITALOCEAN_RUNNER_KIND,
+        cancelledAutomaticDeployment: activeDeployment !== null,
       } as const;
     });
 
@@ -1433,13 +1457,16 @@ export async function stopAgentForUser(
         : {}),
       ...(dependencies.runnerAdapter ? { runnerAdapter: dependencies.runnerAdapter } : {}),
     });
-    const runnerStop = await runnerAdapter.stop(normalizedAgentId);
+    const runnerStop =
+      validation.agent.status === "stopped" ? null : await runnerAdapter.stop(normalizedAgentId);
 
-    if (!runnerStop.ok) {
+    if (runnerStop && !runnerStop.ok) {
       return { ok: false, reason: "runner_stop_failed" } as const;
     }
 
-    await captureLifecycleRunnerLogs(runnerAdapter, normalizedAgentId);
+    if (runnerStop) {
+      await captureLifecycleRunnerLogs(runnerAdapter, normalizedAgentId);
+    }
 
     return await connection.db.transaction(async (tx) => {
       const [stoppedAgent] = await tx
@@ -1454,7 +1481,10 @@ export async function stopAgentForUser(
             eq(agents.id, normalizedAgentId),
             eq(agents.userId, userId),
             isNull(agents.deletedAt),
-            inArray(agents.status, [...STOPPABLE_AGENT_STATUSES]),
+            inArray(agents.status, [
+              ...STOPPABLE_AGENT_STATUSES,
+              ...(validation.cancelledAutomaticDeployment ? (["stopped"] as const) : []),
+            ]),
           ),
         )
         .returning();
@@ -1478,7 +1508,7 @@ export async function stopAgentForUser(
           metadata: {
             fromStatus: validation.agent.status,
             toStatus: "stopped",
-            ...runnerLifecycleEventMetadata(runnerStop),
+            ...(runnerStop ? runnerLifecycleEventMetadata(runnerStop) : {}),
           },
         },
         {
@@ -1489,7 +1519,7 @@ export async function stopAgentForUser(
           metadata: {
             fromStatus: validation.agent.status,
             toStatus: "stopped",
-            ...runnerLifecycleEventMetadata(runnerStop),
+            ...(runnerStop ? runnerLifecycleEventMetadata(runnerStop) : {}),
           },
         },
       ]);
@@ -2339,6 +2369,23 @@ export async function deleteAgentForUser(
         return { ok: false, reason: "invalid_status", status: currentAgent.status } as const;
       }
 
+      const activeDeployment = await lockActiveAutomaticDeploymentInTransaction(
+        tx,
+        normalizedAgentId,
+        userId,
+      );
+
+      if (activeDeployment) {
+        await cancelActiveAutomaticDeploymentInTransaction(tx, {
+          agentId: normalizedAgentId,
+          userId,
+          deployment: activeDeployment,
+          code: "agent_deleted",
+          detail: AGENT_DELETED_DEPLOYMENT_ERROR_DETAIL,
+          now,
+        });
+      }
+
       return { ok: true, agent: currentAgent } as const;
     });
 
@@ -2445,6 +2492,92 @@ export async function deleteAgentForUser(
       await connection.close();
     }
   }
+}
+
+type ActiveAutomaticDeployment = {
+  id: string;
+  stage: string;
+};
+
+async function lockActiveAutomaticDeploymentInTransaction(
+  tx: AgentLifecycleTransaction,
+  agentId: string,
+  userId: string,
+): Promise<ActiveAutomaticDeployment | null> {
+  const [deployment] = await tx.execute<ActiveAutomaticDeployment>(sql`
+    select id, stage
+    from ${agentDeployments}
+    where agent_id = ${agentId}
+      and user_id = ${userId}
+      and stage not in ('ready', 'failed')
+    order by created_at desc, id desc
+    for update
+    limit 1
+  `);
+
+  return deployment ?? null;
+}
+
+async function cancelActiveAutomaticDeploymentInTransaction(
+  tx: AgentLifecycleTransaction,
+  input: {
+    agentId: string;
+    userId: string;
+    deployment: ActiveAutomaticDeployment;
+    code: "deployment_cancelled" | "agent_deleted";
+    detail: string;
+    now: Date;
+  },
+): Promise<void> {
+  await tx
+    .update(agents)
+    .set({ desiredStatus: "stopped", updatedAt: input.now })
+    .where(
+      and(eq(agents.id, input.agentId), eq(agents.userId, input.userId), isNull(agents.deletedAt)),
+    );
+
+  const [cancelled] = await tx.execute<{ id: string }>(sql`
+    update ${agentDeployments}
+    set stage = 'failed',
+        error_code = ${input.code},
+        error_detail = ${input.detail},
+        next_attempt_at = null,
+        lease_owner = null,
+        lease_expires_at = null,
+        completed_at = null,
+        failed_at = ${input.now.toISOString()},
+        updated_at = ${input.now.toISOString()}
+    where id = ${input.deployment.id}
+      and agent_id = ${input.agentId}
+      and user_id = ${input.userId}
+      and stage = ${input.deployment.stage}
+      and stage not in ('ready', 'failed')
+    returning id
+  `);
+
+  if (!cancelled) {
+    throw new Error("Automatic deployment cancellation lost its locked row.");
+  }
+
+  await closeLatestOpenAgentUsagePeriodInTransaction(tx, {
+    agentId: input.agentId,
+    userId: input.userId,
+    stoppedAt: input.now,
+  });
+
+  await recordAgentEventInTransaction(tx, {
+    agentId: input.agentId,
+    actorUserId: input.userId,
+    type: "agent.deployment_stage_changed",
+    message: "Automatic deployment moved to a terminal stage.",
+    metadata: {
+      deploymentId: input.deployment.id,
+      fromStage: input.deployment.stage,
+      toStage: "failed",
+      errorCode: input.code,
+    },
+    createdAt: input.now,
+  });
 }
 
 export async function settleDueStartingAgents(

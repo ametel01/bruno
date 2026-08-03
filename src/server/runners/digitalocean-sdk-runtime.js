@@ -17,33 +17,51 @@ export function createDigitalOceanSdkClient(token, apiBaseUrl) {
   return {
     v2: {
       droplets: {
-        post: (body) => sendJson(adapter, client.v2.droplets.toPostRequestInformation(body)),
+        get: (input, context) =>
+          sendJson(
+            adapter,
+            client.v2.droplets.toGetRequestInformation({
+              queryParameters: { tagName: input.tagName, perPage: input.perPage },
+            }),
+            context,
+          ),
+        post: (body, context) =>
+          sendJson(adapter, client.v2.droplets.toPostRequestInformation(body), context),
         byDroplet_id: (id) => ({
-          get: () =>
-            sendJson(adapter, client.v2.droplets.byDroplet_id(id).toGetRequestInformation()),
-          delete: () =>
+          get: (context) =>
+            sendJson(
+              adapter,
+              client.v2.droplets.byDroplet_id(id).toGetRequestInformation(),
+              context,
+            ),
+          delete: (context) =>
             sendNoContent(
               adapter,
               client.v2.droplets.byDroplet_id(id).toDeleteRequestInformation(),
+              context,
             ),
         }),
       },
       account: {
         keys: {
-          get: () => sendJson(adapter, client.v2.account.keys.toGetRequestInformation()),
-          post: (body) => sendJson(adapter, client.v2.account.keys.toPostRequestInformation(body)),
+          get: (context) =>
+            sendJson(adapter, client.v2.account.keys.toGetRequestInformation(), context),
+          post: (body, context) =>
+            sendJson(adapter, client.v2.account.keys.toPostRequestInformation(body), context),
         },
       },
       firewalls: {
-        post: (body) => sendJson(adapter, client.v2.firewalls.toPostRequestInformation(body)),
+        post: (body, context) =>
+          sendJson(adapter, client.v2.firewalls.toPostRequestInformation(body), context),
       },
       tags: {
         byTag_id: (tag) => ({
           resources: {
-            post: (body) =>
+            post: (body, context) =>
               sendNoContent(
                 adapter,
                 client.v2.tags.byTag_id(tag).resources.toPostRequestInformation(body),
+                context,
               ),
           },
         }),
@@ -52,8 +70,8 @@ export function createDigitalOceanSdkClient(token, apiBaseUrl) {
   };
 }
 
-async function sendJson(adapter, requestInfo) {
-  const response = await send(adapter, requestInfo);
+async function sendJson(adapter, requestInfo, context) {
+  const response = await send(adapter, requestInfo, context);
 
   if (response.status === 204) {
     return undefined;
@@ -62,16 +80,17 @@ async function sendJson(adapter, requestInfo) {
   return response.json();
 }
 
-async function sendNoContent(adapter, requestInfo) {
-  await send(adapter, requestInfo);
+async function sendNoContent(adapter, requestInfo, context) {
+  await send(adapter, requestInfo, context);
 }
 
-async function send(adapter, requestInfo) {
+async function send(adapter, requestInfo, context) {
   const request = await adapter.convertToNativeRequest(requestInfo);
   const response = await fetch(buildUrl(requestInfo), {
     method: request.method,
     headers: request.headers,
     body: request.body,
+    signal: context?.signal,
   });
 
   if (!response.ok) {

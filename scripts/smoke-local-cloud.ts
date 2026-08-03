@@ -1,217 +1,522 @@
-type CreatedAgentResponse = {
-  agent?: {
-    id?: unknown;
-    runnerId?: unknown;
-    status?: unknown;
-  };
+import { randomUUID } from "node:crypto";
+import { pathToFileURL } from "node:url";
+import { eq } from "drizzle-orm";
+import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
+import type { RunnerAgentStatusSnapshot } from "@/src/runner-service/runner-contracts";
+import {
+  reconcileNextAgentDeployment,
+  reconcileTargetAgentDeployment,
+  reconcileTargetRunnerDeployment,
+} from "@/src/server/agents/agent-deployment-reconciler";
+import {
+  type AgentLaunchSpec,
+  MANAGED_AGENT_LAUNCH_SPEC_VERSION,
+} from "@/src/server/agents/agent-launch-spec";
+import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import {
+  agentConfigs,
+  agentDeployments,
+  agentEvents,
+  agents,
+  agentUsagePeriods,
+  runnerHeartbeats,
+  runnerProvisioningEvents,
+  runnerRegistrationTokens,
+  runners,
+  users,
+} from "@/src/server/db/schema";
+import type { DigitalOceanProviderConfig } from "@/src/server/env";
+import { FakeDigitalOceanProvider } from "@/src/server/runners/digitalocean-provider";
+
+export type LocalCloudSmokeSummary = {
+  agentId: string;
+  browserClosedAfter202: true;
+  canaryCalls: 1;
+  cleanupDeterministic: true;
+  fakeContainers: 1;
+  fakeProvisioningResources: 1;
+  openUsagePeriods: 1;
+  runningTransitions: 1;
+  simultaneousTriggers: ["create-kick", "heartbeat", "cron", "manual"];
+  stages: string[];
 };
 
-export {};
+export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
+  process.env.DATABASE_URL ??= "postgres://agentbay:agentbay@127.0.0.1:54329/plingpling";
+  process.env.NEXT_PUBLIC_APP_URL ??= "http://127.0.0.1:3000";
+  const connections = Array.from({ length: 4 }, () => createDatabaseConnection());
+  const inspection = createDatabaseConnection();
+  const userId = randomUUID();
+  const agentId = randomUUID();
+  const deploymentId = randomUUID();
+  const operationId = randomUUID();
+  const configRevision = `cfg-${Date.now()}`;
+  let logicalNow = new Date();
+  const provider = new FakeDigitalOceanProvider({ now: () => logicalNow, idPrefix: "smoke" });
+  const launchSpec = buildFakeLaunchSpec(agentId, configRevision);
+  const stages = ["pending"];
+  let runnerId: string | null = null;
+  let statusCalls = 0;
+  let startCalls = 0;
+  let canaryCalls = 0;
+  let fakeContainers = 0;
+  let heartbeatCommitted = false;
 
-const appUrl = normalizeBaseUrl(process.env.NEXT_PUBLIC_APP_URL ?? "http://127.0.0.1:3000");
-const runnerUrl = normalizeBaseUrl(
-  process.env.AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL ?? "http://127.0.0.1:3045",
-);
-const timeoutMs = readPositiveInteger(process.env.AGENTBAY_LOCAL_CLOUD_SMOKE_TIMEOUT_MS, 240_000);
-const pollMs = readPositiveInteger(process.env.AGENTBAY_LOCAL_CLOUD_SMOKE_POLL_MS, 2_000);
-
-const startedAt = Date.now();
-
-await waitForDashboard();
-const { agentId, runnerId } = await createAgent();
-await waitForRunnerService(agentId, runnerId);
-const startResult = await startAgent(agentId);
-
-console.log(
-  JSON.stringify({
-    event: "local_cloud_smoke_passed",
-    agentId,
-    runnerId,
-    startResult,
-    elapsedMs: Date.now() - startedAt,
-  }),
-);
-
-async function waitForDashboard(): Promise<void> {
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      const response = await fetch(`${appUrl}/`);
-
-      if (response.ok) {
-        return;
-      }
-    } catch {
-      // Dashboard may still be building or restarting.
-    }
-
-    await sleep(pollMs);
-  }
-
-  throw new Error(`Dashboard did not become ready at ${appUrl} before timeout.`);
-}
-
-async function createAgent(): Promise<{ agentId: string; runnerId: string | null }> {
-  const response = await fetch(`${appUrl}/api/agents`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      name: `Local cloud smoke ${new Date().toISOString()}`,
-      templateKey: "research_agent",
-    }),
+  const adapterFactory = (runner: {
+    id: string;
+    userId: string;
+    name: string;
+    kind: "digitalocean";
+    endpointUrl: string;
+    status: "online";
+    createdAt: string;
+    updatedAt: string;
+    deletedAt: null;
+  }) => ({
+    start: async () => {
+      startCalls += 1;
+      fakeContainers = 1;
+      return {
+        ok: true as const,
+        state: "accepted" as const,
+        runner,
+        operation: operationEvidence(operationId, configRevision, logicalNow),
+        snapshot: fakeSnapshot("starting", operationId, configRevision, logicalNow),
+      };
+    },
+    status: async () => {
+      statusCalls += 1;
+      return {
+        ok: true as const,
+        runner,
+        snapshot: fakeSnapshot(
+          statusCalls === 1 ? "starting" : "ready",
+          operationId,
+          configRevision,
+          logicalNow,
+        ),
+      };
+    },
+    canary: async () => {
+      canaryCalls += 1;
+      return {
+        ok: true as const,
+        runner,
+        response: {
+          ok: true as const,
+          contractVersion: "agentbay.runner.canary.v1" as const,
+          agentId,
+          action: "canary" as const,
+          operationId,
+          configRevision,
+          observation: {
+            state: "passed" as const,
+            reason: null,
+            observedAt: logicalNow.toISOString(),
+            latencyMs: 1,
+          },
+        },
+      };
+    },
+    stop: async () => ({ ok: true as const, runner, containers: [] }),
+    streamLogs: async () => ({ logs: [], nextAfter: null }),
   });
-  const text = await response.text();
+  const common = {
+    now: () => logicalNow,
+    readDigitalOceanConfig: () => fakeProviderConfig(),
+    digitalOceanProvider: provider,
+    launchSpec: async () => ({ ok: true as const, spec: launchSpec }),
+    manualRunnerAdapter: (runner: unknown) => adapterFactory(runner as never) as never,
+  };
 
-  if (response.status !== 201) {
-    throw new Error(`Agent create failed with HTTP ${response.status}: ${text}`);
-  }
-
-  const parsed = parseJson<CreatedAgentResponse>(text);
-  const agentId = typeof parsed.agent?.id === "string" ? parsed.agent.id : null;
-  const runnerId = typeof parsed.agent?.runnerId === "string" ? parsed.agent.runnerId : null;
-
-  if (!agentId) {
-    throw new Error(`Agent create response did not include an agent id: ${text}`);
-  }
-
-  console.log(
-    JSON.stringify({
-      event: "local_cloud_smoke_agent_created",
+  try {
+    await seedCommitted202Operation(inspection, {
       agentId,
-      runnerId,
-    }),
-  );
+      configRevision,
+      deploymentId,
+      now: logicalNow,
+      userId,
+    });
+    const acceptedResponse = { status: 202 as const, deploymentId };
+    let browserOpen = true;
+    if (acceptedResponse.status === 202) browserOpen = false;
+    if (browserOpen) throw new Error("Local cloud browser did not close after committed 202.");
 
-  return { agentId, runnerId };
-}
+    await reconcileTargetAgentDeployment(deploymentId, {
+      ...common,
+      createConnection: () => connections[0] as DatabaseConnection,
+    });
+    ({ runnerId } = (
+      await inspection.db
+        .select({ runnerId: agents.runnerId })
+        .from(agents)
+        .where(eq(agents.id, agentId))
+    )[0] ?? { runnerId: null });
+    if (!runnerId) throw new Error("Create kick did not assign the persisted provisioning runner.");
+    await observeStage(inspection, deploymentId, stages);
 
-async function waitForRunnerService(agentId: string, runnerId: string | null): Promise<void> {
-  let attempt = 0;
-
-  while (Date.now() - startedAt < timeoutMs) {
-    attempt += 1;
-
-    try {
-      const response = await fetch(`${runnerUrl}/`);
-
-      if (response.status === 401 || response.status === 404 || response.ok) {
-        console.log(
-          JSON.stringify({
-            event: "local_cloud_smoke_runner_service_ready",
-            agentId,
-            runnerId,
-            attempt,
-            httpStatus: response.status,
-          }),
-        );
-        return;
+    for (let wave = 0; wave < 16; wave += 1) {
+      logicalNow = new Date(logicalNow.getTime() + 61_000);
+      if (heartbeatCommitted) {
+        await inspection.db
+          .update(runnerHeartbeats)
+          .set({ observedAt: logicalNow })
+          .where(eq(runnerHeartbeats.runnerId, runnerId));
       }
-    } catch {
-      // The local droplet simulator is still installing Docker/Caddy or starting the runner.
-    }
-
-    if (attempt === 1 || attempt % 10 === 0) {
-      console.log(
-        JSON.stringify({
-          event: "local_cloud_smoke_waiting_for_runner_service",
-          agentId,
+      await Promise.all([
+        reconcileTargetAgentDeployment(deploymentId, {
+          ...common,
+          createConnection: () => connections[0] as DatabaseConnection,
+        }),
+        reconcileTargetRunnerDeployment(runnerId, {
+          ...common,
+          createConnection: () => connections[1] as DatabaseConnection,
+        }),
+        reconcileNextAgentDeployment({
+          ...common,
+          createConnection: () => connections[2] as DatabaseConnection,
+        }),
+        reconcileNextAgentDeployment({
+          ...common,
+          createConnection: () => connections[3] as DatabaseConnection,
+        }),
+      ]);
+      await observeStage(inspection, deploymentId, stages);
+      const [runner] = await inspection.db.select().from(runners).where(eq(runners.id, runnerId));
+      if (runner?.provisioningStatus === "waiting_for_runner") {
+        await sleep(50);
+        logicalNow = new Date(logicalNow.getTime() + 1_000);
+        await inspection.db
+          .update(runners)
+          .set({
+            status: "online",
+            provisioningStatus: "ready",
+            provisioningCompletedAt: logicalNow,
+            updatedAt: logicalNow,
+          })
+          .where(eq(runners.id, runnerId));
+        await inspection.db.insert(runnerHeartbeats).values({
           runnerId,
-          attempt,
-        }),
-      );
+          status: "online",
+          metadata: { metrics: { maxAgents: 1, runningAgents: 0 } },
+          observedAt: logicalNow,
+          createdAt: logicalNow,
+        });
+        heartbeatCommitted = true;
+      }
+      const [deployment] = await inspection.db
+        .select()
+        .from(agentDeployments)
+        .where(eq(agentDeployments.id, deploymentId));
+      if (deployment?.stage === "ready") break;
     }
 
-    await sleep(pollMs);
-  }
-
-  throw new Error(`Runner service did not become ready at ${runnerUrl} before timeout.`);
-}
-
-async function startAgent(agentId: string): Promise<"started" | "blocked_by_hermes_setup"> {
-  let attempt = 0;
-
-  while (Date.now() - startedAt < timeoutMs) {
-    attempt += 1;
-
-    const response = await fetch(
-      `${appUrl}/api/agents/${encodeURIComponent(agentId)}/actions/start`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-      },
-    );
-    const text = await response.text();
-
-    if (response.status === 202) {
-      console.log(
-        JSON.stringify({
-          event: "local_cloud_smoke_agent_started",
-          agentId,
-          attempt,
-        }),
-      );
-      return "started";
-    }
-
-    if (response.status === 409 && text.includes("hermes_setup_incomplete")) {
-      console.log(
-        JSON.stringify({
-          event: "local_cloud_smoke_agent_start_blocked_by_hermes_setup",
-          agentId,
-          attempt,
-          httpStatus: response.status,
-        }),
-      );
-      return "blocked_by_hermes_setup";
-    }
+    const [deployment] = await inspection.db
+      .select()
+      .from(agentDeployments)
+      .where(eq(agentDeployments.id, deploymentId));
+    const [agent] = await inspection.db.select().from(agents).where(eq(agents.id, agentId));
+    const usage = await inspection.db
+      .select()
+      .from(agentUsagePeriods)
+      .where(eq(agentUsagePeriods.agentId, agentId));
+    const events = await inspection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, agentId));
+    const runningTransitions = events.filter((event) => event.type === "agent.start_completed");
+    const createCalls = provider.calls.filter((call) => call.step === "create");
 
     if (
-      (response.status === 409 && text.includes("No online runner is available yet")) ||
-      (response.status === 500 && text.includes("agent_start_failed"))
+      deployment?.stage !== "ready" ||
+      deployment.canaryState !== "passed" ||
+      agent?.status !== "running" ||
+      provider.resources.size !== 1 ||
+      createCalls.length !== 1 ||
+      startCalls !== 1 ||
+      fakeContainers !== 1 ||
+      canaryCalls !== 1 ||
+      runningTransitions.length !== 1 ||
+      usage.length !== 1 ||
+      usage[0]?.stoppedAt !== null
     ) {
-      if (attempt === 1 || attempt % 10 === 0) {
-        console.log(
-          JSON.stringify({
-            event: "local_cloud_smoke_waiting_for_start",
-            agentId,
-            attempt,
-            httpStatus: response.status,
-          }),
-        );
-      }
-      await sleep(pollMs);
-      continue;
+      throw new Error(
+        `Local cloud reconciliation did not deduplicate every persisted side effect: ${JSON.stringify(
+          {
+            stage: deployment?.stage,
+            canaryState: deployment?.canaryState,
+            agentStatus: agent?.status,
+            resources: provider.resources.size,
+            createCalls: createCalls.length,
+            startCalls,
+            fakeContainers,
+            canaryCalls,
+            runningTransitions: runningTransitions.length,
+            usage: usage.length,
+            openUsage: usage[0]?.stoppedAt === null,
+            stages,
+          },
+        )}`,
+      );
     }
 
-    throw new Error(`Agent start failed with HTTP ${response.status}: ${text}`);
+    const resource = [...provider.resources.values()][0];
+    if (!resource) throw new Error("Local fake provider resource disappeared before cleanup.");
+    await provider.cleanupResource({ providerResourceId: resource.providerResourceId });
+    await inspection.db.delete(agentEvents).where(eq(agentEvents.agentId, agentId));
+    await inspection.db.delete(agentUsagePeriods).where(eq(agentUsagePeriods.agentId, agentId));
+    await inspection.db.delete(agentDeployments).where(eq(agentDeployments.id, deploymentId));
+    await inspection.db.delete(agentConfigs).where(eq(agentConfigs.agentId, agentId));
+    await inspection.db.delete(agents).where(eq(agents.id, agentId));
+    await inspection.db
+      .delete(runnerProvisioningEvents)
+      .where(eq(runnerProvisioningEvents.runnerId, runnerId));
+    await inspection.db
+      .delete(runnerRegistrationTokens)
+      .where(eq(runnerRegistrationTokens.runnerId, runnerId));
+    await inspection.db.delete(runnerHeartbeats).where(eq(runnerHeartbeats.runnerId, runnerId));
+    await inspection.db.delete(runners).where(eq(runners.id, runnerId));
+    await inspection.db.delete(users).where(eq(users.id, userId));
+    const cleanupResiduals = await Promise.all([
+      inspection.db.select().from(agents).where(eq(agents.id, agentId)),
+      inspection.db.select().from(agentDeployments).where(eq(agentDeployments.id, deploymentId)),
+      inspection.db.select().from(runners).where(eq(runners.id, runnerId)),
+    ]);
+    if (
+      cleanupResiduals.some((rows) => rows.length > 0) ||
+      provider.resources.get(resource.providerResourceId)?.deletedAt === null
+    ) {
+      throw new Error("Local cloud smoke cleanup did not remove every owned artifact.");
+    }
+
+    return {
+      agentId,
+      browserClosedAfter202: true,
+      canaryCalls: 1,
+      cleanupDeterministic: true,
+      fakeContainers: 1,
+      fakeProvisioningResources: 1,
+      openUsagePeriods: 1,
+      runningTransitions: 1,
+      simultaneousTriggers: ["create-kick", "heartbeat", "cron", "manual"],
+      stages,
+    };
+  } finally {
+    const resource = [...provider.resources.values()][0];
+    if (resource && resource.deletedAt === null) {
+      await provider.cleanupResource({ providerResourceId: resource.providerResourceId });
+    }
+    await inspection.db.delete(agentEvents).where(eq(agentEvents.agentId, agentId));
+    await inspection.db.delete(agentUsagePeriods).where(eq(agentUsagePeriods.agentId, agentId));
+    await inspection.db.delete(agentDeployments).where(eq(agentDeployments.id, deploymentId));
+    await inspection.db.delete(agentConfigs).where(eq(agentConfigs.agentId, agentId));
+    await inspection.db.delete(agents).where(eq(agents.id, agentId));
+    if (runnerId) {
+      await inspection.db
+        .delete(runnerProvisioningEvents)
+        .where(eq(runnerProvisioningEvents.runnerId, runnerId));
+      await inspection.db
+        .delete(runnerRegistrationTokens)
+        .where(eq(runnerRegistrationTokens.runnerId, runnerId));
+      await inspection.db.delete(runnerHeartbeats).where(eq(runnerHeartbeats.runnerId, runnerId));
+      await inspection.db.delete(runners).where(eq(runners.id, runnerId));
+    }
+    await inspection.db.delete(users).where(eq(users.id, userId));
+    await Promise.all([...connections.map((connection) => connection.close()), inspection.close()]);
   }
-
-  throw new Error(`Agent did not start before timeout: ${agentId}`);
 }
 
-function parseJson<T>(text: string): T {
-  try {
-    return JSON.parse(text) as T;
-  } catch (error) {
-    throw new Error(
-      `Response was not valid JSON: ${error instanceof Error ? error.message : text}`,
-    );
-  }
+async function seedCommitted202Operation(
+  connection: DatabaseConnection,
+  input: {
+    agentId: string;
+    configRevision: string;
+    deploymentId: string;
+    now: Date;
+    userId: string;
+  },
+) {
+  await connection.db.insert(users).values({ id: input.userId, createdAt: input.now });
+  await connection.db.insert(agents).values({
+    id: input.agentId,
+    userId: input.userId,
+    name: "Local cloud Step 7 smoke",
+    templateKey: "research_agent",
+    templateSnapshotJson: getAgentTemplateSnapshot("research_agent"),
+    status: "stopped",
+    desiredStatus: "running",
+    createdAt: input.now,
+    updatedAt: input.now,
+  });
+  await connection.db.insert(agentConfigs).values({
+    agentId: input.agentId,
+    systemPrompt: "Local fake only.",
+    modelProvider: "openrouter",
+    modelName: "openai/gpt-4.1-mini",
+    scheduleMode: "manual",
+    timezone: "UTC",
+    createdAt: input.now,
+    updatedAt: input.now,
+  });
+  await connection.db.insert(agentDeployments).values({
+    id: input.deploymentId,
+    agentId: input.agentId,
+    userId: input.userId,
+    stage: "pending",
+    configRevision: input.configRevision,
+    idempotencyKey: `local-cloud-${input.deploymentId}`,
+    createdAt: input.now,
+    updatedAt: input.now,
+  });
 }
 
-function normalizeBaseUrl(value: string): string {
-  return new URL(value).toString().replace(/\/$/, "");
+async function observeStage(
+  connection: DatabaseConnection,
+  deploymentId: string,
+  stages: string[],
+) {
+  const [deployment] = await connection.db
+    .select({ stage: agentDeployments.stage })
+    .from(agentDeployments)
+    .where(eq(agentDeployments.id, deploymentId));
+  if (deployment && stages.at(-1) !== deployment.stage) stages.push(deployment.stage);
 }
 
-function readPositiveInteger(value: string | undefined, fallback: number): number {
-  if (value === undefined) {
-    return fallback;
-  }
-
-  const parsed = Number(value);
-
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+function fakeProviderConfig(): DigitalOceanProviderConfig {
+  return {
+    token: "local-fake-token",
+    providerMode: "digitalocean",
+    runnerBearerToken: "local-fake-runner-token",
+    runnerImage: "agentbay-runner:local-fake",
+    region: "sfo3",
+    sizeSlug: "s-1vcpu-1gb",
+    image: "ubuntu-24-04-x64",
+    tags: ["agentbay", "local-fake"],
+    sshKeyIds: ["52830696"],
+    sshSourceAddresses: ["203.0.113.5/32"],
+  };
 }
 
-function sleep(ms: number): Promise<void> {
+function buildFakeLaunchSpec(agentId: string, configRevision: string): AgentLaunchSpec {
+  return {
+    version: MANAGED_AGENT_LAUNCH_SPEC_VERSION,
+    requestId: randomUUID(),
+    agent: {
+      id: agentId,
+      name: "Local cloud Step 7 smoke",
+      templateKey: "research_agent",
+      templateVersion: "1.0.0",
+      configRevision,
+    },
+    image: { ref: DEFAULT_HERMES_WORKLOAD_IMAGE },
+    model: { provider: "openrouter", model: "openai/gpt-4.1-mini" },
+    platforms: {
+      required: ["api_server", "telegram"],
+      apiServer: { enabled: true, host: "0.0.0.0", port: 8642 },
+      telegram: { enabled: true, allowAllUsers: false, unauthorizedDmBehavior: "ignore" },
+    },
+    schedule: { mode: "manual", cron: null, timezone: "UTC" },
+    prompt: { soul: "Local fake only." },
+    runtime: {
+      dataDir: "/opt/data",
+      workspaceDir: "/workspace",
+      terminalCwd: "/workspace",
+      browserEnabled: false,
+      unattendedLoopLimit: 3,
+      toolLoopGuardrails: {
+        hardStopEnabled: true,
+        hardStopAfter: { exactFailure: 5, idempotentNoProgress: 5 },
+      },
+    },
+    tools: {
+      enabled: ["file_operations", "terminal"],
+      disabled: ["browser", "mcp", "delegation", "voice", "code_execution"],
+    },
+    secrets: {
+      kind: "inline",
+      openrouterApiKey: "sk-or-v1-local-fake-smoke",
+      telegramBotToken: "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ12",
+      telegramAllowedUsers: ["1"],
+      apiServerKey: `agb_agent_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`,
+    },
+  };
+}
+
+function operationEvidence(id: string, configRevision: string, now: Date) {
+  return {
+    id,
+    action: "start" as const,
+    target: {
+      image: DEFAULT_HERMES_WORKLOAD_IMAGE,
+      launchSpecVersion: MANAGED_AGENT_LAUNCH_SPEC_VERSION,
+      configRevision,
+    },
+    acceptedAt: now.toISOString(),
+  };
+}
+
+function fakeSnapshot(
+  phase: "ready" | "starting",
+  operationId: string,
+  configRevision: string,
+  now: Date,
+): RunnerAgentStatusSnapshot {
+  const ready = phase === "ready";
+  return {
+    phase,
+    operation: operationEvidence(operationId, configRevision, now),
+    container: {
+      id: "local-fake-container-1",
+      name: "local-fake-container-1",
+      image: DEFAULT_HERMES_WORKLOAD_IMAGE,
+      state: "running",
+      startedAt: now.toISOString(),
+      finishedAt: null,
+      observedAt: now.toISOString(),
+    },
+    revision: {
+      state: "match",
+      requested: configRevision,
+      containerLabel: configRevision,
+      projectionMarker: configRevision,
+      observedAt: now.toISOString(),
+    },
+    gateway: { state: ready ? "running" : "starting", observedAt: now.toISOString() },
+    apiServer: {
+      required: true,
+      state: ready ? "connected" : "connecting",
+      observedAt: now.toISOString(),
+    },
+    telegram: {
+      required: true,
+      state: ready ? "connected" : "connecting",
+      observedAt: now.toISOString(),
+    },
+    readinessReason: ready ? null : "gateway_starting",
+    observedAt: now.toISOString(),
+  };
+}
+
+function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function main() {
+  const startedAt = Date.now();
+  const summary = await smokeLocalCloud();
+  console.log(
+    JSON.stringify({
+      event: "local_cloud_step7_reconciler_smoke_passed",
+      ...summary,
+      elapsedMs: Date.now() - startedAt,
+    }),
+  );
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  main().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
 }

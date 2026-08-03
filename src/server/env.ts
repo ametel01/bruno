@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash, timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 import {
   EnvValidationError,
@@ -47,6 +48,16 @@ export type ReadyAgentCreationFlag =
       reason: "invalid_ready_agent_creation_flag";
     };
 
+export type CronSecretConfig =
+  | {
+      ok: true;
+      secret: string;
+    }
+  | {
+      ok: false;
+      reason: "cron_configuration_invalid";
+    };
+
 export function getServerEnv(input = process.env) {
   return validateRequiredEnv(input);
 }
@@ -71,6 +82,48 @@ export function readReadyAgentCreationFlag(
   }
 
   return { ok: false, reason: "invalid_ready_agent_creation_flag" };
+}
+
+export function readCronSecretConfig(
+  input: Record<string, string | undefined> = process.env,
+): CronSecretConfig {
+  const secret = input.CRON_SECRET;
+
+  if (
+    secret === undefined ||
+    !/^[A-Za-z0-9._~+/=-]{32,256}$/.test(secret) ||
+    secret.trim() !== secret
+  ) {
+    return { ok: false, reason: "cron_configuration_invalid" };
+  }
+
+  return { ok: true, secret };
+}
+
+export function isAuthorizedCronRequest(input: {
+  authorizationHeader: string | null;
+  secret: string;
+}): boolean {
+  const header = input.authorizationHeader;
+
+  if (!header?.startsWith("Bearer ")) {
+    return false;
+  }
+
+  const credential = header.slice("Bearer ".length);
+
+  if (
+    credential.length === 0 ||
+    credential.includes(" ") ||
+    !/^[A-Za-z0-9._~+/=-]{32,256}$/.test(credential)
+  ) {
+    return false;
+  }
+
+  const expected = createHash("sha256").update(input.secret).digest();
+  const actual = createHash("sha256").update(credential).digest();
+
+  return timingSafeEqual(expected, actual);
 }
 
 export function readDigitalOceanProviderConfig(

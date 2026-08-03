@@ -202,6 +202,7 @@ export type CreateAgentDependencies = {
   randomUUID?: () => string;
   telegramClient?: TelegramClientDependencies;
   telegramBotValidator?: TelegramBotValidator;
+  onReadyDeploymentCommitted?: (deploymentId: string) => void;
   readyCreateTestHooks?: {
     beforeInsertBoundary?: (boundary: ReadyCreateInsertBoundary) => Promise<void> | void;
   };
@@ -728,11 +729,17 @@ async function createReadyAgentForUser(
     throw new ReadyAgentCreationDisabledError("disabled");
   }
 
+  const now = dependencies.now?.() ?? new Date();
   const placementPrecheck = await connection.db.transaction((tx) =>
-    selectRunnerPlacementForUserInTransaction(tx, userId, {
-      planMaxAgents: dependencies.planMaxAgents,
-      runnerId: input.runnerId,
-    }),
+    selectRunnerPlacementForUserInTransaction(
+      tx,
+      userId,
+      {
+        planMaxAgents: dependencies.planMaxAgents,
+        runnerId: input.runnerId,
+      },
+      { now },
+    ),
   );
 
   if (!placementPrecheck.ok) {
@@ -773,7 +780,6 @@ async function createReadyAgentForUser(
     throw new TelegramValidationUnavailableError(telegramValidation.reason);
   }
 
-  const now = dependencies.now?.() ?? new Date();
   const agentId = dependencies.randomUUID?.() ?? randomUUID();
   const configRevision = `cfg-${now.getTime()}`;
   const templateSnapshot = getAgentTemplateSnapshot(input.templateKey);
@@ -819,8 +825,10 @@ async function createReadyAgentForUser(
     }),
   ];
 
+  let insertedDeploymentId: string | null = null;
+
   try {
-    return await connection.db.transaction(async (tx) => {
+    const response = await connection.db.transaction(async (tx) => {
       await takeReadyCreateIdempotencyLock(tx, {
         userId,
         idempotencyKey: input.idempotencyKey,
@@ -837,10 +845,15 @@ async function createReadyAgentForUser(
 
       await assertNoUnbackfilledActiveTelegramSecretsInTransaction(tx);
 
-      const placement = await selectRunnerPlacementForUserInTransaction(tx, userId, {
-        planMaxAgents: dependencies.planMaxAgents,
-        runnerId: input.runnerId,
-      });
+      const placement = await selectRunnerPlacementForUserInTransaction(
+        tx,
+        userId,
+        {
+          planMaxAgents: dependencies.planMaxAgents,
+          runnerId: input.runnerId,
+        },
+        { now },
+      );
 
       let runnerId: string | null = null;
 
@@ -917,6 +930,8 @@ async function createReadyAgentForUser(
         throw new Error("Ready deployment insert failed.");
       }
 
+      insertedDeploymentId = deployment.deployment.id;
+
       await dependencies.readyCreateTestHooks?.beforeInsertBoundary?.("event");
       await recordAgentEventInTransaction(tx, {
         agentId,
@@ -944,6 +959,16 @@ async function createReadyAgentForUser(
         telegramBot: telegramValidation.bot,
       });
     });
+
+    if (insertedDeploymentId) {
+      try {
+        dependencies.onReadyDeploymentCommitted?.(insertedDeploymentId);
+      } catch {
+        // The committed deployment remains due for protected cron reconciliation.
+      }
+    }
+
+    return response;
   } catch (error) {
     if (
       error instanceof AgentCreateBlockedError ||

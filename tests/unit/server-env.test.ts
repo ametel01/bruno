@@ -11,11 +11,73 @@ import {
 } from "@/src/runner-service/constants";
 import {
   DEFAULT_AGENTBAY_RUNNER_IMAGE,
+  isAuthorizedCronRequest,
+  readCronSecretConfig,
   readDigitalOceanProviderConfig,
   readReadyAgentCreationFlag,
 } from "@/src/server/env";
 
 describe("server-only provider environment validation", () => {
+  it("parses cron secrets exactly and authorizes only a single bearer credential", () => {
+    const secret = "abcdefghijklmnopqrstuvwxyzABCDEF012345";
+
+    expect(readCronSecretConfig({ CRON_SECRET: secret })).toEqual({ ok: true, secret });
+    expect(readCronSecretConfig({})).toEqual({
+      ok: false,
+      reason: "cron_configuration_invalid",
+    });
+    expect(readCronSecretConfig({ CRON_SECRET: ` ${secret}` })).toEqual({
+      ok: false,
+      reason: "cron_configuration_invalid",
+    });
+    expect(readCronSecretConfig({ CRON_SECRET: "short" })).toEqual({
+      ok: false,
+      reason: "cron_configuration_invalid",
+    });
+    expect(readCronSecretConfig({ CRON_SECRET: "a".repeat(32) })).toEqual({
+      ok: true,
+      secret: "a".repeat(32),
+    });
+    expect(readCronSecretConfig({ CRON_SECRET: "a".repeat(256) })).toEqual({
+      ok: true,
+      secret: "a".repeat(256),
+    });
+    expect(readCronSecretConfig({ CRON_SECRET: "a".repeat(257) })).toEqual({
+      ok: false,
+      reason: "cron_configuration_invalid",
+    });
+    expect(
+      isAuthorizedCronRequest({
+        authorizationHeader: `Bearer ${secret}`,
+        secret,
+      }),
+    ).toBe(true);
+    expect(
+      isAuthorizedCronRequest({
+        authorizationHeader: `Bearer ${secret} extra`,
+        secret,
+      }),
+    ).toBe(false);
+    expect(
+      isAuthorizedCronRequest({
+        authorizationHeader: `Bearer ${secret}, Bearer ${secret}`,
+        secret,
+      }),
+    ).toBe(false);
+    expect(
+      isAuthorizedCronRequest({
+        authorizationHeader: `bearer ${secret}`,
+        secret,
+      }),
+    ).toBe(false);
+    expect(
+      isAuthorizedCronRequest({
+        authorizationHeader: `Bearer ${secret.slice(0, -1)}x`,
+        secret,
+      }),
+    ).toBe(false);
+  });
+
   it("parses ready agent creation as an exact default-off lowercase flag", () => {
     expect(readReadyAgentCreationFlag({})).toEqual({ ok: true, enabled: false });
     expect(readReadyAgentCreationFlag({ AGENTBAY_READY_AGENT_CREATION_ENABLED: "false" })).toEqual({

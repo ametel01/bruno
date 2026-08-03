@@ -5567,6 +5567,7 @@ describe("create agent persistence", () => {
     const userId = createdUser?.userId ?? "";
     const stopAt = new Date("2026-07-07T02:00:00.000Z");
     const olderStartAt = new Date("2026-07-07T00:00:00.000Z");
+    const olderClosedAt = new Date("2026-07-07T00:45:00.000Z");
     const latestStartAt = new Date("2026-07-07T01:00:00.000Z");
     const alreadyClosedAt = new Date("2026-07-07T00:30:00.000Z");
     const [runner] = await connection.db
@@ -5600,8 +5601,9 @@ describe("create agent persistence", () => {
         agentId: runningAgent?.id ?? "",
         runnerId: runner?.id,
         startedAt: olderStartAt,
+        stoppedAt: olderClosedAt,
         createdAt: olderStartAt,
-        updatedAt: olderStartAt,
+        updatedAt: olderClosedAt,
       },
       {
         agentId: runningAgent?.id ?? "",
@@ -5645,7 +5647,7 @@ describe("create agent persistence", () => {
     expect(firstStop).toMatchObject({ ok: true, agent: { status: "stopped" } });
     expect(afterFirstStop.map((period) => period.stoppedAt)).toEqual([
       alreadyClosedAt,
-      null,
+      olderClosedAt,
       stopAt,
     ]);
     expect(secondStop).toEqual({ ok: false, reason: "invalid_status", status: "stopped" });

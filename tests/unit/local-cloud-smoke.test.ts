@@ -3,12 +3,20 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("local cloud smoke script", () => {
-  it("accepts the Hermes setup gate as a safe local-cloud control-flow result", async () => {
+  it("proves the persisted Step 7 controller with simultaneous local-fake triggers", async () => {
     const smokeScript = await readFile(join(process.cwd(), "scripts/smoke-local-cloud.ts"), "utf8");
 
-    expect(smokeScript).toContain("local_cloud_smoke_runner_service_ready");
-    expect(smokeScript).toContain("hermes_setup_incomplete");
-    expect(smokeScript).toContain("local_cloud_smoke_agent_start_blocked_by_hermes_setup");
-    expect(smokeScript).toContain('"blocked_by_hermes_setup"');
+    expect(smokeScript).toContain("reconcileTargetAgentDeployment");
+    expect(smokeScript).toContain("reconcileTargetRunnerDeployment");
+    expect(smokeScript).toContain("reconcileNextAgentDeployment");
+    expect(smokeScript).toContain("FakeDigitalOceanProvider");
+    expect(smokeScript).toContain("browserClosedAfter202");
+    expect(smokeScript).toContain(
+      'simultaneousTriggers: ["create-kick", "heartbeat", "cron", "manual"]',
+    );
+    expect(smokeScript).toContain("provider.resources.size !== 1");
+    expect(smokeScript).toContain("canaryCalls !== 1");
+    expect(smokeScript).toContain("runningTransitions.length !== 1");
+    expect(smokeScript).toContain("usage.length !== 1");
   });
 });

@@ -133,12 +133,14 @@ describe("ready agent creation persistence", () => {
 
   it("replays an existing ready deployment before flag and credential validation", async () => {
     const validator = telegramValidator();
+    const onReadyDeploymentCommitted = vi.fn();
     const created = await createAgentForUser(USER_A_ID, readyInput("ready-key-002"), {
       createConnection: () => connection,
       env: KEYRING_ENV,
       now: () => NOW,
       randomBytes: incrementalRandomBytes(),
       telegramBotValidator: validator,
+      onReadyDeploymentCommitted,
     });
     const replay = await createAgentForUser(
       USER_A_ID,
@@ -153,11 +155,16 @@ describe("ready agent creation persistence", () => {
         createConnection: () => connection,
         env: { ...KEYRING_ENV, AGENTBAY_READY_AGENT_CREATION_ENABLED: "false" },
         telegramBotValidator: vi.fn(),
+        onReadyDeploymentCommitted,
       },
     );
 
     expect(replay).toEqual(created);
     expect(validator).toHaveBeenCalledTimes(1);
+    expect(onReadyDeploymentCommitted).toHaveBeenCalledOnce();
+    expect(onReadyDeploymentCommitted).toHaveBeenCalledWith(
+      "deployment" in created ? created.deployment.id : null,
+    );
     await expect(countRows(connection, "agents")).resolves.toBe(1);
     await expect(countRows(connection, "agent_events")).resolves.toBe(1);
   });

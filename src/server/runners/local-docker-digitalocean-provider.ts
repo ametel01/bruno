@@ -5,9 +5,12 @@ import {
   DIGITALOCEAN_PROVIDER,
   type DigitalOceanCleanupInput,
   type DigitalOceanCreateSshKeyInput,
+  type DigitalOceanDiscoverByTagInput,
+  type DigitalOceanDiscovery,
   type DigitalOceanFirewallInput,
   type DigitalOceanProvider,
   type DigitalOceanProviderResult,
+  type DigitalOceanProviderRequestContext,
   type DigitalOceanReadInput,
   type DigitalOceanResource,
   type DigitalOceanRunnerSpec,
@@ -26,7 +29,10 @@ const LOCAL_PRODUCTION_RUNNER_CONTAINER_NAME = "agentbay-runner";
 const LOCAL_SIMULATED_PUBLIC_IPV4 = "127.0.0.1";
 const LOCAL_HOST_BRIDGE_DIR = "/tmp/agentbay-local-cloud";
 
-type DockerRunner = (args: readonly string[]) => Promise<{ stdout: string; stderr: string }>;
+type DockerRunner = (
+  args: readonly string[],
+  context?: DigitalOceanProviderRequestContext,
+) => Promise<{ stdout: string; stderr: string }>;
 
 export type LocalDockerDigitalOceanProviderOptions = {
   containerName?: string;
@@ -52,13 +58,18 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
     this.#startDelayMs = options.startDelayMs ?? DEFAULT_LOCAL_START_DELAY_MS;
   }
 
-  async listSshKeys(): Promise<DigitalOceanProviderResult<DigitalOceanSshKey[]>> {
+  async listSshKeys(
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanSshKey[]>> {
+    if (context?.signal.aborted) return localCancelledResource("ssh_key_lookup_failed");
     return { ok: true, value: [] };
   }
 
   async createSshKey(
     input: DigitalOceanCreateSshKeyInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanSshKey>> {
+    if (context?.signal.aborted) return localCancelledResource("ssh_key_create_failed");
     return {
       ok: true,
       value: {
@@ -71,7 +82,12 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
 
   async createRunner(
     input: DigitalOceanRunnerSpec,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
+    if (context?.signal.aborted) {
+      return localCancelledResource("create_outcome_unknown");
+    }
+
     const resource = {
       provider: DIGITALOCEAN_PROVIDER,
       providerResourceId: LOCAL_DOCKER_DIGITALOCEAN_RESOURCE_ID,
@@ -96,9 +112,30 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
     return { ok: true, value: cloneResource(resource) };
   }
 
+  async discoverResourcesByTag(
+    input: DigitalOceanDiscoverByTagInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanDiscovery>> {
+    if (context?.signal.aborted) {
+      return localCancelledResource("discovery_failed");
+    }
+
+    return {
+      ok: true,
+      value: {
+        authoritative: true,
+        resources: [...this.#resources.values()]
+          .filter((resource) => resource.deletedAt === null && resource.tags.includes(input.tag))
+          .map(cloneResource),
+      },
+    };
+  }
+
   async readResource(
     input: DigitalOceanReadInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
+    if (context?.signal.aborted) return localCancelledResource("resource_not_found");
     const resource = this.#resources.get(input.providerResourceId);
 
     return resource
@@ -112,7 +149,9 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
 
   async tagResource(
     input: DigitalOceanTagInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
+    if (context?.signal.aborted) return localCancelledResource("tag_failed");
     const resource = this.#resources.get(input.providerResourceId);
 
     if (!resource) {
@@ -126,7 +165,9 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
 
   async applyFirewall(
     input: DigitalOceanFirewallInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
+    if (context?.signal.aborted) return localCancelledResource("firewall_failed");
     const resource = this.#resources.get(input.providerResourceId);
 
     if (!resource) {
@@ -140,6 +181,7 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
 
   async cleanupResource(
     input: DigitalOceanCleanupInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
     const resource = this.#resources.get(input.providerResourceId);
 
@@ -147,7 +189,7 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
       return localMissingResource();
     }
 
-    await this.#removeLocalContainers();
+    await this.#removeLocalContainers(context);
     resource.deletedAt = this.#now().toISOString();
 
     return { ok: true, value: cloneResource(resource) };
@@ -213,10 +255,10 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
     }
   }
 
-  async #removeLocalContainers(): Promise<void> {
+  async #removeLocalContainers(context?: DigitalOceanProviderRequestContext): Promise<void> {
     for (const containerName of [this.#containerName, LOCAL_PRODUCTION_RUNNER_CONTAINER_NAME]) {
       try {
-        await this.#docker(["rm", "--force", containerName]);
+        await this.#docker(["rm", "--force", containerName], context);
       } catch {
         // Missing local containers should not block a fresh local provisioning run.
       }
@@ -397,13 +439,17 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\"'\"'")}'`;
 }
 
-function runDocker(args: readonly string[]): Promise<{ stdout: string; stderr: string }> {
+function runDocker(
+  args: readonly string[],
+  context?: DigitalOceanProviderRequestContext,
+): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     execFile(
       "docker",
       [...args],
       {
         encoding: "utf8",
+        ...(context ? { signal: context.signal } : {}),
         timeout: DOCKER_TIMEOUT_MS,
       },
       (error, stdout, stderr) => {
@@ -423,6 +469,24 @@ function localMissingResource(): DigitalOceanProviderResult<DigitalOceanResource
     ok: false,
     reason: "resource_not_found",
     message: "Local Docker runner resource was not found.",
+  };
+}
+
+function localCancelledResource(
+  reason:
+    | "cleanup_failed"
+    | "create_outcome_unknown"
+    | "discovery_failed"
+    | "firewall_failed"
+    | "resource_not_found"
+    | "ssh_key_create_failed"
+    | "ssh_key_lookup_failed"
+    | "tag_failed",
+): DigitalOceanProviderResult<never> {
+  return {
+    ok: false,
+    reason,
+    message: "Local Docker provider action was cancelled before completion.",
   };
 }
 

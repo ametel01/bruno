@@ -1,11 +1,11 @@
-import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agents, runnerHeartbeats, runners } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
+import { agents, runnerHeartbeats, runners } from "@/src/server/db/schema";
 import {
-  DIGITALOCEAN_RUNNER_KIND,
   DIGITALOCEAN_PROVIDER,
+  DIGITALOCEAN_RUNNER_KIND,
 } from "@/src/server/runners/digitalocean-provider";
 import { reconcileStaleRunnerHeartbeatsInTransaction } from "@/src/server/runners/runner-heartbeat";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
@@ -77,6 +77,7 @@ export type RunnerPlacementResult =
     };
 
 export type RunnerPlacementInput = {
+  excludeAgentId?: string | undefined;
   planMaxAgents?: number | null | undefined;
   runnerId?: string | null | undefined;
 };
@@ -230,17 +231,21 @@ export async function selectRunnerPlacementForUserInTransaction(
       .where(eq(runnerHeartbeats.runnerId, row.id))
       .orderBy(desc(runnerHeartbeats.observedAt))
       .limit(1);
+    const assignedAgentFilters = [
+      eq(agents.runnerId, row.id),
+      eq(agents.userId, userId),
+      inArray(agents.status, [...RUNNER_PLACEMENT_AGENT_STATUSES]),
+      isNull(agents.deletedAt),
+    ];
+
+    if (input.excludeAgentId) {
+      assignedAgentFilters.push(ne(agents.id, input.excludeAgentId));
+    }
+
     const assignedRunningAgents = await tx
       .select({ id: agents.id })
       .from(agents)
-      .where(
-        and(
-          eq(agents.runnerId, row.id),
-          eq(agents.userId, userId),
-          inArray(agents.status, [...RUNNER_PLACEMENT_AGENT_STATUSES]),
-          isNull(agents.deletedAt),
-        ),
-      );
+      .where(and(...assignedAgentFilters));
     const capacity = normalizeRunnerCapacitySnapshot(
       latestHeartbeat?.metadata,
       assignedRunningAgents.length,

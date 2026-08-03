@@ -135,8 +135,9 @@ describe("Hermes launch spec builder", () => {
     await connection.db
       .update(agentDeployments)
       .set({
-        stage: "ready",
-        completedAt: new Date("2026-08-03T00:01:00.000Z"),
+        stage: "failed",
+        failedAt: new Date("2026-08-03T00:01:00.000Z"),
+        errorCode: "runner_unavailable",
         updatedAt: new Date("2026-08-03T00:01:00.000Z"),
       })
       .where(eq(agentDeployments.id, firstDeployment.deployment.id));

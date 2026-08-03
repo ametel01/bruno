@@ -304,6 +304,11 @@ describe("Milestone 1 agent persistence schema", () => {
       "nextAttemptAt",
       "leaseOwner",
       "leaseExpiresAt",
+      "runnerOperationId",
+      "runnerAcceptedAt",
+      "canaryState",
+      "canaryAttemptedAt",
+      "canaryCompletedAt",
       "startedAt",
       "completedAt",
       "failedAt",
@@ -324,6 +329,12 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.nextAttemptAt.notNull).toBe(false);
     expect(columns.leaseOwner.notNull).toBe(false);
     expect(columns.leaseExpiresAt.notNull).toBe(false);
+    expect(columns.runnerOperationId.notNull).toBe(false);
+    expect(columns.runnerAcceptedAt.notNull).toBe(false);
+    expect(columns.canaryState.notNull).toBe(true);
+    expect(columns.canaryState.default).toBe("not_started");
+    expect(columns.canaryAttemptedAt.notNull).toBe(false);
+    expect(columns.canaryCompletedAt.notNull).toBe(false);
     expect(columns.startedAt.notNull).toBe(false);
     expect(columns.completedAt.notNull).toBe(false);
     expect(columns.failedAt.notNull).toBe(false);
@@ -382,6 +393,7 @@ describe("Milestone 1 agent persistence schema", () => {
       "image",
       "provisioningStatus",
       "provisioningError",
+      "provisioningOperationKey",
       "provisioningStartedAt",
       "provisioningCompletedAt",
       "createdAt",

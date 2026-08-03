@@ -166,7 +166,7 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain("OpenRouter is the first supported provider");
     expect(automaticLedger).toContain("dedicated staging Telegram bot/user");
     expect(automaticLedger).toContain(
-      "Step 6 is independently accepted through cycle 2 at `fa677fb`.",
+      "Step 7 is complete in this commit and locally green, pending independent checker",
     );
     expect(automaticLedger).toContain("- [x] Step 0: Progress and Changelog Tracking Setup");
     expect(automaticLedger).toContain("- [x] Step 1: Quality Gates Setup and Baseline Evidence");
@@ -185,7 +185,7 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain(
       "- [x] Step 6: Split Runner Launch Acceptance From Observed Readiness",
     );
-    expect(automaticLedger).toContain("- [ ] Step 7: Reconcile Creation Through Ready");
+    expect(automaticLedger).toContain("- [x] Step 7: Reconcile Creation Through Ready");
     expect(automaticLedger).toContain(
       "- [ ] Step 8: Add One-Click Creation and Persisted Progress UI",
     );
@@ -212,6 +212,9 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain(
       "| 6. Split Runner Launch Acceptance From Observed Readiness | Complete and independently accepted after cycle 2 |",
     );
+    expect(automaticLedger).toContain(
+      "| 7. Reconcile Creation Through Ready | Complete; pending independent checker |",
+    );
     expect(automaticLedger).toContain("launch-spec v3 parsing/redaction/serialization");
     expect(automaticLedger).toContain("explicit/custom YAML tags and anchors");
     expect(automaticLedger).toContain("secret-like null/map/array/boolean/number values");
@@ -233,6 +236,11 @@ describe("automatic Hermes Telegram progress status", () => {
     );
     expect(automaticLedger).toContain("108 files / 996 full tests");
     expect(automaticLedger).toContain("`bun run verify:hermes:staging` exited nonzero");
+    expect(automaticLedger).toContain("fail-closed one-open-usage uniqueness");
+    expect(automaticLedger).toContain("Focused Step 7 gates passed 22 files / 311 tests");
+    expect(automaticLedger).toContain("116 files / 1,065 tests");
+    expect(automaticLedger).toContain("`bun run local:cloud:smoke` passed");
+    expect(automaticLedger).toContain("simultaneous create-kick/heartbeat/cron/manual triggers");
     expect(automaticLedger).toContain("local pinned-image behavior");
     expect(automaticLedger).toContain('`telegramBoundary: "local-smoke-disabled"`');
     expect(automaticLedger).toContain("`drizzle/0016_motionless_fantastic_four.sql`");
@@ -241,11 +249,9 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain("Full gates passed");
     expect(automaticLedger).toContain("Step validation commands and results.");
     expect(automaticLedger).toContain("Safe blocker codes, missing capabilities, and next action.");
+    expect(automaticLedger).toContain("No builder blocker remains for Step 7");
     expect(automaticLedger).toContain(
-      "No blocker remains for Step 6; independently accepted at `fa677fb`.",
-    );
-    expect(automaticLedger).toContain(
-      "Step 7 should reconcile accepted deployments through verified ready or failed states.",
+      "Step 8 should add one-click creation and persisted progress UI only after",
     );
     expect(automaticLedger).not.toContain("No blocker remains for Step 3.");
     expect(automaticLedger).not.toContain("Step 4 should add managed creation configuration");
@@ -254,6 +260,9 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(changelog).toContain("## [Unreleased]");
     expect(changelog).toContain(
       "owners can read the latest deployment operation through `GET /api/agents/:agentId/deployment`",
+    );
+    expect(changelog).toContain(
+      "Automatic ready-mode deployments now reconcile durably from creation to verified running state",
     );
   });
 });

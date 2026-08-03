@@ -4,11 +4,9 @@ import { cp, lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { eq } from "drizzle-orm";
 import { parse, stringify } from "yaml";
-import {
-  MANAGED_AGENT_LAUNCH_SPEC_VERSION,
-  type AgentLaunchSpec,
-} from "@/src/server/agents/agent-launch-spec";
+import { DEFAULT_LOCAL_HERMES_IMAGE } from "@/scripts/smoke-hermes-agent-image";
 import {
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
@@ -19,12 +17,28 @@ import {
   type RunnerLogLine,
 } from "@/src/runner-service/docker";
 import {
-  projectHermesHome,
   type HermesProjectionResult,
+  projectHermesHome,
 } from "@/src/runner-service/hermes-projection";
-import { DEFAULT_LOCAL_HERMES_IMAGE } from "@/scripts/smoke-hermes-agent-image";
+import { reconcileNextAgentDeployment } from "@/src/server/agents/agent-deployment-reconciler";
+import {
+  type AgentLaunchSpec,
+  MANAGED_AGENT_LAUNCH_SPEC_VERSION,
+} from "@/src/server/agents/agent-launch-spec";
+import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
+import { createDatabaseConnection } from "@/src/server/db/client";
+import {
+  agentConfigs,
+  agentDeployments,
+  agentEvents,
+  agents,
+  agentUsagePeriods,
+  runnerHeartbeats,
+  runners,
+  users,
+} from "@/src/server/db/schema";
 
-const FAKE_MODEL_ALIAS = "agentbay/local-fake-model";
+const FAKE_MODEL_ALIAS = "openai/gpt-4.1-mini";
 const SMOKE_IMAGE = process.env.AGENTBAY_HERMES_IMAGE?.trim() || DEFAULT_LOCAL_HERMES_IMAGE;
 const TIMEOUT_MS = readPositiveInteger(process.env.AGENTBAY_HERMES_CONTRACT_TIMEOUT_MS, 240_000);
 const POLL_MS = readPositiveInteger(process.env.AGENTBAY_HERMES_CONTRACT_POLL_MS, 1_000);
@@ -46,6 +60,8 @@ export type LocalHermesContractSmokeSummary = {
   backupRestored: true;
   canaryPassed: true;
   configRevision: string;
+  controllerFinalized: true;
+  controllerStages: string[];
   duplicateLaunchReused: true;
   elapsedMs: number;
   fakeModelContainer: string;
@@ -54,15 +70,19 @@ export type LocalHermesContractSmokeSummary = {
   modelResponse: string;
   network: string;
   noPublicHermesPort: true;
+  openUsagePeriods: 1;
   privateApiAuth: true;
   removedAgentRoot: true;
   restartReused: true;
+  runningTransitions: 1;
   statePersistence: true;
   statusProgression: ["accepted", "starting", "ready"];
   telegramBoundary: "local-fake-platform-state";
 };
 
 export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmokeSummary> {
+  process.env.DATABASE_URL ??= "postgres://agentbay:agentbay@127.0.0.1:54329/plingpling";
+  process.env.NEXT_PUBLIC_APP_URL ??= "http://127.0.0.1:3000";
   const startedAt = Date.now();
   const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
   const agentId = randomUUID();
@@ -203,6 +223,7 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
     ) {
       throw new Error("Hermes runner did not return an accepted launch snapshot.");
     }
+    const startedContainerName = started.snapshot.container.name;
 
     await assertProjectedConfigRevision(activeProjection, spec.agent.configRevision);
     await assertNoPublicHermesPort(started.snapshot.container.id);
@@ -220,25 +241,24 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
       throw new Error("Duplicate Hermes launch did not reuse one exact operation and container.");
     }
 
-    const startingStatus = await runner.status(agentId);
-    if (startingStatus.snapshot.phase !== "starting") {
-      throw new Error(
-        `Hermes runner did not expose starting after asynchronous acceptance: ${startingStatus.snapshot.phase}/${startingStatus.snapshot.readinessReason}/${startingStatus.snapshot.revision.state}`,
-      );
-    }
-
-    const readiness = await waitForLocalHermesReadiness({
+    const controller = await drivePersistedHermesController({
       agentId,
-      apiServerKey: spec.secrets.apiServerKey,
-      configRevision: spec.agent.configRevision,
-      containerName: started.snapshot.container.name,
+      runner,
+      spec,
+      waitUntilReady: async () => {
+        const readiness = await waitForLocalHermesReadiness({
+          agentId,
+          apiServerKey: spec.secrets.apiServerKey,
+          configRevision: spec.agent.configRevision,
+          containerName: startedContainerName,
+        });
+        if (!readiness.ok) {
+          throw new Error(
+            `Hermes readiness did not complete after launch acceptance: ${readiness.reason}`,
+          );
+        }
+      },
     });
-
-    if (!readiness.ok) {
-      throw new Error(
-        `Hermes readiness did not complete after launch acceptance: ${readiness.reason}`,
-      );
-    }
 
     await assertPrivateApiAuth(started.snapshot.container.name, spec.secrets.apiServerKey);
     const modelResponse = await runHermesModelTurn(
@@ -249,16 +269,6 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
 
     if (status.snapshot.phase !== "ready" || !status.snapshot.operation) {
       throw new Error("Hermes runner status did not report a ready operation after readiness.");
-    }
-
-    const canary = await runner.canary(agentId, {
-      operationId: status.snapshot.operation.id,
-      configRevision: spec.agent.configRevision,
-      model: spec.model.model,
-    });
-
-    if (canary.observation.state !== "passed") {
-      throw new Error("Hermes runner canary did not pass through the private API seam.");
     }
 
     const reusedRestart = await runner.restart(agentId, spec);
@@ -310,6 +320,8 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
       backupRestored: true,
       canaryPassed: true,
       configRevision: spec.agent.configRevision,
+      controllerFinalized: true,
+      controllerStages: controller.stages,
       duplicateLaunchReused: true,
       elapsedMs: Date.now() - startedAt,
       fakeModelContainer,
@@ -318,9 +330,11 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
       modelResponse,
       network,
       noPublicHermesPort: true,
+      openUsagePeriods: 1,
       privateApiAuth: true,
       removedAgentRoot: true,
       restartReused: true,
+      runningTransitions: 1,
       statePersistence: true,
       statusProgression: ["accepted", "starting", "ready"],
       telegramBoundary: "local-fake-platform-state",
@@ -341,6 +355,188 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
     } else {
       process.env.AGENTBAY_HERMES_STATE_ROOT = previousStateRoot;
     }
+  }
+}
+
+async function drivePersistedHermesController(input: {
+  agentId: string;
+  runner: ManualRunnerDocker;
+  spec: AgentLaunchSpec;
+  waitUntilReady: () => Promise<void>;
+}): Promise<{ stages: string[] }> {
+  const connection = createDatabaseConnection();
+  const userId = randomUUID();
+  const runnerId = randomUUID();
+  const deploymentId = randomUUID();
+  let logicalNow = new Date();
+  const stages: string[] = ["configuring_hermes"];
+  const manualRunner = {
+    id: runnerId,
+    userId,
+    name: "Local Hermes smoke runner",
+    kind: "manual_vps" as const,
+    endpointUrl: "http://127.0.0.1:3045",
+    status: "online" as const,
+    createdAt: logicalNow.toISOString(),
+    updatedAt: logicalNow.toISOString(),
+    deletedAt: null,
+  };
+  let canaryCalls = 0;
+
+  const adapter = {
+    start: async (agentId: string, spec: AgentLaunchSpec) => {
+      const result = await input.runner.start(agentId, spec);
+      if (!("operation" in result) || !("snapshot" in result)) {
+        throw new Error("Persisted controller did not receive managed launch evidence.");
+      }
+      return { ok: true as const, state: "accepted" as const, runner: manualRunner, ...result };
+    },
+    status: async (agentId: string) => {
+      const result = await input.runner.status(agentId);
+      return { ok: true as const, runner: manualRunner, snapshot: result.snapshot };
+    },
+    canary: async (
+      agentId: string,
+      request: { operationId: string; configRevision: string; model: string },
+    ) => {
+      canaryCalls += 1;
+      const response = await input.runner.canary(agentId, request);
+      return {
+        ok: true as const,
+        runner: manualRunner,
+        response: { ok: true as const, agentId, action: "canary" as const, ...response },
+      };
+    },
+    stop: async (agentId: string) => {
+      const stopped = await input.runner.stop(agentId);
+      return { ok: true as const, runner: manualRunner, containers: stopped.containers };
+    },
+    streamLogs: async (agentId: string) => {
+      const logs = await input.runner.logs(agentId);
+      return { logs: logs.logs, nextAfter: null };
+    },
+  };
+  const dependencies = {
+    createConnection: () => connection,
+    now: () => logicalNow,
+    launchSpec: async () => ({ ok: true as const, spec: input.spec }),
+    manualRunnerAdapter: () => adapter as never,
+  };
+
+  try {
+    await connection.db.insert(users).values({ id: userId, createdAt: logicalNow });
+    await connection.db.insert(runners).values({
+      id: runnerId,
+      userId,
+      name: manualRunner.name,
+      kind: manualRunner.kind,
+      endpointUrl: manualRunner.endpointUrl,
+      status: manualRunner.status,
+      createdAt: logicalNow,
+      updatedAt: logicalNow,
+    });
+    await connection.db.insert(runnerHeartbeats).values({
+      runnerId,
+      status: "online",
+      metadata: { metrics: { maxAgents: 1, runningAgents: 0 } },
+      observedAt: logicalNow,
+    });
+    await connection.db.insert(agents).values({
+      id: input.agentId,
+      userId,
+      runnerId,
+      name: input.spec.agent.name,
+      templateKey: input.spec.agent.templateKey,
+      templateVersion: input.spec.agent.templateVersion,
+      templateSnapshotJson: getAgentTemplateSnapshot("research_agent"),
+      status: "starting",
+      desiredStatus: "running",
+      createdAt: logicalNow,
+      updatedAt: logicalNow,
+    });
+    await connection.db.insert(agentConfigs).values({
+      agentId: input.agentId,
+      systemPrompt: input.spec.prompt.soul,
+      modelProvider: "openrouter",
+      modelName: FAKE_MODEL_ALIAS,
+      scheduleMode: "manual",
+      timezone: "UTC",
+      createdAt: logicalNow,
+      updatedAt: logicalNow,
+    });
+    await connection.db.insert(agentDeployments).values({
+      id: deploymentId,
+      agentId: input.agentId,
+      userId,
+      stage: "configuring_hermes",
+      configRevision: input.spec.agent.configRevision,
+      idempotencyKey: `hermes-smoke-${deploymentId}`,
+      createdAt: logicalNow,
+      updatedAt: logicalNow,
+    });
+
+    const reconcile = async () => {
+      const result = await reconcileNextAgentDeployment(dependencies);
+      const [deployment] = await connection.db
+        .select()
+        .from(agentDeployments)
+        .where(eq(agentDeployments.id, deploymentId));
+      if (!deployment) throw new Error("Persisted Hermes deployment disappeared.");
+      if (stages.at(-1) !== deployment.stage) stages.push(deployment.stage);
+      logicalNow = new Date(logicalNow.getTime() + 91_000);
+      return result;
+    };
+
+    await reconcile();
+    const starting = await reconcile();
+    if (starting.outcome !== "retry_scheduled") {
+      throw new Error("Persisted controller did not observe asynchronous starting.");
+    }
+    await input.waitUntilReady();
+    await reconcile();
+    await reconcile();
+    const finalized = await reconcile();
+
+    const [deployment] = await connection.db
+      .select()
+      .from(agentDeployments)
+      .where(eq(agentDeployments.id, deploymentId));
+    const [agent] = await connection.db.select().from(agents).where(eq(agents.id, input.agentId));
+    const usage = await connection.db
+      .select()
+      .from(agentUsagePeriods)
+      .where(eq(agentUsagePeriods.agentId, input.agentId));
+    const events = await connection.db
+      .select()
+      .from(agentEvents)
+      .where(eq(agentEvents.agentId, input.agentId));
+    const runningTransitions = events.filter((event) => event.type === "agent.start_completed");
+
+    if (
+      finalized.outcome !== "ready" ||
+      deployment?.stage !== "ready" ||
+      deployment.canaryState !== "passed" ||
+      agent?.status !== "running" ||
+      canaryCalls !== 1 ||
+      usage.length !== 1 ||
+      usage[0]?.stoppedAt !== null ||
+      runningTransitions.length !== 1
+    ) {
+      throw new Error("Persisted Hermes controller did not finalize atomically and exactly once.");
+    }
+    return { stages };
+  } finally {
+    await connection.db.delete(agentEvents).where(eq(agentEvents.agentId, input.agentId));
+    await connection.db
+      .delete(agentUsagePeriods)
+      .where(eq(agentUsagePeriods.agentId, input.agentId));
+    await connection.db.delete(agentDeployments).where(eq(agentDeployments.id, deploymentId));
+    await connection.db.delete(agentConfigs).where(eq(agentConfigs.agentId, input.agentId));
+    await connection.db.delete(agents).where(eq(agents.id, input.agentId));
+    await connection.db.delete(runnerHeartbeats).where(eq(runnerHeartbeats.runnerId, runnerId));
+    await connection.db.delete(runners).where(eq(runners.id, runnerId));
+    await connection.db.delete(users).where(eq(users.id, userId));
+    await connection.close();
   }
 }
 

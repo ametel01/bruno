@@ -22,6 +22,9 @@ const DEPLOYMENT_STAGE_SET = new Set<string>(AGENT_DEPLOYMENT_STAGES);
 const TERMINAL_DEPLOYMENT_STAGE_SET = new Set<string>(TERMINAL_AGENT_DEPLOYMENT_STAGES);
 const CONFIG_REVISION_PATTERN = /^[A-Za-z0-9_.:-]{1,80}$/;
 const ERROR_CODE_PATTERN = /^[a-z0-9_.:-]{1,64}$/;
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
+const RECONCILE_LEASE_OWNER_PATTERN =
+  /^reconcile:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const ALLOWED_FORWARD_TRANSITIONS: Record<AgentDeploymentStage, readonly AgentDeploymentStage[]> = {
   pending: ["provisioning_runner", "configuring_hermes", "failed"],
@@ -108,7 +111,7 @@ export function normalizeDeploymentIdempotencyKey(value: string):
     } {
   const normalized = value.trim();
 
-  if (normalized.length < 8 || normalized.length > 128) {
+  if (!IDEMPOTENCY_KEY_PATTERN.test(normalized)) {
     return { ok: false, reason: "invalid_idempotency_key" };
   }
 
@@ -123,7 +126,7 @@ export function validateDeploymentConfigRevision(value: string): boolean {
 }
 
 export function validateDeploymentLeaseOwner(value: string): boolean {
-  return value.trim().length > 0 && value.length <= 128;
+  return RECONCILE_LEASE_OWNER_PATTERN.test(value);
 }
 
 export function validateDeploymentLeaseDurationMs(value: number): boolean {

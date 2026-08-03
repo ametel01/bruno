@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Automatic ready-mode deployments now reconcile durably from creation to verified running state with bounded leases, post-response/heartbeat/cron triggers, one canary, Telegram-ready confirmation, usage-period completion, and a safe owner-scoped retry API.
 - Managed Hermes launch-spec v3 now carries approved OpenRouter model configuration plus server-only OpenRouter, Telegram, Telegram allowlist, and private API credentials from persisted deployment state.
 - Automatic Hermes agents now receive a complete managed `config.yaml`, `.env`, `SOUL.md`, workspace, and revision projection from a fresh runner state root without requiring native `hermes setup`.
 - Opt-in `202 Accepted` ready-mode agent creation for the approved OpenRouter model and Telegram adapter inputs, while preserving the existing `201 Created` stopped/manual create path.

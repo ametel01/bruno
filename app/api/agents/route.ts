@@ -19,9 +19,11 @@ import {
   type ConfiguredApplicationUserResolution,
   requireConfiguredApplicationUser,
 } from "@/src/server/users/configured-application-user";
+import { scheduleAgentDeploymentReconcileAfterResponse } from "@/src/server/agents/agent-deployment-triggers";
 
 type CreateAgentRouteDependencies = {
   requireApplicationUser?: typeof requireConfiguredApplicationUser;
+  scheduleDeploymentReconcile?: typeof scheduleAgentDeploymentReconcileAfterResponse;
 };
 
 type CreateAgentRouteContext = {
@@ -58,7 +60,14 @@ export async function POST(
   }
 
   try {
-    const body = await createAgentForUser(applicationUser.userId, validation.value);
+    const body =
+      "launchMode" in validation.value
+        ? await createAgentForUser(applicationUser.userId, validation.value, {
+            onReadyDeploymentCommitted:
+              dependencies.scheduleDeploymentReconcile ??
+              scheduleAgentDeploymentReconcileAfterResponse,
+          })
+        : await createAgentForUser(applicationUser.userId, validation.value);
 
     return Response.json(body, {
       status: "deployment" in body ? 202 : 201,

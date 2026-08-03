@@ -54,6 +54,8 @@ export type DigitalOceanSshKey = {
 
 export type DigitalOceanProviderErrorReason =
   | "create_failed"
+  | "create_outcome_unknown"
+  | "discovery_failed"
   | "tag_failed"
   | "firewall_failed"
   | "cleanup_failed"
@@ -96,25 +98,50 @@ export type DigitalOceanCreateSshKeyInput = {
   publicKey: string;
 };
 
+export type DigitalOceanDiscoverByTagInput = {
+  tag: string;
+};
+
+export type DigitalOceanProviderRequestContext = {
+  signal: AbortSignal;
+};
+
+export type DigitalOceanDiscovery = {
+  authoritative: boolean;
+  resources: DigitalOceanResource[];
+};
+
 export interface DigitalOceanProvider {
-  listSshKeys(): Promise<DigitalOceanProviderResult<DigitalOceanSshKey[]>>;
+  listSshKeys(
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanSshKey[]>>;
   createSshKey(
     input: DigitalOceanCreateSshKeyInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanSshKey>>;
   createRunner(
     input: DigitalOceanRunnerSpec,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>>;
+  discoverResourcesByTag(
+    input: DigitalOceanDiscoverByTagInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanDiscovery>>;
   readResource(
     input: DigitalOceanReadInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>>;
   tagResource(
     input: DigitalOceanTagInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>>;
   applyFirewall(
     input: DigitalOceanFirewallInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>>;
   cleanupResource(
     input: DigitalOceanCleanupInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>>;
 }
 
@@ -140,27 +167,46 @@ export type DigitalOceanSdkClient = {
     droplets: {
       post(
         body: DigitalOceanDropletCreateBody,
+        context?: DigitalOceanProviderRequestContext,
       ): Promise<DigitalOceanDropletCreateResponse | undefined>;
+      get?(
+        input: {
+          tagName: string;
+          perPage: number;
+        },
+        context?: DigitalOceanProviderRequestContext,
+      ): Promise<DigitalOceanDropletsListResponse | undefined>;
       byDroplet_id(id: number): {
-        get?(): Promise<DigitalOceanDropletCreateResponse | undefined>;
-        delete(): Promise<void>;
+        get?(
+          context?: DigitalOceanProviderRequestContext,
+        ): Promise<DigitalOceanDropletCreateResponse | undefined>;
+        delete(context?: DigitalOceanProviderRequestContext): Promise<void>;
       };
     };
     account: {
       keys: {
-        get(): Promise<DigitalOceanSshKeysResponse | undefined>;
+        get(
+          context?: DigitalOceanProviderRequestContext,
+        ): Promise<DigitalOceanSshKeysResponse | undefined>;
         post(
           body: DigitalOceanSshKeyCreateBody,
+          context?: DigitalOceanProviderRequestContext,
         ): Promise<DigitalOceanSshKeyCreateResponse | undefined>;
       };
     };
     firewalls: {
-      post(body: DigitalOceanFirewallBody): Promise<DigitalOceanFirewallCreateResponse | undefined>;
+      post(
+        body: DigitalOceanFirewallBody,
+        context?: DigitalOceanProviderRequestContext,
+      ): Promise<DigitalOceanFirewallCreateResponse | undefined>;
     };
     tags: {
       byTag_id(tag: string): {
         resources: {
-          post(body: DigitalOceanTagResourceBody): Promise<void>;
+          post(
+            body: DigitalOceanTagResourceBody,
+            context?: DigitalOceanProviderRequestContext,
+          ): Promise<void>;
         };
       };
     };
@@ -180,6 +226,10 @@ type DigitalOceanDropletCreateBody = {
 
 type DigitalOceanDropletCreateResponse = {
   droplet?: DigitalOceanApiDroplet | null;
+};
+
+type DigitalOceanDropletsListResponse = {
+  droplets?: DigitalOceanApiDroplet[] | null;
 };
 
 type DigitalOceanSshKeysResponse = {
@@ -260,9 +310,13 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
     this.#now = options.now ?? (() => new Date());
   }
 
-  async listSshKeys(): Promise<DigitalOceanProviderResult<DigitalOceanSshKey[]>> {
-    const response = await runSdkStep("ssh_key_lookup_failed", () =>
-      this.#client.v2.account.keys.get(),
+  async listSshKeys(
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanSshKey[]>> {
+    const response = await runSdkStep(
+      "ssh_key_lookup_failed",
+      () => this.#client.v2.account.keys.get(context),
+      context,
     );
 
     if (!response.ok) {
@@ -289,12 +343,19 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
 
   async createSshKey(
     input: DigitalOceanCreateSshKeyInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanSshKey>> {
-    const response = await runSdkStep("ssh_key_create_failed", () =>
-      this.#client.v2.account.keys.post({
-        name: input.name,
-        publicKey: input.publicKey,
-      }),
+    const response = await runSdkStep(
+      "ssh_key_create_failed",
+      () =>
+        this.#client.v2.account.keys.post(
+          {
+            name: input.name,
+            publicKey: input.publicKey,
+          },
+          context,
+        ),
+      context,
     );
 
     if (!response.ok) {
@@ -314,6 +375,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
 
   async createRunner(
     input: DigitalOceanRunnerSpec,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
     const body: DigitalOceanDropletCreateBody = {
       name: toDropletName(input.name),
@@ -332,7 +394,12 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
       body.userData = input.userData;
     }
 
-    const response = await runSdkStep("create_failed", () => this.#client.v2.droplets.post(body));
+    const response = await runSdkStep(
+      "create_failed",
+      () => this.#client.v2.droplets.post(body, context),
+      context,
+      "create_outcome_unknown",
+    );
 
     if (!response.ok) {
       return response;
@@ -353,8 +420,50 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
     return { ok: true, value: cloneResource(resource) };
   }
 
+  async discoverResourcesByTag(
+    input: DigitalOceanDiscoverByTagInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanDiscovery>> {
+    if (!this.#client.v2.droplets.get) {
+      const resources = [...this.#resources.values()].filter(
+        (resource) => resource.deletedAt === null && resource.tags.includes(input.tag),
+      );
+
+      return {
+        ok: true,
+        value: { authoritative: false, resources: resources.map(cloneResource) },
+      };
+    }
+
+    const discover = this.#client.v2.droplets.get;
+
+    const response = await runSdkStep(
+      "discovery_failed",
+      () => discover({ tagName: input.tag, perPage: 200 }, context),
+      context,
+    );
+
+    if (!response.ok) {
+      return response;
+    }
+
+    const resources = (response.value?.droplets ?? []).flatMap((droplet) => {
+      const resource = apiDropletToResource(droplet, null, this.#now);
+
+      if (!resource?.tags.includes(input.tag)) {
+        return [];
+      }
+
+      this.#resources.set(resource.providerResourceId, resource);
+      return [cloneResource(resource)];
+    });
+
+    return { ok: true, value: { authoritative: true, resources } };
+  }
+
   async tagResource(
     input: DigitalOceanTagInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
     const resource = this.#resources.get(input.providerResourceId);
 
@@ -363,10 +472,16 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
     }
 
     for (const tag of [...new Set(input.tags)].sort()) {
-      const response = await runSdkStep("tag_failed", () =>
-        this.#client.v2.tags.byTag_id(tag).resources.post({
-          resources: [{ resourceId: input.providerResourceId, resourceType: "droplet" }],
-        }),
+      const response = await runSdkStep(
+        "tag_failed",
+        () =>
+          this.#client.v2.tags.byTag_id(tag).resources.post(
+            {
+              resources: [{ resourceId: input.providerResourceId, resourceType: "droplet" }],
+            },
+            context,
+          ),
+        context,
       );
 
       if (!response.ok) {
@@ -381,6 +496,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
 
   async readResource(
     input: DigitalOceanReadInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
     const dropletId = Number(input.providerResourceId);
 
@@ -396,13 +512,17 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
       return cached ? { ok: true, value: cloneResource(cached) } : missingResource();
     }
 
-    const response = await runSdkStep("resource_not_found", () => {
-      if (!dropletResource.get) {
-        throw new Error("DigitalOcean Droplet read is unavailable.");
-      }
+    const response = await runSdkStep(
+      "resource_not_found",
+      () => {
+        if (!dropletResource.get) {
+          throw new Error("DigitalOcean Droplet read is unavailable.");
+        }
 
-      return dropletResource.get();
-    });
+        return dropletResource.get(context);
+      },
+      context,
+    );
 
     if (!response.ok) {
       return response;
@@ -434,6 +554,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
 
   async applyFirewall(
     input: DigitalOceanFirewallInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
     const resource = this.#resources.get(input.providerResourceId);
 
@@ -451,17 +572,23 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
       };
     }
 
-    const response = await runSdkStep("firewall_failed", () =>
-      this.#client.v2.firewalls.post({
-        name: input.firewallName,
-        dropletIds: [dropletId],
-        inboundRules: [
-          ...sshInboundRules(input.sshSourceAddresses),
-          tcpInboundRule("80"),
-          tcpInboundRule("443"),
-        ],
-        outboundRules: [outboundRule("tcp"), outboundRule("udp"), outboundRule("icmp")],
-      }),
+    const response = await runSdkStep(
+      "firewall_failed",
+      () =>
+        this.#client.v2.firewalls.post(
+          {
+            name: input.firewallName,
+            dropletIds: [dropletId],
+            inboundRules: [
+              ...sshInboundRules(input.sshSourceAddresses),
+              tcpInboundRule("80"),
+              tcpInboundRule("443"),
+            ],
+            outboundRules: [outboundRule("tcp"), outboundRule("udp"), outboundRule("icmp")],
+          },
+          context,
+        ),
+      context,
     );
 
     if (!response.ok) {
@@ -475,6 +602,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
 
   async cleanupResource(
     input: DigitalOceanCleanupInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
     const resource = this.#resources.get(input.providerResourceId);
 
@@ -482,8 +610,10 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider {
       return missingResource();
     }
 
-    const response = await runSdkStep("cleanup_failed", () =>
-      this.#client.v2.droplets.byDroplet_id(Number(input.providerResourceId)).delete(),
+    const response = await runSdkStep(
+      "cleanup_failed",
+      () => this.#client.v2.droplets.byDroplet_id(Number(input.providerResourceId)).delete(context),
+      context,
     );
 
     if (!response.ok) {
@@ -504,6 +634,7 @@ export class FakeDigitalOceanProvider implements DigitalOceanProvider {
     | { step: "tag"; input: DigitalOceanTagInput }
     | { step: "firewall"; input: DigitalOceanFirewallInput }
     | { step: "cleanup"; input: DigitalOceanCleanupInput }
+    | { step: "discover"; input: DigitalOceanDiscoverByTagInput }
   > = [];
 
   #counter = 0;
@@ -527,7 +658,11 @@ export class FakeDigitalOceanProvider implements DigitalOceanProvider {
     ];
   }
 
-  async listSshKeys(): Promise<DigitalOceanProviderResult<DigitalOceanSshKey[]>> {
+  async listSshKeys(
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanSshKey[]>> {
+    const aborted = abortedProviderResult<DigitalOceanSshKey[]>("ssh_key_lookup_failed", context);
+    if (aborted) return aborted;
     return {
       ok: true,
       value: this.#sshKeys.map((key) => ({ ...key })),
@@ -536,7 +671,10 @@ export class FakeDigitalOceanProvider implements DigitalOceanProvider {
 
   async createSshKey(
     input: DigitalOceanCreateSshKeyInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanSshKey>> {
+    const aborted = abortedProviderResult<DigitalOceanSshKey>("ssh_key_create_failed", context);
+    if (aborted) return aborted;
     this.calls.push({ step: "createSshKey", input });
 
     const id = `ssh-key-${this.#sshKeys.length + 1}`;
@@ -553,7 +691,14 @@ export class FakeDigitalOceanProvider implements DigitalOceanProvider {
 
   async createRunner(
     input: DigitalOceanRunnerSpec,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
+    const aborted = abortedProviderResult<DigitalOceanResource>("create_outcome_unknown", context);
+
+    if (aborted) {
+      return aborted;
+    }
+
     this.calls.push({ step: "create", input });
 
     const failure = this.#failure("create", "create_failed");
@@ -583,9 +728,35 @@ export class FakeDigitalOceanProvider implements DigitalOceanProvider {
     return { ok: true, value: cloneResource(resource) };
   }
 
+  async discoverResourcesByTag(
+    input: DigitalOceanDiscoverByTagInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanDiscovery>> {
+    const aborted = abortedProviderResult<DigitalOceanDiscovery>("discovery_failed", context);
+
+    if (aborted) {
+      return aborted;
+    }
+
+    this.calls.push({ step: "discover", input });
+
+    return {
+      ok: true,
+      value: {
+        authoritative: true,
+        resources: [...this.resources.values()]
+          .filter((resource) => resource.deletedAt === null && resource.tags.includes(input.tag))
+          .map(cloneResource),
+      },
+    };
+  }
+
   async readResource(
     input: DigitalOceanReadInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
+    const aborted = abortedProviderResult<DigitalOceanResource>("resource_not_found", context);
+    if (aborted) return aborted;
     const resource = this.resources.get(input.providerResourceId);
 
     if (!resource) {
@@ -597,7 +768,10 @@ export class FakeDigitalOceanProvider implements DigitalOceanProvider {
 
   async tagResource(
     input: DigitalOceanTagInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
+    const aborted = abortedProviderResult<DigitalOceanResource>("tag_failed", context);
+    if (aborted) return aborted;
     this.calls.push({ step: "tag", input });
 
     const failure = this.#failure("tag", "tag_failed");
@@ -619,7 +793,10 @@ export class FakeDigitalOceanProvider implements DigitalOceanProvider {
 
   async applyFirewall(
     input: DigitalOceanFirewallInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
+    const aborted = abortedProviderResult<DigitalOceanResource>("firewall_failed", context);
+    if (aborted) return aborted;
     this.calls.push({ step: "firewall", input });
 
     const failure = this.#failure("firewall", "firewall_failed");
@@ -641,7 +818,10 @@ export class FakeDigitalOceanProvider implements DigitalOceanProvider {
 
   async cleanupResource(
     input: DigitalOceanCleanupInput,
+    context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
+    const aborted = abortedProviderResult<DigitalOceanResource>("cleanup_failed", context);
+    if (aborted) return aborted;
     this.calls.push({ step: "cleanup", input });
 
     const failure = this.#failure("cleanup", "cleanup_failed");
@@ -720,16 +900,35 @@ function apiDropletToResource(
 async function runSdkStep<T>(
   reason: DigitalOceanProviderErrorReason,
   execute: () => Promise<T>,
+  context?: DigitalOceanProviderRequestContext,
+  abortedReason: DigitalOceanProviderErrorReason = reason,
 ): Promise<DigitalOceanProviderResult<T>> {
+  if (context?.signal.aborted) {
+    return {
+      ok: false,
+      reason: abortedReason,
+      message: "DigitalOcean API request was cancelled before completion.",
+    };
+  }
+
   try {
     return { ok: true, value: await execute() };
   } catch (error) {
     return {
       ok: false,
-      reason,
+      reason: context?.signal.aborted ? abortedReason : reason,
       message: `DigitalOcean API request failed${readSdkStatusSuffix(error)}.`,
     };
   }
+}
+
+function abortedProviderResult<T>(
+  reason: DigitalOceanProviderErrorReason,
+  context: DigitalOceanProviderRequestContext | undefined,
+): DigitalOceanProviderResult<T> | null {
+  return context?.signal.aborted
+    ? { ok: false, reason, message: "DigitalOcean API request was cancelled before completion." }
+    : null;
 }
 
 function readSdkStatusSuffix(error: unknown): string {
