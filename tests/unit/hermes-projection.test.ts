@@ -11,7 +11,11 @@ import {
   prepareHermesState,
   mergeHermesEnv,
 } from "@/src/runner-service/hermes-projection";
-import { sampleLaunchSpec, sampleManagedLaunchSpec } from "@/tests/helpers/agent-launch-spec";
+import {
+  sampleDirectManagedLaunchSpec,
+  sampleLaunchSpec,
+  sampleManagedLaunchSpec,
+} from "@/tests/helpers/agent-launch-spec";
 
 const execFileAsync = promisify(execFile);
 const envReference = (name: string) => `$${`{${name}}`}`;
@@ -24,6 +28,23 @@ describe("Hermes home projection", () => {
       await rm(tempRoot, { recursive: true, force: true });
       tempRoot = null;
     }
+  });
+
+  it.each([
+    ["openai-api", "OPENAI_API_KEY"],
+    ["anthropic", "ANTHROPIC_API_KEY"],
+  ] as const)("projects direct %s configuration without other provider keys", async (provider, envKey) => {
+    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-direct-"));
+    const spec = sampleDirectManagedLaunchSpec(provider);
+    const result = await projectHermesHome(spec, { stateRoot: tempRoot });
+    const config = await readFile(result.configPath, "utf8");
+    const env = await readFile(result.envPath, "utf8");
+
+    expect(config).toContain(`provider: ${provider}`);
+    expect(config).toContain(`default: ${spec.model.model}`);
+    expect(env).toContain(`${envKey}="${spec.secrets.modelApiKey}"`);
+    expect(env).not.toContain("OPENROUTER_API_KEY");
+    expect(env).not.toContain(provider === "anthropic" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY");
   });
 
   it("preserves Hermes-owned setup and merges only AgentBay API settings", async () => {

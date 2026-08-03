@@ -169,6 +169,8 @@ export const agentApprovalStatusEnum = pgEnum("agent_approval_status", [
 
 export const agentSecretKindEnum = pgEnum("agent_secret_kind", [
   "openrouter_api_key",
+  "openai_api_key",
+  "anthropic_api_key",
   "telegram_bot_token",
   "telegram_allowed_users",
   "api_server_key",

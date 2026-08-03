@@ -22,15 +22,11 @@ export type NativeAgentLaunchSpec = {
   };
 };
 
-export type ManagedAgentLaunchSpec = {
+type ManagedAgentLaunchSpecCommon = {
   version: typeof MANAGED_AGENT_LAUNCH_SPEC_VERSION;
   requestId: string;
   agent: AgentLaunchSpecAgent;
   image: AgentLaunchSpecImage;
-  model: {
-    provider: "openrouter";
-    model: string;
-  };
   platforms: {
     required: readonly ["api_server", "telegram"];
     apiServer: {
@@ -48,6 +44,13 @@ export type ManagedAgentLaunchSpec = {
   prompt: AgentLaunchSpecPrompt;
   runtime: ManagedAgentLaunchSpecRuntime;
   tools: AgentLaunchSpecTools;
+};
+
+export type LegacyManagedAgentLaunchSpec = ManagedAgentLaunchSpecCommon & {
+  model: {
+    provider: "openrouter";
+    model: string;
+  };
   secrets: {
     kind: "inline";
     openrouterApiKey: string;
@@ -56,6 +59,22 @@ export type ManagedAgentLaunchSpec = {
     apiServerKey: string;
   };
 };
+
+export type DirectManagedAgentLaunchSpec = ManagedAgentLaunchSpecCommon & {
+  model: {
+    provider: "openai-api" | "anthropic";
+    model: string;
+  };
+  secrets: {
+    kind: "inline";
+    modelApiKey: string;
+    telegramBotToken: string;
+    telegramAllowedUsers: readonly string[];
+    apiServerKey: string;
+  };
+};
+
+export type ManagedAgentLaunchSpec = LegacyManagedAgentLaunchSpec | DirectManagedAgentLaunchSpec;
 
 export type AgentLaunchSpec = NativeAgentLaunchSpec | ManagedAgentLaunchSpec;
 
@@ -160,11 +179,20 @@ const SECRETS_KEYS_V3 = [
   "telegramAllowedUsers",
   "apiServerKey",
 ] as const;
+const DIRECT_SECRETS_KEYS_V3 = [
+  "kind",
+  "modelApiKey",
+  "telegramBotToken",
+  "telegramAllowedUsers",
+  "apiServerKey",
+] as const;
 const SECRET_REPLACEMENT = "[secret]";
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,79}$/;
 const IMAGE_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/+%-]{0,511}$/;
 const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const OPENROUTER_KEY_PATTERN = /^sk-or-v1-[A-Za-z0-9_-]{20,}$/;
+const OPENAI_KEY_PATTERN = /^sk-(?!ant-|or-v1-)[A-Za-z0-9_-]{20,}$/;
+const ANTHROPIC_KEY_PATTERN = /^sk-ant-[A-Za-z0-9_-]{20,}$/;
 const TELEGRAM_BOT_TOKEN_PATTERN = /^[1-9][0-9]{5,19}:[A-Za-z0-9_-]{20,}$/;
 const TELEGRAM_USER_ID_PATTERN = /^[1-9][0-9]{0,19}$/;
 
@@ -207,11 +235,16 @@ export function parseAgentLaunchSpecJson(input: string): AgentLaunchSpecParseRes
 
 export function redactAgentLaunchSpec<T extends AgentLaunchSpec>(spec: T): T {
   if (spec.version === MANAGED_AGENT_LAUNCH_SPEC_VERSION) {
+    const modelCredential =
+      "openrouterApiKey" in spec.secrets
+        ? { openrouterApiKey: SECRET_REPLACEMENT }
+        : { modelApiKey: SECRET_REPLACEMENT };
+
     return {
       ...spec,
       secrets: {
         kind: "inline",
-        openrouterApiKey: SECRET_REPLACEMENT,
+        ...modelCredential,
         telegramBotToken: SECRET_REPLACEMENT,
         telegramAllowedUsers: [SECRET_REPLACEMENT],
         apiServerKey: SECRET_REPLACEMENT,
@@ -293,6 +326,7 @@ function parseManagedAgentLaunchSpec(
     ? readRecord(guardrails, "hardStopAfter", issues, "$.runtime.toolLoopGuardrails")
     : null;
   const secrets = readRecord(value, "secrets", issues);
+  const provider = model ? readManagedProvider(model, issues) : "openrouter";
 
   if (model) {
     assertExactKeys("$.model", model, MODEL_KEYS, issues);
@@ -321,18 +355,17 @@ function parseManagedAgentLaunchSpec(
     );
   }
   if (secrets) {
-    assertExactKeys("$.secrets", secrets, SECRETS_KEYS_V3, issues);
+    assertExactKeys(
+      "$.secrets",
+      secrets,
+      provider === "openrouter" ? SECRETS_KEYS_V3 : DIRECT_SECRETS_KEYS_V3,
+      issues,
+    );
   }
 
-  const spec = {
+  const commonSpec = {
     ...common,
     version: readLiteral(value, "version", MANAGED_AGENT_LAUNCH_SPEC_VERSION, issues),
-    model: {
-      provider: model
-        ? readLiteral(model, "provider", "openrouter", issues, "$.model")
-        : "openrouter",
-      model: model ? readOpenRouterModelId(model, "model", issues) : "",
-    },
     platforms: {
       required: platforms
         ? readStringTuple(
@@ -373,20 +406,59 @@ function parseManagedAgentLaunchSpec(
       },
     },
     runtime: parseManagedRuntime(runtime, guardrails, hardStopAfter, issues),
-    secrets: {
-      kind: secrets ? readLiteral(secrets, "kind", "inline", issues, "$.secrets") : "inline",
-      openrouterApiKey: secrets
-        ? readPatternedSecret(secrets, "openrouterApiKey", OPENROUTER_KEY_PATTERN, 512, issues)
-        : "",
-      telegramBotToken: secrets
-        ? readPatternedSecret(secrets, "telegramBotToken", TELEGRAM_BOT_TOKEN_PATTERN, 256, issues)
-        : "",
-      telegramAllowedUsers: secrets
-        ? readTelegramAllowedUsers(secrets, "telegramAllowedUsers", issues)
-        : [],
-      apiServerKey: secrets ? readApiServerKey(secrets, "apiServerKey", issues) : "",
-    },
-  } satisfies ManagedAgentLaunchSpec;
+  } satisfies ManagedAgentLaunchSpecCommon;
+
+  const sharedSecrets = {
+    kind: secrets ? readLiteral(secrets, "kind", "inline", issues, "$.secrets") : "inline",
+    telegramBotToken: secrets
+      ? readPatternedSecret(secrets, "telegramBotToken", TELEGRAM_BOT_TOKEN_PATTERN, 256, issues)
+      : "",
+    telegramAllowedUsers: secrets
+      ? readTelegramAllowedUsers(secrets, "telegramAllowedUsers", issues)
+      : [],
+    apiServerKey: secrets ? readApiServerKey(secrets, "apiServerKey", issues) : "",
+  } as const;
+
+  const spec: ManagedAgentLaunchSpec =
+    provider === "openrouter"
+      ? {
+          ...commonSpec,
+          model: {
+            provider,
+            model: model ? readOpenRouterModelId(model, "model", issues) : "",
+          },
+          secrets: {
+            ...sharedSecrets,
+            openrouterApiKey: secrets
+              ? readPatternedSecret(
+                  secrets,
+                  "openrouterApiKey",
+                  OPENROUTER_KEY_PATTERN,
+                  512,
+                  issues,
+                )
+              : "",
+          },
+        }
+      : {
+          ...commonSpec,
+          model: {
+            provider,
+            model: model ? readDirectModelId(model, "model", issues) : "",
+          },
+          secrets: {
+            ...sharedSecrets,
+            modelApiKey: secrets
+              ? readPatternedSecret(
+                  secrets,
+                  "modelApiKey",
+                  provider === "anthropic" ? ANTHROPIC_KEY_PATTERN : OPENAI_KEY_PATTERN,
+                  512,
+                  issues,
+                )
+              : "",
+          },
+        };
 
   return issues.length > 0 ? { ok: false, issues } : { ok: true, spec };
 }
@@ -525,12 +597,11 @@ function parseManagedRuntime(
 
 function toCanonicalAgentLaunchSpec(spec: AgentLaunchSpec): AgentLaunchSpec {
   if (spec.version === MANAGED_AGENT_LAUNCH_SPEC_VERSION) {
-    return {
+    const common = {
       version: spec.version,
       requestId: spec.requestId,
       agent: { ...spec.agent },
       image: { ref: spec.image.ref },
-      model: { provider: "openrouter", model: spec.model.model },
       platforms: {
         required: ["api_server", "telegram"],
         apiServer: { enabled: true, host: "0.0.0.0", port: 8642 },
@@ -553,9 +624,34 @@ function toCanonicalAgentLaunchSpec(spec: AgentLaunchSpec): AgentLaunchSpec {
         enabled: ["file_operations", "terminal"],
         disabled: ["browser", "mcp", "delegation", "voice", "code_execution"],
       },
+    } satisfies ManagedAgentLaunchSpecCommon;
+
+    if ("openrouterApiKey" in spec.secrets) {
+      return {
+        ...common,
+        model: {
+          provider: "openrouter",
+          model: spec.model.model,
+        },
+        secrets: {
+          kind: "inline",
+          openrouterApiKey: spec.secrets.openrouterApiKey,
+          telegramBotToken: spec.secrets.telegramBotToken,
+          telegramAllowedUsers: [...spec.secrets.telegramAllowedUsers],
+          apiServerKey: spec.secrets.apiServerKey,
+        },
+      };
+    }
+
+    return {
+      ...common,
+      model: {
+        provider: spec.model.provider === "anthropic" ? "anthropic" : "openai-api",
+        model: spec.model.model,
+      },
       secrets: {
         kind: "inline",
-        openrouterApiKey: spec.secrets.openrouterApiKey,
+        modelApiKey: spec.secrets.modelApiKey,
         telegramBotToken: spec.secrets.telegramBotToken,
         telegramAllowedUsers: [...spec.secrets.telegramAllowedUsers],
         apiServerKey: spec.secrets.apiServerKey,
@@ -829,6 +925,34 @@ function readOpenRouterModelId(
 
   if (!MODEL_ID_PATTERN.test(model) || model.includes("..")) {
     issues.push({ path: "$.model.model", message: "OpenRouter model id is invalid." });
+  }
+
+  return model;
+}
+
+function readManagedProvider(
+  value: Record<string, unknown>,
+  issues: Array<{ path: string; message: string }>,
+): "openrouter" | "openai-api" | "anthropic" {
+  const provider = value.provider;
+
+  if (provider !== "openrouter" && provider !== "openai-api" && provider !== "anthropic") {
+    issues.push({ path: "$.model.provider", message: "Managed model provider is invalid." });
+    return "openrouter";
+  }
+
+  return provider;
+}
+
+function readDirectModelId(
+  value: Record<string, unknown>,
+  key: string,
+  issues: Array<{ path: string; message: string }>,
+): string {
+  const model = readBoundedString(value, key, issues, { min: 3, maxBytes: 128 }, "$.model");
+
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(model) || model.includes("..")) {
+    issues.push({ path: "$.model.model", message: "Managed model id is invalid." });
   }
 
   return model;

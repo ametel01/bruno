@@ -2091,7 +2091,9 @@ function inspectContainsSecretValue(
   const highEntropySecrets =
     launchSpec.version === "agentbay.hermes.launch.v3"
       ? [
-          launchSpec.secrets.openrouterApiKey,
+          "openrouterApiKey" in launchSpec.secrets
+            ? launchSpec.secrets.openrouterApiKey
+            : launchSpec.secrets.modelApiKey,
           launchSpec.secrets.telegramBotToken,
           launchSpec.secrets.apiServerKey,
         ]

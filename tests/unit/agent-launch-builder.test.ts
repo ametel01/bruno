@@ -210,6 +210,36 @@ describe("Hermes launch spec builder", () => {
     });
   });
 
+  it.each([
+    ["openai-api", "gpt-5.4", "openai_api_key", `sk-${"o".repeat(32)}`],
+    ["anthropic", "claude-sonnet-4-6", "anthropic_api_key", `sk-ant-${"a".repeat(32)}`],
+  ] as const)("builds direct managed %s specs without exposing legacy OpenRouter fields", async (provider, model, secretKind, key) => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Direct Managed Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    await configureManagedHermes(connection, created.agent.userId, created.agent.id, {
+      provider,
+      model,
+      secretKind,
+      key,
+    });
+
+    const result = await buildHermesAgentLaunchSpecForUser(created.agent.userId, created.agent.id, {
+      createConnection: () => connection,
+      env: KEYRING_ENV,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      spec: {
+        model: { provider, model },
+        secrets: { modelApiKey: key },
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("openrouterApiKey");
+  });
+
   it("keeps deployment-backed non-OpenRouter agents on the native v2 path", async () => {
     const created = await createAgentForDevelopmentUser(
       { name: "Native Deployment Agent", templateKey: "research_agent" },
@@ -329,13 +359,23 @@ async function configureManagedHermes(
   connection: DatabaseConnection,
   userId: string,
   agentId: string,
-  options: { createDeployment?: boolean } = {},
+  options: {
+    createDeployment?: boolean;
+    provider?: "openrouter" | "openai-api" | "anthropic";
+    model?: string;
+    secretKind?: "openrouter_api_key" | "openai_api_key" | "anthropic_api_key";
+    key?: string;
+  } = {},
 ): Promise<void> {
+  const provider = options.provider ?? "openrouter";
+  const model = options.model ?? "openai/gpt-4.1-mini";
+  const secretKind = options.secretKind ?? "openrouter_api_key";
+  const key = options.key ?? "sk-or-v1-managedopenrouterkey1234567890";
   await connection.db
     .update(agentConfigs)
     .set({
-      modelProvider: "openrouter",
-      modelName: "openai/gpt-4.1-mini",
+      modelProvider: provider,
+      modelName: model,
       updatedAt: new Date("2026-08-03T03:00:00.000Z"),
     })
     .where(eq(agentConfigs.agentId, agentId));
@@ -343,8 +383,8 @@ async function configureManagedHermes(
     userId,
     agentId,
     {
-      kind: "openrouter_api_key",
-      value: "sk-or-v1-managedopenrouterkey1234567890",
+      kind: secretKind,
+      value: key,
     },
     { createConnection: () => connection, env: KEYRING_ENV },
   );

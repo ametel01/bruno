@@ -601,6 +601,8 @@ async function observeAgentOwnership(
 function emptySecretCounts(): SecretStatusCounts {
   return {
     openrouter_api_key: { active: 0, revoked: 0 },
+    openai_api_key: { active: 0, revoked: 0 },
+    anthropic_api_key: { active: 0, revoked: 0 },
     telegram_bot_token: { active: 0, revoked: 0 },
     telegram_allowed_users: { active: 0, revoked: 0 },
     api_server_key: { active: 0, revoked: 0 },

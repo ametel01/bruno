@@ -14,6 +14,10 @@ import {
 } from "@/src/server/agents/agent-launch-spec";
 import { validateDeploymentConfigRevision } from "@/src/server/agents/deployment-state";
 import { getApprovedOpenRouterModel } from "@/src/server/agents/openrouter-models";
+import {
+  getAssistantProfileForManagedModel,
+  isManagedDirectModel,
+} from "@/src/server/agents/assistant-profiles";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentConfigs, agentDeployments, agents } from "@/src/server/db/schema";
 import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
@@ -58,7 +62,7 @@ type AgentLaunchConfigRow = {
 const REQUIRED_NATIVE_SECRET_KINDS = [
   "api_server_key",
 ] as const satisfies readonly AgentSecretKind[];
-const REQUIRED_MANAGED_SECRET_KINDS = [
+const REQUIRED_LEGACY_MANAGED_SECRET_KINDS = [
   "openrouter_api_key",
   "telegram_bot_token",
   "telegram_allowed_users",
@@ -112,7 +116,10 @@ export async function buildHermesAgentLaunchSpecForUser(
           return await buildManagedLaunchSpec({ row, userId, tx, dependencies });
         }
 
-        if (row.deployment && row.config.modelProvider === "openrouter") {
+        if (
+          row.deployment &&
+          ["openrouter", "openai-api", "anthropic"].includes(row.config.modelProvider)
+        ) {
           return {
             ok: false,
             reason: "managed_configuration_invalid",
@@ -140,8 +147,9 @@ export async function buildHermesAgentLaunchSpecForUser(
 function isManagedLaunchRow(row: AgentLaunchConfigRow): boolean {
   return (
     row.deployment !== null &&
-    row.config.modelProvider === "openrouter" &&
-    getApprovedOpenRouterModel(row.config.modelName) !== null
+    ((row.config.modelProvider === "openrouter" &&
+      getApprovedOpenRouterModel(row.config.modelName) !== null) ||
+      isManagedDirectModel(row.config.modelProvider, row.config.modelName))
   );
 }
 
@@ -229,9 +237,16 @@ async function buildManagedLaunchSpec(input: {
   tx: AgentLaunchTransaction;
   dependencies: AgentLaunchSpecBuilderDependencies;
 }): Promise<AgentLaunchSpecBuildResult> {
-  const model = getApprovedOpenRouterModel(input.row.config.modelName);
+  const legacyModel =
+    input.row.config.modelProvider === "openrouter"
+      ? getApprovedOpenRouterModel(input.row.config.modelName)
+      : null;
+  const assistantProfile = getAssistantProfileForManagedModel(
+    input.row.config.modelProvider,
+    input.row.config.modelName,
+  );
 
-  if (!input.row.deployment || input.row.config.modelProvider !== "openrouter" || !model) {
+  if (!input.row.deployment || (!legacyModel && !assistantProfile)) {
     return {
       ok: false,
       reason: "managed_configuration_invalid",
@@ -258,7 +273,14 @@ async function buildManagedLaunchSpec(input: {
     userId: input.userId,
     agentId: input.row.agent.id,
     ...(input.dependencies.env ? { env: input.dependencies.env } : {}),
-    kinds: REQUIRED_MANAGED_SECRET_KINDS,
+    kinds: legacyModel
+      ? REQUIRED_LEGACY_MANAGED_SECRET_KINDS
+      : ([
+          assistantProfile?.secretKind ?? "openai_api_key",
+          "telegram_bot_token",
+          "telegram_allowed_users",
+          "api_server_key",
+        ] as const),
   });
 
   if (!decrypted.ok) {
@@ -270,7 +292,7 @@ async function buildManagedLaunchSpec(input: {
     };
   }
 
-  const spec = {
+  const commonSpec = {
     version: MANAGED_AGENT_LAUNCH_SPEC_VERSION,
     requestId: input.dependencies.requestId?.() ?? randomUUID(),
     agent: {
@@ -282,10 +304,6 @@ async function buildManagedLaunchSpec(input: {
     },
     image: {
       ref: input.dependencies.hermesWorkloadImage?.trim() || DEFAULT_HERMES_WORKLOAD_IMAGE,
-    },
-    model: {
-      provider: "openrouter",
-      model: model.id,
     },
     platforms: {
       required: ["api_server", "telegram"],
@@ -326,14 +344,34 @@ async function buildManagedLaunchSpec(input: {
       enabled: ["file_operations", "terminal"],
       disabled: ["browser", "mcp", "delegation", "voice", "code_execution"],
     },
-    secrets: {
-      kind: "inline",
-      openrouterApiKey: decrypted.secrets.openrouter_api_key,
-      telegramBotToken: decrypted.secrets.telegram_bot_token,
-      telegramAllowedUsers: decrypted.secrets.telegram_allowed_users.split(","),
-      apiServerKey: decrypted.secrets.api_server_key,
-    },
-  } satisfies AgentLaunchSpec;
+  } as const;
+
+  const spec: AgentLaunchSpec = legacyModel
+    ? {
+        ...commonSpec,
+        model: { provider: "openrouter", model: legacyModel.id },
+        secrets: {
+          kind: "inline",
+          openrouterApiKey: decrypted.secrets.openrouter_api_key,
+          telegramBotToken: decrypted.secrets.telegram_bot_token,
+          telegramAllowedUsers: decrypted.secrets.telegram_allowed_users.split(","),
+          apiServerKey: decrypted.secrets.api_server_key,
+        },
+      }
+    : {
+        ...commonSpec,
+        model: {
+          provider: assistantProfile?.hermesProvider ?? "openai-api",
+          model: assistantProfile?.model ?? "invalid",
+        },
+        secrets: {
+          kind: "inline",
+          modelApiKey: decrypted.secrets[assistantProfile?.secretKind ?? "openai_api_key"],
+          telegramBotToken: decrypted.secrets.telegram_bot_token,
+          telegramAllowedUsers: decrypted.secrets.telegram_allowed_users.split(","),
+          apiServerKey: decrypted.secrets.api_server_key,
+        },
+      };
 
   return parseBuiltSpec(spec);
 }

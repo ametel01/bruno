@@ -6,7 +6,11 @@ import {
   serializeAgentLaunchSpec,
   serializeRedactedAgentLaunchSpec,
 } from "@/src/server/agents/agent-launch-spec";
-import { sampleLaunchSpec, sampleManagedLaunchSpec } from "@/tests/helpers/agent-launch-spec";
+import {
+  sampleDirectManagedLaunchSpec,
+  sampleLaunchSpec,
+  sampleManagedLaunchSpec,
+} from "@/tests/helpers/agent-launch-spec";
 
 describe("AgentLaunchSpec", () => {
   it("accepts the versioned Hermes launch contract and redacts inline secrets", () => {
@@ -77,6 +81,39 @@ describe("AgentLaunchSpec", () => {
       expect(redacted).not.toContain(canary);
       expect(JSON.stringify(redactAgentLaunchSpec(spec))).not.toContain(canary);
     }
+  });
+
+  it.each([
+    "openai-api",
+    "anthropic",
+  ] as const)("accepts and redacts direct %s managed credentials", (provider) => {
+    const spec = sampleDirectManagedLaunchSpec(provider);
+    const parsed = parseAgentLaunchSpec(spec);
+
+    expect(parsed).toEqual({ ok: true, spec });
+    const serialized = serializeAgentLaunchSpec(spec);
+    const redacted = serializeRedactedAgentLaunchSpec(spec);
+
+    expect(serialized).toContain(`"provider":"${provider}"`);
+    expect(serialized).toContain('"modelApiKey"');
+    expect(serialized).not.toContain("openrouterApiKey");
+    expect(redacted).not.toContain(spec.secrets.modelApiKey);
+    expect(redacted).toContain('"modelApiKey":"[secret]"');
+  });
+
+  it("rejects provider/key mismatches and legacy OpenRouter fields on direct providers", () => {
+    const direct = sampleDirectManagedLaunchSpec("anthropic");
+    const wrongKey = {
+      ...direct,
+      secrets: { ...direct.secrets, modelApiKey: `sk-${"a".repeat(32)}` },
+    };
+    const legacyField = {
+      ...direct,
+      secrets: { ...direct.secrets, openrouterApiKey: `sk-or-v1-${"b".repeat(32)}` },
+    };
+
+    expect(parseAgentLaunchSpec(wrongKey)).toMatchObject({ ok: false });
+    expect(parseAgentLaunchSpec(legacyField)).toMatchObject({ ok: false });
   });
 
   it("rejects managed v3 token, allowlist, prototype, and exact-key hazards safely", () => {

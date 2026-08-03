@@ -202,6 +202,31 @@ describe("agent secret storage", () => {
       replaceAgentSecretForUser(
         created.agent.userId,
         created.agent.id,
+        { kind: "openai_api_key", value: `sk-${"a".repeat(32)}` },
+        { createConnection: () => connection, env: KEYRING_ENV },
+      ),
+    ).resolves.toMatchObject({ ok: true, secret: { kind: "openai_api_key" } });
+    await expect(
+      replaceAgentSecretForUser(
+        created.agent.userId,
+        created.agent.id,
+        { kind: "anthropic_api_key", value: `sk-ant-${"b".repeat(32)}` },
+        { createConnection: () => connection, env: KEYRING_ENV },
+      ),
+    ).resolves.toMatchObject({ ok: true, secret: { kind: "anthropic_api_key" } });
+    await expect(
+      replaceAgentSecretForUser(
+        created.agent.userId,
+        created.agent.id,
+        { kind: "openai_api_key", value: `sk-ant-${"c".repeat(32)}` },
+        { createConnection: () => connection, env: KEYRING_ENV },
+      ),
+    ).resolves.toMatchObject({ ok: false, reason: "validation_failed" });
+
+    await expect(
+      replaceAgentSecretForUser(
+        created.agent.userId,
+        created.agent.id,
         { kind: "telegram_allowed_users", value: "123,*" },
         { createConnection: () => connection, env: KEYRING_ENV },
       ),

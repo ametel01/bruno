@@ -62,6 +62,8 @@ const PUBLIC_FILE_MODE = 0o644;
 const GUARDED_FILES = ["config.yaml", ".env", "SOUL.md", "agentbay-config-revision.json"] as const;
 const MANAGED_ENV_KEYS = [
   "OPENROUTER_API_KEY",
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_ALLOWED_USERS",
   "API_SERVER_KEY",
@@ -86,6 +88,8 @@ const SECRET_KEY_PATTERN =
   /(^|_|\b)(token|password|credential|authorization|private[_-]?key|api[_-]?key|secret)(_|$|\b)/i;
 const ENV_REFERENCE_PATTERN = /^(?:\$\{[A-Z_][A-Z0-9_]*\}|env:[A-Z_][A-Z0-9_]*)$/;
 const OPENROUTER_KEY_PATTERN = /^sk-or-v1-[A-Za-z0-9_-]{20,}$/;
+const OPENAI_KEY_PATTERN = /^sk-(?!ant-|or-v1-)[A-Za-z0-9_-]{20,}$/;
+const ANTHROPIC_KEY_PATTERN = /^sk-ant-[A-Za-z0-9_-]{20,}$/;
 const TELEGRAM_BOT_TOKEN_PATTERN = /^[1-9][0-9]{5,19}:[A-Za-z0-9_-]{20,}$/;
 const API_SERVER_KEY_PATTERN = /^agb_agent_[A-Za-z0-9_-]{32,}$/;
 const NODE_FS: HermesProjectionFilesystem = {
@@ -248,7 +252,7 @@ function renderManagedHermesConfig(existing: string, spec: ManagedAgentLaunchSpe
 
   removeManagedLegacySecretPaths(config);
   rejectSecretBearingYaml(config);
-  setPath(config, ["model", "provider"], "openrouter");
+  setPath(config, ["model", "provider"], spec.model.provider);
   setPath(config, ["model", "default"], spec.model.model);
   deletePath(config, ["model", "api_key"]);
   setPath(config, ["terminal", "backend"], "local");
@@ -280,8 +284,15 @@ function renderManagedHermesConfig(existing: string, spec: ManagedAgentLaunchSpe
 
 function renderHermesEnv(spec: AgentLaunchSpec): string {
   if (spec.version === MANAGED_AGENT_LAUNCH_SPEC_VERSION) {
+    const modelCredential =
+      "openrouterApiKey" in spec.secrets
+        ? `OPENROUTER_API_KEY=${envValue(spec.secrets.openrouterApiKey)}`
+        : spec.model.provider === "anthropic"
+          ? `ANTHROPIC_API_KEY=${envValue(spec.secrets.modelApiKey)}`
+          : `OPENAI_API_KEY=${envValue(spec.secrets.modelApiKey)}`;
+
     return [
-      `OPENROUTER_API_KEY=${envValue(spec.secrets.openrouterApiKey)}`,
+      modelCredential,
       `TELEGRAM_BOT_TOKEN=${envValue(spec.secrets.telegramBotToken)}`,
       `TELEGRAM_ALLOWED_USERS=${envValue(spec.secrets.telegramAllowedUsers.join(","))}`,
       `API_SERVER_KEY=${envValue(spec.secrets.apiServerKey)}`,
@@ -517,6 +528,8 @@ function rejectSecretBearingYaml(value: PlainYamlValue, keyPath: string[] = []):
   if (typeof value === "string") {
     if (
       OPENROUTER_KEY_PATTERN.test(value.trim()) ||
+      OPENAI_KEY_PATTERN.test(value.trim()) ||
+      ANTHROPIC_KEY_PATTERN.test(value.trim()) ||
       TELEGRAM_BOT_TOKEN_PATTERN.test(value.trim()) ||
       API_SERVER_KEY_PATTERN.test(value.trim())
     ) {

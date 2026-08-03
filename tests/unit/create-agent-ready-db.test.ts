@@ -27,7 +27,7 @@ const FOREIGN_RUNNER_ID = "00000000-0000-4000-8000-000000000403";
 const NOW = new Date("2026-08-03T06:00:00.000Z");
 const TOKEN = "123456:abcdefghijklmnopqrstuvwxyz";
 const SECOND_TOKEN = "654321:abcdefghijklmnopqrstuvwxyz";
-const OPENROUTER_KEY = "sk-or-v1-abcdefghijklmnopqrstuvwxyz123456";
+const OPENAI_KEY = "sk-abcdefghijklmnopqrstuvwxyz1234567890";
 const KEYRING_ENV = {
   AGENTBAY_READY_AGENT_CREATION_ENABLED: "true",
   AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
@@ -66,11 +66,11 @@ describe("ready agent creation persistence", () => {
         userId: USER_A_ID,
         status: "stopped",
         desiredStatus: "running",
-        model: { provider: "openrouter", id: "openai/gpt-4.1-mini" },
+        assistant: { id: "chatgpt", displayName: "ChatGPT" },
         telegramBot: { id: "123456", username: "Valid_bot" },
       },
     });
-    expect(JSON.stringify(result)).not.toContain(OPENROUTER_KEY);
+    expect(JSON.stringify(result)).not.toContain(OPENAI_KEY);
     expect(JSON.stringify(result)).not.toContain(TOKEN);
     expect(JSON.stringify(result)).not.toContain("agb_agent_");
 
@@ -87,14 +87,14 @@ describe("ready agent creation persistence", () => {
       runnerId: null,
     });
     expect(config).toMatchObject({
-      modelProvider: "openrouter",
-      modelName: "openai/gpt-4.1-mini",
+      modelProvider: "openai-api",
+      modelName: "gpt-5.4",
       systemPrompt: getAgentTemplateSnapshot("research_agent").defaultSystemPrompt,
     });
     expect(secrets).toHaveLength(4);
     expect(secrets.map((secret) => secret.kind).sort()).toEqual([
       "api_server_key",
-      "openrouter_api_key",
+      "openai_api_key",
       "telegram_allowed_users",
       "telegram_bot_token",
     ]);
@@ -121,14 +121,41 @@ describe("ready agent creation persistence", () => {
         status: "stopped",
         desiredStatus: "running",
         launchMode: "ready",
-        modelProvider: "openrouter",
-        modelName: "openai/gpt-4.1-mini",
+        assistant: "chatgpt",
         runnerAssignment: "none",
         deploymentId: deployment?.id,
       },
     });
     expect(JSON.stringify(event?.metadata)).not.toContain("123456");
     expect(JSON.stringify(event?.metadata)).not.toContain("ready-key-001");
+  });
+
+  it("creates Claude with the direct Anthropic binding and encrypted Anthropic key", async () => {
+    const anthropicKey = `sk-ant-${"c".repeat(32)}`;
+    const result = await createAgentForUser(
+      USER_A_ID,
+      readyInput("ready-key-claude", { assistant: "claude", modelApiKey: anthropicKey }),
+      {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        now: () => NOW,
+        randomBytes: incrementalRandomBytes(),
+        telegramBotValidator: telegramValidator(),
+      },
+    );
+
+    expect(result).toMatchObject({
+      agent: { assistant: { id: "claude", displayName: "Claude" } },
+    });
+    const [config] = await connection.db.select().from(agentConfigs);
+    const secrets = await connection.db.select().from(agentSecrets);
+
+    expect(config).toMatchObject({
+      modelProvider: "anthropic",
+      modelName: "claude-sonnet-4-6",
+    });
+    expect(secrets.map((secret) => secret.kind)).toContain("anthropic_api_key");
+    expect(JSON.stringify(result)).not.toContain(anthropicKey);
   });
 
   it("replays an existing ready deployment before flag and credential validation", async () => {
@@ -268,7 +295,7 @@ describe("ready agent creation persistence", () => {
   it("rolls back every logical ready-create group at each insert boundary", async () => {
     const boundaries: ReadyCreateInsertBoundary[] = [
       "config",
-      "secret:openrouter_api_key",
+      "secret:openai_api_key",
       "secret:telegram_bot_token",
       "secret:telegram_allowed_users",
       "secret:api_server_key",
@@ -458,7 +485,12 @@ describe("ready agent creation persistence", () => {
 
 function readyInput(
   idempotencyKey: string,
-  overrides: { runnerId?: string | null; token?: string } = {},
+  overrides: {
+    runnerId?: string | null;
+    token?: string;
+    assistant?: "chatgpt" | "claude";
+    modelApiKey?: string;
+  } = {},
 ) {
   return {
     name: "Ready Agent",
@@ -466,8 +498,8 @@ function readyInput(
     runnerId: overrides.runnerId ?? null,
     launchMode: "ready" as const,
     idempotencyKey,
-    openrouterModel: "openai/gpt-4.1-mini",
-    openrouterApiKey: OPENROUTER_KEY,
+    assistant: overrides.assistant ?? "chatgpt",
+    modelApiKey: overrides.modelApiKey ?? OPENAI_KEY,
     telegramBotToken: overrides.token ?? TOKEN,
     telegramAllowedUserIds: ["111111", "222222", "111111"],
   };

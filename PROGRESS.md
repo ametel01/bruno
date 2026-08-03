@@ -559,7 +559,7 @@ and direct Anthropic under the user-facing choices ChatGPT and Claude.
 ### Correction Checklist
 
 - [x] Step 1: Correct the Product Contract
-- [ ] Step 2: Add Direct ChatGPT and Claude Runtime Support
+- [x] Step 2: Add Direct ChatGPT and Claude Runtime Support
 - [ ] Step 3: Ship the One-Click Common Flow
 - [ ] Step 4: Correct Acceptance, Documentation, and Release Evidence
 
@@ -568,6 +568,6 @@ and direct Anthropic under the user-facing choices ChatGPT and Claude.
 | Step | State | Commit | Evidence | Next work |
 | --- | --- | --- | --- | --- |
 | 1. Correct the Product Contract | Complete | This commit | Replaced the active OpenRouter-first plan with a ChatGPT/Claude model-connection contract; documented direct API-key billing, Anthropic's third-party subscription-auth restriction, the one-click automation boundary, legacy compatibility, strict quality gates, and per-step commits. Historical ledgers remain intact and `CHANGELOG.md` receives no planning-only entry. | Implement the provider-neutral catalog, reusable connections, encrypted credentials, strict launch/projection support, and legacy compatibility in Step 2. |
-| 2. Add Direct ChatGPT and Claude Runtime Support | Pending | — | — | Depends on Step 1. |
+| 2. Add Direct ChatGPT and Claude Runtime Support | Complete | This commit | Added server-owned ChatGPT/OpenAI and Claude/Anthropic profiles, provider-specific encrypted secret kinds, strict direct managed launch parsing/redaction/canonicalization, exact `openai-api`/`anthropic` Hermes config and environment projection, direct lifecycle/deployment/launch-builder eligibility, and legacy-only OpenRouter compatibility. Generated migration `0021_careful_praxagora`; clean migration and idempotent rerun passed in isolated `plingpling_provider_step2`, and the fixture database was removed. Format, lint, typecheck, diff hygiene, 10 focused files / 140 tests, fake-cloud smoke, and the 82-second pinned local Hermes contract smoke passed without external provider or Telegram effects. | Replace the wide OpenRouter create UI with the reusable nontechnical ChatGPT/Claude common flow in Step 3. |
 | 3. Ship the One-Click Common Flow | Pending | — | — | Depends on Step 2. |
 | 4. Correct Acceptance, Documentation, and Release Evidence | Pending | — | — | Depends on Steps 1-3. |

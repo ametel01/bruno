@@ -19,6 +19,7 @@ import { scheduleAgentRuntimeReconcileAfterResponse } from "@/src/server/agents/
 import { revokeActiveAgentSecretsInTransaction } from "@/src/server/agents/agent-secrets";
 import { hermesConfigurationBlocker } from "@/src/server/agents/hermes-readiness";
 import { getApprovedOpenRouterModel } from "@/src/server/agents/openrouter-models";
+import { getAssistantProfileForManagedModel } from "@/src/server/agents/assistant-profiles";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
 import {
@@ -845,14 +846,19 @@ async function readHermesConfigurationBlocker(
     .limit(1);
   const isManaged =
     latestDeployment !== undefined &&
-    config?.modelProvider === "openrouter" &&
-    getApprovedOpenRouterModel(config.modelName) !== null;
+    ((config?.modelProvider === "openrouter" &&
+      getApprovedOpenRouterModel(config.modelName) !== null) ||
+      (config !== undefined &&
+        getAssistantProfileForManagedModel(config.modelProvider, config.modelName) !== null));
 
   if (isManaged) {
     const secretKinds = new Set(activeSecretRows.map((secret) => secret.kind));
 
+    const profile = config
+      ? getAssistantProfileForManagedModel(config.modelProvider, config.modelName)
+      : null;
     const requiredManagedSecretKinds = [
-      "openrouter_api_key",
+      profile?.secretKind ?? "openrouter_api_key",
       "telegram_bot_token",
       "telegram_allowed_users",
       "api_server_key",

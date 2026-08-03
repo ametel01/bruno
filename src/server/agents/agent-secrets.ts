@@ -27,6 +27,8 @@ import type * as schema from "@/src/server/db/schema";
 
 export const AGENT_SECRET_KINDS = [
   "openrouter_api_key",
+  "openai_api_key",
+  "anthropic_api_key",
   "telegram_bot_token",
   "telegram_allowed_users",
   "api_server_key",
@@ -34,6 +36,8 @@ export const AGENT_SECRET_KINDS = [
 
 export const USER_MANAGED_AGENT_SECRET_KINDS = [
   "openrouter_api_key",
+  "openai_api_key",
+  "anthropic_api_key",
   "telegram_bot_token",
   "telegram_allowed_users",
 ] as const;
@@ -980,6 +984,23 @@ function validateAgentSecretValue(
     return {
       ok: false,
       issues: [{ field: "value", message: "OpenRouter API key format is invalid." }],
+    };
+  }
+
+  if (
+    kind === "openai_api_key" &&
+    !/^sk-(?!ant-|or-v1-)[A-Za-z0-9_-]{20,}$/.test(normalized.value)
+  ) {
+    return {
+      ok: false,
+      issues: [{ field: "value", message: "OpenAI API key format is invalid." }],
+    };
+  }
+
+  if (kind === "anthropic_api_key" && !/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(normalized.value)) {
+    return {
+      ok: false,
+      issues: [{ field: "value", message: "Anthropic API key format is invalid." }],
     };
   }
 

@@ -44,9 +44,13 @@ import {
   prepareAgentSecretRow,
 } from "@/src/server/agents/agent-secrets";
 import {
-  getApprovedOpenRouterModel,
-  type OpenRouterModelMetadata,
-} from "@/src/server/agents/openrouter-models";
+  type AssistantChoice,
+  type AssistantProfile,
+  getAssistantProfile,
+  getAssistantProfileForManagedModel,
+  isAssistantChoice,
+  validateAssistantApiKey,
+} from "@/src/server/agents/assistant-profiles";
 import {
   type TelegramBotMetadata,
   type TelegramClientDependencies,
@@ -76,6 +80,8 @@ export type CreateAgentValidationIssue = {
     | "runnerId"
     | "launchMode"
     | "idempotencyKey"
+    | "assistant"
+    | "modelApiKey"
     | "openrouterModel"
     | "openrouterApiKey"
     | "telegramBotToken"
@@ -95,8 +101,8 @@ export type ReadyCreateAgentInput = {
   runnerId: string | null;
   launchMode: "ready";
   idempotencyKey: string;
-  openrouterModel?: unknown;
-  openrouterApiKey?: unknown;
+  assistant?: unknown;
+  modelApiKey?: unknown;
   telegramBotToken?: unknown;
   telegramAllowedUserIds?: unknown;
 };
@@ -136,11 +142,9 @@ export type CreatedAgentResponse = {
 export type ReadyCreatedAgentResponse = {
   agent: CreatedAgentResponse["agent"] & {
     desiredStatus: "running";
-    model: {
-      provider: "openrouter";
-      id: string;
-      displayName: string;
-      contextTokens: number;
+    assistant: {
+      id: AssistantChoice;
+      displayName: "ChatGPT" | "Claude";
     };
     telegramBot: {
       id: string;
@@ -211,6 +215,8 @@ export type CreateAgentDependencies = {
 export type ReadyCreateInsertBoundary =
   | "config"
   | "secret:openrouter_api_key"
+  | "secret:openai_api_key"
+  | "secret:anthropic_api_key"
   | "secret:telegram_bot_token"
   | "secret:telegram_allowed_users"
   | "secret:api_server_key"
@@ -376,6 +382,8 @@ export function validateCreateAgentPayload(payload: unknown): CreateAgentValidat
     const idempotencyKey = normalizeReadyIdempotencyKey(payload.idempotencyKey);
     const readyForbiddenFields = [
       "provider",
+      "openrouterModel",
+      "openrouterApiKey",
       "modelProvider",
       "modelName",
       "contextTokens",
@@ -418,8 +426,8 @@ export function validateCreateAgentPayload(payload: unknown): CreateAgentValidat
         runnerId,
         launchMode: "ready",
         idempotencyKey: idempotencyKey.value,
-        openrouterModel: payload.openrouterModel,
-        openrouterApiKey: payload.openrouterApiKey,
+        assistant: payload.assistant,
+        modelApiKey: payload.modelApiKey,
         telegramBotToken: payload.telegramBotToken,
         telegramAllowedUserIds: payload.telegramAllowedUserIds,
       },
@@ -428,6 +436,8 @@ export function validateCreateAgentPayload(payload: unknown): CreateAgentValidat
 
   const readyOnlyFields = [
     "idempotencyKey",
+    "assistant",
+    "modelApiKey",
     "openrouterModel",
     "openrouterApiKey",
     "telegramBotToken",
@@ -788,8 +798,8 @@ async function createReadyAgentForUser(
   const preparedSecrets = [
     prepareAgentSecretRow({
       agentId,
-      kind: "openrouter_api_key",
-      value: firstWriteValidation.openrouterApiKey,
+      kind: firstWriteValidation.profile.secretKind,
+      value: firstWriteValidation.modelApiKey,
       keyring,
       now,
       rotatedAt: null,
@@ -899,8 +909,8 @@ async function createReadyAgentForUser(
       await tx.insert(agentConfigs).values({
         agentId,
         systemPrompt: templateSnapshot.defaultSystemPrompt,
-        modelProvider: firstWriteValidation.model.provider,
-        modelName: firstWriteValidation.model.id,
+        modelProvider: firstWriteValidation.profile.hermesProvider,
+        modelName: firstWriteValidation.profile.model,
         maxDailySpendCents: DEFAULT_AGENT_CONFIG_BASE.maxDailySpendCents,
         scheduleMode: DEFAULT_AGENT_CONFIG_BASE.scheduleMode,
         scheduleCron: DEFAULT_AGENT_CONFIG_BASE.scheduleCron,
@@ -944,8 +954,7 @@ async function createReadyAgentForUser(
           status: "stopped",
           desiredStatus: "running",
           launchMode: "ready",
-          modelProvider: "openrouter",
-          modelName: firstWriteValidation.model.id,
+          assistant: firstWriteValidation.profile.assistant,
           runnerAssignment: runnerId ? "assigned" : "none",
           deploymentId: deployment.deployment.id,
         },
@@ -955,7 +964,7 @@ async function createReadyAgentForUser(
       return toReadyCreatedAgentResponse({
         agent: createdAgent,
         deployment: deployment.deployment,
-        model: firstWriteValidation.model,
+        profile: firstWriteValidation.profile,
         telegramBot: telegramValidation.bot,
       });
     });
@@ -1225,8 +1234,8 @@ function normalizeReadyIdempotencyKey(value: unknown): { ok: true; value: string
 function validateReadyFirstWriteInput(input: ReadyCreateAgentInput):
   | {
       ok: true;
-      model: OpenRouterModelMetadata;
-      openrouterApiKey: string;
+      profile: AssistantProfile;
+      modelApiKey: string;
       telegramBotToken: string;
       telegramAllowedUsers: string;
     }
@@ -1236,19 +1245,18 @@ function validateReadyFirstWriteInput(input: ReadyCreateAgentInput):
     } {
   const issues: CreateAgentValidationIssue[] = [];
 
-  const model =
-    typeof input.openrouterModel === "string"
-      ? getApprovedOpenRouterModel(input.openrouterModel)
-      : null;
+  const profile = isAssistantChoice(input.assistant) ? getAssistantProfile(input.assistant) : null;
 
-  if (!model) {
-    issues.push({ field: "openrouterModel", message: "OpenRouter model is not approved." });
+  if (!profile) {
+    issues.push({ field: "assistant", message: "Choose ChatGPT or Claude." });
   }
 
-  const openrouterApiKey = normalizeOpenRouterApiKey(input.openrouterApiKey);
+  const modelApiKey = profile
+    ? validateAssistantApiKey(profile, input.modelApiKey)
+    : ({ ok: false } as const);
 
-  if (!openrouterApiKey.ok) {
-    issues.push({ field: "openrouterApiKey", message: "OpenRouter API key format is invalid." });
+  if (!modelApiKey.ok) {
+    issues.push({ field: "modelApiKey", message: "The assistant API key format is invalid." });
   }
 
   const telegramBotToken = normalizeTelegramBotToken(input.telegramBotToken);
@@ -1268,8 +1276,8 @@ function validateReadyFirstWriteInput(input: ReadyCreateAgentInput):
 
   if (
     issues.length > 0 ||
-    !model ||
-    !openrouterApiKey.ok ||
+    !profile ||
+    !modelApiKey.ok ||
     !telegramBotToken.ok ||
     !allowedUsers.ok
   ) {
@@ -1278,29 +1286,11 @@ function validateReadyFirstWriteInput(input: ReadyCreateAgentInput):
 
   return {
     ok: true,
-    model,
-    openrouterApiKey: openrouterApiKey.value,
+    profile,
+    modelApiKey: modelApiKey.value,
     telegramBotToken: telegramBotToken.value,
     telegramAllowedUsers: allowedUsers.value,
   };
-}
-
-function normalizeOpenRouterApiKey(value: unknown): { ok: true; value: string } | { ok: false } {
-  if (typeof value !== "string") {
-    return { ok: false };
-  }
-
-  const normalizedValue = value.trim();
-
-  if (
-    Buffer.byteLength(normalizedValue, "utf8") > 512 ||
-    !/^sk-or-v1-[A-Za-z0-9_-]{20,}$/.test(normalizedValue) ||
-    hasControlCharacter(normalizedValue)
-  ) {
-    return { ok: false };
-  }
-
-  return { ok: true, value: normalizedValue };
 }
 
 function normalizeTelegramBotToken(value: unknown): { ok: true; value: string } | { ok: false } {
@@ -1404,16 +1394,19 @@ async function selectReadyCreateReplay(
     return null;
   }
 
-  const model = getApprovedOpenRouterModel(row.config.modelName);
+  const profile = getAssistantProfileForManagedModel(
+    row.config.modelProvider,
+    row.config.modelName,
+  );
 
-  if (!model || row.config.modelProvider !== "openrouter" || !row.telegramBotId) {
+  if (!profile || !row.telegramBotId) {
     throw new AgentPersistenceError();
   }
 
   return toReadyCreatedAgentResponse({
     agent: row.agent as CreatedAgentRow,
     deployment,
-    model,
+    profile,
     telegramBot: {
       botId: row.telegramBotId,
       username: row.telegramUsername,
@@ -1424,7 +1417,7 @@ async function selectReadyCreateReplay(
 function toReadyCreatedAgentResponse(input: {
   agent: CreatedAgentRow;
   deployment: AgentDeploymentDto;
-  model: OpenRouterModelMetadata;
+  profile: AssistantProfile;
   telegramBot: TelegramBotMetadata;
 }): ReadyCreatedAgentResponse {
   const stoppedResponse = toCreatedAgentResponse(input.agent);
@@ -1433,11 +1426,9 @@ function toReadyCreatedAgentResponse(input: {
     agent: {
       ...stoppedResponse.agent,
       desiredStatus: "running",
-      model: {
-        provider: "openrouter",
-        id: input.model.id,
-        displayName: input.model.displayName,
-        contextTokens: input.model.contextTokens,
+      assistant: {
+        id: input.profile.assistant,
+        displayName: input.profile.displayName,
       },
       telegramBot: {
         id: input.telegramBot.botId,

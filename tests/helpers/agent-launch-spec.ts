@@ -1,7 +1,8 @@
 import {
   AGENT_LAUNCH_SPEC_VERSION,
   MANAGED_AGENT_LAUNCH_SPEC_VERSION,
-  type ManagedAgentLaunchSpec,
+  type DirectManagedAgentLaunchSpec,
+  type LegacyManagedAgentLaunchSpec,
   type NativeAgentLaunchSpec,
 } from "@/src/server/agents/agent-launch-spec";
 
@@ -52,9 +53,32 @@ export function sampleLaunchSpec(
   };
 }
 
+export function sampleDirectManagedLaunchSpec(
+  provider: "openai-api" | "anthropic" = "openai-api",
+  overrides: Partial<DirectManagedAgentLaunchSpec> = {},
+): DirectManagedAgentLaunchSpec {
+  const legacy = sampleManagedLaunchSpec();
+  const direct: DirectManagedAgentLaunchSpec = {
+    ...legacy,
+    model: {
+      provider,
+      model: provider === "anthropic" ? "claude-sonnet-4-6" : "gpt-5.4",
+    },
+    secrets: {
+      kind: "inline",
+      modelApiKey: provider === "anthropic" ? `sk-ant-${"a".repeat(32)}` : `sk-${"b".repeat(32)}`,
+      telegramBotToken: legacy.secrets.telegramBotToken,
+      telegramAllowedUsers: legacy.secrets.telegramAllowedUsers,
+      apiServerKey: legacy.secrets.apiServerKey,
+    },
+  };
+
+  return { ...direct, ...overrides } as DirectManagedAgentLaunchSpec;
+}
+
 export function sampleManagedLaunchSpec(
-  overrides: Partial<ManagedAgentLaunchSpec> = {},
-): ManagedAgentLaunchSpec {
+  overrides: Partial<LegacyManagedAgentLaunchSpec> = {},
+): LegacyManagedAgentLaunchSpec {
   return {
     version: MANAGED_AGENT_LAUNCH_SPEC_VERSION,
     requestId: "managed-request-0001",

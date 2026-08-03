@@ -41,11 +41,11 @@ describe("create agent validation", () => {
       validateCreateAgentPayload({
         name: "Research Agent",
         templateKey: "research_agent",
-        openrouterApiKey: "sk-or-v1-abcdefghijklmnopqrstuvwxyz",
+        modelApiKey: `sk-${"a".repeat(32)}`,
       }),
     ).toMatchObject({
       ok: false,
-      issues: [{ field: "openrouterApiKey" }],
+      issues: [{ field: "modelApiKey" }],
     });
   });
 
@@ -65,8 +65,8 @@ describe("create agent validation", () => {
         runnerId: null,
         launchMode: "ready",
         idempotencyKey: "Ready-Key_01",
-        openrouterModel: undefined,
-        openrouterApiKey: undefined,
+        assistant: undefined,
+        modelApiKey: undefined,
         telegramBotToken: undefined,
         telegramAllowedUserIds: undefined,
       },

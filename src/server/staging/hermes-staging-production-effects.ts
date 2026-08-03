@@ -12,6 +12,12 @@ import {
   reconcileTargetAgentDeployment,
 } from "@/src/server/agents/agent-deployment-reconciler";
 import { getAgentDeploymentByIdempotencyKeyForUser } from "@/src/server/agents/agent-deployments";
+import {
+  type AssistantChoice,
+  getAssistantProfile,
+  isAssistantChoice,
+  validateAssistantApiKey,
+} from "@/src/server/agents/assistant-profiles";
 import { reconcileTargetAgentRuntime } from "@/src/server/agents/agent-runtime-reconciler";
 import {
   parseAgentSecretKeyring,
@@ -73,7 +79,6 @@ import {
 
 const LIVE_SENTINEL = "send-telegram-and-spend-digitalocean-staging";
 const BUDGET_SENTINEL = "authorize-basic-4usd-digitalocean-staging";
-const APPROVED_MODEL = "openai/gpt-4.1-mini";
 const CANONICAL_IMAGE_PATTERN = /^ghcr\.io\/ametel01\/agentbay-hermes@(sha256:[0-9a-f]{64})$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LOCATOR_PATTERN = /^[A-Za-z0-9_.:-]{1,120}$/;
@@ -185,8 +190,8 @@ export type HermesStagingProductionEffectPorts = {
 
 type ReadyAgentFixture = {
   name: string;
-  model: typeof APPROVED_MODEL;
-  openrouterApiKey: string;
+  assistant: AssistantChoice;
+  modelApiKey: string;
   telegramBotToken: string;
   telegramAllowedUserId: string;
 };
@@ -438,8 +443,8 @@ function createDefaultPorts(input: {
           runnerId: null,
           launchMode: "ready",
           idempotencyKey: context.idempotencyKey,
-          openrouterModel: fixture.model,
-          openrouterApiKey: fixture.openrouterApiKey,
+          assistant: fixture.assistant,
+          modelApiKey: fixture.modelApiKey,
           telegramBotToken: fixture.telegramBotToken,
           telegramAllowedUserIds: [fixture.telegramAllowedUserId],
         },
@@ -700,7 +705,11 @@ function readFixtureConfig(
   | { ok: false } {
   const canonicalRef = env.AGENTBAY_HERMES_STAGING_PUBLISHED_IMAGE_REF;
   const imageMatch = canonicalRef ? CANONICAL_IMAGE_PATTERN.exec(canonicalRef) : null;
-  const openrouterApiKey = env.AGENTBAY_HERMES_STAGING_OPENROUTER_API_KEY;
+  const assistant = env.AGENTBAY_HERMES_STAGING_ASSISTANT;
+  const openAiApiKey = env.AGENTBAY_HERMES_STAGING_OPENAI_API_KEY;
+  const anthropicApiKey = env.AGENTBAY_HERMES_STAGING_ANTHROPIC_API_KEY;
+  const assistantProfile = isAssistantChoice(assistant) ? getAssistantProfile(assistant) : null;
+  const modelApiKey = assistant === "claude" ? anthropicApiKey : openAiApiKey;
   const telegramBotToken = env.AGENTBAY_HERMES_STAGING_TELEGRAM_BOT_TOKEN;
   const telegramAllowedUserId = env.AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_USER_ID;
   const telegramChatId = env.AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID;
@@ -726,8 +735,10 @@ function readFixtureConfig(
     !/^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$/.test(context.idempotencyKey) ||
     !SOURCE_REVISION_PATTERN.test(context.expectedSourceRevision) ||
     !/^[1-9][0-9]{0,15}$/.test(context.expectedPublishWorkflowRunId) ||
-    !openrouterApiKey ||
-    !/^sk-or-v1-[A-Za-z0-9_-]{20,}$/.test(openrouterApiKey) ||
+    !assistantProfile ||
+    !modelApiKey ||
+    !validateAssistantApiKey(assistantProfile, modelApiKey).ok ||
+    (assistant === "chatgpt" ? Boolean(anthropicApiKey) : Boolean(openAiApiKey)) ||
     !telegramBotToken ||
     !/^[1-9][0-9]{5,19}:[A-Za-z0-9_-]{20,}$/.test(telegramBotToken) ||
     !telegramAllowedUserId ||
@@ -739,8 +750,8 @@ function readFixtureConfig(
     !providerToken ||
     providerToken.trim() !== providerToken ||
     providerToken.length < 32 ||
-    new Set([acceptanceBearer, runnerBearer, providerToken, openrouterApiKey, telegramBotToken])
-      .size !== 5
+    new Set([acceptanceBearer, runnerBearer, providerToken, modelApiKey, telegramBotToken]).size !==
+      5
   ) {
     return { ok: false };
   }
@@ -760,8 +771,8 @@ function readFixtureConfig(
     canonicalRef,
     fixture: {
       name: `Hermes staging ${context.runId.slice(0, 8)}`,
-      model: APPROVED_MODEL,
-      openrouterApiKey,
+      assistant: assistantProfile.assistant,
+      modelApiKey,
       telegramBotToken,
       telegramAllowedUserId,
     },
@@ -769,7 +780,7 @@ function readFixtureConfig(
       acceptanceBearer,
       runnerBearer,
       providerToken,
-      openrouterApiKey,
+      modelApiKey,
       telegramBotToken,
       telegramAllowedUserId,
       telegramChatId,
@@ -792,8 +803,8 @@ function verifyManualRollback(env: Record<string, string | undefined>): "passed"
     templateKey: "research_agent",
     launchMode: "ready",
     idempotencyKey: "rollback-proof-fixture",
-    openrouterModel: APPROVED_MODEL,
-    openrouterApiKey: `sk-or-v1-${"a".repeat(20)}`,
+    assistant: "chatgpt",
+    modelApiKey: `sk-${"a".repeat(24)}`,
     telegramBotToken: `123456:${"a".repeat(20)}`,
     telegramAllowedUserIds: ["123456"],
   });

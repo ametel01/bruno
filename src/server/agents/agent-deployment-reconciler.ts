@@ -12,6 +12,7 @@ import {
   validateDeploymentErrorCode,
 } from "@/src/server/agents/deployment-state";
 import { getApprovedOpenRouterModel } from "@/src/server/agents/openrouter-models";
+import { getAssistantProfileForManagedModel } from "@/src/server/agents/assistant-profiles";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   agentConfigs,
@@ -1721,9 +1722,18 @@ async function readApprovedModel(
     .where(sql`${agentConfigs.agentId} = ${work.agentId}`)
     .limit(1);
 
-  return config?.modelProvider === "openrouter" && getApprovedOpenRouterModel(config.modelName)
-    ? config.modelName
-    : null;
+  if (!config) {
+    return null;
+  }
+
+  if (
+    (config.modelProvider === "openrouter" && getApprovedOpenRouterModel(config.modelName)) ||
+    getAssistantProfileForManagedModel(config.modelProvider, config.modelName)
+  ) {
+    return config.modelName;
+  }
+
+  return null;
 }
 
 function createRunnerAdapter(
