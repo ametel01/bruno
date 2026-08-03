@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  acquireDeploymentRetryAttempt,
+  createDeploymentRetryLatch,
   deploymentPollDelayMs,
   isPollResponseCurrent,
   nextObservationFailureState,
@@ -9,6 +11,7 @@ import {
   retryConflictRequiresForcedRead,
   retryFailureMessage,
   retryReplacementIsSafe,
+  releaseDeploymentRetryAttempt,
   shouldAcceptDeploymentUpdate,
   shouldRefreshTerminalOnce,
 } from "@/app/agents/_components/agent-deployment-progress";
@@ -147,6 +150,72 @@ describe("agent deployment progress controller", () => {
         }),
       }),
     ).toBe(false);
+  });
+
+  it("latches retry synchronously before UUID generation and fetch", async () => {
+    const latch = createDeploymentRetryLatch();
+    const createIdempotencyKey = vi.fn(() => "RETRY-KEY-1");
+    let resolveRequest!: () => void;
+    const fetchRetry = vi.fn<(idempotencyKey: string) => Promise<void>>(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRequest = resolve;
+        }),
+    );
+
+    async function invokeRetryBeforeRerender() {
+      const acquired = acquireDeploymentRetryAttempt({
+        createIdempotencyKey,
+        latch,
+        retry: { status: "idle" },
+      });
+
+      if (!acquired.ok) {
+        return;
+      }
+
+      try {
+        await fetchRetry(acquired.idempotencyKey);
+      } finally {
+        releaseDeploymentRetryAttempt(latch);
+      }
+    }
+
+    const first = invokeRetryBeforeRerender();
+    const second = invokeRetryBeforeRerender();
+
+    expect(createIdempotencyKey).toHaveBeenCalledTimes(1);
+    expect(fetchRetry).toHaveBeenCalledTimes(1);
+    expect(fetchRetry).toHaveBeenCalledWith("retry-key-1");
+
+    resolveRequest();
+    await Promise.all([first, second]);
+  });
+
+  it("preserves the retry key across ambiguous retry responses", () => {
+    const latch = createDeploymentRetryLatch();
+    const createIdempotencyKey = vi.fn(() => "RETRY-KEY-1");
+    const first = acquireDeploymentRetryAttempt({
+      createIdempotencyKey,
+      latch,
+      retry: { status: "idle" },
+    });
+
+    expect(first).toEqual({ ok: true, idempotencyKey: "retry-key-1" });
+    releaseDeploymentRetryAttempt(latch);
+
+    const ambiguousRetry = acquireDeploymentRetryAttempt({
+      createIdempotencyKey,
+      latch,
+      retry: {
+        status: "ambiguous",
+        idempotencyKey: "retry-key-1",
+        message: "Retry response was interrupted. Retry the same request.",
+      },
+    });
+
+    expect(ambiguousRetry).toEqual({ ok: true, idempotencyKey: "retry-key-1" });
+    expect(createIdempotencyKey).toHaveBeenCalledTimes(1);
   });
 
   it("refreshes terminal deployments once and preserves only nonterminal last-safe stages", () => {

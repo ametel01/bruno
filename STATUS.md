@@ -6,11 +6,11 @@
   owner: coordinator with Step 8 repair streams
   branch: `main`
   worktree: `/Users/alexmetelli/source/plingpling`
-  phase: Step 8 implementation complete; final coordinator gates before exact product commit and independent checker
-  cycle: builder repair 1/5
+  phase: Step 8 Retry-latch repair gates green; preparing repair commit and checker cycle 2
+  cycle: checker repair 2/5
   contract: `STATUS.archive.md` → `Step 8 Completion Contract (pre-spec)`
-  blocker: no builder blocker; provider-backed `verify:e2e` remains intentionally unrun without an authorized provider-safe environment.
-  next-action: Run final full repository gates, create the exact Step 8 product commit, and dispatch an independent checker.
+  blocker: no builder blocker; independent checker cycle 2 remains required.
+  next-action: Commit the Retry-latch repair and dispatch checker cycle 2 against `ef9b7fc` plus the repair commit.
 
 ## Completion Contract
 
@@ -48,6 +48,7 @@
 - Step 6 `4e2897a` + `fa677fb`: independently green after cycle 2 — credential-file matrix, focused 4 files / 77 tests, local fake-boundary smoke, 108 files / 996 tests, build, 14 E2E, and fail-closed staging with no effects.
 - Step 7 `798cbf3`: independently green after checker cycle 1 — `db:generate` no drift, `db:migrate` twice, focused changed-unit 21 files / 306 tests, full 116 files / 1,065 tests, local duplicate-trigger cloud smoke through ready, real local Hermes controller smoke, build, 14 CI E2E, and fail-closed staging with no effects.
 - Step 8 candidate: builder/coordinator gates green — focused create/poll/presentation 34 tests, lifecycle/routes 31, server/UI 107, responsive/accessibility 22, full 123 files / 1,142 tests, production build, 24/24 fake-only desktop/mobile CI E2E with exact 320px layout, redaction, and zero external requests, plus fail-closed staging with `sideEffectsAttempted: false`; independent checker pending.
+- Step 8 `ef9b7fc`: checker cycle 1 reproduced every automated gate but found one semantic Retry latch race in the progress card. The cycle 2 repair adds a pre-UUID/pre-fetch synchronous latch plus same-turn regression; 44 focused tests, 123 files / 1,144 full tests, build, 24/24 CI E2E, and fail-closed staging are green.
 
 ## Worktrees
 

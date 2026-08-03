@@ -38,7 +38,7 @@ export type ObservationState =
   | { status: "unavailable"; message: string }
   | { status: "paused"; message: string };
 
-type RetryState =
+export type RetryState =
   | { status: "idle" }
   | { status: "requesting" }
   | { status: "ambiguous"; message: string; idempotencyKey: string }
@@ -66,6 +66,7 @@ export function AgentDeploymentProgress({
     startForegroundPollingWindow(Date.now()),
   );
   const refreshedTerminalRef = useRef(false);
+  const retryLatchRef = useRef<DeploymentRetryLatch>(createDeploymentRetryLatch());
   const [deployment, setDeployment] = useState(initialDeployment);
   const [lastObservedStage, setLastObservedStage] = useState<Exclude<
     PublicAgentDeploymentStage,
@@ -268,9 +269,11 @@ export function AgentDeploymentProgress({
     generationRef.current += 1;
     resumeForegroundTracking({ reset: true });
     refreshedTerminalRef.current = false;
+    resetDeploymentRetryAttempt(retryLatchRef.current);
     setDeployment(initialDeployment);
     setLastObservedStage(toNonterminalStage(initialDeployment?.stage ?? null));
     setObservation({ status: "idle", consecutiveFailures: 0 });
+    setRetry({ status: "idle" });
   }, [initialDeployment, resumeForegroundTracking]);
 
   useEffect(() => {
@@ -335,15 +338,17 @@ export function AgentDeploymentProgress({
       return;
     }
 
-    const idempotencyKey =
-      retry.status === "ambiguous" || (retry.status === "error" && retry.idempotencyKey)
-        ? retry.idempotencyKey
-        : crypto.randomUUID().toLowerCase();
+    const acquired = acquireDeploymentRetryAttempt({
+      createIdempotencyKey: () => crypto.randomUUID().toLowerCase(),
+      latch: retryLatchRef.current,
+      retry,
+    });
 
-    if (!idempotencyKey) {
+    if (!acquired.ok) {
       return;
     }
 
+    const { idempotencyKey } = acquired;
     setRetry({ status: "requesting" });
 
     try {
@@ -406,6 +411,7 @@ export function AgentDeploymentProgress({
       generationRef.current += 1;
       resumeForegroundTracking({ reset: true });
       refreshedTerminalRef.current = false;
+      resetDeploymentRetryAttempt(retryLatchRef.current);
       setDeployment(parsed.deployment);
       setLastObservedStage(toNonterminalStage(parsed.deployment.stage));
       setRetry({ status: "idle" });
@@ -418,6 +424,8 @@ export function AgentDeploymentProgress({
         idempotencyKey,
         message: "Retry response was interrupted. Retry the same request.",
       });
+    } finally {
+      releaseDeploymentRetryAttempt(retryLatchRef.current);
     }
   }
 
@@ -645,6 +653,52 @@ export function retryReplacementIsSafe(input: {
     input.replacement.stage === "pending" &&
     compareDeploymentCreatedAt(input.replacement, input.current) > 0
   );
+}
+
+export type DeploymentRetryLatch = {
+  inFlight: boolean;
+  idempotencyKey: string | null;
+};
+
+export function createDeploymentRetryLatch(): DeploymentRetryLatch {
+  return { inFlight: false, idempotencyKey: null };
+}
+
+export function acquireDeploymentRetryAttempt(input: {
+  createIdempotencyKey: () => string;
+  latch: DeploymentRetryLatch;
+  retry: RetryState;
+}): { ok: true; idempotencyKey: string } | { ok: false } {
+  if (input.latch.inFlight) {
+    return { ok: false };
+  }
+
+  input.latch.inFlight = true;
+
+  const existingStateKey =
+    input.retry.status === "ambiguous" || input.retry.status === "error"
+      ? input.retry.idempotencyKey
+      : null;
+  const idempotencyKey =
+    existingStateKey ?? input.latch.idempotencyKey ?? input.createIdempotencyKey().toLowerCase();
+
+  if (idempotencyKey.length === 0) {
+    input.latch.inFlight = false;
+    return { ok: false };
+  }
+
+  input.latch.idempotencyKey = idempotencyKey;
+
+  return { ok: true, idempotencyKey };
+}
+
+export function releaseDeploymentRetryAttempt(latch: DeploymentRetryLatch): void {
+  latch.inFlight = false;
+}
+
+export function resetDeploymentRetryAttempt(latch: DeploymentRetryLatch): void {
+  latch.inFlight = false;
+  latch.idempotencyKey = null;
 }
 
 export function publicNonterminalDeploymentStage(
