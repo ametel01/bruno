@@ -523,3 +523,51 @@ the exact final commit pass.
   automate or retain an MTProto user session. Exact image attestation and
   workload/secret/firewall/Droplet/runner cleanup are durable and fail closed;
   they still require an authorized hosted run to produce acceptance evidence.
+
+## ChatGPT and Claude Provider Correction
+
+Source plan: `PLAN.md`
+
+This ledger supersedes the unreleased OpenRouter-first product direction above
+without rewriting its historical implementation evidence. OpenRouter remains a
+legacy compatibility concern only; new-agent onboarding supports direct OpenAI
+and direct Anthropic under the user-facing choices ChatGPT and Claude.
+
+### Product and Authorization Decisions
+
+- The common flow asks users to choose ChatGPT or Claude. It never asks for a
+  provider ID, model ID, runner, launch mode, environment variable, or Hermes
+  configuration.
+- The first release uses official direct API keys. ChatGPT uses an OpenAI
+  Platform API key and Claude uses an Anthropic API key; both are billed
+  separately from consumer subscriptions.
+- Claude.ai subscription OAuth is excluded from this third-party product based
+  on Anthropic's published authentication policy. Unsupported cookies,
+  passwords, browser sessions, and subscription artifacts are never accepted.
+- Owner-scoped healthy model connections are reused for later agents. Future
+  official OAuth/device methods may be added behind the same connection state
+  contract without changing ordinary callers.
+- The app automates provider/model selection, capacity, configuration,
+  deployment, canary, Telegram connection verification, retries, and recovery.
+  BotFather bot creation and initial provider-key creation remain unavoidable
+  user actions.
+- Existing OpenRouter agents are never silently converted and remain available
+  only through an explicit legacy runtime compatibility branch.
+- No live provider, billable infrastructure, image publication, or Telegram
+  effect is authorized by this correction.
+
+### Correction Checklist
+
+- [x] Step 1: Correct the Product Contract
+- [ ] Step 2: Add Direct ChatGPT and Claude Runtime Support
+- [ ] Step 3: Ship the One-Click Common Flow
+- [ ] Step 4: Correct Acceptance, Documentation, and Release Evidence
+
+### Correction Ledger
+
+| Step | State | Commit | Evidence | Next work |
+| --- | --- | --- | --- | --- |
+| 1. Correct the Product Contract | Complete | This commit | Replaced the active OpenRouter-first plan with a ChatGPT/Claude model-connection contract; documented direct API-key billing, Anthropic's third-party subscription-auth restriction, the one-click automation boundary, legacy compatibility, strict quality gates, and per-step commits. Historical ledgers remain intact and `CHANGELOG.md` receives no planning-only entry. | Implement the provider-neutral catalog, reusable connections, encrypted credentials, strict launch/projection support, and legacy compatibility in Step 2. |
+| 2. Add Direct ChatGPT and Claude Runtime Support | Pending | — | — | Depends on Step 1. |
+| 3. Ship the One-Click Common Flow | Pending | — | — | Depends on Step 2. |
+| 4. Correct Acceptance, Documentation, and Release Evidence | Pending | — | — | Depends on Steps 1-3. |
