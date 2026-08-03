@@ -7,6 +7,7 @@ export const CI_E2E_SELECTORS = [
   "tests/e2e/root-route.spec.ts:45",
   "tests/e2e/root-route.spec.ts:60",
   "tests/e2e/root-route.spec.ts:2191",
+  "tests/e2e/automatic-ready.spec.ts",
 ] as const;
 
 export const FULL_E2E_CAPABILITY_MESSAGE =

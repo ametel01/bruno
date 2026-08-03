@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AgentDetailPage from "@/app/agents/[agentId]/page";
+import AgentsPage from "@/app/agents/page";
 import DashboardPage from "@/app/dashboard/page";
 import { FakeBackupObjectStorage } from "@/src/server/backups/backup-storage";
 import { createManualBackupForUser } from "@/src/server/backups/create-backup";
@@ -9,6 +10,7 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import {
   agentApprovals,
   agentConfigs,
+  agentDeployments,
   agentEvents,
   agentLogs,
   agents,
@@ -81,6 +83,7 @@ describe("operational page user isolation", () => {
       },
     ]) {
       requestIdentity.userId = expected.userId;
+      const agentsHtml = renderToStaticMarkup(await AgentsPage());
       const dashboardHtml = renderToStaticMarkup(await DashboardPage());
       const detailHtml = renderToStaticMarkup(
         await AgentDetailPage({ params: Promise.resolve({ agentId: expected.agentId }) }),
@@ -99,6 +102,21 @@ describe("operational page user isolation", () => {
         expect(detailHtml).not.toContain(`${expected.foreignPrefix}-${suffix}`);
       }
       expect(detailHtml).toContain("1 listed");
+      expect(agentsHtml).toContain(`${expected.ownPrefix}-AGENT`);
+      expect(agentsHtml).not.toContain(`${expected.foreignPrefix}-AGENT`);
+      expect(agentsHtml).toContain("Setup failed");
+      expect(dashboardHtml).toContain("Setup failed");
+      expect(detailHtml).toContain("Setup failed");
+      expect(agentsHtml).not.toContain(`${expected.ownPrefix}-DEPLOYMENT-DETAIL`);
+      expect(dashboardHtml).not.toContain(`${expected.ownPrefix}-DEPLOYMENT-DETAIL`);
+      expect(detailHtml).not.toContain(`${expected.ownPrefix}-DEPLOYMENT-DETAIL`);
+      expect(agentsHtml).not.toContain(`${expected.foreignPrefix}-DEPLOYMENT-DETAIL`);
+      expect(dashboardHtml).not.toContain(`${expected.foreignPrefix}-DEPLOYMENT-DETAIL`);
+      expect(detailHtml).not.toContain(`${expected.foreignPrefix}-DEPLOYMENT-DETAIL`);
+      expect(detailHtml).toContain("Advanced Hermes setup and recovery");
+      expect(detailHtml.indexOf("deployment-progress-title")).toBeLessThan(
+        detailHtml.indexOf("Advanced Hermes setup and recovery"),
+      );
       expect(detailHtml).not.toContain(`${expected.foreignPrefix}-PROCESS-LOG`);
       expect(costJson).toContain(`${expected.ownPrefix}-MANUAL-RUNNER`);
       expect(costJson).toContain(`${expected.ownPrefix}-CLOUD-RUNNER`);
@@ -156,6 +174,7 @@ async function seedOperationalPageUsers(connection: DatabaseConnection): Promise
       name: "A-ONLY-AGENT",
       templateKey: "research_agent",
       status: "stopped",
+      desiredStatus: "running",
     },
     {
       id: AGENT_B_ID,
@@ -164,8 +183,15 @@ async function seedOperationalPageUsers(connection: DatabaseConnection): Promise
       name: "B-ONLY-AGENT",
       templateKey: "research_agent",
       status: "stopped",
+      desiredStatus: "running",
     },
   ]);
+  await connection.db
+    .insert(agentDeployments)
+    .values([
+      deployment(USER_A_ID, AGENT_A_ID, "A-ONLY"),
+      deployment(USER_B_ID, AGENT_B_ID, "B-ONLY"),
+    ]);
   await connection.db
     .insert(agentConfigs)
     .values([agentConfig(AGENT_A_ID, "A-ONLY-PROMPT"), agentConfig(AGENT_B_ID, "B-ONLY-PROMPT")]);
@@ -265,6 +291,23 @@ function event(actorUserId: string, agentId: string, message: string) {
   };
 }
 
+function deployment(userId: string, agentId: string, prefix: string) {
+  const failedAt = new Date("2026-08-03T05:30:00.000Z");
+
+  return {
+    userId,
+    agentId,
+    stage: "failed" as const,
+    configRevision: `cfg-${prefix.toLowerCase()}`,
+    idempotencyKey: `${prefix.toLowerCase()}-deployment-key`,
+    errorCode: "telegram_not_connected",
+    errorDetail: `${prefix}-DEPLOYMENT-DETAIL`,
+    failedAt,
+    createdAt: failedAt,
+    updatedAt: failedAt,
+  };
+}
+
 function processLog(id: string, agentId: string, runnerId: string, message: string) {
   return {
     id,
@@ -279,17 +322,19 @@ function processLog(id: string, agentId: string, runnerId: string, message: stri
 }
 
 async function captureOperationalState(connection: DatabaseConnection) {
-  const [agentRows, approvalRows, backupRows, eventRows, runnerRows] = await Promise.all([
-    connection.db.select().from(agents),
-    connection.db.select().from(agentApprovals),
-    connection.db.select().from(backups),
-    connection.db.select().from(agentEvents),
-    connection.db.select().from(runners),
-  ]);
+  const [agentRows, approvalRows, backupRows, deploymentRows, eventRows, runnerRows] =
+    await Promise.all([
+      connection.db.select().from(agents),
+      connection.db.select().from(agentApprovals),
+      connection.db.select().from(backups),
+      connection.db.select().from(agentDeployments),
+      connection.db.select().from(agentEvents),
+      connection.db.select().from(runners),
+    ]);
 
-  return { agentRows, approvalRows, backupRows, eventRows, runnerRows };
+  return { agentRows, approvalRows, backupRows, deploymentRows, eventRows, runnerRows };
 }
 
 async function resetOperationalTables(connection: DatabaseConnection): Promise<void> {
-  await connection.client`truncate table agent_approvals, agent_configs, agent_usage_periods, backups, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runner_provisioning_events, runner_heartbeats, runner_credentials, runner_registration_tokens, runners, app_metadata, users restart identity cascade`;
+  await connection.client`truncate table agent_approvals, agent_configs, agent_usage_periods, agent_deployments, backups, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runner_provisioning_events, runner_heartbeats, runner_credentials, runner_registration_tokens, runners, app_metadata, users restart identity cascade`;
 }

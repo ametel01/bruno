@@ -4,6 +4,7 @@ import { EmptyState, ProductShell } from "@/app/_components/product-shell";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { listedAgentStartDisabledReason } from "@/app/agents/_components/agent-start-readiness";
 import { CreateAgentForm } from "@/app/agents/_components/create-agent-form";
+import { DeploymentStatusLabel } from "@/app/agents/_components/deployment-status-label";
 import { MobileAgentList } from "@/app/agents/_components/mobile-agent-list";
 import { AGENT_NAME_MAX_LENGTH } from "@/src/server/agents/create-agent";
 import { AGENT_TEMPLATE_OPTIONS } from "@/src/server/agents/templates";
@@ -11,6 +12,7 @@ import {
   AgentListPersistenceError,
   listActiveAgentsForUser,
 } from "@/src/server/agents/list-agents";
+import { APPROVED_OPENROUTER_MODELS } from "@/src/server/agents/openrouter-models";
 import {
   listAssignableRunnersForUser,
   RunnerAssignmentPersistenceError,
@@ -19,6 +21,7 @@ import {
   CloudRunnerProvisioningPersistenceError,
   listCloudRunnerProvisioningSummariesForUser,
 } from "@/src/server/runners/cloud-runner-provisioning";
+import { readReadyAgentCreationFlag } from "@/src/server/env";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
 export const dynamic = "force-dynamic";
@@ -52,6 +55,14 @@ export default async function AgentsPage() {
   const readyCloudRunnerCount = cloudRunnersResult.ok
     ? cloudRunnersResult.runners.filter((runner) => runner.readinessStatus === "online").length
     : null;
+  const readyFlag = readReadyAgentCreationFlag();
+  const readyModeEnabled = readyFlag.ok && readyFlag.enabled;
+  const openrouterModels = readyModeEnabled
+    ? APPROVED_OPENROUTER_MODELS.map((model) => ({
+        id: model.id,
+        displayName: model.displayName,
+      }))
+    : [];
 
   return (
     <ProductShell
@@ -142,10 +153,19 @@ export default async function AgentsPage() {
                           <td>{agent.templateLabel}</td>
                           <td>
                             <span className="status-pill">{agent.status}</span>
+                            <DeploymentStatusLabel
+                              deployment={agent.latestDeployment}
+                              desiredStatus={agent.desiredStatus}
+                              href={`${agent.href}#deployment-progress-title`}
+                              observedStatus={agent.status}
+                            />
                           </td>
                           <td>
                             <AgentLifecycleControls
                               agentId={agent.id}
+                              deployment={agent.latestDeployment}
+                              detailHref={`${agent.href}#deployment-progress-title`}
+                              desiredStatus={agent.desiredStatus}
                               startDisabledReason={listedAgentStartDisabledReason(agent)}
                               status={agent.status}
                             />
@@ -192,6 +212,8 @@ export default async function AgentsPage() {
           <div className="agent-creation-body">
             <CreateAgentForm
               maxNameLength={AGENT_NAME_MAX_LENGTH}
+              openrouterModels={openrouterModels}
+              readyModeEnabled={readyModeEnabled}
               runners={runnerResult.ok ? runnerResult.runners : []}
               templates={AGENT_TEMPLATE_OPTIONS}
             />

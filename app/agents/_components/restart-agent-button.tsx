@@ -3,6 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { AgentLifecycleStatus } from "@/src/server/agents/lifecycle";
+import {
+  acquireAgentActionRequestLatch,
+  releaseAgentActionRequestLatch,
+} from "./agent-action-request-latch";
 
 type RestartAgentButtonProps = {
   agentId: string;
@@ -27,6 +31,7 @@ export function RestartAgentButton({
   const [state, setState] = useState<RestartState>({ status: "idle" });
   const observedRestartingRef = useRef(false);
   const requestedAtRef = useRef(0);
+  const requestLatchRef = useRef(false);
 
   useEffect(() => {
     if (status === "restarting") {
@@ -44,6 +49,7 @@ export function RestartAgentButton({
     ) {
       observedRestartingRef.current = false;
       requestedAtRef.current = 0;
+      releaseAgentActionRequestLatch(requestLatchRef);
       setState({ status: "idle" });
       return;
     }
@@ -69,6 +75,7 @@ export function RestartAgentButton({
     const settleTimeout = window.setTimeout(() => {
       observedRestartingRef.current = false;
       requestedAtRef.current = 0;
+      releaseAgentActionRequestLatch(requestLatchRef);
       setState((current) => (current.status === "polling" ? { status: "idle" } : current));
     }, RESTART_SETTLE_FALLBACK_MS);
 
@@ -78,7 +85,7 @@ export function RestartAgentButton({
   }, [state.status, status]);
 
   async function handleRestart() {
-    if (status !== "running") {
+    if (status !== "running" || !acquireAgentActionRequestLatch(requestLatchRef)) {
       return;
     }
 
@@ -87,11 +94,13 @@ export function RestartAgentButton({
     requestedAtRef.current = Date.now();
 
     try {
-      const response = await fetch(`/api/agents/${agentId}/actions/restart`, {
+      const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}/actions/restart`, {
+        credentials: "same-origin",
         method: "POST",
       });
 
       if (!response.ok) {
+        releaseAgentActionRequestLatch(requestLatchRef);
         setState({ status: "error", message: await safeFailureMessage(response) });
         return;
       }
@@ -99,6 +108,7 @@ export function RestartAgentButton({
       setState({ status: "polling", message: "Restart requested." });
       router.refresh();
     } catch {
+      releaseAgentActionRequestLatch(requestLatchRef);
       setState({ status: "error", message: "Agent could not be restarted." });
     }
   }
@@ -117,6 +127,7 @@ export function RestartAgentButton({
         <button
           className="secondary-button"
           type="button"
+          aria-busy={busy}
           disabled={disabled}
           onClick={handleRestart}
         >
@@ -141,14 +152,11 @@ async function safeFailureMessage(response: Response): Promise<string> {
     const body = (await response.json()) as {
       error?: {
         code?: unknown;
-        message?: unknown;
       };
     };
 
     if (body.error?.code === "hermes_setup_incomplete") {
-      return typeof body.error.message === "string"
-        ? body.error.message
-        : "Complete Hermes setup before restarting this agent.";
+      return "Complete Hermes setup before restarting this agent.";
     }
 
     if (body.error?.code === "invalid_agent_status") {

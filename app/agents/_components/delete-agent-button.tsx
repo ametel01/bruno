@@ -1,8 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { AgentLifecycleStatus } from "@/src/server/agents/lifecycle";
+import {
+  acquireAgentActionRequestLatch,
+  releaseAgentActionRequestLatch,
+} from "./agent-action-request-latch";
 
 type DeleteAgentButtonProps = {
   agentId: string;
@@ -14,25 +18,35 @@ type DeleteState =
   | { status: "requesting" }
   | { status: "error"; message: string };
 
-const DELETABLE_STATUSES = new Set<AgentLifecycleStatus>(["idle", "running", "stopped", "error"]);
+const DELETABLE_STATUSES = new Set<AgentLifecycleStatus>([
+  "idle",
+  "starting",
+  "running",
+  "restarting",
+  "stopped",
+  "error",
+]);
 
 export function DeleteAgentButton({ agentId, status }: DeleteAgentButtonProps) {
   const router = useRouter();
   const [state, setState] = useState<DeleteState>({ status: "idle" });
+  const requestLatchRef = useRef(false);
 
   async function handleDelete() {
-    if (!DELETABLE_STATUSES.has(status)) {
+    if (!DELETABLE_STATUSES.has(status) || !acquireAgentActionRequestLatch(requestLatchRef)) {
       return;
     }
 
     setState({ status: "requesting" });
 
     try {
-      const response = await fetch(`/api/agents/${agentId}`, {
+      const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, {
+        credentials: "same-origin",
         method: "DELETE",
       });
 
       if (!response.ok) {
+        releaseAgentActionRequestLatch(requestLatchRef);
         setState({ status: "error", message: await safeFailureMessage(response) });
         return;
       }
@@ -40,6 +54,7 @@ export function DeleteAgentButton({ agentId, status }: DeleteAgentButtonProps) {
       router.push("/agents");
       router.refresh();
     } catch {
+      releaseAgentActionRequestLatch(requestLatchRef);
       setState({ status: "error", message: "Agent could not be deleted." });
     }
   }
@@ -54,6 +69,7 @@ export function DeleteAgentButton({ agentId, status }: DeleteAgentButtonProps) {
         <button
           className="secondary-button danger-button"
           type="button"
+          aria-busy={state.status === "requesting"}
           disabled={state.status === "requesting"}
           onClick={handleDelete}
         >

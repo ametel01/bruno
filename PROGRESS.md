@@ -451,20 +451,19 @@ the existing `Added`, `Changed`, `Fixed`, or `Security` sections as applicable.
 
 ### Current Status
 
-Step 7 is independently accepted at `798cbf3`. Ready-mode deployments now
-reconcile through bounded, lease-safe
-stages from pending creation to idempotent runner provisioning, exact launch
-acceptance, observed readiness, one model canary, Telegram confirmation, and one
-atomic running/usage completion. Create and heartbeat triggers run after the
-response, the one-item cron route is exact-secret protected, and owners can
-retry failed deployments without duplicating agents, runners, canaries, or
-usage periods.
+Step 8 implementation is complete and awaiting independent checker acceptance.
+Ready-mode creation is now the compact primary path when the exact rollout flag
+is enabled. It clears credentials after submission, preserves one logical
+idempotency key across safe retries, redirects to the agent detail page, and
+renders the same owner-scoped persisted deployment snapshot on inventory,
+detail, and dashboard surfaces without row-level polling.
 
-No Step 7 blocker remains. Builder and independent-checker gates passed with
-real PostgreSQL race coverage, local fake-provider duplicate-trigger smoke,
-real local Hermes controller smoke, 1,065 unit/integration tests, production
-build, 14 CI browser tests, and credential-free staging preflight with no side
-effects. Step 8 is the active implementation step.
+The detail page uses bounded single-flight polling with foreground-only timeout
+accounting, safe retry/stop controls, exact persisted stages, and fail-closed
+presentation. Desktop and mobile fake-only browser acceptance covers refresh,
+reopen, a second context, failure/retry recovery, intentional stop, manual
+fallback, 320px layout, credential redaction, and zero external requests. Step
+9 is next after the Step 8 checker accepts the product commit.
 
 ### Step Checklist
 
@@ -476,7 +475,7 @@ effects. Step 8 is the active implementation step.
 - [x] Step 5: Project a Complete Managed Hermes Configuration
 - [x] Step 6: Split Runner Launch Acceptance From Observed Readiness
 - [x] Step 7: Reconcile Creation Through Ready
-- [ ] Step 8: Add One-Click Creation and Persisted Progress UI
+- [x] Step 8: Add One-Click Creation and Persisted Progress UI
 - [ ] Step 9: Make Desired-Running Gateways Durable
 - [ ] Step 10: Final Acceptance, Documentation, and Controlled Rollout
 
@@ -492,7 +491,7 @@ effects. Step 8 is the active implementation step.
 | 5. Project a Complete Managed Hermes Configuration | Complete and independently accepted after cycle 3 | Steps 0-4 | `fe13ab9`, `d50cc4e`, `4f8312d` | Added exact launch-spec v3 parsing/redaction/serialization with strict key and secret validation; owner-scoped newest-deployment launch building with required active OpenRouter, Telegram, allowlist, and API-server secrets; strict YAML 1.2 managed projection with no-follow/path-escape defenses, marker-last atomic writes, `0600` env handling, v2/manual compatibility, fresh managed setup bypass, and local fake Telegram/model contract smoke coverage. Cycle 2 rejects explicit/custom YAML tags and anchors, secret-like null/map/array/boolean/number values, non-exact env references such as shell defaults, malformed multiline env constructs, all four hard-linked/nonregular projected targets, broken active secret metadata, restored-agent auto-managed conversion, and Docker inspect Telegram allowlist leaks without false positives from unrelated `=1` env. Cycle 3 preserves safe YAML scalar punctuation while rejecting real YAML tags, anchors, aliases, and merge keys; the injected filesystem transaction seam covers temp collision/symlink handling, UID/GID ownership calls, write/chmod/chown/fsync/rename failures, marker-last repair, temp cleanup, exact modes, no workspace deletion, and nonregular FIFO/socket projected targets. Independent acceptance passed 17 files / 102 focused tests; `bun run agent:hermes:contract-smoke` passed with local fake model, private API auth, state persistence, backup/restore, no public Hermes port, cleanup, and `telegramBoundary: "local-fake-platform-state"`. Full gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 107 files / 961 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; credential-free `bun run verify:hermes:staging` exited nonzero with `capability_unavailable` and `sideEffectsAttempted: false`; `git diff --check`. | Complete; Step 6 is active. |
 | 6. Split Runner Launch Acceptance From Observed Readiness | Complete and independently accepted after cycle 2 | Steps 0-5 | `4e2897a`, `fa677fb` | Product commit added strict runner launch/status/canary contracts; one request-scoped 30-second launch budget; cancellation-safe cleanup; deterministic exact reuse/replacement; bounded private health/canary seams; stopped/cancelled snapshots; accepted/ready compatibility DTOs; and stale-result lifecycle guards. Initial combined focused coverage passed 11 files / 216 tests. Checker cycle 1 reproduced a FIFO `.env` blocking open. Cycle 2 added pre/post file identity validation plus nonblocking no-follow reads and a bounded FIFO status/canary regression. Independent acceptance verified missing/FIFO/symlink/hardlink/oversize/malformed/regular credential files, 4 files / 77 focused tests, 108 files / 996 full tests, local fake-boundary smoke, build, 14 E2E tests, and fail-closed staging with no external effects. | Complete; Step 7 remains active. |
 | 7. Reconcile Creation Through Ready | Complete and independently accepted after cycle 1 | Steps 0-6 | `798cbf3` | Added migration `0018_first_polaris` with runner-operation/canary evidence, exact provisioning keys, strong stage checks, and fail-closed one-open-usage uniqueness. Added a 90-second leased, 45-second abort-bounded one-item reconciler; owner-safe provisioning discovery/adoption; exact runner/canary correlation; deterministic backoff and attempt-64 failure; post-response create/heartbeat triggers; exact-secret cron; owner-concealed idempotent retry; stop/delete cancellation precedence; redacted failure logs and cleanup ownership; and atomic ready/running/usage/events. Focused Step 7 gates passed 22 files / 311 tests, including clean/upgrade migrations and real separate-connection claim/retry/cancellation/finalization/capacity races. Full tests passed 116 files / 1,065 tests. Independent checker cycle 1 passed a 21-file / 306-test changed-unit suite, the 116-file / 1,065-test full suite, repeated migrations, format, lint, typecheck, build, 14 CI E2E tests, both local smokes, and fail-closed staging with no external effects. `bun run local:cloud:smoke` passed and proved simultaneous create-kick/heartbeat/cron/manual triggers produce exactly one fake resource, container, canary, running transition, and open usage period. `bun run agent:hermes:contract-smoke` passed persisted controller finalization against the local pinned image with private API auth, no public Hermes port, backup/restore, cleanup, and `telegramBoundary: "local-fake-platform-state"`. | Complete; Step 8 is active. |
-| 8. Add One-Click Creation and Persisted Progress UI | In progress | Steps 0-7 | Not collected | Not collected | Implement the accepted Step 8 completion contract against the reconciler and readiness snapshot. |
+| 8. Add One-Click Creation and Persisted Progress UI | Complete; independent checker pending | Steps 0-7 | This commit | Added credential-complete ready/manual creation, server-owned rollout/model boundaries, synchronous duplicate-submit latches, safe ambiguous retry semantics, owner-scoped bounded latest-deployment reads, code-only public errors, exact persisted-stage presentation, detail-only single-flight polling, deployment-aware lifecycle controls, and secondary advanced Hermes recovery. Focused coverage passed 34 create/poll/presentation tests, 31 lifecycle/route tests, 107 server/UI isolation and projection tests, and 22 responsive/accessibility CSS tests. Final `bun run verify` passed format, lint, typecheck, 123 test files / 1,142 tests, and the production build. Fake-only Playwright passed 10/10 focused and 24/24 aggregate desktop/mobile CI cases, including refresh/reopen/second-context persistence, ready without Start/setup, failure/retry, stop, observation recovery, manual fallback, exact 320px layout, credential redaction, and zero external requests; `git diff --check` passed. Credential-free `bun run verify:hermes:staging` exited with `capability_unavailable` and `sideEffectsAttempted: false`. Provider-backed `verify:e2e` was not run because no documented authorized provider-safe environment was available. | Implementation complete; independent checker must accept the exact product commit before Step 9 begins. |
 | 9. Make Desired-Running Gateways Durable | Not started | Steps 0-8 | Not collected | Not collected | Requires verified ready/failed state handling. |
 | 10. Final Acceptance, Documentation, and Controlled Rollout | Not started | Steps 0-9, published image, authorized DigitalOcean budget, staging Telegram bot/user, funded OpenRouter key | Not collected | Not collected | External live acceptance prerequisites must be explicit before contacting external services. |
 
@@ -509,6 +508,6 @@ effects. Step 8 is the active implementation step.
 
 ### Current Blockers and Next Work
 
-- Step 7 is independently accepted at `798cbf3`; no Step 7 blocker remains.
-- Step 8 should add one-click creation and persisted progress UI against the
-  accepted reconciler and readiness snapshot.
+- Step 8 implementation is complete; no builder blocker remains.
+- Independent checker acceptance of the exact Step 8 product commit is required
+  before Step 9 begins.

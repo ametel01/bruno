@@ -1,13 +1,13 @@
-import {
-  expect,
-  test,
-  type APIRequestContext,
-  type APIResponse,
-  type Page,
-  type Route,
-} from "@playwright/test";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import {
+  type APIRequestContext,
+  type APIResponse,
+  expect,
+  type Page,
+  type Route,
+  test,
+} from "@playwright/test";
 import postgres from "postgres";
 
 const createdAgentIds = new Set<string>();
@@ -1178,7 +1178,7 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
 
   const name = "Research Agent";
 
-  await page.goto("/agents");
+  await openManualAgentCreation(page);
   await expect(page.locator(".selected-template-summary")).toContainText("Web search");
   await expect(page.locator(".selected-template-summary")).toContainText("Manual");
   await expect(page.locator(".template-option-list")).toContainText("Inbox Triage Agent");
@@ -2189,7 +2189,7 @@ test("/agents detail keeps the record readable when runtime logs fail safely", a
 });
 
 test("/agents shows safe client validation for invalid create input", async ({ page }) => {
-  await page.goto("/agents");
+  await openManualAgentCreation(page);
   await page.getByLabel("Name").fill("   ");
   await page.getByRole("button", { name: "Create agent" }).click();
 
@@ -3544,6 +3544,15 @@ async function expectPageNotHorizontallyOverflowing(page: Page): Promise<void> {
   }));
 
   expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
+}
+
+async function openManualAgentCreation(page: Page): Promise<void> {
+  await page.goto("/agents");
+  const manualMode = page.getByRole("button", { name: "Manual", exact: true });
+
+  if (await manualMode.isVisible()) {
+    await manualMode.click();
+  }
 }
 
 async function withDatabase<T>(run: (sql: postgres.Sql) => Promise<T>): Promise<T> {

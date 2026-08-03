@@ -1,3 +1,4 @@
+import { readdir, readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
   APPROVED_OPENROUTER_MODELS,
@@ -66,5 +67,14 @@ describe("approved OpenRouter model catalog", () => {
     expect(isSafeOpenRouterModelId("openai/gpt 4.1")).toBe(false);
     expect(isSafeOpenRouterModelId("../openai/gpt-4.1-mini")).toBe(false);
     expect(isSafeOpenRouterModelId("openai/gpt-4.1-mini?context=1")).toBe(false);
+  });
+
+  it("keeps the approved model registry server-owned", async () => {
+    const source = await readFile("src/server/agents/openrouter-models.ts", "utf8");
+    const sharedFiles = await readdir("src/shared");
+
+    expect(source).toContain("export const APPROVED_OPENROUTER_MODELS");
+    expect(source).not.toContain("@/src/shared/openrouter-model-registry");
+    expect(sharedFiles).not.toContain("openrouter-model-registry.ts");
   });
 });

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Credential-complete one-click ready agent creation with masked OpenRouter and Telegram inputs, normalized Telegram allowlists, idempotent submission, and persisted deployment progress across inventory, detail, dashboard, refreshes, and browser contexts.
 - Automatic ready-mode deployments now reconcile durably from creation to verified running state with bounded leases, post-response/heartbeat/cron triggers, one canary, Telegram-ready confirmation, usage-period completion, and a safe owner-scoped retry API.
 - Managed Hermes launch-spec v3 now carries approved OpenRouter model configuration plus server-only OpenRouter, Telegram, Telegram allowlist, and private API credentials from persisted deployment state.
 - Automatic Hermes agents now receive a complete managed `config.yaml`, `.env`, `SOUL.md`, workspace, and revision projection from a fresh runner state root without requiring native `hermes setup`.
@@ -101,6 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Agent lifecycle controls now follow persisted desired and deployment state: managed setup can be stopped or retried, ready agents need no Start action, and manual Hermes setup is secondary advanced recovery.
 - Managed Hermes runner start/restart now return asynchronous launch acceptance with typed observed status and canary contracts, so the control plane no longer treats Docker launch as application readiness.
 - Native/manual Hermes agents retain the launch-spec v2 compatibility path and still require existing Hermes setup state, while managed OpenRouter deployments bypass that setup gate and reapply plingpling-owned provider, Telegram, API-server, terminal, browser, safety, and prompt settings on start/restart.
 - Agent records now persist explicit stopped/running desired state, and owners can read the latest deployment operation through `GET /api/agents/:agentId/deployment` without exposing leases, idempotency keys, or ownership internals.

@@ -6,6 +6,7 @@ import { EmptyState, ProductShell } from "@/app/_components/product-shell";
 import { RunnerCapacityDefinitionItems } from "@/app/_components/runner-capacity-details";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { listedAgentStartDisabledReason } from "@/app/agents/_components/agent-start-readiness";
+import { DeploymentStatusLabel } from "@/app/agents/_components/deployment-status-label";
 import { MobileAgentList } from "@/app/agents/_components/mobile-agent-list";
 import {
   DashboardCostSummary,
@@ -226,10 +227,19 @@ export function DashboardContent({
                           <td>{agent.templateLabel}</td>
                           <td>
                             <span className="status-pill">{agent.status}</span>
+                            <DeploymentStatusLabel
+                              deployment={agent.latestDeployment}
+                              desiredStatus={agent.desiredStatus}
+                              href={`${agent.href}#deployment-progress-title`}
+                              observedStatus={agent.status}
+                            />
                           </td>
                           <td>
                             <AgentLifecycleControls
                               agentId={agent.id}
+                              deployment={agent.latestDeployment}
+                              detailHref={`${agent.href}#deployment-progress-title`}
+                              desiredStatus={agent.desiredStatus}
                               startDisabledReason={listedAgentStartDisabledReason(agent)}
                               status={agent.status}
                             />

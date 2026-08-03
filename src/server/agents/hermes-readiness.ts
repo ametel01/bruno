@@ -1,31 +1,16 @@
-import type { AgentDetailConfig } from "@/src/server/agents/list-agents";
 import type { AgentSecretStatus } from "@/src/server/agents/agent-secrets";
 import type { AssignedManualRunnerStatusSummary } from "@/src/server/runners/manual-runner-status";
-
-export type HermesReadinessRequirementStatus = "ready" | "missing" | "blocked";
-
-export type HermesReadinessRequirement = {
-  id: "api_server_key" | "runner";
-  label: string;
-  status: HermesReadinessRequirementStatus;
-  message: string;
-  updatedAt: string | null;
-};
-
-export type HermesSetupReadiness = {
-  requiresHermesSetup: boolean;
-  configurationReady: boolean;
-  runnerReady: boolean;
-  startReady: boolean;
-  startDisabledReason: string | null;
-  requirements: HermesReadinessRequirement[];
-};
+import type { AgentDetailConfigUi } from "@/src/shared/agent-ui-types";
+import type {
+  HermesReadinessRequirement,
+  HermesSetupReadiness,
+} from "@/src/shared/hermes-readiness-types";
 
 const REQUIRED_SECRET_LABELS = { api_server_key: "Agent API server key" } as const;
 const REQUIRED_SECRET_KINDS = ["api_server_key"] as const;
 
 export function buildHermesSetupReadiness(input: {
-  config: AgentDetailConfig;
+  config: AgentDetailConfigUi;
   secretStatuses: AgentSecretStatus[];
   assignedRunner: AssignedManualRunnerStatusSummary | null;
 }): HermesSetupReadiness {

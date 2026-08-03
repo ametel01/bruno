@@ -17,6 +17,16 @@ import {
 
 export const DEFAULT_AGENTBAY_RUNNER_IMAGE = "ghcr.io/ametel01/agentbay-runner:main";
 
+export type ReadyAgentCreationFlag =
+  | {
+      ok: true;
+      enabled: boolean;
+    }
+  | {
+      ok: false;
+      reason: "invalid_ready_agent_creation_flag";
+    };
+
 export type DigitalOceanProviderConfig = {
   token: string;
   providerMode?: "digitalocean" | "local_docker";
@@ -37,16 +47,6 @@ export type DigitalOceanProviderConfig = {
   localRunnerContainerName?: string;
   localRunnerStartDelayMs?: number;
 };
-
-export type ReadyAgentCreationFlag =
-  | {
-      ok: true;
-      enabled: boolean;
-    }
-  | {
-      ok: false;
-      reason: "invalid_ready_agent_creation_flag";
-    };
 
 export type CronSecretConfig =
   | {

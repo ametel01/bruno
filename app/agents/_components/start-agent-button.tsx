@@ -1,8 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AgentLifecycleStatus } from "@/src/server/agents/lifecycle";
+import {
+  acquireAgentActionRequestLatch,
+  releaseAgentActionRequestLatch,
+} from "./agent-action-request-latch";
 
 type StartAgentButtonProps = {
   agentId: string;
@@ -35,9 +39,11 @@ export function StartAgentButton({
 }: StartAgentButtonProps) {
   const router = useRouter();
   const [state, setState] = useState<StartState>({ status: "idle" });
+  const requestLatchRef = useRef(false);
 
   useEffect(() => {
     if (status === "running") {
+      releaseAgentActionRequestLatch(requestLatchRef);
       setState({ status: "idle" });
       return;
     }
@@ -56,18 +62,20 @@ export function StartAgentButton({
   }, [router, state.status, status]);
 
   async function handleStart() {
-    if (!STARTABLE_STATUSES.has(status)) {
+    if (!STARTABLE_STATUSES.has(status) || !acquireAgentActionRequestLatch(requestLatchRef)) {
       return;
     }
 
     setState({ status: "requesting" });
 
     try {
-      const response = await fetch(`/api/agents/${agentId}/actions/start`, {
+      const response = await fetch(`/api/agents/${encodeURIComponent(agentId)}/actions/start`, {
+        credentials: "same-origin",
         method: "POST",
       });
 
       if (!response.ok) {
+        releaseAgentActionRequestLatch(requestLatchRef);
         setState({
           status: "error",
           message: await safeFailureMessage(response, invalidStatusMessage, failureMessage),
@@ -78,6 +86,7 @@ export function StartAgentButton({
       setState({ status: "polling", message: requestedMessage });
       router.refresh();
     } catch {
+      releaseAgentActionRequestLatch(requestLatchRef);
       setState({ status: "error", message: failureMessage });
     }
   }
@@ -89,7 +98,13 @@ export function StartAgentButton({
 
   return (
     <div className="start-agent-action">
-      <button className="secondary-button" type="button" disabled={disabled} onClick={handleStart}>
+      <button
+        aria-busy={busy}
+        className="secondary-button"
+        type="button"
+        disabled={disabled}
+        onClick={handleStart}
+      >
         {buttonLabel}
       </button>
       {state.status === "polling" || state.status === "error" ? (
@@ -131,14 +146,11 @@ async function safeFailureMessage(
     const body = (await response.json()) as {
       error?: {
         code?: unknown;
-        message?: unknown;
       };
     };
 
     if (body.error?.code === "hermes_setup_incomplete") {
-      return typeof body.error.message === "string"
-        ? body.error.message
-        : "Complete Hermes setup before starting this agent.";
+      return "Complete Hermes setup before starting this agent.";
     }
 
     if (body.error?.code === "invalid_agent_status") {

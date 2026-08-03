@@ -2,10 +2,10 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import {
   CI_E2E_SELECTORS,
+  type E2ECommand,
   FULL_E2E_CAPABILITY_MESSAGE,
   planE2ECommand,
   runE2E,
-  type E2ECommand,
 } from "@/scripts/run-e2e";
 
 const EXPECTED_CI_SELECTORS = [
@@ -13,6 +13,7 @@ const EXPECTED_CI_SELECTORS = [
   "tests/e2e/root-route.spec.ts:45",
   "tests/e2e/root-route.spec.ts:60",
   "tests/e2e/root-route.spec.ts:2191",
+  "tests/e2e/automatic-ready.spec.ts",
 ];
 
 describe("E2E capability gates", () => {

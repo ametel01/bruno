@@ -1,15 +1,12 @@
 import Link from "next/link";
-import type { ListedAgent } from "@/src/server/agents/list-agents";
-import type { AgentLifecycleStatus } from "@/src/server/agents/lifecycle";
+import type { ListedAgentUi } from "@/src/shared/agent-ui-types";
+import { AgentLifecycleControls } from "./agent-lifecycle-controls";
 import { listedAgentStartDisabledReason } from "./agent-start-readiness";
-import { StartAgentButton } from "./start-agent-button";
-import { StopAgentButton } from "./stop-agent-button";
+import { DeploymentStatusLabel } from "./deployment-status-label";
 
 type MobileAgentListProps = {
-  agents: ListedAgent[];
+  agents: ListedAgentUi[];
 };
-
-const RESUMABLE_STATUSES = new Set<AgentLifecycleStatus>(["idle", "stopped", "error"]);
 
 export function MobileAgentList({ agents }: MobileAgentListProps) {
   return (
@@ -23,6 +20,12 @@ export function MobileAgentList({ agents }: MobileAgentListProps) {
             </div>
             <span className="status-pill">{agent.status}</span>
           </div>
+          <DeploymentStatusLabel
+            deployment={agent.latestDeployment}
+            desiredStatus={agent.desiredStatus}
+            href={`${agent.href}#deployment-progress-title`}
+            observedStatus={agent.status}
+          />
           <dl className="mobile-agent-metadata">
             <div>
               <dt>Template key</dt>
@@ -41,50 +44,24 @@ export function MobileAgentList({ agents }: MobileAgentListProps) {
           >
             Configure
           </Link>
-          <MobileAgentActions
-            agentId={agent.id}
-            startDisabledReason={listedAgentStartDisabledReason(agent)}
-            status={agent.status}
-          />
+          <MobileAgentActions agent={agent} />
         </li>
       ))}
     </ol>
   );
 }
 
-function MobileAgentActions({
-  agentId,
-  startDisabledReason,
-  status,
-}: {
-  agentId: string;
-  startDisabledReason: string | null;
-  status: AgentLifecycleStatus;
-}) {
-  if (RESUMABLE_STATUSES.has(status)) {
-    return (
-      <div className="mobile-agent-actions">
-        <StartAgentButton
-          agentId={agentId}
-          busyLabel="Resuming"
-          disabledReason={startDisabledReason}
-          failureMessage="Agent could not be resumed."
-          invalidStatusMessage="Agent cannot be resumed from its current status."
-          label="Resume"
-          requestedMessage="Resume requested."
-          status={status}
-        />
-      </div>
-    );
-  }
-
-  if (status === "running") {
-    return (
-      <div className="mobile-agent-actions">
-        <StopAgentButton agentId={agentId} requireConfirmation={true} status={status} />
-      </div>
-    );
-  }
-
-  return <p className="mobile-agent-muted-action">No quick action for {status}.</p>;
+function MobileAgentActions({ agent }: { agent: ListedAgentUi }) {
+  return (
+    <div className="mobile-agent-actions">
+      <AgentLifecycleControls
+        agentId={agent.id}
+        deployment={agent.latestDeployment}
+        detailHref={`${agent.href}#deployment-progress-title`}
+        desiredStatus={agent.desiredStatus}
+        startDisabledReason={listedAgentStartDisabledReason(agent)}
+        status={agent.status}
+      />
+    </div>
+  );
 }

@@ -3236,11 +3236,12 @@ h2 {
 
 @media (max-width: 860px) {
   .app-shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .app-sidebar {
     min-height: auto;
+    min-width: 0;
     border-right: 0;
     border-bottom: 1px solid var(--line);
     padding: 16px;
@@ -3268,6 +3269,7 @@ h2 {
   }
 
   .shell-main {
+    min-width: 0;
     padding: 24px 16px 36px;
   }
 
@@ -3537,6 +3539,282 @@ h2 {
   }
 }
 
+.agent-create-mode-fieldset,
+.ready-credential-fieldset {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  margin: 0 0 18px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.agent-create-mode-fieldset > *,
+.ready-credential-fieldset > *,
+.agent-deployment-progress-card > *,
+.agent-deployment-progress-header > * {
+  min-width: 0;
+}
+
+.agent-create-mode-fieldset legend,
+.ready-credential-fieldset legend {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 0 6px;
+}
+
+.segmented-control {
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 420px;
+  min-width: 0;
+  padding: 3px;
+  width: min(100%, 420px);
+}
+
+.segmented-control button {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  min-height: 42px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 8px 12px;
+}
+
+.segmented-control button.selected {
+  background: var(--panel);
+  color: var(--foreground);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 12%);
+}
+
+.ready-credential-fieldset {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ready-credential-fieldset > .field-group,
+.advanced-runner-select,
+.advanced-runner-select .field-group {
+  min-width: 0;
+}
+
+.field-group-full,
+.advanced-runner-select {
+  grid-column: 1 / -1;
+}
+
+.ready-credential-fieldset textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.advanced-runner-select summary,
+.advanced-hermes-recovery summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-weight: 700;
+  min-height: 42px;
+  overflow-wrap: anywhere;
+}
+
+.advanced-runner-select summary:focus-visible,
+.advanced-hermes-recovery summary:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.deployment-status-summary {
+  align-items: flex-start;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.deployment-status-link {
+  justify-content: center;
+  min-height: 42px;
+}
+
+.deployment-status-label {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.1;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 5px 8px;
+  white-space: normal;
+}
+
+.deployment-status-label[data-tone="active"] {
+  background: #eef6ff;
+  border-color: #b7d6ff;
+  color: #1f5f9f;
+}
+
+.deployment-status-label[data-tone="ready"] {
+  background: #eefbf3;
+  border-color: #b8e8c8;
+  color: #196b3a;
+}
+
+.deployment-status-label[data-tone="failed"] {
+  background: #fff1f1;
+  border-color: #ffc9c9;
+  color: #9b1c1c;
+}
+
+.deployment-status-label[data-tone="stopped"],
+.deployment-status-label[data-tone="neutral"],
+.deployment-status-label[data-tone="unknown"] {
+  background: var(--panel-subtle);
+  color: var(--muted);
+}
+
+.deployment-status-stage {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.agent-deployment-progress-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: 18px;
+}
+
+.agent-deployment-progress-card > p {
+  overflow-wrap: anywhere;
+}
+
+.agent-deployment-progress-header {
+  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.agent-deployment-progress-header > div {
+  flex: 1 1 200px;
+}
+
+.agent-deployment-progress-header p {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+  margin: 0 0 4px;
+  text-transform: uppercase;
+}
+
+.agent-deployment-progress-header h2 {
+  font-size: 1.18rem;
+  margin: 0;
+}
+
+.deployment-stage-list {
+  display: grid;
+  gap: 8px;
+  list-style: decimal;
+  margin: 0;
+  min-width: 0;
+  padding-left: 22px;
+}
+
+.deployment-stage-list li {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 14px minmax(0, 1fr);
+  min-height: 42px;
+  min-width: 0;
+  padding: 9px 10px;
+}
+
+.deployment-stage-list li strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.deployment-stage-list li > span {
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  height: 12px;
+  width: 12px;
+}
+
+.deployment-stage-list li[data-stage-status="completed"] > span,
+.deployment-stage-list li[data-stage-status="current"] > span {
+  border-color: #278358;
+}
+
+.deployment-stage-list li[data-stage-status="current"] {
+  background: #eefbf3;
+}
+
+.deployment-stage-list li[data-stage-status="blocked"] {
+  background: var(--panel-subtle);
+}
+
+.deployment-progress-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.deployment-progress-actions > button {
+  max-width: 100%;
+}
+
+.advanced-hermes-recovery {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.advanced-hermes-recovery summary span {
+  display: inline-grid;
+  gap: 2px;
+}
+
+.advanced-hermes-recovery summary small {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+@media (max-width: 720px) {
+  .ready-credential-fieldset {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mobile-agent-card > .deployment-status-summary {
+    display: flex;
+    width: 100%;
+  }
+}
+
 @media (max-width: 460px) {
   .brand-mark {
     width: 38px;
@@ -3549,6 +3827,35 @@ h2 {
 
   .empty-state {
     min-height: 260px;
+  }
+
+  .agent-create-mode-fieldset,
+  .ready-credential-fieldset,
+  .agent-deployment-progress-card {
+    padding: 12px;
+  }
+
+  .agent-creation-actions > .primary-button,
+  .agent-creation-actions > .secondary-button,
+  .deployment-progress-actions > button {
+    width: 100%;
+  }
+
+  .deployment-progress-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .deployment-stage-list {
+    padding-left: 18px;
+  }
+
+  .mobile-agent-card-header {
+    flex-wrap: wrap;
+  }
+
+  .mobile-agent-card-header .status-pill {
+    max-width: 100%;
   }
 
   .agent-readiness-track {

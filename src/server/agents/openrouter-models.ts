@@ -1,5 +1,6 @@
 import "server-only";
 
+const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 export const HERMES_MINIMUM_CONTEXT_TOKENS = 32_768;
 
 export type OpenRouterModelMetadata = {
@@ -21,8 +22,6 @@ export const APPROVED_OPENROUTER_MODELS = [
 ] as const satisfies readonly OpenRouterModelMetadata[];
 
 export type ApprovedOpenRouterModelId = (typeof APPROVED_OPENROUTER_MODELS)[number]["id"];
-
-const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 export function getApprovedOpenRouterModel(
   modelId: string,

@@ -5,6 +5,7 @@ import { ApprovalDecisionControls } from "@/app/_components/approval-decision-co
 import { PlaceholderPanel, ProductShell } from "@/app/_components/product-shell";
 import { AgentBackupControls } from "@/app/agents/_components/agent-backup-controls";
 import { AgentConfigEditor } from "@/app/agents/_components/agent-config-editor";
+import { AgentDeploymentProgress } from "@/app/agents/_components/agent-deployment-progress";
 import { AgentHermesSetup } from "@/app/agents/_components/agent-hermes-setup";
 import { AssignedRunnerPanel } from "@/app/agents/_components/assigned-runner-panel";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
@@ -106,6 +107,7 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
   if (!agent) {
     return notFound();
   }
+  const { desiredStatus, latestDeployment } = agent;
 
   const activityCursor = parseActivityCursor(resolvedSearchParams?.activityCursor);
   const activityPromise =
@@ -196,6 +198,9 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
               <span>Actions</span>
               <AgentLifecycleControls
                 agentId={agent.id}
+                deployment={latestDeployment}
+                detailHref={`${agent.href}#deployment-progress-title`}
+                desiredStatus={desiredStatus}
                 restartDisabledReason={
                   agent.status === "running" ? hermesLifecycleDisabledReason : null
                 }
@@ -263,8 +268,15 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
 
         <div className="agent-detail-workspace">
           <main className="agent-detail-primary">
-            <AgentHermesSetupPanel
+            <AgentDeploymentProgress
               agentId={agent.id}
+              desiredStatus={desiredStatus}
+              initialDeployment={latestDeployment}
+              observedStatus={agent.status}
+            />
+            <AdvancedHermesSetupPanel
+              agentId={agent.id}
+              managed={latestDeployment !== null}
               readiness={hermesReadiness}
               result={secretsResult}
             />
@@ -358,18 +370,48 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
   );
 }
 
-function AgentHermesSetupPanel({
+function AdvancedHermesSetupPanel({
   agentId,
+  managed,
   readiness,
   result,
 }: {
   agentId: string;
+  managed: boolean;
   readiness: ReturnType<typeof buildHermesSetupReadiness>;
   result: AgentSecretsResult;
 }) {
-  return result.ok ? (
-    <AgentHermesSetup agentId={agentId} readiness={readiness} />
-  ) : (
+  if (!managed) {
+    return result.ok ? (
+      <AgentHermesSetup agentId={agentId} readiness={readiness} />
+    ) : (
+      <HermesSetupLoadError />
+    );
+  }
+
+  return (
+    <details className="advanced-hermes-recovery">
+      <summary>
+        <span>
+          <strong>Advanced Hermes setup and recovery</strong>
+          <small>Manual terminal setup for recovery and compatibility</small>
+        </span>
+      </summary>
+      <p>
+        Managed provider and Telegram keys are control-plane-owned and may be reprojected during
+        recovery.
+      </p>
+      {result.ok ? (
+        <AgentHermesSetup agentId={agentId} readiness={readiness} />
+      ) : (
+        <HermesSetupLoadError />
+      )}
+    </details>
+  );
+}
+
+function HermesSetupLoadError() {
+  return (
     <section className="hermes-setup-panel" aria-labelledby="hermes-setup-title">
       <div className="section-heading">
         <h2 id="hermes-setup-title">Hermes setup</h2>

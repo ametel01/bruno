@@ -1,52 +1,36 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import {
-  type AgentLifecycleStatus,
+  mapAgentDeploymentRowToDto,
+  type AgentDeploymentRowForDto,
+} from "@/src/server/agents/deployment-dto";
+import {
   reconcileDockerRunnerAgentForDevelopmentUser,
   reconcileDockerRunnerAgentForUser,
   reconcileDockerRunnerAgentsForDevelopmentUser,
   reconcileDockerRunnerAgentsForUser,
 } from "@/src/server/agents/lifecycle";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agentConfigs, agents, runners } from "@/src/server/db/schema";
+import { agentConfigs, agentDeployments, agents, runners } from "@/src/server/db/schema";
 import {
   getAgentTemplateLabel,
   getAgentTemplateSnapshot,
   isSupportedTemplateKey,
   type AgentTemplateSnapshot,
 } from "@/src/server/agents/templates";
+import type { AgentDetailConfigUi, ListedAgentUi } from "@/src/shared/agent-ui-types";
+import type { PublicAgentDeployment } from "@/src/shared/agent-deployment-presentation";
 
-export type ListedAgent = {
-  id: string;
-  name: string;
-  templateKey: string;
-  templateVersion: string;
-  templateLabel: string;
-  status: AgentLifecycleStatus;
-  assignedRunnerKind?: string | null;
-  assignedRunnerStatus?: string | null;
-  assignedRunnerProvisioningStatus?: string | null;
-  href: string;
-  createdAt: string;
-};
+export type ListedAgent = ListedAgentUi;
 
 export type AgentDetail = ListedAgent & {
   statusReason: string | null;
   updatedAt: string;
   templateSnapshot: AgentTemplateSnapshot;
-  config: AgentDetailConfig;
+  config: AgentDetailConfigUi;
 };
 
-export type AgentDetailConfig = {
-  systemPrompt: string;
-  modelProvider: string;
-  modelName: string;
-  maxDailySpendCents: number;
-  scheduleMode: "manual" | "cron";
-  scheduleCron: string | null;
-  timezone: string;
-  updatedAt: string;
-};
+export type AgentDetailConfig = AgentDetailConfigUi;
 
 export type ListAgentsDependencies = {
   createConnection?: () => DatabaseConnection;
@@ -82,6 +66,7 @@ export async function listActiveAgentsForDevelopmentUser(
         templateKey: agents.templateKey,
         templateVersion: agents.templateVersion,
         status: agents.status,
+        desiredStatus: agents.desiredStatus,
         assignedRunnerKind: runners.kind,
         assignedRunnerStatus: runners.status,
         assignedRunnerProvisioningStatus: runners.provisioningStatus,
@@ -92,6 +77,12 @@ export async function listActiveAgentsForDevelopmentUser(
       .where(isNull(agents.deletedAt))
       .orderBy(desc(agents.createdAt), desc(agents.id));
 
+    const deployments = await loadLatestDeploymentMap({
+      db: connection.db,
+      userId: null,
+      agentIds: rows.map((row) => row.id),
+    });
+
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -99,6 +90,8 @@ export async function listActiveAgentsForDevelopmentUser(
       templateVersion: row.templateVersion,
       templateLabel: getAgentTemplateLabel(row.templateKey),
       status: row.status,
+      desiredStatus: row.desiredStatus,
+      latestDeployment: deployments.get(row.id) ?? null,
       assignedRunnerKind: row.assignedRunnerKind,
       assignedRunnerStatus: row.assignedRunnerStatus,
       assignedRunnerProvisioningStatus: row.assignedRunnerProvisioningStatus,
@@ -131,6 +124,7 @@ export async function listActiveAgentsForUser(
         templateKey: agents.templateKey,
         templateVersion: agents.templateVersion,
         status: agents.status,
+        desiredStatus: agents.desiredStatus,
         assignedRunnerKind: runners.kind,
         assignedRunnerStatus: runners.status,
         assignedRunnerProvisioningStatus: runners.provisioningStatus,
@@ -141,6 +135,12 @@ export async function listActiveAgentsForUser(
       .where(and(eq(agents.userId, userId), isNull(agents.deletedAt)))
       .orderBy(desc(agents.createdAt), desc(agents.id));
 
+    const deployments = await loadLatestDeploymentMap({
+      db: connection.db,
+      userId,
+      agentIds: rows.map((row) => row.id),
+    });
+
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -148,6 +148,8 @@ export async function listActiveAgentsForUser(
       templateVersion: row.templateVersion,
       templateLabel: getAgentTemplateLabel(row.templateKey),
       status: row.status,
+      desiredStatus: row.desiredStatus,
+      latestDeployment: deployments.get(row.id) ?? null,
       assignedRunnerKind: row.assignedRunnerKind,
       assignedRunnerStatus: row.assignedRunnerStatus,
       assignedRunnerProvisioningStatus: row.assignedRunnerProvisioningStatus,
@@ -187,6 +189,7 @@ export async function getActiveAgentForDevelopmentUser(
         templateVersion: agents.templateVersion,
         templateSnapshotJson: agents.templateSnapshotJson,
         status: agents.status,
+        desiredStatus: agents.desiredStatus,
         statusReason: agents.statusReason,
         createdAt: agents.createdAt,
         updatedAt: agents.updatedAt,
@@ -217,6 +220,12 @@ export async function getActiveAgentForDevelopmentUser(
       templateVersion: row.templateVersion,
       templateLabel: getAgentTemplateLabel(row.templateKey),
       status: row.status,
+      desiredStatus: row.desiredStatus,
+      latestDeployment: await loadLatestDeploymentForAgent({
+        db: connection.db,
+        userId: null,
+        agentId: row.id,
+      }),
       statusReason: row.statusReason,
       href: `/agents/${row.id}`,
       createdAt: row.createdAt.toISOString(),
@@ -267,6 +276,7 @@ export async function getActiveAgentForUser(
         templateVersion: agents.templateVersion,
         templateSnapshotJson: agents.templateSnapshotJson,
         status: agents.status,
+        desiredStatus: agents.desiredStatus,
         statusReason: agents.statusReason,
         createdAt: agents.createdAt,
         updatedAt: agents.updatedAt,
@@ -297,6 +307,12 @@ export async function getActiveAgentForUser(
       templateVersion: row.templateVersion,
       templateLabel: getAgentTemplateLabel(row.templateKey),
       status: row.status,
+      desiredStatus: row.desiredStatus,
+      latestDeployment: await loadLatestDeploymentForAgent({
+        db: connection.db,
+        userId,
+        agentId: row.id,
+      }),
       statusReason: row.statusReason,
       href: `/agents/${row.id}`,
       createdAt: row.createdAt.toISOString(),
@@ -342,4 +358,99 @@ function normalizeTemplateSnapshot(
     ...templateSnapshot,
     defaultSystemPrompt: getAgentTemplateSnapshot(templateKey).defaultSystemPrompt,
   };
+}
+
+async function loadLatestDeploymentForAgent(input: {
+  db: DatabaseConnection["db"];
+  userId: string | null;
+  agentId: string;
+}): Promise<PublicAgentDeployment | null> {
+  const [row] = await input.db
+    .select(latestDeploymentSelection)
+    .from(agentDeployments)
+    .innerJoin(
+      agents,
+      and(eq(agents.id, agentDeployments.agentId), eq(agents.userId, agentDeployments.userId)),
+    )
+    .where(
+      and(
+        eq(agentDeployments.agentId, input.agentId),
+        isNull(agents.deletedAt),
+        ...(input.userId === null
+          ? []
+          : [eq(agents.userId, input.userId), eq(agentDeployments.userId, input.userId)]),
+      ),
+    )
+    .orderBy(desc(agentDeployments.createdAt), desc(agentDeployments.id))
+    .limit(1);
+
+  return row ? mapDeploymentRowToUi(row) : null;
+}
+
+async function loadLatestDeploymentMap(input: {
+  db: DatabaseConnection["db"];
+  userId: string | null;
+  agentIds: string[];
+}): Promise<Map<string, PublicAgentDeployment>> {
+  if (input.agentIds.length === 0) {
+    return new Map();
+  }
+
+  const rows = await input.db
+    .selectDistinctOn([agentDeployments.agentId], latestDeploymentSelection)
+    .from(agentDeployments)
+    .innerJoin(
+      agents,
+      and(eq(agents.id, agentDeployments.agentId), eq(agents.userId, agentDeployments.userId)),
+    )
+    .where(
+      and(
+        inArray(agentDeployments.agentId, input.agentIds),
+        isNull(agents.deletedAt),
+        ...(input.userId === null
+          ? []
+          : [eq(agents.userId, input.userId), eq(agentDeployments.userId, input.userId)]),
+      ),
+    )
+    .orderBy(agentDeployments.agentId, desc(agentDeployments.createdAt), desc(agentDeployments.id));
+
+  return new Map(rows.map((row) => [row.agentId, mapDeploymentRowToUi(row)]));
+}
+
+const latestDeploymentSelection = {
+  id: agentDeployments.id,
+  agentId: agentDeployments.agentId,
+  stage: agentDeployments.stage,
+  configRevision: agentDeployments.configRevision,
+  attemptCount: agentDeployments.attemptCount,
+  errorCode: agentDeployments.errorCode,
+  nextAttemptAt: agentDeployments.nextAttemptAt,
+  startedAt: agentDeployments.startedAt,
+  completedAt: agentDeployments.completedAt,
+  failedAt: agentDeployments.failedAt,
+  createdAt: agentDeployments.createdAt,
+  updatedAt: agentDeployments.updatedAt,
+};
+
+function mapDeploymentRowToUi(
+  row: Omit<AgentDeploymentRowForDto, "errorDetail">,
+): PublicAgentDeployment {
+  return toUiSafeDeployment(mapAgentDeploymentRowToDto({ ...row, errorDetail: null }));
+}
+
+function toUiSafeDeployment(deployment: ReturnType<typeof mapAgentDeploymentRowToDto>) {
+  return {
+    id: deployment.id,
+    agentId: deployment.agentId,
+    stage: deployment.stage,
+    configRevision: deployment.configRevision,
+    attemptCount: deployment.attemptCount,
+    error: deployment.error ? { code: deployment.error.code } : null,
+    nextAttemptAt: deployment.nextAttemptAt,
+    startedAt: deployment.startedAt,
+    completedAt: deployment.completedAt,
+    failedAt: deployment.failedAt,
+    createdAt: deployment.createdAt,
+    updatedAt: deployment.updatedAt,
+  } satisfies PublicAgentDeployment;
 }

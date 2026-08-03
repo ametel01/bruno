@@ -4,7 +4,7 @@ import type { FitAddon as XtermFitAddon } from "@xterm/addon-fit";
 import type { Terminal as XtermTerminal } from "@xterm/xterm";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import type { HermesSetupReadiness } from "@/src/server/agents/hermes-readiness";
+import type { HermesSetupReadiness } from "@/src/shared/hermes-readiness-types";
 
 type AgentHermesSetupProps = {
   agentId: string;

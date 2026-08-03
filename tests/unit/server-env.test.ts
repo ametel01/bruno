@@ -100,6 +100,15 @@ describe("server-only provider environment validation", () => {
     });
   });
 
+  it("keeps the ready creation flag parser server-owned", async () => {
+    const source = await readFile("src/server/env.ts", "utf8");
+    const sharedFiles = await readdir("src/shared");
+
+    expect(source).toContain("export function readReadyAgentCreationFlag");
+    expect(source).not.toContain("@/src/shared/ready-agent-creation-flag");
+    expect(sharedFiles).not.toContain("ready-agent-creation-flag.ts");
+  });
+
   it("returns null when DigitalOcean provisioning is not configured", () => {
     expect(readDigitalOceanProviderConfig({})).toBeNull();
   });
