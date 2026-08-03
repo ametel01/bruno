@@ -1,10 +1,12 @@
 import { execFile } from "node:child_process";
 import { link, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  type HermesProjectionFilesystem,
   projectHermesHome,
   prepareHermesState,
   mergeHermesEnv,
@@ -267,6 +269,35 @@ describe("Hermes home projection", () => {
     }
   });
 
+  it("preserves safe unrelated YAML scalar text containing punctuation", async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    const spec = sampleManagedLaunchSpec();
+    const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
+
+    await writeFile(
+      join(state.hermesHome, "config.yaml"),
+      [
+        'quoted_bang: "hello !important"',
+        'quoted_glob: "use *glob"',
+        'quoted_amp: "rock &roll"',
+        "literal_note: |",
+        "  Keep !important in docs.",
+        "  Use *glob and rock &roll.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const projected = await projectHermesHome(spec, { stateRoot: tempRoot });
+    const config = await readFile(projected.configPath, "utf8");
+
+    expect(config).toContain("quoted_bang: hello !important");
+    expect(config).toContain("quoted_glob: use *glob");
+    expect(config).toContain("quoted_amp: rock &roll");
+    expect(config).toContain("Keep !important in docs.");
+    expect(config).toContain("Use *glob and rock &roll.");
+  });
+
   it("normalizes CRLF/export/duplicate managed env and rejects malformed multiline managed env", async () => {
     tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
     const spec = sampleManagedLaunchSpec();
@@ -321,6 +352,21 @@ describe("Hermes home projection", () => {
     }
   });
 
+  it("rejects symlinks at every projected target", async () => {
+    for (const fileName of ["config.yaml", ".env", "SOUL.md", "agentbay-config-revision.json"]) {
+      tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+      const spec = sampleManagedLaunchSpec();
+      const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
+
+      await symlink("/tmp/outside-agentbay", join(state.hermesHome, fileName));
+      await expect(projectHermesHome(spec, { stateRoot: tempRoot })).rejects.toThrow(
+        "Hermes projection is invalid.",
+      );
+      await rm(tempRoot, { recursive: true, force: true });
+      tempRoot = null;
+    }
+  });
+
   it("rejects nonregular targets, non-directory state components, and oversized existing files", async () => {
     tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
     const spec = sampleManagedLaunchSpec();
@@ -330,6 +376,24 @@ describe("Hermes home projection", () => {
     await expect(projectHermesHome(spec, { stateRoot: tempRoot })).rejects.toThrow(
       "Hermes projection is invalid.",
     );
+    await rm(tempRoot, { recursive: true, force: true });
+
+    tempRoot = await mkdtemp("/tmp/ahp-socket-");
+    const socketState = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
+    const socketPath = join(socketState.hermesHome, "SOUL.md");
+    const server = createServer();
+
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(socketPath, resolve);
+    });
+    try {
+      await expect(projectHermesHome(spec, { stateRoot: tempRoot })).rejects.toThrow(
+        "Hermes projection is invalid.",
+      );
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
     await rm(tempRoot, { recursive: true, force: true });
 
     tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
@@ -364,5 +428,177 @@ describe("Hermes home projection", () => {
     expect((await stat(projected.envPath)).mode & 0o777).toBe(0o600);
     expect((await stat(projected.soulPath)).mode & 0o777).toBe(0o644);
     expect((await stat(projected.revisionPath)).mode & 0o777).toBe(0o644);
+  });
+
+  it("uses injected ownership hooks for directories and all staged files", async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    const chownCalls: Array<{ path: string; uid: number; gid: number }> = [];
+    const handleChownCalls: Array<{ uid: number; gid: number }> = [];
+
+    await projectHermesHome(sampleManagedLaunchSpec(), {
+      stateRoot: tempRoot,
+      ownership: { uid: 10000, gid: 10000 },
+      fs: {
+        chown: async (path, uid, gid) => {
+          chownCalls.push({ path, uid, gid });
+        },
+        handleChown: async (_handle, uid, gid) => {
+          handleChownCalls.push({ uid, gid });
+        },
+      },
+    });
+
+    expect(chownCalls).toHaveLength(3);
+    expect(chownCalls.map((call) => [call.uid, call.gid])).toEqual([
+      [10000, 10000],
+      [10000, 10000],
+      [10000, 10000],
+    ]);
+    expect(handleChownCalls).toEqual([
+      { uid: 10000, gid: 10000 },
+      { uid: 10000, gid: 10000 },
+      { uid: 10000, gid: 10000 },
+      { uid: 10000, gid: 10000 },
+    ]);
+  });
+
+  it("fails closed on owned temp collisions without removing preexisting temp paths", async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    const spec = sampleManagedLaunchSpec();
+    const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
+    const tempSuffix = Buffer.alloc(12, 0xab).toString("hex");
+    const collidingTemp = join(state.hermesHome, `.config.yaml.tmp-${tempSuffix}`);
+
+    await symlink("/tmp/outside-agentbay", collidingTemp);
+    await expect(
+      projectHermesHome(spec, {
+        stateRoot: tempRoot,
+        fs: { randomBytes: () => Buffer.alloc(12, 0xab) },
+      }),
+    ).rejects.toThrow("Hermes projection is invalid.");
+    expect((await readdir(state.hermesHome)).filter((entry) => entry.includes(tempSuffix))).toEqual(
+      [`.config.yaml.tmp-${tempSuffix}`],
+    );
+  });
+
+  it("cleans owned temps and preserves the old marker on injected stage and marker failures", async () => {
+    const failureCases: Array<{
+      name: string;
+      fs: Partial<HermesProjectionFilesystem>;
+    }> = [
+      {
+        name: "write",
+        fs: {
+          handleWriteFile: async () => {
+            throw new Error("injected write failure");
+          },
+        },
+      },
+      {
+        name: "chmod",
+        fs: {
+          handleChmod: async () => {
+            throw new Error("injected chmod failure");
+          },
+        },
+      },
+      {
+        name: "chown",
+        fs: {
+          handleChown: async () => {
+            throw new Error("injected chown failure");
+          },
+        },
+      },
+      {
+        name: "fsync",
+        fs: {
+          handleSync: async () => {
+            throw new Error("injected fsync failure");
+          },
+        },
+      },
+      {
+        name: "marker-rename",
+        fs: {
+          rename: async (from, to) => {
+            if (String(to).endsWith("agentbay-config-revision.json")) {
+              throw new Error("injected marker rename failure");
+            }
+            await import("node:fs/promises").then(({ rename }) => rename(from, to));
+          },
+        },
+      },
+    ];
+
+    for (const failureCase of failureCases) {
+      tempRoot = await mkdtemp(join(tmpdir(), `agentbay-hermes-${failureCase.name}-`));
+      const spec = sampleManagedLaunchSpec();
+      const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
+
+      await writeFile(
+        join(state.hermesHome, "agentbay-config-revision.json"),
+        '{"version":"old","agentId":"old","configRevision":"old","image":"old"}\n',
+        "utf8",
+      );
+      await expect(
+        projectHermesHome(spec, {
+          stateRoot: tempRoot,
+          ownership: { uid: 10000, gid: 10000 },
+          fs: {
+            chown: async () => undefined,
+            handleChown: async () => undefined,
+            ...failureCase.fs,
+          },
+        }),
+      ).rejects.toThrow("Hermes projection is invalid.");
+      expect(await readFile(join(state.hermesHome, "agentbay-config-revision.json"), "utf8")).toBe(
+        '{"version":"old","agentId":"old","configRevision":"old","image":"old"}\n',
+      );
+      expect((await readdir(state.hermesHome)).filter((entry) => entry.includes(".tmp-"))).toEqual(
+        [],
+      );
+      await rm(tempRoot, { recursive: true, force: true });
+      tempRoot = null;
+    }
+  });
+
+  it("repairs projection after marker-last interruption without deleting workspace data", async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    const spec = sampleManagedLaunchSpec();
+    const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
+    const workspaceSentinel = join(state.workspace, "sentinel.txt");
+    let failedMarker = false;
+
+    await writeFile(workspaceSentinel, "preserved", "utf8");
+    await writeFile(
+      join(state.hermesHome, "agentbay-config-revision.json"),
+      '{"version":"old","agentId":"old","configRevision":"old","image":"old"}\n',
+      "utf8",
+    );
+    await expect(
+      projectHermesHome(spec, {
+        stateRoot: tempRoot,
+        fs: {
+          rename: async (from, to) => {
+            if (!failedMarker && String(to).endsWith("agentbay-config-revision.json")) {
+              failedMarker = true;
+              throw new Error("injected marker interruption");
+            }
+            await import("node:fs/promises").then(({ rename }) => rename(from, to));
+          },
+        },
+      }),
+    ).rejects.toThrow("Hermes projection is invalid.");
+    expect(await readFile(join(state.hermesHome, "agentbay-config-revision.json"), "utf8")).toBe(
+      '{"version":"old","agentId":"old","configRevision":"old","image":"old"}\n',
+    );
+
+    const repaired = await projectHermesHome(spec, { stateRoot: tempRoot });
+
+    expect(JSON.parse(await readFile(repaired.revisionPath, "utf8"))).toMatchObject({
+      configRevision: spec.agent.configRevision,
+    });
+    expect(await readFile(workspaceSentinel, "utf8")).toBe("preserved");
   });
 });

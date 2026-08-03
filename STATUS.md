@@ -6,11 +6,11 @@
   owner: builder-step-5
   branch: `main`
   worktree: `/Users/alexmetelli/source/plingpling`
-  phase: cycle-2 validated; pending independent checker
-  cycle: 2/5
+  phase: cycle-3 validated; pending independent checker
+  cycle: 3/5
   contract: `STATUS.archive.md` → `Step 5 Completion Contract (pre-spec)`
-  blocker: none; Step 5 cycle-2 repair is in this commit after `fe13ab9`.
-  next-action: Checker independently verifies Step 5 cycle 2 before Step 6 starts.
+  blocker: none; Step 5 cycle-3 repair is in this commit after `fe13ab9` and `d50cc4e`.
+  next-action: Checker independently verifies Step 5 cycle 3 before Step 6 starts.
 
 ## Completion Contract
 
@@ -43,11 +43,12 @@
 - Step 3 `7024bc2`: independently green — focused 7 files / 72 tests, clean/upgrade loopback migration fixtures, 103 files / 905 tests, build, 14 E2E; evidence recorded in `ba8c969`.
 - Step 4 `546b9df`: independently green after cycle 2 — focused 12 files / 111 tests, migrations, 107 files / 939 tests, build, 14 E2E, and fail-closed staging with no effects.
 - Step 5 `fe13ab9`: builder green but checker cycle 1 found YAML/env/filesystem/Docker inspect gaps.
-- Step 5 cycle 2 this commit: builder green — focused repair 17 files / 95 tests, local Hermes contract smoke with fake model and fake Telegram boundary, 107 files / 955 tests, build, 14 E2E, and fail-closed staging with no effects.
+- Step 5 `d50cc4e`: cycle 2 builder green but checker cycle 2 found safe YAML punctuation and filesystem matrix gaps.
+- Step 5 cycle 3 this commit: builder green — focused repair 17 files / 101 tests, local Hermes contract smoke with fake model and fake Telegram boundary, 107 files / 961 tests, build, 14 E2E, and fail-closed staging with no effects.
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling` — branch `main`; sole active worktree; Step 5 cycle-2 validated pending independent checker; no stashes. Archived Steps 5–9 contracts are committed through `368c4da`; the Step 10 pre-spec is append-only and out of the builder's scope.
+- `/Users/alexmetelli/source/plingpling` — branch `main`; sole active worktree; Step 5 cycle-3 validated pending independent checker; no stashes. Archived Steps 5–9 contracts are committed through `368c4da`; the Step 10 pre-spec is append-only and out of the builder's scope.
 
 ## Decisions And Lessons
 
@@ -63,4 +64,4 @@
 - Step 2 — `897e28f` — pinned Hermes readiness contract and failed-launch cleanup.
 - Step 3 — `7024bc2` — desired state, durable deployment operations, leases, migration, and concealed read API; checker evidence `ba8c969`.
 - Step 4 — `d942270` + `546b9df` — ready-mode encrypted creation, bounded Telegram validation, active-bot uniqueness/backfill, atomic deployment persistence, and independently accepted security/concurrency gates.
-- Step 5 — `fe13ab9` plus this commit — managed Hermes launch-spec v3, owner-scoped secret launch building, hardened strict YAML/env/filesystem projection, v2/manual compatibility, and fake-provider/Telegram local smoke coverage.
+- Step 5 — `fe13ab9` + `d50cc4e` + this commit — managed Hermes launch-spec v3, owner-scoped secret launch building, hardened strict YAML/env/filesystem projection, safe YAML scalar punctuation preservation, filesystem transaction seam coverage, v2/manual compatibility, and fake-provider/Telegram local smoke coverage.

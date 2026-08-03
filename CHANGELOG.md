@@ -118,6 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Managed Hermes projection now preserves safe unrelated YAML scalar text containing punctuation such as `!`, `*`, and `&` while still rejecting actual YAML tags, anchors, aliases, and merge keys.
 - Managed Hermes projection now rejects explicit YAML tags, secret-like null/map/array/non-placeholder values, shell-default env references, nonregular target files, and Docker inspect exposure of Telegram allowlist values.
 - Telegram secret replacement now returns generic active-bot conflicts and distinguishes invalid bot tokens from temporary Telegram validation outages without mutating stored secrets.
 - Pinned Hermes gateway readiness now follows the `v2026.7.7.2` detailed-health platform-state contract without requiring an HTTP config-revision echo, while failed post-launch evidence or readiness checks remove the partial selected-agent container.
@@ -163,6 +164,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Managed Hermes projection tests now exercise the injected filesystem transaction seam for temp collisions, UID/GID ownership calls, write/chmod/chown/fsync/rename failures, marker-last recovery, temp cleanup, and nonregular projected targets.
 - Managed Hermes projection hardening now enforces exact env-reference placeholders for secret-like YAML keys, AST-level YAML tag/anchor rejection, uniform hardlink/FIFO/device/nonregular target validation across all four projected files, and low-entropy Telegram allowlist inspect-leak checks.
 - Managed Hermes projection now uses strict YAML parsing, exact launch-spec key validation, prototype/tag/alias/duplicate/size/depth defenses, no-follow path checks, marker-last atomic writes, secret-free serialization, and `0600` env file handling.
 - Ready-mode creation and Telegram secret backfill now have real-Postgres race, rollback, replay, and isolation coverage for token uniqueness, bot-subject uniqueness, idempotency, requested runners, and insert-boundary failures.

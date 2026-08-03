@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes as cryptoRandomBytes } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { chmod, lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
@@ -21,12 +21,29 @@ export type HermesProjectionResult = {
 };
 
 export type HermesProjectionOptions = {
+  fs?: Partial<HermesProjectionFilesystem>;
   stateRoot?: string;
   ownership?: {
     uid: number;
     gid: number;
   };
 };
+
+export type HermesProjectionFilesystem = {
+  chmod: typeof chmod;
+  chown: (path: string, uid: number, gid: number) => Promise<void>;
+  handleChmod: (handle: ProjectionFileHandle, mode: number) => Promise<void>;
+  handleChown: (handle: ProjectionFileHandle, uid: number, gid: number) => Promise<void>;
+  handleSync: (handle: ProjectionFileHandle) => Promise<void>;
+  handleWriteFile: (handle: ProjectionFileHandle, content: string) => Promise<void>;
+  mkdir: typeof mkdir;
+  open: typeof open;
+  randomBytes: typeof cryptoRandomBytes;
+  rename: typeof rename;
+  rm: typeof rm;
+};
+
+type ProjectionFileHandle = Awaited<ReturnType<typeof open>>;
 
 export type HermesStatePaths = Pick<
   HermesProjectionResult,
@@ -71,6 +88,23 @@ const ENV_REFERENCE_PATTERN = /^(?:\$\{[A-Z_][A-Z0-9_]*\}|env:[A-Z_][A-Z0-9_]*)$
 const OPENROUTER_KEY_PATTERN = /^sk-or-v1-[A-Za-z0-9_-]{20,}$/;
 const TELEGRAM_BOT_TOKEN_PATTERN = /^[1-9][0-9]{5,19}:[A-Za-z0-9_-]{20,}$/;
 const API_SERVER_KEY_PATTERN = /^agb_agent_[A-Za-z0-9_-]{32,}$/;
+const NODE_FS: HermesProjectionFilesystem = {
+  chmod,
+  async chown(path, uid, gid) {
+    const { chown: nodeChown } = await import("node:fs/promises");
+
+    await nodeChown(path, uid, gid);
+  },
+  handleChmod: (handle, mode) => handle.chmod(mode),
+  handleChown: (handle, uid, gid) => handle.chown(uid, gid),
+  handleSync: (handle) => handle.sync(),
+  handleWriteFile: (handle, content) => handle.writeFile(content, "utf8"),
+  mkdir,
+  open,
+  randomBytes: cryptoRandomBytes,
+  rename,
+  rm,
+};
 
 export async function projectHermesHome(
   spec: AgentLaunchSpec,
@@ -119,6 +153,7 @@ async function projectHermesHomeUnchecked(
       : (existingConfig ?? "");
   const envContent = mergeHermesEnv(existingEnv, spec);
   const soulContent = `${spec.prompt.soul.trim()}\n`;
+  const fs = resolveProjectionFilesystem(options.fs);
   const revisionContent = `${JSON.stringify({
     version: spec.version,
     agentId: spec.agent.id,
@@ -130,32 +165,35 @@ async function projectHermesHomeUnchecked(
 
   try {
     staged.push(
-      await stageAtomicWrite(configPath, configContent, PUBLIC_FILE_MODE, options.ownership),
+      await stageAtomicWrite(configPath, configContent, PUBLIC_FILE_MODE, options.ownership, fs),
     );
-    staged.push(await stageAtomicWrite(envPath, envContent, ENV_MODE, options.ownership));
-    staged.push(await stageAtomicWrite(soulPath, soulContent, PUBLIC_FILE_MODE, options.ownership));
+    staged.push(await stageAtomicWrite(envPath, envContent, ENV_MODE, options.ownership, fs));
+    staged.push(
+      await stageAtomicWrite(soulPath, soulContent, PUBLIC_FILE_MODE, options.ownership, fs),
+    );
     revisionStage = await stageAtomicWrite(
       revisionPath,
       revisionContent,
       PUBLIC_FILE_MODE,
       options.ownership,
+      fs,
     );
 
     for (const entry of staged) {
       await assertRealDirectory(hermesHome);
       await assertSafeExistingTarget(entry.path);
-      await rename(entry.tempPath, entry.path);
+      await fs.rename(entry.tempPath, entry.path);
     }
 
     await assertRealDirectory(hermesHome);
     await assertSafeExistingTarget(revisionStage.path);
-    await rename(revisionStage.tempPath, revisionStage.path);
-    await fsyncDirectory(hermesHome);
-    await pruneObsoleteManagedTemps(hermesHome);
+    await fs.rename(revisionStage.tempPath, revisionStage.path);
+    await fsyncDirectory(hermesHome, fs);
+    await pruneObsoleteManagedTemps(hermesHome, fs);
   } catch (error) {
     await Promise.all(
       [...staged, ...(revisionStage ? [revisionStage] : [])].map((entry) =>
-        rm(entry.tempPath, { force: true }).catch(() => undefined),
+        fs.rm(entry.tempPath, { force: true }).catch(() => undefined),
       ),
     );
     throw error;
@@ -192,9 +230,11 @@ export async function prepareHermesState(
   const hermesHome = resolveManagedPath(agentRoot, "hermes");
   const workspace = resolveManagedPath(agentRoot, "workspace");
 
-  await ensureManagedDirectory(agentRoot, DIRECTORY_MODE, options.ownership);
-  await ensureManagedDirectory(hermesHome, DIRECTORY_MODE, options.ownership);
-  await ensureManagedDirectory(workspace, DIRECTORY_MODE, options.ownership);
+  const fs = resolveProjectionFilesystem(options.fs);
+
+  await ensureManagedDirectory(agentRoot, DIRECTORY_MODE, options.ownership, fs);
+  await ensureManagedDirectory(hermesHome, DIRECTORY_MODE, options.ownership, fs);
+  await ensureManagedDirectory(workspace, DIRECTORY_MODE, options.ownership, fs);
 
   return {
     agentRoot,
@@ -317,7 +357,6 @@ function parseHermesYaml(input: string): PlainYamlRecord {
   if (
     /(^|\n)\s*%/.test(input) ||
     /(^|\n)\s*(?:---|\.\.\.)\s*(?:\n|$)/.test(input) ||
-    /(^|[\s[{,])(?:&[A-Za-z0-9_-]+|\*[A-Za-z0-9_-]+|![^\s\]}:,]+)/.test(input) ||
     /(^|\n)\s*<<\s*:/.test(input)
   ) {
     throw new Error("Hermes config uses unsafe YAML syntax.");
@@ -560,16 +599,15 @@ async function ensureManagedDirectory(
   path: string,
   mode: number,
   ownership: HermesProjectionOptions["ownership"],
+  fs: HermesProjectionFilesystem,
 ): Promise<void> {
   await rejectSymlinkIfExists(path);
-  await mkdir(path, { recursive: true, mode });
+  await fs.mkdir(path, { recursive: true, mode });
   await assertRealDirectory(path);
-  await chmod(path, mode);
+  await fs.chmod(path, mode);
 
   if (ownership) {
-    const { chown } = await import("node:fs/promises");
-
-    await chown(path, ownership.uid, ownership.gid);
+    await fs.chown(path, ownership.uid, ownership.gid);
   }
 }
 
@@ -578,15 +616,16 @@ async function stageAtomicWrite(
   content: string,
   mode: number,
   ownership: HermesProjectionOptions["ownership"],
+  fs: HermesProjectionFilesystem = NODE_FS,
 ): Promise<{ path: string; tempPath: string }> {
   const parent = dirname(path);
   await assertRealDirectory(parent);
   assertChildPath(parent, path);
   const tempPath = resolveManagedPath(
     parent,
-    `.${path.split(sep).at(-1)}.tmp-${randomBytes(12).toString("hex")}`,
+    `.${path.split(sep).at(-1)}.tmp-${fs.randomBytes(12).toString("hex")}`,
   );
-  const handle = await open(
+  const handle = await fs.open(
     tempPath,
     fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | (fsConstants.O_NOFOLLOW ?? 0),
     mode,
@@ -594,14 +633,14 @@ async function stageAtomicWrite(
   let closed = false;
 
   try {
-    await handle.writeFile(content, "utf8");
-    await handle.chmod(mode);
+    await fs.handleWriteFile(handle, content);
+    await fs.handleChmod(handle, mode);
 
     if (ownership) {
-      await handle.chown(ownership.uid, ownership.gid);
+      await fs.handleChown(handle, ownership.uid, ownership.gid);
     }
 
-    await handle.sync();
+    await fs.handleSync(handle);
     await handle.close();
     closed = true;
     await assertRegularOwnedFile(tempPath);
@@ -611,7 +650,7 @@ async function stageAtomicWrite(
     if (!closed) {
       await handle.close().catch(() => undefined);
     }
-    await rm(tempPath, { force: true }).catch(() => undefined);
+    await fs.rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
   }
 }
@@ -687,21 +726,30 @@ async function assertDirectoryNoFinalSymlink(path: string): Promise<void> {
   }
 }
 
-async function fsyncDirectory(path: string): Promise<void> {
-  const handle = await open(path, fsConstants.O_RDONLY);
+async function fsyncDirectory(path: string, fs: HermesProjectionFilesystem): Promise<void> {
+  const handle = await fs.open(path, fsConstants.O_RDONLY);
 
   try {
-    await handle.sync();
+    await fs.handleSync(handle);
   } finally {
     await handle.close();
   }
 }
 
-async function pruneObsoleteManagedTemps(hermesHome: string): Promise<void> {
+function resolveProjectionFilesystem(
+  overrides: HermesProjectionOptions["fs"],
+): HermesProjectionFilesystem {
+  return { ...NODE_FS, ...(overrides ?? {}) };
+}
+
+async function pruneObsoleteManagedTemps(
+  hermesHome: string,
+  fs: HermesProjectionFilesystem,
+): Promise<void> {
   for (const fileName of GUARDED_FILES) {
-    await rm(resolveManagedPath(hermesHome, `${fileName}.tmp`), { force: true }).catch(
-      () => undefined,
-    );
+    await fs
+      .rm(resolveManagedPath(hermesHome, `${fileName}.tmp`), { force: true })
+      .catch(() => undefined);
   }
 }
 
