@@ -177,7 +177,7 @@ export function AgentHermesSetup({ agentId, readiness }: AgentHermesSetupProps) 
   return (
     <section className="hermes-setup-panel" aria-labelledby="hermes-setup-title">
       <div className="section-heading">
-        <h2 id="hermes-setup-title">Hermes setup</h2>
+        <h2 id="hermes-setup-title">Advanced Hermes setup</h2>
         <span>{readiness.runnerReady ? "Runner ready" : "Runner unavailable"}</span>
       </div>
       <div className="hermes-native-setup">
@@ -188,11 +188,11 @@ export function AgentHermesSetup({ agentId, readiness }: AgentHermesSetupProps) 
             type="button"
             onClick={openSetup}
           >
-            {sessionActive ? "Setup active" : "Open Hermes setup"}
+            {sessionActive ? "Setup active" : "Open advanced setup"}
           </button>
           {state.status === "completed" ? (
             <span className="form-message success" role="status">
-              Hermes setup completed.
+              Advanced setup completed.
             </span>
           ) : null}
           {state.status === "error" ? (
@@ -201,6 +201,11 @@ export function AgentHermesSetup({ agentId, readiness }: AgentHermesSetupProps) 
             </span>
           ) : null}
         </div>
+        <p className="form-helper">
+          Managed provider, model, API server, Telegram access, terminal, browser, safety, and
+          managed environment settings are reapplied on the next Start or Restart. Unrelated
+          advanced Hermes settings are preserved.
+        </p>
         {sessionActive || state.status === "completed" || state.status === "error" ? (
           <div
             className="hermes-setup-terminal"

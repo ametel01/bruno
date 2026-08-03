@@ -29,6 +29,8 @@ const HERMES_READINESS_PORT_ENV = "AGENTBAY_HERMES_READINESS_PORT";
 const HERMES_STATE_ROOT_ENV = "AGENTBAY_HERMES_STATE_ROOT";
 const AGENTBAY_CONFIG_REVISION_LABEL = "agentbay.config_revision";
 const AGENTBAY_LAUNCH_SPEC_VERSION_LABEL = "agentbay.launch_spec_version";
+const HERMES_WORKLOAD_UID = 10000;
+const HERMES_WORKLOAD_GID = 10000;
 const MAX_HERMES_LOG_BYTES_PER_FILE = 64 * 1024;
 const MAX_HERMES_LOG_LINES = 500;
 const DUMMY_DOCKER_RUNNER_ARGS = [
@@ -216,7 +218,11 @@ export class ManualRunnerDocker {
     this.nameSuffix = options.nameSuffix ?? (() => randomUUID().replaceAll("-", "").slice(0, 12));
     this.project =
       options.projection?.project ??
-      ((spec) => projectHermesHome(spec, options.projection?.options));
+      ((spec) =>
+        projectHermesHome(spec, {
+          ownership: { uid: HERMES_WORKLOAD_UID, gid: HERMES_WORKLOAD_GID },
+          ...(options.projection?.options ?? {}),
+        }));
     this.waitForReadiness = options.readiness?.wait ?? createHermesReadinessWaiter(this.hermes);
   }
 
@@ -562,7 +568,14 @@ function inspectContainsSecretValue(
   inspect: DockerInspectContainer,
   launchSpec: AgentLaunchSpec,
 ): boolean {
-  const secrets = [launchSpec.secrets.apiServerKey].filter((secret) => secret.trim().length > 0);
+  const secrets =
+    launchSpec.version === "agentbay.hermes.launch.v3"
+      ? [
+          launchSpec.secrets.openrouterApiKey,
+          launchSpec.secrets.telegramBotToken,
+          launchSpec.secrets.apiServerKey,
+        ]
+      : [launchSpec.secrets.apiServerKey];
   const inspectText = JSON.stringify({
     Args: inspect.Args,
     Cmd: inspect.Config?.Cmd,
@@ -573,7 +586,7 @@ function inspectContainsSecretValue(
     Name: inspect.Name,
   });
 
-  return secrets.some((secret) => inspectText.includes(secret));
+  return secrets.some((secret) => secret.trim().length > 0 && inspectText.includes(secret));
 }
 
 function parseDockerCpusToNanoCpus(value: string): number {

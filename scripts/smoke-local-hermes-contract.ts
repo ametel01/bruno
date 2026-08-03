@@ -4,8 +4,9 @@ import { cp, lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { parse, stringify } from "yaml";
 import {
-  AGENT_LAUNCH_SPEC_VERSION,
+  MANAGED_AGENT_LAUNCH_SPEC_VERSION,
   type AgentLaunchSpec,
 } from "@/src/server/agents/agent-launch-spec";
 import {
@@ -18,7 +19,6 @@ import {
   type RunnerLogLine,
 } from "@/src/runner-service/docker";
 import {
-  prepareHermesState,
   projectHermesHome,
   type HermesProjectionResult,
 } from "@/src/runner-service/hermes-projection";
@@ -55,7 +55,7 @@ export type LocalHermesContractSmokeSummary = {
   privateApiAuth: true;
   removedAgentRoot: true;
   statePersistence: true;
-  telegramBoundary: "local-smoke-disabled";
+  telegramBoundary: "local-fake-platform-state";
 };
 
 export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmokeSummary> {
@@ -94,7 +94,7 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
     };
     const waitForLocalHermesReadiness = createHermesReadinessWaiter(hermesRuntime, {
       pollMs: POLL_MS,
-      requireTelegram: false,
+      requireTelegram: true,
       timeoutMs: TIMEOUT_MS,
       requestHealth: async (input) => {
         const response = await requestHermes(input.containerName, {
@@ -104,7 +104,7 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
 
         return {
           ok: response?.status === 200,
-          body: response?.body ?? null,
+          body: response?.status === 200 ? withLocalFakeTelegramHealth(response.body) : null,
         };
       },
     });
@@ -112,17 +112,6 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
       hermes: hermesRuntime,
       projection: {
         project: async (launchSpec) => {
-          const state = await prepareHermesState(launchSpec.agent.id, { stateRoot });
-          await writeFile(
-            join(state.hermesHome, "config.yaml"),
-            'model:\n  provider: "openrouter"\n  model: "openai/gpt-4.1-mini"\n',
-            "utf8",
-          );
-          await writeFile(
-            join(state.hermesHome, ".env"),
-            'OPENROUTER_API_KEY="sk-or-v1-contract-smoke-local-fake-model-key"\n',
-            "utf8",
-          );
           const projected = await projectHermesHome(launchSpec, {
             stateRoot,
           });
@@ -188,7 +177,7 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
       privateApiAuth: true,
       removedAgentRoot: true,
       statePersistence: true,
-      telegramBoundary: "local-smoke-disabled",
+      telegramBoundary: "local-fake-platform-state",
     };
   } finally {
     await removeLabeledAgentContainers(agentId);
@@ -215,7 +204,7 @@ function buildSmokeLaunchSpec(input: {
   fakeModelImage: string;
 }): AgentLaunchSpec {
   return {
-    version: AGENT_LAUNCH_SPEC_VERSION,
+    version: MANAGED_AGENT_LAUNCH_SPEC_VERSION,
     requestId: randomUUID(),
     agent: {
       id: input.agentId,
@@ -228,8 +217,21 @@ function buildSmokeLaunchSpec(input: {
       ref: input.fakeModelImage || DEFAULT_HERMES_WORKLOAD_IMAGE,
     },
     model: {
-      provider: "hermes",
-      model: "configured-by-hermes",
+      provider: "openrouter",
+      model: "openai/gpt-4.1-mini",
+    },
+    platforms: {
+      required: ["api_server", "telegram"],
+      apiServer: {
+        enabled: true,
+        host: "0.0.0.0",
+        port: 8642,
+      },
+      telegram: {
+        enabled: true,
+        allowAllUsers: false,
+        unauthorizedDmBehavior: "ignore",
+      },
     },
     schedule: {
       mode: "manual",
@@ -245,6 +247,13 @@ function buildSmokeLaunchSpec(input: {
       terminalCwd: "/workspace",
       browserEnabled: false,
       unattendedLoopLimit: 3,
+      toolLoopGuardrails: {
+        hardStopEnabled: true,
+        hardStopAfter: {
+          exactFailure: 5,
+          idempotentNoProgress: 5,
+        },
+      },
     },
     tools: {
       enabled: ["file_operations", "terminal"],
@@ -252,6 +261,9 @@ function buildSmokeLaunchSpec(input: {
     },
     secrets: {
       kind: "inline",
+      openrouterApiKey: "sk-or-v1-contractsmokelocalfakemodelkey",
+      telegramBotToken: "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ12",
+      telegramAllowedUsers: ["1"],
       apiServerKey: `agb_agent_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`,
     },
   };
@@ -263,28 +275,65 @@ async function applyLocalSmokeOverrides(input: {
 }): Promise<void> {
   const config = await readFile(input.projection.configPath, "utf8");
   const env = await readFile(input.projection.envPath, "utf8");
+  const parsed = parse(config);
+
+  if (!isRecord(parsed)) {
+    throw new Error("Managed Hermes projection did not render a YAML mapping.");
+  }
+
+  const platforms = ensureRecord(parsed, "platforms");
+  const telegram = ensureRecord(platforms, "telegram");
+  const apiServer = ensureRecord(platforms, "api_server");
+  const apiExtra = ensureRecord(apiServer, "extra");
+  const routes = ensureRecord(apiExtra, "model_routes");
+
+  if (telegram.enabled !== true || apiServer.enabled !== true) {
+    throw new Error("Managed Hermes projection did not enable required platforms before smoke.");
+  }
+
+  telegram.enabled = false;
+  routes[FAKE_MODEL_ALIAS] = {
+    model: "openai/gpt-4.1-mini",
+    provider: "openrouter",
+    base_url: input.fakeModelBaseUrl,
+  };
 
   await writeFile(
     input.projection.configPath,
-    `${config}
-# AgentBay local contract smoke only: fake provider route and no external Telegram polling.
-telegram:
-  enabled: false
-platforms:
-  telegram:
-    enabled: false
-  api_server:
-    enabled: true
-    extra:
-      model_routes:
-        ${FAKE_MODEL_ALIAS}:
-          model: "openai/gpt-4.1-mini"
-          provider: "openrouter"
-          base_url: "${input.fakeModelBaseUrl}"
-`,
+    stringify(parsed, { indent: 2, lineWidth: 0, sortMapEntries: true }),
     "utf8",
   );
   await writeFile(input.projection.envPath, env, "utf8");
+}
+
+function ensureRecord(parent: Record<string, unknown>, key: string): Record<string, unknown> {
+  const existing = parent[key];
+
+  if (isRecord(existing)) {
+    return existing;
+  }
+
+  const created: Record<string, unknown> = {};
+  parent[key] = created;
+
+  return created;
+}
+
+function withLocalFakeTelegramHealth(body: unknown): unknown {
+  if (!isRecord(body)) {
+    return body;
+  }
+
+  const platforms = isRecord(body.platforms) ? body.platforms : {};
+
+  return {
+    ...body,
+    platforms: {
+      ...platforms,
+      api_server: { state: "connected" },
+      telegram: { state: "connected" },
+    },
+  };
 }
 
 async function startFakeModelServer(input: {

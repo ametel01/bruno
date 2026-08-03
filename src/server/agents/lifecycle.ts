@@ -8,10 +8,12 @@ import {
 import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import { revokeActiveAgentSecretsInTransaction } from "@/src/server/agents/agent-secrets";
 import { hermesConfigurationBlocker } from "@/src/server/agents/hermes-readiness";
+import { getApprovedOpenRouterModel } from "@/src/server/agents/openrouter-models";
 import type { HermesReadinessReason } from "@/src/runner-service/docker";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   agentConfigs,
+  agentDeployments,
   agentLogs,
   agentSecrets,
   agentUsagePeriods,
@@ -768,6 +770,35 @@ async function readHermesConfigurationBlocker(
     .select({ kind: agentSecrets.kind })
     .from(agentSecrets)
     .where(and(eq(agentSecrets.agentId, agentId), eq(agentSecrets.status, "active")));
+  const [latestDeployment] = await tx
+    .select({ id: agentDeployments.id })
+    .from(agentDeployments)
+    .where(and(eq(agentDeployments.agentId, agentId)))
+    .orderBy(desc(agentDeployments.createdAt), desc(agentDeployments.id))
+    .limit(1);
+  const isManaged =
+    latestDeployment !== undefined &&
+    config?.modelProvider === "openrouter" &&
+    getApprovedOpenRouterModel(config.modelName) !== null;
+
+  if (isManaged) {
+    const secretKinds = new Set(activeSecretRows.map((secret) => secret.kind));
+
+    const requiredManagedSecretKinds = [
+      "openrouter_api_key",
+      "telegram_bot_token",
+      "telegram_allowed_users",
+      "api_server_key",
+    ] as const;
+
+    for (const kind of requiredManagedSecretKinds) {
+      if (!secretKinds.has(kind)) {
+        return "Managed Hermes credentials are incomplete.";
+      }
+    }
+
+    return null;
+  }
 
   return hermesConfigurationBlocker({
     modelProvider: config?.modelProvider ?? "not_configured",

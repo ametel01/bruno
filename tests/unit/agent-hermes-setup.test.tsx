@@ -12,7 +12,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("AgentHermesSetup", () => {
-  it("renders the native Hermes setup action without provider key fields", () => {
+  it("renders the advanced Hermes setup action without provider key fields", () => {
     const html = renderToStaticMarkup(
       createElement(AgentHermesSetup, {
         agentId: "00000000-0000-4000-8000-000000000401",
@@ -33,8 +33,9 @@ describe("AgentHermesSetup", () => {
       }),
     );
 
-    expect(html).toContain("Hermes setup");
-    expect(html).toContain("Open Hermes setup");
+    expect(html).toContain("Advanced Hermes setup");
+    expect(html).toContain("Open advanced setup");
+    expect(html).toContain("managed environment settings are reapplied");
     expect(html).toContain("Runner ready");
     expect(html).not.toContain("OpenRouter API key");
     expect(html).not.toContain("Telegram bot token");

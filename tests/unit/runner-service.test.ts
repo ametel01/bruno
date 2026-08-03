@@ -12,6 +12,7 @@ import {
   type HermesReadinessReason,
 } from "@/src/runner-service/docker";
 import { createRunnerService } from "@/src/runner-service/server";
+import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import { sampleLaunchSpec } from "@/tests/helpers/agent-launch-spec";
 
 const AGENT_ID = "00000000-0000-4000-8000-000000000123";
@@ -831,7 +832,7 @@ describe("Hermes detailed readiness contract", () => {
 });
 
 async function createHermesProjectionForTest(
-  spec: ReturnType<typeof sampleLaunchSpec>,
+  spec: AgentLaunchSpec,
   options: { marker?: Record<string, unknown> } = {},
 ) {
   const agentRoot = join(tmpdir(), `agentbay-runner-projection-${Date.now()}-${Math.random()}`);

@@ -165,7 +165,7 @@ describe("automatic Hermes Telegram progress status", () => {
     );
     expect(automaticLedger).toContain("OpenRouter is the first supported provider");
     expect(automaticLedger).toContain("dedicated staging Telegram bot/user");
-    expect(automaticLedger).toContain("Step 4 is complete.");
+    expect(automaticLedger).toContain("Step 5 is complete.");
     expect(automaticLedger).toContain("- [x] Step 0: Progress and Changelog Tracking Setup");
     expect(automaticLedger).toContain("- [x] Step 1: Quality Gates Setup and Baseline Evidence");
     expect(automaticLedger).toContain(
@@ -178,7 +178,7 @@ describe("automatic Hermes Telegram progress status", () => {
       "- [x] Step 4: Add Managed Creation Configuration and Encrypted Credentials",
     );
     expect(automaticLedger).toContain(
-      "- [ ] Step 5: Project a Complete Managed Hermes Configuration",
+      "- [x] Step 5: Project a Complete Managed Hermes Configuration",
     );
     expect(automaticLedger).toContain(
       "- [ ] Step 6: Split Runner Launch Acceptance From Observed Readiness",
@@ -204,15 +204,19 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain(
       "| 4. Add Managed Creation Configuration and Encrypted Credentials | Complete |",
     );
-    expect(automaticLedger).toContain("Ready-mode creation remains default-off");
     expect(automaticLedger).toContain(
-      "accepted replays return before flag or credential validation",
+      "| 5. Project a Complete Managed Hermes Configuration | Complete |",
     );
+    expect(automaticLedger).toContain("exact managed Hermes launch-spec");
+    expect(automaticLedger).toContain("owner-scoped repeatable-read transaction");
+    expect(automaticLedger).toContain("fresh managed Hermes roots");
+    expect(automaticLedger).toContain("Focused Step 5 tests passed 4 files / 38 tests");
+    expect(automaticLedger).toContain('`telegramBoundary: "local-fake-platform-state"`');
     expect(automaticLedger).toContain("`drizzle/0017_ambitious_tyrannus.sql`");
     expect(automaticLedger).toContain("three nullable Telegram secret metadata columns");
     expect(automaticLedger).toContain("Focused Step 4 tests passed");
     expect(automaticLedger).toContain("credential-free `bun run verify:hermes:staging`");
-    expect(automaticLedger).toContain("Step 5 is next");
+    expect(automaticLedger).toContain("Step 6 is next");
     expect(automaticLedger).toContain("`bun run verify:hermes:staging` exited nonzero");
     expect(automaticLedger).toContain("local pinned-image behavior");
     expect(automaticLedger).toContain('`telegramBoundary: "local-smoke-disabled"`');
@@ -222,8 +226,8 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain("Full gates passed");
     expect(automaticLedger).toContain("Step validation commands and results.");
     expect(automaticLedger).toContain("Safe blocker codes, missing capabilities, and next action.");
-    expect(automaticLedger).toContain("No blocker remains for Step 4.");
-    expect(automaticLedger).toContain("Step 5 should project managed Hermes");
+    expect(automaticLedger).toContain("No blocker remains for Step 5.");
+    expect(automaticLedger).toContain("Step 6 should split runner launch acceptance");
     expect(automaticLedger).not.toContain("No blocker remains for Step 3.");
     expect(automaticLedger).not.toContain("Step 4 should add managed creation configuration");
     expect(changelog).toContain("# Changelog");

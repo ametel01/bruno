@@ -8,7 +8,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
@@ -84,11 +84,33 @@ export type DecryptedAgentSecretsResult =
       reason: "missing_agent_id" | "malformed_agent_id" | "agent_not_found";
     };
 
+export type RequiredDecryptedAgentSecretsResult =
+  | {
+      ok: true;
+      secrets: Record<AgentSecretKind, string>;
+    }
+  | {
+      ok: false;
+      reason:
+        | "missing_agent_id"
+        | "malformed_agent_id"
+        | "agent_not_found"
+        | "required_secret_missing"
+        | "required_secret_revoked"
+        | "secret_storage_unavailable"
+        | "secret_decryption_failed";
+      kind?: AgentSecretKind;
+    };
+
 type AgentSecretsTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
 >[0];
 
 type AgentSecretRow = typeof agentSecrets.$inferSelect;
+type DecryptableAgentSecretRow = Pick<
+  AgentSecretRow,
+  "agentId" | "kind" | "ciphertext" | "iv" | "authTag" | "keyVersion"
+>;
 
 export type AgentSecretKeyring = {
   activeVersion: string;
@@ -134,6 +156,8 @@ export type PreparedAgentSecretRow = {
   rotatedAt: Date | null;
   revokedAt: null;
 };
+
+export type AgentSecretsReadTransaction = AgentSecretsTransaction;
 
 const ENCRYPTION_ALGORITHM = "aes-256-gcm";
 const AES_256_KEY_BYTES = 32;
@@ -336,6 +360,118 @@ export async function readDecryptedActiveAgentSecretsForUser(
     if (ownsConnection) {
       await connection.close();
     }
+  }
+}
+
+export async function readRequiredDecryptedActiveAgentSecretsForUser(
+  userId: string,
+  agentId: string,
+  dependencies: Pick<AgentSecretDependencies, "createConnection" | "env"> & {
+    kinds: readonly AgentSecretKind[];
+  },
+): Promise<RequiredDecryptedAgentSecretsResult> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+
+  try {
+    return await connection.db.transaction((tx) =>
+      readRequiredDecryptedActiveAgentSecretsInTransaction(tx, {
+        userId,
+        agentId,
+        ...(dependencies.env ? { env: dependencies.env } : {}),
+        kinds: dependencies.kinds,
+      }),
+    );
+  } catch {
+    return { ok: false, reason: "secret_storage_unavailable" };
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+export async function readRequiredDecryptedActiveAgentSecretsInTransaction(
+  tx: AgentSecretsReadTransaction,
+  input: {
+    userId: string;
+    agentId: string;
+    env?: Record<string, string | undefined>;
+    kinds: readonly AgentSecretKind[];
+  },
+): Promise<RequiredDecryptedAgentSecretsResult> {
+  const agentIdValidation = validateAgentId(input.agentId);
+
+  if (!agentIdValidation.ok) {
+    return agentIdValidation;
+  }
+
+  let keyring: AgentSecretKeyring;
+
+  try {
+    keyring = parseAgentSecretKeyring(input.env);
+  } catch {
+    return { ok: false, reason: "secret_storage_unavailable" };
+  }
+
+  try {
+    const agentExists = await selectOwnedActiveAgent(tx, {
+      agentId: agentIdValidation.agentId,
+      userId: input.userId,
+    });
+
+    if (!agentExists) {
+      return { ok: false, reason: "agent_not_found" };
+    }
+
+    const rows = await tx
+      .select({
+        agentId: agentSecrets.agentId,
+        kind: agentSecrets.kind,
+        ciphertext: agentSecrets.ciphertext,
+        iv: agentSecrets.iv,
+        authTag: agentSecrets.authTag,
+        keyVersion: agentSecrets.keyVersion,
+        status: agentSecrets.status,
+      })
+      .from(agentSecrets)
+      .where(
+        and(
+          eq(agentSecrets.agentId, agentIdValidation.agentId),
+          inArray(agentSecrets.kind, [...input.kinds]),
+        ),
+      );
+    const secrets = {} as Record<AgentSecretKind, string>;
+
+    for (const kind of input.kinds) {
+      const activeRows = rows.filter((row) => row.kind === kind && row.status === "active");
+
+      if (activeRows.length !== 1) {
+        const revoked = rows.some((row) => row.kind === kind && row.status === "revoked");
+
+        return {
+          ok: false,
+          reason: revoked ? "required_secret_revoked" : "required_secret_missing",
+          kind,
+        };
+      }
+
+      try {
+        const activeRow = activeRows[0];
+
+        if (!activeRow) {
+          return { ok: false, reason: "required_secret_missing", kind };
+        }
+
+        secrets[kind] = decryptAgentSecretValue(activeRow, keyring);
+      } catch {
+        return { ok: false, reason: "secret_decryption_failed", kind };
+      }
+    }
+
+    return { ok: true, secrets };
+  } catch {
+    return { ok: false, reason: "secret_storage_unavailable" };
   }
 }
 
@@ -718,7 +854,10 @@ function encryptAgentSecretValue(input: {
   };
 }
 
-function decryptAgentSecretValue(row: AgentSecretRow, keyring: AgentSecretKeyring): string {
+function decryptAgentSecretValue(
+  row: DecryptableAgentSecretRow,
+  keyring: AgentSecretKeyring,
+): string {
   const key = keyring.keys.get(row.keyVersion);
 
   if (!key) {

@@ -2,7 +2,10 @@ import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { validateManualRunnerEndpointUrl } from "@/src/env/validation";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
+import {
+  serializeAgentLaunchSpec,
+  type AgentLaunchSpec,
+} from "@/src/server/agents/agent-launch-spec";
 import { agentLogs, agents } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
 import {
@@ -280,7 +283,7 @@ export class ManualRunnerAdapter
     const startedAt = Date.now();
 
     try {
-      const body = launchSpec ? JSON.stringify(launchSpec) : undefined;
+      const body = launchSpec ? serializeAgentLaunchSpec(launchSpec) : undefined;
       const response = await this.fetch(requestUrl, {
         method,
         headers: {

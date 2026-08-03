@@ -1,18 +1,20 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import {
-  readDecryptedActiveAgentSecretsForUser,
+  readRequiredDecryptedActiveAgentSecretsInTransaction,
   type AgentSecretKind,
 } from "@/src/server/agents/agent-secrets";
 import {
   AGENT_LAUNCH_SPEC_VERSION,
+  MANAGED_AGENT_LAUNCH_SPEC_VERSION,
   type AgentLaunchSpec,
   parseAgentLaunchSpec,
 } from "@/src/server/agents/agent-launch-spec";
+import { getApprovedOpenRouterModel } from "@/src/server/agents/openrouter-models";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agentConfigs, agents } from "@/src/server/db/schema";
+import { agentConfigs, agentDeployments, agents } from "@/src/server/db/schema";
 import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
 
 export type AgentLaunchSpecBuildResult =
@@ -24,8 +26,15 @@ export type AgentLaunchSpecBuildResult =
         | "malformed_agent_id"
         | "agent_not_found"
         | "hermes_setup_incomplete"
+        | "managed_deployment_missing"
+        | "managed_configuration_invalid"
+        | "required_secret_missing"
+        | "required_secret_revoked"
+        | "secret_storage_unavailable"
+        | "secret_decryption_failed"
         | "launch_spec_invalid";
       message: string;
+      kind?: AgentSecretKind;
     };
 
 export type AgentLaunchSpecBuilderDependencies = {
@@ -35,14 +44,23 @@ export type AgentLaunchSpecBuilderDependencies = {
   requestId?: () => string;
 };
 
+type AgentLaunchTransaction = Parameters<Parameters<DatabaseConnection["db"]["transaction"]>[0]>[0];
+
 type AgentLaunchConfigRow = {
   agent: typeof agents.$inferSelect;
   config: typeof agentConfigs.$inferSelect;
+  deployment: typeof agentDeployments.$inferSelect | null;
 };
 
-const REQUIRED_SECRET_MESSAGES = {
-  api_server_key: "Run Hermes setup before starting this agent.",
-} as const satisfies Partial<Record<AgentSecretKind, string>>;
+const REQUIRED_NATIVE_SECRET_KINDS = [
+  "api_server_key",
+] as const satisfies readonly AgentSecretKind[];
+const REQUIRED_MANAGED_SECRET_KINDS = [
+  "openrouter_api_key",
+  "telegram_bot_token",
+  "telegram_allowed_users",
+  "api_server_key",
+] as const satisfies readonly AgentSecretKind[];
 
 export async function buildHermesAgentLaunchSpecForUser(
   userId: string,
@@ -75,94 +93,40 @@ export async function buildHermesAgentLaunchSpecForUser(
   const ownsConnection = !dependencies.createConnection;
 
   try {
-    const row = await readAgentLaunchConfig(connection, userId, normalizedAgentId);
+    return await connection.db.transaction(
+      async (tx) => {
+        const row = await readAgentLaunchConfig(tx, userId, normalizedAgentId);
 
-    if (!row) {
-      return {
-        ok: false,
-        reason: "agent_not_found",
-        message: "Agent was not found.",
-      };
-    }
+        if (!row) {
+          return {
+            ok: false,
+            reason: "agent_not_found",
+            message: "Agent was not found.",
+          };
+        }
 
-    const decrypted = await readDecryptedActiveAgentSecretsForUser(userId, normalizedAgentId, {
-      createConnection: () => connection,
-      ...(dependencies.env ? { env: dependencies.env } : {}),
-      kind: "api_server_key",
-    });
+        if (isManagedLaunchRow(row)) {
+          return await buildManagedLaunchSpec({ row, userId, tx, dependencies });
+        }
 
-    if (!decrypted.ok) {
-      return {
-        ok: false,
-        reason: decrypted.reason,
-        message: "Agent secrets could not be loaded.",
-      };
-    }
+        if (row.deployment && row.config.modelProvider === "openrouter") {
+          return {
+            ok: false,
+            reason: "managed_configuration_invalid",
+            message: "Managed Hermes configuration is invalid.",
+          };
+        }
 
-    for (const kind of Object.keys(REQUIRED_SECRET_MESSAGES) as Array<
-      keyof typeof REQUIRED_SECRET_MESSAGES
-    >) {
-      if (!decrypted.secrets[kind]) {
-        return {
-          ok: false,
-          reason: "hermes_setup_incomplete",
-          message: REQUIRED_SECRET_MESSAGES[kind],
-        };
-      }
-    }
-
-    const spec = {
-      version: AGENT_LAUNCH_SPEC_VERSION,
-      requestId: dependencies.requestId?.() ?? randomUUID(),
-      agent: {
-        id: row.agent.id,
-        name: row.agent.name,
-        templateKey: row.agent.templateKey,
-        templateVersion: row.agent.templateVersion,
-        configRevision: `cfg-${row.config.updatedAt.getTime()}`,
+        return await buildNativeLaunchSpec({ row, userId, tx, dependencies });
       },
-      image: {
-        ref: dependencies.hermesWorkloadImage?.trim() || DEFAULT_HERMES_WORKLOAD_IMAGE,
-      },
-      model: {
-        provider: "hermes",
-        model: "configured-by-hermes",
-      },
-      schedule: {
-        mode: row.config.scheduleMode,
-        cron: row.config.scheduleCron,
-        timezone: row.config.timezone,
-      },
-      prompt: {
-        soul: row.config.systemPrompt,
-      },
-      runtime: {
-        dataDir: "/opt/data",
-        workspaceDir: "/workspace",
-        terminalCwd: "/workspace",
-        browserEnabled: false,
-        unattendedLoopLimit: 25,
-      },
-      tools: {
-        enabled: ["file_operations", "terminal"],
-        disabled: ["browser", "mcp", "delegation", "voice", "code_execution"],
-      },
-      secrets: {
-        kind: "inline",
-        apiServerKey: decrypted.secrets.api_server_key ?? "",
-      },
-    } satisfies AgentLaunchSpec;
-    const parsed = parseAgentLaunchSpec(spec);
-
-    if (!parsed.ok) {
-      return {
-        ok: false,
-        reason: "launch_spec_invalid",
-        message: "Hermes launch spec could not be built.",
-      };
-    }
-
-    return { ok: true, spec: parsed.spec };
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
+  } catch {
+    return {
+      ok: false,
+      reason: "secret_storage_unavailable",
+      message: "Agent secrets could not be loaded.",
+    };
   } finally {
     if (ownsConnection) {
       await connection.close();
@@ -170,12 +134,212 @@ export async function buildHermesAgentLaunchSpecForUser(
   }
 }
 
+function isManagedLaunchRow(row: AgentLaunchConfigRow): boolean {
+  return (
+    row.deployment !== null &&
+    row.config.modelProvider === "openrouter" &&
+    getApprovedOpenRouterModel(row.config.modelName) !== null
+  );
+}
+
+async function buildNativeLaunchSpec(input: {
+  row: AgentLaunchConfigRow;
+  userId: string;
+  tx: AgentLaunchTransaction;
+  dependencies: AgentLaunchSpecBuilderDependencies;
+}): Promise<AgentLaunchSpecBuildResult> {
+  const decrypted = await readRequiredDecryptedActiveAgentSecretsInTransaction(input.tx, {
+    userId: input.userId,
+    agentId: input.row.agent.id,
+    ...(input.dependencies.env ? { env: input.dependencies.env } : {}),
+    kinds: REQUIRED_NATIVE_SECRET_KINDS,
+  });
+
+  if (!decrypted.ok) {
+    if (
+      decrypted.reason === "required_secret_missing" ||
+      decrypted.reason === "required_secret_revoked"
+    ) {
+      return {
+        ok: false,
+        reason: "hermes_setup_incomplete",
+        message: "Run Hermes setup before starting this agent.",
+      };
+    }
+
+    return {
+      ok: false,
+      reason: decrypted.reason,
+      message: "Agent secrets could not be loaded.",
+      ...(decrypted.kind ? { kind: decrypted.kind } : {}),
+    };
+  }
+
+  const spec = {
+    version: AGENT_LAUNCH_SPEC_VERSION,
+    requestId: input.dependencies.requestId?.() ?? randomUUID(),
+    agent: {
+      id: input.row.agent.id,
+      name: input.row.agent.name,
+      templateKey: input.row.agent.templateKey,
+      templateVersion: input.row.agent.templateVersion,
+      configRevision: `cfg-${input.row.config.updatedAt.getTime()}`,
+    },
+    image: {
+      ref: input.dependencies.hermesWorkloadImage?.trim() || DEFAULT_HERMES_WORKLOAD_IMAGE,
+    },
+    model: {
+      provider: "hermes",
+      model: "configured-by-hermes",
+    },
+    schedule: {
+      mode: input.row.config.scheduleMode,
+      cron: input.row.config.scheduleCron,
+      timezone: input.row.config.timezone,
+    },
+    prompt: {
+      soul: input.row.config.systemPrompt,
+    },
+    runtime: {
+      dataDir: "/opt/data",
+      workspaceDir: "/workspace",
+      terminalCwd: "/workspace",
+      browserEnabled: false,
+      unattendedLoopLimit: 25,
+    },
+    tools: {
+      enabled: ["file_operations", "terminal"],
+      disabled: ["browser", "mcp", "delegation", "voice", "code_execution"],
+    },
+    secrets: {
+      kind: "inline",
+      apiServerKey: decrypted.secrets.api_server_key,
+    },
+  } satisfies AgentLaunchSpec;
+
+  return parseBuiltSpec(spec);
+}
+
+async function buildManagedLaunchSpec(input: {
+  row: AgentLaunchConfigRow;
+  userId: string;
+  tx: AgentLaunchTransaction;
+  dependencies: AgentLaunchSpecBuilderDependencies;
+}): Promise<AgentLaunchSpecBuildResult> {
+  const model = getApprovedOpenRouterModel(input.row.config.modelName);
+
+  if (!input.row.deployment || input.row.config.modelProvider !== "openrouter" || !model) {
+    return {
+      ok: false,
+      reason: "managed_configuration_invalid",
+      message: "Managed Hermes configuration is invalid.",
+    };
+  }
+
+  const decrypted = await readRequiredDecryptedActiveAgentSecretsInTransaction(input.tx, {
+    userId: input.userId,
+    agentId: input.row.agent.id,
+    ...(input.dependencies.env ? { env: input.dependencies.env } : {}),
+    kinds: REQUIRED_MANAGED_SECRET_KINDS,
+  });
+
+  if (!decrypted.ok) {
+    return {
+      ok: false,
+      reason: decrypted.reason,
+      message: "Managed Hermes secrets could not be loaded.",
+      ...(decrypted.kind ? { kind: decrypted.kind } : {}),
+    };
+  }
+
+  const spec = {
+    version: MANAGED_AGENT_LAUNCH_SPEC_VERSION,
+    requestId: input.dependencies.requestId?.() ?? randomUUID(),
+    agent: {
+      id: input.row.agent.id,
+      name: input.row.agent.name,
+      templateKey: input.row.agent.templateKey,
+      templateVersion: input.row.agent.templateVersion,
+      configRevision: input.row.deployment.configRevision,
+    },
+    image: {
+      ref: input.dependencies.hermesWorkloadImage?.trim() || DEFAULT_HERMES_WORKLOAD_IMAGE,
+    },
+    model: {
+      provider: "openrouter",
+      model: model.id,
+    },
+    platforms: {
+      required: ["api_server", "telegram"],
+      apiServer: {
+        enabled: true,
+        host: "0.0.0.0",
+        port: 8642,
+      },
+      telegram: {
+        enabled: true,
+        allowAllUsers: false,
+        unauthorizedDmBehavior: "ignore",
+      },
+    },
+    schedule: {
+      mode: input.row.config.scheduleMode,
+      cron: input.row.config.scheduleCron,
+      timezone: input.row.config.timezone,
+    },
+    prompt: {
+      soul: input.row.config.systemPrompt,
+    },
+    runtime: {
+      dataDir: "/opt/data",
+      workspaceDir: "/workspace",
+      terminalCwd: "/workspace",
+      browserEnabled: false,
+      unattendedLoopLimit: 25,
+      toolLoopGuardrails: {
+        hardStopEnabled: true,
+        hardStopAfter: {
+          exactFailure: 5,
+          idempotentNoProgress: 5,
+        },
+      },
+    },
+    tools: {
+      enabled: ["file_operations", "terminal"],
+      disabled: ["browser", "mcp", "delegation", "voice", "code_execution"],
+    },
+    secrets: {
+      kind: "inline",
+      openrouterApiKey: decrypted.secrets.openrouter_api_key,
+      telegramBotToken: decrypted.secrets.telegram_bot_token,
+      telegramAllowedUsers: decrypted.secrets.telegram_allowed_users.split(","),
+      apiServerKey: decrypted.secrets.api_server_key,
+    },
+  } satisfies AgentLaunchSpec;
+
+  return parseBuiltSpec(spec);
+}
+
+function parseBuiltSpec(spec: AgentLaunchSpec): AgentLaunchSpecBuildResult {
+  const parsed = parseAgentLaunchSpec(spec);
+
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      reason: "launch_spec_invalid",
+      message: "Hermes launch spec could not be built.",
+    };
+  }
+
+  return { ok: true, spec: parsed.spec };
+}
+
 async function readAgentLaunchConfig(
-  connection: DatabaseConnection,
+  tx: AgentLaunchTransaction,
   userId: string,
   agentId: string,
 ): Promise<AgentLaunchConfigRow | null> {
-  const [row] = await connection.db
+  const [row] = await tx
     .select({
       agent: agents,
       config: agentConfigs,
@@ -185,5 +349,19 @@ async function readAgentLaunchConfig(
     .where(and(eq(agents.id, agentId), eq(agents.userId, userId), isNull(agents.deletedAt)))
     .limit(1);
 
-  return row ?? null;
+  if (!row) {
+    return null;
+  }
+
+  const [deployment] = await tx
+    .select()
+    .from(agentDeployments)
+    .where(and(eq(agentDeployments.agentId, agentId), eq(agentDeployments.userId, userId)))
+    .orderBy(desc(agentDeployments.createdAt), desc(agentDeployments.id))
+    .limit(1);
+
+  return {
+    ...row,
+    deployment: deployment ?? null,
+  };
 }

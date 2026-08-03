@@ -11,7 +11,10 @@ import {
   HermesSetupSessionManager,
   type HermesSetupWebSocketData,
 } from "@/src/runner-service/hermes-setup-sessions";
-import { HermesSetupRequiredError } from "@/src/runner-service/hermes-projection";
+import {
+  HermesProjectionInvalidError,
+  HermesSetupRequiredError,
+} from "@/src/runner-service/hermes-projection";
 
 const RUNNER_TOKEN_ENV = "AGENTBAY_RUNNER_BEARER_TOKEN";
 
@@ -168,6 +171,10 @@ export function createRunnerService(options: RunnerServiceOptions = {}) {
         return jsonError(502, "hermes_readiness_failed", "Hermes readiness failed.", undefined, {
           reason: error.reason,
         });
+      }
+
+      if (error instanceof HermesProjectionInvalidError) {
+        return jsonError(409, "hermes_projection_invalid", "Hermes projection is invalid.");
       }
 
       return jsonError(502, "docker_command_failed", "Runner Docker command failed.");

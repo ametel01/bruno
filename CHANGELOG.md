@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Managed Hermes launch-spec v3 now carries approved OpenRouter model configuration plus server-only OpenRouter, Telegram, Telegram allowlist, and private API credentials from persisted deployment state.
+- Automatic Hermes agents now receive a complete managed `config.yaml`, `.env`, `SOUL.md`, workspace, and revision projection from a fresh runner state root without requiring native `hermes setup`.
 - Opt-in `202 Accepted` ready-mode agent creation for the approved OpenRouter model and Telegram adapter inputs, while preserving the existing `201 Created` stopped/manual create path.
 - Exact `AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT=true` opt-in for temporarily exposing a Vercel production-target deployment with the shared development user while keeping hosted development fail-closed by default and preserving runner-machine authentication.
 - Renamed the user-facing application and local package/database defaults from AgentBay to plingpling while retaining the established `AGENTBAY_*` runtime compatibility namespace.
@@ -98,6 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Native/manual Hermes agents retain the launch-spec v2 compatibility path and still require existing Hermes setup state, while managed OpenRouter deployments bypass that setup gate and reapply plingpling-owned provider, Telegram, API-server, terminal, browser, safety, and prompt settings on start/restart.
 - Agent records now persist explicit stopped/running desired state, and owners can read the latest deployment operation through `GET /api/agents/:agentId/deployment` without exposing leases, idempotency keys, or ownership internals.
 - Split deterministic local verification from provider-backed acceptance: `bun run verify` now ends after the production build, while `bun run verify:e2e` adds the full E2E suite.
 
@@ -159,6 +162,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Managed Hermes projection now uses strict YAML parsing, exact launch-spec key validation, prototype/tag/alias/duplicate/size/depth defenses, no-follow path checks, marker-last atomic writes, secret-free serialization, and `0600` env file handling.
 - Ready-mode creation and Telegram secret backfill now have real-Postgres race, rollback, replay, and isolation coverage for token uniqueness, bot-subject uniqueness, idempotency, requested runners, and insert-boundary failures.
 - Secret redaction now also catches percent-encoded Telegram bot API URLs while preserving raw Telegram token redaction.
 - Ready-mode agent creation now prepares encrypted OpenRouter, Telegram, allowlist, and private API credentials in memory and commits the agent, managed config, secrets, deployment, desired-running intent, and creation event atomically.

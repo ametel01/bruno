@@ -20,13 +20,14 @@ describe("local Hermes contract smoke", () => {
     expect(smokeScript).toContain("/v1/chat/completions");
     expect(smokeScript).toContain("/health/detailed");
     expect(smokeScript).toContain("createHermesReadinessWaiter");
-    expect(smokeScript).toContain("requireTelegram: false");
+    expect(smokeScript).toContain("requireTelegram: true");
+    expect(smokeScript).toContain("withLocalFakeTelegramHealth");
     expect(smokeScript).toContain("assertPrivateApiAuth");
     expect(smokeScript).toContain("assertNoPublicHermesPort");
     expect(smokeScript).toContain("waitForHermesGatewayLogs");
     expect(smokeScript).toContain("backupRestored");
     expect(smokeScript).toContain("runner.restart");
     expect(smokeScript).toContain("runner.cleanup");
-    expect(smokeScript).toContain('telegramBoundary: "local-smoke-disabled"');
+    expect(smokeScript).toContain('telegramBoundary: "local-fake-platform-state"');
   });
 });
