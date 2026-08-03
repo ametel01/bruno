@@ -849,6 +849,30 @@ Goal: Charge for the product and enforce plan limits.
 
 Goal: Replace dummy runner behavior with actual Hermes plus Telegram plus BYOK.
 
+### Delivery status (2026-08-03)
+
+The control-plane and runner implementation is complete through the local acceptance boundary.
+Feature-gated `launchMode:"ready"` creation atomically persists encrypted OpenRouter, Telegram,
+allowlist, and private API credentials; a versioned Hermes projection; and durable deployment state.
+The reconciler advances persisted setup stages, records at most one successful bounded model canary
+per deployment/config revision, requires Telegram connected before readiness, and presents redacted
+failures with Retry, Stop, or Delete controls. An explicit Retry creates a new persisted attempt and
+may incur one additional bounded canary charge. Existing `launchMode:"stopped"` creation remains the
+rollback path.
+
+Post-ready runtime reconciliation is also implemented. Selected Hermes containers use
+`unless-stopped`; desired-running agents are observed and recovered with bounded backoff and a
+circuit breaker, while intentional Stop persists desired stopped state before cleanup. Deterministic
+unit/browser coverage, the local cloud smoke, and the pinned-image Hermes contract smoke verify this
+boundary without external provider or Telegram side effects.
+
+Milestone 18 is not accepted for hosted rollout yet. A scanned/published release-candidate image,
+authorized DigitalOcean budget, funded OpenRouter key, and dedicated Telegram bot/user are still
+required for the real message/reply, restart, durable Stop, redaction, and cleanup acceptance. The
+current `bun run verify:hermes:staging` entrypoint fails closed at capability preflight; it has not
+produced live acceptance evidence. Native provider OAuth remains deferred; the implemented narrow
+path is OpenRouter BYOK.
+
 ### Technical implementation
 
 - Confirm current Hermes install, CLI, config, and Telegram integration details during implementation; do not hard-code assumptions from this planning document without verification.
@@ -883,6 +907,15 @@ Goal: Replace dummy runner behavior with actual Hermes plus Telegram plus BYOK.
 ## Milestone 19: Public Beta Version
 
 Goal: Make AgentBay usable by 5 to 10 real users without founder-assisted setup.
+
+### Delivery status (2026-08-03)
+
+The feature-gated create-to-ready UI, persisted deployment/runtime status, mobile presentation,
+manual lifecycle controls, redacted events/logs, runners, approvals, backups, and cost estimates
+provide most of the operational path needed for a beta canary. Automatic-ready creation remains
+disabled by default, and the hosted Telegram reply acceptance described under Milestone 18 has not
+been run. Billing/manual-payment completion, admin/support surfaces, production Clerk cutover, and
+multi-user private-beta acceptance also remain open; Milestone 19 is therefore not complete.
 
 ### Technical implementation
 

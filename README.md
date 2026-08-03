@@ -11,7 +11,10 @@ implementation status and [milestones](./docs/MILESTONES.md) for the product roa
 ## What is implemented
 
 - Agent creation from Research, Inbox Triage, GitHub Issue, and Social Content templates.
-- Start, stop, restart, delete, configuration, encrypted BYOK secrets, and Hermes setup flows.
+- Feature-gated one-click Hermes setup with encrypted OpenRouter BYOK, a dedicated Telegram bot,
+  and a numeric user allowlist; explicit stopped/manual creation remains available.
+- Durable deployment and runtime reconciliation, including Start, Stop, Restart, Delete, bounded
+  recovery, and circuit-breaker status.
 - Per-agent logs and event timelines, dashboard activity, operational alerts, and approvals.
 - Local Docker execution, manually registered runners, and automated DigitalOcean provisioning.
 - Runner registration, scoped credentials, heartbeat health, capacity-aware placement, and
@@ -165,6 +168,8 @@ See [Authentication modes](./docs/AUTHENTICATION.md) and the
 | `AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS` | No | Comma-separated IPs/CIDRs allowed to reach SSH. SSH ingress is closed when this is omitted. |
 | `AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION` | Hermes BYOK setup | Active encryption-key label, for example `v1`. |
 | `AGENTBAY_AGENT_SECRET_KEYS_JSON` | Hermes BYOK setup | JSON object mapping key versions to 32-byte base64url keys. Keep old keys during rotation so existing secrets remain decryptable. |
+| `AGENTBAY_READY_AGENT_CREATION_ENABLED` | Controlled ready-mode rollout | Must be exactly `true` to offer automatic-ready creation. Unset, blank, or `false` keeps stopped/manual creation; any other value fails closed. |
+| `CRON_SECRET` | Hosted reconciliation | A 32–256 character bearer-safe secret used by Vercel to authorize both deployment and runtime reconciliation routes. |
 
 Additional validated tuning variables are documented inline in `.env.example` and
 `src/server/env.ts`. Production runner bootstrap pulls the configured runner and Hermes images;
@@ -202,6 +207,9 @@ billable resources.
 5. Choose `operator` or `clerk` authentication. For a temporary public development deployment,
    explicitly choose `development` and set `AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT=true`; this exposes
    all browser pages and app-side APIs.
+6. Before ready-mode rollout, obtain a funded OpenRouter key and create a dedicated Telegram bot
+   with [BotFather](https://t.me/BotFather). Record at least one positive decimal Telegram user ID
+   that is allowed to message it. Do not share a bot token between active agents.
 
 ### 2. Link the Vercel project
 
@@ -249,7 +257,16 @@ JSON value, and add both keyring variables:
 ```sh
 vercel env add AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION production
 vercel env add AGENTBAY_AGENT_SECRET_KEYS_JSON production
+vercel env add CRON_SECRET production
 ```
+
+`vercel.json` schedules both `/api/internal/agent-deployments/reconcile` and
+`/api/internal/agent-runtime/reconcile` every minute. Each request must carry the exact cron secret
+as a bearer credential, and each invocation claims at most one due row. Keep the value in Vercel;
+do not place it in a URL, log, or committed file.
+
+Leave `AGENTBAY_READY_AGENT_CREATION_ENABLED` unset during initial deployment. Add it with the exact
+value `true` only to the controlled environment after the authorized staging acceptance passes.
 
 Add any runner overrides or all five backup-storage variables from the reference above. Use
 separate preview values if you deploy previews. An unset Vercel preview defaults to Clerk and fails
@@ -301,6 +318,58 @@ open Settings, provision a cloud runner, and wait for registration plus the firs
 assigning or starting an agent. Production start requests fail closed when no online runner is
 available.
 
+### 7. Operate and roll back ready-mode creation
+
+Ready mode requires an approved OpenRouter model and key, one dedicated BotFather token, and one to
+100 positive decimal Telegram user IDs entered one per line. Usernames, groups, CSV input, wildcards,
+and automatic BotFather account management are not supported. The server validates the bot token,
+rejects a token already used by another active agent, and never redisplays submitted secrets.
+
+Initial setup persists its progress rather than tying it to one browser request:
+
+| Deployment stage | Meaning |
+| --- | --- |
+| `pending` | The committed request is waiting to be claimed. |
+| `provisioning_runner` | Runner capacity is being selected, created, or awaited. |
+| `configuring_hermes` | The revisioned managed Hermes configuration is being projected. |
+| `starting_gateway` | The runner accepted or is converging the selected container. |
+| `verifying_model` | The bounded, no-tools canary for this persisted deployment/config revision is being resolved. |
+| `connecting_telegram` | Private API/gateway readiness and the dedicated bot connection are being verified. |
+| `ready` | The expected revision, model canary, private API, gateway, and Telegram connection passed. |
+| `failed` | Setup ended with a safe error code; Retry, Stop, and Delete are available as applicable. |
+
+Transient runner/start conditions use persisted backoff. A terminal failure attempts safe workload
+cleanup and never turns a mock or ambiguous canary outcome into readiness. Automatic reconciliation
+records at most one successful canary for a deployment/config revision. An explicit Retry after a
+failed or unknown outcome creates a new persisted deployment attempt and may incur one additional
+bounded canary charge.
+
+After `ready`, the runtime view separates ongoing health from initial deployment:
+
+| Runtime state | Meaning |
+| --- | --- |
+| Ready | The expected managed gateway revision is healthy. |
+| Recovering | Bounded stop/start or readiness verification is in progress; wait. |
+| Stopping | Desired state is stopped and workload removal is being verified. |
+| Intentionally stopped | Durable Stop is complete; only an explicit Start changes desired state. |
+| Attention required | Automatic recovery opened its circuit; inspect the safe message and Restart explicitly. |
+| Unavailable | Persisted or observed state could not be trusted; the UI fails closed. |
+
+Managed containers use Docker `unless-stopped`. The runtime controller observes desired-running
+agents after runner or Docker restarts, performs bounded recovery, and opens a circuit after repeated
+failures. Stop first persists desired state as stopped and then removes the workload, so a runner
+process or Docker restart must not resurrect it.
+
+To roll back, remove or set `AGENTBAY_READY_AGENT_CREATION_ENABLED=false` in the affected environment
+and redeploy. Users can still create with `launchMode:"stopped"`; existing running agents retain
+their persisted desired state, so stop them explicitly when containment is required. Disabling the
+flag alone is not a bulk-stop operation.
+
+The credential-free, database, browser, and pinned-image paths are locally verified. The final
+provider-backed DigitalOcean plus real Telegram reply acceptance has not been run and remains gated
+on explicit authorization and the capabilities in [E2E validation](./docs/E2E_VALIDATION.md). Do not
+enable ready mode by treating mock or local evidence as live acceptance.
+
 ## Commands
 
 | Command | Purpose |
@@ -322,6 +391,9 @@ available.
 | `bun run test:e2e:clerk` | Run the opt-in hosted Clerk development smoke. |
 | `bun run verify` | Run formatting, lint, type checking, unit tests, and the production build. |
 | `bun run verify:e2e` | Run the base verification gate followed by provider-backed E2E. |
+| `bun run agent:image:smoke` | Verify the selected Hermes image contract locally. |
+| `bun run agent:hermes:contract-smoke` | Exercise the pinned Hermes runner/readiness/restart contract locally. |
+| `bun run verify:hermes:staging` | Run the fail-closed capability gate for the explicitly authorized live Hermes/Telegram acceptance. |
 | `bun run deploy:prod` | Deploy production to the configured Vercel scope. |
 
 See [E2E validation](./docs/E2E_VALIDATION.md) for capability gates and safe test modes.

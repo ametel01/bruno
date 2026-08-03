@@ -90,11 +90,12 @@ bun run verify:hermes:staging
 ```
 
 This command is the single entrypoint for the final live Hermes plus Telegram
-acceptance smoke. In the current Step 1 implementation it is a fail-closed
-capability preflight only: it performs no network, Docker, browser, database,
-provider, Droplet, or Telegram send side effects, and it exits nonzero even
-when every capability is configured because the live executor is added only
-after the automatic-ready deployment path exists.
+acceptance smoke. The current command is still a fail-closed capability
+preflight: it performs no network, Docker, browser, database, provider, Droplet,
+or Telegram-send side effects, and exits nonzero even when every capability is
+configured. Therefore a current nonzero result is expected safety evidence, not
+live acceptance. The provider-backed executor and its first authorized run have
+not yet been completed.
 
 The preflight requires these capability names:
 
@@ -122,6 +123,68 @@ safe reason codes, and `sideEffectsAttempted: false`. It must never print raw
 credentials, Telegram tokens, Telegram user or chat IDs, private endpoints,
 provider responses, or serialized environment objects. A missing, blank,
 placeholder, malformed, or non-exact sentinel value is a blocker, not a passing
-smoke. The later live run may create billable DigitalOcean resources and send a
-Telegram message only after the explicit authorization and confirmation values
-above are present.
+smoke.
+
+### Prepare the dedicated bot and allowlist
+
+1. Open [BotFather](https://t.me/BotFather), choose its new-bot flow, follow its
+   prompts for a staging-only name and username, and copy the resulting token
+   directly into an ignored local or hosted secret store. Bot creation,
+   privacy-mode changes, and Telegram account management are not automated by
+   AgentBay. If the token is exposed, revoke it in BotFather before continuing.
+2. Ensure no other running agent, gateway, webhook, or polling process uses that
+   bot. Ready-mode creation rejects a token fingerprint already active for
+   another agent, and concurrent polling with one token is unsupported.
+3. Record the allowed person's positive decimal Telegram user ID. Product
+   creation accepts one to 100 IDs, one per line; it rejects usernames, group
+   IDs, CSV, wildcards, zero, and negative values. The staging chat ID is a
+   separate signed numeric capability because Telegram chats may use negative
+   identifiers.
+4. Fund the OpenRouter key for the selected approved model. Automatic
+   reconciliation records at most one successful bounded, low-output, no-tools
+   canary for a deployment/config revision. An explicit Retry after a failed or
+   unknown outcome creates a new persisted attempt and may incur one additional
+   bounded canary charge; do not use retries merely to probe credentials.
+
+### Run the authorized workflow
+
+Do not run the live workflow until the command has a reviewed provider-backed
+executor and an operator has approved the exact basic DigitalOcean budget plus
+Telegram send. Supply all nine capabilities out of band, then run exactly:
+
+```bash
+bun run verify:hermes:staging
+```
+
+The executor must create only one staging canary agent for the immutable image
+revision. Observe the persisted deployment sequence `pending` →
+`provisioning_runner` → `configuring_hermes` → `starting_gateway` →
+`verifying_model` → `connecting_telegram` → `ready`. Then send a unique message
+from the allowed user, correlate one Hermes reply without recording message or
+identity content, restart and re-verify readiness, Stop the agent, and verify it
+remains stopped after runner-process and Docker restart. Managed containers use
+`unless-stopped`; AgentBay persists `desiredStatus=stopped` before workload
+cleanup so restart policy cannot override an intentional Stop.
+
+If setup fails, retain only its safe error code and stage. Reconciliation uses
+persisted retries and backoff; terminal setup failures offer an explicit retry
+and attempt safe container cleanup. After readiness, runtime reconciliation
+reports recovery separately, bounds automatic restarts, and opens a circuit for
+operator Restart after repeated or prolonged Telegram failures.
+
+### Evidence and cleanup
+
+Record only sanitized timestamps, command/CI references, immutable image digest,
+stage names, safe reason codes, and yes/no assertions for reply, restart, Stop,
+and cleanup. Never retain credentials, bot/user/chat IDs, message text, private
+runner endpoints, raw upstream responses, environment dumps, browser storage,
+or secret-bearing logs. Delete the staging agent and authorized Droplet, verify
+the provider resource is gone, revoke or rotate temporary credentials as
+planned, and remove local artifacts. A failed cleanup is a blocker and must be
+reported without exposing identifiers.
+
+Only after this live run passes may the controlled environment set
+`AGENTBAY_READY_AGENT_CREATION_ENABLED=true`. Roll back by setting it to `false`
+or removing it and redeploying; explicit `launchMode:"stopped"` creation remains
+available. Stop existing agents explicitly because disabling the flag does not
+change their persisted desired state.
