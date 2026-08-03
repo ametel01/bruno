@@ -2,24 +2,24 @@
 
 ## Active Work
 
-- plan: `PLAN.md` Step 3 — Persist Desired State and Deployment Operations
-  owner: builder-step-3
+- plan: `PLAN.md` Step 4 — Add Managed Creation Configuration and Encrypted Credentials
+  owner: root-builder-step-4
   branch: `main`
   worktree: `/Users/alexmetelli/source/plingpling`
-  phase: checking
+  phase: implementing
   cycle: 1/5
 
 ## Completion Contract
 
-- outcome: Persist explicit desired state and durable owner-scoped deployment operations with safe transitions, idempotency, leases, and a concealed read API.
-- acceptance criteria: Historical agents remain desired-stopped; duplicate owner/idempotency keys resolve to one operation; one active deployment per agent; concurrent claims yield one valid lease with safe expiry takeover; terminal states are immutable; foreign reads match concealed not-found behavior.
-- non-goals: No ready-mode create payload/secrets, runner side effects, reconciliation triggers, product UI, external calls, or live infrastructure.
-- likely touchpoints: See `Step 3 Completion Contract (pre-spec)` below for the exact schema, migration, service, route, DTO, and test set; `CHANGELOG.md` changes only if the read API/desired state is externally observable.
-- required gates: `bun run db:generate`; clean and existing-database `bun run db:migrate`; focused schema/migration/state/idempotency/lease/isolation tests; full format/lint/typecheck/test/build/E2E and diff check.
-- risks: Partial-unique semantics, case-sensitive idempotency, lease races/stale-owner updates, enum migration safety, composite ownership, and accidental historical auto-start.
-- do-not-touch: Step 4 create credentials/API behavior, runner/DigitalOcean side effects, UI, external credentials, hosted configuration, and unrelated historical ledgers.
-- dependency blockers: None; Step 2 closed and independently ALL GREEN at `897e28f`.
-- open questions: Builder must use the detailed pre-spec’s transition graph and migration fixtures exactly or document a smaller compatible schema deviation before editing.
+- outcome: Add opt-in OpenRouter-first `launchMode:"ready"` creation that validates one approved model and a bounded Telegram `getMe`, then atomically persists the owned agent, managed config, four encrypted secrets, generated API-server key, desired-running intent, pending deployment, and one safe audit event.
+- acceptance criteria: Existing stopped/manual creation remains compatible and default; ready-only fields on stopped requests are rejected; disabled first-write ready creation returns safe 503 with zero mutation; idempotent ready replays return the original safe agent/deployment before flag or credential validation; Telegram validation is bounded, injected, redacted, and never sends messages; active Telegram bot uniqueness is database-enforced; rollback leaves no partial rows.
+- non-goals: No Step 5 projection, Step 6 runner launch/status, Step 7 reconciler, Step 8 UI polling, Step 9 restart policy, Step 10 live Telegram/OpenRouter/DigitalOcean/GHCR/Vercel contact, hosted flag mutation, or real credentials.
+- likely touchpoints: See `Step 4 Completion Contract (pre-spec)` below for payload/API compatibility, model registry, Telegram client, secret metadata migration, atomic transaction, redaction, isolation, and test requirements.
+- required gates: `bun run db:generate`; clean/upgrade/backfill migration evidence; focused model/Telegram/create/secret/schema/migration/event/isolation tests; credential-free `bun run verify:hermes:staging`; full format/lint/typecheck/test/build/E2E and diff check.
+- risks: idempotency replay ordering, token uniqueness across key rotation, Telegram fetch redaction/timeouts/oversize bodies, transaction rollback across secrets/deployment/events, PII leakage in logs/events/DTOs, and accidental runner/provider side effects.
+- do-not-touch: Step 5+ projection/reconciler/runner/UI/live acceptance behavior, `.env.local`, hosted configuration, external services, prior ledgers, or raw credentials.
+- dependency blockers: None; Step 3 closed and independently ALL GREEN at `7024bc2`.
+- open questions: None behavior-blocking under the pre-spec; OpenRouter BYOK is the approved opt-in automatic-ready assumption for this plan.
 
 ## Dependency Graph
 
@@ -27,6 +27,13 @@
 - The steps are intentionally serialized because later schemas/contracts depend on prior commits and several steps share core files and trackers.
 
 ## Handoffs
+
+- from: root-checker-step-3
+  to: root-builder-step-4
+  timestamp: 2026-08-03
+  request: Step 3 is independently ALL GREEN at `7024bc2`; implement Step 4 from the existing pre-spec and preserve the exact external-service boundaries.
+  evidence: Step 3 checker evidence is recorded below: semantic inspection passed, focused Step 3 tests passed 7 files / 72 tests, `bun run db:generate` showed no drift, `bun run db:migrate` passed twice on local loopback, full tests passed 103 files / 905 tests, build passed, E2E passed 14 tests, and `git diff --check` passed.
+  next-action: Implement Step 4, update `CHANGELOG.md` and `PROGRESS.md`, run required gates, and commit `feat: accept managed Hermes creation credentials`.
 
 - from: builder-step-3
   to: coordinator
@@ -117,7 +124,71 @@
 
 ## Checker Result
 
-Status: PENDING Step 3 checker
+Status: ALL GREEN
+
+## Commands
+
+- command: `git show --format='%H%n%s' --no-patch 7024bc2`
+  result: passed
+  evidence: `7024bc2af52246179983507d3b9bcbed7e76c7d5`; `feat: persist agent deployment operations`.
+- command: Step 3 semantic and diff inspection at `7024bc2`
+  result: passed
+  evidence: changed files are `CHANGELOG.md`, `PROGRESS.md`, `STATUS.md`, `app/api/agents/[agentId]/deployment/route.ts`, `drizzle/0016_motionless_fantastic_four.sql`, `drizzle/meta/0016_snapshot.json`, `drizzle/meta/_journal.json`, `src/server/agents/agent-deployments.ts`, `src/server/agents/deployment-dto.ts`, `src/server/agents/deployment-state.ts`, `src/server/db/schema.ts`, and seven focused tests. Migration adds `agent_desired_status` exactly `stopped | running`, `agents.desired_status DEFAULT 'stopped' NOT NULL`, `agent_deployment_stage` exactly `pending | provisioning_runner | configuring_hermes | starting_gateway | verifying_model | connecting_telegram | ready | failed`, ordered `agent_deployments` columns, composite owner FK through `agents_id_user_id_unique`, owner/idempotency unique index, one-active partial index, owner-created index, claim index, and check constraints for attempts, safe config revision/idempotency/lease/error fields, terminal timestamps, terminal work clearing, and terminal-after-start ordering.
+- command: Step 3 route/service inspection
+  result: passed
+  evidence: `GET /api/agents/[agentId]/deployment` resolves `requireConfiguredApplicationUser` before DB access, validates malformed/undecodable IDs as safe 400, uses `(agent_id,user_id,deleted_at IS NULL)` owned-agent lookup before deployment reads, returns identical concealed 404 for missing/foreign/deleted agents, returns `200 {deployment:null}` for owned agents without operations, maps persistence failures to safe `agent_deployment_failed`, and DTO output excludes owner, idempotency, lease, endpoint, and secret fields.
+- command: `bun run test tests/unit/agent-schema.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts tests/unit/agent-deployment-state.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-route.test.ts tests/unit/agent-request-user-boundaries.test.ts tests/unit/agent-user-isolation.test.ts`
+  result: passed
+  evidence: 7 test files passed, 72 tests passed; coverage includes catalog and migration source assertions, clean and upgrade-through-0015 disposable loopback migration fixtures, exact state graph/DTO invariants, real separate-connection idempotency/active-operation/claim/expiry/release/renewal/CAS tests, owner-concealed route behavior, explicit request-user boundaries, and two-user route isolation.
+- command: `bun run db:generate`
+  result: passed
+  evidence: Drizzle read 18 tables including `agent_deployments` with 17 columns, 4 indexes, 1 FK and reported `No schema changes, nothing to migrate`; worktree stayed clean.
+- command: `bun run db:migrate`
+  result: passed
+  evidence: local loopback Postgres migration applied successfully; only existing `drizzle` schema and `__drizzle_migrations` notices appeared.
+- command: `bun run db:migrate`
+  result: passed
+  evidence: second local loopback Postgres run applied successfully idempotently with the same existing-object notices.
+- command: `bun run format:check`
+  result: passed
+  evidence: Biome checked 269 files; no fixes applied.
+- command: `bun run lint`
+  result: passed
+  evidence: Biome checked 269 files; no fixes applied.
+- command: `bun run typecheck`
+  result: passed
+  evidence: `tsc --noEmit` exited 0.
+- command: `bun run test`
+  result: passed
+  evidence: 103 test files passed, 905 tests passed.
+- command: `bun run build`
+  result: passed
+  evidence: Next.js 16.2.10 production build compiled successfully; route list includes `/api/agents/[agentId]/deployment`.
+- command: `bun run test:e2e:ci`
+  result: passed
+  evidence: 14 Playwright tests passed across chromium desktop and mobile.
+- command: `git diff --check`
+  result: passed
+  evidence: exited 0 with no whitespace errors.
+- command: `git status --short --branch --untracked-files=all`
+  result: passed
+  evidence: `## main...origin/main [ahead 11]`; no changed or untracked files before this STATUS.md evidence update.
+
+## Failures
+
+- none.
+
+## Coverage Gaps
+
+- This checker pass did not contact hosted databases, external providers, DigitalOcean, OpenRouter, Telegram, GHCR, Vercel, or credentials. Step 4+ creation payloads, credential capture, reconciler behavior, runner side effects, UI polling, restart policy, and live Telegram acceptance remain out of scope for Step 3.
+
+## Next Action
+
+- Step 3 is independently checked at `7024bc2`; Step 4 can start after coordinator handoff under a builder role.
+
+## Prior Checker Result
+
+Status: Step 0 ALL GREEN
 
 ## Commands
 
@@ -155,11 +226,11 @@ Status: PENDING Step 3 checker
 
 ## Coverage Gaps
 
-- This check covers Step 0 only. Step 1 and later PLAN.md implementation steps remain unimplemented in this read-only checker pass.
+- This prior check covers Step 0 only.
 
 ## Next Action
 
-- Assign an independent checker for Step 3.
+- Step 0 accepted; later step evidence appears above.
 - No external-service, credential, or Step 4 product behavior is part of this handoff.
 
 ## Worktrees
@@ -174,8 +245,8 @@ Status: PENDING Step 3 checker
 
 ## Completed
 
-- Step 3 — Persist Desired State and Deployment Operations: implemented and
-  locally validated; pending independent checker.
+- Step 3 — Persist Desired State and Deployment Operations: complete at
+  `7024bc2` and independently ALL GREEN.
 - Step 0 — Progress and Changelog Tracking Setup: complete at `807e401`; no
   changelog entry because this was tracking-only.
 
