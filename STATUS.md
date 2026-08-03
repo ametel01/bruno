@@ -2,38 +2,38 @@
 
 ## Active Work
 
-- plan: `PLAN.md` Step 5 — Build the Hermes Managed Launch Spec and Safe Config Projection
-  owner: builder-step-5
+- plan: `PLAN.md` Step 6 — Split Runner Launch Acceptance From Observed Readiness
+  owner: builder-step-6
   branch: `main`
   worktree: `/Users/alexmetelli/source/plingpling`
-  phase: cycle-3 validated; pending independent checker
-  cycle: 3/5
-  contract: `STATUS.archive.md` → `Step 5 Completion Contract (pre-spec)`
-  blocker: none; Step 5 cycle-3 repair is in this commit after `fe13ab9` and `d50cc4e`.
-  next-action: Checker independently verifies Step 5 cycle 3 before Step 6 starts.
+  phase: ready for implementation
+  cycle: 1/5
+  contract: `STATUS.archive.md` → `Step 6 Completion Contract (pre-spec)`
+  blocker: none; Step 5 is independently accepted through `4f8312d`.
+  next-action: Builder implements the exact Step 6 asynchronous launch-acceptance and truthful observed-status contract, validates it, updates trackers, and commits the prescribed change.
 
 ## Completion Contract
 
-- outcome: Build versioned managed Hermes launch spec v3 and atomically project the complete approved OpenRouter, Telegram, allowlist, private API, prompt, workspace, and revision configuration without leaking credentials or regressing v2/native/manual agents.
-- acceptance criteria: Exact v3 DTO and revision source, pinned strict YAML 1.2 parser, decrypted server-only secret sourcing, no-follow/path-escape defenses, marker-last atomic projection, file modes/ownership, fresh-managed setup bypass, restored/native compatibility, and secret-free serialization are in the archived Step 5 contract.
-- non-goals: No asynchronous launch-acceptance split, deployment reconciler, progress UI, restart policy, live Telegram reply, infrastructure provisioning, hosted-secret mutation, image publication, or Step 6+ behavior.
-- required gates: focused launch-spec/parser/projection/path/permission/backup/setup tests; pinned-image semantic and local smoke evidence; full format/lint/typecheck/test/build/E2E, fail-closed staging gate, and diff check.
-- risks: YAML parser ambiguity, prototype/tag/alias attacks, symlink/path escape, partial projection, unsafe file modes/ownership, secret serialization, revision drift, and setup bypass regressions.
-- do-not-touch: Accepted Step 0–3 behavior; runner/readiness; UI; external resources; prior changelog/progress entries.
+- outcome: Make runner start/restart return bounded HTTP 202 launch acceptance without readiness polling, converge retries to exactly one selected container, and expose a truthful redacted status snapshot for later reconciliation.
+- acceptance criteria: Exact launch/status v2 DTOs, operation labels, one 30-second acceptance budget, per-agent serialization, deterministic reuse/replacement, one-shot authenticated private readiness observation, canary caching, safe cancellation, and no premature control-plane `running` transition are in the archived Step 6 contract.
+- non-goals: No deployment reconciler or leases, create-progress UI, restart policy/reboot recovery, live Telegram reply, infrastructure provisioning, hosted-secret mutation, image publication, or Step 7+ behavior.
+- required gates: focused runner/Docker/status/probe/canary/manual-adapter/lifecycle/auth/redaction tests; local contract smoke; full format/lint/typecheck/test/build/E2E, fail-closed staging, and diff check.
+- risks: duplicate containers, unbounded Vercel waits, stale reuse, cross-agent mutation, unsafe status leakage, canary replay/cost, stop/start races, and false `running` transitions.
+- do-not-touch: Accepted Step 0–5 semantics; deployment reconciler/UI/restart policy; external resources; prior changelog/progress entries.
 
 ## Dependency Graph
 
 - Step 0 → Step 1 → Step 2 → Step 3 → Step 4 → Step 5 → Step 6 → Step 7 → Step 8 → Step 9 → Step 10.
-- Steps 6–10 pre-specs are complete in `STATUS.archive.md`; Step 6 remains blocked until Step 5 commits and independently checks.
+- Steps 6–10 pre-specs are complete in `STATUS.archive.md`; Step 6 is unblocked by independently accepted Step 5.
 
 ## Current Handoff
 
 - from: coordinator
-  to: builder-step-5
+  to: builder-step-6
   timestamp: 2026-08-03
-  request: Implement the archived Step 5 contract only; add strict launch spec v3 and safe managed config projection, validate locally, update changelog/progress, and commit the prescribed change.
-  evidence: Step 4 implementation `d942270` plus repair `546b9df`; checker cycle 2 independently green at 12 files / 111 focused tests, 107 files / 939 full tests, build, 14 E2E, migrations, and fail-closed staging.
-  stop-condition: Stop before Step 6 async launch acceptance/reconciler behavior or any real provider/Telegram/infrastructure effect.
+  request: Implement the archived Step 6 contract only; split bounded launch acceptance from one-shot observed readiness, validate locally, update changelog/progress, and commit `refactor: make Hermes runner launches asynchronous`.
+  evidence: Step 5 commits `fe13ab9`, `d50cc4e`, and `4f8312d`; checker cycle 3 independently green at 17 files / 102 focused tests, 107 files / 961 full tests, build, 14 E2E, local fake-boundary smoke, and fail-closed staging.
+  stop-condition: Stop before Step 7 reconciliation/database-stage progression or any real provider/Telegram/infrastructure effect.
 
 ## Gates
 
@@ -44,11 +44,11 @@
 - Step 4 `546b9df`: independently green after cycle 2 — focused 12 files / 111 tests, migrations, 107 files / 939 tests, build, 14 E2E, and fail-closed staging with no effects.
 - Step 5 `fe13ab9`: builder green but checker cycle 1 found YAML/env/filesystem/Docker inspect gaps.
 - Step 5 `d50cc4e`: cycle 2 builder green but checker cycle 2 found safe YAML punctuation and filesystem matrix gaps.
-- Step 5 cycle 3 this commit: builder green — focused repair 17 files / 101 tests, local Hermes contract smoke with fake model and fake Telegram boundary, 107 files / 961 tests, build, 14 E2E, and fail-closed staging with no effects.
+- Step 5 `4f8312d`: independently green after cycle 3 — 17 files / 102 focused tests, local Hermes contract smoke with fake model and fake Telegram boundary, 107 files / 961 tests, build, 14 E2E, and fail-closed staging with no effects.
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling` — branch `main`; sole active worktree; Step 5 cycle-3 validated pending independent checker; no stashes. Archived Steps 5–9 contracts are committed through `368c4da`; the Step 10 pre-spec is append-only and out of the builder's scope.
+- `/Users/alexmetelli/source/plingpling` — branch `main`; sole active worktree; Step 6 ready for implementation; no stashes. Archived Steps 6–10 contracts are committed and external actions remain prohibited.
 
 ## Decisions And Lessons
 
@@ -64,4 +64,4 @@
 - Step 2 — `897e28f` — pinned Hermes readiness contract and failed-launch cleanup.
 - Step 3 — `7024bc2` — desired state, durable deployment operations, leases, migration, and concealed read API; checker evidence `ba8c969`.
 - Step 4 — `d942270` + `546b9df` — ready-mode encrypted creation, bounded Telegram validation, active-bot uniqueness/backfill, atomic deployment persistence, and independently accepted security/concurrency gates.
-- Step 5 — `fe13ab9` + `d50cc4e` + this commit — managed Hermes launch-spec v3, owner-scoped secret launch building, hardened strict YAML/env/filesystem projection, safe YAML scalar punctuation preservation, filesystem transaction seam coverage, v2/manual compatibility, and fake-provider/Telegram local smoke coverage.
+- Step 5 — `fe13ab9` + `d50cc4e` + `4f8312d` — independently accepted managed launch-spec v3, owner-scoped secret launch building, hardened strict YAML/env/filesystem projection, v2/manual compatibility, and fake-provider/Telegram local smoke coverage.
