@@ -5,6 +5,7 @@ import { POST as simulateErrorAgentRoute } from "@/app/api/agents/[agentId]/acti
 import { POST as startAgentRoute } from "@/app/api/agents/[agentId]/actions/start/route";
 import { POST as stopAgentRoute } from "@/app/api/agents/[agentId]/actions/stop/route";
 import { GET as agentEventsRoute } from "@/app/api/agents/[agentId]/events/route";
+import { GET as agentDeploymentRoute } from "@/app/api/agents/[agentId]/deployment/route";
 import { GET as agentLogsRoute } from "@/app/api/agents/[agentId]/logs/route";
 import {
   DELETE as deleteAgentRoute,
@@ -27,6 +28,7 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import {
   agentApprovals,
   agentConfigs,
+  agentDeployments,
   agentEvents,
   agentLogs,
   agentUsagePeriods,
@@ -232,6 +234,15 @@ describe("agent request-user isolation", () => {
         invoke: (agentId: string) =>
           agentEventsRoute(
             new Request(`http://localhost/api/agents/${agentId}/events`),
+            { params: Promise.resolve({ agentId }) },
+            routeUser(USER_A_ID),
+          ),
+      },
+      {
+        name: "deployment",
+        invoke: (agentId: string) =>
+          agentDeploymentRoute(
+            new Request(`http://localhost/api/agents/${agentId}/deployment`),
             { params: Promise.resolve({ agentId }) },
             routeUser(USER_A_ID),
           ),
@@ -663,6 +674,7 @@ async function captureState(connection: DatabaseConnection) {
   const [
     agentRows,
     configRows,
+    deploymentRows,
     eventRows,
     logRows,
     usageRows,
@@ -674,6 +686,7 @@ async function captureState(connection: DatabaseConnection) {
   ] = await Promise.all([
     connection.db.select().from(agents).orderBy(asc(agents.id)),
     connection.db.select().from(agentConfigs).orderBy(asc(agentConfigs.agentId)),
+    connection.db.select().from(agentDeployments).orderBy(asc(agentDeployments.id)),
     connection.db.select().from(agentEvents).orderBy(asc(agentEvents.id)),
     connection.db.select().from(agentLogs).orderBy(asc(agentLogs.id)),
     connection.db.select().from(agentUsagePeriods).orderBy(asc(agentUsagePeriods.id)),
@@ -687,6 +700,7 @@ async function captureState(connection: DatabaseConnection) {
   return {
     agents: agentRows,
     configs: configRows,
+    deployments: deploymentRows,
     events: eventRows,
     logs: logRows,
     usage: usageRows,
@@ -699,5 +713,5 @@ async function captureState(connection: DatabaseConnection) {
 }
 
 async function resetTables(connection: DatabaseConnection): Promise<void> {
-  await connection.client`truncate table agent_approvals, agent_configs, agent_usage_periods, backups, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runner_provisioning_events, runner_heartbeats, runner_credentials, runner_registration_tokens, runners, app_metadata, users restart identity cascade`;
+  await connection.client`truncate table agent_deployments, agent_approvals, agent_configs, agent_usage_periods, backups, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runner_provisioning_events, runner_heartbeats, runner_credentials, runner_registration_tokens, runners, app_metadata, users restart identity cascade`;
 }

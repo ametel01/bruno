@@ -3,6 +3,9 @@ import { getTableColumns, getTableName } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import {
   agentConfigs,
+  agentDeployments,
+  agentDeploymentStageEnum,
+  agentDesiredStatusEnum,
   agentApprovals,
   agentApprovalStatusEnum,
   agentEvents,
@@ -35,6 +38,7 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(getTableName(backups)).toBe("backups");
     expect(getTableName(agentConfigs)).toBe("agent_configs");
     expect(getTableName(agentSecrets)).toBe("agent_secrets");
+    expect(getTableName(agentDeployments)).toBe("agent_deployments");
     expect(getTableName(agentUsagePeriods)).toBe("agent_usage_periods");
     expect(getTableName(agentApprovals)).toBe("agent_approvals");
     expect(getTableName(agentEvents)).toBe("agent_events");
@@ -54,6 +58,17 @@ describe("Milestone 1 agent persistence schema", () => {
       "restarting",
       "error",
       "deleting",
+    ]);
+    expect(agentDesiredStatusEnum.enumValues).toEqual(["stopped", "running"]);
+    expect(agentDeploymentStageEnum.enumValues).toEqual([
+      "pending",
+      "provisioning_runner",
+      "configuring_hermes",
+      "starting_gateway",
+      "verifying_model",
+      "connecting_telegram",
+      "ready",
+      "failed",
     ]);
     expect(agentScheduleModeEnum.enumValues).toEqual(["manual", "cron"]);
     expect(agentApprovalStatusEnum.enumValues).toEqual([
@@ -220,6 +235,7 @@ describe("Milestone 1 agent persistence schema", () => {
       "templateVersion",
       "templateSnapshotJson",
       "status",
+      "desiredStatus",
       "statusReason",
       "createdAt",
       "updatedAt",
@@ -235,10 +251,89 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.templateSnapshotJson.dataType).toBe("json");
     expect(columns.status.notNull).toBe(true);
     expect(columns.status.default).toBe("stopped");
+    expect(columns.desiredStatus.notNull).toBe(true);
+    expect(columns.desiredStatus.default).toBe("stopped");
     expect(columns.statusReason.notNull).toBe(false);
     expect(columns.createdAt.notNull).toBe(true);
     expect(columns.updatedAt.notNull).toBe(true);
     expect(columns.deletedAt.notNull).toBe(false);
+  });
+
+  it("defines owner-bound deployment operations with durable lease and safe error fields", () => {
+    const columns = getTableColumns(agentDeployments);
+
+    expect(Object.keys(columns)).toEqual([
+      "id",
+      "agentId",
+      "userId",
+      "stage",
+      "configRevision",
+      "idempotencyKey",
+      "attemptCount",
+      "errorCode",
+      "errorDetail",
+      "nextAttemptAt",
+      "leaseOwner",
+      "leaseExpiresAt",
+      "startedAt",
+      "completedAt",
+      "failedAt",
+      "createdAt",
+      "updatedAt",
+    ]);
+    expect(columns.id.notNull).toBe(true);
+    expect(columns.agentId.notNull).toBe(true);
+    expect(columns.userId.notNull).toBe(true);
+    expect(columns.stage.notNull).toBe(true);
+    expect(columns.stage.default).toBe("pending");
+    expect(columns.configRevision.notNull).toBe(true);
+    expect(columns.idempotencyKey.notNull).toBe(true);
+    expect(columns.attemptCount.notNull).toBe(true);
+    expect(columns.attemptCount.default).toBe(0);
+    expect(columns.errorCode.notNull).toBe(false);
+    expect(columns.errorDetail.notNull).toBe(false);
+    expect(columns.nextAttemptAt.notNull).toBe(false);
+    expect(columns.leaseOwner.notNull).toBe(false);
+    expect(columns.leaseExpiresAt.notNull).toBe(false);
+    expect(columns.startedAt.notNull).toBe(false);
+    expect(columns.completedAt.notNull).toBe(false);
+    expect(columns.failedAt.notNull).toBe(false);
+    expect(columns.createdAt.notNull).toBe(true);
+    expect(columns.updatedAt.notNull).toBe(true);
+  });
+
+  it("generates additive desired-state and deployment-operation migration SQL", async () => {
+    const migration = await readFile("drizzle/0016_motionless_fantastic_four.sql", "utf8");
+
+    expect(migration).toContain(
+      `CREATE TYPE "public"."agent_desired_status" AS ENUM('stopped', 'running')`,
+    );
+    expect(migration).toContain(
+      `CREATE TYPE "public"."agent_deployment_stage" AS ENUM('pending', 'provisioning_runner', 'configuring_hermes', 'starting_gateway', 'verifying_model', 'connecting_telegram', 'ready', 'failed')`,
+    );
+    expect(migration).toContain('CREATE TABLE "agent_deployments"');
+    expect(migration).toContain(
+      'ALTER TABLE "agents" ADD COLUMN "desired_status" "agent_desired_status" DEFAULT \'stopped\' NOT NULL',
+    );
+    expect(migration).toContain(
+      'ALTER TABLE "agents" ADD CONSTRAINT "agents_id_user_id_unique" UNIQUE("id","user_id")',
+    );
+    expect(migration.indexOf("agents_id_user_id_unique")).toBeLessThan(
+      migration.indexOf("agent_deployments_agent_owner_fk"),
+    );
+    expect(migration).toContain(
+      'FOREIGN KEY ("agent_id","user_id") REFERENCES "public"."agents"("id","user_id")',
+    );
+    expect(migration).toContain('CREATE UNIQUE INDEX "agent_deployments_user_idempotency_idx"');
+    expect(migration).toContain('CREATE UNIQUE INDEX "agent_deployments_active_agent_idx"');
+    expect(migration).toContain(`WHERE "agent_deployments"."stage" NOT IN ('ready', 'failed')`);
+    expect(migration).toContain('CREATE INDEX "agent_deployments_user_agent_created_idx"');
+    expect(migration).toContain('CREATE INDEX "agent_deployments_claim_idx"');
+    expect(migration).toContain("agent_deployments_config_revision_check");
+    expect(migration).toContain("agent_deployments_idempotency_key_check");
+    expect(migration).toContain("agent_deployments_lease_pair_check");
+    expect(migration).toContain("agent_deployments_terminal_clear_work_check");
+    expect(migration).not.toMatch(/DROP TABLE|DROP COLUMN|ALTER COLUMN|(?:^|\n)UPDATE /);
   });
 
   it("defines durable manual runner identity rows with soft-delete support", () => {

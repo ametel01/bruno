@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -8,6 +9,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -28,6 +30,19 @@ export const agentStatusEnum = pgEnum("agent_status", [
   "restarting",
   "error",
   "deleting",
+]);
+
+export const agentDesiredStatusEnum = pgEnum("agent_desired_status", ["stopped", "running"]);
+
+export const agentDeploymentStageEnum = pgEnum("agent_deployment_stage", [
+  "pending",
+  "provisioning_runner",
+  "configuring_hermes",
+  "starting_gateway",
+  "verifying_model",
+  "connecting_telegram",
+  "ready",
+  "failed",
 ]);
 
 export const agentScheduleModeEnum = pgEnum("agent_schedule_mode", ["manual", "cron"]);
@@ -305,12 +320,115 @@ export const agents = pgTable(
         sql`'{"key":"research_agent","version":"1.0.0","name":"Research Agent","description":"Tracks a research question, gathers source notes, and produces concise summaries for later review.","defaultTools":["Web search","Notes","Summaries"],"defaultSchedule":"Manual","defaultSystemPrompt":"You are a Research Agent. Gather relevant information, keep source notes, and produce concise summaries. Do not take external actions or contact third parties. Ask for approval before using any integration or publishing output.","requiredIntegrations":[]}'::jsonb`,
       ),
     status: agentStatusEnum("status").notNull().default("stopped"),
+    desiredStatus: agentDesiredStatusEnum("desired_status").notNull().default("stopped"),
     statusReason: text("status_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
-  (table) => [index("agents_runner_id_idx").on(table.runnerId)],
+  (table) => [
+    unique("agents_id_user_id_unique").on(table.id, table.userId),
+    index("agents_runner_id_idx").on(table.runnerId),
+  ],
+);
+
+export const agentDeployments = pgTable(
+  "agent_deployments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    stage: agentDeploymentStageEnum("stage").notNull().default("pending"),
+    configRevision: text("config_revision").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    errorCode: text("error_code"),
+    errorDetail: text("error_detail"),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    failedAt: timestamp("failed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "agent_deployments_agent_owner_fk",
+      columns: [table.agentId, table.userId],
+      foreignColumns: [agents.id, agents.userId],
+    }),
+    check("agent_deployments_attempt_count_check", sql`${table.attemptCount} >= 0`),
+    check(
+      "agent_deployments_config_revision_check",
+      sql`trim(${table.configRevision}) = ${table.configRevision} AND ${table.configRevision} ~ '^[A-Za-z0-9_.:-]{1,80}$'`,
+    ),
+    check(
+      "agent_deployments_idempotency_key_check",
+      sql`trim(${table.idempotencyKey}) = ${table.idempotencyKey} AND length(${table.idempotencyKey}) BETWEEN 8 AND 128`,
+    ),
+    check(
+      "agent_deployments_lease_owner_check",
+      sql`${table.leaseOwner} IS NULL OR (length(trim(${table.leaseOwner})) > 0 AND length(${table.leaseOwner}) <= 128)`,
+    ),
+    check(
+      "agent_deployments_error_code_check",
+      sql`${table.errorCode} IS NULL OR ${table.errorCode} ~ '^[a-z0-9_.:-]{1,64}$'`,
+    ),
+    check(
+      "agent_deployments_error_detail_check",
+      sql`${table.errorDetail} IS NULL OR (length(trim(${table.errorDetail})) > 0 AND length(${table.errorDetail}) <= 500)`,
+    ),
+    check(
+      "agent_deployments_error_detail_code_check",
+      sql`${table.errorDetail} IS NULL OR ${table.errorCode} IS NOT NULL`,
+    ),
+    check(
+      "agent_deployments_lease_pair_check",
+      sql`(${table.leaseOwner} IS NULL AND ${table.leaseExpiresAt} IS NULL) OR (${table.leaseOwner} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL)`,
+    ),
+    check(
+      "agent_deployments_completed_stage_check",
+      sql`(${table.stage} = 'ready' AND ${table.completedAt} IS NOT NULL) OR (${table.stage} <> 'ready' AND ${table.completedAt} IS NULL)`,
+    ),
+    check(
+      "agent_deployments_failed_stage_check",
+      sql`(${table.stage} = 'failed' AND ${table.failedAt} IS NOT NULL) OR (${table.stage} <> 'failed' AND ${table.failedAt} IS NULL)`,
+    ),
+    check(
+      "agent_deployments_failed_error_check",
+      sql`${table.stage} <> 'failed' OR ${table.errorCode} IS NOT NULL`,
+    ),
+    check(
+      "agent_deployments_ready_error_check",
+      sql`${table.stage} <> 'ready' OR (${table.errorCode} IS NULL AND ${table.errorDetail} IS NULL)`,
+    ),
+    check(
+      "agent_deployments_terminal_clear_work_check",
+      sql`${table.stage} NOT IN ('ready', 'failed') OR (${table.nextAttemptAt} IS NULL AND ${table.leaseOwner} IS NULL AND ${table.leaseExpiresAt} IS NULL)`,
+    ),
+    check(
+      "agent_deployments_completed_after_started_check",
+      sql`${table.completedAt} IS NULL OR ${table.startedAt} IS NULL OR ${table.completedAt} >= ${table.startedAt}`,
+    ),
+    check(
+      "agent_deployments_failed_after_started_check",
+      sql`${table.failedAt} IS NULL OR ${table.startedAt} IS NULL OR ${table.failedAt} >= ${table.startedAt}`,
+    ),
+    uniqueIndex("agent_deployments_user_idempotency_idx").on(table.userId, table.idempotencyKey),
+    uniqueIndex("agent_deployments_active_agent_idx")
+      .on(table.agentId)
+      .where(sql`${table.stage} NOT IN ('ready', 'failed')`),
+    index("agent_deployments_user_agent_created_idx").on(
+      table.userId,
+      table.agentId,
+      table.createdAt,
+    ),
+    index("agent_deployments_claim_idx")
+      .on(table.nextAttemptAt, table.leaseExpiresAt, table.createdAt)
+      .where(sql`${table.stage} NOT IN ('ready', 'failed')`),
+  ],
 );
 
 export const agentUsagePeriods = pgTable(

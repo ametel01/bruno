@@ -97,6 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Agent records now persist explicit stopped/running desired state, and owners can read the latest deployment operation through `GET /api/agents/:agentId/deployment` without exposing leases, idempotency keys, or ownership internals.
 - Split deterministic local verification from provider-backed acceptance: `bun run verify` now ends after the production build, while `bun run verify:e2e` adds the full E2E suite.
 
 - Hermes launch now preserves the wizard-owned `/opt/data/config.yaml`, `.env`, `auth.json`, subscription, provider, model, and messaging state while AgentBay merges only private API-server values and its prompt/revision files.

@@ -451,19 +451,19 @@ the existing `Added`, `Changed`, `Fixed`, or `Security` sections as applicable.
 
 ### Current Status
 
-Step 2 is complete. The runner now accepts the pinned Hermes `v2026.7.7.2`
-`/health/detailed` shape without requiring an HTTP revision echo, proves the
-selected config revision through runner-owned image/label/mount/marker
-evidence, propagates only allowlisted readiness reasons, and removes the exact
-newly launched selected-agent container on post-launch readiness or revision
-failure. Step 3 is next: persist desired state and deployment operations.
+Step 3 is complete. Agent records now have explicit stopped/running desired
+state defaulting to stopped, deployment operations are durable and owner-bound
+with idempotency, single-active-operation, expiring-lease, and terminal-state
+guards, and owners can poll the latest deployment without exposing internal
+lease or idempotency fields. Step 4 is next: add managed creation configuration
+and encrypted credentials.
 
 ### Step Checklist
 
 - [x] Step 0: Progress and Changelog Tracking Setup
 - [x] Step 1: Quality Gates Setup and Baseline Evidence
 - [x] Step 2: Align Readiness With the Pinned Hermes Contract
-- [ ] Step 3: Persist Desired State and Deployment Operations
+- [x] Step 3: Persist Desired State and Deployment Operations
 - [ ] Step 4: Add Managed Creation Configuration and Encrypted Credentials
 - [ ] Step 5: Project a Complete Managed Hermes Configuration
 - [ ] Step 6: Split Runner Launch Acceptance From Observed Readiness
@@ -479,7 +479,7 @@ failure. Step 3 is next: persist desired state and deployment operations.
 | 0. Progress and Changelog Tracking Setup | Complete | None | This commit | `bun run format:check` passed after formatting the new progress guard; `bun run lint` passed; `bun run typecheck` passed; `bun run test` passed 98 files / 863 tests; `bun run build` passed; `bun run test:e2e:ci` passed 14 tests; `git diff --check` passed; changelog structure verified without a tracking-only entry. | Complete; Step 1 is next. |
 | 1. Quality Gates Setup and Baseline Evidence | Complete | Step 0 | This commit | Pre-edit baseline at `807e401`: `bun run verify` passed (`format:check`, `lint`, `typecheck`, 98 test files / 863 tests, and production build) and `bun run test:e2e:ci` passed 14 browser tests. Added `verify:hermes:staging`, a pure fail-closed preflight, placeholder-only docs/env entries, and 7 focused staging-gate tests. Final gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 99 files / 870 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `bun run verify:hermes:staging` exited nonzero with `capability_unavailable` and `sideEffectsAttempted: false`; `git diff --check`; `CHANGELOG.md` unchanged. | Complete; Step 2 is next. |
 | 2. Align Readiness With the Pinned Hermes Contract | Complete | Steps 0-1 | This commit | Focused Step 2 tests passed 6 files / 43 tests across runner-service, Docker adapter, lifecycle readiness, manual-runner adapter, projection, and local-smoke guards. `bun run agent:hermes:contract-smoke` passed against local pinned-image behavior with `telegramBoundary: "local-smoke-disabled"`, private API auth, no public Hermes port, production waiter reuse, fake model response, state persistence, backup/restore, log-source evidence, and cleanup. Full gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 99 files / 879 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `git diff --check`. | Complete; Step 3 is next. |
-| 3. Persist Desired State and Deployment Operations | Not started | Steps 0-2 | Not collected | Not collected | Requires readiness contract alignment. |
+| 3. Persist Desired State and Deployment Operations | Complete | Steps 0-2 | This commit | Generated `drizzle/0016_motionless_fantastic_four.sql` plus snapshot/journal with `agent_desired_status`, `agents.desired_status DEFAULT 'stopped'`, `agent_deployment_stage`, owner-bound `agent_deployments`, composite owner FK, idempotency/active/owner/claim indexes, and check constraints; reordered generated SQL only so the referenced agent-owner unique key exists before the FK while leaving generated metadata untouched. Focused Step 3 tests passed 7 files / 72 tests across schema/migration source assertions, state/DTO invariants, real separate-connection idempotency/active-operation/lease/expiry/release/renewal/CAS concurrency, owner-concealed route behavior, request-user boundaries, two-user route isolation, and clean/upgrade disposable loopback migration fixtures through `0015_dear_leader`. Migration gates passed: `bun run db:generate` reported no drift after generation; `bun run db:migrate` passed and reran idempotently on local loopback Postgres. Full gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 103 files / 905 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `git diff --check`. | Complete; Step 4 is next. |
 | 4. Add Managed Creation Configuration and Encrypted Credentials | Not started | Steps 0-3 | Not collected | Not collected | Stop here if OpenRouter BYOK is not approved for automatic-ready mode. |
 | 5. Project a Complete Managed Hermes Configuration | Not started | Steps 0-4 | Not collected | Not collected | Requires server-side desired config and encrypted secret contract. |
 | 6. Split Runner Launch Acceptance From Observed Readiness | Not started | Steps 0-5 | Not collected | Not collected | Requires managed launch spec and projection. |
@@ -501,6 +501,6 @@ failure. Step 3 is next: persist desired state and deployment operations.
 
 ### Current Blockers and Next Work
 
-- No blocker remains for Step 2.
-- Step 3 should add durable desired state and deployment-operation persistence
-  without contacting external services.
+- No blocker remains for Step 3.
+- Step 4 should add managed creation configuration and encrypted credentials
+  without contacting external services beyond approved validation boundaries.

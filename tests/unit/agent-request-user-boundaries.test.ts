@@ -40,6 +40,10 @@ const REQUEST_SURFACES = [
     required: ["requireConfiguredApplicationUser", "listAgentEventFeedForUser"],
   },
   {
+    file: "app/api/agents/[agentId]/deployment/route.ts",
+    required: ["requireConfiguredApplicationUser", "getLatestAgentDeploymentForUser"],
+  },
+  {
     file: "app/api/agents/[agentId]/logs/route.ts",
     required: [
       "requireConfiguredApplicationUser",
