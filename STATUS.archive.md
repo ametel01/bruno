@@ -2669,3 +2669,490 @@ Status: ALL GREEN
     policy, retry operation identity, cron auth, or ready/usage boundary is a
     product/security/billing compatibility decision requiring coordinator/user
     approval before implementation.
+
+## Step 8 Completion Contract (pre-spec)
+
+- issue/readiness:
+  - `PLAN.md` Step 8, “Add One-Click Creation and Persisted Progress UI.”
+  - Classification: `blocked`. Do not assign Step 8 implementation until Steps
+    4, 5, 6, and 7 are each committed with their prescribed exact product
+    message and independently accepted. At pre-spec time Step 4 has candidate
+    commit `d942270`; the hot handoff still requires its independent acceptance,
+    and Steps 5–7 remain dependency-blocked contracts. Before implementation,
+    re-read the accepted Step 4–7 code and checker evidence and adjust private
+    component/helper names only; do not weaken the accepted create, deployment,
+    retry, cancellation, or readiness contracts.
+- outcome:
+  - Make the enabled default Agents-page creation path one compact ready-mode
+    submission: name, template, the sole approved OpenRouter model, masked
+    OpenRouter key, masked Telegram bot token, and a one-ID-per-line Telegram
+    allowlist. The browser sends the exact Step 4 ready payload and follows the
+    durable Step 7 operation; it never simulates provisioning progress.
+  - After the server returns the exact Step 4 `202 {agent,deployment}`, clear
+    every credential/allowlist input and navigate immediately to the owner-only
+    agent detail. That page starts from its server-rendered persisted deployment
+    snapshot, then polls the existing deployment endpoint until a terminal
+    state. Closing the tab, refreshing, navigating, or opening a second browser
+    changes only observation; database reconciliation continues independently.
+  - Show the same latest persisted operation on Agents inventory, agent detail,
+    and Dashboard surfaces. Managed creation needs no Start click and no native
+    Hermes setup. Failed managed operations expose the accepted Step 7 Retry
+    action; desired-stopped agents expose intentional stop/resume state. Native
+    Hermes setup remains available as clearly labeled advanced/recovery UI.
+- create form and rollout compatibility:
+  - Preserve the accepted Step 4 API exactly. The ready form submits only
+    `{name,templateKey,runnerId?,launchMode:"ready",idempotencyKey,openrouterModel,
+    openrouterApiKey,telegramBotToken,telegramAllowedUserIds}`. Do not add client
+    stage, provider metadata, desired/observed status, bot identity, revision,
+    event, secret, or deployment fields. A successful ready first write or
+    replay remains HTTP 202; the existing omitted/`stopped` API form remains HTTP
+    201 and creates no deployment.
+  - The server page reads Step 4's exact fail-closed rollout parser and passes
+    only a boolean ready-mode availability plus client-safe model metadata. It
+    never exposes the raw environment value or distinguishes invalid server
+    configuration from disabled rollout in HTML. When enabled, ready mode is
+    the default and visually primary path. When disabled/invalid, show fixed
+    “Automatic setup is unavailable” copy and preserve the existing stopped
+    creation path as an explicitly manual/advanced fallback; do not let a client
+    prop, query parameter, cookie, or local storage value enable ready creation.
+  - Populate the model select from the accepted server-owned registry snapshot,
+    with exactly `openai/gpt-4.1-mini` / “GPT-4.1 Mini” at this step. The posted
+    model ID is still revalidated server-side; the browser never accepts free
+    text, provider overrides, context-window input, fallback models, or a live
+    model-catalog call.
+  - Retain template selection and optional owned runner selection compatibility.
+    Runner selection is an advanced optional field; no-runner means the Step 7
+    reconciler selects/provisions capacity. Do not synchronously provision,
+    poll a runner, contact Telegram/OpenRouter, or wait for ready in the create
+    request or React submit handler.
+  - Keep the manual 201 flow behavior-compatible for API users and for the
+    rollout fallback. A manual creation may still link to its stopped detail and
+    existing explicit Start/Hermes setup flow. Never fabricate a deployment for
+    a historical/manual agent merely to make UI rendering uniform.
+- exact credential and allowlist UX:
+  - Render OpenRouter key and Telegram bot token as uncontrolled
+    `type="password"` inputs with visible labels, safe format hints,
+    `autoComplete="off"`, spellcheck disabled, and no initial/default value.
+    Never place either value in React state, a server component prop, HTML,
+    hydration data, a data attribute, an error, a URL, browser storage, or an
+    analytics/logging call. A show-secret toggle is not required and should not
+    be introduced in this step.
+  - Render the Telegram allowlist as a labeled multiline input: one canonical
+    decimal user ID per line. Client normalization trims each line, rejects
+    blank-only submissions and any sign, decimal, exponent, wildcard, comma/
+    CSV, leading zero, zero, non-digit, or more-than-100-entry input, and
+    deduplicates exact strings in first-seen order without converting through a
+    JavaScript number. The API receives a string array and remains the final
+    authority for Step 4's exact `1..100` canonical-ID contract.
+  - Place BotFather guidance next to the token field: create/select a dedicated
+    bot, copy its token once, and stop/delete any existing agent before reusing
+    that bot. Place allowlist guidance next to the ID field: only listed numeric
+    Telegram users may DM the bot; groups, usernames, CSV, wildcard access, and
+    BotFather automation are unsupported. If linking to BotFather, use the fixed
+    `https://t.me/BotFather` target with safe external-link attributes and never
+    append form state or credentials.
+  - Immediately after constructing each request, overwrite the uncontrolled
+    key/token/allowlist DOM values and discard local variables when the request
+    settles. They must be empty before a successful 202 navigation and after any
+    failed/ambiguous attempt; retry requires re-entry. Do not rehydrate them
+    from the accepted response, deployment reads, browser history, or server
+    state. Non-secret name/template/runner choices may remain after a definitive
+    validation error.
+  - Client validation is convenience only. Render server field issues by their
+    fixed field names, safely map known route codes, and keep unknown failures
+    generic. Do not echo a rejected value, raw response body, exception text,
+    upstream response, Telegram URL, token fragment, bot/user ID, or
+    `error.detail` into the page.
+- idempotent submission and ambiguous-response behavior:
+  - Generate one lowercase Web Crypto `crypto.randomUUID()` only after local
+    validation and immediately before the first POST for a logical submission.
+    Keep it in component memory, not a DOM field, URL, cookie, storage,
+    telemetry, error message, or console. A synchronous ref latch must close
+    before the first `await`; disable submit and set `aria-busy` so double click,
+    Enter plus click, and React rerender cannot start two POSTs.
+  - Reuse the same creation key for every retry of that logical submission.
+    Definitive 400/409/503 responses may unlock editable non-secret fields while
+    retaining the key. A network failure, abort, malformed success body, or
+    response loss is ambiguous: lock the original common envelope and offer
+    “Retry same submission” plus “Start over.” Retry asks for credentials again
+    and sends the same key; if the first request committed, Step 4 replay returns
+    the original agent/deployment without mutation, and if it did not commit,
+    the re-entered complete payload can become the first write. Start over is
+    the only action that discards the key and unlocks a new logical submission.
+  - Validate every 202 response with an exact safe client parser before using
+    IDs or navigation. Require valid agent/deployment UUIDs, matching
+    `deployment.agentId`, an exact known stage, and safe timestamps/counts. A
+    malformed body is an ambiguous failure, not permission to generate a new
+    key or render server-controlled strings. A 201 response is accepted only
+    for the explicit manual fallback.
+  - After a valid 202, clear the logical-submission key from memory, focus a
+    safe “Creation accepted” status/link long enough for assistive technology,
+    and use `router.replace` to `/agents/<encoded UUID>`. Do not put deployment
+    or idempotency IDs in query/hash parameters. A plain owner-scoped detail
+    link remains available if client navigation is interrupted.
+- persisted deployment presentation contract:
+  - Use the accepted exact stage values as data/state, without a second fake
+    progress enum or a percentage/ETA: `pending` → “Preparing deployment”;
+    `provisioning_runner` → “Provisioning runner”;
+    `configuring_hermes` → “Configuring Hermes”;
+    `starting_gateway` → “Starting gateway”; `verifying_model` → “Verifying
+    model”; `connecting_telegram` → “Connecting Telegram”; `ready` → “Ready”;
+    and `failed` → “Setup failed.” Copy may explain the current safe action but
+    must not claim an external phase completed until the persisted stage has
+    advanced.
+  - Build one closed presentation mapper shared by create/detail/inventory/
+    dashboard components. It accepts only the public deployment DTO, the safe
+    observed lifecycle status, and `desiredStatus`; unknown/malformed values map
+    to “Progress unavailable” and never to ready. Do not use attempt count,
+    timestamps, spinner duration, runner status, a container PID, or optimistic
+    local state to infer stage completion.
+  - Show an ordered stage list on the detail progress card. Mark only stages
+    strictly before the persisted stage completed, the exact stage current, and
+    later stages pending. `failed` is terminal but is not an eighth successful
+    milestone: retain the last safe operation heading, mark the operation
+    failed, and do not paint unobserved stages complete. `ready` is shown only
+    for persisted stage `ready`, desired running, and observed agent running;
+    any inconsistent snapshot is “Final status updating,” never ready.
+  - `desiredStatus="stopped"` overrides a historical ready/failed deployment in
+    lifecycle presentation with “Intentionally stopped.” An active Step 7
+    cancellation may briefly show its persisted active/failed stage until the
+    owner read returns desired stopped. A manual agent with no deployment keeps
+    the existing stopped/lifecycle presentation. A desired-running managed
+    agent with no deployment is “Progress unavailable,” not manual, failed, or
+    ready.
+  - “Retrying” is a transient accessible action state after an accepted retry
+    POST and before its returned new pending deployment is installed. After
+    refresh the truthful persisted label is the returned/latest stage; do not
+    invent durable retry metadata absent from the accepted Step 7 DTO. Never
+    mutate or relabel the old terminal failed deployment as pending.
+  - Extend owner-scoped list/detail server reads with the latest safe deployment
+    snapshot and desired status, preferably through one bounded owner-scoped
+    query rather than browser/N+1 fetches. Agents inventory and Dashboard render
+    a compact label and detail link from that snapshot. The detail page renders
+    the full progress card. No server surface may expose lease data, operation
+    keys, runner/provider identities, config content/revision beyond the
+    already-public DTO, canary output, endpoints, or secret metadata.
+- polling, error, and timeout state machine:
+  - The detail progress client starts from server-rendered state and calls only
+    `GET /api/agents/<encoded UUID>/deployment` with `cache:"no-store"` and
+    same-origin credentials. Make one request at a time. Use an `AbortController`
+    and generation token so unmount, agent change, retry acceptance, or a newer
+    response makes every stale response inert.
+  - Poll immediately after hydration or retry acceptance, then after 2 seconds
+    through 30 seconds of foreground tracking, 5 seconds through 5 minutes,
+    and 15 seconds thereafter, with a 30-minute foreground-time ceiling. Count
+    only visible/online time. Pause timers while `document.hidden` or offline;
+    on visibility/online restoration make one immediate request. Do not hold a
+    request open, use recursive zero-delay timers, overlap calls, or use polling
+    as a reconciliation trigger.
+  - Accept a response only when its agent ID matches the route and its DTO
+    passes the exact safe parser. While tracking one operation, ignore an older
+    deployment response; after an accepted Step 7 retry, advance to its returned
+    new deployment ID and make the old poll generation inert. A genuinely newer
+    latest operation from another tab is accepted by persisted `createdAt` and
+    then becomes the tracked operation.
+  - On an unchanged valid nonterminal response, retain the exact stage without
+    a live-region announcement. On a changed stage, update the view and
+    announce once. On `ready` or `failed`, stop polling and call `router.refresh`
+    once so server-rendered inventory/detail metadata and lifecycle controls
+    converge. Never poll a historical manual/no-deployment agent.
+  - Treat network failures, 500 `agent_deployment_failed`, and malformed JSON as
+    observation failures, not deployment failures. Keep the last known stage,
+    retry on the normal schedule, and after three consecutive failures show
+    “Progress updates are temporarily unavailable” with a manual “Check again”
+    action. A successful read clears that view-only error counter.
+  - A 401/403 authentication/configuration response stops polling and asks the
+    user to sign in/reload without echoing detail. A concealed 404 stops polling
+    and shows “Agent is unavailable.” A valid `{deployment:null}` is normal only
+    for a manual/desired-stopped agent loaded as such; for a tracked ready-mode
+    agent it is “Progress unavailable” and must not fall back to simulated
+    progress.
+  - At 30 minutes of foreground polling, stop automatic requests and show
+    “Automatic progress updates paused” with “Resume updates” and the last
+    persisted stage. Timeout is a browser observation state, never `failed`,
+    never an agent error, and never a retry authorization. Resume starts a new
+    bounded foreground window with one immediate GET. Navigation/refresh also
+    reloads authoritative persisted state.
+- failure actions, retry, and lifecycle controls:
+  - For a persisted `failed` operation with desired running, render one Retry
+    control that calls only the accepted Step 7 owner-concealed
+    `POST /api/agents/<agentId>/deployment/retry` with exact
+    `{idempotencyKey}`. Generate one new in-memory UUID for one operator retry,
+    latch before `await`, and reuse that same key after an ambiguous response.
+    A valid 202 exact `{deployment}` must identify the same agent and a new/latest
+    pending operation before the progress card switches to it.
+  - Map retry 400 to fixed invalid-request copy, concealed 404 to agent
+    unavailable, 409 `deployment_not_retryable` to “Refresh status before
+    retrying,” and 500/unknown/network failures to generic retry-unavailable
+    copy. After 409, refresh the deployment once. Do not rerun creation, ask for
+    or resend credentials, revalidate Telegram, rotate secrets, change config,
+    or call a runner/provider from the browser.
+  - Error copy comes from a closed UI map keyed by accepted Step 7 safe error
+    codes/categories. Actions are restricted to Retry, Stop, Delete, refresh,
+    open advanced recovery, or contact the operator as appropriate. Ignore raw
+    upstream content and do not interpolate the DTO `error.detail`; unknown
+    codes get “Automatic setup could not finish. Retry or stop this agent.”
+  - Pass desired status and deployment presentation into lifecycle controls.
+    Hide/disable Start while a managed desired-running deployment is pending or
+    progressing; offer “Stop setup” through the accepted Stop/cancellation path.
+    For ready/running show Stop and existing Restart; for failed/desired-running
+    show Retry rather than Start; for desired-stopped show the existing explicit
+    Start/Resume compatibility action. Delete remains available under its
+    accepted confirmation/cleanup semantics.
+  - The Stop response must be followed by an authoritative refresh before the
+    UI announces “Intentionally stopped.” Step 8 may wire the minimum accepted
+    Step 7 desired-state cancellation behavior into controls, but must not claim
+    Step 9 durability: Docker `unless-stopped`, reboot recovery, periodic
+    desired-running repair, Telegram circuit breaking, and usage segmentation
+    remain Step 9.
+  - For a managed agent, move native `hermes setup` into a secondary collapsed
+    “Advanced Hermes setup and recovery” section with copy that managed provider
+    and Telegram keys are control-plane-owned and may be reprojected. Do not show
+    setup as required for automatic readiness. Preserve the existing manual
+    agent setup terminal, owner/session protections, and recovery behavior.
+- accessibility and responsive behavior:
+  - Use real labels, fieldset/legend grouping, hint/error IDs via
+    `aria-describedby`, and focus the first invalid field after validation.
+    Submission/progress/retry regions use `aria-busy`; stage changes use one
+    `role="status"`, `aria-live="polite"`, `aria-atomic="true"` region; terminal
+    failures use `role="alert"`. Do not announce every unchanged polling tick.
+  - Render the progress track as an ordered list with textual labels. Mark the
+    current persisted stage with `aria-current="step"`; icons, color, and motion
+    are supplementary only. Failed, retrying, intentionally stopped, paused,
+    and observation-error states each have explicit text and an operable action.
+  - Submit/Retry/Stop buttons are native buttons, visibly focused, disabled
+    during their own request, and remain keyboard reachable in logical order.
+    Do not disable the whole page while tracking. Move focus to the accepted
+    progress heading after submit/retry and to a terminal alert only once.
+  - At 320 CSS pixels and the existing mobile breakpoints, fields and stage copy
+    wrap without horizontal scrolling, controls meet the existing minimum touch
+    target, and inventory/dashboard use the mobile card presentation rather
+    than a hidden-only desktop status. Respect `prefers-reduced-motion`; no
+    timer-driven decorative animation may imply progress.
+  - Preserve usable no-JavaScript/server-rendered snapshots on detail,
+    inventory, and Dashboard. Hydration adds polling/actions but does not replace
+    authoritative text with “loading,” and pre-hydration submit remains safely
+    disabled under the existing guard.
+- security, privacy, and isolation:
+  - Every create/deployment/retry/lifecycle call stays same-origin and relies on
+    accepted authenticated owner-concealed routes. IDs come only from validated
+    route/server responses. Never add a public progress endpoint, accept a user
+    ID in client JSON, trust a client ownership field, use the development-user
+    resolver in production UI paths, or let one user's list/detail query join
+    another user's operation.
+  - Never render, log, persist in browser storage, or include in React/Next error
+    serialization the OpenRouter key, Telegram token, allowlist, generated API
+    key, idempotency/retry keys, bot numeric ID, stable/public fingerprints,
+    private URLs, runner/provider data, prompt/completion, raw error/detail, or
+    secret-bearing request body. Bot username/model display metadata may appear
+    only where the accepted safe DTO already permits it; progress UI does not
+    need either.
+  - Do not call Telegram, OpenRouter, DigitalOcean, GHCR, runner private APIs, or
+    Hermes from browser code. BotFather is an explicit user-clicked documentation
+    link only. No prefetch, image, beacon, third-party analytics, or client-side
+    token validation may transmit form values.
+  - Apply the shared redaction corpus to any new server-side safe error/log seam,
+    but design the UI so sensitive values never reach it. React errors, thrown
+    parser failures, route JSON, test snapshots, Playwright traces/screenshots,
+    progress/changelog evidence, and `console.*` must be canary-clean.
+- concurrency and stale-state guarantees:
+  - Browser latches prevent duplicate create, retry, stop, and resume requests;
+    database idempotency/leases remain the authority. Multiple tabs may poll or
+    race Retry/Stop, but the accepted Step 7 endpoint/desired-state compare-and-
+    set decides the result. UI losers refresh and present persisted state; they
+    never optimistically overwrite it.
+  - Keep at most one deployment GET in flight per detail widget and do not start
+    per-row polling from the Agents or Dashboard list. Those list surfaces show
+    the server-rendered latest snapshot and link to detail; this prevents an
+    unbounded browser fan-out for large inventories. A terminal detail refresh
+    updates all server components in that navigation.
+  - Stage order in the browser is not a write authority. A response with a
+    changed/new deployment is selected only by validated operation identity and
+    persisted creation time; late responses from an aborted generation cannot
+    regress the UI or revive a failed/stopped/deleted operation.
+- required semantic and adversarial tests:
+  - Create-form component tests cover enabled-ready/default-off/manual fallback,
+    exact request keys, sole model option, optional runner, newline ID parsing,
+    canonical string preservation/deduplication, all invalid allowlist forms,
+    field focus/hints, pre-hydration guard, double submit, password masking,
+    immediate secret/allowlist clearing, and absence from rendered markup/state/
+    messages after every success/failure/ambiguous path.
+  - Idempotency tests cover one UUID per logical submit, same-key definitive and
+    ambiguous retry, re-entered first-write credentials, Step 4 replay with
+    changed/reduced body, explicit Start over/new key, malformed 202, 201 only
+    for manual mode, and no key in URL, storage, console, DOM, or errors.
+  - Progress mapper/component tests cover every exact persisted stage,
+    completed/current/pending semantics, inconsistent ready/observed status,
+    desired-stopped override, manual null deployment, managed unexpected null,
+    retrying action state, unknown values, closed safe-error actions, no raw
+    detail, and no percentage/ETA/timer-derived advancement.
+  - Fake-clock polling tests cover immediate/2s/5s/15s cadence, single-flight,
+    abort/generation discard, visibility/offline pause and resume, unchanged
+    announcement suppression, three-failure degraded state and recovery,
+    401/403/404/null/malformed/500/network handling, terminal stop/one refresh,
+    retry operation replacement, 30-minute foreground pause, manual resume, and
+    zero reconciliation side effects.
+  - Route/server-page tests cover safe rollout-boolean derivation, owner
+    concealment, exact public deployment projection on list/detail/dashboard,
+    no N+1 browser pollers, latest-operation selection under concurrent retry,
+    cross-user isolation, deleted agent, and no internal lease/runner/canary/
+    secret/error-detail fields in HTML or serialized props.
+  - Lifecycle tests cover no Start during managed creation, Stop setup/cancel,
+    Retry only for failed desired-running, concurrent Retry/Stop convergence,
+    desired-stopped presentation, ready/running Stop/Restart, manual Start
+    compatibility, delete, and advanced Hermes setup remaining owner-protected
+    but secondary for managed agents.
+  - Accessibility/responsive tests cover label relationships, field error focus,
+    native button busy/disabled state, one live announcement per transition,
+    `aria-current`, terminal alert focus, keyboard operation, reduced motion,
+    desktop inventory/detail/dashboard snapshots, and mobile cards/progress at
+    320px without horizontal overflow.
+  - Playwright covers an enabled ready submission on desktop and mobile through
+    injected fake Telegram/provider/runner/model seams: exact 202, immediate
+    detail navigation, close/reopen or refresh during progress, persisted stage
+    continuation through all exact stages, no Start/setup requirement, and final
+    ready/running. Add failure → Retry → new operation → ready, Stop during
+    progress, network observation failure/recovery, second browser/context, and
+    manual fallback scenarios. Fakes only; no external request is allowed.
+  - Redaction canaries for OpenRouter key, Telegram token/allowlist/bot ID,
+    private API key, both idempotency keys, fingerprints, private endpoints,
+    provider/runner data, upstream body/error, prompt/completion, and DTO error
+    detail must be absent from response rendering, hydration payload, URL,
+    browser storage, console/page errors, screenshots/traces, logs, events, and
+    progress evidence.
+- required commands/gates:
+  - Run focused create-form/progress/polling/lifecycle/list/detail/dashboard/
+    route/isolation/redaction tests and both desktop/mobile Playwright specs with
+    the documented local fake seams. Run any accepted Step 7 focused regression
+    tests affected by lifecycle presentation; no database migration generation
+    is expected for this UI step.
+  - Run `bun run format:check`; `bun run lint`; `bun run typecheck`;
+    `bun run test`; `bun run build`; desktop and mobile
+    `bun run test:e2e:ci`; and `git diff --check`.
+  - Run `bun run verify:e2e` only in its documented local-cloud/provider-safe
+    fake environment. Also retain credential-free fail-closed
+    `bun run verify:hermes:staging`; it must exit nonzero with named missing
+    capabilities and no side effects. No live-success staging gate, billable
+    resource, or real Telegram/OpenRouter request is required or authorized in
+    Step 8. Fix every product-caused failure and classify only proven baseline/
+    shared-resource failures under the team protocol.
+- likely touchpoints:
+  - Primary UI: `app/agents/_components/create-agent-form.tsx`; new narrowly
+    scoped deployment presentation/progress and deployment-retry components;
+    `app/agents/_components/agent-lifecycle-controls.tsx`, start/stop buttons,
+    `mobile-agent-list.tsx`, and `app/globals.css`.
+  - Surfaces/reads: `app/agents/page.tsx`, `app/agents/[agentId]/page.tsx`,
+    `app/dashboard/page.tsx`, `src/server/agents/list-agents.ts`, and an internal
+    shared safe deployment-presentation/parser module. Consume the accepted
+    `deployment-dto.ts` and `deployment-state.ts` contracts without moving
+    secret/server-only code into the client bundle.
+  - API consumers: accepted `POST /api/agents`,
+    `GET /api/agents/[agentId]/deployment`, Step 7
+    `POST /api/agents/[agentId]/deployment/retry`, and existing lifecycle routes.
+    Route changes should be unnecessary except narrowly tested safe projections;
+    do not widen any response or authentication contract for UI convenience.
+  - Tests: focused new component/polling/presentation tests, affected
+    `root-page.test.tsx`, operational isolation/lifecycle/route tests, and new
+    desktop/mobile specs under `tests/e2e/` plus the existing E2E launcher only
+    as needed to select documented fake capabilities.
+- non-goals / do not touch:
+  - No Step 9 restart policy, Docker inspect/heartbeat expansion, reboot repair,
+    periodic reconciliation of already-ready agents, Telegram disconnect
+    circuit breaker, restart-loop bounds, or usage-period segmentation. UI must
+    not claim these durability properties early.
+  - No Step 10 real Telegram message/reply, OpenRouter provider call,
+    DigitalOcean spend, GHCR publish/scan, Vercel deploy/secret/cron/flag
+    mutation, hosted rollout, or live acceptance evidence. Do not read
+    `.env.local`, contact an external service, or enable ready creation by
+    default in deployed configuration.
+  - No new model/provider, Telegram group/webhook/pairing/open-access feature,
+    BotFather automation, credential reveal/edit/rehydration, browser secret
+    vault, progress WebSocket/SSE, background service worker, client-side
+    reconciler, percentage/ETA, notification system, or third-party UI/
+    accessibility/analytics dependency.
+  - Do not change Step 4 exact create/replay/getMe/model/encryption/uniqueness
+    semantics, Step 5 projection/YAML/secrets, Step 6 runner/private readiness/
+    canary contract, Step 7 lease/provider/retry/finalization/cron semantics,
+    the pinned Hermes image, manual creation API compatibility, or terminal
+    deployment immutability.
+  - No migration is expected. Do not add operation presentation columns or copy
+    secrets/errors into agent rows merely for the UI; derive from accepted
+    owner-scoped desired state and latest deployment. Any proposed schema/public
+    DTO expansion is a coordinator-reviewed blocker, not incidental UI work.
+- security/data/compatibility risks:
+  - Keeping credential fields in controlled React state, browser storage,
+    hydration, history, error telemetry, or Playwright artifacts creates a
+    durable credential leak. Uncontrolled masked inputs, immediate clearing,
+    same-origin requests, and adversarial canaries are acceptance boundaries.
+  - A timer-driven progress list or optimistic ready state can misrepresent a
+    paid canary, Telegram connectivity, billing start, or failed deployment.
+    Only the persisted DTO advances stage; browser timeout/error is visually and
+    semantically separate from deployment failure.
+  - Generating a fresh key after a lost create/retry response can duplicate an
+    agent or explicit paid retry. Reusing a key with an unlocked changed common
+    envelope can unexpectedly return the original operation. The ambiguous-
+    submission lock and explicit Start over boundary are mandatory.
+  - Polling per inventory row or overlapping timers can amplify load and race
+    stale responses over a new retry/stop. Detail-only single-flight polling,
+    generation cancellation, visibility pausing, and bounded cadence prevent
+    the browser from becoming an orchestration or denial-of-service source.
+  - Treating historical `ready` as current readiness after desired stop/runtime
+    regression is false status. Presentation must combine latest persisted
+    deployment, desired intent, and observed lifecycle conservatively; Step 9
+    later supplies stronger continuing-runtime evidence.
+- progress/changelog/commit:
+  - After every required gate, mark Step 8 complete in the Automatic Ready
+    ledger with sanitized create/idempotency, refresh/navigation/second-browser,
+    exact-stage, failure/retry/stop, accessibility, desktop/mobile, redaction,
+    and fake-only E2E evidence. Record the commit reference if available, set
+    Step 9 next, preserve every historical ledger, and never record credentials,
+    bot/user IDs, operation/idempotency IDs, private endpoints, provider/runner
+    evidence, prompts/completions, raw errors, or screenshots containing inputs.
+  - Add newest-first `Unreleased` entries: `Added` for credential-complete
+    one-click ready agent creation with persisted progress, and `Changed` for
+    deployment-aware lifecycle controls plus advanced Hermes setup becoming the
+    secondary managed-agent path. Do not add changelog entries for tests,
+    styling, refactors, fake seams, or validation alone, and do not duplicate
+    Step 4–7 behavior.
+  - Commit exactly `feat: add one-click ready agent creation` only after the
+    committed/checked Step 4–7 dependencies and all Step 8 gates pass.
+- exact repository evidence at pre-spec time:
+  - Accepted Step 0–3 behavior and Step 4 candidate `d942270` provide the exact
+    eight-stage DTO/owner-concealed GET, ready-mode request, replay-before-flag
+    semantics, sole approved model, server-validated Telegram metadata,
+    encrypted credentials, desired-running intent, and 202 response. The
+    current `create-agent-form.tsx` still posts only the manual envelope and
+    advances seven timer-simulated runner/setup labels every 1.6 seconds.
+  - Current inventory and Dashboard render observed lifecycle status only;
+    detail renders run/Hermes/runner readiness and puts native Hermes setup
+    before configuration. `list-agents.ts` does not expose desired status or a
+    latest deployment summary, and lifecycle controls therefore show Start for
+    a newly committed desired-running agent while it is still observed stopped.
+  - The accepted Step 3 deployment endpoint returns `{deployment}` or null and
+    conceals foreign/deleted agents. Its safe DTO includes stage, attempt,
+    allowlisted safe error, next attempt, and timestamps while excluding leases
+    and idempotency. Step 7 is contracted to retain that DTO and add the exact
+    retry endpoint/new-operation semantics consumed here.
+- blockers:
+  - Hard dependency: prescribed product commits and independent checker
+    acceptance for every Step 4–7 dependency. Step 8 must not code against an
+    unaccepted speculative retry DTO, lifecycle cancellation, stage event, or
+    desired/observed behavior.
+  - Local gates require the repository's PostgreSQL fixture, deterministic
+    injected fake Telegram/provider/runner/model seams, fake clocks, and working
+    desktop/mobile Playwright browsers. Missing capability is a recorded
+    blocker, not authority to weaken persistence, redaction, isolation,
+    accessibility, or browser coverage or to contact a real service.
+  - No production rollout flag, hosted secret, real bot/user, funded OpenRouter
+    key, provider budget, published image, or deployment permission is required
+    or authorized. Those remain Step 10 prerequisites.
+- open questions:
+  - None behavior-blocking after exact Step 4–7 acceptance. This pre-spec fixes
+    the ready/manual rollout presentation, form normalization, in-memory
+    idempotency boundary, safe response parser, persisted stage labels,
+    detail-only polling cadence/timeout, retry/lifecycle states, multi-surface
+    rendering, accessibility, privacy, and fake-only gates. Any request to
+    persist browser keys, widen a public DTO, show raw safe-detail text, add
+    streaming progress, poll every inventory row, expose additional models, or
+    claim Step 9/10 durability is a compatibility/security/product decision that
+    requires coordinator/user approval before implementation.
