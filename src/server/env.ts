@@ -37,8 +37,40 @@ export type DigitalOceanProviderConfig = {
   localRunnerStartDelayMs?: number;
 };
 
+export type ReadyAgentCreationFlag =
+  | {
+      ok: true;
+      enabled: boolean;
+    }
+  | {
+      ok: false;
+      reason: "invalid_ready_agent_creation_flag";
+    };
+
 export function getServerEnv(input = process.env) {
   return validateRequiredEnv(input);
+}
+
+export function readReadyAgentCreationFlag(
+  input: Record<string, string | undefined> = process.env,
+): ReadyAgentCreationFlag {
+  const rawValue = input.AGENTBAY_READY_AGENT_CREATION_ENABLED;
+
+  if (rawValue === undefined) {
+    return { ok: true, enabled: false };
+  }
+
+  const normalizedValue = rawValue.trim();
+
+  if (normalizedValue === "" || normalizedValue === "false") {
+    return { ok: true, enabled: false };
+  }
+
+  if (normalizedValue === "true") {
+    return { ok: true, enabled: true };
+  }
+
+  return { ok: false, reason: "invalid_ready_agent_creation_flag" };
 }
 
 export function readDigitalOceanProviderConfig(

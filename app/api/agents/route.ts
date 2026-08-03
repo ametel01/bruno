@@ -4,9 +4,17 @@ import {
   AgentRunnerProvisioningError,
   AgentRunnerVerificationError,
   AgentPersistenceError,
+  ReadyAgentCreationDisabledError,
+  ReadyAgentValidationError,
+  TelegramBotInUseError,
+  TelegramValidationUnavailableError,
   createAgentForUser,
   validateCreateAgentPayload,
 } from "@/src/server/agents/create-agent";
+import {
+  AgentSecretKeyringError,
+  AgentSecretLegacyBackfillRequiredError,
+} from "@/src/server/agents/agent-secrets";
 import {
   type ConfiguredApplicationUserResolution,
   requireConfiguredApplicationUser,
@@ -53,9 +61,67 @@ export async function POST(
     const body = await createAgentForUser(applicationUser.userId, validation.value);
 
     return Response.json(body, {
-      status: 201,
+      status: "deployment" in body ? 202 : 201,
     });
   } catch (error) {
+    if (error instanceof ReadyAgentValidationError) {
+      return validationResponse(error.issues);
+    }
+
+    if (error instanceof ReadyAgentCreationDisabledError) {
+      return Response.json(
+        {
+          error: {
+            code:
+              error.reason === "invalid_configuration"
+                ? "ready_agent_creation_invalid_config"
+                : "ready_agent_creation_disabled",
+            message: "Automatic ready agent creation is not enabled.",
+          },
+        },
+        { status: 503 },
+      );
+    }
+
+    if (error instanceof TelegramValidationUnavailableError) {
+      return Response.json(
+        {
+          error: {
+            code: "telegram_validation_unavailable",
+            message: "Telegram bot validation is temporarily unavailable.",
+          },
+        },
+        { status: 503 },
+      );
+    }
+
+    if (error instanceof TelegramBotInUseError) {
+      return Response.json(
+        {
+          error: {
+            code: "telegram_bot_in_use",
+            message: "Telegram bot is already assigned to an active agent.",
+          },
+        },
+        { status: 409 },
+      );
+    }
+
+    if (
+      error instanceof AgentSecretKeyringError ||
+      error instanceof AgentSecretLegacyBackfillRequiredError
+    ) {
+      return Response.json(
+        {
+          error: {
+            code: "agent_secret_configuration_invalid",
+            message: "Agent secret storage is not configured safely.",
+          },
+        },
+        { status: 503 },
+      );
+    }
+
     if (error instanceof AgentCreateBlockedError) {
       return createBlockedResponse(error);
     }

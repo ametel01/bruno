@@ -1,4 +1,8 @@
 const SECRET_REDACTION_RULES: Array<[RegExp, string]> = [
+  [
+    /https:\/\/api\.telegram\.org\/bot\d{6,}:[A-Za-z0-9_-]{20,}\/[A-Za-z0-9_/-]+/g,
+    "[redacted-telegram-url]",
+  ],
   [/\bsk-or-v1-[A-Za-z0-9_-]+\b/g, "[redacted-openrouter-key]"],
   [/\b\d{6,}:[A-Za-z0-9_-]{20,}\b/g, "[redacted-telegram-token]"],
   [/\bagb_(?:agent|reg|run)_[A-Za-z0-9_-]+\b/g, "[redacted-agentbay-token]"],

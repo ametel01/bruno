@@ -275,6 +275,30 @@ export async function getLatestAgentDeploymentForUser(input: {
   }
 }
 
+export async function getAgentDeploymentByIdempotencyKeyForUser(input: {
+  db: AgentDeploymentDatabase;
+  userId: string;
+  idempotencyKey: string;
+}): Promise<AgentDeploymentDto | null> {
+  const normalizedKey = normalizeDeploymentIdempotencyKey(input.idempotencyKey);
+
+  if (!normalizedKey.ok) {
+    return null;
+  }
+
+  try {
+    const existing = await selectDeploymentByIdempotencyKey(
+      input.db,
+      input.userId,
+      normalizedKey.value,
+    );
+
+    return existing ? mapAgentDeploymentRowToDto(existing) : null;
+  } catch (error) {
+    throw new AgentDeploymentPersistenceError(error);
+  }
+}
+
 export async function getLatestAgentDeploymentForUserWithConnection(
   userId: string,
   agentId: string,

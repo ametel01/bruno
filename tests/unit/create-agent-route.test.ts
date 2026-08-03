@@ -4,7 +4,12 @@ import {
   AgentPersistenceError,
   AgentRunnerProvisioningError,
   AgentRunnerVerificationError,
+  ReadyAgentCreationDisabledError,
+  ReadyAgentValidationError,
+  TelegramBotInUseError,
+  TelegramValidationUnavailableError,
 } from "@/src/server/agents/create-agent";
+import { AgentSecretKeyringError } from "@/src/server/agents/agent-secrets";
 
 const mocks = vi.hoisted(() => ({
   createAgentForUser: vi.fn(),
@@ -122,6 +127,95 @@ describe("POST /api/agents route", () => {
     expect(mocks.createAgentForUser).not.toHaveBeenCalled();
   });
 
+  it("returns exact 202 JSON for a ready create-agent response", async () => {
+    mocks.createAgentForUser.mockResolvedValueOnce({
+      agent: {
+        id: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+        userId: USER_ID,
+        name: "Ready Agent",
+        templateKey: "research_agent",
+        templateVersion: "1.0.0",
+        templateSnapshotJson: {
+          key: "research_agent",
+          version: "1.0.0",
+          name: "Research Agent",
+          description: "Tracks a research question.",
+          defaultTools: [],
+          defaultSchedule: "Manual",
+          defaultSystemPrompt: "safe prompt",
+          requiredIntegrations: [],
+        },
+        status: "stopped",
+        desiredStatus: "running",
+        statusReason: null,
+        createdAt: "2026-08-03T05:00:00.000Z",
+        updatedAt: "2026-08-03T05:00:00.000Z",
+        deletedAt: null,
+        runnerId: null,
+        model: {
+          provider: "openrouter",
+          id: "openai/gpt-4.1-mini",
+          displayName: "GPT-4.1 Mini",
+          contextTokens: 1_047_576,
+        },
+        telegramBot: { id: "123456", username: "Valid_bot" },
+      },
+      deployment: {
+        id: "00000000-0000-4000-8000-000000000171",
+        agentId: "3e47bed7-b58f-4394-93c0-01e3d1e51774",
+        stage: "pending",
+        configRevision: "cfg-1785722421000",
+        attemptCount: 0,
+        error: null,
+        nextAttemptAt: null,
+        startedAt: null,
+        completedAt: null,
+        failedAt: null,
+        createdAt: "2026-08-03T05:00:00.000Z",
+        updatedAt: "2026-08-03T05:00:00.000Z",
+      },
+    });
+    const { POST } = await import("@/app/api/agents/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/agents", {
+        method: "POST",
+        body: JSON.stringify({
+          name: "Ready Agent",
+          templateKey: "research_agent",
+          launchMode: "ready",
+          idempotencyKey: "Ready-Key_01",
+        }),
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(body).toMatchObject({
+      agent: {
+        name: "Ready Agent",
+        status: "stopped",
+        desiredStatus: "running",
+        model: { id: "openai/gpt-4.1-mini", provider: "openrouter" },
+        telegramBot: { id: "123456", username: "Valid_bot" },
+      },
+      deployment: { stage: "pending", attemptCount: 0 },
+    });
+    expect(body).not.toHaveProperty("event");
+    expect(JSON.stringify(body)).not.toContain("sk-or-v1");
+    expect(mocks.createAgentForUser).toHaveBeenCalledWith(USER_ID, {
+      name: "Ready Agent",
+      templateKey: "research_agent",
+      runnerId: null,
+      launchMode: "ready",
+      idempotencyKey: "Ready-Key_01",
+      openrouterModel: undefined,
+      openrouterApiKey: undefined,
+      telegramBotToken: undefined,
+      telegramAllowedUserIds: undefined,
+    });
+  });
+
   it("returns validation JSON and does not create records for malformed JSON", async () => {
     const { POST } = await import("@/app/api/agents/route");
 
@@ -164,6 +258,65 @@ describe("POST /api/agents route", () => {
       },
     });
     expect(JSON.stringify(body)).not.toContain("postgres://");
+  });
+
+  it("maps ready create failures without leaking credentials or bot ownership", async () => {
+    const { POST } = await import("@/app/api/agents/route");
+    const readyRequest = () =>
+      new Request("http://localhost/api/agents", {
+        method: "POST",
+        body: JSON.stringify({
+          name: "Ready Agent",
+          templateKey: "research_agent",
+          launchMode: "ready",
+          idempotencyKey: "Ready-Key_02",
+        }),
+      });
+    const cases = [
+      {
+        error: new ReadyAgentValidationError([
+          { field: "telegramBotToken", message: "Telegram bot token format is invalid." },
+        ]),
+        status: 400,
+        code: "validation_failed",
+      },
+      {
+        error: new ReadyAgentCreationDisabledError("disabled"),
+        status: 503,
+        code: "ready_agent_creation_disabled",
+      },
+      {
+        error: new ReadyAgentCreationDisabledError("invalid_configuration"),
+        status: 503,
+        code: "ready_agent_creation_invalid_config",
+      },
+      {
+        error: new TelegramValidationUnavailableError("telegram_validation_timeout"),
+        status: 503,
+        code: "telegram_validation_unavailable",
+      },
+      {
+        error: new TelegramBotInUseError(),
+        status: 409,
+        code: "telegram_bot_in_use",
+      },
+      {
+        error: new AgentSecretKeyringError(),
+        status: 503,
+        code: "agent_secret_configuration_invalid",
+      },
+    ];
+
+    for (const testCase of cases) {
+      mocks.createAgentForUser.mockRejectedValueOnce(testCase.error);
+      const response = await POST(readyRequest());
+      const body = await response.json();
+
+      expect(response.status).toBe(testCase.status);
+      expect(body.error.code).toBe(testCase.code);
+      expect(JSON.stringify(body)).not.toContain("123456:abcdefghijklmnopqrstuvwxyz");
+      expect(JSON.stringify(body)).not.toContain("sk-or-v1");
+    }
   });
 
   it("returns a safe plan-limit response when creation is blocked", async () => {

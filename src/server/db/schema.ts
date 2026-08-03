@@ -532,6 +532,9 @@ export const agentSecrets = pgTable(
     authTag: text("auth_tag").notNull(),
     keyVersion: text("key_version").notNull(),
     fingerprint: text("fingerprint").notNull(),
+    uniquenessFingerprint: text("uniqueness_fingerprint"),
+    providerSubjectId: text("provider_subject_id"),
+    providerUsername: text("provider_username"),
     status: agentSecretStatusEnum("status").notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -545,12 +548,42 @@ export const agentSecrets = pgTable(
     check("agent_secrets_key_version_not_empty_check", sql`length(trim(${table.keyVersion})) > 0`),
     check("agent_secrets_fingerprint_check", sql`${table.fingerprint} ~ '^[0-9a-f]{16}$'`),
     check(
+      "agent_secrets_uniqueness_fingerprint_check",
+      sql`${table.uniquenessFingerprint} IS NULL OR ${table.uniquenessFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "agent_secrets_provider_subject_id_check",
+      sql`${table.providerSubjectId} IS NULL OR ${table.providerSubjectId} ~ '^[1-9][0-9]{0,19}$'`,
+    ),
+    check(
+      "agent_secrets_provider_username_check",
+      sql`${table.providerUsername} IS NULL OR ${table.providerUsername} ~ '^[A-Za-z][A-Za-z0-9_]{4,31}$'`,
+    ),
+    check(
+      "agent_secrets_telegram_metadata_kind_check",
+      sql`${table.kind} = 'telegram_bot_token' OR (${table.uniquenessFingerprint} IS NULL AND ${table.providerSubjectId} IS NULL AND ${table.providerUsername} IS NULL)`,
+    ),
+    check(
+      "agent_secrets_telegram_metadata_pair_check",
+      sql`${table.kind} <> 'telegram_bot_token' OR (${table.uniquenessFingerprint} IS NULL AND ${table.providerSubjectId} IS NULL AND ${table.providerUsername} IS NULL) OR (${table.uniquenessFingerprint} IS NOT NULL AND ${table.providerSubjectId} IS NOT NULL)`,
+    ),
+    check(
       "agent_secrets_revoked_status_check",
       sql`(${table.status} = 'revoked' AND ${table.revokedAt} IS NOT NULL) OR (${table.status} <> 'revoked' AND ${table.revokedAt} IS NULL)`,
     ),
     uniqueIndex("agent_secrets_active_agent_kind_idx")
       .on(table.agentId, table.kind)
       .where(sql`${table.status} = 'active'`),
+    uniqueIndex("agent_secrets_active_telegram_uniqueness_idx")
+      .on(table.uniquenessFingerprint)
+      .where(
+        sql`${table.kind} = 'telegram_bot_token' AND ${table.status} = 'active' AND ${table.uniquenessFingerprint} IS NOT NULL`,
+      ),
+    uniqueIndex("agent_secrets_active_telegram_subject_idx")
+      .on(table.providerSubjectId)
+      .where(
+        sql`${table.kind} = 'telegram_bot_token' AND ${table.status} = 'active' AND ${table.providerSubjectId} IS NOT NULL`,
+      ),
     index("agent_secrets_agent_status_idx").on(table.agentId, table.status),
   ],
 );

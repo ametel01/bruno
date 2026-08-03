@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Opt-in `202 Accepted` ready-mode agent creation for the approved OpenRouter model and Telegram adapter inputs, while preserving the existing `201 Created` stopped/manual create path.
 - Exact `AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT=true` opt-in for temporarily exposing a Vercel production-target deployment with the shared development user while keeping hosted development fail-closed by default and preserving runner-machine authentication.
 - Renamed the user-facing application and local package/database defaults from AgentBay to plingpling while retaining the established `AGENTBAY_*` runtime compatibility namespace.
 - Credential-free local Hermes contract smoke command (`agent:hermes:contract-smoke`) that launches the pinned workload image with a fake OpenAI-compatible provider, private API auth checks, durable log ingestion, restart/state persistence, managed-state backup/restore, and cleanup without claiming external Telegram network behavior.
@@ -157,5 +158,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Ready-mode agent creation now prepares encrypted OpenRouter, Telegram, allowlist, and private API credentials in memory and commits the agent, managed config, secrets, deployment, desired-running intent, and creation event atomically.
+- Telegram bot validation is bounded to one redacted `getMe` preflight with fixed origin, timeout, response-size, and safe failure mapping.
+- Active Telegram bot credentials now use stable server-only uniqueness metadata and database-enforced active-bot indexes while preserving the existing public secret fingerprint.
 - Hermes setup terminals use owner-scoped runner placement, stopped-workload and single-session gating, a 15-minute one-time WebSocket-subprotocol token stored only as a digest, bounded PTY messages, private no-port/no-Docker-socket containers, and no terminal-output logging or persistence.
 - Runner and app log ingestion now apply a shared defense-in-depth redaction corpus for OpenRouter keys, Telegram tokens, AgentBay bearer/API tokens, secret-bearing environment assignments, sensitive URL query values, and fixed test canaries.

@@ -3,15 +3,20 @@ import "server-only";
 import {
   createCipheriv,
   createDecipheriv,
+  createHash,
   createHmac,
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentSecrets, agents } from "@/src/server/db/schema";
+import {
+  type TelegramBotMetadata,
+  validateTelegramBotTokenWithGetMe,
+} from "@/src/server/telegram/telegram-client";
 import type * as schema from "@/src/server/db/schema";
 
 export const AGENT_SECRET_KINDS = [
@@ -80,7 +85,7 @@ type AgentSecretsTransaction = Parameters<
 
 type AgentSecretRow = typeof agentSecrets.$inferSelect;
 
-type AgentSecretKeyring = {
+export type AgentSecretKeyring = {
   activeVersion: string;
   keys: Map<string, Buffer>;
 };
@@ -90,6 +95,39 @@ type AgentSecretDependencies = {
   env?: Record<string, string | undefined>;
   now?: () => Date;
   randomBytes?: (size: number) => Buffer;
+  telegramBotValidator?: (token: string) => Promise<TelegramBotValidationForSecrets>;
+};
+
+export type TelegramBotValidationForSecrets =
+  | {
+      ok: true;
+      bot: TelegramBotMetadata;
+    }
+  | {
+      ok: false;
+      reason:
+        | "invalid_bot_token"
+        | "telegram_validation_timeout"
+        | "telegram_validation_unavailable"
+        | "telegram_validation_invalid_response";
+    };
+
+export type PreparedAgentSecretRow = {
+  agentId: string;
+  kind: AgentSecretKind;
+  ciphertext: string;
+  iv: string;
+  authTag: string;
+  keyVersion: string;
+  fingerprint: string;
+  uniquenessFingerprint: string | null;
+  providerSubjectId: string | null;
+  providerUsername: string | null;
+  status: "active";
+  createdAt: Date;
+  updatedAt: Date;
+  rotatedAt: Date | null;
+  revokedAt: null;
 };
 
 const ENCRYPTION_ALGORITHM = "aes-256-gcm";
@@ -116,6 +154,21 @@ export class AgentSecretPersistenceError extends Error {
     super("Agent secret persistence failed.");
     this.name = "AgentSecretPersistenceError";
     this.cause = cause;
+  }
+}
+
+export class AgentSecretTelegramConflictError extends Error {
+  constructor(cause?: unknown) {
+    super("Telegram bot token is already assigned to an active agent.");
+    this.name = "AgentSecretTelegramConflictError";
+    this.cause = cause;
+  }
+}
+
+export class AgentSecretLegacyBackfillRequiredError extends Error {
+  constructor() {
+    super("Legacy Telegram secret uniqueness metadata must be backfilled before ready creation.");
+    this.name = "AgentSecretLegacyBackfillRequiredError";
   }
 }
 
@@ -299,22 +352,31 @@ export async function replaceAgentSecretForUser(
     return { ok: false, reason: "validation_failed", issues: valueValidation.issues };
   }
 
-  const keyring = parseAgentSecretKeyring(dependencies.env);
-  const activeKey = keyring.keys.get(keyring.activeVersion);
+  const telegramBot =
+    input.kind === "telegram_bot_token"
+      ? await validateTelegramBotForSecretMutation(valueValidation.value, dependencies)
+      : null;
 
-  if (!activeKey) {
-    throw new AgentSecretKeyringError();
+  if (telegramBot !== null && !telegramBot.ok) {
+    return {
+      ok: false,
+      reason: "validation_failed",
+      issues: [{ field: "value", message: "Telegram bot token format is invalid." }],
+    };
   }
 
+  const keyring = parseAgentSecretKeyring(dependencies.env);
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
-  const encrypted = encryptAgentSecretValue({
+  const prepared = prepareAgentSecretRow({
     agentId: agentIdValidation.agentId,
     kind: input.kind,
-    keyVersion: keyring.activeVersion,
-    key: activeKey,
     value: valueValidation.value,
+    keyring,
+    now,
+    rotatedAt: null,
+    telegramBot: telegramBot?.ok ? telegramBot.bot : null,
     randomBytes: dependencies.randomBytes ?? randomBytes,
   });
 
@@ -330,6 +392,7 @@ export async function replaceAgentSecretForUser(
       }
 
       const existingRows = await selectActiveSecretRows(tx, agentIdValidation.agentId, input.kind);
+      prepared.rotatedAt = existingRows.length > 0 ? now : null;
 
       await revokeActiveSecretRows(tx, {
         agentId: agentIdValidation.agentId,
@@ -337,23 +400,7 @@ export async function replaceAgentSecretForUser(
         now,
       });
 
-      const [created] = await tx
-        .insert(agentSecrets)
-        .values({
-          agentId: agentIdValidation.agentId,
-          kind: input.kind,
-          ciphertext: encrypted.ciphertext,
-          iv: encrypted.iv,
-          authTag: encrypted.authTag,
-          keyVersion: keyring.activeVersion,
-          fingerprint: encrypted.fingerprint,
-          status: "active",
-          createdAt: now,
-          updatedAt: now,
-          rotatedAt: existingRows.length > 0 ? now : null,
-          revokedAt: null,
-        })
-        .returning();
+      const [created] = await tx.insert(agentSecrets).values(prepared).returning();
 
       if (!created) {
         throw new Error("Agent secret insert returned no rows.");
@@ -362,6 +409,10 @@ export async function replaceAgentSecretForUser(
       return { ok: true, secret: toSecretStatus(created) } as const;
     });
   } catch (error) {
+    if (isTelegramUniquenessViolation(error)) {
+      throw new AgentSecretTelegramConflictError(error);
+    }
+
     throw new AgentSecretPersistenceError(error);
   } finally {
     if (ownsConnection) {
@@ -437,6 +488,175 @@ export async function revokeActiveAgentSecretsInTransaction(
     .update(agentSecrets)
     .set({ status: "revoked", revokedAt: input.now, updatedAt: input.now })
     .where(and(eq(agentSecrets.agentId, input.agentId), eq(agentSecrets.status, "active")));
+}
+
+export function prepareAgentSecretRow(input: {
+  agentId: string;
+  kind: AgentSecretKind;
+  value: string;
+  keyring: AgentSecretKeyring;
+  now: Date;
+  rotatedAt: Date | null;
+  telegramBot?: TelegramBotMetadata | null;
+  randomBytes?: (size: number) => Buffer;
+}): PreparedAgentSecretRow {
+  const activeKey = input.keyring.keys.get(input.keyring.activeVersion);
+
+  if (!activeKey) {
+    throw new AgentSecretKeyringError();
+  }
+
+  const encrypted = encryptAgentSecretValue({
+    agentId: input.agentId,
+    kind: input.kind,
+    keyVersion: input.keyring.activeVersion,
+    key: activeKey,
+    value: input.value,
+    randomBytes: input.randomBytes ?? randomBytes,
+  });
+
+  const telegramMetadata =
+    input.kind === "telegram_bot_token" && input.telegramBot
+      ? {
+          uniquenessFingerprint: fingerprintTelegramBotTokenForUniqueness(input.value),
+          providerSubjectId: input.telegramBot.botId,
+          providerUsername: input.telegramBot.username,
+        }
+      : {
+          uniquenessFingerprint: null,
+          providerSubjectId: null,
+          providerUsername: null,
+        };
+
+  return {
+    agentId: input.agentId,
+    kind: input.kind,
+    ciphertext: encrypted.ciphertext,
+    iv: encrypted.iv,
+    authTag: encrypted.authTag,
+    keyVersion: input.keyring.activeVersion,
+    fingerprint: encrypted.fingerprint,
+    ...telegramMetadata,
+    status: "active",
+    createdAt: input.now,
+    updatedAt: input.now,
+    rotatedAt: input.rotatedAt,
+    revokedAt: null,
+  };
+}
+
+export function createGeneratedApiServerKey(randomBytesFn: (size: number) => Buffer): string {
+  return `agb_agent_${randomBytesFn(32).toString("base64url")}`;
+}
+
+export async function insertPreparedAgentSecretRowsInTransaction(
+  tx: AgentSecretsTransaction,
+  rows: PreparedAgentSecretRow[],
+): Promise<AgentSecretRow[]> {
+  if (rows.length === 0) {
+    return [];
+  }
+
+  try {
+    return await tx.insert(agentSecrets).values(rows).returning();
+  } catch (error) {
+    if (isTelegramUniquenessViolation(error)) {
+      throw new AgentSecretTelegramConflictError(error);
+    }
+
+    throw error;
+  }
+}
+
+export function fingerprintTelegramBotTokenForUniqueness(token: string): string {
+  return createHash("sha256")
+    .update("agentbay.telegram_bot_token.uniqueness.v1")
+    .update("\0")
+    .update(token)
+    .digest("hex");
+}
+
+export async function assertNoUnbackfilledActiveTelegramSecretsInTransaction(
+  tx: AgentSecretsTransaction,
+): Promise<void> {
+  await takeTelegramUniquenessBackfillLock(tx);
+  const rows = await tx
+    .select({ id: agentSecrets.id })
+    .from(agentSecrets)
+    .where(
+      and(
+        eq(agentSecrets.kind, "telegram_bot_token"),
+        eq(agentSecrets.status, "active"),
+        isNull(agentSecrets.uniquenessFingerprint),
+      ),
+    )
+    .limit(1);
+
+  if (rows[0]) {
+    throw new AgentSecretLegacyBackfillRequiredError();
+  }
+}
+
+export async function backfillTelegramSecretUniquenessMetadata(
+  input: { connection?: DatabaseConnection; env?: Record<string, string | undefined> } = {},
+): Promise<{ scanned: number; updated: number }> {
+  const keyring = parseAgentSecretKeyring(input.env);
+  const connection = input.connection ?? createDatabaseConnection();
+  const ownsConnection = !input.connection;
+
+  try {
+    return await connection.db.transaction(async (tx) => {
+      await takeTelegramUniquenessBackfillLock(tx);
+      const rows = await tx
+        .select()
+        .from(agentSecrets)
+        .where(and(eq(agentSecrets.kind, "telegram_bot_token"), eq(agentSecrets.status, "active")));
+      let updated = 0;
+
+      for (const row of rows) {
+        if (row.uniquenessFingerprint !== null) {
+          continue;
+        }
+
+        const value = decryptAgentSecretValue(row, keyring);
+        const subject = parseTelegramTokenSubjectId(value);
+
+        if (subject === null) {
+          throw new AgentSecretLegacyBackfillRequiredError();
+        }
+
+        await tx
+          .update(agentSecrets)
+          .set({
+            uniquenessFingerprint: fingerprintTelegramBotTokenForUniqueness(value),
+            providerSubjectId: subject,
+            updatedAt: new Date(),
+          })
+          .where(eq(agentSecrets.id, row.id));
+        updated += 1;
+      }
+
+      return { scanned: rows.length, updated };
+    });
+  } catch (error) {
+    if (
+      error instanceof AgentSecretKeyringError ||
+      error instanceof AgentSecretDecryptionError ||
+      error instanceof AgentSecretLegacyBackfillRequiredError
+    ) {
+      throw error;
+    }
+
+    if (isTelegramUniquenessViolation(error)) {
+      throw new AgentSecretTelegramConflictError(error);
+    }
+
+    throw new AgentSecretPersistenceError(error);
+  } finally {
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
 }
 
 export async function listActiveAgentSecretReferencesInTransaction(
@@ -670,10 +890,6 @@ function normalizeTelegramAllowedUsers(value: unknown):
   return { ok: true, value: uniqueValues.join(",") };
 }
 
-function createGeneratedApiServerKey(randomBytesFn: (size: number) => Buffer): string {
-  return `agb_agent_${randomBytesFn(32).toString("base64url")}`;
-}
-
 function hasControlCharacter(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
@@ -812,6 +1028,64 @@ function validateAgentId(agentId: string):
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function validateTelegramBotForSecretMutation(
+  token: string,
+  dependencies: AgentSecretDependencies,
+): Promise<TelegramBotValidationForSecrets> {
+  if (dependencies.telegramBotValidator) {
+    return dependencies.telegramBotValidator(token);
+  }
+
+  if (process.env.NODE_ENV === "test") {
+    const subject = parseTelegramTokenSubjectId(token);
+
+    return subject
+      ? { ok: true, bot: { botId: subject, username: null } }
+      : { ok: false, reason: "invalid_bot_token" };
+  }
+
+  return validateTelegramBotTokenWithGetMe(token);
+}
+
+function parseTelegramTokenSubjectId(token: string): string | null {
+  const match = /^([1-9][0-9]{5,19}):[A-Za-z0-9_-]{20,}$/.exec(token.trim());
+
+  return match?.[1] ?? null;
+}
+
+async function takeTelegramUniquenessBackfillLock(tx: AgentSecretsTransaction): Promise<void> {
+  await tx.execute(sql`
+    select pg_advisory_xact_lock(hashtextextended('agentbay:telegram-secret-uniqueness:v1', 0))
+  `);
+}
+
+function isTelegramUniquenessViolation(error: unknown): boolean {
+  return hasPostgresConstraint(error, [
+    "agent_secrets_active_telegram_uniqueness_idx",
+    "agent_secrets_active_telegram_subject_idx",
+  ]);
+}
+
+export function hasPostgresConstraint(error: unknown, constraints: string[], depth = 0): boolean {
+  if (depth > 5 || typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  const constraint = "constraint_name" in error ? error.constraint_name : undefined;
+  const alternateConstraint = "constraint" in error ? error.constraint : undefined;
+
+  if (
+    (typeof constraint === "string" && constraints.includes(constraint)) ||
+    (typeof alternateConstraint === "string" && constraints.includes(alternateConstraint))
+  ) {
+    return true;
+  }
+
+  const cause = "cause" in error ? error.cause : undefined;
+
+  return hasPostgresConstraint(cause, constraints, depth + 1);
 }
 
 export function safeCompareAgentSecretFingerprint(left: string, right: string): boolean {

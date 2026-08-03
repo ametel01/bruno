@@ -3,8 +3,11 @@ import { eq } from "drizzle-orm";
 import { createAgentForDevelopmentUser } from "@/src/server/agents/create-agent";
 import {
   AgentSecretDecryptionError,
+  AgentSecretTelegramConflictError,
   AgentSecretKeyringError,
+  backfillTelegramSecretUniquenessMetadata,
   decryptAgentSecretValueForTest,
+  fingerprintTelegramBotTokenForUniqueness,
   generateApiServerKeyForUser,
   listAgentSecretStatusesForUser,
   parseAgentSecretKeyring,
@@ -268,6 +271,120 @@ describe("agent secret storage", () => {
       status: "revoked",
       revokedAt: new Date("2026-07-08T04:00:00.000Z"),
     });
+  });
+
+  it("stores stable Telegram uniqueness metadata without exposing it in secret status", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Telegram Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const token = "123456:abcdefghijklmnopqrstuvwxyz";
+
+    await replaceAgentSecretForUser(
+      created.agent.userId,
+      created.agent.id,
+      { kind: "telegram_bot_token", value: token },
+      {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        randomBytes: (size) => Buffer.alloc(size, 8),
+        telegramBotValidator: async () => ({
+          ok: true,
+          bot: { botId: "123456", username: "Valid_bot" },
+        }),
+      },
+    );
+
+    const [row] = await connection.db.select().from(agentSecrets);
+    const listed = await listAgentSecretStatusesForUser(created.agent.userId, created.agent.id, {
+      createConnection: () => connection,
+    });
+
+    expect(row).toMatchObject({
+      uniquenessFingerprint: fingerprintTelegramBotTokenForUniqueness(token),
+      providerSubjectId: "123456",
+      providerUsername: "Valid_bot",
+    });
+    expect(JSON.stringify(listed)).not.toContain("uniquenessFingerprint");
+    expect(JSON.stringify(listed)).not.toContain("providerSubjectId");
+    expect(JSON.stringify(listed)).not.toContain("Valid_bot");
+
+    const second = await createAgentForDevelopmentUser(
+      { name: "Second Telegram Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+
+    await expect(
+      replaceAgentSecretForUser(
+        second.agent.userId,
+        second.agent.id,
+        { kind: "telegram_bot_token", value: token },
+        {
+          createConnection: () => connection,
+          env: KEYRING_ENV,
+          randomBytes: (size) => Buffer.alloc(size, 9),
+          telegramBotValidator: async () => ({
+            ok: true,
+            bot: { botId: "123456", username: "Valid_bot" },
+          }),
+        },
+      ),
+    ).rejects.toBeInstanceOf(AgentSecretTelegramConflictError);
+  });
+
+  it("backfills legacy active Telegram uniqueness metadata and fails closed on undecryptable rows", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Legacy Telegram Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const token = "123456:abcdefghijklmnopqrstuvwxyz";
+
+    await replaceAgentSecretForUser(
+      created.agent.userId,
+      created.agent.id,
+      { kind: "telegram_bot_token", value: token },
+      {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        randomBytes: (size) => Buffer.alloc(size, 10),
+        telegramBotValidator: async () => ({
+          ok: true,
+          bot: { botId: "123456", username: "Valid_bot" },
+        }),
+      },
+    );
+    await connection.db
+      .update(agentSecrets)
+      .set({
+        uniquenessFingerprint: null,
+        providerSubjectId: null,
+        providerUsername: null,
+      })
+      .where(eq(agentSecrets.kind, "telegram_bot_token"));
+
+    await expect(
+      backfillTelegramSecretUniquenessMetadata({ connection, env: KEYRING_ENV }),
+    ).resolves.toEqual({ scanned: 1, updated: 1 });
+
+    const [backfilled] = await connection.db.select().from(agentSecrets);
+    expect(backfilled).toMatchObject({
+      uniquenessFingerprint: fingerprintTelegramBotTokenForUniqueness(token),
+      providerSubjectId: "123456",
+      providerUsername: null,
+    });
+
+    await connection.db
+      .update(agentSecrets)
+      .set({
+        uniquenessFingerprint: null,
+        providerSubjectId: null,
+        keyVersion: "missing",
+      })
+      .where(eq(agentSecrets.kind, "telegram_bot_token"));
+
+    await expect(
+      backfillTelegramSecretUniquenessMetadata({ connection, env: KEYRING_ENV }),
+    ).rejects.toBeInstanceOf(AgentSecretDecryptionError);
   });
 });
 

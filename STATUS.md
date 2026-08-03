@@ -3,21 +3,21 @@
 ## Active Work
 
 - plan: `PLAN.md` Step 4 — Add Managed Creation Configuration and Encrypted Credentials
-  owner: coordinator (builder assignment pending compaction commit)
+  owner: builder-step-4
   branch: `main`
   worktree: `/Users/alexmetelli/source/plingpling`
-  phase: ready-for-builder
+  phase: implemented
   cycle: 1/5
   contract: `STATUS.archive.md` → `Step 4 Completion Contract (pre-spec)`
-  blocker: none; Step 3 is committed and independently accepted.
-  next-action: Assign one builder for Step 4; preserve Step 5 as dependency-blocked.
+  blocker: none; local builder gates are green.
+  next-action: Checker should independently verify `feat: accept managed Hermes creation credentials` before Step 5 starts.
 
 ## Completion Contract
 
 - outcome: Atomically accept complete opt-in OpenRouter + Telegram ready-mode creation inputs, validate them safely, persist encrypted credentials and stable Telegram uniqueness metadata, create the durable deployment operation, and return the compatible `201`/`202` response without runner/provider side effects inside the transaction.
 - acceptance criteria: The exact payload/API, replay-before-flag idempotency, default-off feature flag, approved model metadata, bounded injected Telegram `getMe`, stable uniqueness digest, transaction atomicity, redaction, isolation, and rollback rules are in the archived Step 4 contract.
 - non-goals: No managed YAML projection, runner launch, reconciler, progress UI, restart policy, live Telegram send, infrastructure provisioning, image publication, hosted-secret mutation, or Step 5+ behavior.
-- required gates: Migration generation/application if required; focused validation/route/transaction/secret/Telegram/idempotency/isolation tests; full format/lint/typecheck/test/build/E2E and diff check.
+- required gates: complete locally — migration generation/application, focused validation/route/transaction/secret/Telegram/idempotency/isolation tests, full format/lint/typecheck/test/build/E2E, fail-closed staging gate, and diff check.
 - risks: Credential leakage, encryption-key-dependent uniqueness, idempotency replay ordering, partial transaction state, feature-flag compatibility, token reuse across active agents, and provider calls after persistence.
 - do-not-touch: Accepted Step 0–3 behavior; runner/readiness; UI; external resources; prior changelog/progress entries.
 
@@ -30,10 +30,10 @@
 ## Current Handoff
 
 - from: coordinator
-  to: builder-step-4 (pending assignment)
+  to: builder-step-4
   timestamp: 2026-08-03
-  request: Implement the archived Step 4 contract only; migrate, validate, update changelog/progress, and commit `feat: accept managed Hermes creation credentials`.
-  evidence: Step 3 product commit `7024bc2`; checker evidence commit `ba8c969`; clean worktree before status compaction; all Step 3 gates independently green.
+  request: Independently verify the implemented Step 4 contract and commit.
+  evidence: Generated `drizzle/0017_ambitious_tyrannus.sql` and metadata; focused Step 4 tests passed 8 files / 78 tests; full tests passed 106 files / 927 tests; build and 14 E2E passed; staging gate failed closed with no side effects.
   stop-condition: Stop before Step 5 projection or any real provider/Telegram/infrastructure effect.
 
 ## Gates
@@ -42,10 +42,11 @@
 - Step 1 `23a1817`: checker cycle 2 green after exact GHCR boundary fix — 99 files / 870 tests, build, 14 E2E; fail-closed staging command exits nonzero with no effects.
 - Step 2 `897e28f`: independently green — focused 6 files / 43 tests, pinned-image contract smoke, 99 files / 879 tests, build, 14 E2E.
 - Step 3 `7024bc2`: independently green — focused 7 files / 72 tests, clean/upgrade loopback migration fixtures, 103 files / 905 tests, build, 14 E2E; evidence recorded in `ba8c969`.
+- Step 4 current commit: local builder green — `db:generate` no drift after `0017_ambitious_tyrannus`; clean disposable and upgrade/idempotent loopback `db:migrate`; focused 8 files / 78 tests; `format:check`; `lint`; `typecheck`; 106 files / 927 tests; build; 14 E2E; fail-closed staging nonzero/no effects; `git diff --check`.
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling` — branch `main`; sole active worktree; status compaction pending commit; no stashes.
+- `/Users/alexmetelli/source/plingpling` — branch `main`; sole active worktree; Step 4 committed; no stashes. `STATUS.archive.md` has an external Step 6 pre-spec append and remains unstaged/out of scope.
 
 ## Decisions And Lessons
 

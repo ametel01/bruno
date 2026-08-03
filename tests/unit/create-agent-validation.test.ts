@@ -19,6 +19,80 @@ describe("create agent validation", () => {
     }
   });
 
+  it("keeps omitted and explicit stopped launch mode compatible", () => {
+    expect(
+      validateCreateAgentPayload({
+        name: "Research Agent",
+        templateKey: "research_agent",
+        launchMode: "stopped",
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        name: "Research Agent",
+        templateKey: "research_agent",
+        runnerId: null,
+      },
+    });
+  });
+
+  it("rejects ready-only fields on stopped requests", () => {
+    expect(
+      validateCreateAgentPayload({
+        name: "Research Agent",
+        templateKey: "research_agent",
+        openrouterApiKey: "sk-or-v1-abcdefghijklmnopqrstuvwxyz",
+      }),
+    ).toMatchObject({
+      ok: false,
+      issues: [{ field: "openrouterApiKey" }],
+    });
+  });
+
+  it("accepts a replay-compatible ready envelope without credentials", () => {
+    expect(
+      validateCreateAgentPayload({
+        name: "Research Agent",
+        templateKey: "research_agent",
+        launchMode: "ready",
+        idempotencyKey: "Ready-Key_01",
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        name: "Research Agent",
+        templateKey: "research_agent",
+        runnerId: null,
+        launchMode: "ready",
+        idempotencyKey: "Ready-Key_01",
+        openrouterModel: undefined,
+        openrouterApiKey: undefined,
+        telegramBotToken: undefined,
+        telegramAllowedUserIds: undefined,
+      },
+    });
+  });
+
+  it("rejects malformed ready idempotency and client-owned metadata", () => {
+    expect(
+      validateCreateAgentPayload({
+        name: "Research Agent",
+        templateKey: "research_agent",
+        launchMode: "ready",
+        idempotencyKey: "short",
+      }),
+    ).toMatchObject({ ok: false, issues: [{ field: "idempotencyKey" }] });
+    expect(
+      validateCreateAgentPayload({
+        name: "Research Agent",
+        templateKey: "research_agent",
+        launchMode: "ready",
+        idempotencyKey: "Ready-Key_02",
+        modelProvider: "openrouter",
+      }),
+    ).toMatchObject({ ok: false, issues: [{ field: "body" }] });
+  });
+
   it("accepts a valid runner ID and rejects malformed runner IDs", () => {
     expect(
       validateCreateAgentPayload({

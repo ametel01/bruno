@@ -19,6 +19,7 @@ export type AgentEventWrite = {
   type: string;
   message: string;
   metadata?: AgentEventMetadata;
+  createdAt?: Date;
 };
 
 export type AgentEventTransaction = Parameters<
@@ -151,6 +152,7 @@ export async function recordAgentEventsInTransaction(
       type: event.type,
       message: event.message,
       metadata: event.metadata ?? {},
+      ...(event.createdAt ? { createdAt: event.createdAt } : {}),
     })),
   );
 }

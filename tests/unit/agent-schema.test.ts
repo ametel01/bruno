@@ -162,6 +162,9 @@ describe("Milestone 1 agent persistence schema", () => {
       "authTag",
       "keyVersion",
       "fingerprint",
+      "uniquenessFingerprint",
+      "providerSubjectId",
+      "providerUsername",
       "status",
       "createdAt",
       "updatedAt",
@@ -175,6 +178,9 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.authTag.notNull).toBe(true);
     expect(columns.keyVersion.notNull).toBe(true);
     expect(columns.fingerprint.notNull).toBe(true);
+    expect(columns.uniquenessFingerprint.notNull).toBe(false);
+    expect(columns.providerSubjectId.notNull).toBe(false);
+    expect(columns.providerUsername.notNull).toBe(false);
     expect(columns.status.notNull).toBe(true);
     expect(columns.status.default).toBe("active");
     expect(columns.createdAt.notNull).toBe(true);
@@ -184,6 +190,29 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(Object.keys(columns)).not.toContain("plaintext");
     expect(Object.keys(columns)).not.toContain("value");
     expect(Object.keys(columns)).not.toContain("secret");
+  });
+
+  it("generates additive Telegram secret metadata migration SQL", async () => {
+    const migration = await readFile("drizzle/0017_ambitious_tyrannus.sql", "utf8");
+
+    expect(migration).toContain(
+      'ALTER TABLE "agent_secrets" ADD COLUMN "uniqueness_fingerprint" text',
+    );
+    expect(migration).toContain(
+      'ALTER TABLE "agent_secrets" ADD COLUMN "provider_subject_id" text',
+    );
+    expect(migration).toContain('ALTER TABLE "agent_secrets" ADD COLUMN "provider_username" text');
+    expect(migration).toContain(
+      'CREATE UNIQUE INDEX "agent_secrets_active_telegram_uniqueness_idx"',
+    );
+    expect(migration).toContain(
+      `"agent_secrets"."kind" = 'telegram_bot_token' AND "agent_secrets"."status" = 'active'`,
+    );
+    expect(migration).toContain('CREATE UNIQUE INDEX "agent_secrets_active_telegram_subject_idx"');
+    expect(migration).toContain("agent_secrets_uniqueness_fingerprint_check");
+    expect(migration).toContain("agent_secrets_telegram_metadata_kind_check");
+    expect(migration).toContain("agent_secrets_telegram_metadata_pair_check");
+    expect(migration).not.toMatch(/DROP TABLE|DROP COLUMN|ALTER COLUMN|(?:^|\n)UPDATE /);
   });
 
   it("generates an additive encrypted agent secret migration without plaintext fields", async () => {

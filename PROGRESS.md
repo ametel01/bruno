@@ -451,12 +451,13 @@ the existing `Added`, `Changed`, `Fixed`, or `Security` sections as applicable.
 
 ### Current Status
 
-Step 3 is complete. Agent records now have explicit stopped/running desired
-state defaulting to stopped, deployment operations are durable and owner-bound
-with idempotency, single-active-operation, expiring-lease, and terminal-state
-guards, and owners can poll the latest deployment without exposing internal
-lease or idempotency fields. Step 4 is next: add managed creation configuration
-and encrypted credentials.
+Step 4 is complete. Ready-mode creation remains default-off behind the exact
+server flag, but accepted replays return before flag or credential validation.
+First writes validate the sole approved OpenRouter model and a bounded injected
+Telegram `getMe`, then atomically persist the stopped desired-running agent,
+managed config, four encrypted secret rows, stable Telegram uniqueness metadata,
+pending deployment, and one safe creation event. Step 5 is next: project the
+complete managed Hermes configuration from the persisted contract.
 
 ### Step Checklist
 
@@ -464,7 +465,7 @@ and encrypted credentials.
 - [x] Step 1: Quality Gates Setup and Baseline Evidence
 - [x] Step 2: Align Readiness With the Pinned Hermes Contract
 - [x] Step 3: Persist Desired State and Deployment Operations
-- [ ] Step 4: Add Managed Creation Configuration and Encrypted Credentials
+- [x] Step 4: Add Managed Creation Configuration and Encrypted Credentials
 - [ ] Step 5: Project a Complete Managed Hermes Configuration
 - [ ] Step 6: Split Runner Launch Acceptance From Observed Readiness
 - [ ] Step 7: Reconcile Creation Through Ready
@@ -480,8 +481,8 @@ and encrypted credentials.
 | 1. Quality Gates Setup and Baseline Evidence | Complete | Step 0 | This commit | Pre-edit baseline at `807e401`: `bun run verify` passed (`format:check`, `lint`, `typecheck`, 98 test files / 863 tests, and production build) and `bun run test:e2e:ci` passed 14 browser tests. Added `verify:hermes:staging`, a pure fail-closed preflight, placeholder-only docs/env entries, and 7 focused staging-gate tests. Final gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 99 files / 870 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `bun run verify:hermes:staging` exited nonzero with `capability_unavailable` and `sideEffectsAttempted: false`; `git diff --check`; `CHANGELOG.md` unchanged. | Complete; Step 2 is next. |
 | 2. Align Readiness With the Pinned Hermes Contract | Complete | Steps 0-1 | This commit | Focused Step 2 tests passed 6 files / 43 tests across runner-service, Docker adapter, lifecycle readiness, manual-runner adapter, projection, and local-smoke guards. `bun run agent:hermes:contract-smoke` passed against local pinned-image behavior with `telegramBoundary: "local-smoke-disabled"`, private API auth, no public Hermes port, production waiter reuse, fake model response, state persistence, backup/restore, log-source evidence, and cleanup. Full gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 99 files / 879 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `git diff --check`. | Complete; Step 3 is next. |
 | 3. Persist Desired State and Deployment Operations | Complete | Steps 0-2 | This commit | Generated `drizzle/0016_motionless_fantastic_four.sql` plus snapshot/journal with `agent_desired_status`, `agents.desired_status DEFAULT 'stopped'`, `agent_deployment_stage`, owner-bound `agent_deployments`, composite owner FK, idempotency/active/owner/claim indexes, and check constraints; reordered generated SQL only so the referenced agent-owner unique key exists before the FK while leaving generated metadata untouched. Focused Step 3 tests passed 7 files / 72 tests across schema/migration source assertions, state/DTO invariants, real separate-connection idempotency/active-operation/lease/expiry/release/renewal/CAS concurrency, owner-concealed route behavior, request-user boundaries, two-user route isolation, and clean/upgrade disposable loopback migration fixtures through `0015_dear_leader`. Migration gates passed: `bun run db:generate` reported no drift after generation; `bun run db:migrate` passed and reran idempotently on local loopback Postgres. Full gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 103 files / 905 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `git diff --check`. | Complete; Step 4 is next. |
-| 4. Add Managed Creation Configuration and Encrypted Credentials | Not started | Steps 0-3 | Not collected | Not collected | Stop here if OpenRouter BYOK is not approved for automatic-ready mode. |
-| 5. Project a Complete Managed Hermes Configuration | Not started | Steps 0-4 | Not collected | Not collected | Requires server-side desired config and encrypted secret contract. |
+| 4. Add Managed Creation Configuration and Encrypted Credentials | Complete | Steps 0-3 | This commit | Generated `drizzle/0017_ambitious_tyrannus.sql` plus snapshot/journal with three nullable Telegram secret metadata columns, metadata checks, and two active-Telegram partial unique indexes. Clean disposable loopback migration passed; upgrade `bun run db:migrate` passed and reran idempotently; `bun run db:generate` reported no schema drift. Focused Step 4 tests passed 8 files / 78 tests across model catalog, Telegram client, create validation/route, ready-create DB transaction/replay/rollback/runner-precheck, secret uniqueness/backfill, schema, and flag parsing. Full gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 106 files / 927 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; credential-free `bun run verify:hermes:staging` exited nonzero with `capability_unavailable` and `sideEffectsAttempted: false`; `git diff --check`. | Complete; Step 5 is next. |
+| 5. Project a Complete Managed Hermes Configuration | Not started | Steps 0-4 | Not collected | Not collected | Requires the accepted Step 4 commit and independent check before projection work starts. |
 | 6. Split Runner Launch Acceptance From Observed Readiness | Not started | Steps 0-5 | Not collected | Not collected | Requires managed launch spec and projection. |
 | 7. Reconcile Creation Through Ready | Not started | Steps 0-6 | Not collected | Not collected | Requires durable deployment records and runner acceptance. |
 | 8. Add One-Click Creation and Persisted Progress UI | Not started | Steps 0-7 | Not collected | Not collected | Requires reconciler and readiness snapshot. |
@@ -501,6 +502,6 @@ and encrypted credentials.
 
 ### Current Blockers and Next Work
 
-- No blocker remains for Step 3.
-- Step 4 should add managed creation configuration and encrypted credentials
-  without contacting external services beyond approved validation boundaries.
+- No blocker remains for Step 4.
+- Step 5 should project managed Hermes/OpenRouter/Telegram configuration from
+  the persisted Step 4 contract after independent Step 4 acceptance.

@@ -1,9 +1,16 @@
+import { randomBytes, randomUUID } from "node:crypto";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
+import {
+  createAgentDeploymentForUser,
+  getAgentDeploymentByIdempotencyKeyForUser,
+} from "@/src/server/agents/agent-deployments";
+import type { AgentDeploymentDto } from "@/src/server/agents/deployment-dto";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
-import { agentConfigs, agents, runners } from "@/src/server/db/schema";
+import { agentConfigs, agentSecrets, agents, runners } from "@/src/server/db/schema";
+import { readReadyAgentCreationFlag } from "@/src/server/env";
 import {
   getAgentTemplateSnapshot,
   isSupportedTemplateKey,
@@ -25,6 +32,26 @@ import {
   type CreateRunnerProvisioningResult,
 } from "@/src/server/runners/runner-provisioning";
 import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
+import {
+  AgentSecretKeyringError,
+  AgentSecretLegacyBackfillRequiredError,
+  AgentSecretTelegramConflictError,
+  assertNoUnbackfilledActiveTelegramSecretsInTransaction,
+  createGeneratedApiServerKey,
+  hasPostgresConstraint,
+  insertPreparedAgentSecretRowsInTransaction,
+  parseAgentSecretKeyring,
+  prepareAgentSecretRow,
+} from "@/src/server/agents/agent-secrets";
+import {
+  getApprovedOpenRouterModel,
+  type OpenRouterModelMetadata,
+} from "@/src/server/agents/openrouter-models";
+import {
+  type TelegramBotMetadata,
+  type TelegramClientDependencies,
+  validateTelegramBotTokenWithGetMe,
+} from "@/src/server/telegram/telegram-client";
 
 export const AGENT_NAME_MAX_LENGTH = 120;
 export const DEFAULT_AGENT_CONFIG_BASE = {
@@ -42,18 +69,44 @@ export const DEFAULT_AGENT_CONFIG = {
 } as const;
 
 export type CreateAgentValidationIssue = {
-  field: "body" | "name" | "templateKey" | "runnerId";
+  field:
+    | "body"
+    | "name"
+    | "templateKey"
+    | "runnerId"
+    | "launchMode"
+    | "idempotencyKey"
+    | "openrouterModel"
+    | "openrouterApiKey"
+    | "telegramBotToken"
+    | "telegramAllowedUserIds";
   message: string;
 };
+
+type StoppedCreateAgentInput = {
+  name: string;
+  templateKey: SupportedAgentTemplateKey;
+  runnerId?: string | null;
+};
+
+export type ReadyCreateAgentInput = {
+  name: string;
+  templateKey: SupportedAgentTemplateKey;
+  runnerId: string | null;
+  launchMode: "ready";
+  idempotencyKey: string;
+  openrouterModel?: unknown;
+  openrouterApiKey?: unknown;
+  telegramBotToken?: unknown;
+  telegramAllowedUserIds?: unknown;
+};
+
+type CreateAgentInput = StoppedCreateAgentInput | ReadyCreateAgentInput;
 
 export type CreateAgentValidationResult =
   | {
       ok: true;
-      value: {
-        name: string;
-        templateKey: SupportedAgentTemplateKey;
-        runnerId: string | null;
-      };
+      value: CreateAgentInput;
     }
   | {
       ok: false;
@@ -79,6 +132,25 @@ export type CreatedAgentResponse = {
     type: "agent.created";
   };
 };
+
+export type ReadyCreatedAgentResponse = {
+  agent: CreatedAgentResponse["agent"] & {
+    desiredStatus: "running";
+    model: {
+      provider: "openrouter";
+      id: string;
+      displayName: string;
+      contextTokens: number;
+    };
+    telegramBot: {
+      id: string;
+      username: string | null;
+    };
+  };
+  deployment: AgentDeploymentDto;
+};
+
+export type CreateAgentResponse = CreatedAgentResponse | ReadyCreatedAgentResponse;
 
 type AgentTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -110,6 +182,9 @@ type VerifyRunnerPlacement = (
   connection: DatabaseConnection,
   input: { runnerId: string; userId: string },
 ) => Promise<RunnerPlacementVerificationResult>;
+type TelegramBotValidator = (
+  token: string,
+) => Promise<Awaited<ReturnType<typeof validateTelegramBotTokenWithGetMe>>>;
 
 const MAX_RUNNER_PLACEMENT_VERIFICATION_ATTEMPTS = 5;
 
@@ -121,6 +196,12 @@ export type CreateAgentDependencies = {
   verifyRunnerPlacement?: VerifyRunnerPlacement;
   autoProvisionCloudRunner?: boolean;
   planMaxAgents?: number | null;
+  env?: Record<string, string | undefined>;
+  now?: () => Date;
+  randomBytes?: (size: number) => Buffer;
+  randomUUID?: () => string;
+  telegramClient?: TelegramClientDependencies;
+  telegramBotValidator?: TelegramBotValidator;
 };
 
 export class AgentPersistenceError extends Error {
@@ -181,6 +262,47 @@ export class AgentRunnerVerificationError extends Error {
   }
 }
 
+export class ReadyAgentCreationDisabledError extends Error {
+  readonly reason: "disabled" | "invalid_configuration";
+
+  constructor(reason: "disabled" | "invalid_configuration") {
+    super("Ready agent creation is not enabled.");
+    this.name = "ReadyAgentCreationDisabledError";
+    this.reason = reason;
+  }
+}
+
+export class ReadyAgentValidationError extends Error {
+  readonly issues: CreateAgentValidationIssue[];
+
+  constructor(issues: CreateAgentValidationIssue[]) {
+    super("Ready agent creation validation failed.");
+    this.name = "ReadyAgentValidationError";
+    this.issues = issues;
+  }
+}
+
+export class TelegramValidationUnavailableError extends Error {
+  readonly reason:
+    | "telegram_validation_timeout"
+    | "telegram_validation_unavailable"
+    | "telegram_validation_invalid_response";
+
+  constructor(reason: TelegramValidationUnavailableError["reason"]) {
+    super("Telegram bot validation is temporarily unavailable.");
+    this.name = "TelegramValidationUnavailableError";
+    this.reason = reason;
+  }
+}
+
+export class TelegramBotInUseError extends Error {
+  constructor(cause?: unknown) {
+    super("Telegram bot is already assigned to an active agent.");
+    this.name = "TelegramBotInUseError";
+    this.cause = cause;
+  }
+}
+
 export function validateCreateAgentPayload(payload: unknown): CreateAgentValidationResult {
   if (!isPlainObject(payload)) {
     return {
@@ -193,6 +315,7 @@ export function validateCreateAgentPayload(payload: unknown): CreateAgentValidat
   const rawName = payload.name;
   const rawTemplateKey = payload.templateKey;
   const rawRunnerId = payload.runnerId;
+  const rawLaunchMode = payload.launchMode;
 
   if (typeof rawName !== "string") {
     issues.push({ field: "name", message: "Name is required." });
@@ -226,8 +349,85 @@ export function validateCreateAgentPayload(payload: unknown): CreateAgentValidat
     issues.push({ field: "runnerId", message: "Runner ID must be a valid UUID." });
   }
 
+  const launchMode = rawLaunchMode === undefined ? "stopped" : rawLaunchMode;
+
+  if (launchMode !== "stopped" && launchMode !== "ready") {
+    issues.push({ field: "launchMode", message: "Launch mode is not supported." });
+  }
+
   if (issues.length > 0 || !templateKey) {
     return { ok: false, issues };
+  }
+
+  if (launchMode === "ready") {
+    const idempotencyKey = normalizeReadyIdempotencyKey(payload.idempotencyKey);
+    const readyForbiddenFields = [
+      "provider",
+      "modelProvider",
+      "modelName",
+      "contextTokens",
+      "botId",
+      "botUsername",
+      "telegramBot",
+      "deployment",
+      "deploymentStage",
+      "desiredStatus",
+      "status",
+      "configRevision",
+      "apiServerKey",
+      "ciphertext",
+      "fingerprint",
+      "event",
+      "eventMetadata",
+    ] as const;
+    const readyForbiddenIssues = readyForbiddenFields.flatMap((field) =>
+      payload[field] === undefined
+        ? []
+        : [{ field: "body" as const, message: "Ready launch metadata is server-owned." }],
+    );
+
+    if (!idempotencyKey.ok) {
+      return {
+        ok: false,
+        issues: [{ field: "idempotencyKey", message: "Idempotency key is invalid." }],
+      };
+    }
+
+    if (readyForbiddenIssues.length > 0) {
+      return { ok: false, issues: readyForbiddenIssues };
+    }
+
+    return {
+      ok: true,
+      value: {
+        name,
+        templateKey,
+        runnerId,
+        launchMode: "ready",
+        idempotencyKey: idempotencyKey.value,
+        openrouterModel: payload.openrouterModel,
+        openrouterApiKey: payload.openrouterApiKey,
+        telegramBotToken: payload.telegramBotToken,
+        telegramAllowedUserIds: payload.telegramAllowedUserIds,
+      },
+    };
+  }
+
+  const readyOnlyFields = [
+    "idempotencyKey",
+    "openrouterModel",
+    "openrouterApiKey",
+    "telegramBotToken",
+    "telegramAllowedUserIds",
+  ] as const;
+  const stoppedIssues = readyOnlyFields.flatMap((field) =>
+    payload[field] === undefined
+      ? []
+      : [{ field, message: "Field is only accepted for ready launch mode." }],
+  );
+
+  if (stoppedIssues.length > 0) {
+    return { ok: false, issues: stoppedIssues };
   }
 
   return {
@@ -269,17 +469,17 @@ export async function createAgentForDevelopmentUser(
 
 export async function createAgentForUser(
   userId: string,
-  input: {
-    name: string;
-    templateKey: SupportedAgentTemplateKey;
-    runnerId?: string | null;
-  },
+  input: CreateAgentInput,
   dependencies: CreateAgentDependencies = {},
-): Promise<CreatedAgentResponse> {
+): Promise<CreateAgentResponse> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
 
   try {
+    if (isReadyCreateInput(input)) {
+      return await createReadyAgentForUser(connection, userId, input, dependencies);
+    }
+
     return await createAgentWithUserResolver(connection, () => userId, input, dependencies);
   } catch (error) {
     return throwAgentCreateError(error);
@@ -491,6 +691,260 @@ async function createAgentWithUserResolver(
   throw new AgentRunnerVerificationError("verification_churn");
 }
 
+async function createReadyAgentForUser(
+  connection: DatabaseConnection,
+  userId: string,
+  input: ReadyCreateAgentInput,
+  dependencies: CreateAgentDependencies,
+): Promise<ReadyCreatedAgentResponse> {
+  const replay = await selectReadyCreateReplay(connection.db, {
+    userId,
+    idempotencyKey: input.idempotencyKey,
+  });
+
+  if (replay) {
+    return replay;
+  }
+
+  const flag = readReadyAgentCreationFlag(dependencies.env);
+
+  if (!flag.ok) {
+    throw new ReadyAgentCreationDisabledError("invalid_configuration");
+  }
+
+  if (!flag.enabled) {
+    throw new ReadyAgentCreationDisabledError("disabled");
+  }
+
+  const placementPrecheck = await connection.db.transaction((tx) =>
+    selectRunnerPlacementForUserInTransaction(tx, userId, {
+      planMaxAgents: dependencies.planMaxAgents,
+      runnerId: input.runnerId,
+    }),
+  );
+
+  if (!placementPrecheck.ok) {
+    if (input.runnerId && placementPrecheck.reason === "no_online_runner") {
+      throw new AgentRunnerAssignmentError();
+    }
+
+    if (
+      placementPrecheck.reason === "plan_limit_reached" ||
+      placementPrecheck.reason === "runner_capacity_reached"
+    ) {
+      throw new AgentCreateBlockedError(placementPrecheck);
+    }
+  }
+
+  const firstWriteValidation = validateReadyFirstWriteInput(input);
+
+  if (!firstWriteValidation.ok) {
+    throw new ReadyAgentValidationError(firstWriteValidation.issues);
+  }
+
+  const keyring = parseAgentSecretKeyring(dependencies.env);
+  const telegramValidation = await (dependencies.telegramBotValidator?.(
+    firstWriteValidation.telegramBotToken,
+  ) ??
+    validateTelegramBotTokenWithGetMe(
+      firstWriteValidation.telegramBotToken,
+      dependencies.telegramClient,
+    ));
+
+  if (!telegramValidation.ok) {
+    if (telegramValidation.reason === "invalid_bot_token") {
+      throw new ReadyAgentValidationError([
+        { field: "telegramBotToken", message: "Telegram bot token format is invalid." },
+      ]);
+    }
+
+    throw new TelegramValidationUnavailableError(telegramValidation.reason);
+  }
+
+  const now = dependencies.now?.() ?? new Date();
+  const agentId = dependencies.randomUUID?.() ?? randomUUID();
+  const configRevision = `cfg-${now.getTime()}`;
+  const templateSnapshot = getAgentTemplateSnapshot(input.templateKey);
+  const randomBytesFn = dependencies.randomBytes ?? randomBytes;
+  const apiServerKey = createGeneratedApiServerKey(randomBytesFn);
+  const preparedSecrets = [
+    prepareAgentSecretRow({
+      agentId,
+      kind: "openrouter_api_key",
+      value: firstWriteValidation.openrouterApiKey,
+      keyring,
+      now,
+      rotatedAt: null,
+      randomBytes: randomBytesFn,
+    }),
+    prepareAgentSecretRow({
+      agentId,
+      kind: "telegram_bot_token",
+      value: firstWriteValidation.telegramBotToken,
+      keyring,
+      now,
+      rotatedAt: null,
+      telegramBot: telegramValidation.bot,
+      randomBytes: randomBytesFn,
+    }),
+    prepareAgentSecretRow({
+      agentId,
+      kind: "telegram_allowed_users",
+      value: firstWriteValidation.telegramAllowedUsers,
+      keyring,
+      now,
+      rotatedAt: null,
+      randomBytes: randomBytesFn,
+    }),
+    prepareAgentSecretRow({
+      agentId,
+      kind: "api_server_key",
+      value: apiServerKey,
+      keyring,
+      now,
+      rotatedAt: null,
+      randomBytes: randomBytesFn,
+    }),
+  ];
+
+  try {
+    return await connection.db.transaction(async (tx) => {
+      await takeReadyCreateIdempotencyLock(tx, {
+        userId,
+        idempotencyKey: input.idempotencyKey,
+      });
+
+      const replayInTransaction = await selectReadyCreateReplay(tx, {
+        userId,
+        idempotencyKey: input.idempotencyKey,
+      });
+
+      if (replayInTransaction) {
+        return replayInTransaction;
+      }
+
+      await assertNoUnbackfilledActiveTelegramSecretsInTransaction(tx);
+
+      const placement = await selectRunnerPlacementForUserInTransaction(tx, userId, {
+        planMaxAgents: dependencies.planMaxAgents,
+        runnerId: input.runnerId,
+      });
+
+      let runnerId: string | null = null;
+
+      if (!placement.ok) {
+        if (input.runnerId && placement.reason === "no_online_runner") {
+          throw new AgentRunnerAssignmentError();
+        }
+
+        if (
+          placement.reason === "plan_limit_reached" ||
+          placement.reason === "runner_capacity_reached"
+        ) {
+          throw new AgentCreateBlockedError(placement);
+        }
+      } else {
+        runnerId = placement.runner.id;
+      }
+
+      const [agent] = await tx
+        .insert(agents)
+        .values({
+          id: agentId,
+          userId,
+          runnerId,
+          name: input.name,
+          templateKey: input.templateKey,
+          templateVersion: templateSnapshot.version,
+          templateSnapshotJson: templateSnapshot,
+          status: "stopped",
+          desiredStatus: "running",
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+
+      if (!agent) {
+        throw new Error("Agent insert returned no rows.");
+      }
+
+      const createdAgent = agent as CreatedAgentRow;
+
+      await tx.insert(agentConfigs).values({
+        agentId,
+        systemPrompt: templateSnapshot.defaultSystemPrompt,
+        modelProvider: firstWriteValidation.model.provider,
+        modelName: firstWriteValidation.model.id,
+        maxDailySpendCents: DEFAULT_AGENT_CONFIG_BASE.maxDailySpendCents,
+        scheduleMode: DEFAULT_AGENT_CONFIG_BASE.scheduleMode,
+        scheduleCron: DEFAULT_AGENT_CONFIG_BASE.scheduleCron,
+        timezone: DEFAULT_AGENT_CONFIG_BASE.timezone,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      await insertPreparedAgentSecretRowsInTransaction(tx, preparedSecrets);
+
+      const deployment = await createAgentDeploymentForUser({
+        db: tx,
+        userId,
+        agentId,
+        configRevision,
+        idempotencyKey: input.idempotencyKey,
+        now,
+      });
+
+      if (!deployment.ok || !deployment.inserted || deployment.deployment.agentId !== agentId) {
+        throw new Error("Ready deployment insert failed.");
+      }
+
+      await recordAgentEventInTransaction(tx, {
+        agentId,
+        actorUserId: userId,
+        type: "agent.created",
+        message: `Created agent "${input.name}".`,
+        metadata: {
+          templateKey: input.templateKey,
+          templateVersion: templateSnapshot.version,
+          status: "stopped",
+          desiredStatus: "running",
+          launchMode: "ready",
+          modelProvider: "openrouter",
+          modelName: firstWriteValidation.model.id,
+          runnerAssignment: runnerId ? "assigned" : "none",
+          deploymentId: deployment.deployment.id,
+        },
+        createdAt: now,
+      });
+
+      return toReadyCreatedAgentResponse({
+        agent: createdAgent,
+        deployment: deployment.deployment,
+        model: firstWriteValidation.model,
+        telegramBot: telegramValidation.bot,
+      });
+    });
+  } catch (error) {
+    if (
+      error instanceof AgentCreateBlockedError ||
+      error instanceof AgentRunnerAssignmentError ||
+      error instanceof AgentSecretKeyringError ||
+      error instanceof AgentSecretLegacyBackfillRequiredError
+    ) {
+      throw error;
+    }
+
+    if (
+      error instanceof AgentSecretTelegramConflictError ||
+      isTelegramSecretUniquenessConstraint(error)
+    ) {
+      throw new TelegramBotInUseError(error);
+    }
+
+    throw error;
+  }
+}
+
 async function createAgentWithProvisionedRunner(
   connection: DatabaseConnection,
   input: {
@@ -539,6 +993,12 @@ function throwAgentCreateError(error: unknown): never {
     error instanceof AgentRunnerAssignmentError ||
     error instanceof AgentRunnerProvisioningError ||
     error instanceof AgentRunnerVerificationError ||
+    error instanceof ReadyAgentCreationDisabledError ||
+    error instanceof ReadyAgentValidationError ||
+    error instanceof TelegramValidationUnavailableError ||
+    error instanceof TelegramBotInUseError ||
+    error instanceof AgentSecretKeyringError ||
+    error instanceof AgentSecretLegacyBackfillRequiredError ||
     error instanceof AgentPersistenceError
   ) {
     throw error;
@@ -697,6 +1157,269 @@ function ensureDefaultCloudRunnerProvisioning(
     provider: "digitalocean",
     name: "plingpling Cloud Runner",
   });
+}
+
+function isReadyCreateInput(input: CreateAgentInput): input is ReadyCreateAgentInput {
+  return "launchMode" in input && input.launchMode === "ready";
+}
+
+function normalizeReadyIdempotencyKey(value: unknown): { ok: true; value: string } | { ok: false } {
+  if (typeof value !== "string") {
+    return { ok: false };
+  }
+
+  const normalizedValue = value.trim();
+
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(normalizedValue)) {
+    return { ok: false };
+  }
+
+  return { ok: true, value: normalizedValue };
+}
+
+function validateReadyFirstWriteInput(input: ReadyCreateAgentInput):
+  | {
+      ok: true;
+      model: OpenRouterModelMetadata;
+      openrouterApiKey: string;
+      telegramBotToken: string;
+      telegramAllowedUsers: string;
+    }
+  | {
+      ok: false;
+      issues: CreateAgentValidationIssue[];
+    } {
+  const issues: CreateAgentValidationIssue[] = [];
+
+  const model =
+    typeof input.openrouterModel === "string"
+      ? getApprovedOpenRouterModel(input.openrouterModel)
+      : null;
+
+  if (!model) {
+    issues.push({ field: "openrouterModel", message: "OpenRouter model is not approved." });
+  }
+
+  const openrouterApiKey = normalizeOpenRouterApiKey(input.openrouterApiKey);
+
+  if (!openrouterApiKey.ok) {
+    issues.push({ field: "openrouterApiKey", message: "OpenRouter API key format is invalid." });
+  }
+
+  const telegramBotToken = normalizeTelegramBotToken(input.telegramBotToken);
+
+  if (!telegramBotToken.ok) {
+    issues.push({ field: "telegramBotToken", message: "Telegram bot token format is invalid." });
+  }
+
+  const allowedUsers = normalizeReadyTelegramAllowedUserIds(input.telegramAllowedUserIds);
+
+  if (!allowedUsers.ok) {
+    issues.push({
+      field: "telegramAllowedUserIds",
+      message: "Telegram allowed user IDs must be canonical decimal strings.",
+    });
+  }
+
+  if (
+    issues.length > 0 ||
+    !model ||
+    !openrouterApiKey.ok ||
+    !telegramBotToken.ok ||
+    !allowedUsers.ok
+  ) {
+    return { ok: false, issues };
+  }
+
+  return {
+    ok: true,
+    model,
+    openrouterApiKey: openrouterApiKey.value,
+    telegramBotToken: telegramBotToken.value,
+    telegramAllowedUsers: allowedUsers.value,
+  };
+}
+
+function normalizeOpenRouterApiKey(value: unknown): { ok: true; value: string } | { ok: false } {
+  if (typeof value !== "string") {
+    return { ok: false };
+  }
+
+  const normalizedValue = value.trim();
+
+  if (
+    Buffer.byteLength(normalizedValue, "utf8") > 512 ||
+    !/^sk-or-v1-[A-Za-z0-9_-]{20,}$/.test(normalizedValue) ||
+    hasControlCharacter(normalizedValue)
+  ) {
+    return { ok: false };
+  }
+
+  return { ok: true, value: normalizedValue };
+}
+
+function normalizeTelegramBotToken(value: unknown): { ok: true; value: string } | { ok: false } {
+  if (typeof value !== "string") {
+    return { ok: false };
+  }
+
+  const normalizedValue = value.trim();
+
+  if (
+    Buffer.byteLength(normalizedValue, "utf8") > 256 ||
+    !/^[1-9][0-9]{5,19}:[A-Za-z0-9_-]{20,}$/.test(normalizedValue) ||
+    hasControlCharacter(normalizedValue)
+  ) {
+    return { ok: false };
+  }
+
+  return { ok: true, value: normalizedValue };
+}
+
+function normalizeReadyTelegramAllowedUserIds(
+  value: unknown,
+): { ok: true; value: string } | { ok: false } {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 100) {
+    return { ok: false };
+  }
+
+  const values: string[] = [];
+  const seen = new Set<string>();
+
+  for (const rawValue of value) {
+    if (typeof rawValue !== "string" || !/^[1-9][0-9]{0,19}$/.test(rawValue)) {
+      return { ok: false };
+    }
+
+    if (!seen.has(rawValue)) {
+      values.push(rawValue);
+      seen.add(rawValue);
+    }
+  }
+
+  const serialized = values.join(",");
+
+  if (Buffer.byteLength(serialized, "utf8") > 2_100) {
+    return { ok: false };
+  }
+
+  return { ok: true, value: serialized };
+}
+
+async function takeReadyCreateIdempotencyLock(
+  tx: AgentTransaction,
+  input: { userId: string; idempotencyKey: string },
+): Promise<void> {
+  await tx.execute(sql`
+    select pg_advisory_xact_lock(hashtextextended(${`agentbay:ready-create:${input.userId}:${input.idempotencyKey}`}, 0))
+  `);
+}
+
+async function selectReadyCreateReplay(
+  db: PostgresJsDatabase<typeof schema> | AgentTransaction,
+  input: { userId: string; idempotencyKey: string },
+): Promise<ReadyCreatedAgentResponse | null> {
+  const deployment = await getAgentDeploymentByIdempotencyKeyForUser({
+    db,
+    userId: input.userId,
+    idempotencyKey: input.idempotencyKey,
+  });
+
+  if (!deployment) {
+    return null;
+  }
+
+  const [row] = await db
+    .select({
+      agent: agents,
+      config: agentConfigs,
+      telegramBotId: agentSecrets.providerSubjectId,
+      telegramUsername: agentSecrets.providerUsername,
+    })
+    .from(agents)
+    .innerJoin(agentConfigs, eq(agentConfigs.agentId, agents.id))
+    .leftJoin(
+      agentSecrets,
+      and(
+        eq(agentSecrets.agentId, agents.id),
+        eq(agentSecrets.kind, "telegram_bot_token"),
+        eq(agentSecrets.status, "active"),
+      ),
+    )
+    .where(
+      and(
+        eq(agents.id, deployment.agentId),
+        eq(agents.userId, input.userId),
+        isNull(agents.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!row) {
+    return null;
+  }
+
+  const model = getApprovedOpenRouterModel(row.config.modelName);
+
+  if (!model || row.config.modelProvider !== "openrouter" || !row.telegramBotId) {
+    throw new AgentPersistenceError();
+  }
+
+  return toReadyCreatedAgentResponse({
+    agent: row.agent as CreatedAgentRow,
+    deployment,
+    model,
+    telegramBot: {
+      botId: row.telegramBotId,
+      username: row.telegramUsername,
+    },
+  });
+}
+
+function toReadyCreatedAgentResponse(input: {
+  agent: CreatedAgentRow;
+  deployment: AgentDeploymentDto;
+  model: OpenRouterModelMetadata;
+  telegramBot: TelegramBotMetadata;
+}): ReadyCreatedAgentResponse {
+  const stoppedResponse = toCreatedAgentResponse(input.agent);
+
+  return {
+    agent: {
+      ...stoppedResponse.agent,
+      desiredStatus: "running",
+      model: {
+        provider: "openrouter",
+        id: input.model.id,
+        displayName: input.model.displayName,
+        contextTokens: input.model.contextTokens,
+      },
+      telegramBot: {
+        id: input.telegramBot.botId,
+        username: input.telegramBot.username,
+      },
+    },
+    deployment: input.deployment,
+  };
+}
+
+function hasControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+
+    if (code < 32 || code === 127) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isTelegramSecretUniquenessConstraint(error: unknown): boolean {
+  return hasPostgresConstraint(error, [
+    "agent_secrets_active_telegram_uniqueness_idx",
+    "agent_secrets_active_telegram_subject_idx",
+  ]);
 }
 
 function logAgentCreate(event: string, metadata: Record<string, unknown>): void {

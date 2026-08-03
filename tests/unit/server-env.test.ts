@@ -9,9 +9,35 @@ import {
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
 } from "@/src/runner-service/constants";
-import { DEFAULT_AGENTBAY_RUNNER_IMAGE, readDigitalOceanProviderConfig } from "@/src/server/env";
+import {
+  DEFAULT_AGENTBAY_RUNNER_IMAGE,
+  readDigitalOceanProviderConfig,
+  readReadyAgentCreationFlag,
+} from "@/src/server/env";
 
 describe("server-only provider environment validation", () => {
+  it("parses ready agent creation as an exact default-off lowercase flag", () => {
+    expect(readReadyAgentCreationFlag({})).toEqual({ ok: true, enabled: false });
+    expect(readReadyAgentCreationFlag({ AGENTBAY_READY_AGENT_CREATION_ENABLED: "false" })).toEqual({
+      ok: true,
+      enabled: false,
+    });
+    expect(readReadyAgentCreationFlag({ AGENTBAY_READY_AGENT_CREATION_ENABLED: " true " })).toEqual(
+      {
+        ok: true,
+        enabled: true,
+      },
+    );
+    expect(readReadyAgentCreationFlag({ AGENTBAY_READY_AGENT_CREATION_ENABLED: "TRUE" })).toEqual({
+      ok: false,
+      reason: "invalid_ready_agent_creation_flag",
+    });
+    expect(readReadyAgentCreationFlag({ AGENTBAY_READY_AGENT_CREATION_ENABLED: "yes" })).toEqual({
+      ok: false,
+      reason: "invalid_ready_agent_creation_flag",
+    });
+  });
+
   it("returns null when DigitalOcean provisioning is not configured", () => {
     expect(readDigitalOceanProviderConfig({})).toBeNull();
   });
