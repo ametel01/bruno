@@ -165,9 +165,7 @@ describe("automatic Hermes Telegram progress status", () => {
     );
     expect(automaticLedger).toContain("OpenRouter is the first supported provider");
     expect(automaticLedger).toContain("dedicated staging Telegram bot/user");
-    expect(automaticLedger).toContain(
-      "Step 8 implementation is complete and awaiting checker cycle 2 acceptance",
-    );
+    expect(automaticLedger).toContain("Step 8 is independently accepted after checker cycle 2");
     expect(automaticLedger).toContain("- [x] Step 0: Progress and Changelog Tracking Setup");
     expect(automaticLedger).toContain("- [x] Step 1: Quality Gates Setup and Baseline Evidence");
     expect(automaticLedger).toContain(
@@ -216,7 +214,7 @@ describe("automatic Hermes Telegram progress status", () => {
       "| 7. Reconcile Creation Through Ready | Complete and independently accepted after cycle 1 |",
     );
     expect(automaticLedger).toContain(
-      "| 8. Add One-Click Creation and Persisted Progress UI | Complete; checker cycle 2 pending |",
+      "| 8. Add One-Click Creation and Persisted Progress UI | Complete and independently accepted after cycle 2 |",
     );
     expect(automaticLedger).toContain("launch-spec v3 parsing/redaction/serialization");
     expect(automaticLedger).toContain("explicit/custom YAML tags and anchors");
@@ -252,9 +250,11 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain("Full gates passed");
     expect(automaticLedger).toContain("Step validation commands and results.");
     expect(automaticLedger).toContain("Safe blocker codes, missing capabilities, and next action.");
-    expect(automaticLedger).toContain("Step 8 implementation is complete");
     expect(automaticLedger).toContain(
-      "Independent checker acceptance of the exact Step 8 product commit is required",
+      "Step 8 is independently accepted at `ef9b7fc` plus `bc38dd0`",
+    );
+    expect(automaticLedger).toContain(
+      "Step 9 should add durable desired-running runtime reconciliation",
     );
     expect(automaticLedger).not.toContain("No blocker remains for Step 3.");
     expect(automaticLedger).not.toContain("Step 4 should add managed creation configuration");

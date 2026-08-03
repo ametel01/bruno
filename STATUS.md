@@ -2,38 +2,38 @@
 
 ## Active Work
 
-- plan: `PLAN.md` Step 8 — Add One-Click Creation and Persisted Progress UI
-  owner: coordinator with Step 8 repair streams
+- plan: `PLAN.md` Step 9 — Make Desired-Running Gateways Durable
+  owner: coordinator with staged Step 9 builder streams
   branch: `main`
   worktree: `/Users/alexmetelli/source/plingpling`
-  phase: Step 8 Retry-latch repair gates green; preparing repair commit and checker cycle 2
-  cycle: checker repair 2/5
-  contract: `STATUS.archive.md` → `Step 8 Completion Contract (pre-spec)`
-  blocker: no builder blocker; independent checker cycle 2 remains required.
-  next-action: Commit the Retry-latch repair and dispatch checker cycle 2 against `ef9b7fc` plus the repair commit.
+  phase: Step 8 independently accepted; Step 9 persistence and runner-boundary implementation ready to start
+  cycle: builder 1/5
+  contract: `STATUS.archive.md` → `Step 9 Completion Contract (pre-spec)`
+  blocker: no Step 9 repository blocker; external/live capabilities remain prohibited and unnecessary.
+  next-action: Build the additive runtime ledger/state machine and strict runner durability evidence in parallel, then integrate lifecycle/triggers/presentation/smokes.
 
 ## Completion Contract
 
-- outcome: Make ready-mode creation the enabled primary path, clear browser credentials immediately, navigate to detail, and render truthful persisted deployment progress on detail, inventory, and dashboard.
-- acceptance criteria: Exact Step 4 payload and in-memory idempotency, closed safe response/presentation parsers, detail-only single-flight polling, retry/stop lifecycle convergence, owner-scoped latest snapshots, advanced manual Hermes recovery, accessible desktop/mobile states, and fake-only E2E.
-- non-goals: No schema/public DTO widening, Step 9 restart/reboot durability, Step 10 external Telegram/OpenRouter/DigitalOcean/GHCR/Vercel work, browser reconciliation, streaming, percentages, ETA, or new providers/models.
-- required gates: focused create/progress/polling/lifecycle/page/route/isolation/redaction tests; desktop/mobile fake Playwright; full format/lint/typecheck/test/build/E2E; provider-safe verify where documented; fail-closed staging; diff check.
-- risks: browser credential leakage, duplicate logical submits/retries, timer-simulated progress, stale polling regression, false ready, N+1 polling, raw error exposure, and cross-user operation joins.
-- do-not-touch: Accepted Step 4–7 creation, encryption, projection, runner, reconciler, retry/finalization/cron semantics; Step 9 durability; Step 10 external resources; historical ledgers.
+- outcome: Keep managed-v3 latest-ready desired-running agents converged to one exact ready Hermes workload across runner/Docker restarts while explicit Stop remains authoritative.
+- acceptance criteria: Separate durable runtime ledger; exact `unless-stopped` policy/restart evidence; one-effect leased reconciliation; DB-first lifecycle intent; bounded recovery/circuit and Telegram diagnostics; exact usage segmentation; safe runtime UI; local reboot smokes.
+- non-goals: No terminal deployment reopening, repeated canary, automatic provisioning/reassignment, HA/replicas, browser reconciliation, webhook deletion/getUpdates/send, token rotation, or Step 10 live/provider work.
+- required gates: generated migration plus clean/upgrade fixtures; focused concurrency/runner/runtime/lifecycle/Telegram/usage/UI/redaction tests; both local smokes; full format/lint/typecheck/test/build/CI E2E; fail-closed staging; diff check.
+- risks: stale work resurrecting stopped agents, wrong-policy reuse, restart loops, Telegram polling conflicts, usage overlap/backdating, runtime evidence leakage, and adapter rolling mismatch.
+- do-not-touch: Accepted Step 4–8 create/encryption/projection/launch/deployment/UI contracts; immutable terminal deployments; manual/native compatibility; infrastructure runner `--restart always`; Step 10 external resources.
 
 ## Dependency Graph
 
 - Step 0 → Step 1 → Step 2 → Step 3 → Step 4 → Step 5 → Step 6 → Step 7 → Step 8 → Step 9 → Step 10.
-- Step 8 is unblocked by independently accepted Steps 4–7; Steps 9–10 remain blocked on Step 8 and their explicit prerequisites.
+- Step 9 is unblocked by independently accepted Steps 4–8; Step 10 remains blocked on Step 9 plus explicit external prerequisites.
 
 ## Current Handoff
 
-- from: Step 8 builder and repair streams
-  to: coordinator final gate
+- from: Step 8 checker cycle 2
+  to: Step 9 persistence/controller and runner-boundary builders
   timestamp: 2026-08-03
-  request: Verify the converged implementation and record exact product-commit evidence.
-  evidence: Core create/poll/presentation tests passed 34 cases; lifecycle/routes passed 31; server/UI isolation/projection passed 107; responsive/accessibility passed 22 with actual 320/320 DOM width; fake-only Playwright passed 10/10 focused and 24/24 aggregate desktop/mobile CI cases with credential redaction and zero external requests.
-  stop-condition: Commit only after format, lint, typecheck, full tests, build, CI E2E, and diff check are green; do not contact external providers.
+  request: Implement the Step 9 foundations without weakening immutable deployment, desired-state, runner, Telegram, usage, or UI authority boundaries.
+  evidence: Step 8 checker cycle 2 accepted `ef9b7fc` + `bc38dd0`: 4 focused files / 66 tests, 123 files / 1,144 full tests, migration, format, lint, typecheck, build, 24 CI E2E, and fail-closed staging.
+  stop-condition: Return with migration/state and runner-contract focused gates green; no lifecycle integration before durable helpers exist, no external request, no tracker/changelog edit, and no commit.
 
 ## Gates
 
@@ -49,10 +49,11 @@
 - Step 7 `798cbf3`: independently green after checker cycle 1 — `db:generate` no drift, `db:migrate` twice, focused changed-unit 21 files / 306 tests, full 116 files / 1,065 tests, local duplicate-trigger cloud smoke through ready, real local Hermes controller smoke, build, 14 CI E2E, and fail-closed staging with no effects.
 - Step 8 candidate: builder/coordinator gates green — focused create/poll/presentation 34 tests, lifecycle/routes 31, server/UI 107, responsive/accessibility 22, full 123 files / 1,142 tests, production build, 24/24 fake-only desktop/mobile CI E2E with exact 320px layout, redaction, and zero external requests, plus fail-closed staging with `sideEffectsAttempted: false`; independent checker pending.
 - Step 8 `ef9b7fc`: checker cycle 1 reproduced every automated gate but found one semantic Retry latch race in the progress card. The cycle 2 repair adds a pre-UUID/pre-fetch synchronous latch plus same-turn regression; 44 focused tests, 123 files / 1,144 full tests, build, 24/24 CI E2E, and fail-closed staging are green.
+- Step 8 `ef9b7fc` + `bc38dd0`: independently green after checker cycle 2 — 4 focused files / 66 tests, 123 files / 1,144 full tests, migration, build, 24/24 desktop/mobile CI E2E, and fail-closed staging with no side effects.
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling` — branch `main`; shared Step 8 implementation tree; `STATUS.md` is coordinator-owned; external actions remain prohibited.
+- `/Users/alexmetelli/source/plingpling` — branch `main`; shared Step 9 implementation tree; `STATUS.md` is coordinator-owned; external actions remain prohibited.
 
 ## Decisions And Lessons
 
@@ -71,3 +72,4 @@
 - Step 5 — `fe13ab9` + `d50cc4e` + `4f8312d` — independently accepted managed launch-spec v3, owner-scoped secret launch building, hardened strict YAML/env/filesystem projection, v2/manual compatibility, and fake-provider/Telegram local smoke coverage.
 - Step 6 — `4e2897a` + `fa677fb` — independently accepted asynchronous runner launch/status/canary behavior, cancellation, lifecycle evidence, and nonblocking credential reads.
 - Step 7 — `798cbf3` — independently accepted durable automatic create-to-ready reconciliation, safe retry/cron/triggers, provider idempotency, one canary, final ready/usage boundary, and local-only smoke coverage.
+- Step 8 — `ef9b7fc` + `bc38dd0` — independently accepted credential-complete one-click ready creation, persisted progress, safe lifecycle/read projections, fake-only desktop/mobile acceptance, and synchronous retry latching.
