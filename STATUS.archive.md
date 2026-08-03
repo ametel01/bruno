@@ -3156,3 +3156,525 @@ Status: ALL GREEN
     streaming progress, poll every inventory row, expose additional models, or
     claim Step 9/10 durability is a compatibility/security/product decision that
     requires coordinator/user approval before implementation.
+
+## Step 9 Completion Contract (pre-spec)
+
+- issue/readiness:
+  - `PLAN.md` Step 9, “Make Desired-Running Gateways Durable.”
+  - Classification: `blocked`. Do not assign Step 9 implementation until Steps
+    4, 5, 6, 7, and 8 each have the prescribed exact product commit and an
+    independent checker acceptance. Step 4 currently has candidate product
+    commit `d942270` plus an active checker-repair cycle; Steps 5–8 are archived
+    dependency-blocked contracts. Before implementation, re-read the accepted
+    Step 4–8 code/checker evidence and adapt private helper/table names only;
+    do not weaken their credential, projection, runner, deployment, retry,
+    desired-state, or UI contracts.
+- outcome and authority boundary:
+  - Keep every non-deleted managed-v3 agent whose latest deployment is `ready`
+    and whose `desiredStatus` is `running` converged to one exact selected
+    Hermes container and a fresh exact runner observation: pinned image,
+    launch-spec/config revision, projected marker, private runtime, gateway and
+    API server ready, and required Telegram platform connected.
+  - Recover automatically after runner-process restart, Docker/container
+    restart, a missing/exited selected workload, or a bounded transient
+    gateway/platform regression. An explicit Stop remains authoritative across
+    every runner/Docker restart. Runtime repair is level-triggered and survives
+    lost HTTP responses, cron callbacks, heartbeats, and control-plane process
+    restarts without duplicating containers, usage periods, or events.
+  - Step 7 deployment rows remain terminal and immutable. Never reopen a
+    `ready` deployment or reuse its lease/stage fields as a runtime controller.
+    Step 9 adds a separate one-row-per-agent runtime state machine; Step 8 reads
+    desired/observed runtime truth without turning browser polling into a
+    trigger. Step 10 alone owns real message/reply acceptance and hosted rollout.
+- exact Docker restart-policy contract:
+  - Managed v3 selected-agent `docker run` arguments include exactly
+    `--restart unless-stopped`. Docker inspect evidence must expose
+    `HostConfig.RestartPolicy.Name === "unless-stopped"` and
+    `MaximumRetryCount === 0`. Add the restart policy and bounded integer
+    `RestartCount` to the typed runner observation; unknown/missing/negative/
+    oversized values map to safe unknown evidence and never to ready.
+  - Restart policy is part of the Step 6 “exact target” definition for managed
+    v3 only. A pre-Step-9 selected container with `no`, `always`, `on-failure`,
+    incomplete, or malformed policy evidence is stale. Desired-running
+    convergence replaces it once through the accepted stop/remove/start path,
+    preserving the exact `/opt/data` and `/workspace` state roots. Do not use
+    `docker update` as an untracked mutation and do not preserve a wrong-policy
+    container merely because it is currently running.
+  - `unless-stopped` is not a substitute for desired state. Stop persists
+    desired stopped and invalidates runtime work before contacting the runner;
+    runner Stop then manually stops every selected workload. Start/Resume
+    persists desired running before scheduling convergence. Delete invalidates
+    runtime work before accepted Step 6 cleanup. No stale inspect, start,
+    restart, or health result may reverse these database decisions.
+  - Do not set `always`, because it can resurrect an intentionally stopped
+    workload after daemon restart. Do not use unbounded `on-failure` or hide a
+    crash loop behind Docker policy. When a restart loop opens the control-plane
+    circuit, issue one idempotent runner Stop so `unless-stopped` cannot keep
+    recycling the workload; desired intent remains running and the observed
+    agent becomes error until an explicit owner Start/Restart resets the circuit.
+  - Preserve the cloud runner container's existing reviewed `--restart always`
+    bootstrap behavior; it is infrastructure, not a selected-agent workload.
+    Preserve legacy/bodyless/native-manual and local-process adapter behavior.
+    Never add selected-agent policy assertions to unrelated runner containers.
+- additive durable runtime state and migration:
+  - Generate the next additive migration after accepted Step 7. Add a server-
+    only `agent_runtime_reconciliations` table with composite owner foreign key
+    and exactly one row per agent. Its durable fields are: `agent_id` primary
+    key, `user_id`, `state`, monotonic nonnegative `generation`, exact
+    `config_revision`, nullable validated runner `operation_id`, nonnegative
+    `attempt_count`, nonnegative `recovery_count`, nullable
+    `recovery_window_started_at`, nullable `stable_since`, nullable
+    `telegram_non_connected_since`, nullable `last_restart_count`, nullable
+    `last_observed_at`, nullable `last_ready_at`, nullable safe `error_code`,
+    nullable `next_attempt_at`, paired `lease_owner`/`lease_expires_at`, nullable
+    `circuit_opened_at`, and created/updated timestamps.
+  - `state` is exactly `observing | recovering_stop | recovering_start |
+    verifying | stopping | stopped | circuit_open`. Database checks enforce:
+    desired work fields/leases occur only where meaningful; `circuit_open`
+    requires circuit timestamp plus safe error and has no automatic next
+    attempt; `stopped` has no lease/backoff/error; operation UUID is present
+    only for `verifying|observing`; counters are bounded nonnegative integers;
+    timestamps are ordered; and error codes use the repository safe-code form.
+  - Add a due/expired-lease partial index over `next_attempt_at`, lease expiry,
+    and updated time for all states except `stopped|circuit_open`. Keep owner/
+    agent uniqueness and the accepted Step 7 partial unique open-usage index as
+    database authorities. Runtime rows, generations, leases, counters, runner
+    operation IDs, restart counts, and error detail never enter public DTOs.
+  - Step 7 final ready transaction inserts/upserts `observing`, generation 0,
+    its exact config revision and runner operation ID, `stable_since`/last-ready
+    at finalization, and a due observation. A duplicate finalization converges
+    on the same row and cannot reset a newer generation. Managed Start/Restart,
+    Stop, Delete, secret/config revision change, and runner reassignment update
+    the row transactionally through narrow helpers rather than raw SQL in routes.
+  - Migration backfill creates due `observing` rows only for non-deleted,
+    desired-running agents whose latest deployment is exactly `ready` and has
+    accepted Step 7 runtime correlation. Desired-stopped rows backfill as
+    `stopped` only when needed for lifecycle compatibility. Manual agents,
+    agents without a ready deployment, latest-terminal-failed deployments, and
+    ambiguous/malformed legacy evidence are not made automatically runnable.
+    Backfill is idempotent and must not update desired state, open usage, emit
+    events, contact a runner, or infer operation/revision evidence.
+- runtime claim, scheduling, and side-effect budget:
+  - Add a server-only runtime reconciler with global and trusted runner/agent-
+    targeted claim methods. A call claims at most one due row via
+    `FOR UPDATE SKIP LOCKED`, increments `attempt_count` once, performs at most
+    one bounded external action or observation, applies one guarded result, and
+    returns. It never loops over agents/stages or performs stop plus start plus
+    readiness in one invocation.
+  - Reuse Step 7's validated `reconcile:<uuid>` owner form, 90,000-ms lease,
+    45,000-ms total action deadline, remaining-deadline abort propagation, and
+    no external call inside a database transaction. Post-result mutation must
+    compare agent/user, runtime generation, lease owner/unexpired lease,
+    expected state, desired state, non-deleted row, assigned runner, config
+    revision, latest ready deployment, and expected operation where applicable.
+    A loser discards its result; runner convergence remains idempotent.
+  - Healthy `observing` schedules the next observation in 60 seconds. Safe
+    transient runner/transport/health uncertainty uses deterministic 15s, 30s,
+    60s, 2m, then 5m capped backoff without sleeping or extending an expired
+    lease. A runner heartbeat/registration may make one assigned due row
+    immediately eligible, but cannot erase a circuit or desired stop.
+  - Add a separately authenticated force-dynamic/no-store
+    `GET /api/internal/agent-runtime/reconcile` once-per-minute Vercel cron using
+    the accepted Step 7 exact `CRON_SECRET` parser, digest comparison, constant
+    401/503 failures, no body/query controls, and one-row budget. Success is
+    exactly `{ok:true,processed:0|1,outcome:"idle"|"observed"|"recovering"|
+    "stopped"|"circuit_open"}` with no IDs or internal evidence. Do not weaken
+    or overload the deployment cron response contract.
+  - After an authenticated heartbeat commits, schedule at most one post-response
+    targeted runtime reconciliation for an assigned due row, after any Step 7
+    deployment kick. Heartbeat JSON does not accept workload/agent/deployment
+    IDs and need not grow a user-controlled workload list; the control plane
+    selects one owned assignment. Runner registration, managed Start/Restart,
+    and Step 7 finalization use the same lossy targeted scheduling seam. Cron is
+    the durability boundary when callbacks are dropped.
+- exact observation and state transitions:
+  - `observing` performs one accepted Step 9 runner status request. Exact ready
+    plus matching operation/revision/policy resets transient errors, updates
+    last-observed/last-ready, and begins or continues `stable_since`. After 15
+    continuous minutes exact-ready, reset recovery count/window and the Docker
+    restart-count baseline. Ensure one open usage period exists using the Step 7
+    unique index; do not emit repeated ready/recovered events on unchanged polls.
+  - An exact container that is running/restarting but whose gateway/platform is
+    still inside a bounded grace period stays non-ready and schedules another
+    observation. First proof that the workload is absent, stopped, terminal,
+    revision/policy mismatched, or no longer application-ready closes the open
+    usage period at the control-plane observation time and clears `stable_since`.
+    Do not backdate from an untrusted runner/Hermes clock or keep billing through
+    an observed outage.
+  - Missing/terminal/mismatched target with recovery budget remaining moves to
+    `recovering_start`; a running exact target with unhealthy gateway/API/
+    Telegram moves to `recovering_stop` so a later invocation deliberately
+    stops it before a new start. Set observed agent `restarting` and one fixed
+    safe reason in the same transaction. One invocation never performs both
+    phases.
+  - `recovering_stop` makes one accepted Step 6 idempotent Stop/cancel call. A
+    confirmed stopped/absent snapshot advances to `recovering_start`; transport
+    ambiguity remains in the same state with backoff. `recovering_start` first
+    rebuilds the accepted managed v3 spec, proving current active secrets and
+    capacity, then calls one Step 6 start convergence. Typed acceptance stores
+    the operation and advances to `verifying`; exact compatibility-ready may
+    advance to `observing` only through the same final ready helper.
+  - `verifying` performs one correlated status observation. Exact ready returns
+    to `observing`, sets observed agent running with fixed “Hermes gateway is
+    ready.” copy, opens one new usage segment, and emits one recovery-completed
+    event for that generation. Starting/transient stays verifying with backoff;
+    terminal/mismatch consumes another bounded recovery or opens the circuit.
+    Do not rerun the Step 7 model canary for ordinary runtime recovery; preserve
+    the already-passed immutable deployment evidence and require exact current
+    gateway/API/Telegram readiness instead.
+  - Any state seeing desired stopped moves to `stopping`, increments generation,
+    clears automatic recovery/circuit fields, and performs no start. `stopping`
+    keeps making one bounded idempotent Stop per due claim until a typed absent/
+    stopped snapshot is observed, then closes usage and becomes `stopped` with
+    observed agent stopped. Runner unavailability slows to five-minute retries
+    after the normal backoff but does not change desired state or reopen work.
+  - `stopped` plus an explicit authenticated Start/Resume sets desired running,
+    increments generation, resets the circuit/recovery window, and becomes
+    `recovering_start`. An explicit managed Restart does the same but enters
+    `recovering_stop`; it is the only force-recycle path for an exact healthy
+    managed target. Existing manual/native lifecycle stays synchronous and
+    compatible. A Step 7 latest failed deployment requires its explicit Retry,
+    not runtime Start/Restart resurrection.
+  - Delete increments generation/clears the runtime lease before Step 6 cleanup
+    and leaves no due runtime work. Runner reassignment or managed config/secret
+    replacement increments generation and requires a new exact revision before
+    automatic start. A revoked/missing/undecryptable required secret opens the
+    circuit without a runner call; replacement alone does not silently reset it
+    unless the accepted route explicitly schedules an owner-visible Restart.
+- bounded restart/recovery circuit breaker:
+  - Define `MAX_AUTOMATIC_RUNTIME_RECOVERIES = 3`,
+    `RUNTIME_RECOVERY_WINDOW_MS = 15 minutes`, and
+    `RUNTIME_STABILITY_RESET_MS = 15 minutes`. Count a recovery exactly once
+    when a generation first enters a stop/start recovery, not once per claim or
+    transport retry. A fourth required automatic recovery within the same
+    window opens `circuit_open` instead of contacting start/restart again.
+  - Track Docker `RestartCount` deltas in the same rolling window. Three or more
+    daemon-policy restarts observed before 15 stable ready minutes immediately
+    open the circuit, even if the latest snapshot happens to be running. A newly
+    created replacement container resets the raw count baseline but not the
+    control-plane recovery window. Malformed/overflowed restart counts are
+    unknown evidence and cannot reset the breaker.
+  - Opening the circuit atomically sets observed agent `error`, closes usage,
+    clears lease/next attempt, stores only an allowlisted code, timestamps the
+    circuit, and emits exactly one circuit/error event for that generation. It
+    then makes at most one separately claimed idempotent Stop; if Stop cannot be
+    confirmed, keep safe cleanup-required state for operator/cron stop attempts
+    without ever auto-starting. No timer or heartbeat resets a circuit.
+  - Only authenticated owner Start/Restart, an explicit Step 7 deployment Retry
+    when applicable, or deletion changes a circuit. Start/Restart shows fixed
+    warning copy that automatic recovery was paused and begins a new generation.
+    A fresh generation does not delete historical events/usage or reset Docker
+    evidence before a new exact observation.
+- Telegram polling, webhook-conflict, and failure hardening:
+  - Preserve Step 5's single managed Telegram polling configuration and Step 4's
+    stable active-token/subject uniqueness, which prevent two active plingpling
+    agents from owning one bot. Do not add webhook mode, a browser Telegram
+    probe, `getUpdates`, a second poller, token rotation, or automatic BotFather
+    action. Never infer that database uniqueness excludes an external poller.
+  - Version the Step 6 runner status contract for an adapter-first rolling
+    upgrade and extend only Telegram observation to retain exact safe Hermes
+    states `connecting | connected | disconnected | retrying | fatal | paused |
+    disabled | unknown`. Add fixed readiness reasons for retrying/fatal/paused;
+    raw Hermes error/exit text remains ignored. The new adapter accepts old v2
+    snapshots conservatively; old `failed`/`disconnected` is non-ready and
+    missing durability evidence is never ready for Step 9 purposes.
+  - `connecting|disconnected|retrying|unknown` starts one durable
+    `telegram_non_connected_since` timer. Before two continuous minutes it is a
+    transient observation. At two minutes, or immediately for `fatal|paused`,
+    close usage, surface a fixed safe Telegram-unavailable state, and begin one
+    bounded recovery if the breaker allows. A connected observation clears the
+    timer only after full exact readiness; it does not erase recovery history.
+  - Before the first Telegram-driven recycle in a generation, use a server-only
+    injected `getWebhookInfo` diagnostic built on Step 4's fixed Telegram-origin,
+    token-encoded, redirect-error, 5-second abort, streamed 16-KiB ceiling and
+    strict JSON/plain-record seam. Decrypt the active token outside every DB
+    transaction, parse only whether `ok === true` and `result.url` is empty or
+    nonempty, then release it. Never retain, return, log, hash, or persist the
+    URL, response, token, headers, counts, certificate, IP, or upstream error.
+  - A nonempty webhook opens the circuit with exact safe code
+    `telegram_webhook_conflict`; never call `deleteWebhook` automatically,
+    because that may disrupt another user-owned integration. UI copy tells the
+    owner to remove the bot's webhook/other integration and explicitly Restart.
+    Diagnostic failure is transient and bounded; it is not evidence that no
+    webhook exists and is never permission to recycle repeatedly.
+  - If `getWebhookInfo` proves no webhook but Telegram remains fatal/retrying
+    after three bounded recoveries, open the circuit with generic
+    `telegram_polling_conflict_or_unavailable`. Do not call `getUpdates` to
+    distinguish an external long poller, consume an update, expose a bot/user
+    identity, or compete with Hermes. A historical ready deployment must never
+    keep UI status ready while current Telegram is non-connected/circuit-open.
+- runner unavailability, capacity, and terminal exclusions:
+  - A fresh authenticated runner heartbeat only schedules observation. A stale/
+    offline/degraded runner or failed transport never proves a workload stopped,
+    but after the accepted 90-second heartbeat staleness threshold it makes the
+    current ready display unavailable/error, closes the observed usage interval
+    at control-plane detection time, and retries with bounded backoff. Returning
+    heartbeat causes immediate re-observation; it does not itself mark running.
+  - Do not start/restart on a deleted or desired-stopped agent; foreign/unowned
+    runner; latest terminal-failed or active deployment; revoked/missing secret;
+    invalid projection/revision; inactive/unregistered/stale runner; or runner
+    whose accepted capacity evidence cannot fit the assignment. Capacity wait
+    is a safe non-starting retry state and cannot choose/provision a replacement
+    runner in Step 9. Reassignment/provisioning remains an explicit operator or
+    future capacity workflow, not silent billable recovery.
+  - If an exact managed container remains ready on an over-capacity runner,
+    observe it without creating another container. Capacity blocks only a new
+    start/replacement. Unknown failure codes become `runtime_internal_failure`
+    and consume the bounded circuit policy; they never pass through raw detail.
+- usage, events, public status, and UI compatibility:
+  - Usage reflects observed ready intervals. Keep the existing open period
+    continuous while every collected observation remains exact ready, including
+    a runner-service process restart that did not interrupt the workload. Close
+    it once at the first control-plane observation of non-ready, restart,
+    stopping, stale-runner, circuit, or deletion. Reopen once at the next exact
+    ready transaction. Never overlap periods, create a row per healthy poll, or
+    rewrite/backdate historical periods.
+  - Runtime transitions emit at most one each per generation:
+    `agent.runtime_recovery_requested`, `agent.runtime_recovered`, and
+    `agent.runtime_circuit_opened`, while preserving accepted start/stop/restart
+    request/completion compatibility. Fixed event metadata may contain only
+    prior/new observed status, safe reason code, recovery count, desired state,
+    and booleans `cleanupRequired`/`telegramRequired`. Exclude runtime row ID,
+    generation/lease, runner operation/container/restart count, revision,
+    runner/provider IDs, bot/user/webhook data, endpoints, secrets, and raw
+    observations.
+  - Keep the Step 3/7 deployment DTO and terminal `ready` record unchanged.
+    Extend owner-scoped agent/list/detail DTOs only with a closed, safe runtime
+    presentation if Step 8 cannot derive it from desired/observed status:
+    `healthy | recovering | stopping | intentionally_stopped | attention_required |
+    unavailable`, plus fixed safe action. Never expose counters, timestamps that
+    reveal runner activity, or internal error detail. Historical deployment
+    ready plus current runtime non-ready maps conservatively, never to Ready.
+  - Managed Stop returns after desired stopped is durable and runner stop is
+    accepted, but UI says “Stopping” until an authoritative stopped/absent
+    observation. Managed Start/Restart returns truthful HTTP 202 accepted runtime
+    convergence and UI follows owner-scoped persisted state. Preserve manual
+    201 agents, native Hermes setup, legacy/local synchronous route unions, and
+    Step 8 accessibility/detail-only polling behavior.
+- safe errors, redaction, isolation, and external-effect rules:
+  - Use a closed runtime code map including only categories such as
+    `runtime_runner_unavailable`, `runtime_container_absent`,
+    `runtime_container_terminal`, `runtime_revision_mismatch`,
+    `runtime_restart_policy_mismatch`, `runtime_gateway_unhealthy`,
+    `runtime_api_server_unhealthy`, `runtime_telegram_unhealthy`,
+    `telegram_webhook_conflict`, `telegram_polling_conflict_or_unavailable`,
+    `runtime_secret_unavailable`, `runtime_capacity_blocked`,
+    `runtime_recovery_exhausted`, `runtime_stop_unconfirmed`, and
+    `runtime_internal_failure`. Public messages are fixed constants; raw reason,
+    stderr, inspect, health, Telegram, fetch, filesystem, or exception text is
+    never persisted/interpolated.
+  - All claims select composite owner/agent/runner/deployment context from the
+    database. Cron, heartbeat callbacks, and runner responses cannot supply a
+    user ID or redirect work to another agent/runner. No development-user
+    resolver appears in protected routes. Cross-user status, lifecycle, and
+    runtime reads remain concealed under accepted route behavior.
+  - Apply the shared redaction corpus before bounded operational logs as defense
+    in depth, but never pass launch specs, projected env/config, API/OpenRouter/
+    Telegram/runner/cron credentials, allowlists/bot IDs, stable/public
+    fingerprints, private URLs, webhook values, Docker inspect/names/IDs,
+    provider data, model text, idempotency keys, lease/generation, or upstream
+    bodies/errors into a formatter, event, route response, UI, progress, or
+    changelog in the first place.
+  - Step 9 implementation/tests use injected fake Telegram diagnostics and
+    local runner/Docker/provider seams only. It does not contact real Telegram,
+    OpenRouter, DigitalOcean, GHCR, Vercel, or a hosted database; does not read
+    `.env.local`; does not publish/deploy; and does not mutate flags, secrets,
+    webhooks, billable resources, or external polling state.
+- required semantic and adversarial tests:
+  - Real PostgreSQL separate-connection tests cover global/targeted
+    `SKIP LOCKED` claim races, one row per agent, generation/lease result discard,
+    desired-stop/delete precedence at every external barrier, stale lease,
+    heartbeat/cron/manual-trigger collision, one action per call, backoff, and
+    terminal-ready deployment immutability.
+  - Migration tests cover clean install, accepted Step-8 upgrade twice,
+    due-managed-ready backfill, desired-stopped/manual/latest-failed exclusion,
+    malformed legacy evidence fail-closed, constraints/indexes, and no events,
+    usage, desired-state mutation, or external calls during backfill.
+  - Docker/runner tests cover exact `unless-stopped` argv/inspect, zero maximum
+    retry count, all wrong/missing policies, old v2 compatibility, adapter-first
+    rollout, RestartCount bounds/deltas, duplicate exact containers, pre-Step-9
+    replacement, process crash auto-restart, runner process restart, selected
+    workload absence/exit/mismatch, and never touching infrastructure/foreign/
+    legacy containers.
+  - State-machine fake-clock tests cover every state/transition, 60-second
+    healthy cadence, transient backoff, one-effect budget, stop then start split,
+    accepted/verifying/ready, recovery-count/window/stability resets, fourth-
+    recovery circuit, three policy restarts, explicit circuit reset, capacity/
+    secret blocks, stale heartbeat recovery, terminal-failed exclusion, and no
+    automatic provider provisioning.
+  - Usage/event tests prove continuous periods across observation-only and
+    runner-service restarts, segmentation across every observed outage/recovery,
+    one open period under concurrent finalization, idempotent closure, no
+    repeated events on healthy polls/retries, one circuit alert, and no secret/
+    internal metadata.
+  - Telegram tests cover every exact platform state, two-minute grace, fatal/
+    paused immediate handling, timer persistence across process restart,
+    connected reset, bounded recycle, strict bounded `getWebhookInfo`, empty/
+    nonempty/malformed/oversized/slow/redirect/hostile responses, no automatic
+    `deleteWebhook`, no `getUpdates`, external-poller generic circuit, and total
+    token/URL/bot/user/body/error redaction. No real Telegram request.
+  - Lifecycle/UI/route tests cover managed Stop durable-before-runner and
+    “Stopping” until observed, Start/Restart generation reset and truthful 202,
+    multiple-tab races, deletion, no historical-ready display during outage/
+    Telegram failure/circuit, owner concealment, manual/native compatibility,
+    and detail-only bounded observation without browser orchestration.
+  - Redaction canaries cover four managed secrets, cron/runner bearer,
+    Telegram bot/user/webhook, uniqueness/public fingerprints, config revision,
+    runner operation/container/restart data, private endpoints, Docker output,
+    provider/model content, lease/generation/idempotency, and exception/body
+    text across success, stop, recovery, stale result, circuit, logs, events,
+    DTOs, HTML/hydration, errors, progress, and test artifacts.
+- smoke scenarios and required gates:
+  - Extend `agent:hermes:contract-smoke` with the accepted managed v3 image on
+    the private network: assert `unless-stopped`, kill the Hermes process and
+    prove Docker policy recovery is observed, restart the local runner service,
+    preserve state/revision, force a selected-container absence and prove one
+    stop/start recovery, verify no duplicate, then Stop and prove it remains
+    stopped across runner/container restart attempts. Keep fake model/Telegram
+    state and never claim live Telegram reply.
+  - Extend the documented fake-provider `local:cloud:smoke` with simulated
+    runner reboot/heartbeat loss and return, duplicate heartbeat/cron triggers,
+    one desired-running recovery, one desired-stopped non-recovery, bounded
+    Telegram fatal/circuit behavior, correctly segmented usage, and deterministic
+    cleanup. Use no real Droplet/provider credential or billable resource.
+  - Run `bun run db:generate`; clean and accepted Step-8-upgrade
+    `bun run db:migrate` fixtures twice; focused Docker inspect/restart-policy,
+    runner status/heartbeat, runtime reconciliation, lifecycle, cron, event,
+    usage/cost, UI/isolation, Telegram diagnostic, migration, and redaction
+    tests; both local smoke scenarios; and affected Step 6–8 regressions.
+  - Run `bun run agent:hermes:contract-smoke`; documented fake
+    `bun run local:cloud:smoke`; `bun run format:check`; `bun run lint`;
+    `bun run typecheck`; `bun run test`; `bun run build`;
+    `bun run test:e2e:ci`; credential-free fail-closed
+    `bun run verify:hermes:staging`; and `git diff --check`. Run
+    `bun run verify:e2e` only with documented local/fake capabilities. Fix every
+    product-caused failure and classify only proven baseline/shared-resource
+    failures under the team protocol.
+- likely touchpoints:
+  - Persistence/controller: `src/server/db/schema.ts`, the next generated
+    `drizzle/*.sql`/snapshot/journal, new narrowly scoped
+    `src/server/agents/agent-runtime-reconciler.ts` and runtime state/error
+    helpers, accepted Step 7 finalization/trigger seams, lifecycle, events, usage
+    helpers, and owner-scoped agent presentation DTOs only as required.
+  - Runner: `src/runner-service/docker.ts`, runner status contract/parsers,
+    `src/runner-service/server.ts`, `src/server/runners/manual-runner-adapter.ts`,
+    runner adapter types, and per-agent serialization. Preserve Step 5 managed
+    projection and Step 6 private auth/probe/canary boundaries.
+  - Triggers/routes: new internal runtime cron route, `vercel.json`, heartbeat/
+    registration post-response scheduling, and managed start/restart/stop/delete
+    routes through internal lifecycle helpers. Reuse the accepted cron auth
+    module rather than duplicating secret parsing.
+  - Telegram/UI/smoke/tests: a strict server-only webhook-diagnostic method in
+    the accepted Telegram client module, Step 8 runtime presentation/lifecycle
+    components, `scripts/smoke-local-hermes-contract.ts`,
+    `scripts/smoke-local-cloud.ts`, and focused new runtime/migration/restart/
+    Telegram tests plus affected runner/lifecycle/usage/UI/E2E suites.
+- non-goals / do not touch:
+  - No Step 10 real Telegram message/reply, real OpenRouter model call, real
+    DigitalOcean spend/reboot, GHCR publish/scan, Vercel deploy/secret/cron/flag
+    mutation, hosted rollout, or production acceptance. Local/fake evidence is
+    not recorded as live success.
+  - No new deployment stage, reopening/mutating terminal deployment, repeated
+    model canary, automatic runner provisioning/reassignment, cross-runner live
+    migration, failover, high availability, multi-container replicas, queue/
+    Redis/workflow dependency, WebSocket/SSE, browser reconciler, or inventory-
+    row polling fan-out.
+  - No automatic `deleteWebhook`, BotFather automation, `getUpdates`, Telegram
+    send, token rotation/reveal, webhook support, group access, pairing/open
+    access, or raw polling-conflict detail. The external Telegram owner resolves
+    a webhook/other-poller conflict and explicitly resets the circuit.
+  - Do not change Step 4 create/replay/getMe/encryption/uniqueness/API contract,
+    Step 5 v3 YAML/secret projection, Step 6 acceptance/status/canary security,
+    Step 7 initial deployment/canary/retry/finalization semantics, Step 8 create/
+    progress idempotency and accessibility, the pinned Hermes image, manual 201
+    compatibility, or cloud runner infrastructure restart policy.
+- security/data/compatibility risks:
+  - Docker `unless-stopped` alone can both hide a crash loop and revive a
+    workload whose desired stop never reached the runner. Database-first Stop,
+    restart-count evidence, a durable circuit, and continued stop convergence
+    are one acceptance boundary; a run-argument assertion alone is insufficient.
+  - Reusing terminal deployment leases or an in-memory retry counter loses work
+    and bounds after process restart. A separate persisted generation/lease/
+    recovery state with post-result compare-and-set is required.
+  - Closing/opening usage from desired state or Docker process state rather than
+    exact observed application readiness misbills downtime. Conversely,
+    rewriting an old timestamp from a runner clock permits backdating. Use
+    control-plane observation transactions and the one-open-period index.
+  - Treating any Telegram non-connected state as immediate recycle can create a
+    self-amplifying polling conflict. Treating historical ready as current hides
+    delivery failure. Durable grace, webhook diagnosis, bounded stop/start, and
+    explicit circuit reset balance both risks without consuming updates.
+  - A webhook diagnostic URL embeds the bot token and its response may contain
+    an arbitrary private URL. The fixed origin, encoded token, redirect refusal,
+    bounded stream, boolean-only parser, no transactions/logging, and hostile
+    redaction tests are mandatory.
+  - Adapter/runner rolling mismatch can falsely accept a container without
+    restart-policy/Telegram-state evidence. Ship strict parser compatibility
+    first, then the runner contract, then enable the runtime cron; old evidence
+    stays unavailable rather than being treated ready.
+- progress/changelog/commit:
+  - After every required gate, mark Step 9 complete in the Automatic Ready
+    ledger with sanitized restart-policy/process/runner-reboot, desired-stop,
+    concurrency/generation, circuit, Telegram fake/webhook-conflict, usage-
+    segmentation, local-cloud, and redaction evidence. Record the exact commit
+    reference if available, set Step 10 next, preserve every historical ledger,
+    and never record IDs, policy inspect blobs, restart counts/timestamps,
+    credentials, webhook/bot/user data, endpoints, runner/provider evidence,
+    model text, raw errors, or billable/live claims.
+  - Add newest-first `Unreleased` entries: `Changed` for desired-running managed
+    Hermes recovery with bounded observation/circuit behavior, and `Fixed` for
+    intentional Stop durability across runner/Docker restart plus truthful
+    Telegram runtime regression display. Do not add changelog entries for the
+    migration, cron, tests, fakes, refactor, or validation alone, and do not
+    duplicate Step 6/7 asynchronous launch behavior.
+  - Commit exactly `feat: reconcile durable Hermes gateway state` only after
+    committed/independently accepted Steps 4–8 and every Step 9 gate passes.
+- exact repository evidence at pre-spec time:
+  - Accepted Steps 0–3 provide tracking, fail-closed capability gating, pinned
+    readiness, desired state, terminal deployment rows, leases, and concealed
+    DTOs. Step 4 candidate `d942270` adds desired-running ready creation, four
+    encrypted secrets, stable Telegram uniqueness, a pending deployment, and
+    no runner side effect; its checker repair is still active and unaccepted.
+  - Current selected Hermes run arguments have no restart policy. Inspect checks
+    image/revision/spec/mount/network/security/resources/no-port/no-socket and
+    running state but not `RestartPolicy` or `RestartCount`. Current unexpected-
+    exit reconciliation marks `starting|running|restarting` agents error and
+    logs an event; it does not consider desired state or automatically recover.
+  - Existing runner heartbeat persists bounded runner metrics/status and marks
+    stale heartbeats offline after 90 seconds. It carries no workload list and
+    current list/detail reads opportunistically reconcile Docker exits. The
+    Step 6/7 contracts replace that read-side mutation with typed one-probe
+    runner observations and durable deployment work; Step 9 must build on the
+    final accepted versions, not current private shapes.
+  - Current usage rows can represent intervals but lack the Step 7 contracted
+    one-open-period index until that migration lands. Current Hermes health
+    fixtures include Telegram `retrying` and `fatal`, but the public runner
+    readiness union collapses non-connected states. There is no durable runtime
+    breaker, webhook diagnostic, periodic ready-agent reconciliation, or
+    restart-count evidence.
+- blockers:
+  - Hard dependency: prescribed product commits plus independent checker
+    acceptance for every Step 4–8 predecessor. Step 9 cannot safely implement
+    against candidate launch/status/retry/UI schemas or assume migrations that
+    have not landed.
+  - Local gates require isolated PostgreSQL connections, Docker with restart-
+    policy support, the pinned local image, fake clocks, restartable local runner
+    service, synthetic keyring, injected fake Telegram/health/model/provider
+    seams, free ports, and deterministic cleanup. A missing capability is a
+    recorded blocker, not authority to use a developer/global daemon
+    destructively, contact a real service, weaken concurrency/security evidence,
+    or claim the smoke passed.
+  - No real provider key, bot/test user, funded model key, DigitalOcean budget,
+    published image, hosted cron secret, deployment permission, or rollout flag
+    is required or authorized for Step 9. Those remain Step 10 prerequisites.
+- open questions:
+  - None behavior-blocking after exact Step 4–8 acceptance. This pre-spec fixes
+    the separate runtime-state boundary, `unless-stopped` inspect semantics,
+    database-first Stop, one-effect reconciliation, recovery/stability bounds,
+    circuit reset authority, Telegram grace/webhook diagnosis/no-delete policy,
+    actual-observation usage segmentation, safe public state, rolling order,
+    and local-only gates. Any request for automatic webhook deletion, repeated
+    canaries, silent runner replacement/provisioning, a different restart policy
+    or recovery bound, browser-driven reconciliation, raw error display, or live
+    external validation is a product/security/billing compatibility decision
+    requiring coordinator/user approval before implementation.
