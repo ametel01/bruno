@@ -80,3 +80,48 @@ With the default `digitalocean` mode, the full suite may create and delete billa
 For local Docker validation, set `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE=local_docker` and prepare the repository's local cloud-runner stack and its required runner token, image, endpoint, container, and Docker prerequisites. The same provider parser validates local-mode settings before Playwright starts.
 
 An unconfigured or invalid full-suite run exits once with the sanitized capability message before any browser or provider-backed scenario begins. This fail-fast result does not replace provider-backed acceptance: use `test:e2e:ci` for the credential-free CI surface and run `test:e2e` whenever full provider capability is available and required.
+
+## Capability-gated Hermes staging acceptance
+
+Run:
+
+```bash
+bun run verify:hermes:staging
+```
+
+This command is the single entrypoint for the final live Hermes plus Telegram
+acceptance smoke. In the current Step 1 implementation it is a fail-closed
+capability preflight only: it performs no network, Docker, browser, database,
+provider, Droplet, or Telegram send side effects, and it exits nonzero even
+when every capability is configured because the live executor is added only
+after the automatic-ready deployment path exists.
+
+The preflight requires these capability names:
+
+- `AGENTBAY_HERMES_STAGING_PUBLISHED_IMAGE_REF`: scanned GHCR release-candidate
+  Hermes workload image with an immutable `@sha256:` digest. This must be the
+  published/scanned artifact, not the upstream Nous source image digest.
+- `AGENTBAY_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION`: exact value
+  `authorize-basic-4usd-digitalocean-staging`.
+- `AGENTBAY_DIGITALOCEAN_TOKEN`: DigitalOcean staging token for the approved
+  account.
+- `AGENTBAY_RUNNER_BEARER_TOKEN`: staging runner command bearer credential.
+- `AGENTBAY_HERMES_STAGING_OPENROUTER_API_KEY`: funded OpenRouter key used only
+  for the bounded model canary.
+- `AGENTBAY_HERMES_STAGING_TELEGRAM_BOT_TOKEN`: dedicated staging Telegram bot
+  token. Do not reuse a bot that is active elsewhere.
+- `AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_USER_ID`: numeric allowed Telegram test
+  user identifier.
+- `AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID`: numeric Telegram chat
+  identifier for the live smoke.
+- `AGENTBAY_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION`: exact value
+  `send-telegram-and-spend-digitalocean-staging`.
+
+The command reports only capability names, configured/missing/malformed state,
+safe reason codes, and `sideEffectsAttempted: false`. It must never print raw
+credentials, Telegram tokens, Telegram user or chat IDs, private endpoints,
+provider responses, or serialized environment objects. A missing, blank,
+placeholder, malformed, or non-exact sentinel value is a blocker, not a passing
+smoke. The later live run may create billable DigitalOcean resources and send a
+Telegram message only after the explicit authorization and confirmation values
+above are present.

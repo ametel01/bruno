@@ -165,9 +165,9 @@ describe("automatic Hermes Telegram progress status", () => {
     );
     expect(automaticLedger).toContain("OpenRouter is the first supported provider");
     expect(automaticLedger).toContain("dedicated staging Telegram bot/user");
-    expect(automaticLedger).toContain("Step 0 is complete.");
+    expect(automaticLedger).toContain("Step 1 is complete.");
     expect(automaticLedger).toContain("- [x] Step 0: Progress and Changelog Tracking Setup");
-    expect(automaticLedger).toContain("- [ ] Step 1: Quality Gates Setup and Baseline Evidence");
+    expect(automaticLedger).toContain("- [x] Step 1: Quality Gates Setup and Baseline Evidence");
     expect(automaticLedger).toContain(
       "- [ ] Step 2: Align Readiness With the Pinned Hermes Contract",
     );
@@ -192,10 +192,15 @@ describe("automatic Hermes Telegram progress status", () => {
       "- [ ] Step 10: Final Acceptance, Documentation, and Controlled Rollout",
     );
     expect(automaticLedger).toContain("| 0. Progress and Changelog Tracking Setup | Complete |");
+    expect(automaticLedger).toContain(
+      "| 1. Quality Gates Setup and Baseline Evidence | Complete |",
+    );
+    expect(automaticLedger).toContain("`bun run verify:hermes:staging` exited nonzero");
+    expect(automaticLedger).toContain("`CHANGELOG.md` unchanged");
     expect(automaticLedger).toContain("Step validation commands and results.");
     expect(automaticLedger).toContain("Safe blocker codes, missing capabilities, and next action.");
-    expect(automaticLedger).toContain("No blocker remains for Step 0.");
-    expect(automaticLedger).toContain("Step 1 must establish `bun run verify:hermes:staging`");
+    expect(automaticLedger).toContain("No blocker remains for Step 1.");
+    expect(automaticLedger).toContain("Step 2 should update pinned Hermes readiness parsing");
     expect(changelog).toContain("# Changelog");
     expect(changelog).toContain("Keep a Changelog");
     expect(changelog).toContain("## [Unreleased]");

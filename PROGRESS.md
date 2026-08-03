@@ -451,15 +451,18 @@ the existing `Added`, `Changed`, `Fixed`, or `Security` sections as applicable.
 
 ### Current Status
 
-Step 0 is complete. The automatic-ready execution ledger is initialized with
-the full Step 0-10 checklist, conflict assumptions, evidence fields, blockers,
-status, and next action. Step 1 is next: add the fail-closed live Hermes staging
-acceptance gate and record pre-implementation baseline evidence.
+Step 1 is complete. The repository now has a fail-closed
+`verify:hermes:staging` entrypoint that records named staging capabilities,
+requires exact DigitalOcean spend and live-side-effect sentinels, rejects
+missing, blank, placeholder, malformed, tag-only, and source-pinned image
+inputs, prints no secrets or numeric Telegram identifiers, and performs no live
+side effects. Step 2 is next: align readiness parsing and cleanup with the
+pinned Hermes contract.
 
 ### Step Checklist
 
 - [x] Step 0: Progress and Changelog Tracking Setup
-- [ ] Step 1: Quality Gates Setup and Baseline Evidence
+- [x] Step 1: Quality Gates Setup and Baseline Evidence
 - [ ] Step 2: Align Readiness With the Pinned Hermes Contract
 - [ ] Step 3: Persist Desired State and Deployment Operations
 - [ ] Step 4: Add Managed Creation Configuration and Encrypted Credentials
@@ -475,8 +478,8 @@ acceptance gate and record pre-implementation baseline evidence.
 | Step | State | Depends on | Commit | Validation or deployment evidence | Blocker and next work |
 | --- | --- | --- | --- | --- | --- |
 | 0. Progress and Changelog Tracking Setup | Complete | None | This commit | `bun run format:check` passed after formatting the new progress guard; `bun run lint` passed; `bun run typecheck` passed; `bun run test` passed 98 files / 863 tests; `bun run build` passed; `bun run test:e2e:ci` passed 14 tests; `git diff --check` passed; changelog structure verified without a tracking-only entry. | Complete; Step 1 is next. |
-| 1. Quality Gates Setup and Baseline Evidence | Not started | Step 0 | Not collected | Not collected | Add `verify:hermes:staging`, safe capability preflight, docs, tests, and baseline evidence. |
-| 2. Align Readiness With the Pinned Hermes Contract | Not started | Steps 0-1 | Not collected | Not collected | Requires Step 1 gate setup. |
+| 1. Quality Gates Setup and Baseline Evidence | Complete | Step 0 | This commit | Pre-edit baseline at `807e401`: `bun run verify` passed (`format:check`, `lint`, `typecheck`, 98 test files / 863 tests, and production build) and `bun run test:e2e:ci` passed 14 browser tests. Added `verify:hermes:staging`, a pure fail-closed preflight, placeholder-only docs/env entries, and 7 focused staging-gate tests. Final gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 99 files / 870 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `bun run verify:hermes:staging` exited nonzero with `capability_unavailable` and `sideEffectsAttempted: false`; `git diff --check`; `CHANGELOG.md` unchanged. | Complete; Step 2 is next. |
+| 2. Align Readiness With the Pinned Hermes Contract | Not started | Steps 0-1 | Not collected | Not collected | Use Step 1 staging gate and update pinned readiness/parser cleanup behavior. |
 | 3. Persist Desired State and Deployment Operations | Not started | Steps 0-2 | Not collected | Not collected | Requires readiness contract alignment. |
 | 4. Add Managed Creation Configuration and Encrypted Credentials | Not started | Steps 0-3 | Not collected | Not collected | Stop here if OpenRouter BYOK is not approved for automatic-ready mode. |
 | 5. Project a Complete Managed Hermes Configuration | Not started | Steps 0-4 | Not collected | Not collected | Requires server-side desired config and encrypted secret contract. |
@@ -499,6 +502,6 @@ acceptance gate and record pre-implementation baseline evidence.
 
 ### Current Blockers and Next Work
 
-- No blocker remains for Step 0.
-- Step 1 must establish `bun run verify:hermes:staging` as a fail-closed,
-  no-side-effect command before product implementation begins.
+- No blocker remains for Step 1.
+- Step 2 should update pinned Hermes readiness parsing and partial-container
+  cleanup without contacting external services.
