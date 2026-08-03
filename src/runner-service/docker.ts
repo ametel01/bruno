@@ -1461,12 +1461,27 @@ async function readProjectedApiServerKey(agentId: string): Promise<string | null
 }
 
 async function readSafeRegularFile(path: string, maxBytes: number): Promise<string> {
-  const handle = await open(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  const beforeOpen = await lstat(path);
+
+  if (!beforeOpen.isFile() || beforeOpen.nlink !== 1 || beforeOpen.size > maxBytes) {
+    throw new Error("Hermes projected file is not a safe bounded regular file.");
+  }
+
+  const handle = await open(
+    path,
+    fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0),
+  );
 
   try {
     const info = await handle.stat();
 
-    if (!info.isFile() || info.nlink !== 1 || info.size > maxBytes) {
+    if (
+      !info.isFile() ||
+      info.nlink !== 1 ||
+      info.size > maxBytes ||
+      info.dev !== beforeOpen.dev ||
+      info.ino !== beforeOpen.ino
+    ) {
       throw new Error("Hermes projected file is not a safe bounded regular file.");
     }
 

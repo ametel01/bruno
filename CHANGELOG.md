@@ -119,6 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Projected Hermes credential reads now reject FIFO and other nonregular `.env` substitutions without blocking runner status or canary requests.
 - Managed Hermes projection now preserves safe unrelated YAML scalar text containing punctuation such as `!`, `*`, and `&` while still rejecting actual YAML tags, anchors, aliases, and merge keys.
 - Managed Hermes projection now rejects explicit YAML tags, secret-like null/map/array/non-placeholder values, shell-default env references, nonregular target files, and Docker inspect exposure of Telegram allowlist values.
 - Telegram secret replacement now returns generic active-bot conflicts and distinguishes invalid bot tokens from temporary Telegram validation outages without mutating stored secrets.

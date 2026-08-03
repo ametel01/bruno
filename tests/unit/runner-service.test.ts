@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { access, lstat, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import {
   AGENTBAY_AGENT_ID_LABEL,
@@ -18,6 +20,7 @@ import { sampleLaunchSpec, sampleManagedLaunchSpec } from "@/tests/helpers/agent
 
 const AGENT_ID = "00000000-0000-4000-8000-000000000123";
 const OTHER_AGENT_ID = "00000000-0000-4000-8000-000000000456";
+const execFileAsync = promisify(execFile);
 
 describe("manual runner service HTTP contract", () => {
   it("requires bearer auth and returns safe JSON failures", async () => {
@@ -848,6 +851,106 @@ describe("manual runner service HTTP contract", () => {
         readinessReason: "probe_credential_unavailable",
       });
       expect(probe).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("rejects a FIFO projected API key without blocking status or canary", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    await withHermesStateRootForTest(async () => {
+      const requestHealth = vi.fn(async () => ({ ok: true, body: pinnedHermesHealth() }));
+      const requestCanary = vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        body: { choices: [{ message: { role: "assistant", content: "ok" } }] },
+      }));
+      const docker = new ManualRunnerDocker({
+        docker: createMockDocker(),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: (spec) =>
+            createHermesProjectionForTest(spec, { apiServerKey: spec.secrets.apiServerKey }),
+        },
+        probe: { requestHealth, requestCanary },
+      });
+      const service = createRunnerService({ authToken: "test-token", docker });
+      const spec = sampleManagedLaunchSpec({
+        agent: { ...sampleManagedLaunchSpec().agent, id: AGENT_ID },
+      });
+      const acceptedResponse = await service.fetch(
+        authorizedJsonRequest(`/runner/v1/agents/${AGENT_ID}/start`, spec),
+      );
+      const accepted = await acceptedResponse.json();
+      const envPath = join(
+        String(process.env.AGENTBAY_HERMES_STATE_ROOT),
+        AGENT_ID,
+        "hermes",
+        ".env",
+      );
+
+      await rm(envPath);
+      await execFileAsync("mkfifo", [envPath]);
+      expect((await lstat(envPath)).isFIFO()).toBe(true);
+
+      const statusStartedAt = performance.now();
+      const statusResponse = await service.fetch(
+        authorizedRequest(`/runner/v1/agents/${AGENT_ID}/status`),
+      );
+      const statusElapsedMs = performance.now() - statusStartedAt;
+      const status = await statusResponse.json();
+
+      expect(statusResponse.status).toBe(200);
+      expect(statusElapsedMs).toBeLessThan(1_000);
+      expect(status).toMatchObject({
+        ok: true,
+        snapshot: {
+          phase: "starting",
+          readinessReason: "probe_credential_unavailable",
+        },
+      });
+
+      const canaryStartedAt = performance.now();
+      const canaryResponse = await service.fetch(
+        authorizedJsonRequest(`/runner/v1/agents/${AGENT_ID}/canary`, {
+          operationId: accepted.operation.id,
+          configRevision: spec.agent.configRevision,
+          model: spec.model.model,
+        }),
+      );
+      const canaryElapsedMs = performance.now() - canaryStartedAt;
+
+      expect(canaryResponse.status).toBe(409);
+      expect(canaryElapsedMs).toBeLessThan(1_000);
+      await expect(canaryResponse.json()).resolves.toEqual({
+        ok: false,
+        error: {
+          code: "canary_not_ready",
+          message: "Runner canary requires a ready operation.",
+        },
+      });
+      expect(requestHealth).not.toHaveBeenCalled();
+      expect(requestCanary).not.toHaveBeenCalled();
+
+      const repeatedStatus = await service.fetch(
+        authorizedRequest(`/runner/v1/agents/${AGENT_ID}/status`),
+      );
+      await expect(repeatedStatus.json()).resolves.toMatchObject({
+        snapshot: { readinessReason: "probe_credential_unavailable" },
+      });
+
+      await rm(envPath);
+      await writeFile(envPath, `API_SERVER_KEY="${spec.secrets.apiServerKey}"\n`);
+      const recovered = await service.fetch(
+        authorizedRequest(`/runner/v1/agents/${AGENT_ID}/status`),
+      );
+
+      await expect(recovered.json()).resolves.toMatchObject({
+        snapshot: { phase: "ready", readinessReason: null },
+      });
+      expect(requestHealth).toHaveBeenCalledTimes(1);
+      expect(requestCanary).not.toHaveBeenCalled();
     });
   });
 

@@ -166,7 +166,7 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain("OpenRouter is the first supported provider");
     expect(automaticLedger).toContain("dedicated staging Telegram bot/user");
     expect(automaticLedger).toContain(
-      "Step 6 is complete and ready for independent checker review.",
+      "Step 6 cycle-2 repair is complete and awaiting independent recheck.",
     );
     expect(automaticLedger).toContain("- [x] Step 0: Progress and Changelog Tracking Setup");
     expect(automaticLedger).toContain("- [x] Step 1: Quality Gates Setup and Baseline Evidence");
@@ -210,7 +210,7 @@ describe("automatic Hermes Telegram progress status", () => {
       "| 5. Project a Complete Managed Hermes Configuration | Complete and independently accepted after cycle 3 |",
     );
     expect(automaticLedger).toContain(
-      "| 6. Split Runner Launch Acceptance From Observed Readiness | Complete |",
+      "| 6. Split Runner Launch Acceptance From Observed Readiness | Repair complete; checker cycle 2 pending |",
     );
     expect(automaticLedger).toContain("launch-spec v3 parsing/redaction/serialization");
     expect(automaticLedger).toContain("explicit/custom YAML tags and anchors");
@@ -228,8 +228,11 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain("Focused Step 4 tests passed");
     expect(automaticLedger).toContain("credential-free `bun run verify:hermes:staging`");
     expect(automaticLedger).toContain("one request-scoped 30-second launch budget");
-    expect(automaticLedger).toContain("Combined focused coverage passed 11 files / 216 tests");
-    expect(automaticLedger).toContain("108 files / 995 tests");
+    expect(automaticLedger).toContain(
+      "Initial combined focused coverage passed 11 files / 216 tests",
+    );
+    expect(automaticLedger).toContain("108 files / 995 full tests");
+    expect(automaticLedger).toContain("108 files / 996 tests");
     expect(automaticLedger).toContain("`bun run verify:hermes:staging` exited nonzero");
     expect(automaticLedger).toContain("local pinned-image behavior");
     expect(automaticLedger).toContain('`telegramBoundary: "local-smoke-disabled"`');
@@ -239,9 +242,9 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain("Full gates passed");
     expect(automaticLedger).toContain("Step validation commands and results.");
     expect(automaticLedger).toContain("Safe blocker codes, missing capabilities, and next action.");
-    expect(automaticLedger).toContain("No blocker remains for Step 6");
+    expect(automaticLedger).toContain("No implementation blocker remains for Step 6");
     expect(automaticLedger).toContain(
-      "Step 7 should reconcile accepted deployments through verified ready or failed states.",
+      "Start Step 7 only after the FIFO repair is independently accepted.",
     );
     expect(automaticLedger).not.toContain("No blocker remains for Step 3.");
     expect(automaticLedger).not.toContain("Step 4 should add managed creation configuration");
