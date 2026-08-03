@@ -11,6 +11,7 @@ import {
   generateApiServerKeyForUser,
   listAgentSecretStatusesForUser,
   parseAgentSecretKeyring,
+  prepareAgentSecretRow,
   replaceAgentSecretForUser,
   revokeAgentSecretForUser,
 } from "@/src/server/agents/agent-secrets";
@@ -332,6 +333,120 @@ describe("agent secret storage", () => {
     ).rejects.toBeInstanceOf(AgentSecretTelegramConflictError);
   });
 
+  it("keeps Telegram replacement invalid-token and operational failures mutation-free", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Telegram Validation Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const originalToken = "123456:abcdefghijklmnopqrstuvwxyz";
+
+    await replaceAgentSecretForUser(
+      created.agent.userId,
+      created.agent.id,
+      { kind: "telegram_bot_token", value: originalToken },
+      {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        telegramBotValidator: async () => ({
+          ok: true,
+          bot: { botId: "123456", username: "Valid_bot" },
+        }),
+      },
+    );
+    const [before] = await connection.db.select().from(agentSecrets);
+
+    await expect(
+      replaceAgentSecretForUser(
+        created.agent.userId,
+        created.agent.id,
+        { kind: "telegram_bot_token", value: "234567:abcdefghijklmnopqrstuvwxyz" },
+        {
+          createConnection: () => connection,
+          env: KEYRING_ENV,
+          telegramBotValidator: async () => ({ ok: false, reason: "invalid_bot_token" }),
+        },
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "validation_failed",
+      issues: [{ field: "value", message: "Telegram bot token format is invalid." }],
+    });
+    await expect(
+      replaceAgentSecretForUser(
+        created.agent.userId,
+        created.agent.id,
+        { kind: "telegram_bot_token", value: "234567:abcdefghijklmnopqrstuvwxyz" },
+        {
+          createConnection: () => connection,
+          env: KEYRING_ENV,
+          telegramBotValidator: async () => ({
+            ok: false,
+            reason: "telegram_validation_timeout",
+          }),
+        },
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "telegram_validation_unavailable",
+    });
+
+    const rows = await connection.db.select().from(agentSecrets);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: before?.id,
+      status: "active",
+      uniquenessFingerprint: fingerprintTelegramBotTokenForUniqueness(originalToken),
+      providerSubjectId: "123456",
+    });
+  });
+
+  it("rejects active Telegram subject races even when token fingerprints differ", async () => {
+    const first = await createAgentForDevelopmentUser(
+      { name: "Subject Race One", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const second = await createAgentForDevelopmentUser(
+      { name: "Subject Race Two", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+
+    await replaceAgentSecretForUser(
+      first.agent.userId,
+      first.agent.id,
+      { kind: "telegram_bot_token", value: "123456:abcdefghijklmnopqrstuvwxyz" },
+      {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        telegramBotValidator: async () => ({
+          ok: true,
+          bot: { botId: "123456", username: "Valid_bot" },
+        }),
+      },
+    );
+
+    await expect(
+      replaceAgentSecretForUser(
+        second.agent.userId,
+        second.agent.id,
+        { kind: "telegram_bot_token", value: "654321:abcdefghijklmnopqrstuvwxyz" },
+        {
+          createConnection: () => connection,
+          env: KEYRING_ENV,
+          telegramBotValidator: async () => ({
+            ok: true,
+            bot: { botId: "123456", username: "Valid_bot" },
+          }),
+        },
+      ),
+    ).rejects.toBeInstanceOf(AgentSecretTelegramConflictError);
+
+    const activeRows = (await connection.db.select().from(agentSecrets)).filter(
+      (row) => row.status === "active",
+    );
+    expect(activeRows).toHaveLength(1);
+    expect(activeRows[0]).toMatchObject({ agentId: first.agent.id, providerSubjectId: "123456" });
+  });
+
   it("backfills legacy active Telegram uniqueness metadata and fails closed on undecryptable rows", async () => {
     const created = await createAgentForDevelopmentUser(
       { name: "Legacy Telegram Agent", templateKey: "research_agent" },
@@ -385,6 +500,194 @@ describe("agent secret storage", () => {
     await expect(
       backfillTelegramSecretUniquenessMetadata({ connection, env: KEYRING_ENV }),
     ).rejects.toBeInstanceOf(AgentSecretDecryptionError);
+  });
+
+  it("fails legacy backfill closed on duplicate active tokens without partial metadata mutation", async () => {
+    const first = await createAgentForDevelopmentUser(
+      { name: "Legacy Duplicate One", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const second = await createAgentForDevelopmentUser(
+      { name: "Legacy Duplicate Two", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const token = "123456:abcdefghijklmnopqrstuvwxyz";
+
+    await replaceAgentSecretForUser(
+      first.agent.userId,
+      first.agent.id,
+      { kind: "telegram_bot_token", value: token },
+      {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        telegramBotValidator: async () => ({
+          ok: true,
+          bot: { botId: "123456", username: "Valid_bot" },
+        }),
+      },
+    );
+    await replaceAgentSecretForUser(
+      second.agent.userId,
+      second.agent.id,
+      { kind: "telegram_bot_token", value: "654321:abcdefghijklmnopqrstuvwxyz" },
+      {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        telegramBotValidator: async () => ({
+          ok: true,
+          bot: { botId: "654321", username: "Other_bot" },
+        }),
+      },
+    );
+
+    const duplicatePrepared = prepareAgentSecretRow({
+      agentId: second.agent.id,
+      kind: "telegram_bot_token",
+      value: token,
+      keyring: parseAgentSecretKeyring(KEYRING_ENV),
+      now: new Date("2026-07-08T05:00:00.000Z"),
+      rotatedAt: null,
+      telegramBot: { botId: "123456", username: null },
+      randomBytes: (size) => Buffer.alloc(size, 12),
+    });
+    await connection.db
+      .update(agentSecrets)
+      .set({
+        uniquenessFingerprint: null,
+        providerSubjectId: null,
+        providerUsername: null,
+      })
+      .where(eq(agentSecrets.kind, "telegram_bot_token"));
+    await connection.db
+      .update(agentSecrets)
+      .set({
+        ciphertext: duplicatePrepared.ciphertext,
+        iv: duplicatePrepared.iv,
+        authTag: duplicatePrepared.authTag,
+        keyVersion: duplicatePrepared.keyVersion,
+        fingerprint: duplicatePrepared.fingerprint,
+      })
+      .where(eq(agentSecrets.agentId, second.agent.id));
+
+    await expect(
+      backfillTelegramSecretUniquenessMetadata({ connection, env: KEYRING_ENV }),
+    ).rejects.toBeInstanceOf(AgentSecretTelegramConflictError);
+
+    const rows = await connection.db.select().from(agentSecrets);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.uniquenessFingerprint === null)).toBe(true);
+    expect(rows.every((row) => row.providerSubjectId === null)).toBe(true);
+  });
+
+  it("backfills active Telegram rows across key versions while ignoring revoked and soft-deleted history", async () => {
+    const activeV1 = await createAgentForDevelopmentUser(
+      { name: "Legacy Active V1", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const activeOld = await createAgentForDevelopmentUser(
+      { name: "Legacy Active Old", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const revoked = await createAgentForDevelopmentUser(
+      { name: "Legacy Revoked", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const softDeleted = await createAgentForDevelopmentUser(
+      { name: "Legacy Soft Deleted", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const oldEnv = {
+      ...KEYRING_ENV,
+      AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "old",
+    };
+
+    await replaceAgentSecretForUser(
+      activeV1.agent.userId,
+      activeV1.agent.id,
+      { kind: "telegram_bot_token", value: "123456:abcdefghijklmnopqrstuvwxyz" },
+      {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        telegramBotValidator: async () => ({
+          ok: true,
+          bot: { botId: "123456", username: "Valid_bot" },
+        }),
+      },
+    );
+    await replaceAgentSecretForUser(
+      activeOld.agent.userId,
+      activeOld.agent.id,
+      { kind: "telegram_bot_token", value: "654321:abcdefghijklmnopqrstuvwxyz" },
+      {
+        createConnection: () => connection,
+        env: oldEnv,
+        telegramBotValidator: async () => ({
+          ok: true,
+          bot: { botId: "654321", username: "Other_bot" },
+        }),
+      },
+    );
+    await replaceAgentSecretForUser(
+      revoked.agent.userId,
+      revoked.agent.id,
+      { kind: "telegram_bot_token", value: "777777:abcdefghijklmnopqrstuvwxyz" },
+      {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        telegramBotValidator: async () => ({
+          ok: true,
+          bot: { botId: "777777", username: null },
+        }),
+      },
+    );
+    await revokeAgentSecretForUser(
+      revoked.agent.userId,
+      revoked.agent.id,
+      { kind: "telegram_bot_token" },
+      { createConnection: () => connection },
+    );
+    await replaceAgentSecretForUser(
+      softDeleted.agent.userId,
+      softDeleted.agent.id,
+      { kind: "telegram_bot_token", value: "888888:abcdefghijklmnopqrstuvwxyz" },
+      {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        telegramBotValidator: async () => ({
+          ok: true,
+          bot: { botId: "888888", username: null },
+        }),
+      },
+    );
+    await deleteAgentForDevelopmentUser(softDeleted.agent.id, {
+      createConnection: () => connection,
+      dockerRunnerAdapter: { cleanup: async () => ({ ok: true, container: null }) },
+    });
+
+    await connection.db
+      .update(agentSecrets)
+      .set({
+        uniquenessFingerprint: null,
+        providerSubjectId: null,
+        providerUsername: null,
+      })
+      .where(eq(agentSecrets.kind, "telegram_bot_token"));
+
+    await expect(
+      backfillTelegramSecretUniquenessMetadata({ connection, env: KEYRING_ENV }),
+    ).resolves.toEqual({ scanned: 2, updated: 2 });
+
+    const rows = await connection.db.select().from(agentSecrets);
+    const activeRows = rows.filter((row) => row.status === "active");
+    const inactiveRows = rows.filter((row) => row.status === "revoked");
+
+    expect(activeRows).toHaveLength(2);
+    expect(activeRows.map((row) => row.keyVersion).sort()).toEqual(["old", "v1"]);
+    expect(activeRows.every((row) => row.uniquenessFingerprint !== null)).toBe(true);
+    expect(activeRows.map((row) => row.providerSubjectId).sort()).toEqual(["123456", "654321"]);
+    expect(inactiveRows.length).toBeGreaterThanOrEqual(2);
+    expect(inactiveRows.every((row) => row.uniquenessFingerprint === null)).toBe(true);
+    expect(inactiveRows.every((row) => row.providerSubjectId === null)).toBe(true);
   });
 });
 

@@ -2,6 +2,7 @@ import { isValidAgentId } from "@/src/server/agents/agent-id";
 import {
   AgentSecretKeyringError,
   AgentSecretPersistenceError,
+  AgentSecretTelegramConflictError,
   generateApiServerKeyForUser,
   isAgentSecretKind,
   isUserManagedAgentSecretKind,
@@ -129,6 +130,10 @@ export async function PUT(
       return secretConfigurationErrorResponse();
     }
 
+    if (error instanceof AgentSecretTelegramConflictError) {
+      return telegramBotInUseResponse();
+    }
+
     if (error instanceof AgentSecretPersistenceError) {
       return persistenceErrorResponse();
     }
@@ -229,6 +234,10 @@ function mutationResponse(
     );
   }
 
+  if (result.reason === "telegram_validation_unavailable") {
+    return telegramValidationUnavailableResponse();
+  }
+
   return validationResponse("Agent ID must be a valid UUID.");
 }
 
@@ -321,6 +330,30 @@ function secretConfigurationErrorResponse() {
       error: {
         code: "agent_secret_configuration_invalid",
         message: "Agent secret storage is not configured safely.",
+      },
+    },
+    { status: 503 },
+  );
+}
+
+function telegramBotInUseResponse() {
+  return Response.json(
+    {
+      error: {
+        code: "telegram_bot_in_use",
+        message: "Telegram bot is already assigned to an active agent.",
+      },
+    },
+    { status: 409 },
+  );
+}
+
+function telegramValidationUnavailableResponse() {
+  return Response.json(
+    {
+      error: {
+        code: "telegram_validation_unavailable",
+        message: "Telegram bot validation is temporarily unavailable.",
       },
     },
     { status: 503 },

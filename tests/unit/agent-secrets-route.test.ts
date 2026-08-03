@@ -18,9 +18,17 @@ const mocks = vi.hoisted(() => {
     }
   }
 
+  class AgentSecretTelegramConflictError extends Error {
+    constructor() {
+      super("Telegram bot token is already assigned to an active agent.");
+      this.name = "AgentSecretTelegramConflictError";
+    }
+  }
+
   return {
     AgentSecretKeyringError,
     AgentSecretPersistenceError,
+    AgentSecretTelegramConflictError,
     generateApiServerKeyForUser: vi.fn(),
     listAgentSecretStatusesForUser: vi.fn(),
     replaceAgentSecretForUser: vi.fn(),
@@ -38,6 +46,7 @@ vi.mock("@/src/server/agents/agent-secrets", async () => {
     ...actual,
     AgentSecretKeyringError: mocks.AgentSecretKeyringError,
     AgentSecretPersistenceError: mocks.AgentSecretPersistenceError,
+    AgentSecretTelegramConflictError: mocks.AgentSecretTelegramConflictError,
     generateApiServerKeyForUser: mocks.generateApiServerKeyForUser,
     listAgentSecretStatusesForUser: mocks.listAgentSecretStatusesForUser,
     replaceAgentSecretForUser: mocks.replaceAgentSecretForUser,
@@ -244,6 +253,63 @@ describe("/api/agents/[agentId]/secrets route", () => {
     });
     expect(mocks.revokeAgentSecretForUser).toHaveBeenCalledWith(USER_ID, AGENT_ID, {
       kind: "openrouter_api_key",
+    });
+  });
+
+  it("maps Telegram replacement validation, operational failures, and active-bot conflicts safely", async () => {
+    const { PUT } = await import("@/app/api/agents/[agentId]/secrets/route");
+    const putTelegramToken = () =>
+      new Request(`http://localhost/api/agents/${AGENT_ID}/secrets`, {
+        method: "PUT",
+        body: JSON.stringify({
+          kind: "telegram_bot_token",
+          value: "123456:abcdefghijklmnopqrstuvwxyz",
+        }),
+      });
+
+    mocks.replaceAgentSecretForUser
+      .mockResolvedValueOnce({
+        ok: false,
+        reason: "validation_failed",
+        issues: [{ field: "value", message: "Telegram bot token format is invalid." }],
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        reason: "telegram_validation_unavailable",
+      })
+      .mockRejectedValueOnce(new mocks.AgentSecretTelegramConflictError());
+
+    const invalid = await PUT(putTelegramToken(), {
+      params: Promise.resolve({ agentId: AGENT_ID }),
+    });
+    const unavailable = await PUT(putTelegramToken(), {
+      params: Promise.resolve({ agentId: AGENT_ID }),
+    });
+    const conflict = await PUT(putTelegramToken(), {
+      params: Promise.resolve({ agentId: AGENT_ID }),
+    });
+
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toEqual({
+      error: {
+        code: "validation_failed",
+        message: "Request validation failed.",
+        issues: [{ field: "value", message: "Telegram bot token format is invalid." }],
+      },
+    });
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.json()).toEqual({
+      error: {
+        code: "telegram_validation_unavailable",
+        message: "Telegram bot validation is temporarily unavailable.",
+      },
+    });
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toEqual({
+      error: {
+        code: "telegram_bot_in_use",
+        message: "Telegram bot is already assigned to an active agent.",
+      },
     });
   });
 });

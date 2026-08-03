@@ -97,6 +97,28 @@ describe("agent request user boundaries", () => {
       expect(combined).toContain(explicitSeam);
     }
   });
+
+  it("keeps ready creation and idempotency replay bound to the resolved request user", async () => {
+    const [routeSource, createSource] = await Promise.all([
+      readFile("app/api/agents/route.ts", "utf8"),
+      readFile("src/server/agents/create-agent.ts", "utf8"),
+    ]);
+
+    expect(routeSource).not.toMatch(/get(?:OrCreate)?DevelopmentUser/);
+    expect(routeSource).not.toContain("ForDevelopmentUser");
+    expect(routeSource).toContain("requireConfiguredApplicationUser");
+    expect(routeSource).toContain("createAgentForUser(applicationUser.userId");
+    expect(routeSource).toContain("ReadyAgentValidationError");
+    expect(routeSource).toContain("TelegramBotInUseError");
+
+    expect(createSource).toContain("selectReadyCreateReplay(connection.db");
+    expect(createSource).toContain("userId,");
+    expect(createSource).toContain("idempotencyKey: input.idempotencyKey");
+    expect(createSource).toContain("getAgentDeploymentByIdempotencyKeyForUser");
+    expect(createSource).toContain("eq(agents.userId, input.userId)");
+    expect(createSource).toContain("takeReadyCreateIdempotencyLock");
+    expect(createSource).toContain("selectReadyCreateReplay(tx");
+  });
 });
 
 function toCamelCase(value: string) {

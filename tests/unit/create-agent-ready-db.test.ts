@@ -4,6 +4,7 @@ import { AgentSecretKeyringError } from "@/src/server/agents/agent-secrets";
 import {
   AgentPersistenceError,
   AgentRunnerAssignmentError,
+  type ReadyCreateInsertBoundary,
   TelegramBotInUseError,
   createAgentForUser,
 } from "@/src/server/agents/create-agent";
@@ -42,7 +43,7 @@ describe("ready agent creation persistence", () => {
   beforeEach(async () => {
     connection = createDatabaseConnection();
     await resetReadyCreateTables(connection);
-    await connection.db.insert(users).values([{ id: USER_A_ID }, { id: USER_B_ID }]);
+    await seedReadyCreateUsers(connection);
   });
 
   afterEach(async () => {
@@ -256,6 +257,196 @@ describe("ready agent creation persistence", () => {
     await expect(countRows(connection, "agents")).resolves.toBe(1);
     await expect(countRows(connection, "agent_events")).resolves.toBe(1);
   });
+
+  it("rolls back every logical ready-create group at each insert boundary", async () => {
+    const boundaries: ReadyCreateInsertBoundary[] = [
+      "config",
+      "secret:openrouter_api_key",
+      "secret:telegram_bot_token",
+      "secret:telegram_allowed_users",
+      "secret:api_server_key",
+      "deployment",
+      "event",
+    ];
+
+    for (const boundary of boundaries) {
+      await resetReadyCreateTables(connection);
+      await seedReadyCreateUsers(connection);
+
+      await expect(
+        createAgentForUser(USER_A_ID, readyInput(`rollback-${boundary.replaceAll(":", "-")}`), {
+          createConnection: () => connection,
+          env: KEYRING_ENV,
+          now: () => NOW,
+          randomBytes: incrementalRandomBytes(),
+          telegramBotValidator: telegramValidator(),
+          readyCreateTestHooks: {
+            beforeInsertBoundary: (actualBoundary) => {
+              if (actualBoundary === boundary) {
+                throw new Error(`injected ${boundary} failure`);
+              }
+            },
+          },
+        }),
+      ).rejects.toBeInstanceOf(AgentPersistenceError);
+
+      await expect(countReadyCreateGroups(connection)).resolves.toEqual({
+        agents: 0,
+        configs: 0,
+        secrets: 0,
+        deployments: 0,
+        events: 0,
+      });
+    }
+  });
+
+  it("serializes same-key concurrent ready creates into one durable result", async () => {
+    const firstConnection = createDatabaseConnection();
+    const secondConnection = createDatabaseConnection();
+    const barrier = createAsyncBarrier(2);
+
+    try {
+      const [first, second] = await Promise.all([
+        createAgentForUser(USER_A_ID, readyInput("same-key-concurrent"), {
+          createConnection: () => firstConnection,
+          env: KEYRING_ENV,
+          now: () => NOW,
+          randomBytes: incrementalRandomBytes(),
+          telegramBotValidator: telegramValidator("123456", barrier),
+        }),
+        createAgentForUser(USER_A_ID, readyInput("same-key-concurrent"), {
+          createConnection: () => secondConnection,
+          env: KEYRING_ENV,
+          now: () => new Date(NOW.getTime() + 1_000),
+          randomBytes: incrementalRandomBytes(),
+          telegramBotValidator: telegramValidator("123456", barrier),
+        }),
+      ]);
+
+      expect(second).toEqual(first);
+      await expect(countReadyCreateGroups(connection)).resolves.toEqual({
+        agents: 1,
+        configs: 1,
+        secrets: 4,
+        deployments: 1,
+        events: 1,
+      });
+    } finally {
+      await firstConnection.close();
+      await secondConnection.close();
+    }
+  });
+
+  it("rolls back one side of concurrent active Telegram token and subject races", async () => {
+    const tokenBarrier = createAsyncBarrier(2);
+    await assertOneTelegramRaceRollsBack({
+      observerConnection: connection,
+      firstInput: readyInput("token-race-a"),
+      secondInput: readyInput("token-race-b"),
+      firstValidator: telegramValidator("123456", tokenBarrier),
+      secondValidator: telegramValidator("123456", tokenBarrier),
+    });
+
+    await resetReadyCreateTables(connection);
+    await seedReadyCreateUsers(connection);
+
+    const subjectBarrier = createAsyncBarrier(2);
+    await assertOneTelegramRaceRollsBack({
+      observerConnection: connection,
+      firstInput: readyInput("subject-race-a", { token: TOKEN }),
+      secondInput: readyInput("subject-race-b", { token: SECOND_TOKEN }),
+      firstValidator: telegramValidator("123456", subjectBarrier),
+      secondValidator: telegramValidator("123456", subjectBarrier),
+    });
+  });
+
+  it("isolates idempotency keys by user and replays only the owning deployment", async () => {
+    const first = await createAgentForUser(USER_A_ID, readyInput("shared-user-key"), {
+      createConnection: () => connection,
+      env: KEYRING_ENV,
+      now: () => NOW,
+      randomBytes: incrementalRandomBytes(),
+      telegramBotValidator: telegramValidator("123456"),
+    });
+    const second = await createAgentForUser(
+      USER_B_ID,
+      readyInput("shared-user-key", { token: SECOND_TOKEN }),
+      {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        now: () => new Date(NOW.getTime() + 1_000),
+        randomBytes: incrementalRandomBytes(),
+        telegramBotValidator: telegramValidator("654321"),
+      },
+    );
+    const secondReplay = await createAgentForUser(
+      USER_B_ID,
+      {
+        name: "Changed User B Body",
+        templateKey: "github_issue_agent",
+        runnerId: null,
+        launchMode: "ready",
+        idempotencyKey: "shared-user-key",
+      },
+      {
+        createConnection: () => connection,
+        env: { ...KEYRING_ENV, AGENTBAY_READY_AGENT_CREATION_ENABLED: "false" },
+        telegramBotValidator: vi.fn(),
+      },
+    );
+
+    expect(secondReplay).toEqual(second);
+    expect(second.agent.id).not.toBe(first.agent.id);
+    expect(second.agent.userId).toBe(USER_B_ID);
+    await expect(countReadyCreateGroups(connection)).resolves.toEqual({
+      agents: 2,
+      configs: 2,
+      secrets: 8,
+      deployments: 2,
+      events: 2,
+    });
+  });
+
+  it("assigns only an owned requested runner and conceals the same runner from another user", async () => {
+    const runnerId = "00000000-0000-4000-8000-000000000404";
+    await seedOnlineRunner(connection, { runnerId, userId: USER_A_ID });
+
+    const assigned = await createAgentForUser(
+      USER_A_ID,
+      readyInput("owned-runner-ready", { runnerId }),
+      {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        now: () => NOW,
+        randomBytes: incrementalRandomBytes(),
+        telegramBotValidator: telegramValidator(),
+      },
+    );
+    const validator = telegramValidator("654321");
+
+    expect(assigned.agent.runnerId).toBe(runnerId);
+    await expect(
+      createAgentForUser(
+        USER_B_ID,
+        readyInput("foreign-runner-ready", { runnerId, token: SECOND_TOKEN }),
+        {
+          createConnection: () => connection,
+          env: KEYRING_ENV,
+          now: () => new Date(NOW.getTime() + 1_000),
+          randomBytes: incrementalRandomBytes(),
+          telegramBotValidator: validator,
+        },
+      ),
+    ).rejects.toBeInstanceOf(AgentRunnerAssignmentError);
+    expect(validator).not.toHaveBeenCalled();
+    await expect(countReadyCreateGroups(connection)).resolves.toEqual({
+      agents: 1,
+      configs: 1,
+      secrets: 4,
+      deployments: 1,
+      events: 1,
+    });
+  });
 });
 
 function readyInput(
@@ -275,11 +466,15 @@ function readyInput(
   };
 }
 
-function telegramValidator(botId = "123456") {
-  return vi.fn(async () => ({
-    ok: true as const,
-    bot: { botId, username: "Valid_bot" },
-  }));
+function telegramValidator(botId = "123456", barrier?: () => Promise<void>) {
+  return vi.fn(async () => {
+    await barrier?.();
+
+    return {
+      ok: true as const,
+      bot: { botId, username: "Valid_bot" },
+    };
+  });
 }
 
 function incrementalRandomBytes() {
@@ -293,14 +488,21 @@ function incrementalRandomBytes() {
 }
 
 async function seedForeignOnlineRunner(connection: DatabaseConnection) {
+  await seedOnlineRunner(connection, { runnerId: FOREIGN_RUNNER_ID, userId: USER_B_ID });
+}
+
+async function seedOnlineRunner(
+  connection: DatabaseConnection,
+  input: { runnerId: string; userId: string },
+) {
   const [runner] = await connection.db
     .insert(runners)
     .values({
-      id: FOREIGN_RUNNER_ID,
-      userId: USER_B_ID,
-      name: "Foreign Runner",
+      id: input.runnerId,
+      userId: input.userId,
+      name: "Ready Runner",
       kind: "manual_vps",
-      endpointUrl: "https://foreign-runner.example.com",
+      endpointUrl: `https://runner-${input.runnerId.slice(-4)}.example.com`,
       status: "online",
       createdAt: NOW,
       updatedAt: NOW,
@@ -326,6 +528,92 @@ async function countRows(connection: DatabaseConnection, tableName: string): Pro
   );
 
   return Number(result[0]?.count ?? 0);
+}
+
+async function countReadyCreateGroups(connection: DatabaseConnection) {
+  const [agentCount, configCount, secretCount, deploymentCount, eventCount] = await Promise.all([
+    countRows(connection, "agents"),
+    countRows(connection, "agent_configs"),
+    countRows(connection, "agent_secrets"),
+    countRows(connection, "agent_deployments"),
+    countRows(connection, "agent_events"),
+  ]);
+
+  return {
+    agents: agentCount,
+    configs: configCount,
+    secrets: secretCount,
+    deployments: deploymentCount,
+    events: eventCount,
+  };
+}
+
+async function assertOneTelegramRaceRollsBack(input: {
+  observerConnection: DatabaseConnection;
+  firstInput: ReturnType<typeof readyInput>;
+  secondInput: ReturnType<typeof readyInput>;
+  firstValidator: ReturnType<typeof telegramValidator>;
+  secondValidator: ReturnType<typeof telegramValidator>;
+}) {
+  const firstConnection = createDatabaseConnection();
+  const secondConnection = createDatabaseConnection();
+
+  try {
+    const settled = await Promise.allSettled([
+      createAgentForUser(USER_A_ID, input.firstInput, {
+        createConnection: () => firstConnection,
+        env: KEYRING_ENV,
+        now: () => NOW,
+        randomBytes: incrementalRandomBytes(),
+        telegramBotValidator: input.firstValidator,
+      }),
+      createAgentForUser(USER_A_ID, input.secondInput, {
+        createConnection: () => secondConnection,
+        env: KEYRING_ENV,
+        now: () => new Date(NOW.getTime() + 1_000),
+        randomBytes: incrementalRandomBytes(),
+        telegramBotValidator: input.secondValidator,
+      }),
+    ]);
+    const fulfilled = settled.filter((result) => result.status === "fulfilled");
+    const rejected = settled.filter((result) => result.status === "rejected");
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(TelegramBotInUseError);
+    await expect(countReadyCreateGroups(input.observerConnection)).resolves.toEqual({
+      agents: 1,
+      configs: 1,
+      secrets: 4,
+      deployments: 1,
+      events: 1,
+    });
+  } finally {
+    await firstConnection.close();
+    await secondConnection.close();
+  }
+}
+
+async function seedReadyCreateUsers(connection: DatabaseConnection): Promise<void> {
+  await connection.db.insert(users).values([{ id: USER_A_ID }, { id: USER_B_ID }]);
+}
+
+function createAsyncBarrier(count: number): () => Promise<void> {
+  let waiting = 0;
+  let release: (() => void) | null = null;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  return async () => {
+    waiting += 1;
+
+    if (waiting === count) {
+      release?.();
+    }
+
+    await released;
+  };
 }
 
 async function resetReadyCreateTables(connection: DatabaseConnection): Promise<void> {

@@ -7,10 +7,10 @@
   branch: `main`
   worktree: `/Users/alexmetelli/source/plingpling`
   phase: implemented
-  cycle: 1/5
+  cycle: 2/5
   contract: `STATUS.archive.md` → `Step 4 Completion Contract (pre-spec)`
-  blocker: none; local builder gates are green.
-  next-action: Checker should independently verify `feat: accept managed Hermes creation credentials` before Step 5 starts.
+  blocker: none; cycle 2 local builder gates are green.
+  next-action: Checker should independently verify repair commit `fix: complete managed creation security gates` before Step 5 starts.
 
 ## Completion Contract
 
@@ -32,8 +32,8 @@
 - from: coordinator
   to: builder-step-4
   timestamp: 2026-08-03
-  request: Independently verify the implemented Step 4 contract and commit.
-  evidence: Generated `drizzle/0017_ambitious_tyrannus.sql` and metadata; focused Step 4 tests passed 8 files / 78 tests; full tests passed 106 files / 927 tests; build and 14 E2E passed; staging gate failed closed with no side effects.
+  request: Repair Step 4 checker cycle 1 failures without rewriting prior commits, leave `STATUS.archive.md` untouched, and stop before Step 5.
+  evidence: Implemented generic secret-route Telegram 409 mapping, invalid-token versus operational Telegram replacement split, percent-encoded Telegram URL redaction, stale progress assertion fix, real-Postgres ready-create race/rollback/isolation coverage, request-boundary guard, and legacy backfill/race coverage.
   stop-condition: Stop before Step 5 projection or any real provider/Telegram/infrastructure effect.
 
 ## Gates
@@ -42,11 +42,11 @@
 - Step 1 `23a1817`: checker cycle 2 green after exact GHCR boundary fix — 99 files / 870 tests, build, 14 E2E; fail-closed staging command exits nonzero with no effects.
 - Step 2 `897e28f`: independently green — focused 6 files / 43 tests, pinned-image contract smoke, 99 files / 879 tests, build, 14 E2E.
 - Step 3 `7024bc2`: independently green — focused 7 files / 72 tests, clean/upgrade loopback migration fixtures, 103 files / 905 tests, build, 14 E2E; evidence recorded in `ba8c969`.
-- Step 4 current commit: local builder green — `db:generate` no drift after `0017_ambitious_tyrannus`; clean disposable and upgrade/idempotent loopback `db:migrate`; focused 8 files / 78 tests; `format:check`; `lint`; `typecheck`; 106 files / 927 tests; build; 14 E2E; fail-closed staging nonzero/no effects; `git diff --check`.
+- Step 4 repair commit: local builder green — `db:generate` no drift; clean disposable `db:migrate` passed and reran idempotently; loopback `db:migrate` passed twice; focused repair tests passed 6 files / 43 tests; focused Step 4 suite passed 12 files / 110 tests; `format:check`; `lint`; `typecheck`; full `bun run test` passed 107 files / 939 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; credential-free `bun run verify:hermes:staging` exited 1 with `sideEffectsAttempted:false`; `git diff --check`.
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling` — branch `main`; sole active worktree; Step 4 committed; no stashes. `STATUS.archive.md` has an external Step 6 pre-spec append and remains unstaged/out of scope.
+- `/Users/alexmetelli/source/plingpling` — branch `main`; sole active worktree; Step 4 repair ready to commit; no stashes. `STATUS.archive.md` is not owned by builder-step-4.
 
 ## Decisions And Lessons
 

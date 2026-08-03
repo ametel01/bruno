@@ -202,7 +202,19 @@ export type CreateAgentDependencies = {
   randomUUID?: () => string;
   telegramClient?: TelegramClientDependencies;
   telegramBotValidator?: TelegramBotValidator;
+  readyCreateTestHooks?: {
+    beforeInsertBoundary?: (boundary: ReadyCreateInsertBoundary) => Promise<void> | void;
+  };
 };
+
+export type ReadyCreateInsertBoundary =
+  | "config"
+  | "secret:openrouter_api_key"
+  | "secret:telegram_bot_token"
+  | "secret:telegram_allowed_users"
+  | "secret:api_server_key"
+  | "deployment"
+  | "event";
 
 export class AgentPersistenceError extends Error {
   constructor(cause?: unknown) {
@@ -870,6 +882,7 @@ async function createReadyAgentForUser(
 
       const createdAgent = agent as CreatedAgentRow;
 
+      await dependencies.readyCreateTestHooks?.beforeInsertBoundary?.("config");
       await tx.insert(agentConfigs).values({
         agentId,
         systemPrompt: templateSnapshot.defaultSystemPrompt,
@@ -883,8 +896,14 @@ async function createReadyAgentForUser(
         updatedAt: now,
       });
 
-      await insertPreparedAgentSecretRowsInTransaction(tx, preparedSecrets);
+      for (const preparedSecret of preparedSecrets) {
+        await dependencies.readyCreateTestHooks?.beforeInsertBoundary?.(
+          `secret:${preparedSecret.kind}` as ReadyCreateInsertBoundary,
+        );
+        await insertPreparedAgentSecretRowsInTransaction(tx, [preparedSecret]);
+      }
 
+      await dependencies.readyCreateTestHooks?.beforeInsertBoundary?.("deployment");
       const deployment = await createAgentDeploymentForUser({
         db: tx,
         userId,
@@ -898,6 +917,7 @@ async function createReadyAgentForUser(
         throw new Error("Ready deployment insert failed.");
       }
 
+      await dependencies.readyCreateTestHooks?.beforeInsertBoundary?.("event");
       await recordAgentEventInTransaction(tx, {
         agentId,
         actorUserId: userId,

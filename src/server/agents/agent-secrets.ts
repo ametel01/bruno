@@ -55,7 +55,12 @@ export type AgentSecretMutationResult =
     }
   | {
       ok: false;
-      reason: "missing_agent_id" | "malformed_agent_id" | "agent_not_found" | "validation_failed";
+      reason:
+        | "missing_agent_id"
+        | "malformed_agent_id"
+        | "agent_not_found"
+        | "validation_failed"
+        | "telegram_validation_unavailable";
       issues?: Array<{ field: string; message: string }>;
     };
 
@@ -358,6 +363,10 @@ export async function replaceAgentSecretForUser(
       : null;
 
   if (telegramBot !== null && !telegramBot.ok) {
+    if (telegramBot.reason !== "invalid_bot_token") {
+      return { ok: false, reason: "telegram_validation_unavailable" };
+    }
+
     return {
       ok: false,
       reason: "validation_failed",

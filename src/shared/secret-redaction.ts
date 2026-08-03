@@ -1,5 +1,9 @@
 const SECRET_REDACTION_RULES: Array<[RegExp, string]> = [
   [
+    /https:\/\/api\.telegram\.org\/bot\d{6,}%3[Aa][A-Za-z0-9_-]{20,}\/[A-Za-z0-9_/-]+/g,
+    "[redacted-telegram-url]",
+  ],
+  [
     /https:\/\/api\.telegram\.org\/bot\d{6,}:[A-Za-z0-9_-]{20,}\/[A-Za-z0-9_/-]+/g,
     "[redacted-telegram-url]",
   ],

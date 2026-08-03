@@ -115,6 +115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Telegram secret replacement now returns generic active-bot conflicts and distinguishes invalid bot tokens from temporary Telegram validation outages without mutating stored secrets.
 - Pinned Hermes gateway readiness now follows the `v2026.7.7.2` detailed-health platform-state contract without requiring an HTTP config-revision echo, while failed post-launch evidence or readiness checks remove the partial selected-agent container.
 - Local Docker cloud-runner smoke now treats fresh Hermes setup blocking as a safe control-flow result, bridges the runner env file through a host-visible path for Docker-socket simulation, and packages all runner-service runtime imports in the runner image.
 - Hermes readiness failures now record `agent.error`, avoid premature start/restart completion events, and leave a safe actionable lifecycle reason; the Docker capability set now keeps only the minimal capabilities the Hermes supervisor needs after dropping all others.
@@ -158,6 +159,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Ready-mode creation and Telegram secret backfill now have real-Postgres race, rollback, replay, and isolation coverage for token uniqueness, bot-subject uniqueness, idempotency, requested runners, and insert-boundary failures.
+- Secret redaction now also catches percent-encoded Telegram bot API URLs while preserving raw Telegram token redaction.
 - Ready-mode agent creation now prepares encrypted OpenRouter, Telegram, allowlist, and private API credentials in memory and commits the agent, managed config, secrets, deployment, desired-running intent, and creation event atomically.
 - Telegram bot validation is bounded to one redacted `getMe` preflight with fixed origin, timeout, response-size, and safe failure mapping.
 - Active Telegram bot credentials now use stable server-only uniqueness metadata and database-enforced active-bot indexes while preserving the existing public secret fingerprint.
