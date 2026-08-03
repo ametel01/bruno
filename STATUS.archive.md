@@ -3678,3 +3678,490 @@ Status: ALL GREEN
     or recovery bound, browser-driven reconciliation, raw error display, or live
     external validation is a product/security/billing compatibility decision
     requiring coordinator/user approval before implementation.
+
+## Step 10 Completion Contract (pre-spec)
+
+- issue/readiness:
+  - `PLAN.md` Step 10, “Final Acceptance, Documentation, and Controlled
+    Rollout.”
+  - Classification: `blocked`. Step 10 implementation must not begin until
+    Steps 4–9 each have their prescribed product commit and independent checker
+    acceptance recorded by the coordinator. At pre-spec time Step 4 has
+    candidate commit `d942270` plus repair commit `546b9df`, with its independent
+    repair check still pending; Steps 5–9 are dependency-blocked archived
+    contracts rather than accepted product behavior.
+  - Live execution is additionally blocked until the user explicitly approves
+    each external mutation named below and supplies every required capability
+    through an approved secret channel. The original `/goal` authorizes repo
+    implementation, validation, changelog, progress, and commits; it does not
+    by itself authorize GHCR publication, Vercel deployment/environment
+    mutation, DigitalOcean spend, a real OpenRouter call, a real Telegram
+    message, or hosted feature-flag enablement.
+- outcome and completion boundary:
+  - Finish the credential-free implementation and documentation first, then
+    prove one controlled hosted automatic-ready creation end to end using the
+    exact accepted Step 4–9 contracts: a `202` ready-mode create, durable
+    progression through the persisted deployment stages, one bounded model
+    canary for its config revision, required private Hermes readiness, a real
+    allowed-user Telegram message and correlated Hermes reply, managed restart,
+    intentional durable Stop, rollback, and complete resource cleanup.
+  - The accepted outcome is one newly created hosted managed-v3 agent becoming
+    ready without pressing Start or opening Advanced Hermes setup. A configured
+    token, successful `getMe`, accepted runner launch, Docker `running`, model
+    HTTP success alone, Telegram `connected` alone, a mocked reply, or an
+    operator assertion without the bounded challenge/reply procedure is not
+    live acceptance.
+  - Step 10 is complete only when all credential-free gates, the authorized
+    live gate, redaction review, rollback exercise, and cleanup evidence pass.
+    Missing capabilities, partial live progress, an unavailable provider, or
+    unverified cleanup remains a blocker and must not be rewritten as success.
+- credential-free/local prerequisites before requesting live authority:
+  - Re-read the final accepted Step 4–9 commits and checker evidence. Confirm a
+    clean sole worktree, no stale stashes, the expected generated migration
+    chain, and no unresolved checker/security finding. Do not implement the
+    live executor against candidate DTO, stage, launch, canary, UI, runtime, or
+    retry shapes.
+  - Run the complete local/fake matrix from Steps 5–9, including clean and
+    upgrade PostgreSQL migrations, real separate-connection lease/concurrency
+    tests, managed v3 projection, pinned-image contract smoke, local fake model
+    and Telegram state, delayed runner/heartbeat/cron races, UI creation and
+    polling, restart-policy recovery, circuit breaker, desired-stopped
+    non-recovery, usage segmentation, and deterministic cleanup.
+  - Implement the Step 1 `verify:hermes:staging` live executor behind injected,
+    bounded interfaces. Module import and capability evaluation remain pure and
+    side-effect free. Missing, blank, placeholder, malformed, expired, or
+    non-exact confirmation values must stop before authentication, DNS,
+    provider, database, Docker, Telegram, OpenRouter, Vercel, or GHCR access.
+  - Add fake-clock/unit tests for the executor state machine, deadlines,
+    cancellation, evidence redaction, cleanup-after-every-failure boundary, and
+    the rule that a second billable resource is never created after an
+    ambiguous provider response. All destructive cleanup targets must be exact
+    resources tagged/recorded by this run; never enumerate and delete an
+    account, project, registry, runner fleet, or workspace broadly.
+  - Draft and review every documentation, migration, rollout, rollback,
+    BotFather, allowlist, cost, state, retry, and cleanup change with placeholder
+    values only. Documentation work and local validation require no live
+    credential and should not wait on external authorization.
+  - Build and smoke the reviewed release-candidate image locally. Inspect the
+    existing publication workflow, immutable upstream pin, SBOM/provenance, and
+    critical-fixable vulnerability gate without dispatching or publishing it.
+    If an already published, scanned artifact exactly matches the accepted
+    source commit and architecture, reuse its immutable digest after verifying
+    its CI/attestation evidence; do not republish merely to obtain a new tag.
+  - Run `bun run verify:hermes:staging` with an empty/synthetic environment and
+    prove the Step 1 fail-closed behavior still reports only safe capability
+    names/states, `sideEffectsAttempted:false`, and a nonzero exit.
+- required user-supplied and explicitly approved capabilities:
+  - Approval must name the exact controlled environment, source commit, maximum
+    one basic DigitalOcean staging Droplet, approved region/size, maximum spend
+    of the existing `$4` staging sentinel, resource lifetime, dedicated bot and
+    human test user, bounded OpenRouter canary spend, whether GHCR publication
+    is needed, whether Vercel deployment/environment mutation is permitted, and
+    whether successful rollout may leave the ready flag enabled in that
+    environment. Authorization for one action does not imply the others.
+  - Preserve all Step 1 capabilities and exact sentinels:
+    `AGENTBAY_HERMES_STAGING_PUBLISHED_IMAGE_REF`,
+    `AGENTBAY_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION`,
+    `AGENTBAY_DIGITALOCEAN_TOKEN`, `AGENTBAY_RUNNER_BEARER_TOKEN`,
+    `AGENTBAY_HERMES_STAGING_OPENROUTER_API_KEY`,
+    `AGENTBAY_HERMES_STAGING_TELEGRAM_BOT_TOKEN`,
+    `AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_USER_ID`,
+    `AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID`, and
+    `AGENTBAY_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION`. Do not weaken the
+    immutable GHCR digest boundary, exact budget/live sentinels, credential
+    shapes, or placeholder rejection.
+  - Extend the live preflight with an exact HTTPS staging application origin
+    and dedicated operator authentication delivered through environment or an
+    approved secret store, never argv/query strings. The origin has no
+    userinfo, path, query, fragment, redirect, wildcard host, or private runner
+    endpoint. Operator credentials are scoped to the isolated staging user and
+    are destroyed or rotated after acceptance. Clerk/browser authentication is
+    allowed only if the accepted E2E harness can obtain the same bounded
+    owner-scoped session without copying production user credentials.
+  - The staging control plane must already have a dedicated database, exact
+    accepted migrations, `NEXT_PUBLIC_APP_URL`, secure auth mode, a versioned
+    agent-secret keyring, `CRON_SECRET`, the exact runner bearer, DigitalOcean
+    provider settings, and the release-candidate workload digest. Hosted
+    keyring, cron, provider, and auth values are configured by an authorized
+    operator through encrypted prompts/settings; the verifier neither uploads
+    nor reads them back.
+  - The DigitalOcean token is for the approved staging account/project and has
+    only the permissions required to create, inspect, tag, firewall, and delete
+    the one runner. Use exactly one `s-1vcpu-512mb-10gb` basic Droplet unless the
+    user approves another reviewed basic size, one repository-owned unique run
+    tag, closed SSH ingress by default, and the accepted runner bootstrap image.
+    The release-candidate Hermes digest must be pullable from a fresh runner
+    without embedding registry credentials in cloud-init, Docker arguments,
+    labels, or logs.
+  - The OpenRouter key is a dedicated funded staging key with a user-approved
+    spend limit and access to only the accepted registry model
+    `openai/gpt-4.1-mini`. The canary uses the Step 7 deterministic tool-free,
+    bounded-output contract exactly once for the persisted config revision; no
+    fallback provider/model, catalog discovery, repeated ambiguous canary, or
+    general chat load is authorized.
+  - The Telegram token belongs to a dedicated BotFather-created staging bot not
+    active in another Hermes, webhook, or polling process. The supplied test
+    user owns/controls the canonical numeric allowed-user ID, consents to the
+    one bounded live exchange, can access the supplied private chat, and is
+    available during the acceptance window. BotFather creation, privacy-mode
+    changes, webhook deletion, token rotation, account automation, and joining
+    groups remain manual user actions outside the verifier.
+  - A bot token cannot send a message *as* the allowed user, and a second Bot
+    API `getUpdates` poller would conflict with Hermes. Therefore the default
+    accepted Telegram gate is an interactive human-witnessed challenge: the
+    verifier generates a nonsecret one-time correlation nonce, the approved
+    human sends the displayed bounded prompt from the allowed account, observes
+    the bot reply in the same chat, and returns only the correlation nonce plus
+    an explicit yes/no attestation. The verifier must require a TTY, expire the
+    challenge, and never request a Telegram user-session/API hash. A future
+    automated MTProto test-user client is a separate security design and is not
+    invented in Step 10.
+- live verifier and bounded evidence contract:
+  - Extend the Step 1 result to a closed state machine with safe phases such as
+    `preflight`, `target_verified`, `agent_submitted`, `deploying`, `ready`,
+    `telegram_challenge`, `restarted`, `stopped`, `rolled_back`, and `cleaned`.
+    Persist a local run journal only if needed for crash-safe cleanup; it uses a
+    freshly created `0700` temporary directory, `0600` files, safe generated
+    run/resource correlation IDs, and no credentials, bot/user/chat IDs,
+    private endpoints, request/response bodies, model text, or message content.
+  - Apply one total acceptance deadline and shorter phase deadlines rather than
+    unbounded polling. Recommended upper bounds are 30 minutes for the whole
+    live run, 15 minutes from create to terminal deployment, the accepted Step
+    7 model-canary deadline, 2 minutes for each Telegram challenge/reply, and 5
+    minutes each for restart-ready, durable Stop, rollback, and cleanup. A
+    timeout cancels pending work, disables further creation when authorized,
+    enters cleanup, and exits nonzero.
+  - Use the authenticated owner-facing API/UI contracts rather than direct SQL,
+    private runner HTTP, Docker socket, or Telegram `getUpdates`. The verifier
+    may inspect only exact public safe agent/deployment/runtime DTOs plus local
+    provider cleanup handles it created. It does not decrypt database secrets,
+    query secret metadata, access private runner endpoints, or scrape raw
+    Hermes logs.
+  - Create one unique ready-mode request with the accepted sole model, dedicated
+    token, one canonical allowed-user ID, optional explicitly selected owned
+    runner only when required, and one generated idempotency key. Clear plaintext
+    request material immediately after submission. Require exact `202
+    {agent,deployment}`, desired running, safe Telegram bot metadata, and no
+    returned credential/internal fields.
+  - Submit one exact replay with only the common envelope and normalized same
+    idempotency key. Require the original agent/deployment IDs and no second
+    agent, deployment, runner, Droplet, secret set, event, model canary, or
+    usage period. A changed body under the same key must not mutate the original
+    result; exercise its safe response locally, not by resending secrets in the
+    live journal.
+  - Observe the persisted stage order `pending`, `provisioning_runner`,
+    `configuring_hermes`, `starting_gateway`, `verifying_model`,
+    `connecting_telegram`, `ready`. Polling may miss fast intermediate snapshots,
+    but recorded server events/transition evidence must prove monotonic legal
+    progression without invented timestamps or repeated canary. Require final
+    exact managed revision/operation correlation, application readiness,
+    Telegram connected, and one open usage period through safe DTO/event
+    assertions only.
+  - The human sends a unique prompt containing only the run nonce and a fixed
+    request for a short acknowledgement. Acceptance records only that the
+    allowed user sent it, a reply arrived in the same private chat within the
+    bound, and the nonce was correlated by the witness. Do not record the
+    prompt, reply, bot username/ID, user/chat ID, screenshots containing PII,
+    Telegram update objects, or message identifiers.
+  - Invoke the authenticated managed Restart once. Require a new accepted
+    runtime generation/operation as defined by Steps 6/9, exact ready recovery,
+    no duplicate selected container, preserved config revision/state roots,
+    and one post-restart challenge/reply if the approved spend/time window
+    permits. At minimum the post-restart safe observation must show current
+    gateway/API/Telegram readiness, not historical deployment-ready state.
+  - Invoke Stop once and prove desired stopped is persisted before runner work,
+    the workload converges to observed stopped, its open usage period closes,
+    and subsequent heartbeat/cron/runner-process activity cannot resurrect it.
+    The live gate need not reboot the Droplet or Docker daemon unless that
+    additional external disruption is explicitly approved; Step 9 local smoke
+    remains the deterministic host-restart proof.
+  - Inspect the application UI and safe events/log summaries for the required
+    persisted stages and actionable fixed failure/status copy. This is an
+    absence/presentation check: never export raw runtime logs, provider bodies,
+    model prompt/output, private URLs, container inspect data, or chat content
+    into the evidence bundle.
+- image, deployment, and controlled rollout order:
+  - Stage A, code complete: accepted Steps 4–9, docs, live-executor tests, local
+    gates, migration rehearsal, release image local build/smoke, and secret
+    scan are green while the hosted ready flag remains unset/false.
+  - Stage B, artifact: only with publication approval, build from the exact
+    accepted source commit using the reviewed workflow; verify the pinned
+    upstream digest, local smoke, critical-fixable vulnerability scan, SBOM,
+    provenance, and immutable GHCR digest. A mutable tag is never acceptance
+    evidence. Record only the workflow/commit reference and digest.
+  - Stage C, isolated deploy: only with Vercel authorization, deploy the exact
+    commit to the named staging environment with migrations applied and both
+    deployment/runtime cron routes configured. Keep automatic-ready creation
+    disabled and prove auth, stopped/manual `201`, cron fail-closed auth, runner
+    image pull, and database health before adding live credentials.
+  - Stage D, acceptance window: after all live confirmations, temporarily enable
+    `AGENTBAY_READY_AGENT_CREATION_ENABLED=true` only in the isolated staging
+    environment so the accepted Step 8 form/API can submit the one canary. This
+    temporary test enablement is not production rollout. Run the bounded live
+    verifier, Stop the agent, and complete cleanup/rollback checks.
+  - Stage E, controlled enablement: only after the live run and secret review
+    pass, and only if the user separately authorized retention, leave the flag
+    enabled in that same controlled environment. Production, previews, or other
+    tenants remain unchanged. If retention was not approved, restore false
+    after evidence collection even on success.
+  - Rollout is adapter/schema safe: apply additive migrations and strict control-
+    plane parsers before runner behavior, confirm old runners remain unavailable
+    rather than falsely ready, deploy the accepted runner image, then enable
+    deployment/runtime cron and finally ready creation. Never enable the flag
+    while a Step 5–9 rolling-compatibility prerequisite is unverified.
+- rollback, cleanup, and cost controls:
+  - `AGENTBAY_READY_AGENT_CREATION_ENABLED=false` is the creation rollback: new
+    ready submissions return the accepted safe 503 while idempotent replays
+    remain available and explicit `launchMode:"stopped"` remains `201`. It is
+    not a kill switch for already desired-running agents. Operators must Stop
+    those agents through the accepted lifecycle API and wait for observed
+    stopped before deleting runners or disabling cron.
+  - Schema rollback is forward-only for these additive migrations. Do not drop
+    deployment/runtime/secret columns or uniqueness indexes during an incident.
+    Keep old application/runner versions from treating unknown v3/status
+    evidence as ready; roll application code back only to a reviewed version
+    compatible with the applied schema and preserve encrypted rows for explicit
+    cleanup/recovery.
+  - Tag the one Droplet/firewall/runner with a random safe run correlation value
+    and persist its exact provider handle only in the private temporary journal.
+    Before create, confirm no resource for that run exists; after ambiguous
+    create, recover by operation key/tag and never issue a second create. Set an
+    operator-visible maximum lifetime and a cleanup deadline no later than 15
+    minutes after success/failure or 60 minutes after first billable create,
+    whichever comes first.
+  - Cleanup order is: disable new ready creation when authorized; Stop and
+    observe stopped; delete the canary agent so active secrets are revoked and
+    selected workload/state cleanup follows accepted semantics; delete only the
+    exact owned staging runner/Droplet/firewall; confirm provider absence by the
+    saved handle/tag; remove temporary journal/auth session; rotate/revoke
+    ephemeral operator/provider/model/bot credentials when the user designated
+    them single-run. Never delete a pre-existing shared runner or bot.
+  - Cleanup failure is a terminal `cleanup_incomplete` blocker. Report only the
+    resource class, safe run correlation, last completed cleanup phase, and
+    required human action. Do not mark Step 10 complete or discard the private
+    cleanup handle until an authorized operator confirms absence. The live
+    verifier must attempt bounded cleanup on signal, exception, timeout, failed
+    assertion, and normal completion.
+  - Track cost only as the approved maximum and safe aggregate resource/runtime
+    duration; never store provider billing payloads or account identifiers. One
+    Droplet and one model canary per config revision are hard ceilings. A
+    repeated full run requires fresh explicit authorization and a fresh bot/run
+    identity after confirmed cleanup.
+- required failure exercises and classification:
+  - Invalid/revoked Telegram token, hostile/oversized/slow `getMe`, provider
+    canary failure, runner registration delay, missing heartbeat, duplicate
+    idempotency submission, expired lease, stale result, reconciliation retry,
+    Telegram fatal/retrying/webhook-conflict, restart recovery, desired Stop,
+    and cleanup failure are exercised with injected local fakes/fixtures. Do
+    not deliberately send an invalid real token, disable a real provider key,
+    create a webhook conflict, kill a live runner, or consume extra model calls
+    merely to demonstrate a known failure path.
+  - The live run may confirm the harmless same-key replay and normal restart/
+    Stop paths. Any naturally occurring external failure is recorded under a
+    safe class, but it does not replace the deterministic failure suite and is
+    never induced after the environment is healthy.
+  - Closed top-level classifications are: `prerequisite_unaccepted`,
+    `authorization_missing`, `capability_unavailable`, `capability_malformed`,
+    `artifact_unverified`, `target_misconfigured`, `deployment_failed`,
+    `model_acceptance_failed`, `telegram_acceptance_failed`,
+    `restart_acceptance_failed`, `stop_acceptance_failed`, `redaction_failed`,
+    `budget_exhausted`, `external_service_unavailable`, `cleanup_incomplete`,
+    and `operator_cancelled`. Provider/HTTP/exception bodies never become a
+    class or detail.
+  - `redaction_failed`, exceeded budget/resource ceiling, mismatched target
+    commit/digest, unapproved hosted mutation, unexpected second resource,
+    invalid auth isolation, or ambiguous cleanup immediately stops rollout,
+    attempts bounded cleanup, and requires a new review/authorization before
+    retry. Provider outage or Telegram/OpenRouter unavailability may be retried
+    only in a new bounded run after cleanup and fresh authorization; they are
+    not waived.
+- safe evidence and final secret review:
+  - The final evidence record may contain only source/product commit hashes,
+    checker acceptance references, migration versions, CI/workflow/deployment
+    references that expose no private endpoint, immutable image digest, safe
+    run correlation, configured/missing capability names, coarse phase result,
+    deployment stage names, pass/fail booleans, bounded durations/counts, safe
+    error codes, feature-flag state by environment name, cleanup confirmation,
+    and date. It never contains secrets or identifiers derived from them.
+  - Specifically exclude OpenRouter/API/cron/runner/operator/Telegram/provider
+    credentials; ciphertext/IV/tag/key version/fingerprints; bot username/ID;
+    allowed-user/chat/message IDs; Droplet/firewall/account/project IDs or IPs;
+    private runner/application endpoints; cookies/auth headers; database URLs;
+    config/env/YAML; request/response bodies; model prompt/reply; Telegram
+    prompt/reply/update; Docker/cloud-init/inspect output; usage timestamps; and
+    raw errors/logs/screenshots.
+  - Add a repository-owned safe evidence scanner that checks the exact changed
+    docs, progress, changelog, status/evidence JSON, captured command output,
+    test artifacts, and git diff for known credential/token/URL/IP/PII canaries
+    and live secret values without printing matches. It reports file/category/
+    count only, fails closed, and deletes unsafe temporary artifacts. Retain the
+    existing redaction test corpus and perform an independent manual diff/log/
+    artifact review; a scanner pass alone is insufficient.
+  - Do not commit the private live journal. Commit only a sanitized summary
+    generated from its allowlisted schema after cleanup. Delete Playwright
+    traces/videos/screenshots or provider artifacts that could contain form
+    fields, Basic auth, private pages, Telegram data, or endpoints; retain only
+    explicitly sanitized CI references.
+- documentation and milestone semantics:
+  - Update `.env.example`, `README.md`, `docs/E2E_VALIDATION.md`, and the relevant
+    Vercel/operator/deployment documentation with placeholder-only ready-mode,
+    secret keyring, cron, image digest, DigitalOcean, OpenRouter, BotFather,
+    dedicated-bot, numeric allowlist, long-polling/no-webhook, state/stage,
+    retry/circuit, canary-cost, restart/Stop, cleanup, and rollback instructions.
+    State clearly that managed settings are reapplied and Advanced Hermes setup
+    remains a recovery/manual-OAuth path outside automatic readiness.
+  - Document feature flag false as the default; replay-before-flag behavior;
+    stopped/manual fallback; that disabling the flag does not stop existing
+    agents; how to Stop before provider cleanup; additive migration/runner
+    rolling order; cron authentication; safe operator diagnostics; maximum
+    resource/cost/time bounds; and exact conditions requiring escalation.
+  - Update `docs/MILESTONES.md` and `PROGRESS.md` with sanitized proof that the
+    Milestone 18 Hermes + Telegram + BYOK path is accepted. Milestone 19 may
+    reference this as one satisfied beta-flow prerequisite, but must not be
+    marked complete solely by this plan because its billing, admin, telemetry,
+    support, retention, and multi-user criteria are broader. Record native
+    Nous OAuth automation as explicitly deferred, with Advanced Hermes setup
+    retained; do not imply subscription artifacts are managed automatically.
+- required tests and gates:
+  - Unit/integration tests cover every capability state and exact sentinel;
+    added staging target/auth parsing; no import-time effect; interactive TTY/
+    challenge expiry/cancel; executor phase/deadline state machine; exact one-
+    resource and one-canary budgets; same-key replay; safe output schema;
+    cleanup on every failure; signal handling; journal permissions/recovery;
+    and secret/evidence scanner canaries. All external clients are injected and
+    fake in automated tests.
+  - Run the full accepted Step 5–9 focused suites and migration fixtures, then
+    `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test`;
+    `bun run build`; `bun run test:e2e:ci`; documented provider-safe
+    `bun run verify:e2e`; `bun run agent:image:smoke` against the exact release
+    candidate; `bun run agent:hermes:contract-smoke`; credential-free
+    fail-closed `bun run verify:hermes:staging`; repository safe evidence/secret
+    scan; and `git diff --check`.
+  - Only after the credential-free gates, predecessor acceptance, explicit live
+    authorization, capability preflight, exact artifact/deployment verification,
+    and isolated flag window, run `bun run verify:hermes:staging` live. It must
+    pass the one-agent create/stages/model/Telegram/restart/Stop/rollback/
+    cleanup contract and exit zero. Mocks, local fake platform state, `getMe`,
+    or a configured-capabilities-only plan never produce exit zero.
+  - Re-run the safe evidence scan and `git diff --check` after inserting
+    sanitized live references into docs/progress. Independently inspect the
+    final worktree, untracked files, temp artifacts, provider cleanup, hosted
+    flag state, and changelog/progress truth before commit.
+- likely touchpoints:
+  - Live gate and tests: `scripts/verify-hermes-staging.ts`, a narrowly scoped
+    server-only/executor/evidence helper under `scripts/` if needed,
+    `tests/unit/verify-hermes-staging.test.ts`, and focused integration tests
+    using only injected providers. `package.json` changes only if a separate
+    safe evidence command is warranted; preserve the single documented live
+    entrypoint.
+  - Docs/config: `.env.example`, `README.md`, `docs/E2E_VALIDATION.md`, relevant
+    deployment/operator/auth documentation, `docs/MILESTONES.md`, `PROGRESS.md`,
+    and `CHANGELOG.md` only under the semantics below. `vercel.json` or image
+    workflows change only if accepted Steps 7/9 left a documented production
+    schedule/artifact defect; do not churn reviewed infrastructure for evidence.
+  - Product code should ordinarily be unchanged after Step 9. Any defect found
+    by live acceptance returns to the owning step's builder/checker repair cycle
+    with focused regression tests and a separate product fix commit; do not hide
+    a behavioral/security repair inside the Step 10 documentation/rollout
+    commit.
+- non-goals / do not touch:
+  - No production-wide enablement, general beta launch, multi-tenant canary,
+    load/performance test, second Droplet, alternate provider/model, fallback
+    routing, bundled credits, subscription OAuth automation, Telegram group/
+    webhook/pairing/open-access/local-Bot-API support, bot/account creation,
+    automatic webhook deletion, token rotation/reveal, or test-user account
+    automation.
+  - No raw database/runner/Docker/Telegram/provider inspection as acceptance;
+    no public Hermes port; no direct runner endpoint; no `getUpdates` second
+    poller; no sending with the bot token and mislabeling it as a user message;
+    no screenshots or chat transcripts as committed proof.
+  - No destructive migration down, deletion of shared/pre-existing resources,
+    rotation of user-owned long-lived credentials without approval, broad
+    account cleanup, production database use, production user impersonation,
+    or mutation of Vercel/GitHub/DigitalOcean/Telegram/OpenRouter state beyond
+    the exact separately approved canary actions.
+  - Do not reopen accepted Step 4 payload/encryption/uniqueness, Step 5 v3/YAML
+    projection, Step 6 launch/status, Step 7 reconciliation/canary, Step 8 UI,
+    or Step 9 durability semantics merely to make the smoke convenient. Do not
+    weaken owner isolation, redaction, deadlines, idempotency, feature-flag
+    default, stopped fallback, or cleanup to convert an external failure into a
+    pass.
+- progress/changelog/commit:
+  - After every credential-free and live gate plus verified cleanup, mark Step
+    10 and the Automatic Ready Hermes + Telegram Creation plan complete in
+    `PROGRESS.md`. Record only sanitized source/checker/migration/CI/deployment/
+    image/live-phase/cleanup references allowed above, final hosted flag state,
+    native OAuth deferral, and any broader Milestone 19 blocker. Never paste
+    environment dumps, provider output, logs, prompts/replies, IDs, endpoints,
+    or credentials.
+  - Add final newest-first `Unreleased` `Added`, `Changed`, `Fixed`, or
+    `Security` entries only for observable product behavior first shipped or
+    repaired in Step 10 and not already recorded by Steps 2–9. Documentation,
+    live-executor tests, validation, image publication, rollout evidence,
+    feature-flag mutation, and cleanup alone receive no changelog entry. A live-
+    found product fix uses its own appropriate changelog entry and repair
+    commit before the final Step 10 commit.
+  - Commit exactly `feat: complete automatic Hermes Telegram rollout` only
+    after the authorized live command exits zero, cleanup is independently
+    confirmed, evidence is sanitized, final gates pass, and the checker accepts
+    the complete Step 10 diff. If live authority/capabilities remain absent,
+    commit documentation/executor preparation separately only if the coordinator
+    chooses, leave Step 10/goal blocked, and do not create the prescribed final
+    commit or claim completion.
+- exact repository evidence at pre-spec time:
+  - Accepted Steps 0–3 are recorded in hot status. Step 4 candidate `d942270`
+    adds the opt-in ready create, approved OpenRouter model, bounded Telegram
+    `getMe`, encrypted four-secret transaction, stable Telegram uniqueness,
+    pending deployment, and safe `202`; repair `546b9df` adds the checker-driven
+    database race/rollback/isolation and redaction fixes, but independent repair
+    acceptance is not yet recorded.
+  - Step 1's `verify:hermes:staging` is deliberately preflight-only. Even with
+    all nine current capabilities configured it returns
+    `live_executor_unavailable`, reports `sideEffectsAttempted:false`, and exits
+    nonzero. It has no staging application target/auth, live phase controller,
+    human reply handshake, cleanup journal, or success result.
+  - The current image workflow verifies the pinned upstream digest, builds and
+    smokes linux/amd64, scans critical fixable vulnerabilities, uploads SARIF,
+    publishes SBOM/provenance, and emits an immutable GHCR digest. Invoking it,
+    publishing packages, and treating an artifact as the release candidate are
+    external actions requiring approval and accepted source/CI evidence.
+  - The current docs already name the nine staging capabilities, feature flag,
+    DigitalOcean/runner/keyring basics, and deployment flow, but do not yet
+    contain the final automatic-ready operations, cron/reconciler stages,
+    challenge/reply procedure, circuit/restart behavior, forward-only rollback,
+    evidence schema, or cleanup/cost runbook.
+  - Milestone 18 explicitly requires a real Telegram reply, BYOK without key
+    exposure, logs, restart/Stop, and safe boot failure. Milestone 19 is broader
+    than this plan; its completion cannot be inferred from the automatic-ready
+    acceptance alone.
+- blockers and stop conditions:
+  - Hard dependency: exact prescribed product commits and independent checker
+    acceptance for every Step 4–9 predecessor. Any unresolved finding returns
+    to that step; Step 10 cannot bless candidate behavior.
+  - External capabilities: explicit GHCR/Vercel/DigitalOcean/OpenRouter/
+    Telegram/feature-flag authorization as applicable; exact source artifact;
+    isolated staging app/database/auth/keyring/cron; one funded provider key;
+    one dedicated bot; one consenting allowed human; one approved chat; one
+    basic runner; pullable images; provider/network availability; and a cleanup
+    operator. Missing any required item is a truthful blocker.
+  - Human Telegram acceptance requires the approved user to be present for the
+    expiring interactive challenge. The current bot token plus user/chat IDs do
+    not grant authority or technical ability to send as that user. Do not add a
+    Telegram user-session secret or call a second poller to bypass this blocker.
+  - Stop immediately on authorization ambiguity, target/digest mismatch,
+    secret/PII leakage, unexpected public exposure, a second billable resource,
+    exceeded cost/deadline, inability to disable ready creation when required,
+    or incomplete cleanup. Preserve only safe handoff evidence and ask the user
+    for the exact missing decision/capability.
+- open questions:
+  - Before live execution the user/coordinator must confirm the named staging
+    target, whether publication/deployment/hosted-secret and temporary flag
+    mutations are authorized, the exact one-resource/time/spend bounds, whether
+    success may leave the flag enabled, and the availability of the allowed
+    human for the interactive Telegram challenge.
+  - No additional product behavior should be invented. If the user requires a
+    fully unattended Telegram reply gate instead of the human-witnessed default,
+    stop for a separate reviewed design covering a dedicated Telegram test-user
+    MTProto session, storage/rotation, account policy, rate limits, and evidence;
+    a bot-token `sendMessage` or `getUpdates` workaround does not satisfy the
+    plan.
