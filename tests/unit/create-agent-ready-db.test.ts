@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentSecretKeyringError } from "@/src/server/agents/agent-secrets";
+import { listModelConnectionsForUser } from "@/src/server/agents/model-connections";
 import {
   AgentPersistenceError,
   AgentRunnerAssignmentError,
@@ -156,6 +157,59 @@ describe("ready agent creation persistence", () => {
     });
     expect(secrets.map((secret) => secret.kind)).toContain("anthropic_api_key");
     expect(JSON.stringify(result)).not.toContain(anthropicKey);
+  });
+
+  it("reuses an owner-scoped encrypted ChatGPT connection without returning the key", async () => {
+    await createAgentForUser(USER_A_ID, readyInput("ready-key-reuse-1"), {
+      createConnection: () => connection,
+      env: KEYRING_ENV,
+      now: () => NOW,
+      randomBytes: incrementalRandomBytes(),
+      telegramBotValidator: telegramValidator(),
+    });
+
+    const connectionViews = await listModelConnectionsForUser(USER_A_ID, {
+      createConnection: () => connection,
+    });
+    expect(connectionViews).toMatchObject([
+      { assistant: "chatgpt", status: "connected" },
+      { assistant: "claude", status: "action_required" },
+    ]);
+    expect(JSON.stringify(connectionViews)).not.toContain(OPENAI_KEY);
+
+    const reusedInput = readyInput("ready-key-reuse-2", {
+      token: SECOND_TOKEN,
+      modelApiKey: null,
+    });
+    const reused = await createAgentForUser(USER_A_ID, reusedInput, {
+      createConnection: () => connection,
+      env: KEYRING_ENV,
+      now: () => new Date(NOW.getTime() + 1_000),
+      randomBytes: incrementalRandomBytes(),
+      telegramBotValidator: telegramValidator("654321"),
+    });
+
+    expect(reused).toMatchObject({ agent: { assistant: { id: "chatgpt" } } });
+    expect(JSON.stringify(reused)).not.toContain(OPENAI_KEY);
+    const modelSecrets = await connection.db
+      .select()
+      .from(agentSecrets)
+      .where(eq(agentSecrets.kind, "openai_api_key"));
+    expect(modelSecrets).toHaveLength(2);
+
+    const foreignInput = readyInput("ready-key-reuse-3", {
+      token: "777777:abcdefghijklmnopqrstuvwxyz",
+      modelApiKey: null,
+    });
+    await expect(
+      createAgentForUser(USER_B_ID, foreignInput, {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        now: () => new Date(NOW.getTime() + 2_000),
+        randomBytes: incrementalRandomBytes(),
+        telegramBotValidator: telegramValidator("777777"),
+      }),
+    ).rejects.toMatchObject({ name: "ReadyAgentValidationError" });
   });
 
   it("replays an existing ready deployment before flag and credential validation", async () => {
@@ -489,7 +543,7 @@ function readyInput(
     runnerId?: string | null;
     token?: string;
     assistant?: "chatgpt" | "claude";
-    modelApiKey?: string;
+    modelApiKey?: string | null;
   } = {},
 ) {
   return {
@@ -499,7 +553,7 @@ function readyInput(
     launchMode: "ready" as const,
     idempotencyKey,
     assistant: overrides.assistant ?? "chatgpt",
-    modelApiKey: overrides.modelApiKey ?? OPENAI_KEY,
+    ...(overrides.modelApiKey === null ? {} : { modelApiKey: overrides.modelApiKey ?? OPENAI_KEY }),
     telegramBotToken: overrides.token ?? TOKEN,
     telegramAllowedUserIds: ["111111", "222222", "111111"],
   };

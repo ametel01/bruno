@@ -2967,6 +2967,110 @@ h2 {
   gap: 18px;
 }
 
+.one-click-agent-form {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.assistant-choice-fieldset,
+.ready-credential-fieldset {
+  min-width: 0;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.assistant-choice-fieldset legend,
+.ready-credential-fieldset legend {
+  margin-bottom: 9px;
+  color: var(--foreground);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.assistant-choice-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.assistant-choice-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  cursor: pointer;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 14px;
+}
+
+.assistant-choice-card[data-selected="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.assistant-choice-card > span:nth-child(2) {
+  display: grid;
+  gap: 3px;
+}
+
+.assistant-choice-card strong {
+  font-size: 0.94rem;
+}
+
+.assistant-choice-card > span:nth-child(2) small {
+  color: var(--muted);
+}
+
+.connection-status {
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.67rem;
+  font-weight: 800;
+  padding: 4px 7px;
+}
+
+.connection-status[data-status="connected"] {
+  border-color: #9fc9b6;
+  background: #eff9f3;
+  color: #246248;
+}
+
+.connection-key-field {
+  border: 1px solid #cdd9ea;
+  border-radius: 8px;
+  background: #f7faff;
+  padding: 14px;
+}
+
+.one-click-agent-form .ready-credential-fieldset {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.one-click-agent-form .ready-credential-fieldset legend {
+  grid-column: 1 / -1;
+}
+
+.one-click-summary {
+  display: grid;
+  gap: 3px;
+  border-left: 3px solid var(--accent);
+  background: var(--panel-subtle);
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  padding: 11px 13px;
+}
+
+.one-click-summary strong {
+  color: var(--foreground);
+}
+
 .agent-creation-fields {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -3115,6 +3219,22 @@ h2 {
 .agent-creation-actions .form-message {
   flex: 1 1 340px;
   order: -1;
+}
+
+@media (max-width: 680px) {
+  .assistant-choice-list,
+  .one-click-agent-form .ready-credential-fieldset {
+    grid-template-columns: 1fr;
+  }
+
+  .assistant-choice-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .connection-status {
+    grid-column: 2;
+    justify-self: start;
+  }
 }
 
 .agents-cloud-status {

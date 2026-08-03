@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A nontechnical agent setup flow with two assistant choices, ChatGPT and Claude, owner-scoped encrypted connection reuse, first-connection-only API-key entry, fixed safe defaults, and one primary “Create my agent” action while the app owns model, runner, configuration, launch, and health-check details.
 - Server-owned ChatGPT and Claude assistant profiles with encrypted direct OpenAI/Anthropic credentials, strict managed launch parsing, exact Hermes provider/environment projection, bounded model selection, and a legacy-only OpenRouter compatibility branch.
 - Default-disabled durable Hermes staging acceptance with exact published-image provenance, isolated ownership, one-effect reconciliation, two interactive-human Telegram reply attestations, restart/Stop/rollback evidence, and ordered workload, secret, firewall, Droplet, and runner cleanup.
 - Credential-complete one-click ready agent creation with masked OpenRouter and Telegram inputs, normalized Telegram allowlists, idempotent submission, and persisted deployment progress across inventory, detail, dashboard, refreshes, and browser contexts.

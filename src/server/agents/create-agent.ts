@@ -43,6 +43,7 @@ import {
   parseAgentSecretKeyring,
   prepareAgentSecretRow,
 } from "@/src/server/agents/agent-secrets";
+import { resolveReusableAssistantApiKeyInTransaction } from "@/src/server/agents/model-connections";
 import {
   type AssistantChoice,
   type AssistantProfile,
@@ -772,6 +773,25 @@ async function createReadyAgentForUser(
   }
 
   const keyring = parseAgentSecretKeyring(dependencies.env);
+  const modelApiKey =
+    firstWriteValidation.modelApiKey ??
+    (await connection.db.transaction((tx) =>
+      resolveReusableAssistantApiKeyInTransaction(tx, {
+        userId,
+        assistant: firstWriteValidation.profile.assistant,
+        ...(dependencies.env ? { env: dependencies.env } : {}),
+      }),
+    ));
+
+  if (!modelApiKey) {
+    throw new ReadyAgentValidationError([
+      {
+        field: "modelApiKey",
+        message: `${firstWriteValidation.profile.credentialLabel} is required the first time you connect ${firstWriteValidation.profile.displayName}.`,
+      },
+    ]);
+  }
+
   const telegramValidation = await (dependencies.telegramBotValidator?.(
     firstWriteValidation.telegramBotToken,
   ) ??
@@ -799,7 +819,7 @@ async function createReadyAgentForUser(
     prepareAgentSecretRow({
       agentId,
       kind: firstWriteValidation.profile.secretKind,
-      value: firstWriteValidation.modelApiKey,
+      value: modelApiKey,
       keyring,
       now,
       rotatedAt: null,
@@ -1235,7 +1255,7 @@ function validateReadyFirstWriteInput(input: ReadyCreateAgentInput):
   | {
       ok: true;
       profile: AssistantProfile;
-      modelApiKey: string;
+      modelApiKey: string | null;
       telegramBotToken: string;
       telegramAllowedUsers: string;
     }
@@ -1251,9 +1271,12 @@ function validateReadyFirstWriteInput(input: ReadyCreateAgentInput):
     issues.push({ field: "assistant", message: "Choose ChatGPT or Claude." });
   }
 
-  const modelApiKey = profile
-    ? validateAssistantApiKey(profile, input.modelApiKey)
-    : ({ ok: false } as const);
+  const modelApiKey =
+    input.modelApiKey === undefined || input.modelApiKey === null || input.modelApiKey === ""
+      ? ({ ok: true, value: null } as const)
+      : profile
+        ? validateAssistantApiKey(profile, input.modelApiKey)
+        : ({ ok: false } as const);
 
   if (!modelApiKey.ok) {
     issues.push({ field: "modelApiKey", message: "The assistant API key format is invalid." });

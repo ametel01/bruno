@@ -12,7 +12,10 @@ import {
   AgentListPersistenceError,
   listActiveAgentsForUser,
 } from "@/src/server/agents/list-agents";
-import { APPROVED_OPENROUTER_MODELS } from "@/src/server/agents/openrouter-models";
+import {
+  listModelConnectionsForUser,
+  ModelConnectionPersistenceError,
+} from "@/src/server/agents/model-connections";
 import {
   listAssignableRunnersForUser,
   RunnerAssignmentPersistenceError,
@@ -44,10 +47,11 @@ export default async function AgentsPage() {
     );
   }
 
-  const [listResult, runnerResult, cloudRunnersResult] = await Promise.all([
+  const [listResult, runnerResult, cloudRunnersResult, modelConnectionResult] = await Promise.all([
     loadAgents(applicationUser.userId),
     loadAssignableRunners(applicationUser.userId),
     loadCloudRunnerProvisioning(applicationUser.userId),
+    loadModelConnections(applicationUser.userId),
   ]);
   const agentCount = listResult.ok ? listResult.agents.length : null;
   const assignableRunnerCount = runnerResult.ok ? runnerResult.runners.length : null;
@@ -57,19 +61,13 @@ export default async function AgentsPage() {
     : null;
   const readyFlag = readReadyAgentCreationFlag();
   const readyModeEnabled = readyFlag.ok && readyFlag.enabled;
-  const openrouterModels = readyModeEnabled
-    ? APPROVED_OPENROUTER_MODELS.map((model) => ({
-        id: model.id,
-        displayName: model.displayName,
-      }))
-    : [];
 
   return (
     <ProductShell
       active="agents"
       eyebrow="Agents"
-      title="Agent inventory"
-      description="Create persistent agents, choose their operating template, and manage active records from one workspace."
+      title="Your AI agents"
+      description="Choose ChatGPT or Claude. We securely configure, launch, and monitor the agent for you."
     >
       <div className="agents-page">
         <section className="agents-workspace-overview" aria-labelledby="agents-workspace-title">
@@ -194,8 +192,8 @@ export default async function AgentsPage() {
               </>
             ) : (
               <EmptyState
-                title="No agent records"
-                description="Create an agent to store a stopped persistent record in the database."
+                title="No agents yet"
+                description="Create your first agent below. Setup usually takes only a few minutes."
               />
             )
           ) : (
@@ -208,18 +206,16 @@ export default async function AgentsPage() {
         <section className="agent-creation-panel" aria-labelledby="create-agent-title">
           <div className="agent-creation-heading">
             <div>
-              <p>New persistent record</p>
-              <h2 id="create-agent-title">Create agent</h2>
+              <p>Guided setup</p>
+              <h2 id="create-agent-title">Create a new agent</h2>
             </div>
-            <span>Choose one template</span>
+            <span>We handle the technical setup</span>
           </div>
           <div className="agent-creation-body">
             <CreateAgentForm
               maxNameLength={AGENT_NAME_MAX_LENGTH}
-              openrouterModels={openrouterModels}
-              readyModeEnabled={readyModeEnabled}
-              runners={runnerResult.ok ? runnerResult.runners : []}
-              templates={AGENT_TEMPLATE_OPTIONS}
+              modelConnections={modelConnectionResult.ok ? modelConnectionResult.connections : []}
+              readyModeEnabled={readyModeEnabled && modelConnectionResult.ok}
             />
           </div>
         </section>
@@ -290,6 +286,21 @@ async function loadAgents(userId: string) {
       return {
         ok: false as const,
       };
+    }
+
+    throw error;
+  }
+}
+
+async function loadModelConnections(userId: string) {
+  try {
+    return {
+      ok: true as const,
+      connections: await listModelConnectionsForUser(userId),
+    };
+  } catch (error) {
+    if (error instanceof ModelConnectionPersistenceError) {
+      return { ok: false as const };
     }
 
     throw error;
