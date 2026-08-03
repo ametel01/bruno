@@ -28,7 +28,8 @@ export type HermesStagingCapabilityName =
   | "digitalocean_budget_authorization"
   | "digitalocean_token"
   | "runner_bearer_token"
-  | "openrouter_api_key"
+  | "assistant"
+  | "model_api_key"
   | "telegram_bot_token"
   | "telegram_test_user_id"
   | "telegram_test_chat_id"
@@ -179,9 +180,14 @@ const CAPABILITY_SPECS: CapabilitySpec[] = [
     validate: validateOpaqueCredential,
   },
   {
-    name: "openrouter_api_key",
-    envName: "AGENTBAY_HERMES_STAGING_OPENROUTER_API_KEY",
-    validate: validateOpenRouterKey,
+    name: "assistant",
+    envName: "AGENTBAY_HERMES_STAGING_ASSISTANT",
+    validate: validateAssistant,
+  },
+  {
+    name: "model_api_key",
+    envName: "AGENTBAY_HERMES_STAGING_OPENAI_API_KEY",
+    validate: validateDirectModelKey,
   },
   {
     name: "telegram_bot_token",
@@ -209,12 +215,32 @@ export function evaluateHermesStagingCapabilities(
   env: Record<string, string | undefined>,
 ): HermesStagingCapability[] {
   return CAPABILITY_SPECS.map((spec) => {
-    const rawValue = env[spec.envName];
+    const assistant = env.AGENTBAY_HERMES_STAGING_ASSISTANT?.trim();
+    const envName =
+      spec.name === "model_api_key" && assistant === "claude"
+        ? "AGENTBAY_HERMES_STAGING_ANTHROPIC_API_KEY"
+        : spec.envName;
+    const rawValue = env[envName];
+    const unusedModelKey =
+      spec.name === "model_api_key"
+        ? assistant === "claude"
+          ? env.AGENTBAY_HERMES_STAGING_OPENAI_API_KEY
+          : env.AGENTBAY_HERMES_STAGING_ANTHROPIC_API_KEY
+        : undefined;
+
+    if (unusedModelKey?.trim()) {
+      return {
+        name: spec.name,
+        envName,
+        state: "malformed",
+        detail: "unselected_model_api_key_must_be_unset",
+      };
+    }
 
     if (rawValue === undefined) {
       return {
         name: spec.name,
-        envName: spec.envName,
+        envName,
         state: "missing",
       };
     }
@@ -224,7 +250,7 @@ export function evaluateHermesStagingCapabilities(
     if (!value) {
       return {
         name: spec.name,
-        envName: spec.envName,
+        envName,
         state: "malformed",
         detail: "blank",
       };
@@ -233,18 +259,21 @@ export function evaluateHermesStagingCapabilities(
     if (PLACEHOLDER_PATTERN.test(value)) {
       return {
         name: spec.name,
-        envName: spec.envName,
+        envName,
         state: "malformed",
         detail: "placeholder",
       };
     }
 
-    const validationError = spec.validate(rawValue);
+    const validationError =
+      spec.name === "model_api_key"
+        ? validateDirectModelKey(rawValue, assistant)
+        : spec.validate(rawValue);
 
     if (validationError) {
       return {
         name: spec.name,
-        envName: spec.envName,
+        envName,
         state: "malformed",
         detail: validationError,
       };
@@ -278,7 +307,7 @@ export function evaluateHermesStagingCapabilities(
 
     return {
       name: spec.name,
-      envName: spec.envName,
+      envName,
       state: "configured",
     };
   });
@@ -968,8 +997,18 @@ function validateOpaqueCredential(value: string): string | null {
   return value.length >= 20 ? null : "credential_too_short";
 }
 
-function validateOpenRouterKey(value: string): string | null {
-  return /^sk-or-v1-[A-Za-z0-9_-]{20,}$/.test(value) ? null : "openrouter_key_shape_required";
+function validateAssistant(value: string): string | null {
+  return value === "chatgpt" || value === "claude" ? null : "chatgpt_or_claude_required";
+}
+
+function validateDirectModelKey(value: string, assistant?: string): string | null {
+  const valid =
+    assistant === "claude"
+      ? /^sk-ant-[A-Za-z0-9_-]{20,}$/.test(value)
+      : assistant === "chatgpt"
+        ? /^sk-(?!ant-|or-v1-)[A-Za-z0-9_-]{20,}$/.test(value)
+        : false;
+  return valid ? null : "direct_model_api_key_shape_required";
 }
 
 function validateTelegramBotToken(value: string): string | null {

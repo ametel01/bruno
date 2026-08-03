@@ -37,7 +37,7 @@ test.afterEach(async ({ request }) => {
 const shellRoutes = [
   { path: "/", heading: "Operational dashboard" },
   { path: "/dashboard", heading: "Operational dashboard" },
-  { path: "/agents", heading: "Agent inventory" },
+  { path: "/agents", heading: "Your AI agents" },
   { path: "/settings", heading: "Workspace settings" },
 ] as const;
 
@@ -1170,7 +1170,7 @@ test("/dashboard Docker runner final acceptance keeps selected containers isolat
   }
 });
 
-test("/agents creates Research Agent and persists it across read surfaces", async ({
+test("a persisted compatibility record remains available across read surfaces", async ({
   isMobile,
   page,
 }) => {
@@ -1178,25 +1178,21 @@ test("/agents creates Research Agent and persists it across read surfaces", asyn
 
   const name = "Research Agent";
 
-  await openManualAgentCreation(page);
-  await expect(page.locator(".selected-template-summary")).toContainText("Web search");
-  await expect(page.locator(".selected-template-summary")).toContainText("Manual");
-  await expect(page.locator(".template-option-list")).toContainText("Inbox Triage Agent");
-  await expect(page.locator(".template-option-list")).toContainText("GitHub Issue Agent");
-  await expect(page.locator(".template-option-list")).toContainText("Social Content Agent");
-  await page.getByLabel("Name").fill(name);
-  await page.getByLabel("Template").selectOption("research_agent");
-  await page.getByRole("button", { name: "Create agent" }).click();
+  const created = await page.request.post("/api/agents", {
+    data: { name, templateKey: "research_agent", runnerId: null },
+  });
+  expect(created.status()).toBe(201);
+  const createdBody = (await created.json()) as { agent: { id: string } };
+  const agentHref = `/agents/${createdBody.agent.id}`;
+  trackAgentHref(agentHref);
+  await page.goto("/agents");
 
-  await expect(page.getByRole("status")).toContainText("Agent created.");
   const agentLink = page.getByRole("link", { name });
   await expect(agentLink).toBeVisible();
   await expect(
     page.getByRole("row", { name: new RegExp(`${name}.*Research Agent.*stopped`) }),
   ).toBeVisible();
-  const agentHref = await agentLink.getAttribute("href");
-  expect(agentHref).toMatch(/^\/agents\/[0-9a-f-]+$/);
-  trackAgentHref(agentHref);
+  await expect(agentLink).toHaveAttribute("href", agentHref);
 
   await page.reload();
 
@@ -2189,12 +2185,13 @@ test("/agents detail keeps the record readable when runtime logs fail safely", a
 });
 
 test("/agents shows safe client validation for invalid create input", async ({ page }) => {
-  await openManualAgentCreation(page);
-  await page.getByLabel("Name").fill("   ");
-  await page.getByRole("button", { name: "Create agent" }).click();
+  await page.goto("/agents");
+  await page.getByLabel("What should we call your agent?").fill("   ");
+  await page.getByRole("button", { name: "Create my agent" }).click();
 
-  await expect(page.getByRole("status")).toContainText("Name is required.");
-  await expect(page.getByRole("status")).not.toContainText("postgres://");
+  const setupAlert = page.locator(".agent-creation-panel .form-message[role='alert']");
+  await expect(setupAlert).toContainText("Name is required.");
+  await expect(setupAlert).not.toContainText("postgres://");
 });
 
 test("/agents detail returns not found for missing, malformed, and soft-deleted IDs", async ({
@@ -3544,15 +3541,6 @@ async function expectPageNotHorizontallyOverflowing(page: Page): Promise<void> {
   }));
 
   expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth + 1);
-}
-
-async function openManualAgentCreation(page: Page): Promise<void> {
-  await page.goto("/agents");
-  const manualMode = page.getByRole("button", { name: "Manual", exact: true });
-
-  if (await manualMode.isVisible()) {
-    await manualMode.click();
-  }
 }
 
 async function withDatabase<T>(run: (sql: postgres.Sql) => Promise<T>): Promise<T> {

@@ -10,9 +10,11 @@ implementation status and [milestones](./docs/MILESTONES.md) for the product roa
 
 ## What is implemented
 
-- Agent creation from Research, Inbox Triage, GitHub Issue, and Social Content templates.
-- Feature-gated one-click Hermes setup with encrypted OpenRouter BYOK, a dedicated Telegram bot,
-  and a numeric user allowlist; explicit stopped/manual creation remains available.
+- A one-click agent setup that asks nontechnical users only for a name, ChatGPT or Claude, and the
+  unavoidable first-time provider and Telegram credentials. Models, templates, runners, launch,
+  deployment, and health checks are selected and managed by the app.
+- Owner-scoped encrypted OpenAI and Anthropic API-key connections that are reused for later agents
+  without redisplaying credential material.
 - Durable deployment and runtime reconciliation, including Start, Stop, Restart, Delete, bounded
   recovery, and circuit-breaker status.
 - Per-agent logs and event timelines, dashboard activity, operational alerts, and approvals.
@@ -168,14 +170,14 @@ See [Authentication modes](./docs/AUTHENTICATION.md) and the
 | `AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS` | No | Comma-separated IPs/CIDRs allowed to reach SSH. SSH ingress is closed when this is omitted. |
 | `AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION` | Hermes BYOK setup | Active encryption-key label, for example `v1`. |
 | `AGENTBAY_AGENT_SECRET_KEYS_JSON` | Hermes BYOK setup | JSON object mapping key versions to 32-byte base64url keys. Keep old keys during rotation so existing secrets remain decryptable. |
-| `AGENTBAY_READY_AGENT_CREATION_ENABLED` | Controlled ready-mode rollout | Must be exactly `true` to offer automatic-ready creation. Unset, blank, or `false` keeps stopped/manual creation; any other value fails closed. |
+| `AGENTBAY_READY_AGENT_CREATION_ENABLED` | Controlled ready-mode rollout | Must be exactly `true` to offer common one-click creation. Unset, blank, or `false` makes new setup unavailable; any other value fails closed. |
 | `CRON_SECRET` | Hosted reconciliation | A 32–256 character bearer-safe secret used by Vercel to authorize both deployment and runtime reconciliation routes. |
 
 The default-disabled staging acceptance controller additionally requires the
-15 exact capabilities documented in [E2E validation](./docs/E2E_VALIDATION.md),
+16 exact capabilities documented in [E2E validation](./docs/E2E_VALIDATION.md),
 including its dedicated bearer authority, published-image provenance, explicit
-DigitalOcean budget and live-effect sentinels, and isolated Telegram/OpenRouter
-credentials. Disabling the acceptance flag prevents forward work while cron
+DigitalOcean budget and live-effect sentinels, and isolated Telegram plus direct
+OpenAI-or-Anthropic credentials. Disabling the acceptance flag prevents forward work while cron
 continues durable cleanup for an existing run.
 
 Additional validated tuning variables are documented inline in `.env.example` and
@@ -214,9 +216,10 @@ billable resources.
 5. Choose `operator` or `clerk` authentication. For a temporary public development deployment,
    explicitly choose `development` and set `AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT=true`; this exposes
    all browser pages and app-side APIs.
-6. Before ready-mode rollout, obtain a funded OpenRouter key and create a dedicated Telegram bot
-   with [BotFather](https://t.me/BotFather). Record at least one positive decimal Telegram user ID
-   that is allowed to message it. Do not share a bot token between active agents.
+6. Before ready-mode rollout, choose ChatGPT or Claude and obtain the matching funded OpenAI
+   Platform or Anthropic API key. API usage is billed separately from ChatGPT and Claude consumer
+   subscriptions. Create a dedicated Telegram bot with [BotFather](https://t.me/BotFather), record
+   at least one positive decimal Telegram user ID, and do not share its token between active agents.
 
 ### 2. Link the Vercel project
 
@@ -327,10 +330,12 @@ available.
 
 ### 7. Operate and roll back ready-mode creation
 
-Ready mode requires an approved OpenRouter model and key, one dedicated BotFather token, and one to
-100 positive decimal Telegram user IDs entered one per line. Usernames, groups, CSV input, wildcards,
-and automatic BotFather account management are not supported. The server validates the bot token,
-rejects a token already used by another active agent, and never redisplays submitted secrets.
+Ready mode presents only ChatGPT and Claude. The first agent for a choice requires the matching
+OpenAI Platform or Anthropic API key; later agents reuse that encrypted owner-scoped connection.
+It also requires one dedicated BotFather token and one to 100 positive decimal Telegram user IDs
+entered one per line. Usernames, groups, CSV input, wildcards, and automatic BotFather account
+management are not supported. The server validates the bot token, rejects a token already used by
+another active agent, and never redisplays submitted secrets.
 
 Initial setup persists its progress rather than tying it to one browser request:
 
@@ -368,9 +373,10 @@ failures. Stop first persists desired state as stopped and then removes the work
 process or Docker restart must not resurrect it.
 
 To roll back, remove or set `AGENTBAY_READY_AGENT_CREATION_ENABLED=false` in the affected environment
-and redeploy. Users can still create with `launchMode:"stopped"`; existing running agents retain
-their persisted desired state, so stop them explicitly when containment is required. Disabling the
-flag alone is not a bulk-stop operation.
+and redeploy. This disables common new-agent setup. The stopped-create API remains only as a legacy
+operator compatibility path; it is not offered in ordinary onboarding. Existing running agents
+retain their persisted desired state, so stop them explicitly when containment is required.
+Disabling the flag alone is not a bulk-stop operation.
 
 The credential-free, database, browser, and pinned-image paths are locally verified. The final
 provider-backed DigitalOcean plus real Telegram reply acceptance has not been run and remains gated

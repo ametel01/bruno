@@ -24,7 +24,8 @@ function env(): Record<string, string> {
       "authorize-basic-4usd-digitalocean-staging",
     AGENTBAY_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION:
       "send-telegram-and-spend-digitalocean-staging",
-    AGENTBAY_HERMES_STAGING_OPENROUTER_API_KEY: "sk-or-v1-abcdefghijklmnopqrstuvwxyz123456",
+    AGENTBAY_HERMES_STAGING_ASSISTANT: "chatgpt",
+    AGENTBAY_HERMES_STAGING_OPENAI_API_KEY: "sk-abcdefghijklmnopqrstuvwxyz123456",
     AGENTBAY_HERMES_STAGING_TELEGRAM_BOT_TOKEN: "123456789:abcdefghijklmnopqrstuvwxyz123456",
     AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_USER_ID: "123456789",
     AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID: "-123456789",

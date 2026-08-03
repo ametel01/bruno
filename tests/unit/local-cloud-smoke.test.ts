@@ -10,6 +10,8 @@ describe("local cloud smoke script", () => {
     expect(smokeScript).toContain("reconcileTargetRunnerDeployment");
     expect(smokeScript).toContain("reconcileNextAgentDeployment");
     expect(smokeScript).toContain("FakeDigitalOceanProvider");
+    expect(smokeScript).toContain('provider: "openai-api"');
+    expect(smokeScript).not.toContain('provider: "openrouter"');
     expect(smokeScript).toContain("browserClosedAfter202");
     expect(smokeScript).toContain(
       'simultaneousTriggers: ["create-kick", "heartbeat", "cron", "manual"]',

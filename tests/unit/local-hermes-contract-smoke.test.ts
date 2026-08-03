@@ -16,6 +16,8 @@ describe("local Hermes contract smoke", () => {
       "bun --conditions react-server scripts/smoke-local-hermes-contract.ts",
     );
     expect(smokeScript).toContain("FAKE_MODEL_ALIAS");
+    expect(smokeScript).toContain('provider: "openai-api"');
+    expect(smokeScript).not.toContain('provider: "openrouter"');
     expect(smokeScript).toContain("model_routes");
     expect(smokeScript).toContain("/v1/chat/completions");
     expect(smokeScript).toContain("/health/detailed");

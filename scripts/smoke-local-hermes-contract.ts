@@ -39,7 +39,7 @@ import {
   users,
 } from "@/src/server/db/schema";
 
-const FAKE_MODEL_ALIAS = "openai/gpt-4.1-mini";
+const FAKE_MODEL_ALIAS = "gpt-5.4";
 const SMOKE_IMAGE = process.env.AGENTBAY_HERMES_IMAGE?.trim() || DEFAULT_LOCAL_HERMES_IMAGE;
 const LOCAL_DOCKER_PID_HELPER_IMAGE = "busybox:1.36";
 const TIMEOUT_MS = readPositiveInteger(process.env.AGENTBAY_HERMES_CONTRACT_TIMEOUT_MS, 240_000);
@@ -528,7 +528,7 @@ async function drivePersistedHermesController(input: {
     await connection.db.insert(agentConfigs).values({
       agentId: input.agentId,
       systemPrompt: input.spec.prompt.soul,
-      modelProvider: "openrouter",
+      modelProvider: "openai-api",
       modelName: FAKE_MODEL_ALIAS,
       scheduleMode: "manual",
       timezone: "UTC",
@@ -633,7 +633,7 @@ function buildSmokeLaunchSpec(input: {
       ref: input.fakeModelImage || DEFAULT_HERMES_WORKLOAD_IMAGE,
     },
     model: {
-      provider: "openrouter",
+      provider: "openai-api",
       model: FAKE_MODEL_ALIAS,
     },
     platforms: {
@@ -677,7 +677,7 @@ function buildSmokeLaunchSpec(input: {
     },
     secrets: {
       kind: "inline",
-      openrouterApiKey: "sk-or-v1-contractsmokelocalfakemodelkey",
+      modelApiKey: "sk-contractsmokelocalfakemodelkey123456",
       telegramBotToken: "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ12",
       telegramAllowedUsers: ["1"],
       apiServerKey: `agb_agent_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`,
@@ -710,7 +710,7 @@ async function applyLocalSmokeOverrides(input: {
   telegram.enabled = false;
   routes[FAKE_MODEL_ALIAS] = {
     model: FAKE_MODEL_ALIAS,
-    provider: "openrouter",
+    provider: "openai-api",
     base_url: input.fakeModelBaseUrl,
   };
 
@@ -1189,8 +1189,64 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("content-length", "0") or "0")
         body = json.loads(self.rfile.read(length) or b"{}")
+        if self.path == "/v1/responses":
+            model = str(body.get("model") or "unknown")
+            content = f"agentbay fake model response provider=openai-compatible model={model}"
+            message = {
+                "id": "msg_agentbay_local_smoke",
+                "type": "message",
+                "status": "completed",
+                "role": "assistant",
+                "content": [{"type": "output_text", "annotations": [], "text": content}],
+            }
+            response = {
+                "id": "resp_agentbay_local_smoke",
+                "object": "response",
+                "created_at": 1784000000,
+                "status": "completed",
+                "error": None,
+                "incomplete_details": None,
+                "instructions": None,
+                "max_output_tokens": None,
+                "model": model,
+                "output": [message],
+                "parallel_tool_calls": True,
+                "previous_response_id": None,
+                "reasoning": {"effort": None, "summary": None},
+                "store": False,
+                "temperature": 1.0,
+                "text": {"format": {"type": "text"}},
+                "tool_choice": "auto",
+                "tools": [],
+                "top_p": 1.0,
+                "truncation": "disabled",
+                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                "user": None,
+                "metadata": {},
+            }
+            if body.get("stream"):
+                self.send_response(200)
+                self.send_header("content-type", "text/event-stream")
+                self.send_header("cache-control", "no-cache")
+                self.end_headers()
+                events = [
+                    ("response.created", {"type": "response.created", "response": {**response, "status": "in_progress", "output": []}}),
+                    ("response.output_item.added", {"type": "response.output_item.added", "output_index": 0, "item": {**message, "status": "in_progress", "content": []}}),
+                    ("response.content_part.added", {"type": "response.content_part.added", "item_id": message["id"], "output_index": 0, "content_index": 0, "part": {"type": "output_text", "annotations": [], "text": ""}}),
+                    ("response.output_text.delta", {"type": "response.output_text.delta", "item_id": message["id"], "output_index": 0, "content_index": 0, "delta": content}),
+                    ("response.output_text.done", {"type": "response.output_text.done", "item_id": message["id"], "output_index": 0, "content_index": 0, "text": content}),
+                    ("response.content_part.done", {"type": "response.content_part.done", "item_id": message["id"], "output_index": 0, "content_index": 0, "part": message["content"][0]}),
+                    ("response.output_item.done", {"type": "response.output_item.done", "output_index": 0, "item": message}),
+                    ("response.completed", {"type": "response.completed", "response": response}),
+                ]
+                for event, payload in events:
+                    self.wfile.write(f"event: {event}\ndata: {json.dumps(payload)}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                return
+            self._json(200, response)
+            return
         if self.path != "/v1/chat/completions":
-            self._json(404, {"error": "not_found"})
+            self._json(404, {"error": "not_found", "path": self.path})
             return
         model = str(body.get("model") or "unknown")
         content = f"agentbay fake model response provider=openai-compatible model={model}"

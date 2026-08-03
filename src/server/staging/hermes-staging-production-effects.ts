@@ -1039,6 +1039,9 @@ async function auditAllDiagnostics(
   signal: AbortSignal,
 ): Promise<"safe" | "unsafe" | "unknown"> {
   if (!context.agentId || !context.runnerId || signal.aborted) return "unknown";
+  const assistant = env.AGENTBAY_HERMES_STAGING_ASSISTANT;
+  if (!isAssistantChoice(assistant)) return "unknown";
+  const modelSecretKind = getAssistantProfile(assistant).secretKind;
 
   const decrypted = await readRequiredDecryptedActiveAgentSecretsForUser(
     context.ownerUserId,
@@ -1046,12 +1049,7 @@ async function auditAllDiagnostics(
     {
       createConnection: () => connection,
       env,
-      kinds: [
-        "openrouter_api_key",
-        "telegram_bot_token",
-        "telegram_allowed_users",
-        "api_server_key",
-      ],
+      kinds: [modelSecretKind, "telegram_bot_token", "telegram_allowed_users", "api_server_key"],
     },
   );
   if (!decrypted.ok) return "unknown";

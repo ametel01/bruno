@@ -517,8 +517,9 @@ the exact final commit pass.
 - Step 9 is independently accepted at `b41e969`; the default-disabled Step 10
   repository implementation is independently green and ready to commit.
 - Step 10 live completion requires an approved published image, explicitly authorized
-  DigitalOcean budget, a dedicated staging Telegram bot/user, and a funded
-  OpenRouter key. No live or provider-backed action is authorized yet.
+  DigitalOcean budget, a dedicated staging Telegram bot/user, and a funded direct
+  OpenAI or Anthropic API key selected through the ChatGPT/Claude staging profile.
+  No live or provider-backed action is authorized yet.
 - The implemented proof is explicitly interactive-human-attested. It does not
   automate or retain an MTProto user session. Exact image attestation and
   workload/secret/firewall/Droplet/runner cleanup are durable and fail closed;
@@ -561,7 +562,7 @@ and direct Anthropic under the user-facing choices ChatGPT and Claude.
 - [x] Step 1: Correct the Product Contract
 - [x] Step 2: Add Direct ChatGPT and Claude Runtime Support
 - [x] Step 3: Ship the One-Click Common Flow
-- [ ] Step 4: Correct Acceptance, Documentation, and Release Evidence
+- [x] Step 4: Correct Acceptance, Documentation, and Release Evidence
 
 ### Correction Ledger
 
@@ -570,4 +571,4 @@ and direct Anthropic under the user-facing choices ChatGPT and Claude.
 | 1. Correct the Product Contract | Complete | This commit | Replaced the active OpenRouter-first plan with a ChatGPT/Claude model-connection contract; documented direct API-key billing, Anthropic's third-party subscription-auth restriction, the one-click automation boundary, legacy compatibility, strict quality gates, and per-step commits. Historical ledgers remain intact and `CHANGELOG.md` receives no planning-only entry. | Implement the provider-neutral catalog, reusable connections, encrypted credentials, strict launch/projection support, and legacy compatibility in Step 2. |
 | 2. Add Direct ChatGPT and Claude Runtime Support | Complete | This commit | Added server-owned ChatGPT/OpenAI and Claude/Anthropic profiles, provider-specific encrypted secret kinds, strict direct managed launch parsing/redaction/canonicalization, exact `openai-api`/`anthropic` Hermes config and environment projection, direct lifecycle/deployment/launch-builder eligibility, and legacy-only OpenRouter compatibility. Generated migration `0021_careful_praxagora`; clean migration and idempotent rerun passed in isolated `plingpling_provider_step2`, and the fixture database was removed. Format, lint, typecheck, diff hygiene, 10 focused files / 140 tests, fake-cloud smoke, and the 82-second pinned local Hermes contract smoke passed without external provider or Telegram effects. | Replace the wide OpenRouter create UI with the reusable nontechnical ChatGPT/Claude common flow in Step 3. |
 | 3. Ship the One-Click Common Flow | Complete | This commit | Replaced the OpenRouter/model/template/runner/mode form with two recognizable ChatGPT and Claude choices, first-connection-only direct API-key entry, plain-language Telegram inputs, fixed safe server-owned defaults, and one “Create my agent” action. Added owner-scoped encrypted connection discovery/reuse without returning credential material, cross-owner rejection, responsive assistant cards, and nontechnical setup copy. Format, lint, typecheck, 5 controller tests, and 13 real-database ready-create tests passed; the database suite includes encrypted credential copying, safe connection views, and tenant isolation. | Correct staging contracts, remaining regression fixtures, docs, release notes, and full gates in Step 4. |
-| 4. Correct Acceptance, Documentation, and Release Evidence | Pending | — | — | Depends on Steps 1-3. |
+| 4. Correct Acceptance, Documentation, and Release Evidence | Complete | This commit | Replaced active staging with a 16-capability ChatGPT-or-Claude contract that requires exactly one matching direct OpenAI/Anthropic key, rejects the unselected key, and keeps live effects authorization-gated. Updated the fake-cloud and pinned-image smokes to direct `openai-api`; both passed, with the pinned Hermes image completing its OpenAI Responses API turn on `gpt-5.4` in 82 seconds. Updated desktop/mobile browser fixtures, product/operator docs, env examples, milestones, and changelog; active onboarding and staging docs contain no OpenRouter instruction. `bun run db:generate` reported no drift. `bun run verify` passed format, lint, typecheck, 149 files / 1,438 tests, and production build. `bun run test:e2e:ci` passed 26/26 after a clean rerun; an intervening rerun encountered and then cleared a stale local dev-server/advisory-lock condition. Credential-free staging failed closed with all 16 capabilities missing and `sideEffectsAttempted: false`. No live provider, Telegram, billable infrastructure, or publication effect occurred. | Product correction complete; live hosted acceptance remains separately gated on explicit authorization and credentials. |

@@ -1,6 +1,11 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
+import {
+  getAssistantProfile,
+  isAssistantChoice,
+  validateAssistantApiKey,
+} from "@/src/server/agents/assistant-profiles";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import { createDatabaseConnection } from "@/src/server/db/client";
 import { readHermesStagingAcceptanceConfig, readHermesWorkloadImage } from "@/src/server/env";
@@ -60,7 +65,6 @@ const IMAGE_REF_PATTERN = /^ghcr\.io\/ametel01\/agentbay-hermes@(sha256:[a-f0-9]
 const SOURCE_REVISION_PATTERN = /^[a-f0-9]{40}$/;
 const WORKFLOW_RUN_ID_PATTERN = /^[1-9][0-9]{0,19}$/;
 const OPAQUE_SECRET_PATTERN = /^[^\s]{20,4096}$/;
-const OPENROUTER_KEY_PATTERN = /^sk-or-v1-[A-Za-z0-9_-]{20,}$/;
 const TELEGRAM_TOKEN_PATTERN = /^\d{6,}:[A-Za-z0-9_-]{20,}$/;
 const NUMERIC_USER_PATTERN = /^[1-9][0-9]*$/;
 const NUMERIC_CHAT_PATTERN = /^-?[1-9][0-9]*$/;
@@ -871,6 +875,11 @@ async function resolveProductionBeginInput(
   const sourceRevision = process.env.AGENTBAY_HERMES_STAGING_IMAGE_SOURCE_REVISION ?? "";
   const workflowRunId = process.env.AGENTBAY_HERMES_STAGING_PUBLISH_WORKFLOW_RUN_ID ?? "";
   const numericWorkflowRunId = Number(workflowRunId);
+  const assistant = process.env.AGENTBAY_HERMES_STAGING_ASSISTANT;
+  const assistantProfile = isAssistantChoice(assistant) ? getAssistantProfile(assistant) : null;
+  const openAiApiKey = process.env.AGENTBAY_HERMES_STAGING_OPENAI_API_KEY;
+  const anthropicApiKey = process.env.AGENTBAY_HERMES_STAGING_ANTHROPIC_API_KEY;
+  const modelApiKey = assistant === "claude" ? anthropicApiKey : openAiApiKey;
 
   if (
     !config.ok ||
@@ -885,7 +894,9 @@ async function resolveProductionBeginInput(
     process.env.AGENTBAY_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION !== LIVE_SENTINEL ||
     !OPAQUE_SECRET_PATTERN.test(process.env.AGENTBAY_DIGITALOCEAN_TOKEN ?? "") ||
     !OPAQUE_SECRET_PATTERN.test(process.env.AGENTBAY_RUNNER_BEARER_TOKEN ?? "") ||
-    !OPENROUTER_KEY_PATTERN.test(process.env.AGENTBAY_HERMES_STAGING_OPENROUTER_API_KEY ?? "") ||
+    !assistantProfile ||
+    !validateAssistantApiKey(assistantProfile, modelApiKey).ok ||
+    (assistant === "chatgpt" ? Boolean(anthropicApiKey) : Boolean(openAiApiKey)) ||
     !TELEGRAM_TOKEN_PATTERN.test(process.env.AGENTBAY_HERMES_STAGING_TELEGRAM_BOT_TOKEN ?? "") ||
     !NUMERIC_USER_PATTERN.test(process.env.AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_USER_ID ?? "") ||
     !NUMERIC_CHAT_PATTERN.test(process.env.AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID ?? "")

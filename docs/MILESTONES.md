@@ -852,13 +852,14 @@ Goal: Replace dummy runner behavior with actual Hermes plus Telegram plus BYOK.
 ### Delivery status (2026-08-03)
 
 The control-plane and runner implementation is complete through the local acceptance boundary.
-Feature-gated `launchMode:"ready"` creation atomically persists encrypted OpenRouter, Telegram,
-allowlist, and private API credentials; a versioned Hermes projection; and durable deployment state.
+Feature-gated `launchMode:"ready"` creation atomically persists encrypted direct OpenAI or
+Anthropic, Telegram, allowlist, and private API credentials; a versioned Hermes projection; and
+durable deployment state.
 The reconciler advances persisted setup stages, records at most one successful bounded model canary
 per deployment/config revision, requires Telegram connected before readiness, and presents redacted
 failures with Retry, Stop, or Delete controls. An explicit Retry creates a new persisted attempt and
-may incur one additional bounded canary charge. Existing `launchMode:"stopped"` creation remains the
-rollback path.
+may incur one additional bounded canary charge. The common product flow keeps launch mode and all
+provider, model, template, and runner identifiers server-owned.
 
 Post-ready runtime reconciliation is also implemented. Selected Hermes containers use
 `unless-stopped`; desired-running agents are observed and recovered with bounded backoff and a
@@ -867,13 +868,14 @@ unit/browser coverage, the local cloud smoke, and the pinned-image Hermes contra
 boundary without external provider or Telegram side effects.
 
 Milestone 18 is not accepted for hosted rollout yet. A scanned/published release-candidate image,
-authorized DigitalOcean budget, funded OpenRouter key, and dedicated Telegram bot/user are still
+authorized DigitalOcean budget, a funded direct OpenAI or Anthropic key, and dedicated Telegram
+bot/user are still
 required for the real message/reply, restart, durable Stop, redaction, and cleanup acceptance. The
 default-disabled `bun run verify:hermes:staging` workflow now has a durable hosted ledger, exact
 published-image and owned-resource attestation, bounded reconciliation, interactive-human Telegram
-proof before and after Restart, and ordered cleanup. It still fails closed without all 15 explicit
-capabilities and has not produced live acceptance evidence. Native provider OAuth remains deferred;
-the implemented narrow path is OpenRouter BYOK.
+proof before and after Restart, and ordered cleanup. It still fails closed without all 16 explicit
+capabilities and has not produced live acceptance evidence. Official provider OAuth remains
+deferred; the implemented first-release path is direct OpenAI/Anthropic API-key authentication.
 
 ### Technical implementation
 

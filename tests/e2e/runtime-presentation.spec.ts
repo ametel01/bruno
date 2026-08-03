@@ -133,7 +133,7 @@ async function createFixture(): Promise<{ userId: string; agentId: string }> {
     `;
     await sql`
       insert into agent_configs (agent_id, system_prompt, model_provider, model_name)
-      values (${agentId}, 'Fake-only runtime UI fixture.', 'openrouter', 'openai/gpt-4.1-mini')
+      values (${agentId}, 'Fake-only runtime UI fixture.', 'openai-api', 'gpt-5.4')
     `;
     await sql`
       insert into agent_deployments (

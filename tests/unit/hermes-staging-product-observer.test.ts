@@ -185,7 +185,7 @@ describe.sequential("Hermes staging product observer", () => {
       });
 
       for (const [index, kind] of [
-        "openrouter_api_key",
+        "openai_api_key",
         "telegram_bot_token",
         "telegram_allowed_users",
         "api_server_key",
@@ -226,7 +226,9 @@ describe.sequential("Hermes staging product observer", () => {
         state: "observed",
         allRevoked: true,
         counts: {
-          openrouter_api_key: { active: 0, revoked: 1 },
+          openrouter_api_key: { active: 0, revoked: 0 },
+          openai_api_key: { active: 0, revoked: 1 },
+          anthropic_api_key: { active: 0, revoked: 0 },
           telegram_bot_token: { active: 0, revoked: 1 },
           telegram_allowed_users: { active: 0, revoked: 1 },
           api_server_key: { active: 0, revoked: 1 },

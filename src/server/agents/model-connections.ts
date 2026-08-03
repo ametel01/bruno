@@ -12,7 +12,7 @@ import {
   type AgentSecretsReadTransaction,
 } from "@/src/server/agents/agent-secrets";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agentConfigs, agentSecrets, agents } from "@/src/server/db/schema";
+import { agentConfigs, agentDeployments, agentSecrets, agents } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
 
 export type ModelConnectionView = {
@@ -117,6 +117,7 @@ async function selectReusableCredentialAgentId(
     .from(agents)
     .innerJoin(agentConfigs, eq(agentConfigs.agentId, agents.id))
     .innerJoin(agentSecrets, eq(agentSecrets.agentId, agents.id))
+    .innerJoin(agentDeployments, eq(agentDeployments.agentId, agents.id))
     .where(
       and(
         eq(agents.userId, userId),
@@ -125,6 +126,8 @@ async function selectReusableCredentialAgentId(
         eq(agentConfigs.modelName, profile.model),
         eq(agentSecrets.kind, profile.secretKind),
         eq(agentSecrets.status, "active"),
+        eq(agentDeployments.userId, userId),
+        eq(agentDeployments.stage, "ready"),
       ),
     )
     .orderBy(desc(agentSecrets.updatedAt), desc(agentSecrets.id))

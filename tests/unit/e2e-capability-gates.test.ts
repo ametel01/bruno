@@ -12,7 +12,7 @@ const EXPECTED_CI_SELECTORS = [
   "tests/e2e/health-route.spec.ts",
   "tests/e2e/root-route.spec.ts:45",
   "tests/e2e/root-route.spec.ts:60",
-  "tests/e2e/root-route.spec.ts:2191",
+  "tests/e2e/root-route.spec.ts:2187",
   "tests/e2e/automatic-ready.spec.ts",
   "tests/e2e/runtime-presentation.spec.ts",
 ];

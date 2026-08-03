@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   listLatestAgentActivityForUser: vi.fn(),
   listLatestActiveAgentProcessLogsForUser: vi.fn(),
   listActiveAgentsForUser: vi.fn(),
+  listModelConnectionsForUser: vi.fn(),
   listCloudRunnerProvisioningSummariesForUser: vi.fn(),
   listAssignableRunnersForUser: vi.fn(),
   listManualRunnerStatusSummariesForUser: vi.fn(),
@@ -65,6 +66,15 @@ vi.mock("@/src/server/agents/list-agents", async (importOriginal) => {
     getActiveAgentForUser: mocks.getActiveAgentForUser,
     listActiveAgentsForUser: mocks.listActiveAgentsForUser,
     listActiveAgentsForDevelopmentUser: mocks.listActiveAgentsForUser,
+  };
+});
+
+vi.mock("@/src/server/agents/model-connections", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/server/agents/model-connections")>();
+
+  return {
+    ...actual,
+    listModelConnectionsForUser: mocks.listModelConnectionsForUser,
   };
 });
 
@@ -273,6 +283,24 @@ describe("product shell routes", () => {
     mocks.listManualRunnerStatusSummariesForUser.mockResolvedValue([]);
     mocks.listCloudRunnerProvisioningSummariesForUser.mockResolvedValue([]);
     mocks.listAssignableRunnersForUser.mockResolvedValue([]);
+    mocks.listModelConnectionsForUser.mockResolvedValue([
+      {
+        assistant: "chatgpt",
+        displayName: "ChatGPT",
+        credentialLabel: "OpenAI API key",
+        credentialHelpUrl: "https://platform.openai.com/api-keys",
+        credentialBillingNote: "OpenAI API usage is billed separately.",
+        status: "action_required",
+      },
+      {
+        assistant: "claude",
+        displayName: "Claude",
+        credentialLabel: "Anthropic API key",
+        credentialHelpUrl: "https://console.anthropic.com/settings/keys",
+        credentialBillingNote: "Anthropic API usage is billed separately.",
+        status: "action_required",
+      },
+    ]);
     mocks.getCostEstimatesForUser.mockResolvedValue(costEstimates());
     mocks.listSettingsRunnerManagementSummariesForUser.mockResolvedValue([]);
     mocks.getAssignedManualRunnerStatusForUserAgent.mockResolvedValue(null);
@@ -301,6 +329,7 @@ describe("product shell routes", () => {
     mocks.listLatestAgentActivityForUser.mockReset();
     mocks.listLatestActiveAgentProcessLogsForUser.mockReset();
     mocks.listActiveAgentsForUser.mockReset();
+    mocks.listModelConnectionsForUser.mockReset();
     mocks.listCloudRunnerProvisioningSummariesForUser.mockReset();
     mocks.listAssignableRunnersForUser.mockReset();
     mocks.listManualRunnerStatusSummariesForUser.mockReset();
@@ -1055,14 +1084,12 @@ describe("product shell routes", () => {
     const element = await AgentsPage();
     const html = renderToStaticMarkup(element);
 
-    expect(html).toContain("No agent records");
+    expect(html).toContain("No agents yet");
     expect(html).toContain('class="agents-page"');
     expect(html).toContain('class="agents-workspace-overview"');
     expect(html).toContain("Agent workspace");
     expect(html).toContain('class="agent-creation-panel"');
-    expect(html).toContain('class="agent-creation-fields"');
-    expect(html).toContain('class="agent-template-workspace"');
-    expect(html).toContain('class="template-catalogue"');
+    expect(html).toContain('class="assistant-choice-list"');
     expect(html).toContain('class="agent-creation-actions"');
     expect(html).toContain('class="agents-cloud-status"');
     expect(html.indexOf("agents-workspace-title")).toBeLessThan(html.indexOf("agent-list-title"));
@@ -1070,22 +1097,19 @@ describe("product shell routes", () => {
     expect(html.indexOf("create-agent-title")).toBeLessThan(
       html.indexOf("agents-cloud-runner-title"),
     );
-    expect(html).toContain("Create agent");
-    expect(html).toContain("Research Agent");
-    expect(html).toContain("Inbox Triage Agent");
-    expect(html).toContain("GitHub Issue Agent");
-    expect(html).toContain("Social Content Agent");
-    expect(html).toContain("Web search, Notes, Summaries");
-    expect(html).toContain("Schedule");
-    expect(html).toContain("Manual");
-    expect(html).toContain("Default prompt");
-    expect(html).toContain(
-      "You are a Research Agent. Gather relevant information, keep source notes, and produce concise summaries.",
-    );
-    expect(html).toContain("inbox_triage_agent");
+    expect(html).toContain("Create a new agent");
+    expect(html).toContain("ChatGPT");
+    expect(html).toContain("Claude");
+    expect(html).toContain("OpenAI API key");
+    expect(html).toContain("Create my agent");
+    expect(html).toContain("We handle the rest");
+    expect(html).not.toContain("OpenRouter");
+    expect(html).not.toContain("Template catalogue");
+    expect(html).not.toContain("Advanced runner selection");
     expect(html).not.toContain("Create agent in Milestone 1");
     expect(mocks.listActiveAgentsForUser).toHaveBeenCalledWith(APPLICATION_USER_ID);
     expect(mocks.listAssignableRunnersForUser).toHaveBeenCalledWith(APPLICATION_USER_ID);
+    expect(mocks.listModelConnectionsForUser).toHaveBeenCalledWith(APPLICATION_USER_ID);
     expect(mocks.listCloudRunnerProvisioningSummariesForUser).toHaveBeenCalledWith(
       APPLICATION_USER_ID,
     );

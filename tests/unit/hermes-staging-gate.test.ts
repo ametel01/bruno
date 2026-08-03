@@ -24,7 +24,7 @@ const SECRET_VALUES = {
   acceptanceBearerSecret: "staging_acceptance_abcdefghijklmnopqrstuvwxyz012345",
   digitalOceanToken: `dop_v1_${"a".repeat(64)}`,
   runnerBearerToken: "agb_run_secret1234567890123456789012345678901234567890123",
-  openRouterKey: "sk-or-v1-secret12345678901234567890",
+  openAiKey: "sk-openai-secret12345678901234567890",
   telegramToken: "123456789:abcdefghijklmnopqrstuvwxyzABCDE",
   telegramUserId: "123456789",
   telegramChatId: "-1001234567890",
@@ -43,7 +43,8 @@ function completeEnv(): Record<string, string | undefined> {
       HERMES_STAGING_DIGITALOCEAN_BUDGET_SENTINEL,
     AGENTBAY_DIGITALOCEAN_TOKEN: SECRET_VALUES.digitalOceanToken,
     AGENTBAY_RUNNER_BEARER_TOKEN: SECRET_VALUES.runnerBearerToken,
-    AGENTBAY_HERMES_STAGING_OPENROUTER_API_KEY: SECRET_VALUES.openRouterKey,
+    AGENTBAY_HERMES_STAGING_ASSISTANT: "chatgpt",
+    AGENTBAY_HERMES_STAGING_OPENAI_API_KEY: SECRET_VALUES.openAiKey,
     AGENTBAY_HERMES_STAGING_TELEGRAM_BOT_TOKEN: SECRET_VALUES.telegramToken,
     AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_USER_ID: SECRET_VALUES.telegramUserId,
     AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID: SECRET_VALUES.telegramChatId,
@@ -67,7 +68,7 @@ describe("Hermes staging verification gate", () => {
     const report = serializeHermesStagingPlan(plan);
 
     expect(plan.code).toBe("capability_unavailable");
-    expect(plan.capabilities).toHaveLength(15);
+    expect(plan.capabilities).toHaveLength(16);
     expect(plan.capabilities.every((capability) => capability.state === "missing")).toBe(true);
     expect(report).toContain('"sideEffectsAttempted": false');
     expect(report).toContain("AGENTBAY_HERMES_STAGING_PUBLISHED_IMAGE_REF");
@@ -87,7 +88,8 @@ describe("Hermes staging verification gate", () => {
       AGENTBAY_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION: "true",
       AGENTBAY_DIGITALOCEAN_TOKEN: "replace-with-digitalocean-token",
       AGENTBAY_RUNNER_BEARER_TOKEN: "runner credential with spaces",
-      AGENTBAY_HERMES_STAGING_OPENROUTER_API_KEY: " ",
+      AGENTBAY_HERMES_STAGING_ASSISTANT: "other",
+      AGENTBAY_HERMES_STAGING_OPENAI_API_KEY: " ",
       AGENTBAY_HERMES_STAGING_TELEGRAM_BOT_TOKEN: "not-a-token",
       AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_USER_ID: "user-123",
       AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID: "0",
@@ -97,6 +99,7 @@ describe("Hermes staging verification gate", () => {
     const capabilities = evaluateHermesStagingCapabilities(malformedEnv);
 
     expect(capabilities.map((capability) => capability.state)).toEqual([
+      "malformed",
       "malformed",
       "malformed",
       "malformed",
@@ -124,6 +127,7 @@ describe("Hermes staging verification gate", () => {
       "exact_sentinel_required",
       "placeholder",
       "credential_without_whitespace_required",
+      "chatgpt_or_claude_required",
       "blank",
       "telegram_token_shape_required",
       "positive_numeric_id_required",
@@ -171,6 +175,25 @@ describe("Hermes staging verification gate", () => {
         detail: "exact_sentinel_required",
       },
     );
+  });
+
+  it("selects exactly one assistant-matched direct model key", () => {
+    const claudeEnv = completeEnv();
+    claudeEnv.AGENTBAY_HERMES_STAGING_ASSISTANT = "claude";
+    delete claudeEnv.AGENTBAY_HERMES_STAGING_OPENAI_API_KEY;
+    claudeEnv.AGENTBAY_HERMES_STAGING_ANTHROPIC_API_KEY = `sk-ant-${"a".repeat(32)}`;
+
+    expect(
+      evaluateHermesStagingCapabilities(claudeEnv).find(({ name }) => name === "model_api_key"),
+    ).toMatchObject({
+      envName: "AGENTBAY_HERMES_STAGING_ANTHROPIC_API_KEY",
+      state: "configured",
+    });
+
+    claudeEnv.AGENTBAY_HERMES_STAGING_OPENAI_API_KEY = SECRET_VALUES.openAiKey;
+    expect(
+      evaluateHermesStagingCapabilities(claudeEnv).find(({ name }) => name === "model_api_key"),
+    ).toMatchObject({ state: "malformed", detail: "unselected_model_api_key_must_be_unset" });
   });
 
   it("requires the HTTPS acceptance port and a bearer distinct from every existing authority", () => {
@@ -548,7 +571,7 @@ describe("Hermes staging verification gate", () => {
     expect(result.status).toBe(1);
     expect(output).toContain("capability_unavailable");
     expect(output).toContain("sideEffectsAttempted");
-    expect(output).not.toContain(SECRET_VALUES.openRouterKey);
+    expect(output).not.toContain(SECRET_VALUES.openAiKey);
 
     const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
       scripts: Record<string, string>;

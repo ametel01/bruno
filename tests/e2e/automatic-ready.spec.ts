@@ -3,7 +3,7 @@ import { type BrowserContext, expect, type Page, type Request, test } from "@pla
 import postgres from "postgres";
 
 const DEVELOPMENT_USER_E2E_LOCK_KEY = 125_228;
-const OPENROUTER_CANARY = "e2e-openrouter-canary-not-a-provider-key";
+const OPENAI_CANARY = "e2e-openai-canary-not-a-provider-key";
 const TELEGRAM_CANARY = "e2e-telegram-canary-not-a-bot-token";
 const ALLOWLIST_CANARIES = ["811111111111111111", "822222222222222222"] as const;
 const CONFIG_REVISION = "e2e-ready-ui-v1";
@@ -99,8 +99,8 @@ test("automatic submission follows persisted progress to ready across refresh, r
           runnerId: null,
           launchMode: "ready",
           idempotencyKey: createIdempotencyKey,
-          openrouterModel: "openai/gpt-4.1-mini",
-          openrouterApiKey: OPENROUTER_CANARY,
+          assistant: "chatgpt",
+          modelApiKey: OPENAI_CANARY,
           telegramBotToken: TELEGRAM_CANARY,
           telegramAllowedUserIds: [...ALLOWLIST_CANARIES],
         });
@@ -132,15 +132,11 @@ test("automatic submission follows persisted progress to ready across refresh, r
       });
 
       await page.goto("/agents");
-      await expect(page.getByRole("button", { name: "Automatic setup" })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
-      await expect(page.getByLabel("Model")).toHaveValue("openai/gpt-4.1-mini");
-      await expect(page.getByLabel("Model").locator("option")).toHaveCount(1);
-      await expect(page.getByLabel("OpenRouter API key")).toHaveAttribute("type", "password");
-      await expect(page.getByLabel("Telegram bot token")).toHaveAttribute("type", "password");
-      await expect(page.getByLabel("Telegram allowed user IDs")).toBeVisible();
+      await expect(page.getByLabel("ChatGPT")).toBeChecked();
+      await expect(page.getByLabel("Claude")).not.toBeChecked();
+      await expect(page.getByLabel("OpenAI API key")).toHaveAttribute("type", "password");
+      await expect(page.getByLabel("Bot token")).toHaveAttribute("type", "password");
+      await expect(page.getByLabel("Who may use this bot?")).toBeVisible();
       await expect(page.getByRole("link", { name: "BotFather" })).toHaveAttribute(
         "href",
         "https://t.me/BotFather",
@@ -151,18 +147,18 @@ test("automatic submission follows persisted progress to ready across refresh, r
       );
       await expectNoHorizontalOverflow(page);
 
-      await page.getByLabel("Name").fill("   ");
-      await page.getByRole("button", { name: "Create and set up" }).click();
+      await page.getByLabel("What should we call your agent?").fill("   ");
+      await page.getByRole("button", { name: "Create my agent" }).click();
       await expect(page.locator("#agent-create-name-error")).toHaveText("Name is required.");
-      await expect(page.getByLabel("Name")).toBeFocused();
+      await expect(page.getByLabel("What should we call your agent?")).toBeFocused();
 
-      await page.getByLabel("Name").fill("Persisted Ready Agent");
-      await page.getByLabel("OpenRouter API key").fill(OPENROUTER_CANARY);
-      await page.getByLabel("Telegram bot token").fill(TELEGRAM_CANARY);
+      await page.getByLabel("What should we call your agent?").fill("Persisted Ready Agent");
+      await page.getByLabel("OpenAI API key").fill(OPENAI_CANARY);
+      await page.getByLabel("Bot token").fill(TELEGRAM_CANARY);
       await page
-        .getByLabel("Telegram allowed user IDs")
+        .getByLabel("Who may use this bot?")
         .fill(`${ALLOWLIST_CANARIES[0]}\n${ALLOWLIST_CANARIES[1]}\n${ALLOWLIST_CANARIES[0]}`);
-      const submit = page.getByRole("button", { name: "Create and set up" });
+      const submit = page.getByRole("button", { name: "Create my agent" });
       await submit.focus();
       await page.keyboard.press("Enter");
 
@@ -176,8 +172,8 @@ test("automatic submission follows persisted progress to ready across refresh, r
             runnerId: null,
             launchMode: "ready",
             idempotencyKey: createIdempotencyKey,
-            openrouterModel: "openai/gpt-4.1-mini",
-            openrouterApiKey: OPENROUTER_CANARY,
+            assistant: "chatgpt",
+            modelApiKey: OPENAI_CANARY,
             telegramBotToken: TELEGRAM_CANARY,
             telegramAllowedUserIds: [...ALLOWLIST_CANARIES],
           },
@@ -188,7 +184,7 @@ test("automatic submission follows persisted progress to ready across refresh, r
       await expect(page.getByRole("button", { name: "Stop setup" })).toBeVisible();
       await expect(page.getByRole("button", { name: "Open advanced setup" })).not.toBeVisible();
       await expectNoSensitiveExposure(page, context, evidence, [
-        OPENROUTER_CANARY,
+        OPENAI_CANARY,
         TELEGRAM_CANARY,
         ...ALLOWLIST_CANARIES,
         createIdempotencyKey,
@@ -258,7 +254,7 @@ test("automatic submission follows persisted progress to ready across refresh, r
         await expect(secondPage.getByRole("button", { name: "Start", exact: true })).toHaveCount(0);
         await expectNoHorizontalOverflow(secondPage);
         await expectNoSensitiveExposure(secondPage, secondContext, secondEvidence, [
-          OPENROUTER_CANARY,
+          OPENAI_CANARY,
           TELEGRAM_CANARY,
           ...ALLOWLIST_CANARIES,
           createIdempotencyKey,
@@ -271,7 +267,7 @@ test("automatic submission follows persisted progress to ready across refresh, r
       await requestImmediatePoll(reopenedPage);
       await expectCurrentStage(reopenedPage, "Ready");
       await expectNoSensitiveExposure(reopenedPage, context, evidence, [
-        OPENROUTER_CANARY,
+        OPENAI_CANARY,
         TELEGRAM_CANARY,
         ...ALLOWLIST_CANARIES,
         createIdempotencyKey,
@@ -499,7 +495,7 @@ test("observation failures degrade after three reads and recover without changin
   }
 });
 
-test("manual fallback posts the legacy envelope and keeps automatic setup secondary", async ({
+test("common setup hides implementation choices and legacy provider controls", async ({
   context,
   isMobile,
   page,
@@ -513,55 +509,15 @@ test("manual fallback posts the legacy envelope and keeps automatic setup second
       }
 
       const evidence = await installBrowserEvidence(context, page);
-      const agentId = randomUUID();
-      let manualBody: unknown;
-      let deploymentReads = 0;
-      page.on("request", (request) => {
-        if (new URL(request.url()).pathname.endsWith("/deployment")) {
-          deploymentReads += 1;
-        }
-      });
-      await page.route("**/api/agents", async (route) => {
-        if (route.request().method() !== "POST") {
-          await route.continue();
-          return;
-        }
-
-        manualBody = readJsonRequest(route.request());
-        await insertAgent(fixture, {
-          agentId,
-          deploymentId: null,
-          deploymentIdempotencyKey: null,
-          desiredStatus: "stopped",
-          name: "Manual Fallback Agent",
-          stage: null,
-          status: "stopped",
-          createdAt: new Date().toISOString(),
-        });
-        await route.fulfill({
-          contentType: "application/json",
-          status: 201,
-          body: JSON.stringify({ agent: { id: agentId }, event: { type: "agent.created" } }),
-        });
-      });
-
       await page.goto("/agents");
-      await page.getByRole("button", { name: "Manual", exact: true }).click();
-      await expect(page.getByLabel("OpenRouter API key")).toHaveCount(0);
-      await expect(page.getByLabel("Telegram bot token")).toHaveCount(0);
-      await page.getByLabel("Name").fill("Manual Fallback Agent");
-      await page.getByRole("button", { name: "Create agent" }).click();
-
-      await expect(page).toHaveURL(new RegExp(`/agents/${agentId}$`));
-      expect(manualBody).toEqual({
-        name: "Manual Fallback Agent",
-        templateKey: "research_agent",
-        runnerId: null,
-      });
-      await expect(page.getByRole("heading", { name: "Manual setup" })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Start", exact: true })).toBeVisible();
-      await expect(page.getByRole("heading", { name: "Advanced Hermes setup" })).toBeVisible();
-      expect(deploymentReads).toBe(0);
+      await expect(page.getByLabel("ChatGPT")).toBeVisible();
+      await expect(page.getByLabel("Claude")).toBeVisible();
+      await expect(page.getByText("We handle the rest")).toBeVisible();
+      await expect(page.getByText("OpenRouter", { exact: false })).toHaveCount(0);
+      await expect(page.getByLabel("Model")).toHaveCount(0);
+      await expect(page.getByLabel("Runner")).toHaveCount(0);
+      await expect(page.getByLabel("Template")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Manual", exact: true })).toHaveCount(0);
       await expectNoHorizontalOverflow(page);
       expect(evidence.externalRequests).toEqual([]);
     });
@@ -704,8 +660,8 @@ async function insertAgent(
       values (
         ${input.agentId},
         'E2E fixture prompt with no external actions.',
-        'openrouter',
-        'openai/gpt-4.1-mini'
+        'openai-api',
+        'gpt-5.4'
       )
     `;
 

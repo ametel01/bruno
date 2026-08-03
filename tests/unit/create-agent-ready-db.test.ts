@@ -167,6 +167,22 @@ describe("ready agent creation persistence", () => {
       randomBytes: incrementalRandomBytes(),
       telegramBotValidator: telegramValidator(),
     });
+    await expect(
+      listModelConnectionsForUser(USER_A_ID, { createConnection: () => connection }),
+    ).resolves.toMatchObject([
+      { assistant: "chatgpt", status: "action_required" },
+      { assistant: "claude", status: "action_required" },
+    ]);
+    await connection.db.update(agentDeployments).set({
+      stage: "ready",
+      runnerOperationId: "88888888-8888-4888-8888-888888888888",
+      runnerAcceptedAt: NOW,
+      canaryState: "passed",
+      canaryAttemptedAt: NOW,
+      canaryCompletedAt: NOW,
+      completedAt: NOW,
+      updatedAt: NOW,
+    });
 
     const connectionViews = await listModelConnectionsForUser(USER_A_ID, {
       createConnection: () => connection,

@@ -614,8 +614,8 @@ async function seedCommitted202Operation(
   await connection.db.insert(agentConfigs).values({
     agentId: input.agentId,
     systemPrompt: "Local fake only.",
-    modelProvider: "openrouter",
-    modelName: "openai/gpt-4.1-mini",
+    modelProvider: "openai-api",
+    modelName: "gpt-5.4",
     scheduleMode: "manual",
     timezone: "UTC",
     createdAt: input.now,
@@ -672,7 +672,7 @@ function buildFakeLaunchSpec(agentId: string, configRevision: string): AgentLaun
       configRevision,
     },
     image: { ref: DEFAULT_HERMES_WORKLOAD_IMAGE },
-    model: { provider: "openrouter", model: "openai/gpt-4.1-mini" },
+    model: { provider: "openai-api", model: "gpt-5.4" },
     platforms: {
       required: ["api_server", "telegram"],
       apiServer: { enabled: true, host: "0.0.0.0", port: 8642 },
@@ -697,7 +697,7 @@ function buildFakeLaunchSpec(agentId: string, configRevision: string): AgentLaun
     },
     secrets: {
       kind: "inline",
-      openrouterApiKey: "sk-or-v1-local-fake-smoke",
+      modelApiKey: "sk-localfakesmoke12345678901234567890",
       telegramBotToken: "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ12",
       telegramAllowedUsers: ["1"],
       apiServerKey: `agb_agent_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`,

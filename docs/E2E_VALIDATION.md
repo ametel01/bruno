@@ -91,7 +91,7 @@ bun run verify:hermes:staging
 
 This command is the single entrypoint for the final live Hermes plus Telegram
 acceptance smoke. It fails before any network, database, provider, Droplet, or
-Telegram effect unless all 15 capabilities validate and the process has an
+Telegram effect unless all 16 capabilities validate and the process has an
 interactive TTY. Once authorized, it drives a durable hosted saga one bounded
 effect at a time. A crash, timeout, duplicate command, or disabled acceptance
 flag resumes cleanup from the database ledger rather than relying on a local
@@ -122,8 +122,10 @@ The preflight requires these capability names:
 - `AGENTBAY_DIGITALOCEAN_TOKEN`: DigitalOcean staging token for the approved
   account.
 - `AGENTBAY_RUNNER_BEARER_TOKEN`: staging runner command bearer credential.
-- `AGENTBAY_HERMES_STAGING_OPENROUTER_API_KEY`: funded OpenRouter key used only
-  for the bounded model canary.
+- `AGENTBAY_HERMES_STAGING_ASSISTANT`: exactly `chatgpt` or `claude`.
+- The matching direct model key: `AGENTBAY_HERMES_STAGING_OPENAI_API_KEY` for
+  ChatGPT or `AGENTBAY_HERMES_STAGING_ANTHROPIC_API_KEY` for Claude. Configure
+  exactly one. API usage is billed separately from consumer subscriptions.
 - `AGENTBAY_HERMES_STAGING_TELEGRAM_BOT_TOKEN`: dedicated staging Telegram bot
   token. Do not reuse a bot that is active elsewhere.
 - `AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_USER_ID`: numeric allowed Telegram test
@@ -156,7 +158,7 @@ sentinel value is a blocker, not a passing smoke.
    IDs, CSV, wildcards, zero, and negative values. The staging chat ID is a
    separate signed numeric capability because Telegram chats may use negative
    identifiers.
-4. Fund the OpenRouter key for the selected approved model. Automatic
+4. Fund the direct OpenAI or Anthropic API key for the selected assistant. Automatic
    reconciliation records at most one successful bounded, low-output, no-tools
    canary for a deployment/config revision. An explicit Retry after a failed or
    unknown outcome creates a new persisted attempt and may incur one additional
@@ -165,7 +167,7 @@ sentinel value is a blocker, not a passing smoke.
 ### Run the authorized workflow
 
 Do not run the live workflow until an operator has approved the exact basic
-DigitalOcean budget plus Telegram contact and all 15 capabilities have been
+DigitalOcean budget plus Telegram contact and all 16 capabilities have been
 installed out of band. Run it from an interactive terminal exactly:
 
 ```bash
@@ -212,6 +214,6 @@ report green.
 
 Only after this live run passes may the controlled environment set
 `AGENTBAY_READY_AGENT_CREATION_ENABLED=true`. Roll back by setting it to `false`
-or removing it and redeploying; explicit `launchMode:"stopped"` creation remains
-available. Stop existing agents explicitly because disabling the flag does not
-change their persisted desired state.
+or removing it and redeploying; this disables the common setup UI. The stopped-create API remains
+only as a legacy operator compatibility path. Stop existing agents explicitly because disabling
+the flag does not change their persisted desired state.
