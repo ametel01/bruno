@@ -165,11 +165,11 @@ describe("automatic Hermes Telegram progress status", () => {
     );
     expect(automaticLedger).toContain("OpenRouter is the first supported provider");
     expect(automaticLedger).toContain("dedicated staging Telegram bot/user");
-    expect(automaticLedger).toContain("Step 1 is complete.");
+    expect(automaticLedger).toContain("Step 2 is complete.");
     expect(automaticLedger).toContain("- [x] Step 0: Progress and Changelog Tracking Setup");
     expect(automaticLedger).toContain("- [x] Step 1: Quality Gates Setup and Baseline Evidence");
     expect(automaticLedger).toContain(
-      "- [ ] Step 2: Align Readiness With the Pinned Hermes Contract",
+      "- [x] Step 2: Align Readiness With the Pinned Hermes Contract",
     );
     expect(automaticLedger).toContain(
       "- [ ] Step 3: Persist Desired State and Deployment Operations",
@@ -195,12 +195,17 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain(
       "| 1. Quality Gates Setup and Baseline Evidence | Complete |",
     );
+    expect(automaticLedger).toContain(
+      "| 2. Align Readiness With the Pinned Hermes Contract | Complete |",
+    );
     expect(automaticLedger).toContain("`bun run verify:hermes:staging` exited nonzero");
-    expect(automaticLedger).toContain("`CHANGELOG.md` unchanged");
+    expect(automaticLedger).toContain("pinned Hermes `v2026.7.7.2`");
+    expect(automaticLedger).toContain('`telegramBoundary: "local-smoke-disabled"`');
+    expect(automaticLedger).toContain("Full gates passed");
     expect(automaticLedger).toContain("Step validation commands and results.");
     expect(automaticLedger).toContain("Safe blocker codes, missing capabilities, and next action.");
-    expect(automaticLedger).toContain("No blocker remains for Step 1.");
-    expect(automaticLedger).toContain("Step 2 should update pinned Hermes readiness parsing");
+    expect(automaticLedger).toContain("No blocker remains for Step 2.");
+    expect(automaticLedger).toContain("Step 3 should add durable desired state");
     expect(changelog).toContain("# Changelog");
     expect(changelog).toContain("Keep a Changelog");
     expect(changelog).toContain("## [Unreleased]");

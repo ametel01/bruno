@@ -165,7 +165,9 @@ export function createRunnerService(options: RunnerServiceOptions = {}) {
       }
 
       if (error instanceof HermesReadinessError) {
-        return jsonError(502, "hermes_readiness_failed", "Hermes readiness failed.");
+        return jsonError(502, "hermes_readiness_failed", "Hermes readiness failed.", undefined, {
+          reason: error.reason,
+        });
       }
 
       return jsonError(502, "docker_command_failed", "Runner Docker command failed.");
@@ -379,6 +381,7 @@ function jsonError(
   code: string,
   message: string,
   headers?: Record<string, string>,
+  details?: Record<string, unknown>,
 ): Response {
   return Response.json(
     {
@@ -386,6 +389,7 @@ function jsonError(
       error: {
         code,
         message,
+        ...(details ?? {}),
       },
     },
     {

@@ -451,19 +451,18 @@ the existing `Added`, `Changed`, `Fixed`, or `Security` sections as applicable.
 
 ### Current Status
 
-Step 1 is complete. The repository now has a fail-closed
-`verify:hermes:staging` entrypoint that records named staging capabilities,
-requires exact DigitalOcean spend and live-side-effect sentinels, rejects
-missing, blank, placeholder, malformed, tag-only, and source-pinned image
-inputs, prints no secrets or numeric Telegram identifiers, and performs no live
-side effects. Step 2 is next: align readiness parsing and cleanup with the
-pinned Hermes contract.
+Step 2 is complete. The runner now accepts the pinned Hermes `v2026.7.7.2`
+`/health/detailed` shape without requiring an HTTP revision echo, proves the
+selected config revision through runner-owned image/label/mount/marker
+evidence, propagates only allowlisted readiness reasons, and removes the exact
+newly launched selected-agent container on post-launch readiness or revision
+failure. Step 3 is next: persist desired state and deployment operations.
 
 ### Step Checklist
 
 - [x] Step 0: Progress and Changelog Tracking Setup
 - [x] Step 1: Quality Gates Setup and Baseline Evidence
-- [ ] Step 2: Align Readiness With the Pinned Hermes Contract
+- [x] Step 2: Align Readiness With the Pinned Hermes Contract
 - [ ] Step 3: Persist Desired State and Deployment Operations
 - [ ] Step 4: Add Managed Creation Configuration and Encrypted Credentials
 - [ ] Step 5: Project a Complete Managed Hermes Configuration
@@ -479,7 +478,7 @@ pinned Hermes contract.
 | --- | --- | --- | --- | --- | --- |
 | 0. Progress and Changelog Tracking Setup | Complete | None | This commit | `bun run format:check` passed after formatting the new progress guard; `bun run lint` passed; `bun run typecheck` passed; `bun run test` passed 98 files / 863 tests; `bun run build` passed; `bun run test:e2e:ci` passed 14 tests; `git diff --check` passed; changelog structure verified without a tracking-only entry. | Complete; Step 1 is next. |
 | 1. Quality Gates Setup and Baseline Evidence | Complete | Step 0 | This commit | Pre-edit baseline at `807e401`: `bun run verify` passed (`format:check`, `lint`, `typecheck`, 98 test files / 863 tests, and production build) and `bun run test:e2e:ci` passed 14 browser tests. Added `verify:hermes:staging`, a pure fail-closed preflight, placeholder-only docs/env entries, and 7 focused staging-gate tests. Final gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 99 files / 870 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `bun run verify:hermes:staging` exited nonzero with `capability_unavailable` and `sideEffectsAttempted: false`; `git diff --check`; `CHANGELOG.md` unchanged. | Complete; Step 2 is next. |
-| 2. Align Readiness With the Pinned Hermes Contract | Not started | Steps 0-1 | Not collected | Not collected | Use Step 1 staging gate and update pinned readiness/parser cleanup behavior. |
+| 2. Align Readiness With the Pinned Hermes Contract | Complete | Steps 0-1 | This commit | Focused Step 2 tests passed 6 files / 43 tests across runner-service, Docker adapter, lifecycle readiness, manual-runner adapter, projection, and local-smoke guards. `bun run agent:hermes:contract-smoke` passed against local pinned-image behavior with `telegramBoundary: "local-smoke-disabled"`, private API auth, no public Hermes port, production waiter reuse, fake model response, state persistence, backup/restore, log-source evidence, and cleanup. Full gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test` passed 99 files / 879 tests; `bun run build`; `bun run test:e2e:ci` passed 14 tests; `git diff --check`. | Complete; Step 3 is next. |
 | 3. Persist Desired State and Deployment Operations | Not started | Steps 0-2 | Not collected | Not collected | Requires readiness contract alignment. |
 | 4. Add Managed Creation Configuration and Encrypted Credentials | Not started | Steps 0-3 | Not collected | Not collected | Stop here if OpenRouter BYOK is not approved for automatic-ready mode. |
 | 5. Project a Complete Managed Hermes Configuration | Not started | Steps 0-4 | Not collected | Not collected | Requires server-side desired config and encrypted secret contract. |
@@ -502,6 +501,6 @@ pinned Hermes contract.
 
 ### Current Blockers and Next Work
 
-- No blocker remains for Step 1.
-- Step 2 should update pinned Hermes readiness parsing and partial-container
-  cleanup without contacting external services.
+- No blocker remains for Step 2.
+- Step 3 should add durable desired state and deployment-operation persistence
+  without contacting external services.

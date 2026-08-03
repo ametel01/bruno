@@ -113,6 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Pinned Hermes gateway readiness now follows the `v2026.7.7.2` detailed-health platform-state contract without requiring an HTTP config-revision echo, while failed post-launch evidence or readiness checks remove the partial selected-agent container.
 - Local Docker cloud-runner smoke now treats fresh Hermes setup blocking as a safe control-flow result, bridges the runner env file through a host-visible path for Docker-socket simulation, and packages all runner-service runtime imports in the runner image.
 - Hermes readiness failures now record `agent.error`, avoid premature start/restart completion events, and leave a safe actionable lifecycle reason; the Docker capability set now keeps only the minimal capabilities the Hermes supervisor needs after dropping all others.
 - Cloud runner bootstrap now persists exchanged credentials in the host-mounted environment file,

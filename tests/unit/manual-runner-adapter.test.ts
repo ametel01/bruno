@@ -268,6 +268,82 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
     info.mockRestore();
   });
 
+  it("maps Hermes readiness failures to stable reasons without exposing upstream details", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const adapter = new ManualRunnerAdapter(manualRunner("https://runner.example.com"), {
+      env: { [RUNNER_BEARER_TOKEN_ENV]: "contract-token" },
+      fetch: async () =>
+        Response.json(
+          {
+            ok: false,
+            error: {
+              code: "hermes_readiness_failed",
+              message: "Hermes readiness failed.",
+              reason: "telegram_not_connected",
+              raw: "telegram token 123456:abcdefghijklmnopqrstuvwxyz",
+            },
+          },
+          { status: 502 },
+        ),
+      timeoutMs: 250,
+    });
+
+    await expect(adapter.start("00000000-0000-4000-8000-000000000123")).resolves.toEqual({
+      ok: false,
+      reason: "runner_readiness_failed",
+      readinessReason: "telegram_not_connected",
+    });
+    expect(info).toHaveBeenCalledWith(
+      "[agentbay] manual_runner.request",
+      expect.objectContaining({
+        event: "request_failed",
+        responseErrorCode: "hermes_readiness_failed",
+        responseErrorReason: "telegram_not_connected",
+      }),
+    );
+    expect(JSON.stringify(info.mock.calls)).not.toContain("123456:abcdefghijklmnopqrstuvwxyz");
+    info.mockRestore();
+  });
+
+  it("drops unknown Hermes readiness failure reasons from dashboard metadata", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const adapter = new ManualRunnerAdapter(manualRunner("https://runner.example.com"), {
+      env: { [RUNNER_BEARER_TOKEN_ENV]: "contract-token" },
+      fetch: async () =>
+        Response.json(
+          {
+            ok: false,
+            error: {
+              code: "hermes_readiness_failed",
+              message: "Hermes readiness failed.",
+              reason: "telegram token 123456:abcdefghijklmnopqrstuvwxyz",
+            },
+          },
+          { status: 502 },
+        ),
+      timeoutMs: 250,
+    });
+
+    await expect(adapter.restart("00000000-0000-4000-8000-000000000123")).resolves.toEqual({
+      ok: false,
+      reason: "runner_readiness_failed",
+    });
+    expect(info).toHaveBeenCalledWith(
+      "[agentbay] manual_runner.request",
+      expect.objectContaining({
+        event: "request_failed",
+        responseErrorCode: "hermes_readiness_failed",
+      }),
+    );
+    expect(info.mock.calls[0]?.[1]).toEqual(
+      expect.not.objectContaining({
+        responseErrorReason: expect.anything(),
+      }),
+    );
+    expect(JSON.stringify(info.mock.calls)).not.toContain("123456:abcdefghijklmnopqrstuvwxyz");
+    info.mockRestore();
+  });
+
   async function createAssignedRunner(agentId: string, endpointUrl: string) {
     const runner = await bootstrapManualRunnerForDevelopmentUser({
       createConnection: () => connection,

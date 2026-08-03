@@ -19,6 +19,8 @@ describe("local Hermes contract smoke", () => {
     expect(smokeScript).toContain("model_routes");
     expect(smokeScript).toContain("/v1/chat/completions");
     expect(smokeScript).toContain("/health/detailed");
+    expect(smokeScript).toContain("createHermesReadinessWaiter");
+    expect(smokeScript).toContain("requireTelegram: false");
     expect(smokeScript).toContain("assertPrivateApiAuth");
     expect(smokeScript).toContain("assertNoPublicHermesPort");
     expect(smokeScript).toContain("waitForHermesGatewayLogs");

@@ -4,9 +4,12 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   AGENTBAY_AGENT_ID_LABEL,
+  createHermesReadinessWaiter,
+  evaluateHermesReadyResponse,
   isHermesReadyResponse,
   ManualRunnerDocker,
   type DockerExecutableRunner,
+  type HermesReadinessReason,
 } from "@/src/runner-service/docker";
 import { createRunnerService } from "@/src/runner-service/server";
 import { sampleLaunchSpec } from "@/tests/helpers/agent-launch-spec";
@@ -210,15 +213,7 @@ describe("manual runner service HTTP contract", () => {
         projection: {
           project: async (spec) => {
             projected.push(spec.agent.id);
-            return {
-              agentRoot: "/var/lib/agentbay/agents/test",
-              hermesHome: "/var/lib/agentbay/agents/test/hermes",
-              workspace: "/var/lib/agentbay/agents/test/workspace",
-              configPath: "/var/lib/agentbay/agents/test/hermes/config.yaml",
-              envPath: "/var/lib/agentbay/agents/test/hermes/.env",
-              soulPath: "/var/lib/agentbay/agents/test/hermes/SOUL.md",
-              revisionPath: "/var/lib/agentbay/agents/test/hermes/agentbay-config-revision.json",
-            };
+            return await createHermesProjectionForTest(spec);
           },
         },
         readiness: {
@@ -269,9 +264,9 @@ describe("manual runner service HTTP contract", () => {
         "--network",
         "agentbay-hermes",
         "--mount",
-        "type=bind,source=/var/lib/agentbay/agents/test/hermes,target=/opt/data",
+        expect.stringMatching(/^type=bind,source=.+\/hermes,target=\/opt\/data$/),
         "--mount",
-        "type=bind,source=/var/lib/agentbay/agents/test/workspace,target=/workspace",
+        expect.stringMatching(/^type=bind,source=.+\/workspace,target=\/workspace$/),
         sampleLaunchSpec().image.ref,
         "gateway",
         "run",
@@ -290,15 +285,7 @@ describe("manual runner service HTTP contract", () => {
         docker: createMockDocker({ injectDockerSocket: true }),
         nameSuffix: () => "unit001",
         projection: {
-          project: async () => ({
-            agentRoot: "/var/lib/agentbay/agents/test",
-            hermesHome: "/var/lib/agentbay/agents/test/hermes",
-            workspace: "/var/lib/agentbay/agents/test/workspace",
-            configPath: "/var/lib/agentbay/agents/test/hermes/config.yaml",
-            envPath: "/var/lib/agentbay/agents/test/hermes/.env",
-            soulPath: "/var/lib/agentbay/agents/test/hermes/SOUL.md",
-            revisionPath: "/var/lib/agentbay/agents/test/hermes/agentbay-config-revision.json",
-          }),
+          project: createHermesProjectionForTest,
         },
         readiness: {
           wait: async () => ({ ok: true }),
@@ -327,15 +314,7 @@ describe("manual runner service HTTP contract", () => {
         docker: createMockDocker(),
         nameSuffix: () => "unit001",
         projection: {
-          project: async () => ({
-            agentRoot: "/var/lib/agentbay/agents/test",
-            hermesHome: "/var/lib/agentbay/agents/test/hermes",
-            workspace: "/var/lib/agentbay/agents/test/workspace",
-            configPath: "/var/lib/agentbay/agents/test/hermes/config.yaml",
-            envPath: "/var/lib/agentbay/agents/test/hermes/.env",
-            soulPath: "/var/lib/agentbay/agents/test/hermes/SOUL.md",
-            revisionPath: "/var/lib/agentbay/agents/test/hermes/agentbay-config-revision.json",
-          }),
+          project: createHermesProjectionForTest,
         },
         readiness: {
           wait: async () => ({ ok: false, reason: "timeout" }),
@@ -355,8 +334,155 @@ describe("manual runner service HTTP contract", () => {
       error: {
         code: "hermes_readiness_failed",
         message: "Hermes readiness failed.",
+        reason: "timeout",
       },
     });
+  });
+
+  it("removes the just-created Hermes container when readiness fails", async () => {
+    const calls: string[][] = [];
+    const service = createRunnerService({
+      authToken: "test-token",
+      docker: new ManualRunnerDocker({
+        command: testCommand(),
+        docker: createMockDocker({ calls }),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: createHermesProjectionForTest,
+        },
+        readiness: {
+          wait: async () => ({ ok: false, reason: "telegram_not_connected" }),
+        },
+      }),
+    });
+    const response = await service.fetch(
+      authorizedJsonRequest(
+        `/runner/v1/agents/${AGENT_ID}/start`,
+        sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } }),
+      ),
+    );
+    const status = await service.fetch(authorizedRequest(`/runner/v1/agents/${AGENT_ID}/status`));
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "hermes_readiness_failed",
+        reason: "telegram_not_connected",
+      },
+    });
+    await expect(status.json()).resolves.toMatchObject({
+      ok: true,
+      containers: [],
+    });
+    expect(calls).toContainEqual(["rm", "--force", "container-001"]);
+  });
+
+  it("keeps the primary readiness reason when failed-launch cleanup fails", async () => {
+    const calls: string[][] = [];
+    const service = createRunnerService({
+      authToken: "test-token",
+      docker: new ManualRunnerDocker({
+        command: testCommand(),
+        docker: createMockDocker({ calls, failRemoveIds: ["container-001"] }),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: createHermesProjectionForTest,
+        },
+        readiness: {
+          wait: async () => ({ ok: false, reason: "api_server_not_connected" }),
+        },
+      }),
+    });
+    const response = await service.fetch(
+      authorizedJsonRequest(
+        `/runner/v1/agents/${AGENT_ID}/start`,
+        sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } }),
+      ),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "hermes_readiness_failed",
+        message: "Hermes readiness failed.",
+        reason: "api_server_not_connected",
+      },
+    });
+    expect(calls).toContainEqual(["rm", "--force", "container-001"]);
+  });
+
+  it("keeps the primary revision reason when failed-launch cleanup fails", async () => {
+    const calls: string[][] = [];
+    const service = createRunnerService({
+      authToken: "test-token",
+      docker: new ManualRunnerDocker({
+        command: testCommand(),
+        docker: createMockDocker({ calls, failRemoveIds: ["container-001"] }),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: (spec) =>
+            createHermesProjectionForTest(spec, {
+              marker: { configRevision: "wrong-revision" },
+            }),
+        },
+        readiness: {
+          wait: async () => ({ ok: true }),
+        },
+      }),
+    });
+    const response = await service.fetch(
+      authorizedJsonRequest(
+        `/runner/v1/agents/${AGENT_ID}/start`,
+        sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } }),
+      ),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "hermes_readiness_failed",
+        message: "Hermes readiness failed.",
+        reason: "revision_mismatch",
+      },
+    });
+    expect(calls).toContainEqual(["rm", "--force", "container-001"]);
+  });
+
+  it("removes a failed restart replacement without removing another agent", async () => {
+    const calls: string[][] = [];
+    const docker = new ManualRunnerDocker({
+      command: testCommand(),
+      docker: createMockDocker({
+        calls,
+        containers: [
+          { id: "old-selected", agentId: AGENT_ID, status: "running" },
+          { id: "other-selected", agentId: OTHER_AGENT_ID, status: "running" },
+        ],
+      }),
+      nameSuffix: () => "unit001",
+      projection: {
+        project: (spec) =>
+          createHermesProjectionForTest(spec, {
+            marker: { configRevision: "wrong-revision" },
+          }),
+      },
+      readiness: {
+        wait: async () => ({ ok: true }),
+      },
+    });
+
+    await expect(docker.restart(AGENT_ID, sampleLaunchSpec())).rejects.toMatchObject({
+      reason: "revision_mismatch",
+    });
+    await expect(docker.status(AGENT_ID)).resolves.toEqual({ containers: [] });
+    await expect(docker.status(OTHER_AGENT_ID)).resolves.toMatchObject({
+      containers: [{ id: "other-selected", status: "running" }],
+    });
+    expect(calls).toContainEqual(["rm", "--force", "old-selected"]);
+    expect(calls).toContainEqual(["rm", "--force", "container-001"]);
+    expect(calls).not.toContainEqual(["rm", "--force", "other-selected"]);
   });
 
   it("returns redacted durable Hermes gateway logs before bootstrap diagnostics", async () => {
@@ -581,51 +707,186 @@ describe("manual runner Docker command contract", () => {
 });
 
 describe("Hermes detailed readiness contract", () => {
-  it("requires matching config and Telegram readiness evidence", () => {
+  it("accepts the pinned detailed-health shape without HTTP revision evidence", () => {
+    expect(isHermesReadyResponse(pinnedHermesHealth())).toBe(true);
     expect(
-      isHermesReadyResponse(
-        {
-          status: "ready",
-          configRevision: "cfg-1",
-          telegram: { status: "connected" },
-        },
-        "cfg-1",
-      ),
+      isHermesReadyResponse(pinnedHermesHealth({ platforms: { telegram: undefined } }), {
+        requireTelegram: false,
+      }),
     ).toBe(true);
-    expect(
-      isHermesReadyResponse(
+  });
+
+  it("rejects legacy aliases and classifies pinned platform failures safely", () => {
+    const matrix: Array<[unknown, HermesReadinessReason]> = [
+      [{ ...pinnedHermesHealth(), status: "ready" }, "gateway_failed"],
+      [{ ...pinnedHermesHealth(), gateway_state: "starting" }, "gateway_failed"],
+      [pinnedHermesHealth({ platforms: { api_server: undefined } }), "api_server_not_connected"],
+      [
+        pinnedHermesHealth({ platforms: { api_server: { state: "starting" } } }),
+        "api_server_not_connected",
+      ],
+      [
+        pinnedHermesHealth({ platforms: { api_server: { state: "fatal" } } }),
+        "api_server_not_connected",
+      ],
+      [pinnedHermesHealth({ platforms: { telegram: undefined } }), "telegram_not_connected"],
+      [
+        pinnedHermesHealth({ platforms: { telegram: { state: "disconnected" } } }),
+        "telegram_not_connected",
+      ],
+      [
+        pinnedHermesHealth({ platforms: { telegram: { state: "retrying" } } }),
+        "telegram_not_connected",
+      ],
+      [
+        pinnedHermesHealth({ platforms: { telegram: { state: "fatal" } } }),
+        "telegram_not_connected",
+      ],
+      [null, "gateway_failed"],
+      [
         {
           status: "ready",
-          configRevision: "cfg-2",
-          telegram: { status: "connected" },
-        },
-        "cfg-1",
-      ),
-    ).toBe(false);
-    expect(
-      isHermesReadyResponse(
-        {
-          status: "ready",
+          ok: true,
           configRevision: "cfg-1",
-          telegram: { status: "disconnected" },
+          telegram: { enabled: true, status: "connected" },
+          messaging: { telegram: { connected: true } },
         },
-        "cfg-1",
-      ),
-    ).toBe(false);
-    expect(isHermesReadyResponse({ status: "ready", configRevision: "cfg-1" }, "cfg-1")).toBe(
-      false,
+        "gateway_failed",
+      ],
+    ];
+
+    for (const [body, reason] of matrix) {
+      expect(evaluateHermesReadyResponse(body)).toEqual({ ok: false, reason });
+      expect(isHermesReadyResponse(body)).toBe(false);
+    }
+  });
+
+  it("returns the latest semantic reason at timeout and ignores unparseable probes", async () => {
+    let now = 0;
+    const waiter = createHermesReadinessWaiter(
+      {
+        cpus: "1",
+        memory: "1536m",
+        network: "agentbay-hermes",
+        pidsLimit: "256",
+        readinessPort: 8642,
+      },
+      {
+        now: () => now,
+        pollMs: 10,
+        sleep: async (ms) => {
+          now += ms;
+        },
+        timeoutMs: 30,
+        requestHealth: async () => ({
+          ok: true,
+          body: now === 0 ? null : pinnedHermesHealth({ platforms: { telegram: undefined } }),
+        }),
+      },
     );
-    expect(
-      isHermesReadyResponse(
-        {
-          status: "ready",
-          telegram: { status: "connected" },
+
+    await expect(
+      waiter({
+        agentId: AGENT_ID,
+        apiServerKey: "agb_agent_key",
+        configRevision: "cfg-1",
+        containerName: "agentbay-runner-test",
+      }),
+    ).resolves.toEqual({ ok: false, reason: "telegram_not_connected" });
+  });
+
+  it("returns timeout when the deadline expires without parseable health evidence", async () => {
+    let now = 0;
+    const waiter = createHermesReadinessWaiter(
+      {
+        cpus: "1",
+        memory: "1536m",
+        network: "agentbay-hermes",
+        pidsLimit: "256",
+        readinessPort: 8642,
+      },
+      {
+        now: () => now,
+        pollMs: 10,
+        sleep: async (ms) => {
+          now += ms;
         },
-        "cfg-1",
-      ),
-    ).toBe(false);
+        timeoutMs: 30,
+        requestHealth: async () => ({
+          ok: true,
+          body: null,
+        }),
+      },
+    );
+
+    await expect(
+      waiter({
+        agentId: AGENT_ID,
+        apiServerKey: "agb_agent_key",
+        configRevision: "cfg-1",
+        containerName: "agentbay-runner-test",
+      }),
+    ).resolves.toEqual({ ok: false, reason: "timeout" });
   });
 });
+
+async function createHermesProjectionForTest(
+  spec: ReturnType<typeof sampleLaunchSpec>,
+  options: { marker?: Record<string, unknown> } = {},
+) {
+  const agentRoot = join(tmpdir(), `agentbay-runner-projection-${Date.now()}-${Math.random()}`);
+  const hermesHome = join(agentRoot, "hermes");
+  const workspace = join(agentRoot, "workspace");
+  const revisionPath = join(hermesHome, "agentbay-config-revision.json");
+
+  await mkdir(hermesHome, { recursive: true });
+  await mkdir(workspace, { recursive: true });
+  await writeFile(
+    revisionPath,
+    JSON.stringify({
+      version: spec.version,
+      requestId: spec.requestId,
+      agentId: spec.agent.id,
+      configRevision: spec.agent.configRevision,
+      image: spec.image.ref,
+      ...(options.marker ?? {}),
+    }),
+  );
+
+  return {
+    agentRoot,
+    hermesHome,
+    workspace,
+    configPath: join(hermesHome, "config.yaml"),
+    envPath: join(hermesHome, ".env"),
+    soulPath: join(hermesHome, "SOUL.md"),
+    revisionPath,
+  };
+}
+
+function pinnedHermesHealth(
+  overrides: {
+    platforms?: {
+      api_server?: { state: string } | undefined;
+      telegram?: { state: string } | undefined;
+    };
+  } = {},
+) {
+  return {
+    status: "ok",
+    platform: "hermes-agent",
+    version: "v2026.7.7.2",
+    gateway_state: "running",
+    platforms: {
+      api_server: { state: "connected" },
+      telegram: { state: "connected" },
+      ...(overrides.platforms ?? {}),
+    },
+    exit_reason: null,
+    updated_at: "2026-08-03T00:00:00.000Z",
+    pid: 123,
+  };
+}
 
 function createTestService(input: { docker?: DockerExecutableRunner } = {}) {
   return createRunnerService({
@@ -676,6 +937,7 @@ function createMockDocker(
       runArgs?: readonly string[];
       status: string;
     }[];
+    failRemoveIds?: string[];
     injectDockerSocket?: boolean;
     logs?: { stderr: string; stdout: string };
     psIds?: string[];
@@ -773,6 +1035,10 @@ function createMockDocker(
     }
 
     if (args[0] === "rm") {
+      if (input.failRemoveIds?.includes(String(args.at(-1)))) {
+        throw new Error("cleanup failed");
+      }
+
       containers.delete(String(args.at(-1)));
 
       return { stdout: "", stderr: "" };

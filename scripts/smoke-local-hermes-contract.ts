@@ -12,7 +12,11 @@ import {
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
 } from "@/src/runner-service/constants";
-import { ManualRunnerDocker, type RunnerLogLine } from "@/src/runner-service/docker";
+import {
+  createHermesReadinessWaiter,
+  ManualRunnerDocker,
+  type RunnerLogLine,
+} from "@/src/runner-service/docker";
 import {
   prepareHermesState,
   projectHermesHome,
@@ -81,14 +85,31 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
       configRevision: `cfg-${Date.now()}`,
       fakeModelImage: SMOKE_IMAGE,
     });
-    const runner = new ManualRunnerDocker({
-      hermes: {
-        cpus: "1",
-        memory: "1536m",
-        network,
-        pidsLimit: "256",
-        readinessPort: 8642,
+    const hermesRuntime = {
+      cpus: "1",
+      memory: "1536m",
+      network,
+      pidsLimit: "256",
+      readinessPort: 8642,
+    };
+    const waitForLocalHermesReadiness = createHermesReadinessWaiter(hermesRuntime, {
+      pollMs: POLL_MS,
+      requireTelegram: false,
+      timeoutMs: TIMEOUT_MS,
+      requestHealth: async (input) => {
+        const response = await requestHermes(input.containerName, {
+          apiServerKey: input.apiServerKey,
+          path: "/health/detailed",
+        }).catch(() => null);
+
+        return {
+          ok: response?.status === 200,
+          body: response?.body ?? null,
+        };
       },
+    });
+    const runner = new ManualRunnerDocker({
+      hermes: hermesRuntime,
       projection: {
         project: async (launchSpec) => {
           const state = await prepareHermesState(launchSpec.agent.id, { stateRoot });
@@ -113,14 +134,7 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
         },
       },
       readiness: {
-        wait: async (input) => {
-          const health = await waitForHermesHealth({
-            apiServerKey: input.apiServerKey,
-            containerName: input.containerName,
-          });
-
-          return health ? { ok: true } : { ok: false, reason: "timeout" };
-        },
+        wait: waitForLocalHermesReadiness,
       },
     });
 
@@ -318,28 +332,6 @@ async function startFakeModelServer(input: {
   throw new Error("Fake OpenAI-compatible model server did not become ready.");
 }
 
-async function waitForHermesHealth(input: {
-  apiServerKey: string;
-  containerName: string;
-}): Promise<boolean> {
-  const deadline = Date.now() + TIMEOUT_MS;
-
-  while (Date.now() < deadline) {
-    const response = await requestHermes(input.containerName, {
-      apiServerKey: input.apiServerKey,
-      path: "/health/detailed",
-    }).catch(() => null);
-
-    if (response?.status === 200 && isHermesHealthReady(response.body)) {
-      return true;
-    }
-
-    await sleep(POLL_MS);
-  }
-
-  return false;
-}
-
 async function assertPrivateApiAuth(containerName: string, apiServerKey: string): Promise<void> {
   const unauthorized = await requestHermes(containerName, {
     apiServerKey: "wrong-local-smoke-key",
@@ -522,20 +514,6 @@ function readChatCompletionContent(value: unknown): string {
   }
 
   return message.content;
-}
-
-function isHermesHealthReady(value: unknown): boolean {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const platforms = value.platforms;
-
-  return (
-    value.status === "ok" &&
-    value.platform === "hermes-agent" &&
-    JSON.stringify(platforms).includes("api_server")
-  );
 }
 
 function docker(

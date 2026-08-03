@@ -137,7 +137,10 @@ describe("Hermes lifecycle readiness", () => {
     expect(events).toContainEqual(
       expect.objectContaining({
         type: "agent.error",
-        metadata: { reason: "hermes_readiness_failed" },
+        metadata: {
+          reason: "hermes_readiness_failed",
+          readinessReason: "telegram_not_connected",
+        },
       }),
     );
     expect(calls).toEqual([`start:${created.agent.id}`]);
@@ -381,7 +384,11 @@ function readinessFailingRunnerStub(
     ...lifecycleRunnerStub(calls),
     start: vi.fn(async (agentId: string) => {
       calls.push(`start:${agentId}`);
-      return { ok: false as const, reason: "runner_readiness_failed" as const };
+      return {
+        ok: false as const,
+        reason: "runner_readiness_failed" as const,
+        readinessReason: "telegram_not_connected" as const,
+      };
     }),
   };
 }

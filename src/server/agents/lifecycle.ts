@@ -8,6 +8,7 @@ import {
 import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import { revokeActiveAgentSecretsInTransaction } from "@/src/server/agents/agent-secrets";
 import { hermesConfigurationBlocker } from "@/src/server/agents/hermes-readiness";
+import type { HermesReadinessReason } from "@/src/runner-service/docker";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   agentConfigs,
@@ -1069,6 +1070,7 @@ export async function startAgentForUser(
           userId,
           connection,
           now,
+          ...(runnerStart.readinessReason ? { readinessReason: runnerStart.readinessReason } : {}),
         });
 
         logAgentStart("runner_start_failed", {
@@ -1539,6 +1541,9 @@ export async function restartAgentForUser(
           userId,
           connection,
           now,
+          ...(runnerRestart.readinessReason
+            ? { readinessReason: runnerRestart.readinessReason }
+            : {}),
         });
 
         return { ok: false, reason: "runner_restart_failed" } as const;
@@ -2324,6 +2329,7 @@ function isHermesReadinessRunnerFailure(
 ): result is (LifecycleRunnerStartResult | LifecycleRunnerRestartResult) & {
   ok: false;
   reason: "runner_readiness_failed";
+  readinessReason?: HermesReadinessReason;
 } {
   return !result.ok && "reason" in result && result.reason === "runner_readiness_failed";
 }
@@ -2342,6 +2348,7 @@ async function recordHermesReadinessFailure(input: {
   userId: string;
   connection: DatabaseConnection;
   now: Date;
+  readinessReason?: HermesReadinessReason;
 }): Promise<void> {
   await input.connection.db.transaction(async (tx) => {
     const [agent] = await tx
@@ -2371,6 +2378,7 @@ async function recordHermesReadinessFailure(input: {
       message: "Hermes readiness failed before the agent was marked running.",
       metadata: {
         reason: "hermes_readiness_failed",
+        ...(input.readinessReason ? { readinessReason: input.readinessReason } : {}),
       },
     });
   });

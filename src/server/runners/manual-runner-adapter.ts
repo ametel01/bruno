@@ -11,6 +11,7 @@ import {
   type AgentLogPage,
 } from "@/src/server/logs/agent-logs";
 import { DOCKER_CLI_TIMEOUT_MS } from "@/src/runner-service/constants";
+import { isHermesReadinessReason, type HermesReadinessReason } from "@/src/runner-service/docker";
 import type { ManualRunnerRecord } from "@/src/server/runners/manual-runner-persistence";
 import { fingerprintRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
 import type {
@@ -53,7 +54,7 @@ export type ManualRunnerRemoteContainer = {
 
 export type ManualRunnerStartResult =
   | { ok: true; runner: ManualRunnerRecord; container: ManualRunnerRemoteContainer | null }
-  | { ok: false; reason: ManualRunnerFailureReason };
+  | ManualRunnerFailureResult;
 
 export type ManualRunnerStopResult =
   | { ok: true; runner: ManualRunnerRecord; containers: ManualRunnerRemoteContainer[] }
@@ -61,7 +62,7 @@ export type ManualRunnerStopResult =
 
 export type ManualRunnerRestartResult =
   | { ok: true; runner: ManualRunnerRecord; container: ManualRunnerRemoteContainer | null }
-  | { ok: false; reason: ManualRunnerFailureReason };
+  | ManualRunnerFailureResult;
 
 export type ManualRunnerStatusResult =
   | { ok: true; runner: ManualRunnerRecord; containers: ManualRunnerRemoteContainer[] }
@@ -79,6 +80,12 @@ export type ManualRunnerFailureReason =
   | "runner_not_running"
   | "hermes_setup_incomplete"
   | "runner_readiness_failed";
+
+export type ManualRunnerFailureResult = {
+  ok: false;
+  reason: ManualRunnerFailureReason;
+  readinessReason?: HermesReadinessReason;
+};
 
 export type ManualRunnerAdapterDependencies = {
   createConnection?: () => DatabaseConnection;
@@ -248,9 +255,7 @@ export class ManualRunnerAdapter
     agentId: string,
     method: "GET" | "POST",
     launchSpec: AgentLaunchSpec | null = null,
-  ): Promise<
-    { ok: true; body: Record<string, unknown> } | { ok: false; reason: ManualRunnerFailureReason }
-  > {
+  ): Promise<{ ok: true; body: Record<string, unknown> } | ManualRunnerFailureResult> {
     let endpointUrl: string;
 
     try {
@@ -288,7 +293,7 @@ export class ManualRunnerAdapter
       });
 
       if (!response.ok) {
-        const responseErrorCode = await readResponseErrorCode(response);
+        const responseError = await readResponseError(response);
         logManualRunnerRequest("request_failed", {
           action,
           agentId,
@@ -297,18 +302,25 @@ export class ManualRunnerAdapter
           endpointHost: safeEndpointHost(endpointUrl),
           method,
           responseStatus: response.status,
-          responseErrorCode,
+          responseErrorCode: responseError.code,
+          responseErrorReason: responseError.reason,
           runnerBearerTokenFingerprint: tokenFingerprint,
           durationMs: Date.now() - startedAt,
         });
+        if (responseError.code === "hermes_readiness_failed") {
+          return {
+            ok: false,
+            reason: "runner_readiness_failed",
+            ...(responseError.reason ? { readinessReason: responseError.reason } : {}),
+          };
+        }
+
         return {
           ok: false,
           reason:
-            responseErrorCode === "hermes_readiness_failed"
-              ? "runner_readiness_failed"
-              : responseErrorCode === "hermes_setup_incomplete"
-                ? "hermes_setup_incomplete"
-                : "runner_request_failed",
+            responseError.code === "hermes_setup_incomplete"
+              ? "hermes_setup_incomplete"
+              : "runner_request_failed",
         };
       }
 
@@ -629,18 +641,29 @@ function normalizeTimeoutMs(timeoutMs: number | undefined): number {
   return Math.min(Math.max(timeoutMs, 100), 60_000);
 }
 
-async function readResponseErrorCode(response: Response): Promise<string | null> {
+async function readResponseError(
+  response: Response,
+): Promise<{ code: string | null; reason?: HermesReadinessReason }> {
   try {
     const parsed: unknown = await response.clone().json();
 
     if (!isRecord(parsed) || !isRecord(parsed.error) || typeof parsed.error.code !== "string") {
-      return null;
+      return { code: null };
     }
 
-    return parsed.error.code.slice(0, 80);
+    const reason = normalizeHermesReadinessReason(parsed.error.reason);
+
+    return {
+      code: parsed.error.code.slice(0, 80),
+      ...(reason ? { reason } : {}),
+    };
   } catch {
-    return null;
+    return { code: null };
   }
+}
+
+function normalizeHermesReadinessReason(value: unknown): HermesReadinessReason | null {
+  return isHermesReadinessReason(value) ? value : null;
 }
 
 function safeEndpointHost(endpointUrl: string): string | null {

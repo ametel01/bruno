@@ -80,7 +80,35 @@ export type HermesReadinessWaiter = (input: {
   apiServerKey: string;
   configRevision: string;
   containerName: string;
-}) => Promise<{ ok: true } | { ok: false; reason: string }>;
+}) => Promise<{ ok: true } | { ok: false; reason: HermesReadinessReason }>;
+
+export type HermesReadinessReason =
+  | "api_server_not_connected"
+  | "telegram_not_connected"
+  | "gateway_failed"
+  | "revision_mismatch"
+  | "timeout";
+
+const HERMES_READINESS_REASONS = new Set<HermesReadinessReason>([
+  "api_server_not_connected",
+  "telegram_not_connected",
+  "gateway_failed",
+  "revision_mismatch",
+  "timeout",
+]);
+
+export type HermesReadinessEvaluation = { ok: true } | { ok: false; reason: HermesReadinessReason };
+
+export type HermesHealthTransportResult = {
+  ok: boolean;
+  body: unknown;
+};
+
+export type HermesHealthTransport = (input: {
+  apiServerKey: string;
+  containerName: string;
+  readinessPort: number;
+}) => Promise<HermesHealthTransportResult>;
 
 export type DockerExecutableRunner = (
   executable: string,
@@ -105,9 +133,23 @@ export type RunnerLogLine = {
 };
 
 export class HermesReadinessError extends Error {
-  constructor() {
+  readonly reason: HermesReadinessReason;
+
+  constructor(reason: HermesReadinessReason) {
     super("Hermes readiness check failed.");
     this.name = "HermesReadinessError";
+    this.reason = reason;
+  }
+}
+
+export function isHermesReadinessReason(value: unknown): value is HermesReadinessReason {
+  return typeof value === "string" && HERMES_READINESS_REASONS.has(value as HermesReadinessReason);
+}
+
+class HermesRevisionEvidenceError extends Error {
+  constructor() {
+    super("Hermes runner revision evidence did not match the launch spec.");
+    this.name = "HermesRevisionEvidenceError";
   }
 }
 
@@ -207,24 +249,38 @@ export class ManualRunnerDocker {
       throw new Error("Docker did not return a container id.");
     }
 
-    const hermesInspect =
-      launchSpec && projection ? { launchSpec, projection, runtime: this.hermes } : null;
-    const container = await this.inspectSelectedContainer(containerId, agentId, hermesInspect);
+    try {
+      const hermesInspect =
+        launchSpec && projection ? { launchSpec, projection, runtime: this.hermes } : null;
+      const container = await this.inspectSelectedContainer(containerId, agentId, hermesInspect);
 
-    if (launchSpec) {
-      const readiness = await this.waitForReadiness({
-        agentId,
-        apiServerKey: launchSpec.secrets.apiServerKey,
-        configRevision: launchSpec.agent.configRevision,
-        containerName,
-      });
+      if (launchSpec) {
+        const readiness = await this.waitForReadiness({
+          agentId,
+          apiServerKey: launchSpec.secrets.apiServerKey,
+          configRevision: launchSpec.agent.configRevision,
+          containerName,
+        });
 
-      if (!readiness.ok) {
-        throw new HermesReadinessError();
+        if (!readiness.ok) {
+          throw new HermesReadinessError(readiness.reason);
+        }
       }
-    }
 
-    return { container, projection };
+      return { container, projection };
+    } catch (error) {
+      if (launchSpec) {
+        await this.runDocker(["rm", "--force", containerId]).catch(() => {
+          // Preserve the primary readiness/revision error for the control plane.
+        });
+      }
+
+      if (error instanceof HermesRevisionEvidenceError) {
+        throw new HermesReadinessError("revision_mismatch");
+      }
+
+      throw error;
+    }
   }
 
   async stop(agentId: string): Promise<{ containers: RunnerContainer[] }> {
@@ -333,7 +389,7 @@ export class ManualRunnerDocker {
     }
 
     if (hermes) {
-      assertHermesInspectMatchesRuntime(inspect, hermes);
+      await assertHermesInspectMatchesRuntime(inspect, hermes);
     }
 
     return {
@@ -351,41 +407,42 @@ export class ManualRunnerDocker {
   }
 }
 
-function assertHermesInspectMatchesRuntime(
+async function assertHermesInspectMatchesRuntime(
   inspect: DockerInspectContainer,
   input: {
     launchSpec: AgentLaunchSpec;
     projection: HermesProjectionResult;
     runtime: HermesDockerRuntimeOptions;
   },
-): void {
+): Promise<void> {
   if (inspect.Config?.Image !== input.launchSpec.image.ref) {
-    throw new Error("Docker container image mismatch.");
+    throw new HermesRevisionEvidenceError();
   }
 
   if (
     inspect.Config?.Labels?.[AGENTBAY_CONFIG_REVISION_LABEL] !==
     input.launchSpec.agent.configRevision
   ) {
-    throw new Error("Docker container config revision mismatch.");
+    throw new HermesRevisionEvidenceError();
   }
 
   if (inspect.Config?.Labels?.[AGENTBAY_LAUNCH_SPEC_VERSION_LABEL] !== input.launchSpec.version) {
-    throw new Error("Docker container launch spec version mismatch.");
+    throw new HermesRevisionEvidenceError();
   }
 
   assertMount(inspect, input.projection.hermesHome, "/opt/data");
   assertMount(inspect, input.projection.workspace, "/workspace");
+  await assertProjectedRevisionMatchesLaunchSpec(input.projection, input.launchSpec);
 
   if (!inspect.HostConfig || inspect.HostConfig.NetworkMode !== input.runtime.network) {
-    throw new Error("Docker container network mismatch.");
+    throw new HermesRevisionEvidenceError();
   }
 
   if (
     !inspect.NetworkSettings?.Networks ||
     !(input.runtime.network in inspect.NetworkSettings.Networks)
   ) {
-    throw new Error("Docker container private network missing.");
+    throw new HermesRevisionEvidenceError();
   }
 
   if (
@@ -447,7 +504,31 @@ function assertMount(
   );
 
   if (!hasMount) {
-    throw new Error(`Docker container missing ${expectedDestination} bind mount.`);
+    throw new HermesRevisionEvidenceError();
+  }
+}
+
+async function assertProjectedRevisionMatchesLaunchSpec(
+  projection: HermesProjectionResult,
+  launchSpec: AgentLaunchSpec,
+): Promise<void> {
+  let marker: unknown;
+
+  try {
+    await rejectSymlinkPath(projection.revisionPath);
+    marker = JSON.parse(await readFile(projection.revisionPath, "utf8"));
+  } catch {
+    throw new HermesRevisionEvidenceError();
+  }
+
+  if (
+    !isRecord(marker) ||
+    marker.version !== launchSpec.version ||
+    marker.agentId !== launchSpec.agent.id ||
+    marker.configRevision !== launchSpec.agent.configRevision ||
+    marker.image !== launchSpec.image.ref
+  ) {
+    throw new HermesRevisionEvidenceError();
   }
 }
 
@@ -610,103 +691,116 @@ function resolveHermesDockerRuntimeOptions(
   };
 }
 
-function createHermesReadinessWaiter(runtime: HermesDockerRuntimeOptions): HermesReadinessWaiter {
+export function createHermesReadinessWaiter(
+  runtime: HermesDockerRuntimeOptions,
+  options: {
+    now?: () => number;
+    pollMs?: number;
+    requestHealth?: HermesHealthTransport;
+    requireTelegram?: boolean;
+    sleep?: (ms: number) => Promise<void>;
+    timeoutMs?: number;
+  } = {},
+): HermesReadinessWaiter {
   return async (input) => {
-    const deadline = Date.now() + 180_000;
-    const url = `http://${input.containerName}:${runtime.readinessPort}/health/detailed`;
+    const now = options.now ?? Date.now;
+    const requestHealth = options.requestHealth ?? fetchHermesHealth;
+    const sleep =
+      options.sleep ?? ((ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms)));
+    const deadline = now() + (options.timeoutMs ?? 180_000);
+    let latestReason: HermesReadinessReason | null = null;
 
-    while (Date.now() < deadline) {
+    while (now() < deadline) {
       try {
-        const response = await fetch(url, {
-          headers: {
-            Authorization: `Bearer ${input.apiServerKey}`,
-            Accept: "application/json",
-          },
+        const response = await requestHealth({
+          apiServerKey: input.apiServerKey,
+          containerName: input.containerName,
+          readinessPort: runtime.readinessPort,
         });
 
-        if (response.ok) {
-          const body: unknown = await response.json();
+        if (response.ok && isRecord(response.body)) {
+          const readiness = evaluateHermesReadyResponse(response.body, {
+            requireTelegram: options.requireTelegram ?? true,
+          });
 
-          if (isHermesReadyResponse(body, input.configRevision)) {
+          if (readiness.ok) {
             return { ok: true };
           }
+
+          latestReason = readiness.reason;
         }
       } catch {
         // Hermes may still be booting or the private network route may not be ready yet.
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      await sleep(options.pollMs ?? 1_000);
     }
 
-    return { ok: false, reason: "timeout" };
+    return { ok: false, reason: latestReason ?? "timeout" };
   };
 }
 
-export function isHermesReadyResponse(value: unknown, configRevision: string): boolean {
+async function fetchHermesHealth(input: {
+  apiServerKey: string;
+  containerName: string;
+  readinessPort: number;
+}): Promise<HermesHealthTransportResult> {
+  const response = await fetch(
+    `http://${input.containerName}:${input.readinessPort}/health/detailed`,
+    {
+      headers: {
+        Authorization: `Bearer ${input.apiServerKey}`,
+        Accept: "application/json",
+      },
+    },
+  );
+
+  return {
+    ok: response.ok,
+    body: response.ok ? await response.json() : null,
+  };
+}
+
+export function isHermesReadyResponse(
+  value: unknown,
+  options: { requireTelegram?: boolean } = {},
+): boolean {
+  return evaluateHermesReadyResponse(value, options).ok;
+}
+
+export function evaluateHermesReadyResponse(
+  value: unknown,
+  options: { requireTelegram?: boolean } = {},
+): HermesReadinessEvaluation {
   if (!isRecord(value)) {
-    return false;
+    return { ok: false, reason: "gateway_failed" };
   }
 
-  const status = value.status;
-  const revision = value.configRevision ?? value.config_revision;
-
-  return (
-    (isReadyStatus(status) || value.ok === true) &&
-    revision === configRevision &&
-    isTelegramReady(value)
-  );
-}
-
-function isTelegramReady(value: Record<string, unknown>): boolean {
-  const candidates = [
-    value.telegram,
-    readNestedRecord(value, ["messaging", "telegram"]),
-    readNestedRecord(value, ["platforms", "telegram"]),
-    readNestedRecord(value, ["checks", "telegram"]),
-    readNestedRecord(value, ["services", "telegram"]),
-    readNestedRecord(value, ["integrations", "telegram"]),
-  ];
-
-  return candidates.some((candidate) => {
-    if (!isRecord(candidate)) {
-      return false;
-    }
-
-    return (
-      candidate.ready === true ||
-      candidate.ok === true ||
-      candidate.connected === true ||
-      candidate.enabled === true ||
-      isReadyStatus(candidate.status) ||
-      isReadyStatus(candidate.state) ||
-      isReadyStatus(candidate.connection) ||
-      isReadyStatus(candidate.connectionStatus)
-    );
-  });
-}
-
-function isReadyStatus(value: unknown): boolean {
-  if (typeof value !== "string") {
-    return false;
+  if (value.status !== "ok" || value.gateway_state !== "running") {
+    return { ok: false, reason: "gateway_failed" };
   }
 
-  return ["connected", "enabled", "healthy", "ok", "online", "ready", "running"].includes(
-    value.trim().toLowerCase(),
-  );
-}
-
-function readNestedRecord(value: Record<string, unknown>, path: readonly string[]): unknown {
-  let current: unknown = value;
-
-  for (const key of path) {
-    if (!isRecord(current)) {
-      return null;
-    }
-
-    current = current[key];
+  if (readPlatformState(value, "api_server") !== "connected") {
+    return { ok: false, reason: "api_server_not_connected" };
   }
 
-  return current;
+  if ((options.requireTelegram ?? true) && readPlatformState(value, "telegram") !== "connected") {
+    return { ok: false, reason: "telegram_not_connected" };
+  }
+
+  return { ok: true };
+}
+
+function readPlatformState(value: Record<string, unknown>, platformName: string): unknown {
+  const platforms = value.platforms;
+
+  if (!isRecord(platforms)) {
+    return null;
+  }
+
+  const platform = platforms[platformName];
+
+  return isRecord(platform) ? platform.state : null;
 }
 
 function readPositiveInteger(value: string | undefined, fallback: number): number {
