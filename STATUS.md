@@ -2,24 +2,24 @@
 
 ## Active Work
 
-- plan: `PLAN.md` Step 9 — Make Desired-Running Gateways Durable
-  owner: coordinator; implementation complete, checker next
+- plan: `PLAN.md` Step 10 — Final Acceptance, Documentation, and Controlled Rollout
+  owner: coordinator; user authorization/capabilities required for live work
   branch: `main`
   worktree: `/Users/alexmetelli/source/plingpling`
-  phase: Step 9 coordinator gates green; preparing exact product commit and independent acceptance
-  cycle: builder complete; checker 0/5
-  contract: `STATUS.archive.md` → `Step 9 Completion Contract (pre-spec)`
-  blocker: no Step 9 repository blocker; Step 10 external/live capabilities remain prohibited and unavailable.
-  next-action: Commit the complete Step 9 slice, then run independent read-only acceptance against the exact commit.
+  phase: Step 9 independently accepted; Step 10 live acceptance not authorized
+  cycle: Step 10 preflight 0/5
+  contract: `PLAN.md` → `Step 10: Final Acceptance, Documentation, and Controlled Rollout`
+  blocker: Step 10 requires explicit live/provider authorization, published image evidence, DigitalOcean budget, dedicated Telegram bot/user, and funded OpenRouter key.
+  next-action: Request the missing authorization and capabilities before any hosted mutation, image publication, provider request, or real-user contact.
 
 ## Completion Contract
 
-- outcome: Keep managed-v3 latest-ready desired-running agents converged to one exact ready Hermes workload across runner/Docker restarts while explicit Stop remains authoritative.
-- acceptance criteria: Separate durable runtime ledger; exact `unless-stopped` policy/restart evidence; one-effect leased reconciliation; DB-first lifecycle intent; bounded recovery/circuit and Telegram diagnostics; exact usage segmentation; safe runtime UI; local reboot smokes.
-- non-goals: No terminal deployment reopening, repeated canary, automatic provisioning/reassignment, HA/replicas, browser reconciliation, webhook deletion/getUpdates/send, token rotation, or Step 10 live/provider work.
-- required gates: generated migration plus clean/upgrade fixtures; focused concurrency/runner/runtime/lifecycle/Telegram/usage/UI/redaction tests; both local smokes; full format/lint/typecheck/test/build/CI E2E; fail-closed staging; diff check.
-- risks: stale work resurrecting stopped agents, wrong-policy reuse, restart loops, Telegram polling conflicts, usage overlap/backdating, runtime evidence leakage, and adapter rolling mismatch.
-- do-not-touch: Accepted Step 4–8 create/encryption/projection/launch/deployment/UI contracts; immutable terminal deployments; manual/native compatibility; infrastructure runner `--restart always`; Step 10 external resources.
+- outcome: Prove one authorized hosted automatic-ready Telegram reply, restart, durable Stop, rollback, redacted diagnostics, and cleanup; document the operating contract.
+- acceptance criteria: Exact scanned/published image evidence; authorized basic DigitalOcean runner; dedicated Telegram bot/user; funded OpenRouter key; real correlated reply; restart and Stop proof; rollback and cleanup; no retained secrets, private endpoints, or PII.
+- non-goals: No unapproved spend, production cutover, broad rollout, secret retention, mock-only live acceptance, native-OAuth automation claim, or unrelated feature work.
+- required gates: docs and environment contract; image smoke/scan/publication evidence; full repository gates; provider-safe E2E; exact local Hermes smoke; authorized live staging; diff and secret review; cleanup proof.
+- risks: unauthorized spend/contact, leaking provider or Telegram material, publishing an unreviewed image, enabling ready mode before acceptance, incomplete rollback, and orphaned resources.
+- do-not-touch: Accepted Steps 0–9 semantics; live/provider state until explicitly authorized; user production bots/accounts; unrelated hosted secrets and resources.
 
 ## Dependency Graph
 
@@ -28,12 +28,12 @@
 
 ## Current Handoff
 
-- from: Step 9 coordinator
-  to: independent Step 9 checker
+- from: independent Step 9 checker
+  to: coordinator and user for Step 10 authorization
   timestamp: 2026-08-03
-  request: Audit the exact Step 9 commit for runtime durability semantics and reproduce its repository-local gates without edits or external requests.
-  evidence: Coordinator gates passed clean/upgrade migrations, 8 files / 38 focused DB tests, 11 files / 177 focused controller/runner/UI tests, 137 files / 1,297 full tests, production build, 26/26 CI E2E, fake-cloud recovery/circuit smoke, and local pinned-image restart/Stop durability smoke.
-  stop-condition: Accept only if desired Stop precedence, one-effect CAS, restart/circuit bounds, strict managed-v3 evidence, usage/event idempotency, Telegram safety, passive UI reads, and all local gates remain green.
+  request: Supply explicit authorization and the isolated Step 10 capabilities before any live/provider action.
+  evidence: Step 9 `b41e969` independently passed migrations/no drift, 162 focused DB tests, 209 focused runtime/runner/UI/Telegram tests, 1,297 full tests, static/build, 26/26 CI E2E, both local smokes, manual secret review, cleanup inspection, and fail-closed staging with no effects.
+  stop-condition: Do not publish, provision, mutate hosted secrets, contact providers or a real Telegram user, or enable ready mode until every Step 10 prerequisite is explicit.
 
 ## Gates
 
@@ -51,11 +51,12 @@
 - Step 8 `ef9b7fc`: checker cycle 1 reproduced every automated gate but found one semantic Retry latch race in the progress card. The cycle 2 repair adds a pre-UUID/pre-fetch synchronous latch plus same-turn regression; 44 focused tests, 123 files / 1,144 full tests, build, 24/24 CI E2E, and fail-closed staging are green.
 - Step 8 `ef9b7fc` + `bc38dd0`: independently green after checker cycle 2 — 4 focused files / 66 tests, 123 files / 1,144 full tests, migration, build, 24/24 desktop/mobile CI E2E, and fail-closed staging with no side effects.
 - Step 9 foundations: 8 files / 143 focused tests green — generated `0019_tough_tinkerer`, conservative backfill and claim/CAS store, pure bounded state policy, strict runner status-v3/`unless-stopped` evidence, and fake-only Telegram webhook diagnostic; format, lint, typecheck, and diff checks pass.
-- Step 9 candidate: coordinator gates green — migration clean/upgrade/idempotency and no drift; focused DB 8 files / 38 tests; focused controller/runner/UI 11 files / 177 tests; full 137 files / 1,297 tests; production build; 26/26 desktop/mobile CI E2E; fake-cloud recovery/circuit/usage/Stop smoke; pinned-image process-death, Docker/runner restart, no-duplicate, and Stop-durability smoke. Independent checker pending.
+- Step 9 candidate gates were green before commit — migration clean/upgrade/idempotency and no drift; focused DB 8 files / 38 tests; focused controller/runner/UI 11 files / 177 tests; full 137 files / 1,297 tests; production build; 26/26 desktop/mobile CI E2E; fake-cloud recovery/circuit/usage/Stop smoke; pinned-image process-death, Docker/runner restart, no-duplicate, and Stop-durability smoke.
+- Step 9 `b41e969`: independently green after checker cycle 1 — migration/no drift; 8 files / 162 focused DB tests; 17 files / 209 focused runtime/runner/UI/Telegram tests; 137 files / 1,297 full tests; format/lint/typecheck/build; 26/26 CI E2E; both local smokes; fail-closed staging; manual secret and cleanup review; no image pull or external request.
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling` — branch `main`; shared Step 9 implementation tree; `STATUS.md` is coordinator-owned; external actions remain prohibited.
+- `/Users/alexmetelli/source/plingpling` — branch `main`; Step 9 accepted; Step 10 external actions remain prohibited pending explicit authorization.
 
 ## Decisions And Lessons
 
@@ -75,3 +76,4 @@
 - Step 6 — `4e2897a` + `fa677fb` — independently accepted asynchronous runner launch/status/canary behavior, cancellation, lifecycle evidence, and nonblocking credential reads.
 - Step 7 — `798cbf3` — independently accepted durable automatic create-to-ready reconciliation, safe retry/cron/triggers, provider idempotency, one canary, final ready/usage boundary, and local-only smoke coverage.
 - Step 8 — `ef9b7fc` + `bc38dd0` — independently accepted credential-complete one-click ready creation, persisted progress, safe lifecycle/read projections, fake-only desktop/mobile acceptance, and synchronous retry latching.
+- Step 9 — `b41e969` — independently accepted durable desired-running runtime convergence, authoritative Stop, bounded recovery/circuit, truthful Telegram/runtime presentation, and local restart evidence.

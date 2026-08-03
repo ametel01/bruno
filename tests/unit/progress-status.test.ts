@@ -166,7 +166,7 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain("OpenRouter is the first supported provider");
     expect(automaticLedger).toContain("dedicated staging Telegram bot/user");
     expect(automaticLedger).toContain(
-      "Step 9 implementation is complete and its coordinator gates are green",
+      "Step 9 is independently accepted after checker cycle 1 at `b41e969`",
     );
     expect(automaticLedger).toContain("- [x] Step 0: Progress and Changelog Tracking Setup");
     expect(automaticLedger).toContain("- [x] Step 1: Quality Gates Setup and Baseline Evidence");
@@ -219,7 +219,7 @@ describe("automatic Hermes Telegram progress status", () => {
       "| 8. Add One-Click Creation and Persisted Progress UI | Complete and independently accepted after cycle 2 |",
     );
     expect(automaticLedger).toContain(
-      "| 9. Make Desired-Running Gateways Durable | Complete; independent acceptance pending |",
+      "| 9. Make Desired-Running Gateways Durable | Complete and independently accepted after cycle 1 |",
     );
     expect(automaticLedger).toContain("launch-spec v3 parsing/redaction/serialization");
     expect(automaticLedger).toContain("explicit/custom YAML tags and anchors");
@@ -255,10 +255,11 @@ describe("automatic Hermes Telegram progress status", () => {
     expect(automaticLedger).toContain("Full gates passed");
     expect(automaticLedger).toContain("Step validation commands and results.");
     expect(automaticLedger).toContain("Safe blocker codes, missing capabilities, and next action.");
-    expect(automaticLedger).toContain("Step 9 coordinator gates are green");
-    expect(automaticLedger).toContain("137 files / 1,297 tests");
-    expect(automaticLedger).toContain("26 desktop/mobile tests");
-    expect(automaticLedger).toContain("intentional Stop remaining non-active");
+    expect(automaticLedger).toContain("Step 9 is independently accepted at `b41e969`");
+    expect(automaticLedger).toContain("17 files / 209 focused runtime");
+    expect(automaticLedger).toContain("137 files / 1,297 full tests");
+    expect(automaticLedger).toContain("26 desktop/mobile CI E2E tests");
+    expect(automaticLedger).toContain("restart/Stop smoke");
     expect(automaticLedger).toContain("No live or provider-backed action is authorized yet");
     expect(automaticLedger).not.toContain("No blocker remains for Step 3.");
     expect(automaticLedger).not.toContain("Step 4 should add managed creation configuration");
