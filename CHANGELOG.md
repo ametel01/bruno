@@ -108,6 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Runner releases are now SHA-only immutable candidates that must pass digest verification, critical-vulnerability scanning, and a protected disposable-Droplet boot canary before the exact tested commit and digest can reach production; rollout is one runner per reconciliation and artifact-backed rollback halts further fleet work.
 - Automatic setup and runner recovery now share one public Preparing, Connecting Telegram, and Ready experience; live replacement hides misleading runner alerts and infrastructure identifiers, terminal recovery offers Retry or Stop, and technical runner evidence stays in a closed advanced disclosure.
 - Desired-running agents now move automatically to a validated replacement runner through fresh deployment and runtime evidence, while stopped agents remain stopped and the obsolete managed firewall and Droplet are retired only after convergence.
 - Managed runner assignment, explicit assignment, create/start placement, deployment selection, and live placement verification now share a fail-closed release policy: hosted DigitalOcean images must be immutable digest references, legacy managed rows remain `unknown` and unassignable until an authenticated heartbeat proves the exact configured digest, release version, and boot contract, while explicitly incompatible manual runners are excluded without being deleted.

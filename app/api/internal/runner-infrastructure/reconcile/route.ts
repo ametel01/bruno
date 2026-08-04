@@ -1,4 +1,8 @@
-import { isAuthorizedCronRequest, readCronSecretConfig } from "@/src/server/env";
+import {
+  isAuthorizedCronRequest,
+  readCronSecretConfig,
+  readRunnerRolloutBatchSize,
+} from "@/src/server/env";
 import { reconcileNextRunnerInfrastructure } from "@/src/server/runners/runner-infrastructure-reconciler";
 
 export const dynamic = "force-dynamic";
@@ -8,6 +12,7 @@ type CronRouteDependencies = {
   readConfig?: typeof readCronSecretConfig;
   authorize?: typeof isAuthorizedCronRequest;
   reconcile?: typeof reconcileNextRunnerInfrastructure;
+  readRolloutBatchSize?: typeof readRunnerRolloutBatchSize;
 };
 
 export async function GET(
@@ -41,6 +46,24 @@ export async function GET(
 
   if (url.search.length > 0 || request.body !== null) {
     return errorResponse(400, "cron_request_invalid", "Cron request controls are not accepted.");
+  }
+
+  let rolloutBatchSize: 0 | 1;
+  try {
+    rolloutBatchSize = (dependencies.readRolloutBatchSize ?? readRunnerRolloutBatchSize)();
+  } catch {
+    return errorResponse(
+      503,
+      "runner_rollout_configuration_invalid",
+      "Runner rollout is not configured safely.",
+    );
+  }
+
+  if (rolloutBatchSize === 0) {
+    return Response.json(
+      { ok: true, processed: 0, outcome: "rollout_halted" },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   try {

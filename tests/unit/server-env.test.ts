@@ -17,6 +17,7 @@ import {
   readHermesStagingAcceptanceConfig,
   readHermesWorkloadImage,
   readReadyAgentCreationFlag,
+  readRunnerRolloutBatchSize,
 } from "@/src/server/env";
 
 const HOSTED_RUNNER_DIGEST = `sha256:${"a".repeat(64)}`;
@@ -103,6 +104,15 @@ describe("server-only provider environment validation", () => {
       ok: false,
       reason: "invalid_ready_agent_creation_flag",
     });
+  });
+
+  it("keeps managed runner rollout gradual by default and supports an exact halt", () => {
+    expect(readRunnerRolloutBatchSize({})).toBe(1);
+    expect(readRunnerRolloutBatchSize({ AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE: "1" })).toBe(1);
+    expect(readRunnerRolloutBatchSize({ AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE: " 0 " })).toBe(0);
+    expect(() => readRunnerRolloutBatchSize({ AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE: "2" })).toThrow(
+      "must be 0 (halted) or 1 (gradual)",
+    );
   });
 
   it("keeps staging acceptance exactly default-off with a dedicated HTTPS transport", () => {

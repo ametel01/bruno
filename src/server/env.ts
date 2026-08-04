@@ -101,6 +101,24 @@ export function readReadyAgentCreationFlag(
   return { ok: false, reason: "invalid_ready_agent_creation_flag" };
 }
 
+export function readRunnerRolloutBatchSize(
+  input: Record<string, string | undefined> = process.env,
+): 0 | 1 {
+  const value = input.AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE?.trim();
+
+  if (value === undefined || value === "1") {
+    return 1;
+  }
+
+  if (value === "0") {
+    return 0;
+  }
+
+  throw new EnvValidationError([
+    "AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE must be 0 (halted) or 1 (gradual) when set.",
+  ]);
+}
+
 export function readCronSecretConfig(
   input: Record<string, string | undefined> = process.env,
 ): CronSecretConfig {

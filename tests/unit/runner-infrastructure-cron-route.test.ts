@@ -76,4 +76,21 @@ describe("GET /api/internal/runner-infrastructure/reconcile", () => {
     });
     expect(JSON.stringify(payload)).not.toContain("private-provider");
   });
+
+  it("halts before reconciliation when the release rollout batch is zero", async () => {
+    const reconcile = vi.fn();
+    const response = await GET(
+      new Request(URL, { headers: { authorization: `Bearer ${SECRET}` } }),
+      undefined,
+      {
+        readConfig: () => ({ ok: true, secret: SECRET }),
+        readRolloutBatchSize: () => 0,
+        reconcile,
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, processed: 0, outcome: "rollout_halted" });
+    expect(reconcile).not.toHaveBeenCalled();
+  });
 });

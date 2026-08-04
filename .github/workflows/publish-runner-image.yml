@@ -1,31 +1,56 @@
-name: Publish runner image
+name: Release runner image
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Release a new runner or roll back to a previously verified runner
+        required: true
+        default: release
+        type: choice
+        options:
+          - release
+          - rollback
+      rollback_image:
+        description: Previously verified immutable image reference (rollback only)
+        required: false
+        type: string
+      rollback_run_id:
+        description: Successful release workflow run containing the verification artifact
+        required: false
+        type: string
 
 permissions:
+  actions: read
   contents: read
   packages: write
   attestations: write
   id-token: write
+  security-events: write
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ametel01/agentbay-runner
+  VERCEL_CLI_VERSION: 58.0.0
 
 jobs:
   publish:
-    name: Build and publish runner image
+    if: inputs.action == 'release'
+    name: Build, publish, scan, and verify digest
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     outputs:
       digest: ${{ steps.push.outputs.digest }}
-      immutable-image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}@${{ steps.push.outputs.digest }}
+      immutable-image: ${{ steps.reference.outputs.image }}
 
     steps:
-      - name: Check out repository
+      - name: Check out exact release commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -34,10 +59,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push runner image
+      - name: Build and push Git-SHA runner image once
         id: push
         uses: docker/build-push-action@v6
         with:
@@ -47,18 +69,243 @@ jobs:
           push: true
           sbom: true
           provenance: mode=max
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:main
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.sha }}
 
-      - name: Verify published runner digest
+      - name: Resolve immutable runner reference
+        id: reference
+        env:
+          PUBLISHED_DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           set -euo pipefail
-          IMAGE="${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}@${{ steps.push.outputs.digest }}"
-          docker buildx imagetools inspect "${IMAGE}"
-          echo "published_digest=${{ steps.push.outputs.digest }}" >> "${GITHUB_STEP_SUMMARY}"
-          echo "immutable_image=${IMAGE}" >> "${GITHUB_STEP_SUMMARY}"
+          test -n "${PUBLISHED_DIGEST}"
+          IMAGE="${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}@${PUBLISHED_DIGEST}"
+          echo "image=${IMAGE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify published runner digest
+        env:
+          IMMUTABLE_IMAGE: ${{ steps.reference.outputs.image }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "${IMMUTABLE_IMAGE}"
+          echo "Published an immutable Git-SHA runner candidate." >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Scan critical fixable vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.reference.outputs.image }}
+          format: sarif
+          output: trivy-runner-image.sarif
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Upload scan report
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-runner-image.sarif
+
+  canary:
+    if: inputs.action == 'release'
+    name: Verify disposable DigitalOcean runner
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: runner-release-canary
+    env:
+      DATABASE_URL: ${{ secrets.RUNNER_RELEASE_DATABASE_URL }}
+      NEXT_PUBLIC_APP_URL: ${{ vars.RUNNER_RELEASE_CONTROL_PLANE_URL }}
+      AGENTBAY_DIGITALOCEAN_TOKEN: ${{ secrets.RUNNER_RELEASE_DIGITALOCEAN_TOKEN }}
+      AGENTBAY_RUNNER_BEARER_TOKEN: ${{ secrets.RUNNER_RELEASE_BEARER_TOKEN }}
+      AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: digitalocean
+      AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: disabled
+      AGENTBAY_DIGITALOCEAN_REGION: ${{ vars.RUNNER_RELEASE_DIGITALOCEAN_REGION }}
+      AGENTBAY_DIGITALOCEAN_SIZE_SLUG: s-1vcpu-512mb-10gb
+      AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION: authorize-disposable-runner-release-smoke
+
+    steps:
+      - name: Check out exact release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run disposable runner release smoke
+        env:
+          IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
+        run: bun run runner:release:smoke -- --image "${IMMUTABLE_IMAGE}"
+
+      - name: Record verified release metadata
+        env:
+          IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
+        run: |
+          set -euo pipefail
+          mkdir -p runner-release-evidence
+          echo "${IMMUTABLE_IMAGE}" > runner-release-evidence/immutable-image.txt
+          echo "${GITHUB_SHA}" > runner-release-evidence/source-revision.txt
+          echo "Disposable Droplet smoke and exact cleanup passed." >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload rollback verification artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-runner-release
+          path: runner-release-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Record safe failure summary
+        if: failure()
+        run: echo "Runner release canary failed; promotion is blocked and exact cleanup was requested." >> "${GITHUB_STEP_SUMMARY}"
+
+  deploy:
+    if: inputs.action == 'release'
+    name: Deploy tested release to production
+    needs:
+      - publish
+      - canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+      IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
+
+    steps:
+      - name: Check out exact tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Pull production project settings
+        run: bunx vercel@${VERCEL_CLI_VERSION} pull --yes --environment=production --token="${VERCEL_TOKEN}"
+
+      - name: Deploy exact tested commit and runner digest
+        run: |
+          set -euo pipefail
+          bunx vercel@${VERCEL_CLI_VERSION} deploy --prod --yes --token="${VERCEL_TOKEN}" \
+            --env "AGENTBAY_RUNNER_IMAGE=${IMMUTABLE_IMAGE}" \
+            --env "AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=1" \
+            --build-env "AGENTBAY_RUNNER_IMAGE=${IMMUTABLE_IMAGE}" \
+            --build-env "AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=1"
+
+      - name: Verify production health and required release
+        run: |
+          set -euo pipefail
+          VERIFIED=false
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error "${PRODUCTION_URL}/health" > /dev/null; then
+              REQUIRED="$(curl --fail --silent --show-error \
+                -H "Authorization: Bearer ${CRON_SECRET}" \
+                "${PRODUCTION_URL}/api/internal/runner-release/required" || true)"
+              if [[ "$(jq -r '.requiredRelease.imageReference // empty' <<< "${REQUIRED}")" = "${IMMUTABLE_IMAGE}" ]] \
+                && [[ "$(jq -r '.rollout.batchSize // empty' <<< "${REQUIRED}")" = "1" ]]; then
+                VERIFIED=true
+                break
+              fi
+            fi
+            sleep 5
+          done
+          test "${VERIFIED}" = "true"
+          echo "Production requires the canary-verified immutable runner with batch size 1." >> "${GITHUB_STEP_SUMMARY}"
+
+  rollback:
+    if: inputs.action == 'rollback'
+    name: Roll back to a verified immutable runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+      ROLLBACK_IMAGE: ${{ inputs.rollback_image }}
+
+    steps:
+      - name: Validate rollback inputs
+        env:
+          ROLLBACK_RUN_ID: ${{ inputs.rollback_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "${ROLLBACK_IMAGE}" =~ ^ghcr\.io/ametel01/agentbay-runner:[a-f0-9]{40}@sha256:[a-f0-9]{64}$ ]]
+          [[ "${ROLLBACK_RUN_ID}" =~ ^[1-9][0-9]{0,19}$ ]]
+
+      - name: Download prior canary verification
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-runner-release
+          path: verified-runner-release
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.rollback_run_id }}
+
+      - name: Require exact previously verified image
+        run: test "$(cat verified-runner-release/immutable-image.txt)" = "${ROLLBACK_IMAGE}"
+
+      - name: Check out rollback workflow commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Pull production project settings
+        run: bunx vercel@${VERCEL_CLI_VERSION} pull --yes --environment=production --token="${VERCEL_TOKEN}"
+
+      - name: Deploy verified rollback digest with rollout halted
+        run: |
+          set -euo pipefail
+          bunx vercel@${VERCEL_CLI_VERSION} deploy --prod --yes --token="${VERCEL_TOKEN}" \
+            --env "AGENTBAY_RUNNER_IMAGE=${ROLLBACK_IMAGE}" \
+            --env "AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=0" \
+            --build-env "AGENTBAY_RUNNER_IMAGE=${ROLLBACK_IMAGE}" \
+            --build-env "AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=0"
+
+      - name: Verify rollback health, digest, and halted rollout
+        run: |
+          set -euo pipefail
+          VERIFIED=false
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error "${PRODUCTION_URL}/health" > /dev/null; then
+              REQUIRED="$(curl --fail --silent --show-error \
+                -H "Authorization: Bearer ${CRON_SECRET}" \
+                "${PRODUCTION_URL}/api/internal/runner-release/required" || true)"
+              if [[ "$(jq -r '.requiredRelease.imageReference // empty' <<< "${REQUIRED}")" = "${ROLLBACK_IMAGE}" ]] \
+                && [[ "$(jq -r '.rollout.halted // empty' <<< "${REQUIRED}")" = "true" ]]; then
+                VERIFIED=true
+                break
+              fi
+            fi
+            sleep 5
+          done
+          test "${VERIFIED}" = "true"
+          echo "Production rolled back to a previously verified digest with rollout halted." >> "${GITHUB_STEP_SUMMARY}"

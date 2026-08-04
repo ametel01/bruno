@@ -1,5 +1,8 @@
 # End-to-end validation
 
+Runner-image publication, disposable-Droplet canary requirements, gradual promotion, and
+artifact-backed rollback are documented in [Runner releases](RUNNER_RELEASES.md).
+
 AgentBay keeps two distinct Playwright gates. Both use the unchanged desktop and mobile projects in `playwright.config.ts`.
 
 ## Credential-free CI gate

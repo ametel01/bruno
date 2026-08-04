@@ -34,9 +34,12 @@ describe("runner image", () => {
     expect(workflow).toContain(`org.opencontainers.image.revision=${githubSha}`);
     expect(workflow).toContain(`org.opencontainers.image.version=${githubSha}`);
     expect(workflow).toContain(`${registry}/${imageName}:${githubSha}`);
-    expect(workflow).toContain(`${registry}/${imageName}:main`);
+    expect(workflow).not.toContain(`${registry}/${imageName}:main`);
     expect(workflow).toContain(`digest: ${pushedDigest}`);
     expect(workflow).toContain("immutable-image:");
     expect(workflow).toContain("docker buildx imagetools inspect");
+    expect(workflow).toContain("aquasecurity/trivy-action@0.28.0");
+    expect(workflow).toContain("needs: publish");
+    expect(workflow).toContain("runner:release:smoke");
   });
 });
