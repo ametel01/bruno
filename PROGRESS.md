@@ -615,7 +615,7 @@ and replace the fleet in bounded batches.
 - [x] Step 3: Persist Compatibility and Fail Closed During Assignment
 - [x] Step 4: Enforce a Real Boot-Readiness Contract
 - [x] Step 5: Persist a Durable Runner Replacement Workflow
-- [ ] Step 6: Provision and Validate Replacement Runners
+- [x] Step 6: Provision and Validate Replacement Runners
 - [ ] Step 7: Hand Over Agents and Clean Up the Source Runner
 - [ ] Step 8: Reconcile DigitalOcean and Database Ownership
 - [ ] Step 9: Replace Runners After Strict Deployment Deadlines
@@ -625,13 +625,12 @@ and replace the fleet in bounded batches.
 
 ### Current Status
 
-Step 5 is complete in this commit. Automatic runner replacement now has a
-durable, inspectable nine-state saga with duplicate-trigger convergence,
-generation-fenced compare-and-set transitions, resumable 90-second leases,
-separate processing and billable replacement counts, and an atomic maximum of
-two billable replacements per agent deployment in a 24-hour window. Terminal
-evidence is restricted to closed codes and fixed safe summaries. Step 6 is
-next; no provider or Droplet effect is performed by this persistence slice.
+Step 6 is complete in this commit. The leased replacement reconciler now creates
+one immutable digest-pinned target, resumes provider provisioning by exact
+operation tag, requires compatible boot-ready evidence plus a fresh online
+heartbeat and enough capacity, and cleans only the exact owned target set on
+failure. Source credentials, assignments, workload, and provider resource stay
+untouched throughout this slice. Step 7 is next.
 
 ### Step Ledger
 
@@ -642,8 +641,8 @@ next; no provider or Droplet effect is performed by this persistence slice.
 | 2. Report Immutable Runner Release Identity | Complete | `71fc024` | Added the bounded `plingpling.runner.boot.v1` release contract, strict immutable image/reference parsing, Docker container/image inspection through argv-only bounded calls, OCI version/revision reading, canonical unique repository-digest derivation, expected-versus-observed comparison, and an explicit image-ID development seam. Bootstrap and service heartbeats report the observed release; malformed release fields fail validation and legacy payloads remain parseable with explicit missing evidence. Cloud bootstrap injects expected identity only for immutable references. Runner images now carry OCI labels and the publication workflow emits linux/amd64 Git-SHA and transition `main` tags with SBOM, max provenance, digest verification, and digest/image outputs. Eight focused files / 122 tests and the full 150-file / 1,462-test suite passed. The built runner container inspected itself through the mounted Docker socket and returned only `development`, its canonical local image digest, `plingpling.runner.boot.v1`, and `expectedMatch: null`. Runner Docker build, 83-second Hermes contract smoke, format, lint, typecheck, production build, and diff hygiene passed. | Complete; Step 3 is next. |
 | 3. Persist Compatibility and Fail Closed During Assignment | Complete | `813c8cb` | Added six backward-safe runner compatibility fields, canonical release constraints, assignment indexes, and additive migration `0022_unknown_ma_gnuci`. Authenticated heartbeats now persist normalized observed identity and a server-owned `compatible`, `unknown`, `outdated`, or `invalid` decision in one transaction. Hosted provider configuration rejects mutable runner tags; provisioning records the required digest; placement, explicit assignment, create/start/lifecycle/deployment selection, and pre/post live verification use one exact-release predicate. Legacy managed rows stay unknown and unassignable, concurrent verification cannot bypass a downgrade, and incompatible manual rows are excluded without deletion. Nine focused files / 262 tests and the full 151-file / 1,472-test suite passed. Clean migration, upgraded migration fixture, schema drift check, format, lint, typecheck, production build, database health, and local cloud reconciler smoke passed. | Complete; Step 4 is next. |
 | 4. Enforce a Real Boot-Readiness Contract | Complete | `cc27fa2` | Added the exact `plingpling.runner.boot-snapshot.v1` persisted snapshot with deterministic testing/ready/failed timestamps and six closed component states. Runner boot now performs bounded Docker/self-image verification, creates a UUID-scoped private network and pinned Hermes fixture with a local fake model, loads real-shaped synthetic Telegram configuration without traffic, probes container-local detailed health, runs a fixed no-tools canary, and cleans up exact labeled resources on success, failure, timeout, and restart. The authenticated no-store route returns 200 only for exact ready evidence; app parsing rejects legacy, malformed, incomplete, incompatible, or non-ready evidence before assignment. Eight focused files / 123 tests and the full 152-file / 1,480-test suite passed. Format, lint, typecheck, production build, runner Docker build, a production-path all-six-component ready smoke with zero remaining labeled fixtures, local-cloud smoke, and the 82,866 ms pinned Hermes contract smoke passed. | Complete; Step 5 is next. |
-| 5. Persist a Durable Runner Replacement Workflow | Complete | This commit | Added additive migration `0023_stiff_masque` with the exact nine replacement states, six trigger reasons, closed terminal codes, source/target/deployment relationships, unique active source and deployment guards, operation idempotency, due-work indexes, generation/lease fields, and a deployment budget ledger. Pure transitions reject skips, missing or cross-source targets, stale generations, terminal replay, and unsafe retry dates. Store claims use `FOR UPDATE SKIP LOCKED`, exact-expiry takeover, and lease/generation/source/target CAS fences; concurrent cron/heartbeat/deployment/user-shaped operation keys converge on one active workflow. Billable reservations are transactionally separate from claims and capped at two per deployment/24 hours under concurrency. Four focused files / 52 tests and the full 155-file / 1,498-test suite passed. Clean and pre-0023 upgrade migrations passed twice with existing evidence unchanged; schema drift, format, lint, typecheck, production build, and diff hygiene passed. No external/provider effect or operator surface was added, so the Step 5 changelog entry is deferred per the plan. | Complete; Step 6 is next. |
-| 6. Provision and Validate Replacement Runners | Pending | Pending | Not started. | Waits for Step 5. |
+| 5. Persist a Durable Runner Replacement Workflow | Complete | `44c5e92` | Added additive migration `0023_stiff_masque` with the exact nine replacement states, six trigger reasons, closed terminal codes, source/target/deployment relationships, unique active source and deployment guards, operation idempotency, due-work indexes, generation/lease fields, and a deployment budget ledger. Pure transitions reject skips, missing or cross-source targets, stale generations, terminal replay, and unsafe retry dates. Store claims use `FOR UPDATE SKIP LOCKED`, exact-expiry takeover, and lease/generation/source/target CAS fences; concurrent cron/heartbeat/deployment/user-shaped operation keys converge on one active workflow. Billable reservations are transactionally separate from claims and capped at two per deployment/24 hours under concurrency. Four focused files / 52 tests and the full 155-file / 1,498-test suite passed. Clean and pre-0023 upgrade migrations passed twice with existing evidence unchanged; schema drift, format, lint, typecheck, production build, and diff hygiene passed. No external/provider effect or operator surface was added, so the Step 5 changelog entry is deferred per the plan. | Complete; Step 6 is next. |
+| 6. Provision and Validate Replacement Runners | Complete | This commit | Added a leased one-slice reconciler that creates and associates one managed target, derives its provisioning operation key from the durable replacement key, pins the configured immutable digest and boot contract, reserves the billable deployment budget before create, and reuses authoritative DigitalOcean discovery/create/tag/firewall/bootstrap. Validation requires exact release compatibility, capability-backed boot readiness, a fresh online heartbeat, and capacity for every source assignment before advancing to fencing. Failed targets use exact operation-tag discovery and the owned-set firewall-before-Droplet cleanup protocol, then atomically revoke target access, tombstone the target, and persist closed terminal evidence while leaving the source untouched. Ten focused real-database/fake-provider tests cover successful create, rediscovery, duplicate ambiguity, known create failure, release and boot incompatibility, capacity, budget exhaustion, timeouts, cleanup, and concurrent claimers. Full format, lint, typecheck, 156-file / 1,508-test suite, production build, local cloud smoke, runner image build, and diff hygiene passed. | Complete; Step 7 is next. |
 | 7. Hand Over Agents and Clean Up the Source Runner | Pending | Pending | Not started. | Waits for Step 6. |
 | 8. Reconcile DigitalOcean and Database Ownership | Pending | Pending | Not started. | Waits for Steps 5-7. |
 | 9. Replace Runners After Strict Deployment Deadlines | Pending | Pending | Not started. | Waits for Steps 5-8. |
@@ -714,6 +713,14 @@ next; no provider or Droplet effect is performed by this persistence slice.
 | 5 | `bun run test` | Passed serially against the clean Step 5 database; 155 files / 1,498 tests. |
 | 5 | `bun run build` | Passed; Next.js production build completed. |
 | 5 | `git diff --check` | Passed. |
+| 6 | Ten focused replacement reconciler tests | Passed against a disposable migrated PostgreSQL database with fake-provider create, rediscovery, duplicate ambiguity, failure cleanup, release/boot rejection, capacity, budget, timeout, and concurrency evidence. |
+| 6 | `bun run format:check` and `bun run lint` | Passed; 370 files checked with no fixes or warnings. |
+| 6 | `bun run typecheck` | Passed. |
+| 6 | `bun run test` | Passed serially against the isolated migrated database; 156 files / 1,508 tests. |
+| 6 | `bun run build` | Passed; Next.js production build completed. |
+| 6 | `bun run local:cloud:smoke` | Passed in 398 ms through Ready, runtime fault recovery, Stop, and deterministic cleanup. |
+| 6 | `docker build --no-cache -f Dockerfile.runner -t plingpling-runner:resilience .` | Passed after bypassing a stale Docker Desktop extraction snapshot; the clean image export and unpack completed. |
+| 6 | `git diff --check` | Passed. |
 
 ### Step 1 Gap Matrix
 
@@ -721,7 +728,7 @@ next; no provider or Droplet effect is performed by this persistence slice.
 | --- | --- | --- |
 | Exact immutable runner identity | Authenticated heartbeat parsing allowlists legacy version and metrics but ignores an untrusted release object; no observed image digest or boot-contract identity is derived or persisted. | Not implemented; Step 2. |
 | Capability-backed boot readiness | Authenticated `/runner/v1/readiness` reads an atomically persisted exact contract only after bounded Docker/self-image, isolated pinned Hermes fixture, private detailed health, fixed model canary, synthetic no-traffic Telegram configuration, and exact cleanup checks. App parsing requires all six passed components before managed assignment. | Complete; Step 4. |
-| Automatic replacement | The durable nine-state saga, idempotent active-workflow guards, leased SKIP LOCKED claims, generation CAS, safe terminal evidence, and two-per-deployment/24-hour budget are complete. Provider effects, handover, inventory reconciliation, and deadline triggers remain absent. | Foundation complete in Step 5; effects continue in Steps 6-9. |
+| Automatic replacement | The durable saga now provisions, rediscovers, immutably validates, capacity-checks, and safely cleans exact replacement targets within the two-per-deployment/24-hour budget while preserving the source. Agent handover, inventory reconciliation, and deadline triggers remain absent. | Validated target capacity complete in Step 6; handover and triggers continue in Steps 7-9. |
 | Infrastructure inventory reconciliation | Placement performs current stale-heartbeat fencing and live provider-resource verification, and exact missing resources are tombstoned; no leased authoritative inventory, adoption, duplicate classification, or orphan grace exists. | Not implemented; Step 8. |
 | Smoke-before-deploy release ordering | The runner workflow pushes Git-SHA and mutable `main` tags directly on main; it has no digest output, SBOM/provenance configuration, disposable-Droplet canary, control-plane dependency, or fleet rollout. | Not implemented; Steps 2 and 11-12. |
 
@@ -771,10 +778,17 @@ next; no provider or Droplet effect is performed by this persistence slice.
   limits. Clean and upgraded migration fixtures plus all repository gates
   passed. No provider call, Droplet effect, or new operator surface occurred,
   so the Step 5 changelog entry is deferred as required. The focused commit is
-  `feat: persist runner replacement workflows` (`This commit`).
+  `feat: persist runner replacement workflows` (`44c5e92`).
+- 2026-08-04: Completed Step 6 with one-claim target creation and reused
+  DigitalOcean provisioning, exact immutable release/boot validation, fresh
+  heartbeat and capacity gates, crash rediscovery, deployment-budget
+  reservation, and exact owned-set failure cleanup that preserves the source.
+  Ten focused scenarios and all repository/image/local-smoke gates passed. No
+  live provider call or Droplet effect was performed. The focused commit is
+  `feat: provision validated replacement runners` (`This commit`).
 
 ### Next Step
 
-Begin Step 6 by reconciling one provider effect per claim to provision,
-rediscover, validate, and safely clean replacement target capacity without
-changing source assignments.
+Begin Step 7 by fencing the source, atomically reassigning desired-running
+agents to the validated target, converging workloads, and retiring only the
+exact obsolete source owned set.

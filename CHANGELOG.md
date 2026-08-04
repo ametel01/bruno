@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Automatic managed-runner recovery now provisions immutable digest-pinned replacement capacity, rediscovers interrupted targets by operation tag, verifies fresh release and boot readiness plus assignment capacity, and safely cleans failed targets without disturbing source workloads.
 - Capability-backed cloud runner boot validation now verifies Docker and self-image access, an isolated pinned Hermes fixture, private detailed health, a fixed model canary, synthetic no-traffic Telegram configuration loading, and exact cleanup before a compatible runner becomes assignable.
 - Authenticated runner heartbeats now report Docker-observed immutable image digests, bounded OCI release versions, and the versioned runner boot contract, while cloud bootstrap carries expected release identity only as non-secret comparison data.
 - A nontechnical agent setup flow with two assistant choices, ChatGPT and Claude, owner-scoped encrypted connection reuse, first-connection-only API-key entry, fixed safe defaults, and one primary “Create my agent” action while the app owns model, runner, configuration, launch, and health-check details.
