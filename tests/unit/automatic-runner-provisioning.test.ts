@@ -1,7 +1,12 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { runnerProvisioningEvents, runners, users } from "@/src/server/db/schema";
+import {
+  runnerProvisioningEvents,
+  runnerRegistrationTokens,
+  runners,
+  users,
+} from "@/src/server/db/schema";
 import type { DigitalOceanProviderConfig } from "@/src/server/env";
 import {
   DIGITALOCEAN_PROVIDER,
@@ -89,6 +94,30 @@ describe("automatic DigitalOcean runner provisioning", () => {
     const [runner] = await connection.db.select().from(runners).where(eq(runners.id, RUNNER_ID));
     expect(runner).toMatchObject({
       providerResourceId: "adopted-1",
+      provisioningStatus: "tagging",
+    });
+  });
+
+  it("replays one operation tag without duplicating the token or billable create", async () => {
+    const provider = new FakeDigitalOceanProvider({ now: () => NOW, idPrefix: "replayed" });
+
+    await expect(advance(connection, provider)).resolves.toEqual({ ok: true, state: "pending" });
+    await connection.db
+      .update(runners)
+      .set({ provisioningStatus: "pending", providerResourceId: null })
+      .where(eq(runners.id, RUNNER_ID));
+
+    await expect(advance(connection, provider)).resolves.toEqual({ ok: true, state: "pending" });
+
+    const tokens = await connection.db
+      .select({ id: runnerRegistrationTokens.id })
+      .from(runnerRegistrationTokens)
+      .where(eq(runnerRegistrationTokens.runnerId, RUNNER_ID));
+    const [runner] = await connection.db.select().from(runners).where(eq(runners.id, RUNNER_ID));
+    expect(tokens).toHaveLength(1);
+    expect(provider.calls.filter((call) => call.step === "create")).toHaveLength(1);
+    expect(runner).toMatchObject({
+      providerResourceId: "replayed-1",
       provisioningStatus: "tagging",
     });
   });

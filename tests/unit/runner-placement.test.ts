@@ -9,6 +9,8 @@ import {
   selectRunnerPlacementForUser,
 } from "@/src/server/runners/runner-placement";
 import { DEVELOPMENT_USER_METADATA_KEY } from "@/src/server/users/development-user";
+import { FakeDigitalOceanProvider } from "@/src/server/runners/digitalocean-provider";
+import { verifyRunnerPlacementCandidate } from "@/src/server/runners/runner-placement-verification";
 
 describe.sequential("runner placement contract", () => {
   let connection: DatabaseConnection;
@@ -279,6 +281,77 @@ describe.sequential("runner placement contract", () => {
         { createConnection: () => connection, now: () => now },
       ),
     ).resolves.toMatchObject({ ok: true, runner: { id: runner.id, kind: "digitalocean" } });
+  });
+
+  it("characterizes live provider verification as a required post-selection fence", async () => {
+    const now = new Date("2026-07-06T04:02:00.000Z");
+    const userId = await seedDevelopmentUser(connection);
+    const [runner] = await connection.db
+      .insert(runners)
+      .values({
+        userId,
+        name: "Missing Provider Runner",
+        kind: "digitalocean",
+        endpointUrl: "https://missing-provider-runner.example.com",
+        status: "online",
+        provider: "digitalocean",
+        providerResourceId: "missing-provider-resource",
+        region: "sfo3",
+        sizeSlug: "s-1vcpu-512mb-10gb",
+        image: "ubuntu-24-04-x64",
+        provisioningStatus: "ready",
+        provisioningStartedAt: new Date("2026-07-06T04:00:00.000Z"),
+        provisioningCompletedAt: new Date("2026-07-06T04:01:00.000Z"),
+      })
+      .returning({ id: runners.id });
+
+    if (!runner) {
+      throw new Error("Runner insert returned no rows.");
+    }
+
+    await seedHeartbeat(connection, runner.id, {
+      observedAt: new Date("2026-07-06T04:01:00.000Z"),
+      metrics: { maxAgents: 1, runningAgents: 0 },
+    });
+
+    await expect(
+      selectRunnerPlacementForUser(
+        userId,
+        {},
+        { createConnection: () => connection, now: () => now },
+      ),
+    ).resolves.toMatchObject({ ok: true, runner: { id: runner.id } });
+
+    await expect(
+      verifyRunnerPlacementCandidate(
+        connection,
+        { runnerId: runner.id, userId },
+        {
+          now: () => now,
+          provider: new FakeDigitalOceanProvider(),
+          readConfig: () => ({
+            token: "fake-provider-token",
+            runnerBearerToken: "fake-runner-token",
+            runnerImage: "agentbay-runner:test",
+            region: "sfo3",
+            sizeSlug: "s-1vcpu-512mb-10gb",
+            image: "ubuntu-24-04-x64",
+            tags: ["agentbay"],
+          }),
+        },
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      action: "reject_candidate",
+      reason: "provider_resource_missing",
+      transitioned: true,
+    });
+
+    const [persistedRunner] = await connection.db
+      .select({ status: runners.status, deletedAt: runners.deletedAt })
+      .from(runners)
+      .where(eq(runners.id, runner.id));
+    expect(persistedRunner).toEqual({ status: "deleted", deletedAt: now });
   });
 
   it("marks stale online runners offline before placement selection", async () => {

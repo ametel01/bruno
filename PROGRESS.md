@@ -610,7 +610,7 @@ and replace the fleet in bounded batches.
 ### Step Checklist
 
 - [x] Step 0: Progress and Changelog Tracking Setup
-- [ ] Step 1: Baseline Gates and Failure Characterization
+- [x] Step 1: Baseline Gates and Failure Characterization
 - [ ] Step 2: Report Immutable Runner Release Identity
 - [ ] Step 3: Persist Compatibility and Fail Closed During Assignment
 - [ ] Step 4: Enforce a Real Boot-Readiness Contract
@@ -625,17 +625,19 @@ and replace the fleet in bounded batches.
 
 ### Current Status
 
-Step 0 is complete in this commit. The historical progress ledger was restored
-from `9f45d89^:PROGRESS.md`, this tracker was appended without rewriting prior
-evidence, and the existing Keep a Changelog structure was verified without a
-tracking-only entry. All required Step 0 gates passed. Step 1 is next.
+Step 1 is complete in this commit. A fresh isolated local PostgreSQL database
+migrated through all current migrations, the pre-change baseline passed, and
+five focused characterization files now preserve the existing authentication,
+ownership, idempotency, redaction, in-container probing, and bounded timeout
+guarantees. The post-change full suite and desktop/mobile E2E are green. Step 2
+is next.
 
 ### Step Ledger
 
 | Step | State | Commit | Validation or acceptance evidence | Next work or blocker |
 | --- | --- | --- | --- | --- |
-| 0. Progress and Changelog Tracking Setup | Complete | This commit | Restored all 574 historical lines from `9f45d89^:PROGRESS.md`; appended the complete Step 0-12 tracker; verified the Keep a Changelog header, preamble, and Unreleased section; 1 focused file / 3 progress tests passed; format and lint checked 356 files; typecheck, 149 files / 1,449 tests, production build, and diff hygiene passed. No changelog entry was added for this tracking-only step. | Complete; Step 1 is next. |
-| 1. Baseline Gates and Failure Characterization | Pending | Pending | Not started. | Waits for Step 0. |
+| 0. Progress and Changelog Tracking Setup | Complete | `e892330` | Restored all 574 historical lines from `9f45d89^:PROGRESS.md`; appended the complete Step 0-12 tracker; verified the Keep a Changelog header, preamble, and Unreleased section; 1 focused file / 3 progress tests passed; format and lint checked 356 files; typecheck, 149 files / 1,449 tests, production build, and diff hygiene passed. No changelog entry was added for this tracking-only step. | Complete; Step 1 is next. |
+| 1. Baseline Gates and Failure Characterization | Complete | This commit | Frozen install made no changes; clean isolated PostgreSQL migration passed; pre-change `bun run verify` passed 149 files / 1,449 tests and production build; pre-change E2E passed 26/26. Added legacy authenticated heartbeat allowlisting, provider verification after selection, secret-safe in-container probing, exact selected-agent cleanup, operation-tag replay idempotency, and single-shot timeout cleanup coverage. Five focused files / 126 tests passed. Post-change format, lint, typecheck, 149 files / 1,452 tests, production build, 26/26 E2E, and diff hygiene passed. No changelog entry was added for test-only work. | Complete; Step 2 is next. |
 | 2. Report Immutable Runner Release Identity | Pending | Pending | Not started. | Waits for Steps 0-1. |
 | 3. Persist Compatibility and Fail Closed During Assignment | Pending | Pending | Not started. | Waits for Step 2. |
 | 4. Enforce a Real Boot-Readiness Contract | Pending | Pending | Not started. | Waits for Steps 2-3. |
@@ -661,6 +663,28 @@ tracking-only entry. All required Step 0 gates passed. Step 1 is next.
 | 0 | `bun run typecheck` | Passed. |
 | 0 | `bun run build` | Passed; Next.js production build completed. |
 | 0 | `git diff --check` | Passed. |
+| 1 | `bun install --frozen-lockfile` | Passed; 173 installs across 308 packages checked with no changes. |
+| 1 | `bun run db:migrate` on isolated local PostgreSQL | Passed cleanly through migration 0021; the exact validation database was removed afterward. |
+| 1 | Pre-change `bun run verify` | Passed; format, lint, typecheck, 149 files / 1,449 tests, and production build. |
+| 1 | Pre-change `bun run test:e2e:ci` | Passed; 26/26 desktop and mobile tests. |
+| 1 | Five focused characterization files | Passed; 126/126 tests. |
+| 1 | Post-change `bun run format:check` | Passed; 356 files checked. |
+| 1 | Post-change `bun run lint` | Passed; 356 files checked. |
+| 1 | Post-change `bun run typecheck` | Passed. |
+| 1 | Post-change `bun run test` | Passed; 149 files / 1,452 tests. |
+| 1 | Post-change `bun run build` | Passed; Next.js production build completed. |
+| 1 | Post-change `bun run test:e2e:ci` | Passed; 26/26 desktop and mobile tests. |
+| 1 | `git diff --check` | Passed. |
+
+### Step 1 Gap Matrix
+
+| Required capability | Baseline evidence | Status entering Step 2 |
+| --- | --- | --- |
+| Exact immutable runner identity | Authenticated heartbeat parsing allowlists legacy version and metrics but ignores an untrusted release object; no observed image digest or boot-contract identity is derived or persisted. | Not implemented; Step 2. |
+| Capability-backed boot readiness | Authenticated `/runner/v1/readiness` returns constant ready without invoking Docker or a self-test. | Not implemented; Step 4 after identity persistence. |
+| Automatic replacement | A readiness timeout captures logs once, stops once, and terminally fails the deployment; there is no durable replacement saga or replacement budget. | Not implemented; Steps 5-9. |
+| Infrastructure inventory reconciliation | Placement performs current stale-heartbeat fencing and live provider-resource verification, and exact missing resources are tombstoned; no leased authoritative inventory, adoption, duplicate classification, or orphan grace exists. | Not implemented; Step 8. |
+| Smoke-before-deploy release ordering | The runner workflow pushes Git-SHA and mutable `main` tags directly on main; it has no digest output, SBOM/provenance configuration, disposable-Droplet canary, control-plane dependency, or fleet rollout. | Not implemented; Steps 2 and 11-12. |
 
 ### Update Log
 
@@ -671,10 +695,18 @@ tracking-only entry. All required Step 0 gates passed. Step 1 is next.
 - 2026-08-04: Completed Step 0 after the focused progress test, format, lint,
   typecheck, 149-file / 1,449-test unit suite, production build, and diff hygiene
   all passed. The focused commit is `docs: initialize runner resilience
-  tracking` (`This commit`).
+  tracking` (`e892330`).
+- 2026-08-04: Completed Step 1 on a disposable local PostgreSQL database. The
+  default development database was not modified because its historical Drizzle
+  journal records migration 0020 with an older timestamp and attempts a replay;
+  a clean database migrated successfully, proving the repository migration path
+  is green. Added three new characterization tests and strengthened two existing
+  tests across the five required files. The focused commit is `test:
+  characterize runner resilience contracts` (`This commit`).
 
 ### Next Step
 
-Begin Step 1 by running the repository baseline with local Postgres, recording
-the gap matrix, and adding deterministic current-behavior characterization
-tests without encoding future behavior as passing expectations.
+Begin Step 2 by adding bounded release identity contracts, deriving observed
+runner image identity through Docker inspection, extending authenticated
+heartbeats and cloud bootstrap, and publishing immutable image metadata without
+trusting expected environment values as observed evidence.

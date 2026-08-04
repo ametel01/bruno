@@ -840,7 +840,13 @@ describe("manual runner service HTTP contract", () => {
       const dockerCalls: string[][] = [];
       const requestHealth = vi.fn(async () => ({ ok: false, status: 0, body: null }));
       const docker = new ManualRunnerDocker({
-        docker: createMockDocker({ calls: dockerCalls, execProbeBody: pinnedHermesHealth() }),
+        docker: createMockDocker({
+          calls: dockerCalls,
+          execProbeBody: {
+            ...pinnedHermesHealth(),
+            raw: "OPENAI_API_KEY=sk-proj-runner-probe-secret",
+          },
+        }),
         nameSuffix: () => "unit001",
         projection: {
           project: (spec) =>
@@ -852,7 +858,9 @@ describe("manual runner service HTTP contract", () => {
 
       await docker.start(AGENT_ID, spec);
 
-      await expect(docker.status(AGENT_ID)).resolves.toMatchObject({
+      const status = await docker.status(AGENT_ID);
+
+      expect(status).toMatchObject({
         snapshot: {
           phase: "ready",
           readinessReason: null,
@@ -867,6 +875,7 @@ describe("manual runner service HTTP contract", () => {
         expect.arrayContaining(["exec", `agentbay-runner-${AGENT_ID}-unit001`, "python", "8642"]),
       );
       expect(JSON.stringify(execProbe)).not.toContain(spec.secrets.apiServerKey);
+      expect(JSON.stringify(status)).not.toContain("sk-proj-runner-probe-secret");
     });
   });
 
@@ -1562,16 +1571,21 @@ describe("manual runner service HTTP contract", () => {
     const previousStateRoot = process.env.AGENTBAY_HERMES_STATE_ROOT;
     const stateRoot = join(tmpdir(), `agentbay-runner-cleanup-${Date.now()}`);
     const agentRoot = join(stateRoot, AGENT_ID);
+    const unrelatedAgentRoot = join(stateRoot, OTHER_AGENT_ID);
     const calls: string[][] = [];
 
     await mkdir(join(agentRoot, "workspace"), { recursive: true });
+    await mkdir(join(unrelatedAgentRoot, "workspace"), { recursive: true });
 
     try {
       process.env.AGENTBAY_HERMES_STATE_ROOT = stateRoot;
       const service = createTestService({
         docker: createMockDocker({
           calls,
-          containers: [{ id: "container-001", agentId: AGENT_ID, status: "running" }],
+          containers: [
+            { id: "container-001", agentId: AGENT_ID, status: "running" },
+            { id: "unrelated-container", agentId: OTHER_AGENT_ID, status: "running" },
+          ],
         }),
       });
       const first = await service.fetch(
@@ -1584,7 +1598,9 @@ describe("manual runner service HTTP contract", () => {
       expect(first.status).toBe(200);
       expect(second.status).toBe(200);
       await expect(access(agentRoot)).rejects.toThrow();
+      await expect(access(unrelatedAgentRoot)).resolves.toBeUndefined();
       expect(calls).toContainEqual(["rm", "--force", "container-001"]);
+      expect(calls).not.toContainEqual(["rm", "--force", "unrelated-container"]);
     } finally {
       if (previousStateRoot === undefined) {
         delete process.env.AGENTBAY_HERMES_STATE_ROOT;

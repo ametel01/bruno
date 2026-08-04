@@ -571,8 +571,18 @@ describe("agent deployment reconciler", () => {
       }),
     ).resolves.toEqual({ processed: 1, outcome: "failed" });
 
+    await expect(
+      reconcileNextAgentDeployment({
+        createConnection: () => connection,
+        now: () => NOW,
+        manualRunnerAdapter: () => adapter as never,
+      }),
+    ).resolves.toEqual({ processed: 0, outcome: "idle" });
+
     expect(adapter.start).not.toHaveBeenCalled();
+    expect(adapter.streamLogs).toHaveBeenCalledTimes(1);
     expect(adapter.streamLogs).toHaveBeenCalledWith({ agentId: AGENT_ID, limit: 100 });
+    expect(adapter.stop).toHaveBeenCalledTimes(1);
     expect(adapter.stop).toHaveBeenCalledWith(AGENT_ID);
     const [deployment] = await connection.db
       .select()

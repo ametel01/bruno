@@ -105,6 +105,48 @@ describe("runner heartbeat persistence", () => {
     expect(JSON.stringify(persistedHeartbeats[0]?.metadata)).not.toContain("must-not-persist");
   });
 
+  it("characterizes legacy authenticated heartbeats as allowlisted but release-agnostic", async () => {
+    const credential = createRunnerCredential({
+      randomBytes: (size) => Buffer.alloc(size, 13),
+    });
+    const runner = await seedRunnerCredential(connection, {
+      credentialValue: credential.value,
+      runnerStatus: "active",
+    });
+    const untrustedDigest = `sha256:${"d".repeat(64)}`;
+
+    await expect(
+      recordRunnerHeartbeat(
+        {
+          authorizationHeader: `Bearer ${credential.value}`,
+          payload: {
+            runnerId: runner.id,
+            version: "agentbay-runner/baseline",
+            release: {
+              imageDigest: untrustedDigest,
+              bootContractVersion: "forged-contract",
+              registryCredential: "must-not-persist",
+            },
+          },
+        },
+        {
+          createConnection: () => connection,
+          now: () => new Date("2026-07-05T08:00:00.000Z"),
+        },
+      ),
+    ).resolves.toMatchObject({ ok: true, runner: { id: runner.id, status: "online" } });
+
+    const [heartbeat] = await connection.db
+      .select({ metadata: runnerHeartbeats.metadata })
+      .from(runnerHeartbeats)
+      .where(eq(runnerHeartbeats.runnerId, runner.id));
+
+    expect(heartbeat?.metadata).toEqual({ version: "agentbay-runner/baseline" });
+    expect(JSON.stringify(heartbeat?.metadata)).not.toContain(untrustedDigest);
+    expect(JSON.stringify(heartbeat?.metadata)).not.toContain("forged-contract");
+    expect(JSON.stringify(heartbeat?.metadata)).not.toContain("must-not-persist");
+  });
+
   it.each([
     ["missing bearer", null],
     ["malformed bearer", "Token wrong"],
