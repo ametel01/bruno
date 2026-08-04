@@ -6,19 +6,21 @@ import type { RunnerAgentStatusSnapshot } from "@/src/runner-service/runner-cont
 import { buildHermesAgentLaunchSpecForUser } from "@/src/server/agents/agent-launch-builder";
 import { initializeAgentRuntimeAfterDeploymentReady } from "@/src/server/agents/agent-runtime-store";
 import { scheduleAgentRuntimeReconcileAfterResponse } from "@/src/server/agents/agent-runtime-triggers";
+import { getAssistantProfileForManagedModel } from "@/src/server/agents/assistant-profiles";
 import {
   type AgentDeploymentStage,
   normalizeDeploymentErrorDetail,
   validateDeploymentErrorCode,
 } from "@/src/server/agents/deployment-state";
 import { getApprovedOpenRouterModel } from "@/src/server/agents/openrouter-models";
-import { getAssistantProfileForManagedModel } from "@/src/server/agents/assistant-profiles";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   agentConfigs,
   agentDeployments,
   agents,
   agentUsagePeriods,
+  runnerHeartbeats,
+  runnerReplacements,
   runners,
 } from "@/src/server/db/schema";
 import {
@@ -37,19 +39,36 @@ import {
   type ManualRunnerCanaryResult,
 } from "@/src/server/runners/manual-runner-adapter";
 import type { ManualRunnerRecord } from "@/src/server/runners/manual-runner-persistence";
+import { requiredRunnerImageDigestForProvider } from "@/src/server/runners/runner-compatibility";
+import { RUNNER_HEARTBEAT_STALE_THRESHOLD_MS } from "@/src/server/runners/runner-heartbeat";
 import {
   lockRunnerPlacementCapacityInTransaction,
   selectRunnerPlacementForUserInTransaction,
 } from "@/src/server/runners/runner-placement";
-import { requiredRunnerImageDigestForProvider } from "@/src/server/runners/runner-compatibility";
 import {
   advanceAutomaticDigitalOceanRunnerProvisioning,
   createConfiguredDigitalOceanProvider,
 } from "@/src/server/runners/runner-provisioning";
+import type { RunnerReplacementReason } from "@/src/server/runners/runner-replacement-state";
+import { createOrGetRunnerReplacement } from "@/src/server/runners/runner-replacement-store";
+import { scheduleRunnerReplacementReconcileAfterResponse } from "@/src/server/runners/runner-replacement-triggers";
 
 export const DEPLOYMENT_RECONCILE_LEASE_MS = 90_000;
 export const DEPLOYMENT_RECONCILE_ACTION_DEADLINE_MS = 45_000;
-export const MAX_AUTOMATIC_DEPLOYMENT_ATTEMPTS = 64;
+export const GATEWAY_START_DEADLINE_MS = 30_000;
+
+const MAX_REPLACEMENTS_PER_DEPLOYMENT = 2;
+const REPLACEMENT_WINDOW_MS = 24 * 60 * 60 * 1_000;
+const STAGE_RETRY_LIMITS: Readonly<Record<AgentDeploymentStage, number>> = {
+  pending: 16,
+  provisioning_runner: 32,
+  configuring_hermes: 3,
+  starting_gateway: Number.MAX_SAFE_INTEGER,
+  verifying_model: 2,
+  connecting_telegram: 8,
+  ready: 0,
+  failed: 0,
+};
 
 const STARTING_STATUS_REASON = "Automatic deployment is in progress.";
 const RUNNING_STATUS_REASON = "Hermes gateway is ready.";
@@ -63,6 +82,7 @@ export type AgentDeploymentReconcileOutcome =
   | "advanced"
   | "retry_scheduled"
   | "failed"
+  | "recovering"
   | "ready";
 
 export type AgentDeploymentReconcileResult = {
@@ -104,6 +124,8 @@ export type AgentDeploymentReconcilerDependencies = {
   provisioner?: DeploymentProvisioner;
   digitalOceanProvider?: DigitalOceanProvider;
   readDigitalOceanConfig?: () => DigitalOceanProviderConfig | null;
+  randomUUID?: () => string;
+  triggerReplacement?: (replacementId: string) => void;
 };
 
 type ReconcilerRunnerAdapter = {
@@ -133,7 +155,7 @@ type ClaimedDeploymentWork = {
   attemptCount: number;
   leaseOwner: string;
   runnerOperationId: string | null;
-  runnerAcceptedAt: Date | null;
+  runnerAcceptedAt: Date | string | null;
   canaryState: CanaryState;
   canaryAttemptedAt: Date | null;
   agentRunnerId: string | null;
@@ -149,6 +171,7 @@ type DeploymentTerminalErrorCode =
   | "runner_provisioning_unavailable"
   | "runner_provisioning_outcome_unknown"
   | "runner_start_failed"
+  | "replacement_budget_exhausted"
   | "telegram_connection_failed";
 
 const RETRYABLE_DETAILS = {
@@ -207,14 +230,6 @@ async function reconcileOne(
       return { processed: 0, outcome: "idle" };
     }
 
-    if (claimed.attemptCount > MAX_AUTOMATIC_DEPLOYMENT_ATTEMPTS) {
-      await terminallyFailDeployment(connection, claimed, {
-        code: "deployment_attempts_exhausted",
-        now: now(),
-      });
-      return { processed: 1, outcome: "failed" };
-    }
-
     return {
       processed: 1,
       outcome: await runClaimedStage(connection, claimed, dependencies, hermesWorkloadImage, now),
@@ -269,14 +284,7 @@ async function runClaimedStage(
           context,
         );
       case "starting_gateway":
-        return reconcileStartingGateway(
-          connection,
-          work,
-          dependencies,
-          hermesWorkloadImage,
-          now,
-          context,
-        );
+        return reconcileStartingGateway(connection, work, dependencies, now, context);
       case "verifying_model":
         return reconcileVerifyingModel(connection, work, dependencies, now, context);
       case "connecting_telegram":
@@ -543,14 +551,14 @@ async function reconcileConfiguringHermes(
   const runner = await getAssignedRunner(connection, work);
 
   if (!runner) {
-    return scheduleRetry(connection, work, "runner_not_ready", now());
+    return maybeRecoverManagedTransport(connection, work, dependencies, context, now());
   }
 
   const adapter = createRunnerAdapter(runner, dependencies, context);
   const started = await adapter.start(work.agentId, launch.spec);
 
   if (!started.ok) {
-    return scheduleRetry(connection, work, "runner_transport_unavailable", now());
+    return maybeRecoverManagedTransport(connection, work, dependencies, context, now());
   }
 
   if (!("state" in started)) {
@@ -625,34 +633,47 @@ async function reconcileStartingGateway(
   connection: DatabaseConnection,
   work: ClaimedDeploymentWork,
   dependencies: AgentDeploymentReconcilerDependencies,
-  hermesWorkloadImage: string,
   now: () => Date,
   context: DeploymentActionContext,
 ): Promise<AgentDeploymentReconcileOutcome> {
-  const runner = await getAssignedRunner(connection, work);
-
-  if (!runner || !work.runnerOperationId) {
+  const observedAt = now();
+  if (!work.runnerAcceptedAt || !work.runnerOperationId) {
     await terminallyFailDeployment(connection, work, {
       code: "runner_start_failed",
-      now: now(),
+      now: observedAt,
       cleanup: { dependencies, context },
     });
     return "failed";
+  }
+
+  const acceptedAt = toDate(work.runnerAcceptedAt);
+  if (!acceptedAt) {
+    await terminallyFailDeployment(connection, work, {
+      code: "runner_start_failed",
+      now: observedAt,
+      cleanup: { dependencies, context },
+    });
+    return "failed";
+  }
+  const deadlineAt = new Date(acceptedAt.getTime() + GATEWAY_START_DEADLINE_MS);
+  if (observedAt.getTime() >= deadlineAt.getTime()) {
+    return beginManagedRunnerRecovery(connection, work, dependencies, context, {
+      reason: "gateway_deadline",
+      now: observedAt,
+    });
+  }
+
+  const runner = await getAssignedRunner(connection, work);
+
+  if (!runner) {
+    return maybeRecoverManagedTransport(connection, work, dependencies, context, observedAt);
   }
 
   const adapter = createRunnerAdapter(runner, dependencies, context);
   const status = await adapter.status(work.agentId);
 
   if (!status.ok || !("snapshot" in status)) {
-    return retryStartConvergence(
-      connection,
-      work,
-      dependencies,
-      hermesWorkloadImage,
-      now,
-      context,
-      runner,
-    );
+    return maybeRecoverManagedTransport(connection, work, dependencies, context, observedAt);
   }
 
   console.info("[agentbay] agent.deployment", {
@@ -671,12 +692,10 @@ async function reconcileStartingGateway(
   });
 
   if (status.snapshot.readinessReason === "readiness_timeout") {
-    await terminallyFailDeployment(connection, work, {
-      code: "runner_start_failed",
-      now: now(),
-      cleanup: { dependencies, context },
+    return beginManagedRunnerRecovery(connection, work, dependencies, context, {
+      reason: "gateway_deadline",
+      now: observedAt,
     });
-    return "failed";
   }
 
   if (isReadySnapshot(status.snapshot, work)) {
@@ -685,120 +704,228 @@ async function reconcileStartingGateway(
       : "retry_scheduled";
   }
 
-  if (requiresStartConvergence(status.snapshot, work)) {
-    return retryStartConvergence(
-      connection,
-      work,
-      dependencies,
-      hermesWorkloadImage,
-      now,
-      context,
-      runner,
-    );
-  }
-
-  if (isRetryableSnapshot(status.snapshot)) {
-    return scheduleRetry(connection, work, "gateway_starting", now());
-  }
-
-  return retryStartConvergence(
+  return scheduleRetry(
     connection,
     work,
-    dependencies,
-    hermesWorkloadImage,
-    now,
-    context,
-    runner,
+    requiresStartConvergence(status.snapshot, work)
+      ? "runner_transport_unavailable"
+      : "gateway_starting",
+    observedAt,
   );
 }
 
-async function retryStartConvergence(
+async function maybeRecoverManagedTransport(
   connection: DatabaseConnection,
   work: ClaimedDeploymentWork,
   dependencies: AgentDeploymentReconcilerDependencies,
-  hermesWorkloadImage: string,
-  now: () => Date,
   context: DeploymentActionContext,
-  runner: ManualRunnerRecord,
+  now: Date,
 ): Promise<AgentDeploymentReconcileOutcome> {
-  const launch = await (dependencies.launchSpec ?? buildHermesAgentLaunchSpecForUser)(
-    work.userId,
-    work.agentId,
-    { hermesWorkloadImage },
-  );
-
-  if (!launch.ok || launch.spec.agent.configRevision !== work.configRevision) {
-    await terminallyFailDeployment(connection, work, {
-      code: "managed_configuration_invalid",
-      now: now(),
-      cleanup: { dependencies, context },
-    });
-    return "failed";
-  }
-
-  const started = await createRunnerAdapter(runner, dependencies, context).start(
-    work.agentId,
-    launch.spec,
-  );
-
-  if (!started.ok) {
-    return scheduleRetry(connection, work, "runner_transport_unavailable", now());
-  }
-
-  if (!("state" in started)) {
-    return scheduleRetry(connection, work, "gateway_starting", now());
-  }
-
-  if (started.state === "ready") {
-    if (
-      !started.target ||
-      started.target.configRevision !== work.configRevision ||
-      started.target.image !== launch.spec.image.ref ||
-      started.target.launchSpecVersion !== launch.spec.version
-    ) {
-      await terminallyFailDeployment(connection, work, {
-        code: "runner_start_failed",
-        now: now(),
-        cleanup: { dependencies, context },
-      });
-      return "failed";
-    }
-
-    const persisted = await connection.db.transaction((tx) =>
-      persistRunnerAcceptedAndStage(tx, work, {
-        operationId: randomUUID(),
-        acceptedAt: now(),
-        nextStage: "starting_gateway",
-        now: now(),
-      }),
-    );
-    return persisted ? "advanced" : "retry_scheduled";
-  }
-
-  if (
-    started.state !== "accepted" ||
-    started.operation.target.configRevision !== work.configRevision ||
-    started.operation.target.image !== launch.spec.image.ref ||
-    started.operation.target.launchSpecVersion !== launch.spec.version
-  ) {
+  const reason = await readManagedRunnerRecoveryReason(connection, work, "endpoint_failure", now);
+  if (!reason) {
     await terminallyFailDeployment(connection, work, {
       code: "runner_start_failed",
-      now: now(),
+      now,
       cleanup: { dependencies, context },
     });
     return "failed";
   }
+  if (reason === "endpoint_failure" && work.attemptCount < STAGE_RETRY_LIMITS.configuring_hermes) {
+    return scheduleRetry(connection, work, "runner_transport_unavailable", now);
+  }
+  return beginManagedRunnerRecovery(connection, work, dependencies, context, { reason, now });
+}
 
-  const persisted = await connection.db.transaction((tx) =>
-    persistRunnerAcceptedAndStage(tx, work, {
-      operationId: started.operation.id,
-      acceptedAt: new Date(started.operation.acceptedAt),
-      nextStage: "starting_gateway",
-      now: now(),
-    }),
+async function beginManagedRunnerRecovery(
+  connection: DatabaseConnection,
+  work: ClaimedDeploymentWork,
+  dependencies: AgentDeploymentReconcilerDependencies,
+  context: DeploymentActionContext,
+  input: { reason: RunnerReplacementReason; now: Date },
+): Promise<AgentDeploymentReconcileOutcome> {
+  const verifiedReason = await readManagedRunnerRecoveryReason(
+    connection,
+    work,
+    input.reason,
+    input.now,
   );
+  if (!verifiedReason || !work.agentRunnerId) {
+    await terminallyFailDeployment(connection, work, {
+      code: "runner_start_failed",
+      now: input.now,
+      cleanup: { dependencies, context },
+    });
+    return "failed";
+  }
+  const sourceRunnerId = work.agentRunnerId;
 
-  return persisted ? "advanced" : "retry_scheduled";
+  const prepared = await connection.db.transaction(async (tx) => {
+    const [locked] = await tx.execute<{ id: string }>(sql`
+      select ${agentDeployments.id} as id
+      from ${agentDeployments}
+      where ${agentDeployments.id} = ${work.id}
+        and ${agentDeployments.stage} = ${work.stage}
+        and ${agentDeployments.configRevision} = ${work.configRevision}
+        and ${agentDeployments.leaseOwner} = ${work.leaseOwner}
+        and ${agentDeployments.leaseExpiresAt} > ${input.now.toISOString()}
+      for update
+    `);
+    if (!locked) return { kind: "stale" as const };
+
+    const windowFloor = new Date(input.now.getTime() - REPLACEMENT_WINDOW_MS);
+    const [history] = await tx.execute<{
+      count: number;
+      budgetExhausted: boolean;
+    }>(sql`
+      select
+        count(*)::int as count,
+        coalesce(bool_or(${runnerReplacements.terminalCode} = 'replacement_budget_exhausted'), false) as "budgetExhausted"
+      from ${runnerReplacements}
+      where ${runnerReplacements.triggerDeploymentId} = ${work.id}
+        and ${runnerReplacements.startedAt} > ${windowFloor.toISOString()}
+    `);
+    if (history?.budgetExhausted || (history?.count ?? 0) >= MAX_REPLACEMENTS_PER_DEPLOYMENT) {
+      const failed = await markDeploymentFailedInTransaction(tx, work, {
+        code: "replacement_budget_exhausted",
+        now: input.now,
+        cleanupRequired: false,
+      });
+      return failed ? { kind: "failed" as const } : { kind: "stale" as const };
+    }
+
+    const created = await createOrGetRunnerReplacement({
+      db: tx,
+      sourceRunnerId,
+      triggerDeploymentId: work.id,
+      reason: verifiedReason,
+      operationKey: `agentbay-replace-${(dependencies.randomUUID?.() ?? randomUUID()).replaceAll(
+        "-",
+        "",
+      )}`,
+      now: input.now,
+    });
+    const [paused] = await tx.execute<{ id: string }>(sql`
+      update ${agentDeployments}
+      set error_code = 'runner_recovery_in_progress',
+          error_detail = 'Automatic runner recovery is preparing validated capacity.',
+          next_attempt_at = null,
+          lease_owner = null,
+          lease_expires_at = null,
+          updated_at = ${input.now.toISOString()}
+      where ${agentDeployments.id} = ${work.id}
+        and ${agentDeployments.stage} = ${work.stage}
+        and ${agentDeployments.configRevision} = ${work.configRevision}
+        and ${agentDeployments.leaseOwner} = ${work.leaseOwner}
+        and ${agentDeployments.leaseExpiresAt} > ${input.now.toISOString()}
+      returning id
+    `);
+    if (!paused) throw new LostDeploymentLeaseError();
+    await tx.execute(sql`
+      update ${runners}
+      set status = 'degraded', updated_at = ${input.now.toISOString()}
+      where ${runners.id} = ${sourceRunnerId}
+        and ${runners.userId} = ${work.userId}
+        and ${runners.kind} = ${DIGITALOCEAN_RUNNER_KIND}
+        and ${runners.provider} = ${DIGITALOCEAN_PROVIDER}
+        and ${runners.deletedAt} is null
+    `);
+    await recordAgentEventsInTransaction(tx, [
+      {
+        agentId: work.agentId,
+        actorUserId: work.userId,
+        type: "agent.runner_recovery_started",
+        message: "Automatic runner recovery started.",
+        metadata: {
+          deploymentId: work.id,
+          replacementId: created.replacement.id,
+          reason: verifiedReason,
+        },
+        createdAt: input.now,
+      },
+    ]);
+    return {
+      kind: "recovering" as const,
+      replacementId: created.replacement.id,
+      captureDiagnostics: created.created && (history?.count ?? 0) === 0,
+    };
+  });
+
+  if (prepared.kind === "failed") return "failed";
+  if (prepared.kind === "stale") return "retry_scheduled";
+
+  if (prepared.captureDiagnostics) {
+    const runner = await getAssignedRunner(connection, work);
+    if (runner) {
+      const adapter = createRunnerAdapter(runner, dependencies, context);
+      try {
+        await adapter.streamLogs({ agentId: work.agentId, limit: 100 });
+      } catch {
+        // Log capture is best-effort and adapter persistence is bounded and redacted.
+      }
+      try {
+        await adapter.stop(work.agentId);
+      } catch {
+        // Replacement fencing repeats exact best-effort stop before handover.
+      }
+    }
+  }
+
+  (dependencies.triggerReplacement ?? scheduleRunnerReplacementReconcileAfterResponse)(
+    prepared.replacementId,
+  );
+  return "recovering";
+}
+
+async function readManagedRunnerRecoveryReason(
+  connection: DatabaseConnection,
+  work: ClaimedDeploymentWork,
+  fallback: RunnerReplacementReason,
+  now: Date,
+): Promise<RunnerReplacementReason | null> {
+  if (!work.agentRunnerId) return null;
+  const [runner] = await connection.db
+    .select({
+      kind: runners.kind,
+      provider: runners.provider,
+      providerResourceId: runners.providerResourceId,
+      provisioningStatus: runners.provisioningStatus,
+      compatibilityState: runners.compatibilityState,
+      status: runners.status,
+      endpointUrl: runners.endpointUrl,
+    })
+    .from(runners)
+    .where(
+      sql`${runners.id} = ${work.agentRunnerId} and ${runners.userId} = ${work.userId} and ${runners.deletedAt} is null`,
+    )
+    .limit(1);
+  if (
+    !runner ||
+    runner.kind !== DIGITALOCEAN_RUNNER_KIND ||
+    runner.provider !== DIGITALOCEAN_PROVIDER
+  ) {
+    return null;
+  }
+  if (!runner.providerResourceId) return "provider_resource_missing";
+  if (runner.provisioningStatus === "failed") return "boot_failure";
+  if (runner.compatibilityState !== "compatible") return "release_mismatch";
+  if (fallback === "gateway_deadline") return fallback;
+  const [heartbeat] = await connection.db
+    .select({ status: runnerHeartbeats.status, observedAt: runnerHeartbeats.observedAt })
+    .from(runnerHeartbeats)
+    .where(sql`${runnerHeartbeats.runnerId} = ${work.agentRunnerId}`)
+    .orderBy(sql`${runnerHeartbeats.observedAt} desc, ${runnerHeartbeats.createdAt} desc`)
+    .limit(1);
+  const heartbeatAt = toDate(heartbeat?.observedAt ?? null);
+  if (
+    ["offline", "degraded"].includes(runner.status) ||
+    heartbeat?.status !== "online" ||
+    !heartbeatAt ||
+    now.getTime() - heartbeatAt.getTime() >= RUNNER_HEARTBEAT_STALE_THRESHOLD_MS
+  ) {
+    return "stale_heartbeat";
+  }
+  if (!runner.endpointUrl) return "endpoint_failure";
+  return fallback;
 }
 
 async function reconcileVerifyingModel(
@@ -911,18 +1038,13 @@ async function reconcileConnectingTelegram(
   const runner = await getAssignedRunner(connection, work);
 
   if (!runner) {
-    await terminallyFailDeployment(connection, work, {
-      code: "telegram_connection_failed",
-      now: now(),
-      cleanup: { dependencies, context },
-    });
-    return "failed";
+    return maybeRecoverManagedTransport(connection, work, dependencies, context, now());
   }
 
   const status = await createRunnerAdapter(runner, dependencies, context).status(work.agentId);
 
   if (!status.ok || !("snapshot" in status)) {
-    return scheduleRetry(connection, work, "runner_transport_unavailable", now());
+    return maybeRecoverManagedTransport(connection, work, dependencies, context, now());
   }
 
   if (!isReadySnapshot(status.snapshot, work)) {
@@ -978,6 +1100,11 @@ async function claimOneDeploymentForReconcile(
         and ${agents.desiredStatus} = 'running'
         and (${agentDeployments.nextAttemptAt} is null or ${agentDeployments.nextAttemptAt} <= ${nowIso})
         and (${agentDeployments.leaseExpiresAt} is null or ${agentDeployments.leaseExpiresAt} <= ${nowIso})
+        and not exists (
+          select 1 from ${runnerReplacements}
+          where ${runnerReplacements.triggerDeploymentId} = ${agentDeployments.id}
+            and ${runnerReplacements.state} not in ('complete', 'failed')
+        )
         ${targetSql}
       order by ${agentDeployments.createdAt}, ${agentDeployments.id}
       for update of ${agentDeployments} skip locked
@@ -1141,6 +1268,7 @@ async function markDeploymentStage(
   const [updated] = await tx.execute<{ id: string }>(sql`
     update ${agentDeployments}
     set stage = ${input.nextStage},
+        attempt_count = 0,
         error_code = null,
         error_detail = null,
         next_attempt_at = null,
@@ -1199,6 +1327,7 @@ async function persistRunnerAcceptedAndStage(
   const [updated] = await tx.execute<{ id: string }>(sql`
     update ${agentDeployments}
     set stage = ${input.nextStage},
+        attempt_count = 0,
         runner_operation_id = ${input.operationId},
         runner_accepted_at = ${input.acceptedAt.toISOString()},
         error_code = null,
@@ -1256,9 +1385,9 @@ async function scheduleRetry(
   reason: keyof typeof RETRYABLE_DETAILS,
   now: Date,
 ): Promise<"failed" | "retry_scheduled"> {
-  if (work.attemptCount >= MAX_AUTOMATIC_DEPLOYMENT_ATTEMPTS) {
+  if (work.attemptCount >= STAGE_RETRY_LIMITS[work.stage]) {
     await terminallyFailDeployment(connection, work, {
-      code: "deployment_attempts_exhausted",
+      code: terminalCodeForRetryExhaustion(work.stage),
       now,
     });
     return "failed";
@@ -1266,12 +1395,23 @@ async function scheduleRetry(
 
   const detail = RETRYABLE_DETAILS[reason];
   const backoffMs = computeDeploymentBackoffMs(work.attemptCount);
+  const proposedAttemptAt = new Date(now.getTime() + backoffMs);
+  const gatewayAcceptedAt =
+    work.stage === "starting_gateway" ? toDate(work.runnerAcceptedAt) : null;
+  const nextAttemptAt = gatewayAcceptedAt
+    ? new Date(
+        Math.min(
+          proposedAttemptAt.getTime(),
+          gatewayAcceptedAt.getTime() + GATEWAY_START_DEADLINE_MS,
+        ),
+      )
+    : proposedAttemptAt;
 
   await connection.db.execute(sql`
     update ${agentDeployments}
     set error_code = ${reason},
         error_detail = ${detail},
-        next_attempt_at = ${new Date(now.getTime() + backoffMs).toISOString()},
+        next_attempt_at = ${nextAttemptAt.toISOString()},
         lease_owner = null,
         lease_expires_at = null,
         updated_at = ${now.toISOString()}
@@ -1410,6 +1550,7 @@ async function markCanaryPassedAndStage(
   const [updated] = await tx.execute<{ id: string }>(sql`
     update ${agentDeployments}
     set stage = ${input.nextStage},
+        attempt_count = 0,
         canary_state = 'passed',
         canary_completed_at = ${input.now.toISOString()},
         error_code = null,
@@ -1851,7 +1992,7 @@ async function defaultProvisioner(
     runnerId: work.agentRunnerId,
     operationKey,
     attemptCount: work.attemptCount,
-    maxAttempts: MAX_AUTOMATIC_DEPLOYMENT_ATTEMPTS,
+    maxAttempts: STAGE_RETRY_LIMITS.provisioning_runner,
     config,
     provider,
     context,
@@ -1888,6 +2029,7 @@ function safeTerminalDetail(code: DeploymentTerminalErrorCode): string {
       runner_provisioning_outcome_unknown:
         "Runner provisioning outcome is unknown and requires operator confirmation.",
       runner_start_failed: "Hermes runner start could not be confirmed.",
+      replacement_budget_exhausted: "Automatic runner recovery reached its safe limit.",
       telegram_connection_failed: "Telegram connection could not be confirmed.",
     } satisfies Record<DeploymentTerminalErrorCode, string>
   )[code];
@@ -1898,4 +2040,19 @@ function safeTerminalDetail(code: DeploymentTerminalErrorCode): string {
   }
 
   return normalized.value;
+}
+
+function terminalCodeForRetryExhaustion(stage: AgentDeploymentStage): DeploymentTerminalErrorCode {
+  if (stage === "provisioning_runner" || stage === "pending") {
+    return "runner_provisioning_outcome_unknown";
+  }
+  if (stage === "verifying_model") return "model_canary_outcome_unknown";
+  if (stage === "connecting_telegram") return "telegram_connection_failed";
+  return "deployment_attempts_exhausted";
+}
+
+function toDate(value: Date | string | null): Date | null {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }

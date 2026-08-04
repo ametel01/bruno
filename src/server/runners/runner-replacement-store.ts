@@ -3,6 +3,7 @@ import "server-only";
 import { and, eq, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
 import {
   agentDeploymentReplacementBudgets,
   agentDeployments,
@@ -10,13 +11,12 @@ import {
   runnerReplacements,
   runners,
 } from "@/src/server/db/schema";
-import type * as schema from "@/src/server/db/schema";
 import {
   isRunnerReplacementReason,
   isRunnerReplacementState,
-  transitionRunnerReplacement,
   type RunnerReplacementAction,
   type RunnerReplacementReason,
+  transitionRunnerReplacement,
 } from "@/src/server/runners/runner-replacement-state";
 
 type RunnerReplacementTransaction = Parameters<
@@ -105,10 +105,11 @@ export async function createOrGetRunnerReplacement(input: {
               on ${agents.id} = ${agentDeployments.agentId}
              and ${agents.userId} = ${agentDeployments.userId}
             where ${agentDeployments.id} = ${input.triggerDeploymentId}
-              and ${agentDeployments.stage} = 'ready'
+              and ${agentDeployments.stage} <> 'failed'
               and ${agents.userId} = ${runners.userId}
               and ${agents.runnerId} = ${runners.id}
               and ${agents.deletedAt} is null
+              and ${agents.desiredStatus} = 'running'
           )
         )
       on conflict do nothing

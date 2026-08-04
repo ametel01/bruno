@@ -17,6 +17,10 @@
     {
       "path": "/api/internal/runner-infrastructure/reconcile",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/internal/runner-replacements/reconcile",
+      "schedule": "* * * * *"
     }
   ]
 }

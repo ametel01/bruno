@@ -26,6 +26,7 @@ import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   agentConfigs,
+  agentDeploymentReplacementBudgets,
   agentDeployments,
   agentEvents,
   agentRuntimeReconciliations,
@@ -34,6 +35,7 @@ import {
   runnerHeartbeats,
   runnerProvisioningEvents,
   runnerRegistrationTokens,
+  runnerReplacements,
   runners,
   users,
 } from "@/src/server/db/schema";
@@ -208,7 +210,13 @@ export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
     await observeStage(inspection, deploymentId, stages);
 
     for (let wave = 0; wave < 16; wave += 1) {
-      logicalNow = new Date(logicalNow.getTime() + 61_000);
+      const [beforeWave] = await inspection.db
+        .select({ stage: agentDeployments.stage })
+        .from(agentDeployments)
+        .where(eq(agentDeployments.id, deploymentId));
+      logicalNow = new Date(
+        logicalNow.getTime() + (beforeWave?.stage === "starting_gateway" ? 5_000 : 61_000),
+      );
       if (heartbeatCommitted) {
         await inspection.db
           .update(runnerHeartbeats)
@@ -532,6 +540,12 @@ export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
     await inspection.db
       .delete(agentRuntimeReconciliations)
       .where(eq(agentRuntimeReconciliations.agentId, agentId));
+    await inspection.db
+      .delete(agentDeploymentReplacementBudgets)
+      .where(eq(agentDeploymentReplacementBudgets.deploymentId, deploymentId));
+    await inspection.db
+      .delete(runnerReplacements)
+      .where(eq(runnerReplacements.triggerDeploymentId, deploymentId));
     await inspection.db.delete(agentDeployments).where(eq(agentDeployments.id, deploymentId));
     await inspection.db.delete(agentConfigs).where(eq(agentConfigs.agentId, agentId));
     await inspection.db.delete(agents).where(eq(agents.id, agentId));
@@ -585,6 +599,12 @@ export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
     await inspection.db
       .delete(agentRuntimeReconciliations)
       .where(eq(agentRuntimeReconciliations.agentId, agentId));
+    await inspection.db
+      .delete(agentDeploymentReplacementBudgets)
+      .where(eq(agentDeploymentReplacementBudgets.deploymentId, deploymentId));
+    await inspection.db
+      .delete(runnerReplacements)
+      .where(eq(runnerReplacements.triggerDeploymentId, deploymentId));
     await inspection.db.delete(agentDeployments).where(eq(agentDeployments.id, deploymentId));
     await inspection.db.delete(agentConfigs).where(eq(agentConfigs.agentId, agentId));
     await inspection.db.delete(agents).where(eq(agents.id, agentId));

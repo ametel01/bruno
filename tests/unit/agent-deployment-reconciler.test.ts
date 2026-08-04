@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RunnerAgentStatusSnapshot } from "@/src/runner-service/runner-contracts";
 import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
+import type { RunnerAgentStatusSnapshot } from "@/src/runner-service/runner-contracts";
 import {
   computeDeploymentBackoffMs,
   reconcileNextAgentDeployment,
@@ -12,6 +12,7 @@ import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   agentConfigs,
+  agentDeploymentReplacementBudgets,
   agentDeployments,
   agentEvents,
   agentLogs,
@@ -21,6 +22,7 @@ import {
   runnerHeartbeats,
   runnerProvisioningEvents,
   runnerRegistrationTokens,
+  runnerReplacements,
   runners,
   users,
 } from "@/src/server/db/schema";
@@ -100,7 +102,7 @@ describe("agent deployment reconciler", () => {
     });
     expect(deployment).toMatchObject({
       stage: "configuring_hermes",
-      attemptCount: 1,
+      attemptCount: 0,
       leaseOwner: null,
     });
     expect(events.map((event) => event.type)).toEqual([
@@ -516,7 +518,7 @@ describe("agent deployment reconciler", () => {
     ["absent", convergenceSnapshot("absent")],
     ["terminal", convergenceSnapshot("terminal")],
     ["revision mismatch", convergenceSnapshot("revision_mismatch")],
-  ])("performs one same-v3 convergence launch for %s status", async (_name, snapshot) => {
+  ])("waits without relaunching the same runner for %s status", async (_name, snapshot) => {
     await seedRunner(connection);
     await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
     await seedDeployment(connection, {
@@ -527,10 +529,8 @@ describe("agent deployment reconciler", () => {
     const launchSpec = managedLaunchSpec({ image: { ref: CUSTOM_HERMES_IMAGE } });
     const launchSpecBuilder = vi.fn(async () => ({ ok: true as const, spec: launchSpec }));
     const readHermesWorkloadImage = vi.fn(() => CUSTOM_HERMES_IMAGE);
-    const replacementOperationId = "00000000-0000-4000-8000-00000000a742";
     const adapter = fakeRunnerAdapter({
       status: vi.fn(async () => ({ ok: true, runner: manualRunner(), snapshot })),
-      start: vi.fn(async () => acceptedStart(launchSpec, replacementOperationId)),
     });
 
     await expect(
@@ -541,14 +541,12 @@ describe("agent deployment reconciler", () => {
         launchSpec: launchSpecBuilder,
         manualRunnerAdapter: () => adapter as never,
       }),
-    ).resolves.toEqual({ processed: 1, outcome: "advanced" });
+    ).resolves.toEqual({ processed: 1, outcome: "retry_scheduled" });
 
     expect(adapter.status).toHaveBeenCalledTimes(1);
-    expect(adapter.start).toHaveBeenCalledTimes(1);
+    expect(adapter.start).not.toHaveBeenCalled();
     expect(readHermesWorkloadImage).toHaveBeenCalledOnce();
-    expect(launchSpecBuilder).toHaveBeenCalledWith(USER_ID, AGENT_ID, {
-      hermesWorkloadImage: CUSTOM_HERMES_IMAGE,
-    });
+    expect(launchSpecBuilder).not.toHaveBeenCalled();
     expect(adapter.canary).not.toHaveBeenCalled();
     const [deployment] = await connection.db
       .select()
@@ -556,12 +554,12 @@ describe("agent deployment reconciler", () => {
       .where(eq(agentDeployments.id, DEPLOYMENT_ID));
     expect(deployment).toMatchObject({
       stage: "starting_gateway",
-      runnerOperationId: replacementOperationId,
+      runnerOperationId: OPERATION_ID,
     });
   });
 
-  it("fails and cleans up one timed-out gateway instead of restarting it indefinitely", async () => {
-    await seedRunner(connection);
+  it("captures and stops once when runner evidence reports the gateway deadline", async () => {
+    await seedAutomaticRunner(connection, { status: "online", provisioningStatus: "ready" });
     await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
     await seedDeployment(connection, {
       stage: "starting_gateway",
@@ -579,14 +577,17 @@ describe("agent deployment reconciler", () => {
     const adapter = fakeRunnerAdapter({
       status: vi.fn(async () => ({ ok: true, runner: manualRunner(), snapshot })),
     });
+    const triggerReplacement = vi.fn();
 
     await expect(
       reconcileNextAgentDeployment({
         createConnection: () => connection,
         now: () => NOW,
         manualRunnerAdapter: () => adapter as never,
+        randomUUID: () => "99999999-9999-4999-8999-999999999999",
+        triggerReplacement,
       }),
-    ).resolves.toEqual({ processed: 1, outcome: "failed" });
+    ).resolves.toEqual({ processed: 1, outcome: "recovering" });
 
     await expect(
       reconcileNextAgentDeployment({
@@ -606,13 +607,21 @@ describe("agent deployment reconciler", () => {
       .from(agentDeployments)
       .where(eq(agentDeployments.id, DEPLOYMENT_ID));
     expect(deployment).toMatchObject({
-      stage: "failed",
-      errorCode: "runner_start_failed",
+      stage: "starting_gateway",
+      errorCode: "runner_recovery_in_progress",
       nextAttemptAt: null,
     });
+    const [replacement] = await connection.db.select().from(runnerReplacements);
+    expect(replacement).toMatchObject({
+      sourceRunnerId: RUNNER_ID,
+      triggerDeploymentId: DEPLOYMENT_ID,
+      reason: "gateway_deadline",
+      state: "pending",
+    });
+    expect(triggerReplacement).toHaveBeenCalledWith(replacement?.id);
   });
 
-  it("adopts exact legacy-ready launch evidence, then replaces compatibility correlation on exact convergence", async () => {
+  it("adopts exact legacy-ready launch evidence without relaunching on later mismatch", async () => {
     await seedRunner(connection);
     await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
     await seedDeployment(connection, { stage: "configuring_hermes" });
@@ -658,14 +667,14 @@ describe("agent deployment reconciler", () => {
 
     await expect(reconcileNextAgentDeployment(dependencies)).resolves.toEqual({
       processed: 1,
-      outcome: "advanced",
+      outcome: "retry_scheduled",
     });
     const [converged] = await connection.db
       .select()
       .from(agentDeployments)
       .where(eq(agentDeployments.id, DEPLOYMENT_ID));
-    expect(converged?.runnerOperationId).toBe(replacementOperationId);
-    expect(adapter.start).toHaveBeenCalledTimes(2);
+    expect(converged?.runnerOperationId).not.toBe(replacementOperationId);
+    expect(adapter.start).toHaveBeenCalledTimes(1);
   });
 
   it("clears a canary marker and backs off only for exact 409 no-dispatch proof", async () => {
@@ -703,7 +712,7 @@ describe("agent deployment reconciler", () => {
   });
 
   it("treats ambiguous canary transport as terminal and captures redacted logs before bounded stop", async () => {
-    await seedRunner(connection);
+    await seedAutomaticRunner(connection, { status: "online", provisioningStatus: "ready" });
     await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
     await seedDeployment(connection, {
       stage: "verifying_model",
@@ -761,10 +770,11 @@ describe("agent deployment reconciler", () => {
       canaryState: "outcome_unknown",
       errorCode: "model_canary_outcome_unknown",
     });
+    expect(await connection.db.select().from(runnerReplacements)).toHaveLength(0);
   });
 
   it("propagates one shared 45-second signal budget to every runner transport", async () => {
-    await seedRunner(connection);
+    await seedAutomaticRunner(connection, { status: "online", provisioningStatus: "ready" });
     await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
     await seedDeployment(connection, { stage: "configuring_hermes" });
     const launchSpec = managedLaunchSpec();
@@ -788,15 +798,15 @@ describe("agent deployment reconciler", () => {
     expect(seen[0]?.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("fails attempt 64 in the same call without leaving a claimable attempt 65", async () => {
-    await seedRunner(connection);
+  it("waits at 29,999 ms and starts one replacement at the exact 30,000 ms boundary", async () => {
+    await seedAutomaticRunner(connection, { status: "online", provisioningStatus: "ready" });
     await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
     await seedDeployment(connection, {
       stage: "starting_gateway",
       runnerOperationId: OPERATION_ID,
       runnerAcceptedAt: NOW,
-      attemptCount: 63,
     });
+    let current = new Date(NOW.getTime() + 29_999);
     const adapter = fakeRunnerAdapter({
       status: vi.fn(async () => ({
         ok: true,
@@ -804,12 +814,161 @@ describe("agent deployment reconciler", () => {
         snapshot: startingSnapshot(),
       })),
     });
+    const triggerReplacement = vi.fn();
+    const dependencies = {
+      createConnection: () => connection,
+      now: () => current,
+      manualRunnerAdapter: () => adapter as never,
+      randomUUID: () => "99999999-9999-4999-8999-999999999998",
+      triggerReplacement,
+    };
+
+    await expect(reconcileNextAgentDeployment(dependencies)).resolves.toEqual({
+      processed: 1,
+      outcome: "retry_scheduled",
+    });
+
+    const [waiting] = await connection.db
+      .select()
+      .from(agentDeployments)
+      .where(eq(agentDeployments.id, DEPLOYMENT_ID));
+    expect(waiting?.stage).toBe("starting_gateway");
+    expect(waiting?.nextAttemptAt?.toISOString()).toBe(
+      new Date(NOW.getTime() + 30_000).toISOString(),
+    );
+    expect(adapter.status).toHaveBeenCalledOnce();
+    expect(adapter.start).not.toHaveBeenCalled();
+    expect(await connection.db.select().from(runnerReplacements)).toHaveLength(0);
+
+    current = new Date(NOW.getTime() + 30_000);
+    await expect(reconcileNextAgentDeployment(dependencies)).resolves.toEqual({
+      processed: 1,
+      outcome: "recovering",
+    });
+    expect(adapter.status).toHaveBeenCalledOnce();
+    expect(adapter.streamLogs).toHaveBeenCalledOnce();
+    expect(adapter.stop).toHaveBeenCalledOnce();
+    expect(triggerReplacement).toHaveBeenCalledOnce();
+    expect(await connection.db.select().from(runnerReplacements)).toHaveLength(1);
+  });
+
+  it("retries a missing endpoint twice, then recovers without a same-runner launch", async () => {
+    await seedAutomaticRunner(connection, { status: "online", provisioningStatus: "ready" });
+    await connection.db.insert(runnerHeartbeats).values({
+      runnerId: RUNNER_ID,
+      status: "online",
+      metadata: { metrics: { maxAgents: 1, runningAgents: 0 } },
+      observedAt: NOW,
+      createdAt: NOW,
+    });
+    await connection.db
+      .update(runners)
+      .set({ endpointUrl: null, updatedAt: NOW })
+      .where(eq(runners.id, RUNNER_ID));
+    await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
+    await seedDeployment(connection, { stage: "configuring_hermes" });
+    const launchSpec = managedLaunchSpec();
+    const adapterFactory = vi.fn();
+    const triggerReplacement = vi.fn();
+    let current = NOW;
+    const dependencies = {
+      createConnection: () => connection,
+      now: () => current,
+      launchSpec: async () => ({ ok: true as const, spec: launchSpec }),
+      manualRunnerAdapter: adapterFactory,
+      randomUUID: () => "99999999-9999-4999-8999-999999999997",
+      triggerReplacement,
+    };
+
+    await expect(reconcileNextAgentDeployment(dependencies)).resolves.toEqual({
+      processed: 1,
+      outcome: "retry_scheduled",
+    });
+    current = new Date(NOW.getTime() + 2_000);
+    await expect(reconcileNextAgentDeployment(dependencies)).resolves.toEqual({
+      processed: 1,
+      outcome: "retry_scheduled",
+    });
+    current = new Date(NOW.getTime() + 6_000);
+    await expect(reconcileNextAgentDeployment(dependencies)).resolves.toEqual({
+      processed: 1,
+      outcome: "recovering",
+    });
+
+    expect(adapterFactory).not.toHaveBeenCalled();
+    expect(triggerReplacement).toHaveBeenCalledOnce();
+    const [replacement] = await connection.db.select().from(runnerReplacements);
+    expect(replacement?.reason).toBe("endpoint_failure");
+  });
+
+  it.each([
+    [
+      "missing provider resource",
+      { providerResourceId: null, providerFirewallId: null },
+      "provider_resource_missing",
+    ],
+    ["failed boot", { provisioningStatus: "failed" }, "boot_failure"],
+    ["release mismatch", { compatibilityState: "outdated" }, "release_mismatch"],
+    ["stale heartbeat", { status: "offline" }, "stale_heartbeat"],
+  ] as const)("routes %s into the durable replacement trigger", async (_name, changes, reason) => {
+    await seedAutomaticRunner(connection, { status: "online", provisioningStatus: "ready" });
+    await connection.db.update(runners).set(changes).where(eq(runners.id, RUNNER_ID));
+    await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
+    await seedDeployment(connection, { stage: "configuring_hermes" });
+    const launchSpec = managedLaunchSpec();
+    const adapter = fakeRunnerAdapter({
+      start: vi.fn(async () => ({ ok: false, reason: "runner_unreachable" })),
+    });
 
     await expect(
       reconcileNextAgentDeployment({
         createConnection: () => connection,
         now: () => NOW,
+        launchSpec: async () => ({ ok: true, spec: launchSpec }),
         manualRunnerAdapter: () => adapter as never,
+        randomUUID: () => "99999999-9999-4999-8999-999999999996",
+        triggerReplacement: vi.fn(),
+      }),
+    ).resolves.toEqual({ processed: 1, outcome: "recovering" });
+
+    const [replacement] = await connection.db.select().from(runnerReplacements);
+    expect(replacement?.reason).toBe(reason);
+    expect(adapter.start.mock.calls.length).toBeLessThanOrEqual(1);
+  });
+
+  it("fails safely without a third workflow when the two-replacement budget is exhausted", async () => {
+    await seedAutomaticRunner(connection, { status: "online", provisioningStatus: "ready" });
+    await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
+    await seedDeployment(connection, {
+      stage: "starting_gateway",
+      runnerOperationId: OPERATION_ID,
+      runnerAcceptedAt: NOW,
+    });
+    for (const suffix of ["1", "2"]) {
+      await connection.db.insert(runnerReplacements).values({
+        sourceRunnerId: RUNNER_ID,
+        triggerDeploymentId: DEPLOYMENT_ID,
+        reason: "gateway_deadline",
+        state: "failed",
+        operationKey: `agentbay-replace-${suffix.repeat(32)}`,
+        nextAttemptAt: null,
+        terminalCode: "target_provisioning_failed",
+        terminalSummary: "Replacement runner provisioning did not complete.",
+        startedAt: NOW,
+        failedAt: NOW,
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+    }
+    const adapter = fakeRunnerAdapter();
+    const triggerReplacement = vi.fn();
+
+    await expect(
+      reconcileNextAgentDeployment({
+        createConnection: () => connection,
+        now: () => new Date(NOW.getTime() + 30_000),
+        manualRunnerAdapter: () => adapter as never,
+        triggerReplacement,
       }),
     ).resolves.toEqual({ processed: 1, outcome: "failed" });
 
@@ -819,14 +978,13 @@ describe("agent deployment reconciler", () => {
       .where(eq(agentDeployments.id, DEPLOYMENT_ID));
     expect(deployment).toMatchObject({
       stage: "failed",
-      attemptCount: 64,
-      errorCode: "deployment_attempts_exhausted",
+      errorCode: "replacement_budget_exhausted",
       nextAttemptAt: null,
-      leaseOwner: null,
     });
-    await expect(
-      reconcileNextAgentDeployment({ createConnection: () => connection, now: () => NOW }),
-    ).resolves.toEqual({ processed: 0, outcome: "idle" });
+    expect(await connection.db.select().from(runnerReplacements)).toHaveLength(2);
+    expect(adapter.streamLogs).not.toHaveBeenCalled();
+    expect(adapter.stop).not.toHaveBeenCalled();
+    expect(triggerReplacement).not.toHaveBeenCalled();
   });
 
   it("discards a ready result after a separate connection cancels desired state", async () => {
@@ -905,7 +1063,7 @@ describe("agent deployment reconciler", () => {
         .select()
         .from(agentDeployments)
         .where(eq(agentDeployments.id, DEPLOYMENT_ID));
-      expect(deployment).toMatchObject({ stage: "configuring_hermes", attemptCount: 1 });
+      expect(deployment).toMatchObject({ stage: "configuring_hermes", attemptCount: 0 });
       const events = await connection.db.select().from(agentEvents);
       expect(events.map((event) => event.type)).toEqual([
         "agent.start_requested",
@@ -989,7 +1147,7 @@ describe("agent deployment reconciler", () => {
     ["failed", "failed", "failed"],
     ["disabled", "disabled", "failed"],
   ] as const)("classifies Telegram %s evidence without weakening terminal states", async (_name, telegramState, expectedOutcome) => {
-    await seedRunner(connection);
+    await seedAutomaticRunner(connection, { status: "online", provisioningStatus: "ready" });
     await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
     await seedDeployment(connection, {
       stage: "connecting_telegram",
@@ -1024,6 +1182,7 @@ describe("agent deployment reconciler", () => {
       .from(agentDeployments)
       .where(eq(agentDeployments.id, DEPLOYMENT_ID));
     expect(deployment?.stage).toBe(expectedOutcome === "failed" ? "failed" : "connecting_telegram");
+    expect(await connection.db.select().from(runnerReplacements)).toHaveLength(0);
   });
 
   it("terminally fails wrong-revision Telegram evidence without finalizing usage", async () => {
@@ -1112,6 +1271,8 @@ async function seedAutomaticRunner(
     kind: "digitalocean",
     status: input.status,
     provider: "digitalocean",
+    providerResourceId: input.provisioningStatus === "ready" ? "droplet-step9" : null,
+    providerFirewallId: input.provisioningStatus === "ready" ? "firewall-step9" : null,
     endpointUrl: input.provisioningStatus === "ready" ? "https://192-0-2-10.sslip.io" : null,
     region: "sfo3",
     sizeSlug: "s-1vcpu-1gb",
@@ -1384,6 +1545,8 @@ async function resetTables(connection: DatabaseConnection) {
   await connection.db.delete(agentEvents);
   await connection.db.delete(agentUsagePeriods);
   await connection.db.delete(agentRuntimeReconciliations);
+  await connection.db.delete(agentDeploymentReplacementBudgets);
+  await connection.db.delete(runnerReplacements);
   await connection.db.delete(agentDeployments);
   await connection.db.delete(agentConfigs);
   await connection.db.delete(agents);

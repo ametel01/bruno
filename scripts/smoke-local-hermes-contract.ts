@@ -554,7 +554,9 @@ async function drivePersistedHermesController(input: {
         .where(eq(agentDeployments.id, deploymentId));
       if (!deployment) throw new Error("Persisted Hermes deployment disappeared.");
       if (stages.at(-1) !== deployment.stage) stages.push(deployment.stage);
-      logicalNow = new Date(logicalNow.getTime() + 91_000);
+      logicalNow = new Date(
+        logicalNow.getTime() + (deployment.stage === "starting_gateway" ? 5_000 : 91_000),
+      );
       return result;
     };
 
