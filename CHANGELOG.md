@@ -126,6 +126,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Assigned DigitalOcean runners no longer raise misleading offline or degraded operational alerts while cloud provisioning is actively progressing.
 - The empty agent list now shows a real “Create your first agent” action that jumps to Guided setup instead of leaving a decorative line that could be mistaken for a broken button.
 - Deployment and runtime reconciliation now use the exact configured `AGENTBAY_HERMES_WORKLOAD_IMAGE` instead of falling back to the source-pinned default during launch and observation.
 - Intentional Stop now remains authoritative across runner and Docker restarts, while agent inventory, detail, dashboard, and the runtime endpoint report current managed gateway and Telegram truth instead of stale deployment readiness.

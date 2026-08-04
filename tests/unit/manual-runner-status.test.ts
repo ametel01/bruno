@@ -195,6 +195,31 @@ describe("manual runner status summaries", () => {
     expect(JSON.stringify(summary)).not.toContain("stored-for-downstream");
   });
 
+  it.each([
+    "pending",
+    "creating",
+    "tagging",
+    "firewall_configuring",
+    "bootstrapping",
+    "waiting_for_runner",
+  ])("does not raise a broken-runner alert while cloud provisioning is %s", (provisioningStatus) => {
+    const assigned = toAssignedManualRunnerStatusSummary({
+      name: "Provisioning Runner",
+      kind: "digitalocean",
+      endpointUrl: null,
+      status: "provisioning",
+      provisioningStatus,
+      updatedAt: "2026-08-04T03:14:35.303Z",
+    });
+
+    expect(assigned).toMatchObject({
+      status: "degraded",
+      provisioningStatus,
+      alertState: null,
+      alertMessage: null,
+    });
+  });
+
   it("adds a settings-only management id without adding secret or hash fields", () => {
     const summary = toSettingsRunnerManagementSummary({
       id: "00000000-0000-4000-8000-000000000133",

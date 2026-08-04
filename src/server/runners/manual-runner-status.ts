@@ -2,7 +2,10 @@ import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agents, runnerHeartbeats, runners } from "@/src/server/db/schema";
-import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
+import {
+  type DigitalOceanProvisioningStatus,
+  DIGITALOCEAN_RUNNER_KIND,
+} from "@/src/server/runners/digitalocean-provider";
 import { MANUAL_RUNNER_KIND } from "@/src/server/runners/manual-runner-persistence";
 import {
   normalizeRunnerCapacitySnapshot,
@@ -63,6 +66,14 @@ type ManualRunnerStatusRow = {
 };
 
 const RUNNER_STATUS_RUNNING_AGENT_STATES = ["starting", "running", "restarting"] as const;
+const ACTIVE_CLOUD_RUNNER_PROVISIONING_STATUSES = new Set<DigitalOceanProvisioningStatus>([
+  "pending",
+  "creating",
+  "tagging",
+  "firewall_configuring",
+  "bootstrapping",
+  "waiting_for_runner",
+]);
 
 export class ManualRunnerStatusPersistenceError extends Error {
   constructor() {
@@ -505,8 +516,18 @@ export function toAssignedManualRunnerStatusSummary(
   row: ManualRunnerStatusRow,
 ): AssignedManualRunnerStatusSummary {
   const summary = toManualRunnerStatusSummary(row);
-  const alertState =
-    summary.status === "offline" ? "offline" : summary.status === "degraded" ? "degraded" : null;
+  const provisioningInProgress =
+    row.kind === DIGITALOCEAN_RUNNER_KIND &&
+    ACTIVE_CLOUD_RUNNER_PROVISIONING_STATUSES.has(
+      row.provisioningStatus as DigitalOceanProvisioningStatus,
+    );
+  const alertState = provisioningInProgress
+    ? null
+    : summary.status === "offline"
+      ? "offline"
+      : summary.status === "degraded"
+        ? "degraded"
+        : null;
 
   return {
     ...summary,
