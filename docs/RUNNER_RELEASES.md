@@ -12,6 +12,14 @@ automatic production build unless the release workflow supplies its non-secret
 rollback jobs are the only repository-owned paths that supply that marker, preventing a push from
 bypassing image verification and the Droplet canary.
 
+Production builds also fail before migrations or compilation when ready agent creation is enabled
+without a DigitalOcean token, runner command bearer token, and immutable Git-SHA-plus-digest
+`AGENTBAY_RUNNER_IMAGE`. At runtime, agent creation reuses an eligible runner when one exists. If
+none is available, creation requires that provisioning configuration before persistence, then the
+post-response reconciler performs one initialization slice and one provisioning slice so exactly
+one durable provider attempt starts immediately. Protected cron reconciliation remains the retry
+path. Automated and local tests inject fake providers and never create a Droplet.
+
 Release workflow runs share one non-cancelling concurrency group. Automated and local tests create
 zero Droplets: the DigitalOcean provider rejects network-client construction in test processes, and
 provider tests must inject fake clients. A release run can provision exactly one

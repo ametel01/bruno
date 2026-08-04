@@ -5,6 +5,7 @@ import { listModelConnectionsForUser } from "@/src/server/agents/model-connectio
 import {
   AgentPersistenceError,
   AgentRunnerAssignmentError,
+  AgentRunnerProvisioningError,
   type ReadyCreateInsertBoundary,
   TelegramBotInUseError,
   createAgentForUser,
@@ -29,8 +30,12 @@ const NOW = new Date("2026-08-03T06:00:00.000Z");
 const TOKEN = "123456:abcdefghijklmnopqrstuvwxyz";
 const SECOND_TOKEN = "654321:abcdefghijklmnopqrstuvwxyz";
 const OPENAI_KEY = "sk-abcdefghijklmnopqrstuvwxyz1234567890";
+const RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:${"a".repeat(40)}@sha256:${"b".repeat(64)}`;
 const KEYRING_ENV = {
   AGENTBAY_READY_AGENT_CREATION_ENABLED: "true",
+  AGENTBAY_DIGITALOCEAN_TOKEN: "provider-token-present",
+  AGENTBAY_RUNNER_BEARER_TOKEN: "runner-token-present",
+  AGENTBAY_RUNNER_IMAGE: RUNNER_IMAGE,
   AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
   AGENTBAY_AGENT_SECRET_KEYS_JSON: JSON.stringify({
     v1: Buffer.alloc(32, 41).toString("base64url"),
@@ -129,6 +134,52 @@ describe("ready agent creation persistence", () => {
     });
     expect(JSON.stringify(event?.metadata)).not.toContain("123456");
     expect(JSON.stringify(event?.metadata)).not.toContain("ready-key-001");
+  });
+
+  it("rejects creation before persistence when no runner can be provisioned safely", async () => {
+    const validator = telegramValidator();
+
+    await expect(
+      createAgentForUser(USER_A_ID, readyInput("ready-key-provider-missing"), {
+        createConnection: () => connection,
+        env: {
+          ...KEYRING_ENV,
+          AGENTBAY_DIGITALOCEAN_TOKEN: undefined,
+          AGENTBAY_RUNNER_BEARER_TOKEN: undefined,
+          AGENTBAY_RUNNER_IMAGE: undefined,
+        },
+        now: () => NOW,
+        randomBytes: incrementalRandomBytes(),
+        telegramBotValidator: validator,
+      }),
+    ).rejects.toMatchObject({
+      name: AgentRunnerProvisioningError.name,
+      reason: "provider_not_configured",
+    });
+
+    expect(validator).not.toHaveBeenCalled();
+    await expect(countRows(connection, "agents")).resolves.toBe(0);
+    await expect(countRows(connection, "agent_deployments")).resolves.toBe(0);
+  });
+
+  it("uses an available runner without requiring new Droplet provisioning configuration", async () => {
+    const runnerId = "00000000-0000-4000-8000-000000000405";
+    await seedOnlineRunner(connection, { runnerId, userId: USER_A_ID });
+
+    const result = await createAgentForUser(USER_A_ID, readyInput("ready-key-existing-runner"), {
+      createConnection: () => connection,
+      env: {
+        ...KEYRING_ENV,
+        AGENTBAY_DIGITALOCEAN_TOKEN: undefined,
+        AGENTBAY_RUNNER_BEARER_TOKEN: undefined,
+        AGENTBAY_RUNNER_IMAGE: undefined,
+      },
+      now: () => NOW,
+      randomBytes: incrementalRandomBytes(),
+      telegramBotValidator: telegramValidator(),
+    });
+
+    expect(result.agent.runnerId).toBe(runnerId);
   });
 
   it("creates Claude with the direct Anthropic binding and encrypted Anthropic key", async () => {

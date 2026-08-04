@@ -23,12 +23,22 @@ export function scheduleAgentDeploymentReconcileAfterResponse(
 
   try {
     schedule(async () => {
-      await reconcile(deploymentId).catch(() => {
+      await reconcileDeploymentAfterResponse(deploymentId, reconcile).catch(() => {
         // The deployment row remains due for the protected cron reconciler.
       });
     });
   } catch {
     // Synchronous registration failure is equivalent to a dropped callback.
+  }
+}
+
+async function reconcileDeploymentAfterResponse(
+  deploymentId: string,
+  reconcile: typeof reconcileTargetAgentDeployment,
+): Promise<void> {
+  const initialized = await reconcile(deploymentId);
+  if (initialized.processed === 1 && initialized.outcome === "advanced") {
+    await reconcile(deploymentId);
   }
 }
 

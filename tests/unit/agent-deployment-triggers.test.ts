@@ -10,7 +10,7 @@ const RUNNER_ID = "00000000-0000-4000-8000-000000000772";
 describe("agent deployment post-response triggers", () => {
   it("registers targeted work without running it before the callback", async () => {
     let callback: (() => void | Promise<void>) | undefined;
-    const reconcile = vi.fn(async () => ({ processed: 1 as const, outcome: "advanced" as const }));
+    const reconcile = vi.fn(async () => ({ processed: 0 as const, outcome: "idle" as const }));
 
     scheduleAgentDeploymentReconcileAfterResponse(DEPLOYMENT_ID, {
       afterScheduler: (registered) => {
@@ -23,6 +23,26 @@ describe("agent deployment post-response triggers", () => {
     await callback?.();
     expect(reconcile).toHaveBeenCalledOnce();
     expect(reconcile).toHaveBeenCalledWith(DEPLOYMENT_ID);
+  });
+
+  it("continues once after runner initialization so Droplet provisioning starts immediately", async () => {
+    let callback: (() => void | Promise<void>) | undefined;
+    const reconcile = vi
+      .fn()
+      .mockResolvedValueOnce({ processed: 1 as const, outcome: "advanced" as const })
+      .mockResolvedValueOnce({ processed: 1 as const, outcome: "retry_scheduled" as const });
+
+    scheduleAgentDeploymentReconcileAfterResponse(DEPLOYMENT_ID, {
+      afterScheduler: (registered) => {
+        callback = registered;
+      },
+      reconcile,
+    });
+
+    await callback?.();
+    expect(reconcile).toHaveBeenCalledTimes(2);
+    expect(reconcile).toHaveBeenNthCalledWith(1, DEPLOYMENT_ID);
+    expect(reconcile).toHaveBeenNthCalledWith(2, DEPLOYMENT_ID);
   });
 
   it("leaves dropped callbacks harmless and contains callback failures", async () => {

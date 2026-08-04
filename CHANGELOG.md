@@ -133,6 +133,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Ready agent creation now reuses an eligible runner or fails before persistence unless automatic DigitalOcean provisioning is fully configured; when no runner is available, the bounded post-response reconciler immediately advances through runner initialization and starts one provisioning attempt instead of leaving the deployment pending. Production builds also reject ready-agent configuration without an immutable runner image.
 - Managed gateway launches now have a strict 30-second deadline and recover on a validated replacement runner after one bounded diagnostic capture and stop, instead of repeatedly starting the same operation on an unhealthy machine; model and Telegram failures remain agent-specific and recovery stops safely after two replacement workflows per day.
 - Managed runner infrastructure now repairs externally deleted Droplets, stale assignments, and exact interrupted provisions automatically, while duplicate or ambiguous resources fail closed and only provably owned orphans are deleted after two authoritative observations.
 - Deleting an agent now remains authoritative after automatic setup is cancelled or its database tombstone is committed, so an unreachable assigned runner cannot leave the agent visible or require a second Delete attempt.

@@ -10,7 +10,7 @@ import type { AgentDeploymentDto } from "@/src/server/agents/deployment-dto";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
 import { agentConfigs, agentSecrets, agents, runners } from "@/src/server/db/schema";
-import { readReadyAgentCreationFlag } from "@/src/server/env";
+import { readDigitalOceanProviderConfig, readReadyAgentCreationFlag } from "@/src/server/env";
 import {
   getAgentTemplateSnapshot,
   isSupportedTemplateKey,
@@ -764,6 +764,8 @@ async function createReadyAgentForUser(
     ) {
       throw new AgentCreateBlockedError(placementPrecheck);
     }
+
+    requireReadyRunnerProvisioningConfig(dependencies.env ?? process.env);
   }
 
   const firstWriteValidation = validateReadyFirstWriteInput(input);
@@ -1017,6 +1019,18 @@ async function createReadyAgentForUser(
 
     throw error;
   }
+}
+
+function requireReadyRunnerProvisioningConfig(env: Record<string, string | undefined>): void {
+  try {
+    if (readDigitalOceanProviderConfig(env)) {
+      return;
+    }
+  } catch (error) {
+    throw new AgentRunnerProvisioningError("provider_not_configured", error);
+  }
+
+  throw new AgentRunnerProvisioningError("provider_not_configured");
 }
 
 async function createAgentWithProvisionedRunner(

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { requireValidAuthMode } from "@/src/auth/auth-mode";
+import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
 
 type VercelBuildEnvironment = Record<string, string | undefined>;
 
@@ -17,6 +18,24 @@ export function planVercelBuildCommands(env: VercelBuildEnvironment): VercelBuil
   if (env.VERCEL_ENV === "production") {
     if (!env.DATABASE_URL?.trim()) {
       throw new Error("DATABASE_URL is required for production Vercel migrations.");
+    }
+
+    if (env.AGENTBAY_READY_AGENT_CREATION_ENABLED?.trim() === "true") {
+      if (!env.AGENTBAY_DIGITALOCEAN_TOKEN?.trim()) {
+        throw new Error(
+          "DigitalOcean runner provisioning is required when ready agent creation is enabled in production.",
+        );
+      }
+      if (!env.AGENTBAY_RUNNER_BEARER_TOKEN?.trim()) {
+        throw new Error(
+          "AGENTBAY_RUNNER_BEARER_TOKEN is required when ready agent creation is enabled in production.",
+        );
+      }
+      if (!parseImmutableRunnerImageReference(env.AGENTBAY_RUNNER_IMAGE?.trim() ?? "")) {
+        throw new Error(
+          "AGENTBAY_RUNNER_IMAGE must be an immutable registry image reference with a sha256 digest for hosted DigitalOcean provisioning.",
+        );
+      }
     }
 
     commands.push({ command: "bun", args: ["run", "db:migrate"] });

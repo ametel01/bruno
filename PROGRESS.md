@@ -632,8 +632,13 @@ serialized, require an exact typed billable authorization before creating their
 single disposable canary, and always request exact cleanup. Git-triggered Vercel
 production builds are skipped unless the canary-verified release or rollback job
 supplies its build marker. Production rollout is limited to one runner per
-invocation and can be halted at zero. Live publication, reviewed canary, deploy,
-and post-deploy checks remain required before Step 12.
+invocation and can be halted at zero. A direct production deploy exposed a missing immutable
+runner image by accepting an agent that could not provision capacity; production was rolled back
+to deployment `dpl_CdG8WSKjXcJKCXKi1ErsShBUt7qh`. The local repair now fails creation before
+persistence when neither an eligible runner nor valid provisioning configuration exists, advances
+one bounded provisioning attempt immediately when configuration is valid, and fails production
+builds that omit the immutable image. Live publication, reviewed canary, deploy, and post-deploy
+checks remain required before Step 12.
 
 ### Step Ledger
 
@@ -770,6 +775,7 @@ and post-deploy checks remain required before Step 12.
 | 11 | Credential-free `runner:release:smoke` preflight | Failed closed as designed with `capability_unavailable`, four missing capability names, `sideEffectsAttempted: false`, and no secret values. |
 | 11 | Follow-up provider, workflow, and smoke contracts | Passed 3 files / 28 tests. Test processes cannot construct the real DigitalOcean network client, release runs are serialized, a typed exact authorization is required before the one-Droplet release canary, Git-linked production builds fail closed, previews remain enabled, and only verified release/rollback commands carry the Vercel marker. |
 | 11 | Follow-up clean migration, full suite, and build | Passed all migrations through 0024 on an isolated temporary local database, 164 files / 1,572 tests, format/lint across 384 files, typecheck, production build, and diff hygiene. The temporary database was removed; no provider or cloud effect occurred. |
+| 11 | Agent-creation provisioning regression characterization and repair | Production was rolled back to `dpl_CdG8WSKjXcJKCXKi1ErsShBUt7qh`; the deleted failed agent was not reconciled and no Droplet was created. Focused build, creation, and trigger coverage passed 3 files / 36 tests with fake configuration/providers only. Format and lint checked 384 files, typecheck passed, all migrations through 0024 and 164 files / 1,576 tests passed on a clean temporary database, the production build passed, and the database was removed. No provider or cloud effect occurred. |
 | 11 | Live GHCR publish, Trivy scan of published digest, disposable DigitalOcean release canary, Vercel production deploy, `/health`, and required-release verification | Not run. Environment values are configured, but required reviewer protection is unsupported by the current GitHub plan and no explicit billable release authorization was given; no live acceptance is claimed. |
 
 ### Step 1 Gap Matrix
@@ -888,6 +894,19 @@ and post-deploy checks remain required before Step 12.
   passed without any provider effect. Step 11 remains pending live reviewed
   acceptance. The focused commit is `ci: require explicit runner canary
   authorization` (`This commit`).
+- 2026-08-05: Diagnosed a production regression from agent
+  `5655bb67-d565-4dc6-9dc6-efaacd1c3cd6`: ready creation persisted a pending
+  deployment even though production lacked the newly required immutable runner
+  image, and the single post-response reconciliation stopped after initializing
+  a provisioning runner. Rolled production back to
+  `dpl_CdG8WSKjXcJKCXKi1ErsShBUt7qh`; the agent had already been deleted and no
+  provider reconciliation was triggered. Added pre-persistence provisioning
+  validation, a production-build guard, and one bounded follow-up reconciliation
+  so a real creation reuses eligible capacity or begins one Droplet provisioning
+  attempt immediately. Focused tests passed 36/36; format, lint, typecheck, all
+  migrations and 1,576 tests on a clean temporary database, the production
+  build, and diff hygiene passed with no provider effect. The corrective commit
+  is `fix: restore automatic runner provisioning` (`This commit`).
 
 ### Next Step
 

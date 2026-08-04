@@ -6,6 +6,13 @@ import {
   type VercelBuildCommand,
 } from "@/scripts/vercel-build";
 
+const PRODUCTION_RUNNER_ENV = {
+  AGENTBAY_READY_AGENT_CREATION_ENABLED: "true",
+  AGENTBAY_DIGITALOCEAN_TOKEN: "provider-token-present",
+  AGENTBAY_RUNNER_BEARER_TOKEN: "runner-token-present",
+  AGENTBAY_RUNNER_IMAGE: `ghcr.io/ametel01/agentbay-runner:${"a".repeat(40)}@sha256:${"b".repeat(64)}`,
+};
+
 describe("Vercel build workflow", () => {
   it("migrates the production database before building", async () => {
     const commands: VercelBuildCommand[] = [];
@@ -15,6 +22,7 @@ describe("Vercel build workflow", () => {
 
     await runVercelBuild(
       {
+        ...PRODUCTION_RUNNER_ENV,
         AGENTBAY_AUTH_MODE: "clerk",
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "publishable-key-present",
         CLERK_SECRET_KEY: "secret-key-present",
@@ -78,6 +86,21 @@ describe("Vercel build workflow", () => {
         VERCEL_ENV: "production",
       }),
     ).toThrow("DATABASE_URL is required for production Vercel migrations.");
+  });
+
+  it("fails a ready-agent production build before deployment without an immutable runner", () => {
+    expect(() =>
+      planVercelBuildCommands({
+        AGENTBAY_AUTH_MODE: "development",
+        AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: "true",
+        AGENTBAY_READY_AGENT_CREATION_ENABLED: "true",
+        AGENTBAY_DIGITALOCEAN_TOKEN: "provider-token-present",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-token-present",
+        NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+        VERCEL_ENV: "production",
+        DATABASE_URL: "postgres://production.example/agentbay",
+      }),
+    ).toThrow("AGENTBAY_RUNNER_IMAGE must be an immutable registry image reference");
   });
 
   it.each([
