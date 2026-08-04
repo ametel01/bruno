@@ -102,6 +102,8 @@ describe("local Docker DigitalOcean provider", () => {
       "AGENTBAY_HERMES_WORKLOAD_IMAGE=nousresearch/hermes-agent:v2026.7.7.2@sha256",
     );
     expect(bootstrapScript).toContain("/var/lib/agentbay/agents:/var/lib/agentbay/agents");
+    expect(bootstrapScript).toContain("/var/lib/agentbay/boot-self-test");
+    expect(bootstrapScript).toContain('translated_source="$bridge_dir$source_path"');
     expect(bootstrapScript).toContain("/var/run/docker.sock:/var/run/docker.sock");
     expect(bootstrapScript).toContain("127.0.0.1:3045:3045");
     expect(bootstrapScript).toContain("agentbay-runner:local");

@@ -4,6 +4,7 @@ export const RUNNER_LAUNCH_CONTRACT_VERSION = "agentbay.runner.launch.v2" as con
 export const LEGACY_RUNNER_STATUS_CONTRACT_VERSION = "agentbay.runner.status.v2" as const;
 export const RUNNER_STATUS_CONTRACT_VERSION = "agentbay.runner.status.v3" as const;
 export const RUNNER_CANARY_CONTRACT_VERSION = "agentbay.runner.canary.v1" as const;
+export const RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION = "plingpling.runner.boot-snapshot.v1" as const;
 export const MAX_RUNNER_RESTART_COUNT = 2_147_483_647;
 export const MAX_RUNNER_IMAGE_IDENTITY_DIGESTS = 16;
 export const MAX_RUNNER_IMAGE_REFERENCE_LENGTH = 512;
@@ -216,6 +217,100 @@ export type RunnerCanaryRequest = {
   configRevision: string;
   model: string;
 };
+
+export const RUNNER_BOOT_COMPONENTS = [
+  "docker",
+  "hermesFixture",
+  "detailedHealth",
+  "modelCanary",
+  "telegramConfig",
+  "cleanup",
+] as const;
+
+export type RunnerBootComponent = (typeof RUNNER_BOOT_COMPONENTS)[number];
+export type RunnerBootComponentState = "pending" | "passed" | "failed";
+export type RunnerBootSnapshotStatus = "testing" | "ready" | "failed";
+export type RunnerBootFailureReason =
+  | null
+  | "docker_unavailable"
+  | "release_mismatch"
+  | "fixture_launch_failed"
+  | "detailed_health_failed"
+  | "canary_failed"
+  | "telegram_config_failed"
+  | "cleanup_failed"
+  | "deadline_exceeded"
+  | "snapshot_invalid";
+
+export type RunnerBootSnapshot = {
+  ok: true;
+  contractVersion: typeof RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION;
+  status: RunnerBootSnapshotStatus;
+  components: Record<RunnerBootComponent, RunnerBootComponentState>;
+  failureReason: RunnerBootFailureReason;
+  startedAt: string;
+  completedAt: string | null;
+};
+
+export function parseRunnerBootSnapshot(value: unknown): RunnerBootSnapshot | null {
+  if (
+    !isExactRecord(value, [
+      "completedAt",
+      "components",
+      "contractVersion",
+      "failureReason",
+      "ok",
+      "startedAt",
+      "status",
+    ]) ||
+    value.ok !== true ||
+    value.contractVersion !== RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION ||
+    !["testing", "ready", "failed"].includes(value.status as never) ||
+    !isRunnerIsoTimestamp(value.startedAt) ||
+    !isNullableIsoTimestamp(value.completedAt) ||
+    ![
+      null,
+      "docker_unavailable",
+      "release_mismatch",
+      "fixture_launch_failed",
+      "detailed_health_failed",
+      "canary_failed",
+      "telegram_config_failed",
+      "cleanup_failed",
+      "deadline_exceeded",
+      "snapshot_invalid",
+    ].includes(value.failureReason as never) ||
+    !isExactRecord(value.components, RUNNER_BOOT_COMPONENTS)
+  ) {
+    return null;
+  }
+
+  const components = value.components as Record<string, unknown>;
+  const states = RUNNER_BOOT_COMPONENTS.map((component) => components[component]);
+  if (!states.every((state) => ["pending", "passed", "failed"].includes(state as never))) {
+    return null;
+  }
+
+  const isReady = value.status === "ready";
+  const isTesting = value.status === "testing";
+  if (
+    (isReady &&
+      (value.failureReason !== null ||
+        value.completedAt === null ||
+        !states.every((state) => state === "passed"))) ||
+    (isTesting && (value.failureReason !== null || value.completedAt !== null)) ||
+    (value.status === "failed" &&
+      (value.failureReason === null || value.completedAt === null || !states.includes("failed")))
+  ) {
+    return null;
+  }
+
+  return value as RunnerBootSnapshot;
+}
+
+export function isReadyRunnerBootSnapshot(value: unknown): value is RunnerBootSnapshot {
+  return parseRunnerBootSnapshot(value)?.status === "ready";
+}
 
 export type RunnerStopResponsePayload = {
   cancelledOperationId: string | null;

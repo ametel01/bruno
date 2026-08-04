@@ -16,6 +16,10 @@ import {
   type RunnerCanaryRequest,
 } from "@/src/runner-service/runner-contracts";
 import {
+  createRunnerBootReadinessController,
+  type RunnerBootReadinessController,
+} from "@/src/runner-service/boot-self-test";
+import {
   HermesSetupSessionError,
   HermesSetupSessionManager,
   type HermesSetupWebSocketData,
@@ -37,6 +41,7 @@ export type RunnerServiceOptions = {
   authToken?: string;
   docker?: RunnerServiceDocker;
   heartbeat?: RunnerHeartbeatLoopOptions;
+  readiness?: RunnerBootReadinessController;
   setupSessions?: HermesSetupSessionManager;
 };
 
@@ -91,6 +96,8 @@ export function createRunnerService(options: RunnerServiceOptions = {}) {
   const setupSessions = options.setupSessions ?? new HermesSetupSessionManager();
   const authToken = options.authToken ?? process.env[RUNNER_TOKEN_ENV]?.trim();
   const heartbeatLoop = options.heartbeat ? startRunnerHeartbeatLoop(options.heartbeat) : null;
+  const readiness = options.readiness ?? createRunnerBootReadinessController();
+  void readiness.start().catch(() => undefined);
 
   const handleFetch = async (
     request: Request,
@@ -118,7 +125,7 @@ export function createRunnerService(options: RunnerServiceOptions = {}) {
       return authFailure;
     }
 
-    const readinessResponse = handleReadinessRequest(request);
+    const readinessResponse = await handleReadinessRequest(request, readiness);
 
     if (readinessResponse) {
       return readinessResponse;
@@ -373,7 +380,10 @@ async function readCanaryRequest(
   return { ok: true, request: result.request };
 }
 
-function handleReadinessRequest(request: Request): Response | null {
+async function handleReadinessRequest(
+  request: Request,
+  readiness: RunnerBootReadinessController,
+): Promise<Response | null> {
   const { pathname } = new URL(request.url);
 
   if (pathname !== "/runner/v1/readiness") {
@@ -386,7 +396,11 @@ function handleReadinessRequest(request: Request): Response | null {
     });
   }
 
-  return Response.json({ ok: true, status: "ready" }, { status: 200 });
+  const snapshot = await readiness.read();
+  return Response.json(snapshot, {
+    status: snapshot.status === "ready" ? 200 : 503,
+    headers: { "Cache-Control": "no-store" },
+  });
 }
 
 function isSetupWebSocketRequest(request: Request): boolean {

@@ -613,7 +613,7 @@ and replace the fleet in bounded batches.
 - [x] Step 1: Baseline Gates and Failure Characterization
 - [x] Step 2: Report Immutable Runner Release Identity
 - [x] Step 3: Persist Compatibility and Fail Closed During Assignment
-- [ ] Step 4: Enforce a Real Boot-Readiness Contract
+- [x] Step 4: Enforce a Real Boot-Readiness Contract
 - [ ] Step 5: Persist a Durable Runner Replacement Workflow
 - [ ] Step 6: Provision and Validate Replacement Runners
 - [ ] Step 7: Hand Over Agents and Clean Up the Source Runner
@@ -625,14 +625,13 @@ and replace the fleet in bounded batches.
 
 ### Current Status
 
-Step 3 is complete in this commit. Runner compatibility is now durable,
-indexed, constrained, and updated transactionally with authenticated heartbeat
-evidence. Hosted DigitalOcean configuration requires an immutable image digest,
-all managed placement and assignment boundaries require exact current release
-evidence, and live verification fences concurrent compatibility changes.
-Legacy managed rows remain unknown and unassignable without inferring identity
-from mutable tags; explicitly incompatible manual runners are excluded without
-deletion. Step 4 is next.
+Step 4 is complete in this commit. Authenticated runner readiness now exposes a
+persisted, versioned boot snapshot and stays unavailable until Docker and image
+identity, an isolated pinned Hermes fixture, private detailed health, a fixed
+no-tools model canary, synthetic no-traffic Telegram configuration, and exact
+cleanup all pass. App-side readiness parsing requires the exact contract and
+all six components before a compatible cloud runner can become assignable.
+Step 5 is next.
 
 ### Step Ledger
 
@@ -641,8 +640,8 @@ deletion. Step 4 is next.
 | 0. Progress and Changelog Tracking Setup | Complete | `e892330` | Restored all 574 historical lines from `9f45d89^:PROGRESS.md`; appended the complete Step 0-12 tracker; verified the Keep a Changelog header, preamble, and Unreleased section; 1 focused file / 3 progress tests passed; format and lint checked 356 files; typecheck, 149 files / 1,449 tests, production build, and diff hygiene passed. No changelog entry was added for this tracking-only step. | Complete; Step 1 is next. |
 | 1. Baseline Gates and Failure Characterization | Complete | `ae39387` | Frozen install made no changes; clean isolated PostgreSQL migration passed; pre-change `bun run verify` passed 149 files / 1,449 tests and production build; pre-change E2E passed 26/26. Added legacy authenticated heartbeat allowlisting, provider verification after selection, secret-safe in-container probing, exact selected-agent cleanup, operation-tag replay idempotency, and single-shot timeout cleanup coverage. Five focused files / 126 tests passed. Post-change format, lint, typecheck, 149 files / 1,452 tests, production build, 26/26 E2E, and diff hygiene passed. No changelog entry was added for test-only work. | Complete; Step 2 is next. |
 | 2. Report Immutable Runner Release Identity | Complete | `71fc024` | Added the bounded `plingpling.runner.boot.v1` release contract, strict immutable image/reference parsing, Docker container/image inspection through argv-only bounded calls, OCI version/revision reading, canonical unique repository-digest derivation, expected-versus-observed comparison, and an explicit image-ID development seam. Bootstrap and service heartbeats report the observed release; malformed release fields fail validation and legacy payloads remain parseable with explicit missing evidence. Cloud bootstrap injects expected identity only for immutable references. Runner images now carry OCI labels and the publication workflow emits linux/amd64 Git-SHA and transition `main` tags with SBOM, max provenance, digest verification, and digest/image outputs. Eight focused files / 122 tests and the full 150-file / 1,462-test suite passed. The built runner container inspected itself through the mounted Docker socket and returned only `development`, its canonical local image digest, `plingpling.runner.boot.v1`, and `expectedMatch: null`. Runner Docker build, 83-second Hermes contract smoke, format, lint, typecheck, production build, and diff hygiene passed. | Complete; Step 3 is next. |
-| 3. Persist Compatibility and Fail Closed During Assignment | Complete | This commit | Added six backward-safe runner compatibility fields, canonical release constraints, assignment indexes, and additive migration `0022_unknown_ma_gnuci`. Authenticated heartbeats now persist normalized observed identity and a server-owned `compatible`, `unknown`, `outdated`, or `invalid` decision in one transaction. Hosted provider configuration rejects mutable runner tags; provisioning records the required digest; placement, explicit assignment, create/start/lifecycle/deployment selection, and pre/post live verification use one exact-release predicate. Legacy managed rows stay unknown and unassignable, concurrent verification cannot bypass a downgrade, and incompatible manual rows are excluded without deletion. Nine focused files / 262 tests and the full 151-file / 1,472-test suite passed. Clean migration, upgraded migration fixture, schema drift check, format, lint, typecheck, production build, database health, and local cloud reconciler smoke passed. | Complete; Step 4 is next. |
-| 4. Enforce a Real Boot-Readiness Contract | Pending | Pending | Not started. | Waits for Steps 2-3. |
+| 3. Persist Compatibility and Fail Closed During Assignment | Complete | `813c8cb` | Added six backward-safe runner compatibility fields, canonical release constraints, assignment indexes, and additive migration `0022_unknown_ma_gnuci`. Authenticated heartbeats now persist normalized observed identity and a server-owned `compatible`, `unknown`, `outdated`, or `invalid` decision in one transaction. Hosted provider configuration rejects mutable runner tags; provisioning records the required digest; placement, explicit assignment, create/start/lifecycle/deployment selection, and pre/post live verification use one exact-release predicate. Legacy managed rows stay unknown and unassignable, concurrent verification cannot bypass a downgrade, and incompatible manual rows are excluded without deletion. Nine focused files / 262 tests and the full 151-file / 1,472-test suite passed. Clean migration, upgraded migration fixture, schema drift check, format, lint, typecheck, production build, database health, and local cloud reconciler smoke passed. | Complete; Step 4 is next. |
+| 4. Enforce a Real Boot-Readiness Contract | Complete | This commit | Added the exact `plingpling.runner.boot-snapshot.v1` persisted snapshot with deterministic testing/ready/failed timestamps and six closed component states. Runner boot now performs bounded Docker/self-image verification, creates a UUID-scoped private network and pinned Hermes fixture with a local fake model, loads real-shaped synthetic Telegram configuration without traffic, probes container-local detailed health, runs a fixed no-tools canary, and cleans up exact labeled resources on success, failure, timeout, and restart. The authenticated no-store route returns 200 only for exact ready evidence; app parsing rejects legacy, malformed, incomplete, incompatible, or non-ready evidence before assignment. Eight focused files / 123 tests and the full 152-file / 1,480-test suite passed. Format, lint, typecheck, production build, runner Docker build, a production-path all-six-component ready smoke with zero remaining labeled fixtures, local-cloud smoke, and the 82,866 ms pinned Hermes contract smoke passed. | Complete; Step 5 is next. |
 | 5. Persist a Durable Runner Replacement Workflow | Pending | Pending | Not started. | Waits for Steps 3-4. |
 | 6. Provision and Validate Replacement Runners | Pending | Pending | Not started. | Waits for Step 5. |
 | 7. Hand Over Agents and Clean Up the Source Runner | Pending | Pending | Not started. | Waits for Step 6. |
@@ -698,13 +697,22 @@ deletion. Step 4 is next.
 | 3 | `bun run build` | Passed; Next.js production build completed. |
 | 3 | Database health with the repository's `react-server` condition | Passed against the isolated Step 3 database. |
 | 3 | Local cloud reconciler smoke | Passed in 402 ms through pending, provisioning, Hermes configuration, gateway start, model verification, Telegram connection, Ready, runtime recovery, Stop, and deterministic cleanup using exact persisted compatibility evidence. |
+| 4 | Eight focused readiness/bootstrap/heartbeat/placement/provisioning/progress files | Passed; 123/123 tests. |
+| 4 | `bun run format:check` and `bun run lint` | Passed; 363 files checked with no fixes or warnings. |
+| 4 | `bun run typecheck` | Passed. |
+| 4 | `bun run test` | Passed serially against the isolated migrated database; 152 files / 1,480 tests. |
+| 4 | `bun run build` | Passed; Next.js production build completed. |
+| 4 | `docker build -f Dockerfile.runner -t plingpling-runner:resilience .` | Passed; final runner image built successfully. |
+| 4 | Ephemeral built-runner boot-readiness smoke through the mounted Docker socket | Passed with exact `ready` status and all six components passed; no labeled fixture container or network remained. |
+| 4 | `bun run local:cloud:smoke` | Passed in 435 ms against the isolated migrated database through Ready, runtime fault recovery, Stop, and deterministic cleanup. |
+| 4 | `bun run agent:hermes:contract-smoke` | Passed in 82,866 ms with fake model, private API auth, canary, restart/Stop persistence, backup/restore, and cleanup without external Telegram traffic. |
 
 ### Step 1 Gap Matrix
 
 | Required capability | Baseline evidence | Status entering Step 2 |
 | --- | --- | --- |
 | Exact immutable runner identity | Authenticated heartbeat parsing allowlists legacy version and metrics but ignores an untrusted release object; no observed image digest or boot-contract identity is derived or persisted. | Not implemented; Step 2. |
-| Capability-backed boot readiness | Authenticated `/runner/v1/readiness` returns constant ready without invoking Docker or a self-test. | Not implemented; Step 4 after identity persistence. |
+| Capability-backed boot readiness | Authenticated `/runner/v1/readiness` reads an atomically persisted exact contract only after bounded Docker/self-image, isolated pinned Hermes fixture, private detailed health, fixed model canary, synthetic no-traffic Telegram configuration, and exact cleanup checks. App parsing requires all six passed components before managed assignment. | Complete; Step 4. |
 | Automatic replacement | A readiness timeout captures logs once, stops once, and terminally fails the deployment; there is no durable replacement saga or replacement budget. | Not implemented; Steps 5-9. |
 | Infrastructure inventory reconciliation | Placement performs current stale-heartbeat fencing and live provider-resource verification, and exact missing resources are tombstoned; no leased authoritative inventory, adoption, duplicate classification, or orphan grace exists. | Not implemented; Step 8. |
 | Smoke-before-deploy release ordering | The runner workflow pushes Git-SHA and mutable `main` tags directly on main; it has no digest output, SBOM/provenance configuration, disposable-Droplet canary, control-plane dependency, or fleet rollout. | Not implemented; Steps 2 and 11-12. |
@@ -740,10 +748,16 @@ deletion. Step 4 is next.
   upgraded migration gates, 1,472 tests, build, and the local cloud reconciler
   smoke passed. No registry publication, provider resource, or other live
   external effect was performed. The focused commit is `feat: enforce runner
-  release compatibility` (`This commit`).
+  release compatibility` (`813c8cb`).
+- 2026-08-04: Completed Step 4 with an atomically persisted boot-readiness
+  snapshot, bounded isolated Docker/Hermes self-test, fixed private fake-model
+  canary, no-traffic Telegram configuration proof, strict app-side contract
+  parsing, and exact cleanup/restart recovery. All repository, image, and local
+  smoke gates passed; no registry publication, provider resource, Telegram
+  request, or paid model request was performed. The focused commit is `feat:
+  require runner boot readiness contract` (`This commit`).
 
 ### Next Step
 
-Begin Step 4 by replacing constant readiness with a bounded, authenticated,
-capability-backed boot proof for Docker, Hermes launch, internal health, model
-canary, and Telegram configuration loading.
+Begin Step 5 by adding the durable, leased replacement workflow and its
+idempotency, fencing, retry, and recovery invariants.

@@ -11,6 +11,7 @@ import { hashRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
 import { markCloudRunnerReadyAfterAuthenticatedProbe } from "@/src/server/runners/runner-provisioning-events";
 import {
   assessRunnerCompatibility,
+  isPersistedRunnerCompatible,
   readRunnerCompatibilityRequirement,
   type RunnerCompatibilityRequirement,
 } from "@/src/server/runners/runner-compatibility";
@@ -18,6 +19,10 @@ import {
   parseRunnerReleaseIdentity,
   type RunnerReleaseIdentity,
 } from "@/src/runner-service/release-identity";
+import {
+  parseRunnerBootSnapshot,
+  type RunnerBootSnapshot,
+} from "@/src/runner-service/runner-contracts";
 
 export const RUNNER_HEARTBEAT_ONLINE_STATUS = "online";
 export const RUNNER_HEARTBEAT_DEGRADED_STATUS = "degraded";
@@ -119,6 +124,7 @@ export type ConfirmCloudRunnerReadinessResult =
         | "endpoint_rejected"
         | "network_error"
         | "persistence_error"
+        | "release_incompatible"
         | "response_invalid"
         | "token_not_configured";
     }
@@ -128,7 +134,7 @@ export type ConfirmCloudRunnerReadinessResult =
     };
 
 export type ProbeRunnerEndpointReadinessResult =
-  | { ok: true; protocol: "readiness_endpoint" | "legacy_authenticated_not_found" }
+  | { ok: true; protocol: "readiness_endpoint"; snapshot: RunnerBootSnapshot }
   | {
       ok: false;
       reason:
@@ -266,6 +272,7 @@ export async function confirmCloudRunnerReadiness(
   runnerId: string,
   dependencies: {
     allowInsecureLoopback?: boolean;
+    compatibilityRequirement?: RunnerCompatibilityRequirement;
     createConnection?: () => DatabaseConnection;
     fetch?: typeof fetch;
     now?: () => Date;
@@ -283,6 +290,12 @@ export async function confirmCloudRunnerReadiness(
         kind: runners.kind,
         provider: runners.provider,
         provisioningStatus: runners.provisioningStatus,
+        requiredRunnerImageDigest: runners.requiredRunnerImageDigest,
+        observedRunnerImageDigest: runners.observedRunnerImageDigest,
+        observedRunnerReleaseVersion: runners.observedRunnerReleaseVersion,
+        observedRunnerBootContractVersion: runners.observedRunnerBootContractVersion,
+        compatibilityState: runners.compatibilityState,
+        compatibilityVerifiedAt: runners.compatibilityVerifiedAt,
         status: runners.status,
       })
       .from(runners)
@@ -323,9 +336,22 @@ export async function confirmCloudRunnerReadiness(
       return { outcome: "pending", reason: probe.reason };
     }
 
+    if (
+      !isPersistedRunnerCompatible(
+        runner,
+        dependencies.compatibilityRequirement ?? readRunnerCompatibilityRequirement(),
+      )
+    ) {
+      return { outcome: "pending", reason: "release_incompatible" };
+    }
+
     const now = dependencies.now?.() ?? new Date();
     const transitioned = await connection.db.transaction((tx) =>
-      markCloudRunnerReadyAfterAuthenticatedProbe(tx, { runnerId, now }),
+      markCloudRunnerReadyAfterAuthenticatedProbe(tx, {
+        runnerId,
+        now,
+        bootSnapshot: probe.snapshot,
+      }),
     );
 
     return { outcome: "ready", transitioned };
@@ -381,7 +407,7 @@ export async function probeRunnerEndpointReadiness(input: {
   }
 
   if (response.status === 404 && (await isLegacyAuthenticatedNotFoundResponse(response))) {
-    return { ok: true, protocol: "legacy_authenticated_not_found" };
+    return { ok: false, reason: "response_invalid" };
   }
 
   if (!response.ok) {
@@ -396,8 +422,9 @@ export async function probeRunnerEndpointReadiness(input: {
     return { ok: false, reason: "response_invalid" };
   }
 
-  return isReadinessResponse(payload)
-    ? { ok: true, protocol: "readiness_endpoint" }
+  const snapshot = parseRunnerBootSnapshot(payload);
+  return snapshot?.status === "ready"
+    ? { ok: true, protocol: "readiness_endpoint", snapshot }
     : { ok: false, reason: "response_invalid" };
 }
 
@@ -461,15 +488,6 @@ function isLoopbackHostname(hostname: string): boolean {
     normalized === "host.docker.internal" ||
     normalized === "::1" ||
     normalized.endsWith(".localhost")
-  );
-}
-
-function isReadinessResponse(value: unknown): value is { ok: true; status: "ready" } {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      (value as Record<string, unknown>).ok === true &&
-      (value as Record<string, unknown>).status === "ready",
   );
 }
 

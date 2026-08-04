@@ -131,7 +131,7 @@ describe.sequential("cloud runner bootstrap content", () => {
     );
     expect(content.userData).toContain("docker rm --force 'agentbay-runner' || true");
     expect(content.userData).toContain(
-      `docker run --detach --name 'agentbay-runner' --restart always --network 'agentbay-hermes' --env-file '/etc/agentbay/runner.env' -v '/etc/agentbay/runner.env:/etc/agentbay/runner.env' -v '/var/lib/agentbay/agents:/var/lib/agentbay/agents' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' '${IMMUTABLE_RUNNER_IMAGE}'`,
+      `docker run --detach --name 'agentbay-runner' --restart always --network 'agentbay-hermes' --env-file '/etc/agentbay/runner.env' -v '/etc/agentbay/runner.env:/etc/agentbay/runner.env' -v '/var/lib/agentbay/agents:/var/lib/agentbay/agents' -v '/var/lib/agentbay/boot-self-test:/var/lib/agentbay/boot-self-test' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' '${IMMUTABLE_RUNNER_IMAGE}'`,
     );
     expect(content.userData).toContain("/runner/v1/bootstrap-events");
     for (const token of LEGACY_HOST_BOOTSTRAP_TOKENS) {

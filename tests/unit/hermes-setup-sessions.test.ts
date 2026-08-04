@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HermesSetupSessionManager } from "@/src/runner-service/hermes-setup-sessions";
 import { createRunnerService } from "@/src/runner-service/server";
+import { readyRunnerBootController } from "@/tests/helpers/runner-boot";
 
 const AGENT_ID = "00000000-0000-4000-8000-000000000123";
 
@@ -207,6 +208,7 @@ describe("Hermes setup sessions", () => {
       docker: async () => ({ stdout: "" }),
     });
     const service = createRunnerService({
+      readiness: readyRunnerBootController(),
       authToken: "runner-secret",
       setupSessions,
       docker: createNoopDocker(),

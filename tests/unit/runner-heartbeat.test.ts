@@ -18,6 +18,17 @@ import {
 } from "@/src/server/runners/runner-heartbeat";
 import { createRunnerCredential, hashRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
 import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
+import { readyRunnerBootSnapshot } from "@/tests/helpers/runner-boot";
+
+const RUNNER_IMAGE_DIGEST = `sha256:${"c".repeat(64)}`;
+const HOSTED_COMPATIBILITY_REQUIREMENT = {
+  mode: "hosted",
+  release: {
+    version: "sha-current",
+    imageDigest: RUNNER_IMAGE_DIGEST,
+    bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+  },
+} as const;
 
 describe("runner heartbeat persistence", () => {
   let connection: DatabaseConnection;
@@ -391,9 +402,14 @@ describe("runner heartbeat persistence", () => {
           runnerId: runner.id,
           status: "online",
           version: "agentbay-runner/bootstrap",
+          release: HOSTED_COMPATIBILITY_REQUIREMENT.release,
         },
       },
-      { createConnection: () => connection, now: () => now },
+      {
+        compatibilityRequirement: HOSTED_COMPATIBILITY_REQUIREMENT,
+        createConnection: () => connection,
+        now: () => now,
+      },
     );
 
     const [heartbeatOnlyRunner] = await connection.db
@@ -450,10 +466,11 @@ describe("runner heartbeat persistence", () => {
           url: String(input),
           authorization: new Headers(init?.headers).get("authorization"),
         });
-        return Response.json({ ok: true, status: "ready" });
+        return Response.json(readyRunnerBootSnapshot());
       },
       now: () => now,
       runnerBearerToken: "runner-command-token",
+      compatibilityRequirement: HOSTED_COMPATIBILITY_REQUIREMENT,
     });
     const duplicateProbe = await confirmCloudRunnerReadiness(runner.id, {
       createConnection: () => connection,
@@ -495,6 +512,9 @@ describe("runner heartbeat persistence", () => {
           provider: "digitalocean",
           heartbeatStatus: "online",
           readinessProbe: "authenticated_endpoint",
+          bootContractVersion: "plingpling.runner.boot-snapshot.v1",
+          bootStatus: "ready",
+          bootComponents: readyRunnerBootSnapshot().components,
         },
       }),
     ]);
@@ -507,11 +527,12 @@ describe("runner heartbeat persistence", () => {
       status: "online",
       kind: "digitalocean",
       provisioningStatus: "waiting_for_runner",
+      compatible: true,
     });
     let fetchCalls = 0;
     const fetchImplementation: typeof fetch = async () => {
       fetchCalls += 1;
-      return Response.json({ ok: true, status: "ready" });
+      return Response.json(readyRunnerBootSnapshot());
     };
 
     await expect(
@@ -531,7 +552,7 @@ describe("runner heartbeat persistence", () => {
     expect(fetchCalls).toBe(0);
   });
 
-  it("accepts only the exact authenticated not-found response from a legacy runner image", async () => {
+  it("rejects legacy authenticated not-found responses without a boot contract", async () => {
     const common = {
       endpointUrl: "https://legacy-cloud-runner.example.com",
       runnerBearerToken: "runner-command-token",
@@ -549,7 +570,7 @@ describe("runner heartbeat persistence", () => {
             { status: 404 },
           ),
       }),
-    ).resolves.toEqual({ ok: true, protocol: "legacy_authenticated_not_found" });
+    ).resolves.toEqual({ ok: false, reason: "response_invalid" });
     await expect(
       probeRunnerEndpointReadiness({
         ...common,
@@ -571,6 +592,7 @@ describe("runner heartbeat persistence", () => {
       status: "online",
       kind: "digitalocean",
       provisioningStatus: "waiting_for_runner",
+      compatible: true,
     });
     const requests: string[] = [];
 
@@ -579,9 +601,10 @@ describe("runner heartbeat persistence", () => {
       createConnection: () => connection,
       fetch: async (input) => {
         requests.push(String(input));
-        return Response.json({ ok: true, status: "ready" });
+        return Response.json(readyRunnerBootSnapshot());
       },
       runnerBearerToken: "local-runner-command-token",
+      compatibilityRequirement: HOSTED_COMPATIBILITY_REQUIREMENT,
     });
 
     expect(result).toEqual({ outcome: "ready", transitioned: true });
@@ -742,6 +765,7 @@ async function seedRunner(
     endpointUrl: string;
     status: string;
     kind?: "manual_vps" | "digitalocean";
+    compatible?: boolean;
     provisioningStatus?: string;
     provisioningStartedAt?: Date;
   },
@@ -769,6 +793,16 @@ async function seedRunner(
             provisioningStatus: input.provisioningStatus ?? "waiting_for_runner",
             provisioningStartedAt:
               input.provisioningStartedAt ?? new Date("2026-07-05T07:00:00.000Z"),
+            ...(input.compatible
+              ? {
+                  requiredRunnerImageDigest: RUNNER_IMAGE_DIGEST,
+                  observedRunnerImageDigest: RUNNER_IMAGE_DIGEST,
+                  observedRunnerReleaseVersion: "sha-current",
+                  observedRunnerBootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+                  compatibilityState: "compatible",
+                  compatibilityVerifiedAt: new Date("2026-07-05T07:00:00.000Z"),
+                }
+              : {}),
           }
         : {}),
       createdAt: new Date("2026-07-05T07:00:00.000Z"),

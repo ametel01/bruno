@@ -181,6 +181,7 @@ export type DockerRunnerCommand = {
 };
 
 export type ManualRunnerDockerOptions = {
+  additionalContainerLabels?: Readonly<Record<string, string>>;
   command?: DockerRunnerCommand;
   docker?: DockerExecutableRunner;
   dockerExecutable?: string;
@@ -390,6 +391,7 @@ type LaunchToken = {
 };
 
 export class ManualRunnerDocker {
+  private readonly additionalContainerLabels: readonly (readonly [string, string])[];
   private readonly command: DockerRunnerCommand;
   private readonly docker: DockerExecutableRunner;
   private readonly dockerExecutable: string;
@@ -404,11 +406,15 @@ export class ManualRunnerDocker {
   private readonly requestContainerCanary: HermesContainerCanaryTransport;
   private readonly requestContainerHealth: HermesContainerHealthTransport;
   private readonly requestHealth: HermesHealthTransport;
+  private readonly stateRoot: string;
   private readonly preferContainerHealthProbe: boolean;
   private readonly agentLocks = new Map<string, Promise<unknown>>();
   private readonly launchTokens = new Map<string, Set<LaunchToken>>();
 
   constructor(options: ManualRunnerDockerOptions = {}) {
+    this.additionalContainerLabels = resolveAdditionalContainerLabels(
+      options.additionalContainerLabels,
+    );
     this.command = options.command ?? resolveManualRunnerCommand();
     this.docker = options.docker ?? runDockerExecutable;
     this.dockerExecutable =
@@ -416,6 +422,7 @@ export class ManualRunnerDocker {
     this.hermes = resolveHermesDockerRuntimeOptions(options.hermes);
     this.nameSuffix = options.nameSuffix ?? (() => randomUUID().replaceAll("-", "").slice(0, 12));
     this.now = options.now ?? (() => new Date());
+    this.stateRoot = resolveHermesStateRoot(options.projection?.options?.stateRoot);
     this.project =
       options.projection?.project ??
       ((spec) =>
@@ -496,7 +503,7 @@ export class ManualRunnerDocker {
       return {
         cancelledOperationId: inFlightOperationId ?? selectedOperationId ?? null,
         containers,
-        removedAgentRoot: await removeHermesAgentRoot(agentId),
+        removedAgentRoot: await removeHermesAgentRoot(agentId, this.stateRoot),
         snapshot: buildTerminalSnapshot("cancelled", selected, observedAt, true),
       };
     });
@@ -540,7 +547,7 @@ export class ManualRunnerDocker {
       throw new RunnerCanaryNotReadyError();
     }
 
-    let apiServerKey = await readProjectedApiServerKey(agentId);
+    let apiServerKey = await readProjectedApiServerKey(agentId, this.stateRoot);
     const containerName = snapshot.container.name;
 
     if (!apiServerKey || !containerName) {
@@ -571,7 +578,7 @@ export class ManualRunnerDocker {
     agentId: string,
   ): Promise<{ container: RunnerContainer | null; logs: RunnerLogLine[] }> {
     const [container] = await this.listSelectedContainers(agentId);
-    const gatewayLogs = await readHermesGatewayLogLines(agentId);
+    const gatewayLogs = await readHermesGatewayLogLines(agentId, this.stateRoot);
 
     if (!container) {
       return { container: null, logs: gatewayLogs };
@@ -696,6 +703,7 @@ export class ManualRunnerDocker {
           launchSpec,
           projection,
           runtime: this.hermes,
+          additionalLabels: this.additionalContainerLabels,
           operation: {
             id: token.operationId,
             action: token.action,
@@ -778,7 +786,7 @@ export class ManualRunnerDocker {
     const selected = chooseStatusContainer(details);
     const imageIdentity = await this.observeImageIdentity(selected.inspect);
     const operation = readOperationFromInspect(selected.inspect);
-    const revision = await readProjectedRevision(agentId);
+    const revision = await readProjectedRevision(agentId, this.stateRoot);
     const requestedRevision =
       operation?.target.configRevision ??
       selected.inspect.Config?.Labels?.[AGENTBAY_CONFIG_REVISION_LABEL] ??
@@ -825,7 +833,7 @@ export class ManualRunnerDocker {
       };
     }
 
-    let apiServerKey = await readProjectedApiServerKey(agentId);
+    let apiServerKey = await readProjectedApiServerKey(agentId, this.stateRoot);
 
     if (!apiServerKey) {
       return applyReadinessWindow(base, operation, "probe_credential_unavailable", observedAt);
@@ -1701,7 +1709,10 @@ function normalizeContainerState(value: string): RunnerContainerState {
     : "unknown";
 }
 
-async function readProjectedRevision(agentId: string): Promise<{
+async function readProjectedRevision(
+  agentId: string,
+  configuredStateRoot?: string,
+): Promise<{
   agentId: string | null;
   configRevision: string | null;
   configuredStateRoot: string | null;
@@ -1711,16 +1722,18 @@ async function readProjectedRevision(agentId: string): Promise<{
   version: string | null;
 }> {
   const revisionPath = resolve(
-    resolveHermesStateRoot(),
+    resolveHermesStateRoot(configuredStateRoot),
     agentId,
     "hermes",
     "agentbay-config-revision.json",
   );
 
   try {
-    await rejectSymlinkPath(resolveHermesStateRoot());
-    await rejectSymlinkPath(resolve(resolveHermesStateRoot(), agentId));
-    await rejectSymlinkPath(resolve(resolveHermesStateRoot(), agentId, "hermes"));
+    await rejectSymlinkPath(resolveHermesStateRoot(configuredStateRoot));
+    await rejectSymlinkPath(resolve(resolveHermesStateRoot(configuredStateRoot), agentId));
+    await rejectSymlinkPath(
+      resolve(resolveHermesStateRoot(configuredStateRoot), agentId, "hermes"),
+    );
     const parsed: unknown = JSON.parse(
       await readSafeRegularFile(revisionPath, MAX_PROBE_RESPONSE_BYTES),
     );
@@ -1731,10 +1744,10 @@ async function readProjectedRevision(agentId: string): Promise<{
         isRecord(parsed) && typeof parsed.configRevision === "string"
           ? parsed.configRevision
           : null,
-      configuredStateRoot: resolveHermesStateRoot(),
+      configuredStateRoot: resolveHermesStateRoot(configuredStateRoot),
       image: isRecord(parsed) && typeof parsed.image === "string" ? parsed.image : null,
       state: "read",
-      stateRoot: await realpath(resolveHermesStateRoot()),
+      stateRoot: await realpath(resolveHermesStateRoot(configuredStateRoot)),
       version: isRecord(parsed) && typeof parsed.version === "string" ? parsed.version : null,
     };
   } catch (error) {
@@ -1750,13 +1763,17 @@ async function readProjectedRevision(agentId: string): Promise<{
   }
 }
 
-async function readProjectedApiServerKey(agentId: string): Promise<string | null> {
-  const envPath = resolve(resolveHermesStateRoot(), agentId, "hermes", ".env");
+async function readProjectedApiServerKey(
+  agentId: string,
+  configuredStateRoot?: string,
+): Promise<string | null> {
+  const stateRoot = resolveHermesStateRoot(configuredStateRoot);
+  const envPath = resolve(stateRoot, agentId, "hermes", ".env");
 
   try {
-    await rejectSymlinkPath(resolveHermesStateRoot());
-    await rejectSymlinkPath(resolve(resolveHermesStateRoot(), agentId));
-    await rejectSymlinkPath(resolve(resolveHermesStateRoot(), agentId, "hermes"));
+    await rejectSymlinkPath(stateRoot);
+    await rejectSymlinkPath(resolve(stateRoot, agentId));
+    await rejectSymlinkPath(resolve(stateRoot, agentId, "hermes"));
     const content = await readSafeRegularFile(envPath, MAX_PROBE_RESPONSE_BYTES);
 
     const assignments = content
@@ -2444,6 +2461,7 @@ function parseDockerMemoryBytes(value: string): number {
 }
 
 export function buildHermesDockerRunArgs(input: {
+  additionalLabels?: readonly (readonly [string, string])[];
   agentId: string;
   containerName: string;
   launchSpec: AgentLaunchSpec;
@@ -2470,6 +2488,7 @@ export function buildHermesDockerRunArgs(input: {
     `${AGENTBAY_OPERATION_ACTION_LABEL}=${input.operation.action}`,
     "--label",
     `${AGENTBAY_OPERATION_ACCEPTED_AT_LABEL}=${input.operation.acceptedAt}`,
+    ...(input.additionalLabels ?? []).flatMap(([name, value]) => ["--label", `${name}=${value}`]),
     "--network",
     input.runtime.network,
     "--mount",
@@ -2500,6 +2519,21 @@ export function buildHermesDockerRunArgs(input: {
     "gateway",
     "run",
   ];
+}
+
+function resolveAdditionalContainerLabels(
+  labels: Readonly<Record<string, string>> | undefined,
+): readonly (readonly [string, string])[] {
+  const entries = Object.entries(labels ?? {});
+  for (const [name, value] of entries) {
+    if (
+      !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(name) ||
+      !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value)
+    ) {
+      throw new Error("Additional Docker container label is invalid.");
+    }
+  }
+  return entries;
 }
 
 function buildLegacyDockerRunArgs(input: {
@@ -2935,12 +2969,16 @@ function parseDockerLogLine(stream: RunnerLogLine["stream"], line: string): Runn
   };
 }
 
-async function readHermesGatewayLogLines(agentId: string): Promise<RunnerLogLine[]> {
-  const logDirectory = resolveHermesGatewayLogDirectory(agentId);
+async function readHermesGatewayLogLines(
+  agentId: string,
+  configuredStateRoot?: string,
+): Promise<RunnerLogLine[]> {
+  const stateRoot = resolveHermesStateRoot(configuredStateRoot);
+  const logDirectory = resolveHermesGatewayLogDirectory(agentId, stateRoot);
 
   try {
-    await rejectSymlinkPath(resolveHermesStateRoot());
-    await rejectSymlinkPath(resolve(resolveHermesStateRoot(), agentId));
+    await rejectSymlinkPath(stateRoot);
+    await rejectSymlinkPath(resolve(stateRoot, agentId));
     await rejectSymlinkPath(logDirectory);
   } catch {
     return [];
@@ -3055,8 +3093,11 @@ function sourceOrder(line: RunnerLogLine): number {
   return line.source === "hermes_gateway" ? 0 : 1;
 }
 
-async function removeHermesAgentRoot(agentId: string): Promise<boolean> {
-  const stateRoot = resolveHermesStateRoot();
+async function removeHermesAgentRoot(
+  agentId: string,
+  configuredStateRoot?: string,
+): Promise<boolean> {
+  const stateRoot = resolveHermesStateRoot(configuredStateRoot);
   const agentRoot = resolve(stateRoot, agentId);
   assertChildPath(stateRoot, agentRoot);
 
@@ -3074,8 +3115,8 @@ async function removeHermesAgentRoot(agentId: string): Promise<boolean> {
   }
 }
 
-function resolveHermesGatewayLogDirectory(agentId: string): string {
-  const stateRoot = resolveHermesStateRoot();
+function resolveHermesGatewayLogDirectory(agentId: string, configuredStateRoot?: string): string {
+  const stateRoot = resolveHermesStateRoot(configuredStateRoot);
   const agentRoot = resolve(stateRoot, agentId);
   const logDirectory = resolve(agentRoot, "hermes", "logs", "gateways", "default");
   assertChildPath(stateRoot, agentRoot);
@@ -3084,8 +3125,10 @@ function resolveHermesGatewayLogDirectory(agentId: string): string {
   return logDirectory;
 }
 
-function resolveHermesStateRoot(): string {
-  return resolve(process.env[HERMES_STATE_ROOT_ENV]?.trim() || DEFAULT_HERMES_STATE_ROOT);
+function resolveHermesStateRoot(configuredStateRoot?: string): string {
+  return resolve(
+    configuredStateRoot ?? process.env[HERMES_STATE_ROOT_ENV]?.trim() ?? DEFAULT_HERMES_STATE_ROOT,
+  );
 }
 
 async function rejectSymlinkPath(path: string): Promise<void> {

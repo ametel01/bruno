@@ -10,6 +10,7 @@ export const DEFAULT_HERMES_PRIVATE_NETWORK = "agentbay-hermes";
 export const DEFAULT_HERMES_READINESS_TIMEOUT_MS = 180_000;
 export const DEFAULT_HERMES_RUNNER_MAX_AGENTS = 1;
 export const DEFAULT_HERMES_STATE_ROOT = "/var/lib/agentbay/agents";
+export const DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT = "/var/lib/agentbay/boot-self-test";
 export const DOCKER_CLI_TIMEOUT_MS = 30_000;
 export const RUNNER_BOOT_CONTRACT_VERSION = "plingpling.runner.boot.v1";
 export const RUNNER_RELEASE_VERSION_MAX_LENGTH = 80;

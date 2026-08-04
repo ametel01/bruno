@@ -5,6 +5,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { runnerProvisioningEvents, runners } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
 import { DIGITALOCEAN_PROVIDER } from "@/src/server/runners/digitalocean-provider";
+import type { RunnerBootSnapshot } from "@/src/runner-service/runner-contracts";
 
 export type RunnerProvisioningPhase =
   | "pending"
@@ -110,6 +111,7 @@ export async function markCloudRunnerReadyAfterAuthenticatedProbe(
   input: {
     runnerId: string;
     now: Date;
+    bootSnapshot: RunnerBootSnapshot;
   },
 ): Promise<boolean> {
   const transitionedRows = await tx
@@ -145,6 +147,9 @@ export async function markCloudRunnerReadyAfterAuthenticatedProbe(
       provider: DIGITALOCEAN_PROVIDER,
       heartbeatStatus: "online",
       readinessProbe: "authenticated_endpoint",
+      bootContractVersion: input.bootSnapshot.contractVersion,
+      bootStatus: input.bootSnapshot.status,
+      bootComponents: input.bootSnapshot.components,
     },
     now: input.now,
   });

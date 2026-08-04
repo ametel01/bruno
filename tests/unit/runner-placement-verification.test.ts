@@ -8,6 +8,7 @@ import {
   verifyRunnerPlacementCandidate,
 } from "@/src/server/runners/runner-placement-verification";
 import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
+import { readyRunnerBootSnapshot } from "@/tests/helpers/runner-boot";
 
 const RUNNER_IMAGE_DIGEST = `sha256:${"c".repeat(64)}`;
 const HOSTED_COMPATIBILITY_REQUIREMENT = {
@@ -197,7 +198,7 @@ describe.sequential("runner placement live verification", () => {
             .update(runners)
             .set({ compatibilityState: "outdated" })
             .where(eq(runners.id, runner.id));
-          return Response.json({ ok: true, status: "ready" });
+          return Response.json(readyRunnerBootSnapshot());
         },
         provider,
         readConfig,

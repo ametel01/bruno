@@ -18,6 +18,7 @@ import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
 import { createRunnerService } from "@/src/runner-service/server";
 import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import { sampleLaunchSpec, sampleManagedLaunchSpec } from "@/tests/helpers/agent-launch-spec";
+import { readyRunnerBootController, readyRunnerBootSnapshot } from "@/tests/helpers/runner-boot";
 
 const AGENT_ID = "00000000-0000-4000-8000-000000000123";
 const OTHER_AGENT_ID = "00000000-0000-4000-8000-000000000456";
@@ -25,6 +26,9 @@ const MOCK_IMAGE_ID = `sha256:${"c".repeat(64)}`;
 const MOCK_REPO_DIGEST =
   "nousresearch/hermes-agent@sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973";
 const execFileAsync = promisify(execFile);
+
+const createReadyRunnerService = (options: Parameters<typeof createRunnerService>[0] = {}) =>
+  createRunnerService({ ...options, readiness: readyRunnerBootController() });
 
 describe("manual runner service HTTP contract", () => {
   it("requires bearer auth and returns safe JSON failures", async () => {
@@ -53,16 +57,41 @@ describe("manual runner service HTTP contract", () => {
 
     expect(unauthorized.status).toBe(401);
     expect(ready.status).toBe(200);
-    await expect(ready.json()).resolves.toEqual({ ok: true, status: "ready" });
+    expect(ready.headers.get("cache-control")).toBe("no-store");
+    await expect(ready.json()).resolves.toEqual(readyRunnerBootSnapshot());
     expect(wrongMethod.status).toBe(405);
     expect(wrongMethod.headers.get("allow")).toBe("GET");
     expect(calls).toEqual([]);
   });
 
+  it("returns a deterministic no-store 503 for a failed boot snapshot", async () => {
+    const snapshot = readyRunnerBootSnapshot({
+      status: "failed",
+      components: { ...readyRunnerBootSnapshot().components, cleanup: "failed" },
+      failureReason: "cleanup_failed",
+    });
+    const service = createRunnerService({
+      authToken: "test-token",
+      docker: new ManualRunnerDocker({ command: testCommand(), docker: createMockDocker() }),
+      readiness: {
+        async read() {
+          return snapshot;
+        },
+        async start() {},
+      },
+    });
+
+    const response = await service.fetch(authorizedRequest("/runner/v1/readiness"));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual(snapshot);
+  });
+
   it("starts a continuous heartbeat loop when configured with runner identity", () => {
     const starts: Array<{ runnerId: string; credential: string; appBaseUrl: string }> = [];
 
-    createRunnerService({
+    createReadyRunnerService({
       authToken: "test-token",
       docker: new ManualRunnerDocker({
         command: testCommand(),
@@ -99,7 +128,7 @@ describe("manual runner service HTTP contract", () => {
 
   it("sends startup heartbeat payloads with capacity metrics without requiring Docker calls", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
-    const service = createRunnerService({
+    const service = createReadyRunnerService({
       authToken: "test-token",
       docker: new ManualRunnerDocker({
         command: testCommand(),
@@ -232,7 +261,7 @@ describe("manual runner service HTTP contract", () => {
       configRevision: string;
       containerName: string;
     }> = [];
-    const service = createRunnerService({
+    const service = createReadyRunnerService({
       authToken: "test-token",
       docker: new ManualRunnerDocker({
         command: testCommand(),
@@ -319,7 +348,7 @@ describe("manual runner service HTTP contract", () => {
   });
 
   it("fails closed when inspect reports a Docker socket mount for Hermes", async () => {
-    const service = createRunnerService({
+    const service = createReadyRunnerService({
       authToken: "test-token",
       docker: new ManualRunnerDocker({
         command: testCommand(),
@@ -349,7 +378,7 @@ describe("manual runner service HTTP contract", () => {
 
   it("fails closed when Docker inspect exposes managed Telegram allowlist values", async () => {
     const calls: string[][] = [];
-    const service = createRunnerService({
+    const service = createReadyRunnerService({
       authToken: "test-token",
       docker: new ManualRunnerDocker({
         command: testCommand(),
@@ -383,7 +412,7 @@ describe("manual runner service HTTP contract", () => {
 
   it("does not poll Hermes readiness during launch acceptance", async () => {
     const readiness = vi.fn(async () => ({ ok: false as const, reason: "timeout" as const }));
-    const service = createRunnerService({
+    const service = createReadyRunnerService({
       authToken: "test-token",
       docker: new ManualRunnerDocker({
         command: testCommand(),
@@ -415,7 +444,7 @@ describe("manual runner service HTTP contract", () => {
 
   it("retains the accepted container when later health would still be unready", async () => {
     const calls: string[][] = [];
-    const service = createRunnerService({
+    const service = createReadyRunnerService({
       authToken: "test-token",
       docker: new ManualRunnerDocker({
         command: testCommand(),
@@ -448,7 +477,7 @@ describe("manual runner service HTTP contract", () => {
 
   it("does not run failed-launch readiness cleanup during async acceptance", async () => {
     const calls: string[][] = [];
-    const service = createRunnerService({
+    const service = createReadyRunnerService({
       authToken: "test-token",
       docker: new ManualRunnerDocker({
         command: testCommand(),
@@ -709,7 +738,7 @@ describe("manual runner service HTTP contract", () => {
     const calls: string[][] = [];
 
     try {
-      const service = createRunnerService({
+      const service = createReadyRunnerService({
         authToken: "test-token",
         docker: new ManualRunnerDocker({
           docker: createMockDocker({ calls }),
@@ -1141,7 +1170,7 @@ describe("manual runner service HTTP contract", () => {
         },
         probe: { requestHealth, requestCanary },
       });
-      const service = createRunnerService({ authToken: "test-token", docker });
+      const service = createReadyRunnerService({ authToken: "test-token", docker });
       const spec = sampleManagedLaunchSpec({
         agent: { ...sampleManagedLaunchSpec().agent, id: AGENT_ID },
       });
@@ -1261,7 +1290,7 @@ describe("manual runner service HTTP contract", () => {
     });
     const canaryCalls: Array<{ apiServerKey: string; model: string }> = [];
     await withHermesStateRootForTest(async () => {
-      const service = createRunnerService({
+      const service = createReadyRunnerService({
         authToken: "test-token",
         docker: new ManualRunnerDocker({
           command: testCommand(),
@@ -1432,7 +1461,7 @@ describe("manual runner service HTTP contract", () => {
 
   it("keeps the primary revision reason when failed-launch cleanup fails", async () => {
     const calls: string[][] = [];
-    const service = createRunnerService({
+    const service = createReadyRunnerService({
       authToken: "test-token",
       docker: new ManualRunnerDocker({
         command: testCommand(),
@@ -1685,7 +1714,7 @@ describe("manual runner service HTTP contract", () => {
       cleanup: async () => ({}),
       canary,
     };
-    const service = createRunnerService({ authToken: "test-token", docker: failingDocker });
+    const service = createReadyRunnerService({ authToken: "test-token", docker: failingDocker });
     const invalidContentType = await service.fetch(
       new Request(`http://runner.test/runner/v1/agents/${AGENT_ID}/canary`, {
         method: "POST",
@@ -2009,6 +2038,7 @@ function pinnedHermesHealth(
 function createTestService(input: { docker?: DockerExecutableRunner } = {}) {
   return createRunnerService({
     authToken: "test-token",
+    readiness: readyRunnerBootController(),
     docker: new ManualRunnerDocker({
       command: testCommand(),
       ...(input.docker ? { docker: input.docker } : {}),

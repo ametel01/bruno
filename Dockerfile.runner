@@ -13,6 +13,7 @@ RUN apk add --no-cache ca-certificates docker-cli
 WORKDIR /app
 
 COPY package.json bun.lock tsconfig.json ./
+RUN bun install --frozen-lockfile --production
 COPY src/runner-service ./src/runner-service
 COPY src/server/agents/agent-id.ts ./src/server/agents/agent-id.ts
 COPY src/server/agents/agent-launch-spec.ts ./src/server/agents/agent-launch-spec.ts
