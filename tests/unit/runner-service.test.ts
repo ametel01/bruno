@@ -14,6 +14,7 @@ import {
   type DockerExecutableRunner,
   type HermesReadinessReason,
 } from "@/src/runner-service/docker";
+import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
 import { createRunnerService } from "@/src/runner-service/server";
 import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import { sampleLaunchSpec, sampleManagedLaunchSpec } from "@/tests/helpers/agent-launch-spec";
@@ -110,6 +111,14 @@ describe("manual runner service HTTP contract", () => {
         appBaseUrl: "https://app.agentbay.test/",
         intervalMs: 60_000,
         maxAgents: 5,
+        releaseEvidence: {
+          release: {
+            version: "release-sha",
+            imageDigest: `sha256:${"a".repeat(64)}`,
+            bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+          },
+          expectedMatch: true,
+        },
         fetch: async (url, init) => {
           requests.push({ url: String(url), init: init ?? {} });
           return Response.json({ ok: true });
@@ -135,6 +144,11 @@ describe("manual runner service HTTP contract", () => {
       runnerId: "00000000-0000-4000-8000-000000000153",
       status: "online",
       version: "agentbay-runner/service",
+      release: {
+        version: "release-sha",
+        imageDigest: `sha256:${"a".repeat(64)}`,
+        bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+      },
       metrics: {
         maxAgents: 5,
         runningAgents: 0,

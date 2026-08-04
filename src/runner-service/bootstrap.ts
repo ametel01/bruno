@@ -1,4 +1,13 @@
 import { writeFile } from "node:fs/promises";
+import {
+  resolveRunnerReleaseEvidence,
+  RUNNER_CONTAINER_ID_ENV,
+  RUNNER_EXPECTED_BOOT_CONTRACT_VERSION_ENV,
+  RUNNER_EXPECTED_IMAGE_DIGEST_ENV,
+  RUNNER_EXPECTED_RELEASE_VERSION_ENV,
+  RUNNER_RELEASE_IDENTITY_MODE_ENV,
+  type RunnerReleaseEvidence,
+} from "@/src/runner-service/release-identity";
 
 type RunnerBootstrapEnv = {
   AGENTBAY_APP_URL?: string;
@@ -12,6 +21,11 @@ type RunnerBootstrapEnv = {
   AGENTBAY_RUNNER_PORT?: string;
   AGENTBAY_RUNNER_BEARER_TOKEN?: string;
   AGENTBAY_DOCKER_RUNNER_IMAGE?: string;
+  AGENTBAY_RUNNER_CONTAINER_ID?: string;
+  AGENTBAY_RUNNER_EXPECTED_RELEASE_VERSION?: string;
+  AGENTBAY_RUNNER_EXPECTED_IMAGE_DIGEST?: string;
+  AGENTBAY_RUNNER_EXPECTED_BOOT_CONTRACT_VERSION?: string;
+  AGENTBAY_RUNNER_RELEASE_IDENTITY_MODE?: string;
 };
 
 type WriteRunnerEnvFile = (
@@ -24,7 +38,7 @@ export type RunnerBootstrapResult =
   | {
       ok: true;
       runnerId: string;
-      status: "online";
+      status: "degraded" | "online";
     }
   | {
       ok: false;
@@ -32,11 +46,18 @@ export type RunnerBootstrapResult =
         | "not_configured"
         | "registration_failed"
         | "registration_response_invalid"
+        | "release_identity_unavailable"
         | "heartbeat_failed";
     };
 
 export async function bootstrapRegisteredRunner(
-  input: { env?: RunnerBootstrapEnv; fetch?: typeof fetch; writeEnvFile?: WriteRunnerEnvFile } = {},
+  input: {
+    env?: RunnerBootstrapEnv;
+    fetch?: typeof fetch;
+    releaseEvidence?: RunnerReleaseEvidence;
+    resolveReleaseEvidence?: (env: RunnerBootstrapEnv) => Promise<RunnerReleaseEvidence>;
+    writeEnvFile?: WriteRunnerEnvFile;
+  } = {},
 ): Promise<RunnerBootstrapResult> {
   const env = (input.env ?? process.env) as RunnerBootstrapEnv;
   const fetchImplementation = input.fetch ?? fetch;
@@ -58,6 +79,24 @@ export async function bootstrapRegisteredRunner(
     if (!registrationToken) {
       return { ok: false, reason: "not_configured" };
     }
+  }
+
+  let releaseEvidence: RunnerReleaseEvidence;
+
+  try {
+    releaseEvidence =
+      input.releaseEvidence ??
+      (await (input.resolveReleaseEvidence
+        ? input.resolveReleaseEvidence(env)
+        : resolveRunnerReleaseEvidence({ env })));
+  } catch {
+    return { ok: false, reason: "release_identity_unavailable" };
+  }
+
+  if (!runnerId || !credential) {
+    const registrationToken = env.AGENTBAY_RUNNER_REGISTRATION_TOKEN?.trim();
+
+    if (!registrationToken) return { ok: false, reason: "not_configured" };
 
     const registered = await fetchImplementation(`${appBaseUrl}/runner/v1/register`, {
       method: "POST",
@@ -107,8 +146,9 @@ export async function bootstrapRegisteredRunner(
     },
     body: JSON.stringify({
       runnerId,
-      status: "online",
+      status: releaseEvidence.expectedMatch === false ? "degraded" : "online",
       version: "agentbay-runner/bootstrap",
+      release: releaseEvidence.release,
     }),
   });
 
@@ -119,7 +159,7 @@ export async function bootstrapRegisteredRunner(
   return {
     ok: true,
     runnerId,
-    status: "online",
+    status: releaseEvidence.expectedMatch === false ? "degraded" : "online",
   };
 }
 
@@ -148,6 +188,11 @@ function buildPersistedRunnerEnv(input: {
     "AGENTBAY_RUNNER_PORT",
     "AGENTBAY_RUNNER_BEARER_TOKEN",
     "AGENTBAY_DOCKER_RUNNER_IMAGE",
+    RUNNER_CONTAINER_ID_ENV,
+    RUNNER_EXPECTED_RELEASE_VERSION_ENV,
+    RUNNER_EXPECTED_IMAGE_DIGEST_ENV,
+    RUNNER_EXPECTED_BOOT_CONTRACT_VERSION_ENV,
+    RUNNER_RELEASE_IDENTITY_MODE_ENV,
   ] as const) {
     const value = input.env[key]?.trim();
 

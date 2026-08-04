@@ -17,6 +17,7 @@ import {
   validateRunnerHeartbeatPayload,
 } from "@/src/server/runners/runner-heartbeat";
 import { createRunnerCredential, hashRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
+import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
 
 describe("runner heartbeat persistence", () => {
   let connection: DatabaseConnection;
@@ -105,7 +106,7 @@ describe("runner heartbeat persistence", () => {
     expect(JSON.stringify(persistedHeartbeats[0]?.metadata)).not.toContain("must-not-persist");
   });
 
-  it("characterizes legacy authenticated heartbeats as allowlisted but release-agnostic", async () => {
+  it("persists only canonical release fields from an authenticated heartbeat", async () => {
     const credential = createRunnerCredential({
       randomBytes: (size) => Buffer.alloc(size, 13),
     });
@@ -113,7 +114,7 @@ describe("runner heartbeat persistence", () => {
       credentialValue: credential.value,
       runnerStatus: "active",
     });
-    const untrustedDigest = `sha256:${"d".repeat(64)}`;
+    const observedDigest = `sha256:${"d".repeat(64)}`;
 
     await expect(
       recordRunnerHeartbeat(
@@ -123,8 +124,9 @@ describe("runner heartbeat persistence", () => {
             runnerId: runner.id,
             version: "agentbay-runner/baseline",
             release: {
-              imageDigest: untrustedDigest,
-              bootContractVersion: "forged-contract",
+              version: "release-sha",
+              imageDigest: observedDigest,
+              bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
               registryCredential: "must-not-persist",
             },
           },
@@ -141,9 +143,15 @@ describe("runner heartbeat persistence", () => {
       .from(runnerHeartbeats)
       .where(eq(runnerHeartbeats.runnerId, runner.id));
 
-    expect(heartbeat?.metadata).toEqual({ version: "agentbay-runner/baseline" });
-    expect(JSON.stringify(heartbeat?.metadata)).not.toContain(untrustedDigest);
-    expect(JSON.stringify(heartbeat?.metadata)).not.toContain("forged-contract");
+    expect(heartbeat?.metadata).toEqual({
+      version: "agentbay-runner/baseline",
+      releaseEvidence: "present",
+      release: {
+        version: "release-sha",
+        imageDigest: observedDigest,
+        bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+      },
+    });
     expect(JSON.stringify(heartbeat?.metadata)).not.toContain("must-not-persist");
   });
 
@@ -573,9 +581,46 @@ describe("runner heartbeat persistence", () => {
         runnerId: "00000000-0000-4000-8000-000000000130",
         status: "online",
         metadata: {
+          releaseEvidence: "missing",
           metrics: { cpuPercent: 50 },
         },
       },
+    });
+  });
+
+  it.each([
+    ["missing fields", { version: "release-sha" }],
+    [
+      "uppercase digest",
+      {
+        version: "release-sha",
+        imageDigest: `sha256:${"A".repeat(64)}`,
+        bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+      },
+    ],
+    [
+      "unbounded version",
+      {
+        version: "x".repeat(81),
+        imageDigest: `sha256:${"a".repeat(64)}`,
+        bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+      },
+    ],
+  ])("rejects %s release evidence safely", (_case, release) => {
+    expect(
+      validateRunnerHeartbeatPayload({
+        runnerId: "00000000-0000-4000-8000-000000000130",
+        release,
+      }),
+    ).toEqual({
+      ok: false,
+      reason: "invalid_payload",
+      issues: [
+        {
+          field: "release",
+          message: "Release identity must contain canonical bounded fields.",
+        },
+      ],
     });
   });
 });

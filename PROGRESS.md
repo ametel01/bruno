@@ -611,7 +611,7 @@ and replace the fleet in bounded batches.
 
 - [x] Step 0: Progress and Changelog Tracking Setup
 - [x] Step 1: Baseline Gates and Failure Characterization
-- [ ] Step 2: Report Immutable Runner Release Identity
+- [x] Step 2: Report Immutable Runner Release Identity
 - [ ] Step 3: Persist Compatibility and Fail Closed During Assignment
 - [ ] Step 4: Enforce a Real Boot-Readiness Contract
 - [ ] Step 5: Persist a Durable Runner Replacement Workflow
@@ -625,20 +625,20 @@ and replace the fleet in bounded batches.
 
 ### Current Status
 
-Step 1 is complete in this commit. A fresh isolated local PostgreSQL database
-migrated through all current migrations, the pre-change baseline passed, and
-five focused characterization files now preserve the existing authentication,
-ownership, idempotency, redaction, in-container probing, and bounded timeout
-guarantees. The post-change full suite and desktop/mobile E2E are green. Step 2
-is next.
+Step 2 is complete in this commit. Bootstrap and steady-state heartbeats now
+carry a bounded canonical release object derived from the runner container's
+Docker image metadata and repository digest. Expected bootstrap identity is
+non-secret comparison input and cannot forge the observed fields. The runner
+publication workflow produces immutable Git-SHA tags, OCI metadata, amd64 SBOM
+and provenance, and exposes the pushed registry digest. Step 3 is next.
 
 ### Step Ledger
 
 | Step | State | Commit | Validation or acceptance evidence | Next work or blocker |
 | --- | --- | --- | --- | --- |
 | 0. Progress and Changelog Tracking Setup | Complete | `e892330` | Restored all 574 historical lines from `9f45d89^:PROGRESS.md`; appended the complete Step 0-12 tracker; verified the Keep a Changelog header, preamble, and Unreleased section; 1 focused file / 3 progress tests passed; format and lint checked 356 files; typecheck, 149 files / 1,449 tests, production build, and diff hygiene passed. No changelog entry was added for this tracking-only step. | Complete; Step 1 is next. |
-| 1. Baseline Gates and Failure Characterization | Complete | This commit | Frozen install made no changes; clean isolated PostgreSQL migration passed; pre-change `bun run verify` passed 149 files / 1,449 tests and production build; pre-change E2E passed 26/26. Added legacy authenticated heartbeat allowlisting, provider verification after selection, secret-safe in-container probing, exact selected-agent cleanup, operation-tag replay idempotency, and single-shot timeout cleanup coverage. Five focused files / 126 tests passed. Post-change format, lint, typecheck, 149 files / 1,452 tests, production build, 26/26 E2E, and diff hygiene passed. No changelog entry was added for test-only work. | Complete; Step 2 is next. |
-| 2. Report Immutable Runner Release Identity | Pending | Pending | Not started. | Waits for Steps 0-1. |
+| 1. Baseline Gates and Failure Characterization | Complete | `ae39387` | Frozen install made no changes; clean isolated PostgreSQL migration passed; pre-change `bun run verify` passed 149 files / 1,449 tests and production build; pre-change E2E passed 26/26. Added legacy authenticated heartbeat allowlisting, provider verification after selection, secret-safe in-container probing, exact selected-agent cleanup, operation-tag replay idempotency, and single-shot timeout cleanup coverage. Five focused files / 126 tests passed. Post-change format, lint, typecheck, 149 files / 1,452 tests, production build, 26/26 E2E, and diff hygiene passed. No changelog entry was added for test-only work. | Complete; Step 2 is next. |
+| 2. Report Immutable Runner Release Identity | Complete | This commit | Added the bounded `plingpling.runner.boot.v1` release contract, strict immutable image/reference parsing, Docker container/image inspection through argv-only bounded calls, OCI version/revision reading, canonical unique repository-digest derivation, expected-versus-observed comparison, and an explicit image-ID development seam. Bootstrap and service heartbeats report the observed release; malformed release fields fail validation and legacy payloads remain parseable with explicit missing evidence. Cloud bootstrap injects expected identity only for immutable references. Runner images now carry OCI labels and the publication workflow emits linux/amd64 Git-SHA and transition `main` tags with SBOM, max provenance, digest verification, and digest/image outputs. Eight focused files / 122 tests and the full 150-file / 1,462-test suite passed. The built runner container inspected itself through the mounted Docker socket and returned only `development`, its canonical local image digest, `plingpling.runner.boot.v1`, and `expectedMatch: null`. Runner Docker build, 83-second Hermes contract smoke, format, lint, typecheck, production build, and diff hygiene passed. | Complete; Step 3 is next. |
 | 3. Persist Compatibility and Fail Closed During Assignment | Pending | Pending | Not started. | Waits for Step 2. |
 | 4. Enforce a Real Boot-Readiness Contract | Pending | Pending | Not started. | Waits for Steps 2-3. |
 | 5. Persist a Durable Runner Replacement Workflow | Pending | Pending | Not started. | Waits for Steps 3-4. |
@@ -675,6 +675,16 @@ is next.
 | 1 | Post-change `bun run build` | Passed; Next.js production build completed. |
 | 1 | Post-change `bun run test:e2e:ci` | Passed; 26/26 desktop and mobile tests. |
 | 1 | `git diff --check` | Passed. |
+| 2 | Eight focused release/bootstrap/heartbeat/image files | Passed; 122/122 tests. |
+| 2 | `bun run format:check` | Passed; 358 files checked. |
+| 2 | `bun run lint` | Passed; 358 files checked with no warnings. |
+| 2 | `bun run typecheck` | Passed. |
+| 2 | `bun run test` | Passed; 150 files / 1,462 tests. |
+| 2 | `bun run build` | Passed; Next.js production build completed. |
+| 2 | `docker build -f Dockerfile.runner -t plingpling-runner:resilience .` | Passed; local runner image built successfully. |
+| 2 | Ephemeral built-runner self-inspection through mounted Docker socket | Passed; derived the local image digest and OCI `development` version with `plingpling.runner.boot.v1` and no expected identity. |
+| 2 | `bun run agent:hermes:contract-smoke` | Passed in 83,252 ms with fake OpenAI-compatible model, private API auth, canary, restart/Stop persistence, backup/restore, exact cleanup, and `telegramBoundary: "local-fake-platform-state"`. |
+| 2 | `git diff --check` | Passed. |
 
 ### Step 1 Gap Matrix
 
@@ -702,11 +712,18 @@ is next.
   a clean database migrated successfully, proving the repository migration path
   is green. Added three new characterization tests and strengthened two existing
   tests across the five required files. The focused commit is `test:
-  characterize runner resilience contracts` (`This commit`).
+  characterize runner resilience contracts` (`ae39387`).
+- 2026-08-04: Completed Step 2 with Docker-observed release identity,
+  canonical heartbeat validation, non-secret expected bootstrap comparison,
+  OCI-labeled runner images, and an amd64 SBOM/provenance publication workflow
+  that returns and verifies the pushed digest. Local image and Hermes contract
+  gates passed; no registry publication or live provider action was performed
+  or claimed. The focused commit is `feat: report immutable runner release
+  identity` (`This commit`).
 
 ### Next Step
 
-Begin Step 2 by adding bounded release identity contracts, deriving observed
-runner image identity through Docker inspection, extending authenticated
-heartbeats and cloud bootstrap, and publishing immutable image metadata without
-trusting expected environment values as observed evidence.
+Begin Step 3 by adding backward-safe indexed runner compatibility columns and
+a single server-owned decision module, then make every assignment and start
+boundary fail closed unless the fresh observed release equals the required
+immutable control-plane release.

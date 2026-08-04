@@ -9,6 +9,10 @@ import {
 } from "@/src/server/runners/digitalocean-provider";
 import { hashRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
 import { markCloudRunnerReadyAfterAuthenticatedProbe } from "@/src/server/runners/runner-provisioning-events";
+import {
+  parseRunnerReleaseIdentity,
+  type RunnerReleaseIdentity,
+} from "@/src/runner-service/release-identity";
 
 export const RUNNER_HEARTBEAT_ONLINE_STATUS = "online";
 export const RUNNER_HEARTBEAT_DEGRADED_STATUS = "degraded";
@@ -36,6 +40,8 @@ type RunnerHeartbeatStatus =
 
 type RunnerHeartbeatMetadata = {
   version?: string;
+  releaseEvidence: "missing" | "present";
+  release?: RunnerReleaseIdentity;
   metrics?:
     | Record<keyof typeof METRIC_LIMITS, number>
     | Partial<Record<keyof typeof METRIC_LIMITS, number>>;
@@ -555,7 +561,17 @@ export function validateRunnerHeartbeatPayload(payload: unknown): RunnerHeartbea
 
   const version = sanitizeVersion(body.version);
   const metrics = sanitizeMetrics(body.metrics);
-  const metadata: RunnerHeartbeatMetadata = {};
+  const release = body.release === undefined ? null : parseRunnerReleaseIdentity(body.release);
+  const metadata: RunnerHeartbeatMetadata = {
+    releaseEvidence: release ? "present" : "missing",
+  };
+
+  if (body.release !== undefined && !release) {
+    issues.push({
+      field: "release",
+      message: "Release identity must contain canonical bounded fields.",
+    });
+  }
 
   if (version) {
     metadata.version = version;
@@ -563,6 +579,10 @@ export function validateRunnerHeartbeatPayload(payload: unknown): RunnerHeartbea
 
   if (Object.keys(metrics).length > 0) {
     metadata.metrics = metrics;
+  }
+
+  if (release) {
+    metadata.release = release;
   }
 
   if (issues.length > 0) {

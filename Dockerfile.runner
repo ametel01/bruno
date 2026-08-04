@@ -1,5 +1,13 @@
 FROM oven/bun:1-alpine
 
+ARG RUNNER_RELEASE_VERSION=development
+ARG RUNNER_RELEASE_REVISION=development
+ARG RUNNER_SOURCE_URL=https://github.com/ametel01/plingpling
+
+LABEL org.opencontainers.image.source="${RUNNER_SOURCE_URL}"
+LABEL org.opencontainers.image.revision="${RUNNER_RELEASE_REVISION}"
+LABEL org.opencontainers.image.version="${RUNNER_RELEASE_VERSION}"
+
 RUN apk add --no-cache ca-certificates docker-cli
 
 WORKDIR /app

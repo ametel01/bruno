@@ -15,7 +15,15 @@ import {
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
   DEFAULT_MANUAL_RUNNER_IMAGE,
+  RUNNER_BOOT_CONTRACT_VERSION,
 } from "@/src/runner-service/constants";
+import {
+  RUNNER_EXPECTED_BOOT_CONTRACT_VERSION_ENV,
+  RUNNER_EXPECTED_IMAGE_DIGEST_ENV,
+  RUNNER_EXPECTED_RELEASE_VERSION_ENV,
+  RUNNER_RELEASE_DEVELOPMENT_MODE,
+  RUNNER_RELEASE_IDENTITY_MODE_ENV,
+} from "@/src/runner-service/release-identity";
 import { DEFAULT_AGENTBAY_RUNNER_IMAGE } from "@/src/server/env";
 
 const LEGACY_HOST_BOOTSTRAP_TOKENS = [
@@ -24,6 +32,9 @@ const LEGACY_HOST_BOOTSTRAP_TOKENS = [
   "/root/.bun/bin/" + "bun",
   "https://github.com/ametel01/" + "agentbay.git",
 ];
+const RUNNER_RELEASE_VERSION = "0123456789abcdef";
+const RUNNER_IMAGE_DIGEST = `sha256:${"a".repeat(64)}`;
+const IMMUTABLE_RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:${RUNNER_RELEASE_VERSION}@${RUNNER_IMAGE_DIGEST}`;
 
 describe.sequential("cloud runner bootstrap content", () => {
   let connection: DatabaseConnection;
@@ -46,7 +57,7 @@ describe.sequential("cloud runner bootstrap content", () => {
       commandBearerToken: "runner-command-token",
       runnerEndpointUrl: "https://runner.agentbay.test",
       runnerName: "Cloud Runner 1",
-      runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
+      runnerImage: IMMUTABLE_RUNNER_IMAGE,
     });
 
     expect(content.userData).toContain("#cloud-config");
@@ -75,8 +86,15 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain("AGENTBAY_RUNNER_ENDPOINT_URL=https://runner.agentbay.test");
     expect(content.userData).toContain("AGENTBAY_RUNNER_NAME=Cloud Runner 1");
     expect(content.userData).toContain("AGENTBAY_RUNNER_BEARER_TOKEN=runner-command-token");
+    expect(content.userData).toContain(`AGENTBAY_RUNNER_IMAGE=${IMMUTABLE_RUNNER_IMAGE}`);
     expect(content.userData).toContain(
-      "AGENTBAY_RUNNER_IMAGE=ghcr.io/ametel01/agentbay-runner:sha-123",
+      `${RUNNER_EXPECTED_RELEASE_VERSION_ENV}=${RUNNER_RELEASE_VERSION}`,
+    );
+    expect(content.userData).toContain(
+      `${RUNNER_EXPECTED_IMAGE_DIGEST_ENV}=${RUNNER_IMAGE_DIGEST}`,
+    );
+    expect(content.userData).toContain(
+      `${RUNNER_EXPECTED_BOOT_CONTRACT_VERSION_ENV}=${RUNNER_BOOT_CONTRACT_VERSION}`,
     );
     expect(content.userData).toContain(
       `AGENTBAY_DOCKER_RUNNER_IMAGE=${DEFAULT_MANUAL_RUNNER_IMAGE}`,
@@ -102,11 +120,9 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain("AGENTBAY_RUNNER_HOST=0.0.0.0");
     expect(content.userData).not.toContain("AGENTBAY_RUNNER_HOST=127.0.0.1");
     expect(content.userData).not.toContain('AGENTBAY_APP_URL="https://app.agentbay.test"');
-    expect(content.userData).not.toContain(
-      'AGENTBAY_RUNNER_IMAGE="ghcr.io/ametel01/agentbay-runner:sha-123"',
-    );
+    expect(content.userData).not.toContain(`AGENTBAY_RUNNER_IMAGE="${IMMUTABLE_RUNNER_IMAGE}"`);
     expect(content.userData).not.toContain(". '/etc/agentbay/runner.env'");
-    expect(content.userData).toContain("docker pull 'ghcr.io/ametel01/agentbay-runner:sha-123'");
+    expect(content.userData).toContain(`docker pull '${IMMUTABLE_RUNNER_IMAGE}'`);
     expect(content.userData).toContain(`docker pull '${DEFAULT_MANUAL_RUNNER_IMAGE}'`);
     expect(content.userData).toContain(`docker pull '${DEFAULT_HERMES_WORKLOAD_IMAGE}'`);
     expect(content.userData).toContain(`install -m 0710 -d '${DEFAULT_HERMES_STATE_ROOT}'`);
@@ -115,7 +131,7 @@ describe.sequential("cloud runner bootstrap content", () => {
     );
     expect(content.userData).toContain("docker rm --force 'agentbay-runner' || true");
     expect(content.userData).toContain(
-      "docker run --detach --name 'agentbay-runner' --restart always --network 'agentbay-hermes' --env-file '/etc/agentbay/runner.env' -v '/etc/agentbay/runner.env:/etc/agentbay/runner.env' -v '/var/lib/agentbay/agents:/var/lib/agentbay/agents' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' 'ghcr.io/ametel01/agentbay-runner:sha-123'",
+      `docker run --detach --name 'agentbay-runner' --restart always --network 'agentbay-hermes' --env-file '/etc/agentbay/runner.env' -v '/etc/agentbay/runner.env:/etc/agentbay/runner.env' -v '/var/lib/agentbay/agents:/var/lib/agentbay/agents' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' '${IMMUTABLE_RUNNER_IMAGE}'`,
     );
     expect(content.userData).toContain("/runner/v1/bootstrap-events");
     for (const token of LEGACY_HOST_BOOTSTRAP_TOKENS) {
@@ -125,7 +141,12 @@ describe.sequential("cloud runner bootstrap content", () => {
       appBaseUrl: "https://app.agentbay.test",
       runnerEndpointUrl: "https://runner.agentbay.test",
       runnerName: "Cloud Runner 1",
-      runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
+      runnerImage: IMMUTABLE_RUNNER_IMAGE,
+      runnerRelease: {
+        version: RUNNER_RELEASE_VERSION,
+        imageDigest: RUNNER_IMAGE_DIGEST,
+        bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+      },
       hermesWorkloadImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
       hermesStateRoot: DEFAULT_HERMES_STATE_ROOT,
       hermesPrivateNetwork: DEFAULT_HERMES_PRIVATE_NETWORK,
@@ -153,7 +174,24 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.safeSummary.hermesPrivateNetwork).toBe(DEFAULT_HERMES_PRIVATE_NETWORK);
     expect(content.safeSummary.hermesReadinessTimeoutMs).toBe(DEFAULT_HERMES_READINESS_TIMEOUT_MS);
     expect(content.safeSummary.runnerMaxAgents).toBe(DEFAULT_HERMES_RUNNER_MAX_AGENTS);
+    expect(content.safeSummary.runnerRelease).toBeNull();
     expect(content.userData).toContain(`AGENTBAY_RUNNER_IMAGE=${DEFAULT_AGENTBAY_RUNNER_IMAGE}`);
+    expect(content.userData).not.toContain(RUNNER_EXPECTED_IMAGE_DIGEST_ENV);
+  });
+
+  it("marks local tagged images with the explicit development identity seam", () => {
+    const content = buildCloudRunnerBootstrapContent({
+      appBaseUrl: "https://app.agentbay.test",
+      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      runnerEndpointUrl: "https://runner.agentbay.test",
+      runnerImage: "agentbay-runner:local",
+      releaseIdentityMode: RUNNER_RELEASE_DEVELOPMENT_MODE,
+    });
+
+    expect(content.safeSummary.runnerRelease).toBeNull();
+    expect(content.userData).toContain(
+      `${RUNNER_RELEASE_IDENTITY_MODE_ENV}=${RUNNER_RELEASE_DEVELOPMENT_MODE}`,
+    );
   });
 
   it("uses custom safe Hermes deployment settings without exposing secrets", () => {
@@ -317,7 +355,7 @@ describe.sequential("cloud runner bootstrap content", () => {
       appBaseUrl: "https://app.agentbay.test",
       registrationToken,
       runnerEndpointUrl: "https://runner.agentbay.test",
-      runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
+      runnerImage: IMMUTABLE_RUNNER_IMAGE,
       createConnection: () => connection,
       now: () => new Date("2026-07-06T02:00:30.000Z"),
     });
@@ -343,7 +381,12 @@ describe.sequential("cloud runner bootstrap content", () => {
         metadata: expect.objectContaining({
           provider: "digitalocean",
           registrationToken: "injected",
-          runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
+          runnerImage: IMMUTABLE_RUNNER_IMAGE,
+          runnerRelease: {
+            version: RUNNER_RELEASE_VERSION,
+            imageDigest: RUNNER_IMAGE_DIGEST,
+            bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+          },
         }),
       }),
     ]);

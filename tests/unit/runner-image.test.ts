@@ -13,5 +13,30 @@ describe("runner image", () => {
     expect(dockerfile).toContain(
       "COPY src/shared/secret-redaction.ts ./src/shared/secret-redaction.ts",
     );
+    expect(dockerfile).toContain("org.opencontainers.image.source");
+    expect(dockerfile).toContain("org.opencontainers.image.revision");
+    expect(dockerfile).toContain("org.opencontainers.image.version");
+  });
+
+  it("publishes immutable amd64 images with supply-chain evidence and a returned digest", async () => {
+    const workflow = await readFile(
+      join(process.cwd(), ".github/workflows/publish-runner-image.yml"),
+      "utf8",
+    );
+    const githubSha = "$" + "{{ github.sha }}";
+    const registry = "$" + "{{ env.REGISTRY }}";
+    const imageName = "$" + "{{ env.IMAGE_NAME }}";
+    const pushedDigest = "$" + "{{ steps.push.outputs.digest }}";
+
+    expect(workflow).toContain("platforms: linux/amd64");
+    expect(workflow).toContain("sbom: true");
+    expect(workflow).toContain("provenance: mode=max");
+    expect(workflow).toContain(`org.opencontainers.image.revision=${githubSha}`);
+    expect(workflow).toContain(`org.opencontainers.image.version=${githubSha}`);
+    expect(workflow).toContain(`${registry}/${imageName}:${githubSha}`);
+    expect(workflow).toContain(`${registry}/${imageName}:main`);
+    expect(workflow).toContain(`digest: ${pushedDigest}`);
+    expect(workflow).toContain("immutable-image:");
+    expect(workflow).toContain("docker buildx imagetools inspect");
   });
 });

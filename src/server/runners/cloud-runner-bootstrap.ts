@@ -7,7 +7,16 @@ import {
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
   DEFAULT_MANUAL_RUNNER_IMAGE,
+  RUNNER_BOOT_CONTRACT_VERSION,
 } from "@/src/runner-service/constants";
+import {
+  parseImmutableRunnerImageReference,
+  RUNNER_EXPECTED_BOOT_CONTRACT_VERSION_ENV,
+  RUNNER_EXPECTED_IMAGE_DIGEST_ENV,
+  RUNNER_EXPECTED_RELEASE_VERSION_ENV,
+  type RUNNER_RELEASE_DEVELOPMENT_MODE,
+  RUNNER_RELEASE_IDENTITY_MODE_ENV,
+} from "@/src/runner-service/release-identity";
 import { DEFAULT_AGENTBAY_RUNNER_IMAGE } from "@/src/server/env";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { DIGITALOCEAN_PROVIDER } from "@/src/server/runners/digitalocean-provider";
@@ -42,6 +51,7 @@ type CloudRunnerBootstrapInput = {
   envFilePath?: string;
   runnerHost?: string;
   runnerPort?: number;
+  releaseIdentityMode?: typeof RUNNER_RELEASE_DEVELOPMENT_MODE;
 };
 
 export type CloudRunnerBootstrapContent = {
@@ -56,6 +66,11 @@ export type CloudRunnerBootstrapContent = {
     hermesPrivateNetwork: string;
     hermesReadinessTimeoutMs: number;
     runnerMaxAgents: number;
+    runnerRelease: {
+      version: string;
+      imageDigest: string;
+      bootContractVersion: string;
+    } | null;
     envFilePath: string;
     registrationToken: typeof BOOTSTRAP_REDACTION;
   };
@@ -88,6 +103,7 @@ export async function buildCloudRunnerBootstrapForRunner(
           hermesPrivateNetwork: content.safeSummary.hermesPrivateNetwork,
           hermesReadinessTimeoutMs: content.safeSummary.hermesReadinessTimeoutMs,
           runnerMaxAgents: content.safeSummary.runnerMaxAgents,
+          runnerRelease: content.safeSummary.runnerRelease,
         },
       }),
     );
@@ -120,6 +136,16 @@ export function buildCloudRunnerBootstrapContent(
     `AGENTBAY_HERMES_READINESS_TIMEOUT_MS=${config.hermesReadinessTimeoutMs}`,
     `AGENTBAY_RUNNER_ENV_FILE=${escapeDockerEnvHereDocValue(config.containerEnvFilePath)}`,
     `AGENTBAY_RUNNER_MAX_AGENTS=${config.runnerMaxAgents}`,
+    ...(config.expectedRelease
+      ? [
+          `${RUNNER_EXPECTED_RELEASE_VERSION_ENV}=${escapeDockerEnvHereDocValue(config.expectedRelease.version)}`,
+          `${RUNNER_EXPECTED_IMAGE_DIGEST_ENV}=${config.expectedRelease.imageDigest}`,
+          `${RUNNER_EXPECTED_BOOT_CONTRACT_VERSION_ENV}=${RUNNER_BOOT_CONTRACT_VERSION}`,
+        ]
+      : []),
+    ...(config.releaseIdentityMode
+      ? [`${RUNNER_RELEASE_IDENTITY_MODE_ENV}=${config.releaseIdentityMode}`]
+      : []),
     ...(config.commandBearerToken
       ? [`AGENTBAY_RUNNER_BEARER_TOKEN=${escapeDockerEnvHereDocValue(config.commandBearerToken)}`]
       : []),
@@ -240,6 +266,13 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
       hermesPrivateNetwork: config.hermesPrivateNetwork,
       hermesReadinessTimeoutMs: config.hermesReadinessTimeoutMs,
       runnerMaxAgents: config.runnerMaxAgents,
+      runnerRelease: config.expectedRelease
+        ? {
+            version: config.expectedRelease.version,
+            imageDigest: config.expectedRelease.imageDigest,
+            bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+          }
+        : null,
       envFilePath: config.envFilePath,
       registrationToken: BOOTSTRAP_REDACTION,
     },
@@ -269,6 +302,10 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
     enableSwap: input.enableSwap ?? false,
     runnerName: input.runnerName?.trim() || DEFAULT_CLOUD_RUNNER_NAME,
     runnerImage: input.runnerImage?.trim() || DEFAULT_AGENTBAY_RUNNER_IMAGE,
+    expectedRelease: parseImmutableRunnerImageReference(
+      input.runnerImage?.trim() || DEFAULT_AGENTBAY_RUNNER_IMAGE,
+    ),
+    releaseIdentityMode: input.releaseIdentityMode ?? null,
     agentImage: DEFAULT_MANUAL_RUNNER_IMAGE,
     hermesWorkloadImage: normalizeContainerImage(
       input.hermesWorkloadImage?.trim() || DEFAULT_HERMES_WORKLOAD_IMAGE,

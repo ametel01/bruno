@@ -24,6 +24,10 @@ import {
   HermesProjectionInvalidError,
   HermesSetupRequiredError,
 } from "@/src/runner-service/hermes-projection";
+import {
+  resolveRunnerReleaseEvidence,
+  type RunnerReleaseEvidence,
+} from "@/src/runner-service/release-identity";
 
 const RUNNER_TOKEN_ENV = "AGENTBAY_RUNNER_BEARER_TOKEN";
 
@@ -73,6 +77,8 @@ export type RunnerHeartbeatLoopOptions = {
   intervalMs?: number;
   maxAgents?: number;
   runnerId: string;
+  releaseEvidence?: RunnerReleaseEvidence;
+  resolveReleaseEvidence?: () => Promise<RunnerReleaseEvidence>;
   start?: (input: { appBaseUrl: string; credential: string; runnerId: string }) => { stop(): void };
   fetch?: typeof fetch;
 };
@@ -419,6 +425,7 @@ export function startRunnerHeartbeatLoop(options: RunnerHeartbeatLoopOptions): {
   }
 
   let stopped = false;
+  let cachedReleaseEvidence = options.releaseEvidence;
   const fetchImplementation = options.fetch ?? fetch;
   const intervalMs = options.intervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
 
@@ -428,6 +435,8 @@ export function startRunnerHeartbeatLoop(options: RunnerHeartbeatLoopOptions): {
     }
 
     try {
+      cachedReleaseEvidence ??= await (options.resolveReleaseEvidence?.() ??
+        resolveRunnerReleaseEvidence());
       await fetchImplementation(`${normalizeBaseUrl(options.appBaseUrl)}/runner/v1/heartbeat`, {
         method: "POST",
         headers: {
@@ -436,8 +445,9 @@ export function startRunnerHeartbeatLoop(options: RunnerHeartbeatLoopOptions): {
         },
         body: JSON.stringify({
           runnerId: options.runnerId,
-          status: "online",
+          status: cachedReleaseEvidence.expectedMatch === false ? "degraded" : "online",
           version: "agentbay-runner/service",
+          release: cachedReleaseEvidence.release,
           metrics: {
             maxAgents: normalizePositiveInteger(options.maxAgents, DEFAULT_RUNNER_MAX_AGENTS),
             runningAgents: 0,

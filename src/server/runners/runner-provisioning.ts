@@ -12,6 +12,7 @@ import {
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
 } from "@/src/runner-service/constants";
+import { RUNNER_RELEASE_DEVELOPMENT_MODE } from "@/src/runner-service/release-identity";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   runnerProvisioningEvents,
@@ -293,6 +294,9 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
       hermesPrivateNetwork: hermes.hermesPrivateNetwork,
       hermesReadinessTimeoutMs: hermes.hermesReadinessTimeoutMs,
       runnerMaxAgents: hermes.runnerMaxAgents,
+      ...(input.config.providerMode === "local_docker"
+        ? { releaseIdentityMode: RUNNER_RELEASE_DEVELOPMENT_MODE }
+        : {}),
       sizeSlug: input.config.sizeSlug,
       now: input.now,
     });
@@ -590,6 +594,8 @@ export async function createDigitalOceanRunnerForUser(
       hermesPrivateNetwork: hermesConfig.hermesPrivateNetwork,
       hermesReadinessTimeoutMs: hermesConfig.hermesReadinessTimeoutMs,
       runnerMaxAgents: hermesConfig.runnerMaxAgents,
+      releaseIdentityMode:
+        config.providerMode === "local_docker" ? RUNNER_RELEASE_DEVELOPMENT_MODE : undefined,
       tagCount: config.tags.length,
       hasRunnerBearerToken: Boolean(config.runnerBearerToken),
       runnerBearerTokenFingerprint: fingerprintRunnerSecret(config.runnerBearerToken),
@@ -756,6 +762,9 @@ export async function createDigitalOceanRunnerForUser(
       hermesPrivateNetwork: hermesConfig.hermesPrivateNetwork,
       hermesReadinessTimeoutMs: hermesConfig.hermesReadinessTimeoutMs,
       runnerMaxAgents: hermesConfig.runnerMaxAgents,
+      ...(config.providerMode === "local_docker"
+        ? { releaseIdentityMode: RUNNER_RELEASE_DEVELOPMENT_MODE }
+        : {}),
       sizeSlug: initialized.runner.sizeSlug,
       now,
     });
@@ -1335,6 +1344,7 @@ async function buildProvisioningBootstrap(input: {
   hermesPrivateNetwork?: string;
   hermesReadinessTimeoutMs?: number;
   runnerMaxAgents?: number;
+  releaseIdentityMode?: typeof RUNNER_RELEASE_DEVELOPMENT_MODE;
   sizeSlug: string;
   now: () => Date;
 }): Promise<CloudRunnerBootstrapContent> {
@@ -1365,6 +1375,7 @@ async function buildProvisioningBootstrap(input: {
         ? {}
         : { hermesReadinessTimeoutMs: input.hermesReadinessTimeoutMs }),
       ...(input.runnerMaxAgents === undefined ? {} : { runnerMaxAgents: input.runnerMaxAgents }),
+      ...(input.releaseIdentityMode ? { releaseIdentityMode: input.releaseIdentityMode } : {}),
       endpointDiscovery: { type: "digitalocean_metadata" },
       enableSwap: LOW_MEMORY_DIGITALOCEAN_SIZE_SLUGS.has(input.sizeSlug),
       runnerName: input.runnerName,
