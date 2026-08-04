@@ -1,17 +1,27 @@
 import "server-only";
 
 import { sql } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
+import {
+  type AgentDeploymentDto,
+  mapAgentDeploymentRowToDto,
+} from "@/src/server/agents/deployment-dto";
 import {
   normalizeDeploymentIdempotencyKey,
   validateDeploymentConfigRevision,
 } from "@/src/server/agents/deployment-state";
-import {
-  mapAgentDeploymentRowToDto,
-  type AgentDeploymentDto,
-} from "@/src/server/agents/deployment-dto";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
 import { agentDeployments, agentEvents, agents } from "@/src/server/db/schema";
+
+type AgentDeploymentRetryTransaction = Parameters<
+  Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
+>[0];
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const REPLACEMENT_INTERRUPTED_CODE = "runner_replaced";
+const REPLACEMENT_INTERRUPTED_DETAIL = "Deployment was superseded by automatic runner replacement.";
 
 export type RetryAgentDeploymentResult =
   | { ok: true; deployment: AgentDeploymentDto }
@@ -29,6 +39,105 @@ export type RetryAgentDeploymentDependencies = {
   now?: () => Date;
   onDeploymentCommitted?: (deploymentId: string) => void;
 };
+
+export async function createAgentDeploymentForRunnerReplacement(input: {
+  tx: AgentDeploymentRetryTransaction;
+  replacementId: string;
+  agentId: string;
+  userId: string;
+  now: Date;
+}): Promise<{ deploymentId: string; created: boolean } | null> {
+  if (
+    !UUID_PATTERN.test(input.replacementId) ||
+    !UUID_PATTERN.test(input.agentId) ||
+    !UUID_PATTERN.test(input.userId) ||
+    Number.isNaN(input.now.getTime())
+  ) {
+    return null;
+  }
+  const idempotencyKey = replacementDeploymentIdempotencyKey(input.replacementId, input.agentId);
+  const [agent] = await input.tx.execute<{ id: string }>(sql`
+    select id
+    from ${agents}
+    where id = ${input.agentId}
+      and user_id = ${input.userId}
+      and desired_status = 'running'
+      and deleted_at is null
+    for update
+    limit 1
+  `);
+  if (!agent) return null;
+
+  const [replayed] = await input.tx.execute<{ id: string }>(sql`
+    select id
+    from ${agentDeployments}
+    where user_id = ${input.userId}
+      and agent_id = ${input.agentId}
+      and idempotency_key = ${idempotencyKey}
+    limit 1
+  `);
+  if (replayed) return { deploymentId: replayed.id, created: false };
+
+  const [latest] = await input.tx.execute<{ configRevision: string }>(sql`
+    select config_revision as "configRevision"
+    from ${agentDeployments}
+    where user_id = ${input.userId}
+      and agent_id = ${input.agentId}
+    order by created_at desc, id desc
+    limit 1
+  `);
+  if (!latest || !validateDeploymentConfigRevision(latest.configRevision)) return null;
+
+  await input.tx.execute(sql`
+    update ${agentDeployments}
+    set stage = 'failed',
+        error_code = ${REPLACEMENT_INTERRUPTED_CODE},
+        error_detail = ${REPLACEMENT_INTERRUPTED_DETAIL},
+        next_attempt_at = null,
+        lease_owner = null,
+        lease_expires_at = null,
+        failed_at = ${input.now.toISOString()},
+        updated_at = ${input.now.toISOString()}
+    where user_id = ${input.userId}
+      and agent_id = ${input.agentId}
+      and stage not in ('ready', 'failed')
+  `);
+
+  const [created] = await input.tx
+    .insert(agentDeployments)
+    .values({
+      agentId: input.agentId,
+      userId: input.userId,
+      configRevision: latest.configRevision,
+      idempotencyKey,
+      nextAttemptAt: input.now,
+      createdAt: input.now,
+      updatedAt: input.now,
+    })
+    .returning({ id: agentDeployments.id });
+  if (!created) return null;
+
+  await input.tx.insert(agentEvents).values({
+    agentId: input.agentId,
+    actorUserId: input.userId,
+    type: "agent.deployment_retry_requested",
+    message: "Automatic deployment retry requested after runner replacement.",
+    metadata: {
+      deploymentId: created.id,
+      replacementId: input.replacementId,
+      launchMode: "ready",
+    },
+    createdAt: input.now,
+  });
+  return { deploymentId: created.id, created: true };
+}
+
+export function replacementDeploymentIdempotencyKey(
+  replacementId: string,
+  agentId: string,
+): string {
+  return `runner-replacement:${replacementId}:${agentId}`;
+}
 
 type RetryDeploymentRow = {
   id: string;
