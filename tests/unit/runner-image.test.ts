@@ -38,7 +38,9 @@ describe("runner image", () => {
     expect(workflow).toContain(`digest: ${pushedDigest}`);
     expect(workflow).toContain("immutable-image:");
     expect(workflow).toContain("docker buildx imagetools inspect");
-    expect(workflow).toContain("aquasecurity/trivy-action@v0.28.0");
+    expect(workflow).toContain(
+      "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0",
+    );
     expect(workflow).toContain("needs: publish");
     expect(workflow).toContain("runner:release:smoke");
   });

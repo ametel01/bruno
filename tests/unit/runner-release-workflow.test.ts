@@ -38,10 +38,12 @@ describe("runner release workflow contract", () => {
     );
     expect(workflowSource).not.toContain("$" + "{{ env.IMAGE_NAME }}:main");
     expect(workflowSource).toContain("docker buildx imagetools inspect");
-    expect(workflowSource).toContain("aquasecurity/trivy-action@v0.28.0");
-    expect(agentWorkflowSource).toContain("aquasecurity/trivy-action@v0.28.0");
-    expect(workflowSource).not.toContain("aquasecurity/trivy-action@0.28.0");
-    expect(agentWorkflowSource).not.toContain("aquasecurity/trivy-action@0.28.0");
+    const pinnedTrivyAction =
+      "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0";
+    expect(workflowSource).toContain(pinnedTrivyAction);
+    expect(agentWorkflowSource).toContain(pinnedTrivyAction);
+    expect(workflowSource).not.toMatch(/aquasecurity\/trivy-action@v?\d/);
+    expect(agentWorkflowSource).not.toMatch(/aquasecurity\/trivy-action@v?\d/);
     expect(workflowSource).toContain("severity: CRITICAL");
     expect(workflowSource).toContain("provenance: mode=max");
     expect(workflowSource).toContain("sbom: true");
