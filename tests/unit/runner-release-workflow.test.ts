@@ -5,6 +5,11 @@ import { parse } from "yaml";
 
 const workflowPath = new URL("../../.github/workflows/publish-runner-image.yml", import.meta.url);
 const workflowSource = readFileSync(workflowPath, "utf8");
+const agentWorkflowPath = new URL(
+  "../../.github/workflows/publish-agent-image.yml",
+  import.meta.url,
+);
+const agentWorkflowSource = readFileSync(agentWorkflowPath, "utf8");
 const vercelConfigPath = new URL("../../vercel.json", import.meta.url);
 const vercelConfig = JSON.parse(readFileSync(vercelConfigPath, "utf8")) as {
   ignoreCommand?: string;
@@ -33,7 +38,10 @@ describe("runner release workflow contract", () => {
     );
     expect(workflowSource).not.toContain("$" + "{{ env.IMAGE_NAME }}:main");
     expect(workflowSource).toContain("docker buildx imagetools inspect");
-    expect(workflowSource).toContain("aquasecurity/trivy-action@0.28.0");
+    expect(workflowSource).toContain("aquasecurity/trivy-action@v0.28.0");
+    expect(agentWorkflowSource).toContain("aquasecurity/trivy-action@v0.28.0");
+    expect(workflowSource).not.toContain("aquasecurity/trivy-action@0.28.0");
+    expect(agentWorkflowSource).not.toContain("aquasecurity/trivy-action@0.28.0");
     expect(workflowSource).toContain("severity: CRITICAL");
     expect(workflowSource).toContain("provenance: mode=max");
     expect(workflowSource).toContain("sbom: true");

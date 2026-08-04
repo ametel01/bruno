@@ -102,7 +102,7 @@ jobs:
           echo "Published an immutable Git-SHA runner candidate." >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Scan critical fixable vulnerabilities
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           image-ref: ${{ steps.reference.outputs.image }}
           format: sarif

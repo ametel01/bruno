@@ -779,7 +779,7 @@ and post-deploy checks remain required before Step 12.
 | 11 | Follow-up clean migration, full suite, and build | Passed all migrations through 0024 on an isolated temporary local database, 164 files / 1,572 tests, format/lint across 384 files, typecheck, production build, and diff hygiene. The temporary database was removed; no provider or cloud effect occurred. |
 | 11 | Agent-creation provisioning regression characterization and repair | Production was rolled back to `dpl_CdG8WSKjXcJKCXKi1ErsShBUt7qh`; the deleted failed agent was not reconciled and no Droplet was created. Focused build, creation, and trigger coverage passed 3 files / 36 tests with fake configuration/providers only. Format and lint checked 384 files, typecheck passed, all migrations through 0024 and 164 files / 1,576 tests passed on a clean temporary database, the production build passed, and the database was removed. No provider or cloud effect occurred. |
 | 11 | Compatible pre-canary control-plane staging | Read-only live-state inspection proved production is rolled back to pre-plan deployment `dpl_CdG8WSKjXcJKCXKi1ErsShBUt7qh`, so it cannot prove the new release/boot contract. The workflow now stages the exact production-configured commit with no domain assignment, passes that URL to the canary, and promotes the same deployment only after success. Frozen install, 4 focused files / 32 tests, workflow YAML parsing, format/lint across 384 files, typecheck, clean migrations through 0024, 164 files / 1,577 tests, production build, and diff hygiene passed. The temporary database was removed; no Vercel deployment, registry publication, provider call, or Droplet occurred. |
-| 11 | Live GHCR publish, Trivy scan of published digest, disposable DigitalOcean release canary, Vercel production deploy, `/health`, and required-release verification | Not run. Environment values are configured, but required reviewer protection is unsupported by the current GitHub plan and no explicit billable release authorization was given; no live acceptance is claimed. |
+| 11 | Live GHCR publish, Trivy scan of published digest, disposable DigitalOcean release canary, Vercel production deploy, `/health`, and required-release verification | Release run [`30959832776`](https://github.com/ametel01/plingpling/actions/runs/30959832776) failed safely during job setup because both image workflows referenced nonexistent action revision `aquasecurity/trivy-action@0.28.0` instead of the published `v0.28.0` tag. No checkout, image build, publication, scan, Vercel deployment, provider call, or Droplet occurred. Both references and source-contract assertions are corrected locally. Frozen install, 2 focused files / 8 tests, format/lint across 384 files, typecheck, clean migrations through 0024, 164 files / 1,577 tests, production build, and diff hygiene passed; both temporary databases were removed. A new authorized run is required and no live acceptance is claimed. |
 
 ### Step 1 Gap Matrix
 
@@ -921,6 +921,17 @@ and post-deploy checks remain required before Step 12.
   migrations, 1,577 tests, the production build, and diff hygiene also passed
   without publishing, deploying, or creating a Droplet. The corrective commit
   is `ci: stage compatible control plane before runner canary` (`This commit`).
+- 2026-08-05: The first authorized release attempt, workflow run
+  [`30959832776`](https://github.com/ametel01/plingpling/actions/runs/30959832776),
+  failed in two seconds while GitHub prepared the publish job because the Trivy
+  action reference omitted its required `v` tag prefix. All downstream jobs
+  were skipped, so no image, deployment, provider request, or Droplet was
+  created. Corrected both runner and Hermes publication workflows to the
+  existing `aquasecurity/trivy-action@v0.28.0` tag and strengthened the release
+  source contract to reject the unprefixed revision. Frozen install, 8 focused
+  tests, format, lint, typecheck, clean migrations, all 1,577 tests, the
+  production build, and diff hygiene passed with no external effect. The
+  corrective commit is `ci: fix Trivy action release tag` (`This commit`).
 
 ### Next Step
 
