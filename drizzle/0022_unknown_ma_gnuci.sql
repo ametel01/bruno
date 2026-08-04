@@ -1,0 +1,15 @@
+ALTER TABLE "runners" ADD COLUMN "required_runner_image_digest" text;--> statement-breakpoint
+ALTER TABLE "runners" ADD COLUMN "observed_runner_image_digest" text;--> statement-breakpoint
+ALTER TABLE "runners" ADD COLUMN "observed_runner_release_version" text;--> statement-breakpoint
+ALTER TABLE "runners" ADD COLUMN "observed_runner_boot_contract_version" text;--> statement-breakpoint
+ALTER TABLE "runners" ADD COLUMN "compatibility_state" text DEFAULT 'unknown' NOT NULL;--> statement-breakpoint
+ALTER TABLE "runners" ADD COLUMN "compatibility_verified_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "runners_user_status_compatibility_idx" ON "runners" USING btree ("user_id","status","compatibility_state");--> statement-breakpoint
+CREATE INDEX "runners_managed_release_idx" ON "runners" USING btree ("kind","provider","required_runner_image_digest","observed_runner_image_digest","compatibility_state") WHERE "runners"."deleted_at" IS NULL AND "runners"."kind" = 'digitalocean';--> statement-breakpoint
+ALTER TABLE "runners" ADD CONSTRAINT "runners_required_runner_image_digest_check" CHECK ("runners"."required_runner_image_digest" IS NULL OR "runners"."required_runner_image_digest" ~ '^sha256:[a-f0-9]{64}$');--> statement-breakpoint
+ALTER TABLE "runners" ADD CONSTRAINT "runners_observed_runner_image_digest_check" CHECK ("runners"."observed_runner_image_digest" IS NULL OR "runners"."observed_runner_image_digest" ~ '^sha256:[a-f0-9]{64}$');--> statement-breakpoint
+ALTER TABLE "runners" ADD CONSTRAINT "runners_observed_runner_release_version_check" CHECK ("runners"."observed_runner_release_version" IS NULL OR "runners"."observed_runner_release_version" ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$');--> statement-breakpoint
+ALTER TABLE "runners" ADD CONSTRAINT "runners_observed_runner_boot_contract_version_check" CHECK ("runners"."observed_runner_boot_contract_version" IS NULL OR "runners"."observed_runner_boot_contract_version" ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$');--> statement-breakpoint
+ALTER TABLE "runners" ADD CONSTRAINT "runners_observed_runner_release_tuple_check" CHECK (("runners"."observed_runner_image_digest" IS NULL AND "runners"."observed_runner_release_version" IS NULL AND "runners"."observed_runner_boot_contract_version" IS NULL) OR ("runners"."observed_runner_image_digest" IS NOT NULL AND "runners"."observed_runner_release_version" IS NOT NULL AND "runners"."observed_runner_boot_contract_version" IS NOT NULL));--> statement-breakpoint
+ALTER TABLE "runners" ADD CONSTRAINT "runners_compatibility_state_check" CHECK ("runners"."compatibility_state" IN ('compatible', 'unknown', 'outdated', 'invalid'));--> statement-breakpoint
+ALTER TABLE "runners" ADD CONSTRAINT "runners_compatible_evidence_check" CHECK ("runners"."compatibility_state" <> 'compatible' OR ("runners"."required_runner_image_digest" IS NOT NULL AND "runners"."observed_runner_image_digest" = "runners"."required_runner_image_digest" AND "runners"."observed_runner_release_version" IS NOT NULL AND "runners"."observed_runner_boot_contract_version" IS NOT NULL AND "runners"."compatibility_verified_at" IS NOT NULL));

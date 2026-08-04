@@ -37,6 +37,7 @@ import {
   type DigitalOceanResource,
 } from "@/src/server/runners/digitalocean-provider";
 import { LocalDockerDigitalOceanProvider } from "@/src/server/runners/local-docker-digitalocean-provider";
+import { requiredRunnerImageDigestForProvider } from "@/src/server/runners/runner-compatibility";
 import {
   createRunnerRegistrationToken,
   fingerprintRunnerSecret,
@@ -636,6 +637,7 @@ export async function createDigitalOceanRunnerForUser(
           region: config.region,
           sizeSlug: config.sizeSlug,
           image: config.image,
+          requiredRunnerImageDigest: requiredRunnerImageDigestForProvider(config),
           provisioningStatus: "pending",
           provisioningStartedAt: createdAt,
           createdAt,

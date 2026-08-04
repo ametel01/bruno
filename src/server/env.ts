@@ -14,6 +14,7 @@ import {
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
 } from "@/src/runner-service/constants";
+import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
 
 export const DEFAULT_AGENTBAY_RUNNER_IMAGE = "ghcr.io/ametel01/agentbay-runner:main";
 
@@ -248,6 +249,11 @@ export function readDigitalOceanProviderConfig(
 
   const sshKeyIds = readDigitalOceanSshKeyIds(input.AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS);
   const providerMode = readDigitalOceanProviderMode(input.AGENTBAY_DIGITALOCEAN_PROVIDER_MODE);
+  const runnerImage = readRunnerImage(input.AGENTBAY_RUNNER_IMAGE, {
+    envName: "AGENTBAY_RUNNER_IMAGE",
+    defaultValue: DEFAULT_AGENTBAY_RUNNER_IMAGE,
+  });
+
   const localRunnerEndpointUrl =
     providerMode === "local_docker"
       ? validateManualRunnerEndpointUrl(
@@ -272,14 +278,11 @@ export function readDigitalOceanProviderConfig(
         })
       : undefined;
 
-  return {
+  const config: DigitalOceanProviderConfig = {
     token,
     providerMode,
     runnerBearerToken,
-    runnerImage: readRunnerImage(input.AGENTBAY_RUNNER_IMAGE, {
-      envName: "AGENTBAY_RUNNER_IMAGE",
-      defaultValue: DEFAULT_AGENTBAY_RUNNER_IMAGE,
-    }),
+    runnerImage,
     hermesWorkloadImage: readHermesWorkloadImage(input),
     hermesStateRoot: readAbsoluteRuntimePath(input.AGENTBAY_HERMES_STATE_ROOT, {
       envName: "AGENTBAY_HERMES_STATE_ROOT",
@@ -319,6 +322,14 @@ export function readDigitalOceanProviderConfig(
     ...(localRunnerContainerName ? { localRunnerContainerName } : {}),
     ...(localRunnerStartDelayMs === undefined ? {} : { localRunnerStartDelayMs }),
   };
+
+  if (providerMode === "digitalocean" && !parseImmutableRunnerImageReference(runnerImage)) {
+    throw new EnvValidationError([
+      "AGENTBAY_RUNNER_IMAGE must be an immutable registry image reference with a sha256 digest for hosted DigitalOcean provisioning.",
+    ]);
+  }
+
+  return config;
 }
 
 export function readHermesWorkloadImage(

@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
 import { createAgentForDevelopmentUser } from "@/src/server/agents/create-agent";
 import {
   generateApiServerKeyForUser,
@@ -30,9 +31,24 @@ const KEYRING_ENV = {
     v1: Buffer.alloc(32, 23).toString("base64url"),
   }),
 };
+const RUNNER_IMAGE_DIGEST = `sha256:${"d".repeat(64)}`;
+const RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:sha-hermes@${RUNNER_IMAGE_DIGEST}`;
+const ORIGINAL_RUNNER_IMAGE = process.env.AGENTBAY_RUNNER_IMAGE;
 
 describe("Hermes lifecycle readiness", () => {
   let connection: DatabaseConnection;
+
+  beforeAll(() => {
+    process.env.AGENTBAY_RUNNER_IMAGE = RUNNER_IMAGE;
+  });
+
+  afterAll(() => {
+    if (ORIGINAL_RUNNER_IMAGE === undefined) {
+      delete process.env.AGENTBAY_RUNNER_IMAGE;
+    } else {
+      process.env.AGENTBAY_RUNNER_IMAGE = ORIGINAL_RUNNER_IMAGE;
+    }
+  });
 
   beforeEach(async () => {
     connection = createDatabaseConnection();
@@ -485,6 +501,12 @@ async function insertReadyCloudRunner(
       provisioningStatus: "ready",
       provisioningStartedAt: now,
       provisioningCompletedAt: now,
+      requiredRunnerImageDigest: RUNNER_IMAGE_DIGEST,
+      observedRunnerImageDigest: RUNNER_IMAGE_DIGEST,
+      observedRunnerReleaseVersion: "sha-hermes",
+      observedRunnerBootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+      compatibilityState: "compatible",
+      compatibilityVerifiedAt: now,
       createdAt: now,
       updatedAt: now,
     })

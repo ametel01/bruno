@@ -160,7 +160,7 @@ See [Authentication modes](./docs/AUTHENTICATION.md) and the
 | --- | --- | --- |
 | `AGENTBAY_DIGITALOCEAN_TOKEN` | Automated cloud runners | DigitalOcean API token. If omitted, cloud provisioning is unavailable. |
 | `AGENTBAY_RUNNER_BEARER_TOKEN` | DigitalOcean or manual runner control | Shared server-side command token used between the control plane and runner service. |
-| `AGENTBAY_RUNNER_IMAGE` | No | Runner image; defaults to `ghcr.io/ametel01/agentbay-runner:main`. |
+| `AGENTBAY_RUNNER_IMAGE` | Hosted cloud runners | Immutable runner reference in `registry/path:version@sha256:digest` form. Hosted DigitalOcean configuration rejects mutable or tag-only references; `local_docker` may use a tagged development image. |
 | `AGENTBAY_HERMES_WORKLOAD_IMAGE` | No | Exact Hermes workload image used by deployment and runtime reconciliation; defaults to the source-pinned image and digest. Controlled staging requires the attested untagged GHCR amd64 manifest digest. |
 | `AGENTBAY_RUNNER_MAX_AGENTS` | No | Positive per-runner agent capacity; defaults to `1`. |
 | `AGENTBAY_DIGITALOCEAN_REGION` | No | Droplet region; defaults to `sfo3`. |

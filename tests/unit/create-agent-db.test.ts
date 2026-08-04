@@ -138,6 +138,7 @@ import {
   detectDockerAvailability,
   dockerUnavailableSkipReason,
 } from "@/tests/helpers/docker-availability";
+import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
 
 const HERMES_KEYRING_ENV = {
   AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
@@ -145,9 +146,33 @@ const HERMES_KEYRING_ENV = {
     v1: Buffer.alloc(32, 29).toString("base64url"),
   }),
 };
+const TEST_RUNNER_IMAGE_DIGEST = `sha256:${"e".repeat(64)}`;
+const TEST_RUNNER_RELEASE_VERSION = "sha-current";
+const TEST_RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:${TEST_RUNNER_RELEASE_VERSION}@${TEST_RUNNER_IMAGE_DIGEST}`;
+const TEST_COMPATIBILITY_REQUIREMENT = {
+  mode: "hosted",
+  release: {
+    version: TEST_RUNNER_RELEASE_VERSION,
+    imageDigest: TEST_RUNNER_IMAGE_DIGEST,
+    bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+  },
+} as const;
+const ORIGINAL_RUNNER_IMAGE = process.env.AGENTBAY_RUNNER_IMAGE;
 
 describe("create agent persistence", () => {
   let connection: DatabaseConnection;
+
+  beforeAll(() => {
+    process.env.AGENTBAY_RUNNER_IMAGE = TEST_RUNNER_IMAGE;
+  });
+
+  afterAll(() => {
+    if (ORIGINAL_RUNNER_IMAGE === undefined) {
+      delete process.env.AGENTBAY_RUNNER_IMAGE;
+    } else {
+      process.env.AGENTBAY_RUNNER_IMAGE = ORIGINAL_RUNNER_IMAGE;
+    }
+  });
 
   beforeEach(async () => {
     connection = createDatabaseConnection();
@@ -344,6 +369,12 @@ describe("create agent persistence", () => {
         provisioningStatus: "ready",
         provisioningStartedAt: now,
         provisioningCompletedAt: now,
+        requiredRunnerImageDigest: TEST_RUNNER_IMAGE_DIGEST,
+        observedRunnerImageDigest: TEST_RUNNER_IMAGE_DIGEST,
+        observedRunnerReleaseVersion: TEST_RUNNER_RELEASE_VERSION,
+        observedRunnerBootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+        compatibilityState: "compatible",
+        compatibilityVerifiedAt: now,
         createdAt: now,
         updatedAt: now,
       })
@@ -418,11 +449,12 @@ describe("create agent persistence", () => {
         ensureCloudRunnerProvisioning,
         verifyRunnerPlacement: (candidateConnection, input) =>
           verifyRunnerPlacementCandidate(candidateConnection, input, {
+            compatibilityRequirement: TEST_COMPATIBILITY_REQUIREMENT,
             provider: new FakeDigitalOceanProvider(),
             readConfig: () => ({
               token: "digitalocean-test-token",
               runnerBearerToken: "runner-command-token",
-              runnerImage: "ghcr.io/ametel01/agentbay-runner:test",
+              runnerImage: TEST_RUNNER_IMAGE,
               region: "sfo3",
               sizeSlug: "s-1vcpu-512mb-10gb",
               image: "ubuntu-24-04-x64",
@@ -1015,6 +1047,12 @@ describe("create agent persistence", () => {
         provisioningStatus: "ready",
         provisioningStartedAt: new Date("2026-07-06T01:00:00.000Z"),
         provisioningCompletedAt: new Date("2026-07-06T01:05:00.000Z"),
+        requiredRunnerImageDigest: TEST_RUNNER_IMAGE_DIGEST,
+        observedRunnerImageDigest: TEST_RUNNER_IMAGE_DIGEST,
+        observedRunnerReleaseVersion: TEST_RUNNER_RELEASE_VERSION,
+        observedRunnerBootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+        compatibilityState: "compatible",
+        compatibilityVerifiedAt: new Date("2026-07-06T01:05:00.000Z"),
         createdAt: new Date("2026-07-06T01:00:00.000Z"),
         updatedAt: new Date("2026-07-06T01:05:00.000Z"),
       })

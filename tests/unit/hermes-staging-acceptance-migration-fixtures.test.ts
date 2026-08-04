@@ -180,7 +180,18 @@ describe("Hermes staging acceptance migration", () => {
         db`select count(*)::int as count from hermes_staging_acceptance_runs`,
       ).resolves.toEqual([{ count: 0 }]);
       const after = await db`select * from runners`;
-      expect(after).toEqual(before.map((row) => ({ ...row, provider_firewall_id: null })));
+      expect(after).toEqual(
+        before.map((row) => ({
+          ...row,
+          provider_firewall_id: null,
+          required_runner_image_digest: null,
+          observed_runner_image_digest: null,
+          observed_runner_release_version: null,
+          observed_runner_boot_contract_version: null,
+          compatibility_state: "unknown",
+          compatibility_verified_at: null,
+        })),
+      );
     } finally {
       await db.end();
     }

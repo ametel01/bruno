@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { eq } from "drizzle-orm";
-import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
+import {
+  DEFAULT_HERMES_WORKLOAD_IMAGE,
+  RUNNER_BOOT_CONTRACT_VERSION,
+} from "@/src/runner-service/constants";
 import type { RunnerDurableStatusSnapshot } from "@/src/runner-service/runner-contracts";
 import {
   reconcileNextAgentDeployment,
@@ -57,6 +60,10 @@ export type LocalCloudSmokeSummary = {
   stages: string[];
 };
 
+const FAKE_RUNNER_IMAGE_DIGEST = `sha256:${"9".repeat(64)}`;
+const FAKE_RUNNER_RELEASE_VERSION = "sha-local-smoke";
+const FAKE_RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:${FAKE_RUNNER_RELEASE_VERSION}@${FAKE_RUNNER_IMAGE_DIGEST}`;
+
 type RuntimeFault =
   | "healthy"
   | "starting"
@@ -70,6 +77,7 @@ type RuntimeFault =
 export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
   process.env.DATABASE_URL ??= "postgres://agentbay:agentbay@127.0.0.1:54329/plingpling";
   process.env.NEXT_PUBLIC_APP_URL ??= "http://127.0.0.1:3000";
+  process.env.AGENTBAY_RUNNER_IMAGE ??= FAKE_RUNNER_IMAGE;
   const connections = Array.from({ length: 4 }, () => createDatabaseConnection());
   const inspection = createDatabaseConnection();
   const runtimeConnection = (index: number): DatabaseConnection => {
@@ -236,6 +244,12 @@ export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
             status: "online",
             provisioningStatus: "ready",
             provisioningCompletedAt: logicalNow,
+            requiredRunnerImageDigest: FAKE_RUNNER_IMAGE_DIGEST,
+            observedRunnerImageDigest: FAKE_RUNNER_IMAGE_DIGEST,
+            observedRunnerReleaseVersion: FAKE_RUNNER_RELEASE_VERSION,
+            observedRunnerBootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+            compatibilityState: "compatible",
+            compatibilityVerifiedAt: logicalNow,
             updatedAt: logicalNow,
           })
           .where(eq(runners.id, runnerId));
@@ -650,7 +664,7 @@ function fakeProviderConfig(): DigitalOceanProviderConfig {
     token: "local-fake-token",
     providerMode: "digitalocean",
     runnerBearerToken: "local-fake-runner-token",
-    runnerImage: "agentbay-runner:local-fake",
+    runnerImage: FAKE_RUNNER_IMAGE,
     region: "sfo3",
     sizeSlug: "s-1vcpu-1gb",
     image: "ubuntu-24-04-x64",

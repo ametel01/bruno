@@ -10,6 +10,11 @@ import {
 import { hashRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
 import { markCloudRunnerReadyAfterAuthenticatedProbe } from "@/src/server/runners/runner-provisioning-events";
 import {
+  assessRunnerCompatibility,
+  readRunnerCompatibilityRequirement,
+  type RunnerCompatibilityRequirement,
+} from "@/src/server/runners/runner-compatibility";
+import {
   parseRunnerReleaseIdentity,
   type RunnerReleaseIdentity,
 } from "@/src/runner-service/release-identity";
@@ -150,6 +155,7 @@ export async function recordRunnerHeartbeat(
   dependencies: {
     createConnection?: () => DatabaseConnection;
     now?: () => Date;
+    compatibilityRequirement?: RunnerCompatibilityRequirement;
   } = {},
 ): Promise<RecordRunnerHeartbeatResult> {
   const credential = parseRunnerBearerCredential(input.authorizationHeader);
@@ -178,6 +184,9 @@ export async function recordRunnerHeartbeat(
           credentialStatus: runnerCredentials.status,
           expiresAt: runnerCredentials.expiresAt,
           runnerId: runners.id,
+          runnerKind: runners.kind,
+          runnerProvider: runners.provider,
+          requiredRunnerImageDigest: runners.requiredRunnerImageDigest,
         })
         .from(runnerCredentials)
         .innerJoin(runners, eq(runners.id, runnerCredentials.runnerId))
@@ -194,6 +203,15 @@ export async function recordRunnerHeartbeat(
       ) {
         return { ok: false, reason: "wrong_runner" } as const;
       }
+
+      const compatibility = assessRunnerCompatibility({
+        kind: row.runnerKind,
+        provider: row.runnerProvider,
+        requiredImageDigest: row.requiredRunnerImageDigest,
+        observedRelease: payload.value.metadata.release ?? null,
+        requirement: dependencies.compatibilityRequirement ?? readRunnerCompatibilityRequirement(),
+        now,
+      });
 
       await tx.insert(runnerHeartbeats).values({
         runnerId: payload.value.runnerId,
@@ -215,6 +233,13 @@ export async function recordRunnerHeartbeat(
         .update(runners)
         .set({
           status: payload.value.status,
+          requiredRunnerImageDigest: compatibility.requiredImageDigest,
+          observedRunnerImageDigest: compatibility.observedRelease?.imageDigest ?? null,
+          observedRunnerReleaseVersion: compatibility.observedRelease?.version ?? null,
+          observedRunnerBootContractVersion:
+            compatibility.observedRelease?.bootContractVersion ?? null,
+          compatibilityState: compatibility.state,
+          compatibilityVerifiedAt: compatibility.verifiedAt,
           updatedAt: now,
         })
         .where(eq(runners.id, payload.value.runnerId));

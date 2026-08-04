@@ -41,6 +41,7 @@ import {
   lockRunnerPlacementCapacityInTransaction,
   selectRunnerPlacementForUserInTransaction,
 } from "@/src/server/runners/runner-placement";
+import { requiredRunnerImageDigestForProvider } from "@/src/server/runners/runner-compatibility";
 import {
   advanceAutomaticDigitalOceanRunnerProvisioning,
   createConfiguredDigitalOceanProvider,
@@ -1075,6 +1076,7 @@ async function initializeProvisioningRunner(
       region: config.region,
       sizeSlug: config.sizeSlug,
       image: config.image,
+      requiredRunnerImageDigest: requiredRunnerImageDigestForProvider(config),
       provisioningStatus: "pending",
       provisioningOperationKey: operationKey,
       provisioningStartedAt: now,

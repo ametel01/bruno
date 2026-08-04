@@ -142,6 +142,17 @@ describe("runner heartbeat persistence", () => {
       .select({ metadata: runnerHeartbeats.metadata })
       .from(runnerHeartbeats)
       .where(eq(runnerHeartbeats.runnerId, runner.id));
+    const [persistedRunner] = await connection.db
+      .select({
+        requiredRunnerImageDigest: runners.requiredRunnerImageDigest,
+        observedRunnerImageDigest: runners.observedRunnerImageDigest,
+        observedRunnerReleaseVersion: runners.observedRunnerReleaseVersion,
+        observedRunnerBootContractVersion: runners.observedRunnerBootContractVersion,
+        compatibilityState: runners.compatibilityState,
+        compatibilityVerifiedAt: runners.compatibilityVerifiedAt,
+      })
+      .from(runners)
+      .where(eq(runners.id, runner.id));
 
     expect(heartbeat?.metadata).toEqual({
       version: "agentbay-runner/baseline",
@@ -153,6 +164,75 @@ describe("runner heartbeat persistence", () => {
       },
     });
     expect(JSON.stringify(heartbeat?.metadata)).not.toContain("must-not-persist");
+    expect(persistedRunner).toEqual({
+      requiredRunnerImageDigest: observedDigest,
+      observedRunnerImageDigest: observedDigest,
+      observedRunnerReleaseVersion: "release-sha",
+      observedRunnerBootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+      compatibilityState: "compatible",
+      compatibilityVerifiedAt: new Date("2026-07-05T08:00:00.000Z"),
+    });
+  });
+
+  it("persists a managed runner mismatch as outdated in the heartbeat transaction", async () => {
+    const credential = createRunnerCredential({
+      randomBytes: (size) => Buffer.alloc(size, 14),
+    });
+    const runner = await seedRunnerCredential(connection, {
+      credentialValue: credential.value,
+      runnerStatus: "registering",
+      kind: "digitalocean",
+    });
+    const requiredDigest = `sha256:${"a".repeat(64)}`;
+    const observedDigest = `sha256:${"b".repeat(64)}`;
+
+    await connection.db
+      .update(runners)
+      .set({ requiredRunnerImageDigest: requiredDigest })
+      .where(eq(runners.id, runner.id));
+
+    await expect(
+      recordRunnerHeartbeat(
+        {
+          authorizationHeader: `Bearer ${credential.value}`,
+          payload: {
+            runnerId: runner.id,
+            release: {
+              version: "sha-old",
+              imageDigest: observedDigest,
+              bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+            },
+          },
+        },
+        {
+          compatibilityRequirement: {
+            mode: "hosted",
+            release: {
+              version: "sha-current",
+              imageDigest: requiredDigest,
+              bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+            },
+          },
+          createConnection: () => connection,
+          now: () => new Date("2026-07-05T08:00:00.000Z"),
+        },
+      ),
+    ).resolves.toMatchObject({ ok: true });
+
+    const [persistedRunner] = await connection.db
+      .select({
+        observedRunnerImageDigest: runners.observedRunnerImageDigest,
+        observedRunnerReleaseVersion: runners.observedRunnerReleaseVersion,
+        compatibilityState: runners.compatibilityState,
+      })
+      .from(runners)
+      .where(eq(runners.id, runner.id));
+
+    expect(persistedRunner).toEqual({
+      observedRunnerImageDigest: observedDigest,
+      observedRunnerReleaseVersion: "sha-old",
+      compatibilityState: "outdated",
+    });
   });
 
   it.each([

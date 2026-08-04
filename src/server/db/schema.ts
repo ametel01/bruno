@@ -219,6 +219,12 @@ export const runners = pgTable(
     provisioningOperationKey: text("provisioning_operation_key"),
     provisioningStartedAt: timestamp("provisioning_started_at", { withTimezone: true }),
     provisioningCompletedAt: timestamp("provisioning_completed_at", { withTimezone: true }),
+    requiredRunnerImageDigest: text("required_runner_image_digest"),
+    observedRunnerImageDigest: text("observed_runner_image_digest"),
+    observedRunnerReleaseVersion: text("observed_runner_release_version"),
+    observedRunnerBootContractVersion: text("observed_runner_boot_contract_version"),
+    compatibilityState: text("compatibility_state").notNull().default("unknown"),
+    compatibilityVerifiedAt: timestamp("compatibility_verified_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -278,7 +284,49 @@ export const runners = pgTable(
       "runners_provisioning_operation_key_check",
       sql`${table.provisioningOperationKey} IS NULL OR (${table.kind} = 'digitalocean' AND ${table.provisioningOperationKey} ~ '^agentbay-deploy-[0-9a-f]{32}$')`,
     ),
+    check(
+      "runners_required_runner_image_digest_check",
+      sql`${table.requiredRunnerImageDigest} IS NULL OR ${table.requiredRunnerImageDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "runners_observed_runner_image_digest_check",
+      sql`${table.observedRunnerImageDigest} IS NULL OR ${table.observedRunnerImageDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "runners_observed_runner_release_version_check",
+      sql`${table.observedRunnerReleaseVersion} IS NULL OR ${table.observedRunnerReleaseVersion} ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$'`,
+    ),
+    check(
+      "runners_observed_runner_boot_contract_version_check",
+      sql`${table.observedRunnerBootContractVersion} IS NULL OR ${table.observedRunnerBootContractVersion} ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$'`,
+    ),
+    check(
+      "runners_observed_runner_release_tuple_check",
+      sql`(${table.observedRunnerImageDigest} IS NULL AND ${table.observedRunnerReleaseVersion} IS NULL AND ${table.observedRunnerBootContractVersion} IS NULL) OR (${table.observedRunnerImageDigest} IS NOT NULL AND ${table.observedRunnerReleaseVersion} IS NOT NULL AND ${table.observedRunnerBootContractVersion} IS NOT NULL)`,
+    ),
+    check(
+      "runners_compatibility_state_check",
+      sql`${table.compatibilityState} IN ('compatible', 'unknown', 'outdated', 'invalid')`,
+    ),
+    check(
+      "runners_compatible_evidence_check",
+      sql`${table.compatibilityState} <> 'compatible' OR (${table.requiredRunnerImageDigest} IS NOT NULL AND ${table.observedRunnerImageDigest} = ${table.requiredRunnerImageDigest} AND ${table.observedRunnerReleaseVersion} IS NOT NULL AND ${table.observedRunnerBootContractVersion} IS NOT NULL AND ${table.compatibilityVerifiedAt} IS NOT NULL)`,
+    ),
     index("runners_user_status_idx").on(table.userId, table.status),
+    index("runners_user_status_compatibility_idx").on(
+      table.userId,
+      table.status,
+      table.compatibilityState,
+    ),
+    index("runners_managed_release_idx")
+      .on(
+        table.kind,
+        table.provider,
+        table.requiredRunnerImageDigest,
+        table.observedRunnerImageDigest,
+        table.compatibilityState,
+      )
+      .where(sql`${table.deletedAt} IS NULL AND ${table.kind} = 'digitalocean'`),
     index("runners_provider_resource_idx").on(table.provider, table.providerResourceId),
     uniqueIndex("runners_provider_firewall_idx")
       .on(table.providerFirewallId)

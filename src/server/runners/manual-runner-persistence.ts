@@ -8,6 +8,11 @@ import { agents, runners } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
 import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
 import {
+  readRunnerCompatibilityRequirement,
+  runnerCompatibilityPredicate,
+  type RunnerCompatibilityRequirement,
+} from "@/src/server/runners/runner-compatibility";
+import {
   getDevelopmentUserId,
   getOrCreateDevelopmentUserId,
 } from "@/src/server/users/development-user";
@@ -113,6 +118,7 @@ export async function assignRunnerToActiveAgentForDevelopmentUser(
     runnerId: string;
   },
   dependencies: {
+    compatibilityRequirement?: RunnerCompatibilityRequirement;
     createConnection?: () => DatabaseConnection;
     now?: () => Date;
   } = {},
@@ -150,6 +156,9 @@ export async function assignRunnerToActiveAgentForDevelopmentUser(
             inArray(runners.status, [...ASSIGNABLE_RUNNER_STATUSES]),
             isNotNull(runners.endpointUrl),
             isNull(runners.deletedAt),
+            runnerCompatibilityPredicate(
+              dependencies.compatibilityRequirement ?? readRunnerCompatibilityRequirement(),
+            ),
           ),
         )
         .limit(1);

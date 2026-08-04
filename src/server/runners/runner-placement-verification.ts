@@ -12,6 +12,11 @@ import {
 import { probeRunnerEndpointReadiness } from "@/src/server/runners/runner-heartbeat";
 import { createConfiguredDigitalOceanProvider } from "@/src/server/runners/runner-provisioning";
 import { markCloudRunnerExternallyDeleted } from "@/src/server/runners/runner-provisioning-events";
+import {
+  isPersistedRunnerCompatible,
+  readRunnerCompatibilityRequirement,
+  type RunnerCompatibilityRequirement,
+} from "@/src/server/runners/runner-compatibility";
 
 export type RunnerPlacementVerificationResult =
   | {
@@ -30,6 +35,7 @@ export type RunnerPlacementVerificationResult =
         | "endpoint_rejected"
         | "network_error"
         | "provider_resource_missing"
+        | "release_incompatible"
         | "response_invalid"
         | "runner_not_eligible"
         | "token_not_configured";
@@ -43,6 +49,7 @@ export type RunnerPlacementVerificationResult =
     };
 
 export type RunnerPlacementVerificationDependencies = {
+  compatibilityRequirement?: RunnerCompatibilityRequirement;
   createProvider?: (config: DigitalOceanProviderConfig) => DigitalOceanProvider;
   fetch?: typeof fetch;
   now?: () => Date;
@@ -65,6 +72,12 @@ export async function verifyRunnerPlacementCandidate(
       providerResourceId: runners.providerResourceId,
       provisioningStatus: runners.provisioningStatus,
       status: runners.status,
+      requiredRunnerImageDigest: runners.requiredRunnerImageDigest,
+      observedRunnerImageDigest: runners.observedRunnerImageDigest,
+      observedRunnerReleaseVersion: runners.observedRunnerReleaseVersion,
+      observedRunnerBootContractVersion: runners.observedRunnerBootContractVersion,
+      compatibilityState: runners.compatibilityState,
+      compatibilityVerifiedAt: runners.compatibilityVerifiedAt,
       updatedAt: runners.updatedAt,
     })
     .from(runners)
@@ -79,6 +92,13 @@ export async function verifyRunnerPlacementCandidate(
 
   if (runner?.status !== "online" || !runner.endpointUrl) {
     return rejected("runner_not_eligible", false);
+  }
+
+  const compatibilityRequirement =
+    dependencies.compatibilityRequirement ?? readRunnerCompatibilityRequirement();
+
+  if (!isPersistedRunnerCompatible(runner, compatibilityRequirement)) {
+    return rejected("release_incompatible", false);
   }
 
   if (runner.kind !== DIGITALOCEAN_RUNNER_KIND) {
@@ -171,6 +191,32 @@ export async function verifyRunnerPlacementCandidate(
       .returning({ id: runners.id });
 
     return rejected(endpointProbe.reason, transitionedRows.length > 0);
+  }
+
+  const [verifiedRunner] = await connection.db
+    .select({
+      kind: runners.kind,
+      provider: runners.provider,
+      requiredRunnerImageDigest: runners.requiredRunnerImageDigest,
+      observedRunnerImageDigest: runners.observedRunnerImageDigest,
+      observedRunnerReleaseVersion: runners.observedRunnerReleaseVersion,
+      observedRunnerBootContractVersion: runners.observedRunnerBootContractVersion,
+      compatibilityState: runners.compatibilityState,
+      compatibilityVerifiedAt: runners.compatibilityVerifiedAt,
+    })
+    .from(runners)
+    .where(
+      and(
+        eq(runners.id, runner.id),
+        eq(runners.userId, input.userId),
+        eq(runners.status, "online"),
+        isNull(runners.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!verifiedRunner || !isPersistedRunnerCompatible(verifiedRunner, compatibilityRequirement)) {
+    return rejected("release_incompatible", false);
   }
 
   return {

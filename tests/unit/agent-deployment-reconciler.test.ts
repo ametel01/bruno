@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerAgentStatusSnapshot } from "@/src/runner-service/runner-contracts";
+import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
 import {
   computeDeploymentBackoffMs,
   reconcileNextAgentDeployment,
@@ -40,9 +41,24 @@ const NOW = new Date("2026-08-03T08:00:00.000Z");
 const CONFIG_REVISION = "cfg-1784000000000";
 const CUSTOM_HERMES_IMAGE =
   "ghcr.io/ametel01/agentbay-hermes@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const RUNNER_IMAGE_DIGEST = `sha256:${"f".repeat(64)}`;
+const RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:sha-current@${RUNNER_IMAGE_DIGEST}`;
+const ORIGINAL_RUNNER_IMAGE = process.env.AGENTBAY_RUNNER_IMAGE;
 
 describe("agent deployment reconciler", () => {
   let connection: DatabaseConnection;
+
+  beforeAll(() => {
+    process.env.AGENTBAY_RUNNER_IMAGE = RUNNER_IMAGE;
+  });
+
+  afterAll(() => {
+    if (ORIGINAL_RUNNER_IMAGE === undefined) {
+      delete process.env.AGENTBAY_RUNNER_IMAGE;
+    } else {
+      process.env.AGENTBAY_RUNNER_IMAGE = ORIGINAL_RUNNER_IMAGE;
+    }
+  });
 
   beforeEach(async () => {
     connection = createDatabaseConnection();
@@ -170,6 +186,7 @@ describe("agent deployment reconciler", () => {
       expect(provisioned[0]).toMatchObject({
         userId: USER_ID,
         kind: "digitalocean",
+        requiredRunnerImageDigest: RUNNER_IMAGE_DIGEST,
         provisioningStatus: "pending",
         provisioningOperationKey: `agentbay-deploy-${DEPLOYMENT_ID.replaceAll("-", "")}`,
       });
@@ -1103,6 +1120,16 @@ async function seedAutomaticRunner(
     provisioningOperationKey: `agentbay-deploy-${DEPLOYMENT_ID.replaceAll("-", "")}`,
     provisioningStartedAt: NOW,
     provisioningCompletedAt: input.provisioningStatus === "ready" ? NOW : null,
+    ...(input.provisioningStatus === "ready"
+      ? {
+          requiredRunnerImageDigest: RUNNER_IMAGE_DIGEST,
+          observedRunnerImageDigest: RUNNER_IMAGE_DIGEST,
+          observedRunnerReleaseVersion: "sha-current",
+          observedRunnerBootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+          compatibilityState: "compatible",
+          compatibilityVerifiedAt: NOW,
+        }
+      : {}),
     createdAt: NOW,
     updatedAt: NOW,
   });
@@ -1113,7 +1140,7 @@ function automaticProviderConfig(): DigitalOceanProviderConfig {
     token: "local-fake-token",
     providerMode: "digitalocean",
     runnerBearerToken: "local-fake-runner-token",
-    runnerImage: "agentbay-runner:test",
+    runnerImage: RUNNER_IMAGE,
     region: "sfo3",
     sizeSlug: "s-1vcpu-1gb",
     image: "ubuntu-24-04-x64",

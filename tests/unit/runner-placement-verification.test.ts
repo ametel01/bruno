@@ -7,6 +7,17 @@ import {
   reconcileExternallyDeletedDigitalOceanRunners,
   verifyRunnerPlacementCandidate,
 } from "@/src/server/runners/runner-placement-verification";
+import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
+
+const RUNNER_IMAGE_DIGEST = `sha256:${"c".repeat(64)}`;
+const HOSTED_COMPATIBILITY_REQUIREMENT = {
+  mode: "hosted",
+  release: {
+    version: "sha-current",
+    imageDigest: RUNNER_IMAGE_DIGEST,
+    bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+  },
+} as const;
 
 describe.sequential("runner placement live verification", () => {
   let connection: DatabaseConnection;
@@ -30,6 +41,7 @@ describe.sequential("runner placement live verification", () => {
       connection,
       { runnerId: runner.id, userId },
       {
+        compatibilityRequirement: HOSTED_COMPATIBILITY_REQUIREMENT,
         now: () => now,
         provider: new FakeDigitalOceanProvider(),
         readConfig,
@@ -79,7 +91,11 @@ describe.sequential("runner placement live verification", () => {
     const result = await verifyRunnerPlacementCandidate(
       connection,
       { runnerId: runner.id, userId },
-      { provider, readConfig },
+      {
+        compatibilityRequirement: HOSTED_COMPATIBILITY_REQUIREMENT,
+        provider,
+        readConfig,
+      },
     );
     const [persisted] = await connection.db
       .select({ status: runners.status, deletedAt: runners.deletedAt })
@@ -106,6 +122,7 @@ describe.sequential("runner placement live verification", () => {
       connection,
       { runnerId: runner.id, userId },
       {
+        compatibilityRequirement: HOSTED_COMPATIBILITY_REQUIREMENT,
         fetch: async () => {
           throw new Error("connection refused");
         },
@@ -139,6 +156,7 @@ describe.sequential("runner placement live verification", () => {
       connection,
       { runnerId: runner.id, userId },
       {
+        compatibilityRequirement: HOSTED_COMPATIBILITY_REQUIREMENT,
         fetch: async () => {
           await connection.db
             .update(runners)
@@ -161,6 +179,37 @@ describe.sequential("runner placement live verification", () => {
       transitioned: false,
     });
     expect(persisted).toEqual({ status: "online", updatedAt: heartbeatAt });
+  });
+
+  it("rejects a candidate whose compatibility changes during live verification", async () => {
+    const provider = new FakeDigitalOceanProvider({ idPrefix: "compatibility-race" });
+    const resource = await createProviderResource(provider);
+    const userId = await seedUser(connection);
+    const runner = await seedCloudRunner(connection, userId, resource.providerResourceId);
+
+    const result = await verifyRunnerPlacementCandidate(
+      connection,
+      { runnerId: runner.id, userId },
+      {
+        compatibilityRequirement: HOSTED_COMPATIBILITY_REQUIREMENT,
+        fetch: async () => {
+          await connection.db
+            .update(runners)
+            .set({ compatibilityState: "outdated" })
+            .where(eq(runners.id, runner.id));
+          return Response.json({ ok: true, status: "ready" });
+        },
+        provider,
+        readConfig,
+      },
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      action: "reject_candidate",
+      reason: "release_incompatible",
+      transitioned: false,
+    });
   });
 
   it("bulk reconciliation removes missing provider resources and reports provider failures", async () => {
@@ -198,7 +247,7 @@ function readConfig() {
   return {
     token: "digitalocean-test-token",
     runnerBearerToken: "runner-command-token",
-    runnerImage: "ghcr.io/ametel01/agentbay-runner:test",
+    runnerImage: `ghcr.io/ametel01/agentbay-runner:sha-current@${RUNNER_IMAGE_DIGEST}`,
     region: "sfo3",
     sizeSlug: "s-1vcpu-512mb-10gb",
     image: "ubuntu-24-04-x64",
@@ -234,6 +283,12 @@ async function seedCloudRunner(
       provisioningStatus: "ready",
       provisioningStartedAt: now,
       provisioningCompletedAt: now,
+      requiredRunnerImageDigest: RUNNER_IMAGE_DIGEST,
+      observedRunnerImageDigest: RUNNER_IMAGE_DIGEST,
+      observedRunnerReleaseVersion: "sha-current",
+      observedRunnerBootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+      compatibilityState: "compatible",
+      compatibilityVerifiedAt: now,
       createdAt: now,
       updatedAt: now,
     })

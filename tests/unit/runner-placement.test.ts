@@ -11,6 +11,17 @@ import {
 import { DEVELOPMENT_USER_METADATA_KEY } from "@/src/server/users/development-user";
 import { FakeDigitalOceanProvider } from "@/src/server/runners/digitalocean-provider";
 import { verifyRunnerPlacementCandidate } from "@/src/server/runners/runner-placement-verification";
+import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
+
+const RUNNER_IMAGE_DIGEST = `sha256:${"a".repeat(64)}`;
+const HOSTED_COMPATIBILITY_REQUIREMENT = {
+  mode: "hosted",
+  release: {
+    version: "sha-current",
+    imageDigest: RUNNER_IMAGE_DIGEST,
+    bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+  },
+} as const;
 
 describe.sequential("runner placement contract", () => {
   let connection: DatabaseConnection;
@@ -204,6 +215,92 @@ describe.sequential("runner placement contract", () => {
     ).resolves.toEqual({ ok: false, reason: "no_online_runner" });
   });
 
+  it("keeps legacy ready managed runners nonassignable after the additive backfill", async () => {
+    const userId = await seedDevelopmentUser(connection);
+    const [runner] = await connection.db
+      .insert(runners)
+      .values({
+        userId,
+        name: "Legacy Ready Cloud Runner",
+        kind: "digitalocean",
+        endpointUrl: "https://legacy-ready.example.com",
+        status: "online",
+        provider: "digitalocean",
+        providerResourceId: "legacy-ready",
+        region: "sfo3",
+        sizeSlug: "s-1vcpu-512mb-10gb",
+        image: "ubuntu-24-04-x64",
+        provisioningStatus: "ready",
+        provisioningStartedAt: new Date("2026-07-06T04:00:00.000Z"),
+        provisioningCompletedAt: new Date("2026-07-06T04:01:00.000Z"),
+      })
+      .returning({ id: runners.id });
+
+    if (!runner) throw new Error("Runner insert returned no rows.");
+
+    await seedHeartbeat(connection, runner.id, {
+      observedAt: new Date("2026-07-06T04:01:00.000Z"),
+      metrics: { maxAgents: 1, runningAgents: 0 },
+    });
+
+    await expect(
+      selectRunnerPlacementForUser(
+        userId,
+        {},
+        {
+          compatibilityRequirement: HOSTED_COMPATIBILITY_REQUIREMENT,
+          createConnection: () => connection,
+          now: () => new Date("2026-07-06T04:02:00.000Z"),
+        },
+      ),
+    ).resolves.toEqual({ ok: false, reason: "no_online_runner" });
+  });
+
+  it("excludes but does not delete a manual runner with incompatible release evidence", async () => {
+    const userId = await seedDevelopmentUser(connection);
+    const [runner] = await connection.db
+      .insert(runners)
+      .values({
+        userId,
+        name: "Outdated Manual Runner",
+        kind: "manual_vps",
+        endpointUrl: "https://outdated-manual.example.com",
+        status: "online",
+        requiredRunnerImageDigest: RUNNER_IMAGE_DIGEST,
+        observedRunnerImageDigest: RUNNER_IMAGE_DIGEST,
+        observedRunnerReleaseVersion: "sha-old",
+        observedRunnerBootContractVersion: "plingpling.runner.boot.v0",
+        compatibilityState: "outdated",
+        compatibilityVerifiedAt: new Date("2026-07-06T04:01:00.000Z"),
+      })
+      .returning({ id: runners.id });
+
+    if (!runner) throw new Error("Runner insert returned no rows.");
+
+    await seedHeartbeat(connection, runner.id, {
+      observedAt: new Date("2026-07-06T04:01:00.000Z"),
+      metrics: { maxAgents: 1, runningAgents: 0 },
+    });
+
+    await expect(
+      selectRunnerPlacementForUser(
+        userId,
+        {},
+        {
+          compatibilityRequirement: HOSTED_COMPATIBILITY_REQUIREMENT,
+          createConnection: () => connection,
+          now: () => new Date("2026-07-06T04:02:00.000Z"),
+        },
+      ),
+    ).resolves.toEqual({ ok: false, reason: "no_online_runner" });
+
+    const [persisted] = await connection.db
+      .select({ status: runners.status, deletedAt: runners.deletedAt })
+      .from(runners)
+      .where(eq(runners.id, runner.id));
+    expect(persisted).toEqual({ status: "online", deletedAt: null });
+  });
+
   it("excludes online DigitalOcean runners until authenticated readiness is complete", async () => {
     const now = new Date("2026-07-06T04:02:00.000Z");
     const userId = await seedDevelopmentUser(connection);
@@ -262,6 +359,12 @@ describe.sequential("runner placement contract", () => {
         provisioningStatus: "ready",
         provisioningStartedAt: new Date("2026-07-06T04:00:00.000Z"),
         provisioningCompletedAt: new Date("2026-07-06T04:01:00.000Z"),
+        requiredRunnerImageDigest: RUNNER_IMAGE_DIGEST,
+        observedRunnerImageDigest: RUNNER_IMAGE_DIGEST,
+        observedRunnerReleaseVersion: "sha-current",
+        observedRunnerBootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+        compatibilityState: "compatible",
+        compatibilityVerifiedAt: new Date("2026-07-06T04:01:00.000Z"),
       })
       .returning({ id: runners.id });
 
@@ -278,7 +381,11 @@ describe.sequential("runner placement contract", () => {
       selectRunnerPlacementForUser(
         userId,
         {},
-        { createConnection: () => connection, now: () => now },
+        {
+          compatibilityRequirement: HOSTED_COMPATIBILITY_REQUIREMENT,
+          createConnection: () => connection,
+          now: () => now,
+        },
       ),
     ).resolves.toMatchObject({ ok: true, runner: { id: runner.id, kind: "digitalocean" } });
   });
@@ -302,6 +409,12 @@ describe.sequential("runner placement contract", () => {
         provisioningStatus: "ready",
         provisioningStartedAt: new Date("2026-07-06T04:00:00.000Z"),
         provisioningCompletedAt: new Date("2026-07-06T04:01:00.000Z"),
+        requiredRunnerImageDigest: RUNNER_IMAGE_DIGEST,
+        observedRunnerImageDigest: RUNNER_IMAGE_DIGEST,
+        observedRunnerReleaseVersion: "sha-current",
+        observedRunnerBootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+        compatibilityState: "compatible",
+        compatibilityVerifiedAt: new Date("2026-07-06T04:01:00.000Z"),
       })
       .returning({ id: runners.id });
 
@@ -318,7 +431,11 @@ describe.sequential("runner placement contract", () => {
       selectRunnerPlacementForUser(
         userId,
         {},
-        { createConnection: () => connection, now: () => now },
+        {
+          compatibilityRequirement: HOSTED_COMPATIBILITY_REQUIREMENT,
+          createConnection: () => connection,
+          now: () => now,
+        },
       ),
     ).resolves.toMatchObject({ ok: true, runner: { id: runner.id } });
 
@@ -328,6 +445,7 @@ describe.sequential("runner placement contract", () => {
         { runnerId: runner.id, userId },
         {
           now: () => now,
+          compatibilityRequirement: HOSTED_COMPATIBILITY_REQUIREMENT,
           provider: new FakeDigitalOceanProvider(),
           readConfig: () => ({
             token: "fake-provider-token",

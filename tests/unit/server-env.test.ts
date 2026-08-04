@@ -10,7 +10,6 @@ import {
   DEFAULT_HERMES_WORKLOAD_IMAGE,
 } from "@/src/runner-service/constants";
 import {
-  DEFAULT_AGENTBAY_RUNNER_IMAGE,
   isAuthorizedCronRequest,
   isAuthorizedHermesStagingAcceptanceRequest,
   readCronSecretConfig,
@@ -19,6 +18,9 @@ import {
   readHermesWorkloadImage,
   readReadyAgentCreationFlag,
 } from "@/src/server/env";
+
+const HOSTED_RUNNER_DIGEST = `sha256:${"a".repeat(64)}`;
+const HOSTED_RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:sha-test@${HOSTED_RUNNER_DIGEST}`;
 
 describe("server-only provider environment validation", () => {
   it("parses cron secrets exactly and authorizes only a single bearer credential", () => {
@@ -252,14 +254,22 @@ describe("server-only provider environment validation", () => {
   });
 
   it("validates DigitalOcean token and non-secret provisioning defaults on the server path", () => {
-    expect(
+    expect(() =>
       readDigitalOceanProviderConfig({
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
         AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
       }),
+    ).toThrow("AGENTBAY_RUNNER_IMAGE must be an immutable registry image reference");
+
+    expect(
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+      }),
     ).toMatchObject({
       runnerBearerToken: "runner-command-token",
-      runnerImage: DEFAULT_AGENTBAY_RUNNER_IMAGE,
+      runnerImage: HOSTED_RUNNER_IMAGE,
       hermesWorkloadImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
       hermesStateRoot: DEFAULT_HERMES_STATE_ROOT,
       hermesPrivateNetwork: DEFAULT_HERMES_PRIVATE_NETWORK,
@@ -278,7 +288,7 @@ describe("server-only provider environment validation", () => {
       AGENTBAY_DIGITALOCEAN_REGION: " nyc3 ",
       AGENTBAY_DIGITALOCEAN_SIZE_SLUG: " s-2vcpu-2gb ",
       AGENTBAY_DIGITALOCEAN_IMAGE: " ubuntu-24-04-x64 ",
-      AGENTBAY_RUNNER_IMAGE: " ghcr.io/ametel01/agentbay-runner:sha-123 ",
+      AGENTBAY_RUNNER_IMAGE: ` ${HOSTED_RUNNER_IMAGE} `,
       AGENTBAY_HERMES_WORKLOAD_IMAGE: " ghcr.io/ametel01/agentbay-hermes:sha-123 ",
       AGENTBAY_HERMES_STATE_ROOT: " /var/lib/agentbay/custom-agents ",
       AGENTBAY_HERMES_PRIVATE_NETWORK: " agentbay-custom-hermes ",
@@ -292,7 +302,7 @@ describe("server-only provider environment validation", () => {
       token: "dop_v1_test_token",
       providerMode: "digitalocean",
       runnerBearerToken: "runner-command-token",
-      runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
+      runnerImage: HOSTED_RUNNER_IMAGE,
       hermesWorkloadImage: "ghcr.io/ametel01/agentbay-hermes:sha-123",
       hermesStateRoot: "/var/lib/agentbay/custom-agents",
       hermesPrivateNetwork: "agentbay-custom-hermes",
@@ -333,6 +343,7 @@ describe("server-only provider environment validation", () => {
       readDigitalOceanProviderConfig({
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
         AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
         AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "52830696, c3:2a:31",
         AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS: "203.0.113.5/32, 2001:db8::/64",
       }),
@@ -345,6 +356,7 @@ describe("server-only provider environment validation", () => {
       readDigitalOceanProviderConfig({
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
         AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
         AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "auto",
       }),
     ).not.toHaveProperty("sshKeyIds");
@@ -353,6 +365,7 @@ describe("server-only provider environment validation", () => {
       readDigitalOceanProviderConfig({
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
         AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
         AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "none",
       }),
     ).toMatchObject({ sshKeyIds: [] });
@@ -363,6 +376,7 @@ describe("server-only provider environment validation", () => {
       readDigitalOceanProviderConfig({
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
         AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
       }),
     ).toMatchObject({ sshSourceAddresses: [] });
 
@@ -370,6 +384,7 @@ describe("server-only provider environment validation", () => {
       readDigitalOceanProviderConfig({
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
         AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
         AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH: "true",
       }),
     ).toMatchObject({ sshSourceAddresses: ["0.0.0.0/0", "::/0"] });
@@ -378,6 +393,7 @@ describe("server-only provider environment validation", () => {
       readDigitalOceanProviderConfig({
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
         AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
         AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH: "false",
       }),
     ).toMatchObject({ sshSourceAddresses: [] });

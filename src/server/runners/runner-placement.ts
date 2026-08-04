@@ -7,6 +7,11 @@ import {
   DIGITALOCEAN_PROVIDER,
   DIGITALOCEAN_RUNNER_KIND,
 } from "@/src/server/runners/digitalocean-provider";
+import {
+  readRunnerCompatibilityRequirement,
+  runnerCompatibilityPredicate,
+  type RunnerCompatibilityRequirement,
+} from "@/src/server/runners/runner-compatibility";
 import { reconcileStaleRunnerHeartbeatsInTransaction } from "@/src/server/runners/runner-heartbeat";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
@@ -94,6 +99,7 @@ export class RunnerPlacementPersistenceError extends Error {
 }
 
 export type RunnerPlacementDependencies = {
+  compatibilityRequirement?: RunnerCompatibilityRequirement;
   createConnection?: () => DatabaseConnection;
   now?: () => Date;
 };
@@ -108,7 +114,12 @@ export async function selectRunnerPlacementForDevelopmentUser(
 
   try {
     return await connection.db.transaction((tx) =>
-      selectRunnerPlacementForDevelopmentUserInTransaction(tx, input, { now }),
+      selectRunnerPlacementForDevelopmentUserInTransaction(tx, input, {
+        now,
+        ...(dependencies.compatibilityRequirement
+          ? { compatibilityRequirement: dependencies.compatibilityRequirement }
+          : {}),
+      }),
     );
   } catch {
     throw new RunnerPlacementPersistenceError();
@@ -130,7 +141,12 @@ export async function selectRunnerPlacementForUser(
 
   try {
     return await connection.db.transaction((tx) =>
-      selectRunnerPlacementForUserInTransaction(tx, userId, input, { now }),
+      selectRunnerPlacementForUserInTransaction(tx, userId, input, {
+        now,
+        ...(dependencies.compatibilityRequirement
+          ? { compatibilityRequirement: dependencies.compatibilityRequirement }
+          : {}),
+      }),
     );
   } catch {
     throw new RunnerPlacementPersistenceError();
@@ -144,7 +160,7 @@ export async function selectRunnerPlacementForUser(
 export async function selectRunnerPlacementForDevelopmentUserInTransaction(
   tx: RunnerPlacementTransaction,
   input: RunnerPlacementInput = {},
-  options: { now?: Date } = {},
+  options: { now?: Date; compatibilityRequirement?: RunnerCompatibilityRequirement } = {},
 ): Promise<RunnerPlacementResult> {
   const userId = await getDevelopmentUserId(tx);
 
@@ -159,7 +175,7 @@ export async function selectRunnerPlacementForUserInTransaction(
   tx: RunnerPlacementTransaction,
   userId: string,
   input: RunnerPlacementInput = {},
-  options: { now?: Date } = {},
+  options: { now?: Date; compatibilityRequirement?: RunnerCompatibilityRequirement } = {},
 ): Promise<RunnerPlacementResult> {
   await reconcileStaleRunnerHeartbeatsInTransaction(tx, {
     now: options.now ?? new Date(),
@@ -187,6 +203,9 @@ export async function selectRunnerPlacementForUserInTransaction(
     eq(runners.status, "online"),
     isNotNull(runners.endpointUrl),
     isNull(runners.deletedAt),
+    runnerCompatibilityPredicate(
+      options.compatibilityRequirement ?? readRunnerCompatibilityRequirement(),
+    ),
     or(
       eq(runners.kind, "manual_vps"),
       and(

@@ -399,6 +399,12 @@ describe("Milestone 1 agent persistence schema", () => {
       "provisioningOperationKey",
       "provisioningStartedAt",
       "provisioningCompletedAt",
+      "requiredRunnerImageDigest",
+      "observedRunnerImageDigest",
+      "observedRunnerReleaseVersion",
+      "observedRunnerBootContractVersion",
+      "compatibilityState",
+      "compatibilityVerifiedAt",
       "createdAt",
       "updatedAt",
       "deletedAt",
@@ -421,9 +427,34 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.provisioningError.notNull).toBe(false);
     expect(columns.provisioningStartedAt.notNull).toBe(false);
     expect(columns.provisioningCompletedAt.notNull).toBe(false);
+    expect(columns.requiredRunnerImageDigest.notNull).toBe(false);
+    expect(columns.observedRunnerImageDigest.notNull).toBe(false);
+    expect(columns.observedRunnerReleaseVersion.notNull).toBe(false);
+    expect(columns.observedRunnerBootContractVersion.notNull).toBe(false);
+    expect(columns.compatibilityState.notNull).toBe(true);
+    expect(columns.compatibilityState.default).toBe("unknown");
+    expect(columns.compatibilityVerifiedAt.notNull).toBe(false);
     expect(columns.createdAt.notNull).toBe(true);
     expect(columns.updatedAt.notNull).toBe(true);
     expect(columns.deletedAt.notNull).toBe(false);
+  });
+
+  it("generates an additive fail-closed runner compatibility migration", async () => {
+    const migration = await readFile("drizzle/0022_unknown_ma_gnuci.sql", "utf8");
+
+    expect(migration).toContain('ADD COLUMN "required_runner_image_digest" text');
+    expect(migration).toContain('ADD COLUMN "observed_runner_image_digest" text');
+    expect(migration).toContain('ADD COLUMN "observed_runner_release_version" text');
+    expect(migration).toContain('ADD COLUMN "observed_runner_boot_contract_version" text');
+    expect(migration).toContain(
+      "ADD COLUMN \"compatibility_state\" text DEFAULT 'unknown' NOT NULL",
+    );
+    expect(migration).toContain('ADD COLUMN "compatibility_verified_at" timestamp with time zone');
+    expect(migration).toContain('CREATE INDEX "runners_user_status_compatibility_idx"');
+    expect(migration).toContain('CREATE INDEX "runners_managed_release_idx"');
+    expect(migration).toContain('CONSTRAINT "runners_compatibility_state_check"');
+    expect(migration).toContain('CONSTRAINT "runners_compatible_evidence_check"');
+    expect(migration).not.toMatch(/DROP TABLE|DROP COLUMN|ALTER COLUMN|(?:^|\n)UPDATE /);
   });
 
   it("defines one-time runner registration token rows with hashes only", () => {
