@@ -56,6 +56,38 @@ export const agentRuntimeReconciliationStateEnum = pgEnum("agent_runtime_reconci
   "circuit_open",
 ]);
 
+export const runnerReplacementStateEnum = pgEnum("runner_replacement_state", [
+  "pending",
+  "provisioning_target",
+  "validating_target",
+  "fencing_source",
+  "reassigning",
+  "converging_agents",
+  "cleaning_source",
+  "complete",
+  "failed",
+]);
+
+export const runnerReplacementReasonEnum = pgEnum("runner_replacement_reason", [
+  "release_mismatch",
+  "boot_failure",
+  "provider_resource_missing",
+  "stale_heartbeat",
+  "endpoint_failure",
+  "gateway_deadline",
+]);
+
+export const runnerReplacementTerminalCodeEnum = pgEnum("runner_replacement_terminal_code", [
+  "replacement_budget_exhausted",
+  "target_provisioning_failed",
+  "target_validation_failed",
+  "source_fence_failed",
+  "reassignment_failed",
+  "agent_convergence_failed",
+  "source_cleanup_failed",
+  "state_invalid",
+]);
+
 export const hermesStagingAcceptanceDesiredOutcomeEnum = pgEnum(
   "hermes_staging_acceptance_desired_outcome",
   ["acceptance", "cleanup"],
@@ -643,6 +675,136 @@ export const agentDeployments = pgTable(
     index("agent_deployments_claim_idx")
       .on(table.nextAttemptAt, table.leaseExpiresAt, table.createdAt)
       .where(sql`${table.stage} NOT IN ('ready', 'failed')`),
+  ],
+);
+
+export const runnerReplacements = pgTable(
+  "runner_replacements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sourceRunnerId: uuid("source_runner_id")
+      .notNull()
+      .references(() => runners.id),
+    targetRunnerId: uuid("target_runner_id").references(() => runners.id),
+    triggerDeploymentId: uuid("trigger_deployment_id").references(() => agentDeployments.id),
+    reason: runnerReplacementReasonEnum("reason").notNull(),
+    state: runnerReplacementStateEnum("state").notNull().default("pending"),
+    operationKey: text("operation_key").notNull(),
+    generation: integer("generation").notNull().default(0),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    replacementCount: integer("replacement_count").notNull().default(0),
+    replacementWindowStartedAt: timestamp("replacement_window_started_at", {
+      withTimezone: true,
+    }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    terminalCode: runnerReplacementTerminalCodeEnum("terminal_code"),
+    terminalSummary: text("terminal_summary"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    failedAt: timestamp("failed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "runner_replacements_source_target_check",
+      sql`${table.targetRunnerId} IS NULL OR ${table.targetRunnerId} <> ${table.sourceRunnerId}`,
+    ),
+    check(
+      "runner_replacements_operation_key_check",
+      sql`${table.operationKey} ~ '^agentbay-replace-[0-9a-f]{32}$'`,
+    ),
+    check("runner_replacements_generation_check", sql`${table.generation} >= 0`),
+    check("runner_replacements_attempt_count_check", sql`${table.attemptCount} >= 0`),
+    check(
+      "runner_replacements_replacement_count_check",
+      sql`${table.replacementCount} BETWEEN 0 AND 2`,
+    ),
+    check(
+      "runner_replacements_replacement_window_check",
+      sql`(${table.replacementCount} = 0 AND ${table.replacementWindowStartedAt} IS NULL) OR (${table.replacementCount} BETWEEN 1 AND 2 AND ${table.replacementWindowStartedAt} IS NOT NULL)`,
+    ),
+    check(
+      "runner_replacements_lease_owner_check",
+      sql`${table.leaseOwner} IS NULL OR ${table.leaseOwner} ~ '^runner-replacement:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'`,
+    ),
+    check(
+      "runner_replacements_lease_pair_check",
+      sql`(${table.leaseOwner} IS NULL AND ${table.leaseExpiresAt} IS NULL) OR (${table.leaseOwner} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL)`,
+    ),
+    check(
+      "runner_replacements_terminal_summary_check",
+      sql`${table.terminalSummary} IS NULL OR (length(trim(${table.terminalSummary})) BETWEEN 1 AND 240 AND ${table.terminalCode} IS NOT NULL)`,
+    ),
+    check(
+      "runner_replacements_terminal_evidence_check",
+      sql`(${table.terminalCode} IS NULL AND ${table.terminalSummary} IS NULL) OR (${table.terminalCode} = 'replacement_budget_exhausted' AND ${table.terminalSummary} = 'Automatic runner replacement budget was exhausted.') OR (${table.terminalCode} = 'target_provisioning_failed' AND ${table.terminalSummary} = 'Replacement runner provisioning did not complete.') OR (${table.terminalCode} = 'target_validation_failed' AND ${table.terminalSummary} = 'Replacement runner validation did not pass.') OR (${table.terminalCode} = 'source_fence_failed' AND ${table.terminalSummary} = 'The source runner could not be fenced safely.') OR (${table.terminalCode} = 'reassignment_failed' AND ${table.terminalSummary} = 'Agent reassignment did not complete safely.') OR (${table.terminalCode} = 'agent_convergence_failed' AND ${table.terminalSummary} = 'Agents did not converge on the replacement runner.') OR (${table.terminalCode} = 'source_cleanup_failed' AND ${table.terminalSummary} = 'The obsolete source runner could not be cleaned up safely.') OR (${table.terminalCode} = 'state_invalid' AND ${table.terminalSummary} = 'The replacement workflow reached an invalid state.')`,
+    ),
+    check(
+      "runner_replacements_terminal_state_check",
+      sql`(${table.state} = 'complete' AND ${table.completedAt} IS NOT NULL AND ${table.failedAt} IS NULL AND ${table.terminalCode} IS NULL AND ${table.terminalSummary} IS NULL) OR (${table.state} = 'failed' AND ${table.failedAt} IS NOT NULL AND ${table.completedAt} IS NULL AND ${table.terminalCode} IS NOT NULL AND ${table.terminalSummary} IS NOT NULL) OR (${table.state} NOT IN ('complete', 'failed') AND ${table.completedAt} IS NULL AND ${table.failedAt} IS NULL AND ${table.terminalCode} IS NULL AND ${table.terminalSummary} IS NULL)`,
+    ),
+    check(
+      "runner_replacements_terminal_clear_work_check",
+      sql`${table.state} NOT IN ('complete', 'failed') OR (${table.nextAttemptAt} IS NULL AND ${table.leaseOwner} IS NULL AND ${table.leaseExpiresAt} IS NULL)`,
+    ),
+    check(
+      "runner_replacements_active_work_check",
+      sql`${table.state} IN ('complete', 'failed') OR ${table.nextAttemptAt} IS NOT NULL OR ${table.leaseOwner} IS NOT NULL`,
+    ),
+    check(
+      "runner_replacements_target_state_check",
+      sql`${table.state} IN ('pending', 'provisioning_target', 'failed') OR ${table.targetRunnerId} IS NOT NULL`,
+    ),
+    check(
+      "runner_replacements_completed_after_started_check",
+      sql`${table.completedAt} IS NULL OR ${table.completedAt} >= ${table.startedAt}`,
+    ),
+    check(
+      "runner_replacements_failed_after_started_check",
+      sql`${table.failedAt} IS NULL OR ${table.failedAt} >= ${table.startedAt}`,
+    ),
+    uniqueIndex("runner_replacements_operation_key_idx").on(table.operationKey),
+    uniqueIndex("runner_replacements_active_source_idx")
+      .on(table.sourceRunnerId)
+      .where(sql`${table.state} NOT IN ('complete', 'failed')`),
+    uniqueIndex("runner_replacements_active_deployment_idx")
+      .on(table.triggerDeploymentId)
+      .where(
+        sql`${table.triggerDeploymentId} IS NOT NULL AND ${table.state} NOT IN ('complete', 'failed')`,
+      ),
+    index("runner_replacements_claim_idx")
+      .on(table.nextAttemptAt, table.leaseExpiresAt, table.createdAt)
+      .where(sql`${table.state} NOT IN ('complete', 'failed')`),
+    index("runner_replacements_deployment_budget_idx").on(
+      table.triggerDeploymentId,
+      table.replacementWindowStartedAt,
+    ),
+  ],
+);
+
+export const agentDeploymentReplacementBudgets = pgTable(
+  "agent_deployment_replacement_budgets",
+  {
+    deploymentId: uuid("deployment_id")
+      .primaryKey()
+      .references(() => agentDeployments.id),
+    windowStartedAt: timestamp("window_started_at", { withTimezone: true }).notNull(),
+    replacementCount: integer("replacement_count").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "agent_deployment_replacement_budgets_count_check",
+      sql`${table.replacementCount} BETWEEN 1 AND 2`,
+    ),
+    check(
+      "agent_deployment_replacement_budgets_updated_check",
+      sql`${table.updatedAt} >= ${table.windowStartedAt}`,
+    ),
   ],
 );
 

@@ -162,6 +162,13 @@
       "when": 1785827527484,
       "tag": "0022_unknown_ma_gnuci",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785831987094,
+      "tag": "0023_stiff_masque",
+      "breakpoints": true
     }
   ]
 }

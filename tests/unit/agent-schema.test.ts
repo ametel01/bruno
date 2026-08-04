@@ -6,6 +6,7 @@ import {
   agentApprovals,
   agentConfigs,
   agentDeploymentStageEnum,
+  agentDeploymentReplacementBudgets,
   agentDeployments,
   agentDesiredStatusEnum,
   agentEvents,
@@ -25,6 +26,10 @@ import {
   runnerCredentials,
   runnerHeartbeats,
   runnerProvisioningEvents,
+  runnerReplacementReasonEnum,
+  runnerReplacements,
+  runnerReplacementStateEnum,
+  runnerReplacementTerminalCodeEnum,
   runnerRegistrationTokens,
   runners,
   users,
@@ -39,11 +44,15 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(getTableName(agentConfigs)).toBe("agent_configs");
     expect(getTableName(agentSecrets)).toBe("agent_secrets");
     expect(getTableName(agentDeployments)).toBe("agent_deployments");
+    expect(getTableName(agentDeploymentReplacementBudgets)).toBe(
+      "agent_deployment_replacement_budgets",
+    );
     expect(getTableName(agentUsagePeriods)).toBe("agent_usage_periods");
     expect(getTableName(agentApprovals)).toBe("agent_approvals");
     expect(getTableName(agentEvents)).toBe("agent_events");
     expect(getTableName(runners)).toBe("runners");
     expect(getTableName(runnerProvisioningEvents)).toBe("runner_provisioning_events");
+    expect(getTableName(runnerReplacements)).toBe("runner_replacements");
     expect(getTableName(runnerRegistrationTokens)).toBe("runner_registration_tokens");
     expect(getTableName(runnerCredentials)).toBe("runner_credentials");
     expect(getTableName(runnerHeartbeats)).toBe("runner_heartbeats");
@@ -70,6 +79,26 @@ describe("Milestone 1 agent persistence schema", () => {
       "ready",
       "failed",
     ]);
+    expect(runnerReplacementStateEnum.enumValues).toEqual([
+      "pending",
+      "provisioning_target",
+      "validating_target",
+      "fencing_source",
+      "reassigning",
+      "converging_agents",
+      "cleaning_source",
+      "complete",
+      "failed",
+    ]);
+    expect(runnerReplacementReasonEnum.enumValues).toEqual([
+      "release_mismatch",
+      "boot_failure",
+      "provider_resource_missing",
+      "stale_heartbeat",
+      "endpoint_failure",
+      "gateway_deadline",
+    ]);
+    expect(runnerReplacementTerminalCodeEnum.enumValues).toContain("replacement_budget_exhausted");
     expect(agentScheduleModeEnum.enumValues).toEqual(["manual", "cron"]);
     expect(agentApprovalStatusEnum.enumValues).toEqual([
       "pending",
@@ -454,6 +483,20 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(migration).toContain('CREATE INDEX "runners_managed_release_idx"');
     expect(migration).toContain('CONSTRAINT "runners_compatibility_state_check"');
     expect(migration).toContain('CONSTRAINT "runners_compatible_evidence_check"');
+    expect(migration).not.toMatch(/DROP TABLE|DROP COLUMN|ALTER COLUMN|(?:^|\n)UPDATE /);
+  });
+
+  it("generates an additive durable runner replacement migration", async () => {
+    const migration = await readFile("drizzle/0023_stiff_masque.sql", "utf8");
+
+    expect(migration).toContain('CREATE TABLE "runner_replacements"');
+    expect(migration).toContain('CREATE TABLE "agent_deployment_replacement_budgets"');
+    expect(migration).toContain('CREATE UNIQUE INDEX "runner_replacements_active_source_idx"');
+    expect(migration).toContain('CREATE UNIQUE INDEX "runner_replacements_active_deployment_idx"');
+    expect(migration).toContain('CREATE INDEX "runner_replacements_claim_idx"');
+    expect(migration).toContain('CONSTRAINT "runner_replacements_terminal_state_check"');
+    expect(migration).toContain('CONSTRAINT "runner_replacements_terminal_evidence_check"');
+    expect(migration).toContain('CONSTRAINT "agent_deployment_replacement_budgets_count_check"');
     expect(migration).not.toMatch(/DROP TABLE|DROP COLUMN|ALTER COLUMN|(?:^|\n)UPDATE /);
   });
 
