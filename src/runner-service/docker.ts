@@ -71,6 +71,94 @@ const CANARY_TIMEOUT_MS = 15_000;
 const MAX_PROBE_RESPONSE_BYTES = 64 * 1024;
 const MAX_DOCKER_IMAGE_IDENTITY_BYTES = 16 * 1024;
 const DOCKER_IMAGE_IDENTITY_FORMAT = '{"imageId":{{json .Id}},"repoDigests":{{json .RepoDigests}}}';
+const HERMES_CONTAINER_HEALTH_PROBE_SOURCE = `
+import json
+import sys
+import urllib.error
+import urllib.request
+
+status = 0
+body = None
+
+try:
+    api_key = None
+    with open("/opt/data/.env", encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if line.startswith("API_SERVER_KEY="):
+                raw_value = line.split("=", 1)[1].strip()
+                api_key = json.loads(raw_value) if raw_value.startswith('"') else raw_value
+                break
+    if not api_key:
+        raise ValueError("missing API server key")
+    request = urllib.request.Request(
+        "http://127.0.0.1:" + sys.argv[1] + "/health/detailed",
+        headers={"Authorization": "Bearer " + api_key, "Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=2) as response:
+            status = response.status
+            raw_body = response.read(${MAX_PROBE_RESPONSE_BYTES + 1})
+            if len(raw_body) <= ${MAX_PROBE_RESPONSE_BYTES}:
+                body = json.loads(raw_body.decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        status = error.code
+except Exception:
+    pass
+
+print(json.dumps({"status": status, "body": body}, separators=(",", ":")))
+`;
+const HERMES_CONTAINER_CANARY_PROBE_SOURCE = `
+import json
+import sys
+import urllib.error
+import urllib.request
+
+status = 0
+body = None
+
+try:
+    api_key = None
+    with open("/opt/data/.env", encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if line.startswith("API_SERVER_KEY="):
+                raw_value = line.split("=", 1)[1].strip()
+                api_key = json.loads(raw_value) if raw_value.startswith('"') else raw_value
+                break
+    if not api_key:
+        raise ValueError("missing API server key")
+    payload = json.dumps({
+        "model": sys.argv[2],
+        "messages": [{"role": "user", "content": "Reply with ok."}],
+        "tools": [],
+        "stream": False,
+        "max_tokens": 16,
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        "http://127.0.0.1:" + sys.argv[1] + "/v1/chat/completions",
+        data=payload,
+        headers={
+            "Authorization": "Bearer " + api_key,
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            status = response.status
+            raw_body = response.read(${MAX_PROBE_RESPONSE_BYTES + 1})
+            if len(raw_body) <= ${MAX_PROBE_RESPONSE_BYTES}:
+                body = json.loads(raw_body.decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        status = error.code
+except Exception:
+    pass
+
+print(json.dumps({"status": status, "body": body}, separators=(",", ":")))
+`;
 const DUMMY_DOCKER_RUNNER_ARGS = [
   "sh",
   "-c",
@@ -101,7 +189,9 @@ export type ManualRunnerDockerOptions = {
   now?: () => Date;
   probe?: {
     requestHealth?: HermesHealthTransport;
+    requestContainerHealth?: HermesContainerHealthTransport;
     requestCanary?: HermesCanaryTransport;
+    requestContainerCanary?: HermesContainerCanaryTransport;
   };
   projection?: {
     project?: (
@@ -160,6 +250,12 @@ export type HermesHealthTransport = (input: {
   signal?: AbortSignal;
 }) => Promise<HermesHealthTransportResult>;
 
+export type HermesContainerHealthTransport = (input: {
+  containerName: string;
+  readinessPort: number;
+  signal?: AbortSignal;
+}) => Promise<HermesHealthTransportResult>;
+
 export type HermesCanaryTransportResult = {
   ok: boolean;
   status: number;
@@ -168,6 +264,13 @@ export type HermesCanaryTransportResult = {
 
 export type HermesCanaryTransport = (input: {
   apiServerKey: string;
+  containerName: string;
+  model: string;
+  readinessPort: number;
+  signal?: AbortSignal;
+}) => Promise<HermesCanaryTransportResult>;
+
+export type HermesContainerCanaryTransport = (input: {
   containerName: string;
   model: string;
   readinessPort: number;
@@ -298,7 +401,10 @@ export class ManualRunnerDocker {
     context?: { signal: AbortSignal },
   ) => Promise<HermesProjectionResult>;
   private readonly requestCanary: HermesCanaryTransport;
+  private readonly requestContainerCanary: HermesContainerCanaryTransport;
+  private readonly requestContainerHealth: HermesContainerHealthTransport;
   private readonly requestHealth: HermesHealthTransport;
+  private readonly preferContainerHealthProbe: boolean;
   private readonly agentLocks = new Map<string, Promise<unknown>>();
   private readonly launchTokens = new Map<string, Set<LaunchToken>>();
 
@@ -318,7 +424,14 @@ export class ManualRunnerDocker {
           ...(options.projection?.options ?? {}),
         }));
     this.requestHealth = options.probe?.requestHealth ?? fetchHermesHealth;
+    this.preferContainerHealthProbe = options.probe?.requestHealth === undefined;
+    this.requestContainerHealth =
+      options.probe?.requestContainerHealth ??
+      ((input) => this.requestHermesHealthFromContainer(input));
     this.requestCanary = options.probe?.requestCanary ?? fetchHermesCanary;
+    this.requestContainerCanary =
+      options.probe?.requestContainerCanary ??
+      ((input) => this.requestHermesCanaryFromContainer(input));
   }
 
   async start(
@@ -770,14 +883,64 @@ export class ManualRunnerDocker {
     }
 
     try {
-      const response = await withProbeTimeout(STATUS_PROBE_TIMEOUT_MS, (signal) =>
-        this.requestHealth({
-          apiServerKey: input.apiServerKey,
-          containerName: input.containerName,
-          readinessPort: this.hermes.readinessPort,
-          signal,
-        }),
-      );
+      let usedFallbackProbe = false;
+      let response: HermesHealthTransportResult;
+
+      try {
+        response = this.preferContainerHealthProbe
+          ? await withProbeTimeout(STATUS_PROBE_TIMEOUT_MS, (signal) =>
+              this.requestContainerHealth({
+                containerName: input.containerName,
+                readinessPort: this.hermes.readinessPort,
+                signal,
+              }),
+            )
+          : await withProbeTimeout(STATUS_PROBE_TIMEOUT_MS, (signal) =>
+              this.requestHealth({
+                apiServerKey: input.apiServerKey,
+                containerName: input.containerName,
+                readinessPort: this.hermes.readinessPort,
+                signal,
+              }),
+            );
+      } catch {
+        usedFallbackProbe = true;
+        response = this.preferContainerHealthProbe
+          ? await withProbeTimeout(STATUS_PROBE_TIMEOUT_MS, (signal) =>
+              this.requestHealth({
+                apiServerKey: input.apiServerKey,
+                containerName: input.containerName,
+                readinessPort: this.hermes.readinessPort,
+                signal,
+              }),
+            )
+          : await withProbeTimeout(STATUS_PROBE_TIMEOUT_MS, (signal) =>
+              this.requestContainerHealth({
+                containerName: input.containerName,
+                readinessPort: this.hermes.readinessPort,
+                signal,
+              }),
+            );
+      }
+
+      if (!response.ok && !usedFallbackProbe) {
+        response = this.preferContainerHealthProbe
+          ? await withProbeTimeout(STATUS_PROBE_TIMEOUT_MS, (signal) =>
+              this.requestHealth({
+                apiServerKey: input.apiServerKey,
+                containerName: input.containerName,
+                readinessPort: this.hermes.readinessPort,
+                signal,
+              }),
+            )
+          : await withProbeTimeout(STATUS_PROBE_TIMEOUT_MS, (signal) =>
+              this.requestContainerHealth({
+                containerName: input.containerName,
+                readinessPort: this.hermes.readinessPort,
+                signal,
+              }),
+            );
+      }
 
       if (!response.ok) {
         return {
@@ -816,6 +979,47 @@ export class ManualRunnerDocker {
     }
   }
 
+  private async requestHermesHealthFromContainer(
+    input: Parameters<HermesContainerHealthTransport>[0],
+  ): Promise<HermesHealthTransportResult> {
+    try {
+      const result = await this.runDocker(
+        [
+          "exec",
+          input.containerName,
+          "python",
+          "-c",
+          HERMES_CONTAINER_HEALTH_PROBE_SOURCE,
+          String(input.readinessPort),
+        ],
+        {
+          ...(input.signal ? { signal: input.signal } : {}),
+          timeoutMs: STATUS_PROBE_TIMEOUT_MS,
+        },
+      );
+      const parsed: unknown = JSON.parse(result.stdout);
+
+      if (!isSafePlainRecord(parsed)) {
+        return { ok: false, status: 0, body: null };
+      }
+
+      const status = safeOwnValue(parsed, "status");
+      const body = safeOwnValue(parsed, "body");
+
+      if (!Number.isInteger(status) || Number(status) < 0 || Number(status) > 599) {
+        return { ok: false, status: 0, body: null };
+      }
+
+      return {
+        ok: Number(status) >= 200 && Number(status) < 300,
+        status: Number(status),
+        body,
+      };
+    } catch {
+      return { ok: false, status: 0, body: null };
+    }
+  }
+
   private async observeImageIdentity(
     inspect: DockerInspectContainer,
   ): Promise<RunnerImageIdentity | null> {
@@ -847,15 +1051,41 @@ export class ManualRunnerDocker {
     }
 
     try {
-      const response = await withProbeTimeout(CANARY_TIMEOUT_MS, (signal) =>
-        this.requestCanary({
-          apiServerKey: input.apiServerKey,
-          containerName: input.containerName,
-          model: input.model,
-          readinessPort: this.hermes.readinessPort,
-          signal,
-        }),
-      );
+      let usedContainerProbe = false;
+      let response: HermesCanaryTransportResult;
+
+      try {
+        response = await withProbeTimeout(CANARY_TIMEOUT_MS, (signal) =>
+          this.requestCanary({
+            apiServerKey: input.apiServerKey,
+            containerName: input.containerName,
+            model: input.model,
+            readinessPort: this.hermes.readinessPort,
+            signal,
+          }),
+        );
+      } catch {
+        usedContainerProbe = true;
+        response = await withProbeTimeout(CANARY_TIMEOUT_MS, (signal) =>
+          this.requestContainerCanary({
+            containerName: input.containerName,
+            model: input.model,
+            readinessPort: this.hermes.readinessPort,
+            signal,
+          }),
+        );
+      }
+
+      if (!response.ok && !usedContainerProbe) {
+        response = await withProbeTimeout(CANARY_TIMEOUT_MS, (signal) =>
+          this.requestContainerCanary({
+            containerName: input.containerName,
+            model: input.model,
+            readinessPort: this.hermes.readinessPort,
+            signal,
+          }),
+        );
+      }
 
       if (response.status === 401 || response.status === 403) {
         return { state: "failed", reason: "canary_unauthorized" };
@@ -875,6 +1105,33 @@ export class ManualRunnerDocker {
         state: "failed",
         reason: error instanceof ProbeTimeoutError ? "canary_timeout" : "canary_unreachable",
       };
+    }
+  }
+
+  private async requestHermesCanaryFromContainer(
+    input: Parameters<HermesContainerCanaryTransport>[0],
+  ): Promise<HermesCanaryTransportResult> {
+    try {
+      const result = await this.runDocker(
+        [
+          "exec",
+          input.containerName,
+          "python",
+          "-c",
+          HERMES_CONTAINER_CANARY_PROBE_SOURCE,
+          String(input.readinessPort),
+          input.model,
+        ],
+        {
+          ...(input.signal ? { signal: input.signal } : {}),
+          timeoutMs: CANARY_TIMEOUT_MS,
+        },
+      );
+      const parsed = parseHermesContainerProbeOutput(result.stdout);
+
+      return parsed ?? { ok: false, status: 0, body: null };
+    } catch {
+      return { ok: false, status: 0, body: null };
     }
   }
 
@@ -2487,6 +2744,32 @@ async function readBoundedResponseText(
   } finally {
     await reader.cancel().catch(() => undefined);
   }
+}
+
+function parseHermesContainerProbeOutput(stdout: string): HermesCanaryTransportResult | null {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+
+  if (!isSafePlainRecord(parsed)) {
+    return null;
+  }
+
+  const status = safeOwnValue(parsed, "status");
+
+  if (!Number.isInteger(status) || Number(status) < 0 || Number(status) > 599) {
+    return null;
+  }
+
+  return {
+    ok: Number(status) >= 200 && Number(status) < 300,
+    status: Number(status),
+    body: safeOwnValue(parsed, "body"),
+  };
 }
 
 export function isHermesReadyResponse(

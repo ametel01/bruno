@@ -543,6 +543,48 @@ describe("agent deployment reconciler", () => {
     });
   });
 
+  it("fails and cleans up one timed-out gateway instead of restarting it indefinitely", async () => {
+    await seedRunner(connection);
+    await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
+    await seedDeployment(connection, {
+      stage: "starting_gateway",
+      runnerOperationId: OPERATION_ID,
+      runnerAcceptedAt: NOW,
+    });
+    const snapshot: RunnerAgentStatusSnapshot = {
+      ...startingSnapshot(),
+      phase: "failed",
+      gateway: { state: "unknown", observedAt: NOW.toISOString() },
+      apiServer: { required: true, state: "unknown", observedAt: NOW.toISOString() },
+      telegram: { required: true, state: "unknown", observedAt: NOW.toISOString() },
+      readinessReason: "readiness_timeout",
+    };
+    const adapter = fakeRunnerAdapter({
+      status: vi.fn(async () => ({ ok: true, runner: manualRunner(), snapshot })),
+    });
+
+    await expect(
+      reconcileNextAgentDeployment({
+        createConnection: () => connection,
+        now: () => NOW,
+        manualRunnerAdapter: () => adapter as never,
+      }),
+    ).resolves.toEqual({ processed: 1, outcome: "failed" });
+
+    expect(adapter.start).not.toHaveBeenCalled();
+    expect(adapter.streamLogs).toHaveBeenCalledWith({ agentId: AGENT_ID, limit: 100 });
+    expect(adapter.stop).toHaveBeenCalledWith(AGENT_ID);
+    const [deployment] = await connection.db
+      .select()
+      .from(agentDeployments)
+      .where(eq(agentDeployments.id, DEPLOYMENT_ID));
+    expect(deployment).toMatchObject({
+      stage: "failed",
+      errorCode: "runner_start_failed",
+      nextAttemptAt: null,
+    });
+  });
+
   it("adopts exact legacy-ready launch evidence, then replaces compatibility correlation on exact convergence", async () => {
     await seedRunner(connection);
     await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });

@@ -654,6 +654,30 @@ async function reconcileStartingGateway(
     );
   }
 
+  console.info("[agentbay] agent.deployment", {
+    event: "starting_gateway_status",
+    agentId: work.agentId,
+    deploymentId: work.id,
+    phase: status.snapshot.phase,
+    readinessReason: status.snapshot.readinessReason,
+    operationMatches: status.snapshot.operation?.id === work.runnerOperationId,
+    configRevisionMatches: status.snapshot.operation?.target.configRevision === work.configRevision,
+    revisionState: status.snapshot.revision.state,
+    containerState: status.snapshot.container.state,
+    gatewayState: status.snapshot.gateway.state,
+    apiServerState: status.snapshot.apiServer.state,
+    telegramState: status.snapshot.telegram.state,
+  });
+
+  if (status.snapshot.readinessReason === "readiness_timeout") {
+    await terminallyFailDeployment(connection, work, {
+      code: "runner_start_failed",
+      now: now(),
+      cleanup: { dependencies, context },
+    });
+    return "failed";
+  }
+
   if (isReadySnapshot(status.snapshot, work)) {
     return (await transitionStage(connection, work, "verifying_model", now()))
       ? "advanced"

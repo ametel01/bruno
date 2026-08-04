@@ -835,6 +835,41 @@ describe("manual runner service HTTP contract", () => {
     });
   });
 
+  it("falls back to a private in-container health probe when runner-network transport fails", async () => {
+    await withHermesStateRootForTest(async () => {
+      const dockerCalls: string[][] = [];
+      const requestHealth = vi.fn(async () => ({ ok: false, status: 0, body: null }));
+      const docker = new ManualRunnerDocker({
+        docker: createMockDocker({ calls: dockerCalls, execProbeBody: pinnedHermesHealth() }),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: (spec) =>
+            createHermesProjectionForTest(spec, { apiServerKey: spec.secrets.apiServerKey }),
+        },
+        probe: { requestHealth },
+      });
+      const spec = sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } });
+
+      await docker.start(AGENT_ID, spec);
+
+      await expect(docker.status(AGENT_ID)).resolves.toMatchObject({
+        snapshot: {
+          phase: "ready",
+          readinessReason: null,
+          gateway: { state: "running" },
+          apiServer: { state: "connected" },
+          telegram: { state: "connected" },
+        },
+      });
+      expect(requestHealth).toHaveBeenCalledOnce();
+      const execProbe = dockerCalls.find((args) => args[0] === "exec");
+      expect(execProbe).toEqual(
+        expect.arrayContaining(["exec", `agentbay-runner-${AGENT_ID}-unit001`, "python", "8642"]),
+      );
+      expect(JSON.stringify(execProbe)).not.toContain(spec.secrets.apiServerKey);
+    });
+  });
+
   it("keeps bounded image identity stable while Docker restart observations advance", async () => {
     let restartCount = 0;
 
@@ -962,11 +997,15 @@ describe("manual runner service HTTP contract", () => {
     });
   });
 
-  it("bounds one status probe at two seconds and maps timeout without leaking errors", async () => {
+  it("bounds both status transports and maps timeout without leaking errors", async () => {
     vi.useFakeTimers();
     let markProbeStarted!: () => void;
+    let markFallbackStarted!: () => void;
     const probeStarted = new Promise<void>((resolveStarted) => {
       markProbeStarted = resolveStarted;
+    });
+    const fallbackStarted = new Promise<void>((resolveStarted) => {
+      markFallbackStarted = resolveStarted;
     });
 
     try {
@@ -983,6 +1022,10 @@ describe("manual runner service HTTP contract", () => {
               markProbeStarted();
               return await new Promise(() => undefined);
             },
+            requestContainerHealth: async () => {
+              markFallbackStarted();
+              return await new Promise(() => undefined);
+            },
           },
         });
         const spec = sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } });
@@ -990,6 +1033,8 @@ describe("manual runner service HTTP contract", () => {
         const statusPromise = docker.status(AGENT_ID);
         await probeStarted;
 
+        await vi.advanceTimersByTimeAsync(2_000);
+        await fallbackStarted;
         await vi.advanceTimersByTimeAsync(2_000);
 
         await expect(statusPromise).resolves.toMatchObject({
@@ -1316,6 +1361,50 @@ describe("manual runner service HTTP contract", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it("falls back to an in-container canary without putting the API key in Docker arguments", async () => {
+    const dockerCalls: string[][] = [];
+    const requestCanary = vi.fn(async () => ({ ok: false, status: 0, body: null }));
+
+    await withHermesStateRootForTest(async () => {
+      const docker = new ManualRunnerDocker({
+        docker: createMockDocker({
+          calls: dockerCalls,
+          execProbeBody: { choices: [{ message: { role: "assistant", content: "ok" } }] },
+        }),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: (spec) =>
+            createHermesProjectionForTest(spec, { apiServerKey: spec.secrets.apiServerKey }),
+        },
+        probe: {
+          requestHealth: async () => ({ ok: true, body: pinnedHermesHealth() }),
+          requestCanary,
+        },
+      });
+      const spec = sampleManagedLaunchSpec({
+        agent: { ...sampleManagedLaunchSpec().agent, id: AGENT_ID },
+      });
+      const accepted = await docker.start(AGENT_ID, spec);
+
+      if (!("operation" in accepted)) {
+        throw new Error("managed launch did not return an accepted operation");
+      }
+
+      await expect(
+        docker.canary(AGENT_ID, {
+          operationId: accepted.operation.id,
+          configRevision: spec.agent.configRevision,
+          model: spec.model.model,
+        }),
+      ).resolves.toMatchObject({ observation: { state: "passed", reason: null } });
+
+      expect(requestCanary).toHaveBeenCalledOnce();
+      const execProbe = dockerCalls.find((args) => args[0] === "exec");
+      expect(execProbe).toEqual(expect.arrayContaining(["exec", "python", spec.model.model]));
+      expect(JSON.stringify(execProbe)).not.toContain(spec.secrets.apiServerKey);
+    });
   });
 
   it("keeps the primary revision reason when failed-launch cleanup fails", async () => {
@@ -1939,6 +2028,7 @@ function createMockDocker(
       status: string;
     }[];
     failRemoveIds?: string[];
+    execProbeBody?: unknown;
     inspectEnv?: string[];
     imageInspectStdout?: () => string;
     inspectRestartCount?: () => unknown;
@@ -2085,6 +2175,13 @@ function createMockDocker(
       return {
         stdout: input.logs?.stdout ?? "2026-07-05T00:00:01.000000000Z ready\n",
         stderr: input.logs?.stderr ?? "2026-07-05T00:00:02.000000000Z warn\n",
+      };
+    }
+
+    if (args[0] === "exec") {
+      return {
+        stdout: JSON.stringify({ status: 200, body: input.execProbeBody ?? pinnedHermesHealth() }),
+        stderr: "",
       };
     }
 
