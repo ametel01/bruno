@@ -637,8 +637,10 @@ runner image by accepting an agent that could not provision capacity; production
 to deployment `dpl_CdG8WSKjXcJKCXKi1ErsShBUt7qh`. The local repair now fails creation before
 persistence when neither an eligible runner nor valid provisioning configuration exists, advances
 one bounded provisioning attempt immediately when configuration is valid, and fails production
-builds that omit the immutable image. Live publication, reviewed canary, deploy, and post-deploy
-checks remain required before Step 12.
+builds that omit the immutable image. The release workflow now stages the exact production-configured
+control plane without assigning domains, runs the canary against that compatible URL, and promotes
+that same deployment only after the canary passes. Live publication, reviewed canary, promotion,
+and post-deploy checks remain required before Step 12.
 
 ### Step Ledger
 
@@ -776,6 +778,7 @@ checks remain required before Step 12.
 | 11 | Follow-up provider, workflow, and smoke contracts | Passed 3 files / 28 tests. Test processes cannot construct the real DigitalOcean network client, release runs are serialized, a typed exact authorization is required before the one-Droplet release canary, Git-linked production builds fail closed, previews remain enabled, and only verified release/rollback commands carry the Vercel marker. |
 | 11 | Follow-up clean migration, full suite, and build | Passed all migrations through 0024 on an isolated temporary local database, 164 files / 1,572 tests, format/lint across 384 files, typecheck, production build, and diff hygiene. The temporary database was removed; no provider or cloud effect occurred. |
 | 11 | Agent-creation provisioning regression characterization and repair | Production was rolled back to `dpl_CdG8WSKjXcJKCXKi1ErsShBUt7qh`; the deleted failed agent was not reconciled and no Droplet was created. Focused build, creation, and trigger coverage passed 3 files / 36 tests with fake configuration/providers only. Format and lint checked 384 files, typecheck passed, all migrations through 0024 and 164 files / 1,576 tests passed on a clean temporary database, the production build passed, and the database was removed. No provider or cloud effect occurred. |
+| 11 | Compatible pre-canary control-plane staging | Read-only live-state inspection proved production is rolled back to pre-plan deployment `dpl_CdG8WSKjXcJKCXKi1ErsShBUt7qh`, so it cannot prove the new release/boot contract. The workflow now stages the exact production-configured commit with no domain assignment, passes that URL to the canary, and promotes the same deployment only after success. Frozen install, 4 focused files / 32 tests, workflow YAML parsing, format/lint across 384 files, typecheck, clean migrations through 0024, 164 files / 1,577 tests, production build, and diff hygiene passed. The temporary database was removed; no Vercel deployment, registry publication, provider call, or Droplet occurred. |
 | 11 | Live GHCR publish, Trivy scan of published digest, disposable DigitalOcean release canary, Vercel production deploy, `/health`, and required-release verification | Not run. Environment values are configured, but required reviewer protection is unsupported by the current GitHub plan and no explicit billable release authorization was given; no live acceptance is claimed. |
 
 ### Step 1 Gap Matrix
@@ -907,6 +910,17 @@ checks remain required before Step 12.
   migrations and 1,576 tests on a clean temporary database, the production
   build, and diff hygiene passed with no provider effect. The corrective commit
   is `fix: restore automatic runner provisioning` (`This commit`).
+- 2026-08-05: A completion audit found that the release canary still targeted
+  the current production control plane. Because production was intentionally
+  rolled back to pre-plan code, that deployment cannot accept and prove the new
+  release identity and boot contract, making the release order circular. Added
+  a production-configured Vercel staging job using `--prod --skip-domain`, made
+  the canary use its exact deployment URL, and changed production release to
+  promote that already-built deployment only after canary success. Focused
+  workflow coverage passed 32/32; frozen install, format, lint, typecheck, clean
+  migrations, 1,577 tests, the production build, and diff hygiene also passed
+  without publishing, deploying, or creating a Droplet. The corrective commit
+  is `ci: stage compatible control plane before runner canary` (`This commit`).
 
 ### Next Step
 

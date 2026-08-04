@@ -11,13 +11,16 @@ const vercelConfig = JSON.parse(readFileSync(vercelConfigPath, "utf8")) as {
 };
 
 describe("runner release workflow contract", () => {
-  it("is valid YAML with explicit publish, canary, deploy, and rollback boundaries", () => {
+  it("is valid YAML with explicit publish, staging, canary, deploy, and rollback boundaries", () => {
     const workflow = parse(workflowSource) as Record<string, unknown>;
     expect(workflow).toBeTypeOf("object");
     expect(workflowSource).toContain("workflow_dispatch:");
     expect(workflowSource).toContain("environment: runner-release-canary");
     expect(workflowSource).toContain("environment: production");
-    expect(workflowSource).toContain("needs:\n      - publish\n      - canary");
+    expect(workflowSource).toContain("needs:\n      - publish\n      - stage-control-plane");
+    expect(workflowSource).toContain(
+      "needs:\n      - publish\n      - stage-control-plane\n      - canary",
+    );
     expect(workflowSource).toContain(
       "concurrency:\n  group: runner-release\n  cancel-in-progress: false",
     );
@@ -54,6 +57,22 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).toContain("/api/internal/runner-release/required");
     expect(workflowSource).toContain("/health");
     expect(workflowSource).not.toMatch(/cloud-init.*GITHUB_STEP_SUMMARY/i);
+  });
+
+  it("stages a compatible production candidate for the canary and promotes that exact deployment", () => {
+    expect(workflowSource).toContain("stage-control-plane:");
+    expect(workflowSource).toContain("outputs:\n      deployment-url:");
+    expect(workflowSource).toContain("deploy --prod --skip-domain --yes");
+    expect(workflowSource).toContain(
+      "NEXT_PUBLIC_APP_URL: $" + "{{ needs.stage-control-plane.outputs.deployment-url }}",
+    );
+    expect(workflowSource).toContain(
+      "CANDIDATE_DEPLOYMENT_URL: $" + "{{ needs.stage-control-plane.outputs.deployment-url }}",
+    );
+    expect(workflowSource).toContain(
+      "vercel@$" + '{VERCEL_CLI_VERSION} promote "$' + '{CANDIDATE_DEPLOYMENT_URL}"',
+    );
+    expect(workflowSource).not.toContain("RUNNER_RELEASE_CONTROL_PLANE_URL");
   });
 
   it("skips automatic production builds while allowing verified releases and previews", () => {

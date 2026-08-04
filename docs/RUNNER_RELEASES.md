@@ -2,9 +2,11 @@
 
 Runner releases use the manually dispatched `Release runner image` workflow. The workflow never
 publishes or promotes a mutable `:main` tag. A release builds the exact selected commit once, pushes
-only its Git-SHA tag, verifies and scans the resulting digest, proves that immutable image on a
-disposable DigitalOcean Droplet, and only then deploys that same commit and image reference to
-Vercel.
+only its Git-SHA tag, verifies and scans the resulting digest, and stages the exact control-plane
+commit against production configuration without assigning any production domain. The disposable
+DigitalOcean Droplet uses that compatible staged URL for registration, heartbeat, release identity,
+and boot-contract verification. Only a successful canary may promote that exact staged deployment
+to the production domains; promotion does not rebuild or substitute another commit or image.
 
 The linked Git repository does not deploy `main` directly to production. `vercel.json` skips an
 automatic production build unless the release workflow supplies its non-secret
@@ -33,10 +35,9 @@ Configure `runner-release-canary` with required reviewers and these scoped value
 
 | Kind | Name | Purpose |
 | --- | --- | --- |
-| Secret | `RUNNER_RELEASE_DATABASE_URL` | Database used by the current public control plane for the disposable runner registration record. |
+| Secret | `RUNNER_RELEASE_DATABASE_URL` | Database used by the staged control plane for the disposable runner registration record. |
 | Secret | `RUNNER_RELEASE_DIGITALOCEAN_TOKEN` | Token limited to the Droplet, tag, firewall, and read operations required by the canary. |
 | Secret | `RUNNER_RELEASE_BEARER_TOKEN` | Dedicated command bearer shared only with disposable release runners. |
-| Variable | `RUNNER_RELEASE_CONTROL_PLANE_URL` | Current HTTPS production control-plane origin used for runner registration and heartbeat callbacks. |
 | Variable | `RUNNER_RELEASE_DIGITALOCEAN_REGION` | Region for the disposable basic-size canary. |
 
 Configure `production` with required reviewers and the existing Vercel project credentials:
@@ -81,14 +82,17 @@ database URLs, or cloud-init output.
 
 ## Promotion and rollback
 
-After the canary succeeds, the production job deploys the exact tested commit with:
+Before the canary, the workflow stages the exact tested commit using Vercel's production
+configuration and `--prod --skip-domain`, with:
 
 ```text
 AGENTBAY_RUNNER_IMAGE=<tested immutable Git-SHA-plus-digest reference>
 AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=1
 ```
 
-It then verifies `/health` and the authenticated
+The staged deployment URL is passed directly to the canary and is never assigned a production
+domain before the canary succeeds. The production job then promotes that exact URL and verifies
+`/health` plus the authenticated
 `/api/internal/runner-release/required` contract. Infrastructure reconciliation processes at most
 one managed runner per invocation. Set the batch size to `0` to halt automatic fleet work.
 

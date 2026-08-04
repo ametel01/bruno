@@ -117,16 +117,64 @@ jobs:
         with:
           sarif_file: trivy-runner-image.sarif
 
+  stage-control-plane:
+    if: inputs.action == 'release'
+    name: Stage compatible control plane without production traffic
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    outputs:
+      deployment-url: ${{ steps.stage.outputs.deployment-url }}
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
+
+    steps:
+      - name: Check out exact release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Pull production project settings
+        run: bunx vercel@${VERCEL_CLI_VERSION} pull --yes --environment=production --token="${VERCEL_TOKEN}"
+
+      - name: Stage exact control plane without assigning production domains
+        id: stage
+        run: |
+          set -euo pipefail
+          CANDIDATE_DEPLOYMENT_URL="$(bunx vercel@${VERCEL_CLI_VERSION} deploy --prod --skip-domain --yes --token="${VERCEL_TOKEN}" \
+            --env "AGENTBAY_RUNNER_IMAGE=${IMMUTABLE_IMAGE}" \
+            --env "AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=1" \
+            --build-env "AGENTBAY_CANARY_VERIFIED_DEPLOY=true" \
+            --build-env "AGENTBAY_RUNNER_IMAGE=${IMMUTABLE_IMAGE}" \
+            --build-env "AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=1")"
+          [[ "${CANDIDATE_DEPLOYMENT_URL}" =~ ^https://[A-Za-z0-9.-]+\.vercel\.app$ ]]
+          echo "deployment-url=${CANDIDATE_DEPLOYMENT_URL}" >> "${GITHUB_OUTPUT}"
+          echo "Staged the exact release control plane without assigning production domains." >> "${GITHUB_STEP_SUMMARY}"
+
   canary:
     if: inputs.action == 'release'
     name: Verify disposable DigitalOcean runner
-    needs: publish
+    needs:
+      - publish
+      - stage-control-plane
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment: runner-release-canary
     env:
       DATABASE_URL: ${{ secrets.RUNNER_RELEASE_DATABASE_URL }}
-      NEXT_PUBLIC_APP_URL: ${{ vars.RUNNER_RELEASE_CONTROL_PLANE_URL }}
+      NEXT_PUBLIC_APP_URL: ${{ needs.stage-control-plane.outputs.deployment-url }}
       AGENTBAY_DIGITALOCEAN_TOKEN: ${{ secrets.RUNNER_RELEASE_DIGITALOCEAN_TOKEN }}
       AGENTBAY_RUNNER_BEARER_TOKEN: ${{ secrets.RUNNER_RELEASE_BEARER_TOKEN }}
       AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: digitalocean
@@ -186,6 +234,7 @@ jobs:
     name: Deploy tested release to production
     needs:
       - publish
+      - stage-control-plane
       - canary
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -197,6 +246,7 @@ jobs:
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
       PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
       IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
+      CANDIDATE_DEPLOYMENT_URL: ${{ needs.stage-control-plane.outputs.deployment-url }}
 
     steps:
       - name: Check out exact tested commit
@@ -209,21 +259,10 @@ jobs:
         with:
           bun-version-file: .bun-version
 
-      - name: Install frozen dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Pull production project settings
-        run: bunx vercel@${VERCEL_CLI_VERSION} pull --yes --environment=production --token="${VERCEL_TOKEN}"
-
-      - name: Deploy exact tested commit and runner digest
-        run: |
-          set -euo pipefail
-          bunx vercel@${VERCEL_CLI_VERSION} deploy --prod --yes --token="${VERCEL_TOKEN}" \
-            --env "AGENTBAY_RUNNER_IMAGE=${IMMUTABLE_IMAGE}" \
-            --env "AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=1" \
-            --build-env "AGENTBAY_CANARY_VERIFIED_DEPLOY=true" \
-            --build-env "AGENTBAY_RUNNER_IMAGE=${IMMUTABLE_IMAGE}" \
-            --build-env "AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=1"
+      - name: Promote the exact canary-tested deployment
+        run: >-
+          bunx vercel@${VERCEL_CLI_VERSION} promote "${CANDIDATE_DEPLOYMENT_URL}"
+          --yes --token="${VERCEL_TOKEN}" --timeout=5m
 
       - name: Verify production health and required release
         run: |
