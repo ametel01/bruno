@@ -50,6 +50,7 @@ export type OperationalRunnerState = {
 
 export type BuildAgentOperationalAlertsInput = {
   agent: OperationalAlertAgent;
+  automaticRecoveryActive?: boolean;
   approvals: readonly OperationalAlertApproval[];
   events: readonly OperationalAlertEvent[];
   now?: Date;
@@ -81,7 +82,10 @@ export function buildAgentOperationalAlerts(
     });
   }
 
-  if (input.runnerState?.status === "offline" || input.runnerState?.status === "degraded") {
+  if (
+    !input.automaticRecoveryActive &&
+    (input.runnerState?.status === "offline" || input.runnerState?.status === "degraded")
+  ) {
     alerts.push({
       id: `runner:${input.agent.id}:${input.runnerState.status}`,
       severity: input.runnerState.status === "offline" ? "critical" : "warning",
@@ -133,9 +137,11 @@ export function buildAgentOperationalAlerts(
 
   return {
     alerts: alerts.slice(0, MAX_ALERTS),
-    runnerStateNotice: input.runnerState
+    runnerStateNotice: input.automaticRecoveryActive
       ? null
-      : "No assigned manual runner state is available for this agent.",
+      : input.runnerState
+        ? null
+        : "No assigned manual runner state is available for this agent.",
   };
 }
 

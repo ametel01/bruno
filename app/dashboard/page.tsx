@@ -9,38 +9,38 @@ import { listedAgentStartDisabledReason } from "@/app/agents/_components/agent-s
 import { DeploymentStatusLabel } from "@/app/agents/_components/deployment-status-label";
 import { MobileAgentList } from "@/app/agents/_components/mobile-agent-list";
 import {
-  DashboardCostSummary,
   type DashboardCostResult,
+  DashboardCostSummary,
 } from "@/app/dashboard/_components/cost-summary";
-import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import {
   AgentListPersistenceError,
   listActiveAgentsForUser,
 } from "@/src/server/agents/list-agents";
+import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import {
   AgentApprovalPersistenceError,
   listPendingApprovalsForUser,
   type PendingApprovalDto,
 } from "@/src/server/approvals/agent-approvals";
+import {
+  CostEstimatePersistenceError,
+  getCostEstimatesForUser,
+} from "@/src/server/costs/cost-estimates";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { listLatestAgentActivityForUser } from "@/src/server/events/agent-events";
 import {
-  listLatestActiveAgentProcessLogsForUser,
   type LatestAgentProcessLogDto,
+  listLatestActiveAgentProcessLogsForUser,
 } from "@/src/server/logs/agent-logs";
-import {
-  listManualRunnerStatusSummariesForUser,
-  ManualRunnerStatusPersistenceError,
-  type ManualRunnerStatusSummary,
-} from "@/src/server/runners/manual-runner-status";
 import {
   CloudRunnerProvisioningPersistenceError,
   listCloudRunnerProvisioningSummariesForUser,
 } from "@/src/server/runners/cloud-runner-provisioning";
 import {
-  CostEstimatePersistenceError,
-  getCostEstimatesForUser,
-} from "@/src/server/costs/cost-estimates";
+  listManualRunnerStatusSummariesForUser,
+  ManualRunnerStatusPersistenceError,
+  type ManualRunnerStatusSummary,
+} from "@/src/server/runners/manual-runner-status";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
 type DashboardContentProps = {
@@ -142,6 +142,11 @@ export function DashboardContent({
         cloudRunnersResult.runners.filter((runner) => runner.readinessStatus === "online").length
       : null;
   const recentActivityCount = activityResult.ok ? activityResult.events.length : null;
+  const automaticRecoveryCount = listResult.ok
+    ? listResult.agents.filter(
+        (agent) => agent.latestDeployment?.recovery?.state === "preparing_capacity",
+      ).length
+    : 0;
 
   return (
     <ProductShell
@@ -178,18 +183,27 @@ export function DashboardContent({
             </div>
             <div
               data-state={
-                knownRunnerCount !== null && knownRunnerCount > 0 && onlineRunnerCount === 0
-                  ? "attention"
-                  : "clear"
+                automaticRecoveryCount > 0
+                  ? "active"
+                  : knownRunnerCount !== null && knownRunnerCount > 0 && onlineRunnerCount === 0
+                    ? "attention"
+                    : "clear"
               }
             >
-              <dt>Runners</dt>
-              <dd>
-                <strong>
-                  {onlineRunnerCount ?? "—"}/{knownRunnerCount ?? "—"}
-                </strong>
-                <span>online and known</span>
-              </dd>
+              <dt>{automaticRecoveryCount > 0 ? "Recovery" : "Runners"}</dt>
+              {automaticRecoveryCount > 0 ? (
+                <dd>
+                  <strong>{automaticRecoveryCount}</strong>
+                  <span>preparing replacement capacity</span>
+                </dd>
+              ) : (
+                <dd>
+                  <strong>
+                    {onlineRunnerCount ?? "—"}/{knownRunnerCount ?? "—"}
+                  </strong>
+                  <span>online and known</span>
+                </dd>
+              )}
             </div>
             <div data-state={recentActivityCount && recentActivityCount > 0 ? "active" : "neutral"}>
               <dt>Recent changes</dt>

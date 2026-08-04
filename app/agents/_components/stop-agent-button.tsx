@@ -44,6 +44,7 @@ export function StopAgentButton({
   const requestLatchRef = useRef(false);
   const canStop =
     status === "running" ||
+    status === "error" ||
     (allowSetupCancel && SETUP_CANCELLABLE_STATUSES.has(status)) ||
     (allowRuntimeStop && status !== "deleting");
 

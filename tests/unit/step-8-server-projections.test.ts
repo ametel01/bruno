@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getActiveAgentForUser, listActiveAgentsForUser } from "@/src/server/agents/list-agents";
 import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
@@ -111,6 +112,25 @@ describe("Step 8 owner-scoped deployment projections", () => {
         expect(serialized).not.toContain(internalField);
       }
     }
+  });
+
+  it("projects only the safe active-recovery state from private replacement evidence", async () => {
+    await connection.db
+      .update(agentDeployments)
+      .set({
+        errorCode: "runner_recovery_in_progress",
+        errorDetail:
+          "runner=private-runner droplet=private-resource endpoint=https://private.example replacement=private-workflow",
+      })
+      .where(eq(agentDeployments.id, LATEST_DEPLOYMENT_ID));
+
+    const [agent] = await listActiveAgentsForUser(USER_A_ID, {
+      createConnection: () => connection,
+    });
+    expect(agent?.latestDeployment?.recovery).toEqual({ state: "preparing_capacity" });
+    expect(JSON.stringify(agent?.latestDeployment)).not.toMatch(
+      /private-runner|private-resource|private\.example|private-workflow/,
+    );
   });
 });
 

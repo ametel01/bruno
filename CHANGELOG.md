@@ -108,6 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Automatic setup and runner recovery now share one public Preparing, Connecting Telegram, and Ready experience; live replacement hides misleading runner alerts and infrastructure identifiers, terminal recovery offers Retry or Stop, and technical runner evidence stays in a closed advanced disclosure.
 - Desired-running agents now move automatically to a validated replacement runner through fresh deployment and runtime evidence, while stopped agents remain stopped and the obsolete managed firewall and Droplet are retired only after convergence.
 - Managed runner assignment, explicit assignment, create/start placement, deployment selection, and live placement verification now share a fail-closed release policy: hosted DigitalOcean images must be immutable digest references, legacy managed rows remain `unknown` and unassignable until an authenticated heartbeat proves the exact configured digest, release version, and boot contract, while explicitly incompatible manual runners are excluded without being deleted.
 - Managed desired-running Hermes gateways now recover through a durable, leased runtime reconciler with bounded observation, restart backoff, Telegram diagnostics, usage segmentation, and a circuit breaker across runner and Docker restarts.

@@ -12,19 +12,32 @@ export type AssignedRunnerStatusResult =
 export function AssignedRunnerPanel({
   costResult,
   result,
+  suppressAlert = false,
 }: {
   costResult: RunnerCostContextResult;
   result: AssignedRunnerStatusResult;
+  suppressAlert?: boolean;
 }) {
   return (
-    <section className="manual-runner-panel" aria-labelledby="agent-assigned-runner-title">
-      <div className="section-heading">
-        <h2 id="agent-assigned-runner-title">Assigned runner</h2>
-        {result.ok ? <span>{result.runner ? result.runner.status : "none"}</span> : null}
-      </div>
+    <details className="manual-runner-panel assigned-runner-disclosure">
+      <summary id="agent-assigned-runner-title">
+        <span>
+          <strong>Assigned runner details</strong>
+          <small>Advanced operational evidence</small>
+        </span>
+        {result.ok ? (
+          <span>
+            {suppressAlert && result.runner ? "recovering" : (result.runner?.status ?? "none")}
+          </span>
+        ) : null}
+      </summary>
       {result.ok ? (
         result.runner ? (
-          <AssignedRunnerStatus costResult={costResult} runner={result.runner} />
+          <AssignedRunnerStatus
+            costResult={costResult}
+            runner={result.runner}
+            suppressAlert={suppressAlert}
+          />
         ) : (
           <div className="activity-empty-state">
             <h3>No runner assigned</h3>
@@ -36,16 +49,18 @@ export function AssignedRunnerPanel({
           Assigned runner status could not be loaded.
         </div>
       )}
-    </section>
+    </details>
   );
 }
 
 function AssignedRunnerStatus({
   costResult,
   runner,
+  suppressAlert,
 }: {
   costResult: RunnerCostContextResult;
   runner: AssignedManualRunnerStatusSummary;
+  suppressAlert: boolean;
 }) {
   return (
     <div className="manual-runner-item" data-status={runner.status}>
@@ -88,7 +103,7 @@ function AssignedRunnerStatus({
         </div>
       </dl>
       <RunnerCostContext result={costResult} />
-      {runner.alertMessage ? (
+      {runner.alertMessage && !suppressAlert ? (
         <div className="safe-error manual-runner-alert" role="alert">
           {runner.alertMessage}
         </div>

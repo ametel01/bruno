@@ -179,7 +179,7 @@ test("automatic submission follows persisted progress to ready across refresh, r
           },
         },
       ]);
-      await expectCurrentStage(page, "Preparing deployment");
+      await expectCurrentStage(page, "Preparing your agent");
       await expect(page.getByRole("button", { name: "Start", exact: true })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Stop setup" })).toBeVisible();
       await expect(page.getByRole("button", { name: "Open advanced setup" })).not.toBeVisible();
@@ -192,11 +192,11 @@ test("automatic submission follows persisted progress to ready across refresh, r
 
       await updateDeploymentStage(agentId, deploymentId, "provisioning_runner");
       await requestImmediatePoll(page);
-      await expectCurrentStage(page, "Provisioning runner");
+      await expectCurrentStage(page, "Preparing your agent");
 
       await updateDeploymentStage(agentId, deploymentId, "configuring_hermes");
       await page.reload();
-      await expectCurrentStage(page, "Configuring Hermes");
+      await expectCurrentStage(page, "Preparing your agent");
 
       await updateDeploymentStage(agentId, deploymentId, "starting_gateway");
       const detailUrl = page.url();
@@ -205,7 +205,7 @@ test("automatic submission follows persisted progress to ready across refresh, r
       await reopenedPage.emulateMedia({ reducedMotion: "reduce" });
       await reopenedPage.goto(detailUrl);
       await page.close();
-      await expectCurrentStage(reopenedPage, "Starting gateway");
+      await expectCurrentStage(reopenedPage, "Preparing your agent");
 
       await updateDeploymentStage(agentId, deploymentId, "verifying_model");
       const secondContext = await browser.newContext({
@@ -232,7 +232,7 @@ test("automatic submission follows persisted progress to ready across refresh, r
 
       try {
         await secondPage.goto(detailUrl);
-        await expectCurrentStage(secondPage, "Verifying model");
+        await expectCurrentStage(secondPage, "Preparing your agent");
         await expectNoHorizontalOverflow(secondPage);
 
         await updateDeploymentStage(agentId, deploymentId, "connecting_telegram");
@@ -280,6 +280,93 @@ test("automatic submission follows persisted progress to ready across refresh, r
           .length,
       }));
       expect(reducedMotionEvidence).toEqual({ matches: true, animations: 0 });
+    });
+  } finally {
+    await deleteFixture(fixture);
+  }
+});
+
+test("automatic replacement stays Preparing across refresh and list surfaces without infrastructure disclosure", async ({
+  context,
+  isMobile,
+  page,
+}) => {
+  const fixture = await createFixture();
+  const agentId = randomUUID();
+  const deploymentId = randomUUID();
+  const createdAt = new Date().toISOString();
+  const privateEvidence = [
+    "e2e-private-runner-id",
+    "e2e-private-droplet-resource",
+    "runner-private.example",
+    "e2e-private-replacement-id",
+  ];
+
+  try {
+    await insertAgent(fixture, {
+      agentId,
+      deploymentId,
+      deploymentIdempotencyKey: randomUUID(),
+      desiredStatus: "running",
+      name: "Automatic Recovery Agent",
+      stage: "starting_gateway",
+      status: "stopped",
+      createdAt,
+    });
+    await withDatabase(async (sql) => {
+      await sql`
+        update agent_deployments
+        set error_code = 'runner_recovery_in_progress',
+            error_detail = ${privateEvidence.join(" ")},
+            next_attempt_at = null,
+            updated_at = ${new Date().toISOString()}
+        where id = ${deploymentId} and agent_id = ${agentId}
+      `;
+    });
+
+    await withPinnedDevelopmentUser(fixture.userId, async () => {
+      if (isMobile) await page.setViewportSize({ width: 320, height: 720 });
+      await page.goto(`/agents/${agentId}`);
+
+      const progress = page.locator(".agent-deployment-progress-card");
+      await expectCurrentStage(page, "Preparing your agent");
+      await expect(progress).toContainText(
+        "plingpling is preparing replacement capacity automatically.",
+      );
+      await expect(progress.locator(".deployment-stage-list li")).toHaveCount(3);
+      await expect(progress.locator("[aria-live='polite']")).toHaveCount(1);
+      await expect(page.locator(".assigned-runner-disclosure")).not.toHaveAttribute("open", "");
+      await expect(page.getByText("No assigned manual runner state is available")).toHaveCount(0);
+      for (const privateValue of privateEvidence)
+        await expect(progress).not.toContainText(privateValue);
+
+      await page.reload();
+      await expectCurrentStage(page, "Preparing your agent");
+
+      const reopened = await context.newPage();
+      await reopened.goto(`/agents/${agentId}`);
+      await page.close();
+      await expectCurrentStage(reopened, "Preparing your agent");
+
+      await reopened.goto("/agents");
+      await expect(
+        reopened.locator(".agent-table tr", { hasText: "Automatic Recovery Agent" }),
+      ).toContainText("Preparing your agent");
+      await expect(reopened.locator(".agents-workspace-overview")).toContainText(
+        "preparing replacement capacity",
+      );
+
+      await reopened.goto("/dashboard");
+      await expect(
+        reopened.locator(".agent-table tr", { hasText: "Automatic Recovery Agent" }),
+      ).toContainText("Preparing your agent");
+      await expect(reopened.locator(".dashboard-fleet-pulse")).toContainText(
+        "preparing replacement capacity",
+      );
+      await reopened.goto("/");
+      for (const privateValue of privateEvidence)
+        await expect(reopened.locator("body")).not.toContainText(privateValue);
+      await expectNoHorizontalOverflow(reopened);
     });
   } finally {
     await deleteFixture(fixture);
@@ -359,10 +446,10 @@ test("failed setup retries with one new operation and reaches ready", async ({
 
       await page.goto(`/agents/${agentId}`);
       await expect(page.locator(".agent-deployment-progress-card [role='alert']")).toContainText(
-        "Automatic setup could not finish. Retry or stop this agent.",
+        "Automatic setup could not recover. Try again or stop this agent.",
       );
       await page.getByRole("button", { name: "Retry", exact: true }).click();
-      await expectCurrentStage(page, "Preparing deployment");
+      await expectCurrentStage(page, "Preparing your agent");
       expect(retryBody).toMatchObject({ idempotencyKey: expect.any(String) });
       expect(Object.keys(retryBody as object)).toEqual(["idempotencyKey"]);
       const retryIdempotencyKey = (retryBody as { idempotencyKey: string }).idempotencyKey;
@@ -418,7 +505,7 @@ test("Stop setup persists intentional stop during progress", async ({
       });
 
       await page.goto(`/agents/${agentId}`);
-      await expectCurrentStage(page, "Configuring Hermes");
+      await expectCurrentStage(page, "Preparing your agent");
       await page.getByRole("button", { name: "Stop setup" }).focus();
       await page.keyboard.press("Enter");
       await expect(page.getByRole("heading", { name: "Intentionally stopped" })).toBeVisible();
@@ -481,11 +568,11 @@ test("observation failures degrade after three reads and recover without changin
       await requestImmediatePoll(page);
       await expect.poll(() => deploymentReads).toBeGreaterThanOrEqual(3);
       await expect(page.getByText("Progress updates are temporarily unavailable")).toBeVisible();
-      await expectCurrentStage(page, "Preparing deployment");
+      await expectCurrentStage(page, "Preparing your agent");
 
       await updateDeploymentStage(agentId, deploymentId, "configuring_hermes");
       await page.getByRole("button", { name: "Check again" }).click();
-      await expectCurrentStage(page, "Configuring Hermes");
+      await expectCurrentStage(page, "Preparing your agent");
       await expect(page.getByText("Progress updates are temporarily unavailable")).toHaveCount(0);
       expect(deploymentReads).toBeGreaterThanOrEqual(4);
       expect(evidence.externalRequests).toEqual([]);
@@ -560,7 +647,7 @@ async function expectCurrentStage(page: Page, label: string): Promise<void> {
   await expect(page.locator("#deployment-progress-title")).toHaveText(label);
   await expect(
     page
-      .getByRole("list", { name: "Persisted deployment stages" })
+      .getByRole("list", { name: "Automatic setup progress" })
       .getByRole("listitem")
       .filter({ hasText: label }),
   ).toHaveAttribute("aria-current", "step");

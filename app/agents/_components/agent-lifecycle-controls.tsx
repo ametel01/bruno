@@ -161,17 +161,22 @@ export function buildAgentLifecycleActionPlan(input: {
     }
   }
 
-  if (presentation.kind === "progress" || presentation.kind === "updating") {
+  if (
+    presentation.kind === "progress" ||
+    presentation.kind === "recovery" ||
+    presentation.kind === "updating"
+  ) {
     return {
       ...base,
       showStopSetup:
         SETUP_CANCELLABLE_STATUSES.has(status) ||
-        (presentation.kind === "progress" && status === "stopped"),
+        ((presentation.kind === "progress" || presentation.kind === "recovery") &&
+          status === "stopped"),
     };
   }
 
   if (presentation.kind === "failed" && presentation.canRetry) {
-    return { ...base, showRetryDetail: true };
+    return { ...base, showRetryDetail: true, showStop: true };
   }
 
   if (presentation.kind === "ready") {

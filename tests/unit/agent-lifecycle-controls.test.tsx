@@ -84,7 +84,7 @@ describe("agent lifecycle action matrix", () => {
     expect(buttonLabels(html)).toContain("Delete");
   });
 
-  it("offers Retry detail instead of Start for failed desired-running setup", () => {
+  it("offers Retry and Stop instead of Start for failed desired-running setup", () => {
     const html = renderControls({
       agentId: "agent/id",
       deployment: deploymentDto({
@@ -98,6 +98,7 @@ describe("agent lifecycle action matrix", () => {
 
     expect(html).toContain('href="/agents/agent%2Fid"');
     expect(html).toContain(">Retry</a>");
+    expect(buttonLabels(html)).toContain("Stop");
     expect(buttonLabels(html)).not.toContain("Start");
     expect(buttonLabels(html)).toContain("Delete");
   });
@@ -226,6 +227,7 @@ function deploymentDto(
     attemptCount: 0,
     error: null,
     nextAttemptAt: null,
+    recovery: null,
     startedAt: null,
     completedAt: null,
     failedAt: null,

@@ -104,9 +104,9 @@ describe("operational page user isolation", () => {
       expect(detailHtml).toContain("1 listed");
       expect(agentsHtml).toContain(`${expected.ownPrefix}-AGENT`);
       expect(agentsHtml).not.toContain(`${expected.foreignPrefix}-AGENT`);
-      expect(agentsHtml).toContain("Setup failed");
-      expect(dashboardHtml).toContain("Setup failed");
-      expect(detailHtml).toContain("Setup failed");
+      expect(agentsHtml).toContain("Automatic setup could not recover");
+      expect(dashboardHtml).toContain("Automatic setup could not recover");
+      expect(detailHtml).toContain("Automatic setup could not recover");
       expect(agentsHtml).not.toContain(`${expected.ownPrefix}-DEPLOYMENT-DETAIL`);
       expect(dashboardHtml).not.toContain(`${expected.ownPrefix}-DEPLOYMENT-DETAIL`);
       expect(detailHtml).not.toContain(`${expected.ownPrefix}-DEPLOYMENT-DETAIL`);

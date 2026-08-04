@@ -5,23 +5,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildDeploymentPresentation,
   compareDeploymentCreatedAt,
+  deploymentExperienceStageLabel,
+  deploymentExperienceStageState,
   deploymentStageLabel,
-  deploymentStageListState,
   isTerminalPublicDeploymentStage,
-  parseSafeDeploymentGetBody,
-  parseSafeRetry202Body,
-  PUBLIC_AGENT_DEPLOYMENT_STAGES,
+  PUBLIC_AGENT_EXPERIENCE_STAGES,
   type PublicAgentDeployment,
+  type PublicAgentDeploymentStage,
   type PublicAgentDesiredStatus,
   type PublicAgentLifecycleStatus,
-  type PublicAgentDeploymentStage,
+  parseSafeDeploymentGetBody,
+  parseSafeRetry202Body,
 } from "@/src/shared/agent-deployment-presentation";
 import {
+  type ForegroundPollingWindow,
   foregroundPollingElapsedMs,
   pauseForegroundPollingWindow,
   resumeForegroundPollingWindow,
   startForegroundPollingWindow,
-  type ForegroundPollingWindow,
 } from "@/src/shared/deployment-polling-state";
 
 type AgentDeploymentProgressProps = {
@@ -45,9 +46,6 @@ export type RetryState =
   | { status: "error"; message: string; idempotencyKey: string | null };
 
 export const POLL_FOREGROUND_LIMIT_MS = 30 * 60 * 1000;
-const SUCCESSFUL_STAGES = PUBLIC_AGENT_DEPLOYMENT_STAGES.filter(
-  (stage) => stage !== "failed",
-) as Exclude<(typeof PUBLIC_AGENT_DEPLOYMENT_STAGES)[number], "failed">[];
 
 export function AgentDeploymentProgress({
   agentId,
@@ -505,9 +503,9 @@ export function AgentDeploymentProgress({
         </span>
       </div>
       <p>{presentation.description}</p>
-      <ol className="deployment-stage-list" aria-label="Persisted deployment stages">
-        {SUCCESSFUL_STAGES.map((stage) => {
-          const state = deploymentStageListState(presentation, stage);
+      <ol className="deployment-stage-list" aria-label="Automatic setup progress">
+        {PUBLIC_AGENT_EXPERIENCE_STAGES.map((stage) => {
+          const state = deploymentExperienceStageState(presentation, stage);
           return (
             <li
               key={stage}
@@ -515,7 +513,7 @@ export function AgentDeploymentProgress({
               aria-current={state === "current" ? "step" : undefined}
             >
               <span aria-hidden="true" />
-              <strong>{deploymentStageLabel(stage)}</strong>
+              <strong>{deploymentExperienceStageLabel(stage)}</strong>
             </li>
           );
         })}
@@ -539,7 +537,7 @@ export function AgentDeploymentProgress({
       </div>
       {presentation.kind === "failed" ? (
         <div className="safe-error" role="alert" tabIndex={-1} ref={terminalAlertRef}>
-          Automatic setup could not finish. Retry or stop this agent.
+          Automatic setup could not recover. Try again or stop this agent.
         </div>
       ) : null}
       {observation.status !== "idle" ? (
@@ -727,7 +725,7 @@ export async function retryFailureMessage(response: Response): Promise<string> {
     // Keep retry errors generic when JSON is absent or malformed.
   }
 
-  return "Automatic setup could not finish. Retry or stop this agent.";
+  return "Automatic setup could not recover. Try again or stop this agent.";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

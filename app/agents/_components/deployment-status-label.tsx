@@ -42,7 +42,11 @@ export function DeploymentStatusLabel({
       </span>
       {presentation.deployment ? (
         <small className="deployment-status-stage">
-          {presentation.deployment.stage === "failed" ? "Terminal operation" : "Latest operation"}
+          {presentation.kind === "recovery"
+            ? "Automatic recovery"
+            : presentation.deployment.stage === "failed"
+              ? "Terminal operation"
+              : "Latest operation"}
         </small>
       ) : null}
     </>

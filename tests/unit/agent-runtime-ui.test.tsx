@@ -125,6 +125,7 @@ function readyDeployment(): PublicAgentDeployment {
     attemptCount: 0,
     error: null,
     nextAttemptAt: null,
+    recovery: null,
     startedAt: "2026-08-03T00:00:00.000Z",
     completedAt: "2026-08-03T00:01:00.000Z",
     failedAt: null,

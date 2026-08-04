@@ -619,19 +619,19 @@ and replace the fleet in bounded batches.
 - [x] Step 7: Hand Over Agents and Clean Up the Source Runner
 - [x] Step 8: Reconcile DigitalOcean and Database Ownership
 - [x] Step 9: Replace Runners After Strict Deployment Deadlines
-- [ ] Step 10: Present One Automatic Recovery Experience
+- [x] Step 10: Present One Automatic Recovery Experience
 - [ ] Step 11: Release Through an Immutable Disposable-Droplet Canary
 - [ ] Step 12: Migration, Rollout, and Final Acceptance
 
 ### Current Status
 
-Step 9 is complete in this commit. Gateway launch acceptance now starts one
-strict 30-second clock independent of cron cadence. The deployment controller
-polls the accepted operation without relaunching it, captures one bounded
-redacted diagnostic batch at expiry, stops once, and pauses the existing
-deployment behind the durable replacement saga. Managed endpoint, heartbeat,
-boot, compatibility, and provider-resource failures use the same bounded path;
-model and Telegram failures remain agent-specific. Step 10 is next.
+Step 10 is complete in this commit. Common deployment and recovery surfaces now
+show only Preparing your agent, Connecting Telegram, Ready, or the generic
+terminal recovery state. Live replacement projects a safe public recovery
+signal, suppresses misleading runner alerts, and keeps technical runner evidence
+inside a closed advanced disclosure. Terminal automatic setup offers working
+Retry and Stop actions. Step 11 is next and remains credential- and
+authorization-aware for registry and disposable-Droplet effects.
 
 ### Step Ledger
 
@@ -646,8 +646,8 @@ model and Telegram failures remain agent-specific. Step 10 is next.
 | 6. Provision and Validate Replacement Runners | Complete | `b235136` | Added a leased one-slice reconciler that creates and associates one managed target, derives its provisioning operation key from the durable replacement key, pins the configured immutable digest and boot contract, reserves the billable deployment budget before create, and reuses authoritative DigitalOcean discovery/create/tag/firewall/bootstrap. Validation requires exact release compatibility, capability-backed boot readiness, a fresh online heartbeat, and capacity for every source assignment before advancing to fencing. Failed targets use exact operation-tag discovery and the owned-set firewall-before-Droplet cleanup protocol, then atomically revoke target access, tombstone the target, and persist closed terminal evidence while leaving the source untouched. Ten focused real-database/fake-provider tests cover successful create, rediscovery, duplicate ambiguity, known create failure, release and boot incompatibility, capacity, budget exhaustion, timeouts, cleanup, and concurrent claimers. Full format, lint, typecheck, 156-file / 1,508-test suite, production build, local cloud smoke, runner image build, and diff hygiene passed. | Complete; Step 7 is next. |
 | 7. Hand Over Agents and Clean Up the Source Runner | Complete | `4265875` | Extended the leased reconciler through source fencing, reassignment, convergence, cleanup, and completion. The source becomes nonassignable before best-effort exact workload stops and credential/token revocation. Source/target advisory capacity locks, owner/heartbeat/release checks, and one transaction now preserve agent configuration, encrypted secrets, deployment history, and usage accounting while assigning all active agents to the target and creating deterministic fresh deployments only for desired-running agents. Convergence requires each moved running agent's newest deployment and runtime to be ready; stopped agents stay stopped and failed deployments use the existing retry path. Exact owned-set firewall-before-Droplet deletion is crash-resumable, ambiguity stays in durable cleanup without rollback, and completion atomically revokes old access, clears residual deleted-agent assignments, tombstones the source, and records bounded events. Six handover scenarios plus the Step 6 matrix and deployment/runtime suites passed. Full format, lint, typecheck, 157-file / 1,514-test suite, production build, local cloud smoke, 84,106 ms Hermes contract smoke, 26/26 E2E, and diff hygiene passed. | Complete; Step 8 is next. |
 | 8. Reconcile DigitalOcean and Database Ownership | Complete | `166ac75` | Added additive leased reconciliation and orphan-evidence tables, authoritative stable-tag inventory with completeness/timestamp/firewall evidence, and a bounded one-result reconciler shared by a protected cron route and operator script. Exact matches remain unchanged; assigned missing or unhealthy runners start the durable replacement saga; unassigned missing rows are ownership-checked and tombstoned; stale deleted-runner assignments are cleared without changing desired state; exact interrupted operation-tag creates are adopted; duplicates and ambiguity never mutate or delete. Provably owned unassigned orphans require two authoritative observations separated by ten minutes before exact owned-set firewall-first cleanup, and active ownership outside the current database batch is rechecked before orphan handling. Focused provider, route, schema, migration, provisioning, reconciliation, orphan, race, and redaction coverage passed. Full format, lint, typecheck, 159-file / 1,533-test suite, production build, additive clean/upgrade/idempotent migrations, schema drift check, 440 ms local cloud smoke, 26/26 E2E, and diff hygiene passed. | Complete; Step 9 is next. |
-| 9. Replace Runners After Strict Deployment Deadlines | Complete | This commit | Replaced same-runner launch retries with a strict accepted-at plus 30-second gateway deadline. Before expiry the controller polls only the accepted operation; at expiry it creates or reuses one deployment-linked replacement, pauses the deployment, captures at most one bounded redacted log batch, and stops once. Repeated missing endpoint, stale heartbeat, failed boot, release mismatch, and missing provider resource evidence enter the same durable saga. Active replacement work blocks deployment claims until Step 7 handover assigns the validated target and creates a fresh correlated deployment. Model and Telegram failures remain agent-specific, stage transitions reset independent retry budgets, and two replacement workflows in 24 hours produce one safe terminal result. Protected per-minute reconciliation and a post-response targeted kick provide durable progress. Exact 29,999/30,000 ms, classification, budget, no-relaunch, trigger, cron redaction, handover resume, and duplicate behavior passed. Full format, lint, typecheck, 161-file / 1,548-test suite, production build, 444 ms local cloud smoke, 81,907 ms Hermes contract smoke, 26/26 E2E, and diff hygiene passed. | Complete; Step 10 is next. |
-| 10. Present One Automatic Recovery Experience | Pending | Pending | Not started. | Waits for Steps 7-9. |
+| 9. Replace Runners After Strict Deployment Deadlines | Complete | `19a3e8a` | Replaced same-runner launch retries with a strict accepted-at plus 30-second gateway deadline. Before expiry the controller polls only the accepted operation; at expiry it creates or reuses one deployment-linked replacement, pauses the deployment, captures at most one bounded redacted log batch, and stops once. Repeated missing endpoint, stale heartbeat, failed boot, release mismatch, and missing provider resource evidence enter the same durable saga. Active replacement work blocks deployment claims until Step 7 handover assigns the validated target and creates a fresh correlated deployment. Model and Telegram failures remain agent-specific, stage transitions reset independent retry budgets, and two replacement workflows in 24 hours produce one safe terminal result. Protected per-minute reconciliation and a post-response targeted kick provide durable progress. Exact 29,999/30,000 ms, classification, budget, no-relaunch, trigger, cron redaction, handover resume, and duplicate behavior passed. Full format, lint, typecheck, 161-file / 1,548-test suite, production build, 444 ms local cloud smoke, 81,907 ms Hermes contract smoke, 26/26 E2E, and diff hygiene passed. | Complete; Step 10 is next. |
+| 10. Present One Automatic Recovery Experience | Complete | This commit | Collapsed every pre-Telegram automatic deployment and live runner replacement into a safe Preparing your agent presentation, retained Connecting Telegram and Ready, and added a public replacement-capacity signal that strips private error evidence. Inventory, detail, root/dashboard summaries, live regions, and refresh/browser reopen preserve the same three-stage experience. Offline/degraded and assigned-runner alerts are suppressed during live replacement; technical runner, endpoint, release, and cost evidence remains closed in an advanced disclosure. Terminal recovery now uses one generic message with functional Retry and Stop actions, including persisted desired-stopped intent from error. Eleven focused presentation/projection/accessibility/lifecycle files passed 140 tests; terminal lifecycle coverage passed 148 focused tests. Full format/lint checked 379 files, typecheck passed, 161 files / 1,554 tests passed, production build passed, and 28/28 desktop/mobile E2E passed including refresh, reopen, 320px overflow, live-region, and private-identifier non-disclosure coverage. | Complete; Step 11 is next and external registry/provider effects require configured credentials and authorization. |
 | 11. Release Through an Immutable Disposable-Droplet Canary | Pending | Pending | Not started. | Waits for Steps 2-10 and configured release credentials. |
 | 12. Migration, Rollout, and Final Acceptance | Pending | Pending | Not started. | Waits for Steps 0-11. |
 
@@ -751,6 +751,13 @@ model and Telegram failures remain agent-specific. Step 10 is next.
 | 9 | `bun run agent:hermes:contract-smoke` | Passed in 81,907 ms with accepted/starting/ready evidence, fake model, private API auth, canary, restart/Stop persistence, backup/restore, and exact cleanup. |
 | 9 | `bun run test:e2e:ci` | Passed; 26/26 desktop and mobile tests. |
 | 9 | `git diff --check` | Passed. |
+| 10 | Focused deployment presentation, controller, lifecycle, operational summary/page, root-page, advanced-disclosure, server projection, and cancellation coverage | Passed; 11 files / 140 tests, with the terminal Stop contract included in a broader 3-file / 148-test lifecycle run. |
+| 10 | `bun run format:check` and `bun run lint` | Passed; 379 files checked with no fixes or warnings. |
+| 10 | `bun run typecheck` | Passed. |
+| 10 | `bun run test` | Passed serially against the isolated migrated database; 161 files / 1,554 tests. |
+| 10 | `bun run build` | Passed; Next.js production build completed. |
+| 10 | `bun run test:e2e:ci` | Passed; 28/28 desktop and mobile tests, including recovery refresh/reopen, inventory/detail/dashboard continuity, 320px overflow, live-region, and private-identifier non-disclosure checks. |
+| 10 | Prohibited common-copy and diff inspection | Passed; common app/shared presentation contains no cloud-init, endpoint repair, Droplet deletion, database-record repair, or new-runner instructions; technical evidence remains in the closed advanced disclosure and server/operator records. `git diff --check` passed. |
 
 ### Step 1 Gap Matrix
 
@@ -840,10 +847,19 @@ model and Telegram failures remain agent-specific. Step 10 is next.
   Focused recovery tests, the full suite/build, both local smokes, and 26/26 E2E
   passed. No live provider call, Droplet effect, Telegram request, or paid model
   request was performed. The focused commit is `fix: replace runners after
-  bounded gateway failure` (`This commit`).
+  bounded gateway failure` (`19a3e8a`).
+- 2026-08-04: Completed Step 10 with one public three-stage setup experience,
+  safe replacement-capacity projection, misleading runner-alert suppression,
+  closed advanced operational evidence, generic terminal recovery, and working
+  Retry/Stop actions that persist stopped intent from error. Focused UI,
+  projection, isolation, accessibility, and lifecycle coverage plus the full
+  1,554-test suite, production build, and 28/28 desktop/mobile E2E passed. No
+  registry publication, provider resource, Telegram request, or paid model
+  request was performed. The focused commit is `feat: simplify automatic
+  runner recovery status` (`This commit`).
 
 ### Next Step
 
-Begin Step 10 by mapping deployment, replacement, and runtime truth into one
-automatic Preparing, Connecting Telegram, Ready, or terminal recovery-failure
-experience without exposing infrastructure diagnosis in the common flow.
+Begin Step 11 by making runner publication depend on a disposable immutable-
+digest Droplet canary and recording its exact registry/provider capability and
+authorization boundaries without claiming unavailable live effects.

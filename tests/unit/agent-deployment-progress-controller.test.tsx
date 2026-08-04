@@ -8,10 +8,10 @@ import {
   observationStateForPollStatus,
   POLL_FOREGROUND_LIMIT_MS,
   publicNonterminalDeploymentStage,
+  releaseDeploymentRetryAttempt,
   retryConflictRequiresForcedRead,
   retryFailureMessage,
   retryReplacementIsSafe,
-  releaseDeploymentRetryAttempt,
   shouldAcceptDeploymentUpdate,
   shouldRefreshTerminalOnce,
 } from "@/app/agents/_components/agent-deployment-progress";
@@ -249,7 +249,7 @@ describe("agent deployment progress controller", () => {
       ),
     ).resolves.toBe("Refresh status before retrying.");
     await expect(retryFailureMessage(new Response("not-json", { status: 500 }))).resolves.toBe(
-      "Automatic setup could not finish. Retry or stop this agent.",
+      "Automatic setup could not recover. Try again or stop this agent.",
     );
   });
 });
@@ -265,6 +265,7 @@ function deployment(overrides: Partial<PublicAgentDeployment> = {}): PublicAgent
     failedAt: null,
     id: deploymentId(1),
     nextAttemptAt: null,
+    recovery: null,
     stage: "pending",
     startedAt: null,
     updatedAt: "2026-08-03T05:00:00.000Z",

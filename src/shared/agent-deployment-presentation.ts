@@ -29,6 +29,9 @@ export type PublicAgentDeployment = {
   error: {
     code: string;
   } | null;
+  recovery: {
+    state: "preparing_capacity";
+  } | null;
   nextAttemptAt: string | null;
   startedAt: string | null;
   completedAt: string | null;
@@ -51,6 +54,18 @@ export type DeploymentPresentation =
       description: string;
     }
   | {
+      kind: "recovery";
+      heading: "Preparing your agent";
+      label: "Preparing your agent";
+      tone: "active";
+      currentStage: Exclude<PublicAgentDeploymentStage, "ready" | "failed">;
+      deployment: PublicAgentDeployment;
+      terminal: false;
+      canRetry: false;
+      canStopSetup: true;
+      description: string;
+    }
+  | {
       kind: "ready";
       heading: "Ready";
       label: "Ready";
@@ -64,8 +79,8 @@ export type DeploymentPresentation =
     }
   | {
       kind: "failed";
-      heading: string;
-      label: "Setup failed";
+      heading: "Automatic setup could not recover";
+      label: "Automatic setup could not recover";
       tone: "failed";
       currentStage: "failed";
       lastObservedStage: Exclude<PublicAgentDeploymentStage, "ready" | "failed"> | null;
@@ -113,8 +128,8 @@ export type DeploymentPresentation =
     }
   | {
       kind: "updating";
-      heading: "Final status updating";
-      label: "Final status updating";
+      heading: "Preparing your agent";
+      label: "Preparing your agent";
       tone: "active";
       currentStage: "ready";
       deployment: PublicAgentDeployment;
@@ -159,26 +174,40 @@ const LIFECYCLE_STATUS_SET = new Set<string>([
 ]);
 
 const STAGE_LABELS: Record<PublicAgentDeploymentStage, string> = {
-  pending: "Preparing deployment",
-  provisioning_runner: "Provisioning runner",
-  configuring_hermes: "Configuring Hermes",
-  starting_gateway: "Starting gateway",
-  verifying_model: "Verifying model",
+  pending: "Preparing your agent",
+  provisioning_runner: "Preparing your agent",
+  configuring_hermes: "Preparing your agent",
+  starting_gateway: "Preparing your agent",
+  verifying_model: "Preparing your agent",
   connecting_telegram: "Connecting Telegram",
   ready: "Ready",
-  failed: "Setup failed",
+  failed: "Automatic setup could not recover",
 };
 
 const PROGRESS_DESCRIPTIONS: Record<
   Exclude<PublicAgentDeploymentStage, "ready" | "failed">,
   string
 > = {
-  pending: "The persisted deployment request is queued for reconciliation.",
-  provisioning_runner: "Capacity is being selected or provisioned for this agent.",
-  configuring_hermes: "The managed Hermes configuration is being projected.",
-  starting_gateway: "The gateway is being started on the selected runner.",
-  verifying_model: "The model boundary is being checked by the managed setup.",
-  connecting_telegram: "Telegram connectivity is being verified for the dedicated bot.",
+  pending: "plingpling is preparing everything this agent needs.",
+  provisioning_runner: "plingpling is preparing everything this agent needs.",
+  configuring_hermes: "plingpling is preparing everything this agent needs.",
+  starting_gateway: "plingpling is preparing everything this agent needs.",
+  verifying_model: "plingpling is preparing everything this agent needs.",
+  connecting_telegram: "plingpling is connecting the dedicated Telegram bot.",
+};
+
+export const PUBLIC_AGENT_EXPERIENCE_STAGES = [
+  "preparing",
+  "connecting_telegram",
+  "ready",
+] as const;
+
+export type PublicAgentExperienceStage = (typeof PUBLIC_AGENT_EXPERIENCE_STAGES)[number];
+
+const EXPERIENCE_STAGE_LABELS: Record<PublicAgentExperienceStage, string> = {
+  preparing: "Preparing your agent",
+  connecting_telegram: "Connecting Telegram",
+  ready: "Ready",
 };
 
 export function deploymentStageLabel(stage: PublicAgentDeploymentStage): string {
@@ -269,6 +298,10 @@ export function parseSafePublicDeployment(value: unknown): SafeDeploymentParseRe
       configRevision: value.configRevision,
       attemptCount,
       error: value.error === null ? null : { code: value.error.code },
+      recovery:
+        value.error?.code === "runner_recovery_in_progress"
+          ? { state: "preparing_capacity" }
+          : null,
       nextAttemptAt: value.nextAttemptAt,
       startedAt: value.startedAt,
       completedAt: value.completedAt,
@@ -417,8 +450,8 @@ export function buildDeploymentPresentation(input: {
 
     return {
       kind: "updating",
-      heading: "Final status updating",
-      label: "Final status updating",
+      heading: "Preparing your agent",
+      label: "Preparing your agent",
       tone: "active",
       currentStage: "ready",
       deployment,
@@ -434,8 +467,8 @@ export function buildDeploymentPresentation(input: {
 
     return {
       kind: "failed",
-      heading: lastObservedStage ? deploymentStageLabel(lastObservedStage) : "Setup failed",
-      label: "Setup failed",
+      heading: "Automatic setup could not recover",
+      label: "Automatic setup could not recover",
       tone: "failed",
       currentStage: "failed",
       lastObservedStage,
@@ -443,7 +476,22 @@ export function buildDeploymentPresentation(input: {
       terminal: true,
       canRetry: desiredStatus === "running",
       canStopSetup: false,
-      description: "Automatic setup could not finish. Retry or stop this agent.",
+      description: "Try automatic setup again, or stop this agent.",
+    };
+  }
+
+  if (deployment.recovery?.state === "preparing_capacity") {
+    return {
+      kind: "recovery",
+      heading: "Preparing your agent",
+      label: "Preparing your agent",
+      tone: "active",
+      currentStage: deployment.stage,
+      deployment,
+      terminal: false,
+      canRetry: false,
+      canStopSetup: true,
+      description: "plingpling is preparing replacement capacity automatically.",
     };
   }
 
@@ -459,6 +507,26 @@ export function buildDeploymentPresentation(input: {
     canStopSetup: true,
     description: PROGRESS_DESCRIPTIONS[deployment.stage],
   };
+}
+
+export function deploymentExperienceStageLabel(stage: PublicAgentExperienceStage): string {
+  return EXPERIENCE_STAGE_LABELS[stage];
+}
+
+export function deploymentExperienceStageState(
+  presentation: DeploymentPresentation,
+  stage: PublicAgentExperienceStage,
+): "completed" | "current" | "pending" | "blocked" {
+  const current = currentExperienceStage(presentation);
+  if (presentation.kind === "failed") {
+    return stage === current
+      ? "blocked"
+      : experienceStageOrder(stage) < experienceStageOrder(current)
+        ? "completed"
+        : "pending";
+  }
+  if (stage === current) return "current";
+  return experienceStageOrder(stage) < experienceStageOrder(current) ? "completed" : "pending";
 }
 
 export function progressUnavailable(
@@ -539,6 +607,20 @@ export function isPublicAgentLifecycleStatus(value: unknown): value is PublicAge
 
 function stageOrder(stage: Exclude<PublicAgentDeploymentStage, "failed">): number {
   return PUBLIC_AGENT_DEPLOYMENT_STAGES.indexOf(stage);
+}
+
+function currentExperienceStage(presentation: DeploymentPresentation): PublicAgentExperienceStage {
+  if (!presentation.deployment) return "preparing";
+  if (presentation.kind === "ready") return "ready";
+  if (presentation.deployment.stage === "connecting_telegram") return "connecting_telegram";
+  if (presentation.kind === "failed" && presentation.lastObservedStage === "connecting_telegram") {
+    return "connecting_telegram";
+  }
+  return "preparing";
+}
+
+function experienceStageOrder(stage: PublicAgentExperienceStage): number {
+  return PUBLIC_AGENT_EXPERIENCE_STAGES.indexOf(stage);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

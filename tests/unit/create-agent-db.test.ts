@@ -5756,7 +5756,7 @@ describe("create agent persistence", () => {
     ]);
   });
 
-  it("rejects malformed, missing, absent, soft-deleted, and non-running stops without mutation or events", async () => {
+  it("rejects malformed, missing, absent, soft-deleted, and non-stoppable stops without mutation or events", async () => {
     const [createdUser] = await connection.db
       .insert(users)
       .values({})
@@ -5766,7 +5766,7 @@ describe("create agent persistence", () => {
     const userId = createdUser?.userId ?? "";
     const now = new Date("2026-07-03T06:00:00.000Z");
     const pendingStartingAt = new Date(now.getTime() - FAKE_RUNNER_START_DELAY_MS + 1);
-    const invalidStatuses: AgentLifecycleStatus[] = ["idle", "stopped", "error", "deleting"];
+    const invalidStatuses: AgentLifecycleStatus[] = ["idle", "stopped", "deleting"];
     const invalidAgents: { id: string; status: AgentLifecycleStatus }[] = [];
 
     for (const status of invalidStatuses) {

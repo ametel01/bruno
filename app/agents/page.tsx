@@ -7,7 +7,6 @@ import { CreateAgentForm } from "@/app/agents/_components/create-agent-form";
 import { DeploymentStatusLabel } from "@/app/agents/_components/deployment-status-label";
 import { MobileAgentList } from "@/app/agents/_components/mobile-agent-list";
 import { AGENT_NAME_MAX_LENGTH } from "@/src/server/agents/create-agent";
-import { AGENT_TEMPLATE_OPTIONS } from "@/src/server/agents/templates";
 import {
   AgentListPersistenceError,
   listActiveAgentsForUser,
@@ -16,15 +15,16 @@ import {
   listModelConnectionsForUser,
   ModelConnectionPersistenceError,
 } from "@/src/server/agents/model-connections";
-import {
-  listAssignableRunnersForUser,
-  RunnerAssignmentPersistenceError,
-} from "@/src/server/runners/runner-assignment";
+import { AGENT_TEMPLATE_OPTIONS } from "@/src/server/agents/templates";
+import { readReadyAgentCreationFlag } from "@/src/server/env";
 import {
   CloudRunnerProvisioningPersistenceError,
   listCloudRunnerProvisioningSummariesForUser,
 } from "@/src/server/runners/cloud-runner-provisioning";
-import { readReadyAgentCreationFlag } from "@/src/server/env";
+import {
+  listAssignableRunnersForUser,
+  RunnerAssignmentPersistenceError,
+} from "@/src/server/runners/runner-assignment";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
 export const dynamic = "force-dynamic";
@@ -59,6 +59,11 @@ export default async function AgentsPage() {
   const readyCloudRunnerCount = cloudRunnersResult.ok
     ? cloudRunnersResult.runners.filter((runner) => runner.readinessStatus === "online").length
     : null;
+  const automaticRecoveryCount = listResult.ok
+    ? listResult.agents.filter(
+        (agent) => agent.latestDeployment?.recovery?.state === "preparing_capacity",
+      ).length
+    : 0;
   const readyFlag = readReadyAgentCreationFlag();
   const readyModeEnabled = readyFlag.ok && readyFlag.enabled;
 
@@ -106,18 +111,27 @@ export default async function AgentsPage() {
             </div>
             <div
               data-state={
-                cloudRunnerCount !== null && cloudRunnerCount > 0 && readyCloudRunnerCount === 0
-                  ? "attention"
-                  : "clear"
+                automaticRecoveryCount > 0
+                  ? "active"
+                  : cloudRunnerCount !== null && cloudRunnerCount > 0 && readyCloudRunnerCount === 0
+                    ? "attention"
+                    : "clear"
               }
             >
-              <dt>Cloud ready</dt>
-              <dd>
-                <strong>
-                  {readyCloudRunnerCount ?? "—"}/{cloudRunnerCount ?? "—"}
-                </strong>
-                <span>online and tracked</span>
-              </dd>
+              <dt>{automaticRecoveryCount > 0 ? "Recovery" : "Cloud ready"}</dt>
+              {automaticRecoveryCount > 0 ? (
+                <dd>
+                  <strong>{automaticRecoveryCount}</strong>
+                  <span>preparing replacement capacity</span>
+                </dd>
+              ) : (
+                <dd>
+                  <strong>
+                    {readyCloudRunnerCount ?? "—"}/{cloudRunnerCount ?? "—"}
+                  </strong>
+                  <span>online and tracked</span>
+                </dd>
+              )}
             </div>
           </dl>
         </section>

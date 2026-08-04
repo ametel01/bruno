@@ -94,6 +94,28 @@ describe("operational summaries", () => {
     expect(result.runnerStateNotice).toBeNull();
   });
 
+  it("suppresses runner warnings and empty notices during automatic replacement", () => {
+    const result = buildAgentOperationalAlerts({
+      automaticRecoveryActive: true,
+      agent: {
+        id: "00000000-0000-4000-8000-000000000201",
+        name: "Recovery Agent",
+        status: "starting",
+        statusReason: null,
+      },
+      approvals: [],
+      events: [],
+      runnerState: {
+        status: "degraded",
+        message: "Private runner endpoint and resource details.",
+        updatedAt: "2026-07-04T12:05:00.000Z",
+      },
+    });
+
+    expect(result).toEqual({ alerts: [], runnerStateNotice: null });
+    expect(JSON.stringify(result)).not.toMatch(/runner endpoint|resource details/i);
+  });
+
   it("redacts unsafe operational text and bounds long summaries", () => {
     expect(
       summarizeOperationalText(

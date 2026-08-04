@@ -86,7 +86,7 @@ import {
 export type AgentLifecycleStatus = (typeof agentStatusEnum.enumValues)[number];
 
 export const STARTABLE_AGENT_STATUSES = ["idle", "stopped", "error"] as const;
-export const STOPPABLE_AGENT_STATUSES = ["starting", "running", "restarting"] as const;
+export const STOPPABLE_AGENT_STATUSES = ["starting", "running", "restarting", "error"] as const;
 export const RESTARTABLE_AGENT_STATUSES = ["running"] as const;
 export const SIMULATE_ERROR_AGENT_STATUSES = [
   "idle",
@@ -1694,6 +1694,7 @@ export async function stopAgentForUser(
       const [stoppedAgent] = await tx
         .update(agents)
         .set({
+          desiredStatus: "stopped",
           status: "stopped",
           statusReason: null,
           updatedAt: now,

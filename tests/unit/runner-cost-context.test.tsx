@@ -83,6 +83,30 @@ describe("runner cost context", () => {
     expect(html).not.toContain("token=stored-for-downstream");
   });
 
+  it("keeps runner evidence closed and suppresses its alert during automatic recovery", () => {
+    const runner = {
+      ...assignedRunner(),
+      status: "degraded" as const,
+      alertState: "degraded" as const,
+      alertMessage: "Private endpoint and source-draining detail must not appear.",
+    };
+    const html = renderToStaticMarkup(
+      createElement(AssignedRunnerPanel, {
+        result: { ok: true, runner },
+        costResult: { ok: false },
+        suppressAlert: true,
+      }),
+    );
+
+    expect(html).toContain("<details");
+    expect(html).not.toContain(" open");
+    expect(html).toContain("Assigned runner details");
+    expect(html).toContain("Advanced operational evidence");
+    expect(html).toContain(">recovering<");
+    expect(html).not.toContain("Private endpoint");
+    expect(html).not.toContain("source-draining");
+  });
+
   it("adds the estimate to an existing cloud runner card without replacing readiness details", () => {
     const runner = cloudRunner();
     const html = renderToStaticMarkup(

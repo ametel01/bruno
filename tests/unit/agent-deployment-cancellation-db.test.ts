@@ -103,6 +103,37 @@ describe("automatic deployment lifecycle cancellation", () => {
     expect(deployment).toMatchObject({ stage: "failed", errorCode: "deployment_cancelled" });
   });
 
+  it("lets an owner stop after automatic setup reaches a terminal error", async () => {
+    await seedRunner(connection);
+    await seedAgent(connection, { status: "error", runnerId: RUNNER_ID });
+    await connection.db.insert(agentDeployments).values({
+      id: DEPLOYMENT_ID,
+      agentId: AGENT_ID,
+      userId: USER_ID,
+      stage: "failed",
+      configRevision: "cfg-cancel-1",
+      idempotencyKey: "Cancel-Key-001",
+      errorCode: "runner_recovery_exhausted",
+      failedAt: NOW,
+    });
+    const stop = vi.fn(async () => ({ ok: true as const, containers: [] }));
+
+    const result = await stopAgentForUser(USER_ID, AGENT_ID, {
+      createConnection: () => connection,
+      now: () => NOW,
+      manualRunnerAdapter: (runner) =>
+        ({
+          stop: async () => ({ ...(await stop()), runner }),
+          streamLogs: async () => ({ logs: [], nextAfter: null }),
+        }) as never,
+    });
+
+    expect(result).toMatchObject({ ok: true, agent: { status: "stopped" } });
+    expect(stop).toHaveBeenCalledOnce();
+    const [agent] = await connection.db.select().from(agents).where(eq(agents.id, AGENT_ID));
+    expect(agent).toMatchObject({ desiredStatus: "stopped", status: "stopped" });
+  });
+
   it("cancels an active operation before delete cleanup and keeps the stale lease powerless", async () => {
     await seedAgent(connection, { status: "stopped", runnerId: null });
     await seedActiveDeployment(connection, "pending");
@@ -175,7 +206,7 @@ async function seedRunner(connection: DatabaseConnection): Promise<void> {
 
 async function seedAgent(
   connection: DatabaseConnection,
-  input: { status: "starting" | "stopped"; runnerId: string | null },
+  input: { status: "starting" | "stopped" | "error"; runnerId: string | null },
 ): Promise<void> {
   await connection.db.insert(agents).values({
     id: AGENT_ID,

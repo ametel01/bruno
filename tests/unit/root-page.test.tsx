@@ -887,6 +887,39 @@ describe("product shell routes", () => {
     expect(errorHtml).not.toContain("postgres://");
   });
 
+  it("replaces the fleet warning summary with automatic recovery progress", () => {
+    const html = renderToStaticMarkup(
+      createElement(DashboardContent, {
+        listResult: { ok: true, agents: [listedRecoveryAgent()] },
+        manualRunnersResult: {
+          ok: true,
+          runners: [
+            {
+              name: "Advanced source evidence",
+              kind: "digitalocean",
+              endpointHost: "private-source.example",
+              status: "degraded",
+              capacity: capacity(),
+              version: "sha-private",
+              lastSeenAt: null,
+              updatedAt: "2026-08-04T10:00:00.000Z",
+            },
+          ],
+        },
+      }),
+    );
+    const fleetPulse = html.slice(
+      html.indexOf('<section class="dashboard-fleet-pulse"'),
+      html.indexOf('<section class="agent-list-panel"'),
+    );
+
+    expect(fleetPulse).toContain("Recovery");
+    expect(fleetPulse).toContain("preparing replacement capacity");
+    expect(fleetPulse).not.toContain("degraded");
+    expect(html).toContain("Preparing your agent");
+    expect(html).toContain("Automatic recovery");
+  });
+
   it("renders latest dashboard activity newest-first with agent context and deleted labels", () => {
     const html = renderToStaticMarkup(
       createElement(DashboardContent, {
@@ -1846,6 +1879,36 @@ function detailAgent(overrides: Partial<DetailAgent> = {}): DetailAgent {
       updatedAt: "2026-07-03T05:31:00.000Z",
     },
     ...overrides,
+  };
+}
+
+function listedRecoveryAgent() {
+  return {
+    id: "00000000-0000-4000-8000-000000000201",
+    name: "Automatic Recovery Agent",
+    templateKey: "research_agent",
+    templateVersion: "1.0.0",
+    templateLabel: "Research Agent",
+    status: "starting" as const,
+    desiredStatus: "running" as const,
+    latestDeployment: {
+      id: "00000000-0000-4000-8000-000000000202",
+      agentId: "00000000-0000-4000-8000-000000000201",
+      stage: "starting_gateway" as const,
+      configRevision: "cfg-recovery-ui",
+      attemptCount: 1,
+      error: { code: "runner_recovery_in_progress" },
+      recovery: { state: "preparing_capacity" as const },
+      nextAttemptAt: null,
+      startedAt: "2026-08-04T10:00:00.000Z",
+      completedAt: null,
+      failedAt: null,
+      createdAt: "2026-08-04T10:00:00.000Z",
+      updatedAt: "2026-08-04T10:00:30.000Z",
+    },
+    runtime: null,
+    href: "/agents/00000000-0000-4000-8000-000000000201",
+    createdAt: "2026-08-04T10:00:00.000Z",
   };
 }
 

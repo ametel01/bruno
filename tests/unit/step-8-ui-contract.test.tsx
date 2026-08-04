@@ -23,14 +23,14 @@ const DEPLOYMENT_ID = "00000000-0000-4000-8000-000000008202";
 
 describe("Step 8 no-JavaScript deployment snapshots", () => {
   it.each([
-    ["pending", "Preparing deployment"],
-    ["provisioning_runner", "Provisioning runner"],
-    ["configuring_hermes", "Configuring Hermes"],
-    ["starting_gateway", "Starting gateway"],
-    ["verifying_model", "Verifying model"],
+    ["pending", "Preparing your agent"],
+    ["provisioning_runner", "Preparing your agent"],
+    ["configuring_hermes", "Preparing your agent"],
+    ["starting_gateway", "Preparing your agent"],
+    ["verifying_model", "Preparing your agent"],
     ["connecting_telegram", "Connecting Telegram"],
     ["ready", "Ready"],
-    ["failed", "Setup failed"],
+    ["failed", "Automatic setup could not recover"],
   ] as const)("renders the exact %s label on inventory, dashboard-card, and detail projections", (stage, label) => {
     const deployment = deploymentDto(stage);
     const observedStatus = stage === "ready" ? "running" : "stopped";
@@ -105,7 +105,7 @@ describe("Step 8 no-JavaScript deployment snapshots", () => {
     expect(intentionallyStopped).toContain("Intentionally stopped");
     expect(managedNull).toContain("Progress unavailable");
     expect(managedNull).not.toContain("Manual setup");
-    expect(updating).toContain("Final status updating");
+    expect(updating).toContain("Preparing your agent");
     expect(updating).not.toMatch(/>Ready</);
     expect(ready).toMatch(/>Ready</);
   });
@@ -160,15 +160,7 @@ describe("Step 8 progress accessibility and responsive CSS", () => {
         observedStatus: "stopped",
       }),
     );
-    const labels = [
-      "Preparing deployment",
-      "Provisioning runner",
-      "Configuring Hermes",
-      "Starting gateway",
-      "Verifying model",
-      "Connecting Telegram",
-      "Ready",
-    ];
+    const labels = ["Preparing your agent", "Connecting Telegram", "Ready"];
 
     expect(html).toContain('aria-busy="true"');
     expect(html).toContain('<ol class="deployment-stage-list"');
@@ -201,7 +193,7 @@ describe("Step 8 progress accessibility and responsive CSS", () => {
     );
 
     expect(html).toContain('role="alert" tabindex="-1"');
-    expect(html).toContain("Automatic setup could not finish. Retry or stop this agent.");
+    expect(html).toContain("Automatic setup could not recover. Try again or stop this agent.");
     expect(html).not.toContain("STEP8-RAW-DTO-ERROR-DETAIL");
   });
 
@@ -279,6 +271,7 @@ function deploymentDto(stage: PublicAgentDeploymentStage): PublicAgentDeployment
     attemptCount: 0,
     error: stage === "failed" ? { code: "telegram_not_connected" } : null,
     nextAttemptAt: null,
+    recovery: null,
     startedAt: stage === "pending" ? null : "2026-08-03T11:01:00.000Z",
     completedAt: stage === "ready" ? terminalAt : null,
     failedAt: stage === "failed" ? terminalAt : null,

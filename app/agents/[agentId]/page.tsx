@@ -7,25 +7,25 @@ import { AgentBackupControls } from "@/app/agents/_components/agent-backup-contr
 import { AgentConfigEditor } from "@/app/agents/_components/agent-config-editor";
 import { AgentDeploymentProgress } from "@/app/agents/_components/agent-deployment-progress";
 import { AgentHermesSetup } from "@/app/agents/_components/agent-hermes-setup";
-import { AssignedRunnerPanel } from "@/app/agents/_components/assigned-runner-panel";
 import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import { AgentRuntimeLogPanel } from "@/app/agents/_components/agent-runtime-log-panel";
 import { AgentRuntimeStatus } from "@/app/agents/_components/agent-runtime-status";
-import { AGENT_NAME_MAX_LENGTH } from "@/src/server/agents/create-agent";
+import { AssignedRunnerPanel } from "@/app/agents/_components/assigned-runner-panel";
 import {
-  buildAgentOperationalAlerts,
-  type OperationalAlert,
-  summarizeOperationalText,
-} from "@/src/server/alerts/operational-summaries";
+  AgentSecretPersistenceError,
+  listAgentSecretStatusesForUser,
+} from "@/src/server/agents/agent-secrets";
+import { AGENT_NAME_MAX_LENGTH } from "@/src/server/agents/create-agent";
+import { buildHermesSetupReadiness } from "@/src/server/agents/hermes-readiness";
 import {
   AgentDetailPersistenceError,
   getActiveAgentForUser,
 } from "@/src/server/agents/list-agents";
 import {
-  AgentSecretPersistenceError,
-  listAgentSecretStatusesForUser,
-} from "@/src/server/agents/agent-secrets";
-import { buildHermesSetupReadiness } from "@/src/server/agents/hermes-readiness";
+  buildAgentOperationalAlerts,
+  type OperationalAlert,
+  summarizeOperationalText,
+} from "@/src/server/alerts/operational-summaries";
 import {
   AgentApprovalPersistenceError,
   listPendingApprovalsForUserAgent,
@@ -35,16 +35,16 @@ import {
   AgentBackupListPersistenceError,
   listAgentBackupsForUser,
 } from "@/src/server/backups/list-backups";
-import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { listAgentEventFeedForUser } from "@/src/server/events/agent-events";
 import {
   getMonthlyRunnerCostForUserAgent,
   RunnerCostContextPersistenceError,
 } from "@/src/server/costs/runner-cost-context";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import { listAgentEventFeedForUser } from "@/src/server/events/agent-events";
 import {
+  type AssignedManualRunnerStatusSummary,
   getAssignedManualRunnerStatusForUserAgent,
   ManualRunnerStatusPersistenceError,
-  type AssignedManualRunnerStatusSummary,
 } from "@/src/server/runners/manual-runner-status";
 import { requireConfiguredApplicationUser } from "@/src/server/users/configured-application-user";
 
@@ -155,8 +155,10 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
   const runnerReadiness = hermesReadiness.requirements.find(
     (requirement) => requirement.id === "runner",
   );
+  const automaticRecoveryActive = latestDeployment?.recovery?.state === "preparing_capacity";
   const operationalAlerts = buildAgentOperationalAlerts({
     agent,
+    automaticRecoveryActive,
     approvals: approvalsResult.ok ? approvalsResult.approvals : [],
     events: activityEvents,
     runnerState:
@@ -314,6 +316,7 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
             <AssignedRunnerPanel
               costResult={assignedRunnerCostResult}
               result={assignedRunnerResult}
+              suppressAlert={automaticRecoveryActive}
             />
             <AgentOperationalAlertsPanel
               alerts={operationalAlerts.alerts}

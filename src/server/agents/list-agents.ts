@@ -5,9 +5,15 @@ import {
   type RuntimePresentationRow,
 } from "@/src/server/agents/agent-runtime-read";
 import {
-  mapAgentDeploymentRowToDto,
   type AgentDeploymentRowForDto,
+  mapAgentDeploymentRowToDto,
 } from "@/src/server/agents/deployment-dto";
+import {
+  type AgentTemplateSnapshot,
+  getAgentTemplateLabel,
+  getAgentTemplateSnapshot,
+  isSupportedTemplateKey,
+} from "@/src/server/agents/templates";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   agentConfigs,
@@ -16,14 +22,8 @@ import {
   agents,
   runners,
 } from "@/src/server/db/schema";
-import {
-  getAgentTemplateLabel,
-  getAgentTemplateSnapshot,
-  isSupportedTemplateKey,
-  type AgentTemplateSnapshot,
-} from "@/src/server/agents/templates";
-import type { AgentDetailConfigUi, ListedAgentUi } from "@/src/shared/agent-ui-types";
 import type { PublicAgentDeployment } from "@/src/shared/agent-deployment-presentation";
+import type { AgentDetailConfigUi, ListedAgentUi } from "@/src/shared/agent-ui-types";
 
 export type ListedAgent = ListedAgentUi;
 
@@ -551,6 +551,10 @@ function toUiSafeDeployment(deployment: ReturnType<typeof mapAgentDeploymentRowT
     configRevision: deployment.configRevision,
     attemptCount: deployment.attemptCount,
     error: deployment.error ? { code: deployment.error.code } : null,
+    recovery:
+      deployment.error?.code === "runner_recovery_in_progress"
+        ? { state: "preparing_capacity" }
+        : null,
     nextAttemptAt: deployment.nextAttemptAt,
     startedAt: deployment.startedAt,
     completedAt: deployment.completedAt,

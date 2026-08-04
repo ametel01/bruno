@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDeploymentPresentation,
+  deploymentExperienceStageState,
   deploymentStageListState,
+  PUBLIC_AGENT_DEPLOYMENT_STAGES,
   parseSafeCreate202Body,
   parseSafeDeploymentGetBody,
   parseSafePublicDeployment,
-  PUBLIC_AGENT_DEPLOYMENT_STAGES,
 } from "@/src/shared/agent-deployment-presentation";
 import {
   foregroundPollingElapsedMs,
@@ -48,7 +49,7 @@ describe("agent deployment presentation", () => {
       });
 
       expect(presentation.label).toMatch(
-        /Preparing deployment|Provisioning runner|Configuring Hermes|Starting gateway|Verifying model|Connecting Telegram|Ready|Setup failed/,
+        /Preparing your agent|Connecting Telegram|Ready|Automatic setup could not recover/,
       );
     }
   });
@@ -71,7 +72,7 @@ describe("agent deployment presentation", () => {
         desiredStatus: "running",
         observedStatus: "stopped",
       }).label,
-    ).toBe("Final status updating");
+    ).toBe("Preparing your agent");
   });
 
   it("validates exact 202 create and GET response envelopes", () => {
@@ -145,12 +146,44 @@ describe("agent deployment presentation", () => {
       observedStatus: "stopped",
     });
 
-    expect(conservative.heading).toBe("Setup failed");
+    expect(conservative.heading).toBe("Automatic setup could not recover");
     expect(deploymentStageListState(conservative, "pending")).toBe("pending");
-    expect(observed.heading).toBe("Verifying model");
+    expect(observed.heading).toBe("Automatic setup could not recover");
     expect(deploymentStageListState(observed, "configuring_hermes")).toBe("completed");
     expect(deploymentStageListState(observed, "verifying_model")).toBe("blocked");
     expect(deploymentStageListState(observed, "connecting_telegram")).toBe("pending");
+  });
+
+  it("projects active replacement into one safe Preparing state without identifiers", () => {
+    const parsed = parseSafePublicDeployment(
+      deploymentDto({
+        stage: "starting_gateway",
+        error: {
+          code: "runner_recovery_in_progress",
+          detail: "runner=private-id droplet=private-resource endpoint=https://private.example",
+        },
+      }),
+    );
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const presentation = buildDeploymentPresentation({
+      deployment: parsed.deployment,
+      desiredStatus: "running",
+      observedStatus: "starting",
+    });
+
+    expect(parsed.deployment.recovery).toEqual({ state: "preparing_capacity" });
+    expect(presentation).toMatchObject({
+      kind: "recovery",
+      heading: "Preparing your agent",
+      label: "Preparing your agent",
+      description: "plingpling is preparing replacement capacity automatically.",
+    });
+    expect(deploymentExperienceStageState(presentation, "preparing")).toBe("current");
+    expect(JSON.stringify({ parsed: parsed.deployment, presentation })).not.toMatch(
+      /private-id|private-resource|private\.example|droplet|endpoint/i,
+    );
   });
 
   it("does not let desired status mask missing or malformed deployment state", () => {
