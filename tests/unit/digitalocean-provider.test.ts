@@ -1,12 +1,50 @@
 import { describe, expect, it } from "vitest";
 import {
-  DigitalOceanApiProvider,
   DIGITALOCEAN_PROVIDER,
-  FakeDigitalOceanProvider,
+  DigitalOceanApiProvider,
   type DigitalOceanSdkClient,
+  FakeDigitalOceanProvider,
 } from "@/src/server/runners/digitalocean-provider";
 
 describe("fake DigitalOcean provider", () => {
+  it("returns authoritative managed inventory with stable tags and timestamps", async () => {
+    const provider = new FakeDigitalOceanProvider({
+      now: () => new Date("2026-08-04T12:00:00.000Z"),
+      idPrefix: "inventory",
+    });
+    await provider.createRunner({
+      name: "managed-runner",
+      region: "sfo3",
+      sizeSlug: "s-1vcpu-1gb",
+      image: "ubuntu-24-04-x64",
+      tags: ["agentbay-runner", "agentbay-deploy-88888888888888888888888888888888"],
+    });
+    await provider.createRunner({
+      name: "unmanaged-runner",
+      region: "sfo3",
+      sizeSlug: "s-1vcpu-1gb",
+      image: "ubuntu-24-04-x64",
+      tags: ["unmanaged"],
+    });
+
+    await expect(
+      provider.listManagedResources({ stableTag: "agentbay-runner" }),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: {
+        authoritative: true,
+        resources: [
+          {
+            providerResourceId: "inventory-1",
+            tags: ["agentbay-deploy-88888888888888888888888888888888", "agentbay-runner"],
+            createdAt: "2026-08-04T12:00:00.000Z",
+            deletedAt: null,
+          },
+        ],
+      },
+    });
+  });
+
   it("creates, tags, firewalls, and cleans up resources without network calls", async () => {
     const provider = new FakeDigitalOceanProvider({
       now: () => new Date("2026-07-06T02:00:00.000Z"),
@@ -218,6 +256,69 @@ describe("fake DigitalOcean provider", () => {
 });
 
 describe("DigitalOcean API provider", () => {
+  it("joins complete firewall inventory onto authoritative managed Droplets", async () => {
+    const provider = new DigitalOceanApiProvider({
+      token: "dop_v1_super_secret",
+      client: {
+        v2: {
+          droplets: {
+            get: async () => ({
+              droplets: [
+                {
+                  id: 123456,
+                  name: "agentbay-deploy-88888888888888888888888888888888",
+                  region: { slug: "sfo3" },
+                  sizeSlug: "s-1vcpu-1gb",
+                  image: { slug: "ubuntu-24-04-x64" },
+                  tags: ["agentbay-runner", "agentbay-deploy-88888888888888888888888888888888"],
+                  createdAt: "2026-08-04T12:00:00.000Z",
+                },
+              ],
+              meta: { total: 1 },
+            }),
+            post: async () => ({ droplet: null }),
+            byDroplet_id: () => ({ delete: async () => {} }),
+          },
+          account: {
+            keys: {
+              get: async () => ({ sshKeys: [] }),
+              post: async () => ({ sshKey: null }),
+            },
+          },
+          firewalls: {
+            get: async () => ({
+              firewalls: [
+                { id: "firewall-123", name: "agentbay-runners-123456", dropletIds: [123456] },
+              ],
+              meta: { total: 1 },
+            }),
+            post: async () => ({ firewall: null }),
+          },
+          tags: {
+            byTag_id: () => ({ resources: { post: async () => {} } }),
+          },
+        },
+      },
+    });
+
+    await expect(
+      provider.listManagedResources({ stableTag: "agentbay-runner" }),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: {
+        authoritative: true,
+        resources: [
+          {
+            providerResourceId: "123456",
+            providerFirewallId: "firewall-123",
+            firewallApplied: true,
+            createdAt: "2026-08-04T12:00:00.000Z",
+          },
+        ],
+      },
+    });
+  });
+
   it("creates, tags, firewalls, and cleans up resources through safe SDK requests", async () => {
     const calls: Array<{ step: string; body?: unknown; id?: number; tag?: string }> = [];
     const client: DigitalOceanSdkClient = {

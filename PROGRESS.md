@@ -617,7 +617,7 @@ and replace the fleet in bounded batches.
 - [x] Step 5: Persist a Durable Runner Replacement Workflow
 - [x] Step 6: Provision and Validate Replacement Runners
 - [x] Step 7: Hand Over Agents and Clean Up the Source Runner
-- [ ] Step 8: Reconcile DigitalOcean and Database Ownership
+- [x] Step 8: Reconcile DigitalOcean and Database Ownership
 - [ ] Step 9: Replace Runners After Strict Deployment Deadlines
 - [ ] Step 10: Present One Automatic Recovery Experience
 - [ ] Step 11: Release Through an Immutable Disposable-Droplet Canary
@@ -625,12 +625,13 @@ and replace the fleet in bounded batches.
 
 ### Current Status
 
-Step 7 is complete in this commit. Replacement handover now fences the source,
-stops its selected workloads best-effort, revokes command authority, and moves
-all active assignments under source/target capacity locks. Desired-running
-agents receive fresh deployments and must regain deployment/runtime readiness;
-stopped agents remain stopped. Only then is the exact old firewall/Droplet set
-removed and the source tombstoned. Step 8 is next.
+Step 8 is complete in this commit. A leased, bounded infrastructure reconciler
+now compares authoritative managed DigitalOcean inventory with active database
+ownership, repairs exact interrupted provisions and stale assignments, starts
+the durable replacement saga for assigned missing or unhealthy runners, and
+tombstones unassigned missing rows transactionally. Duplicate and ambiguous
+resources fail closed; exact owned orphans require two observations separated
+by grace before ordered firewall/Droplet deletion. Step 9 is next.
 
 ### Step Ledger
 
@@ -643,8 +644,8 @@ removed and the source tombstoned. Step 8 is next.
 | 4. Enforce a Real Boot-Readiness Contract | Complete | `cc27fa2` | Added the exact `plingpling.runner.boot-snapshot.v1` persisted snapshot with deterministic testing/ready/failed timestamps and six closed component states. Runner boot now performs bounded Docker/self-image verification, creates a UUID-scoped private network and pinned Hermes fixture with a local fake model, loads real-shaped synthetic Telegram configuration without traffic, probes container-local detailed health, runs a fixed no-tools canary, and cleans up exact labeled resources on success, failure, timeout, and restart. The authenticated no-store route returns 200 only for exact ready evidence; app parsing rejects legacy, malformed, incomplete, incompatible, or non-ready evidence before assignment. Eight focused files / 123 tests and the full 152-file / 1,480-test suite passed. Format, lint, typecheck, production build, runner Docker build, a production-path all-six-component ready smoke with zero remaining labeled fixtures, local-cloud smoke, and the 82,866 ms pinned Hermes contract smoke passed. | Complete; Step 5 is next. |
 | 5. Persist a Durable Runner Replacement Workflow | Complete | `44c5e92` | Added additive migration `0023_stiff_masque` with the exact nine replacement states, six trigger reasons, closed terminal codes, source/target/deployment relationships, unique active source and deployment guards, operation idempotency, due-work indexes, generation/lease fields, and a deployment budget ledger. Pure transitions reject skips, missing or cross-source targets, stale generations, terminal replay, and unsafe retry dates. Store claims use `FOR UPDATE SKIP LOCKED`, exact-expiry takeover, and lease/generation/source/target CAS fences; concurrent cron/heartbeat/deployment/user-shaped operation keys converge on one active workflow. Billable reservations are transactionally separate from claims and capped at two per deployment/24 hours under concurrency. Four focused files / 52 tests and the full 155-file / 1,498-test suite passed. Clean and pre-0023 upgrade migrations passed twice with existing evidence unchanged; schema drift, format, lint, typecheck, production build, and diff hygiene passed. No external/provider effect or operator surface was added, so the Step 5 changelog entry is deferred per the plan. | Complete; Step 6 is next. |
 | 6. Provision and Validate Replacement Runners | Complete | `b235136` | Added a leased one-slice reconciler that creates and associates one managed target, derives its provisioning operation key from the durable replacement key, pins the configured immutable digest and boot contract, reserves the billable deployment budget before create, and reuses authoritative DigitalOcean discovery/create/tag/firewall/bootstrap. Validation requires exact release compatibility, capability-backed boot readiness, a fresh online heartbeat, and capacity for every source assignment before advancing to fencing. Failed targets use exact operation-tag discovery and the owned-set firewall-before-Droplet cleanup protocol, then atomically revoke target access, tombstone the target, and persist closed terminal evidence while leaving the source untouched. Ten focused real-database/fake-provider tests cover successful create, rediscovery, duplicate ambiguity, known create failure, release and boot incompatibility, capacity, budget exhaustion, timeouts, cleanup, and concurrent claimers. Full format, lint, typecheck, 156-file / 1,508-test suite, production build, local cloud smoke, runner image build, and diff hygiene passed. | Complete; Step 7 is next. |
-| 7. Hand Over Agents and Clean Up the Source Runner | Complete | This commit | Extended the leased reconciler through source fencing, reassignment, convergence, cleanup, and completion. The source becomes nonassignable before best-effort exact workload stops and credential/token revocation. Source/target advisory capacity locks, owner/heartbeat/release checks, and one transaction now preserve agent configuration, encrypted secrets, deployment history, and usage accounting while assigning all active agents to the target and creating deterministic fresh deployments only for desired-running agents. Convergence requires each moved running agent's newest deployment and runtime to be ready; stopped agents stay stopped and failed deployments use the existing retry path. Exact owned-set firewall-before-Droplet deletion is crash-resumable, ambiguity stays in durable cleanup without rollback, and completion atomically revokes old access, clears residual deleted-agent assignments, tombstones the source, and records bounded events. Six handover scenarios plus the Step 6 matrix and deployment/runtime suites passed. Full format, lint, typecheck, 157-file / 1,514-test suite, production build, local cloud smoke, 84,106 ms Hermes contract smoke, 26/26 E2E, and diff hygiene passed. | Complete; Step 8 is next. |
-| 8. Reconcile DigitalOcean and Database Ownership | Pending | Pending | Not started. | Waits for Steps 5-7. |
+| 7. Hand Over Agents and Clean Up the Source Runner | Complete | `4265875` | Extended the leased reconciler through source fencing, reassignment, convergence, cleanup, and completion. The source becomes nonassignable before best-effort exact workload stops and credential/token revocation. Source/target advisory capacity locks, owner/heartbeat/release checks, and one transaction now preserve agent configuration, encrypted secrets, deployment history, and usage accounting while assigning all active agents to the target and creating deterministic fresh deployments only for desired-running agents. Convergence requires each moved running agent's newest deployment and runtime to be ready; stopped agents stay stopped and failed deployments use the existing retry path. Exact owned-set firewall-before-Droplet deletion is crash-resumable, ambiguity stays in durable cleanup without rollback, and completion atomically revokes old access, clears residual deleted-agent assignments, tombstones the source, and records bounded events. Six handover scenarios plus the Step 6 matrix and deployment/runtime suites passed. Full format, lint, typecheck, 157-file / 1,514-test suite, production build, local cloud smoke, 84,106 ms Hermes contract smoke, 26/26 E2E, and diff hygiene passed. | Complete; Step 8 is next. |
+| 8. Reconcile DigitalOcean and Database Ownership | Complete | This commit | Added additive leased reconciliation and orphan-evidence tables, authoritative stable-tag inventory with completeness/timestamp/firewall evidence, and a bounded one-result reconciler shared by a protected cron route and operator script. Exact matches remain unchanged; assigned missing or unhealthy runners start the durable replacement saga; unassigned missing rows are ownership-checked and tombstoned; stale deleted-runner assignments are cleared without changing desired state; exact interrupted operation-tag creates are adopted; duplicates and ambiguity never mutate or delete. Provably owned unassigned orphans require two authoritative observations separated by ten minutes before exact owned-set firewall-first cleanup, and active ownership outside the current database batch is rechecked before orphan handling. Focused provider, route, schema, migration, provisioning, reconciliation, orphan, race, and redaction coverage passed. Full format, lint, typecheck, 159-file / 1,533-test suite, production build, additive clean/upgrade/idempotent migrations, schema drift check, 440 ms local cloud smoke, 26/26 E2E, and diff hygiene passed. | Complete; Step 9 is next. |
 | 9. Replace Runners After Strict Deployment Deadlines | Pending | Pending | Not started. | Waits for Steps 5-8. |
 | 10. Present One Automatic Recovery Experience | Pending | Pending | Not started. | Waits for Steps 7-9. |
 | 11. Release Through an Immutable Disposable-Droplet Canary | Pending | Pending | Not started. | Waits for Steps 2-10 and configured release credentials. |
@@ -731,6 +732,16 @@ removed and the source tombstoned. Step 8 is next.
 | 7 | `bun run agent:hermes:contract-smoke` | Passed in 84,106 ms with fake model, private API auth, canary, restart/Stop persistence, backup/restore, and exact cleanup. |
 | 7 | `bun run test:e2e:ci` | Passed; 26/26 desktop and mobile tests. |
 | 7 | `git diff --check` | Passed. |
+| 8 | `bun run db:generate` and migration review | Generated additive `0024_absurd_chamber`; a second generation reported no schema drift. SQL adds only leased reconciliation/orphan-evidence tables, checks, and indexes with no update, drop, alter-column, or ownership inference. |
+| 8 | Clean and upgraded migration fixtures plus `bun run db:migrate` | Passed clean and idempotent migration through 0024 and upgrade from the exact pre-0024 schema; existing runner, agent, and deployment rows remained unchanged and both infrastructure ledgers began empty. |
+| 8 | Focused provider/route/schema/migration/provisioning/reconciler coverage | Passed 6 files / 82 tests, including complete stable inventory/firewall evidence, missing/unhealthy replacement, unassigned tombstoning, exact adoption, duplicate refusal, stale assignment repair, orphan grace/deletion, out-of-batch ownership protection, ambiguity, lease races, authorization, and redaction. |
+| 8 | `bun run format:check` and `bun run lint` | Passed; 375 files checked with no fixes or warnings. |
+| 8 | `bun run typecheck` | Passed. |
+| 8 | `bun run test` | Passed serially against the isolated migrated database; 159 files / 1,533 tests. |
+| 8 | `bun run build` | Passed; Next.js production build included the protected runner-infrastructure cron route. |
+| 8 | `bun run local:cloud:smoke` | Passed in 440 ms through Ready, runtime fault recovery, Stop, and deterministic cleanup. |
+| 8 | `bun run test:e2e:ci` | Passed; 26/26 desktop and mobile tests. |
+| 8 | `git diff --check` | Passed. |
 
 ### Step 1 Gap Matrix
 
@@ -739,7 +750,7 @@ removed and the source tombstoned. Step 8 is next.
 | Exact immutable runner identity | Authenticated heartbeat parsing allowlists legacy version and metrics but ignores an untrusted release object; no observed image digest or boot-contract identity is derived or persisted. | Not implemented; Step 2. |
 | Capability-backed boot readiness | Authenticated `/runner/v1/readiness` reads an atomically persisted exact contract only after bounded Docker/self-image, isolated pinned Hermes fixture, private detailed health, fixed model canary, synthetic no-traffic Telegram configuration, and exact cleanup checks. App parsing requires all six passed components before managed assignment. | Complete; Step 4. |
 | Automatic replacement | The durable saga now provisions and immutably validates replacement capacity, fences source authority, atomically moves agents, preserves stopped intent, converges fresh deployments/runtimes, and retires only the exact obsolete owned set. Inventory reconciliation and deadline triggers remain absent. | Infrastructure-through-agent recovery complete in Step 7; inventory and triggers continue in Steps 8-9. |
-| Infrastructure inventory reconciliation | Placement performs current stale-heartbeat fencing and live provider-resource verification, and exact missing resources are tombstoned; no leased authoritative inventory, adoption, duplicate classification, or orphan grace exists. | Not implemented; Step 8. |
+| Infrastructure inventory reconciliation | A protected per-minute cron now leases one bounded authoritative stable-tag inventory comparison, adopts exact interrupted creates, starts replacement for assigned missing/unhealthy runners, clears stale assignments, tombstones exact unassigned missing rows, refuses duplicates/ambiguity, and deletes only exact owned orphans after two observations and grace. | Complete; Step 8. |
 | Smoke-before-deploy release ordering | The runner workflow pushes Git-SHA and mutable `main` tags directly on main; it has no digest output, SBOM/provenance configuration, disposable-Droplet canary, control-plane dependency, or fleet rollout. | Not implemented; Steps 2 and 11-12. |
 
 ### Update Log
@@ -802,10 +813,19 @@ removed and the source tombstoned. Step 8 is next.
   closure, and crash-resumable exact firewall/Droplet cleanup. Six handover
   scenarios, the full suite/build, both local smokes, and 26/26 E2E passed. No
   live provider call or Droplet effect was performed. The focused commit is
-  `feat: hand over agents to replacement runners` (`This commit`).
+  `feat: hand over agents to replacement runners` (`4265875`).
+- 2026-08-04: Completed Step 8 with additive lease/orphan evidence,
+  authoritative stable-tag inventory, exact interrupted-create adoption,
+  missing/unhealthy replacement triggers, stale assignment and stale row
+  repair, duplicate/ambiguity refusal, and two-observation exact-owned orphan
+  cleanup behind a protected per-minute cron and shared operator command.
+  Provider, route, migration, reconciliation, race, redaction, full repository,
+  local-cloud, and 26/26 E2E gates passed. No live provider call or Droplet
+  effect was performed. The focused commit is `feat: reconcile managed runner
+  infrastructure` (`This commit`).
 
 ### Next Step
 
-Begin Step 8 by authoritatively reconciling provider and database inventory,
-including owned adoption, duplicate classification, missing resources, and
-orphan grace before any cleanup.
+Begin Step 9 by enforcing the strict 30-second gateway deadline, capturing one
+bounded redacted diagnostic snapshot, and triggering at most two replacement
+workflows per deployment within 24 hours instead of retrying the same runner.

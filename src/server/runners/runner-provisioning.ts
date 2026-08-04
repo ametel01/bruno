@@ -3,8 +3,6 @@ import "server-only";
 import { generateKeyPairSync } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type { DigitalOceanProviderConfig } from "@/src/server/env";
-import { getServerEnv, readDigitalOceanProviderConfig } from "@/src/server/env";
 import {
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_READINESS_TIMEOUT_MS,
@@ -14,19 +12,22 @@ import {
 } from "@/src/runner-service/constants";
 import { RUNNER_RELEASE_DEVELOPMENT_MODE } from "@/src/runner-service/release-identity";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
 import {
   runnerProvisioningEvents,
   runnerRegistrationTokens,
   runners,
 } from "@/src/server/db/schema";
-import type * as schema from "@/src/server/db/schema";
+import type { DigitalOceanProviderConfig } from "@/src/server/env";
+import { getServerEnv, readDigitalOceanProviderConfig } from "@/src/server/env";
 import {
   buildCloudRunnerBootstrapForRunner,
-  redactCloudRunnerBootstrapOutput,
   type CloudRunnerBootstrapContent,
+  redactCloudRunnerBootstrapOutput,
 } from "@/src/server/runners/cloud-runner-bootstrap";
 import { reconcileTimedOutWaitingForRunnerRows } from "@/src/server/runners/cloud-runner-provisioning";
 import {
+  DIGITALOCEAN_MANAGED_RUNNER_TAG,
   DIGITALOCEAN_PROVIDER,
   DIGITALOCEAN_RUNNER_KIND,
   DigitalOceanApiProvider,
@@ -37,12 +38,12 @@ import {
   type DigitalOceanResource,
 } from "@/src/server/runners/digitalocean-provider";
 import { LocalDockerDigitalOceanProvider } from "@/src/server/runners/local-docker-digitalocean-provider";
-import { requiredRunnerImageDigestForProvider } from "@/src/server/runners/runner-compatibility";
 import {
   createRunnerRegistrationToken,
   fingerprintRunnerSecret,
   type GeneratedRunnerSecret,
 } from "@/src/server/runners/runner-auth-secrets";
+import { requiredRunnerImageDigestForProvider } from "@/src/server/runners/runner-compatibility";
 import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
 
 const DEFAULT_CLOUD_RUNNER_NAME = "plingpling Cloud Runner";
@@ -202,7 +203,9 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     };
   }
 
-  const operationTags = [...new Set([...input.config.tags, input.operationKey])].sort();
+  const operationTags = [
+    ...new Set([...input.config.tags, DIGITALOCEAN_MANAGED_RUNNER_TAG, input.operationKey]),
+  ].sort();
 
   if (runner.provisioningStatus === "pending" || runner.provisioningStatus === "creating") {
     const discovered = await input.provider.discoverResourcesByTag(
@@ -583,6 +586,7 @@ export async function createDigitalOceanRunnerForUser(
       return { ok: false, reason: "provider_not_configured" };
     }
 
+    const managedTags = [...new Set([...config.tags, DIGITALOCEAN_MANAGED_RUNNER_TAG])].sort();
     const hermesConfig = resolveHermesDeploymentConfig(config);
 
     logRunnerProvisioning("provider_config_loaded", {
@@ -597,7 +601,7 @@ export async function createDigitalOceanRunnerForUser(
       runnerMaxAgents: hermesConfig.runnerMaxAgents,
       releaseIdentityMode:
         config.providerMode === "local_docker" ? RUNNER_RELEASE_DEVELOPMENT_MODE : undefined,
-      tagCount: config.tags.length,
+      tagCount: managedTags.length,
       hasRunnerBearerToken: Boolean(config.runnerBearerToken),
       runnerBearerTokenFingerprint: fingerprintRunnerSecret(config.runnerBearerToken),
       sshKeyMode:
@@ -695,7 +699,7 @@ export async function createDigitalOceanRunnerForUser(
           hermesWorkloadImage: hermesConfig.hermesWorkloadImage,
           hermesPrivateNetwork: hermesConfig.hermesPrivateNetwork,
           runnerMaxAgents: hermesConfig.runnerMaxAgents,
-          tags: config.tags,
+          tags: managedTags,
           firewallNamePrefix,
         },
         now: createdAt,
@@ -793,7 +797,7 @@ export async function createDigitalOceanRunnerForUser(
           region: config.region,
           sizeSlug: config.sizeSlug,
           image: config.image,
-          tags: config.tags,
+          tags: managedTags,
           firewallName: firewallNamePrefix,
           sshKeyIds: sshAccess.sshKeyIds,
           userData: bootstrap.userData,
@@ -887,7 +891,7 @@ export async function createDigitalOceanRunnerForUser(
       execute: () =>
         provider.tagResource({
           providerResourceId: resource.value.providerResourceId,
-          tags: config.tags,
+          tags: managedTags,
         }),
     });
 
@@ -901,7 +905,7 @@ export async function createDigitalOceanRunnerForUser(
           runnerId,
           providerResourceId: resource.value.providerResourceId,
           failedPhase: "tagging",
-          tags: config.tags,
+          tags: managedTags,
           now,
         }),
       };
@@ -952,7 +956,7 @@ export async function createDigitalOceanRunnerForUser(
           runnerId,
           providerResourceId: resource.value.providerResourceId,
           failedPhase: "firewall_configuring",
-          tags: config.tags,
+          tags: managedTags,
           now,
         }),
       };

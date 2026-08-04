@@ -131,6 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Managed runner infrastructure now repairs externally deleted Droplets, stale assignments, and exact interrupted provisions automatically, while duplicate or ambiguous resources fail closed and only provably owned orphans are deleted after two authoritative observations.
 - Deleting an agent now remains authoritative after automatic setup is cancelled or its database tombstone is committed, so an unreachable assigned runner cannot leave the agent visible or require a second Delete attempt.
 - Cloud runners now use secret-safe in-container Hermes health probes and model-canary fallbacks when the private runner-to-workload network path is unavailable, and a genuine gateway readiness timeout captures logs, stops once, and fails clearly instead of looping through 64 start attempts.
 - Assigned DigitalOcean runners no longer raise misleading offline or degraded operational alerts while cloud provisioning is actively progressing.

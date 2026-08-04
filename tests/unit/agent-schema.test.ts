@@ -5,8 +5,8 @@ import {
   agentApprovalStatusEnum,
   agentApprovals,
   agentConfigs,
-  agentDeploymentStageEnum,
   agentDeploymentReplacementBudgets,
+  agentDeploymentStageEnum,
   agentDeployments,
   agentDesiredStatusEnum,
   agentEvents,
@@ -25,12 +25,14 @@ import {
   localRunnerProcessStatusEnum,
   runnerCredentials,
   runnerHeartbeats,
+  runnerInfrastructureOrphans,
+  runnerInfrastructureReconciliations,
   runnerProvisioningEvents,
-  runnerReplacementReasonEnum,
-  runnerReplacements,
-  runnerReplacementStateEnum,
-  runnerReplacementTerminalCodeEnum,
   runnerRegistrationTokens,
+  runnerReplacementReasonEnum,
+  runnerReplacementStateEnum,
+  runnerReplacements,
+  runnerReplacementTerminalCodeEnum,
   runners,
   users,
 } from "@/src/server/db/schema";
@@ -53,6 +55,10 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(getTableName(runners)).toBe("runners");
     expect(getTableName(runnerProvisioningEvents)).toBe("runner_provisioning_events");
     expect(getTableName(runnerReplacements)).toBe("runner_replacements");
+    expect(getTableName(runnerInfrastructureReconciliations)).toBe(
+      "runner_infrastructure_reconciliations",
+    );
+    expect(getTableName(runnerInfrastructureOrphans)).toBe("runner_infrastructure_orphans");
     expect(getTableName(runnerRegistrationTokens)).toBe("runner_registration_tokens");
     expect(getTableName(runnerCredentials)).toBe("runner_credentials");
     expect(getTableName(runnerHeartbeats)).toBe("runner_heartbeats");
@@ -497,6 +503,23 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(migration).toContain('CONSTRAINT "runner_replacements_terminal_state_check"');
     expect(migration).toContain('CONSTRAINT "runner_replacements_terminal_evidence_check"');
     expect(migration).toContain('CONSTRAINT "agent_deployment_replacement_budgets_count_check"');
+    expect(migration).not.toMatch(/DROP TABLE|DROP COLUMN|ALTER COLUMN|(?:^|\n)UPDATE /);
+  });
+
+  it("generates additive leased infrastructure and orphan-evidence tables", async () => {
+    const migration = await readFile("drizzle/0024_absurd_chamber.sql", "utf8");
+
+    expect(migration).toContain('CREATE TABLE "runner_infrastructure_reconciliations"');
+    expect(migration).toContain('CREATE TABLE "runner_infrastructure_orphans"');
+    expect(migration).toContain(
+      'CONSTRAINT "runner_infrastructure_reconciliations_lease_pair_check"',
+    );
+    expect(migration).toContain(
+      'CONSTRAINT "runner_infrastructure_orphans_observation_order_check"',
+    );
+    expect(migration).toContain(
+      'CREATE UNIQUE INDEX "runner_infrastructure_orphans_active_operation_idx"',
+    );
     expect(migration).not.toMatch(/DROP TABLE|DROP COLUMN|ALTER COLUMN|(?:^|\n)UPDATE /);
   });
 

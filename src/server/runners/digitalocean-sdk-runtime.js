@@ -51,6 +51,14 @@ export function createDigitalOceanSdkClient(token, apiBaseUrl) {
         },
       },
       firewalls: {
+        get: (input, context) =>
+          sendJson(
+            adapter,
+            client.v2.firewalls.toGetRequestInformation({
+              queryParameters: { perPage: input.perPage },
+            }),
+            context,
+          ),
         post: (body, context) =>
           sendJson(adapter, client.v2.firewalls.toPostRequestInformation(body), context),
         byFirewall_id: (id) => ({

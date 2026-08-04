@@ -1,6 +1,6 @@
-import { reconcileExternallyDeletedDigitalOceanRunners } from "@/src/server/runners/runner-placement-verification";
+import { reconcileNextRunnerInfrastructure } from "@/src/server/runners/runner-infrastructure-reconciler";
 
-const result = await reconcileExternallyDeletedDigitalOceanRunners();
+const result = await reconcileNextRunnerInfrastructure();
 
 console.log(
   JSON.stringify(
@@ -13,6 +13,6 @@ console.log(
   ),
 );
 
-if (result.providerCheckFailedRunnerIds.length > 0) {
+if (["provider_unavailable", "ambiguous_resource"].includes(result.outcome)) {
   process.exitCode = 1;
 }

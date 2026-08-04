@@ -785,6 +785,96 @@ export const runnerReplacements = pgTable(
   ],
 );
 
+export const runnerInfrastructureReconciliations = pgTable(
+  "runner_infrastructure_reconciliations",
+  {
+    scopeKey: text("scope_key").primaryKey().default("global"),
+    generation: integer("generation").notNull().default(0),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull(),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("runner_infrastructure_reconciliations_scope_check", sql`${table.scopeKey} = 'global'`),
+    check("runner_infrastructure_reconciliations_generation_check", sql`${table.generation} >= 0`),
+    check(
+      "runner_infrastructure_reconciliations_attempt_count_check",
+      sql`${table.attemptCount} >= 0`,
+    ),
+    check(
+      "runner_infrastructure_reconciliations_lease_owner_check",
+      sql`${table.leaseOwner} IS NULL OR ${table.leaseOwner} ~ '^runner-infrastructure:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'`,
+    ),
+    check(
+      "runner_infrastructure_reconciliations_lease_pair_check",
+      sql`(${table.leaseOwner} IS NULL AND ${table.leaseExpiresAt} IS NULL) OR (${table.leaseOwner} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL)`,
+    ),
+    index("runner_infrastructure_reconciliations_due_idx").on(
+      table.nextAttemptAt,
+      table.leaseExpiresAt,
+    ),
+  ],
+);
+
+export const runnerInfrastructureOrphans = pgTable(
+  "runner_infrastructure_orphans",
+  {
+    providerResourceId: text("provider_resource_id").primaryKey(),
+    operationTag: text("operation_tag").notNull(),
+    providerFirewallId: text("provider_firewall_id"),
+    expectedName: text("expected_name").notNull(),
+    expectedRegion: text("expected_region").notNull(),
+    expectedSizeSlug: text("expected_size_slug").notNull(),
+    observationCount: integer("observation_count").notNull().default(1),
+    firstObservedAt: timestamp("first_observed_at", { withTimezone: true }).notNull(),
+    lastObservedAt: timestamp("last_observed_at", { withTimezone: true }).notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "runner_infrastructure_orphans_resource_check",
+      sql`length(trim(${table.providerResourceId})) > 0`,
+    ),
+    check(
+      "runner_infrastructure_orphans_operation_check",
+      sql`${table.operationTag} ~ '^agentbay-deploy-[0-9a-f]{32}$'`,
+    ),
+    check(
+      "runner_infrastructure_orphans_firewall_check",
+      sql`${table.providerFirewallId} IS NULL OR length(trim(${table.providerFirewallId})) > 0`,
+    ),
+    check(
+      "runner_infrastructure_orphans_expected_fields_check",
+      sql`length(trim(${table.expectedName})) > 0 AND length(trim(${table.expectedRegion})) > 0 AND length(trim(${table.expectedSizeSlug})) > 0`,
+    ),
+    check(
+      "runner_infrastructure_orphans_observation_count_check",
+      sql`${table.observationCount} >= 1`,
+    ),
+    check(
+      "runner_infrastructure_orphans_observation_order_check",
+      sql`${table.lastObservedAt} >= ${table.firstObservedAt}`,
+    ),
+    check(
+      "runner_infrastructure_orphans_deleted_order_check",
+      sql`${table.deletedAt} IS NULL OR ${table.deletedAt} >= ${table.firstObservedAt}`,
+    ),
+    index("runner_infrastructure_orphans_grace_idx").on(
+      table.deletedAt,
+      table.firstObservedAt,
+      table.lastObservedAt,
+    ),
+    uniqueIndex("runner_infrastructure_orphans_active_operation_idx")
+      .on(table.operationTag)
+      .where(sql`${table.deletedAt} IS NULL`),
+  ],
+);
+
 export const agentDeploymentReplacementBudgets = pgTable(
   "agent_deployment_replacement_budgets",
   {

@@ -3,6 +3,7 @@ import "server-only";
 import { createDigitalOceanSdkClient } from "@/src/server/runners/digitalocean-sdk-runtime";
 
 export const DIGITALOCEAN_PROVIDER = "digitalocean";
+export const DIGITALOCEAN_MANAGED_RUNNER_TAG = "agentbay-runner";
 export const DIGITALOCEAN_RUNNER_KIND = "digitalocean";
 
 export type DigitalOceanProviderName = typeof DIGITALOCEAN_PROVIDER;
@@ -43,7 +44,7 @@ export type DigitalOceanResource = {
   image: string;
   tags: string[];
   firewallApplied: boolean;
-  createdAt: string;
+  createdAt: string | null;
   deletedAt: string | null;
 };
 
@@ -153,6 +154,10 @@ export type DigitalOceanDiscoverByTagInput = {
   tag: string;
 };
 
+export type DigitalOceanManagedInventoryInput = {
+  stableTag: string;
+};
+
 export type DigitalOceanProviderRequestContext = {
   signal: AbortSignal;
 };
@@ -163,6 +168,10 @@ export type DigitalOceanDiscovery = {
 };
 
 export interface DigitalOceanProvider {
+  listManagedResources?(
+    input: DigitalOceanManagedInventoryInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanDiscovery>>;
   listSshKeys(
     context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanSshKey[]>>;
@@ -246,6 +255,10 @@ export type DigitalOceanSdkClient = {
       };
     };
     firewalls: {
+      get?(
+        input: { perPage: number },
+        context?: DigitalOceanProviderRequestContext,
+      ): Promise<DigitalOceanFirewallsListResponse | undefined>;
       post(
         body: DigitalOceanFirewallBody,
         context?: DigitalOceanProviderRequestContext,
@@ -287,6 +300,8 @@ type DigitalOceanDropletCreateResponse = {
 
 type DigitalOceanDropletsListResponse = {
   droplets?: DigitalOceanApiDroplet[] | null;
+  links?: { pages?: { next?: string | null } | null } | null;
+  meta?: { total?: number | null } | null;
 };
 
 type DigitalOceanSshKeysResponse = {
@@ -313,6 +328,12 @@ type DigitalOceanApiSshKey = {
 
 type DigitalOceanFirewallCreateResponse = {
   firewall?: DigitalOceanApiFirewall | null;
+};
+
+type DigitalOceanFirewallsListResponse = {
+  firewalls?: DigitalOceanApiFirewall[] | null;
+  links?: { pages?: { next?: string | null } | null } | null;
+  meta?: { total?: number | null } | null;
 };
 
 type DigitalOceanFirewallReadResponse = {
@@ -515,7 +536,8 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
       return response;
     }
 
-    const resources = (response.value?.droplets ?? []).flatMap((droplet) => {
+    const droplets = response.value?.droplets ?? [];
+    const resources = droplets.flatMap((droplet) => {
       const resource = apiDropletToResource(droplet, null, this.#now);
 
       if (!resource?.tags.includes(input.tag)) {
@@ -526,7 +548,56 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
       return [cloneResource(resource)];
     });
 
-    return { ok: true, value: { authoritative: true, resources } };
+    const hasNextPage = Boolean(response.value?.links?.pages?.next);
+    const total = response.value?.meta?.total;
+    const countIsComplete = total === undefined || total === null || total <= droplets.length;
+    return {
+      ok: true,
+      value: { authoritative: !hasNextPage && countIsComplete, resources },
+    };
+  }
+
+  async listManagedResources(
+    input: DigitalOceanManagedInventoryInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanDiscovery>> {
+    const inventory = await this.discoverResourcesByTag({ tag: input.stableTag }, context);
+    const listFirewalls = this.#client.v2.firewalls.get;
+    if (!inventory.ok || !inventory.value.authoritative || !listFirewalls) {
+      return inventory;
+    }
+
+    const response = await runSdkStep(
+      "discovery_failed",
+      () => listFirewalls({ perPage: 200 }, context),
+      context,
+    );
+    if (!response.ok) return response;
+
+    const firewalls = response.value?.firewalls ?? [];
+    const hasNextPage = Boolean(response.value?.links?.pages?.next);
+    const total = response.value?.meta?.total;
+    const countIsComplete = total === undefined || total === null || total <= firewalls.length;
+    const resources = inventory.value.resources.map((resource) => {
+      const attached = firewalls.filter((firewall) =>
+        (firewall.dropletIds ?? firewall.droplet_ids ?? []).some(
+          (dropletId) => String(dropletId) === resource.providerResourceId,
+        ),
+      );
+      const firewall = attached.length === 1 ? attached[0] : undefined;
+      return {
+        ...resource,
+        providerFirewallId: firewall?.id?.trim() || null,
+        firewallApplied: Boolean(firewall?.id?.trim()),
+      };
+    });
+    return {
+      ok: true,
+      value: {
+        authoritative: !hasNextPage && countIsComplete,
+        resources,
+      },
+    };
   }
 
   async tagResource(
@@ -988,6 +1059,13 @@ export class FakeDigitalOceanProvider
     };
   }
 
+  async listManagedResources(
+    input: DigitalOceanManagedInventoryInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanDiscovery>> {
+    return await this.discoverResourcesByTag({ tag: input.stableTag }, context);
+  }
+
   async readResource(
     input: DigitalOceanReadInput,
     context?: DigitalOceanProviderRequestContext,
@@ -1230,7 +1308,9 @@ function apiDropletToResource(
     image: readApiSlug(droplet.image) ?? fallback?.image ?? "unknown",
     tags: [...new Set(droplet.tags ?? fallback?.tags ?? [])].sort(),
     firewallApplied: false,
-    createdAt: readApiDate(droplet.createdAt ?? droplet.created_at) ?? now().toISOString(),
+    createdAt:
+      readApiDate(droplet.createdAt ?? droplet.created_at) ??
+      (fallback ? now().toISOString() : null),
     deletedAt: null,
   };
 }

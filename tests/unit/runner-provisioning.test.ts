@@ -46,7 +46,7 @@ describe.sequential("runner provisioning service", () => {
           region: "nyc3",
           sizeSlug: "s-2vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay", "cloud-runner"],
+          tags: ["agentbay", "agentbay-runner", "cloud-runner"],
         }),
         createRegistrationToken: () => generatedRegistrationToken,
         now: sequenceClock("2026-07-06T02:00:00.000Z"),
@@ -85,7 +85,7 @@ describe.sequential("runner provisioning service", () => {
           region: "nyc3",
           sizeSlug: "s-2vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay", "cloud-runner"],
+          tags: ["agentbay", "agentbay-runner", "cloud-runner"],
           firewallName: "agentbay-runners",
           sshKeyIds: ["52830696"],
           userData: expect.stringContaining("AGENTBAY_RUNNER_REGISTRATION_TOKEN="),
@@ -95,7 +95,7 @@ describe.sequential("runner provisioning service", () => {
         step: "tag",
         input: {
           providerResourceId: "droplet-1",
-          tags: ["agentbay", "cloud-runner"],
+          tags: ["agentbay", "agentbay-runner", "cloud-runner"],
         },
       },
       {

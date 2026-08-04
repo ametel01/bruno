@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import postgres from "postgres";
 import { afterAll, describe, expect, it } from "vitest";
@@ -74,6 +74,29 @@ describe("runner replacement migration", () => {
       ]);
       await expect(
         sql`select count(*)::int as count from agent_deployment_replacement_budgets`,
+      ).resolves.toEqual([{ count: 0 }]);
+    } finally {
+      await sql.end();
+    }
+  });
+
+  it("upgrades through 0023 to leased infrastructure evidence without mutating owned rows", async () => {
+    const databaseUrl = await createDisposableDatabase("infrastructure_upgrade");
+    const sql = postgres(databaseUrl, { max: 1 });
+    try {
+      await applyMigrationsThrough(sql, 23);
+      await seedUpgradeFixture(sql);
+      const before = await readProtectedRows(sql);
+
+      await runDbMigrate(databaseUrl);
+      await runDbMigrate(databaseUrl);
+
+      await expect(readProtectedRows(sql)).resolves.toEqual(before);
+      await expect(
+        sql`select count(*)::int as count from runner_infrastructure_reconciliations`,
+      ).resolves.toEqual([{ count: 0 }]);
+      await expect(
+        sql`select count(*)::int as count from runner_infrastructure_orphans`,
       ).resolves.toEqual([{ count: 0 }]);
     } finally {
       await sql.end();
