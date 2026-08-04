@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "bun run vercel-build",
+  "ignoreCommand": "if [ \"${VERCEL_ENV:-}\" = \"production\" ] && [ \"${AGENTBAY_CANARY_VERIFIED_DEPLOY:-}\" != \"true\" ]; then exit 0; fi; exit 1",
   "crons": [
     {
       "path": "/api/internal/agent-deployments/reconcile",

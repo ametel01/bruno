@@ -256,6 +256,12 @@ describe("fake DigitalOcean provider", () => {
 });
 
 describe("DigitalOcean API provider", () => {
+  it("refuses to construct a network client in test processes", () => {
+    expect(() => new DigitalOceanApiProvider({ token: "unused" })).toThrow(
+      "DigitalOcean network access is disabled in test processes.",
+    );
+  });
+
   it("joins complete firewall inventory onto authoritative managed Droplets", async () => {
     const provider = new DigitalOceanApiProvider({
       token: "dop_v1_super_secret",

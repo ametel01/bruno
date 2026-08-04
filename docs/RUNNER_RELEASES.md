@@ -6,6 +6,19 @@ only its Git-SHA tag, verifies and scans the resulting digest, proves that immut
 disposable DigitalOcean Droplet, and only then deploys that same commit and image reference to
 Vercel.
 
+The linked Git repository does not deploy `main` directly to production. `vercel.json` skips an
+automatic production build unless the release workflow supplies its non-secret
+`AGENTBAY_CANARY_VERIFIED_DEPLOY=true` build marker. Preview builds remain enabled. The release and
+rollback jobs are the only repository-owned paths that supply that marker, preventing a push from
+bypassing image verification and the Droplet canary.
+
+Release workflow runs share one non-cancelling concurrency group. Automated and local tests create
+zero Droplets: the DigitalOcean provider rejects network-client construction in test processes, and
+provider tests must inject fake clients. A release run can provision exactly one
+canary Droplet only when the operator types `authorize-disposable-runner-release-smoke` into the
+`billable_canary_authorization` dispatch input. Another release run cannot enter the workflow until
+the current run has completed its canary cleanup.
+
 ## Protected environments
 
 Configure `runner-release-canary` with required reviewers and these scoped values:
@@ -28,6 +41,10 @@ Configure `production` with required reviewers and the existing Vercel project c
 | Secret | `CRON_SECRET` | Authenticates the post-deploy required-release check. |
 | Variable | `PRODUCTION_URL` | Canonical HTTPS production origin. |
 
+If the repository's GitHub plan cannot enforce required environment reviewers, do not dispatch a
+release. Upgrade the plan or add an equivalently protected approval boundary first; a plain manual
+dispatch is not a substitute for the required review.
+
 The canary injects `AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS=disabled`; it neither creates an account SSH
 key nor opens SSH ingress. `AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION` is set to the exact
 workflow sentinel only inside the reviewed canary job.
@@ -43,10 +60,10 @@ bun run runner:release:smoke -- --image \
 
 The command fails before side effects unless the immutable image, public HTTPS control plane,
 database, dedicated DigitalOcean configuration, bearer token, and explicit budget authorization
-are valid. It creates a uniquely tagged disposable runner, requires the exact image digest, OCI
-release version, boot contract, authenticated ready heartbeat, and all boot components. Those boot
-components exercise an isolated synthetic start, status/readiness probe, model canary, stop, and
-cleanup without Telegram or a paid model request.
+are valid. It creates exactly one uniquely tagged disposable runner, requires the exact image
+digest, OCI release version, boot contract, authenticated ready heartbeat, and all boot components.
+Those boot components exercise an isolated synthetic start, status/readiness probe, model canary,
+stop, and cleanup without Telegram or a paid model request.
 
 Cleanup runs in a `finally` path. It verifies exact operation-tag ownership, deletes the firewall
 before the Droplet, confirms the tagged provider set is absent, revokes runner credentials, and
@@ -72,6 +89,6 @@ the prior successful workflow run ID. The job downloads that run's `verified-run
 artifact and refuses any image that does not match it exactly. Rollback deploys with batch size `0`,
 verifies the required digest, and leaves rollout halted for operator review.
 
-Do not run the live smoke from a developer shell without the dedicated reviewed environment and
-explicit billable authorization. Credential-free runs are expected to exit with
-`capability_unavailable` and `sideEffectsAttempted: false`.
+Do not run the live smoke from a developer shell or as part of an automated test. Only the manually
+dispatched production release workflow may supply the exact billable authorization. Credential-free
+runs are expected to exit with `capability_unavailable` and `sideEffectsAttempted: false`.

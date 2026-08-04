@@ -395,6 +395,9 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
   readonly #resources = new Map<string, DigitalOceanResource>();
 
   constructor(options: DigitalOceanApiProviderOptions) {
+    if (process.env.NODE_ENV === "test" && options.client === undefined) {
+      throw new Error("DigitalOcean network access is disabled in test processes.");
+    }
     this.#client = options.client ?? createDigitalOceanSdkClient(options.token, options.apiBaseUrl);
     this.#now = options.now ?? (() => new Date());
   }

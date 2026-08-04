@@ -625,14 +625,15 @@ and replace the fleet in bounded batches.
 
 ### Current Status
 
-Step 11's repository implementation is complete in this commit, but Step 11 is
-not accepted because its required live release environment was not authorized or
-available. The protected workflow now builds one SHA-only candidate, verifies and
-scans its digest, runs the capability-gated exact-cleanup disposable-Droplet
-canary, and gates pinned Vercel deployment on that canary. Production rollout is
-limited to one runner per invocation and can be halted at zero; rollback requires
-a prior canary artifact. Live publication, canary, deploy, and post-deploy checks
-remain the next executable work before Step 12.
+Step 11's repository implementation is complete across `b471e77` and this
+follow-up commit, but Step 11 is not accepted because its required live release
+has not run. Test processes cannot construct a live DigitalOcean client. Release runs are
+serialized, require an exact typed billable authorization before creating their
+single disposable canary, and always request exact cleanup. Git-triggered Vercel
+production builds are skipped unless the canary-verified release or rollback job
+supplies its build marker. Production rollout is limited to one runner per
+invocation and can be halted at zero. Live publication, reviewed canary, deploy,
+and post-deploy checks remain required before Step 12.
 
 ### Step Ledger
 
@@ -649,7 +650,7 @@ remain the next executable work before Step 12.
 | 8. Reconcile DigitalOcean and Database Ownership | Complete | `166ac75` | Added additive leased reconciliation and orphan-evidence tables, authoritative stable-tag inventory with completeness/timestamp/firewall evidence, and a bounded one-result reconciler shared by a protected cron route and operator script. Exact matches remain unchanged; assigned missing or unhealthy runners start the durable replacement saga; unassigned missing rows are ownership-checked and tombstoned; stale deleted-runner assignments are cleared without changing desired state; exact interrupted operation-tag creates are adopted; duplicates and ambiguity never mutate or delete. Provably owned unassigned orphans require two authoritative observations separated by ten minutes before exact owned-set firewall-first cleanup, and active ownership outside the current database batch is rechecked before orphan handling. Focused provider, route, schema, migration, provisioning, reconciliation, orphan, race, and redaction coverage passed. Full format, lint, typecheck, 159-file / 1,533-test suite, production build, additive clean/upgrade/idempotent migrations, schema drift check, 440 ms local cloud smoke, 26/26 E2E, and diff hygiene passed. | Complete; Step 9 is next. |
 | 9. Replace Runners After Strict Deployment Deadlines | Complete | `19a3e8a` | Replaced same-runner launch retries with a strict accepted-at plus 30-second gateway deadline. Before expiry the controller polls only the accepted operation; at expiry it creates or reuses one deployment-linked replacement, pauses the deployment, captures at most one bounded redacted log batch, and stops once. Repeated missing endpoint, stale heartbeat, failed boot, release mismatch, and missing provider resource evidence enter the same durable saga. Active replacement work blocks deployment claims until Step 7 handover assigns the validated target and creates a fresh correlated deployment. Model and Telegram failures remain agent-specific, stage transitions reset independent retry budgets, and two replacement workflows in 24 hours produce one safe terminal result. Protected per-minute reconciliation and a post-response targeted kick provide durable progress. Exact 29,999/30,000 ms, classification, budget, no-relaunch, trigger, cron redaction, handover resume, and duplicate behavior passed. Full format, lint, typecheck, 161-file / 1,548-test suite, production build, 444 ms local cloud smoke, 81,907 ms Hermes contract smoke, 26/26 E2E, and diff hygiene passed. | Complete; Step 10 is next. |
 | 10. Present One Automatic Recovery Experience | Complete | `8830a1f` | Collapsed every pre-Telegram automatic deployment and live runner replacement into a safe Preparing your agent presentation, retained Connecting Telegram and Ready, and added a public replacement-capacity signal that strips private error evidence. Inventory, detail, root/dashboard summaries, live regions, and refresh/browser reopen preserve the same three-stage experience. Offline/degraded and assigned-runner alerts are suppressed during live replacement; technical runner, endpoint, release, and cost evidence remains closed in an advanced disclosure. Terminal recovery now uses one generic message with functional Retry and Stop actions, including persisted desired-stopped intent from error. Eleven focused presentation/projection/accessibility/lifecycle files passed 140 tests; terminal lifecycle coverage passed 148 focused tests. Full format/lint checked 379 files, typecheck passed, 161 files / 1,554 tests passed, production build passed, and 28/28 desktop/mobile E2E passed including refresh, reopen, 320px overflow, live-region, and private-identifier non-disclosure coverage. | Complete; Step 11 is next and external registry/provider effects require configured credentials and authorization. |
-| 11. Release Through an Immutable Disposable-Droplet Canary | Repository implementation complete; live acceptance pending | This commit | Replaced automatic mutable-main publication with a manually dispatched protected release/rollback workflow. One linux/amd64 Git-SHA build carries SBOM/max provenance, publishes only the SHA tag, emits and inspects the tag-plus-digest reference, and passes the same critical-fixable Trivy/SARIF gate as the Hermes image. The canary job requires a reviewed environment, explicit billable sentinel, dedicated DB/provider/bearer values, no SSH, and a 12-minute smoke that requires exact release heartbeat, compatible boot contract, all six synthetic boot actions, firewall-before-Droplet deletion, authoritative operation-tag absence, credential revocation, and runner tombstoning in a finally path. Vercel promotion depends on publish plus canary, pins Vercel CLI 58.0.0 and the exact commit/digest, sets rollout batch 1, and verifies health plus an authenticated required-release route. Rollback must match a prior 90-day canary artifact and deploys batch 0. Five focused workflow/smoke/route/env files passed 36 tests, the expanded release trio passed 13 tests, frozen install made no changes, full format/lint checked 384 files, typecheck passed, 164 files / 1,570 tests passed, production build passed, and the runner image built cleanly with no cache after Docker Desktop's cached SWC extraction failed. Credential-free smoke exited `capability_unavailable` with `sideEffectsAttempted: false`. | Blocked pending approved `runner-release-canary` and `production` environments, GHCR publication, dedicated DigitalOcean budget/token, production callback/database/bearer values, Vercel credentials, real immutable digest, disposable-Droplet cleanup evidence, and successful post-deploy checks. Step 12 must not begin before those gates pass. |
+| 11. Release Through an Immutable Disposable-Droplet Canary | Repository implementation complete; live acceptance pending | `b471e77` + This commit | Replaced automatic mutable-main publication with a manually dispatched release/rollback workflow. One linux/amd64 Git-SHA build carries SBOM/max provenance, publishes only the SHA tag, emits and inspects the tag-plus-digest reference, and passes the same critical-fixable Trivy/SARIF gate as the Hermes image. Test processes cannot construct a live DigitalOcean client; provider tests must inject fakes and create zero Droplets. Release runs are serialized and require the exact typed billable authorization before their single disposable canary can run; the 12-minute smoke requires exact release heartbeat, compatible boot contract, all six synthetic boot actions, firewall-before-Droplet deletion, authoritative operation-tag absence, credential revocation, and runner tombstoning in a finally path. Git-linked production builds are skipped unless the release workflow supplies its canary marker. Vercel promotion depends on publish plus canary, pins the exact commit/digest, sets rollout batch 1, and verifies health plus an authenticated required-release route. Rollback must match a prior 90-day canary artifact and deploys batch 0. Follow-up release/provider/smoke coverage passed 3 files / 28 tests; full format/lint checked 384 files, typecheck passed, 164 files / 1,572 tests passed on a clean migrated temporary database, and the production build passed. | Blocked pending a reviewer-protected approval boundary (unsupported by the current GitHub plan), GHCR publication, explicit billable release authorization, a real immutable digest, one disposable release-canary cleanup proof, and successful Vercel post-deploy checks. Step 12 must not begin before those gates pass. |
 | 12. Migration, Rollout, and Final Acceptance | Pending | Pending | Not started. | Waits for Steps 0-11. |
 
 ### Validation Ledger
@@ -767,7 +768,9 @@ remain the next executable work before Step 12.
 | 11 | `bun run build` | Passed; production build includes `/api/internal/runner-release/required`. |
 | 11 | `docker build -f Dockerfile.runner -t plingpling-runner:resilience .` | Initial cached build failed during Docker Desktop extraction of `@next/swc-linux-arm64-musl`; the clean `--no-cache` build then passed and exported/unpacked `plingpling-runner:resilience`. |
 | 11 | Credential-free `runner:release:smoke` preflight | Failed closed as designed with `capability_unavailable`, four missing capability names, `sideEffectsAttempted: false`, and no secret values. |
-| 11 | Live GHCR publish, Trivy scan of published digest, disposable DigitalOcean Droplet canary, Vercel production deploy, `/health`, and required-release verification | Not run. Explicit reviewed environments, registry/provider/budget/production authorization, and credentials are unavailable; no live acceptance is claimed. |
+| 11 | Follow-up provider, workflow, and smoke contracts | Passed 3 files / 28 tests. Test processes cannot construct the real DigitalOcean network client, release runs are serialized, a typed exact authorization is required before the one-Droplet release canary, Git-linked production builds fail closed, previews remain enabled, and only verified release/rollback commands carry the Vercel marker. |
+| 11 | Follow-up clean migration, full suite, and build | Passed all migrations through 0024 on an isolated temporary local database, 164 files / 1,572 tests, format/lint across 384 files, typecheck, production build, and diff hygiene. The temporary database was removed; no provider or cloud effect occurred. |
+| 11 | Live GHCR publish, Trivy scan of published digest, disposable DigitalOcean release canary, Vercel production deploy, `/health`, and required-release verification | Not run. Environment values are configured, but required reviewer protection is unsupported by the current GitHub plan and no explicit billable release authorization was given; no live acceptance is claimed. |
 
 ### Step 1 Gap Matrix
 
@@ -875,7 +878,16 @@ remain the next executable work before Step 12.
   preflight, full-suite, build, and runner-image gates passed. The live GHCR,
   DigitalOcean, and Vercel gates were not authorized or run, so Step 11 remains
   pending and Step 12 remains blocked. The focused commit is `ci: release
-  runners through droplet canary` (`This commit`).
+  runners through droplet canary` (`b471e77`).
+- 2026-08-05: Hardened Step 11 so test processes cannot construct a live
+  DigitalOcean client and therefore create zero Droplets,
+  release runs serialize globally, the single disposable release canary requires
+  an exact typed billable authorization, and Git-linked Vercel production builds
+  cannot bypass the canary. Focused workflow/smoke tests passed 12/12; the full
+  1,572-test suite, production build, format, lint, typecheck, and diff hygiene
+  passed without any provider effect. Step 11 remains pending live reviewed
+  acceptance. The focused commit is `ci: require explicit runner canary
+  authorization` (`This commit`).
 
 ### Next Step
 
