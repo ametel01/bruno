@@ -17,9 +17,9 @@ import {
 } from "@/src/server/agents/agent-runtime-lifecycle";
 import { scheduleAgentRuntimeReconcileAfterResponse } from "@/src/server/agents/agent-runtime-triggers";
 import { revokeActiveAgentSecretsInTransaction } from "@/src/server/agents/agent-secrets";
+import { getAssistantProfileForManagedModel } from "@/src/server/agents/assistant-profiles";
 import { hermesConfigurationBlocker } from "@/src/server/agents/hermes-readiness";
 import { getApprovedOpenRouterModel } from "@/src/server/agents/openrouter-models";
-import { getAssistantProfileForManagedModel } from "@/src/server/agents/assistant-profiles";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
 import {
@@ -2836,7 +2836,12 @@ export async function deleteAgentForUser(
           metadata: { fromStatus: currentAgent.status, toStatus: "deleted" },
         });
 
-        return { ok: true, managed: true, agent: deletedAgent } as const;
+        return {
+          ok: true,
+          managed: true,
+          cleanupFailureIsNonBlocking: true,
+          agent: deletedAgent,
+        } as const;
       }
 
       if (runtimeClassification.kind === "managed_unavailable") {
@@ -2871,10 +2876,19 @@ export async function deleteAgentForUser(
           message: `Agent "${deletedAgent.name}" deleted from active views.`,
           metadata: { fromStatus: currentAgent.status, toStatus: "deleted" },
         });
-        return { ok: true, managed: true, agent: deletedAgent } as const;
+        return {
+          ok: true,
+          managed: true,
+          cleanupFailureIsNonBlocking: true,
+          agent: deletedAgent,
+        } as const;
       }
 
-      return { ok: true, agent: currentAgent } as const;
+      return {
+        ok: true,
+        cleanupFailureIsNonBlocking: activeDeployment !== null,
+        agent: currentAgent,
+      } as const;
     });
 
     if (!validation.ok) {
@@ -2886,12 +2900,20 @@ export async function deleteAgentForUser(
       (await createDefaultDockerRunnerAdapter(connection, userId));
     const cleanup = await dockerRunnerAdapter.cleanup(normalizedAgentId);
 
-    if (!cleanup.ok) {
+    if (!cleanup.ok && !validation.cleanupFailureIsNonBlocking) {
       return {
         ok: false,
         reason: "runner_cleanup_failed",
         status: validation.agent.status,
       };
+    }
+
+    if (!cleanup.ok) {
+      console.warn("[agentbay] agent.delete", {
+        event: "runner_cleanup_incomplete",
+        agentId: normalizedAgentId,
+        source: "docker_runner",
+      });
     }
 
     const assignedRunner = validation.agent.runnerId
@@ -2909,12 +2931,20 @@ export async function deleteAgentForUser(
         dependencies,
       });
 
-      if (!manualCleanup.ok) {
+      if (!manualCleanup.ok && !validation.cleanupFailureIsNonBlocking) {
         return {
           ok: false,
           reason: "runner_cleanup_failed",
           status: validation.agent.status,
         };
+      }
+
+      if (!manualCleanup.ok) {
+        console.warn("[agentbay] agent.delete", {
+          event: "runner_cleanup_incomplete",
+          agentId: normalizedAgentId,
+          source: "assigned_runner",
+        });
       }
     }
 
@@ -2964,7 +2994,7 @@ export async function deleteAgentForUser(
           fromStatus: validation.agent.status,
           toStatus: "deleted",
           deletedAt: now.toISOString(),
-          ...(cleanup.container
+          ...(cleanup.ok && cleanup.container
             ? {
                 dockerContainerId: cleanup.container.containerId,
                 dockerContainerStatus: cleanup.container.observedStatus,

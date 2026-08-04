@@ -6,8 +6,8 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import {
   agentDeployments,
   agentEvents,
-  agentUsagePeriods,
   agents,
+  agentUsagePeriods,
   runners,
   users,
 } from "@/src/server/db/schema";
@@ -128,6 +128,37 @@ describe("automatic deployment lifecycle cancellation", () => {
     expect(cleanup).toHaveBeenCalledOnce();
     const [agent] = await connection.db.select().from(agents).where(eq(agents.id, AGENT_ID));
     expect(agent).toMatchObject({ desiredStatus: "stopped", deletedAt: NOW });
+  });
+
+  it("finishes deletion after cancelling setup even when the assigned runner cannot clean up", async () => {
+    await seedRunner(connection);
+    await seedAgent(connection, { status: "starting", runnerId: RUNNER_ID });
+    await seedActiveDeployment(connection, "configuring_hermes");
+    const cleanup = vi.fn(async () => ({ ok: false as const }));
+
+    const result = await deleteAgentForUser(USER_ID, AGENT_ID, {
+      createConnection: () => connection,
+      now: () => NOW,
+      dockerRunnerAdapter: {
+        cleanup: vi.fn(async () => ({ ok: true as const, container: null })),
+      },
+      manualRunnerAdapter: () =>
+        ({
+          cleanup,
+          stop: vi.fn(async () => ({ ok: false as const })),
+        }) as never,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      agent: { id: AGENT_ID, deletedAt: NOW.toISOString() },
+    });
+    expect(cleanup).toHaveBeenCalledOnce();
+    const [agent] = await connection.db.select().from(agents).where(eq(agents.id, AGENT_ID));
+    const [deployment] = await connection.db.select().from(agentDeployments);
+
+    expect(agent).toMatchObject({ desiredStatus: "stopped", deletedAt: NOW });
+    expect(deployment).toMatchObject({ stage: "failed", errorCode: "agent_deleted" });
   });
 });
 

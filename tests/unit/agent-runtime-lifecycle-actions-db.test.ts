@@ -271,6 +271,31 @@ describe("managed runtime lifecycle actions", () => {
     expect(dockerCleanup).toHaveBeenCalledOnce();
     expect(manualStop).toHaveBeenCalledOnce();
   });
+
+  it("keeps a managed Delete successful when cleanup fails after its tombstone", async () => {
+    await seedManagedAgent(connection);
+    const manualStop = vi.fn(async () => ({ ok: false as const }));
+
+    const result = await deleteAgentForUser(USER_ID, AGENT_ID, {
+      createConnection: () => connection,
+      now: () => NOW,
+      dockerRunnerAdapter: {
+        cleanup: vi.fn(async () => ({ ok: false as const, reason: "docker_rm_failed" as const })),
+      },
+      manualRunnerAdapter: () =>
+        ({
+          stop: manualStop,
+        }) as never,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      agent: { id: AGENT_ID, deletedAt: NOW.toISOString() },
+    });
+    expect(manualStop).toHaveBeenCalledOnce();
+    const [agent] = await connection.db.select().from(agents);
+    expect(agent).toMatchObject({ desiredStatus: "stopped", deletedAt: NOW });
+  });
 });
 
 async function seedManagedAgent(

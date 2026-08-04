@@ -126,6 +126,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Deleting an agent now remains authoritative after automatic setup is cancelled or its database tombstone is committed, so an unreachable assigned runner cannot leave the agent visible or require a second Delete attempt.
 - Cloud runners now use secret-safe in-container Hermes health probes and model-canary fallbacks when the private runner-to-workload network path is unavailable, and a genuine gateway readiness timeout captures logs, stops once, and fails clearly instead of looping through 64 start attempts.
 - Assigned DigitalOcean runners no longer raise misleading offline or degraded operational alerts while cloud provisioning is actively progressing.
 - The empty agent list now shows a real “Create your first agent” action that jumps to Guided setup instead of leaving a decorative line that could be mistaken for a broken button.
