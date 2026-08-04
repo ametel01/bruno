@@ -1102,6 +1102,8 @@ describe("product shell routes", () => {
     expect(html).toContain("Claude");
     expect(html).toContain("OpenAI API key");
     expect(html).toContain("Create my agent");
+    expect(html).toContain('href="#create-agent-title"');
+    expect(html).toContain(">Create your first agent</a>");
     expect(html).toContain("We handle the rest");
     expect(html).not.toContain("OpenRouter");
     expect(html).not.toContain("Template catalogue");

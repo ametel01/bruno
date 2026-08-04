@@ -194,6 +194,7 @@ export default async function AgentsPage() {
               <EmptyState
                 title="No agents yet"
                 description="Create your first agent below. Setup usually takes only a few minutes."
+                action={{ href: "#create-agent-title", label: "Create your first agent" }}
               />
             )
           ) : (

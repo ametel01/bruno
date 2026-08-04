@@ -71,21 +71,24 @@ export function ProductShell({ active, eyebrow, title, description, children }: 
 type EmptyStateProps = {
   title: string;
   description: string;
-  actionLabel?: string;
+  action?: {
+    href: string;
+    label: string;
+  };
 };
 
-export function EmptyState({ title, description, actionLabel }: EmptyStateProps) {
+export function EmptyState({ title, description, action }: EmptyStateProps) {
   return (
     <section className="empty-state" aria-labelledby="empty-state-title">
-      <div className="empty-state-rule" aria-hidden="true" />
+      {!action ? <div className="empty-state-rule" aria-hidden="true" /> : null}
       <div>
         <h2 id="empty-state-title">{title}</h2>
         <p>{description}</p>
       </div>
-      {actionLabel ? (
-        <button className="disabled-button" type="button" disabled>
-          {actionLabel}
-        </button>
+      {action ? (
+        <Link className="primary-button empty-state-action" href={action.href}>
+          {action.label}
+        </Link>
       ) : null}
     </section>
   );

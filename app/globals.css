@@ -381,6 +381,14 @@ h2 {
   margin-bottom: 0;
 }
 
+.empty-state-action {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 .disabled-button {
   width: fit-content;
   min-height: 42px;
