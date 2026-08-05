@@ -9,10 +9,30 @@ export type DatabaseConnection = {
   close: () => Promise<void>;
 };
 
+export function normalizePostgresConnectionString(databaseUrl: string): string {
+  let parsed: URL;
+
+  try {
+    parsed = new URL(databaseUrl);
+  } catch {
+    return databaseUrl;
+  }
+
+  if (
+    (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") ||
+    parsed.searchParams.get("sslrootcert") !== "system"
+  ) {
+    return databaseUrl;
+  }
+
+  parsed.searchParams.delete("sslrootcert");
+  return parsed.toString();
+}
+
 export function createDatabaseConnection(
   databaseUrl = getServerEnv().DATABASE_URL,
 ): DatabaseConnection {
-  const client = postgres(databaseUrl, {
+  const client = postgres(normalizePostgresConnectionString(databaseUrl), {
     connect_timeout: 5,
     idle_timeout: 5,
     max: 1,
