@@ -14,6 +14,7 @@
     "local:cloud:down": "sh -lc 'docker rm --force agentbay-local-cloud-runner agentbay-runner >/dev/null 2>&1 || true; ids=$(docker ps -aq --filter label=agentbay.agent_id); if [ -n \"$ids\" ]; then docker rm --force $ids >/dev/null 2>&1 || true; fi; docker compose --profile local-cloud down --remove-orphans'",
     "local:cloud:smoke": "bun --conditions react-server scripts/smoke-local-cloud.ts",
     "local:cloud:up": "AGENTBAY_POSTGRES_HOST_PORT=${AGENTBAY_POSTGRES_HOST_PORT:-55432} docker compose --profile local-cloud up --build dashboard",
+    "local:agent:smoke": "AGENTBAY_DIGITALOCEAN_PROVIDER_MODE=local_docker AGENTBAY_DIGITALOCEAN_TOKEN=local-docker AGENTBAY_LOCAL_AGENT_SMOKE_MODE=synthetic-external-boundaries bun --conditions react-server scripts/smoke-local-agent-cycle.ts",
     "local:down": "docker compose down --remove-orphans",
     "local:up": "docker compose up -d postgres && bun run db:migrate && AGENTBAY_AUTH_MODE=development bun run dev",
     "agent:hermes:contract-smoke": "bun --conditions react-server scripts/smoke-local-hermes-contract.ts",

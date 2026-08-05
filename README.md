@@ -89,6 +89,20 @@ bun run local:cloud:smoke
 The smoke check creates a persisted test agent and runner. A successful result either starts the
 agent or reaches the expected Hermes-setup gate.
 
+To exercise the complete ready-agent lifecycle without any DigitalOcean request, run:
+
+```sh
+bun run local:agent:smoke
+```
+
+This command refuses non-local provider configuration and existing harness containers, creates
+exactly one Docker-based Droplet simulator, and drives the production create, deployment, model
+canary, restart, stop, delete, and cleanup services against a fresh local database. The OpenAI
+model route and Telegram network health are synthetic local boundaries; Hermes itself runs in the
+real pinned workload container. Success includes persisted cleanup and exact container-absence
+checks. This is a zero-cloud regression gate, not DigitalOcean API, firewall, routing, or real
+Telegram acceptance.
+
 Stop the stack and its agent containers with:
 
 ```sh
@@ -392,6 +406,7 @@ enable ready mode by treating mock or local evidence as live acceptance.
 | `bun run local:up` / `bun run local:down` | Start or stop PostgreSQL plus the direct local app path. |
 | `bun run local:cloud:up` / `bun run local:cloud:down` | Start or stop the complete local cloud simulation. |
 | `bun run local:cloud:smoke` | Create an agent and exercise local runner provisioning. |
+| `bun run local:agent:smoke` | Run the full ready-agent lifecycle on exactly one local simulated Droplet with zero provider requests. |
 | `bun run db:migrate` | Apply committed Drizzle migrations. |
 | `bun run db:generate` | Generate a migration from schema changes. |
 | `bun run db:health` | Check database connectivity. |

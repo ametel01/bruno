@@ -19,18 +19,21 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.local-app
-    command: sh -lc "rm -rf .next/* && bun install --frozen-lockfile && bun run local:cloud:prepare && bun run db:migrate && bun run build && sed -i 's#./.next/types/routes.d.ts#./.next/dev/types/routes.d.ts#' next-env.d.ts && bun run start --hostname 0.0.0.0"
+    command: sh -lc "rm -rf .next/* && bun install --frozen-lockfile && bun run db:migrate && bun run local:cloud:prepare && bun run build && sed -i 's#./.next/types/routes.d.ts#./.next/dev/types/routes.d.ts#' next-env.d.ts && bun run start --hostname 0.0.0.0"
     depends_on:
       local-cloud-runner-image:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
     environment:
+      AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: ${AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION:-}
+      AGENTBAY_AGENT_SECRET_KEYS_JSON: ${AGENTBAY_AGENT_SECRET_KEYS_JSON:-}
       AGENTBAY_AUTH_MODE: development
       DATABASE_URL: postgres://agentbay:agentbay@postgres:5432/plingpling
       NEXT_PUBLIC_APP_URL: http://host.docker.internal:3000
       AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: local_docker
       AGENTBAY_DIGITALOCEAN_TOKEN: local-docker
+      AGENTBAY_HERMES_WORKLOAD_IMAGE: ${AGENTBAY_HERMES_WORKLOAD_IMAGE:-agentbay-hermes:local}
       AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: none
       AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: http://host.docker.internal:3045
       AGENTBAY_RUNNER_BEARER_TOKEN: local-runner-command-token
@@ -47,6 +50,7 @@ services:
 
   local-cloud-runner-image:
     image: agentbay-runner:local
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile.runner

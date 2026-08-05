@@ -6,6 +6,7 @@ describe("local Docker DigitalOcean provider", () => {
   it("runs generated cloud runner bootstrap user-data inside a local Ubuntu droplet simulator", async () => {
     const dockerCalls: string[][] = [];
     const provider = new LocalDockerDigitalOceanProvider({
+      agentSmokeMode: true,
       containerName: "agentbay-local-cloud-runner-test",
       endpointUrl: "http://host.docker.internal:3045",
       startDelayMs: 0,
@@ -61,7 +62,7 @@ describe("local Docker DigitalOcean provider", () => {
       "--add-host",
       "host.docker.internal:host-gateway",
     ]);
-    expect(dockerCalls[2]).toContain("ubuntu:24.04");
+    expect(dockerCalls[2]).toContain("agentbay-local-droplet:ubuntu-24.04");
     expect(dockerCalls[2]).toContain(
       "AGENTBAY_LOCAL_RUNNER_ENDPOINT_URL=http://host.docker.internal:3045",
     );
@@ -77,12 +78,12 @@ describe("local Docker DigitalOcean provider", () => {
       "base64",
     ).toString("utf8");
 
-    expect(bootstrapScript).toContain("apt-get install -y bash ca-certificates curl gnupg python3");
+    expect(bootstrapScript).not.toContain("apt-get install");
     expect(bootstrapScript).toContain(
       "169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address",
     );
     expect(bootstrapScript).toContain(
-      `if [[ "${"$"}{1:-}" == "pull" && "${"$"}{2:-}" == "agentbay-runner:local" ]]; then`,
+      `if [[ "${"$"}{1:-}" == "pull" && ( "${"$"}{2:-}" == "agentbay-runner:local" || "${"$"}{2:-}" == "agentbay-hermes:local" ) ]]; then`,
     );
     expect(bootstrapScript).toContain('exec /usr/bin/docker "$@"');
     expect(bootstrapScript).toContain(
@@ -102,6 +103,9 @@ describe("local Docker DigitalOcean provider", () => {
     expect(bootstrapScript).toContain("--env-file");
     expect(bootstrapScript).toContain("/etc/agentbay/runner.env");
     expect(bootstrapScript).toContain("AGENTBAY_RUNNER_MAX_AGENTS=1");
+    expect(bootstrapScript).toContain(
+      "AGENTBAY_LOCAL_AGENT_SMOKE_MODE=synthetic-external-boundaries",
+    );
     expect(bootstrapScript).toContain("docker network create");
     expect(bootstrapScript).toContain("hermes_image_pull");
     expect(bootstrapScript).toContain(

@@ -336,6 +336,7 @@ describe("server-only provider environment validation", () => {
         AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: "http://host.docker.internal:3045",
         AGENTBAY_LOCAL_CLOUD_RUNNER_CONTAINER_NAME: "agentbay-local-cloud-runner",
         AGENTBAY_LOCAL_CLOUD_RUNNER_START_DELAY_MS: "0",
+        AGENTBAY_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
       }),
     ).toMatchObject({
       token: "local-docker",
@@ -345,7 +346,28 @@ describe("server-only provider environment validation", () => {
       localRunnerEndpointUrl: "http://host.docker.internal:3045",
       localRunnerContainerName: "agentbay-local-cloud-runner",
       localRunnerStartDelayMs: 0,
+      localAgentSmokeMode: true,
     });
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "digitalocean",
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        AGENTBAY_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
+      }),
+    ).toThrow(EnvValidationError);
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
+        AGENTBAY_DIGITALOCEAN_TOKEN: "not-the-local-sentinel",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_RUNNER_IMAGE: "agentbay-runner:local",
+        AGENTBAY_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
+      }),
+    ).toThrow(EnvValidationError);
   });
 
   it("parses DigitalOcean SSH access configuration for Droplet creation", () => {

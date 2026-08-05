@@ -26,6 +26,7 @@ type RunnerBootstrapEnv = {
   AGENTBAY_RUNNER_EXPECTED_IMAGE_DIGEST?: string;
   AGENTBAY_RUNNER_EXPECTED_BOOT_CONTRACT_VERSION?: string;
   AGENTBAY_RUNNER_RELEASE_IDENTITY_MODE?: string;
+  AGENTBAY_LOCAL_AGENT_SMOKE_MODE?: string;
 };
 
 type WriteRunnerEnvFile = (
@@ -193,6 +194,7 @@ function buildPersistedRunnerEnv(input: {
     RUNNER_EXPECTED_IMAGE_DIGEST_ENV,
     RUNNER_EXPECTED_BOOT_CONTRACT_VERSION_ENV,
     RUNNER_RELEASE_IDENTITY_MODE_ENV,
+    "AGENTBAY_LOCAL_AGENT_SMOKE_MODE",
   ] as const) {
     const value = input.env[key]?.trim();
 

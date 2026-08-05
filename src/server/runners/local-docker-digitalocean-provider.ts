@@ -26,7 +26,9 @@ const DEFAULT_LOCAL_START_DELAY_MS = 1_000;
 const DOCKER_SOCKET = "/var/run/docker.sock";
 const DOCKER_TIMEOUT_MS = 30_000;
 const LOCAL_DROPLET_IMAGE = "ubuntu:24.04";
+export const LOCAL_AGENT_SMOKE_DROPLET_IMAGE = "agentbay-local-droplet:ubuntu-24.04";
 const LOCAL_DROPLET_PLATFORM = "linux/amd64";
+const LOCAL_HERMES_WORKLOAD_IMAGE = "agentbay-hermes:local";
 const LOCAL_PRODUCTION_RUNNER_CONTAINER_NAME = "agentbay-runner";
 const LOCAL_SIMULATED_PUBLIC_IPV4 = "127.0.0.1";
 const LOCAL_HOST_BRIDGE_DIR = "/tmp/agentbay-local-cloud";
@@ -37,6 +39,7 @@ type DockerRunner = (
 ) => Promise<{ stdout: string; stderr: string }>;
 
 export type LocalDockerDigitalOceanProviderOptions = {
+  agentSmokeMode?: boolean;
   containerName?: string;
   docker?: DockerRunner;
   endpointUrl?: string;
@@ -46,6 +49,7 @@ export type LocalDockerDigitalOceanProviderOptions = {
 
 export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
   readonly #containerName: string;
+  readonly #agentSmokeMode: boolean;
   readonly #docker: DockerRunner;
   readonly #endpointUrl: string;
   readonly #now: () => Date;
@@ -53,6 +57,7 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
   readonly #startDelayMs: number;
 
   constructor(options: LocalDockerDigitalOceanProviderOptions = {}) {
+    this.#agentSmokeMode = options.agentSmokeMode ?? false;
     this.#containerName = options.containerName ?? DEFAULT_LOCAL_CONTAINER_NAME;
     this.#docker = options.docker ?? runDocker;
     this.#endpointUrl = options.endpointUrl ?? DEFAULT_LOCAL_ENDPOINT_URL;
@@ -209,6 +214,7 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
     try {
       await this.#removeLocalContainers();
       const script = buildLocalCloudInitScript(input.userData ?? "", {
+        agentSmokeMode: this.#agentSmokeMode,
         localRunnerEndpointUrl: this.#endpointUrl,
       });
       await this.#docker([
@@ -238,7 +244,7 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
         `AGENTBAY_LOCAL_HOST_BRIDGE_DIR=${LOCAL_HOST_BRIDGE_DIR}`,
         "--env",
         `DOCKER_DEFAULT_PLATFORM=${LOCAL_DROPLET_PLATFORM}`,
-        LOCAL_DROPLET_IMAGE,
+        this.#agentSmokeMode ? LOCAL_AGENT_SMOKE_DROPLET_IMAGE : LOCAL_DROPLET_IMAGE,
         "bash",
         "-lc",
         [
@@ -276,7 +282,7 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
 
 function buildLocalCloudInitScript(
   userData: string,
-  options: { localRunnerEndpointUrl: string },
+  options: { agentSmokeMode: boolean; localRunnerEndpointUrl: string },
 ): string {
   const commands = extractCloudInitRuncmdCommands(userData);
   const commandScripts = commands.flatMap((command, index) => {
@@ -288,7 +294,11 @@ function buildLocalCloudInitScript(
       scripts.push(buildLocalEndpointBridgeScript());
     }
 
-    scripts.push(`bash -lc ${shellQuote(command)}`);
+    scripts.push(
+      options.agentSmokeMode && isLocalAgentSmokePackageBootstrap(command)
+        ? `echo ${shellQuote("Local agent smoke uses the prepared Droplet image.")}`
+        : `bash -lc ${shellQuote(command)}`,
+    );
 
     return scripts;
   });
@@ -297,8 +307,9 @@ function buildLocalCloudInitScript(
     "#!/usr/bin/env bash",
     "set -euo pipefail",
     "export DEBIAN_FRONTEND=noninteractive",
-    "apt-get update",
-    "apt-get install -y bash ca-certificates curl gnupg python3",
+    ...(options.agentSmokeMode
+      ? []
+      : ["apt-get update", "apt-get install -y bash ca-certificates curl gnupg python3"]),
     "install -m 0755 -d /usr/local/bin",
     "cat > /usr/local/bin/curl <<'AGENTBAY_LOCAL_CURL'",
     "#!/usr/bin/env bash",
@@ -312,7 +323,7 @@ function buildLocalCloudInitScript(
     "cat > /usr/local/bin/docker <<'AGENTBAY_LOCAL_DOCKER'",
     "#!/usr/bin/env bash",
     "set -euo pipefail",
-    `if [[ "${"$"}{1:-}" == "pull" && "${"$"}{2:-}" == "agentbay-runner:local" ]]; then`,
+    `if [[ "${"$"}{1:-}" == "pull" && ( "${"$"}{2:-}" == "agentbay-runner:local" || "${"$"}{2:-}" == "${LOCAL_HERMES_WORKLOAD_IMAGE}" ) ]]; then`,
     '  /usr/bin/docker image inspect "$2" >/dev/null',
     "  exit 0",
     "fi",
@@ -324,6 +335,11 @@ function buildLocalCloudInitScript(
     '    cp /etc/agentbay/runner.env "$bridge_env"',
     '    sed -i "s#^AGENTBAY_HERMES_STATE_ROOT=.*#AGENTBAY_HERMES_STATE_ROOT=$bridge_dir/var/lib/agentbay/agents#" "$bridge_env"',
     '    sed -i "s#^AGENTBAY_RUNNER_BOOT_SELF_TEST_ROOT=.*#AGENTBAY_RUNNER_BOOT_SELF_TEST_ROOT=$bridge_dir/var/lib/agentbay/boot-self-test#" "$bridge_env"',
+    ...(options.agentSmokeMode
+      ? [
+          '    printf "%s\\n" "AGENTBAY_LOCAL_AGENT_SMOKE_MODE=synthetic-external-boundaries" >> "$bridge_env"',
+        ]
+      : []),
     "  fi",
     "  translated=()",
     `  translated+=("run" "--add-host" "host.docker.internal:host-gateway")`,
@@ -362,9 +378,27 @@ function buildLocalCloudInitScript(
     "exit 0",
     "AGENTBAY_LOCAL_SYSTEMCTL",
     "chmod 0755 /usr/local/bin/systemctl",
+    ...(options.agentSmokeMode
+      ? [
+          "cat > /usr/local/bin/caddy <<'AGENTBAY_LOCAL_CADDY'",
+          "#!/usr/bin/env bash",
+          "exit 0",
+          "AGENTBAY_LOCAL_CADDY",
+          "chmod 0755 /usr/local/bin/caddy",
+          "install -m 0755 -d /etc/caddy",
+        ]
+      : []),
     `export AGENTBAY_LOCAL_RUNNER_ENDPOINT_URL=${shellQuote(options.localRunnerEndpointUrl)}`,
     ...commandScripts,
   ].join("\n");
+}
+
+function isLocalAgentSmokePackageBootstrap(command: string): boolean {
+  return (
+    command.includes("AGENTBAY_BOOTSTRAP_STEP=docker_apt_repository") ||
+    command.startsWith("apt-get install -y docker-ce ") ||
+    command === "apt-get install -y caddy"
+  );
 }
 
 function buildLocalEndpointBridgeScript(): string {

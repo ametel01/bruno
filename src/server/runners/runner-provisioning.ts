@@ -1020,6 +1020,7 @@ export function createConfiguredDigitalOceanProvider(
 ): DigitalOceanProvider {
   if (config.providerMode === "local_docker") {
     return new LocalDockerDigitalOceanProvider({
+      ...(config.localAgentSmokeMode ? { agentSmokeMode: true } : {}),
       ...(config.localRunnerContainerName
         ? { containerName: config.localRunnerContainerName }
         : {}),

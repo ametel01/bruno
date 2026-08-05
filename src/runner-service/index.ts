@@ -1,4 +1,8 @@
 import { createRunnerService } from "@/src/runner-service/server";
+import {
+  createLocalAgentSmokeBootReadiness,
+  createLocalAgentSmokeRunnerDocker,
+} from "@/src/runner-service/local-agent-smoke";
 
 type BunServerRuntime = {
   serve(input: {
@@ -50,7 +54,12 @@ const RUNNER_HEARTBEAT_INTERVAL_ENV = "AGENTBAY_RUNNER_HEARTBEAT_INTERVAL_MS";
 const RUNNER_MAX_AGENTS_ENV = "AGENTBAY_RUNNER_MAX_AGENTS";
 
 const heartbeat = readHeartbeatOptions(process.env);
-const service = createRunnerService(heartbeat ? { heartbeat } : {});
+const localAgentSmokeDocker = createLocalAgentSmokeRunnerDocker(process.env);
+const service = createRunnerService({
+  ...(heartbeat ? { heartbeat } : {}),
+  ...(localAgentSmokeDocker ? { docker: localAgentSmokeDocker } : {}),
+  ...(localAgentSmokeDocker ? { readiness: createLocalAgentSmokeBootReadiness() } : {}),
+});
 const server = Bun.serve({
   hostname: process.env[RUNNER_HOST_ENV]?.trim() || "127.0.0.1",
   port: parsePort(process.env[RUNNER_PORT_ENV]),

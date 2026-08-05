@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A fail-closed `local:agent:smoke` regression gate now runs the complete ready-agent create, deploy, model-canary, restart, stop, delete, and cleanup cycle against exactly one Docker-based Droplet simulator, a real pinned Hermes workload, and synthetic local model/Telegram boundaries without contacting DigitalOcean.
 - Automatic managed-runner recovery now provisions immutable digest-pinned replacement capacity, rediscovers interrupted targets by operation tag, verifies fresh release and boot readiness plus assignment capacity, and safely cleans failed targets without disturbing source workloads.
 - Capability-backed cloud runner boot validation now verifies Docker and self-image access, an isolated pinned Hermes fixture, private detailed health, a fixed model canary, synthetic no-traffic Telegram configuration loading, and exact cleanup before a compatible runner becomes assignable.
 - Authenticated runner heartbeats now report Docker-observed immutable image digests, bounded OCI release versions, and the versioned runner boot contract, while cloud bootstrap carries expected release identity only as non-secret comparison data.

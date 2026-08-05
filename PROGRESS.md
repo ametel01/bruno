@@ -1083,6 +1083,22 @@ and post-deploy checks remain required before Step 12.
   the repository gate passed format and lint across 385 files, typecheck, 165
   files / 1,584 tests, production build, and diff hygiene. No DigitalOcean API
   call or Droplet creation occurred.
+- 2026-08-05: Added a fail-closed full ready-agent lifecycle smoke command that
+  accepts only the literal `local_docker` provider, `local-docker` token, and
+  synthetic-boundary mode. One fresh local replay provisioned exactly one
+  Docker-based Droplet simulator, registered its real runner, created a
+  ready-mode agent, traversed `pending`, `provisioning_runner`,
+  `configuring_hermes`, `starting_gateway`, `verifying_model`,
+  `connecting_telegram`, and `ready`, then verified managed restart, Stop,
+  Delete, secret revocation, runner tombstoning, and exact container cleanup.
+  The replay used the pinned Hermes workload with a local fake model and
+  synthetic Telegram health, reported `digitalOceanRequests: 0`, and created no
+  billable infrastructure. A cached prepared mock-Droplet image removes
+  repeated package-network setup while retaining generated cloud-init,
+  registration, authenticated heartbeat, runner placement, and lifecycle
+  behavior. Final validation passed format and lint across 388 files,
+  typecheck, 166 files / 1,588 tests, the production build, two complete
+  post-fix local lifecycle replays, and exact cleanup checks.
 
 ### Next Step
 

@@ -47,6 +47,7 @@ export type DigitalOceanProviderConfig = {
   localRunnerEndpointUrl?: string;
   localRunnerContainerName?: string;
   localRunnerStartDelayMs?: number;
+  localAgentSmokeMode?: boolean;
 };
 
 export type CronSecretConfig =
@@ -295,6 +296,18 @@ export function readDigitalOceanProviderConfig(
           defaultValue: 1_000,
         })
       : undefined;
+  const localAgentSmokeMode = input.AGENTBAY_LOCAL_AGENT_SMOKE_MODE;
+
+  if (
+    localAgentSmokeMode !== undefined &&
+    (providerMode !== "local_docker" ||
+      token !== "local-docker" ||
+      localAgentSmokeMode !== "synthetic-external-boundaries")
+  ) {
+    throw new EnvValidationError([
+      "AGENTBAY_LOCAL_AGENT_SMOKE_MODE requires the local_docker provider, the exact local-docker token, and the synthetic-external-boundaries value.",
+    ]);
+  }
 
   const config: DigitalOceanProviderConfig = {
     token,
@@ -339,6 +352,7 @@ export function readDigitalOceanProviderConfig(
     ...(localRunnerEndpointUrl ? { localRunnerEndpointUrl } : {}),
     ...(localRunnerContainerName ? { localRunnerContainerName } : {}),
     ...(localRunnerStartDelayMs === undefined ? {} : { localRunnerStartDelayMs }),
+    ...(localAgentSmokeMode === undefined ? {} : { localAgentSmokeMode: true }),
   };
 
   if (providerMode === "digitalocean" && !parseImmutableRunnerImageReference(runnerImage)) {
