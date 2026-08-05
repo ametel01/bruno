@@ -20,8 +20,17 @@ const VALID_ENV = {
   AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "disabled",
   AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION: RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION,
 };
+const LOCAL_VALID_ENV = {
+  ...VALID_ENV,
+  AGENTBAY_DIGITALOCEAN_TOKEN: "local-docker",
+  AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
+  AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION: undefined,
+};
+const DIGITALOCEAN_ARGS = ["--image", IMAGE, "--provider", "digitalocean"] as const;
+const LOCAL_DOCKER_ARGS = ["--image", IMAGE, "--provider", "local_docker"] as const;
 
 const EVIDENCE: RunnerReleaseSmokeEvidence = {
+  providerMode: "digitalocean",
   releaseVersion: SHA,
   imageDigest: DIGEST,
   bootContractVersion: "plingpling.runner.boot.v1",
@@ -41,7 +50,7 @@ describe("runner release smoke", () => {
     });
 
     const mutable = planRunnerReleaseSmoke(
-      ["--image", "ghcr.io/ametel01/agentbay-runner:main"],
+      ["--image", "ghcr.io/ametel01/agentbay-runner:main", "--provider", "digitalocean"],
       VALID_ENV,
     );
     expect(mutable).toMatchObject({ ok: false, code: "capability_unavailable" });
@@ -51,23 +60,44 @@ describe("runner release smoke", () => {
       state: "malformed",
     });
 
-    const unavailable = planRunnerReleaseSmoke(["--image", IMAGE], {});
+    const unavailable = planRunnerReleaseSmoke(DIGITALOCEAN_ARGS, {});
     expect(unavailable).toMatchObject({ ok: false, code: "capability_unavailable" });
     expect(JSON.stringify(unavailable)).not.toContain("postgres://");
   });
 
   it("accepts only the Git-SHA plus digest release contract", () => {
-    expect(planRunnerReleaseSmoke(["--image", IMAGE], VALID_ENV)).toEqual({
+    expect(planRunnerReleaseSmoke(DIGITALOCEAN_ARGS, VALID_ENV)).toEqual({
       ok: true,
       image: IMAGE,
+      providerMode: "digitalocean",
       release: { version: SHA, imageDigest: DIGEST },
+    });
+  });
+
+  it("accepts the isolated local-Docker provider without billable authorization", () => {
+    expect(planRunnerReleaseSmoke(LOCAL_DOCKER_ARGS, LOCAL_VALID_ENV)).toEqual({
+      ok: true,
+      image: IMAGE,
+      providerMode: "local_docker",
+      release: { version: SHA, imageDigest: DIGEST },
+    });
+
+    const withCloudToken = planRunnerReleaseSmoke(LOCAL_DOCKER_ARGS, {
+      ...LOCAL_VALID_ENV,
+      AGENTBAY_DIGITALOCEAN_TOKEN: "looks-like-a-real-cloud-token",
+    });
+    expect(withCloudToken).toMatchObject({ ok: false, code: "capability_unavailable" });
+    expect(withCloudToken.ok ? [] : withCloudToken.capabilities).toContainEqual({
+      name: "local_docker_isolation",
+      envName: "AGENTBAY_DIGITALOCEAN_TOKEN",
+      state: "malformed",
     });
   });
 
   it("binds the CLI image to the provider session environment", async () => {
     let sessionEnv: Record<string, string | undefined> | undefined;
 
-    await smokeRunnerRelease(["--image", IMAGE], VALID_ENV, {
+    await smokeRunnerRelease(DIGITALOCEAN_ARGS, VALID_ENV, {
       createSession: (_plan, env) => {
         sessionEnv = env;
         return session([]);
@@ -79,7 +109,7 @@ describe("runner release smoke", () => {
 
   it("always cleans and verifies exact absence after a passing smoke", async () => {
     const calls: string[] = [];
-    const result = await smokeRunnerRelease(["--image", IMAGE], VALID_ENV, {
+    const result = await smokeRunnerRelease(DIGITALOCEAN_ARGS, VALID_ENV, {
       createSession: () => session(calls),
     });
 
@@ -95,7 +125,7 @@ describe("runner release smoke", () => {
 
   it("runs cleanup after smoke failure and preserves a closed result", async () => {
     const calls: string[] = [];
-    const result = await smokeRunnerRelease(["--image", IMAGE], VALID_ENV, {
+    const result = await smokeRunnerRelease(DIGITALOCEAN_ARGS, VALID_ENV, {
       createSession: () =>
         session(calls, {
           run: async () => {
@@ -117,7 +147,7 @@ describe("runner release smoke", () => {
 
   it("blocks promotion when cleanup cannot be verified", async () => {
     const calls: string[] = [];
-    const result = await smokeRunnerRelease(["--image", IMAGE], VALID_ENV, {
+    const result = await smokeRunnerRelease(DIGITALOCEAN_ARGS, VALID_ENV, {
       createSession: () => session(calls, { verifyCleanup: async () => false }),
     });
 
@@ -132,7 +162,7 @@ describe("runner release smoke", () => {
   it("does not create a session when authorization is absent", async () => {
     const createSession = vi.fn();
     const result = await smokeRunnerRelease(
-      ["--image", IMAGE],
+      DIGITALOCEAN_ARGS,
       {
         ...VALID_ENV,
         AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION: undefined,

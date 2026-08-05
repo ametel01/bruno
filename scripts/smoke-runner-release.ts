@@ -36,6 +36,7 @@ export type RunnerReleaseSmokePlan =
   | {
       ok: true;
       image: string;
+      providerMode: "digitalocean" | "local_docker";
       release: { version: string; imageDigest: string };
     }
   | {
@@ -49,6 +50,7 @@ export type RunnerReleaseSmokePlan =
     };
 
 export type RunnerReleaseSmokeEvidence = {
+  providerMode: "digitalocean" | "local_docker";
   releaseVersion: string;
   imageDigest: string;
   bootContractVersion: string;
@@ -91,15 +93,23 @@ export function planRunnerReleaseSmoke(
   argv: readonly string[],
   env: Record<string, string | undefined>,
 ): RunnerReleaseSmokePlan {
-  if (argv.length !== 2 || argv[0] !== "--image") {
+  if (
+    argv.length !== 4 ||
+    argv[0] !== "--image" ||
+    argv[2] !== "--provider" ||
+    (argv[3] !== "digitalocean" && argv[3] !== "local_docker")
+  ) {
     return {
       ok: false,
       code: "usage_invalid",
-      capabilities: [{ name: "immutable_image", envName: "--image", state: "malformed" }],
+      capabilities: [
+        { name: "release_smoke_arguments", envName: "--image/--provider", state: "malformed" },
+      ],
     };
   }
 
   const image = argv[1]?.trim() ?? "";
+  const providerMode = argv[3];
   const release = parseImmutableRunnerImageReference(image);
   const capabilities: Array<{
     name: string;
@@ -125,8 +135,9 @@ export function planRunnerReleaseSmoke(
   }
 
   if (
+    providerMode === "digitalocean" &&
     env.AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION?.trim() !==
-    RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION
+      RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION
   ) {
     capabilities.push({
       name: "digitalocean_authorization",
@@ -155,10 +166,19 @@ export function planRunnerReleaseSmoke(
       envName: "AGENTBAY_DIGITALOCEAN_TOKEN",
       state: "missing",
     });
-  } else if (providerConfig.providerMode !== "digitalocean") {
+  } else if (providerConfig.providerMode !== providerMode) {
     capabilities.push({
       name: "digitalocean_configuration",
       envName: "AGENTBAY_DIGITALOCEAN_PROVIDER_MODE",
+      state: "malformed",
+    });
+  } else if (
+    providerMode === "local_docker" &&
+    env.AGENTBAY_DIGITALOCEAN_TOKEN !== "local-docker"
+  ) {
+    capabilities.push({
+      name: "local_docker_isolation",
+      envName: "AGENTBAY_DIGITALOCEAN_TOKEN",
       state: "malformed",
     });
   }
@@ -170,6 +190,7 @@ export function planRunnerReleaseSmoke(
   return {
     ok: true,
     image,
+    providerMode,
     release: { version: release.version, imageDigest: release.imageDigest },
   };
 }
@@ -192,10 +213,7 @@ export async function smokeRunnerRelease(
   }
 
   const sessionEnv = { ...env, AGENTBAY_RUNNER_IMAGE: plan.image };
-  const session = (dependencies.createSession ?? createProductionRunnerReleaseSmokeSession)(
-    plan,
-    sessionEnv,
-  );
+  const session = (dependencies.createSession ?? createRunnerReleaseSmokeSession)(plan, sessionEnv);
   let evidence: RunnerReleaseSmokeEvidence | null = null;
   let runFailed = false;
   let cleanupFailed = false;
@@ -240,19 +258,22 @@ export async function smokeRunnerRelease(
   };
 }
 
-function createProductionRunnerReleaseSmokeSession(
+function createRunnerReleaseSmokeSession(
   plan: Extract<RunnerReleaseSmokePlan, { ok: true }>,
   env: Record<string, string | undefined>,
 ): RunnerReleaseSmokeSession {
   const connection = createDatabaseConnection();
   const config = readDigitalOceanProviderConfig(env);
-  if (config?.providerMode !== "digitalocean") {
+  if (config?.providerMode !== plan.providerMode) {
     void connection.close();
     throw new Error("Runner release smoke configuration is unavailable.");
   }
 
   const operationKey = `agentbay-deploy-${randomUUID().replaceAll("-", "")}`;
-  const runnerName = `plingpling release canary ${plan.release.version.slice(0, 12)}`;
+  const runnerName =
+    plan.providerMode === "local_docker"
+      ? `plingpling release simulation ${plan.release.version.slice(0, 12)}`
+      : `plingpling release canary ${plan.release.version.slice(0, 12)}`;
   const releaseConfig: DigitalOceanProviderConfig = {
     ...config,
     runnerImage: plan.image,
@@ -261,7 +282,10 @@ function createProductionRunnerReleaseSmokeSession(
     tags: [...new Set([...config.tags, DIGITALOCEAN_MANAGED_RUNNER_TAG, operationKey])].sort(),
   };
   const provider = createConfiguredDigitalOceanProvider(releaseConfig);
-  const ownedProvider = provider as DigitalOceanProvider & DigitalOceanOwnedSetProvider;
+  const ownedProvider =
+    plan.providerMode === "digitalocean"
+      ? (provider as DigitalOceanProvider & DigitalOceanOwnedSetProvider)
+      : null;
   let userId: string | null = null;
   let runnerId: string | null = null;
   let closed = false;
@@ -399,6 +423,7 @@ async function waitForReleaseEvidence(
         )
       ) {
         return {
+          providerMode: input.plan.providerMode,
           releaseVersion: input.plan.release.version,
           imageDigest: input.plan.release.imageDigest,
           bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
@@ -423,7 +448,7 @@ async function cleanupReleaseRunner(
     runnerName: string;
     config: DigitalOceanProviderConfig;
     provider: DigitalOceanProvider;
-    ownedProvider: DigitalOceanOwnedSetProvider;
+    ownedProvider: DigitalOceanOwnedSetProvider | null;
   },
 ): Promise<void> {
   const [runner] = await connection.db
@@ -443,7 +468,12 @@ async function cleanupReleaseRunner(
   const providerFirewallId =
     runner?.providerFirewallId ?? discoveredResource?.providerFirewallId ?? null;
 
-  if (providerResourceId && providerFirewallId) {
+  if (
+    input.config.providerMode === "digitalocean" &&
+    input.ownedProvider &&
+    providerResourceId &&
+    providerFirewallId
+  ) {
     const expectation: DigitalOceanOwnedSetExpectation = {
       operationTag: input.operationKey,
       providerResourceId,
