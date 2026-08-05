@@ -216,11 +216,20 @@ async function reconcileOne(
         hermesWorkloadImage,
         now,
       );
+      const persistedAt = now();
+      const persistedTransition =
+        transition.mutation.nextAttemptAt !== null &&
+        transition.mutation.nextAttemptAt < persistedAt
+          ? {
+              ...transition,
+              mutation: { ...transition.mutation, nextAttemptAt: persistedAt },
+            }
+          : transition;
       await (dependencies.persistTransition ?? persistRuntimeTransition)(
         connection,
         claim,
-        transition,
-        now(),
+        persistedTransition,
+        persistedAt,
       );
       return { processed: 1, outcome: transition.outcome };
     } finally {

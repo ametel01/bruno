@@ -14,7 +14,10 @@ import {
   type RuntimeRunnerAdapter,
   type RuntimeTransition,
 } from "@/src/server/agents/agent-runtime-reconciler";
-import type { ClaimedAgentRuntimeReconciliation } from "@/src/server/agents/agent-runtime-store";
+import {
+  AgentRuntimePersistenceError,
+  type ClaimedAgentRuntimeReconciliation,
+} from "@/src/server/agents/agent-runtime-store";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import type { ManualRunnerRecord } from "@/src/server/runners/manual-runner-persistence";
 
@@ -422,6 +425,32 @@ describe("agent runtime reconciler", () => {
         operationId: acceptedOperationId,
         nextAttemptAt: new Date(NOW.getTime() + 15_000),
       },
+    });
+  });
+
+  it("does not persist an immediate restart step before its transaction timestamp", async () => {
+    const test = harness({
+      claim: claim({ state: "recovering_stop", operationId: null }),
+    });
+    let tick = 0;
+    test.dependencies.now = () => new Date(NOW.getTime() + tick++);
+    test.dependencies.persistTransition = vi.fn(
+      async (
+        _connection: DatabaseConnection,
+        _claim: ClaimedAgentRuntimeReconciliation,
+        transition: RuntimeTransition,
+        persistedAt: Date,
+      ) => {
+        if (transition.mutation.nextAttemptAt && transition.mutation.nextAttemptAt < persistedAt) {
+          throw new AgentRuntimePersistenceError(new Error("Invalid runtime result mutation."));
+        }
+        return true;
+      },
+    );
+
+    await expect(reconcileNextAgentRuntime(test.dependencies)).resolves.toEqual({
+      processed: 1,
+      outcome: "recovering",
     });
   });
 
