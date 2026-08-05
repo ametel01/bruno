@@ -103,6 +103,7 @@ export function createLocalAgentSmokeRunnerDocker(
   }
 
   const runtime = resolveRuntime(env);
+  const hermesImage = env.AGENTBAY_HERMES_WORKLOAD_IMAGE?.trim() || "agentbay-hermes:local";
   const requestHealth = async (input: {
     apiServerKey: string;
     containerName: string;
@@ -124,6 +125,7 @@ export function createLocalAgentSmokeRunnerDocker(
     hermes: runtime,
     projection: {
       project: async (spec) => {
+        await ensureLocalAgentSmokeFakeModel(hermesImage, runtime.network);
         const projection = await projectHermesHome(spec, {
           ownership: { uid: 10_000, gid: 10_000 },
           ...(env.AGENTBAY_HERMES_STATE_ROOT ? { stateRoot: env.AGENTBAY_HERMES_STATE_ROOT } : {}),
@@ -163,6 +165,32 @@ export function createLocalAgentSmokeRunnerDocker(
       }),
     },
   });
+}
+
+async function ensureLocalAgentSmokeFakeModel(image: string, network: string): Promise<void> {
+  await runLocalAgentSmokeDocker("docker", ["network", "inspect", network]);
+  await runLocalAgentSmokeDocker("docker", [
+    "rm",
+    "--force",
+    LOCAL_AGENT_SMOKE_FAKE_MODEL_CONTAINER,
+  ]).catch(() => undefined);
+  await runLocalAgentSmokeDocker("docker", [
+    "run",
+    "--detach",
+    "--platform",
+    "linux/amd64",
+    "--name",
+    LOCAL_AGENT_SMOKE_FAKE_MODEL_CONTAINER,
+    "--label",
+    "agentbay.smoke=local-agent-cycle",
+    "--network",
+    network,
+    "--entrypoint",
+    "python",
+    image,
+    "-c",
+    LOCAL_AGENT_SMOKE_FAKE_MODEL_SOURCE,
+  ]);
 }
 
 export function createLocalAgentSmokeBootReadiness(

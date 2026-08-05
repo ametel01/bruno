@@ -27,7 +27,7 @@ describe("local Docker DigitalOcean provider", () => {
     const created = await provider.createRunner({
       name: "plingpling Cloud Runner",
       region: "sfo3",
-      sizeSlug: "s-1vcpu-512mb-10gb",
+      sizeSlug: "s-2vcpu-4gb",
       image: "ubuntu-24-04-x64",
       tags: ["agentbay"],
       userData: content.userData,
@@ -44,9 +44,14 @@ describe("local Docker DigitalOcean provider", () => {
         publicIpv4: null,
       },
     });
-    expect(dockerCalls[0]).toEqual(["rm", "--force", "agentbay-local-cloud-runner-test"]);
+    expect(dockerCalls[0]).toEqual([
+      "rm",
+      "--force",
+      "--volumes",
+      "agentbay-local-cloud-runner-test",
+    ]);
     expect(dockerCalls[1]).toEqual(["rm", "--force", "agentbay-runner"]);
-    expect(dockerCalls[2]?.slice(0, 14)).toEqual([
+    expect(dockerCalls[2]?.slice(0, 21)).toEqual([
       "run",
       "--detach",
       "--platform",
@@ -54,14 +59,22 @@ describe("local Docker DigitalOcean provider", () => {
       "--name",
       "agentbay-local-cloud-runner-test",
       "--cpus",
-      "1",
+      "2",
       "--memory",
-      "512m",
-      "-v",
-      "/var/run/docker.sock:/var/run/docker.sock",
+      "4g",
+      "--privileged",
+      "--cgroupns",
+      "host",
+      "--volume",
+      "/var/lib/docker",
+      "--publish",
+      "127.0.0.1:3045:3045",
+      "--volume",
+      "/tmp/agentbay-local-agent-smoke/images.tar:/opt/agentbay/images.tar:ro",
       "--add-host",
       "host.docker.internal:host-gateway",
     ]);
+    expect(dockerCalls[2]).not.toContain("/var/run/docker.sock:/var/run/docker.sock");
     expect(dockerCalls[2]).toContain("agentbay-local-droplet:ubuntu-24.04");
     expect(dockerCalls[2]).toContain(
       "AGENTBAY_LOCAL_RUNNER_ENDPOINT_URL=http://host.docker.internal:3045",
@@ -80,14 +93,21 @@ describe("local Docker DigitalOcean provider", () => {
 
     expect(bootstrapScript).not.toContain("apt-get install");
     expect(bootstrapScript).toContain(
+      "dockerd --host=unix:///var/run/docker.sock --storage-driver=overlay2",
+    );
+    expect(bootstrapScript).toContain("/usr/bin/docker load --input /opt/agentbay/images.tar");
+    expect(bootstrapScript).toContain(
+      "getent ahostsv4 host.docker.internal | awk 'NR == 1 { print $1 }'",
+    );
+    expect(bootstrapScript).toContain(
       "169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address",
     );
     expect(bootstrapScript).toContain(
-      `if [[ "${"$"}{1:-}" == "pull" && ( "${"$"}{2:-}" == "agentbay-runner:local" || "${"$"}{2:-}" == "agentbay-hermes:local" ) ]]; then`,
+      `if [[ "${"$"}{1:-}" == "pull" && ( "${"$"}{2:-}" == "agentbay-runner:local" || "${"$"}{2:-}" == "agentbay-hermes:local" || "${"$"}{2:-}" == "busybox:1.36" ) ]]; then`,
     );
     expect(bootstrapScript).toContain('exec /usr/bin/docker "$@"');
     expect(bootstrapScript).toContain(
-      'translated+=("run" "--add-host" "host.docker.internal:host-gateway")',
+      'translated=("run" "--add-host" "host.docker.internal:$host_gateway")',
     );
     expect(bootstrapScript).toContain("AGENTBAY_BOOTSTRAP_STEP=docker_container_start");
     expect(bootstrapScript).toContain(
@@ -113,13 +133,14 @@ describe("local Docker DigitalOcean provider", () => {
     );
     expect(bootstrapScript).toContain("/var/lib/agentbay/agents:/var/lib/agentbay/agents");
     expect(bootstrapScript).toContain("/var/lib/agentbay/boot-self-test");
-    expect(bootstrapScript).toContain('translated_source="$bridge_dir$source_path"');
+    expect(bootstrapScript).not.toContain('translated_source="$bridge_dir$source_path"');
     expect(bootstrapScript).toContain("/var/run/docker.sock:/var/run/docker.sock");
     expect(bootstrapScript).toContain("127.0.0.1:3045:3045");
     expect(bootstrapScript).toContain("agentbay-runner:local");
     expect(bootstrapScript).toContain("AGENTBAY_RUNNER_ENV_FILE=/etc/agentbay/runner.env");
     expect(bootstrapScript).toContain("bash -lc");
     expect(dockerCalls[2]).not.toContain("agentbay-runner:local");
+    expect(dockerCalls[2]?.at(-1)).toContain("exec tail --follow /dev/null");
   });
 
   it("removes the droplet simulator and production-named runner during cleanup", async () => {

@@ -1099,6 +1099,21 @@ and post-deploy checks remain required before Step 12.
   behavior. Final validation passed format and lint across 388 files,
   typecheck, 166 files / 1,588 tests, the production build, two complete
   post-fix local lifecycle replays, and exact cleanup checks.
+- 2026-08-05: Strengthened the full ready-agent lifecycle smoke so its one
+  Docker-based Droplet simulator owns an isolated nested Docker daemon instead
+  of sharing the host daemon. A fresh zero-provider replay imported the runner,
+  pinned Hermes, and fake-model images into that simulated Droplet, verified the
+  expected `/opt/hermes/bin/hermes` executable and version inside the workload,
+  started the Hermes gateway, and received an authenticated detailed-health
+  response with `gateway_state=running` and the API server connected from
+  inside the workload container. The same replay traversed every deployment
+  stage, restart, Stop, Delete, and cleanup; it reported
+  `hermesInstalledInsideDroplet: true`,
+  `hermesGatewayLiveInsideDroplet: true`, `nestedDocker: true`,
+  `simulatedDroplets: 1`, and `digitalOceanRequests: 0`. Telegram remained a
+  declared synthetic no-network boundary. Focused provider/smoke coverage
+  passed 2 files / 7 tests; the repository gate passed format and lint across
+  388 files, typecheck, 166 files / 1,588 tests, and the production build.
 
 ### Next Step
 

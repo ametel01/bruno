@@ -1,14 +1,19 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { mkdir, rm } from "node:fs/promises";
+import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { and, eq } from "drizzle-orm";
-import { DEFAULT_LOCAL_HERMES_IMAGE } from "@/scripts/smoke-hermes-agent-image";
+import {
+  DEFAULT_LOCAL_HERMES_IMAGE,
+  HERMES_VERSION_FRAGMENT,
+} from "@/scripts/smoke-hermes-agent-image";
 import {
   LOCAL_AGENT_SMOKE_FAKE_MODEL_CONTAINER,
-  LOCAL_AGENT_SMOKE_FAKE_MODEL_SOURCE,
   LOCAL_AGENT_SMOKE_MODE_ENV,
   LOCAL_AGENT_SMOKE_MODE_VALUE,
 } from "@/src/runner-service/local-agent-smoke";
+import { evaluateHermesReadyResponse } from "@/src/runner-service/docker";
 import { reconcileTargetAgentDeployment } from "@/src/server/agents/agent-deployment-reconciler";
 import { buildHermesAgentLaunchSpecForUser } from "@/src/server/agents/agent-launch-builder";
 import { reconcileTargetAgentRuntime } from "@/src/server/agents/agent-runtime-reconciler";
@@ -31,7 +36,11 @@ import {
 } from "@/src/server/db/schema";
 import { readDigitalOceanProviderConfig } from "@/src/server/env";
 import { LOCAL_DOCKER_DIGITALOCEAN_RESOURCE_ID } from "@/src/server/runners/local-docker-provider-constants";
-import { LOCAL_AGENT_SMOKE_DROPLET_IMAGE } from "@/src/server/runners/local-docker-digitalocean-provider";
+import {
+  LOCAL_AGENT_SMOKE_DROPLET_IMAGE,
+  LOCAL_AGENT_SMOKE_IMAGE_BUNDLE_PATH,
+  LOCAL_DOCKER_DROPLET_CONTAINER_NAME,
+} from "@/src/server/runners/local-docker-digitalocean-provider";
 import { ManualRunnerAdapter } from "@/src/server/runners/manual-runner-adapter";
 import type { ManualRunnerRecord } from "@/src/server/runners/manual-runner-persistence";
 import { createConfiguredDigitalOceanProvider } from "@/src/server/runners/runner-provisioning";
@@ -41,7 +50,6 @@ const DASHBOARD_CONTAINER = `${COMPOSE_PROJECT}-dashboard-1`;
 const DATABASE_URL = "postgres://agentbay:agentbay@127.0.0.1:55432/plingpling";
 const APP_URL = "http://host.docker.internal:3000";
 const RUNNER_ENDPOINT_URL = "http://host.docker.internal:3045";
-const HERMES_NETWORK = "agentbay-hermes";
 const TIMEOUT_MS = readPositiveInteger(
   process.env.AGENTBAY_LOCAL_AGENT_CYCLE_TIMEOUT_MS,
   12 * 60_000,
@@ -49,7 +57,7 @@ const TIMEOUT_MS = readPositiveInteger(
 const POLL_MS = readPositiveInteger(process.env.AGENTBAY_LOCAL_AGENT_CYCLE_POLL_MS, 1_000);
 const SECRET_KEY = Buffer.alloc(32, 73).toString("base64url");
 const MANAGED_CONTAINER_NAMES = [
-  "agentbay-local-cloud-runner",
+  LOCAL_DOCKER_DROPLET_CONTAINER_NAME,
   "agentbay-runner",
   LOCAL_AGENT_SMOKE_FAKE_MODEL_CONTAINER,
   DASHBOARD_CONTAINER,
@@ -64,6 +72,9 @@ export type LocalAgentCycleSmokeSummary = {
   deploymentStages: string[];
   digitalOceanRequests: 0;
   fakeModelBoundary: true;
+  hermesGatewayLiveInsideDroplet: true;
+  hermesInstalledInsideDroplet: true;
+  nestedDocker: true;
   runnerId: string;
   runnerProvisioned: true;
   runtimeRestarted: true;
@@ -92,7 +103,6 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
   const previousEnv = installProcessEnv(smokeEnv);
   let connection: DatabaseConnection | null = null;
   let provider: ReturnType<typeof createConfiguredDigitalOceanProvider> | null = null;
-  let networkCreated = false;
   let runnerId: string | null = null;
   let agentId: string | null = null;
   let summary: LocalAgentCycleSmokeSummary | null = null;
@@ -101,11 +111,12 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
 
   try {
     await ensureLocalDropletImage();
+    await ensureLocalHermesImage();
+    await ensureImage("busybox:1.36");
+    await compose(["build", "local-cloud-runner-image"], smokeEnv);
+    await prepareNestedImageBundle();
     await compose(["up", "--build", "--detach", "dashboard"], smokeEnv);
     await waitForControlPlane();
-    await ensureImage(DEFAULT_LOCAL_HERMES_IMAGE);
-    networkCreated = await ensureDockerNetwork(HERMES_NETWORK);
-    await startFakeModel(DEFAULT_LOCAL_HERMES_IMAGE);
 
     connection = createDatabaseConnection();
     const config = readDigitalOceanProviderConfig(smokeEnv);
@@ -158,6 +169,13 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
     runnerId = ready.agent.runnerId;
     if (!runnerId) throw new Error("Local agent cycle did not assign the simulated runner.");
 
+    await verifyHermesInsideDroplet(connection, {
+      agentId,
+      env: smokeEnv,
+      userId: owner.id,
+    });
+    await assertNoAgentContainers(agentId);
+
     const restarted = await restartAgentForUser(owner.id, agentId, {
       createConnection: () => connection as DatabaseConnection,
       manualRunnerAdapter: createHostRunnerAdapter,
@@ -175,6 +193,7 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
     });
     if (!stopped.ok) throw new Error("Local agent cycle stop was rejected.");
     await driveRuntime(connection, agentId, "stopped", smokeEnv);
+    await assertNoRunningAgentContainersInsideDroplet(agentId);
 
     const deleted = await deleteAgentForUser(owner.id, agentId, {
       createConnection: () => connection as DatabaseConnection,
@@ -194,6 +213,9 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
       deploymentStages,
       digitalOceanRequests: 0,
       fakeModelBoundary: true,
+      hermesGatewayLiveInsideDroplet: true,
+      hermesInstalledInsideDroplet: true,
+      nestedDocker: true,
       runnerId,
       runnerProvisioned: true,
       runtimeRestarted: true,
@@ -220,15 +242,13 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
     if (connection) {
       await connection.close().catch((error) => cleanupErrors.push(error));
     }
-    await docker(["rm", "--force", LOCAL_AGENT_SMOKE_FAKE_MODEL_CONTAINER], {
-      allowFailure: true,
-    });
-    if (networkCreated) {
-      await docker(["network", "rm", HERMES_NETWORK], { allowFailure: true });
-    }
     await compose(["down", "--volumes", "--remove-orphans"], smokeEnv).catch((error) =>
       cleanupErrors.push(error),
     );
+    await rm(dirname(LOCAL_AGENT_SMOKE_IMAGE_BUNDLE_PATH), {
+      force: true,
+      recursive: true,
+    }).catch((error) => cleanupErrors.push(error));
     restoreProcessEnv(previousEnv);
 
     const containersRemain = await listManagedContainers();
@@ -246,6 +266,101 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
   }
   if (!summary) throw new Error("Local agent cycle produced no summary.");
   return summary;
+}
+
+async function verifyHermesInsideDroplet(
+  connection: DatabaseConnection,
+  input: { agentId: string; env: Record<string, string>; userId: string },
+): Promise<void> {
+  const installed = await docker([
+    "exec",
+    LOCAL_DOCKER_DROPLET_CONTAINER_NAME,
+    "docker",
+    "image",
+    "inspect",
+    DEFAULT_LOCAL_HERMES_IMAGE,
+    "--format",
+    "{{.Id}}",
+  ]);
+  if (!installed.stdout.trim().startsWith("sha256:")) {
+    throw new Error("Hermes image was not installed inside the simulated Droplet.");
+  }
+
+  const listed = await listAgentContainersInsideDroplet(input.agentId);
+  if (listed.length !== 1) {
+    throw new Error(
+      `Expected one Hermes container inside the simulated Droplet, found ${listed.length}.`,
+    );
+  }
+  const containerName = listed[0] as string;
+  const version = await docker([
+    "exec",
+    LOCAL_DOCKER_DROPLET_CONTAINER_NAME,
+    "docker",
+    "exec",
+    containerName,
+    "/opt/hermes/bin/hermes",
+    "--version",
+  ]);
+  if (!version.stdout.includes(HERMES_VERSION_FRAGMENT)) {
+    throw new Error("Hermes executable version inside the simulated Droplet was unexpected.");
+  }
+
+  const launch = await buildHermesAgentLaunchSpecForUser(input.userId, input.agentId, {
+    createConnection: () => connection,
+    env: input.env,
+    hermesWorkloadImage: DEFAULT_LOCAL_HERMES_IMAGE,
+  });
+  if (!launch.ok) {
+    throw new Error(`Hermes liveness credentials were unavailable: ${launch.reason}.`);
+  }
+  const probe = await docker([
+    "exec",
+    LOCAL_DOCKER_DROPLET_CONTAINER_NAME,
+    "docker",
+    "exec",
+    containerName,
+    "python",
+    "-c",
+    HERMES_INSIDE_DROPLET_LIVENESS_SOURCE,
+    launch.spec.secrets.apiServerKey,
+  ]);
+  const parsed: unknown = JSON.parse(probe.stdout);
+  if (
+    !isRecord(parsed) ||
+    parsed.status !== 200 ||
+    !evaluateHermesReadyResponse(parsed.body, { requireTelegram: false }).ok
+  ) {
+    throw new Error("Hermes gateway liveness probe failed inside the simulated Droplet.");
+  }
+}
+
+async function assertNoRunningAgentContainersInsideDroplet(agentId: string): Promise<void> {
+  const listed = await listAgentContainersInsideDroplet(agentId, false);
+  if (listed.length > 0) {
+    throw new Error("Stopped Hermes workload remained running inside the simulated Droplet.");
+  }
+}
+
+async function listAgentContainersInsideDroplet(
+  agentId: string,
+  includeStopped = true,
+): Promise<string[]> {
+  const listed = await docker([
+    "exec",
+    LOCAL_DOCKER_DROPLET_CONTAINER_NAME,
+    "docker",
+    "ps",
+    ...(includeStopped ? ["--all"] : []),
+    "--filter",
+    `label=agentbay.agent_id=${agentId}`,
+    "--format",
+    "{{.Names}}",
+  ]);
+  return listed.stdout
+    .split("\n")
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 async function driveDeployment(
@@ -490,12 +605,26 @@ async function waitForControlPlane(): Promise<void> {
 }
 
 async function printFailureDiagnostics(): Promise<void> {
-  for (const name of ["agentbay-local-cloud-runner", "agentbay-runner", DASHBOARD_CONTAINER]) {
+  for (const name of [LOCAL_DOCKER_DROPLET_CONTAINER_NAME, DASHBOARD_CONTAINER]) {
     const result = await docker(["logs", "--tail", "80", name], { allowFailure: true });
     if (result.exitCode === 0 && (result.stdout.trim() || result.stderr.trim())) {
       console.error(`--- ${name} diagnostics ---`);
       console.error([result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n"));
     }
+  }
+  const nested = await docker(
+    [
+      "exec",
+      LOCAL_DOCKER_DROPLET_CONTAINER_NAME,
+      "sh",
+      "-lc",
+      "docker ps -a; docker logs --tail 80 agentbay-runner 2>&1; tail -n 80 /var/log/agentbay-local-dockerd.log",
+    ],
+    { allowFailure: true },
+  );
+  if (nested.stdout.trim() || nested.stderr.trim()) {
+    console.error("--- simulated Droplet nested Docker diagnostics ---");
+    console.error([nested.stdout.trim(), nested.stderr.trim()].filter(Boolean).join("\n"));
   }
 }
 
@@ -521,31 +650,39 @@ async function ensureLocalDropletImage(): Promise<void> {
   );
 }
 
-async function ensureDockerNetwork(name: string): Promise<boolean> {
-  const inspected = await docker(["network", "inspect", name], { allowFailure: true });
-  if (inspected.exitCode === 0) return false;
-  await docker(["network", "create", name]);
-  return true;
+async function ensureLocalHermesImage(): Promise<void> {
+  const inspected = await docker(["image", "inspect", DEFAULT_LOCAL_HERMES_IMAGE], {
+    allowFailure: true,
+  });
+  if (inspected.exitCode === 0) return;
+  await docker(
+    [
+      "build",
+      "--platform",
+      "linux/amd64",
+      "--tag",
+      DEFAULT_LOCAL_HERMES_IMAGE,
+      "--file",
+      "Dockerfile.agent",
+      ".",
+    ],
+    { timeoutMs: TIMEOUT_MS },
+  );
 }
 
-async function startFakeModel(image: string): Promise<void> {
-  await docker([
-    "run",
-    "--detach",
-    "--platform",
-    "linux/amd64",
-    "--name",
-    LOCAL_AGENT_SMOKE_FAKE_MODEL_CONTAINER,
-    "--label",
-    "agentbay.smoke=local-agent-cycle",
-    "--network",
-    HERMES_NETWORK,
-    "--entrypoint",
-    "python",
-    image,
-    "-c",
-    LOCAL_AGENT_SMOKE_FAKE_MODEL_SOURCE,
-  ]);
+async function prepareNestedImageBundle(): Promise<void> {
+  await mkdir(dirname(LOCAL_AGENT_SMOKE_IMAGE_BUNDLE_PATH), { recursive: true });
+  await docker(
+    [
+      "save",
+      "--output",
+      LOCAL_AGENT_SMOKE_IMAGE_BUNDLE_PATH,
+      "agentbay-runner:local",
+      DEFAULT_LOCAL_HERMES_IMAGE,
+      "busybox:1.36",
+    ],
+    { timeoutMs: TIMEOUT_MS },
+  );
 }
 
 async function assertNoManagedContainers(): Promise<void> {
@@ -607,7 +744,8 @@ function buildSmokeEnv(env: Record<string, string | undefined>): Record<string, 
     AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
     AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "none",
     AGENTBAY_DIGITALOCEAN_TOKEN: "local-docker",
-    AGENTBAY_HERMES_PRIVATE_NETWORK: HERMES_NETWORK,
+    AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-2vcpu-4gb",
+    AGENTBAY_HERMES_PRIVATE_NETWORK: "agentbay-hermes",
     AGENTBAY_HERMES_WORKLOAD_IMAGE: DEFAULT_LOCAL_HERMES_IMAGE,
     AGENTBAY_LOCAL_AGENT_SMOKE_MODE: LOCAL_AGENT_SMOKE_MODE_VALUE,
     AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: RUNNER_ENDPOINT_URL,
@@ -620,6 +758,28 @@ function buildSmokeEnv(env: Record<string, string | undefined>): Record<string, 
     NEXT_PUBLIC_APP_URL: APP_URL,
   };
 }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const HERMES_INSIDE_DROPLET_LIVENESS_SOURCE = `
+import json
+import sys
+import urllib.error
+import urllib.request
+
+request = urllib.request.Request(
+    "http://127.0.0.1:8642/health/detailed",
+    headers={"authorization": "Bearer " + sys.argv[1], "accept": "application/json"},
+    method="GET",
+)
+try:
+    with urllib.request.urlopen(request, timeout=10) as response:
+        print(json.dumps({"status": response.status, "body": json.load(response)}))
+except urllib.error.HTTPError as error:
+    print(json.dumps({"status": error.code, "body": None}))
+`;
 
 function installProcessEnv(env: Record<string, string>): Map<string, string | undefined> {
   const previous = new Map<string, string | undefined>();

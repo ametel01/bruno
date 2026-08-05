@@ -96,12 +96,15 @@ bun run local:agent:smoke
 ```
 
 This command refuses non-local provider configuration and existing harness containers, creates
-exactly one Docker-based Droplet simulator, and drives the production create, deployment, model
-canary, restart, stop, delete, and cleanup services against a fresh local database. The OpenAI
-model route and Telegram network health are synthetic local boundaries; Hermes itself runs in the
-real pinned workload container. Success includes persisted cleanup and exact container-absence
-checks. This is a zero-cloud regression gate, not DigitalOcean API, firewall, routing, or real
-Telegram acceptance.
+exactly one Docker-based Droplet simulator with an isolated nested Docker daemon, and drives the
+production create, deployment, model canary, restart, stop, delete, and cleanup services against a
+fresh local database. The runner, pinned Hermes workload, and fake model all run inside the
+simulator rather than as host sibling containers. Success proves that the Hermes image is installed
+in the simulated Droplet, the expected Hermes executable is present, and the gateway returns an
+authenticated detailed-health response from inside its workload container before persisted and
+container cleanup checks run. The OpenAI model route and Telegram network health remain synthetic
+local boundaries, so this is a zero-cloud regression gate, not DigitalOcean API, firewall, routing,
+or real Telegram acceptance.
 
 Stop the stack and its agent containers with:
 

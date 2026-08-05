@@ -100,6 +100,14 @@ describe("local full agent-cycle smoke", () => {
     expect(source).toContain("deleteAgentForUser");
     expect(source).toContain("simulatedDroplets: 1");
     expect(source).toContain("digitalOceanRequests: 0");
+    expect(source).toContain("hermesInstalledInsideDroplet: true");
+    expect(source).toContain("hermesGatewayLiveInsideDroplet: true");
+    expect(source).toContain("nestedDocker: true");
+    expect(source).toContain("verifyHermesInsideDroplet");
+    expect(source).toContain("assertNoRunningAgentContainersInsideDroplet");
+    expect(source).toContain("/opt/hermes/bin/hermes");
+    expect(source).toContain("/health/detailed");
+    expect(source).toContain('"exec",\n    LOCAL_DOCKER_DROPLET_CONTAINER_NAME,\n    "docker"');
     expect(source).toContain("triggerReplacement: () => undefined");
     expect(source).toContain("refuses managed-runner replacement during smoke");
     expect(source).toContain('url.hostname = "127.0.0.1"');
