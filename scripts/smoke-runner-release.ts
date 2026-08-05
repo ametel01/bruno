@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
 import { RUNNER_BOOT_COMPONENTS } from "@/src/runner-service/runner-contracts";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   runnerCredentials,
+  runnerProvisioningEvents,
   runnerRegistrationTokens,
   runners,
   users,
@@ -28,6 +29,17 @@ import {
 export const RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION =
   "authorize-disposable-runner-release-smoke";
 export const RUNNER_RELEASE_SMOKE_TIMEOUT_MS = 12 * 60 * 1000;
+
+const SAFE_BOOTSTRAP_FAILURE_STEPS = new Set([
+  "agent_image_pull",
+  "docker_apt_repository",
+  "docker_container_start",
+  "docker_pull",
+  "hermes_image_pull",
+  "hermes_private_network",
+  "hermes_state_root",
+  "swap_setup",
+]);
 
 const IMMUTABLE_RELEASE_IMAGE_PATTERN =
   /^ghcr\.io\/ametel01\/agentbay-runner:[a-f0-9]{40}@sha256:[a-f0-9]{64}$/;
@@ -88,6 +100,17 @@ export type RunnerReleaseSmokeDependencies = {
     env: Record<string, string | undefined>,
   ) => RunnerReleaseSmokeSession;
 };
+
+export function runnerReleaseBootstrapFailureCode(metadata: unknown): string {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return "runner_provisioning_failed";
+  }
+
+  const step = (metadata as Record<string, unknown>).step;
+  return typeof step === "string" && SAFE_BOOTSTRAP_FAILURE_STEPS.has(step)
+    ? `bootstrap_${step}`
+    : "runner_provisioning_failed";
+}
 
 export function planRunnerReleaseSmoke(
   argv: readonly string[],
@@ -400,7 +423,18 @@ async function waitForReleaseEvidence(
       .limit(1);
 
     if (runner?.status === "provision_failed" || runner?.provisioningStatus === "failed") {
-      throw new Error("Release smoke runner provisioning failed safely.");
+      const [failedEvent] = await connection.db
+        .select({ metadata: runnerProvisioningEvents.metadata })
+        .from(runnerProvisioningEvents)
+        .where(
+          and(
+            eq(runnerProvisioningEvents.runnerId, input.runnerId),
+            eq(runnerProvisioningEvents.status, "failed"),
+          ),
+        )
+        .orderBy(desc(runnerProvisioningEvents.createdAt))
+        .limit(1);
+      throw new RunnerReleaseSmokeFailure(runnerReleaseBootstrapFailureCode(failedEvent?.metadata));
     }
 
     if (
@@ -555,6 +589,16 @@ function safeReleaseControlPlaneUrl(
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+class RunnerReleaseSmokeFailure extends Error {
+  readonly code: string;
+
+  constructor(code: string) {
+    super("Release smoke runner provisioning failed safely.");
+    this.name = "RunnerReleaseSmokeFailure";
+    this.code = code;
+  }
 }
 
 function logClosedSmokeFailure(event: "cleanup_failed" | "run_failed", error: unknown): void {

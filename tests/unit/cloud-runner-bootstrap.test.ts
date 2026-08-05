@@ -122,9 +122,15 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).not.toContain('AGENTBAY_APP_URL="https://app.agentbay.test"');
     expect(content.userData).not.toContain(`AGENTBAY_RUNNER_IMAGE="${IMMUTABLE_RUNNER_IMAGE}"`);
     expect(content.userData).not.toContain(". '/etc/agentbay/runner.env'");
-    expect(content.userData).toContain(`docker pull '${IMMUTABLE_RUNNER_IMAGE}'`);
-    expect(content.userData).toContain(`docker pull '${DEFAULT_MANUAL_RUNNER_IMAGE}'`);
-    expect(content.userData).toContain(`docker pull '${DEFAULT_HERMES_WORKLOAD_IMAGE}'`);
+    expect(content.userData).toContain(`agentbay_pull_image '${IMMUTABLE_RUNNER_IMAGE}'`);
+    expect(content.userData).toContain(`agentbay_pull_image '${DEFAULT_MANUAL_RUNNER_IMAGE}'`);
+    expect(content.userData).toContain(`agentbay_pull_image '${DEFAULT_HERMES_WORKLOAD_IMAGE}'`);
+    expect(content.userData).toContain("for attempt in 1 2 3; do");
+    expect(content.userData).toContain('sleep "$((attempt * 2))"');
+    expect(content.userData).toContain("AGENTBAY_BOOTSTRAP_STEP=docker_pull");
+    expect(content.userData).toContain("AGENTBAY_BOOTSTRAP_STEP=agent_image_pull");
+    expect(content.userData).toContain("AGENTBAY_BOOTSTRAP_STEP=hermes_image_pull");
+    expect(content.userData).toContain("AGENTBAY_BOOTSTRAP_STEP=docker_container_start");
     expect(content.userData).toContain(`install -m 0710 -d '${DEFAULT_HERMES_STATE_ROOT}'`);
     expect(content.userData).toContain(
       `docker network inspect '${DEFAULT_HERMES_PRIVATE_NETWORK}' >/dev/null 2>&1 || docker network create '${DEFAULT_HERMES_PRIVATE_NETWORK}'`,
@@ -216,7 +222,9 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain("AGENTBAY_HERMES_PRIVATE_NETWORK=agentbay-custom-hermes");
     expect(content.userData).toContain("AGENTBAY_HERMES_READINESS_TIMEOUT_MS=240000");
     expect(content.userData).toContain("AGENTBAY_RUNNER_MAX_AGENTS=1");
-    expect(content.userData).toContain("docker pull 'ghcr.io/ametel01/agentbay-hermes:sha-123'");
+    expect(content.userData).toContain(
+      "agentbay_pull_image 'ghcr.io/ametel01/agentbay-hermes:sha-123'",
+    );
     expect(content.userData).toContain("docker network create 'agentbay-custom-hermes'");
     expect(content.userData).toContain(
       "-v '/var/lib/agentbay/custom-agents:/var/lib/agentbay/custom-agents'",

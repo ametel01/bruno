@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import {
   planRunnerReleaseSmoke,
+  runnerReleaseBootstrapFailureCode,
   RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION,
   type RunnerReleaseSmokeEvidence,
   type RunnerReleaseSmokeSession,
@@ -44,6 +45,16 @@ const smokeSource = readFileSync(
 );
 
 describe("runner release smoke", () => {
+  it("reports only allowlisted bootstrap failure steps", () => {
+    expect(
+      runnerReleaseBootstrapFailureCode({ step: "docker_pull", detail: "private output" }),
+    ).toBe("bootstrap_docker_pull");
+    expect(runnerReleaseBootstrapFailureCode({ step: "untrusted_step" })).toBe(
+      "runner_provisioning_failed",
+    );
+    expect(runnerReleaseBootstrapFailureCode("docker_pull")).toBe("runner_provisioning_failed");
+  });
+
   it("fails closed on usage, mutable images, and missing capabilities before effects", () => {
     expect(planRunnerReleaseSmoke([], {})).toMatchObject({
       ok: false,

@@ -244,14 +244,30 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
     - -lc
     - |
       set -euxo pipefail
-      AGENTBAY_BOOTSTRAP_STEP=docker_container_start
+      AGENTBAY_BOOTSTRAP_STEP=docker_pull
       trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true; docker logs --tail 80 ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} 2>&1 || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
+      agentbay_pull_image() {
+        local image="$1"
+        local attempt
+        for attempt in 1 2 3; do
+          if docker pull "$image"; then
+            return 0
+          fi
+          if [ "$attempt" -lt 3 ]; then
+            sleep "$((attempt * 2))"
+          fi
+        done
+        return 1
+      }
       /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling cloud runner image." docker_pull
-      docker pull ${shellQuote(config.runnerImage)}
+      agentbay_pull_image ${shellQuote(config.runnerImage)}
+      AGENTBAY_BOOTSTRAP_STEP=agent_image_pull
       /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling default agent container image." agent_image_pull
-      docker pull ${shellQuote(config.agentImage)}
+      agentbay_pull_image ${shellQuote(config.agentImage)}
+      AGENTBAY_BOOTSTRAP_STEP=hermes_image_pull
       /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling Hermes workload image." hermes_image_pull
-      docker pull ${shellQuote(config.hermesWorkloadImage)}
+      agentbay_pull_image ${shellQuote(config.hermesWorkloadImage)}
+      AGENTBAY_BOOTSTRAP_STEP=docker_container_start
       docker rm --force ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} || true
       docker run --detach --name ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} --restart always --network ${shellQuote(config.hermesPrivateNetwork)} --env-file ${shellQuote(config.envFilePath)} -v ${shellQuote(`${config.envFilePath}:${config.containerEnvFilePath}`)} -v ${shellQuote(`${config.hermesStateRoot}:${config.hermesStateRoot}`)} -v ${shellQuote(`${DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT}:${DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT}`)} -v ${shellQuote(`${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}:${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}`)} -p ${shellQuote(`${config.runnerHost}:${config.runnerPort}:${config.runnerPort}`)} ${shellQuote(config.runnerImage)}
       /usr/local/bin/agentbay-bootstrap-event waiting_for_runner started "Runner container started; waiting for registration and heartbeat." docker_container_started
