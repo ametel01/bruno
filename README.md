@@ -5,8 +5,8 @@ observe, approve, back up, and recover persistent Hermes agents. The Next.js app
 user-facing dashboard and control APIs; PostgreSQL stores durable state; separate runner services
 execute each agent in an isolated Docker container.
 
-The project is under active development. See [delivery progress](./PROGRESS.md) for the current
-implementation status and [milestones](./docs/MILESTONES.md) for the product roadmap.
+The project is under active development. See [milestones](./docs/MILESTONES.md) for the product
+roadmap.
 
 ## What is implemented
 
@@ -450,7 +450,6 @@ See [E2E validation](./docs/E2E_VALIDATION.md) for capability gates and safe tes
 
 - [Product requirements](./docs/PRD.md)
 - [Milestones](./docs/MILESTONES.md)
-- [Delivery progress](./PROGRESS.md)
 - [Authentication modes](./docs/AUTHENTICATION.md)
 - [Two-user isolation acceptance](./docs/TWO_USER_ACCEPTANCE.md)
 - [E2E validation](./docs/E2E_VALIDATION.md)

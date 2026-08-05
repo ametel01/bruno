@@ -29,9 +29,8 @@ and support experiment with five solo founders.
   familiar messaging channel without making the customer operate agent infrastructure.
 - **Business model:** One $30 monthly plan at launch, with the customer supplying model access.
 - **Current stage:** Late MVP / pre-private-beta acceptance, not pre-development. The
-  [README](../README.md) documents substantial implemented behavior, while
-  [delivery progress](../PROGRESS.md) identifies remaining provider-backed acceptance and
-  production-cutover work.
+  [README](../README.md) documents substantial implemented behavior, while the
+  [milestones](./MILESTONES.md) identify remaining product and production-readiness work.
 - **Founder advantage:** Software-engineering ability plus firsthand experience operating a useful
   personal agent.
 - **Founder constraint:** No existing direct access to prospective customers or proven
