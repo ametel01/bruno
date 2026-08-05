@@ -531,6 +531,15 @@ export async function createDigitalOceanRunnerForUser(
   const firewallNamePrefix = DEFAULT_FIREWALL_NAME;
   let resolvedConfig: DigitalOceanProviderConfig | null | undefined;
   let resolvedProvider: DigitalOceanProvider | undefined;
+  const getConfig = () => {
+    if (resolvedConfig === undefined) {
+      resolvedConfig = dependencies.readConfig
+        ? dependencies.readConfig()
+        : readDigitalOceanProviderConfig();
+    }
+
+    return resolvedConfig;
+  };
 
   try {
     const duplicate = await connection.db.transaction(async (tx) => {
@@ -545,10 +554,7 @@ export async function createDigitalOceanRunnerForUser(
         connection,
         userId,
         duplicate,
-        getConfig: () => {
-          resolvedConfig ??= dependencies.readConfig?.() ?? readDigitalOceanProviderConfig();
-          return resolvedConfig;
-        },
+        getConfig,
         getProvider: (config) => {
           resolvedProvider ??=
             dependencies.provider ?? createConfiguredDigitalOceanProvider(config);
@@ -578,8 +584,7 @@ export async function createDigitalOceanRunnerForUser(
       }
     }
 
-    const config =
-      resolvedConfig ?? dependencies.readConfig?.() ?? readDigitalOceanProviderConfig();
+    const config = getConfig();
 
     if (!config) {
       logRunnerProvisioning("provider_not_configured", {});

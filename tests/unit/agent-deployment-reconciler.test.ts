@@ -27,6 +27,7 @@ import {
   users,
 } from "@/src/server/db/schema";
 import type { DigitalOceanProviderConfig } from "@/src/server/env";
+import { FakeDigitalOceanProvider } from "@/src/server/runners/digitalocean-provider";
 import {
   ManualRunnerAdapter,
   RUNNER_BEARER_TOKEN_ENV,
@@ -169,6 +170,7 @@ describe("agent deployment reconciler", () => {
       const dependencies = {
         now: () => NOW,
         readDigitalOceanConfig: () => automaticProviderConfig(),
+        digitalOceanProvider: new FakeDigitalOceanProvider({ idPrefix: "automatic" }),
       };
 
       const results = await Promise.all([
@@ -224,6 +226,7 @@ describe("agent deployment reconciler", () => {
         createConnection: () => connection,
         now: () => NOW,
         readDigitalOceanConfig: () => automaticProviderConfig(),
+        digitalOceanProvider: new FakeDigitalOceanProvider({ idPrefix: "foreign" }),
       }),
     ).resolves.toEqual({ processed: 1, outcome: "failed" });
 
@@ -1119,6 +1122,7 @@ describe("agent deployment reconciler", () => {
       const dependencies = {
         now: () => NOW,
         readDigitalOceanConfig: () => automaticProviderConfig(),
+        digitalOceanProvider: new FakeDigitalOceanProvider({ idPrefix: "concurrent" }),
       };
 
       await Promise.all([
