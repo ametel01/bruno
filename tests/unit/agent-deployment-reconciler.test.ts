@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
 import type { RunnerAgentStatusSnapshot } from "@/src/runner-service/runner-contracts";
@@ -1077,8 +1077,13 @@ describe("agent deployment reconciler", () => {
 
   it("revalidates max-one capacity after the advisory lock before assigning concurrent agents", async () => {
     const second = createDatabaseConnection();
+    const blocker = createDatabaseConnection();
+    const observer = createDatabaseConnection();
     const otherAgentId = "00000000-0000-4000-8000-00000000a712";
     const otherDeploymentId = "00000000-0000-4000-8000-00000000a732";
+    let releaseAgentLocks: () => void = () => undefined;
+    let lockTransaction: Promise<unknown> | null = null;
+    let reconciliations: Promise<unknown> | null = null;
     try {
       await seedRunner(connection);
       await seedAgent(connection, { runnerId: null });
@@ -1123,10 +1128,42 @@ describe("agent deployment reconciler", () => {
         digitalOceanProvider: new FakeDigitalOceanProvider({ idPrefix: "concurrent" }),
       };
 
-      await Promise.all([
+      let markAgentLocksHeld: () => void = () => undefined;
+      const agentLocksHeld = new Promise<void>((resolve) => {
+        markAgentLocksHeld = resolve;
+      });
+      const agentLocksReleased = new Promise<void>((resolve) => {
+        releaseAgentLocks = resolve;
+      });
+      // Hold both agents until each reconciler has committed a distinct deployment lease. This
+      // makes the advisory-lock capacity race deterministic across local and CI schedulers.
+      lockTransaction = blocker.db.transaction(async (tx) => {
+        await tx
+          .select({ id: agents.id })
+          .from(agents)
+          .where(inArray(agents.id, [AGENT_ID, otherAgentId]))
+          .for("update");
+        markAgentLocksHeld();
+        await agentLocksReleased;
+      });
+      await agentLocksHeld;
+
+      reconciliations = Promise.all([
         reconcileNextAgentDeployment({ ...dependencies, createConnection: () => connection }),
         reconcileNextAgentDeployment({ ...dependencies, createConnection: () => second }),
       ]);
+      await vi.waitFor(
+        async () => {
+          const claimed = await observer.db
+            .select({ leaseOwner: agentDeployments.leaseOwner })
+            .from(agentDeployments);
+          expect(claimed.filter((deployment) => deployment.leaseOwner !== null)).toHaveLength(2);
+        },
+        { timeout: 5_000 },
+      );
+      releaseAgentLocks();
+      await lockTransaction;
+      await reconciliations;
 
       const agentRows = await connection.db.select().from(agents);
       const deploymentRows = await connection.db.select().from(agentDeployments);
@@ -1139,7 +1176,12 @@ describe("agent deployment reconciler", () => {
       expect(runnerRows).toHaveLength(2);
       expect(runnerRows.filter((runner) => runner.kind === "digitalocean")).toHaveLength(1);
     } finally {
-      await second.close();
+      releaseAgentLocks();
+      await Promise.allSettled([
+        lockTransaction ?? Promise.resolve(),
+        reconciliations ?? Promise.resolve(),
+      ]);
+      await Promise.all([second.close(), blocker.close(), observer.close()]);
     }
   });
 
