@@ -83,6 +83,7 @@ export type RunnerReleaseSmokeSession = {
 export type RunnerReleaseSmokeDependencies = {
   createSession?: (
     plan: Extract<RunnerReleaseSmokePlan, { ok: true }>,
+    env: Record<string, string | undefined>,
   ) => RunnerReleaseSmokeSession;
 };
 
@@ -190,7 +191,11 @@ export async function smokeRunnerRelease(
     };
   }
 
-  const session = (dependencies.createSession ?? createProductionRunnerReleaseSmokeSession)(plan);
+  const sessionEnv = { ...env, AGENTBAY_RUNNER_IMAGE: plan.image };
+  const session = (dependencies.createSession ?? createProductionRunnerReleaseSmokeSession)(
+    plan,
+    sessionEnv,
+  );
   let evidence: RunnerReleaseSmokeEvidence | null = null;
   let runFailed = false;
   let cleanupFailed = false;
@@ -237,9 +242,10 @@ export async function smokeRunnerRelease(
 
 function createProductionRunnerReleaseSmokeSession(
   plan: Extract<RunnerReleaseSmokePlan, { ok: true }>,
+  env: Record<string, string | undefined>,
 ): RunnerReleaseSmokeSession {
   const connection = createDatabaseConnection();
-  const config = readDigitalOceanProviderConfig();
+  const config = readDigitalOceanProviderConfig(env);
   if (config?.providerMode !== "digitalocean") {
     void connection.close();
     throw new Error("Runner release smoke configuration is unavailable.");

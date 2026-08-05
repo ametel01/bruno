@@ -780,6 +780,7 @@ and post-deploy checks remain required before Step 12.
 | 11 | Agent-creation provisioning regression characterization and repair | Production was rolled back to `dpl_CdG8WSKjXcJKCXKi1ErsShBUt7qh`; the deleted failed agent was not reconciled and no Droplet was created. Focused build, creation, and trigger coverage passed 3 files / 36 tests with fake configuration/providers only. Format and lint checked 384 files, typecheck passed, all migrations through 0024 and 164 files / 1,576 tests passed on a clean temporary database, the production build passed, and the database was removed. No provider or cloud effect occurred. |
 | 11 | Compatible pre-canary control-plane staging | Read-only live-state inspection proved production is rolled back to pre-plan deployment `dpl_CdG8WSKjXcJKCXKi1ErsShBUt7qh`, so it cannot prove the new release/boot contract. The workflow now stages the exact production-configured commit with no domain assignment, passes that URL to the canary, and promotes the same deployment only after success. Frozen install, 4 focused files / 32 tests, workflow YAML parsing, format/lint across 384 files, typecheck, clean migrations through 0024, 164 files / 1,577 tests, production build, and diff hygiene passed. The temporary database was removed; no Vercel deployment, registry publication, provider call, or Droplet occurred. |
 | 11 | Live GHCR publish, Trivy scan of published digest, disposable DigitalOcean release canary, Vercel production deploy, `/health`, and required-release verification | Release runs [`30959832776`](https://github.com/ametel01/plingpling/actions/runs/30959832776) and [`30961074986`](https://github.com/ametel01/plingpling/actions/runs/30961074986) failed safely during job setup. Run [`30961399736`](https://github.com/ametel01/plingpling/actions/runs/30961399736) exposed Trivy SARIF severity and unavailable CodeQL upload issues, which were corrected without weakening the critical-fixable vulnerability gate. Run [`30962185226`](https://github.com/ametel01/plingpling/actions/runs/30962185226) then passed image build/publication, immutable digest verification, the Trivy gate, and SARIF artifact retention for `9e61f46c344cf35049db35f088242747abbeb1b3@sha256:c8b8bfe9261cfe06e7127122dd14c516c1f57648fec295655486a3836fe157de`; it failed while pulling Vercel production settings. After the project identifiers were refreshed and command-line authentication was removed, run [`30962858945`](https://github.com/ametel01/plingpling/actions/runs/30962858945) failed at the same pull because Vercel CLI 58 does not consume `VERCEL_TOKEN` as environment-only authentication. A personal full-account token now passes authenticated user and exact team-project inspection, the GitHub `production` secret was updated without printing it, and the exact production-settings pull passed locally. With the user's explicit authorization, all five workflow CLI calls again pass that environment secret through Vercel's required `--token` option. Frozen install, 3 focused files / 58 tests, YAML parsing, format/lint across 384 files, typecheck, clean migrations through 0024, 164 files / 1,579 tests, production build, and diff hygiene passed. Both failed runs and all local validation skipped provider access and created no Vercel deployment or Droplet. A new authorized run is required; no live acceptance is claimed. |
+| 11 | Release canary immutable-image binding | Run [`30965044255`](https://github.com/ametel01/plingpling/actions/runs/30965044255) passed image publication, digest verification, Trivy, Vercel production-settings pull, and creation of the exact no-domain staging deployment for `212f6d1319f25e3c9ebc30a57663aedda0697c72@sha256:e45b0c59b3147075d32791519c683170aab6297737cfd721c93f16513a38ffeb`. The canary then failed before provider construction because its session reread ambient `AGENTBAY_RUNNER_IMAGE` instead of binding the already-validated `--image` argument. The session now receives an environment derived from that immutable CLI argument, with a regression test at the failed handoff. Frozen install, 2 focused files / 16 tests, format/lint across 384 files, typecheck, clean migrations through 0024, 164 files / 1,580 tests, production build, and diff hygiene passed. Production promotion was skipped; the canary made no DigitalOcean request and created no Droplet. A new authorized run is required; no live acceptance is claimed. |
 
 ### Step 1 Gap Matrix
 
@@ -1004,6 +1005,21 @@ and post-deploy checks remain required before Step 12.
   directory was removed. No local test invoked DigitalOcean or created a
   Droplet. The workflow correction is `ci: restore Vercel CLI authentication`
   (`This commit`).
+- 2026-08-05: Release run
+  [`30965044255`](https://github.com/ametel01/plingpling/actions/runs/30965044255)
+  published and scanned candidate
+  `212f6d1319f25e3c9ebc30a57663aedda0697c72@sha256:e45b0c59b3147075d32791519c683170aab6297737cfd721c93f16513a38ffeb`,
+  pulled production settings, and created its no-domain Vercel staging
+  deployment. The canary stopped during configuration before provider
+  construction because the production session did not receive the immutable
+  image that planning had already validated from `--image`. Bound the CLI
+  image into the session environment and added a red/green regression at that
+  exact handoff. Frozen install, 2 focused files / 16 tests, format/lint across
+  384 files, typecheck, clean migrations through 0024, 164 files / 1,580 tests,
+  production build, and diff hygiene passed. The temporary database was
+  removed. Production promotion was skipped, no DigitalOcean request occurred,
+  and no Droplet was created. The corrective commit is
+  `fix: bind release image to canary session` (`This commit`).
 
 ### Next Step
 

@@ -64,6 +64,19 @@ describe("runner release smoke", () => {
     });
   });
 
+  it("binds the CLI image to the provider session environment", async () => {
+    let sessionEnv: Record<string, string | undefined> | undefined;
+
+    await smokeRunnerRelease(["--image", IMAGE], VALID_ENV, {
+      createSession: (_plan, env) => {
+        sessionEnv = env;
+        return session([]);
+      },
+    });
+
+    expect(sessionEnv?.AGENTBAY_RUNNER_IMAGE).toBe(IMAGE);
+  });
+
   it("always cleans and verifies exact absence after a passing smoke", async () => {
     const calls: string[] = [];
     const result = await smokeRunnerRelease(["--image", IMAGE], VALID_ENV, {
