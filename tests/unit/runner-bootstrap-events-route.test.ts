@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { runnerIngressLogger } from "@/src/server/runners/runner-ingress-logging";
 
 const mocks = vi.hoisted(() => {
   class RunnerBootstrapEventPersistenceError extends Error {
@@ -32,7 +33,7 @@ describe("POST /runner/v1/bootstrap-events route", () => {
   });
 
   it("records safe bootstrap telemetry for a valid registration token", async () => {
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(runnerIngressLogger, "info").mockImplementation(() => {});
 
     mocks.recordRunnerBootstrapEvent.mockResolvedValueOnce({
       ok: true,
@@ -53,9 +54,7 @@ describe("POST /runner/v1/bootstrap-events route", () => {
       }),
     );
     const body = await response.json();
-    const ingressLogs = infoSpy.mock.calls
-      .filter(([scope]) => scope === "[agentbay] runner.ingress")
-      .map(([, payload]) => payload);
+    const ingressLogs = infoSpy.mock.calls.map(([event, metadata]) => ({ ...metadata, event }));
 
     expect(response.status).toBe(200);
     expect(body).toEqual({

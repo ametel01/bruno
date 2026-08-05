@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Production Pino JSON logging with configurable levels, recursive credential redaction, normalized errors, correlated agent/Droplet/deployment lifecycle fields, and targeted provider, runner-ingress, retry, terminal-failure, and cleanup instrumentation.
 - A fail-closed `local:agent:smoke` regression gate now runs the complete ready-agent create, deploy, model-canary, restart, stop, delete, and cleanup cycle inside exactly one Docker-based Droplet simulator with its own nested daemon; it verifies the pinned Hermes image and executable inside that Droplet and probes the started gateway's authenticated detailed-health endpoint in-container while keeping model and Telegram network boundaries synthetic and making no DigitalOcean request.
 - Automatic managed-runner recovery now provisions immutable digest-pinned replacement capacity, rediscovers interrupted targets by operation tag, verifies fresh release and boot readiness plus assignment capacity, and safely cleans failed targets without disturbing source workloads.
 - Capability-backed cloud runner boot validation now verifies Docker and self-image access, an isolated pinned Hermes fixture, private detailed health, a fixed model canary, synthetic no-traffic Telegram configuration loading, and exact cleanup before a compatible runner becomes assignable.

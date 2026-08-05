@@ -70,9 +70,14 @@ export async function POST(
     return invalidRegistrationTokenResponse();
   } catch (error) {
     if (error instanceof RunnerRegistrationPersistenceError) {
-      logRunnerIngress("register", "persistence_failed", {
-        endpointHostname: safeHostname(validation.value.endpointUrl),
-      });
+      logRunnerIngress(
+        "register",
+        "persistence_failed",
+        {
+          endpointHostname: safeHostname(validation.value.endpointUrl),
+        },
+        error,
+      );
 
       return runnerRegistrationPersistenceErrorResponse(error);
     }

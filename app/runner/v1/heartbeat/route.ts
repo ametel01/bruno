@@ -114,9 +114,14 @@ export async function POST(
     });
   } catch (error) {
     if (error instanceof RunnerHeartbeatPersistenceError) {
-      logRunnerIngress("heartbeat", "persistence_failed", {
-        runnerId: readPayloadRunnerId(payload),
-      });
+      logRunnerIngress(
+        "heartbeat",
+        "persistence_failed",
+        {
+          runnerId: readPayloadRunnerId(payload),
+        },
+        error,
+      );
 
       return Response.json(
         {

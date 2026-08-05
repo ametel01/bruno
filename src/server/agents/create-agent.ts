@@ -18,6 +18,7 @@ import {
   type SupportedAgentTemplateKey,
 } from "@/src/server/agents/templates";
 import { recordAgentEventInTransaction } from "@/src/server/events/agent-events";
+import { type AppLogger, createAppLogger } from "@/src/server/logging/logger";
 import {
   selectRunnerPlacementForUserInTransaction,
   type RunnerPlacementResult,
@@ -57,6 +58,8 @@ import {
   type TelegramClientDependencies,
   validateTelegramBotTokenWithGetMe,
 } from "@/src/server/telegram/telegram-client";
+
+const agentCreateLogger = createAppLogger("agent.create");
 
 export const AGENT_NAME_MAX_LENGTH = 120;
 export const DEFAULT_AGENT_CONFIG_BASE = {
@@ -474,15 +477,36 @@ export async function createAgentForDevelopmentUser(
 ): Promise<CreatedAgentResponse> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
+  const lifecycleId = randomUUID();
+  const logger = agentCreateLogger.child({
+    lifecycle: "agent_creation",
+    lifecycleId,
+    launchMode: "stopped",
+  });
+  const startedAt = Date.now();
+
+  logAgentCreate(logger, "requested", {
+    templateKey: input.templateKey,
+    requestedRunnerId: input.runnerId ?? null,
+  });
 
   try {
-    return await createAgentWithUserResolver(
+    const response = await createAgentWithUserResolver(
       connection,
       (tx) => getOrCreateDevelopmentUserId(tx),
       input,
       dependencies,
+      logger,
     );
+
+    logAgentCreate(logger, "completed", {
+      agentId: response.agent.id,
+      runnerId: response.agent.runnerId,
+      durationMs: Date.now() - startedAt,
+    });
+    return response;
   } catch (error) {
+    logAgentCreateError(logger, "failed", error, { durationMs: Date.now() - startedAt });
     return throwAgentCreateError(error);
   } finally {
     if (ownsConnection) {
@@ -498,14 +522,47 @@ export async function createAgentForUser(
 ): Promise<CreateAgentResponse> {
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
+  const lifecycleId = randomUUID();
+  const launchMode = isReadyCreateInput(input) ? "ready" : "stopped";
+  const logger = agentCreateLogger.child({
+    lifecycle: "agent_creation",
+    lifecycleId,
+    launchMode,
+    userId,
+  });
+  const startedAt = Date.now();
+
+  logAgentCreate(logger, "requested", {
+    templateKey: input.templateKey,
+    requestedRunnerId: input.runnerId ?? null,
+  });
 
   try {
+    let response: CreateAgentResponse;
+
     if (isReadyCreateInput(input)) {
-      return await createReadyAgentForUser(connection, userId, input, dependencies);
+      response = await createReadyAgentForUser(connection, userId, input, dependencies);
+    } else {
+      response = await createAgentWithUserResolver(
+        connection,
+        () => userId,
+        input,
+        dependencies,
+        logger,
+      );
     }
 
-    return await createAgentWithUserResolver(connection, () => userId, input, dependencies);
+    logAgentCreate(logger, "completed", {
+      agentId: response.agent.id,
+      runnerId: response.agent.runnerId,
+      durationMs: Date.now() - startedAt,
+      ...(isReadyCreateInput(input) && "deployment" in response
+        ? { deploymentId: response.deployment.id }
+        : {}),
+    });
+    return response;
   } catch (error) {
+    logAgentCreateError(logger, "failed", error, { durationMs: Date.now() - startedAt });
     return throwAgentCreateError(error);
   } finally {
     if (ownsConnection) {
@@ -523,6 +580,7 @@ async function createAgentWithUserResolver(
     runnerId?: string | null;
   },
   dependencies: CreateAgentDependencies,
+  logger: AppLogger,
 ): Promise<CreatedAgentResponse> {
   const insertDefaultAgentConfig =
     dependencies.insertDefaultAgentConfig ?? insertDefaultConfigForCreatedAgent;
@@ -563,7 +621,7 @@ async function createAgentWithUserResolver(
   });
 
   if (initial.status === "created") {
-    logAgentCreate("created_without_runner", { agentId: initial.response.agent.id });
+    logAgentCreate(logger, "created_without_runner", { agentId: initial.response.agent.id });
     return initial.response;
   }
 
@@ -580,7 +638,7 @@ async function createAgentWithUserResolver(
             }),
           );
 
-    logAgentCreate("placement_checked", {
+    logAgentCreate(logger, "placement_checked", {
       attempt,
       autoProvisionCloudRunner,
       requestedRunner: Boolean(input.runnerId),
@@ -601,7 +659,7 @@ async function createAgentWithUserResolver(
       }
 
       if (autoProvisionCloudRunner) {
-        logAgentCreate("cloud_runner_needed", {
+        logAgentCreate(logger, "cloud_runner_needed", {
           autoProvisionCloudRunner,
           requestedRunner: Boolean(input.runnerId),
         });
@@ -613,6 +671,7 @@ async function createAgentWithUserResolver(
           insertDefaultAgentConfig,
           insertCreatedEvent,
           dependencies,
+          logger,
         });
       }
 
@@ -629,7 +688,7 @@ async function createAgentWithUserResolver(
         });
       });
 
-      logAgentCreate("created_without_runner", { agentId: response.agent.id });
+      logAgentCreate(logger, "created_without_runner", { agentId: response.agent.id });
       return response;
     }
 
@@ -639,13 +698,18 @@ async function createAgentWithUserResolver(
     });
 
     if (!verification.ok) {
-      logAgentCreate("runner_candidate_rejected", {
-        action: verification.action,
-        attempt,
-        reason: verification.reason,
-        runnerId: placement.runner.id,
-        transitioned: verification.transitioned,
-      });
+      logAgentCreate(
+        logger,
+        "runner_candidate_rejected",
+        {
+          action: verification.action,
+          attempt,
+          reason: verification.reason,
+          runnerId: placement.runner.id,
+          transitioned: verification.transitioned,
+        },
+        "warn",
+      );
 
       if (verification.action === "fail_closed") {
         throw new AgentRunnerVerificationError(verification.reason);
@@ -683,11 +747,16 @@ async function createAgentWithUserResolver(
     });
 
     if (!created.ok) {
-      logAgentCreate("runner_candidate_changed_before_insert", {
-        attempt,
-        reason: created.placement.reason,
-        runnerId: placement.runner.id,
-      });
+      logAgentCreate(
+        logger,
+        "runner_candidate_changed_before_insert",
+        {
+          attempt,
+          reason: created.placement.reason,
+          runnerId: placement.runner.id,
+        },
+        "warn",
+      );
 
       if (
         created.placement.reason === "plan_limit_reached" ||
@@ -703,7 +772,7 @@ async function createAgentWithUserResolver(
       continue;
     }
 
-    logAgentCreate("created_with_existing_runner", {
+    logAgentCreate(logger, "created_with_existing_runner", {
       agentId: created.response.agent.id,
       runnerId: verification.runner.id,
       runnerKind: verification.runner.kind,
@@ -1043,6 +1112,7 @@ async function createAgentWithProvisionedRunner(
     insertDefaultAgentConfig: InsertDefaultAgentConfig;
     insertCreatedEvent: InsertCreatedEvent;
     dependencies: CreateAgentDependencies;
+    logger: AppLogger;
   },
 ): Promise<CreatedAgentResponse> {
   const { dependencies } = input;
@@ -1050,9 +1120,12 @@ async function createAgentWithProvisionedRunner(
   const ensureCloudRunnerProvisioning =
     dependencies.ensureCloudRunnerProvisioning ??
     (() => ensureDefaultCloudRunnerProvisioning(input.userId));
-  logAgentCreate("cloud_runner_provisioning_start", {});
-  const provisionedRunnerId = await ensureProvisionedRunnerId(ensureCloudRunnerProvisioning);
-  logAgentCreate("cloud_runner_provisioning_runner_selected", {
+  logAgentCreate(input.logger, "cloud_runner_provisioning_start", {});
+  const provisionedRunnerId = await ensureProvisionedRunnerId(
+    ensureCloudRunnerProvisioning,
+    input.logger,
+  );
+  logAgentCreate(input.logger, "cloud_runner_provisioning_runner_selected", {
     runnerId: provisionedRunnerId,
   });
 
@@ -1133,25 +1206,29 @@ async function insertCreatedAgentInTransaction(
 
 async function ensureProvisionedRunnerId(
   ensureCloudRunnerProvisioning: EnsureCloudRunnerProvisioning,
+  logger: AppLogger,
 ): Promise<string> {
   let result: CreateRunnerProvisioningResult;
 
   try {
     result = await ensureCloudRunnerProvisioning();
   } catch (error) {
-    logAgentCreate("cloud_runner_provisioning_threw", {
-      errorName: error instanceof Error ? error.name : typeof error,
-    });
+    logAgentCreateError(logger, "cloud_runner_provisioning_threw", error, {});
     throw new AgentRunnerProvisioningError("provisioning_failed", error);
   }
 
   if (!result.ok) {
     if (result.reason === "provider_not_configured") {
-      logAgentCreate("cloud_runner_provider_not_configured", {});
+      logAgentCreate(logger, "cloud_runner_provider_not_configured", {}, "error");
       throw new AgentRunnerProvisioningError("provider_not_configured");
     }
 
-    logAgentCreate("cloud_runner_provisioning_failed_result", { reason: result.reason });
+    logAgentCreate(
+      logger,
+      "cloud_runner_provisioning_failed_result",
+      { reason: result.reason },
+      "error",
+    );
     throw new AgentRunnerProvisioningError("provisioning_failed", result);
   }
 
@@ -1159,14 +1236,19 @@ async function ensureProvisionedRunnerId(
     result.runner.provisioning.status === "failed" ||
     result.runner.provisioning.status === "deleted"
   ) {
-    logAgentCreate("cloud_runner_unusable", {
-      runnerId: result.runner.id,
-      provisioningStatus: result.runner.provisioning.status,
-    });
+    logAgentCreate(
+      logger,
+      "cloud_runner_unusable",
+      {
+        runnerId: result.runner.id,
+        provisioningStatus: result.runner.provisioning.status,
+      },
+      "error",
+    );
     throw new AgentRunnerProvisioningError("provisioning_failed", result);
   }
 
-  logAgentCreate("cloud_runner_provisioning_result", {
+  logAgentCreate(logger, "cloud_runner_provisioning_result", {
     duplicate: result.duplicate,
     runnerId: result.runner.id,
     runnerStatus: result.runner.status,
@@ -1495,12 +1577,35 @@ function isTelegramSecretUniquenessConstraint(error: unknown): boolean {
   ]);
 }
 
-function logAgentCreate(event: string, metadata: Record<string, unknown>): void {
+function logAgentCreate(
+  logger: AppLogger,
+  event: string,
+  metadata: Record<string, unknown>,
+  level: "info" | "warn" | "error" = "info",
+): void {
   if (process.env.NODE_ENV === "test") {
     return;
   }
 
-  console.info("[agentbay] agent.create", { event, ...metadata });
+  if (level === "error") {
+    logger.errorEvent(event, metadata);
+    return;
+  }
+
+  logger[level](event, metadata);
+}
+
+function logAgentCreateError(
+  logger: AppLogger,
+  event: string,
+  error: unknown,
+  metadata: Record<string, unknown>,
+): void {
+  if (process.env.NODE_ENV === "test") {
+    return;
+  }
+
+  logger.error(event, error, metadata);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

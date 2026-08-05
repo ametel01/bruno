@@ -1,6 +1,6 @@
 import "server-only";
 
-import { generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
@@ -45,6 +45,9 @@ import {
 } from "@/src/server/runners/runner-auth-secrets";
 import { requiredRunnerImageDigestForProvider } from "@/src/server/runners/runner-compatibility";
 import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
+import { createAppLogger } from "@/src/server/logging/logger";
+
+const runnerProvisioningLogger = createAppLogger("runner.provisioning");
 
 const DEFAULT_CLOUD_RUNNER_NAME = "plingpling Cloud Runner";
 const DEFAULT_FIREWALL_NAME = "agentbay-runners";
@@ -58,6 +61,14 @@ const MANAGED_SSH_KEY_NAME = "plingpling managed runner key";
 type RunnerProvisioningTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
 >[0];
+
+type ProvisioningLogLevel = "debug" | "info" | "warn" | "error";
+type ProvisioningLog = (
+  event: string,
+  metadata?: Record<string, unknown>,
+  level?: ProvisioningLogLevel,
+  error?: unknown,
+) => void;
 
 export type RunnerProvisioningPhase =
   | "pending"
@@ -163,6 +174,13 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
   context: DigitalOceanProviderRequestContext;
   now: () => Date;
 }): Promise<AutomaticRunnerProvisioningResult> {
+  const log = createRunnerProvisioningLog({
+    lifecycle: "droplet_creation",
+    lifecycleId: input.operationKey,
+    operationMode: "automatic",
+    runnerId: input.runnerId,
+    userId: input.userId,
+  });
   const [runner] = await input.connection.db
     .select({
       id: runners.id,
@@ -184,6 +202,7 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     .limit(1);
 
   if (!runner || runner.status === "deleted") {
+    log("runner_unavailable", { observedRunnerStatus: runner?.status ?? "missing" }, "error");
     return {
       ok: false,
       cleanupRequired: false,
@@ -192,10 +211,19 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
   }
 
   if (runner.provisioningStatus === "ready") {
+    log("completed", { provisioningStatus: runner.provisioningStatus });
     return { ok: true, state: "ready" };
   }
 
   if (runner.provisioningStatus === "failed" || runner.provisioningStatus === "deleted") {
+    log(
+      "terminal_state_observed",
+      {
+        provisioningStatus: runner.provisioningStatus,
+        providerResourceId: runner.providerResourceId,
+      },
+      "error",
+    );
     return {
       ok: false,
       cleanupRequired: Boolean(runner.providerResourceId),
@@ -207,6 +235,17 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     ...new Set([...input.config.tags, DIGITALOCEAN_MANAGED_RUNNER_TAG, input.operationKey]),
   ].sort();
 
+  log(
+    "phase_observed",
+    {
+      attemptCount: input.attemptCount,
+      maxAttempts: input.maxAttempts,
+      provisioningStatus: runner.provisioningStatus,
+      providerResourceId: runner.providerResourceId,
+    },
+    "debug",
+  );
+
   if (runner.provisioningStatus === "pending" || runner.provisioningStatus === "creating") {
     const discovered = await input.provider.discoverResourcesByTag(
       { tag: input.operationKey },
@@ -214,6 +253,15 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     );
 
     if (!discovered.ok || !discovered.value.authoritative) {
+      log(
+        "resource_discovery_inconclusive",
+        {
+          attemptCount: input.attemptCount,
+          maxAttempts: input.maxAttempts,
+          reason: discovered.ok ? "non_authoritative" : discovered.reason,
+        },
+        input.attemptCount >= input.maxAttempts ? "error" : "warn",
+      );
       if (input.attemptCount >= input.maxAttempts) {
         await markAutomaticProvisioningFailed(input, runner.providerResourceId);
         return {
@@ -227,6 +275,11 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     }
 
     if (discovered.value.resources.length > 1) {
+      log(
+        "multiple_provider_resources_discovered",
+        { resourceCount: discovered.value.resources.length },
+        "error",
+      );
       await markAutomaticProvisioningFailed(input, runner.providerResourceId);
       return {
         ok: false,
@@ -238,6 +291,9 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     const adopted = discovered.value.resources[0];
 
     if (adopted) {
+      log("provider_resource_adopted", {
+        providerResourceId: adopted.providerResourceId,
+      });
       await persistAutomaticProviderResource(input, adopted, "tagging");
       return { ok: true, state: "pending" };
     }
@@ -273,9 +329,11 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
       input.config,
       { runnerId: input.runnerId },
       input.context,
+      log,
     );
 
     if (!sshAccess.ok) {
+      log("ssh_access_resolution_failed", { reason: sshAccess.reason }, "error");
       await markAutomaticProvisioningFailed(input, null);
       return {
         ok: false,
@@ -303,6 +361,13 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
         : {}),
       sizeSlug: input.config.sizeSlug,
       now: input.now,
+      log,
+    });
+    log("provider_create_started", {
+      region: input.config.region,
+      sizeSlug: input.config.sizeSlug,
+      image: input.config.image,
+      sshKeyCount: sshAccess.sshKeyIds.length,
     });
     const created = await input.provider.createRunner(
       {
@@ -319,6 +384,11 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     );
 
     if (!created.ok) {
+      log(
+        "provider_create_failed",
+        { reason: created.reason },
+        created.reason === "create_outcome_unknown" ? "warn" : "error",
+      );
       if (created.reason === "create_outcome_unknown") {
         await setAutomaticProvisioningPhase(input, "creating");
         return { ok: true, state: "pending" };
@@ -333,6 +403,10 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     }
 
     await persistAutomaticProviderResource(input, created.value, "tagging");
+    log("provider_create_completed", {
+      providerResourceId: created.value.providerResourceId,
+      publicIpv4ResolvedInCreateResponse: Boolean(created.value.publicIpv4),
+    });
     return { ok: true, state: "pending" };
   }
 
@@ -352,6 +426,7 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     );
 
     if (!tagged.ok) {
+      log("provider_tagging_failed", { reason: tagged.reason }, "error");
       await markAutomaticProvisioningFailed(input, runner.providerResourceId);
       return {
         ok: false,
@@ -375,6 +450,7 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     );
 
     if (!firewalled.ok) {
+      log("provider_firewall_failed", { reason: firewalled.reason }, "error");
       await markAutomaticProvisioningFailed(input, runner.providerResourceId);
       return {
         ok: false,
@@ -384,6 +460,7 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     }
 
     if (!firewalled.value.providerFirewallId) {
+      log("provider_firewall_missing_id", {}, "error");
       await markAutomaticProvisioningFailed(input, runner.providerResourceId);
       return {
         ok: false,
@@ -399,6 +476,10 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
       endpointUrl,
       firewalled.value.providerFirewallId,
     );
+    log("provider_firewall_completed", {
+      providerFirewallId: firewalled.value.providerFirewallId,
+      endpointResolved: Boolean(endpointUrl),
+    });
     return { ok: true, state: "pending" };
   }
 
@@ -409,6 +490,11 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     );
 
     if (!refreshed.ok) {
+      log(
+        "provider_resource_refresh_failed",
+        { reason: refreshed.reason, attemptCount: input.attemptCount },
+        input.attemptCount >= input.maxAttempts ? "error" : "warn",
+      );
       if (input.attemptCount >= input.maxAttempts) {
         await markAutomaticProvisioningFailed(input, runner.providerResourceId);
         return {
@@ -424,10 +510,12 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     const endpointUrl = endpointForProviderResource(refreshed.value);
 
     if (!endpointUrl) {
+      log("public_endpoint_pending", {}, "debug");
       return { ok: true, state: "pending" };
     }
 
     await setAutomaticProvisioningPhase(input, "waiting_for_runner", endpointUrl);
+    log("public_endpoint_resolved", { endpointUrl });
     return { ok: true, state: "pending" };
   }
 
@@ -519,7 +607,16 @@ export async function createDigitalOceanRunnerForUser(
     return { ok: false, reason: "validation_failed", issues: validated.issues };
   }
 
-  logRunnerProvisioning("request_received", {
+  const lifecycleId = randomUUID();
+  const log = createRunnerProvisioningLog({
+    lifecycle: "droplet_creation",
+    lifecycleId,
+    operationMode: "manual",
+    userId,
+  });
+  const lifecycleStartedAt = Date.now();
+
+  log("request_received", {
     provider: validated.value.provider,
     name: validated.value.name,
   });
@@ -564,12 +661,12 @@ export async function createDigitalOceanRunnerForUser(
       });
 
       if (!duplicateStillReusable) {
-        logRunnerProvisioning("duplicate_provider_resource_missing", {
+        log("duplicate_provider_resource_missing", {
           runnerId: duplicate.id,
           providerResourceId: duplicate.providerResourceId,
         });
       } else {
-        logRunnerProvisioning("duplicate_reused", {
+        log("duplicate_reused", {
           runnerId: duplicate.id,
           runnerStatus: duplicate.status,
           provisioningStatus: duplicate.provisioning.status,
@@ -587,14 +684,14 @@ export async function createDigitalOceanRunnerForUser(
     const config = getConfig();
 
     if (!config) {
-      logRunnerProvisioning("provider_not_configured", {});
+      log("provider_not_configured", {}, "error");
       return { ok: false, reason: "provider_not_configured" };
     }
 
     const managedTags = [...new Set([...config.tags, DIGITALOCEAN_MANAGED_RUNNER_TAG])].sort();
     const hermesConfig = resolveHermesDeploymentConfig(config);
 
-    logRunnerProvisioning("provider_config_loaded", {
+    log("provider_config_loaded", {
       region: config.region,
       sizeSlug: config.sizeSlug,
       image: config.image,
@@ -627,7 +724,7 @@ export async function createDigitalOceanRunnerForUser(
       const duplicateRunner = await findActiveProvisioningRunner(tx, userId);
 
       if (duplicateRunner) {
-        logRunnerProvisioning("duplicate_reused_after_lock", { runnerId: duplicateRunner.id });
+        log("duplicate_reused_after_lock", { runnerId: duplicateRunner.id });
         return {
           duplicate: true,
           runner: await toRunnerProvisioningDto(tx, userId, duplicateRunner.id),
@@ -658,7 +755,7 @@ export async function createDigitalOceanRunnerForUser(
         throw new Error("Provisioning runner insert returned no rows.");
       }
 
-      logRunnerProvisioning("runner_row_created", {
+      log("runner_row_created", {
         runnerId: runner.id,
         region: config.region,
         sizeSlug: config.sizeSlug,
@@ -730,13 +827,23 @@ export async function createDigitalOceanRunnerForUser(
     }
 
     const runnerId = initialized.runner.id;
-    const sshAccess = await resolveDigitalOceanSshAccess(provider, config, { runnerId });
+    const sshAccess = await resolveDigitalOceanSshAccess(
+      provider,
+      config,
+      { runnerId },
+      undefined,
+      log,
+    );
 
     if (!sshAccess.ok) {
-      logRunnerProvisioning("ssh_key_resolution_failed", {
-        runnerId,
-        reason: sshAccess.reason,
-      });
+      log(
+        "ssh_key_resolution_failed",
+        {
+          runnerId,
+          reason: sshAccess.reason,
+        },
+        "error",
+      );
 
       await failProvisioning(connection, {
         userId,
@@ -754,7 +861,7 @@ export async function createDigitalOceanRunnerForUser(
       };
     }
 
-    logRunnerProvisioning("ssh_access_resolved", {
+    log("ssh_access_resolved", {
       runnerId,
       sshKeyCount: sshAccess.sshKeyIds.length,
       sshFirewallEnabled: sshAccess.sshSourceAddresses.length > 0,
@@ -778,6 +885,7 @@ export async function createDigitalOceanRunnerForUser(
         : {}),
       sizeSlug: initialized.runner.sizeSlug,
       now,
+      log,
     });
     const resource = await runProviderStep(connection, {
       userId,
@@ -796,6 +904,7 @@ export async function createDigitalOceanRunnerForUser(
         sshKeyCount: sshAccess.sshKeyIds.length,
       },
       now,
+      log,
       execute: () =>
         provider.createRunner({
           name: initialized.runner.name,
@@ -810,10 +919,14 @@ export async function createDigitalOceanRunnerForUser(
     });
 
     if (!resource.ok) {
-      logRunnerProvisioning("provider_create_failed", {
-        runnerId,
-        reason: resource.reason,
-      });
+      log(
+        "provider_create_failed",
+        {
+          runnerId,
+          reason: resource.reason,
+        },
+        "error",
+      );
 
       return {
         ok: true,
@@ -822,7 +935,7 @@ export async function createDigitalOceanRunnerForUser(
       };
     }
 
-    logRunnerProvisioning("provider_create_completed", {
+    log("provider_create_completed", {
       runnerId,
       providerResourceId: resource.value.providerResourceId,
       publicIpv4ResolvedInCreateResponse: Boolean(resource.value.publicIpv4),
@@ -845,11 +958,15 @@ export async function createDigitalOceanRunnerForUser(
     );
 
     if (!publicEndpoint.ok) {
-      logRunnerProvisioning("public_endpoint_resolution_failed", {
-        runnerId,
-        providerResourceId: resource.value.providerResourceId,
-        reason: publicEndpoint.reason,
-      });
+      log(
+        "public_endpoint_resolution_failed",
+        {
+          runnerId,
+          providerResourceId: resource.value.providerResourceId,
+          reason: publicEndpoint.reason,
+        },
+        "error",
+      );
 
       await failProvisioning(connection, {
         userId,
@@ -868,7 +985,7 @@ export async function createDigitalOceanRunnerForUser(
       };
     }
 
-    logRunnerProvisioning("public_endpoint_resolved", {
+    log("public_endpoint_resolved", {
       runnerId,
       providerResourceId: resource.value.providerResourceId,
       endpointUrl: publicEndpoint.endpointUrl,
@@ -893,6 +1010,7 @@ export async function createDigitalOceanRunnerForUser(
         "DigitalOcean tags could not be applied. Check tag permissions and Droplet state.",
       failureReason: "tag_failed",
       now,
+      log,
       execute: () =>
         provider.tagResource({
           providerResourceId: resource.value.providerResourceId,
@@ -912,6 +1030,7 @@ export async function createDigitalOceanRunnerForUser(
           failedPhase: "tagging",
           tags: managedTags,
           now,
+          log,
         }),
       };
     }
@@ -943,6 +1062,7 @@ export async function createDigitalOceanRunnerForUser(
         sshSourceAddresses: sshAccess.sshSourceAddresses,
       },
       now,
+      log,
       execute: () =>
         provider.applyFirewall({
           providerResourceId: resource.value.providerResourceId,
@@ -963,6 +1083,7 @@ export async function createDigitalOceanRunnerForUser(
           failedPhase: "firewall_configuring",
           tags: managedTags,
           now,
+          log,
         }),
       };
     }
@@ -1001,12 +1122,19 @@ export async function createDigitalOceanRunnerForUser(
       });
     });
 
-    return {
+    const result = {
       ok: true,
       duplicate: false,
       runner: await getRunnerProvisioningDto(connection, userId, runnerId),
-    };
+    } as const;
+    log("waiting_for_runner", {
+      runnerId,
+      durationMs: Date.now() - lifecycleStartedAt,
+      provisioningStatus: result.runner.provisioning.status,
+    });
+    return result;
   } catch (error) {
+    log("persistence_failed", { durationMs: Date.now() - lifecycleStartedAt }, "error", error);
     throw new RunnerProvisioningPersistenceError(error);
   } finally {
     if (ownsConnection) {
@@ -1048,6 +1176,7 @@ async function runProviderStep(
     firewallName?: string;
     startedMetadata?: Record<string, unknown>;
     now: () => Date;
+    log: ProvisioningLog;
     execute: () => Promise<DigitalOceanProviderResult<DigitalOceanResource>>;
   },
 ): Promise<DigitalOceanProviderResult<DigitalOceanResource>> {
@@ -1076,7 +1205,13 @@ async function runProviderStep(
 
   try {
     result = await input.execute();
-  } catch {
+  } catch (error) {
+    input.log(
+      "provider_step_threw",
+      { runnerId: input.runnerId, phase: input.phase },
+      "error",
+      error,
+    );
     result = {
       ok: false,
       reason: input.failureReason,
@@ -1085,11 +1220,15 @@ async function runProviderStep(
   }
 
   if (!result.ok) {
-    logRunnerProvisioning("provider_step_failed", {
-      runnerId: input.runnerId,
-      phase: input.phase,
-      reason: result.reason,
-    });
+    input.log(
+      "provider_step_failed",
+      {
+        runnerId: input.runnerId,
+        phase: input.phase,
+        reason: result.reason,
+      },
+      "error",
+    );
 
     await failProvisioning(connection, {
       userId: input.userId,
@@ -1218,6 +1357,7 @@ async function resolveDigitalOceanSshAccess(
   config: DigitalOceanProviderConfig,
   options: { runnerId: string },
   context?: DigitalOceanProviderRequestContext,
+  log: ProvisioningLog = logRunnerProvisioning,
 ): Promise<
   | {
       ok: true;
@@ -1259,7 +1399,7 @@ async function resolveDigitalOceanSshAccess(
   const sshKeyIds = normalizeUniqueStrings(listedKeys.value.map((key) => key.id));
 
   if (sshKeyIds.length === 0) {
-    logRunnerProvisioning("ssh_key_auto_create_needed", {
+    log("ssh_key_auto_create_needed", {
       runnerId: options.runnerId,
       sshKeyName: MANAGED_SSH_KEY_NAME,
     });
@@ -1275,7 +1415,7 @@ async function resolveDigitalOceanSshAccess(
       };
     }
 
-    logRunnerProvisioning("ssh_key_auto_create_completed", {
+    log("ssh_key_auto_create_completed", {
       runnerId: options.runnerId,
       sshKeyId: createdKey.value.id,
       sshKeyName: createdKey.value.name,
@@ -1359,11 +1499,12 @@ async function buildProvisioningBootstrap(input: {
   releaseIdentityMode?: typeof RUNNER_RELEASE_DEVELOPMENT_MODE;
   sizeSlug: string;
   now: () => Date;
+  log: ProvisioningLog;
 }): Promise<CloudRunnerBootstrapContent> {
   const appBaseUrl = getServerEnv().NEXT_PUBLIC_APP_URL;
   const appUrl = new URL(appBaseUrl);
 
-  logRunnerProvisioning("bootstrap_callback_resolved", {
+  input.log("bootstrap_callback_resolved", {
     runnerId: input.runnerId,
     appBaseUrlOrigin: appUrl.origin,
     appBaseUrlHostname: appUrl.hostname,
@@ -1715,6 +1856,7 @@ async function cleanupFailedProvisioningResource(
     failedPhase: RunnerProvisioningPhase;
     tags: string[];
     now: () => Date;
+    log: ProvisioningLog;
   },
 ): Promise<RunnerProvisioningDto> {
   await connection.db.transaction(async (tx) => {
@@ -1748,7 +1890,7 @@ async function cleanupFailedProvisioningResource(
   });
 
   if (cleanup.ok) {
-    logRunnerProvisioning("cleanup_completed", {
+    input.log("cleanup_completed", {
       runnerId: input.runnerId,
       providerResourceId: input.providerResourceId,
       failedPhase: input.failedPhase,
@@ -1787,12 +1929,16 @@ async function cleanupFailedProvisioningResource(
   }
 
   const message = manualCleanupMessage(input.providerResourceId);
-  logRunnerProvisioning("cleanup_failed", {
-    runnerId: input.runnerId,
-    providerResourceId: input.providerResourceId,
-    failedPhase: input.failedPhase,
-    reason: cleanup.reason,
-  });
+  input.log(
+    "cleanup_failed",
+    {
+      runnerId: input.runnerId,
+      providerResourceId: input.providerResourceId,
+      failedPhase: input.failedPhase,
+      reason: cleanup.reason,
+    },
+    "error",
+  );
 
   await connection.db.transaction(async (tx) => {
     const failedCleanupAt = input.now();
@@ -1988,10 +2134,47 @@ async function toRunnerProvisioningDto(
   };
 }
 
-function logRunnerProvisioning(event: string, metadata: Record<string, unknown>): void {
+function createRunnerProvisioningLog(bindings: Record<string, unknown>): ProvisioningLog {
+  const logger = runnerProvisioningLogger.child(bindings);
+
+  return (event, metadata = {}, level = "info", error) => {
+    if (process.env.NODE_ENV === "test") {
+      return;
+    }
+
+    if (error !== undefined) {
+      logger.error(event, error, metadata);
+      return;
+    }
+
+    if (level === "error") {
+      logger.errorEvent(event, metadata);
+      return;
+    }
+
+    logger[level](event, metadata);
+  };
+}
+
+function logRunnerProvisioning(
+  event: string,
+  metadata: Record<string, unknown> = {},
+  level: ProvisioningLogLevel = "info",
+  error?: unknown,
+): void {
   if (process.env.NODE_ENV === "test") {
     return;
   }
 
-  console.info("[agentbay] runner.provisioning", { event, ...metadata });
+  if (error !== undefined) {
+    runnerProvisioningLogger.error(event, error, metadata);
+    return;
+  }
+
+  if (level === "error") {
+    runnerProvisioningLogger.errorEvent(event, metadata);
+    return;
+  }
+
+  runnerProvisioningLogger[level](event, metadata);
 }

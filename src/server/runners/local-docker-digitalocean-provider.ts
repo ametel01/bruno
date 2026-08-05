@@ -2,6 +2,7 @@ import "server-only";
 
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { createAppLogger } from "@/src/server/logging/logger";
 import {
   DIGITALOCEAN_PROVIDER,
   type DigitalOceanCleanupInput,
@@ -19,6 +20,8 @@ import {
   type DigitalOceanTagInput,
 } from "@/src/server/runners/digitalocean-provider";
 import { LOCAL_DOCKER_DIGITALOCEAN_RESOURCE_ID } from "@/src/server/runners/local-docker-provider-constants";
+
+const localDockerProviderLogger = createAppLogger("local_docker.provider");
 
 export const LOCAL_DOCKER_DROPLET_CONTAINER_NAME = "agentbay-local-cloud-runner";
 const DEFAULT_LOCAL_ENDPOINT_URL = "http://127.0.0.1:3045";
@@ -276,18 +279,20 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
           ...(this.#agentSmokeMode ? ["exec tail --follow /dev/null"] : []),
         ].join("; "),
       ]);
-      console.info("[agentbay] local_docker_provider", {
-        event: "droplet_bootstrap_started",
-        containerName: this.#containerName,
-        endpointUrl: this.#endpointUrl,
-      });
+      if (process.env.NODE_ENV !== "test") {
+        localDockerProviderLogger.info("droplet_bootstrap_started", {
+          lifecycle: "droplet_creation",
+          containerName: this.#containerName,
+          endpointUrl: this.#endpointUrl,
+        });
+      }
     } catch (error) {
-      console.error("[agentbay] local_docker_provider", {
-        event: "droplet_bootstrap_start_failed",
-        containerName: this.#containerName,
-        errorName: error instanceof Error ? error.name : typeof error,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      });
+      if (process.env.NODE_ENV !== "test") {
+        localDockerProviderLogger.error("droplet_bootstrap_start_failed", error, {
+          lifecycle: "droplet_creation",
+          containerName: this.#containerName,
+        });
+      }
     }
   }
 
@@ -303,8 +308,13 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
           ],
           context,
         );
-      } catch {
-        // Missing local containers should not block a fresh local provisioning run.
+      } catch (error) {
+        if (process.env.NODE_ENV !== "test") {
+          localDockerProviderLogger.warn("stale_container_cleanup_skipped", {
+            containerName,
+            error,
+          });
+        }
       }
     }
   }

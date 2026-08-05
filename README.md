@@ -160,6 +160,7 @@ commit tokens, encryption keys, runner credentials, Clerk keys, or database cred
 | --- | --- | --- |
 | `DATABASE_URL` | Yes | PostgreSQL connection URL used by the app and Drizzle migrations. |
 | `NEXT_PUBLIC_APP_URL` | Yes | Canonical absolute application URL. |
+| `AGENTBAY_LOG_LEVEL` | No | Minimum structured server-log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, or `silent`; defaults to `info`. |
 | `AGENTBAY_AUTH_MODE` | Hosted deployments | `operator` or `clerk` normally; `development` is allowed on loopback, protected previews, or an explicitly public development deployment. |
 | `AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT` | Public Vercel development only | Must be exactly `true` with development mode to expose a production-target deployment without browser authentication. |
 | `AGENTBAY_OPERATOR_PASSWORD` | Operator deployments | Password for the Basic-auth gate in front of product pages and browser APIs. |

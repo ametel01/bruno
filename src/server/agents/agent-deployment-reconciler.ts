@@ -52,6 +52,9 @@ import {
 import type { RunnerReplacementReason } from "@/src/server/runners/runner-replacement-state";
 import { createOrGetRunnerReplacement } from "@/src/server/runners/runner-replacement-store";
 import { scheduleRunnerReplacementReconcileAfterResponse } from "@/src/server/runners/runner-replacement-triggers";
+import { createAppLogger, serializeLogError } from "@/src/server/logging/logger";
+
+const agentDeploymentLogger = createAppLogger("agent.deployment");
 
 export const DEPLOYMENT_RECONCILE_LEASE_MS = 90_000;
 export const DEPLOYMENT_RECONCILE_ACTION_DEADLINE_MS = 45_000;
@@ -216,6 +219,8 @@ async function reconcileOne(
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now ?? (() => new Date());
   const leaseOwner = `reconcile:${randomUUID()}`;
+  const lifecycleId = leaseOwner.slice("reconcile:".length);
+  const startedAt = Date.now();
 
   try {
     const claimed = await connection.db.transaction((tx) =>
@@ -227,13 +232,56 @@ async function reconcileOne(
     );
 
     if (!claimed) {
+      logAgentDeployment(
+        "reconcile_idle",
+        {
+          lifecycle: "agent_deployment",
+          lifecycleId,
+          targetKind: target.kind,
+          durationMs: Date.now() - startedAt,
+        },
+        "debug",
+      );
       return { processed: 0, outcome: "idle" };
     }
 
+    const lifecycleMetadata = {
+      lifecycle: "agent_deployment",
+      lifecycleId,
+      agentId: claimed.agentId,
+      deploymentId: claimed.id,
+      runnerId: claimed.agentRunnerId,
+      stage: claimed.stage,
+      attemptCount: claimed.attemptCount,
+    };
+    logAgentDeployment("stage_started", lifecycleMetadata);
+    const outcome = await runClaimedStage(
+      connection,
+      claimed,
+      dependencies,
+      hermesWorkloadImage,
+      now,
+    );
+    logAgentDeployment(
+      "stage_completed",
+      { ...lifecycleMetadata, outcome, durationMs: Date.now() - startedAt },
+      outcome === "failed" ? "error" : outcome === "retry_scheduled" ? "warn" : "info",
+    );
+
     return {
       processed: 1,
-      outcome: await runClaimedStage(connection, claimed, dependencies, hermesWorkloadImage, now),
+      outcome,
     };
+  } catch (error) {
+    logAgentDeploymentError("reconcile_failed", error, {
+      lifecycle: "agent_deployment",
+      lifecycleId,
+      targetKind: target.kind,
+      ...(target.kind === "deployment" ? { deploymentId: target.deploymentId } : {}),
+      ...(target.kind === "runner" ? { runnerId: target.runnerId } : {}),
+      durationMs: Date.now() - startedAt,
+    });
+    throw error;
   } finally {
     if (ownsConnection) {
       await connection.close();
@@ -676,8 +724,7 @@ async function reconcileStartingGateway(
     return maybeRecoverManagedTransport(connection, work, dependencies, context, observedAt);
   }
 
-  console.info("[agentbay] agent.deployment", {
-    event: "starting_gateway_status",
+  logAgentDeployment("starting_gateway_status", {
     agentId: work.agentId,
     deploymentId: work.id,
     phase: status.snapshot.phase,
@@ -859,13 +906,33 @@ async function beginManagedRunnerRecovery(
       const adapter = createRunnerAdapter(runner, dependencies, context);
       try {
         await adapter.streamLogs({ agentId: work.agentId, limit: 100 });
-      } catch {
-        // Log capture is best-effort and adapter persistence is bounded and redacted.
+      } catch (error) {
+        logAgentDeploymentError(
+          "recovery_log_capture_failed",
+          error,
+          {
+            agentId: work.agentId,
+            deploymentId: work.id,
+            runnerId: work.agentRunnerId,
+            stage: work.stage,
+          },
+          "warn",
+        );
       }
       try {
         await adapter.stop(work.agentId);
-      } catch {
-        // Replacement fencing repeats exact best-effort stop before handover.
+      } catch (error) {
+        logAgentDeploymentError(
+          "recovery_stop_failed",
+          error,
+          {
+            agentId: work.agentId,
+            deploymentId: work.id,
+            runnerId: work.agentRunnerId,
+            stage: work.stage,
+          },
+          "warn",
+        );
       }
     }
   }
@@ -1428,6 +1495,20 @@ async function scheduleRetry(
           and ${agents.desiredStatus} = 'running'
       )
   `);
+  logAgentDeployment(
+    "retry_scheduled",
+    {
+      agentId: work.agentId,
+      deploymentId: work.id,
+      runnerId: work.agentRunnerId,
+      stage: work.stage,
+      attemptCount: work.attemptCount,
+      reason,
+      backoffMs,
+      nextAttemptAt,
+    },
+    "warn",
+  );
   return "retry_scheduled";
 }
 
@@ -1718,26 +1799,63 @@ async function terminallyFailDeployment(
 
       try {
         await adapter.streamLogs({ agentId: work.agentId, limit: 100 });
-      } catch {
-        // Log capture is best-effort and the adapter redacts before persistence.
+      } catch (error) {
+        logAgentDeploymentError(
+          "failure_log_capture_failed",
+          error,
+          {
+            agentId: work.agentId,
+            deploymentId: work.id,
+            runnerId: work.agentRunnerId,
+            stage: work.stage,
+          },
+          "warn",
+        );
       }
 
       try {
         const stopped = await adapter.stop(work.agentId);
         cleanupRequired = !stopped.ok;
-      } catch {
+      } catch (error) {
+        logAgentDeploymentError(
+          "failure_cleanup_stop_failed",
+          error,
+          {
+            agentId: work.agentId,
+            deploymentId: work.id,
+            runnerId: work.agentRunnerId,
+            stage: work.stage,
+          },
+          "warn",
+        );
         cleanupRequired = true;
       }
     }
   }
 
-  return connection.db.transaction((tx) =>
+  const failed = await connection.db.transaction((tx) =>
     markDeploymentFailedInTransaction(tx, work, {
       code: input.code,
       now: input.now,
       cleanupRequired,
     }),
   );
+
+  logAgentDeployment(
+    "terminal_failure_recorded",
+    {
+      agentId: work.agentId,
+      deploymentId: work.id,
+      runnerId: work.agentRunnerId,
+      stage: work.stage,
+      attemptCount: work.attemptCount,
+      errorCode: input.code,
+      cleanupRequired,
+      persisted: failed,
+    },
+    "error",
+  );
+  return failed;
 }
 
 async function markDeploymentFailedInTransaction(
@@ -2014,6 +2132,41 @@ function eventMessage(event: string): string {
   }
 
   return "Automatic deployment stage changed.";
+}
+
+function logAgentDeployment(
+  event: string,
+  metadata: Record<string, unknown>,
+  level: "debug" | "info" | "warn" | "error" = "info",
+): void {
+  if (process.env.NODE_ENV === "test") {
+    return;
+  }
+
+  if (level === "error") {
+    agentDeploymentLogger.errorEvent(event, metadata);
+    return;
+  }
+
+  agentDeploymentLogger[level](event, metadata);
+}
+
+function logAgentDeploymentError(
+  event: string,
+  error: unknown,
+  metadata: Record<string, unknown>,
+  level: "warn" | "error" = "error",
+): void {
+  if (process.env.NODE_ENV === "test") {
+    return;
+  }
+
+  if (level === "warn") {
+    agentDeploymentLogger.warn(event, { ...metadata, error: serializeLogError(error) });
+    return;
+  }
+
+  agentDeploymentLogger.error(event, error, metadata);
 }
 
 function safeTerminalDetail(code: DeploymentTerminalErrorCode): string {

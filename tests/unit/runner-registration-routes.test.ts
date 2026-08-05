@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { runnerIngressLogger } from "@/src/server/runners/runner-ingress-logging";
 
 const USER_ID = "00000000-0000-4000-8000-000000000111";
 
@@ -123,7 +124,7 @@ describe("POST /runner/v1/register route", () => {
   });
 
   it("returns runner identity and one visible-once credential for a valid exchange", async () => {
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(runnerIngressLogger, "info").mockImplementation(() => {});
     const scheduleReconciliations = vi.fn();
 
     mocks.exchangeRunnerRegistrationTokenForCredential.mockResolvedValueOnce({
@@ -151,9 +152,7 @@ describe("POST /runner/v1/register route", () => {
       { scheduleReconciliations },
     );
     const body = await response.json();
-    const ingressLogs = infoSpy.mock.calls
-      .filter(([scope]) => scope === "[agentbay] runner.ingress")
-      .map(([, payload]) => payload);
+    const ingressLogs = infoSpy.mock.calls.map(([event, metadata]) => ({ ...metadata, event }));
 
     expect(response.status).toBe(201);
     expect(body).toEqual({

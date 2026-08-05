@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { runnerIngressLogger } from "@/src/server/runners/runner-ingress-logging";
 
 const mocks = vi.hoisted(() => {
   class RunnerHeartbeatPersistenceError extends Error {
@@ -29,7 +30,7 @@ describe("POST /runner/v1/heartbeat route", () => {
   });
 
   it("returns safe JSON for accepted authenticated heartbeats", async () => {
-    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(runnerIngressLogger, "info").mockImplementation(() => {});
     const scheduleReconciliations = vi.fn();
 
     mocks.recordRunnerHeartbeat.mockResolvedValueOnce({
@@ -56,9 +57,7 @@ describe("POST /runner/v1/heartbeat route", () => {
       { scheduleReconciliations },
     );
     const body = await response.json();
-    const ingressLogs = infoSpy.mock.calls
-      .filter(([scope]) => scope === "[agentbay] runner.ingress")
-      .map(([, payload]) => payload);
+    const ingressLogs = infoSpy.mock.calls.map(([event, metadata]) => ({ ...metadata, event }));
 
     expect(response.status).toBe(200);
     expect(body).toEqual({

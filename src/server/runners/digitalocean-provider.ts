@@ -1,6 +1,9 @@
 import "server-only";
 
+import { createAppLogger } from "@/src/server/logging/logger";
 import { createDigitalOceanSdkClient } from "@/src/server/runners/digitalocean-sdk-runtime";
+
+const digitalOceanProviderLogger = createAppLogger("digitalocean.provider");
 
 export const DIGITALOCEAN_PROVIDER = "digitalocean";
 export const DIGITALOCEAN_MANAGED_RUNNER_TAG = "agentbay-runner";
@@ -1453,6 +1456,14 @@ async function runSdkStep<T>(
   try {
     return { ok: true, value: await execute() };
   } catch (error) {
+    if (process.env.NODE_ENV !== "test") {
+      digitalOceanProviderLogger.error("api_request_failed", error, {
+        reason: context?.signal.aborted ? abortedReason : reason,
+        providerStatus: readSdkStatus(error),
+        aborted: Boolean(context?.signal.aborted),
+      });
+    }
+
     return {
       ok: false,
       reason: context?.signal.aborted ? abortedReason : reason,

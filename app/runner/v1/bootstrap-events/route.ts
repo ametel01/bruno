@@ -73,10 +73,15 @@ export async function POST(request: Request) {
     return validationResponse(result.issues ?? []);
   } catch (error) {
     if (error instanceof RunnerBootstrapEventPersistenceError) {
-      logRunnerIngress("bootstrap_events", "persistence_failed", {
-        phase: validation.value.phase,
-        status: validation.value.status,
-      });
+      logRunnerIngress(
+        "bootstrap_events",
+        "persistence_failed",
+        {
+          phase: validation.value.phase,
+          status: validation.value.status,
+        },
+        error,
+      );
 
       return Response.json(
         {

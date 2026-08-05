@@ -1,9 +1,29 @@
+import { createAppLogger } from "@/src/server/logging/logger";
+
+export const runnerIngressLogger = createAppLogger("runner.ingress");
+
 export function logRunnerIngress(
   endpoint: "bootstrap_events" | "register" | "heartbeat",
   event: string,
   metadata: Record<string, unknown> = {},
+  error?: unknown,
 ): void {
-  console.info("[agentbay] runner.ingress", { endpoint, event, ...metadata });
+  if (error !== undefined) {
+    runnerIngressLogger.error(event, error, { endpoint, ...metadata });
+    return;
+  }
+
+  if (
+    event.includes("rejected") ||
+    event.includes("invalid") ||
+    event === "json_parse_failed" ||
+    event === "validation_failed"
+  ) {
+    runnerIngressLogger.warn(event, { endpoint, ...metadata });
+    return;
+  }
+
+  runnerIngressLogger.info(event, { endpoint, ...metadata });
 }
 
 export function validationIssueSummary(issues: Array<{ field: string; message: string }>) {
