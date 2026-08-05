@@ -151,13 +151,16 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Pull production project settings
-        run: bunx vercel@${VERCEL_CLI_VERSION} pull --yes --environment=production
+        run: >-
+          bunx vercel@${VERCEL_CLI_VERSION} pull --yes --environment=production
+          --token="${VERCEL_TOKEN}"
 
       - name: Stage exact control plane without assigning production domains
         id: stage
         run: |
           set -euo pipefail
           CANDIDATE_DEPLOYMENT_URL="$(bunx vercel@${VERCEL_CLI_VERSION} deploy --prod --skip-domain --yes \
+            --token="${VERCEL_TOKEN}" \
             --env "AGENTBAY_RUNNER_IMAGE=${IMMUTABLE_IMAGE}" \
             --env "AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=1" \
             --build-env "AGENTBAY_CANARY_VERIFIED_DEPLOY=true" \
@@ -266,7 +269,7 @@ jobs:
       - name: Promote the exact canary-tested deployment
         run: >-
           bunx vercel@${VERCEL_CLI_VERSION} promote "${CANDIDATE_DEPLOYMENT_URL}"
-          --yes --timeout=5m
+          --yes --timeout=5m --token="${VERCEL_TOKEN}"
 
       - name: Verify production health and required release
         run: |
@@ -336,12 +339,15 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Pull production project settings
-        run: bunx vercel@${VERCEL_CLI_VERSION} pull --yes --environment=production
+        run: >-
+          bunx vercel@${VERCEL_CLI_VERSION} pull --yes --environment=production
+          --token="${VERCEL_TOKEN}"
 
       - name: Deploy verified rollback digest with rollout halted
         run: |
           set -euo pipefail
           bunx vercel@${VERCEL_CLI_VERSION} deploy --prod --yes \
+            --token="${VERCEL_TOKEN}" \
             --env "AGENTBAY_RUNNER_IMAGE=${ROLLBACK_IMAGE}" \
             --env "AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=0" \
             --build-env "AGENTBAY_CANARY_VERIFIED_DEPLOY=true" \
