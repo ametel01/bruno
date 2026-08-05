@@ -326,16 +326,17 @@ bun run deploy:prod
 
 Run this only from a clean `main` branch after pushing the intended release commit. It dispatches the
 protected `Deploy production application` workflow, which publishes an immutable runner image,
-stages the full application without production traffic, verifies the runner against the exact
-application commit in the zero-Droplet canary, and promotes that exact deployment only after every
-gate passes. Follow the returned GitHub Actions URL and approve the protected environments when
-prompted. See
+scans it, stages the full application without production traffic, promotes that exact deployment,
+and verifies the production health and required-release contract. The slow zero-Droplet runner
+canary is temporarily disabled for faster development iteration; releases made while it is disabled
+do not produce new rollback-verification artifacts. Follow the returned GitHub Actions URL and
+approve the protected environments when prompted. See
 [Production application deployments](./docs/RUNNER_RELEASES.md) for the release and rollback
 contract.
 
 Do not run `vercel deploy --prod` directly when ready agent creation is enabled. Direct deployment
-does not supply the canary-verified `AGENTBAY_RUNNER_IMAGE` digest and the production build fails
-closed before migrations.
+does not supply the release-workflow-authorized `AGENTBAY_RUNNER_IMAGE` digest and build marker, so
+the production build fails closed before migrations.
 
 To create a preview first, configure the preview environment and run `vercel deploy`. Preview auth
 rules are stricter than local development; see [Authentication modes](./docs/AUTHENTICATION.md).

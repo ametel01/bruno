@@ -5,22 +5,23 @@ deploys the full Next.js application and coordinates that deployment with its re
 image. The workflow never publishes or promotes a mutable `:main` tag. A release builds the exact
 selected commit once, pushes only its Git-SHA runner tag, verifies and scans the resulting digest,
 and stages the full application against production configuration without assigning any production
-domain. A simulated
-AMD64 Ubuntu Droplet in the GitHub runner executes the generated cloud-init and boots the published
-linux/amd64 image through Docker. The same job builds and starts the candidate control plane on an
-isolated host-only URL for registration, heartbeat, release identity, and boot-contract
-verification; this avoids both production traffic and Vercel deployment-protection credentials.
-That process uses development auth only inside the ephemeral GitHub VM; it is not deployed or
-assigned a public domain.
-Docker Desktop uses AMD64 emulation on ARM developer machines. Only a successful simulation may
-promote the exact separately staged deployment to the production domains; promotion does not
-rebuild or substitute another commit or image.
+domain. The production job promotes that exact staged deployment, then verifies `/health` and the
+authenticated required-release contract without rebuilding or substituting another commit or
+image.
+
+> **Temporary development mode:** The simulated-Droplet canary is disabled in the deployment
+> workflow to shorten iteration time. Image provenance, vulnerability scanning, staging, protected
+> production approval, and post-deploy health/digest verification still run. Releases created while
+> this bypass is active do not produce a `verified-runner-release` artifact and cannot be selected as
+> verified rollback sources. Re-enable the canary before treating this workflow as a hardened
+> production release gate.
 
 The linked Git repository does not deploy `main` directly to production. `vercel.json` skips an
 automatic production build unless the release workflow supplies its non-secret
 `AGENTBAY_CANARY_VERIFIED_DEPLOY=true` build marker. Preview builds remain enabled. The release and
 rollback jobs are the only repository-owned paths that supply that marker, preventing a push from
-bypassing image verification and the simulated-Droplet gate.
+bypassing the publish, scan, and staging path. The marker name is retained temporarily for
+compatibility; it does not imply that the disabled canary ran.
 
 Production builds also fail before migrations or compilation when ready agent creation is enabled
 without a DigitalOcean token, runner command bearer token, and immutable Git-SHA-plus-digest
@@ -31,15 +32,14 @@ one durable provider attempt starts immediately. Protected cron reconciliation r
 path. Automated and local tests inject fake providers and never create a Droplet.
 
 Release workflow runs share one non-cancelling concurrency group. Automated tests and release runs
-create zero DigitalOcean Droplets. The release job explicitly selects `local_docker`, supplies only
-the literal non-secret provider token `local-docker`, and never maps the DigitalOcean release secret
-into the job. The smoke command rejects any other token in local mode, preventing an accidental
-cloud-provider fallback. Another release run cannot enter the workflow until the current run has
-completed its container and database cleanup.
+create zero DigitalOcean Droplets. The release workflow does not configure a DigitalOcean provider
+or map the DigitalOcean release secret into any job. Another release run cannot enter the workflow
+until the current run has completed.
 
 ## Protected environments
 
-Configure `runner-release-canary` with required reviewers and these scoped values:
+The currently disabled `runner-release-canary` environment retains these scoped values for when the
+gate is restored; they are not required by release runs while the bypass is active:
 
 | Kind | Name | Purpose |
 | --- | --- | --- |
@@ -63,9 +63,10 @@ dispatch is not a substitute for the required review.
 The simulation injects `AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS=disabled`; it neither creates an account
 SSH key nor opens SSH ingress.
 
-## Canary contract
+## Temporarily disabled canary contract
 
-The workflow runs:
+The reusable smoke command remains available for local or explicitly requested verification, but
+the deployment workflow does not currently run it:
 
 ```sh
 bun run runner:release:smoke -- --image \
@@ -81,12 +82,14 @@ ready heartbeat, and all boot components. Those boot components exercise an isol
 start, status/readiness probe, model canary, stop, and cleanup without Telegram, a paid model
 request, or a DigitalOcean API call.
 
-Cleanup runs in a `finally` path. It removes the simulated Droplet and runner containers, confirms
+When invoked, cleanup runs in a `finally` path. It removes the simulated Droplet and runner
+containers, confirms
 the tagged local-provider set is absent, revokes runner credentials, and tombstones the runner
 record. A failed cleanup fails the job and blocks promotion. Failure output contains only capability
 names and closed error codes; it does not include tokens, database URLs, or cloud-init output.
 
-This gate proves the runner image, generated bootstrap commands, local candidate-control-plane
+When enabled, this gate proves the runner image, generated bootstrap commands, local
+candidate-control-plane
 registration flow, release identity, readiness contract, and cleanup on an Ubuntu/Docker host. It
 does not prove Vercel deployment-protection behavior, DigitalOcean API availability, regional
 capacity, public-IP assignment, cloud firewall behavior, or external network routing. A real
@@ -95,7 +98,7 @@ changes, never an automatic release retry.
 
 ## Promotion and rollback
 
-Before the canary, the workflow stages the exact tested commit using Vercel's production
+The workflow stages the exact published commit using Vercel's production
 configuration and `--prod --skip-domain`, with:
 
 ```text
@@ -103,16 +106,17 @@ AGENTBAY_RUNNER_IMAGE=<tested immutable Git-SHA-plus-digest reference>
 AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=1
 ```
 
-The staged deployment URL is passed directly to the canary and is never assigned a production
-domain before the canary succeeds. The production job then promotes that exact URL and verifies
-`/health` plus the authenticated
+The staged deployment URL is never assigned a production domain during staging. While the canary is
+temporarily disabled, the production job promotes that URL immediately after publish, scan, and
+staging succeed, then verifies `/health` plus the authenticated
 `/api/internal/runner-release/required` contract. Infrastructure reconciliation processes at most
 one managed runner per invocation. Set the batch size to `0` to halt automatic fleet work.
 
 For emergency rollback, dispatch the same workflow with `action=rollback`, the immutable image, and
 the prior successful workflow run ID. The job downloads that run's `verified-runner-release`
 artifact and refuses any image that does not match it exactly. Rollback deploys with batch size `0`,
-verifies the required digest, and leaves rollout halted for operator review.
+verifies the required digest, and leaves rollout halted for operator review. Runs created while the
+canary bypass is active do not contain this artifact and therefore are not valid rollback sources.
 
 Do not switch the release workflow to `digitalocean` or add a cloud token to its environment.
 Credential-free runs are expected to exit with `capability_unavailable` and
