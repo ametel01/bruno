@@ -64,19 +64,17 @@ describe("runner release workflow contract", () => {
     expect(agentWorkflowSource).toContain("path: trivy-agent-image.sarif");
   });
 
-  it("gates promotion on disposable smoke and deploys the exact tested digest at batch one", () => {
+  it("gates promotion on a zero-Droplet simulation and deploys the exact tested digest at batch one", () => {
     expect(workflowSource).toContain("bun run runner:release:smoke -- --image");
-    expect(workflowSource).toContain("billable_canary_authorization:");
+    expect(workflowSource).toContain("--provider local_docker");
+    expect(workflowSource).toContain("AGENTBAY_DIGITALOCEAN_TOKEN: local-docker");
+    expect(workflowSource).toContain("AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: local_docker");
     expect(workflowSource).toContain(
-      "BILLABLE_CANARY_AUTHORIZATION: $" + "{{ inputs.billable_canary_authorization }}",
+      "AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: http://127.0.0.1:3045",
     );
-    expect(workflowSource).toMatch(
-      /test "\$\{BILLABLE_CANARY_AUTHORIZATION\}" = "authorize-disposable-runner-release-smoke"/,
-    );
-    expect(workflowSource).toContain(
-      "AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION: $" +
-        "{{ inputs.billable_canary_authorization }}",
-    );
+    expect(workflowSource).not.toContain("RUNNER_RELEASE_DIGITALOCEAN_TOKEN");
+    expect(workflowSource).not.toContain("billable_canary_authorization");
+    expect(workflowSource).not.toContain("authorize-disposable-runner-release-smoke");
     expect(workflowSource).toContain("AGENTBAY_RUNNER_IMAGE=$" + "{IMMUTABLE_IMAGE}");
     expect(workflowSource).toContain("AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=1");
     expect(workflowSource).toContain("/api/internal/runner-release/required");
@@ -88,9 +86,11 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).toContain("stage-control-plane:");
     expect(workflowSource).toContain("outputs:\n      deployment-url:");
     expect(workflowSource).toContain("deploy --prod --skip-domain --yes");
-    expect(workflowSource).toContain(
-      "NEXT_PUBLIC_APP_URL: $" + "{{ needs.stage-control-plane.outputs.deployment-url }}",
-    );
+    expect(workflowSource).toContain("NEXT_PUBLIC_APP_URL: http://host.docker.internal:3000");
+    expect(workflowSource).toContain("AGENTBAY_AUTH_MODE: development");
+    expect(workflowSource).toContain('AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: "true"');
+    expect(workflowSource).toContain("bun run start --hostname 0.0.0.0");
+    expect(workflowSource).toContain("http://127.0.0.1:3000/health");
     expect(workflowSource).toContain(
       "CANDIDATE_DEPLOYMENT_URL: $" + "{{ needs.stage-control-plane.outputs.deployment-url }}",
     );

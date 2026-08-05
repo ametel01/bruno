@@ -125,7 +125,7 @@ export function planRunnerReleaseSmoke(
     capabilities.push({ name: "database", envName: "DATABASE_URL", state: "missing" });
   }
 
-  const appUrl = safeHttpsUrl(env.NEXT_PUBLIC_APP_URL);
+  const appUrl = safeReleaseControlPlaneUrl(env.NEXT_PUBLIC_APP_URL, providerMode);
   if (!appUrl) {
     capabilities.push({
       name: "public_control_plane",
@@ -220,14 +220,16 @@ export async function smokeRunnerRelease(
 
   try {
     evidence = await session.run();
-  } catch {
+  } catch (error) {
     runFailed = true;
+    logClosedSmokeFailure("run_failed", error);
   } finally {
     try {
       await session.cleanup();
       cleanupFailed = !(await session.verifyCleanup());
-    } catch {
+    } catch (error) {
       cleanupFailed = true;
+      logClosedSmokeFailure("cleanup_failed", error);
     }
   }
 
@@ -413,6 +415,7 @@ async function waitForReleaseEvidence(
       const readiness = await probeRunnerEndpointReadiness({
         endpointUrl: runner.endpointUrl,
         runnerBearerToken: input.config.runnerBearerToken,
+        allowInsecureLoopback: input.config.providerMode === "local_docker",
         timeoutMs: 10_000,
       });
 
@@ -526,10 +529,25 @@ async function cleanupReleaseRunner(
   });
 }
 
-function safeHttpsUrl(value: string | undefined): URL | null {
+function safeReleaseControlPlaneUrl(
+  value: string | undefined,
+  providerMode: "digitalocean" | "local_docker",
+): URL | null {
   try {
     const url = new URL(value ?? "");
-    return url.protocol === "https:" && url.username === "" && url.password === "" ? url : null;
+    const securePublicOrigin = url.protocol === "https:";
+    const isolatedLocalOrigin =
+      providerMode === "local_docker" &&
+      url.protocol === "http:" &&
+      url.hostname === "host.docker.internal";
+    return (securePublicOrigin || isolatedLocalOrigin) &&
+      url.username === "" &&
+      url.password === "" &&
+      url.pathname === "/" &&
+      url.search === "" &&
+      url.hash === ""
+      ? url
+      : null;
   } catch {
     return null;
   }
@@ -537,6 +555,23 @@ function safeHttpsUrl(value: string | undefined): URL | null {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function logClosedSmokeFailure(event: "cleanup_failed" | "run_failed", error: unknown): void {
+  const cause = error instanceof Error ? error.cause : undefined;
+  console.error("[agentbay] runner.release_smoke", {
+    event,
+    errorName: error instanceof Error ? error.name : typeof error,
+    errorCode: closedErrorCode(error),
+    causeName: cause instanceof Error ? cause.name : cause === undefined ? null : typeof cause,
+    causeCode: closedErrorCode(cause),
+  });
+}
+
+function closedErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("code" in error)) return null;
+  const code = error.code;
+  return typeof code === "string" && /^[A-Za-z0-9_]{1,64}$/.test(code) ? code : null;
 }
 
 async function main(): Promise<void> {

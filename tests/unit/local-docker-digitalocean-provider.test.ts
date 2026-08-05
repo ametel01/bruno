@@ -45,9 +45,11 @@ describe("local Docker DigitalOcean provider", () => {
     });
     expect(dockerCalls[0]).toEqual(["rm", "--force", "agentbay-local-cloud-runner-test"]);
     expect(dockerCalls[1]).toEqual(["rm", "--force", "agentbay-runner"]);
-    expect(dockerCalls[2]?.slice(0, 12)).toEqual([
+    expect(dockerCalls[2]?.slice(0, 14)).toEqual([
       "run",
       "--detach",
+      "--platform",
+      "linux/amd64",
       "--name",
       "agentbay-local-cloud-runner-test",
       "--cpus",
@@ -63,6 +65,7 @@ describe("local Docker DigitalOcean provider", () => {
     expect(dockerCalls[2]).toContain(
       "AGENTBAY_LOCAL_RUNNER_ENDPOINT_URL=http://host.docker.internal:3045",
     );
+    expect(dockerCalls[2]).toContain("DOCKER_DEFAULT_PLATFORM=linux/amd64");
 
     const bootstrapScriptEnv = dockerCalls[2]?.find((arg) =>
       arg.startsWith("AGENTBAY_LOCAL_CLOUD_INIT_SCRIPT_B64="),
@@ -82,6 +85,9 @@ describe("local Docker DigitalOcean provider", () => {
       `if [[ "${"$"}{1:-}" == "pull" && "${"$"}{2:-}" == "agentbay-runner:local" ]]; then`,
     );
     expect(bootstrapScript).toContain('exec /usr/bin/docker "$@"');
+    expect(bootstrapScript).toContain(
+      'translated+=("run" "--add-host" "host.docker.internal:host-gateway")',
+    );
     expect(bootstrapScript).toContain("AGENTBAY_BOOTSTRAP_STEP=docker_container_start");
     expect(bootstrapScript).toContain(
       "Local cloud-init parity check failed: /etc/agentbay/runner.env was not created.",
@@ -140,5 +146,48 @@ describe("local Docker DigitalOcean provider", () => {
       ["rm", "--force", "agentbay-local-cloud-runner-test"],
       ["rm", "--force", "agentbay-runner"],
     ]);
+  });
+
+  it("uses a stable unique firewall identity for each simulated Droplet session", async () => {
+    const createSession = async () => {
+      const provider = new LocalDockerDigitalOceanProvider({
+        docker: async () => ({ stdout: "ok\n", stderr: "" }),
+      });
+      await provider.createRunner({
+        name: "plingpling Cloud Runner",
+        region: "sfo3",
+        sizeSlug: "s-1vcpu-512mb-10gb",
+        image: "ubuntu-24-04-x64",
+        tags: ["agentbay"],
+      });
+      return provider;
+    };
+    const firstProvider = await createSession();
+    const first = await firstProvider.applyFirewall({
+      providerResourceId: "local-docker-droplet",
+      firewallName: "agentbay-runners-local-docker-droplet",
+      sshSourceAddresses: [],
+    });
+    const replay = await firstProvider.applyFirewall({
+      providerResourceId: "local-docker-droplet",
+      firewallName: "agentbay-runners-local-docker-droplet",
+      sshSourceAddresses: [],
+    });
+    const secondProvider = await createSession();
+    const second = await secondProvider.applyFirewall({
+      providerResourceId: "local-docker-droplet",
+      firewallName: "agentbay-runners-local-docker-droplet",
+      sshSourceAddresses: [],
+    });
+
+    expect(first.ok && first.value.providerFirewallId).toMatch(
+      /^local-docker-firewall-[0-9a-f-]{36}$/,
+    );
+    expect(replay.ok && replay.value.providerFirewallId).toBe(
+      first.ok ? first.value.providerFirewallId : null,
+    );
+    expect(second.ok && second.value.providerFirewallId).not.toBe(
+      first.ok ? first.value.providerFirewallId : null,
+    );
   });
 });

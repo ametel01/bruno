@@ -657,7 +657,7 @@ and post-deploy checks remain required before Step 12.
 | 8. Reconcile DigitalOcean and Database Ownership | Complete | `166ac75` | Added additive leased reconciliation and orphan-evidence tables, authoritative stable-tag inventory with completeness/timestamp/firewall evidence, and a bounded one-result reconciler shared by a protected cron route and operator script. Exact matches remain unchanged; assigned missing or unhealthy runners start the durable replacement saga; unassigned missing rows are ownership-checked and tombstoned; stale deleted-runner assignments are cleared without changing desired state; exact interrupted operation-tag creates are adopted; duplicates and ambiguity never mutate or delete. Provably owned unassigned orphans require two authoritative observations separated by ten minutes before exact owned-set firewall-first cleanup, and active ownership outside the current database batch is rechecked before orphan handling. Focused provider, route, schema, migration, provisioning, reconciliation, orphan, race, and redaction coverage passed. Full format, lint, typecheck, 159-file / 1,533-test suite, production build, additive clean/upgrade/idempotent migrations, schema drift check, 440 ms local cloud smoke, 26/26 E2E, and diff hygiene passed. | Complete; Step 9 is next. |
 | 9. Replace Runners After Strict Deployment Deadlines | Complete | `19a3e8a` | Replaced same-runner launch retries with a strict accepted-at plus 30-second gateway deadline. Before expiry the controller polls only the accepted operation; at expiry it creates or reuses one deployment-linked replacement, pauses the deployment, captures at most one bounded redacted log batch, and stops once. Repeated missing endpoint, stale heartbeat, failed boot, release mismatch, and missing provider resource evidence enter the same durable saga. Active replacement work blocks deployment claims until Step 7 handover assigns the validated target and creates a fresh correlated deployment. Model and Telegram failures remain agent-specific, stage transitions reset independent retry budgets, and two replacement workflows in 24 hours produce one safe terminal result. Protected per-minute reconciliation and a post-response targeted kick provide durable progress. Exact 29,999/30,000 ms, classification, budget, no-relaunch, trigger, cron redaction, handover resume, and duplicate behavior passed. Full format, lint, typecheck, 161-file / 1,548-test suite, production build, 444 ms local cloud smoke, 81,907 ms Hermes contract smoke, 26/26 E2E, and diff hygiene passed. | Complete; Step 10 is next. |
 | 10. Present One Automatic Recovery Experience | Complete | `8830a1f` | Collapsed every pre-Telegram automatic deployment and live runner replacement into a safe Preparing your agent presentation, retained Connecting Telegram and Ready, and added a public replacement-capacity signal that strips private error evidence. Inventory, detail, root/dashboard summaries, live regions, and refresh/browser reopen preserve the same three-stage experience. Offline/degraded and assigned-runner alerts are suppressed during live replacement; technical runner, endpoint, release, and cost evidence remains closed in an advanced disclosure. Terminal recovery now uses one generic message with functional Retry and Stop actions, including persisted desired-stopped intent from error. Eleven focused presentation/projection/accessibility/lifecycle files passed 140 tests; terminal lifecycle coverage passed 148 focused tests. Full format/lint checked 379 files, typecheck passed, 161 files / 1,554 tests passed, production build passed, and 28/28 desktop/mobile E2E passed including refresh, reopen, 320px overflow, live-region, and private-identifier non-disclosure coverage. | Complete; Step 11 is next and external registry/provider effects require configured credentials and authorization. |
-| 11. Release Through an Immutable Disposable-Droplet Canary | Repository implementation complete; live acceptance pending | `b471e77` + This commit | Replaced automatic mutable-main publication with a manually dispatched release/rollback workflow. One linux/amd64 Git-SHA build carries SBOM/max provenance, publishes only the SHA tag, emits and inspects the tag-plus-digest reference, and passes the same critical-fixable Trivy/SARIF gate as the Hermes image. Test processes cannot construct a live DigitalOcean client; provider tests must inject fakes and create zero Droplets. Release runs are serialized and require the exact typed billable authorization before their single disposable canary can run; the 12-minute smoke requires exact release heartbeat, compatible boot contract, all six synthetic boot actions, firewall-before-Droplet deletion, authoritative operation-tag absence, credential revocation, and runner tombstoning in a finally path. Git-linked production builds are skipped unless the release workflow supplies its canary marker. Vercel promotion depends on publish plus canary, pins the exact commit/digest, sets rollout batch 1, and verifies health plus an authenticated required-release route. Rollback must match a prior 90-day canary artifact and deploys batch 0. Follow-up release/provider/smoke coverage passed 3 files / 28 tests; full format/lint checked 384 files, typecheck passed, 164 files / 1,572 tests passed on a clean migrated temporary database, and the production build passed. | Blocked pending a reviewer-protected approval boundary (unsupported by the current GitHub plan), GHCR publication, explicit billable release authorization, a real immutable digest, one disposable release-canary cleanup proof, and successful Vercel post-deploy checks. Step 12 must not begin before those gates pass. |
+| 11. Release Through an Immutable Simulated-Droplet Gate | Repository implementation complete; zero-cost release acceptance pending | `b471e77` + `34a78f0` + This commit | The manually dispatched release/rollback workflow builds one linux/amd64 Git-SHA image with SBOM/max provenance, publishes only the SHA tag, verifies its digest, and applies the critical-fixable Trivy/SARIF gate. It stages the exact control-plane commit without production traffic, then boots that published image through production-generated cloud-init in a 512 MiB simulated Ubuntu Droplet on the GitHub runner. The release job selects `local_docker`, accepts only the literal `local-docker` token, maps no DigitalOcean secret, requires the exact release heartbeat, compatible boot contract, and all six synthetic boot actions, then removes the local containers, verifies provider absence, revokes credentials, and tombstones the row. Git-linked production builds remain blocked without the release marker. Vercel promotion depends on publish, staging, and simulation, pins the exact commit/digest, sets rollout batch 1, and verifies health plus the authenticated required-release route. Rollback must match a prior 90-day verification artifact and deploys batch 0. The simulation deliberately does not claim DigitalOcean API, capacity, firewall, public-IP, or external-routing acceptance; those effects require a separate explicit approval when provider/bootstrap code changes. | Pending one protected workflow run proving the simulated boot, exact cleanup, production promotion, health, and required-release contract. Repeated workflow retries cannot create a DigitalOcean Droplet. |
 | 12. Migration, Rollout, and Final Acceptance | Pending | Pending | Not started. | Waits for Steps 0-11. |
 
 ### Validation Ledger
@@ -1040,10 +1040,55 @@ and post-deploy checks remain required before Step 12.
   build, and diff hygiene passed. The temporary database was removed,
   production promotion was skipped, and no Droplet was created. The corrective
   commit is `fix: normalize PlanetScale Postgres URLs` (`This commit`).
+- 2026-08-05: Release run
+  [`30966321098`](https://github.com/ametel01/plingpling/actions/runs/30966321098)
+  published and scanned candidate
+  `4bbf49ec070d4b4d159e8951f26e231ceca2af2f@sha256:b7d0de1b965f55b3a93700ff0df1df7a8437a97dd7c77083ced469b33e70d8a9`,
+  staged its no-domain control plane, and created one DigitalOcean Droplet. The
+  runner did not complete registration before the bounded deadline and cleanup
+  returned `cleanup_failed`. Exact provider inspection confirmed Droplet
+  `590037133` was already absent but found its database-linked orphan firewall;
+  that single firewall was removed and absence verified. The pending
+  registration token was revoked and the exact canary row was tombstoned. To
+  prevent release retries from creating more billable infrastructure, the
+  release smoke now has an explicit `local_docker` mode that accepts only the
+  literal `local-docker` provider token, boots the published image through the
+  generated cloud-init in a simulated 512 MiB Ubuntu Droplet, and verifies the
+  same release/readiness contract against a host-only candidate control plane.
+  This avoids the staged Vercel deployment-protection boundary without adding a
+  bypass secret, then performs local-container plus database cleanup. The
+  GitHub workflow no longer maps a DigitalOcean secret or exposes a billable
+  authorization input. Provider-specific live acceptance remains a separately
+  approved operation, not an automatic release retry. The smoke
+  implementation commit is `feat: simulate runner release droplets locally`
+  (`34a78f0`); workflow and runbook changes are in the following focused commit.
+- 2026-08-05: A zero-provider local replay of the exact published `4bbf49e`
+  digest reproduced the live failure as `registration_failed`: the staged
+  Vercel deployment redirected `/health` to authentication and returned a
+  platform-level `401` for `/runner/v1/register` before application code. The
+  release gate now builds and runs the same candidate control-plane commit on a
+  host-only URL for the simulated runner while preserving the separately staged
+  deployment for later promotion, so no broad Vercel token or new bypass secret
+  enters the runner. The replay also found and fixed a static simulated
+  firewall ID that violated the database's global uniqueness constraint on the
+  second run, pinned the simulated VM and nested pulls to linux/amd64, mapped
+  `host.docker.internal` into the runner container, allowed HTTP only for that
+  exact isolated hostname/loopback probe, and added secret-free error
+  class/code diagnostics. The final zero-Droplet replay passed for
+  `4bbf49ec070d4b4d159e8951f26e231ceca2af2f@sha256:b7d0de1b965f55b3a93700ff0df1df7a8437a97dd7c77083ced469b33e70d8a9`:
+  registration, authenticated heartbeat, exact release identity,
+  `plingpling.runner.boot.v1`, all six readiness components, synthetic actions,
+  local-container absence, credential revocation, and runner tombstoning were
+  verified. Focused workflow/provider/smoke coverage passed 4 files / 22 tests;
+  the repository gate passed format and lint across 385 files, typecheck, 165
+  files / 1,584 tests, production build, and diff hygiene. No DigitalOcean API
+  call or Droplet creation occurred.
 
 ### Next Step
 
-Run the protected Step 11 workflow from an approved `runner-release-canary`
-environment, record the immutable digest, workflow/deployment links, exact
-cleanup proof, and post-deploy required-release evidence, then mark Step 11
-complete and begin Step 12. No Step 12 rollout work is safe before that gate.
+Run the protected Step 11 workflow once with its zero-Droplet simulated runner,
+record the immutable digest, workflow/deployment links, exact local cleanup
+proof, and post-deploy required-release evidence. Treat DigitalOcean-specific
+API, capacity, firewall, and routing acceptance as a separate explicitly
+approved gate when provider/bootstrap code changes; never use repeated release
+dispatches to debug that external path.

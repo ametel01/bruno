@@ -22,6 +22,7 @@ const VALID_ENV = {
 };
 const LOCAL_VALID_ENV = {
   ...VALID_ENV,
+  NEXT_PUBLIC_APP_URL: "http://host.docker.internal:3000",
   AGENTBAY_DIGITALOCEAN_TOKEN: "local-docker",
   AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
   AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION: undefined,
@@ -92,6 +93,12 @@ describe("runner release smoke", () => {
       envName: "AGENTBAY_DIGITALOCEAN_TOKEN",
       state: "malformed",
     });
+
+    const hostedWithLocalUrl = planRunnerReleaseSmoke(DIGITALOCEAN_ARGS, {
+      ...VALID_ENV,
+      NEXT_PUBLIC_APP_URL: "http://host.docker.internal:3000",
+    });
+    expect(hostedWithLocalUrl).toMatchObject({ ok: false, code: "capability_unavailable" });
   });
 
   it("binds the CLI image to the provider session environment", async () => {
@@ -125,6 +132,7 @@ describe("runner release smoke", () => {
 
   it("runs cleanup after smoke failure and preserves a closed result", async () => {
     const calls: string[] = [];
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const result = await smokeRunnerRelease(DIGITALOCEAN_ARGS, VALID_ENV, {
       createSession: () =>
         session(calls, {
@@ -142,7 +150,16 @@ describe("runner release smoke", () => {
       cleanupVerified: true,
     });
     expect(JSON.stringify(result)).not.toMatch(/cloud-init|credential/i);
+    expect(JSON.stringify(error.mock.calls)).not.toMatch(/cloud-init|credential/i);
+    expect(error).toHaveBeenCalledWith("[agentbay] runner.release_smoke", {
+      event: "run_failed",
+      errorName: "Error",
+      errorCode: null,
+      causeName: null,
+      causeCode: null,
+    });
     expect(calls).toEqual(["run", "cleanup", "verifyCleanup"]);
+    error.mockRestore();
   });
 
   it("blocks promotion when cleanup cannot be verified", async () => {
@@ -186,6 +203,9 @@ describe("runner release smoke", () => {
     expect(dropletDelete).toBeGreaterThan(firewallDelete);
     expect(smokeSource).toContain("discoverResourcesByTag({ tag: operationKey })");
     expect(smokeSource).toContain("discovered.value.resources.length === 0");
+    expect(smokeSource).toContain(
+      'allowInsecureLoopback: input.config.providerMode === "local_docker"',
+    );
     expect(smokeSource).toContain("runnerCredentials");
     expect(smokeSource).toContain('status: "revoked"');
     expect(smokeSource).toContain('status: "deleted"');

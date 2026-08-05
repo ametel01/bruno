@@ -19,10 +19,6 @@ on:
         description: Successful release workflow run containing the verification artifact
         required: false
         type: string
-      billable_canary_authorization:
-        description: For release only, type authorize-disposable-runner-release-smoke
-        required: false
-        type: string
 
 concurrency:
   group: runner-release
@@ -172,7 +168,7 @@ jobs:
 
   canary:
     if: inputs.action == 'release'
-    name: Verify disposable DigitalOcean runner
+    name: Verify immutable runner in simulated Droplet
     needs:
       - publish
       - stage-control-plane
@@ -181,21 +177,18 @@ jobs:
     environment: runner-release-canary
     env:
       DATABASE_URL: ${{ secrets.RUNNER_RELEASE_DATABASE_URL }}
-      NEXT_PUBLIC_APP_URL: ${{ needs.stage-control-plane.outputs.deployment-url }}
-      AGENTBAY_DIGITALOCEAN_TOKEN: ${{ secrets.RUNNER_RELEASE_DIGITALOCEAN_TOKEN }}
+      NEXT_PUBLIC_APP_URL: http://host.docker.internal:3000
+      AGENTBAY_AUTH_MODE: development
+      AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: "true"
+      AGENTBAY_DIGITALOCEAN_TOKEN: local-docker
       AGENTBAY_RUNNER_BEARER_TOKEN: ${{ secrets.RUNNER_RELEASE_BEARER_TOKEN }}
-      AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: digitalocean
+      AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: local_docker
       AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: disabled
-      AGENTBAY_DIGITALOCEAN_REGION: ${{ vars.RUNNER_RELEASE_DIGITALOCEAN_REGION }}
       AGENTBAY_DIGITALOCEAN_SIZE_SLUG: s-1vcpu-512mb-10gb
-      AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION: ${{ inputs.billable_canary_authorization }}
+      AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: http://127.0.0.1:3045
+      AGENTBAY_RUNNER_IMAGE: ${{ needs.publish.outputs.immutable-image }}
 
     steps:
-      - name: Require explicit one-Droplet release authorization
-        env:
-          BILLABLE_CANARY_AUTHORIZATION: ${{ inputs.billable_canary_authorization }}
-        run: test "${BILLABLE_CANARY_AUTHORIZATION}" = "authorize-disposable-runner-release-smoke"
-
       - name: Check out exact release commit
         uses: actions/checkout@v4
         with:
@@ -209,10 +202,29 @@ jobs:
       - name: Install frozen dependencies
         run: bun install --frozen-lockfile
 
-      - name: Run disposable runner release smoke
+      - name: Boot exact image in simulated Droplet
         env:
           IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
-        run: bun run runner:release:smoke -- --image "${IMMUTABLE_IMAGE}"
+        run: |
+          set -euo pipefail
+          bun run build
+          bun run start --hostname 0.0.0.0 > "${RUNNER_TEMP}/runner-release-control-plane.log" 2>&1 &
+          CONTROL_PLANE_PID=$!
+          cleanup_control_plane() {
+            kill "${CONTROL_PLANE_PID}" >/dev/null 2>&1 || true
+            wait "${CONTROL_PLANE_PID}" >/dev/null 2>&1 || true
+          }
+          trap cleanup_control_plane EXIT
+          CONTROL_PLANE_READY=false
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/health >/dev/null; then
+              CONTROL_PLANE_READY=true
+              break
+            fi
+            sleep 1
+          done
+          test "${CONTROL_PLANE_READY}" = "true"
+          bun run runner:release:smoke -- --image "${IMMUTABLE_IMAGE}" --provider local_docker
 
       - name: Record verified release metadata
         env:
@@ -222,7 +234,7 @@ jobs:
           mkdir -p runner-release-evidence
           echo "${IMMUTABLE_IMAGE}" > runner-release-evidence/immutable-image.txt
           echo "${GITHUB_SHA}" > runner-release-evidence/source-revision.txt
-          echo "Disposable Droplet smoke and exact cleanup passed." >> "${GITHUB_STEP_SUMMARY}"
+          echo "Simulated Droplet boot, release contract, and exact cleanup passed without cloud resources." >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload rollback verification artifact
         uses: actions/upload-artifact@v4
@@ -234,7 +246,7 @@ jobs:
 
       - name: Record safe failure summary
         if: failure()
-        run: echo "Runner release canary failed; promotion is blocked and exact cleanup was requested." >> "${GITHUB_STEP_SUMMARY}"
+        run: echo "Runner release simulation failed; promotion is blocked and no DigitalOcean resource was requested." >> "${GITHUB_STEP_SUMMARY}"
 
   deploy:
     if: inputs.action == 'release'

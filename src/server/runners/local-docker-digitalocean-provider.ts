@@ -1,6 +1,7 @@
 import "server-only";
 
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   DIGITALOCEAN_PROVIDER,
   type DigitalOceanCleanupInput,
@@ -9,8 +10,8 @@ import {
   type DigitalOceanDiscovery,
   type DigitalOceanFirewallInput,
   type DigitalOceanProvider,
-  type DigitalOceanProviderResult,
   type DigitalOceanProviderRequestContext,
+  type DigitalOceanProviderResult,
   type DigitalOceanReadInput,
   type DigitalOceanResource,
   type DigitalOceanRunnerSpec,
@@ -25,6 +26,7 @@ const DEFAULT_LOCAL_START_DELAY_MS = 1_000;
 const DOCKER_SOCKET = "/var/run/docker.sock";
 const DOCKER_TIMEOUT_MS = 30_000;
 const LOCAL_DROPLET_IMAGE = "ubuntu:24.04";
+const LOCAL_DROPLET_PLATFORM = "linux/amd64";
 const LOCAL_PRODUCTION_RUNNER_CONTAINER_NAME = "agentbay-runner";
 const LOCAL_SIMULATED_PUBLIC_IPV4 = "127.0.0.1";
 const LOCAL_HOST_BRIDGE_DIR = "/tmp/agentbay-local-cloud";
@@ -176,7 +178,7 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
     }
 
     resource.firewallApplied = true;
-    resource.providerFirewallId = "local-docker-firewall";
+    resource.providerFirewallId ??= `local-docker-firewall-${randomUUID()}`;
 
     return { ok: true, value: cloneResource(resource) };
   }
@@ -212,6 +214,8 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
       await this.#docker([
         "run",
         "--detach",
+        "--platform",
+        LOCAL_DROPLET_PLATFORM,
         "--name",
         this.#containerName,
         "--cpus",
@@ -232,6 +236,8 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
         `AGENTBAY_LOCAL_RUNNER_ENDPOINT_URL=${this.#endpointUrl}`,
         "--env",
         `AGENTBAY_LOCAL_HOST_BRIDGE_DIR=${LOCAL_HOST_BRIDGE_DIR}`,
+        "--env",
+        `DOCKER_DEFAULT_PLATFORM=${LOCAL_DROPLET_PLATFORM}`,
         LOCAL_DROPLET_IMAGE,
         "bash",
         "-lc",
@@ -320,6 +326,8 @@ function buildLocalCloudInitScript(
     '    sed -i "s#^AGENTBAY_RUNNER_BOOT_SELF_TEST_ROOT=.*#AGENTBAY_RUNNER_BOOT_SELF_TEST_ROOT=$bridge_dir/var/lib/agentbay/boot-self-test#" "$bridge_env"',
     "  fi",
     "  translated=()",
+    `  translated+=("run" "--add-host" "host.docker.internal:host-gateway")`,
+    "  shift",
     '  for arg in "$@"; do',
     '    case "$arg" in',
     "      /etc/agentbay/runner.env)",

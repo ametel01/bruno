@@ -36,7 +36,8 @@ Releases should automatically:
 
 - Publish an immutable runner image.
 - Verify the image exists in GHCR.
-- Run an actual disposable-Droplet smoke test.
+- Boot the actual immutable image in a simulated Ubuntu Droplet with zero cloud-provider access.
+- Reserve real provider acceptance for separately approved provider/bootstrap changes.
 - Deploy the control plane pinned to that tested digest.
 - Gradually replace outdated runners.
 
