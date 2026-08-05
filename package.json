@@ -28,7 +28,7 @@
     "runner:release:smoke": "bun --conditions react-server scripts/smoke-runner-release.ts",
     "runner:service": "bun src/runner-service/index.ts",
     "start": "next start",
-    "test": "DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} vitest run --no-file-parallelism",
+    "test": "bun scripts/run-unit-tests.ts",
     "test:e2e": "PORT=${PORT:-3100} DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:${PORT:-3100}} bun --conditions react-server scripts/run-e2e.ts full",
     "test:e2e:ci": "PORT=${PORT:-3100} DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:${PORT:-3100}} bun --conditions react-server scripts/run-e2e.ts ci",
     "test:e2e:clerk": "PORT=${PORT:-3200} AGENTBAY_AUTH_MODE=clerk DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=http://localhost:${PORT:-3200} PLAYWRIGHT_BASE_URL=http://localhost:${PORT:-3200} bun --conditions react-server scripts/run-clerk-e2e.ts",

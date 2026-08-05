@@ -417,7 +417,7 @@ enable ready mode by treating mock or local evidence as live acceptance.
 | `bun run format:check` / `bun run format` | Check or write Biome formatting. |
 | `bun run lint` | Run Biome lint rules. |
 | `bun run typecheck` | Run TypeScript without emitting files. |
-| `bun run test` | Run the serial Vitest unit suite. |
+| `bun run test` | Run the serial Vitest unit suite in a temporary PostgreSQL database. |
 | `bun run test:e2e:ci` | Run the credential-free Playwright smoke surface. |
 | `bun run test:e2e` | Run the full provider-backed Playwright suite. |
 | `bun run test:e2e:clerk` | Run the opt-in hosted Clerk development smoke. |
