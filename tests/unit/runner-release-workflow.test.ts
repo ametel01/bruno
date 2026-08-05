@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
-const workflowPath = new URL("../../.github/workflows/publish-runner-image.yml", import.meta.url);
+const workflowPath = new URL("../../.github/workflows/deploy-production.yml", import.meta.url);
 const workflowSource = readFileSync(workflowPath, "utf8");
 const agentWorkflowPath = new URL(
   "../../.github/workflows/publish-agent-image.yml",
@@ -25,6 +25,7 @@ describe("runner release workflow contract", () => {
   it("is valid YAML with explicit publish, staging, canary, deploy, and rollback boundaries", () => {
     const workflow = parse(workflowSource) as Record<string, unknown>;
     expect(workflow).toBeTypeOf("object");
+    expect(workflow.name).toBe("Deploy production application");
     expect(workflowSource).toContain("workflow_dispatch:");
     expect(workflowSource).toContain("environment: runner-release-canary");
     expect(workflowSource).toContain("environment: production");
@@ -33,7 +34,7 @@ describe("runner release workflow contract", () => {
       "needs:\n      - publish\n      - stage-control-plane\n      - canary",
     );
     expect(workflowSource).toContain(
-      "concurrency:\n  group: runner-release\n  cancel-in-progress: false",
+      "concurrency:\n  group: production-application-deploy\n  cancel-in-progress: false",
     );
   });
 
@@ -135,7 +136,7 @@ describe("runner release workflow contract", () => {
 
   it("routes the documented production command through the protected release workflow", () => {
     expect(packageJson.scripts["deploy:prod"]).toBe(
-      "gh workflow run publish-runner-image.yml --repo ametel01/plingpling --ref main --raw-field action=release",
+      "gh workflow run deploy-production.yml --repo ametel01/plingpling --ref main --raw-field action=release",
     );
     expect(packageJson.scripts["deploy:prod"]).not.toContain("vercel deploy --prod");
     expect(readme).toContain("Do not run `vercel deploy --prod` directly");

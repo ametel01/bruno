@@ -20,7 +20,7 @@ describe("runner image", () => {
 
   it("publishes immutable amd64 images with supply-chain evidence and a returned digest", async () => {
     const workflow = await readFile(
-      join(process.cwd(), ".github/workflows/publish-runner-image.yml"),
+      join(process.cwd(), ".github/workflows/deploy-production.yml"),
       "utf8",
     );
     const githubSha = "$" + "{{ github.sha }}";

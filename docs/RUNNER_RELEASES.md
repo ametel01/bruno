@@ -1,9 +1,11 @@
-# Runner releases
+# Production application deployments
 
-Runner releases use the manually dispatched `Release runner image` workflow. The workflow never
-publishes or promotes a mutable `:main` tag. A release builds the exact selected commit once, pushes
-only its Git-SHA tag, verifies and scans the resulting digest, and stages the exact control-plane
-commit against production configuration without assigning any production domain. A simulated
+Production deployments use the manually dispatched `Deploy production application` workflow. It
+deploys the full Next.js application and coordinates that deployment with its required runner
+image. The workflow never publishes or promotes a mutable `:main` tag. A release builds the exact
+selected commit once, pushes only its Git-SHA runner tag, verifies and scans the resulting digest,
+and stages the full application against production configuration without assigning any production
+domain. A simulated
 AMD64 Ubuntu Droplet in the GitHub runner executes the generated cloud-init and boots the published
 linux/amd64 image through Docker. The same job builds and starts the candidate control plane on an
 isolated host-only URL for registration, heartbeat, release identity, and boot-contract

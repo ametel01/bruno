@@ -1,10 +1,10 @@
-name: Release runner image
+name: Deploy production application
 
 on:
   workflow_dispatch:
     inputs:
       action:
-        description: Release a new runner or roll back to a previously verified runner
+        description: Deploy a new application release or roll back to a previously verified runner
         required: true
         default: release
         type: choice
@@ -16,12 +16,12 @@ on:
         required: false
         type: string
       rollback_run_id:
-        description: Successful release workflow run containing the verification artifact
+        description: Successful production deployment run containing the verification artifact
         required: false
         type: string
 
 concurrency:
-  group: runner-release
+  group: production-application-deploy
   cancel-in-progress: false
 
 permissions:

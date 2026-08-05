@@ -325,11 +325,13 @@ bun run deploy:prod
 ```
 
 Run this only from a clean `main` branch after pushing the intended release commit. It dispatches the
-protected `Release runner image` workflow, which publishes an immutable runner image, stages the
-exact control-plane commit without production traffic, verifies the runner in the zero-Droplet
-canary, and promotes that exact deployment only after every gate passes. Follow the returned GitHub
-Actions URL and approve the protected environments when prompted. See
-[Runner releases](./docs/RUNNER_RELEASES.md) for the release and rollback contract.
+protected `Deploy production application` workflow, which publishes an immutable runner image,
+stages the full application without production traffic, verifies the runner against the exact
+application commit in the zero-Droplet canary, and promotes that exact deployment only after every
+gate passes. Follow the returned GitHub Actions URL and approve the protected environments when
+prompted. See
+[Production application deployments](./docs/RUNNER_RELEASES.md) for the release and rollback
+contract.
 
 Do not run `vercel deploy --prod` directly when ready agent creation is enabled. Direct deployment
 does not supply the canary-verified `AGENTBAY_RUNNER_IMAGE` digest and the production build fails
@@ -432,7 +434,7 @@ enable ready mode by treating mock or local evidence as live acceptance.
 | `bun run agent:image:smoke` | Verify the selected Hermes image contract locally. |
 | `bun run agent:hermes:contract-smoke` | Exercise the pinned Hermes runner/readiness/restart contract locally. |
 | `bun run verify:hermes:staging` | Run the capability-gated, interactive-human-attested live Hermes/Telegram acceptance and durable cleanup workflow. |
-| `bun run deploy:prod` | Dispatch the protected runner-image and control-plane production release workflow. |
+| `bun run deploy:prod` | Dispatch the protected full-application production deployment workflow. |
 
 See [E2E validation](./docs/E2E_VALIDATION.md) for capability gates and safe test modes.
 
