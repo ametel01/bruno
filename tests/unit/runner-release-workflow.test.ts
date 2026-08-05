@@ -49,6 +49,21 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).toContain("sbom: true");
   });
 
+  it("gates only on critical fixable vulnerabilities and retains scan reports without code scanning", () => {
+    for (const source of [workflowSource, agentWorkflowSource]) {
+      expect(source).toContain("scanners: vuln");
+      expect(source).toContain("limit-severities-for-sarif: true");
+      expect(source).toContain("actions/upload-artifact@v4");
+      expect(source).toContain("if-no-files-found: error");
+      expect(source).not.toContain("github/codeql-action/upload-sarif");
+      expect(source).not.toContain("security-events: write");
+    }
+    expect(workflowSource).toContain("name: trivy-runner-image-$" + "{{ github.sha }}");
+    expect(workflowSource).toContain("path: trivy-runner-image.sarif");
+    expect(agentWorkflowSource).toContain("name: trivy-agent-image-$" + "{{ github.sha }}");
+    expect(agentWorkflowSource).toContain("path: trivy-agent-image.sarif");
+  });
+
   it("gates promotion on disposable smoke and deploys the exact tested digest at batch one", () => {
     expect(workflowSource).toContain("bun run runner:release:smoke -- --image");
     expect(workflowSource).toContain("billable_canary_authorization:");

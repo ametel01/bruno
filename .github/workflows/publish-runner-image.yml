@@ -34,7 +34,6 @@ permissions:
   packages: write
   attestations: write
   id-token: write
-  security-events: write
 
 env:
   REGISTRY: ghcr.io
@@ -105,17 +104,22 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ steps.reference.outputs.image }}
+          scanners: vuln
           format: sarif
           output: trivy-runner-image.sarif
           severity: CRITICAL
           ignore-unfixed: true
+          limit-severities-for-sarif: true
           exit-code: "1"
 
       - name: Upload scan report
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: trivy-runner-image.sarif
+          name: trivy-runner-image-${{ github.sha }}
+          path: trivy-runner-image.sarif
+          if-no-files-found: error
+          retention-days: 90
 
   stage-control-plane:
     if: inputs.action == 'release'

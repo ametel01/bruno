@@ -779,7 +779,7 @@ and post-deploy checks remain required before Step 12.
 | 11 | Follow-up clean migration, full suite, and build | Passed all migrations through 0024 on an isolated temporary local database, 164 files / 1,572 tests, format/lint across 384 files, typecheck, production build, and diff hygiene. The temporary database was removed; no provider or cloud effect occurred. |
 | 11 | Agent-creation provisioning regression characterization and repair | Production was rolled back to `dpl_CdG8WSKjXcJKCXKi1ErsShBUt7qh`; the deleted failed agent was not reconciled and no Droplet was created. Focused build, creation, and trigger coverage passed 3 files / 36 tests with fake configuration/providers only. Format and lint checked 384 files, typecheck passed, all migrations through 0024 and 164 files / 1,576 tests passed on a clean temporary database, the production build passed, and the database was removed. No provider or cloud effect occurred. |
 | 11 | Compatible pre-canary control-plane staging | Read-only live-state inspection proved production is rolled back to pre-plan deployment `dpl_CdG8WSKjXcJKCXKi1ErsShBUt7qh`, so it cannot prove the new release/boot contract. The workflow now stages the exact production-configured commit with no domain assignment, passes that URL to the canary, and promotes the same deployment only after success. Frozen install, 4 focused files / 32 tests, workflow YAML parsing, format/lint across 384 files, typecheck, clean migrations through 0024, 164 files / 1,577 tests, production build, and diff hygiene passed. The temporary database was removed; no Vercel deployment, registry publication, provider call, or Droplet occurred. |
-| 11 | Live GHCR publish, Trivy scan of published digest, disposable DigitalOcean release canary, Vercel production deploy, `/health`, and required-release verification | Release runs [`30959832776`](https://github.com/ametel01/plingpling/actions/runs/30959832776) and [`30961074986`](https://github.com/ametel01/plingpling/actions/runs/30961074986) failed safely during job setup. The first exposed an unprefixed Trivy Action tag; the second proved that `v0.28.0` transitively referenced a removed `setup-trivy@v0.2.1` tag. Neither run reached checkout, image build, publication, scan, Vercel, the provider, or a Droplet. Both workflows are now pinned to the signed `v0.36.0` commit, whose setup dependency is itself commit-pinned, and source tests reject version-tag references. Frozen install, 2 focused files / 8 tests, format/lint across 384 files, typecheck, clean migrations through 0024, 164 files / 1,577 tests, production build, and diff hygiene passed; the temporary database was removed. A new authorized run is required; no live acceptance is claimed. |
+| 11 | Live GHCR publish, Trivy scan of published digest, disposable DigitalOcean release canary, Vercel production deploy, `/health`, and required-release verification | Release runs [`30959832776`](https://github.com/ametel01/plingpling/actions/runs/30959832776) and [`30961074986`](https://github.com/ametel01/plingpling/actions/runs/30961074986) failed safely during job setup. Run [`30961399736`](https://github.com/ametel01/plingpling/actions/runs/30961399736) then built, published, and digest-verified immutable candidate `dced202e8f372bd84839425e787cd26731cac104@sha256:17a11421f54e4a876be1f5f7ef34154fc53a7d6416d02a442d3f50d154c507d7`, but Trivy Action's default SARIF behavior removed the configured `CRITICAL` filter and the CodeQL uploader failed because code scanning is unavailable for this private repository. Exact-digest reproduction found zero critical fixable vulnerabilities. Both image workflows now scan vulnerabilities only, preserve the critical SARIF limit, retain reports as 90-day artifacts, and omit the unused `security-events` permission. All downstream Vercel, canary, provider, and deploy jobs were skipped, so no Droplet or deployment occurred. Frozen install, 2 focused files / 9 tests, format/lint across 384 files, typecheck, clean migrations through 0024, 164 files / 1,578 tests, production build, exact-digest SARIF reproduction, and diff hygiene passed; the temporary database was removed. A new authorized run is required; no live acceptance is claimed. |
 
 ### Step 1 Gap Matrix
 
@@ -945,6 +945,24 @@ and post-deploy checks remain required before Step 12.
   migrations, all 1,577 tests, the production build, and diff hygiene passed
   without an external effect. The corrective commit is `ci: pin resolvable
   Trivy action` (`This commit`).
+- 2026-08-05: Release run
+  [`30961399736`](https://github.com/ametel01/plingpling/actions/runs/30961399736)
+  successfully built and published the Git-SHA candidate, verified immutable
+  digest `sha256:17a11421f54e4a876be1f5f7ef34154fc53a7d6416d02a442d3f50d154c507d7`,
+  and ran Trivy. The scan step failed because Trivy Action clears the requested
+  severity in SARIF mode unless `limit-severities-for-sarif` is explicitly
+  enabled, so its exit code covered lower severities too. The subsequent CodeQL
+  upload also failed because code scanning is unavailable for this private
+  repository. Reproducing the scan against the exact digest found zero critical
+  fixable vulnerabilities. Both image workflows now scan vulnerabilities only,
+  preserve the critical SARIF threshold, upload the reports as 90-day workflow
+  artifacts, and omit the unused `security-events` permission. Vercel staging,
+  the canary, provider access, and production deployment were all skipped; no
+  Droplet or deployment occurred. Frozen install, 9 focused tests, format,
+  lint, typecheck, clean migrations, all 1,578 tests, the production build,
+  exact-digest SARIF reproduction, and diff hygiene passed. The temporary test
+  database was removed. The corrective commit is `ci: preserve Trivy severity
+  and reports` (`This commit`).
 
 ### Next Step
 
