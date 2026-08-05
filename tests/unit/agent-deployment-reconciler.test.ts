@@ -162,7 +162,7 @@ describe("agent deployment reconciler", () => {
     expect(deployment?.stage).toBe("configuring_hermes");
   });
 
-  it("creates and assigns one exact keyed provisioning runner through the partial unique index", async () => {
+  it("reuses one exact keyed provisioning runner across consecutive reconciliation slices", async () => {
     const second = createDatabaseConnection();
     try {
       await seedAgent(connection, { runnerId: null });
@@ -173,17 +173,15 @@ describe("agent deployment reconciler", () => {
         digitalOceanProvider: new FakeDigitalOceanProvider({ idPrefix: "automatic" }),
       };
 
-      const results = await Promise.all([
-        reconcileNextAgentDeployment({ ...dependencies, createConnection: () => connection }),
-        reconcileNextAgentDeployment({ ...dependencies, createConnection: () => second }),
-      ]);
+      const results = [
+        await reconcileNextAgentDeployment({ ...dependencies, createConnection: () => connection }),
+        await reconcileNextAgentDeployment({ ...dependencies, createConnection: () => second }),
+      ];
 
-      expect(results).toEqual(
-        expect.arrayContaining([
-          { processed: 1, outcome: "advanced" },
-          { processed: 0, outcome: "idle" },
-        ]),
-      );
+      expect(results).toEqual([
+        { processed: 1, outcome: "advanced" },
+        { processed: 1, outcome: "retry_scheduled" },
+      ]);
       const provisioned = await connection.db.select().from(runners);
       const [agent] = await connection.db.select().from(agents).where(eq(agents.id, AGENT_ID));
       expect(provisioned).toHaveLength(1);
@@ -191,7 +189,7 @@ describe("agent deployment reconciler", () => {
         userId: USER_ID,
         kind: "digitalocean",
         requiredRunnerImageDigest: RUNNER_IMAGE_DIGEST,
-        provisioningStatus: "pending",
+        provisioningStatus: "tagging",
         provisioningOperationKey: `agentbay-deploy-${DEPLOYMENT_ID.replaceAll("-", "")}`,
       });
       expect(agent?.runnerId).toBe(provisioned[0]?.id);
