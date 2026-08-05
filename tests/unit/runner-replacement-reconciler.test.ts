@@ -146,6 +146,44 @@ describe("runner replacement target reconciliation", () => {
     expect(provider.calls.filter((call) => call.step === "create")).toHaveLength(1);
   });
 
+  it("rejects a persisted infrastructure replacement while its source is still provisioning", async () => {
+    await connection.db
+      .update(runners)
+      .set({
+        status: "registering",
+        provisioningStatus: "waiting_for_runner",
+        observedRunnerImageDigest: null,
+        observedRunnerReleaseVersion: null,
+        observedRunnerBootContractVersion: null,
+        compatibilityState: "unknown",
+        compatibilityVerifiedAt: null,
+        updatedAt: NOW,
+      })
+      .where(eq(runners.id, SOURCE_ID));
+    const created = await createOrGetRunnerReplacement({
+      db: connection.db,
+      sourceRunnerId: SOURCE_ID,
+      triggerDeploymentId: null,
+      reason: "release_mismatch",
+      operationKey: REPLACEMENT_OPERATION_KEY,
+      now: NOW,
+    });
+    const provider = new FakeDigitalOceanProvider({ now: () => NOW });
+
+    await expect(reconcile(connection, provider, created.replacement.id)).resolves.toEqual({
+      outcome: "failed",
+      replacementId: created.replacement.id,
+      state: "failed",
+    });
+    const [replacement] = await connection.db
+      .select()
+      .from(runnerReplacements)
+      .where(eq(runnerReplacements.id, created.replacement.id));
+    expect(replacement).toMatchObject({ state: "failed", terminalCode: "state_invalid" });
+    expect(await connection.db.select().from(runners)).toHaveLength(1);
+    expect(provider.calls).toHaveLength(0);
+  });
+
   it("authoritatively rediscovers an exact owned target after a crash without duplicate create", async () => {
     const replacementId = await createReplacement(connection);
     const provider = new FakeDigitalOceanProvider({ now: () => NOW, idPrefix: "adopted" });

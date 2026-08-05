@@ -91,6 +91,99 @@ describe("runner infrastructure reconciliation", () => {
     });
   });
 
+  it("never replaces an assigned runner while it is still waiting to register", async () => {
+    const provider = new FakeDigitalOceanProvider({ now: () => NOW });
+    await seedRunner(connection, {
+      status: "registering",
+      provisioningStatus: "waiting_for_runner",
+      provisioningCompletedAt: null,
+      observedRunnerImageDigest: null,
+      observedRunnerReleaseVersion: null,
+      observedRunnerBootContractVersion: null,
+      compatibilityState: "unknown",
+      compatibilityVerifiedAt: null,
+    });
+    await connection.db.insert(agents).values(agentFixture({ status: "starting" }));
+    provider.resources.set("droplet-exact", resource("droplet-exact", OPERATION_TAG));
+
+    await expect(reconcile(connection, provider)).resolves.toEqual({
+      processed: 1,
+      outcome: "exact_match",
+    });
+    expect(await connection.db.select().from(runnerReplacements)).toHaveLength(0);
+    const [runner] = await connection.db.select().from(runners).where(eq(runners.id, RUNNER_ID));
+    expect(runner).toMatchObject({
+      status: "registering",
+      provisioningStatus: "waiting_for_runner",
+      compatibilityState: "unknown",
+    });
+  });
+
+  it("never replaces an inventory-missing runner while provisioning is still in progress", async () => {
+    const provider = new FakeDigitalOceanProvider({ now: () => NOW });
+    await seedRunner(connection, {
+      status: "registering",
+      provisioningStatus: "waiting_for_runner",
+      provisioningCompletedAt: null,
+      observedRunnerImageDigest: null,
+      observedRunnerReleaseVersion: null,
+      observedRunnerBootContractVersion: null,
+      compatibilityState: "unknown",
+      compatibilityVerifiedAt: null,
+    });
+    await connection.db.insert(agents).values(agentFixture({ status: "starting" }));
+
+    await expect(reconcile(connection, provider)).resolves.toEqual({
+      processed: 1,
+      outcome: "provisioning_in_progress",
+    });
+    expect(await connection.db.select().from(runnerReplacements)).toHaveLength(0);
+  });
+
+  it("revalidates replacement eligibility after locking the source runner", async () => {
+    const provider = new FakeDigitalOceanProvider({ now: () => NOW });
+    await seedRunner(connection, { status: "degraded" });
+    await connection.db.insert(agents).values(agentFixture());
+    provider.resources.set("droplet-exact", resource("droplet-exact", OPERATION_TAG));
+
+    const blocker = postgres(databaseUrl, { max: 1 });
+    const observer = postgres(databaseUrl, { max: 1 });
+    let releaseRunnerLock: () => void = () => undefined;
+    let reportRunnerLocked: () => void = () => undefined;
+    const runnerLockReleased = new Promise<void>((resolve) => {
+      releaseRunnerLock = resolve;
+    });
+    const runnerLocked = new Promise<void>((resolve) => {
+      reportRunnerLocked = resolve;
+    });
+    const blockerWork = blocker.begin(async (tx) => {
+      await tx`select id from runners where id = ${RUNNER_ID} for update`;
+      reportRunnerLocked();
+      await runnerLockReleased;
+      await tx`update runners set status = 'online', updated_at = ${NOW} where id = ${RUNNER_ID}`;
+    });
+
+    await runnerLocked;
+    const reconciliation = reconcile(connection, provider);
+    try {
+      await waitForBlockedDatabaseSession(observer);
+      releaseRunnerLock();
+      await blockerWork;
+
+      await expect(reconciliation).resolves.toEqual({
+        processed: 1,
+        outcome: "ambiguous_resource",
+      });
+      expect(await connection.db.select().from(runnerReplacements)).toHaveLength(0);
+      const [runner] = await connection.db.select().from(runners).where(eq(runners.id, RUNNER_ID));
+      expect(runner?.status).toBe("online");
+    } finally {
+      releaseRunnerLock();
+      await Promise.allSettled([blockerWork, reconciliation]);
+      await Promise.all([blocker.end(), observer.end()]);
+    }
+  });
+
   it("starts replacement for an assigned missing Droplet and tombstones an unassigned one", async () => {
     const provider = new FakeDigitalOceanProvider({ now: () => NOW });
     await seedRunner(connection);
@@ -413,4 +506,18 @@ function quoteIdentifier(value: string): string {
 function restoreEnvironment(key: string, value: string | undefined): void {
   if (value === undefined) delete process.env[key];
   else process.env[key] = value;
+}
+
+async function waitForBlockedDatabaseSession(observer: ReturnType<typeof postgres>): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const [row] = await observer<{ blockedCount: number }[]>`
+      select count(*)::int as "blockedCount"
+      from pg_stat_activity
+      where datname = current_database()
+        and cardinality(pg_blocking_pids(pid)) > 0
+    `;
+    if ((row?.blockedCount ?? 0) > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for replacement reconciliation to reach the runner lock.");
 }

@@ -29,6 +29,7 @@ describe("GET /api/internal/runner-infrastructure/reconcile", () => {
   it.each([
     [0, "idle"],
     [1, "exact_match"],
+    [1, "provisioning_in_progress"],
     [1, "replacement_started"],
     [1, "orphan_observed"],
     [1, "ambiguous_resource"],

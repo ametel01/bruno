@@ -52,6 +52,7 @@ import {
   claimNextRunnerReplacement,
   reserveClaimedRunnerReplacementBudget,
 } from "@/src/server/runners/runner-replacement-store";
+import type { RunnerReplacementReason } from "@/src/server/runners/runner-replacement-state";
 
 const DEFAULT_RETRY_MS = 5_000;
 const DEFAULT_MAX_ATTEMPTS = 8;
@@ -213,7 +214,13 @@ async function initializeTarget(
   const provisioningOperationKey = provisioningOperationKeyFor(claim.operationKey);
   return await connection.db.transaction(async (tx) => {
     const [source] = await tx
-      .select({ userId: runners.userId, name: runners.name })
+      .select({
+        userId: runners.userId,
+        name: runners.name,
+        status: runners.status,
+        provisioningStatus: runners.provisioningStatus,
+        compatibilityState: runners.compatibilityState,
+      })
       .from(runners)
       .where(
         and(
@@ -223,8 +230,22 @@ async function initializeTarget(
           isNull(runners.deletedAt),
         ),
       )
-      .limit(1);
+      .limit(1)
+      .for("update");
     if (!source) throw new Error("Replacement source is unavailable.");
+    if (
+      claim.triggerDeploymentId === null &&
+      !isInfrastructureReplacementSourceEligible(source, claim.reason)
+    ) {
+      const failed = await applyClaimedRunnerReplacementTransition({
+        db: tx,
+        claim,
+        action: { kind: "fail", code: "state_invalid" },
+        now,
+      });
+      if (!failed) throw new Error("Ineligible replacement source lost its claim fence.");
+      return { outcome: "failed", replacementId: claim.id, state: "failed" };
+    }
 
     const [target] = await tx
       .insert(runners)
@@ -1302,6 +1323,24 @@ async function failClaim(
 
 function provisioningOperationKeyFor(operationKey: string): string {
   return `agentbay-deploy-${operationKey.slice("agentbay-replace-".length)}`;
+}
+
+function isInfrastructureReplacementSourceEligible(
+  source: {
+    status: string;
+    provisioningStatus: string | null;
+    compatibilityState: string;
+  },
+  reason: RunnerReplacementReason,
+): boolean {
+  if (reason === "boot_failure") return source.provisioningStatus === "failed";
+  if (reason === "provider_resource_missing") {
+    return source.provisioningStatus === "ready" || source.provisioningStatus === "failed";
+  }
+  if (source.provisioningStatus !== "ready") return false;
+  if (reason === "release_mismatch") return source.compatibilityState !== "compatible";
+  if (reason === "stale_heartbeat") return ["offline", "degraded"].includes(source.status);
+  return false;
 }
 
 function isReplacementConfigUsable(config: DigitalOceanProviderConfig): boolean {

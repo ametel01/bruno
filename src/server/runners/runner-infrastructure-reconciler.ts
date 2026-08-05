@@ -44,6 +44,7 @@ export type RunnerInfrastructureReconcileOutcome =
   | "interrupted_runner_adopted"
   | "duplicate_resources"
   | "stale_assignment_cleared"
+  | "provisioning_in_progress"
   | "orphan_observed"
   | "orphan_deleted"
   | "ambiguous_resource"
@@ -148,6 +149,9 @@ export async function reconcileNextRunnerInfrastructure(
           : undefined;
         if (runner.providerResourceId && !byId) {
           if (runner.assignedCount > 0) {
+            if (!isRunnerReplacementEligibleProvisioningStatus(runner.provisioningStatus)) {
+              return { processed: 1, outcome: "provisioning_in_progress" };
+            }
             const started = await startMissingRunnerReplacement(connection, runner, observedAt, {
               randomUUID: dependencies.randomUUID ?? randomUUID,
             });
@@ -383,9 +387,41 @@ async function startRunnerReplacement(
   dependencies: { randomUUID: () => string; reason: RunnerReplacementReason },
 ): Promise<boolean> {
   return await connection.db.transaction(async (tx) => {
+    const [current] = await tx.execute<InventoryRunner>(sql`
+      select
+        ${runners.id} as id,
+        ${runners.userId} as "userId",
+        ${runners.status} as status,
+        ${runners.compatibilityState} as "compatibilityState",
+        ${runners.provisioningStatus} as "provisioningStatus",
+        ${runners.provisioningOperationKey} as "provisioningOperationKey",
+        ${runners.providerResourceId} as "providerResourceId",
+        ${runners.deletedAt} as "deletedAt",
+        (
+          select count(*)::int
+          from ${agents}
+          where ${agents.runnerId} = ${runners.id}
+            and ${agents.deletedAt} is null
+        ) as "assignedCount"
+      from ${runners}
+      where ${runners.id} = ${runner.id}
+        and ${runners.userId} = ${runner.userId}
+        and ${runners.providerResourceId} is not distinct from ${runner.providerResourceId}
+        and ${runners.deletedAt} is null
+      for update
+    `);
+    if (!current || current.assignedCount < 1) return false;
+    if (!isRunnerReplacementEligibleProvisioningStatus(current.provisioningStatus)) return false;
+    if (
+      dependencies.reason !== "provider_resource_missing" &&
+      replacementReasonForUnhealthyRunner(current) !== dependencies.reason
+    ) {
+      return false;
+    }
+
     const created = await createOrGetRunnerReplacement({
       db: tx,
-      sourceRunnerId: runner.id,
+      sourceRunnerId: current.id,
       triggerDeploymentId: null,
       reason: dependencies.reason,
       operationKey: `agentbay-replace-${dependencies.randomUUID().replaceAll("-", "")}`,
@@ -396,9 +432,9 @@ async function startRunnerReplacement(
       .set({ status: "degraded", updatedAt: now })
       .where(
         and(
-          eq(runners.id, runner.id),
-          eq(runners.userId, runner.userId),
-          eq(runners.providerResourceId, runner.providerResourceId as string),
+          eq(runners.id, current.id),
+          eq(runners.userId, current.userId),
+          eq(runners.providerResourceId, current.providerResourceId as string),
           isNull(runners.deletedAt),
         ),
       )
@@ -612,9 +648,14 @@ function replacementReasonForUnhealthyRunner(
   runner: InventoryRunner,
 ): RunnerReplacementReason | null {
   if (runner.provisioningStatus === "failed") return "boot_failure";
+  if (!isRunnerReplacementEligibleProvisioningStatus(runner.provisioningStatus)) return null;
   if (runner.compatibilityState !== "compatible") return "release_mismatch";
   if (["offline", "degraded"].includes(runner.status)) return "stale_heartbeat";
   return null;
+}
+
+function isRunnerReplacementEligibleProvisioningStatus(status: string | null): boolean {
+  return status === "ready" || status === "failed";
 }
 
 async function hasActiveRunnerOwnership(
