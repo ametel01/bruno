@@ -324,10 +324,16 @@ DigitalOcean credentials and may create and delete billable resources.
 bun run deploy:prod
 ```
 
-This runs `vercel deploy --prod --scope ametel01s-projects`. Vercel uses `bun run vercel-build`
-from `vercel.json`; on production deployments that script validates the authentication mode,
-requires `DATABASE_URL`, applies every pending Drizzle migration, and only then runs the Next.js
-build. A migration failure stops the deployment.
+Run this only from a clean `main` branch after pushing the intended release commit. It dispatches the
+protected `Release runner image` workflow, which publishes an immutable runner image, stages the
+exact control-plane commit without production traffic, verifies the runner in the zero-Droplet
+canary, and promotes that exact deployment only after every gate passes. Follow the returned GitHub
+Actions URL and approve the protected environments when prompted. See
+[Runner releases](./docs/RUNNER_RELEASES.md) for the release and rollback contract.
+
+Do not run `vercel deploy --prod` directly when ready agent creation is enabled. Direct deployment
+does not supply the canary-verified `AGENTBAY_RUNNER_IMAGE` digest and the production build fails
+closed before migrations.
 
 To create a preview first, configure the preview environment and run `vercel deploy`. Preview auth
 rules are stricter than local development; see [Authentication modes](./docs/AUTHENTICATION.md).
@@ -426,7 +432,7 @@ enable ready mode by treating mock or local evidence as live acceptance.
 | `bun run agent:image:smoke` | Verify the selected Hermes image contract locally. |
 | `bun run agent:hermes:contract-smoke` | Exercise the pinned Hermes runner/readiness/restart contract locally. |
 | `bun run verify:hermes:staging` | Run the capability-gated, interactive-human-attested live Hermes/Telegram acceptance and durable cleanup workflow. |
-| `bun run deploy:prod` | Deploy production to the configured Vercel scope. |
+| `bun run deploy:prod` | Dispatch the protected runner-image and control-plane production release workflow. |
 
 See [E2E validation](./docs/E2E_VALIDATION.md) for capability gates and safe test modes.
 

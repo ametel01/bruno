@@ -14,6 +14,12 @@ const vercelConfigPath = new URL("../../vercel.json", import.meta.url);
 const vercelConfig = JSON.parse(readFileSync(vercelConfigPath, "utf8")) as {
   ignoreCommand?: string;
 };
+const packageJsonPath = new URL("../../package.json", import.meta.url);
+const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+  scripts: Record<string, string>;
+};
+const readmePath = new URL("../../README.md", import.meta.url);
+const readme = readFileSync(readmePath, "utf8");
 
 describe("runner release workflow contract", () => {
   it("is valid YAML with explicit publish, staging, canary, deploy, and rollback boundaries", () => {
@@ -125,6 +131,15 @@ describe("runner release workflow contract", () => {
     ).toBe(1);
     expect(runIgnoreCommand({ VERCEL_ENV: "preview" })).toBe(1);
     expect(workflowSource.match(/AGENTBAY_CANARY_VERIFIED_DEPLOY=true/g)).toHaveLength(2);
+  });
+
+  it("routes the documented production command through the protected release workflow", () => {
+    expect(packageJson.scripts["deploy:prod"]).toBe(
+      "gh workflow run publish-runner-image.yml --repo ametel01/plingpling --ref main --raw-field action=release",
+    );
+    expect(packageJson.scripts["deploy:prod"]).not.toContain("vercel deploy --prod");
+    expect(readme).toContain("Do not run `vercel deploy --prod` directly");
+    expect(readme).toContain("canary-verified `AGENTBAY_RUNNER_IMAGE` digest");
   });
 
   it("allows only artifact-backed immutable rollback and halts rollout", () => {

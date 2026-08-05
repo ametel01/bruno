@@ -8,7 +8,7 @@
     "db:generate": "drizzle-kit generate",
     "db:health": "DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} bun scripts/db-health.ts",
     "db:migrate": "DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} drizzle-kit migrate",
-    "deploy:prod": "vercel deploy --prod --scope ametel01s-projects",
+    "deploy:prod": "gh workflow run publish-runner-image.yml --repo ametel01/plingpling --ref main --raw-field action=release",
     "dev": "next dev",
     "local:cloud:prepare": "bun scripts/prepare-local-cloud.ts",
     "local:cloud:down": "sh -lc 'docker rm --force agentbay-local-cloud-runner agentbay-runner >/dev/null 2>&1 || true; ids=$(docker ps -aq --filter label=agentbay.agent_id); if [ -n \"$ids\" ]; then docker rm --force $ids >/dev/null 2>&1 || true; fi; docker compose --profile local-cloud down --remove-orphans'",
