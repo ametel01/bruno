@@ -100,6 +100,13 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).not.toContain("RUNNER_RELEASE_CONTROL_PLANE_URL");
   });
 
+  it("targets the linked Vercel project without placing its token in process arguments", () => {
+    expect(workflowSource).toContain("VERCEL_ORG_ID: $" + "{{ secrets.VERCEL_ORG_ID }}");
+    expect(workflowSource).toContain("VERCEL_PROJECT_ID: $" + "{{ secrets.VERCEL_PROJECT_ID }}");
+    expect(workflowSource).toContain("VERCEL_TOKEN: $" + "{{ secrets.VERCEL_TOKEN }}");
+    expect(workflowSource).not.toContain('--token="$' + '{VERCEL_TOKEN}"');
+  });
+
   it("skips automatic production builds while allowing verified releases and previews", () => {
     expect(vercelConfig.ignoreCommand).toBeTypeOf("string");
     const ignoreCommand = vercelConfig.ignoreCommand ?? "exit 99";

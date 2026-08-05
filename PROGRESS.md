@@ -779,7 +779,7 @@ and post-deploy checks remain required before Step 12.
 | 11 | Follow-up clean migration, full suite, and build | Passed all migrations through 0024 on an isolated temporary local database, 164 files / 1,572 tests, format/lint across 384 files, typecheck, production build, and diff hygiene. The temporary database was removed; no provider or cloud effect occurred. |
 | 11 | Agent-creation provisioning regression characterization and repair | Production was rolled back to `dpl_CdG8WSKjXcJKCXKi1ErsShBUt7qh`; the deleted failed agent was not reconciled and no Droplet was created. Focused build, creation, and trigger coverage passed 3 files / 36 tests with fake configuration/providers only. Format and lint checked 384 files, typecheck passed, all migrations through 0024 and 164 files / 1,576 tests passed on a clean temporary database, the production build passed, and the database was removed. No provider or cloud effect occurred. |
 | 11 | Compatible pre-canary control-plane staging | Read-only live-state inspection proved production is rolled back to pre-plan deployment `dpl_CdG8WSKjXcJKCXKi1ErsShBUt7qh`, so it cannot prove the new release/boot contract. The workflow now stages the exact production-configured commit with no domain assignment, passes that URL to the canary, and promotes the same deployment only after success. Frozen install, 4 focused files / 32 tests, workflow YAML parsing, format/lint across 384 files, typecheck, clean migrations through 0024, 164 files / 1,577 tests, production build, and diff hygiene passed. The temporary database was removed; no Vercel deployment, registry publication, provider call, or Droplet occurred. |
-| 11 | Live GHCR publish, Trivy scan of published digest, disposable DigitalOcean release canary, Vercel production deploy, `/health`, and required-release verification | Release runs [`30959832776`](https://github.com/ametel01/plingpling/actions/runs/30959832776) and [`30961074986`](https://github.com/ametel01/plingpling/actions/runs/30961074986) failed safely during job setup. Run [`30961399736`](https://github.com/ametel01/plingpling/actions/runs/30961399736) then built, published, and digest-verified immutable candidate `dced202e8f372bd84839425e787cd26731cac104@sha256:17a11421f54e4a876be1f5f7ef34154fc53a7d6416d02a442d3f50d154c507d7`, but Trivy Action's default SARIF behavior removed the configured `CRITICAL` filter and the CodeQL uploader failed because code scanning is unavailable for this private repository. Exact-digest reproduction found zero critical fixable vulnerabilities. Both image workflows now scan vulnerabilities only, preserve the critical SARIF limit, retain reports as 90-day artifacts, and omit the unused `security-events` permission. All downstream Vercel, canary, provider, and deploy jobs were skipped, so no Droplet or deployment occurred. Frozen install, 2 focused files / 9 tests, format/lint across 384 files, typecheck, clean migrations through 0024, 164 files / 1,578 tests, production build, exact-digest SARIF reproduction, and diff hygiene passed; the temporary database was removed. A new authorized run is required; no live acceptance is claimed. |
+| 11 | Live GHCR publish, Trivy scan of published digest, disposable DigitalOcean release canary, Vercel production deploy, `/health`, and required-release verification | Release runs [`30959832776`](https://github.com/ametel01/plingpling/actions/runs/30959832776) and [`30961074986`](https://github.com/ametel01/plingpling/actions/runs/30961074986) failed safely during job setup. Run [`30961399736`](https://github.com/ametel01/plingpling/actions/runs/30961399736) exposed Trivy SARIF severity and unavailable CodeQL upload issues, which were corrected without weakening the critical-fixable vulnerability gate. Run [`30962185226`](https://github.com/ametel01/plingpling/actions/runs/30962185226) then passed image build/publication, immutable digest verification, the Trivy gate, and SARIF artifact retention for `9e61f46c344cf35049db35f088242747abbeb1b3@sha256:c8b8bfe9261cfe06e7127122dd14c516c1f57648fec295655486a3836fe157de`; it failed while pulling Vercel production settings because the GitHub environment's direct project targeting could not be resolved. The production environment identifiers were refreshed from the authoritative local Vercel link, the environment-token path was verified against the exact account and project, and workflow commands now consume the token only from the environment rather than process arguments. The staging deploy, canary, provider access, and production deploy were skipped, so no Vercel deployment or Droplet occurred. Frozen install, 2 focused files / 10 tests, format/lint across 384 files, typecheck, clean migrations through 0024, 164 files / 1,579 tests, production build, YAML parsing, authenticated read-only Vercel project inspection, and diff hygiene passed; the temporary database was removed. A new authorized run is required; no live acceptance is claimed. |
 
 ### Step 1 Gap Matrix
 
@@ -963,6 +963,25 @@ and post-deploy checks remain required before Step 12.
   exact-digest SARIF reproduction, and diff hygiene passed. The temporary test
   database was removed. The corrective commit is `ci: preserve Trivy severity
   and reports` (`This commit`).
+- 2026-08-05: Release run
+  [`30962185226`](https://github.com/ametel01/plingpling/actions/runs/30962185226)
+  passed the image build and publication, immutable digest verification, Trivy
+  critical-fixable gate, and SARIF artifact upload for candidate
+  `9e61f46c344cf35049db35f088242747abbeb1b3@sha256:c8b8bfe9261cfe06e7127122dd14c516c1f57648fec295655486a3836fe157de`.
+  The next job failed before staging while pulling production project settings
+  because the GitHub production environment's direct Vercel project targeting
+  could not be resolved. Refreshed the two project identifier secrets from the
+  verified local link, and verified the environment-token path against the exact
+  account, team, and project without printing the token. Removed all Vercel
+  token command-line arguments so the CLI consumes the existing
+  environment-scoped token without exposing it in process listings. The staging
+  deploy, canary, provider access, and production
+  deployment were skipped, so no Vercel deployment or Droplet occurred. Frozen
+  install, 10 focused tests, format, lint, typecheck, clean migrations, all
+  1,579 tests, production build, YAML parsing, authenticated read-only Vercel
+  project inspection, and diff hygiene passed. The temporary database was
+  removed. The corrective commit is `ci: fix Vercel project targeting` (`This
+  commit`).
 
 ### Next Step
 
