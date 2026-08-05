@@ -334,11 +334,16 @@ function buildLocalCloudInitScript(
       scripts.push(buildLocalEndpointBridgeScript(options.agentSmokeMode));
     }
 
-    scripts.push(
-      options.agentSmokeMode && isLocalAgentSmokePackageBootstrap(command)
-        ? `echo ${shellQuote("Local agent smoke uses the prepared Droplet image.")}`
-        : `bash -lc ${shellQuote(command)}`,
-    );
+    if (isLocalSwapSetup(command)) {
+      scripts.push(`echo ${shellQuote("Local cloud simulation skips host swap activation.")}`);
+      scripts.push(
+        '/usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Swap setup was skipped by the local cloud simulator." swap_setup',
+      );
+    } else if (options.agentSmokeMode && isLocalAgentSmokePackageBootstrap(command)) {
+      scripts.push(`echo ${shellQuote("Local agent smoke uses the prepared Droplet image.")}`);
+    } else {
+      scripts.push(`bash -lc ${shellQuote(command)}`);
+    }
 
     return scripts;
   });
@@ -480,6 +485,10 @@ function isLocalAgentSmokePackageBootstrap(command: string): boolean {
     command.startsWith("apt-get install -y docker-ce ") ||
     command === "apt-get install -y caddy"
   );
+}
+
+function isLocalSwapSetup(command: string): boolean {
+  return command.includes("AGENTBAY_BOOTSTRAP_STEP=swap_setup");
 }
 
 function buildLocalEndpointBridgeScript(agentSmokeMode: boolean): string {

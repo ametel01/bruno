@@ -147,6 +147,54 @@ describe("local Docker DigitalOcean provider", () => {
     expect(dockerCalls[2]?.at(-1)).toContain("exec tail --follow /dev/null");
   });
 
+  it("preserves production swap setup while keeping it outside the local Docker simulator", async () => {
+    const dockerCalls: string[][] = [];
+    const provider = new LocalDockerDigitalOceanProvider({
+      containerName: "agentbay-local-cloud-runner-test",
+      endpointUrl: "http://host.docker.internal:3045",
+      startDelayMs: 0,
+      docker: async (args) => {
+        dockerCalls.push([...args]);
+        return { stdout: "ok\n", stderr: "" };
+      },
+    });
+    const content = buildCloudRunnerBootstrapContent({
+      appBaseUrl: "http://host.docker.internal:3000",
+      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      commandBearerToken: "runner-command-token",
+      endpointDiscovery: { type: "digitalocean_metadata" },
+      enableSwap: true,
+      runnerImage: "agentbay-runner:local",
+      runnerName: "plingpling Cloud Runner",
+    });
+
+    await provider.createRunner({
+      name: "plingpling Cloud Runner",
+      region: "sfo3",
+      sizeSlug: "s-1vcpu-512mb-10gb",
+      image: "ubuntu-24-04-x64",
+      tags: ["agentbay"],
+      userData: content.userData,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const bootstrapScriptEnv = dockerCalls[2]?.find((arg) =>
+      arg.startsWith("AGENTBAY_LOCAL_CLOUD_INIT_SCRIPT_B64="),
+    );
+    const bootstrapScript = Buffer.from(
+      bootstrapScriptEnv?.replace("AGENTBAY_LOCAL_CLOUD_INIT_SCRIPT_B64=", "") ?? "",
+      "base64",
+    ).toString("utf8");
+
+    expect(content.userData).toContain("AGENTBAY_BOOTSTRAP_STEP=swap_setup");
+    expect(content.userData).toContain("fallocate -l 1G /swapfile");
+    expect(content.userData).toContain("mkswap /swapfile");
+    expect(bootstrapScript).toContain("Local cloud simulation skips host swap activation.");
+    expect(bootstrapScript).not.toContain("fallocate -l 1G /swapfile");
+    expect(bootstrapScript).not.toContain("mkswap /swapfile");
+    expect(bootstrapScript).not.toContain("swapon /swapfile");
+  });
+
   it("removes the droplet simulator and production-named runner during cleanup", async () => {
     const dockerCalls: string[][] = [];
     const provider = new LocalDockerDigitalOceanProvider({
