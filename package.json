@@ -36,7 +36,8 @@
     "verify": "bun run format:check && bun run lint && bun run typecheck && bun run test && bun run build",
     "verify:e2e": "bun run verify && bun run test:e2e",
     "verify:hermes:staging": "bun scripts/verify-hermes-staging.ts",
-    "vercel-build": "bun scripts/vercel-build.ts"
+    "vercel-build": "bun scripts/vercel-build.ts",
+    "doctor": "npx react-doctor@latest"
   },
   "dependencies": {
     "@clerk/nextjs": "7.5.16",
