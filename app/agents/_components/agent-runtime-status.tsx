@@ -180,8 +180,8 @@ function AgentRuntimeStatusState({ agentId, initialRuntime }: AgentRuntimeStatus
       if (requestRef.current === controller) {
         requestRef.current = null;
       }
+      setIsFetching(false);
       if (requestEpoch === requestEpochRef.current) {
-        setIsFetching(false);
         schedule();
       }
     }

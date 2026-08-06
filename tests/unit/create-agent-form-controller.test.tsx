@@ -4,7 +4,7 @@ import {
   READY_SECRET_FIELD_NAMES,
   type LogicalSubmission,
   type ModelConnectionOption,
-} from "@/app/agents/_components/create-agent-form";
+} from "@/app/agents/_components/create-agent-form-controller";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn() }),

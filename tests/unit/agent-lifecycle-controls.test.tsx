@@ -6,10 +6,8 @@ import {
   acquireAgentActionRequestLatch,
   releaseAgentActionRequestLatch,
 } from "@/app/agents/_components/agent-action-request-latch";
-import {
-  AgentLifecycleControls,
-  buildAgentLifecycleActionPlan,
-} from "@/app/agents/_components/agent-lifecycle-controls";
+import { buildAgentLifecycleActionPlan } from "@/app/agents/_components/agent-lifecycle-action-plan";
+import { AgentLifecycleControls } from "@/app/agents/_components/agent-lifecycle-controls";
 import {
   buildDeploymentPresentation,
   type PublicAgentDeployment,
