@@ -3,12 +3,12 @@
 ## Active Work
 
 - issue: [#263](https://github.com/ametel01/plingpling/issues/263)
-  owner: checker-agent (`issue_263_checker`)
+  owner: builder-agent (`issue_263_builder`)
   branch: `codex/issue-263-creation-latency-evidence`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: checking
-  cycle: 0/5
+  phase: checker-ready
+  cycle: 1/5
 
 ## Completion Contract
 
@@ -162,6 +162,17 @@
     remain unauthorized.
   next-action: Run semantic and targeted checks first, then proportionate broad gates; record ALL
     GREEN, FAILED, or BLOCKED with exact evidence and stop without editing implementation code.
+- from: builder-agent (`issue_263_builder`)
+  to: checker-agent
+  timestamp: 2026-08-07T05:30:00+08:00
+  request: Re-verify issue #263 after the narrow cycle-1 checker fix. Do not edit code.
+  evidence: Fixed invalid timestamp handling for agent-stage and runner-boundary evidence so invalid
+    timestamps are surfaced as `invalid_timestamp` instead of collapsing to missing evidence. Replaced
+    free-form bootstrap `metadata.step` projection with an explicit allowlist, preventing hostile
+    secret/endpoint markers from entering report/log stage names. Added adversarial regression tests.
+    No provider effects were run.
+  next-action: Rerun the checker semantic case and focused gates; if green, hand back for PR
+    creation/review.
 
 ## Gates
 
@@ -241,6 +252,28 @@
   result: pass on 2026-08-07
   evidence: exit `128`; the failing new report module is not present on `origin/main`, so this is
     not a baseline failure.
+- command: `bun --conditions react-server -e 'import { buildAgentCreationLatencyReport } from "./src/server/agents/agent-creation-latency.ts"; const report = buildAgentCreationLatencyReport({ generatedAt: "2026-08-07T00:00:00.000Z", deployments: [{ id: "d", runnerId: "r", createdAt: "2026-08-07T00:00:00.000Z", completedAt: "2026-08-07T00:00:10.000Z", failedAt: null, agentStageEvents: [], runnerEvents: [{ phase: "bootstrapping", status: "started", createdAt: "not-a-date", metadata: { step: "dop_v1_secret_endpoint_https_example_com" } }, { phase: "bootstrapping", status: "completed", createdAt: "2026-08-07T00:00:05.000Z", metadata: { step: "dop_v1_secret_endpoint_https_example_com" } }] }] }); console.log(JSON.stringify(report.runs[0])); console.log(JSON.stringify(report).includes("dop_v1_secret")); console.log(JSON.stringify(report).includes("invalid_timestamp"));'`
+  result: pass after builder fix, 2026-08-07
+  evidence: Output stage is only `runner:bootstrapping`; hostile marker check prints `false`;
+    invalid timestamp check prints `true`.
+- command: `bun scripts/run-unit-tests.ts tests/unit/agent-creation-latency.test.ts tests/unit/agent-creation-benchmark.test.ts tests/unit/local-agent-cycle-smoke.test.ts tests/unit/runner-bootstrap-events.test.ts`
+  result: pass after builder fix, 2026-08-07
+  evidence: 4 files and 19 tests passed in isolated database `plingpling_test_85600_d636545ec08a`.
+- command: `bun run format:check`
+  result: pass after builder fix, 2026-08-07
+  evidence: Biome checked 399 files with no fixes applied.
+- command: `bun run lint`
+  result: pass after builder fix, 2026-08-07
+  evidence: Biome checked 399 files with no fixes applied.
+- command: `bun run typecheck`
+  result: pass after builder fix, 2026-08-07
+  evidence: `next typegen && tsc --noEmit` completed successfully.
+- command: `bun run agent:creation:benchmark -- --limit 1`
+  result: pass after builder fix, 2026-08-07
+  evidence: Read-only existing-run mode returned a valid empty JSON report without provider effects.
+- command: `bun run build`
+  result: pass after builder fix, 2026-08-07
+  evidence: Next.js production build completed successfully.
 
 ## Checker Result
 
@@ -310,6 +343,17 @@ Status: FAILED
   expected step labels, and add regression tests using distinctive secret/endpoint marker strings
   in `metadata.step`.
 
+## Fix Handoff
+
+- from: coordinator
+  to: builder-agent (`issue_263_builder`)
+  timestamp: 2026-08-07T05:26:57+08:00
+  request: Fix only the two checker findings recorded above and add the requested adversarial tests.
+  evidence: Checker semantic command, file locations, and expected behavior are recorded under
+    `Checker Result`; checker commit is `8c4ebe5`.
+  next-action: Commit the narrow fix, rerun focused semantic/tests plus affected gates, update this
+    status, and return to checker. Do not run provider effects.
+
 ## Review Threads
 
 - none
@@ -326,7 +370,7 @@ Status: FAILED
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling`: issue #263 branch, checker-owned for read-only verification.
+- `/Users/alexmetelli/source/plingpling`: issue #263 branch, builder-owned for checker-finding fixes.
 - `/Users/alexmetelli/source/plingpling-step7-base`: pre-existing detached user-owned worktree;
   preserve and do not modify.
 

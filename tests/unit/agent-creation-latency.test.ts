@@ -190,6 +190,98 @@ describe("agent creation latency report", () => {
     });
   });
 
+  it("surfaces invalid runner timestamps without projecting hostile bootstrap step labels", () => {
+    const report = buildAgentCreationLatencyReport({
+      generatedAt: "2026-08-07T00:00:00.000Z",
+      deployments: [
+        {
+          id: "deployment-hostile-runner",
+          runnerId: "runner-hostile",
+          createdAt: "2026-08-07T00:00:00.000Z",
+          completedAt: "2026-08-07T00:00:10.000Z",
+          failedAt: null,
+          agentStageEvents: [],
+          runnerEvents: [
+            {
+              phase: "bootstrapping",
+              status: "started",
+              createdAt: "not-a-date",
+              metadata: {
+                step: "dop_v1_secret_endpoint_https_example_com",
+                detail: "https://runner-secret.example.com/dop_v1_secret",
+              },
+            },
+            {
+              phase: "bootstrapping",
+              status: "completed",
+              createdAt: "2026-08-07T00:00:05.000Z",
+              metadata: {
+                step: "dop_v1_secret_endpoint_https_example_com",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const serialized = JSON.stringify(report);
+
+    expect(report.runs[0]?.stages).toEqual([
+      expect.objectContaining({
+        name: "runner:bootstrapping",
+        startedAt: null,
+        completedAt: "2026-08-07T00:00:05.000Z",
+        durationMs: null,
+        issues: ["invalid_timestamp"],
+      }),
+    ]);
+    expect(report.runs[0]).toMatchObject({
+      evidenceStatus: "invalid",
+      issueCounts: { invalid_timestamp: 1 },
+    });
+    expect(serialized).toContain("invalid_timestamp");
+    expect(serialized).not.toContain("dop_v1_secret");
+    expect(serialized).not.toContain("https_example_com");
+    expect(serialized).not.toContain("runner-secret.example.com");
+    expect(serialized).not.toContain("bootstrap:dop");
+  });
+
+  it("surfaces invalid agent-stage timestamps instead of dropping the stage", () => {
+    const report = buildAgentCreationLatencyReport({
+      generatedAt: "2026-08-07T00:00:00.000Z",
+      deployments: [
+        {
+          id: "deployment-invalid-agent-stage",
+          runnerId: null,
+          createdAt: "2026-08-07T00:00:00.000Z",
+          completedAt: "2026-08-07T00:00:10.000Z",
+          failedAt: null,
+          agentStageEvents: [
+            {
+              fromStage: "pending",
+              toStage: "configuring_hermes",
+              createdAt: "not-a-date",
+            },
+          ],
+          runnerEvents: [],
+        },
+      ],
+    });
+
+    expect(report.runs[0]?.stages).toEqual([
+      expect.objectContaining({
+        name: "agent:configuring_hermes",
+        startedAt: "2026-08-07T00:00:00.000Z",
+        completedAt: null,
+        durationMs: null,
+        issues: ["invalid_timestamp"],
+      }),
+    ]);
+    expect(report.runs[0]).toMatchObject({
+      evidenceStatus: "invalid",
+      issueCounts: { invalid_timestamp: 1 },
+    });
+  });
+
   it("keeps ambiguous terminal timestamps invalid", () => {
     const report = buildAgentCreationLatencyReport({
       generatedAt: "2026-08-07T00:00:00.000Z",

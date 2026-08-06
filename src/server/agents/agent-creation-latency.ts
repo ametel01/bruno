@@ -11,6 +11,21 @@ const MAX_REPORT_LIMIT = 1_000;
 const NEAREST_RANK_P95 = 95;
 const NEAREST_RANK_P50 = 50;
 const MAX_LOG_STAGE_COUNT = 20;
+const BOOTSTRAP_STEP_LABELS = new Set([
+  "agent_image_pull",
+  "authenticated_readiness",
+  "boot_validation",
+  "bootstrap_started",
+  "caddy_configured",
+  "docker_package_install",
+  "docker_pull",
+  "hermes_image_pull",
+  "hermes_private_network",
+  "hermes_state_root",
+  "package_install",
+  "runner_container_start",
+  "runner_registration",
+]);
 
 const terminalLogger = createAppLogger("agent.creation.latency");
 
@@ -291,7 +306,7 @@ function buildAgentStageTimings(
       toStage: normalizeLabel(event.toStage),
       at: toIso(event.createdAt),
     }))
-    .filter((event) => event.toStage && event.at)
+    .filter((event) => event.toStage)
     .sort(
       (left, right) =>
         compareIso(left.at, right.at) || (left.toStage ?? "").localeCompare(right.toStage ?? ""),
@@ -301,12 +316,13 @@ function buildAgentStageTimings(
   let cursor = createdAt;
 
   for (const event of ordered) {
-    if (!event.toStage || !event.at) continue;
+    if (!event.toStage) continue;
     const name = `agent:${event.toStage}`;
     const issues: AgentCreationLatencyIssue[] = [];
 
     if (seen.has(name)) issues.push("duplicate_terminal");
-    if (compareIso(event.at, cursor) < 0) issues.push("reversed_timestamp");
+    if (!event.at) issues.push("invalid_timestamp");
+    if (event.at && compareIso(event.at, cursor) < 0) issues.push("reversed_timestamp");
     seen.add(name);
     timings.push({
       name,
@@ -314,10 +330,12 @@ function buildAgentStageTimings(
       status: issues.length > 0 ? "invalid" : "complete",
       startedAt: cursor,
       completedAt: event.at,
-      durationMs: issues.length > 0 ? null : durationMs(cursor, event.at),
+      durationMs: issues.length > 0 || !event.at ? null : durationMs(cursor, event.at),
       issues,
     });
-    cursor = event.at;
+    if (event.at) {
+      cursor = event.at;
+    }
   }
 
   return timings;
@@ -336,19 +354,24 @@ function buildRunnerStageTimings(
   }
 
   return [...byName.entries()].map(([name, list]) => {
-    const starts = list.filter((event) => event.status === "started" && event.at);
-    const terminals = list.filter(
-      (event) => (event.status === "completed" || event.status === "failed") && event.at,
+    const startedEvents = list.filter((event) => event.status === "started");
+    const terminalEvents = list.filter(
+      (event) => event.status === "completed" || event.status === "failed",
     );
+    const validStarts = startedEvents.filter((event) => event.at);
+    const validTerminals = terminalEvents.filter((event) => event.at);
     const issues: AgentCreationLatencyIssue[] = [];
 
-    if (starts.length === 0) issues.push("missing_started");
-    if (starts.length > 1) issues.push("duplicate_started");
-    if (terminals.length === 0) issues.push("missing_terminal");
-    if (terminals.length > 1) issues.push("duplicate_terminal");
+    if (startedEvents.length === 0) issues.push("missing_started");
+    if (startedEvents.length > 1) issues.push("duplicate_started");
+    if (terminalEvents.length === 0) issues.push("missing_terminal");
+    if (terminalEvents.length > 1) issues.push("duplicate_terminal");
+    if ([...startedEvents, ...terminalEvents].some((event) => !event.at)) {
+      issues.push("invalid_timestamp");
+    }
 
-    const startedAt = starts[0]?.at ?? null;
-    const terminal = terminals[0] ?? null;
+    const startedAt = validStarts[0]?.at ?? null;
+    const terminal = validTerminals[0] ?? null;
     const completedAt = terminal?.at ?? null;
 
     if (startedAt && completedAt && compareIso(completedAt, startedAt) < 0) {
@@ -374,7 +397,7 @@ function toBoundaryEvents(event: AgentCreationLatencyRunnerEvent): BoundaryEvent
   const events: BoundaryEvent[] = phase
     ? [{ name: `runner:${phase}`, source: "runner_provisioning_event", status: event.status, at }]
     : [];
-  const step = normalizeLabel(event.metadata?.step);
+  const step = normalizeBootstrapStepLabel(event.metadata?.step);
 
   if (step && phase === "bootstrapping") {
     events.push({
@@ -490,6 +513,11 @@ function normalizeLabel(value: unknown): string | null {
     .toLowerCase()
     .replaceAll(/[^a-z0-9_-]+/g, "_");
   return normalized.length > 0 ? normalized.slice(0, 80) : null;
+}
+
+function normalizeBootstrapStepLabel(value: unknown): string | null {
+  const label = normalizeLabel(value);
+  return label && BOOTSTRAP_STEP_LABELS.has(label) ? label : null;
 }
 
 async function readDeploymentEvidence(
