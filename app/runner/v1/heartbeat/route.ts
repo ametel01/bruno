@@ -99,7 +99,13 @@ export async function POST(
       outcome: readiness.outcome,
       ...(readiness.outcome === "ready"
         ? { transitioned: readiness.transitioned }
-        : { reason: readiness.reason }),
+        : readiness.outcome === "failed"
+          ? {
+              reason: readiness.reason,
+              bootFailureReason: readiness.failureReason,
+              transitioned: readiness.transitioned,
+            }
+          : { reason: readiness.reason }),
     });
 
     (

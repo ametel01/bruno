@@ -586,6 +586,86 @@ describe("runner heartbeat persistence", () => {
     ).resolves.toEqual({ ok: false, reason: "endpoint_rejected" });
   });
 
+  it("preserves an authenticated failed boot snapshot returned with 503", async () => {
+    const snapshot = readyRunnerBootSnapshot({
+      status: "failed",
+      components: {
+        ...readyRunnerBootSnapshot().components,
+        hermesFixture: "failed",
+      },
+      failureReason: "fixture_launch_failed",
+    });
+
+    await expect(
+      probeRunnerEndpointReadiness({
+        endpointUrl: "https://failed-cloud-runner.example.com",
+        runnerBearerToken: "runner-command-token",
+        fetch: async () => Response.json(snapshot, { status: 503 }),
+      }),
+    ).resolves.toEqual({ ok: false, reason: "runner_not_ready", snapshot });
+  });
+
+  it("fails runner provisioning from an authenticated failed boot snapshot", async () => {
+    const now = new Date("2026-08-06T00:10:27.000Z");
+    const runner = await seedRunner(connection, {
+      endpointUrl: "https://failed-cloud-runner.example.com",
+      status: "online",
+      kind: "digitalocean",
+      provisioningStatus: "waiting_for_runner",
+      compatible: true,
+    });
+    const snapshot = readyRunnerBootSnapshot({
+      status: "failed",
+      components: {
+        ...readyRunnerBootSnapshot().components,
+        hermesFixture: "failed",
+      },
+      failureReason: "fixture_launch_failed",
+    });
+
+    const result = await confirmCloudRunnerReadiness(runner.id, {
+      compatibilityRequirement: HOSTED_COMPATIBILITY_REQUIREMENT,
+      createConnection: () => connection,
+      fetch: async () => Response.json(snapshot, { status: 503 }),
+      now: () => now,
+      runnerBearerToken: "runner-command-token",
+    });
+    const [persistedRunner] = await connection.db
+      .select()
+      .from(runners)
+      .where(eq(runners.id, runner.id));
+    const [failureEvent] = await connection.db
+      .select()
+      .from(runnerProvisioningEvents)
+      .where(eq(runnerProvisioningEvents.runnerId, runner.id));
+
+    expect(result).toEqual({
+      outcome: "failed",
+      reason: "boot_self_test_failed",
+      failureReason: "fixture_launch_failed",
+      transitioned: true,
+    });
+    expect(persistedRunner).toMatchObject({
+      status: "provision_failed",
+      provisioningStatus: "failed",
+      provisioningError: "Runner boot self-test failed: Hermes fixture launch failed.",
+      provisioningCompletedAt: now,
+    });
+    expect(failureEvent).toMatchObject({
+      phase: "failed",
+      status: "failed",
+      message: "Authenticated runner boot self-test failed.",
+      metadata: {
+        provider: "digitalocean",
+        readinessProbe: "authenticated_endpoint",
+        bootContractVersion: snapshot.contractVersion,
+        bootStatus: "failed",
+        bootComponents: snapshot.components,
+        bootFailureReason: "fixture_launch_failed",
+      },
+    });
+  });
+
   it("allows insecure loopback readiness only for the explicit local Docker mode", async () => {
     const runner = await seedRunner(connection, {
       endpointUrl: "http://host.docker.internal:3045",

@@ -106,6 +106,52 @@ describe("POST /runner/v1/heartbeat route", () => {
     expect(JSON.stringify(ingressLogs)).not.toContain("agb_run_secret");
   });
 
+  it("logs a safe authenticated boot self-test failure reason", async () => {
+    const infoSpy = vi.spyOn(runnerIngressLogger, "info").mockImplementation(() => {});
+    const scheduleReconciliations = vi.fn();
+    mocks.recordRunnerHeartbeat.mockResolvedValueOnce({
+      ok: true,
+      runner: {
+        id: "00000000-0000-4000-8000-000000000130",
+        status: "online",
+        observedAt: "2026-08-06T00:10:27.000Z",
+      },
+    });
+    mocks.confirmCloudRunnerReadiness.mockResolvedValueOnce({
+      outcome: "failed",
+      reason: "boot_self_test_failed",
+      failureReason: "fixture_launch_failed",
+      transitioned: true,
+    });
+    const { POST } = await import("@/app/runner/v1/heartbeat/route");
+
+    const response = await POST(
+      new Request("http://localhost/runner/v1/heartbeat", {
+        method: "POST",
+        headers: { authorization: "Bearer agb_run_secret" },
+        body: JSON.stringify({ runnerId: "00000000-0000-4000-8000-000000000130" }),
+      }),
+      undefined,
+      { scheduleReconciliations },
+    );
+    const ingressLogs = infoSpy.mock.calls.map(([event, metadata]) => ({ ...metadata, event }));
+
+    expect(response.status).toBe(200);
+    expect(ingressLogs).toContainEqual(
+      expect.objectContaining({
+        endpoint: "heartbeat",
+        event: "readiness_probe_completed",
+        runnerId: "00000000-0000-4000-8000-000000000130",
+        outcome: "failed",
+        reason: "boot_self_test_failed",
+        bootFailureReason: "fixture_launch_failed",
+        transitioned: true,
+      }),
+    );
+    expect(scheduleReconciliations).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000130");
+    expect(JSON.stringify(ingressLogs)).not.toContain("agb_run_secret");
+  });
+
   it.each([
     ["missing_credential", 401, "runner_unauthorized"],
     ["malformed_credential", 401, "runner_unauthorized"],

@@ -8,7 +8,10 @@ import {
   DIGITALOCEAN_RUNNER_KIND,
 } from "@/src/server/runners/digitalocean-provider";
 import { hashRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
-import { markCloudRunnerReadyAfterAuthenticatedProbe } from "@/src/server/runners/runner-provisioning-events";
+import {
+  markCloudRunnerFailedAfterAuthenticatedProbe,
+  markCloudRunnerReadyAfterAuthenticatedProbe,
+} from "@/src/server/runners/runner-provisioning-events";
 import {
   assessRunnerCompatibility,
   isPersistedRunnerCompatible,
@@ -126,7 +129,14 @@ export type ConfirmCloudRunnerReadinessResult =
         | "persistence_error"
         | "release_incompatible"
         | "response_invalid"
+        | "runner_not_ready"
         | "token_not_configured";
+    }
+  | {
+      outcome: "failed";
+      reason: "boot_self_test_failed";
+      failureReason: Exclude<RunnerBootSnapshot["failureReason"], null>;
+      transitioned: boolean;
     }
   | {
       outcome: "not_applicable";
@@ -135,6 +145,7 @@ export type ConfirmCloudRunnerReadinessResult =
 
 export type ProbeRunnerEndpointReadinessResult =
   | { ok: true; protocol: "readiness_endpoint"; snapshot: RunnerBootSnapshot }
+  | { ok: false; reason: "runner_not_ready"; snapshot: RunnerBootSnapshot }
   | {
       ok: false;
       reason:
@@ -333,6 +344,29 @@ export async function confirmCloudRunnerReadiness(
     });
 
     if (!probe.ok) {
+      const failureReason =
+        probe.reason === "runner_not_ready" ? probe.snapshot.failureReason : null;
+      if (
+        probe.reason === "runner_not_ready" &&
+        probe.snapshot.status === "failed" &&
+        failureReason !== null
+      ) {
+        const bootSnapshot = probe.snapshot;
+        const now = dependencies.now?.() ?? new Date();
+        const transitioned = await connection.db.transaction((tx) =>
+          markCloudRunnerFailedAfterAuthenticatedProbe(tx, {
+            runnerId,
+            now,
+            bootSnapshot,
+          }),
+        );
+        return {
+          outcome: "failed",
+          reason: "boot_self_test_failed",
+          failureReason,
+          transitioned,
+        };
+      }
       return { outcome: "pending", reason: probe.reason };
     }
 
@@ -406,37 +440,31 @@ export async function probeRunnerEndpointReadiness(input: {
     clearTimeout(timeout);
   }
 
-  if (response.status === 404 && (await isLegacyAuthenticatedNotFoundResponse(response))) {
-    return { ok: false, reason: "response_invalid" };
-  }
-
-  if (!response.ok) {
-    return { ok: false, reason: "endpoint_rejected" };
-  }
-
   let payload: unknown;
 
   try {
     payload = await response.json();
   } catch {
-    return { ok: false, reason: "response_invalid" };
+    return { ok: false, reason: response.ok ? "response_invalid" : "endpoint_rejected" };
   }
 
   const snapshot = parseRunnerBootSnapshot(payload);
+  if (!response.ok) {
+    if (response.status === 503 && snapshot && snapshot.status !== "ready") {
+      return { ok: false, reason: "runner_not_ready", snapshot };
+    }
+    if (response.status === 404 && isLegacyAuthenticatedNotFoundPayload(payload)) {
+      return { ok: false, reason: "response_invalid" };
+    }
+    return { ok: false, reason: "endpoint_rejected" };
+  }
+
   return snapshot?.status === "ready"
     ? { ok: true, protocol: "readiness_endpoint", snapshot }
     : { ok: false, reason: "response_invalid" };
 }
 
-async function isLegacyAuthenticatedNotFoundResponse(response: Response): Promise<boolean> {
-  let payload: unknown;
-
-  try {
-    payload = await response.json();
-  } catch {
-    return false;
-  }
-
+function isLegacyAuthenticatedNotFoundPayload(payload: unknown): boolean {
   if (!payload || typeof payload !== "object") {
     return false;
   }

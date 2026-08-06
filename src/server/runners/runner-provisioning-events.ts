@@ -5,7 +5,10 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { runnerProvisioningEvents, runners } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
 import { DIGITALOCEAN_PROVIDER } from "@/src/server/runners/digitalocean-provider";
-import type { RunnerBootSnapshot } from "@/src/runner-service/runner-contracts";
+import type {
+  RunnerBootFailureReason,
+  RunnerBootSnapshot,
+} from "@/src/runner-service/runner-contracts";
 
 export type RunnerProvisioningPhase =
   | "pending"
@@ -155,6 +158,74 @@ export async function markCloudRunnerReadyAfterAuthenticatedProbe(
   });
 
   return true;
+}
+
+export async function markCloudRunnerFailedAfterAuthenticatedProbe(
+  tx: RunnerProvisioningTransaction,
+  input: {
+    runnerId: string;
+    now: Date;
+    bootSnapshot: RunnerBootSnapshot;
+  },
+): Promise<boolean> {
+  const failureReason = input.bootSnapshot.failureReason;
+  if (input.bootSnapshot.status !== "failed" || failureReason === null) return false;
+
+  const transitionedRows = await tx
+    .update(runners)
+    .set({
+      status: "provision_failed",
+      provisioningStatus: "failed",
+      provisioningError: runnerBootFailureMessage(failureReason),
+      provisioningCompletedAt: input.now,
+      updatedAt: input.now,
+    })
+    .where(
+      and(
+        eq(runners.id, input.runnerId),
+        eq(runners.kind, "digitalocean"),
+        eq(runners.provider, DIGITALOCEAN_PROVIDER),
+        eq(runners.status, "online"),
+        eq(runners.provisioningStatus, "waiting_for_runner"),
+        isNull(runners.deletedAt),
+      ),
+    )
+    .returning({ id: runners.id });
+
+  if (transitionedRows.length === 0) return false;
+
+  await recordRunnerProvisioningEvent(tx, {
+    runnerId: input.runnerId,
+    phase: "failed",
+    status: "failed",
+    message: "Authenticated runner boot self-test failed.",
+    metadata: {
+      provider: DIGITALOCEAN_PROVIDER,
+      readinessProbe: "authenticated_endpoint",
+      bootContractVersion: input.bootSnapshot.contractVersion,
+      bootStatus: input.bootSnapshot.status,
+      bootComponents: input.bootSnapshot.components,
+      bootFailureReason: failureReason,
+    },
+    now: input.now,
+  });
+
+  return true;
+}
+
+function runnerBootFailureMessage(reason: Exclude<RunnerBootFailureReason, null>): string {
+  const detail: Record<Exclude<RunnerBootFailureReason, null>, string> = {
+    docker_unavailable: "Docker was unavailable.",
+    release_mismatch: "Runner release identity did not match.",
+    fixture_launch_failed: "Hermes fixture launch failed.",
+    detailed_health_failed: "Hermes detailed health failed.",
+    canary_failed: "The model canary failed.",
+    telegram_config_failed: "Telegram configuration validation failed.",
+    cleanup_failed: "Boot fixture cleanup failed.",
+    deadline_exceeded: "The boot self-test deadline was exceeded.",
+    snapshot_invalid: "The boot readiness snapshot was invalid.",
+  };
+  return `Runner boot self-test failed: ${detail[reason]}`;
 }
 
 export async function markCloudRunnerExternallyDeleted(

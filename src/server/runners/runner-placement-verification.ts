@@ -38,6 +38,7 @@ export type RunnerPlacementVerificationResult =
         | "release_incompatible"
         | "response_invalid"
         | "runner_not_eligible"
+        | "runner_not_ready"
         | "token_not_configured";
       transitioned: boolean;
     }
