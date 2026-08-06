@@ -86,17 +86,17 @@ The update log is append-only.
   provider execution remains unimplemented and unauthorized in this step.
 - Wired successful terminal deployment transitions to one sanitized timing log and wired
   `local:agent:smoke` to emit/return `local_agent_cycle_creation_latency` before database volume
-  teardown. The final verified rerun reported `ready=1`, `successRate=1`, `readyLatency.p95Ms=88223`,
-  and `digitalOceanRequests=0`.
+  teardown. The final verified rerun reported a valid 15-stage record with `ready=1`,
+  `successRate=1`, `readyLatency.p95Ms=88760`, `issueCounts:{}`, and `digitalOceanRequests=0`.
 - Added focused regression coverage for report ordering, ready/failed/incomplete rows, nearest-rank
   percentiles, invalid/missing/duplicate/reversed evidence, PostgreSQL timestamp strings, provider
   fail-closed CLI behavior, local zero-cloud guardrails, smoke wiring, and bootstrap boundary
   redaction.
 - Updated `docs/E2E_VALIDATION.md` and `CHANGELOG.md`.
-- Gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; focused unit harness
-  for Step 1 tests; `bun run test` (169 files, 1628 tests); `bun run build`; `bun run test:e2e:ci`
-  (26 tests); `bun run local:agent:smoke`; `bun run agent:creation:benchmark -- --limit 1`.
-- Commit: this Step 1 implementation commit.
+- Gates passed: `bun run verify` (169 files, 1638 tests, production build); focused unit harness
+  (10 files, 95 tests); `bun run test:e2e:ci` (26 tests); `bun run local:agent:smoke`; provider
+  fail-closed guards; and `bun run agent:creation:benchmark -- --limit 1`.
+- Merge: PR #272, commit `7d1cb985c06b0007dadcfb0e42c5631c65b7c472`.
 - Next: Step 2 / issue #264 — durable delayed deployment wakeups.
 
 ### 2026-08-07 — Step 5 authorization-independent implementation in progress
