@@ -453,15 +453,19 @@ async function reconcileFencingSource(input: {
         createConnection: () => input.connection,
         signal: input.context.signal,
       });
-  await Promise.allSettled(
-    assigned
-      .filter((agent) => agent.status !== "stopped")
-      .map((agent) =>
+  const stopAttempts: Array<Promise<unknown> | undefined> = [];
+
+  for (const agent of assigned) {
+    if (agent.status !== "stopped") {
+      stopAttempts.push(
         input.dependencies.stopSourceAgent
           ? input.dependencies.stopSourceAgent(source, agent.id)
           : adapter?.stop(agent.id),
-      ),
-  );
+      );
+    }
+  }
+
+  await Promise.allSettled(stopAttempts);
 
   const advanced = await input.connection.db.transaction(async (tx) => {
     const applied = await applyClaimedRunnerReplacementTransition({

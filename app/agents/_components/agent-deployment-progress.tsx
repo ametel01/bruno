@@ -48,6 +48,15 @@ export type RetryState =
 export const POLL_FOREGROUND_LIMIT_MS = 30 * 60 * 1000;
 
 export function AgentDeploymentProgress(props: AgentDeploymentProgressProps) {
+  return (
+    <AgentDeploymentProgressState
+      key={JSON.stringify([props.agentId, props.initialDeployment])}
+      {...props}
+    />
+  );
+}
+
+function AgentDeploymentProgressState(props: AgentDeploymentProgressProps) {
   const progress = useAgentDeploymentProgress(props);
 
   return <DeploymentProgressView {...progress} />;
@@ -269,17 +278,6 @@ function useAgentDeploymentProgress({
       void pollDeployment();
     };
   }, [pollDeployment]);
-
-  useEffect(() => {
-    generationRef.current += 1;
-    resumeForegroundTracking({ reset: true });
-    refreshedTerminalRef.current = false;
-    resetDeploymentRetryAttempt(retryLatchRef.current);
-    setDeployment(initialDeployment);
-    setLastObservedStage(toNonterminalStage(initialDeployment?.stage ?? null));
-    setObservation({ status: "idle", consecutiveFailures: 0 });
-    setRetry({ status: "idle" });
-  }, [initialDeployment, resumeForegroundTracking]);
 
   useEffect(() => {
     if (!shouldPoll) {

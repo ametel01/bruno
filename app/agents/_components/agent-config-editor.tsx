@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { type FormEvent, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { AgentDetailConfigUi } from "@/src/shared/agent-ui-types";
 
 type PersistedAgentConfig = {
@@ -39,12 +39,30 @@ const REQUIRED_FIELDS = [
   ["modelName", "Model name is required."],
   ["timezone", "Timezone is required."],
 ] as const;
+const CRON_FIELD_RANGES = [
+  [0, 59],
+  [0, 23],
+  [1, 31],
+  [1, 12],
+  [0, 7],
+] as const;
 
 const subscribeToHydration = () => () => {};
 const getHydratedSnapshot = () => true;
 const getServerHydratedSnapshot = () => false;
 
 export function AgentConfigEditor({ agentId, maxNameLength, persisted }: AgentConfigEditorProps) {
+  return (
+    <AgentConfigEditorForm
+      key={JSON.stringify([agentId, persisted])}
+      agentId={agentId}
+      maxNameLength={maxNameLength}
+      persisted={persisted}
+    />
+  );
+}
+
+function AgentConfigEditorForm({ agentId, maxNameLength, persisted }: AgentConfigEditorProps) {
   const router = useRouter();
   const submittingRef = useRef(false);
   const [draft, setDraft] = useState<DraftConfig>(() => persistedToDraft(persisted));
@@ -55,11 +73,6 @@ export function AgentConfigEditor({ agentId, maxNameLength, persisted }: AgentCo
     getServerHydratedSnapshot,
   );
   const persistedDraft = useMemo(() => persistedToDraft(persisted), [persisted]);
-
-  useEffect(() => {
-    setDraft(persistedDraft);
-    setState({ status: "idle" });
-  }, [persistedDraft]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -432,10 +445,13 @@ async function safeFailureMessage(response: Response): Promise<string> {
     };
 
     if (body.error?.code === "validation_failed") {
-      const messages =
-        body.error.issues
-          ?.map((issue) => (typeof issue.message === "string" ? issue.message : null))
-          .filter((message) => message !== null && !looksUnsafe(message)) ?? [];
+      const messages: string[] = [];
+
+      for (const issue of body.error.issues ?? []) {
+        if (typeof issue.message === "string" && !looksUnsafe(issue.message)) {
+          messages.push(issue.message);
+        }
+      }
 
       if (messages.length > 0) {
         return messages.join(" ");
@@ -519,20 +535,12 @@ function isValidTimezone(timezone: string): boolean {
 function isValidCronExpression(cron: string): boolean {
   const fields = cron.trim().split(/\s+/);
 
-  if (fields.length !== 5) {
+  if (fields.length !== CRON_FIELD_RANGES.length) {
     return false;
   }
 
-  const ranges = [
-    [0, 59],
-    [0, 23],
-    [1, 31],
-    [1, 12],
-    [0, 7],
-  ] as const;
-
   return fields.every((field, index) => {
-    const range = ranges[index];
+    const range = CRON_FIELD_RANGES[index];
 
     if (!range) {
       return false;

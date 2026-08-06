@@ -399,9 +399,13 @@ function calculateRunnerEstimate(
       .filter((row) => clipUsageIntervalToWindow(row, window) !== null)
       .map((row) => row.agentId),
   );
-  const runningAgentIds = new Set(
-    runningAgentRows.filter((row) => row.runnerId === runner.id).map((row) => row.id),
-  );
+  const runningAgentIds = new Set<string>();
+
+  for (const row of runningAgentRows) {
+    if (row.runnerId === runner.id) {
+      runningAgentIds.add(row.id);
+    }
+  }
   const uptimeMs = unionUsageIntervalDurationMs(runnerUsageRows, window);
   const price =
     runner.kind === DIGITALOCEAN_RUNNER_KIND

@@ -460,10 +460,17 @@ export class ManualRunnerDocker {
 
     return await this.withAgentLock(agentId, async () => {
       const details = await this.listSelectedContainerDetails(agentId);
-      const runningOperationId = details
-        .filter((container) => container.status === "running" || container.status === "restarting")
-        .map((container) => readOperationFromInspect(container.inspect)?.id ?? null)
-        .find((operationId): operationId is string => operationId !== null);
+      let runningOperationId: string | null = null;
+
+      for (const container of details) {
+        if (container.status === "running" || container.status === "restarting") {
+          const operationId = readOperationFromInspect(container.inspect)?.id ?? null;
+
+          if (runningOperationId === null && operationId !== null) {
+            runningOperationId = operationId;
+          }
+        }
+      }
       const stopped: RunnerContainer[] = [];
 
       for (const container of details) {
@@ -2987,14 +2994,20 @@ async function readHermesGatewayLogLines(
   let entries: Array<{ name: string; mtimeMs: number }> = [];
 
   try {
-    entries = await Promise.all(
-      (await readdir(logDirectory))
-        .filter((name) => name === "current" || name.startsWith("current."))
-        .map(async (name) => ({
-          name,
-          mtimeMs: (await stat(resolve(logDirectory, name))).mtimeMs,
-        })),
-    );
+    const entryPromises: Array<Promise<{ name: string; mtimeMs: number }>> = [];
+
+    for (const name of await readdir(logDirectory)) {
+      if (name === "current" || name.startsWith("current.")) {
+        entryPromises.push(
+          (async () => ({
+            name,
+            mtimeMs: (await stat(resolve(logDirectory, name))).mtimeMs,
+          }))(),
+        );
+      }
+    }
+
+    entries = await Promise.all(entryPromises);
   } catch {
     return [];
   }

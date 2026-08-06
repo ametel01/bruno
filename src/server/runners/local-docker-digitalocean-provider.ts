@@ -132,14 +132,19 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
     if (context?.signal.aborted) {
       return localCancelledResource("discovery_failed");
     }
+    const resources: DigitalOceanResource[] = [];
+
+    for (const resource of this.#resources.values()) {
+      if (resource.deletedAt === null && resource.tags.includes(input.tag)) {
+        resources.push(cloneResource(resource));
+      }
+    }
 
     return {
       ok: true,
       value: {
         authoritative: true,
-        resources: [...this.#resources.values()]
-          .filter((resource) => resource.deletedAt === null && resource.tags.includes(input.tag))
-          .map(cloneResource),
+        resources,
       },
     };
   }

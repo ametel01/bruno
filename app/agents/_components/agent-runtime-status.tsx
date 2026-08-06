@@ -34,7 +34,16 @@ const SAFE_UNAVAILABLE_RUNTIME: PublicAgentRuntimePresentation = {
   message: "Runtime state could not be verified safely.",
 };
 
-export function AgentRuntimeStatus({ agentId, initialRuntime }: AgentRuntimeStatusProps) {
+export function AgentRuntimeStatus(props: AgentRuntimeStatusProps) {
+  return (
+    <AgentRuntimeStatusState
+      key={JSON.stringify([props.agentId, props.initialRuntime])}
+      {...props}
+    />
+  );
+}
+
+function AgentRuntimeStatusState({ agentId, initialRuntime }: AgentRuntimeStatusProps) {
   const router = useRouter();
   const [runtime, setRuntime] = useState(initialRuntime);
   const [observation, setObservation] = useState<RuntimeObservation>({
@@ -180,15 +189,6 @@ export function AgentRuntimeStatus({ agentId, initialRuntime }: AgentRuntimeStat
   useEffect(() => {
     pollRef.current = () => void poll();
   }, [poll]);
-
-  useEffect(() => {
-    requestEpochRef.current += 1;
-    runtimeRef.current = initialRuntime;
-    failureCountRef.current = 0;
-    setRuntime(initialRuntime);
-    setObservation({ kind: "current", failures: 0 });
-    resumeForeground(true);
-  }, [initialRuntime, resumeForeground]);
 
   useEffect(() => {
     void poll();
