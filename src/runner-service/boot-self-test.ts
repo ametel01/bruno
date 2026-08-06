@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { parse, stringify } from "yaml";
@@ -11,26 +11,26 @@ import {
   RUNNER_BOOT_MODEL_CANARY_ENABLED_ENV,
 } from "@/src/runner-service/constants";
 import {
-  ManualRunnerDocker,
   type DockerExecutableRunner,
   type HermesContainerHealthTransport,
+  ManualRunnerDocker,
 } from "@/src/runner-service/docker";
 import {
-  projectHermesHome,
   type HermesProjectionResult,
+  projectHermesHome,
 } from "@/src/runner-service/hermes-projection";
+import { resolveRunnerReleaseEvidence } from "@/src/runner-service/release-identity";
 import {
+  parseRunnerBootSnapshot,
   RUNNER_BOOT_COMPONENTS,
   RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION,
-  parseRunnerBootSnapshot,
   type RunnerBootComponent,
   type RunnerBootFailureReason,
   type RunnerBootSnapshot,
 } from "@/src/runner-service/runner-contracts";
-import { resolveRunnerReleaseEvidence } from "@/src/runner-service/release-identity";
 import {
-  MANAGED_AGENT_LAUNCH_SPEC_VERSION,
   type AgentLaunchSpec,
+  MANAGED_AGENT_LAUNCH_SPEC_VERSION,
 } from "@/src/server/agents/agent-launch-spec";
 
 export const RUNNER_BOOT_SNAPSHOT_PATH_ENV = "AGENTBAY_RUNNER_BOOT_SNAPSHOT_PATH";
@@ -588,11 +588,17 @@ async function removeExactFixtureResources(
     ],
     { signal, timeoutMs: DOCKER_CLI_TIMEOUT_MS },
   );
-  for (const id of containers.stdout
-    .split(/\s+/)
-    .filter((value) => /^[a-f0-9]{12,64}$/.test(value))) {
-    await docker("docker", ["rm", "--force", id], { signal, timeoutMs: DOCKER_CLI_TIMEOUT_MS });
-  }
+  await Promise.all(
+    containers.stdout
+      .split(/\s+/)
+      .filter((value) => /^[a-f0-9]{12,64}$/.test(value))
+      .map((id) =>
+        docker("docker", ["rm", "--force", id], {
+          signal,
+          timeoutMs: DOCKER_CLI_TIMEOUT_MS,
+        }),
+      ),
+  );
   const fixtureContainers = await docker(
     "docker",
     [
@@ -606,12 +612,14 @@ async function removeExactFixtureResources(
     ],
     { signal, timeoutMs: DOCKER_CLI_TIMEOUT_MS },
   );
-  for (const id of safeDockerIds(fixtureContainers.stdout)) {
-    await docker("docker", ["rm", "--force", id], {
-      signal,
-      timeoutMs: DOCKER_CLI_TIMEOUT_MS,
-    });
-  }
+  await Promise.all(
+    safeDockerIds(fixtureContainers.stdout).map((id) =>
+      docker("docker", ["rm", "--force", id], {
+        signal,
+        timeoutMs: DOCKER_CLI_TIMEOUT_MS,
+      }),
+    ),
+  );
   const fixtureNetworks = await docker(
     "docker",
     [
@@ -625,12 +633,14 @@ async function removeExactFixtureResources(
     ],
     { signal, timeoutMs: DOCKER_CLI_TIMEOUT_MS },
   );
-  for (const id of safeDockerIds(fixtureNetworks.stdout)) {
-    await docker("docker", ["network", "rm", id], {
-      signal,
-      timeoutMs: DOCKER_CLI_TIMEOUT_MS,
-    });
-  }
+  await Promise.all(
+    safeDockerIds(fixtureNetworks.stdout).map((id) =>
+      docker("docker", ["network", "rm", id], {
+        signal,
+        timeoutMs: DOCKER_CLI_TIMEOUT_MS,
+      }),
+    ),
+  );
 }
 
 function safeDockerIds(stdout: string): string[] {

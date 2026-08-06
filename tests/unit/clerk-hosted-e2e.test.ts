@@ -6,6 +6,7 @@ import {
   planClerkHostedCommand,
   runClerkHostedE2E,
 } from "@/scripts/run-clerk-e2e";
+import { parsePlaywrightBaseUrl } from "@/src/testing/playwright-base-url";
 
 const COMPLETE_ENV = {
   CLERK_PUBLISHABLE_KEY: "publishable-value-must-not-print",
@@ -129,6 +130,13 @@ describe("optional hosted Clerk E2E gate", () => {
     });
   });
 
+  it("rejects a malformed Playwright base URL before parsing it", () => {
+    expect(parsePlaywrightBaseUrl("https://example.test/path").origin).toBe("https://example.test");
+    expect(() => parsePlaywrightBaseUrl("not an absolute URL")).toThrowError(
+      "PLAYWRIGHT_BASE_URL must be a valid absolute URL.",
+    );
+  });
+
   it("keeps the hosted project opt-in and artifact-free", async () => {
     const [packageJson, config, spec, docs] = await Promise.all([
       readFile("package.json", "utf8"),
@@ -152,7 +160,10 @@ describe("optional hosted Clerk E2E gate", () => {
     expect(config).toContain(`http://localhost:${CONFIG_PORT}`);
     expect(config).toContain("NEXT_PUBLIC_APP_URL: baseURL");
     expect(config).toContain("httpCredentials");
-    expect(config).toContain("origin: new URL(baseURL).origin");
+    expect(await readFile("src/testing/playwright-base-url.ts", "utf8")).toContain(
+      "URL.canParse(value)",
+    );
+    expect(config).toContain("origin: baseOrigin");
     expect(config).toContain('screenshot: "off"');
     expect(config).toContain('trace: "off"');
     expect(config).toContain('video: "off"');

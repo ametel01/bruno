@@ -2483,21 +2483,17 @@ async function reconcileDockerRunnerAgents(
       .orderBy(desc(dockerRunnerContainers.observedAt), desc(dockerRunnerContainers.createdAt))
       .limit(limit);
     const candidateAgentIds = [...new Set(candidateRows.map((row) => row.agentId))];
-    let reconciled = 0;
+    const outcomes = await Promise.all(
+      candidateAgentIds.map((candidateAgentId) =>
+        reconcileDockerRunnerAgent(userId, candidateAgentId, {
+          createConnection: () => connection,
+          dockerRunnerAdapter,
+          ...(dependencies.now ? { now: dependencies.now } : {}),
+        }),
+      ),
+    );
 
-    for (const candidateAgentId of candidateAgentIds) {
-      const didReconcile = await reconcileDockerRunnerAgent(userId, candidateAgentId, {
-        createConnection: () => connection,
-        dockerRunnerAdapter,
-        ...(dependencies.now ? { now: dependencies.now } : {}),
-      });
-
-      if (didReconcile) {
-        reconciled += 1;
-      }
-    }
-
-    return reconciled;
+    return outcomes.filter(Boolean).length;
   } catch {
     throw new AgentLifecyclePersistenceError();
   } finally {

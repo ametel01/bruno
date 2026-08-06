@@ -1,17 +1,20 @@
-import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agents, runnerHeartbeats, runners } from "@/src/server/db/schema";
 import {
-  type DigitalOceanProvisioningStatus,
   DIGITALOCEAN_RUNNER_KIND,
+  type DigitalOceanProvisioningStatus,
 } from "@/src/server/runners/digitalocean-provider";
 import { MANUAL_RUNNER_KIND } from "@/src/server/runners/manual-runner-persistence";
+import {
+  loadLatestRunnerHeartbeatMap,
+  reconcileStaleRunnerHeartbeatsInTransaction,
+} from "@/src/server/runners/runner-heartbeat";
 import {
   normalizeRunnerCapacitySnapshot,
   type RunnerPlacementTransaction,
 } from "@/src/server/runners/runner-placement";
-import { reconcileStaleRunnerHeartbeatsInTransaction } from "@/src/server/runners/runner-heartbeat";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
 export type ManualRunnerDisplayStatus = "online" | "offline" | "degraded" | "unknown";
@@ -120,31 +123,8 @@ export async function listManualRunnerStatusSummariesForDevelopmentUser(
         .orderBy(desc(runners.updatedAt), desc(runners.createdAt))
         .limit(10);
 
-      const summaries: ManualRunnerStatusSummary[] = [];
-
-      for (const row of rows) {
-        const [latestHeartbeat] = await tx
-          .select({
-            status: runnerHeartbeats.status,
-            metadata: runnerHeartbeats.metadata,
-            observedAt: runnerHeartbeats.observedAt,
-          })
-          .from(runnerHeartbeats)
-          .where(eq(runnerHeartbeats.runnerId, row.id))
-          .orderBy(desc(runnerHeartbeats.observedAt))
-          .limit(1);
-        const assignedRunningAgents = await countAssignedRunningAgents(tx, row.id, userId);
-
-        summaries.push(
-          toManualRunnerStatusSummary({
-            ...row,
-            latestHeartbeat: latestHeartbeat ?? null,
-            assignedRunningAgents,
-          }),
-        );
-      }
-
-      return summaries;
+      const hydratedRows = await hydrateRunnerStatusRows(tx, rows, userId);
+      return hydratedRows.map(toManualRunnerStatusSummary);
     });
   } catch {
     throw new ManualRunnerStatusPersistenceError();
@@ -188,31 +168,8 @@ export async function listManualRunnerStatusSummariesForUser(
         .orderBy(desc(runners.updatedAt), desc(runners.createdAt))
         .limit(10);
 
-      const summaries: ManualRunnerStatusSummary[] = [];
-
-      for (const row of rows) {
-        const [latestHeartbeat] = await tx
-          .select({
-            status: runnerHeartbeats.status,
-            metadata: runnerHeartbeats.metadata,
-            observedAt: runnerHeartbeats.observedAt,
-          })
-          .from(runnerHeartbeats)
-          .where(eq(runnerHeartbeats.runnerId, row.id))
-          .orderBy(desc(runnerHeartbeats.observedAt))
-          .limit(1);
-        const assignedRunningAgents = await countAssignedRunningAgents(tx, row.id, userId);
-
-        summaries.push(
-          toManualRunnerStatusSummary({
-            ...row,
-            latestHeartbeat: latestHeartbeat ?? null,
-            assignedRunningAgents,
-          }),
-        );
-      }
-
-      return summaries;
+      const hydratedRows = await hydrateRunnerStatusRows(tx, rows, userId);
+      return hydratedRows.map(toManualRunnerStatusSummary);
     });
   } catch {
     throw new ManualRunnerStatusPersistenceError();
@@ -281,31 +238,8 @@ export async function listSettingsRunnerManagementSummariesForUser(
         .orderBy(desc(runners.updatedAt), desc(runners.createdAt))
         .limit(10);
 
-      const summaries: SettingsRunnerManagementSummary[] = [];
-
-      for (const row of rows) {
-        const [latestHeartbeat] = await tx
-          .select({
-            status: runnerHeartbeats.status,
-            metadata: runnerHeartbeats.metadata,
-            observedAt: runnerHeartbeats.observedAt,
-          })
-          .from(runnerHeartbeats)
-          .where(eq(runnerHeartbeats.runnerId, row.id))
-          .orderBy(desc(runnerHeartbeats.observedAt))
-          .limit(1);
-        const assignedRunningAgents = await countAssignedRunningAgents(tx, row.id, userId);
-
-        summaries.push(
-          toSettingsRunnerManagementSummary({
-            ...row,
-            latestHeartbeat: latestHeartbeat ?? null,
-            assignedRunningAgents,
-          }),
-        );
-      }
-
-      return summaries;
+      const hydratedRows = await hydrateRunnerStatusRows(tx, rows, userId);
+      return hydratedRows.map(toSettingsRunnerManagementSummary);
     });
   } catch {
     throw new ManualRunnerStatusPersistenceError();
@@ -658,6 +592,54 @@ async function countAssignedRunningAgents(
     );
 
   return rows.length;
+}
+
+async function hydrateRunnerStatusRows<T extends ManualRunnerStatusRow & { id: string }>(
+  tx: RunnerPlacementTransaction,
+  rows: readonly T[],
+  userId: string,
+): Promise<Array<T & Pick<ManualRunnerStatusRow, "latestHeartbeat" | "assignedRunningAgents">>> {
+  const runnerIds = rows.map((row) => row.id);
+  const [latestHeartbeats, assignedCounts] = await Promise.all([
+    loadLatestRunnerHeartbeatMap(tx, runnerIds),
+    loadAssignedRunningAgentCounts(tx, runnerIds, userId),
+  ]);
+
+  return rows.map((row) => ({
+    ...row,
+    latestHeartbeat: latestHeartbeats.get(row.id) ?? null,
+    assignedRunningAgents: assignedCounts.get(row.id) ?? 0,
+  }));
+}
+
+async function loadAssignedRunningAgentCounts(
+  tx: RunnerPlacementTransaction,
+  runnerIds: readonly string[],
+  userId: string,
+): Promise<Map<string, number>> {
+  if (runnerIds.length === 0) {
+    return new Map();
+  }
+
+  const rows = await tx
+    .select({
+      runnerId: agents.runnerId,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(agents)
+    .where(
+      and(
+        inArray(agents.runnerId, [...runnerIds]),
+        eq(agents.userId, userId),
+        inArray(agents.status, [...RUNNER_STATUS_RUNNING_AGENT_STATES]),
+        isNull(agents.deletedAt),
+      ),
+    )
+    .groupBy(agents.runnerId);
+
+  return new Map(
+    rows.flatMap((row) => (row.runnerId === null ? [] : [[row.runnerId, Number(row.count)]])),
+  );
 }
 
 function extractEndpointHost(endpointUrl: string | null): string {

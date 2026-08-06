@@ -17,13 +17,13 @@ import {
 } from "@/src/server/agents/agent-runtime-lifecycle";
 import { scheduleAgentRuntimeReconcileAfterResponse } from "@/src/server/agents/agent-runtime-triggers";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
 import { agentSecrets, agents } from "@/src/server/db/schema";
 import { recordAgentEventInTransaction } from "@/src/server/events/agent-events";
 import {
   type TelegramBotMetadata,
   validateTelegramBotTokenWithGetMe,
 } from "@/src/server/telegram/telegram-client";
-import type * as schema from "@/src/server/db/schema";
 
 export const AGENT_SECRET_KINDS = [
   "openrouter_api_key",
@@ -817,30 +817,35 @@ export async function backfillTelegramSecretUniquenessMetadata(
         .select()
         .from(agentSecrets)
         .where(and(eq(agentSecrets.kind, "telegram_bot_token"), eq(agentSecrets.status, "active")));
-      let updated = 0;
-
-      for (const row of rows) {
+      const pendingRows = rows.flatMap((row) => {
         if (row.uniquenessFingerprint !== null) {
-          continue;
+          return [];
         }
 
         const value = decryptAgentSecretValue(row, keyring);
-        const subject = parseTelegramTokenSubjectId(value);
+        const providerSubjectId = parseTelegramTokenSubjectId(value);
 
-        if (subject === null) {
+        if (providerSubjectId === null) {
           throw new AgentSecretLegacyBackfillRequiredError();
         }
 
-        await tx
-          .update(agentSecrets)
-          .set({
-            uniquenessFingerprint: fingerprintTelegramBotTokenForUniqueness(value),
-            providerSubjectId: subject,
-            updatedAt: new Date(),
-          })
-          .where(eq(agentSecrets.id, row.id));
-        updated += 1;
-      }
+        return [{ row, value, providerSubjectId }];
+      });
+      const updated = await pendingRows.reduce(
+        (previous, { row, value, providerSubjectId }) =>
+          previous.then(async (count) => {
+            await tx
+              .update(agentSecrets)
+              .set({
+                uniquenessFingerprint: fingerprintTelegramBotTokenForUniqueness(value),
+                providerSubjectId,
+                updatedAt: new Date(),
+              })
+              .where(eq(agentSecrets.id, row.id));
+            return count + 1;
+          }),
+        Promise.resolve(0),
+      );
 
       return { scanned: rows.length, updated };
     });

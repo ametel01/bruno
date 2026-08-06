@@ -190,6 +190,22 @@ describe("agent lifecycle request latches", () => {
     expect(source).not.toContain("Stop requested.");
     expect(source).not.toContain("Agent stopped.");
   });
+
+  it("remounts Start state before rendering a completed start request", () => {
+    const source = readFileSync(
+      new URL("../../app/agents/_components/start-agent-button.tsx", import.meta.url),
+      "utf8",
+    );
+    const statefulComponent = source.indexOf("function StartAgentButtonStateful");
+    const effect = source.indexOf("useEffect(() =>", statefulComponent);
+    const startHandler = source.indexOf("async function handleStart", effect);
+
+    expect(source).toContain('const resetKey = props.status === "running"');
+    expect(source).toContain(
+      ["<StartAgentButtonStateful key={`", "$", "{props.agentId}:", "$", "{resetKey}`}"].join(""),
+    );
+    expect(source.slice(effect, startHandler)).not.toContain("setState(");
+  });
 });
 
 function renderControls(input: {

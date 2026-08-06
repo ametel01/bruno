@@ -46,13 +46,13 @@ import {
   createConfiguredDigitalOceanProvider,
   digitalOceanRunnerFirewallName,
 } from "@/src/server/runners/runner-provisioning";
+import type { RunnerReplacementReason } from "@/src/server/runners/runner-replacement-state";
 import {
   applyClaimedRunnerReplacementTransition,
   type ClaimedRunnerReplacement,
   claimNextRunnerReplacement,
   reserveClaimedRunnerReplacementBudget,
 } from "@/src/server/runners/runner-replacement-store";
-import type { RunnerReplacementReason } from "@/src/server/runners/runner-replacement-state";
 
 const DEFAULT_RETRY_MS = 5_000;
 const DEFAULT_MAX_ATTEMPTS = 8;
@@ -521,9 +521,10 @@ async function reconcileReassigning(input: {
   let handover: { deploymentIds: string[]; runningAgentIds: string[] };
   try {
     handover = await input.connection.db.transaction(async (tx) => {
-      for (const runnerId of [input.claim.sourceRunnerId, targetRunnerId].sort()) {
-        await lockRunnerPlacementCapacityInTransaction(tx, runnerId);
-      }
+      const [firstRunnerId, secondRunnerId] = [input.claim.sourceRunnerId, targetRunnerId].sort();
+      if (!firstRunnerId || !secondRunnerId) throw new Error("Replacement runner pair is invalid.");
+      await lockRunnerPlacementCapacityInTransaction(tx, firstRunnerId);
+      await lockRunnerPlacementCapacityInTransaction(tx, secondRunnerId);
       const [pair] = await tx.execute<{
         sourceUserId: string;
         sourceStatus: string;
@@ -603,25 +604,28 @@ async function reconcileReassigning(input: {
         throw new Error("Replacement target no longer has sufficient capacity.");
       }
 
-      const deploymentIds: string[] = [];
-      const runningAgentIds: string[] = [];
-      for (const agent of assigned) {
-        if (agent.userId !== pair.sourceUserId) {
-          throw new Error("Replacement agent owner does not match the runner pair.");
-        }
-        if (agent.desiredStatus === "running") {
-          const deployment = await createAgentDeploymentForRunnerReplacement({
+      if (assigned.some((agent) => agent.userId !== pair.sourceUserId)) {
+        throw new Error("Replacement agent owner does not match the runner pair.");
+      }
+      const runningAgents = assigned.filter((agent) => agent.desiredStatus === "running");
+      const deployments = await Promise.all(
+        runningAgents.map((agent) =>
+          createAgentDeploymentForRunnerReplacement({
             tx,
             replacementId: input.claim.id,
             agentId: agent.id,
             userId: agent.userId,
             now: input.now,
-          });
-          if (!deployment) throw new Error("Replacement deployment could not be created.");
-          deploymentIds.push(deployment.deploymentId);
-          runningAgentIds.push(agent.id);
-        }
+          }),
+        ),
+      );
+      if (deployments.some((deployment) => deployment === null)) {
+        throw new Error("Replacement deployment could not be created.");
       }
+      const deploymentIds = deployments.flatMap((deployment) =>
+        deployment === null ? [] : [deployment.deploymentId],
+      );
+      const runningAgentIds = runningAgents.map((agent) => agent.id);
 
       if (assigned.length > 0) {
         const assignedIds = assigned.map((agent) => agent.id);

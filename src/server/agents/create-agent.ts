@@ -1,38 +1,11 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import { isValidAgentId } from "@/src/server/agents/agent-id";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
   createAgentDeploymentForUser,
   getAgentDeploymentByIdempotencyKeyForUser,
 } from "@/src/server/agents/agent-deployments";
-import type { AgentDeploymentDto } from "@/src/server/agents/deployment-dto";
-import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import type * as schema from "@/src/server/db/schema";
-import { agentConfigs, agentSecrets, agents, runners } from "@/src/server/db/schema";
-import { readDigitalOceanProviderConfig, readReadyAgentCreationFlag } from "@/src/server/env";
-import {
-  getAgentTemplateSnapshot,
-  isSupportedTemplateKey,
-  type AgentTemplateSnapshot,
-  type SupportedAgentTemplateKey,
-} from "@/src/server/agents/templates";
-import { recordAgentEventInTransaction } from "@/src/server/events/agent-events";
-import { type AppLogger, createAppLogger } from "@/src/server/logging/logger";
-import {
-  selectRunnerPlacementForUserInTransaction,
-  type RunnerPlacementResult,
-} from "@/src/server/runners/runner-placement";
-import {
-  verifyRunnerPlacementCandidate,
-  type RunnerPlacementVerificationResult,
-} from "@/src/server/runners/runner-placement-verification";
-import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
-import {
-  createDigitalOceanRunnerForUser,
-  type CreateRunnerProvisioningResult,
-} from "@/src/server/runners/runner-provisioning";
-import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
+import { isValidAgentId } from "@/src/server/agents/agent-id";
 import {
   AgentSecretKeyringError,
   AgentSecretLegacyBackfillRequiredError,
@@ -44,7 +17,6 @@ import {
   parseAgentSecretKeyring,
   prepareAgentSecretRow,
 } from "@/src/server/agents/agent-secrets";
-import { resolveReusableAssistantApiKeyInTransaction } from "@/src/server/agents/model-connections";
 import {
   type AssistantChoice,
   type AssistantProfile,
@@ -53,11 +25,39 @@ import {
   isAssistantChoice,
   validateAssistantApiKey,
 } from "@/src/server/agents/assistant-profiles";
+import type { AgentDeploymentDto } from "@/src/server/agents/deployment-dto";
+import { resolveReusableAssistantApiKeyInTransaction } from "@/src/server/agents/model-connections";
+import {
+  type AgentTemplateSnapshot,
+  getAgentTemplateSnapshot,
+  isSupportedTemplateKey,
+  type SupportedAgentTemplateKey,
+} from "@/src/server/agents/templates";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
+import { agentConfigs, agentSecrets, agents, runners } from "@/src/server/db/schema";
+import { readDigitalOceanProviderConfig, readReadyAgentCreationFlag } from "@/src/server/env";
+import { recordAgentEventInTransaction } from "@/src/server/events/agent-events";
+import { type AppLogger, createAppLogger } from "@/src/server/logging/logger";
+import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
+import {
+  type RunnerPlacementResult,
+  selectRunnerPlacementForUserInTransaction,
+} from "@/src/server/runners/runner-placement";
+import {
+  type RunnerPlacementVerificationResult,
+  verifyRunnerPlacementCandidate,
+} from "@/src/server/runners/runner-placement-verification";
+import {
+  type CreateRunnerProvisioningResult,
+  createDigitalOceanRunnerForUser,
+} from "@/src/server/runners/runner-provisioning";
 import {
   type TelegramBotMetadata,
   type TelegramClientDependencies,
   validateTelegramBotTokenWithGetMe,
 } from "@/src/server/telegram/telegram-client";
+import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
 
 const agentCreateLogger = createAppLogger("agent.create");
 
@@ -1010,11 +1010,20 @@ async function createReadyAgentForUser(
         updatedAt: now,
       });
 
-      for (const preparedSecret of preparedSecrets) {
-        await dependencies.readyCreateTestHooks?.beforeInsertBoundary?.(
-          `secret:${preparedSecret.kind}` as ReadyCreateInsertBoundary,
+      const beforeInsertBoundary = dependencies.readyCreateTestHooks?.beforeInsertBoundary;
+      if (preparedSecrets.length > 0 && !beforeInsertBoundary) {
+        await insertPreparedAgentSecretRowsInTransaction(tx, preparedSecrets);
+      } else if (beforeInsertBoundary) {
+        await preparedSecrets.reduce(
+          (previous, preparedSecret) =>
+            previous.then(async () => {
+              await beforeInsertBoundary(
+                `secret:${preparedSecret.kind}` as ReadyCreateInsertBoundary,
+              );
+              await insertPreparedAgentSecretRowsInTransaction(tx, [preparedSecret]);
+            }),
+          Promise.resolve(),
         );
-        await insertPreparedAgentSecretRowsInTransaction(tx, [preparedSecret]);
       }
 
       await dependencies.readyCreateTestHooks?.beforeInsertBoundary?.("deployment");

@@ -302,26 +302,30 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
   }
 
   async #removeLocalContainers(context?: DigitalOceanProviderRequestContext): Promise<void> {
-    for (const containerName of [this.#containerName, LOCAL_PRODUCTION_RUNNER_CONTAINER_NAME]) {
-      try {
-        await this.#docker(
-          [
-            "rm",
-            "--force",
-            ...(this.#agentSmokeMode && containerName === this.#containerName ? ["--volumes"] : []),
-            containerName,
-          ],
-          context,
-        );
-      } catch (error) {
-        if (process.env.NODE_ENV !== "test") {
-          localDockerProviderLogger.warn("stale_container_cleanup_skipped", {
-            containerName,
-            error,
-          });
+    await Promise.all(
+      [this.#containerName, LOCAL_PRODUCTION_RUNNER_CONTAINER_NAME].map(async (containerName) => {
+        try {
+          await this.#docker(
+            [
+              "rm",
+              "--force",
+              ...(this.#agentSmokeMode && containerName === this.#containerName
+                ? ["--volumes"]
+                : []),
+              containerName,
+            ],
+            context,
+          );
+        } catch (error) {
+          if (process.env.NODE_ENV !== "test") {
+            localDockerProviderLogger.warn("stale_container_cleanup_skipped", {
+              containerName,
+              error,
+            });
+          }
         }
-      }
-    }
+      }),
+    );
   }
 }
 
