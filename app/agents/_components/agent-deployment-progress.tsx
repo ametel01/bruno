@@ -47,7 +47,13 @@ export type RetryState =
 
 export const POLL_FOREGROUND_LIMIT_MS = 30 * 60 * 1000;
 
-export function AgentDeploymentProgress({
+export function AgentDeploymentProgress(props: AgentDeploymentProgressProps) {
+  const progress = useAgentDeploymentProgress(props);
+
+  return <DeploymentProgressView {...progress} />;
+}
+
+function useAgentDeploymentProgress({
   agentId,
   desiredStatus,
   observedStatus,
@@ -63,6 +69,7 @@ export function AgentDeploymentProgress({
   const foregroundWindowRef = useRef<ForegroundPollingWindow>(
     startForegroundPollingWindow(Date.now()),
   );
+  const refreshLatchRef = useRef(false);
   const refreshedTerminalRef = useRef(false);
   const retryLatchRef = useRef<DeploymentRetryLatch>(createDeploymentRetryLatch());
   const [deployment, setDeployment] = useState(initialDeployment);
@@ -428,12 +435,22 @@ export function AgentDeploymentProgress({
   }
 
   async function refreshDeploymentOnce() {
+    if (refreshLatchRef.current) {
+      return;
+    }
+
+    refreshLatchRef.current = true;
     generationRef.current += 1;
     clearTimer();
     inFlightRef.current?.abort();
     inFlightRef.current = null;
-    await forceReadDeploymentOnce();
-    router.refresh();
+
+    try {
+      await forceReadDeploymentOnce();
+      router.refresh();
+    } finally {
+      refreshLatchRef.current = false;
+    }
   }
 
   function resumeUpdates() {
@@ -484,6 +501,34 @@ export function AgentDeploymentProgress({
 
   const busy = retry.status === "requesting";
 
+  return {
+    busy,
+    handleRetry,
+    headingRef,
+    liveMessage,
+    observation,
+    presentation,
+    refreshDeploymentOnce,
+    resumeUpdates,
+    retry,
+    shouldPoll,
+    terminalAlertRef,
+  };
+}
+
+function DeploymentProgressView({
+  busy,
+  handleRetry,
+  headingRef,
+  liveMessage,
+  observation,
+  presentation,
+  refreshDeploymentOnce,
+  resumeUpdates,
+  retry,
+  shouldPoll,
+  terminalAlertRef,
+}: ReturnType<typeof useAgentDeploymentProgress>) {
   return (
     <section
       className="agent-deployment-progress-card"

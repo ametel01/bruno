@@ -64,13 +64,15 @@ export function StartAgentButton({
   }, [allowRuntimeStart, router, state.status, status]);
 
   async function handleStart() {
-    if (
-      (!STARTABLE_STATUSES.has(status) && !allowRuntimeStart) ||
-      !acquireAgentActionRequestLatch(requestLatchRef)
-    ) {
+    if ((!STARTABLE_STATUSES.has(status) && !allowRuntimeStart) || requestLatchRef.current) {
       return;
     }
 
+    if (!acquireAgentActionRequestLatch(requestLatchRef)) {
+      return;
+    }
+
+    requestLatchRef.current = true;
     setState({ status: "requesting" });
 
     try {

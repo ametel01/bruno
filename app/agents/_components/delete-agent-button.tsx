@@ -33,10 +33,15 @@ export function DeleteAgentButton({ agentId, status }: DeleteAgentButtonProps) {
   const requestLatchRef = useRef(false);
 
   async function handleDelete() {
-    if (!DELETABLE_STATUSES.has(status) || !acquireAgentActionRequestLatch(requestLatchRef)) {
+    if (!DELETABLE_STATUSES.has(status) || requestLatchRef.current) {
       return;
     }
 
+    if (!acquireAgentActionRequestLatch(requestLatchRef)) {
+      return;
+    }
+
+    requestLatchRef.current = true;
     setState({ status: "requesting" });
 
     try {

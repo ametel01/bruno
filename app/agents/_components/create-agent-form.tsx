@@ -250,6 +250,85 @@ export function CreateAgentForm({
         <FieldError field="name" state={state} />
       </div>
 
+      <AssistantConnectionFields
+        assistant={assistant}
+        locked={locked}
+        modelConnections={modelConnections}
+        modelKeyRef={modelKeyRef}
+        onAssistantChange={setAssistant}
+        selectedConnection={selectedConnection}
+        state={state}
+      />
+
+      <TelegramConnectionFields
+        allowlistRef={allowlistRef}
+        state={state}
+        telegramTokenRef={telegramTokenRef}
+      />
+
+      <div className="one-click-summary">
+        <strong>We handle the rest</strong>
+        <span>
+          Cloud setup, model configuration, secure storage, launch, and health checks happen
+          automatically.
+        </span>
+      </div>
+
+      <div className="agent-creation-actions">
+        {state.status === "ambiguous" ? (
+          <>
+            <button className="primary-button" type="submit" disabled={disabled}>
+              Retry same setup
+            </button>
+            <button className="secondary-button" type="button" onClick={startOver}>
+              Start over
+            </button>
+          </>
+        ) : (
+          <button className="primary-button" type="submit" disabled={disabled}>
+            {submitting ? "Setting up your agent…" : "Create my agent"}
+          </button>
+        )}
+        {state.status === "error" || state.status === "success" || state.status === "ambiguous" ? (
+          <p
+            className={`form-message ${state.status === "error" ? "error" : "success"}`}
+            role={state.status === "error" ? "alert" : "status"}
+            tabIndex={state.status === "success" ? -1 : undefined}
+            ref={statusRef}
+          >
+            {state.message}
+            {state.status === "success" ? (
+              <>
+                {" "}
+                <Link href={state.href}>Open agent</Link>
+              </>
+            ) : null}
+          </p>
+        ) : null}
+      </div>
+    </form>
+  );
+}
+
+function AssistantConnectionFields({
+  assistant,
+  locked,
+  modelConnections,
+  modelKeyRef,
+  onAssistantChange,
+  selectedConnection,
+  state,
+}: {
+  assistant: AssistantChoice;
+  locked: boolean;
+  modelConnections: ModelConnectionOption[];
+  modelKeyRef: RefObject<HTMLInputElement | null>;
+  onAssistantChange: (assistant: AssistantChoice) => void;
+  selectedConnection: ModelConnectionOption | undefined;
+  state: SubmitState;
+}) {
+  return (
+    <>
       <fieldset className="assistant-choice-fieldset">
         <legend>Choose your assistant</legend>
         <div className="assistant-choice-list">
@@ -266,7 +345,7 @@ export function CreateAgentForm({
                 checked={assistant === connection.assistant}
                 disabled={locked}
                 onChange={() => {
-                  setAssistant(connection.assistant);
+                  onAssistantChange(connection.assistant);
                   if (modelKeyRef.current) modelKeyRef.current.value = "";
                 }}
               />
@@ -312,99 +391,66 @@ export function CreateAgentForm({
           <FieldError field="modelApiKey" state={state} />
         </div>
       ) : null}
+    </>
+  );
+}
 
-      <fieldset className="ready-credential-fieldset">
-        <legend>Connect Telegram</legend>
-        <div className="field-group">
-          <label htmlFor="telegram-bot-token">Bot token</label>
-          <input
-            id="telegram-bot-token"
-            name="telegramBotToken"
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            ref={telegramTokenRef}
-            aria-describedby={fieldDescribedBy(
-              "telegram-bot-token-hint",
-              "telegramBotToken",
-              state,
-            )}
-            aria-invalid={fieldHasError("telegramBotToken", state)}
-          />
-          <p className="form-helper" id="telegram-bot-token-hint">
-            Open{" "}
-            <a href="https://t.me/BotFather" target="_blank" rel="noreferrer noopener">
-              BotFather
-            </a>
-            , create a bot, then paste the token it gives you.
-          </p>
-          <FieldError field="telegramBotToken" state={state} />
-        </div>
-        <div className="field-group">
-          <label htmlFor="telegram-allowed-user-ids">Who may use this bot?</label>
-          <textarea
-            id="telegram-allowed-user-ids"
-            name="telegramAllowedUserIds"
-            rows={3}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="Your Telegram numeric user ID"
-            ref={allowlistRef}
-            aria-describedby={fieldDescribedBy(
-              "telegram-allowed-user-ids-hint",
-              "telegramAllowedUserIds",
-              state,
-            )}
-            aria-invalid={fieldHasError("telegramAllowedUserIds", state)}
-          />
-          <p className="form-helper" id="telegram-allowed-user-ids-hint">
-            Enter one numeric user ID per line. This keeps the bot private.
-          </p>
-          <FieldError field="telegramAllowedUserIds" state={state} />
-        </div>
-      </fieldset>
-
-      <div className="one-click-summary">
-        <strong>We handle the rest</strong>
-        <span>
-          Cloud setup, model configuration, secure storage, launch, and health checks happen
-          automatically.
-        </span>
+function TelegramConnectionFields({
+  allowlistRef,
+  state,
+  telegramTokenRef,
+}: {
+  allowlistRef: RefObject<HTMLTextAreaElement | null>;
+  state: SubmitState;
+  telegramTokenRef: RefObject<HTMLInputElement | null>;
+}) {
+  return (
+    <fieldset className="ready-credential-fieldset">
+      <legend>Connect Telegram</legend>
+      <div className="field-group">
+        <label htmlFor="telegram-bot-token">Bot token</label>
+        <input
+          id="telegram-bot-token"
+          name="telegramBotToken"
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          ref={telegramTokenRef}
+          aria-describedby={fieldDescribedBy("telegram-bot-token-hint", "telegramBotToken", state)}
+          aria-invalid={fieldHasError("telegramBotToken", state)}
+        />
+        <p className="form-helper" id="telegram-bot-token-hint">
+          Open{" "}
+          <a href="https://t.me/BotFather" target="_blank" rel="noreferrer noopener">
+            BotFather
+          </a>
+          , create a bot, then paste the token it gives you.
+        </p>
+        <FieldError field="telegramBotToken" state={state} />
       </div>
-
-      <div className="agent-creation-actions">
-        {state.status === "ambiguous" ? (
-          <>
-            <button className="primary-button" type="submit" disabled={disabled}>
-              Retry same setup
-            </button>
-            <button className="secondary-button" type="button" onClick={startOver}>
-              Start over
-            </button>
-          </>
-        ) : (
-          <button className="primary-button" type="submit" disabled={disabled}>
-            {submitting ? "Setting up your agent…" : "Create my agent"}
-          </button>
-        )}
-        {state.status === "error" || state.status === "success" || state.status === "ambiguous" ? (
-          <p
-            className={`form-message ${state.status === "error" ? "error" : "success"}`}
-            role={state.status === "error" ? "alert" : "status"}
-            tabIndex={state.status === "success" ? -1 : undefined}
-            ref={statusRef}
-          >
-            {state.message}
-            {state.status === "success" ? (
-              <>
-                {" "}
-                <Link href={state.href}>Open agent</Link>
-              </>
-            ) : null}
-          </p>
-        ) : null}
+      <div className="field-group">
+        <label htmlFor="telegram-allowed-user-ids">Who may use this bot?</label>
+        <textarea
+          id="telegram-allowed-user-ids"
+          name="telegramAllowedUserIds"
+          rows={3}
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="Your Telegram numeric user ID"
+          ref={allowlistRef}
+          aria-describedby={fieldDescribedBy(
+            "telegram-allowed-user-ids-hint",
+            "telegramAllowedUserIds",
+            state,
+          )}
+          aria-invalid={fieldHasError("telegramAllowedUserIds", state)}
+        />
+        <p className="form-helper" id="telegram-allowed-user-ids-hint">
+          Enter one numeric user ID per line. This keeps the bot private.
+        </p>
+        <FieldError field="telegramAllowedUserIds" state={state} />
       </div>
-    </form>
+    </fieldset>
   );
 }
 

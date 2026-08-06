@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { AgentDetailConfigUi } from "@/src/shared/agent-ui-types";
 
 type PersistedAgentConfig = {
@@ -40,16 +40,21 @@ const REQUIRED_FIELDS = [
   ["timezone", "Timezone is required."],
 ] as const;
 
+const subscribeToHydration = () => () => {};
+const getHydratedSnapshot = () => true;
+const getServerHydratedSnapshot = () => false;
+
 export function AgentConfigEditor({ agentId, maxNameLength, persisted }: AgentConfigEditorProps) {
   const router = useRouter();
+  const submittingRef = useRef(false);
   const [draft, setDraft] = useState<DraftConfig>(() => persistedToDraft(persisted));
   const [state, setState] = useState<SubmitState>({ status: "idle" });
-  const [hydrated, setHydrated] = useState(false);
+  const hydrated = useSyncExternalStore(
+    subscribeToHydration,
+    getHydratedSnapshot,
+    getServerHydratedSnapshot,
+  );
   const persistedDraft = useMemo(() => persistedToDraft(persisted), [persisted]);
-
-  useEffect(() => {
-    setHydrated(true);
-  }, []);
 
   useEffect(() => {
     setDraft(persistedDraft);
@@ -58,6 +63,10 @@ export function AgentConfigEditor({ agentId, maxNameLength, persisted }: AgentCo
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (submittingRef.current) {
+      return;
+    }
 
     const payloadResult = buildPayload(draft, persisted, maxNameLength);
 
@@ -71,6 +80,7 @@ export function AgentConfigEditor({ agentId, maxNameLength, persisted }: AgentCo
       return;
     }
 
+    submittingRef.current = true;
     setState({ status: "submitting" });
 
     try {
@@ -105,6 +115,8 @@ export function AgentConfigEditor({ agentId, maxNameLength, persisted }: AgentCo
       router.refresh();
     } catch {
       setState({ status: "error", message: "Agent config could not be saved." });
+    } finally {
+      submittingRef.current = false;
     }
   }
 
