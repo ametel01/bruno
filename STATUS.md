@@ -3,11 +3,11 @@
 ## Active Work
 
 - issue: [#263](https://github.com/ametel01/plingpling/issues/263)
-  owner: builder-agent (`issue_263_builder`)
+  owner: maintainer-reviewer (`issue_263_reviewer`)
   branch: `codex/issue-263-creation-latency-evidence`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: [#272](https://github.com/ametel01/plingpling/pull/272)
-  phase: checker-ready
+  phase: maintainer re-review
   cycle: 2/5
 
 ## Completion Contract
@@ -553,6 +553,134 @@ Status: ALL GREEN
     REQUEST_CHANGES, submitted as COMMENT only because GitHub rejects same-author approval/change
     requests.
 
+## Cycle 2 Checker Handoff
+
+- from: coordinator
+  to: checker-agent (`issue_263_checker`)
+  timestamp: 2026-08-07T06:05:08+08:00
+  request: Independently verify commit `e956a47` against all four maintainer findings and the full
+    issue #263 completion contract.
+  evidence: Builder reports 63 focused tests, 1636 full tests, build, lint, typecheck, diff check,
+    and zero-cloud smoke passing; format check and E2E still require checker confirmation.
+  next-action: Run semantic checks for absent stages, interval direction, authoritative correlation,
+    and malformed counts, then affected/full gates including format and E2E; record verdict.
+
+## Checker Result
+
+Status: ALL GREEN
+
+## Commands
+
+- command: `git rev-parse --short HEAD && git rev-parse --abbrev-ref HEAD`
+  result: pass
+  evidence: `e956a47` on `codex/issue-263-creation-latency-evidence`.
+- command: `gh pr view 272 --repo ametel01/plingpling --json number,state,isDraft,headRefOid,mergeable,reviewDecision,statusCheckRollup,closingIssuesReferences,latestReviews`
+  result: pass
+  evidence: PR #272 is open draft, head `e956a47228d99bbd0a1364d68ebb0ce1fe422760`,
+    mergeable `MERGEABLE`, merge state later checked as `UNSTABLE`, closing issue references contain
+    exactly #263, and no latest reviews exist after the cycle-2 fix.
+- command: `gh pr checks 272 --repo ametel01/plingpling --watch=false`
+  result: non-blocking external baseline failure
+  evidence: Vercel fails at deployment `8wH9FtgVww1cSV6mVgFeKFrf5dDx`; CodeRabbit passes but says
+    review skipped because draft; GitGuardian, Socket project report, Socket PR alerts, and Vercel
+    Preview Comments pass.
+- command: `gh pr checks 262 --repo ametel01/plingpling --watch=false`
+  result: matching external baseline signal
+  evidence: Unrelated PR #262 also has failing Vercel deployment `Cq5HTYz7vrNVy9SM4RhobRb8fwTe`
+    while CodeRabbit, GitGuardian, Socket, and Vercel Preview Comments pass.
+- command: `git diff ee6aa4f..e956a47 -- src/server/agents/agent-creation-latency.ts scripts/benchmark-agent-creation.ts src/server/runners/cloud-runner-bootstrap.ts src/server/runners/runner-provisioning-events.ts tests/unit/agent-creation-latency.test.ts tests/unit/agent-creation-benchmark.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/runner-registration.test.ts tests/unit/runner-heartbeat.test.ts`
+  result: pass
+  evidence: Cycle-2 fix seeds required runner/bootstrap stages, attributes agent durations to
+    `fromStage`, makes operation-key correlation authoritative with documented assigned-runner
+    legacy fallback, adds exact bounded integer parsing, instruments production bootstrap/package/
+    image/container/registration/boot/readiness pairs, and adds regression tests.
+- command: `bun --conditions react-server -e 'import { buildAgentCreationLatencyReport, resolveAgentCreationRunnerCorrelation } from "./src/server/agents/agent-creation-latency.ts"; import { parseBenchmarkOptions } from "./scripts/benchmark-agent-creation.ts"; const missing = buildAgentCreationLatencyReport({ generatedAt: "2026-08-07T00:00:00.000Z", deployments: [{ id: "d-missing", runnerId: "runner-missing", createdAt: "2026-08-07T00:00:00.000Z", completedAt: "2026-08-07T00:01:00.000Z", failedAt: null, agentStageEvents: [], runnerEvents: [] }] }); const stage = buildAgentCreationLatencyReport({ generatedAt: "2026-08-07T00:00:00.000Z", deployments: [{ id: "d-stage", runnerId: null, createdAt: "2026-08-07T00:00:00.000Z", completedAt: "2026-08-07T00:00:50.000Z", failedAt: null, agentStageEvents: [{ fromStage: "pending", toStage: "provisioning_runner", createdAt: "2026-08-07T00:00:05.000Z" }, { fromStage: "provisioning_runner", toStage: "connecting_telegram", createdAt: "2026-08-07T00:00:35.000Z" }, { fromStage: "connecting_telegram", toStage: "ready", createdAt: "2026-08-07T00:00:50.000Z" }], runnerEvents: [] }] }); const parseErrors = []; for (const args of [["--trials", "1oops"], ["--trials", "1.5"], ["--trials", "31"], ["--limit", "1oops"], ["--limit", "1001"]]) { try { parseBenchmarkOptions(args); parseErrors.push("unexpected:" + args.join("=")); } catch (error) { parseErrors.push(error instanceof Error ? error.message : String(error)); } } console.log(JSON.stringify({ missingStatus: missing.runs[0]?.evidenceStatus, missingNames: missing.runs[0]?.stages.filter((s) => ["runner:creating", "bootstrap:package_install", "bootstrap:authenticated_readiness"].includes(s.name)).map((s) => [s.name, s.issues]), stageNames: stage.runs[0]?.stages.map((s) => [s.name, s.durationMs]), correlationWithOperation: resolveAgentCreationRunnerCorrelation({ runnerOperationId: "00000000-0000-4000-8000-000000000263", operationRunnerId: null, assignedRunnerId: "00000000-0000-4000-8000-000000000999" }), legacyFallback: resolveAgentCreationRunnerCorrelation({ runnerOperationId: null, operationRunnerId: null, assignedRunnerId: "00000000-0000-4000-8000-000000000999" }), parseErrors }));'`
+  result: pass
+  evidence: `missingStatus:"invalid"`; required absent stages include
+    `runner:creating`, `bootstrap:package_install`, and `bootstrap:authenticated_readiness` with
+    `missing_started`/`missing_terminal`; stage durations are
+    `agent:pending=5000`, `agent:provisioning_runner=30000`, `agent:connecting_telegram=15000`;
+    operation-key mode ignores mutable assigned runner; legacy fallback only applies without
+    `runnerOperationId`; malformed counts produce exact bounded positive-integer errors.
+- command: `rg "parseInt|Number\\.parseInt|readPositiveInteger|or \\$\\{runnerFilter\\}|operationFilter|runner:bootstrapping|runner_container_start|runner_registration|boot_validation|authenticated_readiness" scripts/benchmark-agent-creation.ts src/server/agents/agent-creation-latency.ts src/server/runners/cloud-runner-bootstrap.ts src/server/runners/runner-provisioning-events.ts tests/unit/agent-creation-latency.test.ts tests/unit/agent-creation-benchmark.test.ts tests/unit/runner-registration.test.ts tests/unit/runner-heartbeat.test.ts tests/unit/cloud-runner-bootstrap.test.ts`
+  result: pass
+  evidence: No `parseInt`/old `readPositiveInteger`/old OR-correlation pattern remains; required
+    production and test boundary labels are present.
+- command: `bun scripts/run-unit-tests.ts tests/unit/agent-creation-latency.test.ts tests/unit/agent-creation-benchmark.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/runner-registration.test.ts tests/unit/runner-heartbeat.test.ts`
+  result: pass
+  evidence: 6 files and 63 tests passed in isolated database
+    `plingpling_test_98372_12c44ed45d0d`; database removed. This includes the DB correlation fixture
+    that proves same-owner historical assigned-runner events are not attributed when an operation key
+    is authoritative.
+- command: `git diff --check origin/main...HEAD`
+  result: pass
+  evidence: no whitespace errors.
+- command: `bun run format:check`
+  result: pass
+  evidence: Biome checked 399 files with no fixes applied.
+- command: `bun run lint`
+  result: pass
+  evidence: Biome checked 399 files with no fixes applied.
+- command: `bun run typecheck`
+  result: pass
+  evidence: `next typegen && tsc --noEmit` completed successfully.
+- command: `bun run test`
+  result: pass
+  evidence: 169 files and 1636 tests passed in isolated database
+    `plingpling_test_98496_b90d5be7021f`; database removed.
+- command: `bun run build`
+  result: pass
+  evidence: Next.js production build completed successfully.
+- command: `bun run test:e2e:ci`
+  result: pass
+  evidence: 26 Playwright CI tests passed.
+- command: `bun run agent:creation:benchmark -- --mode digitalocean`
+  result: pass as fail-closed guard
+  evidence: Exited 1 with required authorization message before provider work; no DigitalOcean
+    provider resource was contacted or created.
+- command: `bun run agent:creation:benchmark -- --mode digitalocean --trials 1oops --authorize-provider-costs`
+  result: pass as malformed-count guard
+  evidence: Exited 1 with `--trials must be an exact positive integer.` before authorization or
+    provider work.
+- command: `bun run agent:creation:benchmark -- --limit 1`
+  result: pass
+  evidence: Read-only existing-run mode returned a valid empty report with `total:0` and no provider
+    effects.
+- command: `bun run local:agent:smoke`
+  result: pass
+  evidence: Zero-cloud local Docker smoke emitted `local_agent_cycle_creation_latency` before
+    cleanup with `ready=1`, `successRate=1`, `readyLatency.p95Ms=88260`, `evidenceStatus:"invalid"`
+    with required missing pairs, `digitalOceanRequests=0`, `simulatedDroplets=1`, and
+    `local_agent_cycle_smoke_passed` with `cleanupVerified=true`.
+
+## Failures
+
+- none for the four maintainer findings or local required gates.
+
+## Coverage Gaps
+
+- PR #272 remains draft and `mergeStateStatus: UNSTABLE` because Vercel preview fails. This matches
+  the already-documented baseline signal also present on unrelated PR #262; local build and E2E CI
+  passed, and this checker does not treat Vercel as a #263 code blocker without maintainer policy
+  changing it to required.
+
+## Next Action
+
+- Return PR #272 to maintainer review for the cycle-2 fix acceptance decision. Do not execute
+  provider-backed or billable SLO trials until explicit authorization.
+
+## Cycle 2 Review Handoff
+
+- from: coordinator
+  to: maintainer-reviewer (`issue_263_reviewer`)
+  timestamp: 2026-08-07T06:14:38+08:00
+  request: Re-review PR #272 at commit `e956a47`, resolving the four prior findings and issuing an
+    explicit acceptance or new actionable findings.
+  evidence: Independent checker status is ALL GREEN across the exact review semantics, full unit,
+    build, E2E, provider fail-closed, and zero-cloud smoke gates; Vercel remains baseline-only.
+  next-action: Inspect the fixes and updated PR state, submit GitHub COMMENT evidence due same-author
+    restrictions, update the review thread classification and status, then stop.
+
 ## Decisions And Lessons
 
 - 2026-08-07:
@@ -565,7 +693,7 @@ Status: ALL GREEN
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling`: issue #263 branch, builder-owned for review fixes.
+- `/Users/alexmetelli/source/plingpling`: issue #263 branch, reviewer-owned for cycle-2 re-review.
 - `/Users/alexmetelli/source/plingpling-step7-base`: pre-existing detached user-owned worktree;
   preserve and do not modify.
 
