@@ -3,11 +3,11 @@
 ## Active Work
 
 - issue: [#263](https://github.com/ametel01/plingpling/issues/263)
-  owner: builder-agent (`issue_263_builder`)
+  owner: checker-agent (`issue_263_checker`)
   branch: `codex/issue-263-creation-latency-evidence`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: checker-ready
+  phase: checking
   cycle: 0/5
 
 ## Completion Contract
@@ -154,6 +154,14 @@
     was not run or authorized. Implementation commit: this checker-ready branch commit.
   next-action: Check diff, issue contract, gates, and redaction/provider guardrails. If accepted,
     hand back for PR creation/review.
+- from: coordinator
+  to: checker-agent (`issue_263_checker`)
+  timestamp: 2026-08-07T05:23:05+08:00
+  request: Independently verify commit `05569ba` against issue #263 and the completion contract.
+  evidence: Builder gate evidence is recorded below; worktree was clean at handoff; provider effects
+    remain unauthorized.
+  next-action: Run semantic and targeted checks first, then proportionate broad gates; record ALL
+    GREEN, FAILED, or BLOCKED with exact evidence and stop without editing implementation code.
 
 ## Gates
 
@@ -192,6 +200,115 @@
 - command: `bun run agent:creation:benchmark -- --limit 1`
   result: pass on 2026-08-07
   evidence: Read-only default DB query returned a valid empty report without provider effects.
+- command: `git rev-parse --short HEAD && git rev-parse --abbrev-ref HEAD`
+  result: pass on 2026-08-07
+  evidence: `05569ba` on `codex/issue-263-creation-latency-evidence`.
+- command: `gh issue view 263 --repo ametel01/plingpling --json number,title,state,labels,body,url`
+  result: pass on 2026-08-07
+  evidence: Issue #263 is open, agent-ready, and requires sanitized latency evidence without
+    pre-provisioning or provider execution.
+- command: `bun --conditions react-server -e 'import { buildAgentCreationLatencyReport } from "./src/server/agents/agent-creation-latency.ts"; const report = buildAgentCreationLatencyReport({ generatedAt: "2026-08-07T00:00:00.000Z", deployments: [{ id: "d", runnerId: "r", createdAt: "2026-08-07T00:00:00.000Z", completedAt: "2026-08-07T00:00:10.000Z", failedAt: null, agentStageEvents: [], runnerEvents: [{ phase: "bootstrapping", status: "started", createdAt: "not-a-date", metadata: { step: "dop_v1_secret_endpoint_https_example_com" } }, { phase: "bootstrapping", status: "completed", createdAt: "2026-08-07T00:00:05.000Z", metadata: { step: "dop_v1_secret_endpoint_https_example_com" } }] }] }); console.log(JSON.stringify(report.runs[0])); console.log(JSON.stringify(report).includes("dop_v1_secret")); console.log(JSON.stringify(report).includes("invalid_timestamp"));'`
+  result: fail on 2026-08-07
+  evidence: The report contains `bootstrap:dop_v1_secret_endpoint_https_example_com`,
+    prints `true` for leaked distinctive marker, and prints `false` for `invalid_timestamp`.
+    This violates the contract that invalid timestamps are surfaced and that bootstrap step labels
+    are allowlisted/sanitized rather than projecting hostile metadata into report/log stage names.
+- command: `bun scripts/run-unit-tests.ts tests/unit/agent-creation-latency.test.ts tests/unit/agent-creation-benchmark.test.ts tests/unit/local-agent-cycle-smoke.test.ts tests/unit/runner-bootstrap-events.test.ts`
+  result: pass on checker rerun, 2026-08-07
+  evidence: Created isolated unit-test database `plingpling_test_84646_e677405148e8`; 4 files and
+    17 tests passed; database removed.
+- command: `bun run format:check`
+  result: pass on checker rerun, 2026-08-07
+  evidence: Biome checked 399 files with no fixes applied.
+- command: `bun run lint`
+  result: pass on checker rerun, 2026-08-07
+  evidence: Biome checked 399 files with no fixes applied.
+- command: `bun run typecheck`
+  result: pass on checker rerun, 2026-08-07
+  evidence: `next typegen && tsc --noEmit` completed successfully.
+- command: `bun run agent:creation:benchmark -- --mode digitalocean`
+  result: pass as fail-closed guard on checker rerun, 2026-08-07
+  evidence: Exited 1 before provider execution with required authorization message; no provider
+    resource was contacted or created.
+- command: `bun run agent:creation:benchmark -- --limit 1`
+  result: pass on checker rerun, 2026-08-07
+  evidence: Read-only existing-run mode returned a valid empty JSON report with `total:0` and no
+    provider effects.
+- command: `gh pr list --repo ametel01/plingpling --head codex/issue-263-creation-latency-evidence --json number,url,state,headRefName,statusCheckRollup`
+  result: pass on 2026-08-07
+  evidence: `[]`; no PR checks exist for this branch yet.
+- command: `git cat-file -e origin/main:src/server/agents/agent-creation-latency.ts; echo exit:$?`
+  result: pass on 2026-08-07
+  evidence: exit `128`; the failing new report module is not present on `origin/main`, so this is
+    not a baseline failure.
+
+## Checker Result
+
+Status: FAILED
+
+## Commands
+
+- command: `git rev-parse --short HEAD && git rev-parse --abbrev-ref HEAD`
+  result: pass
+  evidence: `05569ba` on `codex/issue-263-creation-latency-evidence`.
+- command: `bun --conditions react-server -e 'import { buildAgentCreationLatencyReport } from "./src/server/agents/agent-creation-latency.ts"; const report = buildAgentCreationLatencyReport({ generatedAt: "2026-08-07T00:00:00.000Z", deployments: [{ id: "d", runnerId: "r", createdAt: "2026-08-07T00:00:00.000Z", completedAt: "2026-08-07T00:00:10.000Z", failedAt: null, agentStageEvents: [], runnerEvents: [{ phase: "bootstrapping", status: "started", createdAt: "not-a-date", metadata: { step: "dop_v1_secret_endpoint_https_example_com" } }, { phase: "bootstrapping", status: "completed", createdAt: "2026-08-07T00:00:05.000Z", metadata: { step: "dop_v1_secret_endpoint_https_example_com" } }] }] }); console.log(JSON.stringify(report.runs[0])); console.log(JSON.stringify(report).includes("dop_v1_secret")); console.log(JSON.stringify(report).includes("invalid_timestamp"));'`
+  result: fail
+  evidence: Output includes `bootstrap:dop_v1_secret_endpoint_https_example_com`, then `true`,
+    then `false`.
+- command: `bun scripts/run-unit-tests.ts tests/unit/agent-creation-latency.test.ts tests/unit/agent-creation-benchmark.test.ts tests/unit/local-agent-cycle-smoke.test.ts tests/unit/runner-bootstrap-events.test.ts`
+  result: pass
+  evidence: 4 files, 17 tests passed in isolated database `plingpling_test_84646_e677405148e8`.
+- command: `bun run format:check`
+  result: pass
+  evidence: Biome checked 399 files with no fixes applied.
+- command: `bun run lint`
+  result: pass
+  evidence: Biome checked 399 files with no fixes applied.
+- command: `bun run typecheck`
+  result: pass
+  evidence: `next typegen && tsc --noEmit` completed successfully.
+- command: `bun run agent:creation:benchmark -- --mode digitalocean`
+  result: pass as fail-closed guard
+  evidence: Exited 1 with the fail-closed DigitalOcean authorization error before provider work.
+- command: `bun run agent:creation:benchmark -- --limit 1`
+  result: pass
+  evidence: Read-only mode returned a valid empty report and did not invoke provider work.
+- command: `gh pr list --repo ametel01/plingpling --head codex/issue-263-creation-latency-evidence --json number,url,state,headRefName,statusCheckRollup`
+  result: pass
+  evidence: No PR exists, so no remote PR checks are available.
+
+## Failures
+
+- file: `src/server/agents/agent-creation-latency.ts:371`
+  check: Invalid runner event timestamps must be surfaced as `invalid_timestamp`.
+  exact error: A runner `started` boundary with `createdAt: "not-a-date"` is silently reduced to
+    `missing_started`; `JSON.stringify(report).includes("invalid_timestamp")` returned `false`.
+  likely owner: builder-agent for #263.
+- file: `src/server/agents/agent-creation-latency.ts:377`
+  check: Bootstrap step evidence must be allowlisted/sanitized and must not project hostile raw
+    metadata into public report/log stage names.
+  exact error: A synthetic `metadata.step` value
+    `dop_v1_secret_endpoint_https_example_com` appeared in the report as
+    `bootstrap:dop_v1_secret_endpoint_https_example_com`; `JSON.stringify(report).includes("dop_v1_secret")`
+    returned `true`.
+  likely owner: builder-agent for #263.
+
+## Coverage Gaps
+
+- `test-workflow-standards` skill is not installed at
+  `/Users/alexmetelli/.agents/skills/test-workflow-standards/SKILL.md`; checker used
+  `testing-standards` plus CI quality/security skills instead.
+- `bun run test`, `bun run build`, `bun run test:e2e:ci`, and `bun run local:agent:smoke` were not
+  rerun by checker after the semantic failure. Builder evidence says they previously passed, but
+  this checker result is not ALL GREEN.
+- No PR exists for `codex/issue-263-creation-latency-evidence`; remote PR checks are unavailable.
+
+## Next Action
+
+- Return #263 to builder. Add explicit invalid-timestamp evidence handling for runner and agent
+  stage timestamps, replace free-form bootstrap `metadata.step` projection with an allowlist of
+  expected step labels, and add regression tests using distinctive secret/endpoint marker strings
+  in `metadata.step`.
 
 ## Review Threads
 
@@ -209,7 +326,7 @@
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling`: issue #263 branch, coordinator-owned until handoff.
+- `/Users/alexmetelli/source/plingpling`: issue #263 branch, checker-owned for read-only verification.
 - `/Users/alexmetelli/source/plingpling-step7-base`: pre-existing detached user-owned worktree;
   preserve and do not modify.
 
