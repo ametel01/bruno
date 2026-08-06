@@ -850,32 +850,34 @@ async function beginManagedRunnerRecovery(
       return failed ? { kind: "failed" as const } : { kind: "stale" as const };
     }
 
-    const created = await createOrGetRunnerReplacement({
-      db: tx,
-      sourceRunnerId,
-      triggerDeploymentId: work.id,
-      reason: verifiedReason,
-      operationKey: `agentbay-replace-${(dependencies.randomUUID?.() ?? randomUUID()).replaceAll(
-        "-",
-        "",
-      )}`,
-      now: input.now,
-    });
-    const [paused] = await tx.execute<{ id: string }>(sql`
-      update ${agentDeployments}
-      set error_code = 'runner_recovery_in_progress',
-          error_detail = 'Automatic runner recovery is preparing validated capacity.',
-          next_attempt_at = null,
-          lease_owner = null,
-          lease_expires_at = null,
-          updated_at = ${input.now.toISOString()}
-      where ${agentDeployments.id} = ${work.id}
-        and ${agentDeployments.stage} = ${work.stage}
-        and ${agentDeployments.configRevision} = ${work.configRevision}
-        and ${agentDeployments.leaseOwner} = ${work.leaseOwner}
-        and ${agentDeployments.leaseExpiresAt} > ${input.now.toISOString()}
-      returning id
-    `);
+    const [created, [paused]] = await Promise.all([
+      createOrGetRunnerReplacement({
+        db: tx,
+        sourceRunnerId,
+        triggerDeploymentId: work.id,
+        reason: verifiedReason,
+        operationKey: `agentbay-replace-${(dependencies.randomUUID?.() ?? randomUUID()).replaceAll(
+          "-",
+          "",
+        )}`,
+        now: input.now,
+      }),
+      tx.execute<{ id: string }>(sql`
+        update ${agentDeployments}
+        set error_code = 'runner_recovery_in_progress',
+            error_detail = 'Automatic runner recovery is preparing validated capacity.',
+            next_attempt_at = null,
+            lease_owner = null,
+            lease_expires_at = null,
+            updated_at = ${input.now.toISOString()}
+        where ${agentDeployments.id} = ${work.id}
+          and ${agentDeployments.stage} = ${work.stage}
+          and ${agentDeployments.configRevision} = ${work.configRevision}
+          and ${agentDeployments.leaseOwner} = ${work.leaseOwner}
+          and ${agentDeployments.leaseExpiresAt} > ${input.now.toISOString()}
+        returning id
+      `),
+    ]);
     if (!paused) throw new LostDeploymentLeaseError();
     await tx.execute(sql`
       update ${runners}

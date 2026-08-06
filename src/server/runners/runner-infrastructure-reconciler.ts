@@ -129,6 +129,12 @@ export async function reconcileNextRunnerInfrastructure(
       const resources = inventory.value.resources
         .filter((resource) => resource.deletedAt === null)
         .sort((left, right) => left.providerResourceId.localeCompare(right.providerResourceId));
+      const resourcesByProviderId = new Map<string, DigitalOceanResource>();
+      for (const resource of resources) {
+        if (!resourcesByProviderId.has(resource.providerResourceId)) {
+          resourcesByProviderId.set(resource.providerResourceId, resource);
+        }
+      }
       const inventoryRunners = await readInventoryRunners(connection, limit);
 
       const staleAssignment = await clearOneStaleAssignment(connection, observedAt);
@@ -145,7 +151,7 @@ export async function reconcileNextRunnerInfrastructure(
         }
 
         const byId = runner.providerResourceId
-          ? resources.find((resource) => resource.providerResourceId === runner.providerResourceId)
+          ? resourcesByProviderId.get(runner.providerResourceId)
           : undefined;
         if (runner.providerResourceId && !byId) {
           if (runner.assignedCount > 0) {
@@ -419,26 +425,28 @@ async function startRunnerReplacement(
       return false;
     }
 
-    const created = await createOrGetRunnerReplacement({
-      db: tx,
-      sourceRunnerId: current.id,
-      triggerDeploymentId: null,
-      reason: dependencies.reason,
-      operationKey: `agentbay-replace-${dependencies.randomUUID().replaceAll("-", "")}`,
-      now,
-    });
-    const [updated] = await tx
-      .update(runners)
-      .set({ status: "degraded", updatedAt: now })
-      .where(
-        and(
-          eq(runners.id, current.id),
-          eq(runners.userId, current.userId),
-          eq(runners.providerResourceId, current.providerResourceId as string),
-          isNull(runners.deletedAt),
-        ),
-      )
-      .returning({ id: runners.id });
+    const [created, [updated]] = await Promise.all([
+      createOrGetRunnerReplacement({
+        db: tx,
+        sourceRunnerId: current.id,
+        triggerDeploymentId: null,
+        reason: dependencies.reason,
+        operationKey: `agentbay-replace-${dependencies.randomUUID().replaceAll("-", "")}`,
+        now,
+      }),
+      tx
+        .update(runners)
+        .set({ status: "degraded", updatedAt: now })
+        .where(
+          and(
+            eq(runners.id, current.id),
+            eq(runners.userId, current.userId),
+            eq(runners.providerResourceId, current.providerResourceId as string),
+            isNull(runners.deletedAt),
+          ),
+        )
+        .returning({ id: runners.id }),
+    ]);
     return Boolean(updated && created.replacement.id);
   });
 }

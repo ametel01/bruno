@@ -321,8 +321,14 @@ async function reconcileProvisioningTarget(input: {
     context: input.context,
     now: () => input.now,
   });
+  if (!result.ok) {
+    return await cleanupFailedTarget({
+      ...input,
+      terminalCode: "target_provisioning_failed",
+    });
+  }
   const refreshed = await readTarget(input.connection, input.claim);
-  if (!result.ok || refreshed?.provisioningStatus === "failed") {
+  if (refreshed?.provisioningStatus === "failed") {
     return await cleanupFailedTarget({
       ...input,
       terminalCode: "target_provisioning_failed",
@@ -582,24 +588,24 @@ async function reconcileReassigning(input: {
         .limit(1);
       if (authority) throw new Error("Replacement source still has command authority.");
 
-      const assigned = await tx
-        .select({
-          id: agents.id,
-          userId: agents.userId,
-          desiredStatus: agents.desiredStatus,
-        })
-        .from(agents)
-        .where(and(eq(agents.runnerId, input.claim.sourceRunnerId), isNull(agents.deletedAt)))
-        .orderBy(agents.id)
-        .for("update");
-      const [{ assigned: targetAssigned = 0 } = { assigned: 0 }] = await tx.execute<{
-        assigned: number;
-      }>(sql`
-        select count(*)::int as assigned
-        from ${agents}
-        where ${agents.runnerId} = ${input.claim.targetRunnerId}
-          and ${agents.deletedAt} is null
-      `);
+      const [assigned, [{ assigned: targetAssigned = 0 } = { assigned: 0 }]] = await Promise.all([
+        tx
+          .select({
+            id: agents.id,
+            userId: agents.userId,
+            desiredStatus: agents.desiredStatus,
+          })
+          .from(agents)
+          .where(and(eq(agents.runnerId, input.claim.sourceRunnerId), isNull(agents.deletedAt)))
+          .orderBy(agents.id)
+          .for("update"),
+        tx.execute<{ assigned: number }>(sql`
+          select count(*)::int as assigned
+          from ${agents}
+          where ${agents.runnerId} = ${input.claim.targetRunnerId}
+            and ${agents.deletedAt} is null
+        `),
+      ]);
       if (assigned.length + Number(targetAssigned) > (input.config.runnerMaxAgents ?? 1)) {
         throw new Error("Replacement target no longer has sufficient capacity.");
       }
