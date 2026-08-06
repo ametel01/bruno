@@ -549,9 +549,14 @@ Status: ALL GREEN
 - thread: [maintainer review #4878363214](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878363214)
   status: open
   owner: coordinator
-  evidence: Three blocking actionable findings and one important actionable finding; decision is
-    REQUEST_CHANGES, submitted as COMMENT only because GitHub rejects same-author approval/change
-    requests.
+  evidence: Cycle 2 fixed findings 2-4. Finding 1 is only partially fixed: absent-stage invalidity
+    and package/image/container pairs landed, but production registration/readiness timing remains
+    duplicate or synthetic zero-duration evidence.
+- thread: [cycle-2 maintainer review #4878490254](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878490254)
+  status: open
+  owner: coordinator
+  evidence: REQUEST_CHANGES for the remaining producer timing defect and stale PR body; submitted as
+    COMMENT only because GitHub rejects same-author approval/change requests.
 
 ## Cycle 2 Checker Handoff
 
@@ -680,6 +685,46 @@ Status: ALL GREEN
     build, E2E, provider fail-closed, and zero-cloud smoke gates; Vercel remains baseline-only.
   next-action: Inspect the fixes and updated PR state, submit GitHub COMMENT evidence due same-author
     restrictions, update the review thread classification and status, then stop.
+
+## Cycle 2 Maintainer Review Result
+
+- decision: REQUEST_CHANGES
+- GitHub event: COMMENTED because authenticated identity `ametel01` is also the PR author.
+- review: [#4878490254](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878490254)
+- prior finding classification:
+  - production pairs / absent-stage evidence: partially fixed and still blocking. Entirely absent
+    stages are invalid and package/image/container pairs exist, but registration produces duplicate
+    starts and boot/readiness pairs use the same completion-time timestamp for both edges.
+  - `fromStage` interval attribution: fixed.
+  - operation-key authority: fixed, including the same-owner historical-runner database fixture.
+  - exact bounded integer parsing: fixed.
+- new blocking context finding: PR body validation remains at cycle-1 counts and incorrectly says
+  instrumentation belongs downstream even though cycle 2 implements it in #263.
+- semantic failure evidence: the exact emitted registration/waiting/boot/readiness event shape
+  reports `duplicate_started` for `runner:waiting_for_runner` and
+  `bootstrap:runner_registration`, while boot validation, authenticated readiness, and
+  `runner:ready` appear as successful `0 ms` stages.
+- checker evidence accepted: absent-stage invalidity, `fromStage` timing, operation authority,
+  strict parsing, focused 63 tests, format, lint, typecheck, full 1636 tests, build, E2E CI,
+  fail-closed provider guard, and read-only benchmark all passed.
+- non-blocking external status: Vercel remains the matching Clerk-preview baseline failure also seen
+  on unrelated PR #262; GitGuardian and Socket checks pass; CodeRabbit remains skipped draft output.
+- provider effects: none executed.
+
+## Cycle 2 Maintainer Handoff
+
+- from: maintainer-reviewer (`issue_263_reviewer`)
+  to: coordinator
+  timestamp: 2026-08-07T06:18:30+08:00
+  request: Return #263 to builder for one producer-timing fix and a PR body refresh, then rerun the
+    focused checker semantics and maintainer review.
+  evidence: Review
+    [#4878490254](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878490254)
+    records exact files, the reproducible duplicate/zero-duration output, and smallest fixes.
+  next-action: Give each logical stage one real start and terminal timestamp, ensure local smoke
+    exercises or faithfully synthesizes a complete required record, add an integrated sequence-to-
+    report regression, refresh PR scope/validation context, and do not merge or execute provider
+    effects before reacceptance.
 
 ## Decisions And Lessons
 
