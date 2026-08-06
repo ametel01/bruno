@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { buildAgentCreationLatencyReport } from "@/src/server/agents/agent-creation-latency";
+import {
+  buildAgentCreationLatencyReport,
+  buildAgentCreationLatencyReportForDatabase,
+  resolveAgentCreationRunnerCorrelation,
+} from "@/src/server/agents/agent-creation-latency";
+import { createDatabaseConnection } from "@/src/server/db/client";
+import {
+  agentDeployments,
+  agents,
+  runnerProvisioningEvents,
+  runners,
+  users,
+} from "@/src/server/db/schema";
 
 describe("agent creation latency report", () => {
   it("summarizes ready, failed, and nonterminal deployments with deterministic ordering", () => {
@@ -85,8 +97,19 @@ describe("agent creation latency report", () => {
     expect(report.runs[0]).toMatchObject({
       outcome: "ready",
       totalDurationMs: 55_000,
-      evidenceStatus: "valid",
+      evidenceStatus: "invalid",
     });
+    expect(report.runs[0]?.stages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "agent:pending", durationMs: 5_000 }),
+        expect.objectContaining({ name: "agent:connecting_telegram", durationMs: 50_000 }),
+        expect.objectContaining({ name: "runner:creating", durationMs: 10_000 }),
+        expect.objectContaining({
+          name: "bootstrap:runner_container_start",
+          issues: ["missing_started", "missing_terminal"],
+        }),
+      ]),
+    );
     expect(report.runs[2]).toMatchObject({
       outcome: "incomplete",
       totalDurationMs: null,
@@ -170,7 +193,7 @@ describe("agent creation latency report", () => {
 
     expect(bootstrapping).toMatchObject({
       durationMs: null,
-      issues: ["duplicate_started", "reversed_timestamp"],
+      issues: ["missing_started", "missing_terminal"],
     });
     expect(step).toMatchObject({
       durationMs: null,
@@ -182,12 +205,56 @@ describe("agent creation latency report", () => {
     });
     expect(report.runs[0]).toMatchObject({
       evidenceStatus: "invalid",
-      issueCounts: {
-        duplicate_started: 2,
-        reversed_timestamp: 2,
-        missing_terminal: 1,
-      },
     });
+    expect(report.runs[0]?.issueCounts.duplicate_started).toBe(1);
+    expect(report.runs[0]?.issueCounts.reversed_timestamp).toBe(1);
+    expect(report.runs[0]?.issueCounts.missing_terminal).toBeGreaterThanOrEqual(1);
+  });
+
+  it("surfaces entirely absent required runner and bootstrap stages as missing evidence", () => {
+    const report = buildAgentCreationLatencyReport({
+      generatedAt: "2026-08-07T00:00:00.000Z",
+      deployments: [
+        {
+          id: "deployment-missing-runner-evidence",
+          runnerId: "runner-missing",
+          createdAt: "2026-08-07T00:00:00.000Z",
+          completedAt: "2026-08-07T00:01:00.000Z",
+          failedAt: null,
+          agentStageEvents: [],
+          runnerEvents: [],
+        },
+      ],
+    });
+
+    expect(report.runs[0]).toMatchObject({
+      evidenceStatus: "invalid",
+      totalDurationMs: 60_000,
+    });
+    expect(report.runs[0]?.stages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "runner:creating",
+          status: "invalid",
+          issues: ["missing_started", "missing_terminal"],
+        }),
+        expect.objectContaining({
+          name: "runner:ready",
+          status: "invalid",
+          issues: ["missing_started", "missing_terminal"],
+        }),
+        expect.objectContaining({
+          name: "bootstrap:package_install",
+          status: "invalid",
+          issues: ["missing_started", "missing_terminal"],
+        }),
+        expect.objectContaining({
+          name: "bootstrap:authenticated_readiness",
+          status: "invalid",
+          issues: ["missing_started", "missing_terminal"],
+        }),
+      ]),
+    );
   });
 
   it("surfaces invalid runner timestamps without projecting hostile bootstrap step labels", () => {
@@ -225,15 +292,17 @@ describe("agent creation latency report", () => {
     });
     const serialized = JSON.stringify(report);
 
-    expect(report.runs[0]?.stages).toEqual([
-      expect.objectContaining({
-        name: "runner:bootstrapping",
-        startedAt: null,
-        completedAt: "2026-08-07T00:00:05.000Z",
-        durationMs: null,
-        issues: ["invalid_timestamp"],
-      }),
-    ]);
+    expect(report.runs[0]?.stages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "runner:bootstrapping",
+          startedAt: null,
+          completedAt: "2026-08-07T00:00:05.000Z",
+          durationMs: null,
+          issues: ["invalid_timestamp"],
+        }),
+      ]),
+    );
     expect(report.runs[0]).toMatchObject({
       evidenceStatus: "invalid",
       issueCounts: { invalid_timestamp: 1 },
@@ -269,7 +338,7 @@ describe("agent creation latency report", () => {
 
     expect(report.runs[0]?.stages).toEqual([
       expect.objectContaining({
-        name: "agent:configuring_hermes",
+        name: "agent:pending",
         startedAt: "2026-08-07T00:00:00.000Z",
         completedAt: null,
         durationMs: null,
@@ -280,6 +349,181 @@ describe("agent creation latency report", () => {
       evidenceStatus: "invalid",
       issueCounts: { invalid_timestamp: 1 },
     });
+  });
+
+  it("attributes agent-stage intervals to the stage being exited", () => {
+    const report = buildAgentCreationLatencyReport({
+      generatedAt: "2026-08-07T00:00:00.000Z",
+      deployments: [
+        {
+          id: "deployment-agent-stages",
+          runnerId: null,
+          createdAt: "2026-08-07T00:00:00.000Z",
+          completedAt: "2026-08-07T00:00:50.000Z",
+          failedAt: null,
+          agentStageEvents: [
+            {
+              fromStage: "pending",
+              toStage: "provisioning_runner",
+              createdAt: "2026-08-07T00:00:05.000Z",
+            },
+            {
+              fromStage: "provisioning_runner",
+              toStage: "connecting_telegram",
+              createdAt: "2026-08-07T00:00:35.000Z",
+            },
+            {
+              fromStage: "connecting_telegram",
+              toStage: "ready",
+              createdAt: "2026-08-07T00:00:50.000Z",
+            },
+          ],
+          runnerEvents: [],
+        },
+      ],
+    });
+
+    expect(report.runs[0]?.stages).toEqual([
+      expect.objectContaining({ name: "agent:connecting_telegram", durationMs: 15_000 }),
+      expect.objectContaining({ name: "agent:pending", durationMs: 5_000 }),
+      expect.objectContaining({ name: "agent:provisioning_runner", durationMs: 30_000 }),
+    ]);
+    expect(report.runs[0]?.stages.some((stage) => stage.name === "agent:ready")).toBe(false);
+  });
+
+  it("keeps operation-derived runner correlation authoritative over assigned runner fallback", () => {
+    expect(
+      resolveAgentCreationRunnerCorrelation({
+        runnerOperationId: "00000000-0000-4000-8000-000000000263",
+        operationRunnerId: null,
+        assignedRunnerId: "00000000-0000-4000-8000-000000000999",
+      }),
+    ).toEqual({
+      reportRunnerId: null,
+      eventRunnerId: null,
+      eventRunnerOperationId: "00000000-0000-4000-8000-000000000263",
+      mode: "operation_key",
+    });
+
+    expect(
+      resolveAgentCreationRunnerCorrelation({
+        runnerOperationId: null,
+        operationRunnerId: null,
+        assignedRunnerId: "00000000-0000-4000-8000-000000000999",
+      }),
+    ).toEqual({
+      reportRunnerId: "00000000-0000-4000-8000-000000000999",
+      eventRunnerId: "00000000-0000-4000-8000-000000000999",
+      eventRunnerOperationId: null,
+      mode: "assigned_runner_legacy_fallback",
+    });
+  });
+
+  it("does not attribute same-owner historical runner events when an operation key is authoritative", async () => {
+    const connection = createDatabaseConnection();
+    try {
+      await resetLatencyFixtureTables(connection);
+      const now = new Date("2026-08-07T00:00:00.000Z");
+      const runnerOperationId = "00000000-0000-4000-8000-000000000263";
+      const [user] = await connection.db.insert(users).values({}).returning({ id: users.id });
+
+      if (!user) throw new Error("Expected user fixture.");
+
+      const [historicalRunner] = await connection.db
+        .insert(runners)
+        .values({
+          userId: user.id,
+          name: "Assigned Historical Runner",
+          kind: "digitalocean",
+          status: "online",
+          provider: "digitalocean",
+          region: "sfo3",
+          sizeSlug: "s-1vcpu-1gb",
+          image: "ubuntu-24-04-x64",
+          provisioningStatus: "ready",
+          provisioningStartedAt: now,
+          provisioningCompletedAt: new Date("2026-08-07T00:00:10.000Z"),
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: runners.id });
+
+      if (!historicalRunner) throw new Error("Expected runner fixture.");
+
+      const [agent] = await connection.db
+        .insert(agents)
+        .values({
+          userId: user.id,
+          runnerId: historicalRunner.id,
+          name: "Agent",
+          templateKey: "research_agent",
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: agents.id });
+
+      if (!agent) throw new Error("Expected agent fixture.");
+
+      const [deployment] = await connection.db
+        .insert(agentDeployments)
+        .values({
+          agentId: agent.id,
+          userId: user.id,
+          stage: "ready",
+          configRevision: "cfg-issue-263",
+          idempotencyKey: "issue-263-operation-authority",
+          runnerOperationId,
+          runnerAcceptedAt: new Date("2026-08-07T00:00:03.000Z"),
+          canaryState: "skipped",
+          completedAt: new Date("2026-08-07T00:00:30.000Z"),
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: agentDeployments.id });
+
+      if (!deployment) throw new Error("Expected deployment fixture.");
+
+      await connection.db.insert(runnerProvisioningEvents).values([
+        {
+          runnerId: historicalRunner.id,
+          phase: "creating",
+          status: "started",
+          message: "Historical creation started.",
+          createdAt: new Date("2026-08-07T00:00:01.000Z"),
+        },
+        {
+          runnerId: historicalRunner.id,
+          phase: "creating",
+          status: "completed",
+          message: "Historical creation completed.",
+          createdAt: new Date("2026-08-07T00:00:02.000Z"),
+        },
+      ]);
+
+      const report = await buildAgentCreationLatencyReportForDatabase(connection, {
+        deploymentId: deployment.id,
+        generatedAt: new Date("2026-08-07T00:01:00.000Z"),
+      });
+      const run = report.runs[0];
+      const creating = run?.stages.find((stage) => stage.name === "runner:creating");
+
+      expect(run).toMatchObject({
+        deploymentId: deployment.id,
+        runnerId: null,
+        evidenceStatus: "invalid",
+        totalDurationMs: 30_000,
+      });
+      expect(creating).toMatchObject({
+        startedAt: null,
+        completedAt: null,
+        durationMs: null,
+        issues: ["missing_started", "missing_terminal"],
+      });
+      expect(JSON.stringify(report)).not.toContain("Historical creation completed.");
+    } finally {
+      await resetLatencyFixtureTables(connection);
+      await connection.close();
+    }
   });
 
   it("keeps ambiguous terminal timestamps invalid", () => {
@@ -338,3 +582,9 @@ describe("agent creation latency report", () => {
     });
   });
 });
+
+async function resetLatencyFixtureTables(
+  connection: ReturnType<typeof createDatabaseConnection>,
+): Promise<void> {
+  await connection.client`truncate table runner_provisioning_events, agent_deployments, agents, runner_credentials, runner_heartbeats, runner_registration_tokens, runners, app_metadata, users restart identity cascade`;
+}

@@ -10,6 +10,8 @@ import {
 } from "@/src/runner-service/local-agent-smoke";
 
 const DIGITALOCEAN_AUTHORIZATION_SENTINEL = "authorize-digitalocean-agent-creation-benchmark";
+const MAX_REPORT_LIMIT = 1_000;
+const MAX_PROVIDER_TRIALS = 30;
 
 type BenchmarkMode = "existing" | "local_docker" | "digitalocean";
 
@@ -64,7 +66,11 @@ export function parseBenchmarkOptions(argv: readonly string[]): BenchmarkOptions
       continue;
     }
     if (arg === "--limit") {
-      limit = readPositiveInteger(readRequiredValue(argv, index), "--limit");
+      limit = readBoundedPositiveInteger(
+        readRequiredValue(argv, index),
+        "--limit",
+        MAX_REPORT_LIMIT,
+      );
       index += 1;
       continue;
     }
@@ -74,7 +80,11 @@ export function parseBenchmarkOptions(argv: readonly string[]): BenchmarkOptions
       continue;
     }
     if (arg === "--trials") {
-      trials = readPositiveInteger(readRequiredValue(argv, index), "--trials");
+      trials = readBoundedPositiveInteger(
+        readRequiredValue(argv, index),
+        "--trials",
+        MAX_PROVIDER_TRIALS,
+      );
       index += 1;
       continue;
     }
@@ -140,10 +150,14 @@ function readRequiredValue(argv: readonly string[], index: number): string {
   return value;
 }
 
-function readPositiveInteger(value: string, label: string): number {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new Error(`${label} must be a positive integer.`);
+function readBoundedPositiveInteger(value: string, label: string, max: number): number {
+  if (!/^[1-9][0-9]*$/.test(value)) {
+    throw new Error(`${label} must be an exact positive integer.`);
+  }
+
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed > max) {
+    throw new Error(`${label} must be a positive integer no greater than ${max}.`);
   }
   return parsed;
 }

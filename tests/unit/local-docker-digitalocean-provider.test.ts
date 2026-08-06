@@ -112,7 +112,7 @@ describe("local Docker DigitalOcean provider", () => {
     expect(bootstrapScript).toContain("AGENTBAY_BOOTSTRAP_STEP=docker_pull");
     expect(bootstrapScript).toContain("AGENTBAY_BOOTSTRAP_STEP=agent_image_pull");
     expect(bootstrapScript).toContain("AGENTBAY_BOOTSTRAP_STEP=hermes_image_pull");
-    expect(bootstrapScript).toContain("AGENTBAY_BOOTSTRAP_STEP=docker_container_start");
+    expect(bootstrapScript).toContain("AGENTBAY_BOOTSTRAP_STEP=runner_container_start");
     expect(bootstrapScript).toContain("for attempt in 1 2 3; do");
     expect(bootstrapScript).toContain(
       "Local cloud-init parity check failed: /etc/agentbay/runner.env was not created.",

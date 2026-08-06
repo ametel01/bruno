@@ -41,6 +41,27 @@ describe("agent creation benchmark command", () => {
     ).rejects.toThrow(/DigitalOcean benchmark mode is fail-closed/);
   });
 
+  it("requires exact bounded positive-integer syntax for provider trials", () => {
+    expect(() => parseBenchmarkOptions(["--mode", "digitalocean", "--trials", "1oops"])).toThrow(
+      /--trials must be an exact positive integer/,
+    );
+    expect(() => parseBenchmarkOptions(["--mode", "digitalocean", "--trials", "1.5"])).toThrow(
+      /--trials must be an exact positive integer/,
+    );
+    expect(() => parseBenchmarkOptions(["--mode", "digitalocean", "--trials", "31"])).toThrow(
+      /--trials must be a positive integer no greater than 30/,
+    );
+  });
+
+  it("requires exact bounded positive-integer syntax for report limits", () => {
+    expect(() => parseBenchmarkOptions(["--limit", "1oops"])).toThrow(
+      /--limit must be an exact positive integer/,
+    );
+    expect(() => parseBenchmarkOptions(["--limit", "1001"])).toThrow(
+      /--limit must be a positive integer no greater than 1000/,
+    );
+  });
+
   it("requires exact local Docker sentinels for local benchmark mode", async () => {
     await expect(
       runAgentCreationBenchmark(["--mode", "local_docker"], {

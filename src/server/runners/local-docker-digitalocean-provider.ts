@@ -339,7 +339,7 @@ function buildLocalCloudInitScript(
       `echo ${shellQuote(`== local cloud-init runcmd ${index + 1}/${commands.length} ==`)}`,
     ];
 
-    if (command.includes("AGENTBAY_BOOTSTRAP_STEP=docker_container_start")) {
+    if (command.includes("AGENTBAY_BOOTSTRAP_STEP=runner_container_start")) {
       scripts.push(buildLocalEndpointBridgeScript(options.agentSmokeMode));
     }
 
@@ -491,8 +491,7 @@ function buildLocalDockerShim(agentSmokeMode: boolean): string[] {
 function isLocalAgentSmokePackageBootstrap(command: string): boolean {
   return (
     command.includes("AGENTBAY_BOOTSTRAP_STEP=docker_apt_repository") ||
-    command.startsWith("apt-get install -y docker-ce ") ||
-    command === "apt-get install -y caddy"
+    command.includes("AGENTBAY_BOOTSTRAP_STEP=package_install")
   );
 }
 

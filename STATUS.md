@@ -3,12 +3,12 @@
 ## Active Work
 
 - issue: [#263](https://github.com/ametel01/plingpling/issues/263)
-  owner: maintainer-reviewer (`issue_263_reviewer`)
+  owner: builder-agent (`issue_263_builder`)
   branch: `codex/issue-263-creation-latency-evidence`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: [#272](https://github.com/ametel01/plingpling/pull/272)
-  phase: review
-  cycle: 1/5
+  phase: checker-ready
+  cycle: 2/5
 
 ## Completion Contract
 
@@ -506,6 +506,43 @@ Status: ALL GREEN
     records exact file/line evidence, smallest acceptable fixes, gates, and baseline Vercel status.
   next-action: Coordinator changes ownership and increments the implementation/review cycle. Do not
     merge PR #272 or execute provider effects until the blocking findings are fixed and reaccepted.
+- from: coordinator
+  to: builder-agent (`issue_263_builder`)
+  timestamp: 2026-08-07T05:46:22+08:00
+  request: Fix the four findings in maintainer review #4878363214 without expanding into downstream
+    orchestration work.
+  evidence: Exact file/line findings, required behaviors, and smallest acceptable fixes are recorded
+    above and in the GitHub review; Vercel is a documented non-blocking baseline failure.
+  next-action: Add production boundary instrumentation and absent-stage evidence, correct stage
+    interval attribution, make operation-key correlation authoritative, strictly parse bounded trial
+    counts, add regression tests, commit, push, and return to checker. No provider effects.
+- from: builder-agent (`issue_263_builder`)
+  to: checker-agent
+  timestamp: 2026-08-07T06:00:34+08:00
+  request: Verify the narrow cycle-2 fixes for maintainer review #4878363214 on PR #272.
+  evidence: Production cloud-init now emits started/completed package, image-pull, and
+    runner-container boundaries; registration/readiness producers now persist paired
+    runner-registration, boot-validation, and authenticated-readiness boundaries. Latency reports
+    seed required runner/bootstrap stages so absent evidence is invalid/missing, agent-stage
+    intervals close on `fromStage`, operation-key runner evidence is authoritative with only a
+    documented legacy assigned-runner fallback, and benchmark `--limit`/`--trials` parsing requires
+    exact bounded positive integers.
+  validation:
+    - `bun scripts/run-unit-tests.ts tests/unit/agent-creation-latency.test.ts tests/unit/agent-creation-benchmark.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/runner-registration.test.ts tests/unit/runner-heartbeat.test.ts`
+      passed: 6 files, 63 tests, including the operation-key database fixture.
+    - `bunx biome format --write scripts/benchmark-agent-creation.ts src/server/agents/agent-creation-latency.ts src/server/runners/cloud-runner-bootstrap.ts src/server/runners/local-docker-digitalocean-provider.ts src/server/runners/runner-provisioning-events.ts tests/unit/agent-creation-benchmark.test.ts tests/unit/agent-creation-latency.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/runner-heartbeat.test.ts tests/unit/runner-registration.test.ts`
+      formatted 11 files.
+    - `bun run lint` passed: 399 files checked.
+    - `bunx tsc --noEmit` passed.
+    - `bun run build` passed.
+    - `bun run test` passed: 169 files, 1636 tests.
+    - `bun run local:agent:smoke` passed with `digitalOceanRequests: 0`; the emitted
+      `creationLatencyReport` remained ready but `evidenceStatus: "invalid"` with explicit
+      `missing_started`/`missing_terminal` for required runner/bootstrap stages, preserving the
+      local-smoke gap instead of hiding it.
+  provider effects: none; only local/zero-cloud smoke was executed.
+  next-action: Independent checker should rerun review-focused gates, then return to maintainer
+    review if clean.
 
 ## Review Threads
 
@@ -528,7 +565,7 @@ Status: ALL GREEN
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling`: issue #263 branch, reviewer-owned for read-only review.
+- `/Users/alexmetelli/source/plingpling`: issue #263 branch, builder-owned for review fixes.
 - `/Users/alexmetelli/source/plingpling-step7-base`: pre-existing detached user-owned worktree;
   preserve and do not modify.
 

@@ -11,6 +11,25 @@ const MAX_REPORT_LIMIT = 1_000;
 const NEAREST_RANK_P95 = 95;
 const NEAREST_RANK_P50 = 50;
 const MAX_LOG_STAGE_COUNT = 20;
+const REQUIRED_RUNNER_STAGE_NAMES = [
+  "runner:creating",
+  "runner:tagging",
+  "runner:firewall_configuring",
+  "runner:bootstrapping",
+  "runner:waiting_for_runner",
+  "runner:ready",
+];
+const REQUIRED_BOOTSTRAP_STAGE_NAMES = [
+  "bootstrap:bootstrap_started",
+  "bootstrap:package_install",
+  "bootstrap:docker_pull",
+  "bootstrap:agent_image_pull",
+  "bootstrap:hermes_image_pull",
+  "bootstrap:runner_container_start",
+  "bootstrap:runner_registration",
+  "bootstrap:boot_validation",
+  "bootstrap:authenticated_readiness",
+];
 const BOOTSTRAP_STEP_LABELS = new Set([
   "agent_image_pull",
   "authenticated_readiness",
@@ -19,6 +38,8 @@ const BOOTSTRAP_STEP_LABELS = new Set([
   "caddy_configured",
   "docker_package_install",
   "docker_pull",
+  "docker_apt_repository",
+  "docker_container_started",
   "hermes_image_pull",
   "hermes_private_network",
   "hermes_state_root",
@@ -47,6 +68,7 @@ export type AgentCreationLatencyRunnerEvent = {
 export type AgentCreationLatencyDeploymentEvidence = {
   id: string;
   runnerId: string | null;
+  requiresRunnerEvidence?: boolean;
   createdAt: Date | string;
   completedAt: Date | string | null;
   failedAt: Date | string | null;
@@ -142,6 +164,19 @@ type BoundaryEvent = {
   at: string | null;
 };
 
+export type AgentCreationRunnerCorrelationInput = {
+  runnerOperationId: string | null;
+  operationRunnerId: string | null;
+  assignedRunnerId: string | null;
+};
+
+export type AgentCreationRunnerCorrelation = {
+  reportRunnerId: string | null;
+  eventRunnerId: string | null;
+  eventRunnerOperationId: string | null;
+  mode: "operation_key" | "assigned_runner_legacy_fallback" | "none";
+};
+
 export function buildAgentCreationLatencyReport(
   input: BuildReportInput,
 ): AgentCreationLatencyReport {
@@ -229,6 +264,38 @@ export async function logAgentCreationTerminalCompletion(
   });
 }
 
+export function resolveAgentCreationRunnerCorrelation(
+  input: AgentCreationRunnerCorrelationInput,
+): AgentCreationRunnerCorrelation {
+  if (input.runnerOperationId) {
+    return {
+      reportRunnerId: input.operationRunnerId,
+      eventRunnerId: input.operationRunnerId,
+      eventRunnerOperationId: input.runnerOperationId,
+      mode: "operation_key",
+    };
+  }
+
+  if (input.assignedRunnerId) {
+    // Legacy deployments that predate runner_operation_id have no immutable operation key.
+    // Only those rows may fall back to the current assigned runner; operation-backed rows
+    // above never OR assigned-runner evidence into the authoritative operation correlation.
+    return {
+      reportRunnerId: input.assignedRunnerId,
+      eventRunnerId: input.assignedRunnerId,
+      eventRunnerOperationId: null,
+      mode: "assigned_runner_legacy_fallback",
+    };
+  }
+
+  return {
+    reportRunnerId: null,
+    eventRunnerId: null,
+    eventRunnerOperationId: null,
+    mode: "none",
+  };
+}
+
 function toLatencyRun(input: AgentCreationLatencyDeploymentEvidence): AgentCreationLatencyRun {
   const createdAt = toIso(input.createdAt);
   const completedAt = toIso(input.completedAt);
@@ -236,7 +303,12 @@ function toLatencyRun(input: AgentCreationLatencyDeploymentEvidence): AgentCreat
   const terminal = selectTerminal(createdAt, completedAt, failedAt);
   const stages = [
     ...buildAgentStageTimings(createdAt, input.agentStageEvents),
-    ...buildRunnerStageTimings(input.runnerEvents),
+    ...buildRunnerStageTimings(
+      input.runnerEvents,
+      input.requiresRunnerEvidence === true ||
+        input.runnerId !== null ||
+        input.runnerEvents.length > 0,
+    ),
   ].sort(
     (left, right) => left.name.localeCompare(right.name) || left.source.localeCompare(right.source),
   );
@@ -309,15 +381,16 @@ function buildAgentStageTimings(
     .filter((event) => event.toStage)
     .sort(
       (left, right) =>
-        compareIso(left.at, right.at) || (left.toStage ?? "").localeCompare(right.toStage ?? ""),
+        compareIso(left.at, right.at) ||
+        (left.fromStage ?? "").localeCompare(right.fromStage ?? ""),
     );
   const seen = new Set<string>();
   const timings: AgentCreationLatencyStageTiming[] = [];
   let cursor = createdAt;
 
   for (const event of ordered) {
-    if (!event.toStage) continue;
-    const name = `agent:${event.toStage}`;
+    if (!event.fromStage) continue;
+    const name = `agent:${event.fromStage}`;
     const issues: AgentCreationLatencyIssue[] = [];
 
     if (seen.has(name)) issues.push("duplicate_terminal");
@@ -343,9 +416,16 @@ function buildAgentStageTimings(
 
 function buildRunnerStageTimings(
   events: readonly AgentCreationLatencyRunnerEvent[],
+  requireExpectedStages: boolean,
 ): AgentCreationLatencyStageTiming[] {
   const boundaryEvents = events.flatMap(toBoundaryEvents);
   const byName = new Map<string, BoundaryEvent[]>();
+
+  if (requireExpectedStages) {
+    for (const name of [...REQUIRED_RUNNER_STAGE_NAMES, ...REQUIRED_BOOTSTRAP_STAGE_NAMES]) {
+      byName.set(name, []);
+    }
+  }
 
   for (const event of boundaryEvents) {
     const list = byName.get(event.name) ?? [];
@@ -394,12 +474,13 @@ function buildRunnerStageTimings(
 function toBoundaryEvents(event: AgentCreationLatencyRunnerEvent): BoundaryEvent[] {
   const at = toIso(event.createdAt);
   const phase = normalizeLabel(event.phase);
-  const events: BoundaryEvent[] = phase
+  const step = normalizeBootstrapStepLabel(event.metadata?.step);
+  const emitRunnerPhase = Boolean(phase && !(phase === "bootstrapping" && step));
+  const events: BoundaryEvent[] = emitRunnerPhase
     ? [{ name: `runner:${phase}`, source: "runner_provisioning_event", status: event.status, at }]
     : [];
-  const step = normalizeBootstrapStepLabel(event.metadata?.step);
 
-  if (step && phase === "bootstrapping") {
+  if (step && (phase === "bootstrapping" || phase === "waiting_for_runner" || phase === "ready")) {
     events.push({
       name: `bootstrap:${step}`,
       source: "runner_provisioning_event",
@@ -528,7 +609,8 @@ async function readDeploymentEvidence(
   const deploymentFilter = deploymentId ? sql`d.id = ${deploymentId}::uuid` : sql`true`;
   const rows = await connection.db.execute<{
     id: string;
-    runnerId: string | null;
+    operationRunnerId: string | null;
+    assignedRunnerId: string | null;
     userId: string;
     runnerOperationId: string | null;
     createdAt: Date;
@@ -537,7 +619,8 @@ async function readDeploymentEvidence(
   }>(sql`
     select
       d.id,
-      coalesce(operation_runner.id, a.runner_id) as "runnerId",
+      operation_runner.id as "operationRunnerId",
+      a.runner_id as "assignedRunnerId",
       d.user_id as "userId",
       d.runner_operation_id as "runnerOperationId",
       d.created_at as "createdAt",
@@ -556,19 +639,28 @@ async function readDeploymentEvidence(
   `);
 
   return await Promise.all(
-    rows.map(async (row) => ({
-      id: row.id,
-      runnerId: row.runnerId,
-      createdAt: row.createdAt,
-      completedAt: row.completedAt,
-      failedAt: row.failedAt,
-      agentStageEvents: await readAgentStageEvents(connection, row.id),
-      runnerEvents: await readRunnerEvents(connection, {
-        userId: row.userId,
-        runnerId: row.runnerId,
+    rows.map(async (row) => {
+      const correlation = resolveAgentCreationRunnerCorrelation({
         runnerOperationId: row.runnerOperationId,
-      }),
-    })),
+        operationRunnerId: row.operationRunnerId,
+        assignedRunnerId: row.assignedRunnerId,
+      });
+
+      return {
+        id: row.id,
+        runnerId: correlation.reportRunnerId,
+        requiresRunnerEvidence: correlation.mode !== "none",
+        createdAt: row.createdAt,
+        completedAt: row.completedAt,
+        failedAt: row.failedAt,
+        agentStageEvents: await readAgentStageEvents(connection, row.id),
+        runnerEvents: await readRunnerEvents(connection, {
+          userId: row.userId,
+          runnerId: correlation.eventRunnerId,
+          runnerOperationId: correlation.eventRunnerOperationId,
+        }),
+      };
+    }),
   );
 }
 
@@ -605,10 +697,11 @@ async function readRunnerEvents(
   const operationKey = input.runnerOperationId
     ? toProvisioningOperationKey(input.runnerOperationId)
     : null;
-  const operationFilter = input.runnerOperationId
+  const correlationFilter = input.runnerOperationId
     ? sql`runner.provisioning_operation_key = ${operationKey}`
-    : sql`false`;
-  const runnerFilter = input.runnerId ? sql`runner.id = ${input.runnerId}::uuid` : sql`false`;
+    : input.runnerId
+      ? sql`runner.id = ${input.runnerId}::uuid`
+      : sql`false`;
   const rows = await connection.db.execute<{
     phase: string;
     status: AgentCreationLatencyBoundary;
@@ -620,7 +713,7 @@ async function readRunnerEvents(
     inner join runners runner
       on runner.id = events.runner_id
      and runner.user_id = ${input.userId}::uuid
-    where (${operationFilter} or ${runnerFilter})
+    where ${correlationFilter}
     order by events.created_at asc, events.id asc
   `);
 

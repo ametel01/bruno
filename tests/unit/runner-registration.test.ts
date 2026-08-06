@@ -309,11 +309,41 @@ describe.sequential("runner registration service", () => {
     expect(events).toEqual([
       expect.objectContaining({
         runnerId: cloudRunner.id,
+        phase: "bootstrapping",
+        status: "completed",
+        message: "Cloud runner bootstrap completed registration handoff.",
+        metadata: {
+          provider: "digitalocean",
+        },
+      }),
+      expect.objectContaining({
+        runnerId: cloudRunner.id,
+        phase: "bootstrapping",
+        status: "completed",
+        message: "Cloud runner bootstrap startup boundary completed.",
+        metadata: {
+          provider: "digitalocean",
+          step: "bootstrap_started",
+        },
+      }),
+      expect.objectContaining({
+        runnerId: cloudRunner.id,
+        phase: "waiting_for_runner",
+        status: "started",
+        message: "Cloud runner registration wait started.",
+        metadata: {
+          provider: "digitalocean",
+          step: "runner_registration",
+        },
+      }),
+      expect.objectContaining({
+        runnerId: cloudRunner.id,
         phase: "waiting_for_runner",
         status: "completed",
         message: "Cloud runner exchanged its one-time registration token.",
         metadata: {
           provider: "digitalocean",
+          step: "runner_registration",
           registration: "completed",
         },
       }),

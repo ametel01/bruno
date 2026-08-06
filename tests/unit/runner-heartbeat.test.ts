@@ -550,11 +550,46 @@ describe("runner heartbeat persistence", () => {
     });
     expect(events).toEqual([
       expect.objectContaining({
+        phase: "bootstrapping",
+        status: "started",
+        message: "Runner boot validation started.",
+        metadata: expect.objectContaining({
+          provider: "digitalocean",
+          step: "boot_validation",
+          bootContractVersion: "plingpling.runner.boot-snapshot.v1",
+          bootStatus: "ready",
+        }),
+      }),
+      expect.objectContaining({
+        phase: "bootstrapping",
+        status: "completed",
+        message: "Runner boot validation succeeded.",
+        metadata: {
+          provider: "digitalocean",
+          step: "boot_validation",
+          bootContractVersion: "plingpling.runner.boot-snapshot.v1",
+          bootStatus: "ready",
+          bootComponents: readyRunnerBootSnapshot().components,
+        },
+      }),
+      expect.objectContaining({
+        phase: "ready",
+        status: "started",
+        message: "Authenticated runner readiness probe started.",
+        metadata: {
+          provider: "digitalocean",
+          step: "authenticated_readiness",
+          heartbeatStatus: "online",
+          readinessProbe: "authenticated_endpoint",
+        },
+      }),
+      expect.objectContaining({
         phase: "ready",
         status: "completed",
         message: "Authenticated runner readiness probe succeeded.",
         metadata: {
           provider: "digitalocean",
+          step: "authenticated_readiness",
           heartbeatStatus: "online",
           readinessProbe: "authenticated_endpoint",
           bootContractVersion: "plingpling.runner.boot-snapshot.v1",
@@ -696,10 +731,11 @@ describe("runner heartbeat persistence", () => {
       .select()
       .from(runners)
       .where(eq(runners.id, runner.id));
-    const [failureEvent] = await connection.db
+    const events = await connection.db
       .select()
       .from(runnerProvisioningEvents)
       .where(eq(runnerProvisioningEvents.runnerId, runner.id));
+    const failureEvent = events.find((event) => event.phase === "failed");
 
     expect(result).toEqual({
       outcome: "failed",
@@ -726,6 +762,20 @@ describe("runner heartbeat persistence", () => {
         bootFailureReason: "fixture_launch_failed",
       },
     });
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          phase: "bootstrapping",
+          status: "failed",
+          metadata: expect.objectContaining({ step: "boot_validation" }),
+        }),
+        expect.objectContaining({
+          phase: "ready",
+          status: "failed",
+          metadata: expect.objectContaining({ step: "authenticated_readiness" }),
+        }),
+      ]),
+    );
   });
 
   it("allows insecure loopback readiness only for the explicit local Docker mode", async () => {
