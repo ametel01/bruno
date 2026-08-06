@@ -692,8 +692,9 @@ async function createAgentWithUserResolver(
       return response;
     }
 
+    const { id: placementRunnerId } = placement.runner;
     const verification = await verifyRunnerPlacement(connection, {
-      runnerId: placement.runner.id,
+      runnerId: placementRunnerId,
       userId,
     });
 
@@ -705,7 +706,7 @@ async function createAgentWithUserResolver(
           action: verification.action,
           attempt,
           reason: verification.reason,
-          runnerId: placement.runner.id,
+          runnerId: placementRunnerId,
           transitioned: verification.transitioned,
         },
         "warn",
@@ -725,7 +726,7 @@ async function createAgentWithUserResolver(
     const created = await connection.db.transaction(async (tx) => {
       const finalPlacement = await selectRunnerPlacementForUserInTransaction(tx, userId, {
         planMaxAgents: dependencies.planMaxAgents,
-        runnerId: placement.runner.id,
+        runnerId: placementRunnerId,
       });
 
       if (!finalPlacement.ok) {
@@ -747,21 +748,19 @@ async function createAgentWithUserResolver(
     });
 
     if (!created.ok) {
+      const { reason } = created.placement;
       logAgentCreate(
         logger,
         "runner_candidate_changed_before_insert",
         {
           attempt,
-          reason: created.placement.reason,
-          runnerId: placement.runner.id,
+          reason,
+          runnerId: placementRunnerId,
         },
         "warn",
       );
 
-      if (
-        created.placement.reason === "plan_limit_reached" ||
-        created.placement.reason === "runner_capacity_reached"
-      ) {
+      if (reason === "plan_limit_reached" || reason === "runner_capacity_reached") {
         throw new AgentCreateBlockedError(created.placement);
       }
 

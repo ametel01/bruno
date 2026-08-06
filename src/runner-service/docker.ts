@@ -586,8 +586,10 @@ export class ManualRunnerDocker {
   async logs(
     agentId: string,
   ): Promise<{ container: RunnerContainer | null; logs: RunnerLogLine[] }> {
-    const [container] = await this.listSelectedContainers(agentId);
-    const gatewayLogs = await readHermesGatewayLogLines(agentId, this.stateRoot);
+    const [[container], gatewayLogs] = await Promise.all([
+      this.listSelectedContainers(agentId),
+      readHermesGatewayLogLines(agentId, this.stateRoot),
+    ]);
 
     if (!container) {
       return { container: null, logs: gatewayLogs };

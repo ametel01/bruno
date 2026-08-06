@@ -1,6 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
-export const HERMES_STAGING_ATTESTATION_PROTOCOL_VERSION = "v1";
 export const HERMES_STAGING_ATTESTATION_CHALLENGE_TTL_MS = 5 * 60_000;
 
 const CHALLENGE_DOMAIN = "plingpling-hermes-staging-challenge-v1";

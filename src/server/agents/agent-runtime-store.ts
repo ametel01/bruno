@@ -3,8 +3,6 @@ import "server-only";
 import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
-  AGENT_RUNTIME_ERROR_CODES,
-  AGENT_RUNTIME_STATES,
   type AgentRuntimeErrorCode,
   type AgentRuntimeState,
   MAX_RUNTIME_COUNTER,
@@ -21,7 +19,6 @@ type AgentRuntimeTransaction = Parameters<
 
 export type AgentRuntimeDatabase = PostgresJsDatabase<typeof schema> | AgentRuntimeTransaction;
 
-export { AGENT_RUNTIME_ERROR_CODES, AGENT_RUNTIME_STATES };
 export type AgentRuntimeReconciliationState = AgentRuntimeState;
 export type { AgentRuntimeErrorCode };
 

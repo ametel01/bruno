@@ -317,10 +317,6 @@ export function parseRunnerBootSnapshot(value: unknown): RunnerBootSnapshot | nu
   return value as RunnerBootSnapshot;
 }
 
-export function isReadyRunnerBootSnapshot(value: unknown): value is RunnerBootSnapshot {
-  return parseRunnerBootSnapshot(value)?.status === "ready";
-}
-
 export type RunnerStopResponsePayload = {
   cancelledOperationId: string | null;
   containers: Array<{

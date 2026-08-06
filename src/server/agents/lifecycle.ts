@@ -826,24 +826,26 @@ async function readHermesConfigurationBlocker(
   tx: AgentLifecycleTransaction,
   agentId: string,
 ): Promise<string | null> {
-  const [config] = await tx
-    .select({
-      modelProvider: agentConfigs.modelProvider,
-      modelName: agentConfigs.modelName,
-    })
-    .from(agentConfigs)
-    .where(eq(agentConfigs.agentId, agentId))
-    .limit(1);
-  const activeSecretRows = await tx
-    .select({ kind: agentSecrets.kind })
-    .from(agentSecrets)
-    .where(and(eq(agentSecrets.agentId, agentId), eq(agentSecrets.status, "active")));
-  const [latestDeployment] = await tx
-    .select({ id: agentDeployments.id })
-    .from(agentDeployments)
-    .where(and(eq(agentDeployments.agentId, agentId)))
-    .orderBy(desc(agentDeployments.createdAt), desc(agentDeployments.id))
-    .limit(1);
+  const [[config], activeSecretRows, [latestDeployment]] = await Promise.all([
+    tx
+      .select({
+        modelProvider: agentConfigs.modelProvider,
+        modelName: agentConfigs.modelName,
+      })
+      .from(agentConfigs)
+      .where(eq(agentConfigs.agentId, agentId))
+      .limit(1),
+    tx
+      .select({ kind: agentSecrets.kind })
+      .from(agentSecrets)
+      .where(and(eq(agentSecrets.agentId, agentId), eq(agentSecrets.status, "active"))),
+    tx
+      .select({ id: agentDeployments.id })
+      .from(agentDeployments)
+      .where(and(eq(agentDeployments.agentId, agentId)))
+      .orderBy(desc(agentDeployments.createdAt), desc(agentDeployments.id))
+      .limit(1),
+  ]);
   const isManaged =
     latestDeployment !== undefined &&
     ((config?.modelProvider === "openrouter" &&

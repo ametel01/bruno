@@ -28,7 +28,7 @@ export type HermesStagingAcceptanceDatabase =
 
 export const HERMES_STAGING_ACCEPTANCE_LEASE_MS = 90_000;
 export const HERMES_STAGING_ACCEPTANCE_MAX_LEASE_ATTEMPTS = HERMES_STAGING_MAX_COUNTER;
-export const HERMES_STAGING_ACCEPTANCE_QUEUE_STATES = [
+const HERMES_STAGING_ACCEPTANCE_QUEUE_STATES = [
   "pending",
   "executing",
   "waiting",

@@ -298,17 +298,19 @@ export async function getAssignedManualRunnerStatusForDevelopmentUserAgent(
         return null;
       }
 
-      const [latestHeartbeat] = await tx
-        .select({
-          status: runnerHeartbeats.status,
-          metadata: runnerHeartbeats.metadata,
-          observedAt: runnerHeartbeats.observedAt,
-        })
-        .from(runnerHeartbeats)
-        .where(eq(runnerHeartbeats.runnerId, row.id))
-        .orderBy(desc(runnerHeartbeats.observedAt))
-        .limit(1);
-      const assignedRunningAgents = await countAssignedRunningAgents(tx, row.id, userId);
+      const [[latestHeartbeat], assignedRunningAgents] = await Promise.all([
+        tx
+          .select({
+            status: runnerHeartbeats.status,
+            metadata: runnerHeartbeats.metadata,
+            observedAt: runnerHeartbeats.observedAt,
+          })
+          .from(runnerHeartbeats)
+          .where(eq(runnerHeartbeats.runnerId, row.id))
+          .orderBy(desc(runnerHeartbeats.observedAt))
+          .limit(1),
+        countAssignedRunningAgents(tx, row.id, userId),
+      ]);
 
       return toAssignedManualRunnerStatusSummary({
         ...row,
@@ -390,17 +392,19 @@ export async function getAssignedManualRunnerStatusForUserAgent(
         return null;
       }
 
-      const [latestHeartbeat] = await tx
-        .select({
-          status: runnerHeartbeats.status,
-          metadata: runnerHeartbeats.metadata,
-          observedAt: runnerHeartbeats.observedAt,
-        })
-        .from(runnerHeartbeats)
-        .where(eq(runnerHeartbeats.runnerId, row.id))
-        .orderBy(desc(runnerHeartbeats.observedAt))
-        .limit(1);
-      const assignedRunningAgents = await countAssignedRunningAgents(tx, row.id, userId);
+      const [[latestHeartbeat], assignedRunningAgents] = await Promise.all([
+        tx
+          .select({
+            status: runnerHeartbeats.status,
+            metadata: runnerHeartbeats.metadata,
+            observedAt: runnerHeartbeats.observedAt,
+          })
+          .from(runnerHeartbeats)
+          .where(eq(runnerHeartbeats.runnerId, row.id))
+          .orderBy(desc(runnerHeartbeats.observedAt))
+          .limit(1),
+        countAssignedRunningAgents(tx, row.id, userId),
+      ]);
 
       return toAssignedManualRunnerStatusSummary({
         ...row,

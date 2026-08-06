@@ -164,51 +164,53 @@ export async function getCostEstimatesForUser(
     return await connection.db.transaction(async (tx) => {
       const windows = createWindows(now);
 
-      const runnerRows = await tx
-        .select({
-          id: runners.id,
-          name: runners.name,
-          kind: runners.kind,
-          sizeSlug: runners.sizeSlug,
-          deletedAt: runners.deletedAt,
-        })
-        .from(runners)
-        .where(eq(runners.userId, userId));
-      const runningAgentRows = await tx
-        .select({
-          id: agents.id,
-          runnerId: agents.runnerId,
-        })
-        .from(agents)
-        .where(
-          and(
-            eq(agents.userId, userId),
-            isNull(agents.deletedAt),
-            isNotNull(agents.runnerId),
-            inArray(agents.status, [...RUNNING_AGENT_STATUSES]),
-          ),
-        );
-      const usageRows = await tx
-        .select({
-          agentId: agentUsagePeriods.agentId,
-          runnerId: runners.id,
-          startedAt: agentUsagePeriods.startedAt,
-          stoppedAt: agentUsagePeriods.stoppedAt,
-        })
-        .from(agentUsagePeriods)
-        .innerJoin(agents, eq(agentUsagePeriods.agentId, agents.id))
-        .innerJoin(runners, eq(agentUsagePeriods.runnerId, runners.id))
-        .where(
-          and(
-            eq(agents.userId, userId),
-            eq(runners.userId, userId),
-            lt(agentUsagePeriods.startedAt, windows.daily.endsAt),
-            or(
-              isNull(agentUsagePeriods.stoppedAt),
-              gt(agentUsagePeriods.stoppedAt, windows.monthly.startsAt),
+      const [runnerRows, runningAgentRows, usageRows] = await Promise.all([
+        tx
+          .select({
+            id: runners.id,
+            name: runners.name,
+            kind: runners.kind,
+            sizeSlug: runners.sizeSlug,
+            deletedAt: runners.deletedAt,
+          })
+          .from(runners)
+          .where(eq(runners.userId, userId)),
+        tx
+          .select({
+            id: agents.id,
+            runnerId: agents.runnerId,
+          })
+          .from(agents)
+          .where(
+            and(
+              eq(agents.userId, userId),
+              isNull(agents.deletedAt),
+              isNotNull(agents.runnerId),
+              inArray(agents.status, [...RUNNING_AGENT_STATUSES]),
             ),
           ),
-        );
+        tx
+          .select({
+            agentId: agentUsagePeriods.agentId,
+            runnerId: runners.id,
+            startedAt: agentUsagePeriods.startedAt,
+            stoppedAt: agentUsagePeriods.stoppedAt,
+          })
+          .from(agentUsagePeriods)
+          .innerJoin(agents, eq(agentUsagePeriods.agentId, agents.id))
+          .innerJoin(runners, eq(agentUsagePeriods.runnerId, runners.id))
+          .where(
+            and(
+              eq(agents.userId, userId),
+              eq(runners.userId, userId),
+              lt(agentUsagePeriods.startedAt, windows.daily.endsAt),
+              or(
+                isNull(agentUsagePeriods.stoppedAt),
+                gt(agentUsagePeriods.stoppedAt, windows.monthly.startsAt),
+              ),
+            ),
+          ),
+      ]);
 
       const scopedRunningAgentRows = runningAgentRows.flatMap((row) =>
         row.runnerId === null ? [] : [{ id: row.id, runnerId: row.runnerId }],

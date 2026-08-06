@@ -19,5 +19,4 @@ export const RUNNER_BOOT_CONTRACT_VERSION_MAX_LENGTH = 80;
 export const RUNNER_RELEASE_DOCKER_OUTPUT_MAX_BYTES = 32 * 1024;
 export const RUNNER_RELEASE_MAX_REPO_DIGESTS = 16;
 export const RUNNER_OCI_REVISION_LABEL = "org.opencontainers.image.revision";
-export const RUNNER_OCI_SOURCE_LABEL = "org.opencontainers.image.source";
 export const RUNNER_OCI_VERSION_LABEL = "org.opencontainers.image.version";
