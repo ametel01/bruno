@@ -1,18 +1,18 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  type PublicAgentRuntimePresentation,
   parseSafeRuntimeGetBody,
   runtimePollDelayMs,
-  type PublicAgentRuntimePresentation,
 } from "@/src/shared/agent-runtime-presentation";
 import {
+  type ForegroundPollingWindow,
   foregroundPollingElapsedMs,
   pauseForegroundPollingWindow,
   resumeForegroundPollingWindow,
   startForegroundPollingWindow,
-  type ForegroundPollingWindow,
 } from "@/src/shared/deployment-polling-state";
 
 type AgentRuntimeStatusProps = {
@@ -58,7 +58,8 @@ function AgentRuntimeStatusState({ agentId, initialRuntime }: AgentRuntimeStatus
   const requestRef = useRef<AbortController | null>(null);
   const requestEpochRef = useRef(0);
   const pollRef = useRef<() => void>(() => {});
-  const foregroundRef = useRef<ForegroundPollingWindow>(startForegroundPollingWindow(Date.now()));
+  const initialForegroundWindow = useMemo(() => startForegroundPollingWindow(Date.now()), []);
+  const foregroundRef = useRef<ForegroundPollingWindow>(initialForegroundWindow);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {

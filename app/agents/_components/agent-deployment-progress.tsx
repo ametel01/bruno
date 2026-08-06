@@ -75,17 +75,19 @@ function useAgentDeploymentProgress({
   const inFlightRef = useRef<AbortController | null>(null);
   const timerRef = useRef<number | null>(null);
   const pollDeploymentRef = useRef<() => void>(() => {});
-  const foregroundWindowRef = useRef<ForegroundPollingWindow>(
-    startForegroundPollingWindow(Date.now()),
-  );
+  const initialForegroundWindow = useMemo(() => startForegroundPollingWindow(Date.now()), []);
+  const foregroundWindowRef = useRef<ForegroundPollingWindow>(initialForegroundWindow);
   const refreshLatchRef = useRef(false);
   const refreshedTerminalRef = useRef(false);
-  const retryLatchRef = useRef<DeploymentRetryLatch>(createDeploymentRetryLatch());
+  const initialRetryLatch = useMemo(createDeploymentRetryLatch, []);
+  const retryLatchRef = useRef<DeploymentRetryLatch>(initialRetryLatch);
+  const retryLatch = retryLatchRef.current;
+  const deploymentRef = useRef(initialDeployment);
   const [deployment, setDeployment] = useState(initialDeployment);
   const [lastObservedStage, setLastObservedStage] = useState<Exclude<
     PublicAgentDeploymentStage,
     "ready" | "failed"
-  > | null>(toNonterminalStage(initialDeployment?.stage ?? null));
+  > | null>(() => toNonterminalStage(initialDeployment?.stage ?? null));
   const [liveMessage, setLiveMessage] = useState("");
   const [observation, setObservation] = useState<ObservationState>({
     status: "idle",
@@ -229,35 +231,29 @@ function useAgentDeploymentProgress({
         return;
       }
       const nextDeployment = parsed.deployment;
+      const currentDeployment = deploymentRef.current;
+
+      if (!shouldAcceptDeploymentUpdate(currentDeployment, nextDeployment)) {
+        return;
+      }
 
       setObservation({ status: "idle", consecutiveFailures: 0 });
-      setDeployment((current) => {
-        if (!current) {
-          setLiveMessage(deploymentStageLabel(nextDeployment.stage));
-          const nonterminalStage = toNonterminalStage(nextDeployment.stage);
+      deploymentRef.current = nextDeployment;
+      setDeployment(nextDeployment);
 
-          if (nonterminalStage) {
-            setLastObservedStage(nonterminalStage);
-          }
-          return nextDeployment;
-        }
+      if (
+        currentDeployment === null ||
+        nextDeployment.stage !== currentDeployment.stage ||
+        nextDeployment.id !== currentDeployment.id
+      ) {
+        setLiveMessage(deploymentStageLabel(nextDeployment.stage));
+      }
 
-        if (!shouldAcceptDeploymentUpdate(current, nextDeployment)) {
-          return current;
-        }
+      const nonterminalStage = toNonterminalStage(nextDeployment.stage);
 
-        if (nextDeployment.stage !== current.stage || nextDeployment.id !== current.id) {
-          setLiveMessage(deploymentStageLabel(nextDeployment.stage));
-        }
-
-        const nonterminalStage = toNonterminalStage(nextDeployment.stage);
-
-        if (nonterminalStage) {
-          setLastObservedStage(nonterminalStage);
-        }
-
-        return nextDeployment;
-      });
+      if (nonterminalStage) {
+        setLastObservedStage(nonterminalStage);
+      }
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         markObservationFailure();
@@ -343,7 +339,7 @@ function useAgentDeploymentProgress({
 
     const acquired = acquireDeploymentRetryAttempt({
       createIdempotencyKey: () => crypto.randomUUID().toLowerCase(),
-      latch: retryLatchRef.current,
+      latch: retryLatch,
       retry,
     });
 
@@ -414,7 +410,8 @@ function useAgentDeploymentProgress({
       generationRef.current += 1;
       resumeForegroundTracking({ reset: true });
       refreshedTerminalRef.current = false;
-      resetDeploymentRetryAttempt(retryLatchRef.current);
+      resetDeploymentRetryAttempt(retryLatch);
+      deploymentRef.current = parsed.deployment;
       setDeployment(parsed.deployment);
       setLastObservedStage(toNonterminalStage(parsed.deployment.stage));
       setRetry({ status: "idle" });
@@ -428,7 +425,7 @@ function useAgentDeploymentProgress({
         message: "Retry response was interrupted. Retry the same request.",
       });
     } finally {
-      releaseDeploymentRetryAttempt(retryLatchRef.current);
+      releaseDeploymentRetryAttempt(retryLatch);
     }
   }
 
@@ -478,20 +475,21 @@ function useAgentDeploymentProgress({
       }
 
       const nextDeployment = parsed.deployment;
+      const currentDeployment = deploymentRef.current;
+
+      if (!shouldAcceptDeploymentUpdate(currentDeployment, nextDeployment)) {
+        return;
+      }
+
       setObservation({ status: "idle", consecutiveFailures: 0 });
-      setDeployment((current) => {
-        if (current && !shouldAcceptDeploymentUpdate(current, nextDeployment)) {
-          return current;
-        }
+      deploymentRef.current = nextDeployment;
+      setDeployment(nextDeployment);
 
-        const nonterminalStage = toNonterminalStage(nextDeployment.stage);
+      const nonterminalStage = toNonterminalStage(nextDeployment.stage);
 
-        if (nonterminalStage) {
-          setLastObservedStage(nonterminalStage);
-        }
-
-        return nextDeployment;
-      });
+      if (nonterminalStage) {
+        setLastObservedStage(nonterminalStage);
+      }
     } catch {
       markObservationFailure();
     }
