@@ -162,8 +162,20 @@ export type ConfirmCloudRunnerReadinessResult =
     };
 
 export type ProbeRunnerEndpointReadinessResult =
-  | { ok: true; protocol: "readiness_endpoint"; snapshot: RunnerBootSnapshot }
-  | { ok: false; reason: "runner_not_ready"; snapshot: RunnerBootSnapshot }
+  | {
+      ok: true;
+      protocol: "readiness_endpoint";
+      snapshot: RunnerBootSnapshot;
+      observedStartedAt: Date;
+      observedCompletedAt: Date;
+    }
+  | {
+      ok: false;
+      reason: "runner_not_ready";
+      snapshot: RunnerBootSnapshot;
+      observedStartedAt: Date;
+      observedCompletedAt: Date;
+    }
   | {
       ok: false;
       reason:
@@ -368,6 +380,7 @@ export async function confirmCloudRunnerReadiness(
       runnerBearerToken,
       allowInsecureLoopback,
       ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+      ...(dependencies.now ? { now: dependencies.now } : {}),
       ...(dependencies.timeoutMs === undefined ? {} : { timeoutMs: dependencies.timeoutMs }),
     });
 
@@ -386,6 +399,8 @@ export async function confirmCloudRunnerReadiness(
             runnerId,
             now,
             bootSnapshot,
+            readinessProbeStartedAt: probe.observedStartedAt,
+            readinessProbeCompletedAt: probe.observedCompletedAt,
           }),
         );
         return {
@@ -413,6 +428,8 @@ export async function confirmCloudRunnerReadiness(
         runnerId,
         now,
         bootSnapshot: probe.snapshot,
+        readinessProbeStartedAt: probe.observedStartedAt,
+        readinessProbeCompletedAt: probe.observedCompletedAt,
       }),
     );
 
@@ -431,6 +448,7 @@ export async function probeRunnerEndpointReadiness(input: {
   runnerBearerToken: string | null | undefined;
   allowInsecureLoopback?: boolean;
   fetch?: typeof fetch;
+  now?: () => Date;
   timeoutMs?: number;
 }): Promise<ProbeRunnerEndpointReadinessResult> {
   const runnerBearerToken = input.runnerBearerToken?.trim();
@@ -451,6 +469,7 @@ export async function probeRunnerEndpointReadiness(input: {
     input.timeoutMs ?? RUNNER_READINESS_PROBE_TIMEOUT_MS,
   );
   let response: Response;
+  const observedStartedAt = input.now?.() ?? new Date();
 
   try {
     response = await (input.fetch ?? fetch)(readinessUrl, {
@@ -475,11 +494,18 @@ export async function probeRunnerEndpointReadiness(input: {
   } catch {
     return { ok: false, reason: response.ok ? "response_invalid" : "endpoint_rejected" };
   }
+  const observedCompletedAt = input.now?.() ?? new Date();
 
   const snapshot = parseRunnerBootSnapshot(payload);
   if (!response.ok) {
     if (response.status === 503 && snapshot && snapshot.status !== "ready") {
-      return { ok: false, reason: "runner_not_ready", snapshot };
+      return {
+        ok: false,
+        reason: "runner_not_ready",
+        snapshot,
+        observedStartedAt,
+        observedCompletedAt,
+      };
     }
     if (response.status === 404 && isLegacyAuthenticatedNotFoundPayload(payload)) {
       return { ok: false, reason: "response_invalid" };
@@ -488,7 +514,13 @@ export async function probeRunnerEndpointReadiness(input: {
   }
 
   return snapshot?.status === "ready"
-    ? { ok: true, protocol: "readiness_endpoint", snapshot }
+    ? {
+        ok: true,
+        protocol: "readiness_endpoint",
+        snapshot,
+        observedStartedAt,
+        observedCompletedAt,
+      }
     : { ok: false, reason: "response_invalid" };
 }
 

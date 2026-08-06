@@ -15,6 +15,10 @@ import {
 } from "@/src/runner-service/local-agent-smoke";
 import { evaluateHermesReadyResponse } from "@/src/runner-service/docker";
 import { reconcileTargetAgentDeployment } from "@/src/server/agents/agent-deployment-reconciler";
+import {
+  buildAgentCreationLatencyReportForDatabase,
+  type AgentCreationLatencyReport,
+} from "@/src/server/agents/agent-creation-latency";
 import { buildHermesAgentLaunchSpecForUser } from "@/src/server/agents/agent-launch-builder";
 import { reconcileTargetAgentRuntime } from "@/src/server/agents/agent-runtime-reconciler";
 import { createAgentForUser } from "@/src/server/agents/create-agent";
@@ -69,6 +73,7 @@ export type LocalAgentCycleSmokeSummary = {
   agentDeleted: true;
   agentId: string;
   cleanupVerified: true;
+  creationLatencyReport: AgentCreationLatencyReport;
   deploymentStages: string[];
   digitalOceanRequests: 0;
   fakeModelBoundary: true;
@@ -105,6 +110,7 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
   let provider: ReturnType<typeof createConfiguredDigitalOceanProvider> | null = null;
   let runnerId: string | null = null;
   let agentId: string | null = null;
+  let creationLatencyReport: AgentCreationLatencyReport | null = null;
   let summary: LocalAgentCycleSmokeSummary | null = null;
   let primaryError: unknown = null;
   const cleanupErrors: unknown[] = [];
@@ -168,6 +174,16 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
     });
     runnerId = ready.agent.runnerId;
     if (!runnerId) throw new Error("Local agent cycle did not assign the simulated runner.");
+    creationLatencyReport = await buildAgentCreationLatencyReportForDatabase(connection, {
+      deploymentId: created.deployment.id,
+      limit: 1,
+    });
+    process.stdout.write(
+      `${JSON.stringify({
+        event: "local_agent_cycle_creation_latency",
+        creationLatencyReport,
+      })}\n`,
+    );
 
     await verifyHermesInsideDroplet(connection, {
       agentId,
@@ -210,6 +226,7 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
       agentDeleted: true,
       agentId,
       cleanupVerified: true,
+      creationLatencyReport,
       deploymentStages,
       digitalOceanRequests: 0,
       fakeModelBoundary: true,

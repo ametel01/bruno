@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import type { RunnerAgentStatusSnapshot } from "@/src/runner-service/runner-contracts";
 import { buildHermesAgentLaunchSpecForUser } from "@/src/server/agents/agent-launch-builder";
+import { logAgentCreationTerminalCompletion } from "@/src/server/agents/agent-creation-latency";
 import { initializeAgentRuntimeAfterDeploymentReady } from "@/src/server/agents/agent-runtime-store";
 import { scheduleAgentRuntimeReconcileAfterResponse } from "@/src/server/agents/agent-runtime-triggers";
 import { getAssistantProfileForManagedModel } from "@/src/server/agents/assistant-profiles";
@@ -1868,6 +1869,17 @@ async function finalizeReady(
 
   if (finalized) {
     scheduleAgentRuntimeReconcileAfterResponse(work.agentId);
+    await logAgentCreationTerminalCompletion(connection, work.id).catch((error: unknown) => {
+      logAgentDeployment(
+        "terminal_completion_log_failed",
+        {
+          deploymentId: work.id,
+          runnerId: work.agentRunnerId,
+          error: serializeLogError(error),
+        },
+        "warn",
+      );
+    });
   }
 
   return finalized;

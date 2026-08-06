@@ -93,6 +93,7 @@ describe("local full agent-cycle smoke", () => {
     );
     expect(source).toContain("createAgentForUser");
     expect(source).toContain("reconcileTargetAgentDeployment");
+    expect(source).toContain("buildAgentCreationLatencyReportForDatabase");
     expect(source).toContain("restartAgentForUser");
     expect(source).toContain("reconcileTargetAgentRuntime");
     expect(source).toContain("buildHermesAgentLaunchSpecForUser");
@@ -100,6 +101,8 @@ describe("local full agent-cycle smoke", () => {
     expect(source).toContain("deleteAgentForUser");
     expect(source).toContain("simulatedDroplets: 1");
     expect(source).toContain("digitalOceanRequests: 0");
+    expect(source).toContain("local_agent_cycle_creation_latency");
+    expect(source).toContain("creationLatencyReport");
     expect(source).toContain("hermesInstalledInsideDroplet: true");
     expect(source).toContain("hermesGatewayLiveInsideDroplet: true");
     expect(source).toContain("nestedDocker: true");

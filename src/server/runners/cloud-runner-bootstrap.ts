@@ -194,14 +194,24 @@ runcmd:
       AGENTBAY_BOOTSTRAP_STEP=docker_apt_repository
       trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
       install -m 0755 -d /etc/apt/keyrings
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Configuring Docker apt repository." docker_apt_repository
       curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
       chmod a+r /etc/apt/keyrings/docker.gpg
       sh -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list'
       apt-get update
       /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Docker apt repository was configured." docker_apt_repository
-${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-  - apt-get install -y caddy
-  - systemctl enable --now docker
+${swapCommands}  -
+    - bash
+    - -lc
+    - |
+      set -euxo pipefail
+      AGENTBAY_BOOTSTRAP_STEP=package_install
+      trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Installing cloud runner packages." package_install
+      apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      apt-get install -y caddy
+      systemctl enable --now docker
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Cloud runner packages were installed." package_install
   - install -m 0700 -d ${shellQuote(dirname(config.envFilePath))}
   -
     - bash
@@ -265,16 +275,21 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
       }
       /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling cloud runner image." docker_pull
       agentbay_pull_image ${shellQuote(config.runnerImage)}
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled cloud runner image." docker_pull
       AGENTBAY_BOOTSTRAP_STEP=agent_image_pull
       /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling default agent container image." agent_image_pull
       agentbay_pull_image ${shellQuote(config.agentImage)}
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled default agent container image." agent_image_pull
       AGENTBAY_BOOTSTRAP_STEP=hermes_image_pull
       /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling Hermes workload image." hermes_image_pull
       agentbay_pull_image ${shellQuote(config.hermesWorkloadImage)}
-      AGENTBAY_BOOTSTRAP_STEP=docker_container_start
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled Hermes workload image." hermes_image_pull
+      AGENTBAY_BOOTSTRAP_STEP=runner_container_start
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Starting runner container." runner_container_start
       docker rm --force ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} || true
       docker run --detach --name ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} --restart always --network ${shellQuote(config.hermesPrivateNetwork)} --env-file ${shellQuote(config.envFilePath)} -v ${shellQuote(`${config.envFilePath}:${config.containerEnvFilePath}`)} -v ${shellQuote(`${config.hermesStateRoot}:${config.hermesStateRoot}`)} -v ${shellQuote(`${DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT}:${DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT}`)} -v ${shellQuote(`${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}:${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}`)} -p ${shellQuote(`${config.runnerHost}:${config.runnerPort}:${config.runnerPort}`)} ${shellQuote(config.runnerImage)}
-      /usr/local/bin/agentbay-bootstrap-event waiting_for_runner started "Runner container started; waiting for registration and heartbeat." docker_container_started
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Runner container started." runner_container_start
+      /usr/local/bin/agentbay-bootstrap-event waiting_for_runner started "Runner container started; waiting for registration and heartbeat." runner_registration
 `;
 
   return {

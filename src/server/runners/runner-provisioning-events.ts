@@ -98,11 +98,47 @@ export async function markCloudRunnerRegistered(
 
   await recordRunnerProvisioningEvent(tx, {
     runnerId: input.runnerId,
+    phase: "bootstrapping",
+    status: "completed",
+    message: "Cloud runner bootstrap completed registration handoff.",
+    metadata: {
+      provider: DIGITALOCEAN_PROVIDER,
+    },
+    now: input.now,
+  });
+
+  await recordRunnerProvisioningEvent(tx, {
+    runnerId: input.runnerId,
+    phase: "bootstrapping",
+    status: "completed",
+    message: "Cloud runner bootstrap startup boundary completed.",
+    metadata: {
+      provider: DIGITALOCEAN_PROVIDER,
+      step: "bootstrap_started",
+    },
+    now: input.now,
+  });
+
+  await recordRunnerProvisioningEvent(tx, {
+    runnerId: input.runnerId,
     phase: "waiting_for_runner",
     status: "completed",
     message: "Cloud runner exchanged its one-time registration token.",
     metadata: {
       provider: DIGITALOCEAN_PROVIDER,
+      registration: "completed",
+    },
+    now: input.now,
+  });
+
+  await recordRunnerProvisioningEvent(tx, {
+    runnerId: input.runnerId,
+    phase: "waiting_for_runner",
+    status: "completed",
+    message: "Cloud runner exchanged its one-time registration token.",
+    metadata: {
+      provider: DIGITALOCEAN_PROVIDER,
+      step: "runner_registration",
       registration: "completed",
     },
     now: input.now,
@@ -115,15 +151,18 @@ export async function markCloudRunnerReadyAfterAuthenticatedProbe(
     runnerId: string;
     now: Date;
     bootSnapshot: RunnerBootSnapshot;
+    readinessProbeStartedAt: Date;
+    readinessProbeCompletedAt: Date;
   },
 ): Promise<boolean> {
+  const bootCompletedAt = bootSnapshotCompletedAt(input.bootSnapshot, input.now);
   const transitionedRows = await tx
     .update(runners)
     .set({
       status: "online",
       provisioningStatus: "ready",
-      provisioningCompletedAt: input.now,
-      updatedAt: input.now,
+      provisioningCompletedAt: input.readinessProbeCompletedAt,
+      updatedAt: input.readinessProbeCompletedAt,
     })
     .where(
       and(
@@ -143,18 +182,87 @@ export async function markCloudRunnerReadyAfterAuthenticatedProbe(
 
   await recordRunnerProvisioningEvent(tx, {
     runnerId: input.runnerId,
+    phase: "bootstrapping",
+    status: "started",
+    message: "Runner boot validation started.",
+    metadata: {
+      provider: DIGITALOCEAN_PROVIDER,
+      step: "boot_validation",
+      bootContractVersion: input.bootSnapshot.contractVersion,
+      bootStatus: input.bootSnapshot.status,
+    },
+    now: new Date(input.bootSnapshot.startedAt),
+  });
+
+  await recordRunnerProvisioningEvent(tx, {
+    runnerId: input.runnerId,
+    phase: "bootstrapping",
+    status: "completed",
+    message: "Runner boot validation succeeded.",
+    metadata: {
+      provider: DIGITALOCEAN_PROVIDER,
+      step: "boot_validation",
+      bootContractVersion: input.bootSnapshot.contractVersion,
+      bootStatus: input.bootSnapshot.status,
+      bootComponents: input.bootSnapshot.components,
+    },
+    now: bootCompletedAt,
+  });
+
+  await recordRunnerProvisioningEvent(tx, {
+    runnerId: input.runnerId,
+    phase: "ready",
+    status: "started",
+    message: "Runner readiness transition started.",
+    metadata: {
+      provider: DIGITALOCEAN_PROVIDER,
+      readinessProbe: "authenticated_endpoint",
+    },
+    now: input.readinessProbeStartedAt,
+  });
+
+  await recordRunnerProvisioningEvent(tx, {
+    runnerId: input.runnerId,
+    phase: "ready",
+    status: "started",
+    message: "Authenticated runner readiness probe started.",
+    metadata: {
+      provider: DIGITALOCEAN_PROVIDER,
+      step: "authenticated_readiness",
+      heartbeatStatus: "online",
+      readinessProbe: "authenticated_endpoint",
+    },
+    now: input.readinessProbeStartedAt,
+  });
+
+  await recordRunnerProvisioningEvent(tx, {
+    runnerId: input.runnerId,
+    phase: "ready",
+    status: "completed",
+    message: "Runner readiness transition completed.",
+    metadata: {
+      provider: DIGITALOCEAN_PROVIDER,
+      heartbeatStatus: "online",
+      readinessProbe: "authenticated_endpoint",
+    },
+    now: input.readinessProbeCompletedAt,
+  });
+
+  await recordRunnerProvisioningEvent(tx, {
+    runnerId: input.runnerId,
     phase: "ready",
     status: "completed",
     message: "Authenticated runner readiness probe succeeded.",
     metadata: {
       provider: DIGITALOCEAN_PROVIDER,
+      step: "authenticated_readiness",
       heartbeatStatus: "online",
       readinessProbe: "authenticated_endpoint",
       bootContractVersion: input.bootSnapshot.contractVersion,
       bootStatus: input.bootSnapshot.status,
       bootComponents: input.bootSnapshot.components,
     },
-    now: input.now,
+    now: input.readinessProbeCompletedAt,
   });
 
   return true;
@@ -166,10 +274,13 @@ export async function markCloudRunnerFailedAfterAuthenticatedProbe(
     runnerId: string;
     now: Date;
     bootSnapshot: RunnerBootSnapshot;
+    readinessProbeStartedAt: Date;
+    readinessProbeCompletedAt: Date;
   },
 ): Promise<boolean> {
   const failureReason = input.bootSnapshot.failureReason;
   if (input.bootSnapshot.status !== "failed" || failureReason === null) return false;
+  const bootCompletedAt = bootSnapshotCompletedAt(input.bootSnapshot, input.now);
 
   const transitionedRows = await tx
     .update(runners)
@@ -177,8 +288,8 @@ export async function markCloudRunnerFailedAfterAuthenticatedProbe(
       status: "provision_failed",
       provisioningStatus: "failed",
       provisioningError: runnerBootFailureMessage(failureReason),
-      provisioningCompletedAt: input.now,
-      updatedAt: input.now,
+      provisioningCompletedAt: input.readinessProbeCompletedAt,
+      updatedAt: input.readinessProbeCompletedAt,
     })
     .where(
       and(
@@ -196,6 +307,93 @@ export async function markCloudRunnerFailedAfterAuthenticatedProbe(
 
   await recordRunnerProvisioningEvent(tx, {
     runnerId: input.runnerId,
+    phase: "bootstrapping",
+    status: "started",
+    message: "Runner boot validation started.",
+    metadata: {
+      provider: DIGITALOCEAN_PROVIDER,
+      step: "boot_validation",
+      bootContractVersion: input.bootSnapshot.contractVersion,
+      bootStatus: input.bootSnapshot.status,
+    },
+    now: new Date(input.bootSnapshot.startedAt),
+  });
+
+  await recordRunnerProvisioningEvent(tx, {
+    runnerId: input.runnerId,
+    phase: "bootstrapping",
+    status: "failed",
+    message: "Runner boot validation failed.",
+    metadata: {
+      provider: DIGITALOCEAN_PROVIDER,
+      step: "boot_validation",
+      bootContractVersion: input.bootSnapshot.contractVersion,
+      bootStatus: input.bootSnapshot.status,
+      bootComponents: input.bootSnapshot.components,
+      bootFailureReason: failureReason,
+    },
+    now: bootCompletedAt,
+  });
+
+  await recordRunnerProvisioningEvent(tx, {
+    runnerId: input.runnerId,
+    phase: "ready",
+    status: "started",
+    message: "Runner readiness transition started.",
+    metadata: {
+      provider: DIGITALOCEAN_PROVIDER,
+      readinessProbe: "authenticated_endpoint",
+    },
+    now: input.readinessProbeStartedAt,
+  });
+
+  await recordRunnerProvisioningEvent(tx, {
+    runnerId: input.runnerId,
+    phase: "ready",
+    status: "started",
+    message: "Authenticated runner readiness probe started.",
+    metadata: {
+      provider: DIGITALOCEAN_PROVIDER,
+      step: "authenticated_readiness",
+      readinessProbe: "authenticated_endpoint",
+    },
+    now: input.readinessProbeStartedAt,
+  });
+
+  await recordRunnerProvisioningEvent(tx, {
+    runnerId: input.runnerId,
+    phase: "ready",
+    status: "failed",
+    message: "Runner readiness transition failed.",
+    metadata: {
+      provider: DIGITALOCEAN_PROVIDER,
+      readinessProbe: "authenticated_endpoint",
+      bootContractVersion: input.bootSnapshot.contractVersion,
+      bootStatus: input.bootSnapshot.status,
+      bootFailureReason: failureReason,
+    },
+    now: input.readinessProbeCompletedAt,
+  });
+
+  await recordRunnerProvisioningEvent(tx, {
+    runnerId: input.runnerId,
+    phase: "ready",
+    status: "failed",
+    message: "Authenticated runner readiness probe failed.",
+    metadata: {
+      provider: DIGITALOCEAN_PROVIDER,
+      step: "authenticated_readiness",
+      readinessProbe: "authenticated_endpoint",
+      bootContractVersion: input.bootSnapshot.contractVersion,
+      bootStatus: input.bootSnapshot.status,
+      bootComponents: input.bootSnapshot.components,
+      bootFailureReason: failureReason,
+    },
+    now: input.readinessProbeCompletedAt,
+  });
+
+  await recordRunnerProvisioningEvent(tx, {
+    runnerId: input.runnerId,
     phase: "failed",
     status: "failed",
     message: "Authenticated runner boot self-test failed.",
@@ -207,10 +405,14 @@ export async function markCloudRunnerFailedAfterAuthenticatedProbe(
       bootComponents: input.bootSnapshot.components,
       bootFailureReason: failureReason,
     },
-    now: input.now,
+    now: input.readinessProbeCompletedAt,
   });
 
   return true;
+}
+
+function bootSnapshotCompletedAt(snapshot: RunnerBootSnapshot, fallback: Date): Date {
+  return snapshot.completedAt ? new Date(snapshot.completedAt) : fallback;
 }
 
 function runnerBootFailureMessage(reason: Exclude<RunnerBootFailureReason, null>): string {

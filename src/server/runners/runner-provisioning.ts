@@ -322,7 +322,13 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
       log("provider_resource_adopted", {
         providerResourceId: adopted.providerResourceId,
       });
-      await persistAutomaticProviderResource(input, adopted, "tagging");
+      const startedAt = await setAutomaticProvisioningPhase(input, "creating");
+      await completeAutomaticProvisioningPhase(input, {
+        phase: "creating",
+        nextPhase: "tagging",
+        resource: adopted,
+        notBefore: startedAt,
+      });
       return { ok: true, state: "pending" };
     }
 
@@ -391,6 +397,7 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
       now: input.now,
       log,
     });
+    const startedAt = await setAutomaticProvisioningPhase(input, "creating");
     log("provider_create_started", {
       region: input.config.region,
       sizeSlug: input.config.sizeSlug,
@@ -418,7 +425,6 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
         created.reason === "create_outcome_unknown" ? "warn" : "error",
       );
       if (created.reason === "create_outcome_unknown") {
-        await setAutomaticProvisioningPhase(input, "creating");
         return { ok: true, state: "pending" };
       }
 
@@ -430,7 +436,12 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
       };
     }
 
-    await persistAutomaticProviderResource(input, created.value, "tagging");
+    await completeAutomaticProvisioningPhase(input, {
+      phase: "creating",
+      nextPhase: "tagging",
+      resource: created.value,
+      notBefore: startedAt,
+    });
     log("provider_create_completed", {
       providerResourceId: created.value.providerResourceId,
       publicIpv4ResolvedInCreateResponse: Boolean(created.value.publicIpv4),
@@ -448,6 +459,7 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
   }
 
   if (runner.provisioningStatus === "tagging") {
+    const startedAt = await setAutomaticProvisioningPhase(input, "tagging");
     const tagged = await input.provider.tagResource(
       { providerResourceId: runner.providerResourceId, tags: operationTags },
       input.context,
@@ -463,11 +475,17 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
       };
     }
 
-    await setAutomaticProvisioningPhase(input, "firewall_configuring");
+    await completeAutomaticProvisioningPhase(input, {
+      phase: "tagging",
+      nextPhase: "firewall_configuring",
+      resource: tagged.value,
+      notBefore: startedAt,
+    });
     return { ok: true, state: "pending" };
   }
 
   if (runner.provisioningStatus === "firewall_configuring") {
+    const startedAt = await setAutomaticProvisioningPhase(input, "firewall_configuring");
     const firewalled = await input.provider.applyFirewall(
       {
         providerResourceId: runner.providerResourceId,
@@ -498,12 +516,22 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     }
 
     const endpointUrl = endpointForProviderResource(firewalled.value);
-    await setAutomaticProvisioningPhase(
-      input,
-      endpointUrl ? "waiting_for_runner" : "bootstrapping",
+    await completeAutomaticProvisioningPhase(input, {
+      phase: "firewall_configuring",
+      nextPhase: endpointUrl ? "waiting_for_runner" : "bootstrapping",
+      resource: firewalled.value,
       endpointUrl,
-      firewalled.value.providerFirewallId,
-    );
+      providerFirewallId: firewalled.value.providerFirewallId,
+      notBefore: startedAt,
+    });
+    if (endpointUrl) {
+      await setAutomaticProvisioningPhase(
+        input,
+        "waiting_for_runner",
+        endpointUrl,
+        firewalled.value.providerFirewallId,
+      );
+    }
     log("provider_firewall_completed", {
       providerFirewallId: firewalled.value.providerFirewallId,
       endpointResolved: Boolean(endpointUrl),
@@ -1801,20 +1829,26 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function persistAutomaticProviderResource(
+async function completeAutomaticProvisioningPhase(
   input: Parameters<typeof advanceAutomaticDigitalOceanRunnerProvisioning>[0],
-  resource: DigitalOceanResource,
-  phase: RunnerProvisioningPhase,
+  update: {
+    phase: Extract<RunnerProvisioningPhase, "creating" | "tagging" | "firewall_configuring">;
+    nextPhase: RunnerProvisioningPhase;
+    resource: DigitalOceanResource;
+    endpointUrl?: string | null;
+    providerFirewallId?: string | null;
+    notBefore?: Date | null;
+  },
 ): Promise<void> {
-  const now = input.now();
+  const now = nextAutomaticProvisioningEventTimestamp(input.now(), update.notBefore);
   await input.connection.db.transaction(async (tx) => {
     const [updated] = await tx
       .update(runners)
       .set({
-        providerResourceId: resource.providerResourceId,
-        providerFirewallId: resource.providerFirewallId,
-        endpointUrl: endpointForProviderResource(resource),
-        provisioningStatus: phase,
+        providerResourceId: update.resource.providerResourceId,
+        providerFirewallId: update.providerFirewallId ?? update.resource.providerFirewallId,
+        endpointUrl: update.endpointUrl ?? endpointForProviderResource(update.resource),
+        provisioningStatus: update.nextPhase,
         updatedAt: now,
       })
       .where(
@@ -1831,10 +1865,15 @@ async function persistAutomaticProviderResource(
       await recordProvisioningEvent(tx, {
         userId: input.userId,
         runnerId: input.runnerId,
-        phase,
+        phase: update.phase,
         status: "completed",
-        message: automaticProvisioningPhaseMessage(phase),
-        metadata: { provider: DIGITALOCEAN_PROVIDER },
+        message: automaticProvisioningPhaseCompletedMessage(update.phase),
+        metadata: {
+          provider: DIGITALOCEAN_PROVIDER,
+          providerResourceId: update.resource.providerResourceId,
+          providerFirewallId: update.providerFirewallId ?? update.resource.providerFirewallId,
+          nextPhase: update.nextPhase,
+        },
         now,
       });
     }
@@ -1846,8 +1885,9 @@ async function setAutomaticProvisioningPhase(
   phase: RunnerProvisioningPhase,
   endpointUrl?: string | null,
   providerFirewallId?: string | null,
-): Promise<void> {
+): Promise<Date | null> {
   const now = input.now();
+  let recorded = false;
   await input.connection.db.transaction(async (tx) => {
     const [updated] = await tx
       .update(runners)
@@ -1869,6 +1909,7 @@ async function setAutomaticProvisioningPhase(
       .returning({ id: runners.id });
 
     if (updated) {
+      recorded = true;
       await recordProvisioningEvent(tx, {
         userId: input.userId,
         runnerId: input.runnerId,
@@ -1880,6 +1921,8 @@ async function setAutomaticProvisioningPhase(
       });
     }
   });
+
+  return recorded ? now : null;
 }
 
 async function markAutomaticProvisioningFailed(
@@ -1944,6 +1987,28 @@ function automaticProvisioningPhaseMessage(phase: RunnerProvisioningPhase): stri
   }
 
   return "Automatic DigitalOcean runner registration is pending.";
+}
+
+function automaticProvisioningPhaseCompletedMessage(
+  phase: Extract<RunnerProvisioningPhase, "creating" | "tagging" | "firewall_configuring">,
+): string {
+  if (phase === "creating") {
+    return "Automatic DigitalOcean resource creation completed.";
+  }
+
+  if (phase === "tagging") {
+    return "Automatic DigitalOcean resource tags were confirmed.";
+  }
+
+  return "Automatic DigitalOcean network policy was confirmed.";
+}
+
+function nextAutomaticProvisioningEventTimestamp(now: Date, notBefore?: Date | null): Date {
+  if (!notBefore || now.getTime() > notBefore.getTime()) {
+    return now;
+  }
+
+  return new Date(notBefore.getTime() + 1);
 }
 
 async function failProvisioning(
