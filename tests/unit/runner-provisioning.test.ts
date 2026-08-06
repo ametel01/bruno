@@ -158,6 +158,10 @@ describe.sequential("runner provisioning service", () => {
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
+    ).toContain("AGENTBAY_RUNNER_BOOT_MODEL_CANARY_ENABLED=false");
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
     ).toContain(
       "docker run --detach --name 'agentbay-runner' --restart always --network 'agentbay-hermes' --env-file '/etc/agentbay/runner.env' -v '/etc/agentbay/runner.env:/etc/agentbay/runner.env' -v '/var/lib/agentbay/agents:/var/lib/agentbay/agents' -v '/var/lib/agentbay/boot-self-test:/var/lib/agentbay/boot-self-test' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' 'ghcr.io/ametel01/agentbay-runner:sha-123'",
     );

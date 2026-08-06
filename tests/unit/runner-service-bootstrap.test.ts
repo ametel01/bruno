@@ -96,6 +96,7 @@ describe("runner service bootstrap registration", () => {
         AGENTBAY_RUNNER_EXPECTED_IMAGE_DIGEST: RELEASE_EVIDENCE.release.imageDigest,
         AGENTBAY_RUNNER_EXPECTED_BOOT_CONTRACT_VERSION:
           RELEASE_EVIDENCE.release.bootContractVersion,
+        AGENTBAY_RUNNER_BOOT_MODEL_CANARY_ENABLED: "false",
         AGENTBAY_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
       },
       fetch: async (url) => {
@@ -151,6 +152,7 @@ describe("runner service bootstrap registration", () => {
     expect(writes[0]?.content).toContain(
       'AGENTBAY_LOCAL_AGENT_SMOKE_MODE="synthetic-external-boundaries"',
     );
+    expect(writes[0]?.content).toContain('AGENTBAY_RUNNER_BOOT_MODEL_CANARY_ENABLED="false"');
     expect(writes[0]?.content).not.toContain("AGENTBAY_RUNNER_REGISTRATION_TOKEN");
   });
 

@@ -1,4 +1,5 @@
 import { writeFile } from "node:fs/promises";
+import { RUNNER_BOOT_MODEL_CANARY_ENABLED_ENV } from "@/src/runner-service/constants";
 import {
   resolveRunnerReleaseEvidence,
   RUNNER_CONTAINER_ID_ENV,
@@ -26,6 +27,7 @@ type RunnerBootstrapEnv = {
   AGENTBAY_RUNNER_EXPECTED_IMAGE_DIGEST?: string;
   AGENTBAY_RUNNER_EXPECTED_BOOT_CONTRACT_VERSION?: string;
   AGENTBAY_RUNNER_RELEASE_IDENTITY_MODE?: string;
+  AGENTBAY_RUNNER_BOOT_MODEL_CANARY_ENABLED?: string;
   AGENTBAY_LOCAL_AGENT_SMOKE_MODE?: string;
 };
 
@@ -194,6 +196,7 @@ function buildPersistedRunnerEnv(input: {
     RUNNER_EXPECTED_IMAGE_DIGEST_ENV,
     RUNNER_EXPECTED_BOOT_CONTRACT_VERSION_ENV,
     RUNNER_RELEASE_IDENTITY_MODE_ENV,
+    RUNNER_BOOT_MODEL_CANARY_ENABLED_ENV,
     "AGENTBAY_LOCAL_AGENT_SMOKE_MODE",
   ] as const) {
     const value = input.env[key]?.trim();

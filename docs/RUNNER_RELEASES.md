@@ -31,6 +31,11 @@ post-response reconciler performs one initialization slice and one provisioning 
 one durable provider attempt starts immediately. Protected cron reconciliation remains the retry
 path. Automated and local tests inject fake providers and never create a Droplet.
 
+New production Droplets skip the runner boot model canary so user creation is not delayed by a
+synthetic model round trip. Boot still verifies Docker, release identity, Hermes fixture startup,
+detailed health, Telegram configuration loading, and cleanup. The local runner release smoke keeps
+the model canary enabled before an image is selected for production.
+
 Release workflow runs share one non-cancelling concurrency group. Automated tests and release runs
 create zero DigitalOcean Droplets. The release workflow does not configure a DigitalOcean provider
 or map the DigitalOcean release secret into any job. Another release run cannot enter the workflow

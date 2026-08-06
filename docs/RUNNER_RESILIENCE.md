@@ -23,8 +23,10 @@ A runner becomes assignable only after it proves:
 - Docker works.
 - Hermes can start.
 - The internal health endpoint responds.
-- The model canary path works.
 - Telegram configuration can be loaded.
+
+Production Droplet boot does not run a model canary. The synthetic model path remains covered by
+the local runner release smoke gate, outside the user creation path.
 
 ## Strict stage deadlines
 

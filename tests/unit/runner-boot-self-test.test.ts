@@ -90,6 +90,28 @@ describe("runner boot self-test", () => {
     expect(canaryAttempts).toBe(2);
   });
 
+  it("skips the model canary when production boot disables it", async () => {
+    const { controller, calls } = await createHarness({}, 1_000, 1_000, {
+      modelCanaryEnabled: false,
+    });
+
+    await controller.start();
+
+    await expect(controller.read()).resolves.toMatchObject({
+      status: "ready",
+      failureReason: null,
+      components: {
+        docker: "passed",
+        hermesFixture: "passed",
+        detailedHealth: "passed",
+        modelCanary: "skipped",
+        telegramConfig: "passed",
+        cleanup: "passed",
+      },
+    });
+    expect(calls).not.toContain("canary");
+  });
+
   it("enforces the total deadline even when a fixture operation ignores abort", async () => {
     const { controller, calls } = await createHarness(
       { launchFixture: async () => await new Promise<RunnerBootFixture>(() => undefined) },
@@ -209,6 +231,7 @@ async function createHarness(
   overrides: Partial<RunnerBootSelfTestExecutor> = {},
   timeoutMs = 1_000,
   cleanupTimeoutMs = 1_000,
+  controllerOptions: { modelCanaryEnabled?: boolean } = {},
 ) {
   const root = await temporaryRoot();
   const snapshotPath = join(root, "boot.json");
@@ -250,6 +273,7 @@ async function createHarness(
     timeoutMs,
     cleanupTimeoutMs,
     canaryRetryDelayMs: 0,
+    ...controllerOptions,
     now: vi
       .fn<() => Date>()
       .mockReturnValueOnce(new Date("2026-08-04T00:00:00.000Z"))

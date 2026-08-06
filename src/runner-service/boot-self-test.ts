@@ -8,6 +8,7 @@ import {
   DEFAULT_HERMES_WORKLOAD_IMAGE,
   DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT,
   DOCKER_CLI_TIMEOUT_MS,
+  RUNNER_BOOT_MODEL_CANARY_ENABLED_ENV,
 } from "@/src/runner-service/constants";
 import {
   ManualRunnerDocker,
@@ -88,6 +89,7 @@ export function createRunnerBootReadinessController(
     cleanupTimeoutMs?: number;
     canaryAttempts?: number;
     canaryRetryDelayMs?: number;
+    modelCanaryEnabled?: boolean;
   } = {},
 ): RunnerBootReadinessController {
   const now = options.now ?? (() => new Date());
@@ -122,6 +124,9 @@ export function createRunnerBootReadinessController(
           canaryAttempts: options.canaryAttempts ?? DEFAULT_RUNNER_BOOT_CANARY_ATTEMPTS,
           canaryRetryDelayMs:
             options.canaryRetryDelayMs ?? DEFAULT_RUNNER_BOOT_CANARY_RETRY_DELAY_MS,
+          modelCanaryEnabled:
+            options.modelCanaryEnabled ??
+            process.env[RUNNER_BOOT_MODEL_CANARY_ENABLED_ENV]?.trim().toLowerCase() !== "false",
         });
       }
       return run;
@@ -138,6 +143,7 @@ async function executeBootSelfTest(input: {
   cleanupTimeoutMs: number;
   canaryAttempts: number;
   canaryRetryDelayMs: number;
+  modelCanaryEnabled: boolean;
 }): Promise<void> {
   const startedAt = input.startedAt;
   const states = Object.fromEntries(
@@ -183,17 +189,21 @@ async function executeBootSelfTest(input: {
     states.detailedHealth = "passed";
     await persistTestingSnapshot(input.snapshotPath, startedAt, states);
 
-    activeComponent = "modelCanary";
-    await abortable(controller.signal, () =>
-      runBootCanaryWithRetries({
-        executor: input.executor,
-        fixture: fixture as RunnerBootFixture,
-        signal: controller.signal,
-        attempts: input.canaryAttempts,
-        retryDelayMs: input.canaryRetryDelayMs,
-      }),
-    );
-    states.modelCanary = "passed";
+    if (input.modelCanaryEnabled) {
+      activeComponent = "modelCanary";
+      await abortable(controller.signal, () =>
+        runBootCanaryWithRetries({
+          executor: input.executor,
+          fixture: fixture as RunnerBootFixture,
+          signal: controller.signal,
+          attempts: input.canaryAttempts,
+          retryDelayMs: input.canaryRetryDelayMs,
+        }),
+      );
+      states.modelCanary = "passed";
+    } else {
+      states.modelCanary = "skipped";
+    }
     await persistTestingSnapshot(input.snapshotPath, startedAt, states);
   } catch (error) {
     failureReason = controller.signal.aborted

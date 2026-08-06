@@ -228,7 +228,7 @@ export const RUNNER_BOOT_COMPONENTS = [
 ] as const;
 
 export type RunnerBootComponent = (typeof RUNNER_BOOT_COMPONENTS)[number];
-export type RunnerBootComponentState = "pending" | "passed" | "failed";
+export type RunnerBootComponentState = "pending" | "passed" | "failed" | "skipped";
 export type RunnerBootSnapshotStatus = "testing" | "ready" | "failed";
 export type RunnerBootFailureReason =
   | null
@@ -287,7 +287,16 @@ export function parseRunnerBootSnapshot(value: unknown): RunnerBootSnapshot | nu
 
   const components = value.components as Record<string, unknown>;
   const states = RUNNER_BOOT_COMPONENTS.map((component) => components[component]);
-  if (!states.every((state) => ["pending", "passed", "failed"].includes(state as never))) {
+  if (
+    !states.every((state) => ["pending", "passed", "failed", "skipped"].includes(state as never))
+  ) {
+    return null;
+  }
+  if (
+    RUNNER_BOOT_COMPONENTS.some(
+      (component) => components[component] === "skipped" && component !== "modelCanary",
+    )
+  ) {
     return null;
   }
 
@@ -297,7 +306,7 @@ export function parseRunnerBootSnapshot(value: unknown): RunnerBootSnapshot | nu
     (isReady &&
       (value.failureReason !== null ||
         value.completedAt === null ||
-        !states.every((state) => state === "passed"))) ||
+        !states.every((state) => state === "passed" || state === "skipped"))) ||
     (isTesting && (value.failureReason !== null || value.completedAt !== null)) ||
     (value.status === "failed" &&
       (value.failureReason === null || value.completedAt === null || !states.includes("failed")))

@@ -8,6 +8,7 @@ import {
   DEFAULT_HERMES_WORKLOAD_IMAGE,
   DEFAULT_MANUAL_RUNNER_IMAGE,
   DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT,
+  RUNNER_BOOT_MODEL_CANARY_ENABLED_ENV,
   RUNNER_BOOT_CONTRACT_VERSION,
 } from "@/src/runner-service/constants";
 import {
@@ -49,6 +50,7 @@ type CloudRunnerBootstrapInput = {
   hermesPrivateNetwork?: string;
   hermesReadinessTimeoutMs?: number;
   runnerMaxAgents?: number;
+  bootModelCanaryEnabled?: boolean;
   envFilePath?: string;
   runnerHost?: string;
   runnerPort?: number;
@@ -67,6 +69,7 @@ export type CloudRunnerBootstrapContent = {
     hermesPrivateNetwork: string;
     hermesReadinessTimeoutMs: number;
     runnerMaxAgents: number;
+    bootModelCanaryEnabled: boolean;
     runnerRelease: {
       version: string;
       imageDigest: string;
@@ -138,6 +141,7 @@ export function buildCloudRunnerBootstrapContent(
     `AGENTBAY_HERMES_READINESS_TIMEOUT_MS=${config.hermesReadinessTimeoutMs}`,
     `AGENTBAY_RUNNER_ENV_FILE=${escapeDockerEnvHereDocValue(config.containerEnvFilePath)}`,
     `AGENTBAY_RUNNER_MAX_AGENTS=${config.runnerMaxAgents}`,
+    `${RUNNER_BOOT_MODEL_CANARY_ENABLED_ENV}=${config.bootModelCanaryEnabled}`,
     ...(config.expectedRelease
       ? [
           `${RUNNER_EXPECTED_RELEASE_VERSION_ENV}=${escapeDockerEnvHereDocValue(config.expectedRelease.version)}`,
@@ -285,6 +289,7 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
       hermesPrivateNetwork: config.hermesPrivateNetwork,
       hermesReadinessTimeoutMs: config.hermesReadinessTimeoutMs,
       runnerMaxAgents: config.runnerMaxAgents,
+      bootModelCanaryEnabled: config.bootModelCanaryEnabled,
       runnerRelease: config.expectedRelease
         ? {
             version: config.expectedRelease.version,
@@ -346,6 +351,7 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
       input.runnerMaxAgents ?? DEFAULT_HERMES_RUNNER_MAX_AGENTS,
       "runnerMaxAgents",
     ),
+    bootModelCanaryEnabled: input.bootModelCanaryEnabled ?? false,
     envFilePath: input.envFilePath?.trim() || DEFAULT_CLOUD_RUNNER_ENV_FILE,
     containerEnvFilePath: input.envFilePath?.trim() || DEFAULT_CLOUD_RUNNER_ENV_FILE,
     runnerHost: input.runnerHost?.trim() || DEFAULT_CLOUD_RUNNER_HOST,

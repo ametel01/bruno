@@ -112,6 +112,7 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain(
       `AGENTBAY_RUNNER_MAX_AGENTS=${DEFAULT_HERMES_RUNNER_MAX_AGENTS}`,
     );
+    expect(content.userData).toContain("AGENTBAY_RUNNER_BOOT_MODEL_CANARY_ENABLED=false");
     expect(content.userData).toContain(
       "          AGENTBAY_APP_URL=https://app.agentbay.test\n" +
         "          AGENTBAY_RUNNER_REGISTRATION_TOKEN=",
@@ -158,6 +159,7 @@ describe.sequential("cloud runner bootstrap content", () => {
       hermesPrivateNetwork: DEFAULT_HERMES_PRIVATE_NETWORK,
       hermesReadinessTimeoutMs: DEFAULT_HERMES_READINESS_TIMEOUT_MS,
       runnerMaxAgents: DEFAULT_HERMES_RUNNER_MAX_AGENTS,
+      bootModelCanaryEnabled: false,
       registrationToken: BOOTSTRAP_REDACTION,
     });
     expect(JSON.stringify(content.safeSummary)).not.toContain(registrationToken);

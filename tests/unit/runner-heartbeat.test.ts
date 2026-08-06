@@ -631,6 +631,23 @@ describe("runner heartbeat persistence", () => {
     ).resolves.toEqual({ ok: false, reason: "endpoint_rejected" });
   });
 
+  it("accepts production readiness when only the boot model canary is skipped", async () => {
+    const snapshot = readyRunnerBootSnapshot({
+      components: {
+        ...readyRunnerBootSnapshot().components,
+        modelCanary: "skipped",
+      },
+    });
+
+    await expect(
+      probeRunnerEndpointReadiness({
+        endpointUrl: "https://production-cloud-runner.example.com",
+        runnerBearerToken: "runner-command-token",
+        fetch: async () => Response.json(snapshot),
+      }),
+    ).resolves.toEqual({ ok: true, protocol: "readiness_endpoint", snapshot });
+  });
+
   it("preserves an authenticated failed boot snapshot returned with 503", async () => {
     const snapshot = readyRunnerBootSnapshot({
       status: "failed",

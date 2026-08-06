@@ -1661,6 +1661,7 @@ async function buildProvisioningBootstrap(input: {
         : { hermesReadinessTimeoutMs: input.hermesReadinessTimeoutMs }),
       ...(input.runnerMaxAgents === undefined ? {} : { runnerMaxAgents: input.runnerMaxAgents }),
       ...(input.releaseIdentityMode ? { releaseIdentityMode: input.releaseIdentityMode } : {}),
+      bootModelCanaryEnabled: input.releaseIdentityMode === RUNNER_RELEASE_DEVELOPMENT_MODE,
       endpointDiscovery: { type: "digitalocean_metadata" },
       enableSwap: LOW_MEMORY_DIGITALOCEAN_SIZE_SLUGS.has(input.sizeSlug),
       runnerName: input.runnerName,
