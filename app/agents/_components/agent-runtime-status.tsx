@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import {
   type PublicAgentRuntimePresentation,
   parseSafeRuntimeGetBody,
@@ -187,6 +187,10 @@ function AgentRuntimeStatusState({ agentId, initialRuntime }: AgentRuntimeStatus
     }
   }, [agentId, clearTimer, recordFailure, router, schedule]);
 
+  const pollOnResume = useEffectEvent(() => {
+    void poll();
+  });
+
   useEffect(() => {
     pollRef.current = () => void poll();
   }, [poll]);
@@ -205,7 +209,7 @@ function AgentRuntimeStatusState({ agentId, initialRuntime }: AgentRuntimeStatus
     const resume = () => {
       if (!document.hidden && navigator.onLine) {
         resumeForeground(false);
-        void poll();
+        pollOnResume();
       } else {
         pauseForeground();
         clearTimer();
@@ -220,7 +224,7 @@ function AgentRuntimeStatusState({ agentId, initialRuntime }: AgentRuntimeStatus
       window.removeEventListener("online", resume);
       window.removeEventListener("offline", resume);
     };
-  }, [clearTimer, pauseForeground, poll, resumeForeground]);
+  }, [clearTimer, pauseForeground, resumeForeground]);
 
   return (
     <section

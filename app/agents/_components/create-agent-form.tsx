@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, type RefObject, useEffect, useRef, useState } from "react";
+import { type FormEvent, type RefObject, useRef, useState, useSyncExternalStore } from "react";
 import { parseSafeCreate202Body } from "@/src/shared/agent-deployment-presentation";
 import {
   type AssistantChoice,
@@ -25,6 +25,10 @@ type SubmitState =
   | { status: "error"; message: string; field?: FieldName; definitive: boolean }
   | { status: "ambiguous"; message: string };
 
+const subscribeToHydration = () => () => {};
+const getHydratedSnapshot = () => true;
+const getServerHydratedSnapshot = () => false;
+
 export function CreateAgentForm({
   maxNameLength,
   readyModeEnabled,
@@ -38,24 +42,16 @@ export function CreateAgentForm({
   const statusRef = useRef<HTMLParagraphElement | null>(null);
   const latchRef = useRef(false);
   const logicalSubmissionRef = useRef<LogicalSubmission | null>(null);
-  const [hydrated, setHydrated] = useState(false);
   const [assistant, setAssistant] = useState<AssistantChoice>(
     modelConnections[0]?.assistant ?? "chatgpt",
   );
   const [state, setState] = useState<SubmitState>({ status: "idle" });
+  const hydrated = useSyncExternalStore(
+    subscribeToHydration,
+    getHydratedSnapshot,
+    getServerHydratedSnapshot,
+  );
   const selectedConnection = modelConnections.find((item) => item.assistant === assistant);
-
-  useEffect(() => setHydrated(true), []);
-
-  useEffect(() => {
-    if (state.status === "error" && state.field) {
-      focusField(state.field, { nameRef, modelKeyRef, telegramTokenRef, allowlistRef });
-    }
-
-    if (state.status === "success") {
-      statusRef.current?.focus();
-    }
-  }, [state]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -78,12 +74,7 @@ export function CreateAgentForm({
     });
 
     if (!prepared.ok) {
-      setState({
-        status: "error",
-        message: prepared.message,
-        field: prepared.field,
-        definitive: true,
-      });
+      showError(prepared.message, true, prepared.field);
       return;
     }
 
@@ -119,7 +110,7 @@ export function CreateAgentForm({
 
       if (definitive) {
         releaseSubmission();
-        setState(errorState(failure.message, true, failure.field));
+        showError(failure.message, true, failure.field);
       } else {
         lockSubmission();
         setState({
@@ -155,7 +146,15 @@ export function CreateAgentForm({
     logicalSubmissionRef.current = null;
     const href = `/agents/${encodeURIComponent(parsed.agentId)}`;
     setState({ status: "success", message: "Your agent is being set up.", href });
+    window.requestAnimationFrame(() => statusRef.current?.focus());
     window.setTimeout(() => router.replace(href), 750);
+  }
+
+  function showError(message: string, definitive: boolean, field?: FieldName) {
+    setState(errorState(message, definitive, field));
+    if (field) {
+      focusField(field, { nameRef, modelKeyRef, telegramTokenRef, allowlistRef });
+    }
   }
 
   function clearCredentialFields() {
