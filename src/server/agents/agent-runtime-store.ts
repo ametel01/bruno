@@ -166,12 +166,25 @@ export async function initializeAgentRuntimeAfterDeploymentReady(input: {
             and finalized_deployment.runner_operation_id = ${input.operationId}
             and finalized_deployment.runner_accepted_at is not null
             and finalized_deployment.completed_at is not null
-            and finalized_deployment.canary_state = 'passed'
-            and finalized_deployment.canary_attempted_at is not null
-            and finalized_deployment.canary_completed_at is not null
-            and finalized_deployment.canary_completed_at >= finalized_deployment.canary_attempted_at
+            and finalized_deployment.canary_state in ('passed', 'skipped')
+            and (
+              (
+                finalized_deployment.canary_state = 'passed'
+                and finalized_deployment.canary_attempted_at is not null
+                and finalized_deployment.canary_completed_at is not null
+                and finalized_deployment.canary_completed_at >= finalized_deployment.canary_attempted_at
+              )
+              or (
+                finalized_deployment.canary_state = 'skipped'
+                and finalized_deployment.canary_attempted_at is null
+                and finalized_deployment.canary_completed_at is null
+              )
+            )
             and finalized_deployment.completed_at >= finalized_deployment.runner_accepted_at
-            and finalized_deployment.completed_at >= finalized_deployment.canary_completed_at
+            and (
+              finalized_deployment.canary_completed_at is null
+              or finalized_deployment.completed_at >= finalized_deployment.canary_completed_at
+            )
             and not exists (
               select 1
               from agent_deployments as newer_deployment

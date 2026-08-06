@@ -1,0 +1,4 @@
+ALTER TABLE "agent_deployments" DROP CONSTRAINT "agent_deployments_canary_state_check";--> statement-breakpoint
+ALTER TABLE "agent_deployments" DROP CONSTRAINT "agent_deployments_telegram_ready_canary_check";--> statement-breakpoint
+ALTER TABLE "agent_deployments" ADD CONSTRAINT "agent_deployments_canary_state_check" CHECK ("agent_deployments"."canary_state" IN ('not_started', 'started', 'passed', 'skipped', 'failed', 'outcome_unknown'));--> statement-breakpoint
+ALTER TABLE "agent_deployments" ADD CONSTRAINT "agent_deployments_telegram_ready_canary_check" CHECK ("agent_deployments"."stage" NOT IN ('connecting_telegram', 'ready') OR "agent_deployments"."canary_state" IN ('passed', 'skipped'));

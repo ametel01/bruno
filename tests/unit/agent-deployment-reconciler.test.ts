@@ -70,6 +70,7 @@ describe("agent deployment reconciler", () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await resetTables(connection);
     await connection.close();
   });
@@ -501,6 +502,82 @@ describe("agent deployment reconciler", () => {
       "agent.deployment_stage_changed",
       "agent.start_completed",
     ]);
+  });
+
+  it("skips model verification without dispatch when production creation disables the canary", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    await seedRunner(connection);
+    await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
+    await seedDeployment(connection, {
+      stage: "starting_gateway",
+      runnerOperationId: OPERATION_ID,
+      runnerAcceptedAt: NOW,
+    });
+    const adapter = fakeRunnerAdapter({
+      status: vi.fn(async () => ({ ok: true, runner: manualRunner(), snapshot: readySnapshot() })),
+    });
+
+    await expect(
+      reconcileNextAgentDeployment({
+        createConnection: () => connection,
+        now: () => NOW,
+        manualRunnerAdapter: () => adapter as never,
+      }),
+    ).resolves.toEqual({ processed: 1, outcome: "advanced" });
+
+    await expect(
+      reconcileNextAgentDeployment({
+        createConnection: () => connection,
+        now: () => NOW,
+        manualRunnerAdapter: () => adapter as never,
+      }),
+    ).resolves.toEqual({ processed: 1, outcome: "ready" });
+
+    expect(adapter.canary).not.toHaveBeenCalled();
+    const [deployment] = await connection.db
+      .select()
+      .from(agentDeployments)
+      .where(eq(agentDeployments.id, DEPLOYMENT_ID));
+    expect(deployment).toMatchObject({
+      stage: "ready",
+      canaryState: "skipped",
+      canaryAttemptedAt: null,
+      canaryCompletedAt: null,
+    });
+  });
+
+  it("converges legacy verifying-model work to skipped without dispatch", async () => {
+    await seedRunner(connection);
+    await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
+    await seedDeployment(connection, {
+      stage: "verifying_model",
+      runnerOperationId: OPERATION_ID,
+      runnerAcceptedAt: NOW,
+      canaryState: "started",
+      canaryAttemptedAt: NOW,
+    });
+    const adapter = fakeRunnerAdapter();
+
+    await expect(
+      reconcileNextAgentDeployment({
+        createConnection: () => connection,
+        now: () => NOW,
+        manualRunnerAdapter: () => adapter as never,
+        modelCanaryEnabled: false,
+      }),
+    ).resolves.toEqual({ processed: 1, outcome: "advanced" });
+
+    expect(adapter.canary).not.toHaveBeenCalled();
+    const [deployment] = await connection.db
+      .select()
+      .from(agentDeployments)
+      .where(eq(agentDeployments.id, DEPLOYMENT_ID));
+    expect(deployment).toMatchObject({
+      stage: "connecting_telegram",
+      canaryState: "skipped",
+      canaryAttemptedAt: null,
+      canaryCompletedAt: null,
+    });
   });
 
   it("fails outcome-unknown after a crash following canary dispatch and lets owner retry once", async () => {

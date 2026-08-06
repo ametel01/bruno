@@ -36,6 +36,10 @@ synthetic model round trip. Boot still verifies Docker, release identity, Hermes
 detailed health, Telegram configuration loading, and cleanup. The local runner release smoke keeps
 the model canary enabled before an image is selected for production.
 
+Production agent creation does not dispatch the later agent-specific model canary either. After the
+real Hermes gateway reports ready, the deployment records the canary as skipped and proceeds to
+Telegram verification. Local release and contract smoke paths retain model-path coverage.
+
 Release workflow runs share one non-cancelling concurrency group. Automated tests and release runs
 create zero DigitalOcean Droplets. The release workflow does not configure a DigitalOcean provider
 or map the DigitalOcean release secret into any job. Another release run cannot enter the workflow

@@ -52,6 +52,10 @@ describe("agent deployment state contract", () => {
       ok: true,
       kind: "transition",
     });
+    expect(checkAgentDeploymentTransition("starting_gateway", "connecting_telegram")).toEqual({
+      ok: true,
+      kind: "transition",
+    });
     expect(checkAgentDeploymentTransition("starting_gateway", "starting_gateway")).toEqual({
       ok: true,
       kind: "same_stage",

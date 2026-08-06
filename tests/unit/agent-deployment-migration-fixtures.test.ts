@@ -81,6 +81,12 @@ describe("agent deployment migration fixtures", () => {
       await expect(
         readConstraintDefinition(sql, "agent_deployments_agent_owner_fk"),
       ).resolves.toContain("FOREIGN KEY (agent_id, user_id) REFERENCES agents(id, user_id)");
+      await expect(
+        readConstraintDefinition(sql, "agent_deployments_canary_state_check"),
+      ).resolves.toContain("'skipped'::text");
+      await expect(
+        readConstraintDefinition(sql, "agent_deployments_telegram_ready_canary_check"),
+      ).resolves.toContain("'skipped'::text");
       await expect(readConstraintDefinition(sql, "agents_id_user_id_unique")).resolves.toContain(
         "UNIQUE (id, user_id)",
       );

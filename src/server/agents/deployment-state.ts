@@ -30,7 +30,7 @@ const ALLOWED_FORWARD_TRANSITIONS: Record<AgentDeploymentStage, readonly AgentDe
   pending: ["provisioning_runner", "configuring_hermes", "failed"],
   provisioning_runner: ["configuring_hermes", "failed"],
   configuring_hermes: ["starting_gateway", "failed"],
-  starting_gateway: ["verifying_model", "failed"],
+  starting_gateway: ["verifying_model", "connecting_telegram", "failed"],
   verifying_model: ["connecting_telegram", "failed"],
   connecting_telegram: ["ready", "failed"],
   ready: [],

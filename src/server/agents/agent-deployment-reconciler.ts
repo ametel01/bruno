@@ -128,6 +128,7 @@ export type AgentDeploymentReconcilerDependencies = {
   digitalOceanProvider?: DigitalOceanProvider;
   readDigitalOceanConfig?: () => DigitalOceanProviderConfig | null;
   randomUUID?: () => string;
+  modelCanaryEnabled?: boolean;
   triggerReplacement?: (replacementId: string) => void;
 };
 
@@ -147,7 +148,7 @@ type ReconcileTarget =
   | { kind: "deployment"; deploymentId: string }
   | { kind: "runner"; runnerId: string };
 
-type CanaryState = "not_started" | "started" | "passed" | "failed" | "outcome_unknown";
+type CanaryState = "not_started" | "started" | "passed" | "skipped" | "failed" | "outcome_unknown";
 
 type ClaimedDeploymentWork = {
   id: string;
@@ -750,6 +751,11 @@ async function reconcileStartingGateway(
   }
 
   if (isReadySnapshot(status.snapshot, work)) {
+    if (!modelCanaryEnabled(dependencies)) {
+      return (await markCanarySkippedAndStage(connection, work, now()))
+        ? "advanced"
+        : "retry_scheduled";
+    }
     return (await transitionStage(connection, work, "verifying_model", now()))
       ? "advanced"
       : "retry_scheduled";
@@ -1006,6 +1012,12 @@ async function reconcileVerifyingModel(
   now: () => Date,
   context: DeploymentActionContext,
 ): Promise<AgentDeploymentReconcileOutcome> {
+  if (!modelCanaryEnabled(dependencies)) {
+    return (await markCanarySkippedAndStage(connection, work, now()))
+      ? "advanced"
+      : "retry_scheduled";
+  }
+
   if (!work.runnerOperationId) {
     await terminallyFailDeployment(connection, work, {
       code: "runner_start_failed",
@@ -1709,6 +1721,55 @@ async function markCanaryPassedAndStage(
   return true;
 }
 
+async function markCanarySkippedAndStage(
+  connection: DatabaseConnection,
+  work: ClaimedDeploymentWork,
+  now: Date,
+): Promise<boolean> {
+  return connection.db.transaction(async (tx) => {
+    const [updated] = await tx.execute<{ id: string }>(sql`
+      update ${agentDeployments}
+      set stage = 'connecting_telegram',
+          attempt_count = 0,
+          canary_state = 'skipped',
+          canary_attempted_at = null,
+          canary_completed_at = null,
+          error_code = null,
+          error_detail = null,
+          next_attempt_at = null,
+          lease_owner = null,
+          lease_expires_at = null,
+          updated_at = ${now.toISOString()}
+      where id = ${work.id}
+        and stage = ${work.stage}
+        and stage in ('starting_gateway', 'verifying_model')
+        and lease_owner = ${work.leaseOwner}
+        and lease_expires_at > ${now.toISOString()}
+        and config_revision = ${work.configRevision}
+        and exists (
+          select 1 from ${agents}
+          where ${agents.id} = ${work.agentId}
+            and ${agents.userId} = ${work.userId}
+            and ${agents.deletedAt} is null
+            and ${agents.desiredStatus} = 'running'
+        )
+      returning id
+    `);
+
+    if (!updated) {
+      return false;
+    }
+
+    await writeDeploymentEvents(tx, work, {
+      events: ["agent.deployment_stage_changed"],
+      fromStage: work.stage,
+      toStage: "connecting_telegram",
+      now,
+    });
+    return true;
+  });
+}
+
 async function finalizeReady(
   connection: DatabaseConnection,
   work: ClaimedDeploymentWork,
@@ -1740,7 +1801,7 @@ async function finalizeReady(
           updated_at = ${now.toISOString()}
       where id = ${work.id}
         and stage = 'connecting_telegram'
-        and canary_state = 'passed'
+        and canary_state in ('passed', 'skipped')
         and runner_operation_id = ${work.runnerOperationId}
         and config_revision = ${work.configRevision}
         and lease_owner = ${work.leaseOwner}
@@ -1808,6 +1869,10 @@ async function finalizeReady(
   }
 
   return finalized;
+}
+
+function modelCanaryEnabled(dependencies: AgentDeploymentReconcilerDependencies): boolean {
+  return dependencies.modelCanaryEnabled ?? process.env.NODE_ENV !== "production";
 }
 
 async function terminallyFailDeployment(

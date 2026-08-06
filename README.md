@@ -372,16 +372,17 @@ Initial setup persists its progress rather than tying it to one browser request:
 | `provisioning_runner` | Runner capacity is being selected, created, or awaited. |
 | `configuring_hermes` | The revisioned managed Hermes configuration is being projected. |
 | `starting_gateway` | The runner accepted or is converging the selected container. |
-| `verifying_model` | The bounded, no-tools canary for this persisted deployment/config revision is being resolved. |
+| `verifying_model` | Legacy or non-production model verification is being resolved; production creation skips this stage. |
 | `connecting_telegram` | Private API/gateway readiness and the dedicated bot connection are being verified. |
-| `ready` | The expected revision, model canary, private API, gateway, and Telegram connection passed. |
+| `ready` | The expected revision, private API, gateway, and Telegram connection passed. |
 | `failed` | Setup ended with a safe error code; Retry, Stop, and Delete are available as applicable. |
 
 Transient runner/start conditions use persisted backoff. A terminal failure attempts safe workload
-cleanup and never turns a mock or ambiguous canary outcome into readiness. Automatic reconciliation
-records at most one successful canary for a deployment/config revision. An explicit Retry after a
-failed or unknown outcome creates a new persisted deployment attempt and may incur one additional
-bounded canary charge.
+cleanup. Production creation does not dispatch a model canary: once the configured Hermes gateway
+is ready, reconciliation records the model check as skipped and continues to Telegram. Local and
+release acceptance paths retain synthetic model coverage outside the user creation path. An
+explicit Retry creates a new persisted deployment attempt without a model call during production
+creation.
 
 After `ready`, the runtime view separates ongoing health from initial deployment:
 

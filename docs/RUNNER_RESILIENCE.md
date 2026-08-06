@@ -28,6 +28,11 @@ A runner becomes assignable only after it proves:
 Production Droplet boot does not run a model canary. The synthetic model path remains covered by
 the local runner release smoke gate, outside the user creation path.
 
+Production agent creation also skips the later deployment model canary. Model latency or provider
+availability must not turn an otherwise healthy runner, gateway, and Telegram setup into a terminal
+creation failure. The deployment ledger records this decision explicitly as `canary_state =
+'skipped'`.
+
 ## Strict stage deadlines
 
 “Starting gateway” should complete within seconds. If it does not, capture sanitized logs and replace the runner. Never repeat the same action 64 times.

@@ -89,6 +89,28 @@ describe("agent runtime persistence fences", () => {
     });
   });
 
+  it("initializes runtime from a ready deployment whose production canary was skipped", async () => {
+    await seedReadyAgent(connection, "a");
+    await connection.db
+      .update(agentDeployments)
+      .set({
+        canaryState: "skipped",
+        canaryAttemptedAt: null,
+        canaryCompletedAt: null,
+      })
+      .where(eq(agentDeployments.id, DEPLOYMENT_A_ID));
+
+    await expect(initializeReady(connection, "a")).resolves.toEqual({ inserted: true });
+
+    const [runtime] = await connection.db.select().from(agentRuntimeReconciliations);
+    expect(runtime).toMatchObject({
+      agentId: AGENT_A_ID,
+      state: "observing",
+      configRevision: "cfg-runtime-a",
+      operationId: OPERATION_A_ID,
+    });
+  });
+
   it("refreshes distinct latest-ready evidence on a safe generation-zero row", async () => {
     await seedReadyAgent(connection, "a");
     await initializeReady(connection, "a");

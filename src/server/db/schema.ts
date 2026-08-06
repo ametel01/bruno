@@ -613,7 +613,7 @@ export const agentDeployments = pgTable(
     ),
     check(
       "agent_deployments_canary_state_check",
-      sql`${table.canaryState} IN ('not_started', 'started', 'passed', 'failed', 'outcome_unknown')`,
+      sql`${table.canaryState} IN ('not_started', 'started', 'passed', 'skipped', 'failed', 'outcome_unknown')`,
     ),
     check(
       "agent_deployments_canary_stage_check",
@@ -633,7 +633,7 @@ export const agentDeployments = pgTable(
     ),
     check(
       "agent_deployments_telegram_ready_canary_check",
-      sql`${table.stage} NOT IN ('connecting_telegram', 'ready') OR ${table.canaryState} = 'passed'`,
+      sql`${table.stage} NOT IN ('connecting_telegram', 'ready') OR ${table.canaryState} IN ('passed', 'skipped')`,
     ),
     check(
       "agent_deployments_completed_stage_check",
