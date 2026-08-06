@@ -108,6 +108,11 @@ describe("runner release workflow contract", () => {
     expect(workflowSource.split(tokenArgument)).toHaveLength(6);
   });
 
+  it("keeps dependency lifecycle code outside production secret scopes", () => {
+    expect(workflowSource.match(/bun install --frozen-lockfile --ignore-scripts/g)).toHaveLength(2);
+    expect(workflowSource).not.toMatch(/^ {6}[A-Z_]+: \$\{\{ secrets\./m);
+  });
+
   it("skips automatic production builds while allowing verified releases and previews", () => {
     expect(vercelConfig.ignoreCommand).toBeTypeOf("string");
     const ignoreCommand = vercelConfig.ignoreCommand ?? "exit 99";

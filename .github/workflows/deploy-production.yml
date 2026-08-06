@@ -127,9 +127,6 @@ jobs:
     outputs:
       deployment-url: ${{ steps.stage.outputs.deployment-url }}
     env:
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
 
     steps:
@@ -144,15 +141,23 @@ jobs:
           bun-version-file: .bun-version
 
       - name: Install frozen dependencies
-        run: bun install --frozen-lockfile
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Pull production project settings
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: >-
           bunx vercel@${VERCEL_CLI_VERSION} pull --yes --environment=production
           --token="${VERCEL_TOKEN}"
 
       - name: Stage exact control plane without assigning production domains
         id: stage
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
           CANDIDATE_DEPLOYMENT_URL="$(bunx vercel@${VERCEL_CLI_VERSION} deploy --prod --skip-domain --yes \
@@ -176,10 +181,6 @@ jobs:
     timeout-minutes: 25
     environment: production
     env:
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      CRON_SECRET: ${{ secrets.CRON_SECRET }}
       PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
       IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
       CANDIDATE_DEPLOYMENT_URL: ${{ needs.stage-control-plane.outputs.deployment-url }}
@@ -196,11 +197,17 @@ jobs:
           bun-version-file: .bun-version
 
       - name: Promote the exact staged deployment
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: >-
           bunx vercel@${VERCEL_CLI_VERSION} promote "${CANDIDATE_DEPLOYMENT_URL}"
           --yes --timeout=5m --token="${VERCEL_TOKEN}"
 
       - name: Verify production health and required release
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           set -euo pipefail
           VERIFIED=false
@@ -227,10 +234,6 @@ jobs:
     timeout-minutes: 25
     environment: production
     env:
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      CRON_SECRET: ${{ secrets.CRON_SECRET }}
       PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
       ROLLBACK_IMAGE: ${{ inputs.rollback_image }}
 
@@ -265,14 +268,22 @@ jobs:
           bun-version-file: .bun-version
 
       - name: Install frozen dependencies
-        run: bun install --frozen-lockfile
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Pull production project settings
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: >-
           bunx vercel@${VERCEL_CLI_VERSION} pull --yes --environment=production
           --token="${VERCEL_TOKEN}"
 
       - name: Deploy verified rollback digest with rollout halted
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           set -euo pipefail
           bunx vercel@${VERCEL_CLI_VERSION} deploy --prod --yes \
@@ -284,6 +295,8 @@ jobs:
             --build-env "AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=0"
 
       - name: Verify rollback health, digest, and halted rollout
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           set -euo pipefail
           VERIFIED=false
