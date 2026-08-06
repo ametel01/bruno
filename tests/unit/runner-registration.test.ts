@@ -329,11 +329,11 @@ describe.sequential("runner registration service", () => {
       expect.objectContaining({
         runnerId: cloudRunner.id,
         phase: "waiting_for_runner",
-        status: "started",
-        message: "Cloud runner registration wait started.",
+        status: "completed",
+        message: "Cloud runner exchanged its one-time registration token.",
         metadata: {
           provider: "digitalocean",
-          step: "runner_registration",
+          registration: "completed",
         },
       }),
       expect.objectContaining({

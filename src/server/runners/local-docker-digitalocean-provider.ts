@@ -335,6 +335,9 @@ function buildLocalCloudInitScript(
 ): string {
   const commands = extractCloudInitRuncmdCommands(userData);
   const commandScripts = commands.flatMap((command, index) => {
+    const skippedBootstrapStep = options.agentSmokeMode
+      ? localAgentSmokeSkippedBootstrapStep(command)
+      : null;
     const scripts = [
       `echo ${shellQuote(`== local cloud-init runcmd ${index + 1}/${commands.length} ==`)}`,
     ];
@@ -348,8 +351,18 @@ function buildLocalCloudInitScript(
       scripts.push(
         '/usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Swap setup was skipped by the local cloud simulator." swap_setup',
       );
-    } else if (options.agentSmokeMode && isLocalAgentSmokePackageBootstrap(command)) {
+    } else if (skippedBootstrapStep) {
+      scripts.push(
+        `/usr/local/bin/agentbay-bootstrap-event bootstrapping started ${shellQuote(
+          localAgentSmokeSkippedBootstrapStartedMessage(skippedBootstrapStep),
+        )} ${skippedBootstrapStep}`,
+      );
       scripts.push(`echo ${shellQuote("Local agent smoke uses the prepared Droplet image.")}`);
+      scripts.push(
+        `/usr/local/bin/agentbay-bootstrap-event bootstrapping completed ${shellQuote(
+          localAgentSmokeSkippedBootstrapCompletedMessage(skippedBootstrapStep),
+        )} ${skippedBootstrapStep}`,
+      );
     } else {
       scripts.push(`bash -lc ${shellQuote(command)}`);
     }
@@ -488,11 +501,34 @@ function buildLocalDockerShim(agentSmokeMode: boolean): string[] {
   ];
 }
 
-function isLocalAgentSmokePackageBootstrap(command: string): boolean {
-  return (
-    command.includes("AGENTBAY_BOOTSTRAP_STEP=docker_apt_repository") ||
-    command.includes("AGENTBAY_BOOTSTRAP_STEP=package_install")
-  );
+function localAgentSmokeSkippedBootstrapStep(
+  command: string,
+): "docker_apt_repository" | "package_install" | null {
+  if (command.includes("AGENTBAY_BOOTSTRAP_STEP=docker_apt_repository")) {
+    return "docker_apt_repository";
+  }
+
+  if (command.includes("AGENTBAY_BOOTSTRAP_STEP=package_install")) {
+    return "package_install";
+  }
+
+  return null;
+}
+
+function localAgentSmokeSkippedBootstrapStartedMessage(
+  step: "docker_apt_repository" | "package_install",
+): string {
+  return step === "docker_apt_repository"
+    ? "Configuring Docker apt repository."
+    : "Installing cloud runner packages.";
+}
+
+function localAgentSmokeSkippedBootstrapCompletedMessage(
+  step: "docker_apt_repository" | "package_install",
+): string {
+  return step === "docker_apt_repository"
+    ? "Docker apt repository was already configured in the local smoke image."
+    : "Cloud runner packages were already installed in the local smoke image.";
 }
 
 function isLocalSwapSetup(command: string): boolean {

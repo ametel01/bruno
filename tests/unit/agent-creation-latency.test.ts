@@ -257,7 +257,163 @@ describe("agent creation latency report", () => {
     );
   });
 
-  it("surfaces invalid runner timestamps without projecting hostile bootstrap step labels", () => {
+  it("rejects zero-duration runner evidence as synthetic invalid timing", () => {
+    const report = buildAgentCreationLatencyReport({
+      generatedAt: "2026-08-07T00:00:00.000Z",
+      deployments: [
+        {
+          id: "deployment-zero-runner-evidence",
+          runnerId: "runner-zero",
+          createdAt: "2026-08-07T00:00:00.000Z",
+          completedAt: "2026-08-07T00:01:00.000Z",
+          failedAt: null,
+          agentStageEvents: [],
+          runnerEvents: [
+            event("creating", "started", "2026-08-07T00:00:10.000Z"),
+            event("creating", "completed", "2026-08-07T00:00:10.000Z"),
+          ],
+        },
+      ],
+    });
+
+    const creating = report.runs[0]?.stages.find((stage) => stage.name === "runner:creating");
+
+    expect(creating).toMatchObject({
+      status: "invalid",
+      durationMs: null,
+      issues: ["non_positive_duration"],
+    });
+    expect(report.runs[0]).toMatchObject({
+      evidenceStatus: "invalid",
+    });
+    expect(report.runs[0]?.issueCounts.non_positive_duration).toBe(1);
+  });
+
+  it("accepts the integrated production runner/bootstrap event sequence without duplicate or zero-duration synthetic evidence", () => {
+    const report = buildAgentCreationLatencyReport({
+      generatedAt: "2026-08-07T00:00:00.000Z",
+      deployments: [
+        {
+          id: "deployment-complete-runner-evidence",
+          runnerId: "runner-complete",
+          createdAt: "2026-08-07T00:00:00.000Z",
+          completedAt: "2026-08-07T00:01:20.000Z",
+          failedAt: null,
+          agentStageEvents: [],
+          runnerEvents: [
+            event("creating", "started", "2026-08-07T00:00:01.000Z"),
+            event("creating", "completed", "2026-08-07T00:00:05.000Z"),
+            event("tagging", "started", "2026-08-07T00:00:05.000Z"),
+            event("tagging", "completed", "2026-08-07T00:00:07.000Z"),
+            event("firewall_configuring", "started", "2026-08-07T00:00:07.000Z"),
+            event("firewall_configuring", "completed", "2026-08-07T00:00:10.000Z"),
+            event("bootstrapping", "started", "2026-08-07T00:00:10.000Z"),
+            event("bootstrapping", "started", "2026-08-07T00:00:12.000Z", {
+              step: "bootstrap_started",
+            }),
+            event("bootstrapping", "started", "2026-08-07T00:00:13.000Z", {
+              step: "package_install",
+            }),
+            event("bootstrapping", "completed", "2026-08-07T00:00:20.000Z", {
+              step: "package_install",
+            }),
+            event("bootstrapping", "completed", "2026-08-07T00:00:20.500Z", {
+              step: "caddy_configured",
+            }),
+            event("bootstrapping", "completed", "2026-08-07T00:00:20.750Z", {
+              step: "hermes_state_root",
+            }),
+            event("bootstrapping", "started", "2026-08-07T00:00:21.000Z", {
+              step: "docker_pull",
+            }),
+            event("bootstrapping", "completed", "2026-08-07T00:00:27.000Z", {
+              step: "docker_pull",
+            }),
+            event("bootstrapping", "started", "2026-08-07T00:00:28.000Z", {
+              step: "agent_image_pull",
+            }),
+            event("bootstrapping", "completed", "2026-08-07T00:00:33.000Z", {
+              step: "agent_image_pull",
+            }),
+            event("bootstrapping", "started", "2026-08-07T00:00:34.000Z", {
+              step: "hermes_image_pull",
+            }),
+            event("bootstrapping", "completed", "2026-08-07T00:00:40.000Z", {
+              step: "hermes_image_pull",
+            }),
+            event("bootstrapping", "started", "2026-08-07T00:00:41.000Z", {
+              step: "runner_container_start",
+            }),
+            event("bootstrapping", "completed", "2026-08-07T00:00:45.000Z", {
+              step: "runner_container_start",
+            }),
+            event("waiting_for_runner", "started", "2026-08-07T00:00:45.000Z", {
+              step: "runner_registration",
+            }),
+            event("waiting_for_runner", "started", "2026-08-07T00:00:46.000Z"),
+            event("bootstrapping", "completed", "2026-08-07T00:00:55.000Z"),
+            event("bootstrapping", "completed", "2026-08-07T00:00:55.000Z", {
+              step: "bootstrap_started",
+            }),
+            event("waiting_for_runner", "completed", "2026-08-07T00:00:55.000Z"),
+            event("waiting_for_runner", "completed", "2026-08-07T00:00:55.000Z", {
+              step: "runner_registration",
+            }),
+            event("bootstrapping", "started", "2026-08-07T00:00:50.000Z", {
+              step: "boot_validation",
+            }),
+            event("bootstrapping", "completed", "2026-08-07T00:01:05.000Z", {
+              step: "boot_validation",
+            }),
+            event("ready", "started", "2026-08-07T00:01:06.000Z"),
+            event("ready", "started", "2026-08-07T00:01:06.000Z", {
+              step: "authenticated_readiness",
+            }),
+            event("ready", "completed", "2026-08-07T00:01:09.000Z"),
+            event("ready", "completed", "2026-08-07T00:01:09.000Z", {
+              step: "authenticated_readiness",
+            }),
+          ],
+        },
+      ],
+    });
+    const run = report.runs[0];
+
+    expect(run).toMatchObject({
+      outcome: "ready",
+      evidenceStatus: "valid",
+      issueCounts: {},
+    });
+    expect(run?.stages).toEqual(
+      expect.arrayContaining([
+        completeStage("runner:creating", 4_000),
+        completeStage("runner:tagging", 2_000),
+        completeStage("runner:firewall_configuring", 3_000),
+        completeStage("runner:bootstrapping", 45_000),
+        completeStage("runner:waiting_for_runner", 9_000),
+        completeStage("runner:ready", 3_000),
+        completeStage("bootstrap:bootstrap_started", 43_000),
+        completeStage("bootstrap:package_install", 7_000),
+        completeStage("bootstrap:docker_pull", 6_000),
+        completeStage("bootstrap:agent_image_pull", 5_000),
+        completeStage("bootstrap:hermes_image_pull", 6_000),
+        completeStage("bootstrap:runner_container_start", 4_000),
+        completeStage("bootstrap:runner_registration", 10_000),
+        completeStage("bootstrap:boot_validation", 15_000),
+        completeStage("bootstrap:authenticated_readiness", 3_000),
+      ]),
+    );
+    expect(
+      run?.stages.filter((stage) => stage.source === "runner_provisioning_event"),
+    ).toHaveLength(15);
+    expect(
+      run?.stages
+        .filter((stage) => stage.source === "runner_provisioning_event")
+        .every((stage) => stage.issues.length === 0 && (stage.durationMs ?? 0) > 0),
+    ).toBe(true);
+  });
+
+  it("ignores hostile bootstrap step labels without projecting them into runner evidence", () => {
     const report = buildAgentCreationLatencyReport({
       generatedAt: "2026-08-07T00:00:00.000Z",
       deployments: [
@@ -295,18 +451,21 @@ describe("agent creation latency report", () => {
     expect(report.runs[0]?.stages).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          name: "runner:bootstrapping",
+          name: "bootstrap:unrecognized_step",
           startedAt: null,
-          completedAt: "2026-08-07T00:00:05.000Z",
+          completedAt: null,
           durationMs: null,
-          issues: ["invalid_timestamp"],
+          issues: expect.arrayContaining(["invalid_timestamp", "missing_terminal"]),
         }),
       ]),
     );
     expect(report.runs[0]).toMatchObject({
       evidenceStatus: "invalid",
-      issueCounts: { invalid_timestamp: 1 },
     });
+    expect(report.runs[0]?.issueCounts.invalid_timestamp).toBe(1);
+    expect(report.runs[0]?.issueCounts.missing_started).toBeGreaterThanOrEqual(1);
+    expect(report.runs[0]?.issueCounts.missing_terminal).toBeGreaterThanOrEqual(1);
+    expect(serialized).toContain("bootstrap:unrecognized_step");
     expect(serialized).toContain("invalid_timestamp");
     expect(serialized).not.toContain("dop_v1_secret");
     expect(serialized).not.toContain("https_example_com");
@@ -587,4 +746,27 @@ async function resetLatencyFixtureTables(
   connection: ReturnType<typeof createDatabaseConnection>,
 ): Promise<void> {
   await connection.client`truncate table runner_provisioning_events, agent_deployments, agents, runner_credentials, runner_heartbeats, runner_registration_tokens, runners, app_metadata, users restart identity cascade`;
+}
+
+function event(
+  phase: string,
+  status: "started" | "completed" | "failed",
+  createdAt: string,
+  metadata?: Record<string, unknown>,
+) {
+  return {
+    phase,
+    status,
+    createdAt,
+    ...(metadata ? { metadata } : {}),
+  };
+}
+
+function completeStage(name: string, durationMs: number) {
+  return expect.objectContaining({
+    name,
+    status: "complete",
+    durationMs,
+    issues: [],
+  });
 }

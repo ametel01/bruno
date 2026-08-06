@@ -40,8 +40,12 @@ describe("automatic DigitalOcean runner provisioning", () => {
 
   it("persists the operation key before create and advances exactly one provider phase per call", async () => {
     const provider = new FakeDigitalOceanProvider({ now: () => NOW, idPrefix: "automatic" });
+    const now = sequenceClock("2026-08-03T09:00:00.000Z");
 
-    await expect(advance(connection, provider)).resolves.toEqual({ ok: true, state: "pending" });
+    await expect(advance(connection, provider, 1, undefined, now)).resolves.toEqual({
+      ok: true,
+      state: "pending",
+    });
 
     expect(provider.calls.map((call) => call.step)).toEqual(["discover", "create"]);
     const createCall = provider.calls.find((call) => call.step === "create");
@@ -60,13 +64,19 @@ describe("automatic DigitalOcean runner provisioning", () => {
     });
 
     provider.calls.length = 0;
-    await expect(advance(connection, provider)).resolves.toEqual({ ok: true, state: "pending" });
+    await expect(advance(connection, provider, 1, undefined, now)).resolves.toEqual({
+      ok: true,
+      state: "pending",
+    });
     expect(provider.calls.map((call) => call.step)).toEqual(["tag"]);
     const [afterTag] = await connection.db.select().from(runners).where(eq(runners.id, RUNNER_ID));
     expect(afterTag?.provisioningStatus).toBe("firewall_configuring");
 
     provider.calls.length = 0;
-    await expect(advance(connection, provider)).resolves.toEqual({ ok: true, state: "pending" });
+    await expect(advance(connection, provider, 1, undefined, now)).resolves.toEqual({
+      ok: true,
+      state: "pending",
+    });
     expect(provider.calls.map((call) => call.step)).toEqual(["firewall"]);
     const [afterFirewall] = await connection.db
       .select()
@@ -77,6 +87,40 @@ describe("automatic DigitalOcean runner provisioning", () => {
       status: "registering",
       providerFirewallId: "automatic-firewall-1",
     });
+
+    const emitted = await connection.db
+      .select({
+        phase: runnerProvisioningEvents.phase,
+        status: runnerProvisioningEvents.status,
+        createdAt: runnerProvisioningEvents.createdAt,
+      })
+      .from(runnerProvisioningEvents)
+      .where(eq(runnerProvisioningEvents.runnerId, RUNNER_ID))
+      .orderBy(runnerProvisioningEvents.createdAt);
+
+    expect(emitted.map((event) => [event.phase, event.status])).toEqual([
+      ["bootstrapping", "started"],
+      ["creating", "started"],
+      ["creating", "completed"],
+      ["tagging", "started"],
+      ["tagging", "completed"],
+      ["firewall_configuring", "started"],
+      ["firewall_configuring", "completed"],
+      ["waiting_for_runner", "started"],
+    ]);
+
+    for (const phase of ["creating", "tagging", "firewall_configuring"] as const) {
+      const startedAt = emitted.find(
+        (event) => event.phase === phase && event.status === "started",
+      )?.createdAt;
+      const completedAt = emitted.find(
+        (event) => event.phase === phase && event.status === "completed",
+      )?.createdAt;
+
+      expect(startedAt).toBeInstanceOf(Date);
+      expect(completedAt).toBeInstanceOf(Date);
+      expect((completedAt as Date).getTime()).toBeGreaterThan((startedAt as Date).getTime());
+    }
   });
 
   it("adopts one exact-tag resource after a crash without issuing a second create", async () => {
@@ -316,6 +360,7 @@ function advance(
   provider: DigitalOceanProvider,
   attemptCount = 1,
   signal = new AbortController().signal,
+  now: () => Date = () => NOW,
 ) {
   return advanceAutomaticDigitalOceanRunnerProvisioning({
     connection,
@@ -327,8 +372,17 @@ function advance(
     config: providerConfig(),
     provider,
     context: { signal },
-    now: () => NOW,
+    now,
   });
+}
+
+function sequenceClock(startIso: string): () => Date {
+  let currentMs = new Date(startIso).getTime();
+  return () => {
+    const current = new Date(currentMs);
+    currentMs += 1_000;
+    return current;
+  };
 }
 
 function providerConfig(): DigitalOceanProviderConfig {

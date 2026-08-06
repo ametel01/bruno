@@ -35,14 +35,11 @@ const BOOTSTRAP_STEP_LABELS = new Set([
   "authenticated_readiness",
   "boot_validation",
   "bootstrap_started",
-  "caddy_configured",
   "docker_package_install",
   "docker_pull",
   "docker_apt_repository",
   "docker_container_started",
   "hermes_image_pull",
-  "hermes_private_network",
-  "hermes_state_root",
   "package_install",
   "runner_container_start",
   "runner_registration",
@@ -82,6 +79,7 @@ export type AgentCreationLatencyIssue =
   | "duplicate_started"
   | "duplicate_terminal"
   | "reversed_timestamp"
+  | "non_positive_duration"
   | "invalid_timestamp"
   | "ambiguous_terminal"
   | "unknown_terminal";
@@ -454,8 +452,13 @@ function buildRunnerStageTimings(
     const terminal = validTerminals[0] ?? null;
     const completedAt = terminal?.at ?? null;
 
-    if (startedAt && completedAt && compareIso(completedAt, startedAt) < 0) {
-      issues.push("reversed_timestamp");
+    if (startedAt && completedAt) {
+      const boundaryOrder = compareIso(completedAt, startedAt);
+      if (boundaryOrder < 0) {
+        issues.push("reversed_timestamp");
+      } else if (boundaryOrder === 0) {
+        issues.push("non_positive_duration");
+      }
     }
 
     return {
@@ -474,8 +477,23 @@ function buildRunnerStageTimings(
 function toBoundaryEvents(event: AgentCreationLatencyRunnerEvent): BoundaryEvent[] {
   const at = toIso(event.createdAt);
   const phase = normalizeLabel(event.phase);
-  const step = normalizeBootstrapStepLabel(event.metadata?.step);
-  const emitRunnerPhase = Boolean(phase && !(phase === "bootstrapping" && step));
+  const rawStep = normalizeLabel(event.metadata?.step);
+  const step = rawStep && BOOTSTRAP_STEP_LABELS.has(rawStep) ? rawStep : null;
+
+  if (rawStep && !step) {
+    return at
+      ? []
+      : [
+          {
+            name: "bootstrap:unrecognized_step",
+            source: "runner_provisioning_event",
+            status: event.status,
+            at,
+          },
+        ];
+  }
+
+  const emitRunnerPhase = Boolean(phase && !rawStep);
   const events: BoundaryEvent[] = emitRunnerPhase
     ? [{ name: `runner:${phase}`, source: "runner_provisioning_event", status: event.status, at }]
     : [];
@@ -596,11 +614,6 @@ function normalizeLabel(value: unknown): string | null {
   return normalized.length > 0 ? normalized.slice(0, 80) : null;
 }
 
-function normalizeBootstrapStepLabel(value: unknown): string | null {
-  const label = normalizeLabel(value);
-  return label && BOOTSTRAP_STEP_LABELS.has(label) ? label : null;
-}
-
 async function readDeploymentEvidence(
   connection: DatabaseConnection,
   deploymentId: string | undefined,
@@ -612,7 +625,7 @@ async function readDeploymentEvidence(
     operationRunnerId: string | null;
     assignedRunnerId: string | null;
     userId: string;
-    runnerOperationId: string | null;
+    provisioningOperationId: string;
     createdAt: Date;
     completedAt: Date | null;
     failedAt: Date | null;
@@ -622,7 +635,7 @@ async function readDeploymentEvidence(
       operation_runner.id as "operationRunnerId",
       a.runner_id as "assignedRunnerId",
       d.user_id as "userId",
-      d.runner_operation_id as "runnerOperationId",
+      d.id as "provisioningOperationId",
       d.created_at as "createdAt",
       d.completed_at as "completedAt",
       d.failed_at as "failedAt"
@@ -632,7 +645,7 @@ async function readDeploymentEvidence(
      and a.user_id = d.user_id
     left join runners operation_runner
       on operation_runner.user_id = d.user_id
-     and operation_runner.provisioning_operation_key = concat('agentbay-deploy-', replace(d.runner_operation_id::text, '-', ''))
+     and operation_runner.provisioning_operation_key = concat('agentbay-deploy-', replace(d.id::text, '-', ''))
     where ${deploymentFilter}
     order by d.created_at desc, d.id desc
     limit ${limit}
@@ -641,7 +654,7 @@ async function readDeploymentEvidence(
   return await Promise.all(
     rows.map(async (row) => {
       const correlation = resolveAgentCreationRunnerCorrelation({
-        runnerOperationId: row.runnerOperationId,
+        runnerOperationId: row.provisioningOperationId,
         operationRunnerId: row.operationRunnerId,
         assignedRunnerId: row.assignedRunnerId,
       });

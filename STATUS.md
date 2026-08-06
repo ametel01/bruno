@@ -3,12 +3,12 @@
 ## Active Work
 
 - issue: [#263](https://github.com/ametel01/plingpling/issues/263)
-  owner: maintainer-reviewer (`issue_263_reviewer`)
+  owner: builder-agent (`issue_263_builder`)
   branch: `codex/issue-263-creation-latency-evidence`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: [#272](https://github.com/ametel01/plingpling/pull/272)
-  phase: maintainer re-review
-  cycle: 2/5
+  phase: checker-ready
+  cycle: 3/5
 
 ## Completion Contract
 
@@ -725,6 +725,41 @@ Status: ALL GREEN
     exercises or faithfully synthesizes a complete required record, add an integrated sequence-to-
     report regression, refresh PR scope/validation context, and do not merge or execute provider
     effects before reacceptance.
+- from: coordinator
+  to: builder-agent (`issue_263_builder`)
+  timestamp: 2026-08-07T06:19:26+08:00
+  request: Fix only the remaining producer-timing defects and integrated local-smoke evidence at
+    cycle 3; coordinator will refresh the PR body after final validation counts are known.
+  evidence: Review #4878490254 accepts three prior findings and records the exact duplicate-start and
+    synthetic-zero-duration event sequence that remains blocking.
+  next-action: Produce one real start and terminal timestamp per logical registration, boot
+    validation, authenticated readiness, and ready boundary; make zero-cloud smoke complete; add an
+    integrated sequence-to-report regression; commit/push and return to checker. No provider effects.
+- from: builder-agent (`issue_263_builder`)
+  to: checker-agent
+  timestamp: 2026-08-07T07:00:00+08:00
+  request: Verify the narrow cycle-3 producer-timing fix for review #4878490254. Do not edit code.
+  evidence: Registration now has exactly one real bootstrap/waiting start and terminal pair without
+    duplicate coarse projection; boot validation and authenticated readiness use genuine observed
+    start/completion timestamps; automatic provider phases record started/completed pairs with
+    positive persisted durations; optional bootstrap step labels no longer pollute coarse
+    `runner:bootstrapping`; hostile unknown step labels still surface invalid timestamps only through
+    a fixed sanitized `bootstrap:unrecognized_step` stage; zero-cloud local smoke now emits a
+    complete valid timing record.
+  validation:
+    - `bun scripts/run-unit-tests.ts tests/unit/agent-creation-latency.test.ts tests/unit/runner-heartbeat.test.ts tests/unit/runner-registration.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/runner-provisioning.test.ts`
+      passed: 7 files, 81 tests.
+    - `bun run lint` passed: 399 files checked with no fixes applied.
+    - `bunx tsc --noEmit` passed.
+    - `git diff --check` passed.
+    - `bun run local:agent:smoke` passed with `local_agent_cycle_smoke_passed`,
+      `cleanupVerified=true`, `digitalOceanRequests=0`, `simulatedDroplets=1`,
+      `readyLatency.p95Ms=90999`, `evidenceStatus:"valid"`, and `issueCounts:{}`.
+    - `bun run verify` passed: format check, lint, `next typegen && tsc --noEmit`, 169 unit-test
+      files / 1638 tests, and Next.js production build.
+  provider effects: none; only zero-cloud `local_docker` smoke was executed.
+  next-action: Independent checker should rerun the cycle-3 semantic/focused gates, then return to
+    maintainer review if clean. Coordinator owns PR body refresh.
 
 ## Decisions And Lessons
 
@@ -738,7 +773,7 @@ Status: ALL GREEN
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling`: issue #263 branch, reviewer-owned for cycle-2 re-review.
+- `/Users/alexmetelli/source/plingpling`: issue #263 branch, builder-owned for cycle-3 fixes.
 - `/Users/alexmetelli/source/plingpling-step7-base`: pre-existing detached user-owned worktree;
   preserve and do not modify.
 
