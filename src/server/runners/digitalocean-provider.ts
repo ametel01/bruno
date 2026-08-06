@@ -1565,7 +1565,12 @@ function tcpInboundRule(
 }
 
 function normalizeFirewallAddresses(addresses: string[] | undefined): string[] {
-  return [...new Set((addresses ?? []).map((address) => address.trim()).filter(Boolean))].sort();
+  const normalizedAddresses = new Set<string>();
+  for (const address of addresses ?? []) {
+    const normalizedAddress = address.trim();
+    if (normalizedAddress) normalizedAddresses.add(normalizedAddress);
+  }
+  return [...normalizedAddresses].sort();
 }
 
 function outboundRule(protocol: "icmp" | "tcp" | "udp"): DigitalOceanFirewallOutboundRule {

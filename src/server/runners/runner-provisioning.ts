@@ -1612,7 +1612,12 @@ function resolveHermesDeploymentConfig(config: DigitalOceanProviderConfig): {
 }
 
 function normalizeUniqueStrings(values: string[]): string[] {
-  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort();
+  const normalizedValues = new Set<string>();
+  for (const value of values) {
+    const normalizedValue = value.trim();
+    if (normalizedValue) normalizedValues.add(normalizedValue);
+  }
+  return [...normalizedValues].sort();
 }
 
 async function buildProvisioningBootstrap(input: {
