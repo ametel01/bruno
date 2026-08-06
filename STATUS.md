@@ -3,11 +3,11 @@
 ## Active Work
 
 - issue: [#263](https://github.com/ametel01/plingpling/issues/263)
-  owner: issue-spec-agent (`issue_263_spec`)
+  owner: builder-agent (`issue_263_builder`)
   branch: `codex/issue-263-creation-latency-evidence`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: specified; awaiting coordinator builder assignment
+  phase: checker-ready
   cycle: 0/5
 
 ## Completion Contract
@@ -134,6 +134,26 @@
     main CI were inspected. No upstream blocker or linked implementation PR exists.
   next-action: Coordinator assigns branch ownership to one builder. Builder must stop before any
     DigitalOcean effect, preserve shared trackers, and hand focused/full gate evidence to checker.
+- from: coordinator
+  to: builder-agent (`issue_263_builder`)
+  timestamp: 2026-08-07T04:49:03+08:00
+  request: Implement only the issue #263 completion contract in this worktree and branch.
+  evidence: Contract committed at `d8c6b7a`; Step 0 committed at `3d435fc`; main CI evidence is in
+    the contract; no DigitalOcean verification is authorized.
+  next-action: Implement test-first where practical, run focused gates, update `STATUS.md`, and stop
+    with a complete checker handoff. Do not create or access provider resources.
+- from: builder-agent (`issue_263_builder`)
+  to: checker-agent
+  timestamp: 2026-08-07T05:14:00+08:00
+  request: Verify issue #263 implementation against the completion contract. Do not edit code.
+  evidence: Implemented deterministic creation-latency reporting, read-only benchmark CLI,
+    sanitized terminal-completion logging, local smoke timing output before cleanup, E2E docs, and
+    changelog/progress updates. Final implementation also normalizes PostgreSQL timestamp strings
+    and correlates runner evidence through the deployment-derived `agentbay-deploy-*` operation key
+    with owner-safe joins, using current assignment only as fallback. DigitalOcean/provider execution
+    was not run or authorized. Implementation commit: this checker-ready branch commit.
+  next-action: Check diff, issue contract, gates, and redaction/provider guardrails. If accepted,
+    hand back for PR creation/review.
 
 ## Gates
 
@@ -141,6 +161,37 @@
   result: pass on 2026-08-07
   evidence: Both files exist; `CHANGELOG.md` retains `# Changelog` and `## [Unreleased]`, and
   `PROGRESS.md` lists Steps 0–9 with Step 0 complete.
+- command: `bun scripts/run-unit-tests.ts tests/unit/agent-creation-latency.test.ts tests/unit/agent-creation-benchmark.test.ts tests/unit/local-agent-cycle-smoke.test.ts tests/unit/runner-bootstrap-events.test.ts`
+  result: pass on 2026-08-07
+  evidence: 4 files, 17 tests passed after PostgreSQL timestamp normalization and operation-key
+    correlation fixes.
+- command: `bun run format:check`
+  result: pass on 2026-08-07
+  evidence: Biome checked 399 files with no fixes applied.
+- command: `bun run lint`
+  result: pass on 2026-08-07
+  evidence: Biome checked 399 files with no fixes applied.
+- command: `bun run typecheck`
+  result: pass on 2026-08-07
+  evidence: `next typegen && tsc --noEmit` completed successfully.
+- command: `bun run test`
+  result: pass on 2026-08-07
+  evidence: 169 files and 1628 tests passed after all fixes in isolated unit-test database
+    `plingpling_test_81485_2ff5ae0a25f9`.
+- command: `bun run build`
+  result: pass on 2026-08-07
+  evidence: Next.js production build completed successfully after the operation-key correlation fix.
+- command: `bun run test:e2e:ci`
+  result: pass on 2026-08-07
+  evidence: 26 Playwright CI tests passed after the operation-key correlation fix.
+- command: `bun run local:agent:smoke`
+  result: pass on 2026-08-07
+  evidence: Zero-cloud local Docker smoke passed after the operation-key correlation fix. Timing
+    report emitted before cleanup with `ready=1`, `successRate=1`, `readyLatency.p95Ms=88223`,
+    `digitalOceanRequests=0`, and invalid runner/bootstrap pair evidence surfaced for later steps.
+- command: `bun run agent:creation:benchmark -- --limit 1`
+  result: pass on 2026-08-07
+  evidence: Read-only default DB query returned a valid empty report without provider effects.
 
 ## Review Threads
 

@@ -18,6 +18,7 @@
     "local:down": "docker compose down --remove-orphans",
     "local:up": "docker compose up -d postgres && bun run db:migrate && AGENTBAY_AUTH_MODE=development bun run dev",
     "agent:hermes:contract-smoke": "bun --conditions react-server scripts/smoke-local-hermes-contract.ts",
+    "agent:creation:benchmark": "bun --conditions react-server scripts/benchmark-agent-creation.ts",
     "agent:image:smoke": "bun scripts/smoke-hermes-agent-image.ts",
     "repro:cloud-runner": "bun --conditions react-server scripts/repro-cloud-runner-bootstrap.ts",
     "runners:reconcile-provider": "bun --conditions react-server scripts/reconcile-cloud-runners.ts",
