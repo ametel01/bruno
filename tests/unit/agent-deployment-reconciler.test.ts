@@ -198,6 +198,38 @@ describe("agent deployment reconciler", () => {
     }
   });
 
+  it("waits for an existing automatic runner instead of provisioning a second Droplet", async () => {
+    await seedAutomaticRunner(connection, {
+      status: "provisioning",
+      provisioningStatus: "pending",
+    });
+    await seedAgent(connection, { runnerId: null });
+    await seedDeployment(connection, { stage: "pending" });
+    const provider = new FakeDigitalOceanProvider({ idPrefix: "no-overlap" });
+
+    await expect(
+      reconcileNextAgentDeployment({
+        createConnection: () => connection,
+        now: () => NOW,
+        readDigitalOceanConfig: () => automaticProviderConfig(),
+        digitalOceanProvider: provider,
+      }),
+    ).resolves.toEqual({ processed: 1, outcome: "retry_scheduled" });
+
+    const [agent] = await connection.db.select().from(agents).where(eq(agents.id, AGENT_ID));
+    const [deployment] = await connection.db
+      .select()
+      .from(agentDeployments)
+      .where(eq(agentDeployments.id, DEPLOYMENT_ID));
+    expect(await connection.db.select().from(runners)).toHaveLength(1);
+    expect(provider.resources.size).toBe(0);
+    expect(agent?.runnerId).toBeNull();
+    expect(deployment).toMatchObject({
+      stage: "pending",
+      errorCode: "runner_capacity_wait",
+    });
+  });
+
   it("fails closed when an exact provisioning operation key belongs to another owner", async () => {
     const otherUserId = "00000000-0000-4000-8000-00000000a702";
     await connection.db.insert(users).values({ id: otherUserId, createdAt: NOW, updatedAt: NOW });

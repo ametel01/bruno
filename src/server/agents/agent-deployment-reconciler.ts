@@ -442,6 +442,10 @@ async function reconcilePending(
         return { kind: "fail" as const, code: provisioning.code };
       }
 
+      if (provisioning.state === "waiting") {
+        return { kind: "retry" as const };
+      }
+
       return { kind: "advanced" as const };
     });
   } catch (error) {
@@ -1249,13 +1253,49 @@ async function initializeProvisioningRunner(
   work: ClaimedDeploymentWork,
   now: Date,
   dependencies: AgentDeploymentReconcilerDependencies,
-): Promise<{ ok: true } | { ok: false; code: DeploymentTerminalErrorCode }> {
+): Promise<
+  { ok: true; state: "created" | "waiting" } | { ok: false; code: DeploymentTerminalErrorCode }
+> {
   const config = dependencies.readDigitalOceanConfig
     ? dependencies.readDigitalOceanConfig()
     : readDigitalOceanProviderConfig();
 
   if (!config) {
     return { ok: false, code: "runner_provisioning_unavailable" };
+  }
+
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext(${`automatic-runner-provisioning:${work.userId}`}))`,
+  );
+  const [blockingRunner] = await tx.execute<{ id: string }>(sql`
+    select ${runners.id} as id
+    from ${runners}
+    where ${runners.userId} = ${work.userId}
+      and ${runners.kind} = ${DIGITALOCEAN_RUNNER_KIND}
+      and ${runners.provider} = ${DIGITALOCEAN_PROVIDER}
+      and ${runners.deletedAt} is null
+      and (
+        ${runners.provisioningStatus} in (
+          'pending',
+          'creating',
+          'tagging',
+          'firewall_configuring',
+          'bootstrapping',
+          'waiting_for_runner',
+          'cleaning_up'
+        )
+        or (
+          ${runners.provisioningStatus} = 'failed'
+          and ${runners.providerResourceId} is not null
+        )
+      )
+    order by ${runners.createdAt}, ${runners.id}
+    limit 1
+    for update
+  `);
+
+  if (blockingRunner) {
+    return { ok: true, state: "waiting" };
   }
 
   const operationKey = provisioningOperationKeyForDeployment(work.id);
@@ -1318,7 +1358,7 @@ async function initializeProvisioningRunner(
     throw new LostDeploymentLeaseError();
   }
 
-  return { ok: true };
+  return { ok: true, state: "created" };
 }
 
 async function markDeploymentStage(
