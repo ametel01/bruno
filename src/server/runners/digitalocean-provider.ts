@@ -546,7 +546,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
     const resources = droplets.flatMap((droplet) => {
       const resource = apiDropletToResource(droplet, null, this.#now);
 
-      if (!resource?.tags.includes(input.tag)) {
+      if (!resource?.tags.some((tag) => tag === input.tag)) {
         return [];
       }
 

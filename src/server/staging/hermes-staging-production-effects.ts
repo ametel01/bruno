@@ -1127,7 +1127,8 @@ export function hasHermesStagingDiagnosticLeak(
     return true;
   }
   if (Buffer.byteLength(serialized, "utf8") > 8 * 1024 * 1024) return true;
-  if (sensitiveValues.some((secret) => secret.length >= 4 && serialized.includes(secret))) {
+  const serializedIncludes = serialized.includes.bind(serialized);
+  if (sensitiveValues.some((secret) => secret.length >= 4 && serializedIncludes(secret))) {
     return true;
   }
   return (

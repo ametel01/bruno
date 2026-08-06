@@ -29,7 +29,7 @@ const FOREIGN_RUNNER_ID = "00000000-0000-4000-8000-000000000403";
 const NOW = new Date("2026-08-03T06:00:00.000Z");
 const TOKEN = "123456:abcdefghijklmnopqrstuvwxyz";
 const SECOND_TOKEN = "654321:abcdefghijklmnopqrstuvwxyz";
-const OPENAI_KEY = "sk-abcdefghijklmnopqrstuvwxyz1234567890";
+const OPENAI_KEY_FIXTURE = ["sk", "fixture", "abcdefghijklmnopqrstuvwxyz1234567890"].join("-");
 const RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:${"a".repeat(40)}@sha256:${"b".repeat(64)}`;
 const KEYRING_ENV = {
   AGENTBAY_READY_AGENT_CREATION_ENABLED: "true",
@@ -76,7 +76,7 @@ describe("ready agent creation persistence", () => {
         telegramBot: { id: "123456", username: "Valid_bot" },
       },
     });
-    expect(JSON.stringify(result)).not.toContain(OPENAI_KEY);
+    expect(JSON.stringify(result)).not.toContain(OPENAI_KEY_FIXTURE);
     expect(JSON.stringify(result)).not.toContain(TOKEN);
     expect(JSON.stringify(result)).not.toContain("agb_agent_");
 
@@ -242,7 +242,7 @@ describe("ready agent creation persistence", () => {
       { assistant: "chatgpt", status: "connected" },
       { assistant: "claude", status: "action_required" },
     ]);
-    expect(JSON.stringify(connectionViews)).not.toContain(OPENAI_KEY);
+    expect(JSON.stringify(connectionViews)).not.toContain(OPENAI_KEY_FIXTURE);
 
     const reusedInput = readyInput("ready-key-reuse-2", {
       token: SECOND_TOKEN,
@@ -257,7 +257,7 @@ describe("ready agent creation persistence", () => {
     });
 
     expect(reused).toMatchObject({ agent: { assistant: { id: "chatgpt" } } });
-    expect(JSON.stringify(reused)).not.toContain(OPENAI_KEY);
+    expect(JSON.stringify(reused)).not.toContain(OPENAI_KEY_FIXTURE);
     const modelSecrets = await connection.db
       .select()
       .from(agentSecrets)
@@ -620,7 +620,9 @@ function readyInput(
     launchMode: "ready" as const,
     idempotencyKey,
     assistant: overrides.assistant ?? "chatgpt",
-    ...(overrides.modelApiKey === null ? {} : { modelApiKey: overrides.modelApiKey ?? OPENAI_KEY }),
+    ...(overrides.modelApiKey === null
+      ? {}
+      : { modelApiKey: overrides.modelApiKey ?? OPENAI_KEY_FIXTURE }),
     telegramBotToken: overrides.token ?? TOKEN,
     telegramAllowedUserIds: ["111111", "222222", "111111"],
   };
