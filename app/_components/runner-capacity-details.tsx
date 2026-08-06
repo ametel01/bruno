@@ -1,5 +1,9 @@
 import type { ManualRunnerCapacitySummary } from "@/src/server/runners/manual-runner-status";
 
+const WHOLE_NUMBER_FORMATTER = new Intl.NumberFormat("en-US", {
+  maximumFractionDigits: 0,
+});
+
 export function RunnerCapacityDefinitionItems({
   capacity,
 }: {
@@ -58,7 +62,5 @@ function formatMegabytes(used: number | null, total: number | null): string {
 }
 
 function formatNumber(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 0,
-  }).format(Math.round(value));
+  return WHOLE_NUMBER_FORMATTER.format(Math.round(value));
 }

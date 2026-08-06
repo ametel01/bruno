@@ -56,9 +56,9 @@ export function ProductShell({ active, eyebrow, title, description, children }: 
           </div>
           <div className="topbar-actions">
             {clerkEnabled ? <AccountControls /> : null}
-            <a className="health-link" href="/health">
+            <Link className="health-link" href="/health">
               Health JSON
-            </a>
+            </Link>
           </div>
         </header>
         <p className="page-description">{description}</p>

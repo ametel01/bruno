@@ -7,6 +7,12 @@ import {
 
 const ESTIMATE_DAYS_PER_MONTH = 30;
 const ESTIMATE_HOURS_PER_MONTH = ESTIMATE_DAYS_PER_MONTH * 24;
+const USD_FORMATTER = new Intl.NumberFormat("en-US", {
+  currency: "USD",
+  maximumFractionDigits: 2,
+  minimumFractionDigits: 2,
+  style: "currency",
+});
 
 const DIGITALOCEAN_RUNNER_PRICES = {
   "s-1vcpu-512mb-10gb": {
@@ -122,12 +128,7 @@ function normalizeSizeSlug(sizeSlug: string | null | undefined): string | null {
 }
 
 function formatUsdCents(cents: number, suffix: string): string {
-  return `${new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
-    style: "currency",
-  }).format(cents / 100)}${suffix}`;
+  return `${USD_FORMATTER.format(cents / 100)}${suffix}`;
 }
 
 function unavailableDisplay(): UnavailableRunnerPriceMetadata["display"] {

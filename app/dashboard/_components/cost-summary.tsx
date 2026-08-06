@@ -5,6 +5,13 @@ import type {
 } from "@/src/server/costs/cost-estimates";
 import styles from "./cost-summary.module.css";
 
+const USD_FORMATTER = new Intl.NumberFormat("en-US", {
+  currency: "USD",
+  maximumFractionDigits: 2,
+  minimumFractionDigits: 2,
+  style: "currency",
+});
+
 export type DashboardCostResult =
   | { ok: true; estimates: DevelopmentUserCostEstimatesDto }
   | { ok: false };
@@ -125,12 +132,7 @@ function CostMetric({
 }
 
 function formatUsdCents(cents: number): string {
-  return new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
-    style: "currency",
-  }).format(cents / 100);
+  return USD_FORMATTER.format(cents / 100);
 }
 
 function formatCount(count: number, noun: string): string {
