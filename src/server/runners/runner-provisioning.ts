@@ -31,6 +31,7 @@ import {
   DIGITALOCEAN_PROVIDER,
   DIGITALOCEAN_RUNNER_KIND,
   DigitalOceanApiProvider,
+  type DigitalOceanOwnedSetProvider,
   type DigitalOceanProvider,
   type DigitalOceanProviderErrorReason,
   type DigitalOceanProviderRequestContext,
@@ -187,8 +188,12 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
       name: runners.name,
       status: runners.status,
       providerResourceId: runners.providerResourceId,
+      providerFirewallId: runners.providerFirewallId,
       endpointUrl: runners.endpointUrl,
       provisioningStatus: runners.provisioningStatus,
+      provisioningOperationKey: runners.provisioningOperationKey,
+      region: runners.region,
+      sizeSlug: runners.sizeSlug,
     })
     .from(runners)
     .where(
@@ -224,9 +229,32 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
       },
       "error",
     );
+    let cleaned = runner.provisioningStatus === "deleted";
+    if (runner.provisioningStatus === "failed" && runner.providerResourceId) {
+      cleaned = await cleanupAutomaticFailedRunner({
+        connection: input.connection,
+        provider: input.provider,
+        context: input.context,
+        runner: {
+          id: runner.id,
+          userId: input.userId,
+          providerResourceId: runner.providerResourceId,
+          providerFirewallId: runner.providerFirewallId,
+          provisioningOperationKey: runner.provisioningOperationKey,
+          region: runner.region,
+          sizeSlug: runner.sizeSlug,
+        },
+        now: input.now,
+        log,
+      });
+      if (!cleaned) {
+        log("terminal_cleanup_pending", { providerResourceId: runner.providerResourceId }, "warn");
+        return { ok: true, state: "pending" };
+      }
+    }
     return {
       ok: false,
-      cleanupRequired: Boolean(runner.providerResourceId),
+      cleanupRequired: Boolean(runner.providerResourceId) && !cleaned,
       terminalCode: "runner_provisioning_unavailable",
     };
   }
@@ -520,6 +548,110 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
   }
 
   return { ok: true, state: "pending" };
+}
+
+async function cleanupAutomaticFailedRunner(input: {
+  connection: DatabaseConnection;
+  provider: DigitalOceanProvider;
+  context: DigitalOceanProviderRequestContext;
+  runner: {
+    id: string;
+    userId: string;
+    providerResourceId: string;
+    providerFirewallId: string | null;
+    provisioningOperationKey: string | null;
+    region: string | null;
+    sizeSlug: string | null;
+  };
+  now: () => Date;
+  log: ProvisioningLog;
+}): Promise<boolean> {
+  const owned = asOwnedSetProvider(input.provider);
+  const operationKey = input.runner.provisioningOperationKey;
+  const firewallId = input.runner.providerFirewallId;
+  const region = input.runner.region;
+  const sizeSlug = input.runner.sizeSlug;
+  if (!owned || !operationKey || !firewallId || !region || !sizeSlug) return false;
+
+  const expectation = {
+    operationTag: operationKey,
+    providerResourceId: input.runner.providerResourceId,
+    providerFirewallId: firewallId,
+    expectedName: operationKey,
+    expectedRegion: region,
+    expectedSizeSlug: sizeSlug,
+    expectedFirewallName: digitalOceanRunnerFirewallName(input.runner.providerResourceId),
+  };
+  const observed = await owned.observeOwnedSet(expectation, input.context);
+  if (!observed.ok) return false;
+
+  if (observed.value.firewall === "present") {
+    const deletedFirewall = await owned.deleteFirewall(expectation, input.context);
+    if (!deletedFirewall.ok) return false;
+  }
+  if (observed.value.droplet === "present") {
+    const deletedDroplet = await owned.deleteDroplet(expectation, input.context);
+    if (!deletedDroplet.ok) return false;
+  }
+
+  const absent = await owned.observeOwnedSet(expectation, input.context);
+  if (!absent.ok || absent.value.state !== "absent") return false;
+
+  const deletedAt = input.now();
+  const cleaned = await input.connection.db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(runners)
+      .set({
+        status: "deleted",
+        provisioningStatus: "deleted",
+        provisioningError: null,
+        provisioningCompletedAt: deletedAt,
+        deletedAt,
+        updatedAt: deletedAt,
+      })
+      .where(
+        and(
+          eq(runners.id, input.runner.id),
+          eq(runners.userId, input.runner.userId),
+          eq(runners.providerResourceId, input.runner.providerResourceId),
+          eq(runners.provisioningStatus, "failed"),
+          isNull(runners.deletedAt),
+        ),
+      )
+      .returning({ id: runners.id });
+    if (!updated) return false;
+
+    await recordProvisioningEvent(tx, {
+      userId: input.runner.userId,
+      runnerId: input.runner.id,
+      phase: "deleted",
+      status: "completed",
+      message: "Failed automatic DigitalOcean runner was cleaned up safely.",
+      metadata: {
+        provider: DIGITALOCEAN_PROVIDER,
+        providerResourceId: input.runner.providerResourceId,
+      },
+      now: deletedAt,
+    });
+    return true;
+  });
+
+  if (cleaned) {
+    input.log("terminal_cleanup_completed", {
+      runnerId: input.runner.id,
+      providerResourceId: input.runner.providerResourceId,
+    });
+  }
+  return cleaned;
+}
+
+function asOwnedSetProvider(provider: DigitalOceanProvider): DigitalOceanOwnedSetProvider | null {
+  const candidate = provider as Partial<DigitalOceanOwnedSetProvider>;
+  return typeof candidate.observeOwnedSet === "function" &&
+    typeof candidate.deleteFirewall === "function" &&
+    typeof candidate.deleteDroplet === "function"
+    ? (candidate as DigitalOceanOwnedSetProvider)
+    : null;
 }
 
 export function validateCreateRunnerProvisioningPayload(

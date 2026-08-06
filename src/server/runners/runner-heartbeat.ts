@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { runnerCredentials, runnerHeartbeats, runners } from "@/src/server/db/schema";
@@ -51,6 +51,18 @@ type RunnerHeartbeatStatus =
   | typeof RUNNER_HEARTBEAT_ONLINE_STATUS
   | typeof RUNNER_HEARTBEAT_DEGRADED_STATUS;
 
+type PersistedRunnerStatus =
+  | "active"
+  | "inactive"
+  | "registering"
+  | "online"
+  | "offline"
+  | "degraded"
+  | "provisioning"
+  | "provision_failed"
+  | "deleting"
+  | "deleted";
+
 type RunnerHeartbeatMetadata = {
   version?: string;
   releaseEvidence: "missing" | "present";
@@ -100,7 +112,7 @@ export type RecordRunnerHeartbeatResult =
       ok: true;
       runner: {
         id: string;
-        status: RunnerHeartbeatStatus;
+        status: PersistedRunnerStatus;
         observedAt: string;
       };
     }
@@ -246,10 +258,15 @@ export async function recordRunnerHeartbeat(
         })
         .where(eq(runnerCredentials.id, row.credentialId));
 
-      await tx
+      const [updatedRunner] = await tx
         .update(runners)
         .set({
-          status: payload.value.status,
+          status: sql<string>`case
+            when ${runners.provisioningStatus} in ('failed', 'cleaning_up', 'deleted')
+              or ${runners.status} in ('provision_failed', 'deleting', 'deleted')
+            then ${runners.status}
+            else ${payload.value.status}
+          end`,
           requiredRunnerImageDigest: compatibility.requiredImageDigest,
           observedRunnerImageDigest: compatibility.observedRelease?.imageDigest ?? null,
           observedRunnerReleaseVersion: compatibility.observedRelease?.version ?? null,
@@ -259,13 +276,18 @@ export async function recordRunnerHeartbeat(
           compatibilityVerifiedAt: compatibility.verifiedAt,
           updatedAt: now,
         })
-        .where(eq(runners.id, payload.value.runnerId));
+        .where(eq(runners.id, payload.value.runnerId))
+        .returning({ status: sql<PersistedRunnerStatus>`${runners.status}` });
+
+      if (!updatedRunner) {
+        throw new Error("Authenticated runner disappeared during heartbeat persistence.");
+      }
 
       return {
         ok: true,
         runner: {
           id: payload.value.runnerId,
-          status: payload.value.status,
+          status: updatedRunner.status,
           observedAt: now.toISOString(),
         },
       } as const;

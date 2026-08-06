@@ -13,7 +13,10 @@ import {
   type DigitalOceanProvider,
   FakeDigitalOceanProvider,
 } from "@/src/server/runners/digitalocean-provider";
-import { advanceAutomaticDigitalOceanRunnerProvisioning } from "@/src/server/runners/runner-provisioning";
+import {
+  advanceAutomaticDigitalOceanRunnerProvisioning,
+  digitalOceanRunnerFirewallName,
+} from "@/src/server/runners/runner-provisioning";
 
 const USER_ID = "00000000-0000-4000-8000-00000000b701";
 const RUNNER_ID = "00000000-0000-4000-8000-00000000b721";
@@ -96,6 +99,55 @@ describe("automatic DigitalOcean runner provisioning", () => {
       providerResourceId: "adopted-1",
       provisioningStatus: "tagging",
     });
+  });
+
+  it("cleans up the exact owned Droplet after a terminal runner boot failure", async () => {
+    const provider = new FakeDigitalOceanProvider({ now: () => NOW, idPrefix: "failed-boot" });
+    const created = await provider.createRunner({
+      name: OPERATION_KEY,
+      region: "sfo3",
+      sizeSlug: "s-1vcpu-1gb",
+      image: "ubuntu-24-04-x64",
+      tags: ["agentbay", "agentbay-runner", OPERATION_KEY],
+    });
+    if (!created.ok) throw new Error("Expected fake Droplet creation to succeed.");
+    await provider.tagResource({
+      providerResourceId: created.value.providerResourceId,
+      tags: ["agentbay", "agentbay-runner", OPERATION_KEY],
+    });
+    const firewalled = await provider.applyFirewall({
+      providerResourceId: created.value.providerResourceId,
+      firewallName: digitalOceanRunnerFirewallName(created.value.providerResourceId),
+    });
+    if (!firewalled.ok || !firewalled.value.providerFirewallId) {
+      throw new Error("Expected fake firewall creation to succeed.");
+    }
+    await connection.db
+      .update(runners)
+      .set({
+        status: "provision_failed",
+        provisioningStatus: "failed",
+        providerResourceId: created.value.providerResourceId,
+        providerFirewallId: firewalled.value.providerFirewallId,
+      })
+      .where(eq(runners.id, RUNNER_ID));
+    provider.calls.length = 0;
+
+    await expect(advance(connection, provider)).resolves.toEqual({
+      ok: false,
+      cleanupRequired: false,
+      terminalCode: "runner_provisioning_unavailable",
+    });
+
+    const [runner] = await connection.db.select().from(runners).where(eq(runners.id, RUNNER_ID));
+    const discovery = await provider.discoverResourcesByTag({ tag: OPERATION_KEY });
+    expect(runner).toMatchObject({
+      status: "deleted",
+      provisioningStatus: "deleted",
+      deletedAt: NOW,
+    });
+    expect(discovery).toMatchObject({ ok: true, value: { resources: [] } });
+    expect(provider.calls.map((call) => call.step)).not.toContain("create");
   });
 
   it("replays one operation tag without duplicating the token or billable create", async () => {

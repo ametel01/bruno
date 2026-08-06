@@ -69,6 +69,27 @@ describe("runner boot self-test", () => {
     expect(JSON.stringify(snapshot)).not.toContain("owned-by-another-user");
   });
 
+  it("recovers from a transient model canary failure before declaring boot failed", async () => {
+    let canaryAttempts = 0;
+    const { controller } = await createHarness({
+      async runCanary() {
+        canaryAttempts += 1;
+        if (canaryAttempts === 1) {
+          throw new RunnerBootSelfTestError("canary_failed");
+        }
+      },
+    });
+
+    await controller.start();
+
+    await expect(controller.read()).resolves.toMatchObject({
+      status: "ready",
+      failureReason: null,
+      components: { modelCanary: "passed", cleanup: "passed" },
+    });
+    expect(canaryAttempts).toBe(2);
+  });
+
   it("enforces the total deadline even when a fixture operation ignores abort", async () => {
     const { controller, calls } = await createHarness(
       { launchFixture: async () => await new Promise<RunnerBootFixture>(() => undefined) },
@@ -228,6 +249,7 @@ async function createHarness(
     snapshotPath,
     timeoutMs,
     cleanupTimeoutMs,
+    canaryRetryDelayMs: 0,
     now: vi
       .fn<() => Date>()
       .mockReturnValueOnce(new Date("2026-08-04T00:00:00.000Z"))

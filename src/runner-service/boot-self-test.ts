@@ -37,6 +37,8 @@ export const RUNNER_BOOT_SELF_TEST_ROOT_ENV = "AGENTBAY_RUNNER_BOOT_SELF_TEST_RO
 export const DEFAULT_RUNNER_BOOT_SNAPSHOT_PATH = "/var/lib/agentbay/boot-readiness.json";
 export const DEFAULT_RUNNER_BOOT_SELF_TEST_TIMEOUT_MS = 180_000;
 export const DEFAULT_RUNNER_BOOT_CLEANUP_TIMEOUT_MS = 30_000;
+export const DEFAULT_RUNNER_BOOT_CANARY_ATTEMPTS = 3;
+export const DEFAULT_RUNNER_BOOT_CANARY_RETRY_DELAY_MS = 2_000;
 
 const FIXTURE_LABEL = "agentbay.boot_fixture";
 const FIXTURE_LABEL_VALUE = "v1";
@@ -84,6 +86,8 @@ export function createRunnerBootReadinessController(
     snapshotPath?: string;
     timeoutMs?: number;
     cleanupTimeoutMs?: number;
+    canaryAttempts?: number;
+    canaryRetryDelayMs?: number;
   } = {},
 ): RunnerBootReadinessController {
   const now = options.now ?? (() => new Date());
@@ -115,6 +119,9 @@ export function createRunnerBootReadinessController(
           startedAt,
           timeoutMs: options.timeoutMs ?? DEFAULT_RUNNER_BOOT_SELF_TEST_TIMEOUT_MS,
           cleanupTimeoutMs: options.cleanupTimeoutMs ?? DEFAULT_RUNNER_BOOT_CLEANUP_TIMEOUT_MS,
+          canaryAttempts: options.canaryAttempts ?? DEFAULT_RUNNER_BOOT_CANARY_ATTEMPTS,
+          canaryRetryDelayMs:
+            options.canaryRetryDelayMs ?? DEFAULT_RUNNER_BOOT_CANARY_RETRY_DELAY_MS,
         });
       }
       return run;
@@ -129,6 +136,8 @@ async function executeBootSelfTest(input: {
   startedAt: string;
   timeoutMs: number;
   cleanupTimeoutMs: number;
+  canaryAttempts: number;
+  canaryRetryDelayMs: number;
 }): Promise<void> {
   const startedAt = input.startedAt;
   const states = Object.fromEntries(
@@ -176,7 +185,13 @@ async function executeBootSelfTest(input: {
 
     activeComponent = "modelCanary";
     await abortable(controller.signal, () =>
-      input.executor.runCanary(fixture as RunnerBootFixture, controller.signal),
+      runBootCanaryWithRetries({
+        executor: input.executor,
+        fixture: fixture as RunnerBootFixture,
+        signal: controller.signal,
+        attempts: input.canaryAttempts,
+        retryDelayMs: input.canaryRetryDelayMs,
+      }),
     );
     states.modelCanary = "passed";
     await persistTestingSnapshot(input.snapshotPath, startedAt, states);
@@ -218,6 +233,32 @@ async function executeBootSelfTest(input: {
     startedAt,
     completedAt,
   });
+}
+
+async function runBootCanaryWithRetries(input: {
+  executor: RunnerBootSelfTestExecutor;
+  fixture: RunnerBootFixture;
+  signal: AbortSignal;
+  attempts: number;
+  retryDelayMs: number;
+}): Promise<void> {
+  const attempts = Number.isSafeInteger(input.attempts) && input.attempts > 0 ? input.attempts : 1;
+  const retryDelayMs =
+    Number.isSafeInteger(input.retryDelayMs) && input.retryDelayMs >= 0 ? input.retryDelayMs : 0;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await input.executor.runCanary(input.fixture, input.signal);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (input.signal.aborted || attempt === attempts) throw error;
+      await delay(retryDelayMs, input.signal);
+    }
+  }
+
+  throw lastError;
 }
 
 function failureFrom(

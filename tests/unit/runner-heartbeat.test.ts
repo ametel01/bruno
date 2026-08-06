@@ -117,6 +117,51 @@ describe("runner heartbeat persistence", () => {
     expect(JSON.stringify(persistedHeartbeats[0]?.metadata)).not.toContain("must-not-persist");
   });
 
+  it("accepts a terminal runner heartbeat without resurrecting failed provisioning", async () => {
+    const now = new Date("2026-08-06T00:45:35.282Z");
+    const credential = createRunnerCredential({
+      randomBytes: (size) => Buffer.alloc(size, 14),
+    });
+    const runner = await seedRunnerCredential(connection, {
+      credentialValue: credential.value,
+      runnerStatus: "provision_failed",
+      kind: "digitalocean",
+      provisioningStatus: "failed",
+    });
+
+    const result = await recordRunnerHeartbeat(
+      {
+        authorizationHeader: `Bearer ${credential.value}`,
+        payload: { runnerId: runner.id, status: "online" },
+      },
+      { createConnection: () => connection, now: () => now },
+    );
+    const [persistedRunner] = await connection.db
+      .select({ status: runners.status, provisioningStatus: runners.provisioningStatus })
+      .from(runners)
+      .where(eq(runners.id, runner.id))
+      .limit(1);
+    const [heartbeat] = await connection.db
+      .select({ status: runnerHeartbeats.status })
+      .from(runnerHeartbeats)
+      .where(eq(runnerHeartbeats.runnerId, runner.id))
+      .limit(1);
+
+    expect(result).toEqual({
+      ok: true,
+      runner: {
+        id: runner.id,
+        status: "provision_failed",
+        observedAt: now.toISOString(),
+      },
+    });
+    expect(persistedRunner).toEqual({
+      status: "provision_failed",
+      provisioningStatus: "failed",
+    });
+    expect(heartbeat).toEqual({ status: "online" });
+  });
+
   it("persists only canonical release fields from an authenticated heartbeat", async () => {
     const credential = createRunnerCredential({
       randomBytes: (size) => Buffer.alloc(size, 13),
