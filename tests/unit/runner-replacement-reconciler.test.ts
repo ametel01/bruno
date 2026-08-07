@@ -79,12 +79,6 @@ describe("runner replacement target reconciliation", () => {
       state: "provisioning_target",
     });
     await expect(reconcile(connection, provider, replacementId)).resolves.toMatchObject({
-      outcome: "retry_scheduled",
-    });
-    await expect(reconcile(connection, provider, replacementId)).resolves.toMatchObject({
-      outcome: "retry_scheduled",
-    });
-    await expect(reconcile(connection, provider, replacementId)).resolves.toMatchObject({
       outcome: "advanced",
       state: "validating_target",
     });
@@ -199,7 +193,7 @@ describe("runner replacement target reconciliation", () => {
     await reconcile(connection, provider, replacementId);
     await reconcile(connection, provider, replacementId);
 
-    expect(provider.calls.map((call) => call.step)).toEqual(["discover"]);
+    expect(provider.calls.map((call) => call.step)).toEqual(["discover", "tag", "firewall"]);
     const [workflow] = await connection.db
       .select()
       .from(runnerReplacements)
@@ -210,7 +204,7 @@ describe("runner replacement target reconciliation", () => {
       .where(eq(runners.id, workflow?.targetRunnerId ?? SOURCE_ID));
     expect(target).toMatchObject({
       providerResourceId: "adopted-1",
-      provisioningStatus: "tagging",
+      provisioningStatus: "waiting_for_runner",
     });
     expect(provider.calls.filter((call) => call.step === "create")).toHaveLength(0);
   });
@@ -452,7 +446,7 @@ describe("runner replacement target reconciliation", () => {
         .select()
         .from(runnerReplacements)
         .where(eq(runnerReplacements.id, replacementId));
-      expect(workflow).toMatchObject({ state: "provisioning_target" });
+      expect(workflow).toMatchObject({ state: "validating_target" });
       expect(workflow?.targetRunnerId).toBeTruthy();
       await expect(
         connection.db

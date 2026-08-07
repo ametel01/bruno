@@ -313,7 +313,7 @@ describe("runner infrastructure reconciliation", () => {
         { processed: 0, outcome: "idle" },
       ]),
     );
-    expect(provider.calls.filter((call) => call.step === "discover")).toHaveLength(1);
+    expect(provider.calls.filter((call) => call.step === "discover")).toHaveLength(0);
   });
 
   it("never treats active ownership outside the DB batch as an orphan", async () => {

@@ -4,12 +4,12 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 
 ## Active Work
 
-- issue: [#264](https://github.com/ametel01/plingpling/issues/264)
-  owner: coordinator (`root`)
-  branch: `codex/issue-264-durable-wakeups`
+- issue: [#267](https://github.com/ametel01/plingpling/issues/267)
+  owner: checker-agent (`issue_264_checker`)
+  branch: `codex/issue-267-provider-phase-drain`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: checker-green; opening PR
+  phase: checker-green; merge-ready after PR/review/CI policy
   cycle: 3/5
 
 ## Goal Contract
@@ -17,9 +17,10 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 - outcome: Execute `PLAN.md` through its Definition of Done, including 30 explicitly authorized
   clean cold DigitalOcean trials with at least 95% success and p95 committed-create-to-durable-ready
   latency at or below 60 seconds.
-- current result: Repository work for #263, #265, and #266 is merged. The rebased #264 zero-cloud
-  lifecycle smoke passed at 149.874 seconds with zero DigitalOcean requests, so the SLO is not yet
-  met; #267 is expected to remove the observed 60-second post-readiness provider poll.
+- current result: Repository work for #263-#266 is merged. #267's clean zero-cloud lifecycle smoke
+  passed at 89.513 seconds with zero DigitalOcean requests, down 60.361 seconds from the rebased
+  #264 smoke. The SLO is not yet met; runner boot was 59.628 seconds and post-registration work is
+  addressed by #268.
 - non-goals: No Droplets before a create request; no warm pools, ready capacity, onboarding or
   predictive provisioning, cross-user sharing, or SLO expansion beyond durable `ready`.
 - authorization boundary: Do not spend provider resources, build provider snapshots, configure
@@ -29,22 +30,201 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 
 ## Dependency Graph
 
-- completed repository scope: #263 / PR #272; #265 / PR #273; #266 / PR #274
-- ready now: #264 durable wakeups
-- blocked by #264: #267, #268
-- blocked by #266: #269
-- blocked by #265: #270
+- completed repository scope: #263 / PR #272; #264 / PR #275; #265 / PR #273; #266 / PR #274
+- ready now: #267 provider-phase drain; #268 post-registration stage drain
+- #267 and #268 are parallel-safe only in isolated worktrees and both touch
+  `src/server/agents/agent-deployment-reconciler.ts`; coordinate merge order.
+- #269 remains downstream of #266's authorization-independent repository work; #270 remains
+  downstream of #265's authorization-independent repository work.
 - blocked by #264-#270: #271 provider-backed SLO proof
 
 ## Next Assignment Contract
 
-- #264, #265, and #266 are parallel-safe only in separate branches/worktrees with one owner each.
-- Every checker must exercise a real producer-sequence-to-consumer semantic path, not only isolated
-  consumer fixtures.
-- Any stream touching provider/benchmark arguments must probe malformed counts and fail-closed
-  provider mode.
-- #266 may implement repository scripts/workflow and local tests, but actual DigitalOcean snapshot
-  creation is authorization-gated.
+- Assign one builder to #267 on `codex/issue-267-provider-phase-drain`; the implementation must stay
+  inside fake providers, injected SDK clients, and the isolated `local_docker` smoke boundary.
+- Every checker must exercise the real deployment-trigger -> lease claim -> provider drain ->
+  persisted wakeup path, not only direct provisioner fixtures.
+- Provider-effect recovery must prove authoritative observation before any replay after an ambiguous
+  create, tag, or firewall outcome.
+- No real DigitalOcean/QStash request, snapshot build, workflow dispatch, deployment, hosted-secret
+  mutation, or billable action is authorized for #267.
+
+## Completion Contract — #267
+
+- readiness: `ready`. Issue #264 is closed by merged PR #275 at `fa79f4a`; #267 has no comments,
+  linked PR, unresolved review thread, credential need, or remaining agent-actionable dependency.
+- outcome: In one deployment action, drain the cold on-demand runner through authoritative
+  discovery, at most one Droplet create, tag confirmation/correction, firewall confirmation/create,
+  and endpoint persistence until `waiting_for_runner`, while preserving a durable checkpoint around
+  every provider effect and the existing user/operation/cleanup fences.
+- acceptance criteria and invariants:
+  - The normal `FakeDigitalOceanProvider` path reaches persisted runner status `registering` /
+    provisioning status `waiting_for_runner` in one call to
+    `advanceAutomaticDigitalOceanRunnerProvisioning`, with one authoritative discovery, exactly one
+    create, no redundant tag POST when the create response already proves all required tags, exactly
+    one firewall, a persisted endpoint/firewall ID, and ordered started/completed phase events.
+  - Keep the operation key durably stored before the first provider request. Before every subsequent
+    phase/effect, reload or fence the owned runner by runner ID, user ID, operation key, non-deleted
+    state, active deployment lease/config revision, and agent desired-running state. A concurrent
+    Stop/Delete/lost lease may finish checkpointing an effect already in flight but starts no later
+    provider effect.
+  - Persist each successful provider result transactionally before continuing: provider resource
+    ID, firewall ID when known, endpoint when known, next provisioning phase, and the safe completed
+    event. A failed checkpoint stops the drain; it must never fall through to the next effect.
+  - Create recovery stays fail-closed: `pending` may create only after authoritative exact-operation-
+    tag discovery proves zero matches. `creating`, an unknown create outcome, a crash after create,
+    non-authoritative discovery, or discovery transport failure never issues another create. One
+    exact owned match is adopted; multiple/mismatched matches terminalize as
+    `runner_provisioning_outcome_unknown` with cleanup ownership retained.
+  - The create request contains the full normalized tag set. In `tagging`, an authoritative provider
+    observation that already contains that set advances without `tagResource`; a correction is sent
+    only for authoritatively missing tags. Unknown/ambiguous tag results stop for observation, and a
+    crash after an applied tag resumes without replaying it.
+  - Firewall recovery uses the deterministic firewall name plus Droplet attachment/ownership. An
+    authoritative exact match is adopted and checkpointed, authoritative absence may create once,
+    and missing observation support, multiple/mismatched matches, or an unknown effect outcome stops
+    without another firewall create. A crash after firewall application resumes with the same
+    firewall ID and exact cleanup ownership.
+  - After firewall completion, persist an endpoint from authoritative provider state and enter
+    `waiting_for_runner`. If no public endpoint exists, persist `bootstrapping` and stop; do not poll
+    or consume repeated provider phases inside the same action.
+  - Use a named default drain bound of eight state-machine iterations (with a smaller injectable test
+    bound); never execute a ninth. Check the existing 45-second action deadline/abort signal before
+    every provider transport and pass the same signal through. Stop on cancellation, lost authority,
+    abort/deadline, bound, retryable transport failure, provider ambiguity, missing endpoint,
+    `waiting_for_runner`, or any terminal runner/deployment state.
+  - Return a typed stop disposition so the reconciler persists the precise wakeup: unfinished but
+    immediately executable work stopped only by the iteration/deadline bound is due immediately;
+    `waiting_for_runner`, missing endpoint, or a safe retryable observation failure uses the bounded
+    external-wait retry; ambiguous effects permit observation/discovery only and eventually fail at
+    the existing attempt limit. Do not apply exponential `runner_not_ready` delay between successful
+    immediately executable phases.
+  - Duplicate/reordered targeted triggers retain the deployment lease as the execution fence and
+    produce at most one create, one required tag correction, and one firewall. Safe events/logs must
+    not expose operation tags, registration/bearer/provider/QStash secrets, raw provider responses,
+    endpoint credentials, or arbitrary exception text.
+- crash/failure semantics required by tests:
+  - Inject a crash after each create, tag, and firewall fake effect but before its completion
+    checkpoint; the next invocation must authoritatively adopt the same effect, reach
+    `waiting_for_runner`, keep one Droplet/firewall, and retain exact cleanup ownership.
+  - Inject a crash after each committed phase checkpoint; resume at the next phase without replay.
+  - Inject checkpoint persistence failure, cancellation/lost lease between phases, duplicate
+    triggers, deadline abort, iteration exhaustion, non-authoritative/failed observation, unknown
+    create/tag/firewall outcome, missing endpoint, and multiple discovered resources; assert the
+    stop disposition, wakeup timing, provider call counts, terminal code, and cleanup flag.
+- non-goals / authorization boundary:
+  - No pre-provisioned Droplets, warm/ready pools, predictive provisioning, cross-user sharing, or
+    capacity created before the user's committed create request.
+  - Do not implement #268 post-registration draining, #265 size-default selection, #266 snapshot
+    execution, #269/#270, or #271 provider SLO proof; do not change the durable-ready SLO boundary.
+  - Do not make a real DigitalOcean or QStash request; build/run a provider snapshot; run provider-
+    backed `test:e2e`, benchmark trials, or reconcile scripts; configure secrets; dispatch a GitHub
+    workflow; deploy/release; or perform any billable action.
+- likely touchpoints:
+  - `src/server/runners/runner-provisioning.ts` for the bounded drain, phase reload/fences, typed stop
+    disposition, and checkpoint-before-continue behavior.
+  - `src/server/runners/digitalocean-provider.ts` and
+    `src/server/runners/local-docker-digitalocean-provider.ts` only as needed for authoritative
+    tag/firewall observation and idempotent fake/local behavior; all API tests use injected SDK
+    clients and no network.
+  - `src/server/agents/agent-deployment-reconciler.ts` for immediate versus external-wait wakeups
+    without weakening deployment leases or transactional wakeup replacement.
+  - `tests/unit/automatic-runner-provisioning.test.ts`,
+    `tests/unit/agent-deployment-reconciler.test.ts`, `tests/unit/digitalocean-provider.test.ts`,
+    `tests/unit/local-docker-digitalocean-provider.test.ts`, cancellation/finalization race tests,
+    and local-smoke timing assertions. `PROGRESS.md`/`CHANGELOG.md` updates belong to the builder only
+    after gates pass; no schema/migration change is expected.
+- required tests / gates:
+  - Focused provider/provisioner/reconciler/cancellation/finalization/local-smoke unit tests, including
+    one concurrent real producer path: committed deployment -> targeted claim -> bounded drain ->
+    durable precise wakeup, with fake call-count and checkpoint assertions.
+  - `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test`; `bun run build`;
+    `bun run test:e2e:ci`; `bun run repro:cloud-runner`; `git diff --check`.
+  - Run `bun run local:agent:smoke` only with its package-script-enforced `local_docker`, local token,
+    and synthetic-boundary sentinels. Require `digitalOceanRequests:0`, `simulatedDroplets:1`,
+    `cleanupVerified:true`, one provider-phase invocation to `waiting_for_runner`, and before/after
+    orchestration timing versus the Step 1 baseline. This is local behavior evidence, not SLO proof.
+- risks: Provider reads that are cached/non-authoritative can incorrectly authorize replay; firewall
+  POST can succeed before a transport failure; concurrent cancellation can race an in-flight effect;
+  and an unconditional loop can overrun the 45-second lease/deadline. Fail closed and checkpoint
+  ownership before continuing; never infer absence from an unsupported or partial provider read.
+- do-not-touch: schema/migrations unless a blocking invariant is first escalated; post-registration
+  stage logic, size/snapshot defaults/workflows, benchmark provider authorization, production/release
+  configuration, unrelated PR #262, and `/Users/alexmetelli/source/plingpling-step7-base`.
+- open questions: none blocking. Provider observation method names and internal result type names are
+  implementation choices, provided the authoritative present/absent/ambiguous semantics above are
+  explicit and testable.
+
+## Handoff — #267 Spec to Builder
+
+- request: Implement only the #267 contract on `codex/issue-267-provider-phase-drain`, starting with
+  crash fixtures and authoritative tag/firewall observation, then add the bounded loop and precise
+  reconciler wakeup disposition.
+- evidence: Issue #267 and PLAN Step 3 match; current code returns after each successful provider
+  phase and `reconcileProvisioningRunner` always schedules `runner_not_ready` backoff. Create already
+  carries the complete tags, while DigitalOcean firewall creation lacks crash-safe authoritative
+  adoption and therefore needs special review.
+- stop condition: Hand off after fake/injected/local gates and before/after orchestration evidence are
+  recorded, or earlier on repeated failure, a required schema/product decision, or any need for real
+  provider/QStash/deployment/billable authority.
+
+## Handoff — #267 Builder to Checker
+
+- request: Independently verify #267 on branch `codex/issue-267-provider-phase-drain` at the builder
+  commit. Do not edit code.
+- files changed: `CHANGELOG.md`, `PROGRESS.md`, `STATUS.md`,
+  `src/server/runners/runner-provisioning.ts`,
+  `src/server/runners/digitalocean-provider.ts`,
+  `src/server/runners/local-docker-digitalocean-provider.ts`,
+  `src/server/agents/agent-deployment-reconciler.ts`,
+  `tests/unit/automatic-runner-provisioning.test.ts`,
+  `tests/unit/local-docker-digitalocean-provider.test.ts`,
+  `tests/unit/agent-deployment-reconciler.test.ts`,
+  `tests/unit/digitalocean-provider.test.ts`,
+  `tests/unit/runner-infrastructure-reconciler.test.ts`, and
+  `tests/unit/runner-replacement-reconciler.test.ts`.
+- behavior implemented: automatic DigitalOcean provisioning now drains bounded provider phases through
+  `waiting_for_runner` in one fake/injected provider call path, skips redundant tag POSTs when create
+  already proves the full required tag set, observes/adopts crash-completed create/tag/firewall
+  effects before replay, persists waiting status/firewall/endpoint in one checkpoint, rechecks
+  deployment lease/config/desired-running authority before provider effects, and returns typed
+  dispositions consumed by the reconciler for immediate versus external-wait wakeups.
+- checker cycle 1 fix: coordinator serialized local smoke at `b476652` exposed that
+  `LocalDockerDigitalOceanProvider` did not implement the authoritative managed-inventory/firewall
+  observation path, so local_docker stopped at `provider_firewall_observation_failed` with reason
+  `unsupported` and scheduled repeated `runner_not_ready` backoffs. The local provider now returns
+  authoritative local inventory, records deterministic firewall names, and preserves cleanup state
+  without changing fail-closed real-provider semantics.
+- tests added/updated: one-call normal fake drain, create/tag/firewall after-effect crash recovery,
+  one-call local_docker drain to `waiting_for_runner`, immediate provisioner wakeup disposition, and
+  updated replacement/infrastructure/provider assertions for bounded drain and firewall-name
+  metadata.
+- gates passed:
+  - `bun scripts/run-unit-tests.ts tests/unit/automatic-runner-provisioning.test.ts` — 15 tests
+    passed.
+  - `bun scripts/run-unit-tests.ts tests/unit/local-docker-digitalocean-provider.test.ts` — 4 tests
+    passed.
+  - `bun scripts/run-unit-tests.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/local-docker-digitalocean-provider.test.ts`
+    — 19 tests passed.
+  - `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-reconciler.test.ts` — 41 tests
+    passed.
+  - `bun scripts/run-unit-tests.ts tests/unit/digitalocean-provider.test.ts` — 17 tests passed.
+  - `bun scripts/run-unit-tests.ts tests/unit/runner-infrastructure-reconciler.test.ts` — 11 tests
+    passed.
+  - `bun scripts/run-unit-tests.ts tests/unit/runner-replacement-reconciler.test.ts` — 11 tests
+    passed.
+  - `bun run format:check`; `bun run lint`; `bun run typecheck`; `git diff --check`; `bun run test`
+    — 174 files / 1701 tests; `bun run build`; `bun run test:e2e:ci` — 26 tests;
+    `bun run repro:cloud-runner`.
+- coordinator serialized smoke: PASS after fixing the local provider observation gap and clearing
+  one interrupted-run test-volume collision. Evidence: `cleanupVerified:true`,
+  `digitalOceanRequests:0`, `simulatedDroplets:1`, exact 1 vCPU / 2 GiB runner profile, exact Hermes
+  limits, all lifecycle actions, and valid p95/total `89513ms`. Provider phases drained in one
+  invocation (`creating`, `tagging`, and `firewall_configuring` each recorded at 1ms); runner boot
+  remained 59.628s. No real DigitalOcean/QStash/deploy/release/billable action was run.
+- reviewer focus: verify provider-effect checkpoint ordering, crash adoption without replay, typed
+  wakeup persistence, lease/desired-running fence behavior, safe logs/events, and zero external
+  effects.
 
 ## Completion Contract — #264
 
@@ -669,7 +849,7 @@ Status: FAILED
   - next action: commit/push/open the #264 PR before any #264 merge; continue #265/#266 checks.
     Do not merge #262 as part of this goal.
 
-## Checker Result
+## Checker Result — #264 Final
 
 Status: ALL GREEN
 
@@ -762,6 +942,272 @@ Status: ALL GREEN
 - Open/push the #264 PR from `codex/issue-264-durable-wakeups`, then merge only after normal PR
   review/CI policy is satisfied. Checker verdict on the branch head: merge-ready for #264.
 
+## Checker Result — #267 Cycle 2
+
+Status: FAILED
+
+## Commands
+
+- command: required skill load
+  result: PASS
+  evidence: loaded `checker-agent`, `agent-team-status-protocol`, `testing-standards`,
+    `ci-quality-gates`, and `ci-security-gates`; followed read-only checker scope except this
+    `STATUS.md` update.
+- command: `git status --short --branch --untracked-files=all && git rev-parse --short HEAD && git branch --show-current`
+  result: PASS
+  evidence: branch `codex/issue-267-provider-phase-drain`; HEAD `075d55d`; worktree clean before
+    checker evidence.
+- command: `git merge-base HEAD origin/main && git diff --stat origin/main...HEAD && git diff --name-status origin/main...HEAD && git diff --check origin/main...HEAD`
+  result: PASS
+  evidence: merge-base `fa79f4a69b5e684573bd42dcd59f4f9ffe4f1fa6`; scoped #267 diff is 12 files /
+    1,214 insertions / 432 deletions across runner provisioning, DigitalOcean/local Docker
+    providers, deployment reconciler, docs/status, and focused tests; no diff-check errors.
+- command: `gh pr list --repo ametel01/plingpling --state open --head codex/issue-267-provider-phase-drain --json ...`
+  result: PASS
+  evidence: `[]`; no open PR object exists for #267 yet.
+- command: source inspection of provider-effect checkpoint ordering and replay fences
+  result: PASS
+  evidence: `runner-provisioning.ts:215-717` drains at bounded iterations; `:311-508` discovers
+    authoritatively before create/adoption and persists create completion before continuing;
+    `:520-581` observes tags and skips redundant tag POSTs when tags are complete;
+    `:584-672` observes/adopts or creates firewall once and persists firewall/endpoint before
+    returning; `:752-759` checks abort plus `canContinue`; `agent-deployment-reconciler.ts:2334-2365`
+    passes the deployment authority predicate; `:2368-2390` fences deployment stage, config revision,
+    lease owner/expiry, user, non-deleted agent, and desired-running state.
+- command: source inspection of precise wakeup dispositions
+  result: PASS
+  evidence: provisioner returns `immediate`, `external_wait`, and `observation_wait` dispositions;
+    `agent-deployment-reconciler.ts:574-576` maps `immediate` to `scheduleImmediateRetry`;
+    `:1528-1588` persists external retry wakeups with backoff through
+    `replaceDeploymentWakeupInTransaction`; `:1606-1654` persists immediate wakeups at `now` with
+    the same lease/config/desired-running fences.
+- command: source inspection of authoritative LocalDocker managed inventory semantics
+  result: PASS
+  evidence: `local-docker-digitalocean-provider.ts:132-176` returns authoritative tag and managed
+    inventory; `:195-227` applies tags and stable firewall metadata; `:229-247` clears cleanup state;
+    focused local tests cover authoritative inventory and stable firewall IDs.
+- command: source inspection of safe logs/events
+  result: FAILED
+  evidence: `runner-provisioning.ts:194-200` constructs provisioning logger bindings with
+    `lifecycleId: input.operationKey`; `operationKey` is the provider operation tag
+    `agentbay-deploy-<deployment-id-without-dashes>` from
+    `agent-deployment-reconciler.ts:2330-2331`; `createRunnerProvisioningLog` only suppresses logs
+    in `NODE_ENV=test` at `runner-provisioning.ts:2692-2695`. `logger.ts:126-128`, `:140-164`,
+    `:261-285`, and `:288-300` sanitize sensitive keys/text but do not redact `lifecycleId` or the
+    `agentbay-deploy-...` operation-tag pattern. Non-test logs therefore expose the operation tag,
+    contrary to the #267 contract's explicit "Safe events/logs must not expose operation tags"
+    invariant.
+- command:
+    `bun scripts/run-unit-tests.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/agent-deployment-reconciler.test.ts tests/unit/digitalocean-provider.test.ts tests/unit/runner-infrastructure-reconciler.test.ts tests/unit/runner-replacement-reconciler.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_94522_8312da9da98a`; migrations applied; 6 files / 99
+    tests passed; DB removed.
+- command: `bun run format:check`
+  result: PASS
+  evidence: Biome checked 410 files in 99ms; no fixes applied.
+- command: `bun run lint`
+  result: PASS
+  evidence: Biome checked 410 files in 200ms; no fixes applied.
+- command: `bun run typecheck`
+  result: PASS
+  evidence: Next route types generated successfully and `tsc --noEmit` passed.
+- command: `bun run repro:cloud-runner`
+  result: PASS
+  evidence: generated local user-data in a temp path; Docker/cloud-init schema validation passed;
+    runcmd bash syntax OK for 11 script blocks.
+- command: ambient external-effect preflight
+  result: PASS
+  evidence: environment variable names checked without printing values:
+    `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE`, `AGENTBAY_DIGITALOCEAN_TOKEN`,
+    `DIGITALOCEAN_ACCESS_TOKEN`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`,
+    `QSTASH_NEXT_SIGNING_KEY`, `AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION`, and
+    `AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION` are all unset.
+- command: coordinator serialized smoke evidence for `075d55d`
+  result: PASS
+  evidence: coordinator reported clean local smoke at `89513ms`, `cleanupVerified:true`,
+    `digitalOceanRequests:0`, `simulatedDroplets:1`, one provider-phase invocation to
+    `waiting_for_runner`, exact 1 vCPU / 2 GiB profile, exact Hermes limits, all lifecycle actions,
+    and no real DigitalOcean/QStash/deploy/release/billable effect; checker did not rerun smoke by
+    assignment.
+
+## Failures
+
+- file: `src/server/runners/runner-provisioning.ts:194`
+  check: safe provider provisioning logs must not expose operation tags
+  exact error: logger child binding sets `lifecycleId: input.operationKey`; `input.operationKey` is
+    the provider operation tag `agentbay-deploy-<deployment-id-without-dashes>`, and the app logger
+    does not redact `lifecycleId` or `agentbay-deploy-...` values in non-test logs.
+  likely owner: builder-agent for #267 / runner provisioning logging.
+
+## Coverage Gaps
+
+- Did not rerun `bun run local:agent:smoke`; coordinator already provided serialized smoke evidence
+  and assignment explicitly said not to rerun it.
+- Did not run real DigitalOcean, real QStash, deploy, release, workflow dispatch, or billable paths;
+  those effects are outside #267 authorization.
+- No focused test currently asserts provisioning logs/events omit operation tags; the static
+  inspection failure above should be covered by a regression test or logger sanitizer test.
+
+## Next Action
+
+- Redact or replace the provisioning log `lifecycleId` value so non-test logs cannot expose
+  `agentbay-deploy-...` operation tags, add regression coverage, then rerun focused provider/
+  reconciler gates and lightweight quality gates. Do not merge #267 until this is fixed.
+
+## Builder Result — #267 Log Redaction Fix
+
+Status: READY FOR CHECKER
+
+## Changes
+
+- `src/server/runners/runner-provisioning.ts` now binds automatic provisioning lifecycle logs with
+  the runner ID instead of the provider operation tag and no longer binds user IDs to provisioning
+  child loggers.
+- Added a provisioning-log redaction guard that strips the full provider operation tag plus the
+  derived compact/dashed deployment identifier forms from provisioning log bindings, metadata, and
+  errors before forwarding to the app logger.
+- Added `tests/unit/runner-provisioning-logging.test.ts`, which forces `NODE_ENV=production` and
+  captures logger child bindings/metadata so the regression cannot pass because of test-mode log
+  suppression.
+
+## Commands
+
+- command:
+    `bun scripts/run-unit-tests.ts tests/unit/runner-provisioning-logging.test.ts tests/unit/automatic-runner-provisioning.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_97966_65b3f33bc8c7`; 2 files / 16 tests passed; DB removed.
+- command:
+    `bun scripts/run-unit-tests.ts tests/unit/runner-provisioning-logging.test.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/agent-deployment-reconciler.test.ts tests/unit/digitalocean-provider.test.ts tests/unit/runner-infrastructure-reconciler.test.ts tests/unit/runner-replacement-reconciler.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_98231_11638b7d8d6b`; 7 files / 100 tests passed; DB removed.
+- command: `bun run format:check`
+  result: PASS
+  evidence: Biome checked 411 files in 85ms; no fixes applied.
+- command: `bun run lint`
+  result: PASS
+  evidence: Biome checked 411 files in 202ms; no fixes applied.
+- command: `bun run typecheck`
+  result: PASS
+  evidence: Next route types generated successfully and `tsc --noEmit` passed.
+- command: `git diff --check`
+  result: PASS
+  evidence: no whitespace errors.
+- command: `bun run repro:cloud-runner`
+  result: PASS
+  evidence: generated current user-data in a temp path; schema validation passed; runcmd bash syntax
+    OK for 11 script blocks.
+- command:
+    `if rg -n "lifecycleId:\s*(input\.operationKey|operationKey)|log\([^\n]*(operationKey|provisioningOperationKey|operationTag|deploymentId)" src/server/runners src/server/agents; then exit 1; else echo ...; fi`
+  result: PASS
+  evidence: no direct provisioning operation identifiers in logger lifecycle bindings or direct log
+    calls under `src/server/runners` / `src/server/agents`.
+- command: `bun run build`
+  result: PASS
+  evidence: Next.js production build compiled, typechecked, generated static pages, and finalized
+    route output successfully.
+
+## Coverage Gaps
+
+- Did not rerun `bun run local:agent:smoke`; coordinator said no smoke rerun was required for this
+  logging-only fix.
+- Did not run real DigitalOcean, real QStash, deploy, release, workflow dispatch, or billable paths.
+
+## Checker Result
+
+Status: ALL GREEN
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all && git rev-parse --short HEAD && git branch --show-current`
+  result: PASS
+  evidence: branch `codex/issue-267-provider-phase-drain`; HEAD `600568d`; worktree clean before
+    checker evidence.
+- command: `git show --stat --name-status --oneline --decorate --no-renames 600568d` and
+    `git diff --check 075d55d..600568d`
+  result: PASS
+  evidence: log-redaction fix commit `600568d Redact provisioning operation log context` changes only
+    `STATUS.md`, `src/server/runners/runner-provisioning.ts`, and
+    `tests/unit/runner-provisioning-logging.test.ts`; no diff-check errors in the head-only fix.
+- command: source inspection of production provisioning logger bindings
+  result: PASS
+  evidence: `runner-provisioning.ts:195-205` now binds automatic lifecycle logs to
+    `lifecycleId: input.runnerId` and `runnerId: input.runnerId`, not `input.operationKey`, and
+    passes redaction values derived from the provider operation key; `runner-provisioning.ts:1007-1012`
+    uses a random manual lifecycle ID and no longer binds `userId`.
+- command: source inspection of operation-tag redaction through child bindings, metadata, and errors
+  result: PASS
+  evidence: `runner-provisioning.ts:2693-2720` redacts child bindings before `logger.child`, redacts
+    metadata before every log call, and redacts `Error` values before `logger.error`;
+    `runner-provisioning.ts:2723-2844` redacts the full `agentbay-deploy|replace-<32hex>` tag plus
+    compact and dashed deployment identifiers, recurses through arrays/objects/errors, preserves
+    safe scalar values, handles cycles, and leaves final generic app-logger secret redaction intact.
+- command: source inspection of sanitizer over/under-redaction
+  result: PASS
+  evidence: generic app logger still redacts secret-keyed metadata and token-like text at
+    `logger.ts:58-78`, `:92-123`, `:261-300`; provisioning-specific redaction is scoped only to
+    automatic provisioning operation identifiers via `redactedValues`, so it does not broaden global
+    log redaction and does not mask unrelated safe runner-scoped correlation.
+- command: production-mode regression inspection
+  result: PASS
+  evidence: `tests/unit/runner-provisioning-logging.test.ts:21-78` stubs `NODE_ENV=production`,
+    mocks `createAppLogger`, captures child bindings and event metadata, asserts lifecycle
+    correlation is runner-scoped, and asserts the raw operation key, compact deployment identifier,
+    and user ID are absent from serialized log output. This prevents the regression from passing
+    solely because `NODE_ENV=test` suppresses provisioning logs.
+- command:
+    `if rg -n "lifecycleId:\s*(input\.operationKey|operationKey)|log\([^\n]*(operationKey|provisioningOperationKey|operationTag|deploymentId)" src/server/runners src/server/agents; then exit 1; else echo ...; fi`
+  result: PASS
+  evidence: no direct provisioning operation identifiers remain in logger lifecycle bindings or
+    direct log calls under `src/server/runners` or `src/server/agents`.
+- command:
+    `bun scripts/run-unit-tests.ts tests/unit/runner-provisioning-logging.test.ts tests/unit/automatic-runner-provisioning.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_98945_28a4890cbcf1`; migrations applied; 2 files / 16
+    tests passed; DB removed.
+- command: `git diff --check origin/main...HEAD`
+  result: PASS
+  evidence: no whitespace errors across the #267 branch diff.
+- command: `bun run format:check`
+  result: PASS
+  evidence: Biome checked 411 files in 215ms; no fixes applied.
+- command: `bun run lint`
+  result: PASS
+  evidence: Biome checked 411 files in 588ms; no fixes applied.
+- command: `bun run typecheck`
+  result: PASS
+  evidence: Next route types generated successfully and `tsc --noEmit` passed.
+- command: ambient external-effect preflight
+  result: PASS
+  evidence: environment variable names checked without printing values:
+    `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE`, `AGENTBAY_DIGITALOCEAN_TOKEN`,
+    `DIGITALOCEAN_ACCESS_TOKEN`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`,
+    `QSTASH_NEXT_SIGNING_KEY`, `AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION`, and
+    `AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION` are all unset.
+- command: prior functional/full/E2E/repro/smoke evidence accepted for unchanged behavior
+  result: PASS
+  evidence: head-only fix is logging/redaction scoped. Prior coordinator/builder evidence on this
+    branch remains applicable: 7 files / 100 focused tests, full unit 174 files / 1,701 tests,
+    format/lint/typecheck/build, E2E 26/26, `bun run repro:cloud-runner`, and serialized local smoke
+    `89513ms` with `cleanupVerified:true`, `digitalOceanRequests:0`, `simulatedDroplets:1`, and one
+    provider-phase invocation to `waiting_for_runner`.
+
+## Failures
+
+- none.
+
+## Coverage Gaps
+
+- Did not rerun `bun run local:agent:smoke`; assignment explicitly said no smoke rerun and the fix is
+  logging-only.
+- Did not run real DigitalOcean, real QStash, deploy, release, workflow dispatch, provider-backed
+  E2E, or billable paths; those effects are outside #267 authorization.
+
+## Next Action
+
+- Checker verdict: #267 is merge-ready for its repository scope after PR/review/CI policy. Coordinator
+  alone should open/push/merge; checker performed no commit, push, PR, merge, smoke, or external
+  effect.
+
 ## Review Threads
 
 - none. Reviews #4878363214 and #4878490254 were fixed and accepted by review #4878725523.
@@ -783,9 +1229,11 @@ Status: ALL GREEN
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling`: issue #264 branch; coordinator-owned, checker-green.
+- `/Users/alexmetelli/source/plingpling`: issue #267 branch; coordinator-owned, checker-green.
 - `/Users/alexmetelli/source/plingpling-issue-265`: merged #265 branch; preserve existing state.
 - `/Users/alexmetelli/source/plingpling-issue-266`: main at merged #266; preserve existing state.
+- `/Users/alexmetelli/source/plingpling-issue-268`: issue #268 branch; implementation committed and
+  waiting for #267-first merge/rebase order.
 - `/Users/alexmetelli/source/plingpling-step7-base`: pre-existing detached user-owned worktree;
   preserve and do not modify.
 
@@ -794,6 +1242,9 @@ Status: ALL GREEN
 - issue [#263](https://github.com/ametel01/plingpling/issues/263), PR
   [#272](https://github.com/ametel01/plingpling/pull/272), merge
   `7d1cb985c06b0007dadcfb0e42c5631c65b7c472`; maker/checker/reviewer accepted.
+- issue [#264](https://github.com/ametel01/plingpling/issues/264), PR
+  [#275](https://github.com/ametel01/plingpling/pull/275), merge
+  `fa79f4a69b5e684573bd42dcd59f4f9ffe4f1fa6`; checker and post-merge main CI accepted.
 - repository scope for issue [#265](https://github.com/ametel01/plingpling/issues/265), PR
   [#273](https://github.com/ametel01/plingpling/pull/273), merge
   `84a1860f4030496adda7dfc324ef86acafb19742`; post-merge main CI rerun passed.
