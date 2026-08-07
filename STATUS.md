@@ -5,12 +5,12 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 ## Active Work
 
 - issue: [#264](https://github.com/ametel01/plingpling/issues/264)
-  owner: checker-agent (`issue_264_checker`)
+  owner: builder-agent (`issue_264_builder`)
   branch: `codex/issue-264-durable-wakeups`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: failed serialized local smoke
-  cycle: 1/5
+  phase: awaiting serialized local-smoke slot after cycle-2 harness fix
+  cycle: 2/5
 - issue: [#265](https://github.com/ametel01/plingpling/issues/265)
   owner: checker-agent (`issue_265_checker`)
   branch: `codex/issue-265-runner-sizing`
@@ -404,9 +404,58 @@ Status: FAILED
   `agentbay-local-cloud-runner`, then rerun `bun run local:agent:smoke` and require a completed
   summary with `cleanupVerified:true`, `digitalOceanRequests:0`, and a valid creation-latency timing
   record before PR/review.
+- Coordinator should grant #264 a serialized `bun run local:agent:smoke` slot after the cycle-2
+  commit lands; builder intentionally did not run smoke while #265 may own the shared namespace.
+
+## Handoff — #264 Builder Cycle 2 to Coordinator/Checker
+
+- request: Re-run serialized local smoke for #264 after this branch's harness fix is committed.
+- scope: minimal shared harness fix only; preserved #264 QStash/signature/transaction changes and
+  did not import #265 resource-profile scope.
+- behavior changes:
+  - `compose.yaml` now maps dashboard container port 3000 to
+    `${AGENTBAY_APP_HOST_PORT:-55300}` and sets `NEXT_PUBLIC_APP_URL` to the matching
+    `http://host.docker.internal:${AGENTBAY_APP_HOST_PORT:-55300}` callback origin.
+  - `local:cloud:up` and `local:agent:smoke` scripts expose the same default
+    `AGENTBAY_APP_HOST_PORT=${AGENTBAY_APP_HOST_PORT:-55300}` override.
+  - `scripts/smoke-local-agent-cycle.ts` resolves the app host port once, passes it to compose,
+    sets `NEXT_PUBLIC_APP_URL` accordingly, and probes
+    `http://127.0.0.1:${AGENTBAY_APP_HOST_PORT}/health` instead of hard-coded port 3000.
+  - Smoke diagnostics no longer attempt nested Docker exec when `agentbay-local-cloud-runner` was
+    never created; dashboard logs remain available for startup failures.
+- regressions added:
+  - Unit coverage for default/custom/invalid app host port resolution and callback URL construction.
+  - Source/compose/package assertions proving the compose port mapping, callback URL, package smoke
+    override, host health probe helper, and container-existence guard are wired.
+- tests passed:
+  - `bun scripts/run-unit-tests.ts tests/unit/local-agent-cycle-smoke.test.ts` — PASS, 1 file / 5
+    tests, isolated DB `plingpling_test_42904_5cc945f7dade`.
+  - `bun run format:check` — PASS, 402 files.
+  - `bun run lint` — PASS, 402 files.
+  - `bun run typecheck` — PASS.
+- not run:
+  - `bun run local:agent:smoke` was intentionally not run while #265 builder/checker may own the
+    shared local-smoke namespace. Coordinator should serialize and run it next.
 
 ## Gates
 
+- #264 builder cycle-2 harness gates (2026-08-07, `issue_264_builder`): PASS locally; smoke pending
+  serialized slot.
+  - command: `bun scripts/run-unit-tests.ts tests/unit/local-agent-cycle-smoke.test.ts`
+    result: PASS.
+    evidence: isolated DB `plingpling_test_42904_5cc945f7dade`; 1 file / 5 tests passed.
+  - command: `bun run format:check`
+    result: PASS.
+    evidence: Biome checked 402 files with no fixes.
+  - command: `bun run lint`
+    result: PASS.
+    evidence: Biome checked 402 files with no fixes.
+  - command: `bun run typecheck`
+    result: PASS.
+    evidence: Next route types generated successfully and `tsc --noEmit` passed.
+  - skipped: `bun run local:agent:smoke`
+    reason: shared local-smoke namespace must be serialized; coordinator should run it after
+    cycle-2 commit.
 - #264 checker cycle-1 result (2026-08-07, `issue_264_checker`): FAILED at `29dba9c`.
   - prior blocker resolved: QStash verification now uses official `@upstash/qstash` `Receiver` and
     `Upstash-Signature` with raw body, callback URL subject, time claims, body hash, current/next
