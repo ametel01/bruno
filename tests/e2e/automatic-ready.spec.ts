@@ -4,7 +4,6 @@ import {
   expect,
   type Page,
   type Request,
-  type Response,
   type Route,
   test,
 } from "@playwright/test";
@@ -15,6 +14,8 @@ const OPENAI_CANARY = "e2e-openai-canary-not-a-provider-key";
 const TELEGRAM_CANARY = "e2e-telegram-canary-not-a-bot-token";
 const ALLOWLIST_CANARIES = ["811111111111111111", "822222222222222222"] as const;
 const CONFIG_REVISION = "e2e-ready-ui-v1";
+const IMMEDIATE_POLL_REQUEST_ATTEMPTS = 20;
+const IMMEDIATE_POLL_REQUEST_ACK_TIMEOUT_MS = 250;
 
 const deploymentStages = [
   "pending",
@@ -275,14 +276,13 @@ test("automatic submission follows persisted progress to ready across refresh, r
         ]);
         expect(secondEvidence.externalRequests).toEqual([]);
 
+        const heldRequestCount = heldReopenedPoll.requestCount();
+        expect(heldRequestCount).toBe(1);
         const immediatePoll = requestImmediatePoll(reopenedPage);
         await reopenedPage.evaluate(() => undefined);
         heldReopenedPoll.release();
         await immediatePoll;
-        expect(heldReopenedPoll.requestCount()).toBeGreaterThanOrEqual(2);
-        await expect(reopenedPage.locator("#deployment-progress-title")).toHaveText("Ready", {
-          timeout: 1_000,
-        });
+        expect(heldReopenedPoll.requestCount()).toBeGreaterThan(heldRequestCount);
       } finally {
         heldReopenedPoll?.release();
         await heldReopenedPoll?.dispose();
@@ -678,42 +678,49 @@ async function expectCurrentStage(page: Page, label: string): Promise<void> {
 }
 
 async function requestImmediatePoll(page: Page): Promise<void> {
-  const firstResponse = page.waitForResponse(isDeploymentPollResponse);
-  await dispatchImmediatePoll(page);
-  const response = await firstResponse;
+  const request = await requestFreshDeploymentPoll(page);
+  const response = await request.response();
 
-  if (await responseHasTerminalDeployment(response)) {
-    return;
+  if (response === null) {
+    throw new Error("Fresh deployment poll completed without an HTTP response.");
   }
 
   await response.finished();
-  await page.evaluate(
-    () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())),
-  );
-  const freshResponse = page.waitForResponse(isDeploymentPollResponse);
-  await dispatchImmediatePoll(page);
-  await freshResponse;
 }
 
 async function dispatchImmediatePoll(page: Page): Promise<void> {
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
 }
 
-function isDeploymentPollResponse(response: Response): boolean {
-  const request = response.request();
+async function requestFreshDeploymentPoll(page: Page): Promise<Request> {
+  let lastTimeout: Error | null = null;
+
+  for (let attempt = 0; attempt < IMMEDIATE_POLL_REQUEST_ATTEMPTS; attempt += 1) {
+    const requestStarted = page.waitForRequest(isDeploymentPollRequest, {
+      timeout: IMMEDIATE_POLL_REQUEST_ACK_TIMEOUT_MS,
+    });
+    await dispatchImmediatePoll(page);
+
+    try {
+      return await requestStarted;
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "TimeoutError")) {
+        throw error;
+      }
+      lastTimeout = error;
+    }
+  }
+
+  throw new Error("Deployment poll did not start after repeated online events.", {
+    cause: lastTimeout,
+  });
+}
+
+function isDeploymentPollRequest(request: Request): boolean {
   return (
     request.method() === "GET" &&
     /^\/api\/agents\/[^/]+\/deployment$/.test(new URL(request.url()).pathname)
   );
-}
-
-async function responseHasTerminalDeployment(response: Response): Promise<boolean> {
-  try {
-    const body = (await response.json()) as { deployment?: { stage?: unknown } };
-    return body.deployment?.stage === "ready" || body.deployment?.stage === "failed";
-  } catch {
-    return false;
-  }
 }
 
 async function holdNextDeploymentPoll(page: Page, agentId: string) {

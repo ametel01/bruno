@@ -1752,3 +1752,29 @@ Status: ALL GREEN
   interception, and fake/local fixtures were used. No DigitalOcean, QStash, workflow, deploy,
   release, hosted-secret, or billable action ran.
 - pending: independent review or coordinator integration. Builder did not push, open a PR, or merge.
+
+## Hosted E2E Synchronization Fix — Builder Cycle 2
+
+- scope: fix the demonstrated PR #278 failures from hosted run `31151693140` without changing
+  production polling behavior or merging the open PR.
+- hosted evidence: the deterministic desktop case observed at least two route requests but did not
+  render Ready inside the newly added one-second assertion; mobile reached the 60-second test
+  timeout. This invalidates the prior assumption that `response.finished()` plus one animation frame
+  proves React has cleared the component's in-flight guard.
+- fix: `requestImmediatePoll` now registers `page.waitForRequest` before each `online` dispatch and
+  retries only when the fresh-request acknowledgement is absent. The loop is bounded to 20 attempts
+  at 250 ms each. Once a GET that started after registration is observed, the helper awaits that
+  exact request's HTTP response and completion. It can no longer resolve from the pre-existing held
+  response.
+- regression: the held route's pre-existing request count is captured and asserted as exactly one
+  before the helper starts. After the stale response is released, the helper must observe a request
+  count strictly greater than that baseline. Route release and exact-handler removal remain in
+  `finally`, and Ready uses the existing `expectCurrentStage` semantics with no new one-second bound.
+- gates: exact scenario desktop/mobile 2/2; stronger repetition 20/20 total (10 desktop and 10
+  mobile) in 1.7 minutes; serialized `bun run test:e2e:ci` passed 26/26 twice in 35.0 and 32.1
+  seconds; `bun run format:check`; `bun run lint`; `bun run typecheck`; and `git diff --check`
+  passed.
+- external effects: none. Validation used local Playwright web servers, the local test database,
+  route interception, and fake/local fixtures only. No DigitalOcean, QStash, workflow, deployment,
+  release, hosted-secret, or billable action ran.
+- pending: coordinator review and push to the already-open PR. Builder did not push or merge.
