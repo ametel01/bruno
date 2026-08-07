@@ -5,11 +5,11 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 ## Active Work
 
 - issue: [#264](https://github.com/ametel01/plingpling/issues/264)
-  owner: builder-agent (`issue_264_builder`)
+  owner: checker-agent (`issue_264_checker`)
   branch: `codex/issue-264-durable-wakeups`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: awaiting serialized local-smoke slot after cycle-2 harness fix
+  phase: failed serialized local-smoke cycle 2
   cycle: 2/5
 - issue: [#265](https://github.com/ametel01/plingpling/issues/265)
   owner: checker-agent (`issue_265_checker`)
@@ -307,7 +307,7 @@ Status: FAILED
   - Real external QStash publishing remains unexercised by design; no real queue/provider effects
     were authorized.
 
-## Checker Result
+## Checker Result — #264 Cycle 1
 
 Status: FAILED
 
@@ -437,8 +437,89 @@ Status: FAILED
   - `bun run local:agent:smoke` was intentionally not run while #265 builder/checker may own the
     shared local-smoke namespace. Coordinator should serialize and run it next.
 
+## Checker Result
+
+Status: FAILED
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all && git log --oneline --decorate -8`
+  result: PASS
+  evidence: branch `codex/issue-264-durable-wakeups`; HEAD
+  `c6e2f28 Fix local smoke app host port isolation`; only `STATUS.md` dirty from checker evidence.
+- command: `git diff --stat 29dba9c..HEAD && git diff --name-status 29dba9c..HEAD && git diff --check 29dba9c..HEAD`
+  result: PASS
+  evidence: cycle-2 diff is scoped to `compose.yaml`, `package.json`,
+  `scripts/smoke-local-agent-cycle.ts`, `tests/unit/local-agent-cycle-smoke.test.ts`, and status;
+  no diff-check whitespace errors.
+- command: source inspection of configurable local smoke port and diagnostics
+  result: PASS
+  evidence: `compose.yaml` maps `${AGENTBAY_APP_HOST_PORT:-55300}:3000` and sets
+  `NEXT_PUBLIC_APP_URL=http://host.docker.internal:${AGENTBAY_APP_HOST_PORT:-55300}`;
+  `package.json` passes `AGENTBAY_APP_HOST_PORT` into `local:cloud:up` and `local:agent:smoke`;
+  `scripts/smoke-local-agent-cycle.ts` resolves `AGENTBAY_APP_HOST_PORT`, uses
+  `http://host.docker.internal:<port>` for app URL, probes `http://127.0.0.1:<port>/health`, and
+  skips nested-Docker diagnostics when `agentbay-local-cloud-runner` does not exist.
+- command: `bun scripts/run-unit-tests.ts tests/unit/local-agent-cycle-smoke.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_43590_2dadf12d3f48`; 1 file / 5 tests passed.
+- command: dedicated port/namespace preflight
+  result: PASS
+  evidence: Python bind check reported ports `55300`, `55311`, `55321`, `55331`, and `55341` free;
+  `docker ps -a --filter label=agentbay.agent_id` returned no rows; broad `name=agentbay` listed
+  only old exited `agentbay-postgres-1`.
+- command: `AGENTBAY_APP_HOST_PORT=55311 bun run local:agent:smoke`
+  result: FAILED
+  evidence: smoke used app callback origin `http://host.docker.internal:55311` and advanced local
+  provisioning through `provider_create_completed`, but failed before ready/cleanup summary. Exact
+  terminal errors: `Error response from daemon: container ... is not running`;
+  `Error response from daemon: removal of container agentbay-local-cloud-runner is already in progress`;
+  `Failed query: select "stage", "error_code", "error_detail" from "agent_deployments" ... <-
+  Error: connect ECONNREFUSED 127.0.0.1:55432`.
+- command: cleanup checks after failed cycle-2 smoke
+  result: PASS
+  evidence: `docker ps -a --filter label=agentbay.agent_id --format ...` returned no rows; broad
+  `docker ps -a --filter name=agentbay --format ...` only listed old exited `agentbay-postgres-1`;
+  bind check reported ports `55311`, `55432`, and `3045` free.
+
+## Failures
+
+- file: `scripts/smoke-local-agent-cycle.ts`
+  check: serialized default-cron local full-cycle smoke on dedicated port
+  exact error: local smoke did not emit the required summary because the simulated Droplet container
+  stopped and cleanup raced with removal; the script then lost its local Postgres connection:
+  `Error: connect ECONNREFUSED 127.0.0.1:55432`.
+  likely owner: builder-agent for #264 or local Docker smoke harness owner.
+
+## Coverage Gaps
+
+- The smoke run did not produce a complete valid creation-latency timing summary,
+  `cleanupVerified:true`, `digitalOceanRequests:0`, or completed proof of no real QStash publish.
+- No dedicated fake-delayed local-smoke command/harness exists. This is non-blocking only for the
+  fake-delay semantic path because the isolated integrated fake producer-consumer check already
+  passed in cycle 1 with fake publisher, signed delivery, duplicate delivery, and exactly one
+  targeted reconcile; it does not replace the failed default local smoke gate.
+- Real external QStash publishing remains unexercised by design; no production secrets, real QStash
+  publishes, provider calls, deployments, or billable effects were authorized or intentionally run.
+
+## Next Action
+
+- Builder/coordinator should fix the remaining local smoke stability failure where the simulated
+  Droplet/local Compose stack exits or is removed before the deployment reaches ready, then rerun
+  `AGENTBAY_APP_HOST_PORT=<free-port> bun run local:agent:smoke` and require a completed summary
+  with valid timing, `cleanupVerified:true`, `digitalOceanRequests:0`, and no real QStash/provider
+  effects before PR/review.
+
 ## Gates
 
+- #264 checker cycle-2 result (2026-08-07, `issue_264_checker`): FAILED at `c6e2f28`.
+  - port isolation/diagnostics regression: PASS via source inspection and
+    `bun scripts/run-unit-tests.ts tests/unit/local-agent-cycle-smoke.test.ts` (1 file / 5 tests).
+  - dedicated smoke preflight: PASS; port `55311` free and no agent-labeled containers before run.
+  - smoke gate: FAILED with simulated Droplet container not running/removal in progress and local DB
+    `ECONNREFUSED 127.0.0.1:55432`; no completed timing/provider/cleanup summary emitted.
+  - cleanup after failure: PASS; no agent-labeled containers remained, and ports `55311`, `55432`,
+    `3045` were free.
 - #264 builder cycle-2 harness gates (2026-08-07, `issue_264_builder`): PASS locally; smoke pending
   serialized slot.
   - command: `bun scripts/run-unit-tests.ts tests/unit/local-agent-cycle-smoke.test.ts`
