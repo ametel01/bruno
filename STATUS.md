@@ -2434,3 +2434,50 @@ Status: ALL GREEN
     snapshot build, billable action, push, PR, merge, or other external mutation was performed.
   - hosted defaults remain fail-closed at one. Keep #270 open for the approved larger profile, disk
     budget, and an explicitly authorized provider-backed two-agent trial.
+
+## Final Checker Review — #270 Cycle 5 Commit `023b0f4`
+
+- verdict: **APPROVE for repository scope**. No blocking, important, or minor findings remain in the
+  five-commit diff. The last required cross-user concurrency/security evidence is present and stable,
+  and every prior Cycle 1–4 finding is reconciled as closed.
+- reviewed boundary: full five-commit diff `origin/main...023b0f4` plus the test-only Cycle 5 delta
+  `bfbbcb9..023b0f4`; worktree was clean before this status-only append. Branch is five commits ahead
+  of and one commit behind `origin/main`; merge base remains `f2fb3f6`.
+- final cross-user verification:
+  - `tests/unit/create-agent-ready-db.test.ts:454-602` seeds one fresh compatible spare runner for
+    `USER_A_ID` and one for `USER_B_ID`, launches ready create on independent connections, and pauses
+    both transactions after capacity-lock acquisition. Reaching both `afterCapacityLock` hooks before
+    release proves the distinct owner/runner locks coexist; the shared database observation reports
+    zero blocked sessions at that boundary.
+  - exact before/after payload arrays contain only `(USER_A_ID, userARunnerId)` and
+    `(USER_B_ID, userBRunnerId)`, with explicit negative checks for both cross-owner pairs. This proves
+    candidate selection and owner-aware locking never expose the foreign runner to either request.
+  - durable post-commit reads contain exactly two nondeleted desired-running agents: exactly one on
+    each runner, each agent owner matching the runner owner. No crossed assignment exists, and runner
+    ownership/cardinality remains unchanged.
+- prior-finding reconciliation:
+  - Cycle 1 placement-lock bypass, replacement effective-capacity error, and failed-start desired-state
+    leak were fixed in Cycle 2 and remain covered.
+  - Cycle 2 Start self-reservation exclusion and desired-running manual assignment lock/revalidation
+    were fixed in Cycle 3 and remain covered.
+  - Cycle 3 deterministic capacity-one/two and real create-vs-Start/Stop/Delete/retry/replacement
+    evidence was fixed in Cycle 4, including rollback, non-resurrection, owner payload, and durable
+    cardinality assertions. The Telegram lock reorder remains idempotent, atomic, uniqueness-safe, and
+    free of an identified reverse lock cycle.
+  - Cycle 4 simultaneous cross-user ownership evidence is closed by Cycle 5. Hosted max-one defaults,
+    effective capacity fail-closed behavior, cold/reuse cohort separation, and non-goals remain intact.
+- independent gates:
+  - targeted cross-user race passed three consecutive fresh isolated databases: 1 passed / 24 skipped
+    per run (950ms, 829ms, 807ms).
+  - focused DB/unit suite passed: 13 files / 357 tests covering resource profiles, placement,
+    ready/legacy create, deployment reconciliation, latency, Hermes readiness, Start route,
+    replacement handover, runner service, runner assignment/manual adapter, and managed lifecycle
+    actions.
+  - `bun run format:check` passed (411 files); `bun run lint` passed (411 files);
+    `bun run typecheck` passed; `git diff --check origin/main...023b0f4` passed.
+- residual/authorization boundary: approval is for the authorization-independent repository scope,
+  not hosted capacity enablement or issue closure. Local smoke remained forbidden and was not run. No
+  product-code edit, push, PR mutation, merge, provider/QStash request, deploy, workflow, snapshot,
+  hosted configuration, billable action, or other external effect was performed. Keep #270 open until
+  maintainers approve the larger profile and disk budget and explicitly authorize the provider-backed
+  two-agent trial.
