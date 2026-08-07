@@ -1778,3 +1778,91 @@ Status: ALL GREEN
   route interception, and fake/local fixtures only. No DigitalOcean, QStash, workflow, deployment,
   release, hosted-secret, or billable action ran.
 - pending: coordinator review and push to the already-open PR. Builder did not push or merge.
+
+## Checker Result — E2E Ready Synchronization Fix Cycle 2
+
+Status: ALL GREEN
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all && git rev-parse --short HEAD && git branch --show-current`
+  result: PASS
+  evidence: branch `codex/fix-ready-e2e-sync`; HEAD `4773779`; worktree was clean before checker
+    appended this result to `STATUS.md`; checker made no implementation/test code edits.
+- command: `git diff --name-status origin/main...HEAD`
+  result: PASS
+  evidence: only `STATUS.md` and `tests/e2e/automatic-ready.spec.ts` differ from branch base;
+    production code, API routes, components, scripts, package scripts, and config are untouched.
+- command: hosted failure inspection for run `31151693140`
+  result: PASS
+  evidence: GitHub Actions run `31151693140` at `9bbb5de` failed `Run E2E smoke tests` after
+    format/lint/typecheck/unit/build passed. E2E failures were exactly the automatic-ready first
+    scenario: desktop expected `Ready`, received `Preparing your agent`, timeout `1000ms` at old
+    lines `283-284`; mobile hit the 60s test timeout. Remaining 24 E2E tests passed.
+- command: helper correction inspection
+  result: PASS
+  evidence: `automatic-ready.spec.ts:680-689` calls `requestFreshDeploymentPoll`, then awaits that
+    exact request's `response()` and `response.finished()`; `:695-717` registers
+    `page.waitForRequest(isDeploymentPollRequest)` before every `online` dispatch, retries only on
+    bounded 250ms request-start acknowledgement timeouts, and errors after 20 missed starts. Static
+    grep found no `requestAnimationFrame`, no `waitForResponse`, no `waitForTimeout`, and no
+    `timeout: 1_000` Ready assertion in the current file.
+- command: stale held request cannot satisfy helper
+  result: PASS
+  evidence: `automatic-ready.spec.ts:254-256` installs and holds the reopened page's pre-existing
+    deployment request before the helper starts; `:279-285` captures `heldRequestCount === 1`, starts
+    `requestImmediatePoll(reopenedPage)`, releases the stale response, and requires
+    `requestCount() > heldRequestCount`, proving a request that started after helper registration was
+    observed.
+- command: no route leak/hang inspection
+  result: PASS
+  evidence: `automatic-ready.spec.ts:286-289` releases and disposes the held route in `finally`;
+    `:726-758` scopes the route to the deployment URL, fulfills the held/fresh responses, and removes
+    the exact handler via `page.unroute(deploymentUrl, handler)`. Stress and full E2E runs below
+    completed without hangs.
+- command: failure-observation semantics inspection
+  result: PASS
+  evidence: `automatic-ready.spec.ts:548-603` still verifies three failed deployment reads surface
+    `Progress updates are temporarily unavailable`, preserve `Preparing your agent`, recover through
+    `Check again`, and keep external requests empty. The two manual triggers remain raw
+    `dispatchImmediatePoll` calls at `:590` and `:592`, preserving request-count semantics rather
+    than using the response-awaiting helper.
+- command:
+    `PORT=3132 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=http://localhost:3132 PLAYWRIGHT_BASE_URL=http://localhost:3132 ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts -g "automatic submission follows persisted progress to ready across refresh, reopen, and a second context" --repeat-each=5`
+  result: PASS
+  evidence: exact automatic-ready scenario passed 10/10 in 56.2s: 5 desktop and 5 mobile on local
+    Playwright webServer port `3132`.
+- command:
+    `PORT=3133 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=http://localhost:3133 PLAYWRIGHT_BASE_URL=http://localhost:3133 bun run test:e2e:ci`
+  result: PASS
+  evidence: full CI E2E selector set passed 26/26 in 37.0s on local Playwright webServer port
+    `3133`, including automatic-ready desktop/mobile and failure-observation cases.
+- command: `git diff --check origin/main...HEAD`
+  result: PASS
+  evidence: no whitespace errors across the branch diff.
+- command: `bun run format:check`
+  result: PASS
+  evidence: Biome checked 411 files in 112ms; no fixes applied.
+- command: `bun run lint`
+  result: PASS
+  evidence: Biome checked 411 files in 263ms; no fixes applied.
+- command: `bun run typecheck`
+  result: PASS
+  evidence: Next route types generated successfully and `tsc --noEmit` passed.
+
+## Failures
+
+- none.
+
+## Coverage Gaps
+
+- Did not rerun unit tests or build locally during Cycle 2 recheck; hosted failed run had already
+  passed format/lint/typecheck/unit/build before failing E2E, and this correction is E2E-test-only.
+- Did not run real DigitalOcean, real QStash, deploy, workflow dispatch, hosted-secret mutation,
+  release, or billable paths.
+- Did not commit, push, open/update PR, merge, or edit production/test code.
+
+## Next Action
+
+- Checker verdict: PR #278 correction commit `4773779` is merge-ready for the E2E synchronization
+  fix after coordinator/PR/hosted-CI policy.
