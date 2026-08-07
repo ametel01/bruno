@@ -3,11 +3,11 @@
 ## Active Work
 
 - issue: [#265](https://github.com/ametel01/plingpling/issues/265)
-  owner: builder-agent (`issue_265_builder`)
+  owner: checker-agent (`issue_265_checker`)
   branch: `codex/issue-265-runner-sizing`
   worktree: `/Users/alexmetelli/source/plingpling-issue-265`
   pr: none
-  phase: checker-ready for authorization-independent scope; merge dependency-blocked on main CI/provider evidence
+  phase: failed after serialized checker smoke rerun; zero-cloud local smoke still fails
   cycle: 0/5
 
 ## Completion Contract
@@ -196,13 +196,99 @@
 
 ## Gates
 
+## Checker Result
+Status: FAILED
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all`
+  result: clean except checker-owned status update
+  evidence: `## codex/issue-265-runner-sizing...origin/main [ahead 2]`; only `M STATUS.md`.
+- command: `git rev-parse HEAD`
+  result: pass
+  evidence: `dd12e41c9aa4ca3fac40236cdbfe4780755646fb`.
+- command: `gh issue view 265 --json number,title,state,body,labels,comments,url`
+  result: pass
+  evidence: issue #265 is open, agent-ready, no comments; upstream #263 is the only listed blocker.
+- command: `gh pr view 272 --repo ametel01/plingpling --json state,mergedAt,mergeCommit,closingIssuesReferences,statusCheckRollup`
+  result: pass
+  evidence: PR #272 is `MERGED`, merge commit `7d1cb985c06b0007dadcfb0e42c5631c65b7c472`, closing issue #263.
+- command: `gh run view 31131392382 --repo ametel01/plingpling --json status,conclusion,headSha,url,jobs`
+  result: pass on attempt 2
+  evidence: main CI at `7d1cb985c06b0007dadcfb0e42c5631c65b7c472` is `completed`, conclusion `success`; format, lint, typecheck, unit, build, E2E smoke, and cleanup steps all succeeded.
+- command: `git diff --check origin/main...HEAD`
+  result: pass
+  evidence: no whitespace errors.
+- command: `bun --conditions react-server scripts/run-unit-tests.ts tests/unit/runner-resource-profiles.test.ts tests/unit/cost-prices.test.ts tests/unit/server-env.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/agent-creation-benchmark.test.ts tests/unit/runner-service.test.ts`
+  result: pass
+  evidence: 8 files, 127 tests passed.
+- command: `bun run verify`
+  result: pass
+  evidence: `format:check`, `lint`, `typecheck`, 170 unit files / 1,645 tests, and `next build` all passed.
+- command: `docker info --format '{{.ServerVersion}}'`
+  result: pass
+  evidence: Docker server version `29.3.1`.
+- command: `AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-2gb AGENTBAY_HERMES_DOCKER_CPUS=1 AGENTBAY_HERMES_DOCKER_MEMORY=1536m AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256 bun run repro:cloud-runner`
+  result: pass
+  evidence: generated user-data, schema valid, 11 runcmd bash script blocks OK.
+- command: `bun --conditions react-server scripts/benchmark-agent-creation.ts --mode digitalocean --trials 0 --authorize-provider-costs --candidate-size-slugs s-1vcpu-2gb`
+  result: expected fail closed
+  evidence: `--trials must be an exact positive integer.` No provider effect.
+- command: `AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION=authorize-digitalocean-agent-creation-benchmark bun --conditions react-server scripts/benchmark-agent-creation.ts --mode digitalocean --trials 1 --authorize-provider-costs --candidate-size-slugs s-1vcpu-2gb,s-1vcpu-2gb`
+  result: expected fail closed
+  evidence: `--candidate-size-slugs must not include duplicate size slugs.` No provider effect.
+- command: `AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION=authorize-digitalocean-agent-creation-benchmark bun --conditions react-server scripts/benchmark-agent-creation.ts --mode digitalocean --trials 1 --authorize-provider-costs --candidate-size-slugs s-9vcpu-99gb`
+  result: expected fail closed
+  evidence: `Unsupported candidate DigitalOcean size slug: s-9vcpu-99gb.` No provider effect.
+- command: `bun --conditions react-server scripts/benchmark-agent-creation.ts --mode digitalocean --trials 1 --authorize-provider-costs --candidate-size-slugs s-1vcpu-2gb`
+  result: expected fail closed
+  evidence: missing authorization sentinel rejected with the DigitalOcean benchmark fail-closed message. No provider effect.
+- command: `AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION=authorize-digitalocean-agent-creation-benchmark bun --conditions react-server scripts/benchmark-agent-creation.ts --mode digitalocean --trials 1 --authorize-provider-costs --candidate-size-slugs s-1vcpu-2gb`
+  result: expected fail closed
+  evidence: stopped at `DigitalOcean trial execution is reserved for the provider-backed SLO proof step and is not implemented by the read-only benchmark.` No provider effect.
+- command: `bun --conditions react-server --eval 'readDigitalOceanProviderConfig(...)'` with hosted token, immutable runner image, and no explicit size
+  result: expected fail closed
+  evidence: `s-1vcpu-512mb-10gb has 512 MiB physical RAM, but 1 Hermes agent(s) require 1920 MiB including the 384 MiB runner/OS reserve. Swap is not counted as compatible memory.`
+- command: `bun --conditions react-server --eval 'readDigitalOceanProviderConfig(...)'` with explicit `s-1vcpu-2gb`, `1` CPU, `1536m`, `256` PIDs, max agents `1`
+  result: pass
+  evidence: parsed config emitted `{"sizeSlug":"s-1vcpu-2gb","cpus":"1","memory":"1536m","pidsLimit":"256","maxAgents":1}`.
+- command: `bun run test:e2e:ci`
+  result: pass
+  evidence: 26 Playwright CI tests passed.
+- command: `AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-2gb AGENTBAY_HERMES_DOCKER_CPUS=1 AGENTBAY_HERMES_DOCKER_MEMORY=1536m AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256 bun run local:agent:smoke`
+  result: failed after serialized rerun
+  evidence: latest serialized attempt stopped with `--- simulated Droplet nested Docker diagnostics ---`, `Error response from daemon: No such container: agentbay-local-cloud-runner`, `Error: docker compose failed with exit 1.` Previous checker pass saw the same failure twice. No passing smoke summary was produced, so zero DigitalOcean request count could not be proven from the smoke report.
+- command: `docker ps -a --filter name=agentbay-local-cloud-runner --format '{{.Names}} {{.Status}}'`; `docker ps -a --filter name=agentbay-runner --format '{{.Names}} {{.Status}}'`; `docker ps -a --filter label=agentbay.agent_id --format '{{.Names}} {{.Status}}'`; `docker compose --project-name agentbay-agent-smoke --profile local-cloud ps`
+  result: cleanup verified after failed smoke
+  evidence: no `agentbay-local-cloud-runner`, `agentbay-runner`, or labeled agent containers were listed; compose printed only its empty header.
+
+## Failures
+
+- file: `scripts/smoke-local-agent-cycle.ts`
+  check: zero-cloud local smoke gate
+  exact error: `Error response from daemon: No such container: agentbay-local-cloud-runner`; `Error: docker compose failed with exit 1.`
+  likely owner: builder to fix or coordinator to prove this is a shared local Docker harness failure on main; checker cannot mark the required smoke green.
+
+## Coverage Gaps
+
+- `test-workflow-standards` skill is not installed in this environment; checker used `testing-standards`, `ci-quality-gates`, and `ci-security-gates`.
+- Main CI baseline blocker is cleared: run `31131392382` attempt 2 succeeded on merged main.
+- No DigitalOcean provider benchmark, default-size selection, production secret change, deployment, release, Droplet, firewall, SSH-key, or billable effect was run.
+- The hosted default slug remains `s-1vcpu-512mb-10gb` and correctly fails closed under the current 1536 MiB Hermes plus 384 MiB reserve envelope; final #265 acceptance still needs explicit provider evidence before changing it.
+
+## Next Action
+
+- Builder/coordinator should fix or baseline-classify the repeated `local:agent:smoke` Docker Compose failure, then rerun that gate.
+- Do not merge #265 as complete until the required zero-cloud smoke is green and the provider-evidence/default-selection authorization boundary is resolved.
+
 - command: local/GitHub preflight
   result: pass on 2026-08-07
   evidence: branch was clean at merged main `7d1cb98`; #265 is open/agent-ready with no comments or
     PR; #263 is closed by merged #272; #270 is open and explicitly blocked by #265.
 - command: `gh run view 31131392382 --repo ametel01/plingpling`
-  result: fail; unit tests report 168 files/1,637 tests passed, then the required real-Docker fixture
-    fails because `docker info` cannot reach the daemon. This is the exact current merge blocker.
+  result: historical stale blocker; superseded by checker evidence above.
+  evidence: a later `gh run view 31131392382 --json ...` check shows attempt 2 succeeded on main at
+    `7d1cb985c06b0007dadcfb0e42c5631c65b7c472`.
 - command: `bun --conditions react-server scripts/run-unit-tests.ts tests/unit/runner-resource-profiles.test.ts tests/unit/cost-prices.test.ts tests/unit/server-env.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/agent-creation-benchmark.test.ts`
   result: pass on 2026-08-07; 7 files, 65 tests.
 - command: `bun run format:check`
@@ -222,8 +308,9 @@
 - command: `bun run test:e2e:ci`
   result: pass on 2026-08-07; 26 tests.
 - command: `AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-2gb AGENTBAY_HERMES_DOCKER_CPUS=1 AGENTBAY_HERMES_DOCKER_MEMORY=1536m AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256 bun run local:agent:smoke`
-  result: pass on 2026-08-07; local Docker boundary only, 0 DigitalOcean requests, agent
-    created/deleted, cleanup verified, p95 161,323 ms for the single synthetic local trial.
+  result: historical builder-reported pass; superseded by checker evidence above.
+  evidence: checker serialized rerun failed with `No such container: agentbay-local-cloud-runner`;
+    the latest checker verdict is FAILED.
 - command: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/plingpling NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run agent:creation:benchmark -- --limit 1`
   result: completed on 2026-08-07; passive read-only report returned the latest local DB row as
     incomplete/invalid, so it is not SLO evidence.
