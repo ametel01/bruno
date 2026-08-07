@@ -718,6 +718,72 @@ Status: FAILED
   firewall inputs, strict host-key evidence retrieval, docs trust chain, and the new adversarial
   tests. Local smoke remains serialized.
 
+## Checker Result - Cycle 4
+
+- status: BLOCKED — no code/security blocker found at `2bdc4ea`; the only remaining unchecked gate is
+  the serialized `bun run local:agent:smoke` gate for the shared
+  `agentbay-local-cloud-runner` Docker Compose namespace.
+- checked at: 2026-08-07 09:28:53 PST.
+- PR state: `gh pr list --head codex/issue-266-attested-snapshot --json
+  number,title,state,url,headRefName,baseRefName --limit 5` returned `[]`; no PR exists to merge from
+  this worktree.
+- security evidence:
+  - `.github/workflows/build-runner-snapshot.yml:86` resolves controller egress before the
+    DigitalOcean-token step at line 112 and passes `--controller-cidr
+    "$AGENTBAY_SNAPSHOT_CONTROLLER_CIDR"` at line 130.
+  - `scripts/build-runner-snapshot.ts:19` validates static/pre-effect args before reading provider
+    token at line 21; `scripts/build-runner-snapshot.ts:129` requires exact `/32` IPv4 or `/128`
+    IPv6 controller CIDR; `scripts/build-runner-snapshot.ts:45` records the provider SSH key ID
+    immediately after creation and `scripts/build-runner-snapshot.ts:87` retries deletion in the
+    controller `finally` if the orchestrator did not record deletion.
+  - `src/server/runners/runner-snapshot-build.ts:183` applies the builder firewall with
+    `sshSourceAddresses: [input.controllerSshSourceCidr]` and `webSourceAddresses: []`; provider
+    web-rule generation at `src/server/runners/digitalocean-provider.ts:2384` returns no web ingress
+    for explicit `[]`.
+  - `src/server/runners/runner-snapshot-build.ts:362` records SSH-key deletion success/failure in
+    cleanup evidence without claiming success on provider cleanup failure.
+  - `src/server/runners/digitalocean-provider.ts:1240` pins the observed builder host key into a
+    temp `known_hosts`; `src/server/runners/digitalocean-provider.ts:1270` uses
+    `StrictHostKeyChecking=yes`; `src/server/runners/digitalocean-provider.ts:1439` fails closed on
+    optional `SHA256:` fingerprint mismatch; temp known-host material is removed in the provider
+    `finally`.
+- adversarial test evidence:
+  - `tests/unit/runner-snapshot-build.test.ts:128` rejects world-open, non-exact, invalid, and
+    injected controller CIDRs before provider effects.
+  - `tests/unit/runner-snapshot-build.test.ts:171` records provider SSH-key deletion failure without
+    claiming success.
+  - `tests/unit/runner-snapshot-build.test.ts:242` rejects injected host-key fingerprints before
+    provider effects, and `tests/unit/runner-snapshot-build.test.ts:306` avoids unowned builder
+    deletion.
+  - `tests/unit/runner-snapshot-workflow.test.ts:91` checks controller-finally SSH-key cleanup after
+    creation, and `tests/unit/digitalocean-provider.test.ts:266` checks strict known-host behavior
+    and absence of `StrictHostKeyChecking=accept-new`.
+- gates passed:
+  - `git diff --check main...HEAD`.
+  - `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts
+    tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-workflow.test.ts
+    tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts
+    tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
+    tests/unit/digitalocean-provider.test.ts` — 8 files, 99 tests.
+  - `bun run format:check` — checked 405 files, no fixes applied.
+  - `bun run lint` — checked 405 files, no fixes applied.
+  - `bun run typecheck` — `next typegen && tsc --noEmit`, passed.
+  - `bun run test` — 172 files, 1,673 tests.
+  - `bun run build` — Next.js 16.2.10 production build passed.
+  - `PORT=3118 bun run test:e2e:ci` — 26/26 passed.
+  - `bun run repro:cloud-runner` — generated current user-data, schema valid, 11 runcmd bash blocks
+    valid.
+  - Snapshot-mode `bun run repro:cloud-runner -- --user-data <generated snapshot-user-data.yaml>` —
+    schema valid, 8 runcmd bash blocks valid.
+- gates not run:
+  - `bun run local:agent:smoke` — intentionally skipped until the coordinator releases the shared
+    Docker Compose namespace.
+  - Protected GitHub workflow dispatch, live DigitalOcean snapshot/Droplet effects,
+    secret/environment configuration, deploy, and release were not authorized or run.
+- next-action: run the serialized `bun run local:agent:smoke` gate when the shared namespace is
+  released; if it passes, this checker has no remaining code/security objection to opening/merging
+  the branch.
+
 ## Completed
 
 - [#263](https://github.com/ametel01/plingpling/issues/263) / merged
