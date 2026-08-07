@@ -264,7 +264,7 @@ test("automatic submission follows persisted progress to ready across refresh, r
         await secondContext.close();
       }
 
-      await requestImmediatePoll(reopenedPage);
+      await reopenedPage.reload();
       await expectCurrentStage(reopenedPage, "Ready");
       await expectNoSensitiveExposure(reopenedPage, context, evidence, [
         OPENAI_CANARY,

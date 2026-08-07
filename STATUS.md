@@ -1629,3 +1629,28 @@ Status: ALL GREEN
 
 - Checker verdict: #268 is merge-ready for its repository scope after coordinator/PR/CI policy. No
   implementation change, push, PR, merge, smoke, or external effect was performed by checker.
+
+## Builder Result — Ready E2E Refresh Synchronization
+
+Status: ALL GREEN
+
+- diagnosis: the recurring hosted failure was confined to the final reopened-page `Ready`
+  assertion after the database had already committed `ready`. A bare synthetic `online` event did
+  not provide a deterministic completion boundary and tested event timing outside this scenario's
+  refresh/reopen/second-context persistence contract.
+- correction: replaced only that final `requestImmediatePoll(reopenedPage)` with
+  `reopenedPage.reload()`. The existing `expectCurrentStage(reopenedPage, "Ready")` now observes
+  persisted state after navigation completion. Production code, the polling helper, earlier
+  transitions, timeouts, and route behavior are unchanged.
+- pre-change red-capable loop: the exact scenario passed 20/20 locally in 1.3 minutes; its final
+  assertion is the same intermittently failing hosted seam, confirming the local timing did not
+  reproduce during this sample.
+- cold-cache exact scenario: PASS, desktop/mobile 2/2 in 12.4s after moving the ignored `.next`
+  cache to `/tmp/plingpling-e2e-ready-refresh-next.ENpBxc/.next`.
+- post-change exact-scenario stress: PASS, 20/20 total (10 desktop, 10 mobile) in 1.4 minutes.
+- serialized `bun run test:e2e:ci`: PASS, 26/26 twice in 28.0s and 28.3s.
+- static gates: `bun run format:check`, `bun run lint`, `bun run typecheck`, and
+  `git diff --check` all passed.
+- external effects: none. Validation used local Playwright servers, the local test database, and
+  test fixtures only. No push, PR, merge, deployment, workflow dispatch, release, hosted-secret
+  mutation, DigitalOcean, QStash, or billable action ran.
