@@ -9,7 +9,7 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
   branch: `codex/issue-268-stage-drain`
   worktree: `/Users/alexmetelli/source/plingpling-issue-268`
   pr: none
-  phase: rebasing implementation onto merged #267
+  phase: rebased onto merged #267; combined gates pending
   cycle: 1/5
 
 ## Goal Contract
@@ -347,6 +347,25 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 - request: Verify the pinned single-deployment drain, shared deadline/bound, exact external-wait
   wakeup, all producer wiring, generation/lease/cancellation races, deployment-before-runtime order,
   and zero external effects. Do not edit code.
+- files changed: `src/server/agents/agent-deployment-reconciler.ts`,
+  `agent-deployment-triggers.ts`, `agent-runtime-triggers.ts`, the signed deployment wakeup route,
+  focused reconciler/trigger/wakeup tests, `PROGRESS.md`, and `CHANGELOG.md`.
+- behavior: targeted drains share one 45-second action context, pin the first claimed deployment,
+  stop unless a stage returns exactly `processed:1/outcome:advanced`, and cap at eight iterations.
+  Runner drains suppress the ready-finalization callback so ordered runner ingress issues exactly one
+  runtime reconcile after deployment/runtime initialization commits. Signed delivery publishes the
+  latest persisted wakeup after draining, including the exact two-second gateway wait.
+- evidence: focused required command passed 9 files / 89 tests; `bun run format:check`, `bun run
+  lint`, `bun run typecheck`, `bun run test` (174 files / 1,703 tests), `bun run build`,
+  `PORT=3128 bun run test:e2e:ci` (26/26), and `git diff --check` passed. Fake semantic tests cover
+  runner-ingress provisioning-to-ready ordering, one pinned deployment, exact events/runtime row,
+  one gateway start, shared signal/deadline, exact two-second due wakeup, no early claim, and a
+  concurrent duplicate runner drain.
+- pending: do not check yet. #267 must merge first; coordinator must rebase this branch and resolve
+  the shared reconciler while preserving both contracts. `bun run local:agent:smoke` was not run
+  because its shared namespace is coordinator-serialized.
+- external effects: none; no real DigitalOcean/QStash/snapshot/workflow/deploy/secret/billable
+  action ran.
 - stop condition: Accept only with producer-to-ready evidence, focused/full gates, serialized local
   smoke, and confirmation that the branch was rebased after merged #267.
 

@@ -3,10 +3,11 @@ import {
   deploymentWakeupCallbackUrl,
   deploymentWakeupSafeCodes,
   parseDeploymentWakeupPayload,
+  publishLatestDeploymentWakeupAfterCommit,
   readBoundedDeploymentWakeupBody,
   verifyDeploymentWakeupSignature,
 } from "@/src/server/agents/agent-deployment-dispatch";
-import { reconcileTargetAgentDeployment } from "@/src/server/agents/agent-deployment-reconciler";
+import { drainTargetAgentDeployment } from "@/src/server/agents/agent-deployment-reconciler";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { type DeploymentDispatchConfig, readDeploymentDispatchConfig } from "@/src/server/env";
 
@@ -16,7 +17,8 @@ export const fetchCache = "force-no-store";
 type WakeupRouteDependencies = {
   readConfig?: typeof readDeploymentDispatchConfig;
   createConnection?: () => DatabaseConnection;
-  reconcile?: typeof reconcileTargetAgentDeployment;
+  reconcile?: typeof drainTargetAgentDeployment;
+  publishWakeup?: typeof publishLatestDeploymentWakeupAfterCommit;
   now?: () => Date;
 };
 
@@ -68,7 +70,8 @@ export async function POST(
       );
     }
 
-    const result = await (dependencies.reconcile ?? reconcileTargetAgentDeployment)(
+    const result = await (dependencies.reconcile ?? drainTargetAgentDeployment)(claim.deploymentId);
+    await (dependencies.publishWakeup ?? publishLatestDeploymentWakeupAfterCommit)(
       claim.deploymentId,
     );
 

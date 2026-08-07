@@ -4,14 +4,19 @@ import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
 import type { RunnerAgentStatusSnapshot } from "@/src/runner-service/runner-contracts";
 import {
   computeDeploymentBackoffMs,
+  DEPLOYMENT_DRAIN_MAX_ITERATIONS,
+  drainTargetAgentDeployment,
+  drainTargetRunnerDeployment,
   reconcileNextAgentDeployment,
   reconcileTargetRunnerDeployment,
 } from "@/src/server/agents/agent-deployment-reconciler";
+import { scheduleRunnerReconciliationsAfterResponse } from "@/src/server/agents/agent-runtime-triggers";
 import { retryAgentDeploymentForUser } from "@/src/server/agents/agent-deployment-retry";
 import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   agentConfigs,
+  agentDeploymentWakeups,
   agentDeploymentReplacementBudgets,
   agentDeployments,
   agentEvents,
@@ -940,6 +945,318 @@ describe("agent deployment reconciler", () => {
     expect(seen[0]?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it("drains one pinned runner deployment through ready with one shared deadline", async () => {
+    const otherAgentId = "00000000-0000-4000-8000-00000000a712";
+    const otherDeploymentId = "00000000-0000-4000-8000-00000000a732";
+    await seedAutomaticRunner(connection, { status: "online", provisioningStatus: "ready" });
+    await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
+    await seedDeployment(connection, { stage: "provisioning_runner" });
+    await connection.db.insert(agents).values({
+      id: otherAgentId,
+      userId: USER_ID,
+      runnerId: RUNNER_ID,
+      name: "Second due agent",
+      templateKey: "research_agent",
+      templateVersion: "1.0.0",
+      templateSnapshotJson: getAgentTemplateSnapshot("research_agent"),
+      status: "starting",
+      desiredStatus: "running",
+      createdAt: new Date(NOW.getTime() + 1),
+      updatedAt: NOW,
+    });
+    await connection.db.insert(agentConfigs).values({
+      agentId: otherAgentId,
+      systemPrompt: "Second due deployment must remain untouched.",
+      modelProvider: "openrouter",
+      modelName: "openai/gpt-4.1-mini",
+      maxDailySpendCents: 0,
+      scheduleMode: "manual",
+      timezone: "UTC",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    await connection.db.insert(agentDeployments).values({
+      id: otherDeploymentId,
+      agentId: otherAgentId,
+      userId: USER_ID,
+      stage: "provisioning_runner",
+      configRevision: "cfg-second-due",
+      idempotencyKey: "ready-key-second-due",
+      createdAt: new Date(NOW.getTime() + 1),
+      updatedAt: NOW,
+    });
+    await connection.db.insert(runnerHeartbeats).values({
+      runnerId: RUNNER_ID,
+      status: "online",
+      metadata: { metrics: { maxAgents: 2, runningAgents: 0 } },
+      observedAt: NOW,
+      createdAt: NOW,
+    });
+    const launchSpec = managedLaunchSpec();
+    const seen: Array<{ signal: AbortSignal; timeoutMs: number }> = [];
+    let clockTick = 0;
+    const adapter = fakeRunnerAdapter({
+      start: vi.fn(async () => acceptedStart(launchSpec, OPERATION_ID)),
+      status: vi.fn(async () => ({
+        ok: true,
+        runner: manualRunner(),
+        snapshot: readySnapshot(),
+      })),
+    });
+
+    let callback: (() => void | Promise<void>) | undefined;
+    let drainResult: Awaited<ReturnType<typeof drainTargetRunnerDeployment>> | undefined;
+    let drainError: unknown;
+    const reconcileRuntime = vi.fn(async () => {
+      const [deployment] = await connection.db
+        .select({ stage: agentDeployments.stage })
+        .from(agentDeployments)
+        .where(eq(agentDeployments.id, DEPLOYMENT_ID));
+      const [runtime] = await connection.db
+        .select({ operationId: agentRuntimeReconciliations.operationId })
+        .from(agentRuntimeReconciliations)
+        .where(eq(agentRuntimeReconciliations.agentId, AGENT_ID));
+      expect(deployment?.stage).toBe("ready");
+      expect(runtime?.operationId).toBe(OPERATION_ID);
+      return { processed: 1 as const, outcome: "observed" as const };
+    });
+    const drain = () =>
+      drainTargetRunnerDeployment(RUNNER_ID, {
+        createConnection: () => connection,
+        now: () => new Date(NOW.getTime() + clockTick++),
+        launchSpec: async () => ({ ok: true, spec: launchSpec }),
+        modelCanaryEnabled: false,
+        manualRunnerAdapter: (_runner, options) => {
+          seen.push(options);
+          return adapter as never;
+        },
+      });
+
+    scheduleRunnerReconciliationsAfterResponse(RUNNER_ID, {
+      afterScheduler: (registered) => {
+        callback = registered;
+      },
+      reconcileRunnerDeployment: async () => {
+        try {
+          drainResult = await drain();
+          return drainResult;
+        } catch (error) {
+          drainError = error;
+          throw error;
+        }
+      },
+      reconcileRunnerRuntime: reconcileRuntime,
+    });
+    await callback?.();
+    if (drainError) throw drainError;
+
+    expect(drainResult).toEqual({ processed: 1, outcome: "ready" });
+
+    const rows = await connection.db
+      .select({ id: agentDeployments.id, stage: agentDeployments.stage })
+      .from(agentDeployments)
+      .orderBy(agentDeployments.createdAt);
+    expect(rows).toEqual([
+      { id: DEPLOYMENT_ID, stage: "ready" },
+      { id: otherDeploymentId, stage: "provisioning_runner" },
+    ]);
+    expect(adapter.start).toHaveBeenCalledOnce();
+    expect(adapter.status).toHaveBeenCalledTimes(2);
+    expect(new Set(seen.map(({ signal }) => signal)).size).toBe(1);
+    expect(seen.every(({ timeoutMs }) => timeoutMs > 0 && timeoutMs < 45_000)).toBe(true);
+    expect(reconcileRuntime).toHaveBeenCalledOnce();
+    const events = await connection.db.select().from(agentEvents).orderBy(agentEvents.createdAt);
+    expect(events.map(({ type }) => type)).toEqual([
+      "agent.deployment_stage_changed",
+      "agent.deployment_stage_changed",
+      "agent.deployment_stage_changed",
+      "agent.deployment_stage_changed",
+      "agent.start_completed",
+    ]);
+  });
+
+  it("stops a targeted drain at the shared outer deadline and leaves the next stage due", async () => {
+    await seedAutomaticRunner(connection, { status: "online", provisioningStatus: "ready" });
+    await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
+    await seedDeployment(connection, { stage: "configuring_hermes" });
+    const launchSpec = managedLaunchSpec();
+    let current = NOW;
+    const adapter = fakeRunnerAdapter({
+      start: vi.fn(async () => {
+        current = new Date(NOW.getTime() + 45_000);
+        return acceptedStart(launchSpec, OPERATION_ID);
+      }),
+    });
+
+    await expect(
+      drainTargetAgentDeployment(DEPLOYMENT_ID, {
+        createConnection: () => connection,
+        now: () => current,
+        launchSpec: async () => ({ ok: true, spec: launchSpec }),
+        modelCanaryEnabled: false,
+        manualRunnerAdapter: () => adapter as never,
+      }),
+    ).resolves.toEqual({ processed: 1, outcome: "advanced" });
+
+    const [deployment] = await connection.db
+      .select()
+      .from(agentDeployments)
+      .where(eq(agentDeployments.id, DEPLOYMENT_ID));
+    expect(deployment).toMatchObject({
+      stage: "starting_gateway",
+      leaseOwner: null,
+      nextAttemptAt: null,
+    });
+    expect(adapter.start).toHaveBeenCalledOnce();
+    expect(adapter.status).not.toHaveBeenCalled();
+  });
+
+  it("releases its exact claim when the shared action deadline aborts a runner call", async () => {
+    await seedAutomaticRunner(connection, { status: "online", provisioningStatus: "ready" });
+    await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
+    await seedDeployment(connection, { stage: "configuring_hermes" });
+    const launchSpec = managedLaunchSpec();
+    let current = NOW;
+    const adapter = fakeRunnerAdapter({
+      start: vi.fn(async () => {
+        current = new Date(NOW.getTime() + 45_000);
+        throw new DOMException("Deployment action deadline exceeded.", "TimeoutError");
+      }),
+    });
+
+    await expect(
+      drainTargetAgentDeployment(DEPLOYMENT_ID, {
+        createConnection: () => connection,
+        now: () => current,
+        launchSpec: async () => ({ ok: true, spec: launchSpec }),
+        manualRunnerAdapter: () => adapter as never,
+      }),
+    ).resolves.toEqual({ processed: 0, outcome: "idle" });
+
+    const [deployment] = await connection.db
+      .select()
+      .from(agentDeployments)
+      .where(eq(agentDeployments.id, DEPLOYMENT_ID));
+    expect(deployment).toMatchObject({
+      stage: "configuring_hermes",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      nextAttemptAt: null,
+    });
+    expect(adapter.start).toHaveBeenCalledOnce();
+  });
+
+  it("persists an exact two-second gateway wakeup and resumes only when due", async () => {
+    await seedAutomaticRunner(connection, { status: "online", provisioningStatus: "ready" });
+    await connection.db.insert(runnerHeartbeats).values({
+      runnerId: RUNNER_ID,
+      status: "online",
+      metadata: { metrics: { maxAgents: 1, runningAgents: 0 } },
+      observedAt: NOW,
+      createdAt: NOW,
+    });
+    await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
+    await seedDeployment(connection, { stage: "configuring_hermes" });
+    const launchSpec = managedLaunchSpec();
+    let current = NOW;
+    const adapter = fakeRunnerAdapter({
+      start: vi.fn(async () => acceptedStart(launchSpec, OPERATION_ID)),
+      status: vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          runner: manualRunner(),
+          snapshot: startingSnapshot(),
+        })
+        .mockResolvedValue({ ok: true, runner: manualRunner(), snapshot: readySnapshot() }),
+    });
+    const drain = () =>
+      drainTargetAgentDeployment(DEPLOYMENT_ID, {
+        createConnection: () => connection,
+        now: () => current,
+        launchSpec: async () => ({ ok: true, spec: launchSpec }),
+        modelCanaryEnabled: false,
+        manualRunnerAdapter: () => adapter as never,
+        scheduleRuntimeAfterReady: vi.fn(),
+      });
+
+    await expect(drain()).resolves.toEqual({ processed: 1, outcome: "retry_scheduled" });
+    const [waiting] = await connection.db
+      .select()
+      .from(agentDeployments)
+      .where(eq(agentDeployments.id, DEPLOYMENT_ID));
+    const [wakeup] = await connection.db
+      .select()
+      .from(agentDeploymentWakeups)
+      .where(eq(agentDeploymentWakeups.deploymentId, DEPLOYMENT_ID));
+    expect(waiting?.nextAttemptAt?.toISOString()).toBe(
+      new Date(NOW.getTime() + 2_000).toISOString(),
+    );
+    expect(wakeup?.dueAt.toISOString()).toBe(new Date(NOW.getTime() + 2_000).toISOString());
+    expect(adapter.start).toHaveBeenCalledOnce();
+    expect(adapter.status).toHaveBeenCalledOnce();
+
+    current = new Date(NOW.getTime() + 1_999);
+    await expect(drain()).resolves.toEqual({ processed: 0, outcome: "idle" });
+    expect(adapter.status).toHaveBeenCalledOnce();
+
+    current = new Date(NOW.getTime() + 2_000);
+    await expect(drain()).resolves.toEqual({ processed: 1, outcome: "ready" });
+    expect(adapter.start).toHaveBeenCalledOnce();
+    expect(adapter.status).toHaveBeenCalledTimes(3);
+    const [ready] = await connection.db
+      .select()
+      .from(agentDeployments)
+      .where(eq(agentDeployments.id, DEPLOYMENT_ID));
+    expect(ready).toMatchObject({ stage: "ready", nextAttemptAt: null, leaseOwner: null });
+  });
+
+  it("lets concurrent runner drains execute at most one stage action", async () => {
+    const second = createDatabaseConnection();
+    try {
+      await seedRunner(connection);
+      await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
+      await seedDeployment(connection, { stage: "configuring_hermes" });
+      const launchSpec = managedLaunchSpec();
+      let releaseStart: ((value: ReturnType<typeof acceptedStart>) => void) | undefined;
+      const startResult = new Promise<ReturnType<typeof acceptedStart>>((resolve) => {
+        releaseStart = resolve;
+      });
+      const adapter = fakeRunnerAdapter({
+        start: vi.fn(() => startResult),
+        status: vi.fn(async () => ({
+          ok: true,
+          runner: manualRunner(),
+          snapshot: readySnapshot(),
+        })),
+      });
+      const dependencies = {
+        now: () => NOW,
+        launchSpec: async () => ({ ok: true as const, spec: launchSpec }),
+        modelCanaryEnabled: false,
+        manualRunnerAdapter: () => adapter as never,
+      };
+
+      const first = drainTargetRunnerDeployment(RUNNER_ID, {
+        ...dependencies,
+        createConnection: () => connection,
+      });
+      await vi.waitFor(() => expect(adapter.start).toHaveBeenCalledOnce());
+      const duplicate = drainTargetRunnerDeployment(RUNNER_ID, {
+        ...dependencies,
+        createConnection: () => second,
+      });
+
+      await expect(duplicate).resolves.toEqual({ processed: 0, outcome: "idle" });
+      releaseStart?.(acceptedStart(launchSpec, OPERATION_ID));
+      await expect(first).resolves.toEqual({ processed: 1, outcome: "ready" });
+      expect(adapter.start).toHaveBeenCalledOnce();
+      expect(adapter.status).toHaveBeenCalledTimes(2);
+    } finally {
+      await second.close();
+    }
+  });
+
   it("waits at 29,999 ms and starts one replacement at the exact 30,000 ms boundary", async () => {
     await seedAutomaticRunner(connection, { status: "online", provisioningStatus: "ready" });
     await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
@@ -1409,6 +1726,10 @@ describe("agent deployment reconciler", () => {
     expect([1, 2, 3, 4, 5, 6, 64].map(computeDeploymentBackoffMs)).toEqual([
       2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000,
     ]);
+  });
+
+  it("caps every targeted drain at eight claimed stage iterations", () => {
+    expect(DEPLOYMENT_DRAIN_MAX_ITERATIONS).toBe(8);
   });
 });
 

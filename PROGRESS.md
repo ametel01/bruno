@@ -19,7 +19,7 @@ The update log is append-only.
 
 - [x] Step 0 — Progress and changelog tracking setup
 - [x] Step 1 — Creation-latency evidence and benchmark
-- [ ] Step 2 — Durable delayed deployment wakeups
+- [x] Step 2 — Durable delayed deployment wakeups
 - [x] Step 3 — Bounded drain for provider provisioning phases
 - [ ] Step 4 — Bounded drain for post-registration deployment stages
 - [ ] Step 5 — Right-size cold managed runners
@@ -71,6 +71,11 @@ The update log is append-only.
   (174 files / 1700 tests), `bun run build`, `bun run test:e2e:ci` (26 tests),
   `bun run repro:cloud-runner`, and `git diff --check` passed locally. `bun run local:agent:smoke`
   was intentionally not run because coordinator serialization is required.
+- Step 4 implementation gates: the nine focused reconciler/trigger/wakeup/runner-ingress/race files
+  passed 89 tests; `bun run format:check`, `bun run lint`, `bun run typecheck`, `bun run test`
+  (174 files, 1,703 tests), `bun run build`, `PORT=3128 bun run test:e2e:ci` (26/26), and
+  `git diff --check` passed. The serialized `local:agent:smoke` gate remains pending coordinator
+  authorization, and #267 must merge before this branch is rebased and checked.
 
 ## Issue Graph
 
@@ -198,3 +203,21 @@ The update log is append-only.
 - Gates additionally passed after tracker updates: `bun run test:e2e:ci` (26/26) and
   `bun run local:agent:smoke` with zero DigitalOcean requests and verified cleanup. The local smoke
   p95 was 150.725 seconds, so the overall one-minute SLO remains unmet pending later plan steps.
+
+### 2026-08-07 — Step 4 implementation ready for ordered rebase and checker
+
+- Added deployment- and runner-targeted drains that select at most one deployment, pin its ID after
+  the first claim, and continue only across successful `advanced` transitions for at most eight
+  stage actions under one shared 45-second deadline and abort signal.
+- Rewired post-create fallback, delayed wakeup delivery, runner registration, and heartbeat ingress
+  to the drains. Signed delivery publishes the newly persisted exact-time wakeup after a drain, and
+  runner ingress commits deployment/runtime initialization before issuing one runtime reconcile.
+- Added fake-only semantic coverage for provisioning-to-ready progression, exact ordered events,
+  one gateway start, a second due deployment remaining untouched, a persisted two-second gateway
+  wait with no early claim, shared deadline/signal behavior, and concurrent runner kicks executing
+  one stage action.
+- Focused 9-file coverage passed 89 tests. Full gates passed: format, lint, typecheck, 174 unit files
+  / 1,703 tests, production build, E2E 26/26 on port 3128, and diff-check. No real DigitalOcean,
+  QStash, workflow, snapshot, deploy, secret, or billable effect ran.
+- Pending: merge #267 first, rebase this branch without weakening either drain, then run checker and
+  the coordinator-serialized `local:agent:smoke` gate.

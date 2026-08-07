@@ -111,6 +111,30 @@ describe("POST /api/internal/agent-deployments/wakeup", () => {
     expect(wakeup).toMatchObject({ state: "claimed", generation: payload.generation });
   });
 
+  it("publishes the exact next wakeup persisted by a bounded drain", async () => {
+    const payload = await createWakeupPayload();
+    const body = JSON.stringify(payload);
+    const reconcile = vi.fn(async () => ({
+      processed: 1 as const,
+      outcome: "retry_scheduled" as const,
+    }));
+    const publishWakeup = vi.fn(async () => "published" as const);
+
+    const response = await POST(await signedRequest(body, CURRENT_SIGNING_KEY), undefined, {
+      readConfig: readQstashConfig,
+      createConnection: () => connection,
+      reconcile,
+      publishWakeup,
+      now: () => NOW,
+    });
+
+    expect(response.status).toBe(200);
+    expect(reconcile).toHaveBeenCalledOnce();
+    expect(reconcile).toHaveBeenCalledWith(payload.deploymentId);
+    expect(publishWakeup).toHaveBeenCalledOnce();
+    expect(publishWakeup).toHaveBeenCalledWith(payload.deploymentId);
+  });
+
   it("rejects QStash JWTs with the wrong callback subject or invalid time claims", async () => {
     const payload = await createWakeupPayload();
     const body = JSON.stringify(payload);
