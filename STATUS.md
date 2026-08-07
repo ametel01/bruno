@@ -3,11 +3,11 @@
 ## Active Work
 
 - issue: [#265](https://github.com/ametel01/plingpling/issues/265)
-  owner: builder-agent (`issue_265_builder`)
+  owner: checker-agent (`issue_265_checker`)
   branch: `codex/issue-265-runner-sizing`
   worktree: `/Users/alexmetelli/source/plingpling-issue-265`
   pr: none
-  phase: checker-ready after serialized local-smoke port fix; provider evidence still unauthorized
+  phase: failed checker cycle 1; local smoke passes but ignores requested exact 2 GiB profile
   cycle: 1/5
 
 ## Completion Contract
@@ -19,8 +19,8 @@
   [#272](https://github.com/ametel01/plingpling/pull/272) at `7d1cb98`; it supplies the sanitized
   creation-latency evidence and fail-closed provider-trial guard. No #265 comments, linked
   implementation PR, failed required main-branch check, schema dependency, or unresolved review
-  thread exists. Main CI run 31131392382 now fails because its required real-Docker fixture cannot
-  reach the Docker daemon. Exact default selection also requires explicit billable authorization.
+  thread exists. Main CI run 31131392382 attempt 2 succeeded at merged main `7d1cb98`; exact default
+  selection still requires explicit billable authorization.
 - outcome: Define one canonical managed-runner resource-profile contract, reject unsupported or
   known-incompatible size/capacity/Hermes-runtime combinations before any provider call, add a
   sanitized and fail-closed size-comparison benchmark, and—only after authorized evidence selects
@@ -145,11 +145,10 @@
   - Avoid a database migration. Resource compatibility is configuration/profile validation unless
     the builder proves durable schema is necessary and escalates before adding one.
 - dependency blockers: required main CI
-  [run 31131392382](https://github.com/ametel01/plingpling/actions/runs/31131392382) fails in
-  `tests/unit/create-agent-db.test.ts` (`start route real Docker fixture`) because `docker info`
-  cannot reach the daemon. Implementation may proceed, but checker/merge needs a green rerun or an
-  upstream fix. #263/#272 is complete and #270 is downstream. Live provider evidence separately
-  remains authorization-gated; no DigitalOcean effect is permitted without explicit authority.
+  [run 31131392382](https://github.com/ametel01/plingpling/actions/runs/31131392382) attempt 2
+  succeeded on merged main `7d1cb985c06b0007dadcfb0e42c5631c65b7c472`. #263/#272 is complete and
+  #270 is downstream. Live provider evidence separately remains authorization-gated; no
+  DigitalOcean effect is permitted without explicit authority.
 - open questions:
   - Blocking final acceptance only: which explicitly authorized candidate set and minimum trial
     count should select the default? Until authorization is granted, implement and test the bounded
@@ -209,6 +208,69 @@
 
 ## Gates
 
+## Checker Result
+Status: FAILED
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all`
+  result: clean except checker-owned status update
+  evidence: `## codex/issue-265-runner-sizing...origin/main [ahead 4]`; only `M STATUS.md`.
+- command: `git rev-parse HEAD`
+  result: pass
+  evidence: `6daa88d0ad35622c403fd3ddd17c095eff8675c0`.
+- command: `lsof -nP -iTCP:3000 -sTCP:LISTEN || true`
+  result: confirms diagnosed failure chain context
+  evidence: port 3000 is occupied by existing `node` PID 80934; checker did not disrupt it.
+- command: `AGENTBAY_APP_HOST_PORT=55300 NEXT_PUBLIC_APP_URL=http://host.docker.internal:55300 AGENTBAY_POSTGRES_HOST_PORT=55432 docker compose --project-name agentbay-agent-smoke --profile local-cloud config`
+  result: pass for port wiring
+  evidence: dashboard publishes host `55300` to container target `3000`; `NEXT_PUBLIC_APP_URL` resolves to `http://host.docker.internal:55300`.
+- command: source inspection, `nl -ba scripts/smoke-local-agent-cycle.ts | sed -n '760,780p'`
+  result: failed exact-profile contract
+  evidence: line 773 hard-codes `AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-2vcpu-4gb"` after spreading caller env, so an external `AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-2gb` is overwritten.
+- command: `gh run view 31131392382 --repo ametel01/plingpling --json status,conclusion,attempt,headSha,url,jobs`
+  result: pass
+  evidence: attempt 2, status `completed`, conclusion `success`, head SHA `7d1cb985c06b0007dadcfb0e42c5631c65b7c472`; format, lint, typecheck, unit, build, E2E smoke, and cleanup steps succeeded.
+- command: `bun --conditions react-server scripts/run-unit-tests.ts tests/unit/local-agent-cycle-smoke.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/runner-resource-profiles.test.ts tests/unit/server-env.test.ts`
+  result: pass
+  evidence: 4 files, 27 tests passed.
+- command: `git diff --check`
+  result: pass
+  evidence: no whitespace errors.
+- command: `bun run format:check`
+  result: pass
+  evidence: Biome checked 401 files; no fixes applied.
+- command: `bun run lint`
+  result: pass
+  evidence: Biome checked 401 files; no fixes applied.
+- command: `bun run typecheck`
+  result: pass
+  evidence: Next route types generated; `tsc --noEmit` passed.
+- command: `AGENTBAY_LOCAL_AGENT_CYCLE_APP_HOST_PORT=55300 AGENTBAY_LOCAL_AGENT_CYCLE_POSTGRES_HOST_PORT=55432 AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-2gb AGENTBAY_HERMES_DOCKER_CPUS=1 AGENTBAY_HERMES_DOCKER_MEMORY=1536m AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256 bun run local:agent:smoke`
+  result: lifecycle passed, but exact-profile contract failed
+  evidence: smoke emitted `local_agent_cycle_smoke_passed` with `digitalOceanRequests:0`, `cleanupVerified:true`, `simulatedDroplets:1`, `agentCreated:true`, `agentDeleted:true`, `nestedDocker:true`, `hermesInstalledInsideDroplet:true`, `hermesGatewayLiveInsideDroplet:true`, and local p95 `90530` ms. However the provisioning log for this same run emitted `sizeSlug:"s-2vcpu-4gb"`, proving the run was not the requested exact validated 2 GiB profile.
+- command: `docker ps -a --filter name=agentbay-local-cloud-runner --format '{{.Names}} {{.Status}}'`; `docker ps -a --filter name=agentbay-runner --format '{{.Names}} {{.Status}}'`; `docker ps -a --filter name=agentbay-agent-smoke --format '{{.Names}} {{.Status}}'`; `docker ps -a --filter label=agentbay.agent_id --format '{{.Names}} {{.Status}}'`; `docker compose --project-name agentbay-agent-smoke --profile local-cloud ps`
+  result: pass cleanup verification
+  evidence: no retained simulated Droplet, runner, compose, or labeled agent containers were listed; compose printed only its empty header.
+
+## Failures
+
+- file: `scripts/smoke-local-agent-cycle.ts:773`
+  check: exact validated 2 GiB profile smoke
+  exact error: caller supplied `AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-2gb`, but `buildSmokeEnv` overwrote it with `AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-2vcpu-4gb"`; runtime log confirmed `sizeSlug:"s-2vcpu-4gb"`.
+  likely owner: builder-agent.
+
+## Coverage Gaps
+
+- The local lifecycle smoke now proves zero-cloud behavior and cleanup for the simulated local path, but not for the exact requested `s-1vcpu-2gb` envelope.
+- No DigitalOcean provider benchmark, default-size selection, production secret change, deployment, release, Droplet, firewall, SSH-key, or billable effect was run.
+- The hosted default slug remains `s-1vcpu-512mb-10gb`; final #265 acceptance still needs explicit provider evidence before changing it.
+
+## Next Action
+
+- Builder should change the smoke harness so the validated size profile is not overwritten, add a regression that proves `AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-2gb` reaches provider creation, then hand back for checker cycle 2/5.
+- Do not merge #265 as complete until the required zero-cloud smoke is green for the exact 2 GiB profile and the provider-evidence/default-selection authorization boundary is resolved.
+
 - command: `AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-2gb AGENTBAY_HERMES_DOCKER_CPUS=1 AGENTBAY_HERMES_DOCKER_MEMORY=1536m AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256 bun run local:agent:smoke`
   result: pass on 2026-08-07 after coordinator released the shared smoke namespace.
   evidence: local Docker boundary only; `digitalOceanRequests=0`, one simulated Droplet, agent
@@ -235,7 +297,7 @@
     reported missing `agentbay-local-cloud-runner` because the simulated Droplet had never been
     created. After the dedicated host port fix, the serialized smoke passed.
 
-## Checker Result
+## Historical Checker Result — Cycle 0
 Status: FAILED
 
 ## Commands
