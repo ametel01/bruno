@@ -9,8 +9,8 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
   branch: `codex/issue-267-provider-phase-drain`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: checker-ready after operation-tag log redaction fix
-  cycle: 2/5
+  phase: checker-green; merge-ready after PR/review/CI policy
+  cycle: 3/5
 
 ## Goal Contract
 
@@ -942,7 +942,7 @@ Status: ALL GREEN
 - Open/push the #264 PR from `codex/issue-264-durable-wakeups`, then merge only after normal PR
   review/CI policy is satisfied. Checker verdict on the branch head: merge-ready for #264.
 
-## Checker Result
+## Checker Result — #267 Cycle 2
 
 Status: FAILED
 
@@ -1112,6 +1112,102 @@ Status: READY FOR CHECKER
   logging-only fix.
 - Did not run real DigitalOcean, real QStash, deploy, release, workflow dispatch, or billable paths.
 
+## Checker Result
+
+Status: ALL GREEN
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all && git rev-parse --short HEAD && git branch --show-current`
+  result: PASS
+  evidence: branch `codex/issue-267-provider-phase-drain`; HEAD `600568d`; worktree clean before
+    checker evidence.
+- command: `git show --stat --name-status --oneline --decorate --no-renames 600568d` and
+    `git diff --check 075d55d..600568d`
+  result: PASS
+  evidence: log-redaction fix commit `600568d Redact provisioning operation log context` changes only
+    `STATUS.md`, `src/server/runners/runner-provisioning.ts`, and
+    `tests/unit/runner-provisioning-logging.test.ts`; no diff-check errors in the head-only fix.
+- command: source inspection of production provisioning logger bindings
+  result: PASS
+  evidence: `runner-provisioning.ts:195-205` now binds automatic lifecycle logs to
+    `lifecycleId: input.runnerId` and `runnerId: input.runnerId`, not `input.operationKey`, and
+    passes redaction values derived from the provider operation key; `runner-provisioning.ts:1007-1012`
+    uses a random manual lifecycle ID and no longer binds `userId`.
+- command: source inspection of operation-tag redaction through child bindings, metadata, and errors
+  result: PASS
+  evidence: `runner-provisioning.ts:2693-2720` redacts child bindings before `logger.child`, redacts
+    metadata before every log call, and redacts `Error` values before `logger.error`;
+    `runner-provisioning.ts:2723-2844` redacts the full `agentbay-deploy|replace-<32hex>` tag plus
+    compact and dashed deployment identifiers, recurses through arrays/objects/errors, preserves
+    safe scalar values, handles cycles, and leaves final generic app-logger secret redaction intact.
+- command: source inspection of sanitizer over/under-redaction
+  result: PASS
+  evidence: generic app logger still redacts secret-keyed metadata and token-like text at
+    `logger.ts:58-78`, `:92-123`, `:261-300`; provisioning-specific redaction is scoped only to
+    automatic provisioning operation identifiers via `redactedValues`, so it does not broaden global
+    log redaction and does not mask unrelated safe runner-scoped correlation.
+- command: production-mode regression inspection
+  result: PASS
+  evidence: `tests/unit/runner-provisioning-logging.test.ts:21-78` stubs `NODE_ENV=production`,
+    mocks `createAppLogger`, captures child bindings and event metadata, asserts lifecycle
+    correlation is runner-scoped, and asserts the raw operation key, compact deployment identifier,
+    and user ID are absent from serialized log output. This prevents the regression from passing
+    solely because `NODE_ENV=test` suppresses provisioning logs.
+- command:
+    `if rg -n "lifecycleId:\s*(input\.operationKey|operationKey)|log\([^\n]*(operationKey|provisioningOperationKey|operationTag|deploymentId)" src/server/runners src/server/agents; then exit 1; else echo ...; fi`
+  result: PASS
+  evidence: no direct provisioning operation identifiers remain in logger lifecycle bindings or
+    direct log calls under `src/server/runners` or `src/server/agents`.
+- command:
+    `bun scripts/run-unit-tests.ts tests/unit/runner-provisioning-logging.test.ts tests/unit/automatic-runner-provisioning.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_98945_28a4890cbcf1`; migrations applied; 2 files / 16
+    tests passed; DB removed.
+- command: `git diff --check origin/main...HEAD`
+  result: PASS
+  evidence: no whitespace errors across the #267 branch diff.
+- command: `bun run format:check`
+  result: PASS
+  evidence: Biome checked 411 files in 215ms; no fixes applied.
+- command: `bun run lint`
+  result: PASS
+  evidence: Biome checked 411 files in 588ms; no fixes applied.
+- command: `bun run typecheck`
+  result: PASS
+  evidence: Next route types generated successfully and `tsc --noEmit` passed.
+- command: ambient external-effect preflight
+  result: PASS
+  evidence: environment variable names checked without printing values:
+    `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE`, `AGENTBAY_DIGITALOCEAN_TOKEN`,
+    `DIGITALOCEAN_ACCESS_TOKEN`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`,
+    `QSTASH_NEXT_SIGNING_KEY`, `AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION`, and
+    `AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION` are all unset.
+- command: prior functional/full/E2E/repro/smoke evidence accepted for unchanged behavior
+  result: PASS
+  evidence: head-only fix is logging/redaction scoped. Prior coordinator/builder evidence on this
+    branch remains applicable: 7 files / 100 focused tests, full unit 174 files / 1,701 tests,
+    format/lint/typecheck/build, E2E 26/26, `bun run repro:cloud-runner`, and serialized local smoke
+    `89513ms` with `cleanupVerified:true`, `digitalOceanRequests:0`, `simulatedDroplets:1`, and one
+    provider-phase invocation to `waiting_for_runner`.
+
+## Failures
+
+- none.
+
+## Coverage Gaps
+
+- Did not rerun `bun run local:agent:smoke`; assignment explicitly said no smoke rerun and the fix is
+  logging-only.
+- Did not run real DigitalOcean, real QStash, deploy, release, workflow dispatch, provider-backed
+  E2E, or billable paths; those effects are outside #267 authorization.
+
+## Next Action
+
+- Checker verdict: #267 is merge-ready for its repository scope after PR/review/CI policy. Coordinator
+  alone should open/push/merge; checker performed no commit, push, PR, merge, smoke, or external
+  effect.
+
 ## Review Threads
 
 - none. Reviews #4878363214 and #4878490254 were fixed and accepted by review #4878725523.
@@ -1133,9 +1229,11 @@ Status: READY FOR CHECKER
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling`: issue #264 branch; coordinator-owned, checker-green.
+- `/Users/alexmetelli/source/plingpling`: issue #267 branch; coordinator-owned, checker-green.
 - `/Users/alexmetelli/source/plingpling-issue-265`: merged #265 branch; preserve existing state.
 - `/Users/alexmetelli/source/plingpling-issue-266`: main at merged #266; preserve existing state.
+- `/Users/alexmetelli/source/plingpling-issue-268`: issue #268 branch; implementation committed and
+  waiting for #267-first merge/rebase order.
 - `/Users/alexmetelli/source/plingpling-step7-base`: pre-existing detached user-owned worktree;
   preserve and do not modify.
 
@@ -1144,6 +1242,9 @@ Status: READY FOR CHECKER
 - issue [#263](https://github.com/ametel01/plingpling/issues/263), PR
   [#272](https://github.com/ametel01/plingpling/pull/272), merge
   `7d1cb985c06b0007dadcfb0e42c5631c65b7c472`; maker/checker/reviewer accepted.
+- issue [#264](https://github.com/ametel01/plingpling/issues/264), PR
+  [#275](https://github.com/ametel01/plingpling/pull/275), merge
+  `fa79f4a69b5e684573bd42dcd59f4f9ffe4f1fa6`; checker and post-merge main CI accepted.
 - repository scope for issue [#265](https://github.com/ametel01/plingpling/issues/265), PR
   [#273](https://github.com/ametel01/plingpling/pull/273), merge
   `84a1860f4030496adda7dfc324ef86acafb19742`; post-merge main CI rerun passed.
