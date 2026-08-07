@@ -1654,3 +1654,138 @@ Status: ALL GREEN
 - external effects: none. Validation used local Playwright servers, the local test database, and
   test fixtures only. No push, PR, merge, deployment, workflow dispatch, release, hosted-secret
   mutation, DigitalOcean, QStash, or billable action ran.
+
+## Checker Result — Ready E2E Refresh Synchronization
+
+Status: NOT GREEN
+
+- branch/commit: `codex/fix-ready-e2e-refresh` at `bc70e88` (`Reload reopened agent before final
+  ready assertion`), ahead of `origin/main` by one commit.
+- diff scope: PASS
+  evidence: `git diff --name-status origin/main...HEAD` shows only `STATUS.md` and
+  `tests/e2e/automatic-ready.spec.ts`.
+- source inspection: PASS
+  evidence: the only test-code delta is
+  `tests/e2e/automatic-ready.spec.ts:267`, replacing the final reopened-page
+  `requestImmediatePoll(reopenedPage)` with `reopenedPage.reload()` after the second context already
+  commits and observes database `ready`. Earlier immediate polling coverage remains at
+  `:194`, `:240`, and `:245`; the `requestImmediatePoll` helper remains unchanged at `:656-658`.
+  Sensitive-evidence checks and request assertions remain after the final ready assertion at
+  `:269-276`; timeout, route, helper, and production files are unchanged by this commit.
+- prior failed mobile repeat evidence requested by coordinator: PARTIAL
+  evidence: the prior worktree's `error-context.md` path was already gone/overwritten, so no
+  exact Playwright step/stack survived beyond STATUS. Durable evidence from the prior checker
+  STATUS says combined stress on port `3135` passed 9/10; `[chromium-mobile]` repeat 4 hit
+  `Test timeout of 60000ms exceeded`; Playwright recorded
+  `test-results/automatic-ready-automatic--d475c-reopen-and-a-second-context-chromium-mobile-repeat4/error-context.md`;
+  WebServer also emitted `error: script "dev" exited with code 143`. Available artifacts do not
+  prove whether the timeout was inside `waitForResponse`, `waitForRequest`, route hold, or elsewhere.
+- command:
+  `PORT=3140 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=http://localhost:3140 PLAYWRIGHT_BASE_URL=http://localhost:3140 ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts -g "automatic submission follows persisted progress to ready across refresh, reopen, and a second context"`
+  result: PASS
+  evidence: moved ignored `.next` cache to
+  `/tmp/plingpling-e2e-ready-refresh-next-checker-20260807144628`; cold-cache exact scenario passed
+  desktop/mobile 2/2 in 14.0s.
+- command:
+  `PORT=3141 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=http://localhost:3141 PLAYWRIGHT_BASE_URL=http://localhost:3141 ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts -g "automatic submission follows persisted progress to ready across refresh, reopen, and a second context" --repeat-each=5`
+  result: PASS
+  evidence: exact scenario passed 10/10 total, 5 desktop and 5 mobile, in 1.0m.
+- command:
+  `PORT=3142 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=http://localhost:3142 PLAYWRIGHT_BASE_URL=http://localhost:3142 bun run test:e2e:ci`
+  result: FAIL
+  evidence: full E2E passed 18/26 before WebServer emitted
+  `error: script "dev" exited with code 143`; remaining mobile tests then failed with
+  `net::ERR_CONNECTION_REFUSED`/`ECONNREFUSED` against `localhost:3142`. The changed ready-refresh
+  scenario passed in both projects before the server exit.
+- command:
+  `PORT=3143 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=http://localhost:3143 PLAYWRIGHT_BASE_URL=http://localhost:3143 bun run test:e2e:ci`
+  result: FAIL
+  evidence: rerun passed 15/26 before WebServer again emitted
+  `error: script "dev" exited with code 143`; one mobile retry test first failed waiting for
+  `#deployment-progress-title` to become `Ready`, then remaining mobile tests failed with
+  `net::ERR_CONNECTION_REFUSED`/`ECONNREFUSED` against `localhost:3143`. The changed ready-refresh
+  scenario again passed in both projects before the server exit.
+- command: `git diff --check origin/main...HEAD`
+  result: PASS
+  evidence: no whitespace errors.
+- command: `bun run format:check`
+  result: PASS
+  evidence: Biome checked 411 files in 180ms; no fixes applied.
+- command: `bun run lint`
+  result: PASS
+  evidence: Biome checked 411 files in 570ms; no fixes applied.
+- command: `bun run typecheck`
+  result: PASS
+  evidence: Next route types generated successfully and `tsc --noEmit` passed.
+- external effects: none. Checker performed no production/test-code edits, push, PR mutation,
+  merge, deployment, workflow dispatch, release, hosted-secret mutation, DigitalOcean, QStash, or
+  billable action. Only this STATUS evidence was appended by checker.
+
+## Failures
+
+- Full E2E is not green in this checker run. Both full-suite attempts lost the local Next dev server
+  during the mobile half with `error: script "dev" exited with code 143`, producing connection
+  refused cascades.
+
+## Coverage Gaps
+
+- Did not merge the PR because the active checker contract is read-only and explicitly forbids
+  push/PR/merge.
+- Did not run `bun run verify`, `bun run build`, real DigitalOcean, real QStash, deploy, release,
+  workflow dispatch, hosted-secret mutation, or billable paths.
+
+## Next Action
+
+- Not merge-ready from this checker run until the full E2E server-lifecycle failure is resolved or a
+  coordinator explicitly accepts that local harness failure as unrelated to this minimal E2E-sync
+  change.
+
+## Checker Result — Ready E2E Refresh Synchronization Cycle 2
+
+Status: ALL GREEN
+
+- reconciliation basis: coordinator provided serialized full-suite evidence after concurrent heavy
+  gates stopped: in this same worktree at `bc70e88`, `PORT=3132 bun run test:e2e:ci` passed 26/26
+  in 26.5s with exit 0.
+- current worktree inspection: PASS
+  evidence: `git rev-parse --short HEAD` returned `bc70e88`; branch is
+  `codex/fix-ready-e2e-refresh`; unstaged changes are STATUS-only checker evidence. The committed
+  branch diff remains `STATUS.md` plus `tests/e2e/automatic-ready.spec.ts`.
+- prior checker failure reconciliation: PASS
+  evidence: the two previous checker full-suite failures were both local Next dev server exits
+  (`error: script "dev" exited with code 143`) followed by connection-refused cascades during the
+  mobile half while other heavy #270 gates were running. They were not failures of the changed
+  ready-refresh assertion; that scenario passed in both projects before the server exits.
+- retained checker evidence: PASS
+  evidence: checker cold-cache exact scenario passed 2/2 in 14.0s, focused repeat passed 10/10
+  total (5 desktop + 5 mobile) in 1.0m, `git diff --check origin/main...HEAD` passed,
+  `bun run format:check` passed, `bun run lint` passed, and `bun run typecheck` passed.
+- source inspection: PASS
+  evidence: the only test-code delta is the final reopened-page synchronization boundary, replacing
+  `requestImmediatePoll(reopenedPage)` with `reopenedPage.reload()` after database `ready` was
+  already committed/observed through the second context. Earlier immediate-poll coverage, the
+  polling helper, timeouts, routes, sensitive-evidence assertions, request assertions, and production
+  files remain unchanged.
+- rerun policy: PASS
+  evidence: checker did not run another heavy E2E now because coordinator reported #270 gates are
+  restarting and requested no concurrent heavy rerun.
+- external effects: none. Checker performed no production/test-code edits, push, PR mutation,
+  merge, deployment, workflow dispatch, release, hosted-secret mutation, DigitalOcean, QStash, or
+  billable action. Only STATUS evidence was appended.
+
+## Failures
+
+- none remaining for this minimal E2E synchronization change.
+
+## Coverage Gaps
+
+- Did not independently rerun full E2E after the coordinator pass to avoid reintroducing concurrent
+  heavy-gate interference. This verdict accepts the coordinator's serialized 26/26 full-suite
+  evidence as resolving the earlier local server-lifecycle gap.
+- Did not run `bun run verify`, `bun run build`, real DigitalOcean, real QStash, deploy, release,
+  workflow dispatch, hosted-secret mutation, push, PR mutation, merge, or billable paths.
+
+## Next Action
+
+- Checker verdict: merge-ready for the minimal ready-refresh E2E synchronization change, subject to
+  normal coordinator/PR/CI policy. No code-level blocker remains.
