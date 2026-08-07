@@ -94,6 +94,10 @@ describe("local full agent-cycle smoke", () => {
     expect(source).toContain("createAgentForUser");
     expect(source).toContain("reconcileTargetAgentDeployment");
     expect(source).toContain("buildAgentCreationLatencyReportForDatabase");
+    expect(source).toContain("AGENTBAY_LOCAL_AGENT_CYCLE_APP_HOST_PORT");
+    expect(source).toContain("AGENTBAY_APP_HOST_PORT: String(APP_HOST_PORT)");
+    expect(source).toMatch(/http:\/\/host\.docker\.internal:\$\{APP_HOST_PORT\}/);
+    expect(source).toMatch(/http:\/\/127\.0\.0\.1:\$\{APP_HOST_PORT\}\/health/);
     expect(source).toContain("restartAgentForUser");
     expect(source).toContain("reconcileTargetAgentRuntime");
     expect(source).toContain("buildHermesAgentLaunchSpecForUser");
@@ -123,6 +127,8 @@ describe("local full agent-cycle smoke", () => {
     expect(compose.indexOf("bun run db:migrate")).toBeLessThan(
       compose.indexOf("bun run local:cloud:prepare"),
     );
+    expect(compose).toMatch(/NEXT_PUBLIC_APP_URL: \$\{NEXT_PUBLIC_APP_URL:-/);
+    expect(compose).toMatch(/"\$\{AGENTBAY_APP_HOST_PORT:-3000\}:3000"/);
     expect(compose).toContain("platform: linux/amd64");
     expect(compose).toContain("AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION");
     expect(compose).toContain("AGENTBAY_AGENT_SECRET_KEYS_JSON");

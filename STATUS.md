@@ -3,12 +3,12 @@
 ## Active Work
 
 - issue: [#265](https://github.com/ametel01/plingpling/issues/265)
-  owner: checker-agent (`issue_265_checker`)
+  owner: builder-agent (`issue_265_builder`)
   branch: `codex/issue-265-runner-sizing`
   worktree: `/Users/alexmetelli/source/plingpling-issue-265`
   pr: none
-  phase: failed after serialized checker smoke rerun; zero-cloud local smoke still fails
-  cycle: 0/5
+  phase: checker-ready after serialized local-smoke port fix; provider evidence still unauthorized
+  cycle: 1/5
 
 ## Completion Contract
 
@@ -193,8 +193,47 @@
   next-action: Review diff and gate evidence; if accepted, coordinator may open/refresh the PR but
     should not merge until required main CI is green or accepted upstream-blocked and provider
     evidence/default-selection authorization is resolved.
+- from: builder-agent (`issue_265_builder`)
+  to: checker-agent
+  timestamp: 2026-08-07T08:50:00+08:00
+  request: Re-check #265 after the local-smoke harness fix. The previous `No such container:
+    agentbay-local-cloud-runner` failure is resolved by avoiding the hard-coded dashboard host port
+    collision before provider creation.
+  evidence: `compose.yaml` now accepts `AGENTBAY_APP_HOST_PORT`; `scripts/smoke-local-agent-cycle.ts`
+    uses dedicated default host app port `55300` and passes the matching `NEXT_PUBLIC_APP_URL` into
+    compose while keeping the dashboard container on port 3000. Regression assertions were added in
+    `tests/unit/local-agent-cycle-smoke.test.ts`.
+  next-action: Verify the narrow diff and gates, especially the serialized local smoke. Do not treat
+    local p95 as DigitalOcean evidence and do not merge as complete until provider evidence/default
+    selection authorization is resolved.
 
 ## Gates
+
+- command: `AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-2gb AGENTBAY_HERMES_DOCKER_CPUS=1 AGENTBAY_HERMES_DOCKER_MEMORY=1536m AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256 bun run local:agent:smoke`
+  result: pass on 2026-08-07 after coordinator released the shared smoke namespace.
+  evidence: local Docker boundary only; `digitalOceanRequests=0`, one simulated Droplet, agent
+    created/deleted, cleanup verified, nested Docker true, Hermes installed/live inside the
+    simulated Droplet, valid single-run p95 `138031` ms. This is local behavior evidence only, not
+    DigitalOcean SLO evidence.
+- command: `docker ps -a --filter name=agentbay-local-cloud-runner --format '{{.Names}} {{.Status}}'`; `docker ps -a --filter name=agentbay-runner --format '{{.Names}} {{.Status}}'`; `docker ps -a --filter name=agentbay-agent-smoke --format '{{.Names}} {{.Status}}'`; `docker ps -a --filter label=agentbay.agent_id --format '{{.Names}} {{.Status}}'`
+  result: pass on 2026-08-07 after smoke cleanup.
+  evidence: no managed smoke, runner, compose, or labeled agent containers were listed.
+- command: `bun --conditions react-server scripts/run-unit-tests.ts tests/unit/local-agent-cycle-smoke.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/runner-resource-profiles.test.ts tests/unit/server-env.test.ts`
+  result: pass on 2026-08-07; 4 files, 27 tests.
+- command: `bun run format:check`
+  result: pass on 2026-08-07.
+- command: `bun run lint`
+  result: pass on 2026-08-07.
+- command: `bun run typecheck`
+  result: pass on 2026-08-07.
+- command: `git diff --check`
+  result: pass on 2026-08-07.
+- command: `AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-2gb AGENTBAY_HERMES_DOCKER_CPUS=1 AGENTBAY_HERMES_DOCKER_MEMORY=1536m AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256 bun run local:agent:smoke`
+  result: diagnostic fail before fix on 2026-08-07.
+  evidence: reproduced checker symptom in 17s. Manual compose minimization showed dashboard startup
+    failed before provider creation because host TCP port 3000 was already in use; diagnostics then
+    reported missing `agentbay-local-cloud-runner` because the simulated Droplet had never been
+    created. After the dedicated host port fix, the serialized smoke passed.
 
 ## Checker Result
 Status: FAILED
@@ -278,8 +317,10 @@ Status: FAILED
 
 ## Next Action
 
-- Builder/coordinator should fix or baseline-classify the repeated `local:agent:smoke` Docker Compose failure, then rerun that gate.
-- Do not merge #265 as complete until the required zero-cloud smoke is green and the provider-evidence/default-selection authorization boundary is resolved.
+- Checker should verify the dedicated local-smoke host-port fix and rerun or accept the serialized
+  `local:agent:smoke` evidence above.
+- Do not merge #265 as complete until checker accepts the zero-cloud smoke fix and the
+  provider-evidence/default-selection authorization boundary is resolved.
 
 - command: local/GitHub preflight
   result: pass on 2026-08-07

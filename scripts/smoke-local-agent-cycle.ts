@@ -51,8 +51,16 @@ import { createConfiguredDigitalOceanProvider } from "@/src/server/runners/runne
 
 const COMPOSE_PROJECT = "agentbay-agent-smoke";
 const DASHBOARD_CONTAINER = `${COMPOSE_PROJECT}-dashboard-1`;
-const DATABASE_URL = "postgres://agentbay:agentbay@127.0.0.1:55432/plingpling";
-const APP_URL = "http://host.docker.internal:3000";
+const APP_HOST_PORT = readPositiveInteger(
+  process.env.AGENTBAY_LOCAL_AGENT_CYCLE_APP_HOST_PORT,
+  55_300,
+);
+const POSTGRES_HOST_PORT = readPositiveInteger(
+  process.env.AGENTBAY_LOCAL_AGENT_CYCLE_POSTGRES_HOST_PORT,
+  55_432,
+);
+const DATABASE_URL = `postgres://agentbay:agentbay@127.0.0.1:${POSTGRES_HOST_PORT}/plingpling`;
+const APP_URL = `http://host.docker.internal:${APP_HOST_PORT}`;
 const RUNNER_ENDPOINT_URL = "http://host.docker.internal:3045";
 const TIMEOUT_MS = readPositiveInteger(
   process.env.AGENTBAY_LOCAL_AGENT_CYCLE_TIMEOUT_MS,
@@ -607,7 +615,7 @@ async function assertPersistedCleanup(
 async function waitForControlPlane(): Promise<void> {
   const deadline = Date.now() + TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const response = await fetch("http://127.0.0.1:3000/health").catch(() => null);
+    const response = await fetch(`http://127.0.0.1:${APP_HOST_PORT}/health`).catch(() => null);
     if (response?.ok) return;
     const dashboard = await docker(
       ["inspect", "--format", "{{.State.Status}}", DASHBOARD_CONTAINER],
@@ -758,6 +766,7 @@ function buildSmokeEnv(env: Record<string, string | undefined>): Record<string, 
     AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "local-smoke-v1",
     AGENTBAY_AGENT_SECRET_KEYS_JSON: JSON.stringify({ "local-smoke-v1": SECRET_KEY }),
     AGENTBAY_AUTH_MODE: "development",
+    AGENTBAY_APP_HOST_PORT: String(APP_HOST_PORT),
     AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
     AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "none",
     AGENTBAY_DIGITALOCEAN_TOKEN: "local-docker",
@@ -767,7 +776,7 @@ function buildSmokeEnv(env: Record<string, string | undefined>): Record<string, 
     AGENTBAY_LOCAL_AGENT_SMOKE_MODE: LOCAL_AGENT_SMOKE_MODE_VALUE,
     AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: RUNNER_ENDPOINT_URL,
     AGENTBAY_LOCAL_CLOUD_RUNNER_START_DELAY_MS: "100",
-    AGENTBAY_POSTGRES_HOST_PORT: "55432",
+    AGENTBAY_POSTGRES_HOST_PORT: String(POSTGRES_HOST_PORT),
     AGENTBAY_READY_AGENT_CREATION_ENABLED: "true",
     AGENTBAY_RUNNER_BEARER_TOKEN: "local-runner-command-token",
     AGENTBAY_RUNNER_IMAGE: "agentbay-runner:local",

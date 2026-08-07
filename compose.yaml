@@ -30,7 +30,7 @@ services:
       AGENTBAY_AGENT_SECRET_KEYS_JSON: ${AGENTBAY_AGENT_SECRET_KEYS_JSON:-}
       AGENTBAY_AUTH_MODE: development
       DATABASE_URL: postgres://agentbay:agentbay@postgres:5432/plingpling
-      NEXT_PUBLIC_APP_URL: http://host.docker.internal:3000
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://host.docker.internal:3000}
       AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: local_docker
       AGENTBAY_DIGITALOCEAN_TOKEN: local-docker
       AGENTBAY_HERMES_WORKLOAD_IMAGE: ${AGENTBAY_HERMES_WORKLOAD_IMAGE:-agentbay-hermes:local}
@@ -39,7 +39,7 @@ services:
       AGENTBAY_RUNNER_BEARER_TOKEN: local-runner-command-token
       AGENTBAY_RUNNER_IMAGE: agentbay-runner:local
     ports:
-      - "3000:3000"
+      - "${AGENTBAY_APP_HOST_PORT:-3000}:3000"
     profiles:
       - local-cloud
     volumes:
