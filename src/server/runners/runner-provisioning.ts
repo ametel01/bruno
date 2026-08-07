@@ -63,6 +63,7 @@ const DEFAULT_FIREWALL_NAME = "agentbay-runners";
 const CLOUD_REGISTRATION_TOKEN_TTL_MS = 60 * 60 * 1000;
 const PUBLIC_ENDPOINT_POLL_ATTEMPTS = 20;
 const PUBLIC_ENDPOINT_POLL_INTERVAL_MS = 3_000;
+const DEFAULT_AUTOMATIC_PROVIDER_DRAIN_ITERATIONS = 8;
 const MAX_RUNNER_NAME_LENGTH = 80;
 const MANAGED_SSH_KEY_NAME = "plingpling managed runner key";
 
@@ -162,8 +163,14 @@ export type RunnerProvisioningDependencies = {
   now?: () => Date;
 };
 
+export type AutomaticRunnerProvisioningStopDisposition =
+  | "immediate"
+  | "external_wait"
+  | "observation_wait";
+
 export type AutomaticRunnerProvisioningResult =
-  | { ok: true; state: "pending" | "ready" }
+  | { ok: true; state: "pending"; disposition: AutomaticRunnerProvisioningStopDisposition }
+  | { ok: true; state: "ready" }
   | {
       ok: false;
       cleanupRequired: boolean;
@@ -181,6 +188,8 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
   provider: DigitalOceanProvider;
   context: DigitalOceanProviderRequestContext;
   now: () => Date;
+  maxDrainIterations?: number;
+  canContinue?: () => Promise<boolean>;
 }): Promise<AutomaticRunnerProvisioningResult> {
   const log = createRunnerProvisioningLog({
     lifecycle: "droplet_creation",
@@ -189,6 +198,530 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     runnerId: input.runnerId,
     userId: input.userId,
   });
+
+  const operationTags = [
+    ...new Set([...input.config.tags, DIGITALOCEAN_MANAGED_RUNNER_TAG, input.operationKey]),
+  ].sort();
+  const maxDrainIterations =
+    input.maxDrainIterations ?? DEFAULT_AUTOMATIC_PROVIDER_DRAIN_ITERATIONS;
+  const pending = (
+    disposition: AutomaticRunnerProvisioningStopDisposition,
+  ): AutomaticRunnerProvisioningResult => ({
+    ok: true,
+    state: "pending",
+    disposition,
+  });
+
+  for (let iteration = 0; iteration < maxDrainIterations; iteration += 1) {
+    const runner = await loadAutomaticProvisioningRunner(input);
+
+    if (!runner || runner.status === "deleted") {
+      log("runner_unavailable", { observedRunnerStatus: runner?.status ?? "missing" }, "error");
+      return {
+        ok: false,
+        cleanupRequired: false,
+        terminalCode: "runner_provisioning_unavailable",
+      };
+    }
+
+    if (runner.provisioningStatus === "ready") {
+      log("completed", { provisioningStatus: runner.provisioningStatus });
+      return { ok: true, state: "ready" };
+    }
+
+    if (runner.provisioningStatus === "waiting_for_runner") {
+      log("waiting_for_runner", { providerResourceId: runner.providerResourceId }, "debug");
+      return pending("external_wait");
+    }
+
+    const validatedResources = validateDigitalOceanProvisioningResources(input.config);
+    if (!validatedResources.ok) {
+      log(
+        "provider_config_rejected",
+        {
+          issueCount: validatedResources.issues.length,
+          sizeSlug: input.config.sizeSlug,
+          runnerMaxAgents: input.config.runnerMaxAgents,
+        },
+        "error",
+      );
+      await markAutomaticProvisioningFailed(input, runner.providerResourceId);
+      return {
+        ok: false,
+        cleanupRequired: Boolean(runner.providerResourceId),
+        terminalCode: "runner_provisioning_unavailable",
+      };
+    }
+
+    if (runner.provisioningStatus === "failed" || runner.provisioningStatus === "deleted") {
+      log(
+        "terminal_state_observed",
+        {
+          provisioningStatus: runner.provisioningStatus,
+          providerResourceId: runner.providerResourceId,
+        },
+        "error",
+      );
+      let cleaned = runner.provisioningStatus === "deleted";
+      if (runner.provisioningStatus === "failed" && runner.providerResourceId) {
+        cleaned = await cleanupAutomaticFailedRunner({
+          connection: input.connection,
+          provider: input.provider,
+          context: input.context,
+          runner: {
+            id: runner.id,
+            userId: input.userId,
+            providerResourceId: runner.providerResourceId,
+            providerFirewallId: runner.providerFirewallId,
+            provisioningOperationKey: runner.provisioningOperationKey,
+            region: runner.region,
+            sizeSlug: runner.sizeSlug,
+          },
+          now: input.now,
+          log,
+        });
+        if (!cleaned) {
+          log(
+            "terminal_cleanup_pending",
+            { providerResourceId: runner.providerResourceId },
+            "warn",
+          );
+          return pending("external_wait");
+        }
+      }
+      return {
+        ok: false,
+        cleanupRequired: Boolean(runner.providerResourceId) && !cleaned,
+        terminalCode: "runner_provisioning_unavailable",
+      };
+    }
+
+    log(
+      "phase_observed",
+      {
+        attemptCount: input.attemptCount,
+        maxAttempts: input.maxAttempts,
+        drainIteration: iteration + 1,
+        provisioningStatus: runner.provisioningStatus,
+        providerResourceId: runner.providerResourceId,
+      },
+      "debug",
+    );
+
+    if (runner.provisioningStatus === "pending" || runner.provisioningStatus === "creating") {
+      if (!(await automaticProviderEffectAllowed(input))) return pending("immediate");
+
+      const discovered = await input.provider.discoverResourcesByTag(
+        { tag: input.operationKey },
+        input.context,
+      );
+
+      if (!discovered.ok || !discovered.value.authoritative) {
+        log(
+          "resource_discovery_inconclusive",
+          {
+            attemptCount: input.attemptCount,
+            maxAttempts: input.maxAttempts,
+            reason: discovered.ok ? "non_authoritative" : discovered.reason,
+          },
+          input.attemptCount >= input.maxAttempts ? "error" : "warn",
+        );
+        if (input.attemptCount >= input.maxAttempts) {
+          await markAutomaticProvisioningFailed(input, runner.providerResourceId);
+          return {
+            ok: false,
+            cleanupRequired: Boolean(runner.providerResourceId),
+            terminalCode: "runner_provisioning_outcome_unknown",
+          };
+        }
+
+        return pending("observation_wait");
+      }
+
+      if (discovered.value.resources.length > 1) {
+        log(
+          "multiple_provider_resources_discovered",
+          { resourceCount: discovered.value.resources.length },
+          "error",
+        );
+        await markAutomaticProvisioningFailed(input, runner.providerResourceId);
+        return {
+          ok: false,
+          cleanupRequired: true,
+          terminalCode: "runner_provisioning_outcome_unknown",
+        };
+      }
+
+      const adopted = discovered.value.resources[0];
+
+      if (adopted) {
+        log("provider_resource_adopted", {
+          providerResourceId: adopted.providerResourceId,
+        });
+        const startedAt = await setAutomaticProvisioningPhase(input, "creating");
+        await completeAutomaticProvisioningPhase(input, {
+          phase: "creating",
+          nextPhase: "tagging",
+          resource: adopted,
+          notBefore: startedAt,
+        });
+        continue;
+      }
+
+      if (runner.provisioningStatus === "creating") {
+        if (input.attemptCount >= input.maxAttempts) {
+          await markAutomaticProvisioningFailed(input, runner.providerResourceId);
+          return {
+            ok: false,
+            cleanupRequired: Boolean(runner.providerResourceId),
+            terminalCode: "runner_provisioning_outcome_unknown",
+          };
+        }
+
+        return pending("observation_wait");
+      }
+
+      if (!(await automaticProviderEffectAllowed(input))) return pending("immediate");
+      const selectedImage = await resolveProvisioningImage({
+        config: input.config,
+        provider: input.provider,
+        context: input.context,
+      });
+
+      if (!selectedImage.ok) {
+        log("snapshot_image_preflight_failed", { reason: selectedImage.reason }, "error");
+        await markAutomaticProvisioningFailed(input, runner.providerResourceId);
+        return {
+          ok: false,
+          cleanupRequired: Boolean(runner.providerResourceId),
+          terminalCode: "runner_provisioning_unavailable",
+        };
+      }
+
+      const generatedToken = createRunnerRegistrationToken();
+      const createdAt = input.now();
+      await input.connection.db.insert(runnerRegistrationTokens).values({
+        userId: input.userId,
+        runnerId: input.runnerId,
+        tokenHash: generatedToken.hash,
+        tokenPrefix: generatedToken.prefix,
+        status: "pending",
+        expiresAt: new Date(createdAt.getTime() + CLOUD_REGISTRATION_TOKEN_TTL_MS),
+        createdAt,
+        updatedAt: createdAt,
+      });
+
+      const sshAccess = await resolveDigitalOceanSshAccess(
+        input.provider,
+        input.config,
+        { runnerId: input.runnerId },
+        input.context,
+        log,
+      );
+
+      if (!sshAccess.ok) {
+        log("ssh_access_resolution_failed", { reason: sshAccess.reason }, "error");
+        await markAutomaticProvisioningFailed(input, null);
+        return {
+          ok: false,
+          cleanupRequired: false,
+          terminalCode: "runner_provisioning_unavailable",
+        };
+      }
+
+      const hermes = resolveHermesDeploymentConfig(input.config);
+      const bootstrap = await buildProvisioningBootstrap({
+        connection: input.connection,
+        userId: input.userId,
+        runnerId: input.runnerId,
+        runnerName: runner.name,
+        registrationToken: generatedToken.value,
+        commandBearerToken: input.config.runnerBearerToken,
+        runnerImage: input.config.runnerImage,
+        hermesWorkloadImage: hermes.hermesWorkloadImage,
+        hermesStateRoot: hermes.hermesStateRoot,
+        hermesPrivateNetwork: hermes.hermesPrivateNetwork,
+        hermesReadinessTimeoutMs: hermes.hermesReadinessTimeoutMs,
+        hermesDockerCpus: hermes.hermesDockerCpus,
+        hermesDockerMemory: hermes.hermesDockerMemory,
+        hermesDockerPidsLimit: hermes.hermesDockerPidsLimit,
+        runnerMaxAgents: hermes.runnerMaxAgents,
+        ...(input.config.providerMode === "local_docker"
+          ? { releaseIdentityMode: RUNNER_RELEASE_DEVELOPMENT_MODE }
+          : {}),
+        bootMode: input.config.snapshotMode?.mode === "snapshot" ? "snapshot" : "stock",
+        sizeSlug: input.config.sizeSlug,
+        now: input.now,
+        log,
+      });
+      const startedAt = await setAutomaticProvisioningPhase(input, "creating");
+      if (!startedAt) return pending("external_wait");
+      if (!(await automaticProviderEffectAllowed(input))) return pending("immediate");
+      log("provider_create_started", {
+        region: input.config.region,
+        sizeSlug: input.config.sizeSlug,
+        image: selectedImage.image,
+        sshKeyCount: sshAccess.sshKeyIds.length,
+      });
+      const created = await input.provider.createRunner(
+        {
+          name: input.operationKey,
+          region: input.config.region,
+          sizeSlug: input.config.sizeSlug,
+          image: selectedImage.image,
+          tags: operationTags,
+          firewallName: DEFAULT_FIREWALL_NAME,
+          sshKeyIds: sshAccess.sshKeyIds,
+          userData: bootstrap.userData,
+        },
+        input.context,
+      );
+
+      if (!created.ok) {
+        log(
+          "provider_create_failed",
+          { reason: created.reason },
+          created.reason === "create_outcome_unknown" ? "warn" : "error",
+        );
+        if (created.reason === "create_outcome_unknown") {
+          return pending("observation_wait");
+        }
+
+        await markAutomaticProvisioningFailed(input, null);
+        return {
+          ok: false,
+          cleanupRequired: false,
+          terminalCode: "runner_provisioning_unavailable",
+        };
+      }
+
+      await completeAutomaticProvisioningPhase(input, {
+        phase: "creating",
+        nextPhase: "tagging",
+        resource: created.value,
+        notBefore: startedAt,
+      });
+      log("provider_create_completed", {
+        providerResourceId: created.value.providerResourceId,
+        publicIpv4ResolvedInCreateResponse: Boolean(created.value.publicIpv4),
+      });
+      continue;
+    }
+
+    if (!runner.providerResourceId) {
+      await markAutomaticProvisioningFailed(input, null);
+      return {
+        ok: false,
+        cleanupRequired: false,
+        terminalCode: "runner_provisioning_unavailable",
+      };
+    }
+
+    if (runner.provisioningStatus === "tagging") {
+      if (!(await automaticProviderEffectAllowed(input))) return pending("immediate");
+      const observed = await input.provider.readResource(
+        { providerResourceId: runner.providerResourceId },
+        input.context,
+      );
+      if (!observed.ok) {
+        log(
+          "provider_tag_observation_failed",
+          { reason: observed.reason, attemptCount: input.attemptCount },
+          input.attemptCount >= input.maxAttempts ? "error" : "warn",
+        );
+        if (input.attemptCount >= input.maxAttempts) {
+          await markAutomaticProvisioningFailed(input, runner.providerResourceId);
+          return {
+            ok: false,
+            cleanupRequired: true,
+            terminalCode: "runner_provisioning_outcome_unknown",
+          };
+        }
+        return pending("observation_wait");
+      }
+
+      const startedAt = await setAutomaticProvisioningPhase(input, "tagging");
+      if (!startedAt) return pending("external_wait");
+      const missingTags = operationTags.filter((tag) => !observed.value.tags.includes(tag));
+      if (missingTags.length === 0) {
+        await completeAutomaticProvisioningPhase(input, {
+          phase: "tagging",
+          nextPhase: "firewall_configuring",
+          resource: observed.value,
+          notBefore: startedAt,
+        });
+        continue;
+      }
+
+      if (!(await automaticProviderEffectAllowed(input))) return pending("immediate");
+      const tagged = await input.provider.tagResource(
+        { providerResourceId: runner.providerResourceId, tags: missingTags },
+        input.context,
+      );
+
+      if (!tagged.ok) {
+        log("provider_tagging_failed", { reason: tagged.reason }, "warn");
+        if (input.attemptCount >= input.maxAttempts) {
+          await markAutomaticProvisioningFailed(input, runner.providerResourceId);
+          return {
+            ok: false,
+            cleanupRequired: true,
+            terminalCode: "runner_provisioning_outcome_unknown",
+          };
+        }
+        return pending("observation_wait");
+      }
+
+      await completeAutomaticProvisioningPhase(input, {
+        phase: "tagging",
+        nextPhase: "firewall_configuring",
+        resource: tagged.value,
+        notBefore: startedAt,
+      });
+      continue;
+    }
+
+    if (runner.provisioningStatus === "firewall_configuring") {
+      const firewallName = digitalOceanRunnerFirewallName(runner.providerResourceId);
+      if (!(await automaticProviderEffectAllowed(input))) return pending("immediate");
+      const observedFirewall = await observeAutomaticFirewallResource(input, {
+        operationTag: input.operationKey,
+        operationTags,
+        providerResourceId: runner.providerResourceId,
+        firewallName,
+      });
+      if (!observedFirewall.ok) {
+        log(
+          "provider_firewall_observation_failed",
+          { reason: observedFirewall.reason, attemptCount: input.attemptCount },
+          input.attemptCount >= input.maxAttempts ? "error" : "warn",
+        );
+        if (input.attemptCount >= input.maxAttempts || observedFirewall.terminal) {
+          await markAutomaticProvisioningFailed(input, runner.providerResourceId);
+          return {
+            ok: false,
+            cleanupRequired: true,
+            terminalCode: "runner_provisioning_outcome_unknown",
+          };
+        }
+        return pending("observation_wait");
+      }
+
+      const startedAt = await setAutomaticProvisioningPhase(input, "firewall_configuring");
+      if (!startedAt) return pending("external_wait");
+
+      if (observedFirewall.resource.providerFirewallId) {
+        const endpointUrl = endpointForProviderResource(observedFirewall.resource);
+        await completeAutomaticProvisioningPhase(input, {
+          phase: "firewall_configuring",
+          nextPhase: endpointUrl ? "waiting_for_runner" : "bootstrapping",
+          resource: observedFirewall.resource,
+          endpointUrl,
+          providerFirewallId: observedFirewall.resource.providerFirewallId,
+          notBefore: startedAt,
+        });
+        return pending(endpointUrl ? "external_wait" : "external_wait");
+      }
+
+      if (!(await automaticProviderEffectAllowed(input))) return pending("immediate");
+      const firewalled = await input.provider.applyFirewall(
+        {
+          providerResourceId: runner.providerResourceId,
+          firewallName,
+          sshSourceAddresses: resolveSshSourceAddresses(input.config),
+        },
+        input.context,
+      );
+
+      if (!firewalled.ok) {
+        log("provider_firewall_failed", { reason: firewalled.reason }, "warn");
+        if (input.attemptCount >= input.maxAttempts) {
+          await markAutomaticProvisioningFailed(input, runner.providerResourceId);
+          return {
+            ok: false,
+            cleanupRequired: true,
+            terminalCode: "runner_provisioning_outcome_unknown",
+          };
+        }
+        return pending("observation_wait");
+      }
+
+      if (!firewalled.value.providerFirewallId) {
+        log("provider_firewall_missing_id", {}, "error");
+        await markAutomaticProvisioningFailed(input, runner.providerResourceId);
+        return {
+          ok: false,
+          cleanupRequired: true,
+          terminalCode: "runner_provisioning_unavailable",
+        };
+      }
+
+      const endpointUrl = endpointForProviderResource(firewalled.value);
+      await completeAutomaticProvisioningPhase(input, {
+        phase: "firewall_configuring",
+        nextPhase: endpointUrl ? "waiting_for_runner" : "bootstrapping",
+        resource: firewalled.value,
+        endpointUrl,
+        providerFirewallId: firewalled.value.providerFirewallId,
+        notBefore: startedAt,
+      });
+      log("provider_firewall_completed", {
+        providerFirewallId: firewalled.value.providerFirewallId,
+        endpointResolved: Boolean(endpointUrl),
+      });
+      return pending(endpointUrl ? "external_wait" : "external_wait");
+    }
+
+    if (runner.provisioningStatus === "bootstrapping") {
+      if (!(await automaticProviderEffectAllowed(input))) return pending("immediate");
+      const refreshed = await input.provider.readResource(
+        { providerResourceId: runner.providerResourceId },
+        input.context,
+      );
+
+      if (!refreshed.ok) {
+        log(
+          "provider_resource_refresh_failed",
+          { reason: refreshed.reason, attemptCount: input.attemptCount },
+          input.attemptCount >= input.maxAttempts ? "error" : "warn",
+        );
+        if (input.attemptCount >= input.maxAttempts) {
+          await markAutomaticProvisioningFailed(input, runner.providerResourceId);
+          return {
+            ok: false,
+            cleanupRequired: true,
+            terminalCode: "runner_provisioning_outcome_unknown",
+          };
+        }
+
+        return pending("observation_wait");
+      }
+
+      const endpointUrl = endpointForProviderResource(refreshed.value);
+
+      if (!endpointUrl) {
+        log("public_endpoint_pending", {}, "debug");
+        return pending("external_wait");
+      }
+
+      await setAutomaticProvisioningPhase(input, "waiting_for_runner", endpointUrl);
+      log("public_endpoint_resolved", { endpointUrl });
+      return pending("external_wait");
+    }
+
+    return pending("external_wait");
+  }
+
+  log("provider_drain_iteration_bound_reached", { maxDrainIterations }, "warn");
+  return pending("immediate");
+}
+
+async function loadAutomaticProvisioningRunner(input: {
+  connection: DatabaseConnection;
+  userId: string;
+  runnerId: string;
+  operationKey: string;
+}) {
   const [runner] = await input.connection.db
     .select({
       id: runners.id,
@@ -213,415 +746,68 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     )
     .limit(1);
 
-  if (!runner || runner.status === "deleted") {
-    log("runner_unavailable", { observedRunnerStatus: runner?.status ?? "missing" }, "error");
-    return {
-      ok: false,
-      cleanupRequired: false,
-      terminalCode: "runner_provisioning_unavailable",
-    };
+  return runner ?? null;
+}
+
+async function automaticProviderEffectAllowed(input: {
+  context: DigitalOceanProviderRequestContext;
+  canContinue?: () => Promise<boolean>;
+}): Promise<boolean> {
+  if (input.context.signal.aborted) return false;
+  if (input.canContinue && !(await input.canContinue())) return false;
+  return !input.context.signal.aborted;
+}
+
+async function observeAutomaticFirewallResource(
+  input: {
+    provider: DigitalOceanProvider;
+    context: DigitalOceanProviderRequestContext;
+  },
+  expected: {
+    operationTag: string;
+    operationTags: string[];
+    providerResourceId: string;
+    firewallName: string;
+  },
+): Promise<
+  | { ok: true; resource: DigitalOceanResource }
+  | { ok: false; reason: "unsupported" | "unknown" | "ambiguous"; terminal: boolean }
+> {
+  if (!input.provider.listManagedResources) {
+    return { ok: false, reason: "unsupported", terminal: false };
   }
 
-  if (runner.provisioningStatus === "ready") {
-    log("completed", { provisioningStatus: runner.provisioningStatus });
-    return { ok: true, state: "ready" };
-  }
-
-  const validatedResources = validateDigitalOceanProvisioningResources(input.config);
-  if (!validatedResources.ok) {
-    log(
-      "provider_config_rejected",
-      {
-        issueCount: validatedResources.issues.length,
-        sizeSlug: input.config.sizeSlug,
-        runnerMaxAgents: input.config.runnerMaxAgents,
-      },
-      "error",
-    );
-    await markAutomaticProvisioningFailed(input, runner.providerResourceId);
-    return {
-      ok: false,
-      cleanupRequired: Boolean(runner.providerResourceId),
-      terminalCode: "runner_provisioning_unavailable",
-    };
-  }
-
-  if (runner.provisioningStatus === "failed" || runner.provisioningStatus === "deleted") {
-    log(
-      "terminal_state_observed",
-      {
-        provisioningStatus: runner.provisioningStatus,
-        providerResourceId: runner.providerResourceId,
-      },
-      "error",
-    );
-    let cleaned = runner.provisioningStatus === "deleted";
-    if (runner.provisioningStatus === "failed" && runner.providerResourceId) {
-      cleaned = await cleanupAutomaticFailedRunner({
-        connection: input.connection,
-        provider: input.provider,
-        context: input.context,
-        runner: {
-          id: runner.id,
-          userId: input.userId,
-          providerResourceId: runner.providerResourceId,
-          providerFirewallId: runner.providerFirewallId,
-          provisioningOperationKey: runner.provisioningOperationKey,
-          region: runner.region,
-          sizeSlug: runner.sizeSlug,
-        },
-        now: input.now,
-        log,
-      });
-      if (!cleaned) {
-        log("terminal_cleanup_pending", { providerResourceId: runner.providerResourceId }, "warn");
-        return { ok: true, state: "pending" };
-      }
-    }
-    return {
-      ok: false,
-      cleanupRequired: Boolean(runner.providerResourceId) && !cleaned,
-      terminalCode: "runner_provisioning_unavailable",
-    };
-  }
-
-  const selectedImage = await resolveProvisioningImage({
-    config: input.config,
-    provider: input.provider,
-    context: input.context,
-  });
-
-  if (!selectedImage.ok) {
-    log("snapshot_image_preflight_failed", { reason: selectedImage.reason }, "error");
-    await markAutomaticProvisioningFailed(input, runner.providerResourceId);
-    return {
-      ok: false,
-      cleanupRequired: Boolean(runner.providerResourceId),
-      terminalCode: "runner_provisioning_unavailable",
-    };
-  }
-
-  const operationTags = [
-    ...new Set([...input.config.tags, DIGITALOCEAN_MANAGED_RUNNER_TAG, input.operationKey]),
-  ].sort();
-
-  log(
-    "phase_observed",
-    {
-      attemptCount: input.attemptCount,
-      maxAttempts: input.maxAttempts,
-      provisioningStatus: runner.provisioningStatus,
-      providerResourceId: runner.providerResourceId,
-    },
-    "debug",
+  const inventory = await input.provider.listManagedResources(
+    { stableTag: expected.operationTag },
+    input.context,
   );
 
-  if (runner.provisioningStatus === "pending" || runner.provisioningStatus === "creating") {
-    const discovered = await input.provider.discoverResourcesByTag(
-      { tag: input.operationKey },
-      input.context,
-    );
-
-    if (!discovered.ok || !discovered.value.authoritative) {
-      log(
-        "resource_discovery_inconclusive",
-        {
-          attemptCount: input.attemptCount,
-          maxAttempts: input.maxAttempts,
-          reason: discovered.ok ? "non_authoritative" : discovered.reason,
-        },
-        input.attemptCount >= input.maxAttempts ? "error" : "warn",
-      );
-      if (input.attemptCount >= input.maxAttempts) {
-        await markAutomaticProvisioningFailed(input, runner.providerResourceId);
-        return {
-          ok: false,
-          cleanupRequired: Boolean(runner.providerResourceId),
-          terminalCode: "runner_provisioning_outcome_unknown",
-        };
-      }
-
-      return { ok: true, state: "pending" };
-    }
-
-    if (discovered.value.resources.length > 1) {
-      log(
-        "multiple_provider_resources_discovered",
-        { resourceCount: discovered.value.resources.length },
-        "error",
-      );
-      await markAutomaticProvisioningFailed(input, runner.providerResourceId);
-      return {
-        ok: false,
-        cleanupRequired: true,
-        terminalCode: "runner_provisioning_outcome_unknown",
-      };
-    }
-
-    const adopted = discovered.value.resources[0];
-
-    if (adopted) {
-      log("provider_resource_adopted", {
-        providerResourceId: adopted.providerResourceId,
-      });
-      const startedAt = await setAutomaticProvisioningPhase(input, "creating");
-      await completeAutomaticProvisioningPhase(input, {
-        phase: "creating",
-        nextPhase: "tagging",
-        resource: adopted,
-        notBefore: startedAt,
-      });
-      return { ok: true, state: "pending" };
-    }
-
-    if (runner.provisioningStatus === "creating") {
-      if (input.attemptCount >= input.maxAttempts) {
-        await markAutomaticProvisioningFailed(input, runner.providerResourceId);
-        return {
-          ok: false,
-          cleanupRequired: Boolean(runner.providerResourceId),
-          terminalCode: "runner_provisioning_outcome_unknown",
-        };
-      }
-
-      return { ok: true, state: "pending" };
-    }
-
-    const generatedToken = createRunnerRegistrationToken();
-    const createdAt = input.now();
-    await input.connection.db.insert(runnerRegistrationTokens).values({
-      userId: input.userId,
-      runnerId: input.runnerId,
-      tokenHash: generatedToken.hash,
-      tokenPrefix: generatedToken.prefix,
-      status: "pending",
-      expiresAt: new Date(createdAt.getTime() + CLOUD_REGISTRATION_TOKEN_TTL_MS),
-      createdAt,
-      updatedAt: createdAt,
-    });
-
-    const sshAccess = await resolveDigitalOceanSshAccess(
-      input.provider,
-      input.config,
-      { runnerId: input.runnerId },
-      input.context,
-      log,
-    );
-
-    if (!sshAccess.ok) {
-      log("ssh_access_resolution_failed", { reason: sshAccess.reason }, "error");
-      await markAutomaticProvisioningFailed(input, null);
-      return {
-        ok: false,
-        cleanupRequired: false,
-        terminalCode: "runner_provisioning_unavailable",
-      };
-    }
-
-    const hermes = resolveHermesDeploymentConfig(input.config);
-    const bootstrap = await buildProvisioningBootstrap({
-      connection: input.connection,
-      userId: input.userId,
-      runnerId: input.runnerId,
-      runnerName: runner.name,
-      registrationToken: generatedToken.value,
-      commandBearerToken: input.config.runnerBearerToken,
-      runnerImage: input.config.runnerImage,
-      hermesWorkloadImage: hermes.hermesWorkloadImage,
-      hermesStateRoot: hermes.hermesStateRoot,
-      hermesPrivateNetwork: hermes.hermesPrivateNetwork,
-      hermesReadinessTimeoutMs: hermes.hermesReadinessTimeoutMs,
-      hermesDockerCpus: hermes.hermesDockerCpus,
-      hermesDockerMemory: hermes.hermesDockerMemory,
-      hermesDockerPidsLimit: hermes.hermesDockerPidsLimit,
-      runnerMaxAgents: hermes.runnerMaxAgents,
-      ...(input.config.providerMode === "local_docker"
-        ? { releaseIdentityMode: RUNNER_RELEASE_DEVELOPMENT_MODE }
-        : {}),
-      bootMode: input.config.snapshotMode?.mode === "snapshot" ? "snapshot" : "stock",
-      sizeSlug: input.config.sizeSlug,
-      now: input.now,
-      log,
-    });
-    const startedAt = await setAutomaticProvisioningPhase(input, "creating");
-    log("provider_create_started", {
-      region: input.config.region,
-      sizeSlug: input.config.sizeSlug,
-      image: selectedImage.image,
-      sshKeyCount: sshAccess.sshKeyIds.length,
-    });
-    const created = await input.provider.createRunner(
-      {
-        name: input.operationKey,
-        region: input.config.region,
-        sizeSlug: input.config.sizeSlug,
-        image: selectedImage.image,
-        tags: operationTags,
-        firewallName: DEFAULT_FIREWALL_NAME,
-        sshKeyIds: sshAccess.sshKeyIds,
-        userData: bootstrap.userData,
-      },
-      input.context,
-    );
-
-    if (!created.ok) {
-      log(
-        "provider_create_failed",
-        { reason: created.reason },
-        created.reason === "create_outcome_unknown" ? "warn" : "error",
-      );
-      if (created.reason === "create_outcome_unknown") {
-        return { ok: true, state: "pending" };
-      }
-
-      await markAutomaticProvisioningFailed(input, null);
-      return {
-        ok: false,
-        cleanupRequired: false,
-        terminalCode: "runner_provisioning_unavailable",
-      };
-    }
-
-    await completeAutomaticProvisioningPhase(input, {
-      phase: "creating",
-      nextPhase: "tagging",
-      resource: created.value,
-      notBefore: startedAt,
-    });
-    log("provider_create_completed", {
-      providerResourceId: created.value.providerResourceId,
-      publicIpv4ResolvedInCreateResponse: Boolean(created.value.publicIpv4),
-    });
-    return { ok: true, state: "pending" };
+  if (!inventory.ok || !inventory.value.authoritative) {
+    return { ok: false, reason: "unknown", terminal: false };
   }
 
-  if (!runner.providerResourceId) {
-    await markAutomaticProvisioningFailed(input, null);
-    return {
-      ok: false,
-      cleanupRequired: false,
-      terminalCode: "runner_provisioning_unavailable",
-    };
+  const exact = inventory.value.resources.filter(
+    (resource) =>
+      resource.providerResourceId === expected.providerResourceId &&
+      resource.deletedAt === null &&
+      expected.operationTags.every((tag) => resource.tags.includes(tag)),
+  );
+
+  if (exact.length !== 1) {
+    return { ok: false, reason: "ambiguous", terminal: true };
   }
 
-  if (runner.provisioningStatus === "tagging") {
-    const startedAt = await setAutomaticProvisioningPhase(input, "tagging");
-    const tagged = await input.provider.tagResource(
-      { providerResourceId: runner.providerResourceId, tags: operationTags },
-      input.context,
-    );
-
-    if (!tagged.ok) {
-      log("provider_tagging_failed", { reason: tagged.reason }, "error");
-      await markAutomaticProvisioningFailed(input, runner.providerResourceId);
-      return {
-        ok: false,
-        cleanupRequired: true,
-        terminalCode: "runner_provisioning_unavailable",
-      };
-    }
-
-    await completeAutomaticProvisioningPhase(input, {
-      phase: "tagging",
-      nextPhase: "firewall_configuring",
-      resource: tagged.value,
-      notBefore: startedAt,
-    });
-    return { ok: true, state: "pending" };
+  const resource = exact[0] as DigitalOceanResource;
+  const providerFirewallName = resource.providerFirewallName?.trim() || null;
+  if (
+    resource.providerFirewallId &&
+    (!resource.firewallApplied ||
+      (providerFirewallName !== null && providerFirewallName !== expected.firewallName))
+  ) {
+    return { ok: false, reason: "ambiguous", terminal: true };
   }
 
-  if (runner.provisioningStatus === "firewall_configuring") {
-    const startedAt = await setAutomaticProvisioningPhase(input, "firewall_configuring");
-    const firewalled = await input.provider.applyFirewall(
-      {
-        providerResourceId: runner.providerResourceId,
-        firewallName: digitalOceanRunnerFirewallName(runner.providerResourceId),
-        sshSourceAddresses: resolveSshSourceAddresses(input.config),
-      },
-      input.context,
-    );
-
-    if (!firewalled.ok) {
-      log("provider_firewall_failed", { reason: firewalled.reason }, "error");
-      await markAutomaticProvisioningFailed(input, runner.providerResourceId);
-      return {
-        ok: false,
-        cleanupRequired: true,
-        terminalCode: "runner_provisioning_unavailable",
-      };
-    }
-
-    if (!firewalled.value.providerFirewallId) {
-      log("provider_firewall_missing_id", {}, "error");
-      await markAutomaticProvisioningFailed(input, runner.providerResourceId);
-      return {
-        ok: false,
-        cleanupRequired: true,
-        terminalCode: "runner_provisioning_unavailable",
-      };
-    }
-
-    const endpointUrl = endpointForProviderResource(firewalled.value);
-    await completeAutomaticProvisioningPhase(input, {
-      phase: "firewall_configuring",
-      nextPhase: endpointUrl ? "waiting_for_runner" : "bootstrapping",
-      resource: firewalled.value,
-      endpointUrl,
-      providerFirewallId: firewalled.value.providerFirewallId,
-      notBefore: startedAt,
-    });
-    if (endpointUrl) {
-      await setAutomaticProvisioningPhase(
-        input,
-        "waiting_for_runner",
-        endpointUrl,
-        firewalled.value.providerFirewallId,
-      );
-    }
-    log("provider_firewall_completed", {
-      providerFirewallId: firewalled.value.providerFirewallId,
-      endpointResolved: Boolean(endpointUrl),
-    });
-    return { ok: true, state: "pending" };
-  }
-
-  if (runner.provisioningStatus === "bootstrapping") {
-    const refreshed = await input.provider.readResource(
-      { providerResourceId: runner.providerResourceId },
-      input.context,
-    );
-
-    if (!refreshed.ok) {
-      log(
-        "provider_resource_refresh_failed",
-        { reason: refreshed.reason, attemptCount: input.attemptCount },
-        input.attemptCount >= input.maxAttempts ? "error" : "warn",
-      );
-      if (input.attemptCount >= input.maxAttempts) {
-        await markAutomaticProvisioningFailed(input, runner.providerResourceId);
-        return {
-          ok: false,
-          cleanupRequired: true,
-          terminalCode: "runner_provisioning_outcome_unknown",
-        };
-      }
-
-      return { ok: true, state: "pending" };
-    }
-
-    const endpointUrl = endpointForProviderResource(refreshed.value);
-
-    if (!endpointUrl) {
-      log("public_endpoint_pending", {}, "debug");
-      return { ok: true, state: "pending" };
-    }
-
-    await setAutomaticProvisioningPhase(input, "waiting_for_runner", endpointUrl);
-    log("public_endpoint_resolved", { endpointUrl });
-    return { ok: true, state: "pending" };
-  }
-
-  return { ok: true, state: "pending" };
+  return { ok: true, resource };
 }
 
 async function cleanupAutomaticFailedRunner(input: {
@@ -2000,6 +2186,7 @@ async function completeAutomaticProvisioningPhase(
         providerFirewallId: update.providerFirewallId ?? update.resource.providerFirewallId,
         endpointUrl: update.endpointUrl ?? endpointForProviderResource(update.resource),
         provisioningStatus: update.nextPhase,
+        ...(update.nextPhase === "waiting_for_runner" ? { status: "registering" } : {}),
         updatedAt: now,
       })
       .where(
@@ -2027,6 +2214,17 @@ async function completeAutomaticProvisioningPhase(
         },
         now,
       });
+      if (update.nextPhase === "waiting_for_runner") {
+        await recordProvisioningEvent(tx, {
+          userId: input.userId,
+          runnerId: input.runnerId,
+          phase: "waiting_for_runner",
+          status: "started",
+          message: automaticProvisioningPhaseMessage("waiting_for_runner"),
+          metadata: { provider: DIGITALOCEAN_PROVIDER },
+          now,
+        });
+      }
     }
   });
 }

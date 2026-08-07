@@ -190,7 +190,7 @@ describe("agent deployment reconciler", () => {
         userId: USER_ID,
         kind: "digitalocean",
         requiredRunnerImageDigest: RUNNER_IMAGE_DIGEST,
-        provisioningStatus: "tagging",
+        provisioningStatus: "waiting_for_runner",
         provisioningOperationKey: `agentbay-deploy-${DEPLOYMENT_ID.replaceAll("-", "")}`,
       });
       expect(agent?.runnerId).toBe(provisioned[0]?.id);
@@ -350,6 +350,38 @@ describe("agent deployment reconciler", () => {
       .from(agentDeployments)
       .where(eq(agentDeployments.id, DEPLOYMENT_ID));
     expect(deployment).toMatchObject({ stage: "provisioning_runner", attemptCount: 1 });
+  });
+
+  it("uses an immediate wakeup when provider drain stops only on its local bound", async () => {
+    await seedAutomaticRunner(connection, {
+      status: "provisioning",
+      provisioningStatus: "pending",
+    });
+    await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
+    await seedDeployment(connection, { stage: "provisioning_runner" });
+    const provisioner = vi.fn(async () => ({
+      ok: true as const,
+      state: "pending" as const,
+      disposition: "immediate" as const,
+    }));
+
+    await expect(
+      reconcileNextAgentDeployment({
+        createConnection: () => connection,
+        now: () => NOW,
+        provisioner,
+      }),
+    ).resolves.toEqual({ processed: 1, outcome: "retry_scheduled" });
+
+    const [deployment] = await connection.db
+      .select()
+      .from(agentDeployments)
+      .where(eq(agentDeployments.id, DEPLOYMENT_ID));
+    expect(deployment).toMatchObject({
+      stage: "provisioning_runner",
+      errorCode: "runner_not_ready",
+      nextAttemptAt: NOW,
+    });
   });
 
   it("keeps a provider-ready runner in provisioning until a current heartbeat proves capacity", async () => {

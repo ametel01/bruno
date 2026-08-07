@@ -46,6 +46,7 @@ export type DigitalOceanResource = {
   provider: DigitalOceanProviderName;
   providerResourceId: string;
   providerFirewallId: string | null;
+  providerFirewallName?: string | null;
   publicIpv4: string | null;
   publicEndpointUrl?: string;
   name: string;
@@ -773,10 +774,12 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
         ),
       );
       const firewall = attached.length === 1 ? attached[0] : undefined;
+      const firewallId = firewall?.id?.trim() || null;
       return {
         ...resource,
-        providerFirewallId: firewall?.id?.trim() || null,
-        firewallApplied: Boolean(firewall?.id?.trim()),
+        providerFirewallId: firewallId,
+        providerFirewallName: firewallId ? firewall?.name?.trim() || null : null,
+        firewallApplied: Boolean(firewallId),
       };
     });
     return {
@@ -932,6 +935,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
 
     resource.firewallApplied = true;
     resource.providerFirewallId = providerFirewallId;
+    resource.providerFirewallName = input.firewallName;
 
     return { ok: true, value: cloneResource(resource) };
   }
@@ -1584,6 +1588,7 @@ export class FakeDigitalOceanProvider
       provider: DIGITALOCEAN_PROVIDER,
       providerResourceId: `${this.#idPrefix}-${this.#counter}`,
       providerFirewallId: null,
+      providerFirewallName: null,
       publicIpv4: this.#publicIpv4,
       name: input.name,
       region: input.region,
@@ -1633,7 +1638,27 @@ export class FakeDigitalOceanProvider
     input: DigitalOceanManagedInventoryInput,
     context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanDiscovery>> {
-    return await this.discoverResourcesByTag({ tag: input.stableTag }, context);
+    const aborted = abortedProviderResult<DigitalOceanDiscovery>("discovery_failed", context);
+
+    if (aborted) {
+      return aborted;
+    }
+
+    const resources: DigitalOceanResource[] = [];
+
+    for (const resource of this.resources.values()) {
+      if (resource.deletedAt === null && resource.tags.includes(input.stableTag)) {
+        resources.push(cloneResource(resource));
+      }
+    }
+
+    return {
+      ok: true,
+      value: {
+        authoritative: true,
+        resources,
+      },
+    };
   }
 
   async readResource(
@@ -1699,6 +1724,7 @@ export class FakeDigitalOceanProvider
     resource.firewallApplied = true;
     const providerFirewallId = `${this.#idPrefix}-firewall-${this.#counter}`;
     resource.providerFirewallId = providerFirewallId;
+    resource.providerFirewallName = input.firewallName;
     this.firewalls.set(providerFirewallId, {
       name: input.firewallName,
       providerResourceId: input.providerResourceId,
@@ -1764,7 +1790,11 @@ export class FakeDigitalOceanProvider
 
     this.firewalls.delete(input.providerFirewallId);
     const resource = this.resources.get(input.providerResourceId);
-    if (resource) resource.providerFirewallId = null;
+    if (resource) {
+      resource.providerFirewallId = null;
+      resource.providerFirewallName = null;
+      resource.firewallApplied = false;
+    }
 
     const verified = await this.observeOwnedSet(input, context);
     return verified.ok && verified.value.firewall === "absent"
@@ -2128,6 +2158,7 @@ function apiDropletToResource(
   fallback:
     | (Pick<DigitalOceanRunnerSpec, "image" | "name" | "region" | "sizeSlug" | "tags"> & {
         providerFirewallId?: string | null;
+        providerFirewallName?: string | null;
       })
     | null,
   now: () => Date,
@@ -2140,6 +2171,7 @@ function apiDropletToResource(
     provider: DIGITALOCEAN_PROVIDER,
     providerResourceId: String(droplet.id),
     providerFirewallId: fallback?.providerFirewallId ?? null,
+    providerFirewallName: fallback?.providerFirewallName ?? null,
     publicIpv4: readApiPublicIpv4(droplet),
     name: droplet.name ?? fallback?.name ?? "agentbay-runner",
     region: readApiSlug(droplet.region) ?? fallback?.region ?? "unknown",

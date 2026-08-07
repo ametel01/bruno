@@ -8,7 +8,7 @@ The update log is append-only.
 
 ## Status
 
-- Current step: Step 2 — durable delayed deployment wakeups
+- Current step: Step 4 — bounded drain for post-registration deployment stages
 - Overall status: in progress
 - SLO target: at least 95% success and p95 committed-create-to-durable-ready latency at or below 60
   seconds across 30 clean cold DigitalOcean trials
@@ -20,7 +20,7 @@ The update log is append-only.
 - [x] Step 0 — Progress and changelog tracking setup
 - [x] Step 1 — Creation-latency evidence and benchmark
 - [ ] Step 2 — Durable delayed deployment wakeups
-- [ ] Step 3 — Bounded drain for provider provisioning phases
+- [x] Step 3 — Bounded drain for provider provisioning phases
 - [ ] Step 4 — Bounded drain for post-registration deployment stages
 - [ ] Step 5 — Right-size cold managed runners
 - [ ] Step 6 — Build and attest a DigitalOcean runner snapshot
@@ -63,6 +63,14 @@ The update log is append-only.
 - Step 2 E2E/local smoke gates: `bun run test:e2e:ci` passed 26/26. `bun run local:agent:smoke`
   passed with `cleanupVerified:true`, `digitalOceanRequests:0`, `issueCounts:{}`, and p95
   150.725 seconds in this local cold run.
+- Step 3 repository implementation: Added a bounded eight-iteration automatic provider drain,
+  typed provisioner stop dispositions, lease/desired-running rechecks before provider effects,
+  authoritative tag/firewall observation and crash adoption, and immediate wakeups for bound-limited
+  provider work. No real DigitalOcean, QStash, deployment, release, or billable action was run.
+- Step 3 gates: `bun run format:check`, `bun run lint`, `bun run typecheck`, `bun run test`
+  (174 files / 1700 tests), `bun run build`, `bun run test:e2e:ci` (26 tests),
+  `bun run repro:cloud-runner`, and `git diff --check` passed locally. `bun run local:agent:smoke`
+  was intentionally not run because coordinator serialization is required.
 
 ## Issue Graph
 

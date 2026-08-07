@@ -5,12 +5,12 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 ## Active Work
 
 - issue: [#267](https://github.com/ametel01/plingpling/issues/267)
-  owner: coordinator (`root`)
+  owner: builder-agent (`issue_264_builder`)
   branch: `codex/issue-267-provider-phase-drain`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: completion contract ready; assign builder
-  cycle: 0/5
+  phase: builder implementation complete; ready for checker
+  cycle: 1/5
 
 ## Goal Contract
 
@@ -169,14 +169,44 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 
 ## Handoff — #267 Builder to Checker
 
-- request: Independently verify the normal one-invocation fake path, all three after-effect crash
-  recoveries, concurrent duplicate/cancellation fences, bound/deadline behavior, precise wakeups,
-  safe logs, and zero external effects. Do not edit code.
-- reviewer focus: Every provider effect must map to a persisted before/after checkpoint; absence must
-  be authoritative before create/correction; unknown outcomes must enter observation, not replay;
-  completed immediate phases must not incur scheduler backoff.
-- required evidence: focused semantic tests, repository gates, credential-free E2E, cloud bootstrap
-  repro, and isolated local smoke with `digitalOceanRequests:0` and cleanup verified.
+- request: Independently verify #267 on branch `codex/issue-267-provider-phase-drain` at the builder
+  commit. Do not edit code.
+- files changed: `CHANGELOG.md`, `PROGRESS.md`, `STATUS.md`,
+  `src/server/runners/runner-provisioning.ts`,
+  `src/server/runners/digitalocean-provider.ts`,
+  `src/server/agents/agent-deployment-reconciler.ts`,
+  `tests/unit/automatic-runner-provisioning.test.ts`,
+  `tests/unit/agent-deployment-reconciler.test.ts`,
+  `tests/unit/digitalocean-provider.test.ts`,
+  `tests/unit/runner-infrastructure-reconciler.test.ts`, and
+  `tests/unit/runner-replacement-reconciler.test.ts`.
+- behavior implemented: automatic DigitalOcean provisioning now drains bounded provider phases through
+  `waiting_for_runner` in one fake/injected provider call path, skips redundant tag POSTs when create
+  already proves the full required tag set, observes/adopts crash-completed create/tag/firewall
+  effects before replay, persists waiting status/firewall/endpoint in one checkpoint, rechecks
+  deployment lease/config/desired-running authority before provider effects, and returns typed
+  dispositions consumed by the reconciler for immediate versus external-wait wakeups.
+- tests added/updated: one-call normal fake drain, create/tag/firewall after-effect crash recovery,
+  immediate provisioner wakeup disposition, updated replacement/infrastructure/provider assertions
+  for bounded drain and firewall-name metadata.
+- gates passed:
+  - `bun scripts/run-unit-tests.ts tests/unit/automatic-runner-provisioning.test.ts` — 14 tests
+    passed.
+  - `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-reconciler.test.ts` — 41 tests
+    passed.
+  - `bun scripts/run-unit-tests.ts tests/unit/digitalocean-provider.test.ts` — 17 tests passed.
+  - `bun scripts/run-unit-tests.ts tests/unit/runner-infrastructure-reconciler.test.ts` — 11 tests
+    passed.
+  - `bun scripts/run-unit-tests.ts tests/unit/runner-replacement-reconciler.test.ts` — 11 tests
+    passed.
+  - `bun run format:check`; `bun run lint`; `bun run typecheck`; `git diff --check`; `bun run test`
+    — 174 files / 1700 tests; `bun run build`; `bun run test:e2e:ci` — 26 tests;
+    `bun run repro:cloud-runner`.
+- skipped: `bun run local:agent:smoke` was intentionally not run; coordinator must serialize the
+  local Docker smoke slot. No real DigitalOcean/QStash/deploy/release/billable action was run.
+- reviewer focus: verify provider-effect checkpoint ordering, crash adoption without replay, typed
+  wakeup persistence, lease/desired-running fence behavior, safe logs/events, and zero external
+  effects.
 
 ## Completion Contract — #264
 

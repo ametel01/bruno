@@ -67,6 +67,7 @@ describe("fake DigitalOcean provider", () => {
         provider: DIGITALOCEAN_PROVIDER,
         providerResourceId: "droplet-1",
         providerFirewallId: null,
+        providerFirewallName: null,
         publicIpv4: "203.0.113.10",
         name: "plingpling Cloud Runner",
         region: "sfo3",

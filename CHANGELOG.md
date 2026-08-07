@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Bounded automatic DigitalOcean provider-phase draining now reaches `waiting_for_runner` in one
+  fake/injected provider action, skips redundant tag writes when create already proves the required
+  tags, adopts crash-completed create/tag/firewall effects through authoritative observation, and
+  persists immediate versus external-wait deployment wakeups from typed provisioner dispositions.
 - Canonical DigitalOcean managed-runner resource profiles now couple price and physical resource
   metadata, reject incompatible Hermes CPU/memory/capacity combinations before provider effects,
   propagate exact Hermes Docker CPU/memory/PID limits through cloud bootstrap, and keep provider

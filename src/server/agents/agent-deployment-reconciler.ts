@@ -103,7 +103,11 @@ export type DeploymentProvisioner = (
 ) => Promise<ProvisionerResult>;
 
 export type ProvisionerResult =
-  | { ok: true; state: "pending" }
+  | {
+      ok: true;
+      state: "pending";
+      disposition?: "immediate" | "external_wait" | "observation_wait";
+    }
   | { ok: true; state: "ready" }
   | {
       ok: false;
@@ -567,7 +571,9 @@ async function reconcileProvisioningRunner(
       : "retry_scheduled";
   }
 
-  return scheduleRetry(connection, work, "runner_not_ready", now());
+  return result.disposition === "immediate"
+    ? scheduleImmediateRetry(connection, work, "runner_not_ready", now())
+    : scheduleRetry(connection, work, "runner_not_ready", now());
 }
 
 async function reconcileConfiguringHermes(
@@ -1597,6 +1603,73 @@ async function scheduleRetry(
   return "retry_scheduled";
 }
 
+async function scheduleImmediateRetry(
+  connection: DatabaseConnection,
+  work: ClaimedDeploymentWork,
+  reason: keyof typeof RETRYABLE_DETAILS,
+  now: Date,
+): Promise<"failed" | "retry_scheduled"> {
+  if (work.attemptCount >= STAGE_RETRY_LIMITS[work.stage]) {
+    await terminallyFailDeployment(connection, work, {
+      code: terminalCodeForRetryExhaustion(work.stage),
+      now,
+    });
+    return "failed";
+  }
+
+  const detail = RETRYABLE_DETAILS[reason];
+
+  await connection.db.transaction(async (tx) => {
+    const [updated] = await tx.execute<{ id: string }>(sql`
+      update ${agentDeployments}
+      set error_code = ${reason},
+          error_detail = ${detail},
+          next_attempt_at = ${now.toISOString()},
+          lease_owner = null,
+          lease_expires_at = null,
+          updated_at = ${now.toISOString()}
+      where id = ${work.id}
+        and stage = ${work.stage}
+        and config_revision = ${work.configRevision}
+        and lease_owner = ${work.leaseOwner}
+        and lease_expires_at > ${now.toISOString()}
+        and exists (
+          select 1 from ${agents}
+          where ${agents.id} = ${work.agentId}
+            and ${agents.userId} = ${work.userId}
+            and ${agents.deletedAt} is null
+            and ${agents.desiredStatus} = 'running'
+        )
+      returning id
+    `);
+
+    if (updated) {
+      await replaceDeploymentWakeupInTransaction(tx, {
+        deploymentId: work.id,
+        dueAt: now,
+        now,
+        safeErrorCode: reason,
+      });
+    }
+  });
+
+  logAgentDeployment(
+    "retry_scheduled",
+    {
+      agentId: work.agentId,
+      deploymentId: work.id,
+      runnerId: work.agentRunnerId,
+      stage: work.stage,
+      attemptCount: work.attemptCount,
+      reason,
+      backoffMs: 0,
+      nextAttemptAt: now,
+    },
+    "warn",
+  );
+  return "retry_scheduled";
+}
+
 async function markCanaryStarted(
   connection: DatabaseConnection,
   work: ClaimedDeploymentWork,
@@ -2288,7 +2361,32 @@ async function defaultProvisioner(
     provider,
     context,
     now: () => currentNow,
+    canContinue: () => deploymentProvisioningAuthorityStillHeld(connection, work, currentNow),
   });
+}
+
+async function deploymentProvisioningAuthorityStillHeld(
+  connection: DatabaseConnection,
+  work: ClaimedDeploymentWork,
+  now: Date,
+): Promise<boolean> {
+  const [held] = await connection.db.execute<{ id: string }>(sql`
+    select ${agentDeployments.id} as id
+    from ${agentDeployments}
+    inner join ${agents} on ${agents.id} = ${agentDeployments.agentId}
+    where ${agentDeployments.id} = ${work.id}
+      and ${agentDeployments.stage} = 'provisioning_runner'
+      and ${agentDeployments.configRevision} = ${work.configRevision}
+      and ${agentDeployments.leaseOwner} = ${work.leaseOwner}
+      and ${agentDeployments.leaseExpiresAt} > ${now.toISOString()}
+      and ${agents.id} = ${work.agentId}
+      and ${agents.userId} = ${work.userId}
+      and ${agents.deletedAt} is null
+      and ${agents.desiredStatus} = 'running'
+    limit 1
+  `);
+
+  return Boolean(held);
 }
 
 function eventMessage(event: string): string {
