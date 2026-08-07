@@ -38,7 +38,7 @@ describe("GET /api/internal/runner-release/required", () => {
         imageReference: IMAGE,
         imageDigest: DIGEST,
         version: SHA,
-        bootContractVersion: "plingpling.runner.boot.v1",
+        bootContractVersion: "plingpling.runner.boot.v2",
       },
       rollout: { batchSize: 1, halted: false },
     });

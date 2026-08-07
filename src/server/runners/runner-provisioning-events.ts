@@ -419,6 +419,9 @@ function runnerBootFailureMessage(reason: Exclude<RunnerBootFailureReason, null>
   const detail: Record<Exclude<RunnerBootFailureReason, null>, string> = {
     docker_unavailable: "Docker was unavailable.",
     release_mismatch: "Runner release identity did not match.",
+    release_attestation_invalid: "Runner release attestation was invalid.",
+    snapshot_attestation_invalid: "Runner snapshot attestation was invalid.",
+    validation_mode_invalid: "Runner boot validation mode was invalid.",
     fixture_launch_failed: "Hermes fixture launch failed.",
     detailed_health_failed: "Hermes detailed health failed.",
     canary_failed: "The model canary failed.",

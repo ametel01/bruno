@@ -10,9 +10,13 @@ export function readyRunnerBootSnapshot(
   return {
     ok: true,
     contractVersion: RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION,
+    validationMode: "full",
+    attestations: null,
     status: "ready",
     components: {
       docker: "passed",
+      releaseAttestation: "not_applicable",
+      snapshotAttestation: "not_applicable",
       hermesFixture: "passed",
       detailedHealth: "passed",
       modelCanary: "passed",

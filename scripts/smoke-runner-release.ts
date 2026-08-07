@@ -455,9 +455,9 @@ async function waitForReleaseEvidence(
 
       if (
         readiness.ok &&
-        RUNNER_BOOT_COMPONENTS.every(
-          (component) => readiness.snapshot.components[component] === "passed",
-        )
+        readiness.snapshot.status === "ready" &&
+        readiness.snapshot.validationMode === "full" &&
+        readiness.snapshot.attestations === null
       ) {
         return {
           providerMode: input.plan.providerMode,

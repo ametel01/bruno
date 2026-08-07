@@ -36,7 +36,7 @@ const EVIDENCE: RunnerReleaseSmokeEvidence = {
   providerMode: "digitalocean",
   releaseVersion: SHA,
   imageDigest: DIGEST,
-  bootContractVersion: "plingpling.runner.boot.v1",
+  bootContractVersion: "plingpling.runner.boot.v2",
   bootComponents: ["docker", "hermes_fixture", "config_load", "health", "model_canary", "cleanup"],
   syntheticActions: ["start", "status", "canary", "stop"],
 };

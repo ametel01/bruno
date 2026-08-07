@@ -57,13 +57,12 @@ describe("runner snapshot workflow", () => {
     expect(workflow).not.toContain("on:\n  push");
     expect(workflow).not.toContain("pull_request");
 
-    for (const file of [
-      ".github/workflows/ci.yml",
-      ".github/workflows/publish-agent-image.yml",
-      ".github/workflows/deploy-production.yml",
-    ]) {
+    for (const file of [".github/workflows/ci.yml", ".github/workflows/publish-agent-image.yml"]) {
       expect(await readFile(file, "utf8")).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN");
     }
+    const releaseWorkflow = await readFile(".github/workflows/deploy-production.yml", "utf8");
+    expect(releaseWorkflow).toContain("AGENTBAY_DIGITALOCEAN_TOKEN: local-docker");
+    expect(releaseWorkflow).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN: $" + "{{ secrets.");
   });
 
   it("build script retrieves builder evidence instead of consuming controller-local evidence", async () => {

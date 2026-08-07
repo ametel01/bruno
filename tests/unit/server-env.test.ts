@@ -385,6 +385,7 @@ describe("server-only provider environment validation", () => {
       tags: ["agentbay", "runner"],
       sshSourceAddresses: ["2001:db8::/64", "203.0.113.5/32"],
       snapshotMode: { mode: "stock" },
+      bootValidation: { mode: "full" },
     });
   });
 

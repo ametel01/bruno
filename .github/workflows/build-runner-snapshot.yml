@@ -153,7 +153,7 @@ jobs:
               boot.runnerImage !== process.env.RUNNER_IMAGE ||
               boot.defaultAgentImage !== process.env.DEFAULT_AGENT_IMAGE ||
               boot.hermesImage !== process.env.HERMES_IMAGE ||
-              boot.bootContractVersion !== "plingpling.runner.boot.v1" ||
+              boot.bootContractVersion !== "plingpling.runner.boot.v2" ||
               JSON.stringify([...(boot.preloadedImages ?? [])].sort()) !== JSON.stringify(required)
             ) {
               throw new Error("builder boot evidence mismatch");

@@ -171,11 +171,97 @@ jobs:
           echo "deployment-url=${CANDIDATE_DEPLOYMENT_URL}" >> "${GITHUB_OUTPUT}"
           echo "Staged the exact release control plane without assigning production domains." >> "${GITHUB_STEP_SUMMARY}"
 
+  canary:
+    if: inputs.action == 'release'
+    name: Verify immutable runner with the full simulated-Droplet fixture
+    needs:
+      - publish
+      - stage-control-plane
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: runner-release-canary
+    env:
+      NEXT_PUBLIC_APP_URL: http://host.docker.internal:3000
+      AGENTBAY_AUTH_MODE: development
+      AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: "true"
+      AGENTBAY_DIGITALOCEAN_TOKEN: local-docker
+      AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: local_docker
+      AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: disabled
+      AGENTBAY_DIGITALOCEAN_SIZE_SLUG: s-1vcpu-512mb-10gb
+      AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: http://127.0.0.1:3045
+      AGENTBAY_RUNNER_BOOT_VALIDATION_MODE: full
+      AGENTBAY_RUNNER_IMAGE: ${{ needs.publish.outputs.immutable-image }}
+
+    steps:
+      - name: Check out exact release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Boot exact image and run full fixture
+        env:
+          DATABASE_URL: ${{ secrets.RUNNER_RELEASE_DATABASE_URL }}
+          AGENTBAY_RUNNER_BEARER_TOKEN: ${{ secrets.RUNNER_RELEASE_BEARER_TOKEN }}
+          IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
+        run: |
+          set -euo pipefail
+          bun run build
+          bun run start --hostname 0.0.0.0 > "${RUNNER_TEMP}/runner-release-control-plane.log" 2>&1 &
+          CONTROL_PLANE_PID=$!
+          cleanup_control_plane() {
+            kill "${CONTROL_PLANE_PID}" >/dev/null 2>&1 || true
+            wait "${CONTROL_PLANE_PID}" >/dev/null 2>&1 || true
+          }
+          trap cleanup_control_plane EXIT
+          CONTROL_PLANE_READY=false
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/health >/dev/null; then
+              CONTROL_PLANE_READY=true
+              break
+            fi
+            sleep 1
+          done
+          test "${CONTROL_PLANE_READY}" = "true"
+          bun run runner:release:smoke -- --image "${IMMUTABLE_IMAGE}" --provider local_docker
+
+      - name: Record verified rollback evidence
+        env:
+          IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
+        run: |
+          set -euo pipefail
+          mkdir -p runner-release-evidence
+          printf '%s\n' "${IMMUTABLE_IMAGE}" > runner-release-evidence/immutable-image.txt
+          printf '%s\n' "${GITHUB_SHA}" > runner-release-evidence/source-revision.txt
+          printf '%s\n' "plingpling.runner.boot.v2" > runner-release-evidence/boot-contract-version.txt
+          printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" > runner-release-evidence/full-fixture-passed-at.txt
+          echo "Full simulated-Droplet boot, release contract, authenticated heartbeat, and exact cleanup passed without cloud resources." >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload verified rollback artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-runner-release
+          path: runner-release-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Record safe failure summary
+        if: failure()
+        run: echo "Runner release simulation failed; promotion is blocked and no DigitalOcean resource was requested." >> "${GITHUB_STEP_SUMMARY}"
+
   deploy:
     if: inputs.action == 'release'
     name: Deploy staged release to production
     needs:
       - publish
+      - canary
       - stage-control-plane
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -225,7 +311,7 @@ jobs:
             sleep 5
           done
           test "${VERIFIED}" = "true"
-          echo "Production requires the published immutable runner with batch size 1; the simulated-Droplet canary is temporarily disabled." >> "${GITHUB_STEP_SUMMARY}"
+          echo "Production requires the full-fixture-verified immutable runner with batch size 1." >> "${GITHUB_STEP_SUMMARY}"
 
   rollback:
     if: inputs.action == 'rollback'

@@ -28,6 +28,7 @@
     "lint": "biome lint app src scripts tests *.ts *.json",
     "runner:bootstrap": "bun src/runner-service/bootstrap.ts",
     "runner:release:smoke": "bun --conditions react-server scripts/smoke-runner-release.ts",
+    "runner:release:attest": "bun --conditions react-server scripts/create-runner-release-attestation.ts",
     "runner:service": "bun src/runner-service/index.ts",
     "start": "next start",
     "test": "bun scripts/run-unit-tests.ts",

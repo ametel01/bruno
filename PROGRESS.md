@@ -51,6 +51,17 @@ The update log is append-only.
   remains unchecked because live DigitalOcean snapshot execution and cleanup acceptance are explicitly
   authorization-gated and have not run.
 - Provider-backed acceptance gate: pending explicit authorization.
+- Step 7 repository implementation: Added exact signed release attestations, fail-closed
+  release/snapshot matching in production configuration and runner boot, boot-contract v2 evidence,
+  lightweight snapshot readiness without a duplicate Hermes fixture, full-mode rollback, and the
+  restored full simulated-Droplet release canary. Repository gates are in progress; merge remains
+  blocked on Step 6 live snapshot evidence.
+- Step 7 local validation: `bun run format:check`, `bun run lint`, `bun run typecheck`, `bun run test`,
+  `bun run build`, `bun run test:e2e:ci` (26/26), and `bun run repro:cloud-runner` passed. The full-mode
+  `bun run local:agent:smoke` passed with one simulated Droplet, zero DigitalOcean requests, exact
+  cleanup, and valid cold-Droplet evidence. Release-attested behavior passed focused signed-evidence,
+  boot, heartbeat, bootstrap, and production-environment tests; live snapshot execution remains the
+  explicit Step 6 prerequisite.
 - Step 5 authorization-independent subset: canonical runner profile validation, pre-provider
   rejection, runtime-limit propagation, and fake-only benchmark candidate validation are implemented
   for issue #265. Full local gates passed. The hosted default is intentionally unchanged pending

@@ -18,7 +18,8 @@ When a runner is stale or unhealthy, the app should:
 
 ## Boot-time readiness contract
 
-A runner becomes assignable only after it proves:
+A runner becomes assignable only after it proves Docker access, a private HTTPS endpoint,
+authenticated heartbeat, and a compatible exact release. In the default `full` mode it also proves:
 
 - Docker works.
 - Hermes can start.
@@ -27,6 +28,12 @@ A runner becomes assignable only after it proves:
 
 Production Droplet boot does not run a model canary. The synthetic model path remains covered by
 the local runner release smoke gate, outside the user creation path.
+
+Snapshot-based production runners may use `release_attested` mode only with an exact, signed,
+unexpired attestation for the Docker-observed release and the configured signed snapshot manifest.
+That mode records the full-fixture components as release-attested and avoids launching and deleting a
+second synthetic Hermes workload before the real agent. Any identity mismatch fails closed. Setting
+the mode back to `full` restores the on-Droplet fixture without changing an image or schema.
 
 Production agent creation also skips the later deployment model canary. Model latency or provider
 availability must not turn an otherwise healthy runner, gateway, and Telegram setup into a terminal

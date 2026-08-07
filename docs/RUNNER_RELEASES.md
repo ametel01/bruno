@@ -119,17 +119,17 @@ AGENTBAY_RUNNER_IMAGE=<tested immutable Git-SHA-plus-digest reference>
 AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=1
 ```
 
-The staged deployment URL is never assigned a production domain during staging. While the canary is
-temporarily disabled, the production job promotes that URL immediately after publish, scan, and
-staging succeed, then verifies `/health` plus the authenticated
+The staged deployment URL is never assigned a production domain during staging. The production job
+promotes that URL only after the published immutable image passes the full simulated-Droplet fixture,
+including authenticated heartbeat, release identity, the complete Hermes fixture, and cleanup. It
+then verifies `/health` plus the authenticated
 `/api/internal/runner-release/required` contract. Infrastructure reconciliation processes at most
 one managed runner per invocation. Set the batch size to `0` to halt automatic fleet work.
 
 For emergency rollback, dispatch the same workflow with `action=rollback`, the immutable image, and
 the prior successful workflow run ID. The job downloads that run's `verified-runner-release`
 artifact and refuses any image that does not match it exactly. Rollback deploys with batch size `0`,
-verifies the required digest, and leaves rollout halted for operator review. Runs created while the
-canary bypass is active do not contain this artifact and therefore are not valid rollback sources.
+verifies the required digest, and leaves rollout halted for operator review.
 
 Do not switch the release workflow to `digitalocean` or add a cloud token to its environment.
 Credential-free runs are expected to exit with `capability_unavailable` and
@@ -174,3 +174,33 @@ architecture, region, minimum disk compatibility, runner/default-agent/Hermes id
 authoritative provider image availability before a Droplet-create call. Invalid or unavailable
 evidence fails closed. Set `AGENTBAY_DIGITALOCEAN_IMAGE_MODE=stock` or remove the snapshot variables
 to use the existing complete Ubuntu bootstrap rollback path.
+
+## Release-attested lightweight readiness
+
+`full` remains the default boot-validation mode and the configuration-only rollback:
+
+```text
+AGENTBAY_RUNNER_BOOT_VALIDATION_MODE=full
+```
+
+After a release has passed the full simulated-Droplet fixture, create its signed release attestation
+with `bun run runner:release:attest`. The command verifies the exact signed snapshot manifest before
+binding the immutable runner digest, boot-contract version, snapshot ID and manifest digest, source
+revision, workflow identity, validation timestamps, and expiry into a canonical Ed25519-signed
+artifact. Keep private signing keys outside repository artifacts.
+
+Lightweight snapshot boot requires all of the following validated production settings:
+
+```text
+AGENTBAY_RUNNER_BOOT_VALIDATION_MODE=release_attested
+AGENTBAY_RUNNER_RELEASE_ATTESTATION=<canonical release attestation JSON>
+AGENTBAY_RUNNER_RELEASE_ATTESTATION_SIGNATURE=<base64url Ed25519 signature>
+AGENTBAY_RUNNER_RELEASE_ATTESTATION_PUBLIC_KEY=<public verification key>
+```
+
+The control plane verifies this evidence against the configured snapshot and immutable runner before
+provisioning. Bootstrap transports the attestation and public key as base64url single-line values.
+The runner verifies its Docker-observed release identity and the exact unexpired attestation before it
+skips the duplicate Hermes fixture. Docker access, authenticated online heartbeat, HTTPS endpoint
+readiness, and exact boot-attestation compatibility remain mandatory. Missing, stale, tampered, or
+mismatched evidence is unassignable.

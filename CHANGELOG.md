@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Release-attested lightweight snapshot readiness with exact signed release/snapshot identity,
+  fail-closed control-plane and runner checks, a versioned boot-attestation contract, full-mode
+  configuration rollback, and a restored zero-cloud full simulated-Droplet release canary.
 - Bounded automatic DigitalOcean provider-phase draining now reaches `waiting_for_runner` in one
   fake/injected provider action, skips redundant tag writes when create already proves the required
   tags, adopts crash-completed create/tag/firewall effects through authoritative observation, and

@@ -42,6 +42,7 @@ describe("runner image", () => {
       "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0",
     );
     expect(workflow).toContain("needs: publish");
-    expect(workflow).not.toContain("runner:release:smoke");
+    expect(workflow).toContain("runner:release:smoke");
+    expect(workflow).toContain("      - canary");
   });
 });

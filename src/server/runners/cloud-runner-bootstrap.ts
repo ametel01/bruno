@@ -1,6 +1,16 @@
 import "server-only";
 
 import {
+  RUNNER_BOOT_VALIDATION_MODE_ENV,
+  RUNNER_RELEASE_ATTESTATION_B64_ENV,
+  RUNNER_RELEASE_ATTESTATION_PUBLIC_KEY_B64_ENV,
+  RUNNER_RELEASE_ATTESTATION_SIGNATURE_ENV,
+  RUNNER_RELEASE_SOURCE_REVISION_ENV,
+  RUNNER_SNAPSHOT_EXPIRES_AT_ENV,
+  RUNNER_SNAPSHOT_ID_ENV,
+  RUNNER_SNAPSHOT_MANIFEST_DIGEST_ENV,
+} from "@/src/runner-service/boot-validation";
+import {
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_READINESS_TIMEOUT_MS,
   DEFAULT_HERMES_DOCKER_CPUS,
@@ -22,7 +32,10 @@ import {
   type RUNNER_RELEASE_DEVELOPMENT_MODE,
   RUNNER_RELEASE_IDENTITY_MODE_ENV,
 } from "@/src/runner-service/release-identity";
-import { DEFAULT_AGENTBAY_RUNNER_IMAGE } from "@/src/server/env";
+import {
+  DEFAULT_AGENTBAY_RUNNER_IMAGE,
+  type DigitalOceanRunnerBootValidationConfig,
+} from "@/src/server/env";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { DIGITALOCEAN_PROVIDER } from "@/src/server/runners/digitalocean-provider";
 import { markCloudRunnerBootstrapInjected } from "@/src/server/runners/runner-provisioning-events";
@@ -68,6 +81,7 @@ export type CloudRunnerBootstrapInput = {
   runnerPort?: number;
   releaseIdentityMode?: typeof RUNNER_RELEASE_DEVELOPMENT_MODE;
   bootMode?: "stock" | "snapshot";
+  bootValidation?: DigitalOceanRunnerBootValidationConfig;
 };
 
 export type CloudRunnerBootstrapContent = {
@@ -88,6 +102,7 @@ export type CloudRunnerBootstrapContent = {
     };
     runnerMaxAgents: number;
     bootModelCanaryEnabled: boolean;
+    bootValidationMode: "full" | "release_attested";
     runnerRelease: {
       version: string;
       imageDigest: string;
@@ -163,6 +178,18 @@ export function buildCloudRunnerBootstrapContent(
     `AGENTBAY_RUNNER_ENV_FILE=${escapeDockerEnvHereDocValue(config.containerEnvFilePath)}`,
     `AGENTBAY_RUNNER_MAX_AGENTS=${config.runnerMaxAgents}`,
     `${RUNNER_BOOT_MODEL_CANARY_ENABLED_ENV}=${config.bootModelCanaryEnabled}`,
+    `${RUNNER_BOOT_VALIDATION_MODE_ENV}=${config.bootValidation.mode}`,
+    ...(config.bootValidation.mode === "release_attested"
+      ? [
+          `${RUNNER_RELEASE_ATTESTATION_B64_ENV}=${Buffer.from(config.bootValidation.attestationBytes).toString("base64url")}`,
+          `${RUNNER_RELEASE_ATTESTATION_SIGNATURE_ENV}=${config.bootValidation.signature}`,
+          `${RUNNER_RELEASE_ATTESTATION_PUBLIC_KEY_B64_ENV}=${Buffer.from(config.bootValidation.publicKeyPem).toString("base64url")}`,
+          `${RUNNER_SNAPSHOT_ID_ENV}=${config.bootValidation.snapshotId}`,
+          `${RUNNER_SNAPSHOT_MANIFEST_DIGEST_ENV}=${config.bootValidation.snapshotManifestDigest}`,
+          `${RUNNER_SNAPSHOT_EXPIRES_AT_ENV}=${config.bootValidation.snapshotExpiresAt}`,
+          `${RUNNER_RELEASE_SOURCE_REVISION_ENV}=${config.bootValidation.sourceRevision}`,
+        ]
+      : []),
     ...(config.expectedRelease
       ? [
           `${RUNNER_EXPECTED_RELEASE_VERSION_ENV}=${escapeDockerEnvHereDocValue(config.expectedRelease.version)}`,
@@ -346,6 +373,7 @@ ${imagePullCommands}      AGENTBAY_BOOTSTRAP_STEP=runner_container_start
       },
       runnerMaxAgents: config.runnerMaxAgents,
       bootModelCanaryEnabled: config.bootModelCanaryEnabled,
+      bootValidationMode: config.bootValidation.mode,
       runnerRelease: config.expectedRelease
         ? {
             version: config.expectedRelease.version,
@@ -426,6 +454,7 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
     runnerContainerHost: DEFAULT_CLOUD_RUNNER_CONTAINER_HOST,
     runnerPort: input.runnerPort ?? DEFAULT_CLOUD_RUNNER_PORT,
     bootMode: input.bootMode ?? "stock",
+    bootValidation: input.bootValidation ?? { mode: "full" },
   };
 }
 

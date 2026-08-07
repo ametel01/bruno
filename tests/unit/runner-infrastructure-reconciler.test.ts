@@ -388,7 +388,7 @@ async function seedRunner(
     requiredRunnerImageDigest: DIGEST,
     observedRunnerImageDigest: DIGEST,
     observedRunnerReleaseVersion: "step8",
-    observedRunnerBootContractVersion: "plingpling.runner.boot.v1",
+    observedRunnerBootContractVersion: "plingpling.runner.boot.v2",
     compatibilityState: "compatible",
     compatibilityVerifiedAt: NOW,
     createdAt: NOW,

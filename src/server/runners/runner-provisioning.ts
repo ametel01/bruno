@@ -21,7 +21,10 @@ import {
   runnerRegistrationTokens,
   runners,
 } from "@/src/server/db/schema";
-import type { DigitalOceanProviderConfig } from "@/src/server/env";
+import type {
+  DigitalOceanProviderConfig,
+  DigitalOceanRunnerBootValidationConfig,
+} from "@/src/server/env";
 import { getServerEnv, readDigitalOceanProviderConfig } from "@/src/server/env";
 import {
   buildCloudRunnerBootstrapForRunner,
@@ -455,6 +458,7 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
           ? { releaseIdentityMode: RUNNER_RELEASE_DEVELOPMENT_MODE }
           : {}),
         bootMode: input.config.snapshotMode?.mode === "snapshot" ? "snapshot" : "stock",
+        bootValidation: input.config.bootValidation ?? { mode: "full" },
         sizeSlug: input.config.sizeSlug,
         now: input.now,
         log,
@@ -1313,6 +1317,7 @@ export async function createDigitalOceanRunnerForUser(
         ? { releaseIdentityMode: RUNNER_RELEASE_DEVELOPMENT_MODE }
         : {}),
       bootMode: config.snapshotMode?.mode === "snapshot" ? "snapshot" : "stock",
+      bootValidation: config.bootValidation ?? { mode: "full" },
       sizeSlug: initialized.runner.sizeSlug,
       now,
       log,
@@ -1995,6 +2000,7 @@ async function buildProvisioningBootstrap(input: {
   runnerMaxAgents?: number;
   releaseIdentityMode?: typeof RUNNER_RELEASE_DEVELOPMENT_MODE;
   bootMode?: "stock" | "snapshot";
+  bootValidation?: DigitalOceanRunnerBootValidationConfig;
   sizeSlug: string;
   now: () => Date;
   log: ProvisioningLog;
@@ -2035,6 +2041,7 @@ async function buildProvisioningBootstrap(input: {
       ...(input.runnerMaxAgents === undefined ? {} : { runnerMaxAgents: input.runnerMaxAgents }),
       ...(input.releaseIdentityMode ? { releaseIdentityMode: input.releaseIdentityMode } : {}),
       ...(input.bootMode ? { bootMode: input.bootMode } : {}),
+      ...(input.bootValidation ? { bootValidation: input.bootValidation } : {}),
       bootModelCanaryEnabled: input.releaseIdentityMode === RUNNER_RELEASE_DEVELOPMENT_MODE,
       endpointDiscovery: { type: "digitalocean_metadata" },
       enableSwap: isDigitalOceanLowMemorySwapResilienceProfile(input.sizeSlug),

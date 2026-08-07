@@ -5,6 +5,12 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { parse, stringify } from "yaml";
 import {
+  readRunnerBootValidationMode,
+  resolveRunnerBootValidation,
+  RunnerBootValidationError,
+  type RunnerBootValidationPlan,
+} from "@/src/runner-service/boot-validation";
+import {
   DEFAULT_HERMES_WORKLOAD_IMAGE,
   DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT,
   DOCKER_CLI_TIMEOUT_MS,
@@ -19,7 +25,10 @@ import {
   type HermesProjectionResult,
   projectHermesHome,
 } from "@/src/runner-service/hermes-projection";
-import { resolveRunnerReleaseEvidence } from "@/src/runner-service/release-identity";
+import {
+  resolveRunnerReleaseEvidence,
+  type RunnerReleaseEvidence,
+} from "@/src/runner-service/release-identity";
 import {
   parseRunnerBootSnapshot,
   RUNNER_BOOT_COMPONENTS,
@@ -58,7 +67,7 @@ export type RunnerBootFixture = {
 
 export type RunnerBootSelfTestExecutor = {
   recover(signal: AbortSignal): Promise<void>;
-  verifyDockerAndRelease(signal: AbortSignal): Promise<void>;
+  verifyDockerAndRelease(signal: AbortSignal): Promise<RunnerReleaseEvidence>;
   launchFixture(signal: AbortSignal): Promise<RunnerBootFixture>;
   probeDetailedHealth(fixture: RunnerBootFixture, signal: AbortSignal): Promise<void>;
   runCanary(fixture: RunnerBootFixture, signal: AbortSignal): Promise<void>;
@@ -90,6 +99,7 @@ export function createRunnerBootReadinessController(
     canaryAttempts?: number;
     canaryRetryDelayMs?: number;
     modelCanaryEnabled?: boolean;
+    env?: Record<string, string | undefined>;
   } = {},
 ): RunnerBootReadinessController {
   const now = options.now ?? (() => new Date());
@@ -98,6 +108,7 @@ export function createRunnerBootReadinessController(
     process.env[RUNNER_BOOT_SNAPSHOT_PATH_ENV]?.trim() ??
     DEFAULT_RUNNER_BOOT_SNAPSHOT_PATH;
   const executor = options.executor ?? createDockerRunnerBootSelfTestExecutor();
+  const env = options.env ?? process.env;
   let run: Promise<void> | null = null;
   let testingSnapshot: RunnerBootSnapshot | null = null;
 
@@ -113,7 +124,8 @@ export function createRunnerBootReadinessController(
     start() {
       if (!run) {
         const startedAt = now().toISOString();
-        testingSnapshot = createTestingSnapshot(startedAt);
+        const validationMode = configuredValidationMode(env);
+        testingSnapshot = createTestingSnapshot(startedAt, validationMode);
         run = executeBootSelfTest({
           executor,
           now,
@@ -127,6 +139,8 @@ export function createRunnerBootReadinessController(
           modelCanaryEnabled:
             options.modelCanaryEnabled ??
             process.env[RUNNER_BOOT_MODEL_CANARY_ENABLED_ENV]?.trim().toLowerCase() !== "false",
+          env,
+          validationMode,
         });
       }
       return run;
@@ -144,6 +158,8 @@ async function executeBootSelfTest(input: {
   canaryAttempts: number;
   canaryRetryDelayMs: number;
   modelCanaryEnabled: boolean;
+  env: Record<string, string | undefined>;
+  validationMode: RunnerBootSnapshot["validationMode"];
 }): Promise<void> {
   const startedAt = input.startedAt;
   const states = Object.fromEntries(
@@ -152,10 +168,14 @@ async function executeBootSelfTest(input: {
   let fixture: RunnerBootFixture | null = null;
   let activeComponent: RunnerBootComponent = "docker";
   let failureReason: Exclude<RunnerBootFailureReason, null> | null = null;
+  let validationPlan: RunnerBootValidationPlan | null = null;
+  let attestations: RunnerBootSnapshot["attestations"] = null;
 
   await persistSnapshot(input.snapshotPath, {
     ok: true,
     contractVersion: RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION,
+    validationMode: input.validationMode,
+    attestations: null,
     status: "testing",
     components: states,
     failureReason: null,
@@ -168,43 +188,97 @@ async function executeBootSelfTest(input: {
 
   try {
     await abortable(controller.signal, () => input.executor.recover(controller.signal));
-    await abortable(controller.signal, () =>
+    const releaseEvidence = await abortable(controller.signal, () =>
       input.executor.verifyDockerAndRelease(controller.signal),
     );
     states.docker = "passed";
-    await persistTestingSnapshot(input.snapshotPath, startedAt, states);
-
-    activeComponent = "hermesFixture";
-    fixture = await abortable(controller.signal, () =>
-      input.executor.launchFixture(controller.signal),
-    );
-    states.hermesFixture = "passed";
-    states.telegramConfig = "passed";
-    await persistTestingSnapshot(input.snapshotPath, startedAt, states);
-
-    activeComponent = "detailedHealth";
-    await abortable(controller.signal, () =>
-      input.executor.probeDetailedHealth(fixture as RunnerBootFixture, controller.signal),
-    );
-    states.detailedHealth = "passed";
-    await persistTestingSnapshot(input.snapshotPath, startedAt, states);
-
-    if (input.modelCanaryEnabled) {
-      activeComponent = "modelCanary";
-      await abortable(controller.signal, () =>
-        runBootCanaryWithRetries({
-          executor: input.executor,
-          fixture: fixture as RunnerBootFixture,
-          signal: controller.signal,
-          attempts: input.canaryAttempts,
-          retryDelayMs: input.canaryRetryDelayMs,
-        }),
-      );
-      states.modelCanary = "passed";
+    activeComponent = "releaseAttestation";
+    validationPlan = resolveRunnerBootValidation({
+      env: input.env,
+      releaseEvidence,
+      now: input.now(),
+    });
+    if (validationPlan.mode === "release_attested") {
+      states.releaseAttestation = "passed";
+      states.snapshotAttestation = "passed";
+      states.hermesFixture = "attested";
+      states.detailedHealth = "attested";
+      states.modelCanary = "attested";
+      states.telegramConfig = "attested";
+      attestations = {
+        release: {
+          digest: validationPlan.releaseAttestationDigest,
+          expiresAt: validationPlan.releaseAttestationExpiresAt,
+        },
+        snapshot: {
+          id: validationPlan.snapshotId,
+          manifestDigest: validationPlan.snapshotManifestDigest,
+          expiresAt: validationPlan.snapshotExpiresAt,
+        },
+      };
     } else {
-      states.modelCanary = "skipped";
+      states.releaseAttestation = "not_applicable";
+      states.snapshotAttestation = "not_applicable";
     }
-    await persistTestingSnapshot(input.snapshotPath, startedAt, states);
+    await persistTestingSnapshot(
+      input.snapshotPath,
+      startedAt,
+      input.validationMode,
+      states,
+      attestations,
+    );
+
+    if (validationPlan.mode === "full") {
+      activeComponent = "hermesFixture";
+      fixture = await abortable(controller.signal, () =>
+        input.executor.launchFixture(controller.signal),
+      );
+      states.hermesFixture = "passed";
+      states.telegramConfig = "passed";
+      await persistTestingSnapshot(
+        input.snapshotPath,
+        startedAt,
+        input.validationMode,
+        states,
+        null,
+      );
+
+      activeComponent = "detailedHealth";
+      await abortable(controller.signal, () =>
+        input.executor.probeDetailedHealth(fixture as RunnerBootFixture, controller.signal),
+      );
+      states.detailedHealth = "passed";
+      await persistTestingSnapshot(
+        input.snapshotPath,
+        startedAt,
+        input.validationMode,
+        states,
+        null,
+      );
+
+      if (input.modelCanaryEnabled) {
+        activeComponent = "modelCanary";
+        await abortable(controller.signal, () =>
+          runBootCanaryWithRetries({
+            executor: input.executor,
+            fixture: fixture as RunnerBootFixture,
+            signal: controller.signal,
+            attempts: input.canaryAttempts,
+            retryDelayMs: input.canaryRetryDelayMs,
+          }),
+        );
+        states.modelCanary = "passed";
+      } else {
+        states.modelCanary = "skipped";
+      }
+      await persistTestingSnapshot(
+        input.snapshotPath,
+        startedAt,
+        input.validationMode,
+        states,
+        null,
+      );
+    }
   } catch (error) {
     failureReason = controller.signal.aborted
       ? "deadline_exceeded"
@@ -237,6 +311,8 @@ async function executeBootSelfTest(input: {
   await persistSnapshot(input.snapshotPath, {
     ok: true,
     contractVersion: RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION,
+    validationMode: input.validationMode,
+    attestations,
     status: failureReason === null ? "ready" : "failed",
     components: states,
     failureReason,
@@ -275,12 +351,26 @@ function failureFrom(
   error: unknown,
   component: RunnerBootComponent,
 ): Exclude<RunnerBootFailureReason, null> {
+  if (error instanceof RunnerBootValidationError) {
+    if (error.reason === "validation_mode_invalid") return "validation_mode_invalid";
+    if (
+      error.reason === "attestation_configuration_missing" ||
+      error.reason === "release_identity_unverified" ||
+      error.reason.startsWith("attestation_")
+    ) {
+      return component === "snapshotAttestation"
+        ? "snapshot_attestation_invalid"
+        : "release_attestation_invalid";
+    }
+  }
   if (error instanceof RunnerBootSelfTestError) {
     return error.reason;
   }
 
   return {
     docker: "docker_unavailable",
+    releaseAttestation: "release_attestation_invalid",
+    snapshotAttestation: "snapshot_attestation_invalid",
     hermesFixture: "fixture_launch_failed",
     detailedHealth: "detailed_health_failed",
     modelCanary: "canary_failed",
@@ -300,11 +390,15 @@ async function persistSnapshot(path: string, snapshot: RunnerBootSnapshot): Prom
 async function persistTestingSnapshot(
   path: string,
   startedAt: string,
+  validationMode: RunnerBootSnapshot["validationMode"],
   components: RunnerBootSnapshot["components"],
+  attestations: RunnerBootSnapshot["attestations"],
 ): Promise<void> {
   await persistSnapshot(path, {
     ok: true,
     contractVersion: RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION,
+    validationMode,
+    attestations,
     status: "testing",
     components: { ...components },
     failureReason: null,
@@ -318,9 +412,13 @@ function invalidSnapshot(now: Date): RunnerBootSnapshot {
   return {
     ok: true,
     contractVersion: RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION,
+    validationMode: "full",
+    attestations: null,
     status: "failed",
     components: {
       docker: "failed",
+      releaseAttestation: "pending",
+      snapshotAttestation: "pending",
       hermesFixture: "pending",
       detailedHealth: "pending",
       modelCanary: "pending",
@@ -333,13 +431,20 @@ function invalidSnapshot(now: Date): RunnerBootSnapshot {
   };
 }
 
-function createTestingSnapshot(startedAt: string): RunnerBootSnapshot {
+function createTestingSnapshot(
+  startedAt: string,
+  validationMode: RunnerBootSnapshot["validationMode"],
+): RunnerBootSnapshot {
   return {
     ok: true,
     contractVersion: RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION,
+    validationMode,
+    attestations: null,
     status: "testing",
     components: {
       docker: "pending",
+      releaseAttestation: "pending",
+      snapshotAttestation: "pending",
       hermesFixture: "pending",
       detailedHealth: "pending",
       modelCanary: "pending",
@@ -350,6 +455,16 @@ function createTestingSnapshot(startedAt: string): RunnerBootSnapshot {
     startedAt,
     completedAt: null,
   };
+}
+
+function configuredValidationMode(
+  env: Record<string, string | undefined>,
+): RunnerBootSnapshot["validationMode"] {
+  try {
+    return readRunnerBootValidationMode(env);
+  } catch {
+    return "full";
+  }
 }
 
 export function createDockerRunnerBootSelfTestExecutor(
@@ -376,6 +491,7 @@ export function createDockerRunnerBootSelfTestExecutor(
         if (evidence.expectedMatch === false) {
           throw new RunnerBootSelfTestError("release_mismatch");
         }
+        return evidence;
       } catch (error) {
         if (error instanceof RunnerBootSelfTestError) throw error;
         throw new RunnerBootSelfTestError("docker_unavailable");

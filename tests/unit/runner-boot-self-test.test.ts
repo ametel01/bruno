@@ -1,7 +1,18 @@
+import { generateKeyPairSync } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  RUNNER_BOOT_VALIDATION_MODE_ENV,
+  RUNNER_RELEASE_ATTESTATION_ENV,
+  RUNNER_RELEASE_ATTESTATION_PUBLIC_KEY_ENV,
+  RUNNER_RELEASE_ATTESTATION_SIGNATURE_ENV,
+  RUNNER_RELEASE_SOURCE_REVISION_ENV,
+  RUNNER_SNAPSHOT_EXPIRES_AT_ENV,
+  RUNNER_SNAPSHOT_ID_ENV,
+  RUNNER_SNAPSHOT_MANIFEST_DIGEST_ENV,
+} from "@/src/runner-service/boot-validation";
 import {
   createDockerRunnerBootSelfTestExecutor,
   createRunnerBootReadinessController,
@@ -10,6 +21,11 @@ import {
   type RunnerBootSelfTestExecutor,
 } from "@/src/runner-service/boot-self-test";
 import { parseRunnerBootSnapshot } from "@/src/runner-service/runner-contracts";
+import {
+  createRunnerReleaseAttestation,
+  RUNNER_RELEASE_ATTESTATION_SCHEMA_VERSION,
+  type RunnerReleaseAttestation,
+} from "@/src/runner-service/release-attestation";
 
 const roots: string[] = [];
 
@@ -110,6 +126,50 @@ describe("runner boot self-test", () => {
       },
     });
     expect(calls).not.toContain("canary");
+  });
+
+  it("uses exact release attestations without launching a duplicate synthetic fixture", async () => {
+    const { controller, calls } = await createHarness({}, 1_000, 1_000, {
+      env: releaseAttestedEnv(),
+    });
+
+    await controller.start();
+
+    expect(calls).toEqual(["recover", "docker", "cleanup", "recover"]);
+    await expect(controller.read()).resolves.toMatchObject({
+      status: "ready",
+      validationMode: "release_attested",
+      components: {
+        docker: "passed",
+        releaseAttestation: "passed",
+        snapshotAttestation: "passed",
+        hermesFixture: "attested",
+        detailedHealth: "attested",
+        modelCanary: "attested",
+        telegramConfig: "attested",
+        cleanup: "passed",
+      },
+      attestations: {
+        release: { expiresAt: "2026-08-14T00:00:00.000Z" },
+        snapshot: { id: "1102", expiresAt: "2026-08-15T00:00:00.000Z" },
+      },
+    });
+  });
+
+  it("fails lightweight readiness closed when attestation configuration is absent", async () => {
+    const { controller, calls } = await createHarness({}, 1_000, 1_000, {
+      env: { [RUNNER_BOOT_VALIDATION_MODE_ENV]: "release_attested" },
+    });
+
+    await controller.start();
+
+    expect(calls).toEqual(["recover", "docker", "cleanup", "recover"]);
+    await expect(controller.read()).resolves.toMatchObject({
+      status: "failed",
+      validationMode: "release_attested",
+      failureReason: "release_attestation_invalid",
+      components: { releaseAttestation: "failed", cleanup: "passed" },
+    });
   });
 
   it("enforces the total deadline even when a fixture operation ignores abort", async () => {
@@ -231,7 +291,10 @@ async function createHarness(
   overrides: Partial<RunnerBootSelfTestExecutor> = {},
   timeoutMs = 1_000,
   cleanupTimeoutMs = 1_000,
-  controllerOptions: { modelCanaryEnabled?: boolean } = {},
+  controllerOptions: {
+    modelCanaryEnabled?: boolean;
+    env?: Record<string, string | undefined>;
+  } = {},
 ) {
   const root = await temporaryRoot();
   const snapshotPath = join(root, "boot.json");
@@ -251,6 +314,14 @@ async function createHarness(
     },
     async verifyDockerAndRelease() {
       calls.push("docker");
+      return {
+        release: {
+          version: "1".repeat(40),
+          imageDigest: `sha256:${"a".repeat(64)}`,
+          bootContractVersion: "plingpling.runner.boot.v2",
+        },
+        expectedMatch: true,
+      };
     },
     async launchFixture() {
       calls.push("launch");
@@ -280,6 +351,48 @@ async function createHarness(
       .mockReturnValue(new Date("2026-08-04T00:00:01.000Z")),
   });
   return { calls, controller, snapshotPath };
+}
+
+function releaseAttestedEnv(): Record<string, string> {
+  const keys = generateKeyPairSync("ed25519");
+  const snapshotDigest = `sha256:${"b".repeat(64)}`;
+  const attestation: RunnerReleaseAttestation = {
+    schemaVersion: RUNNER_RELEASE_ATTESTATION_SCHEMA_VERSION,
+    release: {
+      version: "1".repeat(40),
+      imageDigest: `sha256:${"a".repeat(64)}`,
+      bootContractVersion: "plingpling.runner.boot.v2",
+    },
+    snapshot: {
+      expiresAt: "2026-08-15T00:00:00.000Z",
+      id: "1102",
+      manifestDigest: snapshotDigest,
+    },
+    sourceRevision: "1".repeat(40),
+    workflow: { runId: "123456", runAttempt: "1" },
+    validation: {
+      fullFixturePassedAt: "2026-08-03T23:58:00.000Z",
+      cleanupVerifiedAt: "2026-08-03T23:59:00.000Z",
+    },
+    issuedAt: "2026-08-04T00:00:00.000Z",
+    expiresAt: "2026-08-14T00:00:00.000Z",
+  };
+  const signed = createRunnerReleaseAttestation({
+    attestation,
+    privateKeyPem: keys.privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+  });
+  return {
+    [RUNNER_BOOT_VALIDATION_MODE_ENV]: "release_attested",
+    [RUNNER_RELEASE_ATTESTATION_ENV]: signed.canonicalBytes,
+    [RUNNER_RELEASE_ATTESTATION_SIGNATURE_ENV]: signed.signature,
+    [RUNNER_RELEASE_ATTESTATION_PUBLIC_KEY_ENV]: keys.publicKey
+      .export({ format: "pem", type: "spki" })
+      .toString(),
+    [RUNNER_SNAPSHOT_ID_ENV]: "1102",
+    [RUNNER_SNAPSHOT_MANIFEST_DIGEST_ENV]: snapshotDigest,
+    [RUNNER_SNAPSHOT_EXPIRES_AT_ENV]: "2026-08-15T00:00:00.000Z",
+    [RUNNER_RELEASE_SOURCE_REVISION_ENV]: "1".repeat(40),
+  };
 }
 
 async function temporaryRoot(): Promise<string> {

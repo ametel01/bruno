@@ -13,6 +13,7 @@ import {
   probeRunnerEndpointReadiness,
   recordRunnerHeartbeat,
   reconcileStaleRunnerHeartbeats,
+  runnerBootSnapshotMatchesRequirement,
   RUNNER_HEARTBEAT_STALE_THRESHOLD_MS,
   validateRunnerHeartbeatPayload,
 } from "@/src/server/runners/runner-heartbeat";
@@ -29,6 +30,66 @@ const HOSTED_COMPATIBILITY_REQUIREMENT = {
     bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
   },
 } as const;
+
+describe("runner boot attestation compatibility", () => {
+  const releaseDigest = `sha256:${"d".repeat(64)}`;
+  const snapshotDigest = `sha256:${"e".repeat(64)}`;
+  const expiresAt = "2026-08-14T00:00:00.000Z";
+  const requirement = {
+    mode: "release_attested",
+    attestationBytes: "{}",
+    signature: "signature",
+    publicKeyPem: "public-key",
+    releaseAttestationDigest: releaseDigest,
+    releaseAttestationExpiresAt: expiresAt,
+    snapshotId: "1102",
+    snapshotManifestDigest: snapshotDigest,
+    snapshotExpiresAt: expiresAt,
+    sourceRevision: "1".repeat(40),
+  } as const;
+  const snapshot = readyRunnerBootSnapshot({
+    validationMode: "release_attested",
+    components: {
+      docker: "passed",
+      releaseAttestation: "passed",
+      snapshotAttestation: "passed",
+      hermesFixture: "attested",
+      detailedHealth: "attested",
+      modelCanary: "attested",
+      telegramConfig: "attested",
+      cleanup: "passed",
+    },
+    attestations: {
+      release: { digest: releaseDigest, expiresAt },
+      snapshot: { id: "1102", manifestDigest: snapshotDigest, expiresAt },
+    },
+  });
+
+  it("requires exact unexpired evidence for release-attested readiness", () => {
+    expect(
+      runnerBootSnapshotMatchesRequirement(
+        snapshot,
+        requirement,
+        new Date("2026-08-07T00:00:00.000Z"),
+      ),
+    ).toBe(true);
+    expect(
+      runnerBootSnapshotMatchesRequirement(
+        snapshot,
+        { ...requirement, snapshotId: "1103" },
+        new Date("2026-08-07T00:00:00.000Z"),
+      ),
+    ).toBe(false);
+    expect(
+      runnerBootSnapshotMatchesRequirement(
+        snapshot,
+        requirement,
+        new Date("2026-08-14T00:00:00.000Z"),
+      ),
+    ).toBe(false);
+    expect(runnerBootSnapshotMatchesRequirement(snapshot, { mode: "full" })).toBe(false);
+  });
+});
 
 describe("runner heartbeat persistence", () => {
   let connection: DatabaseConnection;
@@ -562,7 +623,7 @@ describe("runner heartbeat persistence", () => {
         metadata: expect.objectContaining({
           provider: "digitalocean",
           step: "boot_validation",
-          bootContractVersion: "plingpling.runner.boot-snapshot.v1",
+          bootContractVersion: "plingpling.runner.boot-snapshot.v2",
           bootStatus: "ready",
         }),
         createdAt: new Date("2026-08-04T00:00:00.000Z"),
@@ -574,7 +635,7 @@ describe("runner heartbeat persistence", () => {
         metadata: {
           provider: "digitalocean",
           step: "boot_validation",
-          bootContractVersion: "plingpling.runner.boot-snapshot.v1",
+          bootContractVersion: "plingpling.runner.boot-snapshot.v2",
           bootStatus: "ready",
           bootComponents: readyRunnerBootSnapshot().components,
         },
@@ -622,7 +683,7 @@ describe("runner heartbeat persistence", () => {
           step: "authenticated_readiness",
           heartbeatStatus: "online",
           readinessProbe: "authenticated_endpoint",
-          bootContractVersion: "plingpling.runner.boot-snapshot.v1",
+          bootContractVersion: "plingpling.runner.boot-snapshot.v2",
           bootStatus: "ready",
           bootComponents: readyRunnerBootSnapshot().components,
         },

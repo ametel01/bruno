@@ -231,9 +231,17 @@ function localBootSnapshot(
   return {
     ok: true,
     contractVersion: RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION,
+    validationMode: "full",
+    attestations: null,
     status,
     components: Object.fromEntries(
-      RUNNER_BOOT_COMPONENTS.map((component) => [component, componentStatus]),
+      RUNNER_BOOT_COMPONENTS.map((component) => [
+        component,
+        status === "ready" &&
+        (component === "releaseAttestation" || component === "snapshotAttestation")
+          ? "not_applicable"
+          : componentStatus,
+      ]),
     ) as RunnerBootSnapshot["components"],
     failureReason: status === "failed" ? "docker_unavailable" : null,
     startedAt,

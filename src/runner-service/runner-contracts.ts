@@ -4,7 +4,7 @@ export const RUNNER_LAUNCH_CONTRACT_VERSION = "agentbay.runner.launch.v2" as con
 export const LEGACY_RUNNER_STATUS_CONTRACT_VERSION = "agentbay.runner.status.v2" as const;
 export const RUNNER_STATUS_CONTRACT_VERSION = "agentbay.runner.status.v3" as const;
 export const RUNNER_CANARY_CONTRACT_VERSION = "agentbay.runner.canary.v1" as const;
-export const RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION = "plingpling.runner.boot-snapshot.v1" as const;
+export const RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION = "plingpling.runner.boot-snapshot.v2" as const;
 export const MAX_RUNNER_RESTART_COUNT = 2_147_483_647;
 export const MAX_RUNNER_IMAGE_IDENTITY_DIGESTS = 16;
 export const MAX_RUNNER_IMAGE_REFERENCE_LENGTH = 512;
@@ -220,6 +220,8 @@ export type RunnerCanaryRequest = {
 
 export const RUNNER_BOOT_COMPONENTS = [
   "docker",
+  "releaseAttestation",
+  "snapshotAttestation",
   "hermesFixture",
   "detailedHealth",
   "modelCanary",
@@ -228,12 +230,22 @@ export const RUNNER_BOOT_COMPONENTS = [
 ] as const;
 
 export type RunnerBootComponent = (typeof RUNNER_BOOT_COMPONENTS)[number];
-export type RunnerBootComponentState = "pending" | "passed" | "failed" | "skipped";
+export type RunnerBootComponentState =
+  | "pending"
+  | "passed"
+  | "failed"
+  | "skipped"
+  | "attested"
+  | "not_applicable";
+export type RunnerBootValidationMode = "full" | "release_attested";
 export type RunnerBootSnapshotStatus = "testing" | "ready" | "failed";
 export type RunnerBootFailureReason =
   | null
   | "docker_unavailable"
   | "release_mismatch"
+  | "release_attestation_invalid"
+  | "snapshot_attestation_invalid"
+  | "validation_mode_invalid"
   | "fixture_launch_failed"
   | "detailed_health_failed"
   | "canary_failed"
@@ -246,7 +258,12 @@ export type RunnerBootSnapshot = {
   ok: true;
   contractVersion: typeof RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION;
   status: RunnerBootSnapshotStatus;
+  validationMode: RunnerBootValidationMode;
   components: Record<RunnerBootComponent, RunnerBootComponentState>;
+  attestations: {
+    release: { digest: string; expiresAt: string };
+    snapshot: { id: string; manifestDigest: string; expiresAt: string };
+  } | null;
   failureReason: RunnerBootFailureReason;
   startedAt: string;
   completedAt: string | null;
@@ -256,15 +273,18 @@ export function parseRunnerBootSnapshot(value: unknown): RunnerBootSnapshot | nu
   if (
     !isExactRecord(value, [
       "completedAt",
+      "attestations",
       "components",
       "contractVersion",
       "failureReason",
       "ok",
       "startedAt",
       "status",
+      "validationMode",
     ]) ||
     value.ok !== true ||
     value.contractVersion !== RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION ||
+    !["full", "release_attested"].includes(value.validationMode as never) ||
     !["testing", "ready", "failed"].includes(value.status as never) ||
     !isRunnerIsoTimestamp(value.startedAt) ||
     !isNullableIsoTimestamp(value.completedAt) ||
@@ -272,6 +292,9 @@ export function parseRunnerBootSnapshot(value: unknown): RunnerBootSnapshot | nu
       null,
       "docker_unavailable",
       "release_mismatch",
+      "release_attestation_invalid",
+      "snapshot_attestation_invalid",
+      "validation_mode_invalid",
       "fixture_launch_failed",
       "detailed_health_failed",
       "canary_failed",
@@ -288,17 +311,33 @@ export function parseRunnerBootSnapshot(value: unknown): RunnerBootSnapshot | nu
   const components = value.components as Record<string, unknown>;
   const states = RUNNER_BOOT_COMPONENTS.map((component) => components[component]);
   if (
-    !states.every((state) => ["pending", "passed", "failed", "skipped"].includes(state as never))
-  ) {
-    return null;
-  }
-  if (
-    RUNNER_BOOT_COMPONENTS.some(
-      (component) => components[component] === "skipped" && component !== "modelCanary",
+    !states.every((state) =>
+      ["pending", "passed", "failed", "skipped", "attested", "not_applicable"].includes(
+        state as never,
+      ),
     )
   ) {
     return null;
   }
+  if (
+    RUNNER_BOOT_COMPONENTS.some((component) => {
+      const state = components[component];
+      return (
+        (state === "skipped" && component !== "modelCanary") ||
+        (state === "attested" &&
+          !["hermesFixture", "detailedHealth", "modelCanary", "telegramConfig"].includes(
+            component,
+          )) ||
+        (state === "not_applicable" &&
+          !["releaseAttestation", "snapshotAttestation"].includes(component))
+      );
+    })
+  ) {
+    return null;
+  }
+
+  const attestations = parseRunnerBootAttestations(value.attestations);
+  if (value.attestations !== null && !attestations) return null;
 
   const isReady = value.status === "ready";
   const isTesting = value.status === "testing";
@@ -306,7 +345,8 @@ export function parseRunnerBootSnapshot(value: unknown): RunnerBootSnapshot | nu
     (isReady &&
       (value.failureReason !== null ||
         value.completedAt === null ||
-        !states.every((state) => state === "passed" || state === "skipped"))) ||
+        !isReadyBootComponentSet(value.validationMode as RunnerBootValidationMode, components) ||
+        (value.validationMode === "full" ? attestations !== null : attestations === null))) ||
     (isTesting && (value.failureReason !== null || value.completedAt !== null)) ||
     (value.status === "failed" &&
       (value.failureReason === null || value.completedAt === null || !states.includes("failed")))
@@ -314,7 +354,56 @@ export function parseRunnerBootSnapshot(value: unknown): RunnerBootSnapshot | nu
     return null;
   }
 
-  return value as RunnerBootSnapshot;
+  return { ...(value as RunnerBootSnapshot), attestations };
+}
+
+function isReadyBootComponentSet(
+  mode: RunnerBootValidationMode,
+  components: Record<string, unknown>,
+): boolean {
+  if (mode === "full") {
+    return (
+      components.docker === "passed" &&
+      components.releaseAttestation === "not_applicable" &&
+      components.snapshotAttestation === "not_applicable" &&
+      components.hermesFixture === "passed" &&
+      components.detailedHealth === "passed" &&
+      ["passed", "skipped"].includes(components.modelCanary as never) &&
+      components.telegramConfig === "passed" &&
+      components.cleanup === "passed"
+    );
+  }
+
+  return (
+    components.docker === "passed" &&
+    components.releaseAttestation === "passed" &&
+    components.snapshotAttestation === "passed" &&
+    components.hermesFixture === "attested" &&
+    components.detailedHealth === "attested" &&
+    components.modelCanary === "attested" &&
+    components.telegramConfig === "attested" &&
+    components.cleanup === "passed"
+  );
+}
+
+function parseRunnerBootAttestations(value: unknown): RunnerBootSnapshot["attestations"] {
+  if (value === null) return null;
+  if (
+    !isExactRecord(value, ["release", "snapshot"]) ||
+    !isExactRecord(value.release, ["digest", "expiresAt"]) ||
+    !isExactRecord(value.snapshot, ["expiresAt", "id", "manifestDigest"]) ||
+    typeof value.release.digest !== "string" ||
+    !/^sha256:[a-f0-9]{64}$/.test(value.release.digest) ||
+    !isRunnerIsoTimestamp(value.release.expiresAt) ||
+    typeof value.snapshot.id !== "string" ||
+    !/^[1-9][0-9]{0,18}$/.test(value.snapshot.id) ||
+    typeof value.snapshot.manifestDigest !== "string" ||
+    !/^sha256:[a-f0-9]{64}$/.test(value.snapshot.manifestDigest) ||
+    !isRunnerIsoTimestamp(value.snapshot.expiresAt)
+  ) {
+    return null;
+  }
+  return value as RunnerBootSnapshot["attestations"];
 }
 
 export type RunnerStopResponsePayload = {

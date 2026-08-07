@@ -97,6 +97,14 @@ describe("runner service bootstrap registration", () => {
         AGENTBAY_RUNNER_EXPECTED_BOOT_CONTRACT_VERSION:
           RELEASE_EVIDENCE.release.bootContractVersion,
         AGENTBAY_RUNNER_BOOT_MODEL_CANARY_ENABLED: "false",
+        AGENTBAY_RUNNER_BOOT_VALIDATION_MODE: "release_attested",
+        AGENTBAY_RUNNER_RELEASE_ATTESTATION_B64: "ZXhhY3Q",
+        AGENTBAY_RUNNER_RELEASE_ATTESTATION_SIGNATURE: "signature",
+        AGENTBAY_RUNNER_RELEASE_ATTESTATION_PUBLIC_KEY_B64: "cHVibGljLWtleQ",
+        AGENTBAY_RUNNER_SNAPSHOT_ID: "1102",
+        AGENTBAY_RUNNER_SNAPSHOT_MANIFEST_DIGEST: `sha256:${"b".repeat(64)}`,
+        AGENTBAY_RUNNER_SNAPSHOT_EXPIRES_AT: "2026-08-15T00:00:00.000Z",
+        AGENTBAY_RELEASE_SOURCE_REVISION: "1".repeat(40),
         AGENTBAY_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
       },
       fetch: async (url) => {
@@ -153,6 +161,12 @@ describe("runner service bootstrap registration", () => {
       'AGENTBAY_LOCAL_AGENT_SMOKE_MODE="synthetic-external-boundaries"',
     );
     expect(writes[0]?.content).toContain('AGENTBAY_RUNNER_BOOT_MODEL_CANARY_ENABLED="false"');
+    expect(writes[0]?.content).toContain('AGENTBAY_RUNNER_BOOT_VALIDATION_MODE="release_attested"');
+    expect(writes[0]?.content).toContain('AGENTBAY_RUNNER_RELEASE_ATTESTATION_B64="ZXhhY3Q"');
+    expect(writes[0]?.content).toContain(
+      'AGENTBAY_RUNNER_RELEASE_ATTESTATION_SIGNATURE="signature"',
+    );
+    expect(writes[0]?.content).toContain('AGENTBAY_RUNNER_SNAPSHOT_ID="1102"');
     expect(writes[0]?.content).not.toContain("AGENTBAY_RUNNER_REGISTRATION_TOKEN");
   });
 

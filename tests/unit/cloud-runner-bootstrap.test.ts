@@ -3,6 +3,16 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { runnerProvisioningEvents, runners, users } from "@/src/server/db/schema";
 import {
+  RUNNER_BOOT_VALIDATION_MODE_ENV,
+  RUNNER_RELEASE_ATTESTATION_B64_ENV,
+  RUNNER_RELEASE_ATTESTATION_PUBLIC_KEY_B64_ENV,
+  RUNNER_RELEASE_ATTESTATION_SIGNATURE_ENV,
+  RUNNER_RELEASE_SOURCE_REVISION_ENV,
+  RUNNER_SNAPSHOT_EXPIRES_AT_ENV,
+  RUNNER_SNAPSHOT_ID_ENV,
+  RUNNER_SNAPSHOT_MANIFEST_DIGEST_ENV,
+} from "@/src/runner-service/boot-validation";
+import {
   BOOTSTRAP_REDACTION,
   buildCloudRunnerBootstrapContent,
   buildCloudRunnerBootstrapForRunner,
@@ -230,6 +240,53 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.safeSummary.runnerRelease).toBeNull();
     expect(content.userData).toContain(`AGENTBAY_RUNNER_IMAGE=${DEFAULT_AGENTBAY_RUNNER_IMAGE}`);
     expect(content.userData).not.toContain(RUNNER_EXPECTED_IMAGE_DIGEST_ENV);
+  });
+
+  it("injects release-attested evidence as single-line base64url values without exposing it in the safe summary", () => {
+    const attestationBytes = '{"release":"exact"}';
+    const publicKeyPem = "-----BEGIN PUBLIC KEY-----\nexact\n-----END PUBLIC KEY-----\n";
+    const content = buildCloudRunnerBootstrapContent({
+      appBaseUrl: "https://app.agentbay.test",
+      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      runnerEndpointUrl: "https://runner.agentbay.test",
+      runnerImage: IMMUTABLE_RUNNER_IMAGE,
+      bootMode: "snapshot",
+      bootValidation: {
+        mode: "release_attested",
+        attestationBytes,
+        signature: "signed-evidence",
+        publicKeyPem,
+        releaseAttestationDigest: `sha256:${"d".repeat(64)}`,
+        releaseAttestationExpiresAt: "2026-08-14T00:00:00.000Z",
+        snapshotId: "1102",
+        snapshotManifestDigest: `sha256:${"b".repeat(64)}`,
+        snapshotExpiresAt: "2026-08-15T00:00:00.000Z",
+        sourceRevision: "1".repeat(40),
+      },
+    });
+
+    expect(content.userData).toContain(`${RUNNER_BOOT_VALIDATION_MODE_ENV}=release_attested`);
+    expect(content.userData).toContain(
+      `${RUNNER_RELEASE_ATTESTATION_B64_ENV}=${Buffer.from(attestationBytes).toString("base64url")}`,
+    );
+    expect(content.userData).toContain(
+      `${RUNNER_RELEASE_ATTESTATION_PUBLIC_KEY_B64_ENV}=${Buffer.from(publicKeyPem).toString("base64url")}`,
+    );
+    expect(content.userData).toContain(
+      `${RUNNER_RELEASE_ATTESTATION_SIGNATURE_ENV}=signed-evidence`,
+    );
+    expect(content.userData).toContain(`${RUNNER_SNAPSHOT_ID_ENV}=1102`);
+    expect(content.userData).toContain(
+      `${RUNNER_SNAPSHOT_MANIFEST_DIGEST_ENV}=sha256:${"b".repeat(64)}`,
+    );
+    expect(content.userData).toContain(
+      `${RUNNER_SNAPSHOT_EXPIRES_AT_ENV}=2026-08-15T00:00:00.000Z`,
+    );
+    expect(content.userData).toContain(`${RUNNER_RELEASE_SOURCE_REVISION_ENV}=${"1".repeat(40)}`);
+    expect(content.userData).not.toContain(attestationBytes);
+    expect(content.userData).not.toContain(publicKeyPem);
+    expect(content.safeSummary.bootValidationMode).toBe("release_attested");
+    expect(JSON.stringify(content.safeSummary)).not.toContain("signed-evidence");
   });
 
   it("builds snapshot first-boot data without package installation or image pulls", () => {

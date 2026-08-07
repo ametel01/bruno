@@ -22,16 +22,16 @@ const readmePath = new URL("../../README.md", import.meta.url);
 const readme = readFileSync(readmePath, "utf8");
 
 describe("runner release workflow contract", () => {
-  it("is valid YAML with publish, staging, deploy, and rollback boundaries while the canary is disabled", () => {
+  it("is valid YAML with publish, staging, full canary, deploy, and rollback boundaries", () => {
     const workflow = parse(workflowSource) as Record<string, unknown>;
     expect(workflow).toBeTypeOf("object");
     expect(workflow.name).toBe("Deploy production application");
     expect(workflowSource).toContain("workflow_dispatch:");
-    expect(workflowSource).not.toContain("\n  canary:");
-    expect(workflowSource).not.toContain("environment: runner-release-canary");
+    expect(workflowSource).toContain("\n  canary:");
+    expect(workflowSource).toContain("environment: runner-release-canary");
     expect(workflowSource).toContain("environment: production");
     expect(workflowSource).toContain("needs:\n      - publish\n      - stage-control-plane");
-    expect(workflowSource).not.toContain("      - canary");
+    expect(workflowSource).toContain("      - canary");
     expect(workflowSource).toContain(
       "concurrency:\n  group: production-application-deploy\n  cancel-in-progress: false",
     );
@@ -70,11 +70,12 @@ describe("runner release workflow contract", () => {
     expect(agentWorkflowSource).toContain("path: trivy-agent-image.sarif");
   });
 
-  it("temporarily bypasses the simulated-Droplet canary and deploys the published digest at batch one", () => {
-    expect(workflowSource).not.toContain("bun run runner:release:smoke -- --image");
-    expect(workflowSource).not.toContain("--provider local_docker");
-    expect(workflowSource).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN: local-docker");
-    expect(workflowSource).not.toContain("AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: local_docker");
+  it("runs the full simulated-Droplet fixture before deploying the published digest at batch one", () => {
+    expect(workflowSource).toContain("bun run runner:release:smoke -- --image");
+    expect(workflowSource).toContain("--provider local_docker");
+    expect(workflowSource).toContain("AGENTBAY_DIGITALOCEAN_TOKEN: local-docker");
+    expect(workflowSource).toContain("AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: local_docker");
+    expect(workflowSource).toContain("AGENTBAY_RUNNER_BOOT_VALIDATION_MODE: full");
     expect(workflowSource).not.toContain("RUNNER_RELEASE_DIGITALOCEAN_TOKEN");
     expect(workflowSource).not.toContain("billable_canary_authorization");
     expect(workflowSource).not.toContain("authorize-disposable-runner-release-smoke");
@@ -89,8 +90,8 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).toContain("stage-control-plane:");
     expect(workflowSource).toContain("outputs:\n      deployment-url:");
     expect(workflowSource).toContain("deploy --prod --skip-domain --yes");
-    expect(workflowSource).not.toContain("NEXT_PUBLIC_APP_URL: http://host.docker.internal:3000");
-    expect(workflowSource).not.toContain("bun run start --hostname 0.0.0.0");
+    expect(workflowSource).toContain("NEXT_PUBLIC_APP_URL: http://host.docker.internal:3000");
+    expect(workflowSource).toContain("bun run start --hostname 0.0.0.0");
     expect(workflowSource).toContain(
       "CANDIDATE_DEPLOYMENT_URL: $" + "{{ needs.stage-control-plane.outputs.deployment-url }}",
     );
@@ -109,7 +110,7 @@ describe("runner release workflow contract", () => {
   });
 
   it("keeps dependency lifecycle code outside production secret scopes", () => {
-    expect(workflowSource.match(/bun install --frozen-lockfile --ignore-scripts/g)).toHaveLength(2);
+    expect(workflowSource.match(/bun install --frozen-lockfile --ignore-scripts/g)).toHaveLength(3);
     expect(workflowSource).not.toMatch(/^ {6}[A-Z_]+: \$\{\{ secrets\./m);
   });
 

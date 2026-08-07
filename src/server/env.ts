@@ -17,8 +17,16 @@ import {
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
   DEFAULT_MANUAL_RUNNER_IMAGE,
+  RUNNER_BOOT_CONTRACT_VERSION,
 } from "@/src/runner-service/constants";
+import {
+  RUNNER_BOOT_VALIDATION_MODE_ENV,
+  RUNNER_RELEASE_ATTESTATION_ENV,
+  RUNNER_RELEASE_ATTESTATION_PUBLIC_KEY_ENV,
+  RUNNER_RELEASE_ATTESTATION_SIGNATURE_ENV,
+} from "@/src/runner-service/boot-validation";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
+import { verifyRunnerReleaseAttestation } from "@/src/runner-service/release-attestation";
 import {
   findDigitalOceanRunnerResourceProfile,
   MAX_HERMES_DOCKER_PIDS_LIMIT,
@@ -27,7 +35,10 @@ import {
   parseHermesDockerPidsLimit,
   validateDigitalOceanRunnerResourceCompatibility,
 } from "@/src/server/runners/runner-resource-profiles";
-import type { RunnerSnapshotExpectedIdentities } from "@/src/server/runners/runner-snapshot-manifest";
+import {
+  verifyRunnerSnapshotManifest,
+  type RunnerSnapshotExpectedIdentities,
+} from "@/src/server/runners/runner-snapshot-manifest";
 
 export const DEFAULT_AGENTBAY_RUNNER_IMAGE = "ghcr.io/ametel01/agentbay-runner:main";
 
@@ -65,7 +76,23 @@ export type DigitalOceanProviderConfig = {
   localRunnerStartDelayMs?: number;
   localAgentSmokeMode?: boolean;
   snapshotMode?: DigitalOceanSnapshotModeConfig;
+  bootValidation?: DigitalOceanRunnerBootValidationConfig;
 };
+
+export type DigitalOceanRunnerBootValidationConfig =
+  | { mode: "full" }
+  | {
+      mode: "release_attested";
+      attestationBytes: string;
+      signature: string;
+      publicKeyPem: string;
+      releaseAttestationDigest: string;
+      releaseAttestationExpiresAt: string;
+      snapshotId: string;
+      snapshotManifestDigest: string;
+      snapshotExpiresAt: string;
+      sourceRevision: string;
+    };
 
 export type DigitalOceanSnapshotModeConfig =
   | { mode: "stock" }
@@ -493,6 +520,7 @@ export function readDigitalOceanProviderConfig(
     hermesImage: config.hermesWorkloadImage ?? DEFAULT_HERMES_WORKLOAD_IMAGE,
   });
   config.snapshotMode = snapshotMode;
+  config.bootValidation = readDigitalOceanRunnerBootValidation(input, config, snapshotMode);
 
   if (providerMode === "digitalocean" && !parseImmutableRunnerImageReference(runnerImage)) {
     throw new EnvValidationError([
@@ -509,6 +537,86 @@ export function readDigitalOceanProviderConfig(
   }
 
   return config;
+}
+
+function readDigitalOceanRunnerBootValidation(
+  input: Record<string, string | undefined>,
+  config: DigitalOceanProviderConfig,
+  snapshotMode: DigitalOceanSnapshotModeConfig,
+): DigitalOceanRunnerBootValidationConfig {
+  const mode = input[RUNNER_BOOT_VALIDATION_MODE_ENV]?.trim() ?? "full";
+  if (mode === "full") return { mode };
+  if (mode !== "release_attested") {
+    throw new EnvValidationError([
+      `${RUNNER_BOOT_VALIDATION_MODE_ENV} must be full or release_attested when set.`,
+    ]);
+  }
+  if (snapshotMode.mode !== "snapshot") {
+    throw new EnvValidationError([
+      `${RUNNER_BOOT_VALIDATION_MODE_ENV}=release_attested requires snapshot image mode.`,
+    ]);
+  }
+
+  const release = parseImmutableRunnerImageReference(config.runnerImage);
+  const snapshot = verifyRunnerSnapshotManifest({
+    manifestBytes: snapshotMode.manifestBytes,
+    signature: snapshotMode.signature,
+    publicKeyPem: snapshotMode.publicKeyPem,
+    expected: snapshotMode.expected,
+  });
+  if (!release || !snapshot.ok) {
+    throw new EnvValidationError([
+      "release_attested boot validation requires exact verified release and snapshot identities.",
+    ]);
+  }
+
+  const attestationBytes = readRequiredSnapshotSetting(
+    input[RUNNER_RELEASE_ATTESTATION_ENV],
+    RUNNER_RELEASE_ATTESTATION_ENV,
+  );
+  const signature = readRequiredSnapshotSetting(
+    input[RUNNER_RELEASE_ATTESTATION_SIGNATURE_ENV],
+    RUNNER_RELEASE_ATTESTATION_SIGNATURE_ENV,
+  );
+  const publicKeyPem = readRequiredSnapshotSetting(
+    input[RUNNER_RELEASE_ATTESTATION_PUBLIC_KEY_ENV],
+    RUNNER_RELEASE_ATTESTATION_PUBLIC_KEY_ENV,
+  );
+  const sourceRevision = snapshotMode.expected.sourceRevision;
+  const verified = verifyRunnerReleaseAttestation({
+    attestationBytes,
+    signature,
+    publicKeyPem,
+    expected: {
+      release: {
+        version: release.version,
+        imageDigest: release.imageDigest,
+        bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+      },
+      snapshotId: snapshot.manifest.snapshot.id,
+      snapshotManifestDigest: snapshot.digest,
+      snapshotExpiresAt: snapshot.manifest.expiresAt,
+      sourceRevision,
+    },
+  });
+  if (!verified.ok) {
+    throw new EnvValidationError([
+      `release_attested boot validation evidence failed closed: ${verified.reason}.`,
+    ]);
+  }
+
+  return {
+    mode,
+    attestationBytes,
+    signature,
+    publicKeyPem,
+    releaseAttestationDigest: verified.digest,
+    releaseAttestationExpiresAt: verified.attestation.expiresAt,
+    snapshotId: snapshot.manifest.snapshot.id,
+    snapshotManifestDigest: snapshot.digest,
+    snapshotExpiresAt: snapshot.manifest.expiresAt,
+    sourceRevision,
+  };
 }
 
 function readDigitalOceanSnapshotMode(

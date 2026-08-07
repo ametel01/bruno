@@ -4,6 +4,7 @@ import {
   parseRunnerReleaseIdentity,
   type RunnerReleaseIdentity,
 } from "@/src/runner-service/release-identity";
+import { RUNNER_BOOT_VALIDATION_MODE_ENV } from "@/src/runner-service/boot-validation";
 import {
   parseRunnerBootSnapshot,
   type RunnerBootSnapshot,
@@ -11,6 +12,10 @@ import {
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
 import { runnerCredentials, runnerHeartbeats, runners } from "@/src/server/db/schema";
+import {
+  readDigitalOceanProviderConfig,
+  type DigitalOceanRunnerBootValidationConfig,
+} from "@/src/server/env";
 import {
   DIGITALOCEAN_PROVIDER,
   DIGITALOCEAN_RUNNER_KIND,
@@ -145,6 +150,7 @@ export type ConfirmCloudRunnerReadinessResult =
         | "endpoint_rejected"
         | "network_error"
         | "persistence_error"
+        | "boot_attestation_incompatible"
         | "release_incompatible"
         | "response_invalid"
         | "runner_not_ready"
@@ -323,6 +329,7 @@ export async function confirmCloudRunnerReadiness(
   runnerId: string,
   dependencies: {
     allowInsecureLoopback?: boolean;
+    bootValidation?: DigitalOceanRunnerBootValidationConfig;
     compatibilityRequirement?: RunnerCompatibilityRequirement;
     createConnection?: () => DatabaseConnection;
     fetch?: typeof fetch;
@@ -413,6 +420,13 @@ export async function confirmCloudRunnerReadiness(
       return { outcome: "pending", reason: probe.reason };
     }
 
+    const bootValidation = dependencies.bootValidation ?? readConfiguredBootValidationRequirement();
+    if (
+      !runnerBootSnapshotMatchesRequirement(probe.snapshot, bootValidation, dependencies.now?.())
+    ) {
+      return { outcome: "pending", reason: "boot_attestation_incompatible" };
+    }
+
     if (
       !isPersistedRunnerCompatible(
         runner,
@@ -441,6 +455,39 @@ export async function confirmCloudRunnerReadiness(
       await connection.close();
     }
   }
+}
+
+function readConfiguredBootValidationRequirement(): DigitalOceanRunnerBootValidationConfig {
+  const mode = process.env[RUNNER_BOOT_VALIDATION_MODE_ENV]?.trim() ?? "full";
+  if (mode === "full") return { mode };
+  const config = readDigitalOceanProviderConfig();
+  if (!config?.bootValidation) {
+    throw new Error("Runner boot validation configuration is unavailable.");
+  }
+  return config.bootValidation;
+}
+
+export function runnerBootSnapshotMatchesRequirement(
+  snapshot: RunnerBootSnapshot,
+  requirement: DigitalOceanRunnerBootValidationConfig,
+  now: Date = new Date(),
+): boolean {
+  if (requirement.mode === "full") {
+    return snapshot.validationMode === "full" && snapshot.attestations === null;
+  }
+
+  const evidence = snapshot.attestations;
+  return (
+    snapshot.validationMode === "release_attested" &&
+    evidence !== null &&
+    evidence.release.digest === requirement.releaseAttestationDigest &&
+    evidence.release.expiresAt === requirement.releaseAttestationExpiresAt &&
+    Date.parse(evidence.release.expiresAt) > now.getTime() &&
+    evidence.snapshot.id === requirement.snapshotId &&
+    evidence.snapshot.manifestDigest === requirement.snapshotManifestDigest &&
+    evidence.snapshot.expiresAt === requirement.snapshotExpiresAt &&
+    Date.parse(evidence.snapshot.expiresAt) > now.getTime()
+  );
 }
 
 export async function probeRunnerEndpointReadiness(input: {
