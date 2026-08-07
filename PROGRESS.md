@@ -8,7 +8,8 @@ The update log is append-only.
 
 ## Status
 
-- Current step: Step 4 — bounded drain for post-registration deployment stages
+- Current step: Step 7 — authorization-independent release-attested readiness preparation; merge is
+  blocked until Step 6 live snapshot evidence is explicitly authorized and verified
 - Overall status: in progress
 - SLO target: at least 95% success and p95 committed-create-to-durable-ready latency at or below 60
   seconds across 30 clean cold DigitalOcean trials
@@ -21,7 +22,7 @@ The update log is append-only.
 - [x] Step 1 — Creation-latency evidence and benchmark
 - [x] Step 2 — Durable delayed deployment wakeups
 - [x] Step 3 — Bounded drain for provider provisioning phases
-- [ ] Step 4 — Bounded drain for post-registration deployment stages
+- [x] Step 4 — Bounded drain for post-registration deployment stages
 - [ ] Step 5 — Right-size cold managed runners
 - [ ] Step 6 — Build and attest a DigitalOcean runner snapshot
 - [ ] Step 7 — Release-attested lightweight per-Droplet readiness
@@ -85,6 +86,11 @@ The update log is append-only.
   claim, real drain deadline abort, and real replacement publication. The combined focused suite
   passed 12 files / 111 tests; format, lint, typecheck, and diff-check passed. The serialized smoke
   was not rerun.
+- Step 8 repository/local implementation: fail-closed capacity evaluation, owner-aware transactional
+  reservation/revalidation, cross-user exclusion, real lifecycle concurrency races, and separate
+  cold/reuse latency cohorts merged in PR #280. Hosted capacity remains one, so Step 8 stays
+  incomplete pending an approved larger profile, disk budget, local/provider two-agent smoke, and
+  explicitly authorized provider evidence.
 
 ## Issue Graph
 
@@ -256,3 +262,26 @@ The update log is append-only.
   QStash, workflow, snapshot, deploy, secret, or billable effect ran.
 - Pending: merge #267 first, rebase this branch without weakening either drain, then run checker and
   the coordinator-serialized `local:agent:smoke` gate.
+
+### 2026-08-07 — Step 4 complete
+
+- Rebased the post-registration drain after Step 3, fixed deadline-abort wakeup replacement, and
+  merged issue #268 through PR #277 at `f2fb3f6d`.
+- Required repository gates passed, including focused reconciler/trigger/heartbeat races, full unit
+  and build, 26/26 E2E, cloud-runner reproduction, and serialized local simulated-Droplet smoke.
+- The local smoke produced one simulated Droplet, zero DigitalOcean requests, verified cleanup, and
+  152.675 seconds commit-to-ready. This proves safety and orchestration behavior, not the provider
+  SLO.
+
+### 2026-08-07 — Step 8 repository/local scope merged; provider acceptance pending
+
+- Merged issue #270 repository scope through PR #280 at `d07ecf97` after five independent review
+  cycles closed every assignment, replacement, rollback, capacity, and cross-user race finding.
+- Final gates passed: 25 ready-create database races, the 13-file/357-test safety matrix, full 175
+  files / 1,733 tests, production build, 26/26 E2E, cloud-runner reproduction, PR CI, and post-merge
+  main CI.
+- Hosted defaults remain fail-closed at one. Step 8 is not complete until maintainers approve an
+  exact larger runner profile and disk budget and explicitly authorize a two-agent provider-backed
+  isolation/load trial and required local smoke.
+- Next authorization-independent work: specify and prepare Step 7 / issue #269 locally. Do not merge
+  it before Step 6 live snapshot evidence exists. Steps 5, 6, 8, and 9 remain provider-gated.
