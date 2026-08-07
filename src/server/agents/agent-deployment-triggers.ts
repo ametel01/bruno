@@ -3,8 +3,8 @@ import "server-only";
 import { after } from "next/server";
 import { publishLatestDeploymentWakeupAfterCommit } from "@/src/server/agents/agent-deployment-dispatch";
 import {
-  reconcileTargetAgentDeployment,
-  reconcileTargetRunnerDeployment,
+  drainTargetAgentDeployment,
+  drainTargetRunnerDeployment,
 } from "@/src/server/agents/agent-deployment-reconciler";
 
 export type AgentDeploymentAfterScheduler = (callback: () => void | Promise<void>) => void;
@@ -12,8 +12,8 @@ export type AgentDeploymentAfterScheduler = (callback: () => void | Promise<void
 export type AgentDeploymentTriggerDependencies = {
   afterScheduler?: AgentDeploymentAfterScheduler;
   publishWakeup?: typeof publishLatestDeploymentWakeupAfterCommit;
-  reconcile?: typeof reconcileTargetAgentDeployment;
-  reconcileRunner?: typeof reconcileTargetRunnerDeployment;
+  reconcile?: typeof drainTargetAgentDeployment;
+  reconcileRunner?: typeof drainTargetRunnerDeployment;
 };
 
 export function scheduleAgentDeploymentReconcileAfterResponse(
@@ -21,7 +21,7 @@ export function scheduleAgentDeploymentReconcileAfterResponse(
   dependencies: AgentDeploymentTriggerDependencies = {},
 ): void {
   const schedule = dependencies.afterScheduler ?? after;
-  const reconcile = dependencies.reconcile ?? reconcileTargetAgentDeployment;
+  const reconcile = dependencies.reconcile ?? drainTargetAgentDeployment;
 
   try {
     schedule(async () => {
@@ -40,7 +40,7 @@ export function scheduleAgentDeploymentReconcileAfterResponse(
 
 async function reconcileDeploymentAfterResponse(
   deploymentId: string,
-  reconcile: typeof reconcileTargetAgentDeployment,
+  reconcile: typeof drainTargetAgentDeployment,
   publishWakeup: typeof publishLatestDeploymentWakeupAfterCommit = publishLatestDeploymentWakeupAfterCommit,
 ): Promise<void> {
   const publish = await publishWakeup(deploymentId);
@@ -48,10 +48,7 @@ async function reconcileDeploymentAfterResponse(
     return;
   }
 
-  const initialized = await reconcile(deploymentId);
-  if (initialized.processed === 1 && initialized.outcome === "advanced") {
-    await reconcile(deploymentId);
-  }
+  await reconcile(deploymentId);
 }
 
 export function scheduleRunnerDeploymentReconcileAfterResponse(
@@ -59,7 +56,7 @@ export function scheduleRunnerDeploymentReconcileAfterResponse(
   dependencies: AgentDeploymentTriggerDependencies = {},
 ): void {
   const schedule = dependencies.afterScheduler ?? after;
-  const reconcile = dependencies.reconcileRunner ?? reconcileTargetRunnerDeployment;
+  const reconcile = dependencies.reconcileRunner ?? drainTargetRunnerDeployment;
 
   try {
     schedule(async () => {

@@ -30,8 +30,9 @@ export function scheduleAgentRuntimeReconcileAfterResponse(
 /**
  * Runner ingress must preserve this order: let an active Step 7 deployment use
  * the fresh runner first, then offer one due managed-ready runtime row a kick.
- * Both calls retain their own one-row budgets and cron remains the durability
- * boundary when this callback is dropped.
+ * The deployment call pins at most one row for its bounded stage drain; the
+ * runtime call retains its one-row budget. Cron remains the recovery boundary
+ * when this callback is dropped.
  */
 export function scheduleRunnerReconciliationsAfterResponse(
   runnerId: string,
@@ -41,10 +42,10 @@ export function scheduleRunnerReconciliationsAfterResponse(
   const reconcileDeployment =
     dependencies.reconcileRunnerDeployment ??
     (async (targetRunnerId: string) => {
-      const { reconcileTargetRunnerDeployment } = await import(
+      const { drainTargetRunnerDeployment } = await import(
         "@/src/server/agents/agent-deployment-reconciler"
       );
-      return reconcileTargetRunnerDeployment(targetRunnerId);
+      return drainTargetRunnerDeployment(targetRunnerId);
     });
   const reconcileRuntime = dependencies.reconcileRunnerRuntime ?? reconcileTargetRunnerRuntime;
 
