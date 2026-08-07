@@ -5,12 +5,12 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 ## Active Work
 
 - issue: [#264](https://github.com/ametel01/plingpling/issues/264)
-  owner: checker-agent (`issue_264_checker`)
+  owner: builder-agent (`issue_264_builder`)
   branch: `codex/issue-264-durable-wakeups`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: failed serialized local-smoke cycle 2
-  cycle: 2/5
+  phase: rebasing onto merged green smoke harness
+  cycle: 3/5
 - issue: [#265](https://github.com/ametel01/plingpling/issues/265)
   owner: checker-agent (`issue_265_checker`)
   branch: `codex/issue-265-runner-sizing`
