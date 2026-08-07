@@ -7,7 +7,7 @@
   branch: `codex/issue-266-attested-snapshot`
   worktree: `/Users/alexmetelli/source/plingpling-issue-266`
   pr: none
-  phase: rebased onto merged #265; awaiting serialized local smoke
+  phase: repository scope green; PR #274 awaiting remote checks
   cycle: 4/5
 
 ## Completion Contract
@@ -810,6 +810,18 @@ Status: FAILED
   the winner commits the target association; provider creation belongs to a later reconcile.
 - The regression now performs that explicit later reconcile and still asserts one target plus exactly
   one provider create. The isolated corrected test passed 30/30 stress iterations.
+
+### 2026-08-07 — Coordinator local smoke acceptance
+
+- `bun run local:agent:smoke` passed after removing nine verified exited `busybox:1.36`
+  `agentbay.agent_id` test artifacts left by prior local test runs.
+- Evidence: `agentCreated:true`, `agentDeleted:true`, `cleanupVerified:true`,
+  `digitalOceanRequests:0`, `simulatedDroplets:1`, `sizeSlug:"s-1vcpu-2gb"`, 1 vCPU / 2048 MiB
+  host profile, and Hermes limits of 1 CPU / 1536m / 256 PIDs / one agent.
+- The full create, ready, restart, stop, delete cycle completed with valid single-run synthetic p95
+  `89283` ms. This is local behavior evidence only, not DigitalOcean SLO or live snapshot evidence.
+- Post-cleanup verification found no agent-labeled/smoke containers and ports 3045, 55300, and 55432
+  were free. The protected workflow and all live DigitalOcean/provider effects remained untouched.
 
 - [#263](https://github.com/ametel01/plingpling/issues/263) / merged
   [PR #272](https://github.com/ametel01/plingpling/pull/272) at `7d1cb98`; prior evidence is in history.
