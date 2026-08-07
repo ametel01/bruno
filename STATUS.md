@@ -5,25 +5,25 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 ## Active Work
 
 - issue: [#264](https://github.com/ametel01/plingpling/issues/264)
-  owner: builder-agent (`issue_264_builder`)
+  owner: checker-agent (`issue_264_checker`)
   branch: `codex/issue-264-durable-wakeups`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: checker-ready
+  phase: checking
   cycle: 0/5
 - issue: [#265](https://github.com/ametel01/plingpling/issues/265)
-  owner: builder-agent (`issue_265_builder`)
+  owner: checker-agent (`issue_265_checker`)
   branch: `codex/issue-265-runner-sizing`
   worktree: `/Users/alexmetelli/source/plingpling-issue-265`
   pr: none
-  phase: implementing authorization-independent scope
+  phase: checking authorization-independent scope
   cycle: 0/5
 - issue: [#266](https://github.com/ametel01/plingpling/issues/266)
-  owner: builder-agent (`issue_266_builder`)
+  owner: checker-agent (`issue_266_checker`)
   branch: `codex/issue-266-attested-snapshot`
   worktree: `/Users/alexmetelli/source/plingpling-issue-266`
   pr: none
-  phase: implementing repository-only scope
+  phase: checking repository-only scope
   cycle: 0/5
 
 ## Goal Contract
@@ -183,8 +183,164 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 - stop condition: accept for PR only after checker independently exercises a producer-to-delivery
   semantic path and either runs or explicitly classifies the pending heavier gates.
 
+## Checker Result
+
+Status: FAILED
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all`
+  result: branch `codex/issue-264-durable-wakeups`, `M STATUS.md`
+  evidence: HEAD `ebd3773 Add durable deployment wakeups`; checker only updated `STATUS.md`.
+- command: `gh issue view 264 --repo ametel01/plingpling --json title,state,body,labels,assignees,comments,url`
+  result: PASS
+  evidence: issue #264 is open and requires signed delayed QStash delivery plus durable recovery.
+- command: `gh pr list --repo ametel01/plingpling --state open --head codex/issue-264-durable-wakeups --json number,title,url,headRefName,baseRefName,mergeStateStatus,isDraft,reviewDecision,statusCheckRollup,closingIssuesReferences`
+  result: PASS
+  evidence: `[]`; no #264 PR exists yet, so there is nothing merge-ready.
+- command: Upstash primary docs review (`https://upstash.com/docs/qstash/howto/signature`,
+  `https://upstash.com/docs/qstash/sdks/ts/examples/receiver`,
+  `https://upstash.com/docs/qstash/quickstarts/vercel-nextjs`,
+  `https://upstash.com/docs/qstash/howto/roll-signing-keys`)
+  result: FAILED
+  evidence: real QStash deliveries use `Upstash-Signature` JWT verification with raw-body hash and
+  claim checks; implementation uses a bespoke body HMAC in `x-agentbay-qstash-signature`.
+- command: source inspection of deployment mutation + wakeup atomicity
+  result: FAILED
+  evidence: helper APIs can perform deployment mutation and wakeup mutation as separate statements
+  when passed a plain DB handle.
+- command: `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_76358_482cde9c1d27`; 6 files / 43 tests passed.
+
+## Failures
+
+- file: `src/server/agents/agent-deployment-dispatch.ts:56`
+  check: real QStash delivery compatibility
+  exact error: implementation expects `x-agentbay-qstash-signature`, but QStash sends
+  `Upstash-Signature`.
+  likely owner: builder-agent for #264.
+- file: `src/server/agents/agent-deployment-dispatch.ts:72`
+  check: official QStash signature verification
+  exact error: bespoke HMAC over body only; missing JWT signature verification and `iss`, `sub`,
+  `exp`, `nbf`, and raw-body hash claim checks.
+  likely owner: builder-agent for #264.
+- file: `app/api/internal/agent-deployments/wakeup/route.ts:90`
+  check: signed route delivery
+  exact error: route reads the custom header via `deploymentWakeupSafeCodes.signatureHeader`, so a
+  real QStash delivery is rejected before payload parsing.
+  likely owner: builder-agent for #264.
+- file: `tests/unit/agent-deployment-wakeup-route.test.ts:51`
+  check: production-compatible signature fixture
+  exact error: test signs with the same bespoke helper instead of an Upstash-compatible JWT/header
+  fixture.
+  likely owner: builder-agent for #264.
+- file: `src/server/agents/agent-deployments.ts:153`
+  check: atomic deployment mutation and wakeup creation
+  exact error: helper inserts deployment then separately writes wakeup without enforcing an owning
+  transaction at the helper boundary.
+  likely owner: builder-agent for #264.
+
+## Coverage Gaps
+
+- Full gates (`bun run verify`, `bun run test:e2e:ci`, `bun run local:agent:smoke`) were not run
+  after blocking semantic/security failures.
+- No passing test covers real `Upstash-Signature` JWT verification with current/next signing keys,
+  URL subject, expiration, not-before, and raw-body hash.
+- No integrated committed mutation -> durable wakeup -> dropped publish -> cron reclaim -> fake
+  publish -> signed duplicate delivery -> exactly-one targeted reconcile test was found.
+- Cron route tests do not assert the outbox sweep is invoked before reconcile.
+- Fake-delayed local smoke evidence was not found.
+
+## Next Action
+
+- Builder should replace the bespoke HMAC verifier with official/compatible QStash JWT verification,
+  add real signature fixtures and the integrated producer-to-consumer recovery test, and enforce
+  deployment+wakeup atomicity at helper boundaries before checker rerun.
+
 ## Gates
 
+- #264 checker result (2026-08-07, `issue_264_checker`): FAILED at `ebd3773`.
+  - command:
+    `git status --short --branch --untracked-files=all`
+    result: `## codex/issue-264-durable-wakeups` with `M STATUS.md` before checker update.
+    evidence: branch HEAD `ebd3773 Add durable deployment wakeups`; no PR exists for
+    `codex/issue-264-durable-wakeups`.
+  - command:
+    `gh issue view 264 --repo ametel01/plingpling --json title,state,body,labels,assignees,comments,url`
+    result: issue #264 is open and agent-ready.
+    evidence: acceptance requires signed delayed delivery, fail-closed queue mode, duplicate/stale
+    fencing, lost publication recovery, and no real QStash/provider effects.
+  - command:
+    `gh pr list --repo ametel01/plingpling --state open --head codex/issue-264-durable-wakeups --json number,title,url,headRefName,baseRefName,mergeStateStatus,isDraft,reviewDecision,statusCheckRollup,closingIssuesReferences`
+    result: `[]`.
+    evidence: there is no mergeable PR for #264 yet.
+  - command:
+    Upstash primary docs review:
+    `https://upstash.com/docs/qstash/howto/signature`,
+    `https://upstash.com/docs/qstash/sdks/ts/examples/receiver`,
+    `https://upstash.com/docs/qstash/quickstarts/vercel-nextjs`,
+    `https://upstash.com/docs/qstash/howto/roll-signing-keys`.
+    result: blocking contract mismatch.
+    evidence: QStash delivery verification uses a JWT in `Upstash-Signature`; official verification
+    requires raw-body verification plus JWT claim checks including issuer, subject URL, expiration,
+    not-before, and body hash. The implementation instead defines
+    `SIGNATURE_HEADER = "x-agentbay-qstash-signature"` at
+    `src/server/agents/agent-deployment-dispatch.ts:56`, creates a bespoke HMAC at
+    `src/server/agents/agent-deployment-dispatch.ts:72-74`, verifies only that HMAC at
+    `src/server/agents/agent-deployment-dispatch.ts:109-123`, and reads that custom header in
+    `app/api/internal/agent-deployments/wakeup/route.ts:85-95`. Real QStash deliveries would be
+    rejected; non-QStash clients with the signing key could be accepted without JWT issuer/subject,
+    expiry, not-before, or body-hash claim validation.
+  - command:
+    source inspection of deployment mutation atomicity.
+    result: contract not satisfied at helper boundaries.
+    evidence: `createAgentDeploymentForUser` inserts a deployment at
+    `src/server/agents/agent-deployments.ts:153-175` and then writes the wakeup separately at
+    `src/server/agents/agent-deployments.ts:179-184`; `releaseAgentDeploymentLease` mutates the
+    deployment at `src/server/agents/agent-deployments.ts:396-407` and then writes the wakeup at
+    `src/server/agents/agent-deployments.ts:409-414`; `transitionAgentDeploymentStage` mutates the
+    deployment at `src/server/agents/agent-deployments.ts:523-540` and then writes the wakeup at
+    `src/server/agents/agent-deployments.ts:542-547`. These helpers accept a plain DB handle, so
+    atomicity depends on every caller wrapping them in a transaction; a wakeup-write failure after
+    the deployment mutation can expose only half the state. The contract requires the mutation and
+    authoritative wakeup generation to be atomic.
+  - command:
+    `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts`
+    result: PASS.
+    evidence: isolated DB `plingpling_test_76358_482cde9c1d27`; 6 files / 43 tests passed.
+  - failures:
+    - `src/server/agents/agent-deployment-dispatch.ts:56`: signature header is
+      `x-agentbay-qstash-signature`; real QStash sends `Upstash-Signature`.
+    - `src/server/agents/agent-deployment-dispatch.ts:72-123`: signature verification is bespoke
+      HMAC over body only; missing official QStash JWT verification and required `iss`, `sub`,
+      `exp`, `nbf`, and body-hash checks.
+    - `app/api/internal/agent-deployments/wakeup/route.ts:85-95`: route reads the custom header and
+      cannot accept a real QStash delivery.
+    - `tests/unit/agent-deployment-wakeup-route.test.ts:51-54` and
+      `tests/unit/agent-deployment-wakeup-route.test.ts:159-165`: tests generate the same bespoke
+      HMAC instead of an Upstash-compatible JWT/header fixture, so they do not prove the production
+      queue contract.
+    - `src/server/agents/agent-deployments.ts:153-184`,
+      `src/server/agents/agent-deployments.ts:396-414`, and
+      `src/server/agents/agent-deployments.ts:523-547`: deployment mutation and wakeup mutation are
+      not enforced as one transaction by the helper API.
+  - coverage gaps:
+    - Did not run `bun run verify`, `bun run test:e2e:ci`, `bun run local:agent:smoke`, or build
+      gates after the blocking semantic/security failures above.
+    - No passing test covers a real Upstash/QStash JWT in `Upstash-Signature` with current/next key
+      rotation, URL subject validation, expiration, not-before, and body-hash claim validation.
+    - No integrated committed mutation -> durable wakeup -> dropped post-commit publish -> cron
+      reclaim -> fake publish -> signed duplicate delivery -> exactly-one targeted reconcile test
+      was found.
+    - `tests/unit/agent-deployment-cron-route.test.ts` does not assert the outbox sweep is invoked
+      before the cron reconcile path.
+    - No fake-delayed local smoke evidence was found; the builder smoke was default cron-only.
+  - next action:
+    Builder should replace the bespoke HMAC verifier with the official QStash verifier/compatible
+    JWT verification against `Upstash-Signature`, add real signature fixtures and the integrated
+    producer-to-consumer recovery test, and enforce deployment+wakeup atomicity at the helper
+    boundary before checker rerun.
 - #263 checker result: ALL GREEN at implementation `49c872a`.
 - focused: 10 files / 95 tests passed.
 - full: `bun run verify` passed with 169 unit files / 1,638 tests and production build.
