@@ -12,6 +12,7 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import {
   agentDeployments,
   agentRuntimeReconciliations,
+  runnerHeartbeats,
   agents,
   runners,
   users,
@@ -318,6 +319,13 @@ async function seedManagedAgent(
     kind: "manual_vps",
     endpointUrl: "http://127.0.0.1:3045",
     status: input.runnerStatus ?? "online",
+  });
+  await connection.db.insert(runnerHeartbeats).values({
+    runnerId: RUNNER_ID,
+    status: "online",
+    metadata: { metrics: { maxAgents: 1, runningAgents: status === "running" ? 1 : 0 } },
+    observedAt: NOW,
+    createdAt: NOW,
   });
   await connection.db.insert(agents).values({
     id: AGENT_ID,

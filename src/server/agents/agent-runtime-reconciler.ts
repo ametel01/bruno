@@ -1040,7 +1040,7 @@ async function loadRuntimeContext(
         eq(agents.runnerId, claim.runnerId),
         eq(agents.userId, claim.userId),
         isNull(agents.deletedAt),
-        inArray(agents.status, ["starting", "running", "restarting"]),
+        eq(agents.desiredStatus, "running"),
         ne(agents.id, claim.agentId),
       ),
     );

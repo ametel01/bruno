@@ -100,6 +100,32 @@ The update log is append-only.
 
 ## Update Log
 
+### 2026-08-07 — Step 8 repository/local implementation complete
+
+- Implemented fail-closed same-user runner reuse for issue #270 without enabling hosted
+  `maxAgents > 1`: selectable capacity is now bounded by computed CPU, physical memory, disk,
+  heartbeat, configured, and explicit measured-profile caps. Missing/unmeasured inputs default to
+  one.
+- Replaced bare runner capacity locks with owner-aware transaction locks and revalidation across
+  ready create, legacy create, lifecycle start, Hermes setup, pending deployment placement, runtime
+  availability, and runner replacement handover. Durable reservations count
+  `desired_status = 'running'`, including stopped ready-mode agents.
+- Added cold/reuse/unknown creation-latency cohorts so existing-runner reuse cannot improve
+  cold-Droplet p95/SLO evidence.
+- Validation passed: `bun run format:check`, `bun run lint`, `bun run typecheck`, focused
+  `bun scripts/run-unit-tests.ts tests/unit/runner-resource-profiles.test.ts
+  tests/unit/runner-placement.test.ts tests/unit/create-agent-ready-db.test.ts
+  tests/unit/agent-creation-latency.test.ts tests/unit/hermes-readiness.test.ts
+  tests/unit/start-agent-route.test.ts tests/unit/runner-replacement-handover.test.ts
+  tests/unit/runner-service.test.ts`, `bun run test` (175 files / 1718 tests), `bun run build`,
+  `bun run test:e2e:ci` (26/26), `bun run repro:cloud-runner`, and `git diff --check`.
+- Skipped: `bun run local:agent:smoke` because the serialized local smoke slot was not explicitly
+  granted for this builder run. No real provider, deploy, workflow, QStash, hosted-secret, or
+  billable action was run.
+- Remaining blockers for hosted enablement/#270 completion: no approved larger measured runner
+  profile, no approved per-Hermes disk budget/host disk reserve, and no authorized provider-backed
+  two-agent trial. Step 9 remains next for provider-backed SLO proof after authorization.
+
 ### 2026-08-07 — Step 0 complete
 
 - Created the complete Step 0–9 checklist before implementation.

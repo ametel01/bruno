@@ -13,6 +13,10 @@ import {
   type RunnerCompatibilityRequirement,
 } from "@/src/server/runners/runner-compatibility";
 import {
+  lockRunnerPlacementCapacityInTransaction,
+  selectRunnerPlacementForUserInTransaction,
+} from "@/src/server/runners/runner-placement";
+import {
   getDevelopmentUserId,
   getOrCreateDevelopmentUserId,
 } from "@/src/server/users/development-user";
@@ -51,7 +55,12 @@ export type AssignRunnerToAgentResult =
     }
   | {
       ok: false;
-      reason: "missing_agent_id" | "malformed_agent_id" | "agent_not_found" | "runner_not_found";
+      reason:
+        | "missing_agent_id"
+        | "malformed_agent_id"
+        | "agent_not_found"
+        | "runner_not_found"
+        | "runner_capacity_reached";
     };
 
 type ManualRunnerTransaction = Parameters<
@@ -168,7 +177,7 @@ export async function assignRunnerToActiveAgentForDevelopmentUser(
       }
 
       const [currentAgent] = await tx
-        .select({ id: agents.id, runnerId: agents.runnerId })
+        .select({ id: agents.id, desiredStatus: agents.desiredStatus, runnerId: agents.runnerId })
         .from(agents)
         .where(
           and(
@@ -198,6 +207,41 @@ export async function assignRunnerToActiveAgentForDevelopmentUser(
         runtimeClassification.kind === "managed_unavailable"
       ) {
         return { ok: false, reason: "runner_not_found" } as const;
+      }
+
+      if (currentAgent.desiredStatus === "running") {
+        const locked = await lockRunnerPlacementCapacityInTransaction(tx, {
+          userId,
+          runnerId: runner.id,
+        });
+
+        if (!locked) {
+          return { ok: false, reason: "runner_not_found" } as const;
+        }
+
+        const placement = await selectRunnerPlacementForUserInTransaction(
+          tx,
+          userId,
+          {
+            excludeAgentId: currentAgent.id,
+            runnerId: runner.id,
+          },
+          {
+            now,
+            compatibilityRequirement:
+              dependencies.compatibilityRequirement ?? readRunnerCompatibilityRequirement(),
+          },
+        );
+
+        if (!placement.ok) {
+          return {
+            ok: false,
+            reason:
+              placement.reason === "runner_capacity_reached"
+                ? "runner_capacity_reached"
+                : "runner_not_found",
+          } as const;
+        }
       }
 
       const [agent] = await tx

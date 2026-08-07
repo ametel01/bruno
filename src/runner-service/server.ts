@@ -32,6 +32,7 @@ import {
   resolveRunnerReleaseEvidence,
   type RunnerReleaseEvidence,
 } from "@/src/runner-service/release-identity";
+import { DEFAULT_HERMES_RUNNER_MAX_AGENTS } from "@/src/runner-service/constants";
 
 const RUNNER_TOKEN_ENV = "AGENTBAY_RUNNER_BEARER_TOKEN";
 
@@ -89,7 +90,6 @@ export type RunnerHeartbeatLoopOptions = {
 };
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
-const DEFAULT_RUNNER_MAX_AGENTS = 3;
 
 export function createRunnerService(options: RunnerServiceOptions = {}) {
   const docker = options.docker ?? new ManualRunnerDocker();
@@ -463,7 +463,10 @@ export function startRunnerHeartbeatLoop(options: RunnerHeartbeatLoopOptions): {
           version: "agentbay-runner/service",
           release: cachedReleaseEvidence.release,
           metrics: {
-            maxAgents: normalizePositiveInteger(options.maxAgents, DEFAULT_RUNNER_MAX_AGENTS),
+            maxAgents: normalizePositiveInteger(
+              options.maxAgents,
+              DEFAULT_HERMES_RUNNER_MAX_AGENTS,
+            ),
             runningAgents: 0,
           },
         }),

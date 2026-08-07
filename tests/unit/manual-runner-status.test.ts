@@ -114,7 +114,8 @@ describe("manual runner status summaries", () => {
       status: "online",
       capacity: capacity({
         runningAgents: 3,
-        maxAgents: 5,
+        maxAgents: 1,
+        blocker: "runner_capacity_reached",
         cpuUsedPercent: 37,
         memoryUsedMb: 512,
         memoryTotalMb: 2048,

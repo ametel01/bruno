@@ -24,8 +24,11 @@ The JSON report is versioned and deterministic. It contains:
 
 - `summary.total`, `ready`, `failed`, `incomplete`, `successRate`;
 - ready and failed terminal latency `p50Ms`, `p95Ms`, and `maxMs`;
+- `cohorts.cold_droplet`, `cohorts.existing_same_user_runner`, and `cohorts.unknown` with
+  separate counts, success rates, ready/failed p50/p95/max latency, invalid-evidence counts, and
+  stage summaries;
 - ordered per-deployment runs with deployment ID, runner ID when known, outcome, terminal timing,
-  total duration, stage timings, and issue counts; and
+  latency cohort, total duration, stage timings, and issue counts; and
 - per-stage summaries for agent deployment-stage events and runner provisioning/bootstrap events.
 
 Percentiles use nearest-rank ordering. Rows are ordered by deployment creation timestamp and then
@@ -34,6 +37,11 @@ deployment ID. Stage evidence is derived only from persisted timestamps: durable
 events that carry an allowlisted `metadata.step`. Missing starts, missing terminal events, duplicate
 boundaries, reversed timestamps, ambiguous terminal rows, and invalid timestamps are surfaced as
 invalid evidence; they never become zero-duration successful stages.
+
+Cold-Droplet evidence requires the exact deployment operation-key runner correlation. Existing
+same-user runner reuse is reported as a separate cohort and never borrows historical runner
+provisioning stages. Unknown or ambiguous correlation is invalid evidence. Cold-path SLO decisions
+must read the `cold_droplet` cohort; faster reuse samples cannot improve cold p95.
 
 Default mode is read-only and does not create, mutate, clean up, or contact provider resources.
 Local Docker mode requires the exact zero-cloud sentinels used by `local:agent:smoke`:

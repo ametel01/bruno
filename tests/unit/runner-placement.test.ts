@@ -4,6 +4,7 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import { agents, appMetadata, runnerHeartbeats, runners, users } from "@/src/server/db/schema";
 import { RUNNER_HEARTBEAT_STALE_THRESHOLD_MS } from "@/src/server/runners/runner-heartbeat";
 import {
+  lockRunnerPlacementCapacityInTransaction,
   normalizeRunnerCapacitySnapshot,
   selectRunnerPlacementForDevelopmentUser,
   selectRunnerPlacementForUser,
@@ -21,6 +22,13 @@ const HOSTED_COMPATIBILITY_REQUIREMENT = {
     imageDigest: RUNNER_IMAGE_DIGEST,
     bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
   },
+} as const;
+const LOCAL_TWO_AGENT_CAPACITY = {
+  configuredMaxAgents: 2,
+  measuredMaxAgents: 2,
+  perHermesDiskGiB: 10,
+  hostDiskReserveGiB: 10,
+  profile: { vcpus: 2, memoryMiB: 4096, diskGiB: 80 },
 } as const;
 
 describe.sequential("runner placement contract", () => {
@@ -45,7 +53,7 @@ describe.sequential("runner placement contract", () => {
     await seedHeartbeat(connection, runner.id, {
       observedAt: new Date("2026-07-06T04:01:00.000Z"),
       metrics: {
-        maxAgents: 3,
+        maxAgents: 2,
         runningAgents: 1,
         cpuPercent: 37,
         memoryUsedMb: 512,
@@ -60,6 +68,7 @@ describe.sequential("runner placement contract", () => {
       {
         createConnection: () => connection,
         now: () => new Date("2026-07-06T04:02:00.000Z"),
+        capacityOptions: LOCAL_TWO_AGENT_CAPACITY,
       },
     );
 
@@ -70,7 +79,7 @@ describe.sequential("runner placement contract", () => {
         kind: "manual_vps",
         status: "online",
         capacity: {
-          max_agents: 3,
+          max_agents: 2,
           running_agents: 1,
           cpu_used_percent: 37,
           memory_used_mb: 512,
@@ -81,6 +90,96 @@ describe.sequential("runner placement contract", () => {
         latestHeartbeatAt: "2026-07-06T04:01:00.000Z",
       },
     });
+  });
+
+  it("does not let heartbeat capacity exceed missing measured/profile evidence", async () => {
+    const userId = await seedDevelopmentUser(connection);
+    const runner = await seedOnlineRunner(connection, userId, {
+      name: "Fail Closed Runner",
+      updatedAt: new Date("2026-07-06T04:10:00.000Z"),
+    });
+    await seedHeartbeat(connection, runner.id, {
+      observedAt: new Date("2026-07-06T04:11:00.000Z"),
+      metrics: { maxAgents: 99, runningAgents: 0 },
+    });
+
+    const result = await selectRunnerPlacementForDevelopmentUser(
+      {},
+      {
+        createConnection: () => connection,
+        now: () => new Date("2026-07-06T04:12:00.000Z"),
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      runner: {
+        id: runner.id,
+        capacity: { max_agents: 1, running_agents: 0 },
+      },
+    });
+  });
+
+  it("counts stopped desired-running ready agents as durable runner reservations", async () => {
+    const userId = await seedDevelopmentUser(connection);
+    const runner = await seedOnlineRunner(connection, userId, {
+      name: "Reserved Runner",
+      updatedAt: new Date("2026-07-06T04:20:00.000Z"),
+    });
+    await seedHeartbeat(connection, runner.id, {
+      observedAt: new Date("2026-07-06T04:21:00.000Z"),
+      metrics: { maxAgents: 2, runningAgents: 0 },
+    });
+    await connection.db.insert(agents).values([
+      {
+        userId,
+        runnerId: runner.id,
+        name: "Ready Reservation One",
+        templateKey: "research_agent",
+        status: "stopped",
+        desiredStatus: "running",
+      },
+      {
+        userId,
+        runnerId: runner.id,
+        name: "Ready Reservation Two",
+        templateKey: "research_agent",
+        status: "stopped",
+        desiredStatus: "running",
+      },
+    ]);
+
+    const result = await selectRunnerPlacementForDevelopmentUser(
+      {},
+      {
+        createConnection: () => connection,
+        now: () => new Date("2026-07-06T04:22:00.000Z"),
+        capacityOptions: LOCAL_TWO_AGENT_CAPACITY,
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "runner_capacity_reached",
+      runner: { id: runner.id, capacity: { max_agents: 2, running_agents: 2 } },
+    });
+  });
+
+  it("refuses to take an owner-aware capacity lock for a foreign runner", async () => {
+    const [owner, foreignUser] = await connection.db.insert(users).values([{}, {}]).returning();
+    if (!owner || !foreignUser) throw new Error("Expected users.");
+    const foreignRunner = await seedOnlineRunner(connection, foreignUser.id, {
+      name: "Foreign Runner",
+    });
+
+    const locked = await connection.db.transaction((tx) =>
+      lockRunnerPlacementCapacityInTransaction(tx, {
+        userId: owner.id,
+        runnerId: foreignRunner.id,
+      }),
+    );
+
+    expect(locked).toBe(false);
   });
 
   it("selects and reconciles runners only for the explicit user", async () => {
@@ -192,7 +291,7 @@ describe.sequential("runner placement contract", () => {
       runner: expect.objectContaining({
         id: runner.id,
         capacity: expect.objectContaining({
-          max_agents: 2,
+          max_agents: 1,
           running_agents: 2,
           cpu_used_percent: 94,
         }),
@@ -546,7 +645,7 @@ describe.sequential("runner placement contract", () => {
         3,
       ),
     ).toEqual({
-      max_agents: 2,
+      max_agents: 1,
       running_agents: 3,
       cpu_used_percent: 100,
       memory_used_mb: 128.5,

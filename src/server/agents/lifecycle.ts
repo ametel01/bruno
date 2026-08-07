@@ -193,6 +193,11 @@ type StartRunnerReservationResult =
       reason: "no_online_runner";
     };
 
+type RunnerCapacityLockTestHooks = {
+  beforeCapacityLock?: (input: { runnerId: string; userId: string }) => Promise<void> | void;
+  afterCapacityLock?: (input: { runnerId: string; userId: string }) => Promise<void> | void;
+};
+
 type AgentStartRunnerSnapshot = {
   id: string;
   kind: string;
@@ -217,6 +222,7 @@ export type AgentLifecycleDependencies = {
   manualRunnerAdapter?: (runner: ManualRunnerRecord) => LifecycleRunnerAdapter;
   now?: LifecycleClock;
   planMaxAgents?: number | null;
+  runnerCapacityTestHooks?: RunnerCapacityLockTestHooks | undefined;
   runnerAdapter?: LifecycleRunnerAdapter;
   scheduleRuntimeReconcile?: typeof scheduleAgentRuntimeReconcileAfterResponse;
 };
@@ -531,6 +537,7 @@ async function reserveRunnerForAgentStart(input: {
   connection: DatabaseConnection;
   now: Date;
   planMaxAgents?: number | null | undefined;
+  testHooks?: RunnerCapacityLockTestHooks | undefined;
 }): Promise<StartRunnerReservationResult> {
   if (input.assignedRunnerId && !input.assignedRunner) {
     return { ok: false, reason: "no_online_runner" } as const;
@@ -542,10 +549,12 @@ async function reserveRunnerForAgentStart(input: {
 
   return await input.connection.db.transaction(async (tx) => {
     const placement = await selectStartRunnerPlacement(tx, {
+      agentId: input.agentId,
       userId: input.userId,
       assignedRunner: input.assignedRunner,
       now: input.now,
       planMaxAgents: input.planMaxAgents,
+      testHooks: input.testHooks,
     });
 
     if (!placement.ok) {
@@ -577,6 +586,7 @@ async function reserveRunnerForAgentStart(input: {
       .update(agents)
       .set({
         runnerId: placement.runnerId,
+        desiredStatus: "running",
         status: "starting",
         statusReason: "Start requested.",
         updatedAt: input.now,
@@ -602,10 +612,12 @@ async function reserveRunnerForAgentStart(input: {
 async function selectStartRunnerPlacement(
   tx: AgentLifecycleTransaction,
   input: {
+    agentId: string;
     userId: string;
     assignedRunner: ManualRunnerRecord | null;
     now: Date;
     planMaxAgents?: number | null | undefined;
+    testHooks?: RunnerCapacityLockTestHooks | undefined;
   },
 ): Promise<
   | {
@@ -615,11 +627,19 @@ async function selectStartRunnerPlacement(
   | Exclude<StartRunnerReservationResult, { ok: true }>
 > {
   if (input.assignedRunner) {
-    await lockRunnerPlacementCapacityInTransaction(tx, input.assignedRunner.id);
+    const locked = await lockStartRunnerPlacementCapacityInTransaction(tx, {
+      userId: input.userId,
+      runnerId: input.assignedRunner.id,
+      testHooks: input.testHooks,
+    });
+    if (!locked) {
+      return { ok: false, reason: "no_online_runner" } as const;
+    }
     const placement = await selectRunnerPlacementForUserInTransaction(
       tx,
       input.userId,
       {
+        excludeAgentId: input.agentId,
         planMaxAgents: input.planMaxAgents,
         runnerId: input.assignedRunner.id,
       },
@@ -650,17 +670,26 @@ async function selectStartRunnerPlacement(
     tx,
     input.userId,
     {
+      excludeAgentId: input.agentId,
       planMaxAgents: input.planMaxAgents,
     },
     { now: input.now },
   );
 
   if (placement.ok) {
-    await lockRunnerPlacementCapacityInTransaction(tx, placement.runner.id);
+    const locked = await lockStartRunnerPlacementCapacityInTransaction(tx, {
+      userId: input.userId,
+      runnerId: placement.runner.id,
+      testHooks: input.testHooks,
+    });
+    if (!locked) {
+      return { ok: false, reason: "no_online_runner" } as const;
+    }
     const confirmedPlacement = await selectRunnerPlacementForUserInTransaction(
       tx,
       input.userId,
       {
+        excludeAgentId: input.agentId,
         planMaxAgents: input.planMaxAgents,
         runnerId: placement.runner.id,
       },
@@ -707,11 +736,38 @@ async function selectStartRunnerPlacement(
   return { ok: false, reason: "runner_capacity_reached" } as const;
 }
 
+async function lockStartRunnerPlacementCapacityInTransaction(
+  tx: AgentLifecycleTransaction,
+  input: {
+    userId: string;
+    runnerId: string;
+    testHooks?: RunnerCapacityLockTestHooks | undefined;
+  },
+): Promise<boolean> {
+  await input.testHooks?.beforeCapacityLock?.({
+    userId: input.userId,
+    runnerId: input.runnerId,
+  });
+  const locked = await lockRunnerPlacementCapacityInTransaction(tx, {
+    userId: input.userId,
+    runnerId: input.runnerId,
+  });
+  if (locked) {
+    await input.testHooks?.afterCapacityLock?.({
+      userId: input.userId,
+      runnerId: input.runnerId,
+    });
+  }
+
+  return locked;
+}
+
 async function restoreAgentStartReservation(input: {
   agentId: string;
   userId: string;
   connection: DatabaseConnection;
   previousStatus: AgentLifecycleStatus;
+  previousDesiredStatus: "running" | "stopped";
   previousStatusReason: string | null;
   now: Date;
   expectedUpdatedAt: Date;
@@ -720,6 +776,7 @@ async function restoreAgentStartReservation(input: {
     .update(agents)
     .set({
       status: input.previousStatus,
+      desiredStatus: input.previousDesiredStatus,
       statusReason: input.previousStatusReason,
       updatedAt: input.now,
     })
@@ -1057,6 +1114,32 @@ export async function startAgentForUser(
       }
 
       if (runtimeClassification.kind === "managed_ready") {
+        if (!currentAgent.agent.runnerId) {
+          return { ok: false, reason: "no_online_runner" } as const;
+        }
+
+        const assignedRunner = toManualRunnerRecordOrNull(currentAgent.runner);
+        if (!assignedRunner) {
+          return { ok: false, reason: "no_online_runner" } as const;
+        }
+
+        const placement = await selectStartRunnerPlacement(tx, {
+          agentId: normalizedAgentId,
+          userId,
+          assignedRunner,
+          now,
+          planMaxAgents: dependencies.planMaxAgents,
+          testHooks: dependencies.runnerCapacityTestHooks,
+        });
+
+        if (!placement.ok) {
+          return placement;
+        }
+
+        if (placement.runnerId !== currentAgent.agent.runnerId) {
+          return { ok: false, reason: "runner_capacity_reached" } as const;
+        }
+
         const generation = await persistManagedRuntimeOwnerIntent(tx, {
           agentId: normalizedAgentId,
           userId,
@@ -1171,6 +1254,7 @@ export async function startAgentForUser(
       connection,
       now,
       planMaxAgents: dependencies.planMaxAgents,
+      testHooks: dependencies.runnerCapacityTestHooks,
     });
 
     if (!reservation.ok) {
@@ -1234,6 +1318,7 @@ export async function startAgentForUser(
             userId,
             connection,
             previousStatus: validation.agent.status,
+            previousDesiredStatus: validation.agent.desiredStatus,
             previousStatusReason: validation.agent.statusReason,
             now,
             expectedUpdatedAt: now,
@@ -1274,6 +1359,7 @@ export async function startAgentForUser(
           userId,
           connection,
           previousStatus: validation.agent.status,
+          previousDesiredStatus: validation.agent.desiredStatus,
           previousStatusReason: validation.agent.statusReason,
           now,
           expectedUpdatedAt: now,
@@ -1407,6 +1493,7 @@ export async function startAgentForUser(
             userId,
             connection,
             previousStatus: validation.agent.status,
+            previousDesiredStatus: validation.agent.desiredStatus,
             previousStatusReason: validation.agent.statusReason,
             now,
             expectedUpdatedAt: now,

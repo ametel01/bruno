@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
@@ -13,11 +13,22 @@ import {
   type RunnerCompatibilityRequirement,
 } from "@/src/server/runners/runner-compatibility";
 import { reconcileStaleRunnerHeartbeatsInTransaction } from "@/src/server/runners/runner-heartbeat";
+import {
+  computeSelectableRunnerCapacity,
+  findDigitalOceanRunnerResourceProfile,
+  parseHermesDockerCpus,
+  parseHermesDockerMemoryMiB,
+  type RunnerSelectableCapacityInput,
+} from "@/src/server/runners/runner-resource-profiles";
+import {
+  DEFAULT_HERMES_DOCKER_CPUS,
+  DEFAULT_HERMES_DOCKER_MEMORY,
+  DEFAULT_HERMES_RUNNER_MAX_AGENTS,
+} from "@/src/runner-service/constants";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
-export const DEFAULT_RUNNER_MAX_AGENTS = 1;
+export const DEFAULT_RUNNER_MAX_AGENTS = DEFAULT_HERMES_RUNNER_MAX_AGENTS;
 
-const RUNNER_PLACEMENT_AGENT_STATUSES = ["starting", "running", "restarting"] as const;
 const RUNNER_CAPACITY_LIMITS = {
   max_agents: { min: 0, max: 10_000, fallback: DEFAULT_RUNNER_MAX_AGENTS },
   running_agents: { min: 0, max: 10_000, fallback: 0 },
@@ -32,6 +43,7 @@ type RunnerPlacementCandidate = {
   id: string;
   name: string;
   kind: string;
+  sizeSlug: string | null;
   endpointUrl: string;
   status: string;
   updatedAt: Date;
@@ -87,6 +99,19 @@ export type RunnerPlacementInput = {
   runnerId?: string | null | undefined;
 };
 
+export type RunnerPlacementCapacityOptions = Pick<
+  RunnerSelectableCapacityInput,
+  | "configuredMaxAgents"
+  | "measuredMaxAgents"
+  | "perHermesCpu"
+  | "perHermesMemoryMiB"
+  | "perHermesDiskGiB"
+  | "hostMemoryReserveMiB"
+  | "hostDiskReserveGiB"
+> & {
+  profile?: { vcpus: number; memoryMiB: number; diskGiB: number } | null;
+};
+
 export type RunnerPlacementTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
 >[0];
@@ -99,9 +124,16 @@ export class RunnerPlacementPersistenceError extends Error {
 }
 
 export type RunnerPlacementDependencies = {
+  capacityOptions?: RunnerPlacementCapacityOptions;
   compatibilityRequirement?: RunnerCompatibilityRequirement;
   createConnection?: () => DatabaseConnection;
   now?: () => Date;
+};
+
+type RunnerPlacementSelectionOptions = {
+  now?: Date;
+  compatibilityRequirement?: RunnerCompatibilityRequirement;
+  capacityOptions?: RunnerPlacementCapacityOptions;
 };
 
 export async function selectRunnerPlacementForDevelopmentUser(
@@ -119,6 +151,7 @@ export async function selectRunnerPlacementForDevelopmentUser(
         ...(dependencies.compatibilityRequirement
           ? { compatibilityRequirement: dependencies.compatibilityRequirement }
           : {}),
+        ...(dependencies.capacityOptions ? { capacityOptions: dependencies.capacityOptions } : {}),
       }),
     );
   } catch {
@@ -146,6 +179,7 @@ export async function selectRunnerPlacementForUser(
         ...(dependencies.compatibilityRequirement
           ? { compatibilityRequirement: dependencies.compatibilityRequirement }
           : {}),
+        ...(dependencies.capacityOptions ? { capacityOptions: dependencies.capacityOptions } : {}),
       }),
     );
   } catch {
@@ -160,7 +194,7 @@ export async function selectRunnerPlacementForUser(
 export async function selectRunnerPlacementForDevelopmentUserInTransaction(
   tx: RunnerPlacementTransaction,
   input: RunnerPlacementInput = {},
-  options: { now?: Date; compatibilityRequirement?: RunnerCompatibilityRequirement } = {},
+  options: RunnerPlacementSelectionOptions = {},
 ): Promise<RunnerPlacementResult> {
   const userId = await getDevelopmentUserId(tx);
 
@@ -175,7 +209,7 @@ export async function selectRunnerPlacementForUserInTransaction(
   tx: RunnerPlacementTransaction,
   userId: string,
   input: RunnerPlacementInput = {},
-  options: { now?: Date; compatibilityRequirement?: RunnerCompatibilityRequirement } = {},
+  options: RunnerPlacementSelectionOptions = {},
 ): Promise<RunnerPlacementResult> {
   await reconcileStaleRunnerHeartbeatsInTransaction(tx, {
     now: options.now ?? new Date(),
@@ -225,6 +259,7 @@ export async function selectRunnerPlacementForUserInTransaction(
       id: runners.id,
       name: runners.name,
       kind: runners.kind,
+      sizeSlug: runners.sizeSlug,
       endpointUrl: runners.endpointUrl,
       status: runners.status,
       updatedAt: runners.updatedAt,
@@ -253,7 +288,7 @@ export async function selectRunnerPlacementForUserInTransaction(
     const assignedAgentFilters = [
       eq(agents.runnerId, row.id),
       eq(agents.userId, userId),
-      inArray(agents.status, [...RUNNER_PLACEMENT_AGENT_STATUSES]),
+      eq(agents.desiredStatus, "running"),
       isNull(agents.deletedAt),
     ];
 
@@ -268,6 +303,10 @@ export async function selectRunnerPlacementForUserInTransaction(
     const capacity = normalizeRunnerCapacitySnapshot(
       latestHeartbeat?.metadata,
       assignedRunningAgents.length,
+      {
+        ...options.capacityOptions,
+        profile: options.capacityOptions?.profile ?? resolveRunnerCapacityProfile(row.sizeSlug),
+      },
     );
     const candidate = toRunnerPlacementSelection(
       {
@@ -304,14 +343,35 @@ export async function selectRunnerPlacementForUserInTransaction(
 
 export async function lockRunnerPlacementCapacityInTransaction(
   tx: RunnerPlacementTransaction,
-  runnerId: string,
-): Promise<void> {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${runnerId}))`);
+  input: { userId: string; runnerId: string },
+): Promise<boolean> {
+  const [runner] = await tx
+    .select({ id: runners.id })
+    .from(runners)
+    .where(
+      and(
+        eq(runners.id, input.runnerId),
+        eq(runners.userId, input.userId),
+        isNull(runners.deletedAt),
+      ),
+    )
+    .limit(1)
+    .for("update");
+
+  if (!runner) {
+    return false;
+  }
+
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext(${input.userId}), hashtext(${input.runnerId}))`,
+  );
+  return true;
 }
 
 export function normalizeRunnerCapacitySnapshot(
   metadata: Record<string, unknown> | null | undefined,
   assignedRunningAgents = 0,
+  options: RunnerPlacementCapacityOptions = {},
 ): RunnerCapacitySnapshot {
   const metrics =
     metadata && typeof metadata.metrics === "object" && !Array.isArray(metadata.metrics)
@@ -326,7 +386,22 @@ export function normalizeRunnerCapacitySnapshot(
     disk_used_mb: readBoundedMetric(metrics, "diskUsedMb", "disk_used_mb"),
     disk_total_mb: readBoundedMetric(metrics, "diskTotalMb", "disk_total_mb"),
   };
+  const computedCapacity = computeSelectableRunnerCapacity({
+    vcpus: options.profile?.vcpus,
+    memoryMiB: options.profile?.memoryMiB,
+    diskGiB: options.profile?.diskGiB,
+    perHermesCpu: options.perHermesCpu ?? parseHermesDockerCpus(DEFAULT_HERMES_DOCKER_CPUS),
+    perHermesMemoryMiB:
+      options.perHermesMemoryMiB ?? parseHermesDockerMemoryMiB(DEFAULT_HERMES_DOCKER_MEMORY),
+    perHermesDiskGiB: options.perHermesDiskGiB,
+    hostMemoryReserveMiB: options.hostMemoryReserveMiB,
+    hostDiskReserveGiB: options.hostDiskReserveGiB,
+    heartbeatMaxAgents: capacity.max_agents,
+    configuredMaxAgents: options.configuredMaxAgents,
+    measuredMaxAgents: options.measuredMaxAgents,
+  });
 
+  capacity.max_agents = clampMetric("max_agents", computedCapacity.selectableMaxAgents);
   capacity.running_agents = clampMetric(
     "running_agents",
     Math.max(capacity.running_agents, assignedRunningAgents),
@@ -383,4 +458,13 @@ function readBoundedMetric(
 function clampMetric(key: keyof RunnerCapacitySnapshot, value: number): number {
   const limit = RUNNER_CAPACITY_LIMITS[key];
   return Math.min(Math.max(value, limit.min), limit.max);
+}
+
+function resolveRunnerCapacityProfile(
+  sizeSlug: string | null,
+): { vcpus: number; memoryMiB: number; diskGiB: number } | null {
+  const profile = findDigitalOceanRunnerResourceProfile(sizeSlug);
+  return profile
+    ? { vcpus: profile.vcpus, memoryMiB: profile.memoryMiB, diskGiB: profile.diskGiB }
+    : null;
 }

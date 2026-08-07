@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   immediately executable stages under one 45-second abort budget, preserve generation/lease fences,
   publish exact external-wait wakeups, and finish runner-ingress deployment work before one runtime
   reconciliation kick.
+- Safe same-user runner reuse now fails closed to measured CPU, physical-memory, disk, heartbeat,
+  configured, and explicit profile-cap evidence, reserves capacity under owner-aware transaction
+  locks, falls implicit capacity losers back to cold provisioning, and reports cold-Droplet latency
+  separately from existing-runner reuse.
 - Canonical DigitalOcean managed-runner resource profiles now couple price and physical resource
   metadata, reject incompatible Hermes CPU/memory/capacity combinations before provider effects,
   propagate exact Hermes Docker CPU/memory/PID limits through cloud bootstrap, and keep provider

@@ -64,8 +64,10 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import {
   agentApprovals,
   agentConfigs,
+  agentDeployments,
   agentEvents,
   agentLogs,
+  agentRuntimeReconciliations,
   agentUsagePeriods,
   agents,
   appMetadata,
@@ -569,7 +571,7 @@ describe("create agent persistence", () => {
     });
     const afterFailedStart = await connection.db.select().from(agentUsagePeriods);
 
-    expect(failed).toEqual({ ok: false, reason: "runner_start_failed" });
+    expect(failed).toEqual({ ok: false, reason: "runner_capacity_reached" });
     expect(afterFailedStart).toHaveLength(1);
   });
 
@@ -674,24 +676,20 @@ describe("create agent persistence", () => {
     await expect(connection.db.select().from(agents)).resolves.toHaveLength(1);
   });
 
-  it("returns a runner-capacity blocker before creating an agent", async () => {
+  it("creates an unassigned legacy agent when implicit runner capacity is unavailable", async () => {
     const userId = await ensureDevelopmentUser(connection);
     await seedOnlineRunnerWithHeartbeat(connection, userId, {
       maxAgents: 1,
       runningAgents: 1,
     });
 
-    await expect(
-      createAgentForDevelopmentUser(
-        { name: "Blocked Capacity Agent", templateKey: "research_agent" },
-        { createConnection: () => connection },
-      ),
-    ).rejects.toMatchObject({
-      name: "AgentCreateBlockedError",
-      reason: "runner_capacity_reached",
-    } satisfies Partial<AgentCreateBlockedError>);
+    const created = await createAgentForDevelopmentUser(
+      { name: "Blocked Capacity Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
 
-    await expect(connection.db.select().from(agents)).resolves.toHaveLength(0);
+    expect(created.agent.runnerId).toBeNull();
+    await expect(connection.db.select().from(agents)).resolves.toHaveLength(1);
   });
 
   it("assigns an unassigned agent to an online runner before starting", async () => {
@@ -856,7 +854,262 @@ describe("create agent persistence", () => {
     expect(calls.filter((call) => call.startsWith("start:"))).toHaveLength(1);
   });
 
-  it("starts three agents on one runner and blocks a fourth create at capacity", async () => {
+  it("serializes managed-ready starts through the owner-aware runner capacity lock", async () => {
+    const userId = await ensureDevelopmentUser(connection);
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, userId, {
+      maxAgents: 1,
+      runningAgents: 0,
+    });
+    const agentA = await createAgentForDevelopmentUser(
+      { name: "Managed Start Agent A", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const agentB = await createAgentForDevelopmentUser(
+      { name: "Managed Start Agent B", templateKey: "github_issue_agent" },
+      { createConnection: () => connection },
+    );
+    await seedManagedRuntime(connection, userId, agentA.agent.id);
+    await seedManagedRuntime(connection, userId, agentB.agent.id);
+    const firstConnection = createDatabaseConnection();
+    const secondConnection = createDatabaseConnection();
+    const scheduled: string[] = [];
+    let releaseFirst = () => {};
+    const firstMayContinue = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let firstLocked = () => {};
+    const firstCapacityLockAcquired = new Promise<void>((resolve) => {
+      firstLocked = resolve;
+    });
+    let secondAtLock = () => {};
+    const secondCapacityLockReached = new Promise<void>((resolve) => {
+      secondAtLock = resolve;
+    });
+
+    try {
+      const firstStart = startAgentForDevelopmentUser(agentA.agent.id, {
+        createConnection: () => firstConnection,
+        runnerCapacityTestHooks: {
+          afterCapacityLock: async () => {
+            firstLocked();
+            await firstMayContinue;
+          },
+        },
+        scheduleRuntimeReconcile: (agentId) => scheduled.push(agentId),
+      });
+      await firstCapacityLockAcquired;
+
+      const secondStart = startAgentForDevelopmentUser(agentB.agent.id, {
+        createConnection: () => secondConnection,
+        runnerCapacityTestHooks: {
+          beforeCapacityLock: () => {
+            secondAtLock();
+          },
+        },
+        scheduleRuntimeReconcile: (agentId) => scheduled.push(agentId),
+      });
+      await secondCapacityLockReached;
+      releaseFirst();
+
+      const results = await Promise.all([firstStart, secondStart]);
+      const reservations = await connection.db
+        .select({
+          id: agents.id,
+          status: agents.status,
+          desiredStatus: agents.desiredStatus,
+        })
+        .from(agents)
+        .where(eq(agents.runnerId, runner.id));
+
+      expect(results).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ ok: true, state: "accepted" }),
+          { ok: false, reason: "runner_capacity_reached" },
+        ]),
+      );
+      expect(reservations.filter((agent) => agent.desiredStatus === "running")).toHaveLength(1);
+      expect(reservations.filter((agent) => agent.status === "starting")).toHaveLength(1);
+      expect(scheduled).toHaveLength(1);
+    } finally {
+      releaseFirst();
+      await firstConnection.close();
+      await secondConnection.close();
+    }
+  });
+
+  it("allows managed-ready Start recovery to reuse its own max-one desired-running reservation", async () => {
+    const userId = await ensureDevelopmentUser(connection);
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, userId, {
+      maxAgents: 1,
+      runningAgents: 0,
+    });
+    const agent = await createAgentForDevelopmentUser(
+      { name: "Managed Self Recovery Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    await seedManagedRuntime(connection, userId, agent.agent.id);
+    await connection.db
+      .update(agents)
+      .set({
+        runnerId: runner.id,
+        status: "error",
+        desiredStatus: "running",
+        statusReason: "Runtime observation failed.",
+      })
+      .where(eq(agents.id, agent.agent.id));
+    const scheduled: string[] = [];
+
+    const result = await startAgentForDevelopmentUser(agent.agent.id, {
+      createConnection: () => connection,
+      scheduleRuntimeReconcile: (agentId) => scheduled.push(agentId),
+    });
+    const [persisted] = await connection.db
+      .select({
+        runnerId: agents.runnerId,
+        status: agents.status,
+        desiredStatus: agents.desiredStatus,
+      })
+      .from(agents)
+      .where(eq(agents.id, agent.agent.id))
+      .limit(1);
+
+    expect(result).toMatchObject({ ok: true, state: "accepted" });
+    expect(persisted).toEqual({
+      runnerId: runner.id,
+      status: "starting",
+      desiredStatus: "running",
+    });
+    expect(scheduled).toEqual([agent.agent.id]);
+  });
+
+  it("allows non-managed Start recovery to reuse its own max-one desired-running reservation", async () => {
+    const agent = await createAgentForDevelopmentUser(
+      { name: "Manual Self Recovery Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, agent.agent.userId, {
+      maxAgents: 1,
+      runningAgents: 0,
+    });
+    await connection.db
+      .update(agents)
+      .set({
+        runnerId: runner.id,
+        status: "error",
+        desiredStatus: "running",
+        statusReason: "Manual runner failed.",
+      })
+      .where(eq(agents.id, agent.agent.id));
+    const calls: string[] = [];
+
+    const result = await startAgentForDevelopmentUser(agent.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: () => createManualLifecycleRunnerStub(calls, { runnerId: runner.id }),
+      runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
+    });
+    const [persisted] = await connection.db
+      .select({
+        runnerId: agents.runnerId,
+        status: agents.status,
+        desiredStatus: agents.desiredStatus,
+      })
+      .from(agents)
+      .where(eq(agents.id, agent.agent.id))
+      .limit(1);
+
+    expect(result).toMatchObject({ ok: true, agent: { status: "running" } });
+    expect(persisted).toEqual({
+      runnerId: runner.id,
+      status: "running",
+      desiredStatus: "running",
+    });
+    expect(calls.filter((call) => call.startsWith("start:"))).toHaveLength(1);
+  });
+
+  it("blocks desired-running Start recovery when a sibling already reserves the max-one runner", async () => {
+    const self = await createAgentForDevelopmentUser(
+      { name: "Blocked Self Recovery Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const sibling = await createAgentForDevelopmentUser(
+      { name: "Sibling Reservation Agent", templateKey: "github_issue_agent" },
+      { createConnection: () => connection },
+    );
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, self.agent.userId, {
+      maxAgents: 1,
+      runningAgents: 0,
+    });
+    await connection.db
+      .update(agents)
+      .set({ runnerId: runner.id, status: "error", desiredStatus: "running" })
+      .where(eq(agents.id, self.agent.id));
+    await connection.db
+      .update(agents)
+      .set({ runnerId: runner.id, status: "running", desiredStatus: "running" })
+      .where(eq(agents.id, sibling.agent.id));
+    const calls: string[] = [];
+
+    const result = await startAgentForDevelopmentUser(self.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: () => createManualLifecycleRunnerStub(calls, { runnerId: runner.id }),
+      runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
+    });
+    const reservations = await connection.db
+      .select({ id: agents.id, desiredStatus: agents.desiredStatus })
+      .from(agents)
+      .where(eq(agents.runnerId, runner.id));
+
+    expect(result).toEqual({ ok: false, reason: "runner_capacity_reached" });
+    expect(
+      reservations.filter((reservation) => reservation.desiredStatus === "running"),
+    ).toHaveLength(2);
+    expect(calls).toEqual([]);
+  });
+
+  it("restores desired status when a non-managed runner start fails after reservation", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Failed Reservation Rollback Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, created.agent.userId, {
+      maxAgents: 1,
+      runningAgents: 0,
+    });
+    const calls: string[] = [];
+
+    const failed = await startAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: () =>
+        createManualLifecycleRunnerStub(calls, {
+          runnerId: runner.id,
+          startOk: false,
+        }),
+      runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
+    });
+    const [afterFailedStart] = await connection.db
+      .select({
+        runnerId: agents.runnerId,
+        status: agents.status,
+        desiredStatus: agents.desiredStatus,
+      })
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+    const sibling = await createAgentForDevelopmentUser(
+      { name: "Released Capacity Sibling", templateKey: "github_issue_agent" },
+      { createConnection: () => connection },
+    );
+
+    expect(failed).toEqual({ ok: false, reason: "runner_start_failed" });
+    expect(afterFailedStart).toEqual({
+      runnerId: runner.id,
+      status: "stopped",
+      desiredStatus: "stopped",
+    });
+    expect(sibling.agent.runnerId).toBe(runner.id);
+  });
+
+  it("starts one fail-closed runner reservation and leaves additional implicit capacity users unassigned", async () => {
     const userId = await ensureDevelopmentUser(connection);
     const runner = await seedOnlineRunnerWithHeartbeat(connection, userId, {
       maxAgents: 3,
@@ -879,7 +1132,7 @@ describe("create agent persistence", () => {
 
     const calls: string[] = [];
 
-    for (const agent of createdAgents) {
+    for (const [index, agent] of createdAgents.entries()) {
       const result = await startAgentForDevelopmentUser(agent.id, {
         createConnection: () => connection,
         manualRunnerAdapter: (assignedRunner) => {
@@ -893,13 +1146,17 @@ describe("create agent persistence", () => {
         runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
       });
 
-      expect(result).toMatchObject({
-        ok: true,
-        agent: {
-          id: agent.id,
-          status: "running",
-        },
-      });
+      if (index === 0) {
+        expect(result).toMatchObject({
+          ok: true,
+          agent: {
+            id: agent.id,
+            status: "running",
+          },
+        });
+      } else {
+        expect(result).toEqual({ ok: false, reason: "runner_capacity_reached" });
+      }
     }
 
     const persistedAgents = await connection.db
@@ -912,27 +1169,22 @@ describe("create agent persistence", () => {
         ),
       );
 
-    expect(
-      persistedAgents.map((agent) => ({ runnerId: agent.runnerId, status: agent.status })),
-    ).toEqual([
-      { runnerId: runner.id, status: "running" },
-      { runnerId: runner.id, status: "running" },
-      { runnerId: runner.id, status: "running" },
+    expect(new Set(persistedAgents.map((agent) => agent.runnerId))).toEqual(new Set([runner.id]));
+    expect(persistedAgents.map((agent) => agent.status).sort()).toEqual([
+      "running",
+      "stopped",
+      "stopped",
     ]);
-    expect(calls.filter((call) => call.startsWith("start:"))).toEqual(
-      createdAgents.map((agent) => `start:${agent.id}`),
-    );
+    expect(calls.filter((call) => call.startsWith("start:"))).toEqual([
+      `start:${createdAgents[0]?.id}`,
+    ]);
 
-    await expect(
-      createAgentForDevelopmentUser(
-        { name: "Fourth Capacity Agent", templateKey: "research_agent" },
-        { createConnection: () => connection },
-      ),
-    ).rejects.toMatchObject({
-      name: "AgentCreateBlockedError",
-      reason: "runner_capacity_reached",
-    } satisfies Partial<AgentCreateBlockedError>);
-    await expect(connection.db.select().from(agents)).resolves.toHaveLength(3);
+    const fourth = await createAgentForDevelopmentUser(
+      { name: "Fourth Capacity Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    expect(fourth.agent.runnerId).toBeNull();
+    await expect(connection.db.select().from(agents)).resolves.toHaveLength(4);
   });
 
   it("bootstraps one active manual runner idempotently from non-secret env values", async () => {
@@ -9293,7 +9545,7 @@ describe("create agent persistence", () => {
 });
 
 async function resetCreateAgentTables(connection: DatabaseConnection): Promise<void> {
-  await connection.client`truncate table agent_approvals, agent_configs, agent_usage_periods, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runner_heartbeats, runners, app_metadata, users restart identity cascade`;
+  await connection.client`truncate table agent_approvals, agent_configs, agent_runtime_reconciliations, agent_usage_periods, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runner_heartbeats, runners, app_metadata, users restart identity cascade`;
 }
 
 async function ensureDevelopmentUser(connection: DatabaseConnection): Promise<string> {
@@ -9340,6 +9592,43 @@ async function seedOnlineRunnerWithHeartbeat(
   });
 
   return runner;
+}
+
+async function seedManagedRuntime(
+  connection: DatabaseConnection,
+  userId: string,
+  agentId: string,
+): Promise<void> {
+  await connection.db.insert(agentDeployments).values({
+    agentId,
+    userId,
+    stage: "ready",
+    configRevision: `cfg-managed-${agentId.slice(-4)}`,
+    idempotencyKey: `managed-${agentId}`,
+    runnerOperationId: `00000000-0000-4000-8000-${agentId.slice(-12)}`,
+    runnerAcceptedAt: new Date("2026-07-06T04:01:00.000Z"),
+    canaryState: "passed",
+    canaryAttemptedAt: new Date("2026-07-06T04:01:00.000Z"),
+    canaryCompletedAt: new Date("2026-07-06T04:01:00.000Z"),
+    startedAt: new Date("2026-07-06T04:01:00.000Z"),
+    completedAt: new Date("2026-07-06T04:01:00.000Z"),
+    createdAt: new Date("2026-07-06T04:01:00.000Z"),
+    updatedAt: new Date("2026-07-06T04:01:00.000Z"),
+  });
+  await connection.db.insert(agentRuntimeReconciliations).values({
+    agentId,
+    userId,
+    state: "observing",
+    generation: 0,
+    configRevision: `cfg-managed-${agentId.slice(-4)}`,
+    operationId: `00000000-0000-4000-8000-${agentId.slice(-12)}`,
+    stableSince: new Date("2026-07-06T04:01:00.000Z"),
+    lastObservedAt: new Date("2026-07-06T04:01:00.000Z"),
+    lastReadyAt: new Date("2026-07-06T04:01:00.000Z"),
+    nextAttemptAt: new Date("2026-07-06T04:01:00.000Z"),
+    createdAt: new Date("2026-07-06T04:01:00.000Z"),
+    updatedAt: new Date("2026-07-06T04:01:00.000Z"),
+  });
 }
 
 async function createTestApproval(

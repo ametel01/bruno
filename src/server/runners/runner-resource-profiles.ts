@@ -76,6 +76,35 @@ export type RunnerResourceCompatibilityInput = {
   hermesDockerPidsLimit?: string;
 };
 
+export type RunnerCapacityProfileInput = {
+  vcpus: number | null | undefined;
+  memoryMiB: number | null | undefined;
+  diskGiB: number | null | undefined;
+  perHermesCpu?: number | null | undefined;
+  perHermesMemoryMiB?: number | null | undefined;
+  perHermesDiskGiB?: number | null | undefined;
+  hostMemoryReserveMiB?: number | null | undefined;
+  hostDiskReserveGiB?: number | null | undefined;
+};
+
+export type RunnerSelectableCapacityInput = RunnerCapacityProfileInput & {
+  heartbeatMaxAgents?: number | null | undefined;
+  configuredMaxAgents?: number | null | undefined;
+  measuredMaxAgents?: number | null | undefined;
+};
+
+export type RunnerCapacityComputation = {
+  cpuMaxAgents: number;
+  memoryMaxAgents: number;
+  diskMaxAgents: number;
+  profileMaxAgents: number;
+  heartbeatMaxAgents: number;
+  configuredMaxAgents: number;
+  measuredMaxAgents: number;
+  selectableMaxAgents: number;
+  failClosedReasons: string[];
+};
+
 export type RunnerResourceCompatibilityIssue = {
   field: string;
   message: string;
@@ -184,28 +213,37 @@ export function validateDigitalOceanRunnerResourceCompatibility(
     return { ok: false, issues };
   }
 
-  const totalHermesCpus = parsedCpus * runnerMaxAgents;
-  if (totalHermesCpus > profile.vcpus) {
+  const capacity = computeSelectableRunnerCapacity({
+    vcpus: profile.vcpus,
+    memoryMiB: profile.memoryMiB,
+    diskGiB: profile.diskGiB,
+    perHermesCpu: parsedCpus,
+    perHermesMemoryMiB: parsedMemoryMiB,
+    configuredMaxAgents: runnerMaxAgents,
+    measuredMaxAgents: DEFAULT_HERMES_RUNNER_MAX_AGENTS,
+  });
+
+  if (runnerMaxAgents > capacity.cpuMaxAgents) {
     issues.push({
       field: "AGENTBAY_HERMES_DOCKER_CPUS",
-      message: `Hermes CPU capacity (${totalHermesCpus}) exceeds ${profile.sizeSlug}'s ${profile.vcpus} vCPU profile.`,
+      message: `Hermes CPU capacity (${parsedCpus * runnerMaxAgents}) exceeds ${profile.sizeSlug}'s ${profile.vcpus} vCPU profile.`,
     });
   }
 
   const requiredPhysicalMemoryMiB =
     parsedMemoryMiB * runnerMaxAgents + DIGITALOCEAN_RUNNER_HOST_MEMORY_RESERVE_MIB;
-  if (requiredPhysicalMemoryMiB > profile.memoryMiB) {
+  if (runnerMaxAgents > capacity.memoryMaxAgents) {
     issues.push({
       field: "AGENTBAY_DIGITALOCEAN_SIZE_SLUG",
       message: `${profile.sizeSlug} has ${profile.memoryMiB} MiB physical RAM, but ${runnerMaxAgents} Hermes agent(s) require ${requiredPhysicalMemoryMiB} MiB including the ${DIGITALOCEAN_RUNNER_HOST_MEMORY_RESERVE_MIB} MiB runner/OS reserve. Swap is not counted as compatible memory.`,
     });
   }
 
-  if (runnerMaxAgents > 1) {
+  if (runnerMaxAgents > capacity.selectableMaxAgents) {
     issues.push({
       field: "AGENTBAY_RUNNER_MAX_AGENTS",
       message:
-        "AGENTBAY_RUNNER_MAX_AGENTS above 1 is blocked until the capacity-reuse issue proves a higher limit.",
+        "AGENTBAY_RUNNER_MAX_AGENTS above 1 is blocked until an exact measured CPU, memory, and disk capacity profile is approved.",
     });
   }
 
@@ -220,6 +258,82 @@ export function validateDigitalOceanRunnerResourceCompatibility(
     hermesRuntime: { cpus, memory, pidsLimit },
     requiredPhysicalMemoryMiB,
     hostMemoryReserveMiB: DIGITALOCEAN_RUNNER_HOST_MEMORY_RESERVE_MIB,
+  };
+}
+
+export function computeSelectableRunnerCapacity(
+  input: RunnerSelectableCapacityInput,
+): RunnerCapacityComputation {
+  const failClosedReasons: string[] = [];
+  const perHermesCpu = normalizePositiveNumber(
+    input.perHermesCpu,
+    "per_hermes_cpu",
+    failClosedReasons,
+  );
+  const perHermesMemoryMiB = normalizePositiveInteger(
+    input.perHermesMemoryMiB,
+    "per_hermes_memory_mib",
+    failClosedReasons,
+  );
+  const perHermesDiskGiB = normalizePositiveNumber(
+    input.perHermesDiskGiB,
+    "per_hermes_disk_gib",
+    failClosedReasons,
+  );
+  const hostMemoryReserveMiB = normalizeNonNegativeInteger(
+    input.hostMemoryReserveMiB ?? DIGITALOCEAN_RUNNER_HOST_MEMORY_RESERVE_MIB,
+    "host_memory_reserve_mib",
+    failClosedReasons,
+  );
+  const hostDiskReserveGiB = normalizeNonNegativeNumber(
+    input.hostDiskReserveGiB,
+    "host_disk_reserve_gib",
+    failClosedReasons,
+  );
+  const vcpus = normalizePositiveNumber(input.vcpus, "profile_vcpus", failClosedReasons);
+  const memoryMiB = normalizePositiveInteger(
+    input.memoryMiB,
+    "profile_memory_mib",
+    failClosedReasons,
+  );
+  const diskGiB = normalizePositiveNumber(input.diskGiB, "profile_disk_gib", failClosedReasons);
+  const cpuMaxAgents = floorCapacity(vcpus, perHermesCpu);
+  const memoryMaxAgents = floorCapacity(memoryMiB - hostMemoryReserveMiB, perHermesMemoryMiB);
+  const diskMaxAgents = floorCapacity(diskGiB - hostDiskReserveGiB, perHermesDiskGiB);
+  const profileMaxAgents = normalizeComputedMax(
+    Math.min(cpuMaxAgents, memoryMaxAgents, diskMaxAgents),
+  );
+  const heartbeatMaxAgents = normalizePositiveInteger(
+    input.heartbeatMaxAgents,
+    "heartbeat_max_agents",
+    failClosedReasons,
+  );
+  const configuredMaxAgents = normalizePositiveInteger(
+    input.configuredMaxAgents ?? DEFAULT_HERMES_RUNNER_MAX_AGENTS,
+    "configured_max_agents",
+    failClosedReasons,
+  );
+  const measuredMaxAgents = normalizePositiveInteger(
+    input.measuredMaxAgents,
+    "measured_max_agents",
+    failClosedReasons,
+  );
+
+  return {
+    cpuMaxAgents,
+    memoryMaxAgents,
+    diskMaxAgents,
+    profileMaxAgents,
+    heartbeatMaxAgents,
+    configuredMaxAgents,
+    measuredMaxAgents,
+    selectableMaxAgents: Math.min(
+      profileMaxAgents,
+      heartbeatMaxAgents,
+      configuredMaxAgents,
+      measuredMaxAgents,
+    ),
+    failClosedReasons,
   };
 }
 
@@ -267,4 +381,63 @@ function normalizeDigitalOceanSizeSlug(sizeSlug: string | null | undefined): str
   if (!normalizedSizeSlug) return null;
   if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/.test(normalizedSizeSlug)) return null;
   return normalizedSizeSlug;
+}
+
+function normalizePositiveInteger(
+  value: number | null | undefined,
+  field: string,
+  failClosedReasons: string[],
+): number {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+    return value;
+  }
+  failClosedReasons.push(field);
+  return DEFAULT_HERMES_RUNNER_MAX_AGENTS;
+}
+
+function normalizeNonNegativeInteger(
+  value: number | null | undefined,
+  field: string,
+  failClosedReasons: string[],
+): number {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+    return value;
+  }
+  failClosedReasons.push(field);
+  return 0;
+}
+
+function normalizePositiveNumber(
+  value: number | null | undefined,
+  field: string,
+  failClosedReasons: string[],
+): number {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return value;
+  }
+  failClosedReasons.push(field);
+  return 1;
+}
+
+function normalizeNonNegativeNumber(
+  value: number | null | undefined,
+  field: string,
+  failClosedReasons: string[],
+): number {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return value;
+  }
+  failClosedReasons.push(field);
+  return 0;
+}
+
+function floorCapacity(available: number, perAgent: number): number {
+  if (!Number.isFinite(available) || !Number.isFinite(perAgent) || perAgent <= 0) {
+    return DEFAULT_HERMES_RUNNER_MAX_AGENTS;
+  }
+  return Math.max(0, Math.floor(available / perAgent));
+}
+
+function normalizeComputedMax(value: number): number {
+  return Number.isSafeInteger(value) && value > 0 ? value : DEFAULT_HERMES_RUNNER_MAX_AGENTS;
 }
