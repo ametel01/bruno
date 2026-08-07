@@ -1866,3 +1866,50 @@ Status: ALL GREEN
 
 - Checker verdict: PR #278 correction commit `4773779` is merge-ready for the E2E synchronization
   fix after coordinator/PR/hosted-CI policy.
+
+## Builder Result — E2E Ready Synchronization Fix Cycle 3
+
+Status: ALL GREEN
+
+## Diagnosis and Correction
+
+- hosted evidence: PR #278 run `31153040438` failed only the desktop automatic-ready scenario at
+  line 203. Its 20 fresh-request acknowledgement attempts expired while a Next dev on-demand
+  compilation kept the already-started deployment GET in flight for longer than five seconds;
+  each synthetic `online` event was correctly ignored because that request was still active. The
+  mobile scenario passed.
+- corrected assumption: the bounded fresh-request retry clock must not begin while the current
+  deployment poll can still be in flight. The helper now registers `waitForResponse` for any
+  deployment poll before dispatching `online`, then awaits that response under Playwright's normal
+  test budget.
+- terminal path: if that observed response reports `ready` or `failed`, the helper returns because
+  the UI has already received terminal deployment state.
+- nonterminal path: only after the observed response completes does the helper enter the bounded
+  retry loop. Each attempt registers `waitForRequest` before dispatching `online`; the helper then
+  awaits the exact newly-started request's response and body completion.
+- regression: the held stale request baseline remains asserted as exactly one before helper start,
+  and the test still requires a strictly greater request count after release. Route release and
+  exact-handler removal remain in `finally`; Ready uses the existing assertion semantics with no
+  one-second UI assertion.
+- scope: only `tests/e2e/automatic-ready.spec.ts` changed in implementation. Production code was
+  untouched.
+
+## Verification
+
+- cold-cache exact desktop/mobile scenario: PASS, 2/2 in 15.4s on port `3145`. The ignored `.next`
+  cache was moved to `/tmp/plingpling-e2e-ready-flake-next-before-cycle3-20260807` first so the run
+  exercised initial Next compilation; Next regenerated the ignored cache.
+- exact-scenario stress: PASS, 20/20 total (10 desktop and 10 mobile) in 1.6 minutes on port `3146`.
+- serialized `bun run test:e2e:ci`: PASS, 26/26 in 36.6s on port `3147`.
+- second serialized `bun run test:e2e:ci`: PASS, 26/26 in 27.8s on port `3148`.
+- `bun run format:check`: PASS, 411 files checked with no fixes.
+- `bun run lint`: PASS, 411 files checked with no fixes.
+- `bun run typecheck`: PASS, route type generation and `tsc --noEmit` completed.
+- `git diff --check`: PASS.
+
+## External Effects and Next Action
+
+- external effects: none. Validation used local Playwright web servers, the local test database,
+  route interception, and fake/local fixtures only. No DigitalOcean, QStash, workflow, deployment,
+  release, hosted-secret, or billable action ran.
+- pending: coordinator review and push to the already-open PR. Builder did not push or merge.

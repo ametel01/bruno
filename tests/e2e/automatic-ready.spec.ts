@@ -4,6 +4,7 @@ import {
   expect,
   type Page,
   type Request,
+  type Response,
   type Route,
   test,
 } from "@playwright/test";
@@ -678,6 +679,14 @@ async function expectCurrentStage(page: Page, label: string): Promise<void> {
 }
 
 async function requestImmediatePoll(page: Page): Promise<void> {
+  const currentResponse = page.waitForResponse(isDeploymentPollResponse);
+  await dispatchImmediatePoll(page);
+  const observedResponse = await currentResponse;
+
+  if (await responseHasTerminalDeployment(observedResponse)) {
+    return;
+  }
+
   const request = await requestFreshDeploymentPoll(page);
   const response = await request.response();
 
@@ -721,6 +730,19 @@ function isDeploymentPollRequest(request: Request): boolean {
     request.method() === "GET" &&
     /^\/api\/agents\/[^/]+\/deployment$/.test(new URL(request.url()).pathname)
   );
+}
+
+function isDeploymentPollResponse(response: Response): boolean {
+  return isDeploymentPollRequest(response.request());
+}
+
+async function responseHasTerminalDeployment(response: Response): Promise<boolean> {
+  try {
+    const body = (await response.json()) as { deployment?: { stage?: unknown } };
+    return body.deployment?.stage === "ready" || body.deployment?.stage === "failed";
+  } catch {
+    return false;
+  }
 }
 
 async function holdNextDeploymentPoll(page: Page, agentId: string) {
