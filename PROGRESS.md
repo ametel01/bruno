@@ -71,11 +71,20 @@ The update log is append-only.
   (174 files / 1700 tests), `bun run build`, `bun run test:e2e:ci` (26 tests),
   `bun run repro:cloud-runner`, and `git diff --check` passed locally. `bun run local:agent:smoke`
   was intentionally not run because coordinator serialization is required.
-- Step 4 implementation gates: the nine focused reconciler/trigger/wakeup/runner-ingress/race files
-  passed 89 tests; `bun run format:check`, `bun run lint`, `bun run typecheck`, `bun run test`
-  (174 files, 1,703 tests), `bun run build`, `PORT=3128 bun run test:e2e:ci` (26/26), and
-  `git diff --check` passed. The serialized `local:agent:smoke` gate remains pending coordinator
-  authorization, and #267 must merge before this branch is rebased and checked.
+- Step 4 post-rebase gates: after #267 merged, the branch rebased onto `d4541c0` while preserving
+  both reconciler contracts. The combined focused suite passed 12 files / 110 tests; `bun run verify`
+  passed 175 files / 1,709 tests and the production build; `bun run repro:cloud-runner`,
+  `PORT=3128 bun run test:e2e:ci` (26/26), and `git diff --check` passed. The serialized
+  `local:agent:smoke` passed with `cleanupVerified:true`, `digitalOceanRequests:0`, one simulated
+  Droplet, and the full producer-to-ready sequence. Its single local cold run was 152.675 seconds,
+  dominated by 123.888 seconds in provisioning/scheduler wait and 70.593 seconds of runner boot;
+  this is safety evidence, not provider-backed SLO evidence.
+- Step 4 checker-blocker fix: a deadline-aborted signed wakeup delivery now releases its exact
+  deployment claim and creates the next due generation atomically, fenced by the unchanged
+  stage/config/lease and an active running agent. A signed-route regression covers real wakeup
+  claim, real drain deadline abort, and real replacement publication. The combined focused suite
+  passed 12 files / 111 tests; format, lint, typecheck, and diff-check passed. The serialized smoke
+  was not rerun.
 
 ## Issue Graph
 

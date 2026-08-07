@@ -9,8 +9,8 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
   branch: `codex/issue-268-stage-drain`
   worktree: `/Users/alexmetelli/source/plingpling-issue-268`
   pr: none
-  phase: rebased onto merged #267; combined gates pending
-  cycle: 1/5
+  phase: deadline-abort wakeup blocker fixed; independent checker recheck pending
+  cycle: 3/5
 
 ## Goal Contract
 
@@ -361,13 +361,29 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
   runner-ingress provisioning-to-ready ordering, one pinned deployment, exact events/runtime row,
   one gateway start, shared signal/deadline, exact two-second due wakeup, no early claim, and a
   concurrent duplicate runner drain.
-- pending: do not check yet. #267 must merge first; coordinator must rebase this branch and resolve
-  the shared reconciler while preserving both contracts. `bun run local:agent:smoke` was not run
-  because its shared namespace is coordinator-serialized.
+- pending: independent post-rebase checker review and hosted PR checks.
 - external effects: none; no real DigitalOcean/QStash/snapshot/workflow/deploy/secret/billable
   action ran.
 - stop condition: Accept only with producer-to-ready evidence, focused/full gates, serialized local
   smoke, and confirmation that the branch was rebased after merged #267.
+
+## Coordinator Post-Rebase Evidence — #268
+
+- Rebased the two-commit branch onto merged #267 at `d4541c0`. `git range-diff` showed only the
+  expected documentation/context changes; the source merge retained #267's typed provider
+  dispositions, authoritative observation, effect authority checks, and #268's pinned drain,
+  shared deadline, producer wiring, and exact wakeup handling.
+- Combined focused command passed 12 files / 110 tests. `bun run verify` passed formatting, lint,
+  typecheck, 175 files / 1,709 tests, and production build. `bun run repro:cloud-runner` passed,
+  `PORT=3128 bun run test:e2e:ci` passed 26/26, and `git diff --check` passed.
+- Serialized `bun run local:agent:smoke` passed with `cleanupVerified:true`,
+  `digitalOceanRequests:0`, `simulatedDroplets:1`, all deployment stages through durable `ready`,
+  and exact 1 vCPU / 2 GiB limits. The local sample took 152.675 seconds: provisioning/scheduler
+  wait 123.888 seconds, runner boot 70.593 seconds, configuring Hermes 3.573 seconds, gateway 9.754
+  seconds, model verification 13.639 seconds, and Telegram finalization 1.791 seconds. This remains
+  local safety evidence only; no provider-backed SLO claim is made.
+- No real DigitalOcean/QStash request, snapshot/workflow/deploy/release/secret mutation, or billable
+  action ran.
 
 ## Completion Contract — #264
 
@@ -1350,6 +1366,124 @@ Status: ALL GREEN
 - Checker verdict: #267 is merge-ready for its repository scope after PR/review/CI policy. Coordinator
   alone should open/push/merge; checker performed no commit, push, PR, merge, smoke, or external
   effect.
+
+## Checker Result — #268 Cycle 2
+
+Status: RED
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all && git rev-parse --short HEAD`
+  result: PASS
+  evidence: branch `codex/issue-268-stage-drain`; HEAD `fdd6538`; worktree had pre-existing
+    `PROGRESS.md` and `STATUS.md` modifications before checker evidence; checker made no
+    implementation edits.
+- command: `git merge-base HEAD origin/main | cut -c1-8`
+  result: PASS
+  evidence: merge base is `d4541c01`, matching merged #267 / `origin/main`.
+- command: source inspection of targeted drain control flow
+  result: PASS
+  evidence: `agent-deployment-reconciler.ts:258-275` loops with
+    `iteration < DEPLOYMENT_DRAIN_MAX_ITERATIONS`, breaks before a ninth iteration, continues only
+    when `current.processed === 1 && current.outcome === "advanced" && current.deploymentId`, and
+    pins subsequent iterations to `{ kind: "deployment", deploymentId: current.deploymentId }`.
+- command: source inspection of shared action deadline/signal
+  result: PASS
+  evidence: `agent-deployment-reconciler.ts:292-313` creates one 45s action context/deadline and
+    one `AbortController`; `agent-deployment-reconciler.ts:362-389` reuses the shared context for
+    claimed stages; `agent-deployment-reconciler.ts:2402-2406` fences work on aborted/expired
+    context before provider/runner transports.
+- command: source inspection of #267 provider-phase safety preservation
+  result: PASS
+  evidence: `agent-deployment-reconciler.ts:2466-2490` still routes automatic provisioning through
+    `advanceAutomaticDigitalOceanRunnerProvisioning` with a `canContinue` authority callback;
+    focused provider/logging tests below include automatic provisioning, local Docker provider, and
+    redacted provisioning logging coverage inherited from #267.
+- command: source inspection of runner-ingress ordering
+  result: PASS
+  evidence: `agent-runtime-triggers.ts:37-55` schedules runner ingress as deployment drain first and
+    runtime reconcile second; `agent-deployment-reconciler.ts:2006-2110` finalizes deployment,
+    initializes runtime, usage, wakeup, and events inside the ready transaction before scheduling the
+    runtime callback.
+- command: source inspection of signed wakeup delivery
+  result: PASS
+  evidence: `wakeup/route.ts:59-76` claims the signed delivery, drains the targeted deployment, then
+    calls `publishLatestDeploymentWakeupAfterCommit` for that same deployment ID; early/stale/
+    duplicate deliveries return safe 200 responses without reconciling.
+- command:
+    `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-reconciler.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/agent-runtime-triggers.test.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/runner-registration-routes.test.ts tests/unit/runner-heartbeat-route.test.ts tests/unit/agent-deployment-cancellation-db.test.ts tests/unit/agent-deployment-retry-db.test.ts tests/unit/agent-deployment-finalization-race.test.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/runner-provisioning-logging.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_17066_37396b1a1892`; migrations applied; 12 files / 110
+    tests passed; DB removed.
+- command: `git diff --check origin/main...HEAD`
+  result: PASS
+  evidence: no whitespace errors across the #268 branch diff.
+- command: `bun run format:check`
+  result: PASS
+  evidence: Biome checked 411 files in 99ms; no fixes applied.
+- command: `bun run lint`
+  result: PASS
+  evidence: Biome checked 411 files in 249ms; no fixes applied.
+- command: `bun run typecheck`
+  result: PASS
+  evidence: Next route types generated successfully and `tsc --noEmit` passed.
+- command: external-effect preflight
+  result: PASS
+  evidence: variable names checked without printing values:
+    `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE`, `AGENTBAY_DIGITALOCEAN_TOKEN`,
+    `DIGITALOCEAN_ACCESS_TOKEN`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`,
+    `QSTASH_NEXT_SIGNING_KEY`, `AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION`, and
+    `AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION` are unset.
+
+## Failures
+
+- Blocking finding: deadline-aborted signed wakeup delivery can lose the exact external wakeup.
+  `claimDeploymentWakeupDelivery` changes the delivered row to `state = 'claimed'`
+  (`agent-deployment-dispatch.ts:429-440`). If the bounded drain then aborts on the shared deadline,
+  `releaseClaimAfterDeadline` only clears `lease_owner` / `lease_expires_at` on the deployment
+  (`agent-deployment-reconciler.ts:1262-1277`) and does not call
+  `replaceDeploymentWakeupInTransaction`. The route then calls `publishLatestDeploymentWakeupAfterCommit`
+  (`wakeup/route.ts:73-76`), but that publisher only selects wakeups in `state in ('pending',
+  'failed')` (`agent-deployment-dispatch.ts:329-341`). Result: the request can return successful
+  `{ processed: 0, outcome: "idle" }` after consuming the QStash delivery, with no replacement
+  pending/failed wakeup to publish. Cron may eventually recover the deployment row, but this violates
+  #268's exact external wait/wakeup requirement for unfinished work after a bounded/deadline stop.
+
+## Coverage Gaps
+
+- Did not rerun `bun run local:agent:smoke`; coordinator already serialized it and the assignment
+  explicitly said not to rerun it.
+- Did not run full `bun run verify`, `bun run build`, E2E, real DigitalOcean, real QStash, deploy,
+  release, workflow dispatch, hosted-secret mutation, or billable paths. The targeted failure above
+  is source-level and covered by focused gates.
+
+## Next Action
+
+- Fix the deadline-abort path so a claimed signed wakeup is replaced/re-published when unfinished
+  work remains due, or otherwise prove the consumed delivery is retried externally. Add a regression
+  test that exercises real `claimDeploymentWakeupDelivery` -> real drain deadline abort -> route
+  `publishLatestDeploymentWakeupAfterCommit` and asserts a publishable pending/failed wakeup exists
+  at the exact due time. Do not merge #268 until this is fixed and rechecked.
+
+## Handoff — #268 Builder Cycle 3 to Checker
+
+- request: fix the Cycle 2 deadline-abort wakeup-loss blocker without weakening #267 provider
+  authority or #268 drain semantics.
+- behavior: `releaseClaimAfterDeadline` now releases the deployment lease and creates the next
+  immediately due wakeup generation in one transaction. The update is fenced on the exact
+  deployment, stage, config revision, lease owner, unexpired lease, and active running agent; if
+  cancellation, supersession, or lease loss wins, no replacement is created.
+- regression: the signed wakeup route test now exercises real delivery claim, real targeted drain,
+  a runner call reaching the shared 45-second deadline, and real post-drain publication. It proves
+  generation 1 remains `claimed` while generation 2 is observed `pending` at the deadline and then
+  becomes `published` with the exact replacement payload.
+- gates: focused wakeup route test 1 file / 6 tests; combined deployment/runner suite 12 files / 111
+  tests; `bun run format:check`; `bun run lint`; `bun run typecheck`; and `git diff --check` all
+  passed.
+- external effects: none. Tests used isolated databases, fake runner transport, and a fake wakeup
+  publisher. Per assignment, the coordinator-serialized `local:agent:smoke` was not rerun; no real
+  QStash, DigitalOcean, deploy, workflow, secret, release, or billable action ran.
+- pending: independent checker recheck. Builder did not push, open a PR, merge, or run smoke.
 
 ## Review Threads
 

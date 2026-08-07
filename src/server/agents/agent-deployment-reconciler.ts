@@ -1264,16 +1264,35 @@ async function releaseClaimAfterDeadline(
   work: ClaimedDeploymentWork,
   now: Date,
 ): Promise<void> {
-  await connection.db.execute(sql`
-    update ${agentDeployments}
-    set lease_owner = null,
-        lease_expires_at = null,
-        updated_at = ${now.toISOString()}
-    where id = ${work.id}
-      and stage = ${work.stage}
-      and config_revision = ${work.configRevision}
-      and lease_owner = ${work.leaseOwner}
-  `);
+  await connection.db.transaction(async (tx) => {
+    const [updated] = await tx.execute<{ id: string }>(sql`
+      update ${agentDeployments}
+      set lease_owner = null,
+          lease_expires_at = null,
+          updated_at = ${now.toISOString()}
+      where id = ${work.id}
+        and stage = ${work.stage}
+        and config_revision = ${work.configRevision}
+        and lease_owner = ${work.leaseOwner}
+        and lease_expires_at > ${now.toISOString()}
+        and exists (
+          select 1 from ${agents}
+          where ${agents.id} = ${work.agentId}
+            and ${agents.userId} = ${work.userId}
+            and ${agents.deletedAt} is null
+            and ${agents.desiredStatus} = 'running'
+        )
+      returning id
+    `);
+
+    if (updated) {
+      await replaceDeploymentWakeupInTransaction(tx, {
+        deploymentId: work.id,
+        dueAt: now,
+        now,
+      });
+    }
+  });
 }
 
 async function claimOneDeploymentForReconcile(
