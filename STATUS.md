@@ -3,11 +3,11 @@
 ## Active Work
 
 - issue: [#266](https://github.com/ametel01/plingpling/issues/266)
-  owner: checker-agent pending coordinator assignment
+  owner: checker-agent (`issue_266_checker`)
   branch: `codex/issue-266-attested-snapshot`
   worktree: `/Users/alexmetelli/source/plingpling-issue-266`
   pr: none
-  phase: checker-ready for repository-only scope; final acceptance dependency-blocked
+  phase: checker failed; builder action required before PR/merge
   cycle: 1/5
 
 ## Completion Contract
@@ -157,10 +157,8 @@
   - Resolved upstream: #263 closed through merged PR #272 at
     `7d1cb985c06b0007dadcfb0e42c5631c65b7c472`; #266 is based exactly on that `origin/main` commit.
   - Merge-gate dependency: current-main CI run
-    [31131392382](https://github.com/ametel01/plingpling/actions/runs/31131392382) fails because the
-    real-Docker unit fixture could not reach the GitHub runner Docker daemon. No tracking issue or
-    successful rerun exists. The builder may proceed, but checker/coordinator must reproduce or rerun
-    and resolve/explicitly classify this baseline before merge acceptance.
+    [31131392382](https://github.com/ametel01/plingpling/actions/runs/31131392382) is in progress as
+    of 2026-08-07T00:22:38Z. Steps through build passed; E2E was still running when checked.
   - Live-acceptance dependency: explicit user authorization, cost budget, protected environment,
     scoped DigitalOcean credentials, and signing/attestation key configuration are absent by design.
     Stop before provider execution; repository implementation is still agent-actionable.
@@ -214,9 +212,140 @@
   `bun run typecheck`.
 - builder full unit: pass — `bun run test` (172 files, 1,646 tests).
 - builder production build: pass — `bun run build`.
+- checker targeted unit: pass —
+  `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-manifest.test.ts
+  tests/unit/runner-snapshot-build.test.ts tests/unit/runner-snapshot-workflow.test.ts
+  tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
+  tests/unit/digitalocean-provider.test.ts` (6 files, 50 tests).
+- checker format: pass — `bun run format:check` checked 405 files, no fixes applied.
+- checker lint: pass — `bun run lint` checked 405 files, no fixes applied.
+- checker typecheck: pass — `bun run typecheck` ran `next typegen && tsc --noEmit`.
+- checker full unit: pass — `bun run test` (172 files, 1,646 tests, duration 111.51s).
+- checker production build: pass — `bun run build` completed `next build`.
+- checker E2E CI: pass — `bun run test:e2e:ci` (26/26 Playwright tests passed).
+- checker cloud-runner repro: pass — `bun run repro:cloud-runner` validated stock generated
+  user-data; temp-generated snapshot-mode user-data passed `bun run repro:cloud-runner --
+  --user-data <temp>/snapshot-user-data.yaml` with valid cloud-init schema and 8 bash script
+  blocks checked.
+- checker local agent smoke: fail — `bun run local:agent:smoke` exited 1 before smoke assertions:
+  `Error response from daemon: No such container: agentbay-local-cloud-runner` and
+  `Error: docker compose failed with exit 1.`
 - skipped live/billable: protected snapshot workflow dispatch, DigitalOcean resource/snapshot
   creation or deletion, GitHub environment/secret configuration, production deploy/release, and
   provider-backed Step 6 acceptance.
+
+## Checker Result
+
+Status: FAILED
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all`
+  result: pass
+  evidence: branch `codex/issue-266-attested-snapshot` is ahead of `origin/main` by 2; only
+    `STATUS.md` is modified by checker evidence.
+- command: `gh pr list --repo ametel01/plingpling --head codex/issue-266-attested-snapshot --json ...`
+  result: blocked
+  evidence: returned `[]`; there is no PR to merge.
+- command: `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-build.test.ts tests/unit/runner-snapshot-workflow.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts tests/unit/digitalocean-provider.test.ts`
+  result: pass
+  evidence: 6 files, 50 tests passed.
+- command: `bun run format:check`
+  result: pass
+  evidence: 405 files checked, no fixes applied.
+- command: `bun run lint`
+  result: pass
+  evidence: 405 files checked, no fixes applied.
+- command: `bun run typecheck`
+  result: pass
+  evidence: `next typegen && tsc --noEmit` completed.
+- command: `bun run test`
+  result: pass
+  evidence: 172 files, 1,646 tests passed.
+- command: `bun run build`
+  result: pass
+  evidence: `next build` completed successfully.
+- command: `bun run test:e2e:ci`
+  result: pass
+  evidence: 26/26 Playwright tests passed.
+- command: `bun run repro:cloud-runner`
+  result: pass
+  evidence: stock generated user-data passed cloud-init schema and bash syntax validation.
+- command: `bun run repro:cloud-runner -- --user-data <temp>/snapshot-user-data.yaml`
+  result: pass
+  evidence: snapshot-mode user-data passed cloud-init schema and 8 bash script blocks checked.
+- command: `bun run local:agent:smoke`
+  result: failed
+  evidence: exited 1 with `No such container: agentbay-local-cloud-runner`; Docker daemon was
+    reachable (`docker info --format '{{.ServerVersion}}'` returned `29.3.1`).
+
+## Failures
+
+- file: `.github/workflows/build-runner-snapshot.yml:86`
+  check: full boot fixture must pass against the exact preloaded builder image before sanitation or
+    snapshot creation.
+  exact error: workflow runs `bun run runner:release:smoke -- --image "${{ inputs.runner_image }}"
+    --provider digitalocean` on the GitHub runner before `scripts/build-runner-snapshot.ts` creates
+    the builder Droplet, so it does not validate the actual builder, preloaded image set, or snapshot
+    candidate.
+  likely owner: builder-agent (`issue_266_builder`).
+- file: `.github/workflows/build-runner-snapshot.yml:105`
+  check: sanitation must remove credentials/identity/logs/state and prove absence with path and
+    hostile-marker scans.
+  exact error: workflow synthesizes `sanitation-result.json` with `"ok": true`,
+    `"forbiddenPathsAbsent": true`, and `"hostileMarkersAbsent": true`; no sanitation command or scan
+    is executed.
+  likely owner: builder-agent (`issue_266_builder`).
+- file: `src/server/runners/runner-snapshot-build.ts:265`
+  check: builder bootstrap must install Docker/Caddy and preload exact images.
+  exact error: `buildSnapshotBuilderBootstrap` lists `caddy` packages and then executes `docker pull`
+    at lines 280-282, but it never installs/enables Docker (`docker-ce`, Docker repo apt source, or
+    equivalent) before using `docker`.
+  likely owner: builder-agent (`issue_266_builder`).
+- file: `src/server/runners/runner-snapshot-build.ts:156`
+  check: DigitalOcean power-off/snapshot actions require bounded polling of asynchronous action
+    states.
+  exact error: implementation directly requires `powerOffResource(...).value.status === "completed"`
+    and `snapshotResource(...).value.status === "completed"` and never calls the provider
+    `readAction` method required by the contract for `in-progress`, completed, errored, timeout, or
+    unknown outcomes.
+  likely owner: builder-agent (`issue_266_builder`).
+- file: `src/server/runners/runner-snapshot-build.ts:249`
+  check: cleanup must be ordered/idempotent and cover SSH/registry credentials, firewall, Droplet,
+    partial snapshots, safe absence, ambiguous ownership, abort, and unknown outcomes.
+  exact error: finalizer only calls `deleteImage` for a tracked partial snapshot and
+    `cleanupResource` for the builder; it has no firewall/key/credential cleanup, absence proof,
+    ambiguous ownership guard, or action-outcome reconciliation.
+  likely owner: builder-agent (`issue_266_builder`).
+- file: `.github/workflows/build-runner-snapshot.yml:150`
+  check: manifest artifact must be attested/uploaded only after validation.
+  exact error: workflow grants `attestations: write` and `id-token: write` but has no
+    `actions/attest-build-provenance` or equivalent attestation step before upload.
+  likely owner: builder-agent (`issue_266_builder`).
+- file: `tests/unit/runner-snapshot-manifest.test.ts:51`
+  check: required negative fixtures must cover wrong key/schema/time/region/base/arch/source/boot
+    image/min-disk/unknown-field/provider-unavailable and zero Droplet creates on every manual and
+    automatic create path.
+  exact error: tests cover only tamper, unknown top-level field, stale evidence, and one runner
+    identity mismatch; no tests exercise `createDigitalOceanRunnerForUser` or
+    `advanceAutomaticDigitalOceanRunnerProvisioning` with invalid snapshot evidence and assert zero
+    `createRunner` calls.
+  likely owner: builder-agent (`issue_266_builder`).
+
+## Coverage Gaps
+
+- Protected DigitalOcean workflow was not dispatched; no live Droplet/snapshot/secret/environment
+  effects were authorized.
+- GitHub protected environment reviewer enforcement cannot be proven from repository YAML alone.
+- Current-main CI run `31131392382` was still in progress at 2026-08-07T00:22:38Z.
+- `bun run local:agent:smoke` failed in local Docker Compose setup before reaching the snapshot
+  equivalence assertions.
+
+## Next Action
+
+- Builder must fix the contract failures above and add adversarial tests for the missing semantic
+  cases before coordinator pushes/opens/merges any PR. There is currently no GitHub PR for this
+  branch, and checker verdict is not merge-ready.
 
 ## Completed
 
