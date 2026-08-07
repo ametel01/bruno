@@ -86,52 +86,6 @@ jobs:
       - name: Prepare allowlisted artifact directory
         run: install -m 0750 -d snapshot-artifacts
 
-      - name: Require builder-produced boot evidence
-        env:
-          RUNNER_IMAGE: ${{ inputs.runner_image }}
-          DEFAULT_AGENT_IMAGE: ${{ inputs.default_agent_image }}
-          HERMES_IMAGE: ${{ inputs.hermes_image }}
-        run: |
-          set -euo pipefail
-          test -s snapshot-artifacts/boot-result.json
-          bun -e '
-            const evidence = await Bun.file("snapshot-artifacts/boot-result.json").json();
-            const required = [process.env.RUNNER_IMAGE, process.env.DEFAULT_AGENT_IMAGE, process.env.HERMES_IMAGE].sort();
-            if (
-              evidence?.ok !== true ||
-              evidence.runnerImage !== process.env.RUNNER_IMAGE ||
-              evidence.defaultAgentImage !== process.env.DEFAULT_AGENT_IMAGE ||
-              evidence.hermesImage !== process.env.HERMES_IMAGE ||
-              evidence.bootContractVersion !== "plingpling.runner.boot.v1" ||
-              JSON.stringify([...(evidence.preloadedImages ?? [])].sort()) !== JSON.stringify(required)
-            ) {
-              throw new Error("builder boot evidence mismatch");
-            }
-          '
-
-      - name: Require builder-produced sanitation evidence
-        run: |
-          set -euo pipefail
-          test -s snapshot-artifacts/sanitation-result.json
-          bun -e '
-            const evidence = await Bun.file("snapshot-artifacts/sanitation-result.json").json();
-            const removed = new Set(evidence?.removedPaths ?? []);
-            const scanned = new Set(evidence?.scannedPaths ?? []);
-            const markers = new Set(evidence?.hostileMarkers ?? []);
-            for (const value of ["/etc/agentbay/runner.env", "/root/.docker/config.json", "/var/lib/cloud/instances", "/etc/ssh/ssh_host_ed25519_key", "/etc/machine-id", "/var/log/cloud-init-output.log"]) {
-              if (!removed.has(value)) throw new Error("missing sanitation removal evidence");
-            }
-            for (const value of ["/etc", "/root", "/var/lib/agentbay", "/var/log"]) {
-              if (!scanned.has(value)) throw new Error("missing sanitation scan evidence");
-            }
-            for (const value of ["AGENTBAY_RUNNER_REGISTRATION_TOKEN", "AGENTBAY_RUNNER_BEARER_TOKEN", "dop_v1_", "BEGIN OPENSSH PRIVATE KEY"]) {
-              if (!markers.has(value)) throw new Error("missing hostile marker evidence");
-            }
-            if (evidence?.ok !== true || evidence.forbiddenPathsAbsent !== true || evidence.hostileMarkersAbsent !== true) {
-              throw new Error("builder sanitation evidence mismatch");
-            }
-          '
-
       - name: Build snapshot and signed manifest
         env:
           AGENTBAY_DIGITALOCEAN_TOKEN: ${{ secrets.AGENTBAY_DIGITALOCEAN_TOKEN }}
@@ -150,12 +104,52 @@ jobs:
             --runner-image "${{ inputs.runner_image }}" \
             --default-agent-image "${{ inputs.default_agent_image }}" \
             --hermes-image "${{ inputs.hermes_image }}" \
-            --boot-result snapshot-artifacts/boot-result.json \
-            --sanitation-result snapshot-artifacts/sanitation-result.json \
+            --boot-result-out snapshot-artifacts/boot-result.json \
+            --sanitation-result-out snapshot-artifacts/sanitation-result.json \
             --signing-key snapshot-artifacts/signing-key.pem \
             --manifest-out snapshot-artifacts/runner-snapshot-manifest.json \
             --signature-out snapshot-artifacts/runner-snapshot-manifest.sig \
             --digest-out snapshot-artifacts/runner-snapshot-manifest.sha256
+
+      - name: Validate retrieved builder evidence
+        env:
+          RUNNER_IMAGE: ${{ inputs.runner_image }}
+          DEFAULT_AGENT_IMAGE: ${{ inputs.default_agent_image }}
+          HERMES_IMAGE: ${{ inputs.hermes_image }}
+        run: |
+          set -euo pipefail
+          test -s snapshot-artifacts/boot-result.json
+          test -s snapshot-artifacts/sanitation-result.json
+          bun -e '
+            const boot = await Bun.file("snapshot-artifacts/boot-result.json").json();
+            const sanitation = await Bun.file("snapshot-artifacts/sanitation-result.json").json();
+            const required = [process.env.RUNNER_IMAGE, process.env.DEFAULT_AGENT_IMAGE, process.env.HERMES_IMAGE].sort();
+            if (
+              boot?.ok !== true ||
+              boot.runnerImage !== process.env.RUNNER_IMAGE ||
+              boot.defaultAgentImage !== process.env.DEFAULT_AGENT_IMAGE ||
+              boot.hermesImage !== process.env.HERMES_IMAGE ||
+              boot.bootContractVersion !== "plingpling.runner.boot.v1" ||
+              JSON.stringify([...(boot.preloadedImages ?? [])].sort()) !== JSON.stringify(required)
+            ) {
+              throw new Error("builder boot evidence mismatch");
+            }
+            const removed = new Set(sanitation?.removedPaths ?? []);
+            const scanned = new Set(sanitation?.scannedPaths ?? []);
+            const markers = new Set(sanitation?.hostileMarkers ?? []);
+            for (const value of ["/etc/agentbay/runner.env", "/root/.docker/config.json", "/var/lib/cloud/instances", "/etc/ssh/ssh_host_ed25519_key", "/etc/machine-id", "/var/log/cloud-init-output.log"]) {
+              if (!removed.has(value)) throw new Error("missing sanitation removal evidence");
+            }
+            for (const value of ["/etc", "/root", "/var/lib/agentbay", "/var/log"]) {
+              if (!scanned.has(value)) throw new Error("missing sanitation scan evidence");
+            }
+            for (const value of ["AGENTBAY_RUNNER_REGISTRATION_TOKEN", "AGENTBAY_RUNNER_BEARER_TOKEN", "dop_v1_", "BEGIN OPENSSH PRIVATE KEY"]) {
+              if (!markers.has(value)) throw new Error("missing hostile marker evidence");
+            }
+            if (sanitation?.ok !== true || sanitation.forbiddenPathsAbsent !== true || sanitation.hostileMarkersAbsent !== true) {
+              throw new Error("builder sanitation evidence mismatch");
+            }
+          '
 
       - name: Cleanup temporary credentials and builder state
         if: always()

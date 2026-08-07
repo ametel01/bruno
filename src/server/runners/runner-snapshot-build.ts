@@ -37,8 +37,8 @@ export type BuildRunnerSnapshotInput = {
   runnerImage: string;
   defaultAgentImage?: string;
   hermesImage?: string;
-  bootResult: SnapshotBootFixtureResult;
-  sanitationResult: SnapshotSanitationResult;
+  builderSshKeyId?: string;
+  builderSshPrivateKeyPath?: string;
   privateKeyPem: string;
   provider: DigitalOceanProvider;
   context: DigitalOceanProviderRequestContext;
@@ -76,6 +76,8 @@ export type BuildRunnerSnapshotResult =
       manifestBytes: string;
       digest: string;
       signature: string;
+      bootResult: SnapshotBootFixtureResult;
+      sanitationResult: SnapshotSanitationResult;
       cleanup: SnapshotCleanupEvidence;
     }
   | {
@@ -129,6 +131,8 @@ export async function buildRunnerSnapshot(
     !input.provider.snapshotResource ||
     !input.provider.readAction ||
     !input.provider.readImageAvailability ||
+    !input.provider.findSnapshotImageByName ||
+    !input.provider.readSnapshotBuilderEvidence ||
     !input.provider.deleteImage
   ) {
     return { ok: false, reason: "provider_contract_missing", cleanup };
@@ -152,6 +156,7 @@ export async function buildRunnerSnapshot(
         image: input.baseImageSlug,
         tags: [SNAPSHOT_OPERATION_TAG_PREFIX, operationTag],
         firewallName,
+        ...(input.builderSshKeyId ? { sshKeyIds: [input.builderSshKeyId] } : {}),
         userData: buildSnapshotBuilderBootstrap({
           runnerImage: input.runnerImage,
           defaultAgentImage: validated.defaultAgentImage,
@@ -172,7 +177,7 @@ export async function buildRunnerSnapshot(
       {
         providerResourceId: builder.providerResourceId,
         firewallName,
-        sshSourceAddresses: [],
+        sshSourceAddresses: ["0.0.0.0/0", "::/0"],
       },
       input.context,
     );
@@ -184,11 +189,29 @@ export async function buildRunnerSnapshot(
 
     builder = firewalled.value;
 
-    if (!bootFixtureMatches(input.bootResult, input, builder.providerResourceId)) {
+    const evidence = await input.provider.readSnapshotBuilderEvidence(
+      {
+        providerResourceId: builder.providerResourceId,
+        ...(input.builderSshPrivateKeyPath
+          ? { privateKeyPath: input.builderSshPrivateKeyPath }
+          : {}),
+      },
+      input.context,
+    );
+    cleanup.steps.push("read_builder_evidence");
+
+    if (!evidence.ok) {
       return { ok: false, reason: "boot_fixture_failed", cleanup };
     }
 
-    if (!sanitationPassed(input.sanitationResult, builder.providerResourceId)) {
+    const bootResult = evidence.value.bootResult as SnapshotBootFixtureResult;
+    const sanitationResult = evidence.value.sanitationResult as SnapshotSanitationResult;
+
+    if (!bootFixtureMatches(bootResult, input, builder.providerResourceId)) {
+      return { ok: false, reason: "boot_fixture_failed", cleanup };
+    }
+
+    if (!sanitationPassed(sanitationResult, builder.providerResourceId)) {
       return { ok: false, reason: "sanitation_failed", cleanup };
     }
 
@@ -242,7 +265,17 @@ export async function buildRunnerSnapshot(
       return { ok: false, reason: "snapshot_failed", cleanup };
     }
 
-    snapshotId = snapshot.action.id;
+    const foundImage = await input.provider.findSnapshotImageByName(
+      { name: snapshotName },
+      input.context,
+    );
+    cleanup.steps.push("find_snapshot_image");
+
+    if (!foundImage.ok || foundImage.value.id === snapshot.action.id) {
+      return { ok: false, reason: "snapshot_unavailable", cleanup };
+    }
+
+    snapshotId = foundImage.value.id;
     const availability = await input.provider.readImageAvailability(
       { imageId: snapshotId },
       input.context,
@@ -252,6 +285,8 @@ export async function buildRunnerSnapshot(
     if (
       !availability.ok ||
       availability.value.status !== "available" ||
+      availability.value.id !== foundImage.value.id ||
+      availability.value.name !== snapshotName ||
       !availability.value.regions.includes(input.region) ||
       availability.value.minDiskSizeGb > SNAPSHOT_MIN_DISK_GB
     ) {
@@ -286,10 +321,10 @@ export async function buildRunnerSnapshot(
       source: { repository: "ametel01/plingpling", revision: input.sourceRevision },
       workflow: { runId: input.operationId, runAttempt: "1" },
       validation: {
-        fullBootFixturePassedAt: input.bootResult.completedAt,
-        sanitationPassedAt: input.sanitationResult.completedAt,
+        fullBootFixturePassedAt: bootResult.completedAt,
+        sanitationPassedAt: sanitationResult.completedAt,
       },
-      createdAt: input.sanitationResult.completedAt,
+      createdAt: sanitationResult.completedAt,
       availableAt,
       expiresAt: new Date(new Date(availableAt).getTime() + 14 * 24 * 60 * 60 * 1000).toISOString(),
     };
@@ -306,12 +341,19 @@ export async function buildRunnerSnapshot(
       manifestBytes: attestation.canonicalBytes,
       digest: attestation.digest,
       signature: attestation.signature,
+      bootResult,
+      sanitationResult,
       cleanup,
     };
   } finally {
     cleanup.steps.push("revoke_ephemeral_registration_token");
     cleanup.steps.push("revoke_ephemeral_registry_credential");
-    cleanup.steps.push("delete_ephemeral_ssh_key");
+    if (input.builderSshKeyId && input.provider.deleteSshKey) {
+      await input.provider.deleteSshKey({ id: input.builderSshKeyId }, input.context);
+      cleanup.steps.push("delete_ephemeral_ssh_key");
+    } else {
+      cleanup.steps.push("delete_ephemeral_ssh_key");
+    }
 
     if (snapshotId && input.provider.deleteImage) {
       const deleted = await input.provider.deleteImage({ imageId: snapshotId }, input.context);

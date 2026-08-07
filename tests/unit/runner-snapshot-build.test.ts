@@ -1,9 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import {
-  DEFAULT_HERMES_WORKLOAD_IMAGE,
-  RUNNER_BOOT_CONTRACT_VERSION,
-} from "@/src/runner-service/constants";
+import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
 import { FakeDigitalOceanProvider } from "@/src/server/runners/digitalocean-provider";
 import {
   buildRunnerSnapshot,
@@ -60,7 +57,7 @@ describe("runner snapshot build orchestration", () => {
     expect(result).toMatchObject({
       ok: true,
       manifest: {
-        snapshot: { id: "1102", regions: ["sfo3"], architecture: "amd64" },
+        snapshot: { id: "9102", regions: ["sfo3"], architecture: "amd64" },
       },
       cleanup: {
         deletedDropletId: "do-fake-1",
@@ -72,10 +69,12 @@ describe("runner snapshot build orchestration", () => {
     expect(provider.calls.map((call) => call.step)).toEqual([
       "create",
       "firewall",
+      "readBuilderEvidence",
       "powerOff",
       "readAction",
       "snapshot",
       "readAction",
+      "findImage",
       "readImage",
       "observeOwnedSet",
       "deleteFirewall",
@@ -111,20 +110,10 @@ describe("runner snapshot build orchestration", () => {
     expect(provider.calls).toEqual([]);
   });
 
-  it("deletes the builder and partial snapshot when sanitation fails after creation", async () => {
-    const provider = new FakeDigitalOceanProvider();
+  it("deletes the builder when retrieved sanitation evidence fails after creation", async () => {
+    const provider = new BadSanitationEvidenceProvider();
     const result = await buildRunnerSnapshot({
       ...baseInput(provider),
-      sanitationResult: {
-        ok: false,
-        builderResourceId: "do-fake-1",
-        forbiddenPathsAbsent: false,
-        hostileMarkersAbsent: true,
-        removedPaths: ["/etc/agentbay/runner.env"],
-        scannedPaths: ["/etc"],
-        hostileMarkers: ["AGENTBAY_RUNNER_REGISTRATION_TOKEN"],
-        completedAt: "2026-08-07T00:00:02.000Z",
-      },
     });
 
     expect(result).toMatchObject({
@@ -139,6 +128,7 @@ describe("runner snapshot build orchestration", () => {
     expect(provider.calls.map((call) => call.step)).toEqual([
       "create",
       "firewall",
+      "readBuilderEvidence",
       "observeOwnedSet",
       "deleteFirewall",
       "observeOwnedSet",
@@ -166,6 +156,40 @@ describe("runner snapshot build orchestration", () => {
     expect(provider.calls.map((call) => call.step)).toContain("readAction");
   });
 
+  it("does not use the snapshot action ID as the manifest image ID", async () => {
+    const provider = new FakeDigitalOceanProvider();
+    const result = await buildRunnerSnapshot(baseInput(provider));
+
+    expect(result).toMatchObject({
+      ok: true,
+      manifest: { snapshot: { id: "9102" } },
+    });
+    expect(provider.calls).toEqual(
+      expect.arrayContaining([
+        { step: "readAction", input: { actionId: "8102" } },
+        { step: "findImage", input: { name: "agentbay-snapshot-builder-111111111111" } },
+        { step: "readImage", input: { imageId: "9102" } },
+      ]),
+    );
+    expect(JSON.stringify(result)).not.toContain('"id":"8102"');
+  });
+
+  it("fails closed when the provider cannot resolve a distinct snapshot image after action completion", async () => {
+    const provider = new MissingSnapshotImageProvider();
+    const result = await buildRunnerSnapshot(baseInput(provider));
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "snapshot_unavailable",
+      cleanup: {
+        deletedSnapshotId: null,
+        deletedDropletId: "do-fake-1",
+      },
+    });
+    expect(provider.calls.map((call) => call.step)).toContain("findImage");
+    expect(provider.calls.map((call) => call.step)).not.toContain("readImage");
+  });
+
   it("records ambiguous ownership and does not delete an unowned builder", async () => {
     const provider = new AmbiguousOwnedSetProvider();
     const result = await buildRunnerSnapshot(baseInput(provider));
@@ -183,6 +207,32 @@ describe("runner snapshot build orchestration", () => {
   });
 });
 
+class BadSanitationEvidenceProvider extends FakeDigitalOceanProvider {
+  override async readSnapshotBuilderEvidence(
+    input: Parameters<FakeDigitalOceanProvider["readSnapshotBuilderEvidence"]>[0],
+    context?: { signal: AbortSignal },
+  ) {
+    const result = await super.readSnapshotBuilderEvidence(input, context);
+    if (!result.ok) return result;
+    return {
+      ok: true as const,
+      value: {
+        ...result.value,
+        sanitationResult: {
+          ok: false,
+          builderResourceId: input.providerResourceId,
+          forbiddenPathsAbsent: false,
+          hostileMarkersAbsent: true,
+          removedPaths: ["/etc/agentbay/runner.env"],
+          scannedPaths: ["/etc"],
+          hostileMarkers: ["AGENTBAY_RUNNER_REGISTRATION_TOKEN"],
+          completedAt: "2026-08-07T00:00:02.000Z",
+        },
+      },
+    };
+  }
+}
+
 class ActionErroredProvider extends FakeDigitalOceanProvider {
   override async readAction(input: { actionId: string }, context?: { signal: AbortSignal }) {
     await super.readAction(input, context);
@@ -194,6 +244,20 @@ class ActionErroredProvider extends FakeDigitalOceanProvider {
         type: input.actionId.endsWith("02") ? "snapshot" : "power_off",
         resourceId: "do-fake-1",
       },
+    };
+  }
+}
+
+class MissingSnapshotImageProvider extends FakeDigitalOceanProvider {
+  override async findSnapshotImageByName(
+    input: Parameters<FakeDigitalOceanProvider["findSnapshotImageByName"]>[0],
+    context?: { signal: AbortSignal },
+  ) {
+    await super.findSnapshotImageByName(input, context);
+    return {
+      ok: false as const,
+      reason: "image_lookup_failed" as const,
+      message: "missing image",
     };
   }
 }
@@ -224,38 +288,6 @@ function baseInput(provider: FakeDigitalOceanProvider) {
     runnerImage: RUNNER_IMAGE,
     defaultAgentImage: AGENT_IMAGE,
     hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
-    bootResult: {
-      ok: true,
-      builderResourceId: "do-fake-1",
-      runnerImage: RUNNER_IMAGE,
-      defaultAgentImage: AGENT_IMAGE,
-      hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
-      bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
-      preloadedImages: [RUNNER_IMAGE, AGENT_IMAGE, DEFAULT_HERMES_WORKLOAD_IMAGE],
-      completedAt: "2026-08-07T00:00:01.000Z",
-    },
-    sanitationResult: {
-      ok: true,
-      builderResourceId: "do-fake-1",
-      forbiddenPathsAbsent: true,
-      hostileMarkersAbsent: true,
-      removedPaths: [
-        "/etc/agentbay/runner.env",
-        "/root/.docker/config.json",
-        "/var/lib/cloud/instances",
-        "/etc/ssh/ssh_host_ed25519_key",
-        "/etc/machine-id",
-        "/var/log/cloud-init-output.log",
-      ],
-      scannedPaths: ["/etc", "/root", "/var/lib/agentbay", "/var/log"],
-      hostileMarkers: [
-        "AGENTBAY_RUNNER_REGISTRATION_TOKEN",
-        "AGENTBAY_RUNNER_BEARER_TOKEN",
-        "dop_v1_",
-        "BEGIN OPENSSH PRIVATE KEY",
-      ],
-      completedAt: "2026-08-07T00:00:02.000Z",
-    },
     privateKeyPem: generateKeyPairSync("ed25519")
       .privateKey.export({ format: "pem", type: "pkcs8" })
       .toString(),

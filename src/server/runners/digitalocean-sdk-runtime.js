@@ -66,6 +66,15 @@ export function createDigitalOceanSdkClient(token, apiBaseUrl) {
         }),
       },
       images: {
+        get: (input, context) => {
+          const searchParams = new URLSearchParams();
+          if (input.privateImages) searchParams.set("private", "true");
+          searchParams.set("per_page", String(input.perPage));
+          return sendRestJson(token, baseUrl, `/v2/images?${searchParams.toString()}`, {
+            method: "GET",
+            context,
+          });
+        },
         byImage_id: (id) => ({
           get: (context) =>
             sendRestJson(token, baseUrl, `/v2/images/${encodeURIComponent(String(id))}`, {
@@ -85,6 +94,18 @@ export function createDigitalOceanSdkClient(token, apiBaseUrl) {
             sendJson(adapter, client.v2.account.keys.toGetRequestInformation(), context),
           post: (body, context) =>
             sendJson(adapter, client.v2.account.keys.toPostRequestInformation(body), context),
+          bySsh_key_id: (id) => ({
+            delete: (context) =>
+              sendRestNoContent(
+                token,
+                baseUrl,
+                `/v2/account/keys/${encodeURIComponent(String(id))}`,
+                {
+                  method: "DELETE",
+                  context,
+                },
+              ),
+          }),
         },
       },
       firewalls: {

@@ -21,11 +21,22 @@ describe("runner snapshot workflow", () => {
       workflow.indexOf("Validate authorization and static inputs before secrets"),
     ).toBeLessThan(workflow.indexOf("AGENTBAY_DIGITALOCEAN_TOKEN"));
     expect(workflow).toContain("if: always()");
-    expect(workflow).toContain("Require builder-produced boot evidence");
-    expect(workflow).toContain("Require builder-produced sanitation evidence");
+    expect(workflow).toContain("Build snapshot and signed manifest");
+    expect(workflow).toContain("Validate retrieved builder evidence");
+    expect(workflow.indexOf("Build snapshot and signed manifest")).toBeLessThan(
+      workflow.indexOf("Validate retrieved builder evidence"),
+    );
+    expect(workflow.indexOf("--boot-result-out snapshot-artifacts/boot-result.json")).toBeLessThan(
+      workflow.indexOf("Validate retrieved builder evidence"),
+    );
+    expect(
+      workflow.indexOf("--sanitation-result-out snapshot-artifacts/sanitation-result.json"),
+    ).toBeLessThan(workflow.indexOf("Validate retrieved builder evidence"));
     expect(workflow).toContain("preloadedImages");
     expect(workflow).toContain("removedPaths");
     expect(workflow).toContain("hostileMarkers");
+    expect(workflow).not.toContain("--boot-result snapshot-artifacts/boot-result.json");
+    expect(workflow).not.toContain("--sanitation-result snapshot-artifacts/sanitation-result.json");
     expect(workflow).not.toContain("bun run runner:release:smoke -- --image");
     expect(workflow).not.toContain('"ok": true');
     expect(workflow).toContain("actions/attest-build-provenance@v2");
@@ -43,5 +54,20 @@ describe("runner snapshot workflow", () => {
     ]) {
       expect(await readFile(file, "utf8")).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN");
     }
+  });
+
+  it("build script retrieves builder evidence instead of consuming controller-local evidence", async () => {
+    const script = await readFile("scripts/build-runner-snapshot.ts", "utf8");
+
+    expect(script).toContain("ssh-keygen");
+    expect(script).toContain("provider.createSshKey");
+    expect(script).toContain("builderSshKeyId");
+    expect(script).toContain("builderSshPrivateKeyPath");
+    expect(script).toContain("bootResultOut");
+    expect(script).toContain("sanitationResultOut");
+    expect(script).not.toContain("bootResultPath");
+    expect(script).not.toContain("sanitationResultPath");
+    expect(script).not.toContain('requiredArg(parsed, "boot-result")');
+    expect(script).not.toContain('requiredArg(parsed, "sanitation-result")');
   });
 });

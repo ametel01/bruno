@@ -3,12 +3,12 @@
 ## Active Work
 
 - issue: [#266](https://github.com/ametel01/plingpling/issues/266)
-  owner: checker-agent (`issue_266_checker`)
+  owner: builder-agent (`issue_266_builder`)
   branch: `codex/issue-266-attested-snapshot`
   worktree: `/Users/alexmetelli/source/plingpling-issue-266`
   pr: none
-  phase: checker failed cycle 2; builder action required before PR/merge
-  cycle: 2/5
+  phase: checker-ready after cycle-3 builder fixes
+  cycle: 3/5
 
 ## Completion Contract
 
@@ -210,6 +210,23 @@
   next-action: Checker should rerun focused snapshot/provisioning tests, inspect the workflow
     evidence/attestation ordering, verify action polling/cleanup order, and leave local smoke for a
     serialized run because the Docker Compose namespace is shared.
+- from: builder-agent (`issue_266_builder`)
+  to: checker-agent
+  timestamp: 2026-08-07T09:00:00+08:00
+  request: Re-check the four cycle-2 orchestration blockers only. Do not dispatch the protected
+    workflow, contact DigitalOcean, configure secrets/environments, deploy, release, or run
+    billable effects.
+  evidence: The snapshot build script now validates static inputs before effects, creates an
+    ephemeral SSH key, creates the builder, retrieves builder-local
+    `/run/agentbay-snapshot-builder/boot-result.json` and `sanitation-result.json` through the
+    provider, writes retrieved evidence artifacts, and validates them after the producer step in the
+    workflow. The orchestrator validates retrieved evidence before poweroff/snapshot, polls actions,
+    resolves the created snapshot image by exact name, rejects action-ID/image-ID conflation, reads
+    authoritative image availability by the resolved image ID, and deletes the ephemeral SSH key in
+    cleanup. Fake provider action IDs and image IDs are now distinct.
+  next-action: Checker should rerun the focused #266 tests and inspect the script/workflow ordering,
+    builder evidence retrieval path, image resolution path, and fake action/image ID separation.
+    Local smoke remains serialized because the Docker Compose namespace is shared.
 
 ## Gates
 
@@ -284,6 +301,22 @@
   schema and 8 bash script blocks checked.
 - cycle-2 checker local agent smoke: skipped by instruction because #265 owns the shared Docker
   Compose namespace.
+- cycle-3 builder focused unit: pass —
+  `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts
+  tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-workflow.test.ts
+  tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts
+  tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
+  tests/unit/digitalocean-provider.test.ts` (8 files, 92 tests).
+- cycle-3 builder format/lint/typecheck: pass — `bun run format:check`, `bun run lint`,
+  `bun run typecheck`.
+- cycle-3 builder production build: pass — `bun run build`.
+- cycle-3 builder full unit: pass — `bun run test` (172 files, 1,666 tests).
+- cycle-3 builder E2E CI: pass — `bun run test:e2e:ci` (26/26 Playwright tests passed).
+- cycle-3 builder cloud-runner repro: pass — `bun run repro:cloud-runner` validated generated
+  stock user-data schema and 11 bash script blocks.
+- cycle-3 builder diff check: pass — `git diff --check`.
+- cycle-3 local agent smoke: skipped by coordinator direction because #265/#266 share the
+  `agentbay-local-cloud-runner` Docker Compose namespace; leave for serialized checker rerun.
 - skipped live/billable: protected snapshot workflow dispatch, DigitalOcean resource/snapshot
   creation or deletion, GitHub environment/secret configuration, production deploy/release, and
   provider-backed Step 6 acceptance.
