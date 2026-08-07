@@ -3,11 +3,11 @@
 ## Active Work
 
 - issue: [#266](https://github.com/ametel01/plingpling/issues/266)
-  owner: builder-agent (`issue_266_builder`)
+  owner: checker-agent (`issue_266_checker`)
   branch: `codex/issue-266-attested-snapshot`
   worktree: `/Users/alexmetelli/source/plingpling-issue-266`
   pr: none
-  phase: checker-ready after cycle-3 builder fixes
+  phase: checker failed cycle 3; builder security fixes required before PR/merge
   cycle: 3/5
 
 ## Completion Contract
@@ -317,6 +317,27 @@
 - cycle-3 builder diff check: pass — `git diff --check`.
 - cycle-3 local agent smoke: skipped by coordinator direction because #265/#266 share the
   `agentbay-local-cloud-runner` Docker Compose namespace; leave for serialized checker rerun.
+- cycle-3 checker prior-blocker review: partial pass — controller now creates an ephemeral key,
+  workflow ordering is producer-then-validation, builder evidence is read before poweroff/snapshot,
+  and fake action/image IDs are distinct; fail on pre-effect/provider-effect ordering and open SSH
+  firewall exposure.
+- cycle-3 checker focused unit: pass —
+  `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts
+  tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-workflow.test.ts
+  tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts
+  tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
+  tests/unit/digitalocean-provider.test.ts` (8 files, 92 tests).
+- cycle-3 checker format/lint/typecheck: pass — `bun run format:check`, `bun run lint`,
+  `bun run typecheck`.
+- cycle-3 checker full unit: pass — `bun run test` (172 files, 1,666 tests).
+- cycle-3 checker production build: pass — `bun run build`.
+- cycle-3 checker E2E CI: pass — `bun run test:e2e:ci` (26/26 Playwright tests passed).
+- cycle-3 checker cloud-runner repro: pass — `bun run repro:cloud-runner` validated generated
+  stock user-data schema and 11 bash script blocks; temp-generated snapshot-mode user-data passed
+  `bun run repro:cloud-runner -- --user-data <temp>/snapshot-user-data.yaml` with valid cloud-init
+  schema and 8 bash script blocks checked.
+- cycle-3 checker local agent smoke: skipped by instruction because #265 owns the shared Docker
+  Compose namespace.
 - skipped live/billable: protected snapshot workflow dispatch, DigitalOcean resource/snapshot
   creation or deletion, GitHub environment/secret configuration, production deploy/release, and
   provider-backed Step 6 acceptance.
@@ -561,6 +582,103 @@ Status: FAILED
   create the builder, retrieve the actual builder-local boot/sanitation evidence, validate it, poll
   the snapshot action, discover/read the resulting image ID, and update tests so fake action IDs and
   image IDs cannot be conflated. Do not open or merge a PR yet.
+
+## Checker Result - Cycle 3
+
+Status: FAILED
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all`
+  result: pass
+  evidence: branch `codex/issue-266-attested-snapshot` is ahead of `origin/main` by 6; only
+    `STATUS.md` is modified by checker evidence.
+- command: `gh pr list --repo ametel01/plingpling --head codex/issue-266-attested-snapshot --json ...`
+  result: blocked
+  evidence: returned `[]`; there is still no PR to merge.
+- command: `git diff --check`
+  result: pass
+  evidence: no whitespace errors reported.
+- command: `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-workflow.test.ts tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts tests/unit/digitalocean-provider.test.ts`
+  result: pass
+  evidence: 8 files, 92 tests passed.
+- command: `bun run format:check`
+  result: pass
+  evidence: 405 files checked, no fixes applied.
+- command: `bun run lint`
+  result: pass
+  evidence: 405 files checked, no fixes applied.
+- command: `bun run typecheck`
+  result: pass
+  evidence: `next typegen && tsc --noEmit` completed.
+- command: `bun run test`
+  result: pass
+  evidence: 172 files, 1,666 tests passed.
+- command: `bun run build`
+  result: pass
+  evidence: `next build` completed successfully.
+- command: `bun run test:e2e:ci`
+  result: pass
+  evidence: 26/26 Playwright tests passed.
+- command: `bun run repro:cloud-runner`
+  result: pass
+  evidence: stock generated user-data passed cloud-init schema and 11 bash script blocks.
+- command: `bun run repro:cloud-runner -- --user-data <temp>/snapshot-user-data.yaml`
+  result: pass
+  evidence: snapshot-mode user-data passed cloud-init schema and 8 bash script blocks.
+- command: `bun run local:agent:smoke`
+  result: skipped
+  evidence: coordinator directed checker not to run local smoke while #265 owns the shared
+    `agentbay-local-cloud-runner` Docker Compose namespace.
+
+## Failures
+
+- file: `scripts/build-runner-snapshot.ts:31`
+  check: all pre-effect authorization validation must happen before provider effects, and cleanup
+    must cover failure after any created ephemeral credential.
+  exact error: script validates the CLI sentinel in `validatePreEffectArgs`, but then creates a
+    DigitalOcean SSH key at lines 31-37 before calling `buildRunnerSnapshot`, whose own sentinel and
+    provider contract checks run later. If `buildRunnerSnapshot` rejects after this point, the local
+    temp key is removed by `rm(tempDir)`, but the provider SSH key created in the controller script is
+    not deleted by the controller; cleanup is delegated to a function that may never receive control
+    if the controller throws between lines 31 and 43.
+  likely owner: builder-agent (`issue_266_builder`).
+- file: `src/server/runners/runner-snapshot-build.ts:176`
+  check: temporary builder SSH exposure should be least-privilege/bounded for evidence retrieval.
+  exact error: builder firewall is opened to `sshSourceAddresses: ["0.0.0.0/0", "::/0"]` for the
+    snapshot builder. The contract requires protected/manual/least-privilege behavior and careful
+    secret handling; world-open root SSH on a billable snapshot builder is not acceptable without a
+    runner-IP restriction or other narrower retrieval channel.
+  likely owner: builder-agent (`issue_266_builder`).
+- file: `src/server/runners/digitalocean-provider.ts:1253`
+  check: SSH evidence retrieval should avoid trust-on-first-use ambiguity where practical for a
+    security-sensitive snapshot builder.
+  exact error: retrieval uses `StrictHostKeyChecking=accept-new` with a temp known-hosts file. This
+    avoids host-key persistence but still accepts the first host key over a world-open SSH path; no
+    host key fingerprint/source restriction is asserted.
+  likely owner: builder-agent (`issue_266_builder`).
+- file: `tests/unit/runner-snapshot-workflow.test.ts:59`
+  check: tests should fail on provider SSH key leak and world-open builder SSH exposure.
+  exact error: workflow/build tests assert `ssh-keygen`, `provider.createSshKey`, and evidence output
+    paths exist, but no test asserts `deleteSshKey` runs if creation succeeds and later validation
+    fails, and no test rejects `0.0.0.0/0` / `::/0` in the snapshot-builder firewall path.
+  likely owner: builder-agent (`issue_266_builder`).
+
+## Coverage Gaps
+
+- Protected DigitalOcean workflow was not dispatched; no live Droplet/snapshot/secret/environment
+  effects were authorized.
+- GitHub protected environment reviewer enforcement cannot be proven from repository YAML alone.
+- Local agent smoke was intentionally skipped because #265 owns the shared Docker Compose namespace.
+- Evidence retrieval over SSH is only statically/fake-provider validated; no live host-key or network
+  behavior was exercised.
+
+## Next Action
+
+- Builder should move provider SSH key cleanup responsibility into controller-level `finally` or
+  otherwise prove no created key can leak before `buildRunnerSnapshot` takes ownership, restrict the
+  snapshot-builder evidence retrieval path to a least-privilege source or non-SSH provider channel,
+  and add tests that fail on world-open SSH and leaked provider keys. Do not open or merge a PR yet.
 
 ## Completed
 
