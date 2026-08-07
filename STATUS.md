@@ -1531,6 +1531,101 @@ Status: RED
 - retrospective archived; status compaction performed immediately, so no separate process issue is
   needed.
 
+## Checker Result — E2E Ready Synchronization Fix
+
+Status: ALL GREEN
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all && git rev-parse --short HEAD && git branch --show-current`
+  result: PASS
+  evidence: branch `codex/fix-ready-e2e-sync`; HEAD `65b7d93`; worktree was clean before checker
+    appended this result to `STATUS.md`.
+- command: `git diff --name-status origin/main...HEAD`
+  result: PASS
+  evidence: only `STATUS.md` and `tests/e2e/automatic-ready.spec.ts` changed; production code,
+    polling component, API routes, scripts, package scripts, and config are untouched.
+- command: GitHub CI failure inspection
+  result: PASS
+  evidence: run `31150074607` for `Drain ready agent-deployment stages promptly (#277)` at
+    `f2fb3f6` failed only the E2E smoke step. Failed test was
+    `[chromium-desktop] tests/e2e/automatic-ready.spec.ts › automatic submission follows persisted
+    progress to ready across refresh, reopen, and a second context`; error expected
+    `#deployment-progress-title` text `Ready`, received `Preparing your agent` after 5s. The same
+    scenario passed on `[chromium-mobile]`; remaining 25 E2E tests passed.
+- command: production diagnosis source inspection
+  result: PASS
+  evidence: `agent-deployment-progress.tsx:176-185` returns without issuing a GET when
+    `inFlightRef.current` is set; `:297-315` wires the `online` event to `pollDeployment`. This
+    matches the diagnosis that a stale in-flight nonterminal GET can make an `online` dispatch
+    ignored until the old request finishes/schedules later polling.
+- command: helper synchronization inspection
+  result: PASS
+  evidence: `automatic-ready.spec.ts:680-696` now registers
+    `page.waitForResponse(isDeploymentPollResponse)` before dispatching `online`; if the response is
+    nonterminal it waits for `response.finished()`, one `requestAnimationFrame`, dispatches `online`
+    again, and waits for a fresh deployment GET. No production timeout, polling interval, or
+    assertion timeout was inflated; the new explicit ready assertion uses a tighter 1s timeout at
+    `:283-285`.
+- command: deterministic held-response regression inspection
+  result: PASS
+  evidence: `automatic-ready.spec.ts:253-282` holds a reopened-page deployment GET while another
+    context commits `ready`, then calls `requestImmediatePoll(reopenedPage)`, releases the stale
+    held response, asserts `heldReopenedPoll.requestCount() >= 2`, and expects Ready within 1s after
+    the helper resolves. `git show HEAD^:tests/e2e/automatic-ready.spec.ts:267` shows the old path
+    only called `requestImmediatePoll(reopenedPage)` with no held-response regression; source logic
+    confirms the old single-dispatch helper cannot satisfy the new `>=2` fresh-request assertion.
+- command: no-hang/leaked-route inspection
+  result: PASS
+  evidence: `automatic-ready.spec.ts:286-289` always releases and disposes the held route in
+    `finally`; `:719-751` scopes `holdNextDeploymentPoll` to the deployment URL, releases the held
+    response, fulfills with the fetched response, and unregisters the exact handler via
+    `page.unroute(deploymentUrl, handler)`. Repeated and full E2E runs below completed without hang.
+- command: failure-observation semantics inspection
+  result: PASS
+  evidence: `automatic-ready.spec.ts:548-603` still proves three failed deployment reads surface
+    `Progress updates are temporarily unavailable`, preserves `Preparing your agent`, recovers after
+    `Check again`, and keeps external requests empty. Its trigger calls intentionally use
+    `dispatchImmediatePoll` at `:590` and `:592`, retaining request-count synchronization instead of
+    the new response-awaiting helper.
+- command:
+    `PORT=3130 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=http://localhost:3130 PLAYWRIGHT_BASE_URL=http://localhost:3130 ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts -g "automatic submission follows persisted progress to ready across refresh, reopen, and a second context" --project=chromium-desktop --repeat-each=5`
+  result: PASS
+  evidence: exact desktop scenario passed 5/5 in 29.1s on local Playwright webServer port `3130`.
+- command:
+    `PORT=3131 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=http://localhost:3131 PLAYWRIGHT_BASE_URL=http://localhost:3131 ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts`
+  result: PASS
+  evidence: full automatic-ready desktop/mobile coverage passed 12/12 in 24.5s on local Playwright
+    webServer port `3131`, including the failure-observation test on both projects.
+- command: `git diff --check origin/main...HEAD`
+  result: PASS
+  evidence: no whitespace errors across the branch diff.
+- command: `bun run format:check`
+  result: PASS
+  evidence: Biome checked 411 files in 102ms; no fixes applied.
+- command: `bun run lint`
+  result: PASS
+  evidence: Biome checked 411 files in 268ms; no fixes applied.
+- command: `bun run typecheck`
+  result: PASS
+  evidence: Next route types generated successfully and `tsc --noEmit` passed.
+
+## Failures
+
+- none.
+
+## Coverage Gaps
+
+- Did not run full CI, full `bun run test:e2e:ci`, unit tests, build, real DigitalOcean, real QStash,
+  deploy, workflow dispatch, hosted-secret mutation, or billable paths. Scope is a test-only E2E
+  synchronization fix; focused repeated scenario, full automatic-ready desktop/mobile, and
+  lightweight quality gates passed.
+- Did not commit, push, open PR, merge, or edit implementation/test code.
+
+## Next Action
+
+- Checker verdict: merge-ready for the E2E synchronization fix after coordinator/PR/CI policy.
+
 ## Checker Result — #268 Cycle 4
 
 Status: ALL GREEN
