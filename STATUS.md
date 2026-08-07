@@ -5,34 +5,21 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 ## Active Work
 
 - issue: [#264](https://github.com/ametel01/plingpling/issues/264)
-  owner: builder-agent (`issue_264_builder`)
+  owner: coordinator (`root`)
   branch: `codex/issue-264-durable-wakeups`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: rebasing onto merged green smoke harness
+  phase: checker-green; opening PR
   cycle: 3/5
-- issue: [#265](https://github.com/ametel01/plingpling/issues/265)
-  owner: checker-agent (`issue_265_checker`)
-  branch: `codex/issue-265-runner-sizing`
-  worktree: `/Users/alexmetelli/source/plingpling-issue-265`
-  pr: none
-  phase: checking authorization-independent scope
-  cycle: 0/5
-- issue: [#266](https://github.com/ametel01/plingpling/issues/266)
-  owner: checker-agent (`issue_266_checker`)
-  branch: `codex/issue-266-attested-snapshot`
-  worktree: `/Users/alexmetelli/source/plingpling-issue-266`
-  pr: none
-  phase: checking repository-only scope
-  cycle: 0/5
 
 ## Goal Contract
 
 - outcome: Execute `PLAN.md` through its Definition of Done, including 30 explicitly authorized
   clean cold DigitalOcean trials with at least 95% success and p95 committed-create-to-durable-ready
   latency at or below 60 seconds.
-- current result: Step 1 evidence is merged. The latest zero-cloud cold simulation was 88.760
-  seconds, so the SLO is not yet met.
+- current result: Repository work for #263, #265, and #266 is merged. The rebased #264 zero-cloud
+  lifecycle smoke passed at 149.874 seconds with zero DigitalOcean requests, so the SLO is not yet
+  met; #267 is expected to remove the observed 60-second post-readiness provider poll.
 - non-goals: No Droplets before a create request; no warm pools, ready capacity, onboarding or
   predictive provisioning, cross-user sharing, or SLO expansion beyond durable `ready`.
 - authorization boundary: Do not spend provider resources, build provider snapshots, configure
@@ -42,8 +29,8 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 
 ## Dependency Graph
 
-- completed: #263 / PR #272
-- ready Wave 1: #264 durable wakeups; #265 runner sizing; #266 attested snapshot implementation
+- completed repository scope: #263 / PR #272; #265 / PR #273; #266 / PR #274
+- ready now: #264 durable wakeups
 - blocked by #264: #267, #268
 - blocked by #266: #269
 - blocked by #265: #270
@@ -437,7 +424,7 @@ Status: FAILED
   - `bun run local:agent:smoke` was intentionally not run while #265 builder/checker may own the
     shared local-smoke namespace. Coordinator should serialize and run it next.
 
-## Checker Result
+## Checker Result — #264 Cycle 2
 
 Status: FAILED
 
@@ -669,17 +656,111 @@ Status: FAILED
   smoke, and diff-check passed locally. Local smoke p95 was 150.725s, so the overall SLO remains
   unmet pending later steps.
 - merge request check (2026-08-07):
-  - result: BLOCKED; no fast-agent-creation PR is open or merge-ready.
+  - result: PARTIAL; #264 branch is checker-green below, but no PR is open; no PR object can be
+    merged yet.
   - `git status --short --branch --untracked-files=all`: current worktree is
-    `codex/issue-264-durable-wakeups` with uncommitted #264 implementation changes.
+    `codex/issue-264-durable-wakeups` with only `STATUS.md` modified by checker evidence.
   - `gh pr list --head codex/issue-264-durable-wakeups --state open --json ...`: `[]`.
   - `gh pr list --head codex/issue-265-runner-sizing --state open --json ...`: `[]`.
   - `gh pr list --head codex/issue-266-attested-snapshot --state open --json ...`: `[]`.
   - `gh pr list --state open --limit 10 --json ...`: only open PR is unrelated
     [#262](https://github.com/ametel01/plingpling/pull/262) on
     `docs/ai-integration-opportunities`, `mergeStateStatus: UNSTABLE`, with Vercel `FAILURE`.
-  - next action: wait for checker verdicts, then commit/push/open the relevant issue PR before any
-    merge. Do not merge #262 as part of this goal.
+  - next action: commit/push/open the #264 PR before any #264 merge; continue #265/#266 checks.
+    Do not merge #262 as part of this goal.
+
+## Checker Result
+
+Status: ALL GREEN
+
+## Commands
+
+- command: required skill load
+  result: PASS
+  evidence: loaded `checker-agent`, `agent-team-status-protocol`, `testing-standards`,
+    `ci-quality-gates`, and `ci-security-gates`; `test-workflow-standards` was requested by the
+    coordinator but is not present in `/Users/alexmetelli/.agents/skills`, so
+    `testing-standards` is the available test-workflow substitute.
+- command: `git status --short --branch --untracked-files=all`
+  result: PASS
+  evidence: branch `codex/issue-264-durable-wakeups`; no source files dirty before checker update.
+- command: `git rev-parse --short HEAD && git rev-parse --short main && git rev-parse --short origin/main && git merge-base HEAD main`
+  result: PASS
+  evidence: HEAD `65851f1`, `main`/`origin/main` `57e4843`, merge-base
+    `57e4843975175cbb2f04ab45c8f7f6f1d4abcbf6`; branch is rebased on current main.
+- command: `gh pr list --repo ametel01/plingpling --state open --head codex/issue-264-durable-wakeups --json ...`
+  result: PASS
+  evidence: `[]`; no open PR currently exists for this branch.
+- command: `git diff --stat main...HEAD`, `git diff --name-status main...HEAD`, and
+    `git diff --check main...HEAD`
+  result: PASS
+  evidence: scoped #264 diff is 27 files / 8,646 insertions / 895 deletions, covering env/docs,
+    wakeup route, dispatch module, migration/schema, deployment mutators, QStash dependency, and
+    focused tests; no diff-check errors.
+- command: source inspection of producer mutation -> transactional wakeup -> dropped post-commit
+    publish -> cron reclaim -> signed duplicate/stale delivery -> exactly-one targeted reconcile
+  result: PASS
+  evidence: `agent-deployments.ts:137`, `:385`, and `:480` require transaction handles before
+    create/release/transition writes; `agent-deployment-dispatch.ts:170-235` locks the deployment
+    row and terminalizes/replaces generation-fenced wakeups in the same transaction;
+    `publishLatestDeploymentWakeupAfterCommit` at `agent-deployment-dispatch.ts:319-349` publishes
+    only committed pending/failed wakeups; `sweepDeploymentWakeupOutbox` at
+    `agent-deployment-dispatch.ts:355-407` reclaims due unpublished/failed work in QStash mode;
+    `claimDeploymentWakeupDelivery` at `agent-deployment-dispatch.ts:409-478` atomically claims only
+    due latest-generation rows and returns duplicate/stale/terminal outcomes without executing
+    reconciliation; `wakeup/route.ts:38-78` verifies the raw body before parsing, claims inside a
+    transaction, and invokes `reconcileTargetAgentDeployment` only after a successful claim.
+- command: source inspection of official QStash compatibility and no provider/queue authority
+  result: PASS
+  evidence: `agent-deployment-dispatch.ts:3` imports `Client` and `Receiver` from
+    `@upstash/qstash`; `:56-57` uses `Upstash-Signature`/`Upstash-Region`; `:106-135` verifies with
+    `Receiver.verify` using current/next signing keys, callback URL subject, raw body, region, and
+    clock tolerance; `:480-500` publishes with `Client.publishJSON`, `notBefore`, retries,
+    deduplication ID, and redaction. `readDeploymentDispatchConfig` defaults to cron unless QStash
+    config is complete; `package.json` local smoke forces `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE=local_docker`.
+- command: ambient secret/effect preflight
+  result: PASS
+  evidence: environment variable names checked without printing values:
+    `AGENTBAY_DEPLOYMENT_DISPATCH_MODE`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`,
+    `QSTASH_NEXT_SIGNING_KEY`, `DIGITALOCEAN_ACCESS_TOKEN`, and
+    `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE` are all unset in the checker shell.
+- command:
+    `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts tests/unit/agent-launch-builder.test.ts tests/unit/local-agent-cycle-smoke.test.ts tests/unit/agent-deployment-reconciler.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_67745_afb2b3694ad0`; migrations applied; 9 files / 99
+    tests passed; DB removed.
+- command: `bun run format:check`
+  result: PASS
+  evidence: Biome checked 410 files in 108ms; no fixes applied.
+- command: `bun run lint`
+  result: PASS
+  evidence: Biome checked 410 files in 215ms; no fixes applied.
+- command: coordinator gate evidence supplied for final rebased head `65851f1`
+  result: PASS
+  evidence: coordinator reported focused 9 files / 106 tests, format/lint/typecheck/build, full
+    unit 174 files / 1,696 tests, E2E 26/26, exact local smoke
+    `cleanupVerified:true`, `digitalOceanRequests:0`, p95 `149874ms`, and clean ports; checker did
+    not rerun the shared local smoke stack to avoid introducing provider/namespace effects.
+
+## Failures
+
+- none.
+
+## Coverage Gaps
+
+- No open PR exists for `codex/issue-264-durable-wakeups`; there is nothing for the checker to
+  merge or verify as a PR object yet.
+- Real external QStash publishing and real DigitalOcean provisioning were intentionally not run and
+  remain outside #264 authorization. The checked path uses fakes/local Docker plus coordinator smoke
+  evidence with `digitalOceanRequests:0`.
+- #264 is merge-ready for durable wakeups, but it does not by itself prove the overall one-minute
+  creation target; the recorded local smoke p95 is ~150 seconds, and provider-backed 30-trial SLO
+  proof remains downstream.
+
+## Next Action
+
+- Open/push the #264 PR from `codex/issue-264-durable-wakeups`, then merge only after normal PR
+  review/CI policy is satisfied. Checker verdict on the branch head: merge-ready for #264.
 
 ## Review Threads
 
@@ -702,9 +783,9 @@ Status: FAILED
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling`: issue #264 branch; builder-owned, checker-ready.
-- `/Users/alexmetelli/source/plingpling-issue-265`: issue #265 branch; spec-owned.
-- `/Users/alexmetelli/source/plingpling-issue-266`: issue #266 branch; spec-owned.
+- `/Users/alexmetelli/source/plingpling`: issue #264 branch; coordinator-owned, checker-green.
+- `/Users/alexmetelli/source/plingpling-issue-265`: merged #265 branch; preserve existing state.
+- `/Users/alexmetelli/source/plingpling-issue-266`: main at merged #266; preserve existing state.
 - `/Users/alexmetelli/source/plingpling-step7-base`: pre-existing detached user-owned worktree;
   preserve and do not modify.
 
@@ -713,5 +794,11 @@ Status: FAILED
 - issue [#263](https://github.com/ametel01/plingpling/issues/263), PR
   [#272](https://github.com/ametel01/plingpling/pull/272), merge
   `7d1cb985c06b0007dadcfb0e42c5631c65b7c472`; maker/checker/reviewer accepted.
+- repository scope for issue [#265](https://github.com/ametel01/plingpling/issues/265), PR
+  [#273](https://github.com/ametel01/plingpling/pull/273), merge
+  `84a1860f4030496adda7dfc324ef86acafb19742`; post-merge main CI rerun passed.
+- repository scope for issue [#266](https://github.com/ametel01/plingpling/issues/266), PR
+  [#274](https://github.com/ametel01/plingpling/pull/274), merge
+  `57e4843975175cbb2f04ab45c8f7f6f1d4abcbf6`; issue remains open for authorized provider proof.
 - retrospective archived; status compaction performed immediately, so no separate process issue is
   needed.
