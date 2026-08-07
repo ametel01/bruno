@@ -451,6 +451,156 @@ describe("ready agent creation persistence", () => {
     }
   }, 15_000);
 
+  it("keeps simultaneous cross-user ready creates isolated to each owner's spare runner", async () => {
+    const userARunnerId = "00000000-0000-4000-8000-000000000415";
+    const userBRunnerId = "00000000-0000-4000-8000-000000000515";
+    await seedOnlineRunner(connection, { runnerId: userARunnerId, userId: USER_A_ID });
+    await seedOnlineRunner(connection, { runnerId: userBRunnerId, userId: USER_B_ID });
+    const userAConnection = createDatabaseConnection();
+    const userBConnection = createDatabaseConnection();
+    const observerConnection = createDatabaseConnection();
+    const releaseCapacityLocks = createDeferred<void>();
+    const userALockAcquired = createDeferred<void>();
+    const userBLockAcquired = createDeferred<void>();
+    const capacityLockAttempts: Array<{ label: string; runnerId: string; userId: string }> = [];
+    const capacityLocksAcquired: Array<{ label: string; runnerId: string; userId: string }> = [];
+    const pending: Promise<unknown>[] = [];
+
+    try {
+      const userACreate = createAgentForUser(
+        USER_A_ID,
+        readyInput("ready-cross-user-a", { token: TOKEN }),
+        {
+          createConnection: () => userAConnection,
+          env: KEYRING_ENV,
+          now: () => NOW,
+          randomBytes: incrementalRandomBytes(),
+          telegramBotValidator: telegramValidator("123456"),
+          readyCreateTestHooks: {
+            beforeCapacityLock: (input) => {
+              capacityLockAttempts.push({ label: "user-a", ...input });
+            },
+            afterCapacityLock: async (input) => {
+              capacityLocksAcquired.push({ label: "user-a", ...input });
+              userALockAcquired.resolve();
+              await releaseCapacityLocks.promise;
+            },
+          },
+        },
+      );
+      pending.push(userACreate);
+      const userBCreate = createAgentForUser(
+        USER_B_ID,
+        readyInput("ready-cross-user-b", { token: SECOND_TOKEN }),
+        {
+          createConnection: () => userBConnection,
+          env: KEYRING_ENV,
+          now: () => new Date(NOW.getTime() + 1_000),
+          randomBytes: incrementalRandomBytes(),
+          telegramBotValidator: telegramValidator("654321"),
+          readyCreateTestHooks: {
+            beforeCapacityLock: (input) => {
+              capacityLockAttempts.push({ label: "user-b", ...input });
+            },
+            afterCapacityLock: async (input) => {
+              capacityLocksAcquired.push({ label: "user-b", ...input });
+              userBLockAcquired.resolve();
+              await releaseCapacityLocks.promise;
+            },
+          },
+        },
+      );
+      pending.push(userBCreate);
+
+      await Promise.all([userALockAcquired.promise, userBLockAcquired.promise]);
+      expect(await countBlockedDatabaseSessions(observerConnection)).toBe(0);
+      expect(capacityLockAttempts).toHaveLength(2);
+      expect(capacityLockAttempts).toEqual(
+        expect.arrayContaining([
+          { label: "user-a", runnerId: userARunnerId, userId: USER_A_ID },
+          { label: "user-b", runnerId: userBRunnerId, userId: USER_B_ID },
+        ]),
+      );
+      expect(capacityLocksAcquired).toHaveLength(2);
+      expect(capacityLocksAcquired).toEqual(
+        expect.arrayContaining([
+          { label: "user-a", runnerId: userARunnerId, userId: USER_A_ID },
+          { label: "user-b", runnerId: userBRunnerId, userId: USER_B_ID },
+        ]),
+      );
+      expect(
+        [...capacityLockAttempts, ...capacityLocksAcquired].some(
+          ({ runnerId, userId }) =>
+            (userId === USER_A_ID && runnerId === userBRunnerId) ||
+            (userId === USER_B_ID && runnerId === userARunnerId),
+        ),
+      ).toBe(false);
+      releaseCapacityLocks.resolve();
+
+      const [userAResult, userBResult] = await Promise.all([userACreate, userBCreate]);
+      const durableAssignments = await connection.db
+        .select({
+          id: agents.id,
+          userId: agents.userId,
+          runnerId: agents.runnerId,
+          desiredStatus: agents.desiredStatus,
+          deletedAt: agents.deletedAt,
+        })
+        .from(agents);
+      const durableRunnerOwners = await connection.db
+        .select({ id: runners.id, userId: runners.userId })
+        .from(runners);
+
+      expect(userAResult.agent).toMatchObject({ userId: USER_A_ID, runnerId: userARunnerId });
+      expect(userBResult.agent).toMatchObject({ userId: USER_B_ID, runnerId: userBRunnerId });
+      expect(durableAssignments).toHaveLength(2);
+      expect(durableAssignments).toEqual(
+        expect.arrayContaining([
+          {
+            id: userAResult.agent.id,
+            userId: USER_A_ID,
+            runnerId: userARunnerId,
+            desiredStatus: "running",
+            deletedAt: null,
+          },
+          {
+            id: userBResult.agent.id,
+            userId: USER_B_ID,
+            runnerId: userBRunnerId,
+            desiredStatus: "running",
+            deletedAt: null,
+          },
+        ]),
+      );
+      expect(durableAssignments.filter(({ runnerId }) => runnerId === userARunnerId)).toHaveLength(
+        1,
+      );
+      expect(durableAssignments.filter(({ runnerId }) => runnerId === userBRunnerId)).toHaveLength(
+        1,
+      );
+      expect(durableRunnerOwners).toHaveLength(2);
+      expect(durableRunnerOwners).toEqual(
+        expect.arrayContaining([
+          { id: userARunnerId, userId: USER_A_ID },
+          { id: userBRunnerId, userId: USER_B_ID },
+        ]),
+      );
+      expect(
+        durableAssignments.some(
+          ({ runnerId, userId }) =>
+            (userId === USER_A_ID && runnerId === userBRunnerId) ||
+            (userId === USER_B_ID && runnerId === userARunnerId),
+        ),
+      ).toBe(false);
+    } finally {
+      releaseCapacityLocks.resolve();
+      await Promise.allSettled(pending);
+      await userAConnection.close();
+      await userBConnection.close();
+      await observerConnection.close();
+    }
+  }, 15_000);
+
   it("rolls back a held ready create before a blocked lifecycle Start reserves capacity", async () => {
     const runnerId = "00000000-0000-4000-8000-000000000410";
     await seedOnlineRunner(connection, { runnerId, userId: USER_A_ID });
@@ -1735,17 +1885,22 @@ async function waitForBlockedDatabaseSessions(
   description: string,
 ): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
-    const [row] = await observer.client<{ blockedCount: number }[]>`
-      select count(*)::int as "blockedCount"
-      from pg_stat_activity
-      where datname = current_database()
-        and cardinality(pg_blocking_pids(pid)) > 0
-    `;
-    if ((row?.blockedCount ?? 0) >= expectedCount) return;
+    if ((await countBlockedDatabaseSessions(observer)) >= expectedCount) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 
   throw new Error(`Timed out waiting for blocked database sessions: ${description}.`);
+}
+
+async function countBlockedDatabaseSessions(observer: DatabaseConnection): Promise<number> {
+  const [row] = await observer.client<{ blockedCount: number }[]>`
+    select count(*)::int as "blockedCount"
+    from pg_stat_activity
+    where datname = current_database()
+      and cardinality(pg_blocking_pids(pid)) > 0
+  `;
+
+  return row?.blockedCount ?? 0;
 }
 
 async function resetReadyCreateTables(connection: DatabaseConnection): Promise<void> {

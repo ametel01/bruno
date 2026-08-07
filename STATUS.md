@@ -2325,3 +2325,112 @@ Status: ALL GREEN
     snapshot build, billable action, push, PR, merge, or other external mutation was performed.
   - hosted capacity defaults remain fail-closed at one. Keep #270 open for the approved larger
     profile, disk budget, and an explicitly authorized provider-backed two-agent trial.
+
+## Checker Review — #270 Cycle 4 Commit `bfbbcb9`
+
+- verdict: **RED / changes required**. Cycle 4 closes the previously reported create/race evidence
+  gaps and introduces no identified product regression, but one explicit concurrency/security item
+  from the completion contract remains absent from the full four-commit diff: the simultaneous
+  cross-user ownership race.
+- reviewed boundary: full four-commit diff `origin/main...bfbbcb9` plus Cycle 4 delta
+  `a583f03..bfbbcb9`; worktree was clean before this status-only append. Branch is four commits ahead
+  of and one commit behind `origin/main`; merge base remains `f2fb3f6`.
+- verified Cycle 4 evidence:
+  - `tests/unit/create-agent-ready-db.test.ts:244-452` now holds the first capacity lock, proves one
+    or two independent contender sessions are blocked using `pg_blocking_pids`, verifies all hook
+    payloads contain the expected owner and runner, and asserts exactly one-of-two or two-of-three
+    durable desired-running reservations.
+  - `tests/unit/create-agent-ready-db.test.ts:454-551` invokes real lifecycle Start against a held
+    ready-create lock, forces the create to fail after its agent insert boundary, and proves complete
+    create rollback followed by Start as the sole reservation with one adapter start.
+  - `tests/unit/create-agent-ready-db.test.ts:553-624` invokes real deployment retry plus pending
+    reconciliation before allowing create to lock; exact revalidation leaves create unassigned and
+    the retry agent is the sole assigned desired-running reservation.
+  - `tests/unit/create-agent-ready-db.test.ts:626-729` invokes real replacement reconciliation while
+    create holds the target lock. The create wins; replacement fails atomically with source assignment
+    preserved, no replacement deployment/event residue, no stale target resurrection, and exactly one
+    target reservation.
+  - `tests/unit/create-agent-ready-db.test.ts:731-829` invokes real Stop/Delete while ready create
+    holds capacity on the local capacity-two profile and proves the committed stopped/tombstoned row
+    is not resurrected; only the new create remains an active desired-running reservation.
+- product lock-order assessment:
+  - `src/server/agents/create-agent.ts:1008-1082` now orders ready-create locking as scoped
+    idempotency lock, owner-aware runner capacity lock/revalidation, then Telegram uniqueness/backfill
+    lock immediately before atomic row insertion. Same-key replay still occurs after the idempotency
+    lock and before placement. Telegram token/subject unique indexes still turn a losing transaction
+    into `TelegramBotInUseError` with full rollback.
+  - inspected Telegram-lock users do not create a reverse runner-lock order: uniqueness backfill
+    takes only the Telegram lock, while ready create is the only caller of the fail-closed legacy
+    Telegram assertion. No lock cycle, authorization broadening, secret exposure, idempotency break,
+    or partial runner reservation was identified. The reorder removes the former global-lock barrier
+    that prevented runner contention tests from reaching their intended boundary.
+- remaining blocking evidence gap:
+  - the completion contract requires seeding compatible spare runners for two users, racing both
+    users on independent connections, and proving each can reserve only its own runner while the
+    foreign row is absent from candidate, lock, reconciliation, and mutation effects. The full diff
+    has owner-aware lock/selection tests and sequential explicit-foreign-runner concealment
+    (`tests/unit/runner-placement.test.ts:168-257` and
+    `tests/unit/create-agent-ready-db.test.ts:1239-1277`), but no simultaneous cross-user create race;
+    `USER_B_ID` is not used by any capacity-lock race. Add that deterministic two-user race with
+    per-user lock payloads and durable per-runner cardinality/ownership assertions. This is a narrow
+    required test/evidence fix; no product counterexample was found.
+- independent gates:
+  - ready-create DB suite passed three consecutive fresh isolated databases: 1 file / 24 tests on
+    each run (2.98s, 2.69s, 2.55s).
+  - focused DB/unit suite passed: 13 files / 356 tests covering resource profiles, placement,
+    ready/legacy create, deployment reconciliation, latency, Hermes readiness, Start route,
+    replacement handover, runner service, runner assignment/manual adapter, and managed lifecycle
+    actions.
+  - `bun run format:check` passed (411 files); `bun run lint` passed (411 files);
+    `bun run typecheck` passed; `git diff --check origin/main...bfbbcb9` passed.
+- authorization/residual scope: local smoke remained forbidden and was not run. No product-code edit,
+  push, PR mutation, merge, provider/QStash request, deploy, workflow, snapshot, hosted configuration,
+  billable action, or other external effect was performed. Hosted defaults remain max one, and #270
+  must remain open for the approved larger profile, disk budget, and authorized provider-backed trial.
+
+## Handoff — #270 Cycle 5 Cross-User Capacity Isolation
+
+- branch/worktree: `codex/issue-270-safe-capacity-reuse` in
+  `/Users/alexmetelli/source/plingpling-issue-270`.
+- commit: this local Cycle 5 commit containing the handoff; no push, PR, or merge was performed.
+- narrow test-only change:
+  - `tests/unit/create-agent-ready-db.test.ts` now seeds one compatible spare runner for `USER_A_ID`
+    and one for `USER_B_ID`, then starts ready create for both owners on independent connections.
+  - both transactions pause after acquiring their capacity locks. The test proves both owner locks
+    are held simultaneously and `pg_blocking_pids` reports zero blocked sessions, as expected for
+    distinct owner/runner lock keys.
+  - exact before/after capacity-lock payloads prove user A selects and locks only user A's runner and
+    user B selects and locks only user B's runner. Explicit negative assertions reject either
+    cross-owner user/runner pair.
+  - after release, durable reads prove exactly two active desired-running assignments, exactly one on
+    each runner, matching owner IDs on both the agent mutations and runner rows. No foreign runner is
+    present in candidate/lock/revalidation-result/mutation effects.
+  - the blocked-session query was extracted into a shared local helper so existing same-runner race
+    polling and the new distinct-runner zero-block assertion use the same observation.
+  - no product source was edited; the Cycle 4 ready-create lock ordering remains unchanged.
+- focused/repetition evidence:
+  - `bun scripts/run-unit-tests.ts tests/unit/create-agent-ready-db.test.ts -t "keeps simultaneous cross-user ready creates isolated"`
+    — passed, 1 test / 24 skipped (907ms).
+  - the same targeted command repeated three consecutive times against fresh isolated databases —
+    passed each time, 1 test / 24 skipped (912ms, 810ms, 807ms).
+  - `bun scripts/run-unit-tests.ts tests/unit/create-agent-ready-db.test.ts` — passed, 1 file / 25
+    tests (2.96s).
+  - reviewer-focused 13-file command covering runner profiles/placement, ready and legacy creation,
+    deployment reconciliation/latency, Hermes readiness, Start route, replacement handover, runner
+    service/assignment/manual adapter, and lifecycle database actions — passed, 13 files / 357 tests
+    (24.41s).
+- static/full gate evidence:
+  - `bun run format:check` — passed, 411 files; `bun run lint` — passed, 411 files;
+    `bun run typecheck` — passed; `git diff --check` — passed.
+  - `bun run test` — passed, 175 files / 1733 tests (85.30s).
+  - `bun run build` — passed (Next.js optimized production build; compile 14.7s, TypeScript 5.1s).
+  - `PORT=3161 NEXT_PUBLIC_APP_URL=http://localhost:3161 bun run test:e2e:ci` — passed, 26/26
+    tests (28.1s).
+  - `bun run repro:cloud-runner` — passed; generated user-data schema valid and 11 `runcmd` bash
+    blocks syntax-valid.
+- authorization/residual scope:
+  - `bun run local:agent:smoke` remained forbidden and was not run.
+  - no real provider/DigitalOcean, QStash, hosted deployment/configuration/secret, workflow dispatch,
+    snapshot build, billable action, push, PR, merge, or other external mutation was performed.
+  - hosted defaults remain fail-closed at one. Keep #270 open for the approved larger profile, disk
+    budget, and an explicitly authorized provider-backed two-agent trial.
