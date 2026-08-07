@@ -429,7 +429,7 @@ describe("runner replacement target reconciliation", () => {
     expect(await sourceSnapshot(connection)).toEqual(sourceBefore);
   });
 
-  it("allows only one concurrent claimant to create and associate the target", async () => {
+  it("allows only one concurrent claimant and provisions the associated target exactly once", async () => {
     const replacementId = await createReplacement(connection);
     const second = createDatabaseConnection(databaseUrl);
     const provider = new FakeDigitalOceanProvider({ now: () => NOW });
@@ -440,6 +440,14 @@ describe("runner replacement target reconciliation", () => {
       ]);
 
       expect(results.every((result) => result.outcome !== "failed")).toBe(true);
+      // A claimant advances exactly one persisted workflow phase. When both claims begin while the
+      // pending row is locked, the loser may correctly return idle before the winner commits the
+      // target association. A later reconcile must provision that target without duplicating it.
+      await expect(
+        reconcile(connection, provider, replacementId, {}, LEASE_A),
+      ).resolves.not.toMatchObject({
+        outcome: "failed",
+      });
       const [workflow] = await connection.db
         .select()
         .from(runnerReplacements)

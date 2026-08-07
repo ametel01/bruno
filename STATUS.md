@@ -800,5 +800,16 @@ Status: FAILED
   releases the shared Docker Compose namespace. No live DigitalOcean/provider, workflow dispatch,
   secrets, deploy, release, or billable effect was run.
 
+### 2026-08-07 — CI concurrency-test diagnosis
+
+- PR #274 CI exposed a pre-existing nondeterministic assertion in the runner-replacement concurrency
+  test. The isolated original test reproduced the exact failure on iteration 18/30: one target row
+  was associated but the shared fake provider had no create call yet.
+- Root cause: each reconcile advances one durable workflow phase. If both concurrent claim attempts
+  begin while the pending row is locked, the `SKIP LOCKED` loser legitimately returns idle before
+  the winner commits the target association; provider creation belongs to a later reconcile.
+- The regression now performs that explicit later reconcile and still asserts one target plus exactly
+  one provider create. The isolated corrected test passed 30/30 stress iterations.
+
 - [#263](https://github.com/ametel01/plingpling/issues/263) / merged
   [PR #272](https://github.com/ametel01/plingpling/pull/272) at `7d1cb98`; prior evidence is in history.
