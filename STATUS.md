@@ -3,12 +3,12 @@
 ## Active Work
 
 - issue: [#265](https://github.com/ametel01/plingpling/issues/265)
-  owner: checker-agent (`issue_265_checker`)
+  owner: builder-agent (`issue_265_builder`)
   branch: `codex/issue-265-runner-sizing`
   worktree: `/Users/alexmetelli/source/plingpling-issue-265`
   pr: none
-  phase: failed checker cycle 1; local smoke passes but ignores requested exact 2 GiB profile
-  cycle: 1/5
+  phase: checker-ready after exact-profile smoke fix
+  cycle: 2/5
 
 ## Completion Contract
 
@@ -205,8 +205,40 @@
   next-action: Verify the narrow diff and gates, especially the serialized local smoke. Do not treat
     local p95 as DigitalOcean evidence and do not merge as complete until provider evidence/default
     selection authorization is resolved.
+- from: builder-agent (`issue_265_builder`)
+  to: checker-agent
+  timestamp: 2026-08-07T09:12:00+08:00
+  request: Re-check #265 after fixing the exact-profile local smoke override.
+  evidence: `scripts/smoke-local-agent-cycle.ts` now preserves an explicit supported
+    `AGENTBAY_DIGITALOCEAN_SIZE_SLUG` and defaults safely to `s-1vcpu-2gb` only when unset. The
+    selected slug is passed through compose/app env, provider creation logs, and final smoke summary.
+    Cleanup was tightened to reject pre-existing labeled host agent containers and remove all labeled
+    leftovers from the owned smoke slot.
+  next-action: Verify the narrow diff and gates. Do not treat local p95 as DigitalOcean evidence and
+    do not merge as complete until provider evidence/default-selection authorization is resolved.
 
 ## Gates
+
+- command: `AGENTBAY_LOCAL_AGENT_CYCLE_APP_HOST_PORT=55300 AGENTBAY_LOCAL_AGENT_CYCLE_POSTGRES_HOST_PORT=55432 AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-2gb AGENTBAY_HERMES_DOCKER_CPUS=1 AGENTBAY_HERMES_DOCKER_MEMORY=1536m AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256 bun run local:agent:smoke`
+  result: pass on 2026-08-07 after exact-profile fix and cleanup hardening.
+  evidence: provider creation log emitted `sizeSlug:"s-1vcpu-2gb"`; final
+    `local_agent_cycle_smoke_passed` summary emitted `sizeSlug:"s-1vcpu-2gb"`,
+    `digitalOceanRequests:0`, `cleanupVerified:true`, `simulatedDroplets:1`, `agentCreated:true`,
+    `agentDeleted:true`, `nestedDocker:true`, `hermesInstalledInsideDroplet:true`, and
+    `hermesGatewayLiveInsideDroplet:true`. Single-run local p95 was `89443` ms. This is local
+    behavior evidence only, not DigitalOcean SLO evidence.
+- command: `docker ps -a --filter name=agentbay-local-cloud-runner --format '{{.Names}} {{.Status}}'`; `docker ps -a --filter name=agentbay-runner --format '{{.Names}} {{.Status}}'`; `docker ps -a --filter name=agentbay-agent-smoke --format '{{.Names}} {{.Status}}'`; `docker ps -a --filter label=agentbay.agent_id --format '{{.Names}} {{.Status}}'`; `docker compose --project-name agentbay-agent-smoke --profile local-cloud ps`
+  result: pass on 2026-08-07 after final smoke.
+  evidence: no simulated Droplet, runner, compose, or labeled agent containers were listed; compose
+    printed only its empty header.
+- command: `bun --conditions react-server scripts/run-unit-tests.ts tests/unit/local-agent-cycle-smoke.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/runner-resource-profiles.test.ts tests/unit/server-env.test.ts`
+  result: pass on 2026-08-07; 4 files, 28 tests.
+- command: `bun run format:check`
+  result: pass on 2026-08-07 after formatting the cleanup hardening.
+- command: `bun run lint`
+  result: pass on 2026-08-07.
+- command: `bun run typecheck`
+  result: pass on 2026-08-07.
 
 ## Checker Result
 Status: FAILED
