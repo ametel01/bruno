@@ -14,9 +14,10 @@ Historical execution evidence:
   owner: coordinator (`root`)
   branch: `codex/goal-postmerge-reconcile`
   worktree: `/Users/alexmetelli/source/plingpling`
-  phase: reconcile merge `f79cb143`, archive exact review state, run retrospective
-  next: merge this tracker-only reconciliation, then assign issue #269 specification and local
-    implementation. Issue #269 must not merge before issue #266 live snapshot evidence exists.
+  phase: remediate PR #282 maintainer finding, then rerun exact-head review and CI
+  next: coordinator personally merges this tracker-only reconciliation after all gates pass, then
+    assigns issue #269 specification and local implementation. Issue #269 must not merge before
+    issue #266 live snapshot evidence exists.
 
 ## Goal Contract
 
@@ -94,7 +95,7 @@ Historical execution evidence:
 ## Worktrees
 
 - `/Users/alexmetelli/source/plingpling`: coordinator-owned
-  `codex/goal-postmerge-reconcile`; dirty only with this reconciliation.
+  `codex/goal-postmerge-reconcile`; clean at PR #282 head before this reviewer-finding correction.
 - `/Users/alexmetelli/source/plingpling-e2e-ready-flake`: clean superseded PR #278 branch; cleanup
   candidate.
 - `/Users/alexmetelli/source/plingpling-e2e-ready-refresh`: clean merged PR #279 branch with deleted
