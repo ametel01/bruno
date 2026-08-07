@@ -7,6 +7,8 @@ import {
 
 export const DIGITALOCEAN_RUNNER_HOST_MEMORY_RESERVE_MIB = 384;
 export const DIGITALOCEAN_LOW_MEMORY_SWAP_RESILIENCE_SIZE_SLUG = "s-1vcpu-512mb-10gb";
+export const HERMES_DOCKER_CPU_NANO_UNITS = 1_000_000_000;
+export const MAX_HERMES_DOCKER_PIDS_LIMIT = 4096;
 
 const DIGITALOCEAN_RUNNER_RESOURCE_PROFILES = {
   "s-1vcpu-512mb-10gb": {
@@ -116,7 +118,7 @@ export function findDigitalOceanRunnerResourceProfile(
 export function isSupportedDigitalOceanRunnerSizeSlug(
   sizeSlug: string | null,
 ): sizeSlug is SupportedDigitalOceanRunnerSizeSlug {
-  return sizeSlug !== null && sizeSlug in DIGITALOCEAN_RUNNER_RESOURCE_PROFILES;
+  return sizeSlug !== null && Object.hasOwn(DIGITALOCEAN_RUNNER_RESOURCE_PROFILES, sizeSlug);
 }
 
 export function isDigitalOceanLowMemorySwapResilienceProfile(sizeSlug: string): boolean {
@@ -172,7 +174,13 @@ export function validateDigitalOceanRunnerResourceCompatibility(
     });
   }
 
-  if (issues.length > 0 || !profile || parsedCpus === null || parsedMemoryMiB === null) {
+  if (
+    issues.length > 0 ||
+    !profile ||
+    parsedCpus === null ||
+    parsedMemoryMiB === null ||
+    parsedPidsLimit === null
+  ) {
     return { ok: false, issues };
   }
 
@@ -239,16 +247,19 @@ export function parseHermesDockerMemoryMiB(value: string): number | null {
 }
 
 export function parseHermesDockerCpus(value: string): number | null {
-  if (!/^[0-9]+(?:\.[0-9]+)?$/.test(value.trim())) return null;
-  const cpus = Number(value);
+  const normalized = value.trim();
+  if (!/^[0-9]+(?:\.[0-9]+)?$/.test(normalized)) return null;
+  const cpus = Number(normalized);
   if (!Number.isFinite(cpus) || cpus <= 0) return null;
+  const nanoCpus = cpus * HERMES_DOCKER_CPU_NANO_UNITS;
+  if (!Number.isSafeInteger(nanoCpus) || nanoCpus < 1) return null;
   return cpus;
 }
 
 export function parseHermesDockerPidsLimit(value: string): number | null {
   if (!/^[1-9][0-9]*$/.test(value.trim())) return null;
   const parsed = Number(value);
-  return Number.isSafeInteger(parsed) ? parsed : null;
+  return Number.isSafeInteger(parsed) && parsed <= MAX_HERMES_DOCKER_PIDS_LIMIT ? parsed : null;
 }
 
 function normalizeDigitalOceanSizeSlug(sizeSlug: string | null | undefined): string | null {

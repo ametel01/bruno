@@ -3,12 +3,12 @@
 ## Active Work
 
 - issue: [#265](https://github.com/ametel01/plingpling/issues/265)
-  owner: maintainer-reviewer (`issue_265_reviewer`)
+  owner: builder-agent (`issue_265_builder`)
   branch: `codex/issue-265-runner-sizing`
   worktree: `/Users/alexmetelli/source/plingpling-issue-265`
   pr: [#273](https://github.com/ametel01/plingpling/pull/273)
-  phase: changes requested on authorization-independent scope
-  cycle: 2/5
+  phase: fixes pushed for merge checks
+  cycle: 3/5
 
 ## Completion Contract
 
@@ -216,6 +216,26 @@
     leftovers from the owned smoke slot.
   next-action: Verify the narrow diff and gates. Do not treat local p95 as DigitalOcean evidence and
     do not merge as complete until provider evidence/default-selection authorization is resolved.
+- from: builder-agent (`issue_265_builder`)
+  to: coordinator / merger
+  timestamp: 2026-08-07T10:02:00+08:00
+  request: Merge PR #273 after remote required checks are green or explicitly classified as
+    non-blocking by the repository owner. The maintainer cycle-2 blockers are fixed without live
+    provider calls and without changing the hosted default slug.
+  evidence: Fixed own-property size-profile lookup; canonical Docker NanoCPU/PID bounds; manual
+    duplicate validation before provider reuse; manual bootstrap propagation of Hermes CPU/memory/
+    PID limits; local smoke simulated Droplet sizing from the selected profile; exact runtime
+    hardening evidence for `SecurityOpt`, `CapDrop`, and `CapAdd`; and regressions across resource
+    profiles, env, price metadata, benchmark parsing, manual/automatic provisioning, bootstrap,
+    runner-service, and local smoke contracts. Gates passed: `bun run format:check`, `bun run
+    lint`, `bun run typecheck`, `bun run test` (170 files / 1652 tests), `bun run build`, and `bun
+    run local:agent:smoke`. Local smoke summary: `digitalOceanRequests: 0`, `sizeSlug:
+    s-1vcpu-2gb`, `resourceProfile: { vcpus: 1, memoryMiB: 2048 }`, `hermesDocker: { cpus: "1",
+    memory: "1536m", pidsLimit: "256", runnerMaxAgents: 1 }`, `readyLatency.p95Ms: 150549`. Stale
+    local-smoke containers were removed before the serialized smoke; cleanup verified no managed
+    smoke containers remained afterward.
+  next-action: Commit, push `codex/issue-265-runner-sizing`, wait for PR #273 checks, and merge only
+    if GitHub reports a mergeable head.
 
 ## Maintainer Review — Cycle 2
 

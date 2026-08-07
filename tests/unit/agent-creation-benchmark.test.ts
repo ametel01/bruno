@@ -87,6 +87,10 @@ describe("agent creation benchmark command", () => {
     expect(() =>
       parseBenchmarkOptions(["--mode", "digitalocean", "--candidate-size-slugs", "s-4vcpu-8gb"]),
     ).toThrow(/Unsupported candidate DigitalOcean size slug/);
+
+    expect(() =>
+      parseBenchmarkOptions(["--mode", "digitalocean", "--candidate-size-slugs", "toString"]),
+    ).toThrow(/Unsupported candidate DigitalOcean size slug/);
   });
 
   it("requires exact bounded positive-integer syntax for report limits", () => {

@@ -827,6 +827,28 @@ export async function createDigitalOceanRunnerForUser(
   };
 
   try {
+    const config = getConfig();
+    const validatedResources = config
+      ? validateDigitalOceanProvisioningResources(config)
+      : ({ ok: true } as const);
+
+    if (!validatedResources.ok) {
+      log(
+        "provider_config_rejected",
+        {
+          issueCount: validatedResources.issues.length,
+          sizeSlug: config?.sizeSlug,
+          runnerMaxAgents: config?.runnerMaxAgents,
+        },
+        "error",
+      );
+      return {
+        ok: false,
+        reason: "validation_failed",
+        issues: validatedResources.issues,
+      };
+    }
+
     const duplicate = await connection.db.transaction(async (tx) => {
       await reconcileTimedOutWaitingForRunnerRows(tx, userId, operationStartedAt);
       const duplicateRunner = await findActiveProvisioningRunner(tx, userId);
@@ -869,29 +891,9 @@ export async function createDigitalOceanRunnerForUser(
       }
     }
 
-    const config = getConfig();
-
     if (!config) {
       log("provider_not_configured", {}, "error");
       return { ok: false, reason: "provider_not_configured" };
-    }
-
-    const validatedResources = validateDigitalOceanProvisioningResources(config);
-    if (!validatedResources.ok) {
-      log(
-        "provider_config_rejected",
-        {
-          issueCount: validatedResources.issues.length,
-          sizeSlug: config.sizeSlug,
-          runnerMaxAgents: config.runnerMaxAgents,
-        },
-        "error",
-      );
-      return {
-        ok: false,
-        reason: "validation_failed",
-        issues: validatedResources.issues,
-      };
     }
 
     const managedTags = [...new Set([...config.tags, DIGITALOCEAN_MANAGED_RUNNER_TAG])].sort();
@@ -1088,6 +1090,9 @@ export async function createDigitalOceanRunnerForUser(
       hermesStateRoot: hermesConfig.hermesStateRoot,
       hermesPrivateNetwork: hermesConfig.hermesPrivateNetwork,
       hermesReadinessTimeoutMs: hermesConfig.hermesReadinessTimeoutMs,
+      hermesDockerCpus: hermesConfig.hermesDockerCpus,
+      hermesDockerMemory: hermesConfig.hermesDockerMemory,
+      hermesDockerPidsLimit: hermesConfig.hermesDockerPidsLimit,
       runnerMaxAgents: hermesConfig.runnerMaxAgents,
       ...(config.providerMode === "local_docker"
         ? { releaseIdentityMode: RUNNER_RELEASE_DEVELOPMENT_MODE }
@@ -1697,7 +1702,7 @@ function resolveHermesDeploymentConfig(config: DigitalOceanProviderConfig): {
 function validateDigitalOceanProvisioningResources(
   config: DigitalOceanProviderConfig,
 ): { ok: true } | { ok: false; issues: CreateRunnerProvisioningValidationIssue[] } {
-  if (config.providerMode === "local_docker") {
+  if (config.providerMode === "local_docker" && !config.localAgentSmokeMode) {
     return { ok: true };
   }
 

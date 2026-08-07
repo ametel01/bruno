@@ -340,6 +340,22 @@ describe("automatic DigitalOcean runner provisioning", () => {
     });
 
     expect(provider.calls).toEqual([]);
+
+    await resetTables(connection);
+    await connection.db.insert(users).values({ id: USER_ID, createdAt: NOW, updatedAt: NOW });
+    await seedProvisioningRunner(connection);
+
+    await expect(
+      advance(connection, provider, 1, undefined, () => NOW, {
+        ...providerConfig(),
+        sizeSlug: "toString",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      cleanupRequired: false,
+      terminalCode: "runner_provisioning_unavailable",
+    });
+    expect(provider.calls).toEqual([]);
     const [runner] = await connection.db.select().from(runners).where(eq(runners.id, RUNNER_ID));
     expect(runner).toMatchObject({
       status: "provision_failed",

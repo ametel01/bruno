@@ -90,6 +90,17 @@ export type LocalAgentCycleSmokeSummary = {
   hermesGatewayLiveInsideDroplet: true;
   hermesInstalledInsideDroplet: true;
   nestedDocker: true;
+  resourceProfile: {
+    memoryMiB: number;
+    sizeSlug: string;
+    vcpus: number;
+  };
+  hermesDocker: {
+    cpus: string;
+    memory: string;
+    pidsLimit: string;
+    runnerMaxAgents: number;
+  };
   runnerId: string;
   runnerProvisioned: true;
   runtimeRestarted: true;
@@ -139,6 +150,10 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
     const config = readDigitalOceanProviderConfig(smokeEnv);
     if (config?.providerMode !== "local_docker" || !config.localAgentSmokeMode) {
       throw new Error("Local agent cycle provider configuration did not remain isolated.");
+    }
+    const resourceProfile = findDigitalOceanRunnerResourceProfile(config.sizeSlug);
+    if (!resourceProfile) {
+      throw new Error("Local agent cycle selected an unsupported managed-runner profile.");
     }
     provider = createConfiguredDigitalOceanProvider(config);
 
@@ -243,7 +258,18 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
       fakeModelBoundary: true,
       hermesGatewayLiveInsideDroplet: true,
       hermesInstalledInsideDroplet: true,
+      hermesDocker: {
+        cpus: config.hermesDockerCpus ?? "1",
+        memory: config.hermesDockerMemory ?? "1536m",
+        pidsLimit: config.hermesDockerPidsLimit ?? "256",
+        runnerMaxAgents: config.runnerMaxAgents ?? 1,
+      },
       nestedDocker: true,
+      resourceProfile: {
+        memoryMiB: resourceProfile.memoryMiB,
+        sizeSlug: resourceProfile.sizeSlug,
+        vcpus: resourceProfile.vcpus,
+      },
       runnerId,
       runnerProvisioned: true,
       runtimeRestarted: true,

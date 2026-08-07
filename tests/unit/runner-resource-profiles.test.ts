@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   DIGITALOCEAN_RUNNER_HOST_MEMORY_RESERVE_MIB,
+  MAX_HERMES_DOCKER_PIDS_LIMIT,
+  findDigitalOceanRunnerResourceProfile,
+  isSupportedDigitalOceanRunnerSizeSlug,
   listDigitalOceanRunnerResourceProfiles,
+  parseHermesDockerCpus,
+  parseHermesDockerPidsLimit,
   validateDigitalOceanRunnerResourceCompatibility,
 } from "@/src/server/runners/runner-resource-profiles";
 
@@ -62,6 +67,35 @@ describe("DigitalOcean runner resource profiles", () => {
       requiredPhysicalMemoryMiB: 1536 + DIGITALOCEAN_RUNNER_HOST_MEMORY_RESERVE_MIB,
       hostMemoryReserveMiB: DIGITALOCEAN_RUNNER_HOST_MEMORY_RESERVE_MIB,
     });
+  });
+
+  it("rejects inherited object property names as supported size slugs", () => {
+    for (const sizeSlug of ["toString", "constructor"]) {
+      expect(isSupportedDigitalOceanRunnerSizeSlug(sizeSlug)).toBe(false);
+      expect(findDigitalOceanRunnerResourceProfile(sizeSlug)).toBeNull();
+      expect(
+        validateDigitalOceanRunnerResourceCompatibility({
+          sizeSlug,
+          runnerMaxAgents: 1,
+          hermesDockerCpus: "1",
+          hermesDockerMemory: "1536m",
+          hermesDockerPidsLimit: "256",
+        }),
+      ).toMatchObject({
+        ok: false,
+        issues: [expect.objectContaining({ field: "AGENTBAY_DIGITALOCEAN_SIZE_SLUG" })],
+      });
+    }
+  });
+
+  it("fails closed for CPU precision and PID limits Docker can actually represent", () => {
+    expect(parseHermesDockerCpus("0.000000001")).toBe(0.000000001);
+    expect(parseHermesDockerCpus("0.0000000001")).toBeNull();
+    expect(parseHermesDockerCpus("1.0000000001")).toBeNull();
+    expect(parseHermesDockerPidsLimit(String(MAX_HERMES_DOCKER_PIDS_LIMIT))).toBe(
+      MAX_HERMES_DOCKER_PIDS_LIMIT,
+    );
+    expect(parseHermesDockerPidsLimit(String(MAX_HERMES_DOCKER_PIDS_LIMIT + 1))).toBeNull();
   });
 
   it("rejects 512 MiB and 1 GiB hosts for the 1536 MiB Hermes limit without counting swap", () => {

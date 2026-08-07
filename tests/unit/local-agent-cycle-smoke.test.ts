@@ -51,6 +51,11 @@ describe("local full agent-cycle smoke", () => {
         AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-2vcpu-4gb",
       }),
     ).toThrow(/supported managed-runner size slug/);
+    expect(() =>
+      resolveLocalAgentCycleSizeSlug({
+        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "toString",
+      }),
+    ).toThrow(/supported managed-runner size slug/);
   });
 
   it("enables synthetic runner boundaries only on isolated host callbacks", () => {
@@ -117,6 +122,11 @@ describe("local full agent-cycle smoke", () => {
     expect(source).toContain('DEFAULT_LOCAL_AGENT_CYCLE_SIZE_SLUG = "s-1vcpu-2gb"');
     expect(source).toContain("AGENTBAY_DIGITALOCEAN_SIZE_SLUG: selectedSizeSlug");
     expect(source).toContain("sizeSlug: config.sizeSlug");
+    expect(source).toContain("resourceProfile: {");
+    expect(source).toContain("memoryMiB: resourceProfile.memoryMiB");
+    expect(source).toContain("vcpus: resourceProfile.vcpus");
+    expect(source).toContain("hermesDocker: {");
+    expect(source).toContain("pidsLimit: config.hermesDockerPidsLimit");
     expect(source).toMatch(/http:\/\/host\.docker\.internal:\$\{APP_HOST_PORT\}/);
     expect(source).toMatch(/http:\/\/127\.0\.0\.1:\$\{APP_HOST_PORT\}\/health/);
     expect(source).toContain("restartAgentForUser");

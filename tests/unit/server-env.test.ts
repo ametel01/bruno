@@ -351,6 +351,10 @@ describe("server-only provider environment validation", () => {
         AGENTBAY_DIGITALOCEAN_TOKEN: "local-docker",
         AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
         AGENTBAY_RUNNER_IMAGE: "agentbay-runner:local",
+        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
+        AGENTBAY_HERMES_DOCKER_CPUS: "1",
+        AGENTBAY_HERMES_DOCKER_MEMORY: "1536m",
+        AGENTBAY_HERMES_DOCKER_PIDS_LIMIT: "256",
         AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: "http://host.docker.internal:3045",
         AGENTBAY_LOCAL_CLOUD_RUNNER_CONTAINER_NAME: "agentbay-local-cloud-runner",
         AGENTBAY_LOCAL_CLOUD_RUNNER_START_DELAY_MS: "0",
@@ -361,6 +365,7 @@ describe("server-only provider environment validation", () => {
       providerMode: "local_docker",
       runnerBearerToken: "runner-command-token",
       runnerImage: "agentbay-runner:local",
+      sizeSlug: "s-1vcpu-2gb",
       localRunnerEndpointUrl: "http://host.docker.internal:3045",
       localRunnerContainerName: "agentbay-local-cloud-runner",
       localRunnerStartDelayMs: 0,
@@ -386,6 +391,17 @@ describe("server-only provider environment validation", () => {
         AGENTBAY_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
       }),
     ).toThrow(EnvValidationError);
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
+        AGENTBAY_DIGITALOCEAN_TOKEN: "local-docker",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_RUNNER_IMAGE: "agentbay-runner:local",
+        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-512mb-10gb",
+        AGENTBAY_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
+      }),
+    ).toThrow("Swap is not counted as compatible memory");
   });
 
   it("parses DigitalOcean SSH access configuration for Droplet creation", () => {
@@ -497,6 +513,22 @@ describe("server-only provider environment validation", () => {
         AGENTBAY_HERMES_READINESS_TIMEOUT_MS: "0",
       }),
     ).toThrow("AGENTBAY_HERMES_READINESS_TIMEOUT_MS must be a positive integer");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_HERMES_DOCKER_CPUS: "0.0000000001",
+      }),
+    ).toThrow("AGENTBAY_HERMES_DOCKER_CPUS must be a positive Docker CPU value representable");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_HERMES_DOCKER_PIDS_LIMIT: "4097",
+      }),
+    ).toThrow("AGENTBAY_HERMES_DOCKER_PIDS_LIMIT must be a positive integer no greater than 4096");
 
     try {
       readDigitalOceanProviderConfig({

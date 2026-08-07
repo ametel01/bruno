@@ -296,6 +296,28 @@ describe.sequential("cloud runner bootstrap content", () => {
     });
   });
 
+  it("rejects Hermes runtime settings Docker cannot represent", () => {
+    const base = {
+      appBaseUrl: "https://app.agentbay.test",
+      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      runnerName: "Cloud Runner 1",
+    };
+
+    expect(() =>
+      buildCloudRunnerBootstrapContent({
+        ...base,
+        hermesDockerCpus: "0.0000000001",
+      }),
+    ).toThrow("hermesDockerCpus must be a positive Docker CPU value representable");
+
+    expect(() =>
+      buildCloudRunnerBootstrapContent({
+        ...base,
+        hermesDockerPidsLimit: "4097",
+      }),
+    ).toThrow("hermesDockerPidsLimit must be a positive integer no greater than 4096");
+  });
+
   it("rejects loopback runner endpoint URLs for cloud bootstrap registration", () => {
     expect(() =>
       buildCloudRunnerBootstrapContent({

@@ -26,6 +26,12 @@ import { DEFAULT_AGENTBAY_RUNNER_IMAGE } from "@/src/server/env";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { DIGITALOCEAN_PROVIDER } from "@/src/server/runners/digitalocean-provider";
 import { markCloudRunnerBootstrapInjected } from "@/src/server/runners/runner-provisioning-events";
+import {
+  MAX_HERMES_DOCKER_PIDS_LIMIT,
+  parseHermesDockerCpus,
+  parseHermesDockerMemoryMiB,
+  parseHermesDockerPidsLimit,
+} from "@/src/server/runners/runner-resource-profiles";
 
 export const DEFAULT_CLOUD_RUNNER_ENV_FILE = "/etc/agentbay/runner.env";
 export const DEFAULT_CLOUD_RUNNER_HOST = "127.0.0.1";
@@ -389,7 +395,7 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
       input.hermesDockerMemory?.trim() || DEFAULT_HERMES_DOCKER_MEMORY,
       "hermesDockerMemory",
     ),
-    hermesDockerPidsLimit: normalizePositiveIntegerString(
+    hermesDockerPidsLimit: normalizeDockerPidsLimit(
       input.hermesDockerPidsLimit?.trim() || DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
       "hermesDockerPidsLimit",
     ),
@@ -448,25 +454,29 @@ function normalizePositiveInteger(value: number, field: string): number {
   return value;
 }
 
-function normalizePositiveIntegerString(value: string, field: string): string {
-  if (!/^[1-9][0-9]*$/.test(value)) {
-    throw new Error(`${field} must be a positive integer.`);
-  }
-
-  return value;
-}
-
 function normalizeDockerCpuLimit(value: string, field: string): string {
-  if (!/^[0-9]+(?:\.[0-9]+)?$/.test(value) || Number(value) <= 0) {
-    throw new Error(`${field} must be a positive Docker CPU value.`);
+  if (parseHermesDockerCpus(value) === null) {
+    throw new Error(
+      `${field} must be a positive Docker CPU value representable to Docker NanoCPUs.`,
+    );
   }
 
   return value;
 }
 
 function normalizeDockerMemoryLimit(value: string, field: string): string {
-  if (!/^[1-9][0-9]*[bkmg]?$/i.test(value)) {
-    throw new Error(`${field} must be a positive Docker memory value.`);
+  if (parseHermesDockerMemoryMiB(value) === null) {
+    throw new Error(`${field} must be a positive whole-MiB Docker memory value.`);
+  }
+
+  return value;
+}
+
+function normalizeDockerPidsLimit(value: string, field: string): string {
+  if (parseHermesDockerPidsLimit(value) === null) {
+    throw new Error(
+      `${field} must be a positive integer no greater than ${MAX_HERMES_DOCKER_PIDS_LIMIT}.`,
+    );
   }
 
   return value;

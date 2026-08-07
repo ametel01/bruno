@@ -18,7 +18,13 @@ import {
   DEFAULT_HERMES_WORKLOAD_IMAGE,
 } from "@/src/runner-service/constants";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
-import { validateDigitalOceanRunnerResourceCompatibility } from "@/src/server/runners/runner-resource-profiles";
+import {
+  MAX_HERMES_DOCKER_PIDS_LIMIT,
+  parseHermesDockerCpus,
+  parseHermesDockerMemoryMiB,
+  parseHermesDockerPidsLimit,
+  validateDigitalOceanRunnerResourceCompatibility,
+} from "@/src/server/runners/runner-resource-profiles";
 
 export const DEFAULT_AGENTBAY_RUNNER_IMAGE = "ghcr.io/ametel01/agentbay-runner:main";
 
@@ -380,7 +386,7 @@ export function readDigitalOceanProviderConfig(
     ]);
   }
 
-  if (providerMode === "digitalocean") {
+  if (providerMode === "digitalocean" || config.localAgentSmokeMode) {
     const resourceCompatibility = validateDigitalOceanRunnerResourceCompatibility(config);
 
     if (!resourceCompatibility.ok) {
@@ -488,8 +494,10 @@ function readDockerCpuLimit(
 ): string {
   const normalizedValue = readNonEmptyProviderSetting(value, options);
 
-  if (!/^[0-9]+(?:\.[0-9]+)?$/.test(normalizedValue) || Number(normalizedValue) <= 0) {
-    throw new EnvValidationError([`${options.envName} must be a positive Docker CPU value.`]);
+  if (parseHermesDockerCpus(normalizedValue) === null) {
+    throw new EnvValidationError([
+      `${options.envName} must be a positive Docker CPU value representable to Docker NanoCPUs.`,
+    ]);
   }
 
   return normalizedValue;
@@ -501,9 +509,9 @@ function readDockerMemoryLimit(
 ): string {
   const normalizedValue = readNonEmptyProviderSetting(value, options);
 
-  if (!/^[1-9][0-9]*[bkmg]?$/i.test(normalizedValue)) {
+  if (parseHermesDockerMemoryMiB(normalizedValue) === null) {
     throw new EnvValidationError([
-      `${options.envName} must be a positive Docker memory value such as 1536m or 2g.`,
+      `${options.envName} must be a positive whole-MiB Docker memory value such as 1536m or 2g.`,
     ]);
   }
 
@@ -516,8 +524,10 @@ function readDockerPidsLimit(
 ): string {
   const normalizedValue = readNonEmptyProviderSetting(value, options);
 
-  if (!/^[1-9][0-9]*$/.test(normalizedValue)) {
-    throw new EnvValidationError([`${options.envName} must be a positive integer.`]);
+  if (parseHermesDockerPidsLimit(normalizedValue) === null) {
+    throw new EnvValidationError([
+      `${options.envName} must be a positive integer no greater than ${MAX_HERMES_DOCKER_PIDS_LIMIT}.`,
+    ]);
   }
 
   return normalizedValue;

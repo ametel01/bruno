@@ -90,7 +90,16 @@ describe("DigitalOcean runner price metadata", () => {
   });
 
   it("returns explicit unavailable metadata for unknown or manual runner sizes", () => {
-    for (const sizeSlug of [null, undefined, "", "   ", "manual-runner", "s-4vcpu-8gb"]) {
+    for (const sizeSlug of [
+      null,
+      undefined,
+      "",
+      "   ",
+      "manual-runner",
+      "s-4vcpu-8gb",
+      "toString",
+      "constructor",
+    ]) {
       expect(getDigitalOceanRunnerPriceMetadata(sizeSlug)).toEqual({
         available: false,
         provider: "digitalocean",
@@ -112,12 +121,16 @@ describe("DigitalOcean runner price metadata", () => {
     const serializedUnknownPrice = JSON.stringify(
       getDigitalOceanRunnerPriceMetadata("dop_v1_super_secret"),
     );
+    const serializedInheritedKeyPrice = JSON.stringify(
+      getDigitalOceanRunnerPriceMetadata("toString"),
+    );
 
     expect(serializedKnownPrice).not.toContain("token");
     expect(serializedKnownPrice).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN");
     expect(serializedKnownPrice).not.toContain("dop_v1");
     expect(serializedKnownPrice).not.toContain("endpoint");
     expect(serializedUnknownPrice).not.toContain("dop_v1");
+    expect(serializedInheritedKeyPrice).not.toContain("NaN");
     expect(serializedUnknownPrice).not.toContain("token");
     expect(serializedUnknownPrice).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN");
     expect(serializedUnknownPrice).not.toContain("endpoint");
