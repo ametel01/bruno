@@ -1020,8 +1020,6 @@ async function createReadyAgentForUser(
         return replayInTransaction;
       }
 
-      await assertNoUnbackfilledActiveTelegramSecretsInTransaction(tx);
-
       const placement = await selectRunnerPlacementForUserInTransaction(
         tx,
         userId,
@@ -1080,6 +1078,8 @@ async function createReadyAgentForUser(
           throw new AgentRunnerAssignmentError();
         }
       }
+
+      await assertNoUnbackfilledActiveTelegramSecretsInTransaction(tx);
 
       const [agent] = await tx
         .insert(agents)
