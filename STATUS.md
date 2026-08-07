@@ -9,8 +9,8 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
   branch: `codex/issue-267-provider-phase-drain`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: builder implementation complete; ready for checker
-  cycle: 1/5
+  phase: checker cycle 1 local-smoke blocker fixed; ready for checker
+  cycle: 2/5
 
 ## Goal Contract
 
@@ -174,8 +174,10 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 - files changed: `CHANGELOG.md`, `PROGRESS.md`, `STATUS.md`,
   `src/server/runners/runner-provisioning.ts`,
   `src/server/runners/digitalocean-provider.ts`,
+  `src/server/runners/local-docker-digitalocean-provider.ts`,
   `src/server/agents/agent-deployment-reconciler.ts`,
   `tests/unit/automatic-runner-provisioning.test.ts`,
+  `tests/unit/local-docker-digitalocean-provider.test.ts`,
   `tests/unit/agent-deployment-reconciler.test.ts`,
   `tests/unit/digitalocean-provider.test.ts`,
   `tests/unit/runner-infrastructure-reconciler.test.ts`, and
@@ -186,12 +188,23 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
   effects before replay, persists waiting status/firewall/endpoint in one checkpoint, rechecks
   deployment lease/config/desired-running authority before provider effects, and returns typed
   dispositions consumed by the reconciler for immediate versus external-wait wakeups.
+- checker cycle 1 fix: coordinator serialized local smoke at `b476652` exposed that
+  `LocalDockerDigitalOceanProvider` did not implement the authoritative managed-inventory/firewall
+  observation path, so local_docker stopped at `provider_firewall_observation_failed` with reason
+  `unsupported` and scheduled repeated `runner_not_ready` backoffs. The local provider now returns
+  authoritative local inventory, records deterministic firewall names, and preserves cleanup state
+  without changing fail-closed real-provider semantics.
 - tests added/updated: one-call normal fake drain, create/tag/firewall after-effect crash recovery,
-  immediate provisioner wakeup disposition, updated replacement/infrastructure/provider assertions
-  for bounded drain and firewall-name metadata.
+  one-call local_docker drain to `waiting_for_runner`, immediate provisioner wakeup disposition, and
+  updated replacement/infrastructure/provider assertions for bounded drain and firewall-name
+  metadata.
 - gates passed:
-  - `bun scripts/run-unit-tests.ts tests/unit/automatic-runner-provisioning.test.ts` — 14 tests
+  - `bun scripts/run-unit-tests.ts tests/unit/automatic-runner-provisioning.test.ts` — 15 tests
     passed.
+  - `bun scripts/run-unit-tests.ts tests/unit/local-docker-digitalocean-provider.test.ts` — 4 tests
+    passed.
+  - `bun scripts/run-unit-tests.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/local-docker-digitalocean-provider.test.ts`
+    — 19 tests passed.
   - `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-reconciler.test.ts` — 41 tests
     passed.
   - `bun scripts/run-unit-tests.ts tests/unit/digitalocean-provider.test.ts` — 17 tests passed.
@@ -200,7 +213,7 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
   - `bun scripts/run-unit-tests.ts tests/unit/runner-replacement-reconciler.test.ts` — 11 tests
     passed.
   - `bun run format:check`; `bun run lint`; `bun run typecheck`; `git diff --check`; `bun run test`
-    — 174 files / 1700 tests; `bun run build`; `bun run test:e2e:ci` — 26 tests;
+    — 174 files / 1701 tests; `bun run build`; `bun run test:e2e:ci` — 26 tests;
     `bun run repro:cloud-runner`.
 - skipped: `bun run local:agent:smoke` was intentionally not run; coordinator must serialize the
   local Docker smoke slot. No real DigitalOcean/QStash/deploy/release/billable action was run.

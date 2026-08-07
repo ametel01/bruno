@@ -10,6 +10,7 @@ import {
   type DigitalOceanDiscoverByTagInput,
   type DigitalOceanDiscovery,
   type DigitalOceanFirewallInput,
+  type DigitalOceanManagedInventoryInput,
   type DigitalOceanProvider,
   type DigitalOceanProviderRequestContext,
   type DigitalOceanProviderResult,
@@ -105,6 +106,7 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
       provider: DIGITALOCEAN_PROVIDER,
       providerResourceId: LOCAL_DOCKER_DIGITALOCEAN_RESOURCE_ID,
       providerFirewallId: null,
+      providerFirewallName: null,
       publicIpv4: null,
       publicEndpointUrl: this.#endpointUrl,
       name: input.name,
@@ -137,6 +139,30 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
 
     for (const resource of this.#resources.values()) {
       if (resource.deletedAt === null && resource.tags.includes(input.tag)) {
+        resources.push(cloneResource(resource));
+      }
+    }
+
+    return {
+      ok: true,
+      value: {
+        authoritative: true,
+        resources,
+      },
+    };
+  }
+
+  async listManagedResources(
+    input: DigitalOceanManagedInventoryInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanDiscovery>> {
+    if (context?.signal.aborted) {
+      return localCancelledResource("discovery_failed");
+    }
+    const resources: DigitalOceanResource[] = [];
+
+    for (const resource of this.#resources.values()) {
+      if (resource.deletedAt === null && resource.tags.includes(input.stableTag)) {
         resources.push(cloneResource(resource));
       }
     }
@@ -195,6 +221,7 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
 
     resource.firewallApplied = true;
     resource.providerFirewallId ??= `local-docker-firewall-${randomUUID()}`;
+    resource.providerFirewallName = input.firewallName;
 
     return { ok: true, value: cloneResource(resource) };
   }
@@ -211,6 +238,9 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
 
     await this.#removeLocalContainers(context);
     resource.deletedAt = this.#now().toISOString();
+    resource.firewallApplied = false;
+    resource.providerFirewallId = null;
+    resource.providerFirewallName = null;
 
     return { ok: true, value: cloneResource(resource) };
   }

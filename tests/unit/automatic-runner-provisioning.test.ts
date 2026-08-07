@@ -14,6 +14,7 @@ import {
   type DigitalOceanProvider,
   FakeDigitalOceanProvider,
 } from "@/src/server/runners/digitalocean-provider";
+import { LocalDockerDigitalOceanProvider } from "@/src/server/runners/local-docker-digitalocean-provider";
 import {
   advanceAutomaticDigitalOceanRunnerProvisioning,
   digitalOceanRunnerFirewallName,
@@ -102,6 +103,54 @@ describe("automatic DigitalOcean runner provisioning", () => {
       expect(completedAt).toBeInstanceOf(Date);
       expect((completedAt as Date).getTime()).toBeGreaterThan((startedAt as Date).getTime());
     }
+  });
+
+  it("drains the local Docker provider path to waiting_for_runner in one bounded call", async () => {
+    const dockerCalls: string[][] = [];
+    const provider = new LocalDockerDigitalOceanProvider({
+      endpointUrl: "http://127.0.0.1:3045",
+      now: () => NOW,
+      startDelayMs: 0,
+      docker: async (args) => {
+        dockerCalls.push([...args]);
+        return { stdout: "ok\n", stderr: "" };
+      },
+    });
+
+    await expect(
+      advance(connection, provider, 1, undefined, () => NOW, localDockerProviderConfig()),
+    ).resolves.toEqual({
+      ok: true,
+      state: "pending",
+      disposition: "external_wait",
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const [runner] = await connection.db.select().from(runners).where(eq(runners.id, RUNNER_ID));
+    expect(runner).toMatchObject({
+      providerResourceId: "local-docker-droplet",
+      providerFirewallId: expect.stringMatching(/^local-docker-firewall-/),
+      provisioningStatus: "waiting_for_runner",
+      status: "registering",
+      endpointUrl: "http://127.0.0.1:3045",
+    });
+    const discovered = await provider.discoverResourcesByTag({ tag: OPERATION_KEY });
+    expect(discovered).toMatchObject({
+      ok: true,
+      value: {
+        authoritative: true,
+        resources: [
+          expect.objectContaining({
+            providerResourceId: "local-docker-droplet",
+            firewallApplied: true,
+            providerFirewallName: "agentbay-runners-local-docker-droplet",
+            tags: expect.arrayContaining([OPERATION_KEY, "agentbay", "agentbay-runner"]),
+          }),
+        ],
+      },
+    });
+    expect(dockerCalls.filter((call) => call[0] === "run")).toHaveLength(1);
   });
 
   it("adopts one exact-tag resource after a crash without issuing a second create", async () => {
@@ -626,6 +675,16 @@ function providerConfig(): DigitalOceanProviderConfig {
     tags: ["agentbay", "agentbay-runner"],
     sshKeyIds: ["fake-key"],
     sshSourceAddresses: ["203.0.113.5/32"],
+  };
+}
+
+function localDockerProviderConfig(): DigitalOceanProviderConfig {
+  return {
+    ...providerConfig(),
+    token: "local-docker",
+    providerMode: "local_docker",
+    runnerImage: "agentbay-runner:local",
+    localRunnerEndpointUrl: "http://127.0.0.1:3045",
   };
 }
 
