@@ -1629,3 +1629,31 @@ Status: ALL GREEN
 
 - Checker verdict: #268 is merge-ready for its repository scope after coordinator/PR/CI policy. No
   implementation change, push, PR, merge, smoke, or external effect was performed by checker.
+
+## Post-Merge E2E Synchronization Fix — Builder
+
+- scope: diagnose the recurring desktop failure in `tests/e2e/automatic-ready.spec.ts` after #277
+  and fix only test synchronization unless production behavior proved incorrect.
+- diagnosis: `requestImmediatePoll` dispatched `online` and returned without observing network
+  activity. When the deployment component already had a GET in flight, its intentional
+  `inFlightRef` guard ignored that event; the old nonterminal response could then complete without
+  any fresh post-update poll before Playwright's Ready assertion. The mobile pass and intermittent
+  desktop rerun were timing variance around this test race, not evidence of a production defect.
+- red evidence: the baseline desktop scenario passed once in 5.4 seconds. A deterministic browser
+  regression then held a completed `connecting_telegram` GET before delivery, committed `ready`,
+  invoked the helper while the component remained in flight, and released the stale response. The
+  old helper returned after only one request (`expected >= 2`, received `1`) without a post-update
+  response.
+- fix: the Playwright helper registers a deployment-response waiter before dispatching `online` and
+  awaits whichever deployment response completes. If that response is nonterminal, it waits for
+  completion and one browser frame, triggers again, and awaits the fresh GET. Failure-path calls
+  retain their request-count synchronization. The regression requires the held stale request plus a
+  fresh request and reaches Ready within one second after the helper resolves. No production
+  component, polling interval, or assertion timeout was increased.
+- gates: deterministic desktop race green once; repeated exact desktop scenario 10/10 during
+  refinement and 5/5 on the final helper; full `automatic-ready.spec.ts` desktop/mobile coverage
+  12/12; `bun run format:check`; `bun run lint`; `bun run typecheck`; and `git diff --check` passed.
+- external effects: none. Only the local development server, local test database, Playwright route
+  interception, and fake/local fixtures were used. No DigitalOcean, QStash, workflow, deploy,
+  release, hosted-secret, or billable action ran.
+- pending: independent review or coordinator integration. Builder did not push, open a PR, or merge.

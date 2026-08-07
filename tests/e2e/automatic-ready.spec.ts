@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { type BrowserContext, expect, type Page, type Request, test } from "@playwright/test";
+import {
+  type BrowserContext,
+  expect,
+  type Page,
+  type Request,
+  type Response,
+  type Route,
+  test,
+} from "@playwright/test";
 import postgres from "postgres";
 
 const DEVELOPMENT_USER_E2E_LOCK_KEY = 125_228;
@@ -230,6 +238,8 @@ test("automatic submission follows persisted progress to ready across refresh, r
         });
       });
 
+      let heldReopenedPoll: Awaited<ReturnType<typeof holdNextDeploymentPoll>> | null = null;
+
       try {
         await secondPage.goto(detailUrl);
         await expectCurrentStage(secondPage, "Preparing your agent");
@@ -239,6 +249,10 @@ test("automatic submission follows persisted progress to ready across refresh, r
         secondContextStage = "connecting_telegram";
         await requestImmediatePoll(secondPage);
         await expectCurrentStage(secondPage, "Connecting Telegram");
+
+        heldReopenedPoll = await holdNextDeploymentPoll(reopenedPage, agentId);
+        await reopenedPage.reload();
+        await heldReopenedPoll.waitUntilHeld();
 
         await updateDeploymentStage(agentId, deploymentId, "ready");
         secondContextStage = "ready";
@@ -260,11 +274,21 @@ test("automatic submission follows persisted progress to ready across refresh, r
           createIdempotencyKey,
         ]);
         expect(secondEvidence.externalRequests).toEqual([]);
+
+        const immediatePoll = requestImmediatePoll(reopenedPage);
+        await reopenedPage.evaluate(() => undefined);
+        heldReopenedPoll.release();
+        await immediatePoll;
+        expect(heldReopenedPoll.requestCount()).toBeGreaterThanOrEqual(2);
+        await expect(reopenedPage.locator("#deployment-progress-title")).toHaveText("Ready", {
+          timeout: 1_000,
+        });
       } finally {
+        heldReopenedPoll?.release();
+        await heldReopenedPoll?.dispose();
         await secondContext.close();
       }
 
-      await requestImmediatePoll(reopenedPage);
       await expectCurrentStage(reopenedPage, "Ready");
       await expectNoSensitiveExposure(reopenedPage, context, evidence, [
         OPENAI_CANARY,
@@ -563,9 +587,9 @@ test("observation failures degrade after three reads and recover without changin
 
       await page.goto(`/agents/${agentId}`);
       await expect.poll(() => deploymentReads).toBeGreaterThanOrEqual(1);
-      await requestImmediatePoll(page);
+      await dispatchImmediatePoll(page);
       await expect.poll(() => deploymentReads).toBeGreaterThanOrEqual(2);
-      await requestImmediatePoll(page);
+      await dispatchImmediatePoll(page);
       await expect.poll(() => deploymentReads).toBeGreaterThanOrEqual(3);
       await expect(page.getByText("Progress updates are temporarily unavailable")).toBeVisible();
       await expectCurrentStage(page, "Preparing your agent");
@@ -654,7 +678,77 @@ async function expectCurrentStage(page: Page, label: string): Promise<void> {
 }
 
 async function requestImmediatePoll(page: Page): Promise<void> {
+  const firstResponse = page.waitForResponse(isDeploymentPollResponse);
+  await dispatchImmediatePoll(page);
+  const response = await firstResponse;
+
+  if (await responseHasTerminalDeployment(response)) {
+    return;
+  }
+
+  await response.finished();
+  await page.evaluate(
+    () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())),
+  );
+  const freshResponse = page.waitForResponse(isDeploymentPollResponse);
+  await dispatchImmediatePoll(page);
+  await freshResponse;
+}
+
+async function dispatchImmediatePoll(page: Page): Promise<void> {
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
+}
+
+function isDeploymentPollResponse(response: Response): boolean {
+  const request = response.request();
+  return (
+    request.method() === "GET" &&
+    /^\/api\/agents\/[^/]+\/deployment$/.test(new URL(request.url()).pathname)
+  );
+}
+
+async function responseHasTerminalDeployment(response: Response): Promise<boolean> {
+  try {
+    const body = (await response.json()) as { deployment?: { stage?: unknown } };
+    return body.deployment?.stage === "ready" || body.deployment?.stage === "failed";
+  } catch {
+    return false;
+  }
+}
+
+async function holdNextDeploymentPoll(page: Page, agentId: string) {
+  const deploymentUrl = `**/api/agents/${agentId}/deployment`;
+  let releaseHeldResponse = () => {};
+  const heldResponseReleased = new Promise<void>((resolve) => {
+    releaseHeldResponse = resolve;
+  });
+  let markResponseHeld = () => {};
+  const responseHeld = new Promise<void>((resolve) => {
+    markResponseHeld = resolve;
+  });
+  let requestCount = 0;
+  let shouldHold = true;
+  const handler = async (route: Route) => {
+    requestCount += 1;
+    const response = await route.fetch();
+
+    if (shouldHold) {
+      shouldHold = false;
+      markResponseHeld();
+      await heldResponseReleased;
+    }
+
+    await route.fulfill({ response });
+  };
+
+  await page.route(deploymentUrl, handler);
+
+  return {
+    dispose: () => page.unroute(deploymentUrl, handler),
+    release: releaseHeldResponse,
+    requestCount: () => requestCount,
+    waitUntilHeld: () => responseHeld,
+  };
 }
 
 async function expectNoHorizontalOverflow(page: Page): Promise<void> {
