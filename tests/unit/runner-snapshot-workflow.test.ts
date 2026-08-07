@@ -21,6 +21,17 @@ describe("runner snapshot workflow", () => {
       workflow.indexOf("Validate authorization and static inputs before secrets"),
     ).toBeLessThan(workflow.indexOf("AGENTBAY_DIGITALOCEAN_TOKEN"));
     expect(workflow).toContain("if: always()");
+    expect(workflow).toContain("Require builder-produced boot evidence");
+    expect(workflow).toContain("Require builder-produced sanitation evidence");
+    expect(workflow).toContain("preloadedImages");
+    expect(workflow).toContain("removedPaths");
+    expect(workflow).toContain("hostileMarkers");
+    expect(workflow).not.toContain("bun run runner:release:smoke -- --image");
+    expect(workflow).not.toContain('"ok": true');
+    expect(workflow).toContain("actions/attest-build-provenance@v2");
+    expect(workflow.indexOf("Attest allowlisted manifest artifacts")).toBeLessThan(
+      workflow.indexOf("Upload allowlisted manifest artifacts"),
+    );
     expect(workflow).toContain("runner-snapshot-manifest.json");
     expect(workflow).not.toContain("on:\n  push");
     expect(workflow).not.toContain("pull_request");

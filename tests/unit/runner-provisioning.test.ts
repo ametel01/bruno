@@ -8,6 +8,8 @@ import {
   users,
 } from "@/src/server/db/schema";
 import { FakeDigitalOceanProvider } from "@/src/server/runners/digitalocean-provider";
+import type { DigitalOceanProviderConfig } from "@/src/server/env";
+import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
 import { createRunnerRegistrationToken } from "@/src/server/runners/runner-auth-secrets";
 import {
   createDigitalOceanRunnerForDevelopmentUser,
@@ -301,6 +303,26 @@ describe.sequential("runner provisioning service", () => {
       ]),
     );
     expect(persistedTokens).toEqual([{ userId: owner.id }]);
+  });
+
+  it("fails manual snapshot provisioning before any Droplet create when evidence is invalid", async () => {
+    const [owner] = await connection.db.insert(users).values({}).returning({ id: users.id });
+    if (!owner) throw new Error("User insert returned no row.");
+
+    const provider = new FakeDigitalOceanProvider();
+    const result = await createDigitalOceanRunnerForUser(
+      owner.id,
+      { provider: "digitalocean", name: "Snapshot Runner" },
+      {
+        createConnection: () => connection,
+        provider,
+        readConfig: () => invalidSnapshotConfig(),
+        now: sequenceClock("2026-07-06T02:00:00.000Z"),
+      },
+    );
+
+    expect(result).toEqual({ ok: false, reason: "provider_not_configured" });
+    expect(provider.calls.map((call) => call.step)).not.toContain("create");
   });
 
   it("creates a managed DigitalOcean SSH key before creating a Droplet when the account has none", async () => {
@@ -1000,6 +1022,40 @@ async function countRows(connection: DatabaseConnection, tableName: string): Pro
   `;
 
   return Number(result?.count ?? 0);
+}
+
+function invalidSnapshotConfig(): DigitalOceanProviderConfig {
+  const runnerImage = `ghcr.io/ametel01/agentbay-runner:abc123@sha256:${"a".repeat(64)}`;
+  const defaultAgentImage = `ghcr.io/ametel01/agentbay-default:abc123@sha256:${"b".repeat(64)}`;
+
+  return {
+    token: "dop_v1_super_secret",
+    providerMode: "digitalocean",
+    runnerBearerToken: "runner-command-token",
+    runnerImage,
+    region: "sfo3",
+    sizeSlug: "s-1vcpu-1gb",
+    image: "ubuntu-24-04-x64",
+    tags: ["agentbay"],
+    snapshotMode: {
+      mode: "snapshot",
+      manifestBytes: "{}",
+      signature: "bad-signature",
+      publicKeyPem: "bad-public-key",
+      expected: {
+        region: "sfo3",
+        sizeDiskGb: 25,
+        baseImageSlug: "ubuntu-24-04-x64",
+        architecture: "amd64",
+        runnerImage,
+        defaultAgentImage,
+        hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
+        sourceRepository: "ametel01/plingpling",
+        sourceRevision: "1".repeat(40),
+        now: new Date("2026-08-07T00:00:00.000Z"),
+      },
+    },
+  };
 }
 
 async function resetTables(connection: DatabaseConnection): Promise<void> {

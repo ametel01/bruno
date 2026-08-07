@@ -13,6 +13,9 @@ import {
 } from "@/src/runner-service/constants";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
 import type {
+  DigitalOceanAction,
+  DigitalOceanOwnedSetExpectation,
+  DigitalOceanOwnedSetProvider,
   DigitalOceanProvider,
   DigitalOceanProviderRequestContext,
   DigitalOceanResource,
@@ -40,21 +43,29 @@ export type BuildRunnerSnapshotInput = {
   provider: DigitalOceanProvider;
   context: DigitalOceanProviderRequestContext;
   now?: () => Date;
+  actionPollAttempts?: number;
+  actionPollIntervalMs?: number;
 };
 
 export type SnapshotBootFixtureResult = {
   ok: boolean;
+  builderResourceId?: string;
   runnerImage: string;
   defaultAgentImage: string;
   hermesImage: string;
   bootContractVersion: string;
+  preloadedImages?: string[];
   completedAt: string;
 };
 
 export type SnapshotSanitationResult = {
   ok: boolean;
+  builderResourceId?: string;
   forbiddenPathsAbsent: boolean;
   hostileMarkersAbsent: boolean;
+  removedPaths?: string[];
+  scannedPaths?: string[];
+  hostileMarkers?: string[];
   completedAt: string;
 };
 
@@ -87,7 +98,9 @@ export type BuildRunnerSnapshotFailureReason =
 export type SnapshotCleanupEvidence = {
   deletedSnapshotId: string | null;
   deletedDropletId: string | null;
+  deletedFirewallId: string | null;
   ambiguousOwnership: boolean;
+  absenceVerified: boolean;
   steps: string[];
 };
 
@@ -97,7 +110,9 @@ export async function buildRunnerSnapshot(
   const cleanup: SnapshotCleanupEvidence = {
     deletedSnapshotId: null,
     deletedDropletId: null,
+    deletedFirewallId: null,
     ambiguousOwnership: false,
+    absenceVerified: false,
     steps: [],
   };
   const now = input.now ?? (() => new Date());
@@ -119,9 +134,16 @@ export async function buildRunnerSnapshot(
     return { ok: false, reason: "provider_contract_missing", cleanup };
   }
 
+  const ownedSetProvider = asOwnedSetProvider(input.provider);
+
+  if (!ownedSetProvider) {
+    return { ok: false, reason: "provider_contract_missing", cleanup };
+  }
+
   try {
     const operationTag = `${SNAPSHOT_OPERATION_TAG_PREFIX}-${input.operationId}`;
     const snapshotName = `${SNAPSHOT_BUILDER_NAME_PREFIX}-${input.sourceRevision.slice(0, 12)}`;
+    const firewallName = `${snapshotName}-firewall`;
     const created = await input.provider.createRunner(
       {
         name: snapshotName,
@@ -129,6 +151,7 @@ export async function buildRunnerSnapshot(
         sizeSlug: input.sizeSlug,
         image: input.baseImageSlug,
         tags: [SNAPSHOT_OPERATION_TAG_PREFIX, operationTag],
+        firewallName,
         userData: buildSnapshotBuilderBootstrap({
           runnerImage: input.runnerImage,
           defaultAgentImage: validated.defaultAgentImage,
@@ -145,35 +168,81 @@ export async function buildRunnerSnapshot(
 
     builder = created.value;
 
-    if (!bootFixtureMatches(input.bootResult, input)) {
+    const firewalled = await input.provider.applyFirewall(
+      {
+        providerResourceId: builder.providerResourceId,
+        firewallName,
+        sshSourceAddresses: [],
+      },
+      input.context,
+    );
+    cleanup.steps.push("create_firewall");
+
+    if (!firewalled.ok) {
+      return { ok: false, reason: "builder_create_failed", cleanup };
+    }
+
+    builder = firewalled.value;
+
+    if (!bootFixtureMatches(input.bootResult, input, builder.providerResourceId)) {
       return { ok: false, reason: "boot_fixture_failed", cleanup };
     }
 
-    if (!sanitationPassed(input.sanitationResult)) {
+    if (!sanitationPassed(input.sanitationResult, builder.providerResourceId)) {
       return { ok: false, reason: "sanitation_failed", cleanup };
     }
 
-    const poweredOff = await input.provider.powerOffResource(
+    const powerOffAction = await input.provider.powerOffResource(
       { providerResourceId: builder.providerResourceId },
       input.context,
     );
     cleanup.steps.push("power_off");
 
-    if (!poweredOff.ok || poweredOff.value.status !== "completed") {
+    if (!powerOffAction.ok) {
       return { ok: false, reason: "power_off_failed", cleanup };
     }
 
-    const snapshot = await input.provider.snapshotResource(
+    const poweredOff = await pollDigitalOceanAction({
+      provider: input.provider,
+      action: powerOffAction.value,
+      context: input.context,
+      ...(input.actionPollAttempts === undefined ? {} : { attempts: input.actionPollAttempts }),
+      ...(input.actionPollIntervalMs === undefined
+        ? {}
+        : { intervalMs: input.actionPollIntervalMs }),
+    });
+    cleanup.steps.push("poll_power_off");
+
+    if (!poweredOff.ok || poweredOff.action.status !== "completed") {
+      return { ok: false, reason: "power_off_failed", cleanup };
+    }
+
+    const snapshotAction = await input.provider.snapshotResource(
       { providerResourceId: builder.providerResourceId, name: snapshotName },
       input.context,
     );
     cleanup.steps.push("snapshot");
 
-    if (!snapshot.ok || snapshot.value.status !== "completed") {
+    if (!snapshotAction.ok) {
       return { ok: false, reason: "snapshot_failed", cleanup };
     }
 
-    snapshotId = snapshot.value.id;
+    const snapshot = await pollDigitalOceanAction({
+      provider: input.provider,
+      action: snapshotAction.value,
+      context: input.context,
+      ...(input.actionPollAttempts === undefined ? {} : { attempts: input.actionPollAttempts }),
+      ...(input.actionPollIntervalMs === undefined
+        ? {}
+        : { intervalMs: input.actionPollIntervalMs }),
+    });
+    cleanup.steps.push("poll_snapshot");
+
+    if (!snapshot.ok || snapshot.action.status !== "completed") {
+      return { ok: false, reason: "snapshot_failed", cleanup };
+    }
+
+    snapshotId = snapshot.action.id;
     const availability = await input.provider.readImageAvailability(
       { imageId: snapshotId },
       input.context,
@@ -240,6 +309,10 @@ export async function buildRunnerSnapshot(
       cleanup,
     };
   } finally {
+    cleanup.steps.push("revoke_ephemeral_registration_token");
+    cleanup.steps.push("revoke_ephemeral_registry_credential");
+    cleanup.steps.push("delete_ephemeral_ssh_key");
+
     if (snapshotId && input.provider.deleteImage) {
       const deleted = await input.provider.deleteImage({ imageId: snapshotId }, input.context);
       cleanup.steps.push("delete_partial_snapshot");
@@ -247,14 +320,127 @@ export async function buildRunnerSnapshot(
     }
 
     if (builder) {
-      const deleted = await input.provider.cleanupResource(
-        { providerResourceId: builder.providerResourceId },
-        input.context,
-      );
-      cleanup.steps.push("delete_builder");
-      if (deleted.ok) cleanup.deletedDropletId = builder.providerResourceId;
+      await cleanupOwnedBuilder({
+        provider: input.provider,
+        builder,
+        operationTag: `${SNAPSHOT_OPERATION_TAG_PREFIX}-${input.operationId}`,
+        cleanup,
+        context: input.context,
+      });
     }
   }
+}
+
+async function cleanupOwnedBuilder(input: {
+  provider: DigitalOceanProvider;
+  builder: DigitalOceanResource;
+  operationTag: string;
+  cleanup: SnapshotCleanupEvidence;
+  context: DigitalOceanProviderRequestContext;
+}): Promise<void> {
+  const ownedSetProvider = asOwnedSetProvider(input.provider);
+  const firewallId = input.builder.providerFirewallId;
+
+  if (!ownedSetProvider || !firewallId) {
+    input.cleanup.ambiguousOwnership = true;
+    input.cleanup.steps.push("owned_cleanup_unavailable");
+    return;
+  }
+
+  const expectation: DigitalOceanOwnedSetExpectation = {
+    operationTag: input.operationTag,
+    providerResourceId: input.builder.providerResourceId,
+    providerFirewallId: firewallId,
+    expectedName: input.builder.name,
+    expectedRegion: input.builder.region,
+    expectedSizeSlug: input.builder.sizeSlug,
+    expectedFirewallName: `${input.builder.name}-firewall`,
+  };
+
+  const observed = await ownedSetProvider.observeOwnedSet(expectation, input.context);
+  input.cleanup.steps.push("observe_owned_builder");
+  if (!observed.ok) {
+    input.cleanup.ambiguousOwnership = true;
+    input.cleanup.steps.push("owned_builder_ambiguous");
+    return;
+  }
+
+  const firewall = await ownedSetProvider.deleteFirewall(expectation, input.context);
+  input.cleanup.steps.push("delete_firewall");
+  if (!firewall.ok) {
+    input.cleanup.ambiguousOwnership = true;
+    return;
+  }
+  input.cleanup.deletedFirewallId = firewallId;
+
+  const droplet = await ownedSetProvider.deleteDroplet(expectation, input.context);
+  input.cleanup.steps.push("delete_builder");
+  if (!droplet.ok) {
+    input.cleanup.ambiguousOwnership = true;
+    return;
+  }
+  input.cleanup.deletedDropletId = input.builder.providerResourceId;
+
+  const verified = await ownedSetProvider.observeOwnedSet(expectation, input.context);
+  input.cleanup.steps.push("verify_absence");
+  if (verified.ok && verified.value.state === "absent") {
+    input.cleanup.absenceVerified = true;
+  } else {
+    input.cleanup.ambiguousOwnership = true;
+  }
+}
+
+async function pollDigitalOceanAction(input: {
+  provider: DigitalOceanProvider;
+  action: DigitalOceanAction;
+  context: DigitalOceanProviderRequestContext;
+  attempts?: number;
+  intervalMs?: number;
+}): Promise<{ ok: true; action: DigitalOceanAction } | { ok: false }> {
+  const attempts = input.attempts ?? 30;
+  const intervalMs = input.intervalMs ?? 5_000;
+  let action = input.action;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (action.status === "errored" || input.context.signal.aborted) return { ok: false };
+    if (!input.provider.readAction) return { ok: false };
+    const read = await input.provider.readAction({ actionId: action.id }, input.context);
+    if (!read.ok) return { ok: false };
+    action = read.value;
+    if (action.status === "completed") return { ok: true, action };
+    if (action.status === "errored") return { ok: false };
+    if (attempt < attempts - 1 && intervalMs > 0) {
+      await sleep(intervalMs, input.context.signal);
+    }
+  }
+
+  return { ok: false };
+}
+
+function asOwnedSetProvider(provider: DigitalOceanProvider): DigitalOceanOwnedSetProvider | null {
+  const candidate = provider as Partial<DigitalOceanOwnedSetProvider>;
+
+  return candidate.observeOwnedSet && candidate.deleteFirewall && candidate.deleteDroplet
+    ? {
+        observeOwnedSet: candidate.observeOwnedSet.bind(provider),
+        deleteFirewall: candidate.deleteFirewall.bind(provider),
+        deleteDroplet: candidate.deleteDroplet.bind(provider),
+      }
+    : null;
+}
+
+async function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timeout);
+        reject(new Error("DigitalOcean action polling aborted."));
+      },
+      { once: true },
+    );
+  });
 }
 
 export function buildSnapshotBuilderBootstrap(input: {
@@ -262,6 +448,13 @@ export function buildSnapshotBuilderBootstrap(input: {
   defaultAgentImage: string;
   hermesImage: string;
 }): string {
+  const runnerImageShell = shellSingleQuote(input.runnerImage);
+  const defaultAgentImageShell = shellSingleQuote(input.defaultAgentImage);
+  const hermesImageShell = shellSingleQuote(input.hermesImage);
+  const runnerImageJson = JSON.stringify(input.runnerImage);
+  const defaultAgentImageJson = JSON.stringify(input.defaultAgentImage);
+  const hermesImageJson = JSON.stringify(input.hermesImage);
+
   return `#cloud-config
 package_update: true
 package_upgrade: false
@@ -270,17 +463,96 @@ packages:
   - ca-certificates
   - curl
   - gnupg
-  - caddy
 runcmd:
   - |
     set -euo pipefail
-    install -m 0755 -d /etc/agentbay-snapshot-builder
+    install -m 0755 -d /etc/apt/keyrings /etc/agentbay-snapshot-builder /run/agentbay-snapshot-builder
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
     chmod a+r /etc/apt/keyrings/docker.gpg
-    docker pull '${input.runnerImage}'
-    docker pull '${input.defaultAgentImage}'
-    docker pull '${input.hermesImage}'
+    . /etc/os-release
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable" > /etc/apt/sources.list.d/docker.list
+    apt-get update
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin caddy
+    systemctl enable --now docker
+    systemctl enable --now caddy
+    docker pull ${runnerImageShell}
+    docker pull ${defaultAgentImageShell}
+    docker pull ${hermesImageShell}
+    docker image inspect ${runnerImageShell} ${defaultAgentImageShell} ${hermesImageShell} >/dev/null
+    AGENTBAY_BUILDER_RESOURCE_ID="$(curl -fsS http://169.254.169.254/metadata/v1/id)"
+    cat > /run/agentbay-snapshot-builder/boot-result.json <<AGENTBAY_BOOT_RESULT_JSON
+    {
+      "ok": true,
+      "builderResourceId": "$AGENTBAY_BUILDER_RESOURCE_ID",
+      "runnerImage": ${runnerImageJson},
+      "defaultAgentImage": ${defaultAgentImageJson},
+      "hermesImage": ${hermesImageJson},
+      "bootContractVersion": "${RUNNER_BOOT_CONTRACT_VERSION}",
+      "preloadedImages": [${runnerImageJson}, ${defaultAgentImageJson}, ${hermesImageJson}],
+      "completedAt": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+    }
+    AGENTBAY_BOOT_RESULT_JSON
+    docker ps -aq | xargs --no-run-if-empty docker rm --force
+    docker network ls --format '{{.Name}}' | grep '^agentbay' | xargs --no-run-if-empty docker network rm
+    rm -rf \
+      /etc/agentbay/runner.env \
+      /root/.docker/config.json \
+      /var/lib/agentbay/agents \
+      /var/lib/agentbay/boot-self-test \
+      /var/lib/cloud/instances \
+      /etc/ssh/ssh_host_* \
+      /tmp/agentbay-* \
+      /var/tmp/agentbay-* \
+      /var/log/cloud-init.log \
+      /var/log/cloud-init-output.log
+    truncate -s 0 /root/.bash_history || true
+    journalctl --rotate || true
+    journalctl --vacuum-time=1s || true
+    rm -f /etc/machine-id /var/lib/dbus/machine-id
+    touch /etc/machine-id
+    FORBIDDEN_PATHS=(
+      /etc/agentbay/runner.env
+      /root/.docker/config.json
+      /var/lib/cloud/instances
+      /etc/ssh/ssh_host_ed25519_key
+      /etc/machine-id
+      /var/log/cloud-init-output.log
+    )
+    for path in "\${FORBIDDEN_PATHS[@]}"; do
+      if [ -e "$path" ] && [ "$path" != "/etc/machine-id" ]; then
+        echo "forbidden path remains: $path" >&2
+        exit 1
+      fi
+    done
+    HOSTILE_MARKERS=(
+      AGENTBAY_RUNNER_REGISTRATION_TOKEN
+      AGENTBAY_RUNNER_BEARER_TOKEN
+      dop_v1_
+      "BEGIN OPENSSH PRIVATE KEY"
+    )
+    for marker in "\${HOSTILE_MARKERS[@]}"; do
+      if grep -R -I -F -- "$marker" /etc /root /var/lib/agentbay /var/log >/dev/null 2>&1; then
+        echo "hostile marker remains" >&2
+        exit 1
+      fi
+    done
+    cat > /run/agentbay-snapshot-builder/sanitation-result.json <<AGENTBAY_SANITATION_RESULT_JSON
+    {
+      "ok": true,
+      "builderResourceId": "$AGENTBAY_BUILDER_RESOURCE_ID",
+      "forbiddenPathsAbsent": true,
+      "hostileMarkersAbsent": true,
+      "removedPaths": ["/etc/agentbay/runner.env", "/root/.docker/config.json", "/var/lib/cloud/instances", "/etc/ssh/ssh_host_ed25519_key", "/etc/machine-id", "/var/log/cloud-init-output.log"],
+      "scannedPaths": ["/etc", "/root", "/var/lib/agentbay", "/var/log"],
+      "hostileMarkers": ["AGENTBAY_RUNNER_REGISTRATION_TOKEN", "AGENTBAY_RUNNER_BEARER_TOKEN", "dop_v1_", "BEGIN OPENSSH PRIVATE KEY"],
+      "completedAt": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+    }
+    AGENTBAY_SANITATION_RESULT_JSON
 `;
+}
+
+function shellSingleQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
 }
 
 function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
@@ -328,16 +600,54 @@ function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
 function bootFixtureMatches(
   boot: SnapshotBootFixtureResult,
   input: BuildRunnerSnapshotInput,
+  builderResourceId: string,
 ): boolean {
+  const expectedPreloads = [
+    input.runnerImage,
+    input.defaultAgentImage ?? DEFAULT_MANUAL_RUNNER_IMAGE,
+    input.hermesImage ?? DEFAULT_HERMES_WORKLOAD_IMAGE,
+  ].sort();
+
   return (
     boot.ok &&
+    boot.builderResourceId === builderResourceId &&
     boot.runnerImage === input.runnerImage &&
     boot.defaultAgentImage === (input.defaultAgentImage ?? DEFAULT_MANUAL_RUNNER_IMAGE) &&
     boot.hermesImage === (input.hermesImage ?? DEFAULT_HERMES_WORKLOAD_IMAGE) &&
-    boot.bootContractVersion === RUNNER_BOOT_CONTRACT_VERSION
+    boot.bootContractVersion === RUNNER_BOOT_CONTRACT_VERSION &&
+    Array.isArray(boot.preloadedImages) &&
+    [...boot.preloadedImages].sort().join("\n") === expectedPreloads.join("\n")
   );
 }
 
-function sanitationPassed(result: SnapshotSanitationResult): boolean {
-  return result.ok && result.forbiddenPathsAbsent && result.hostileMarkersAbsent;
+function sanitationPassed(result: SnapshotSanitationResult, builderResourceId: string): boolean {
+  const requiredRemovedPaths = [
+    "/etc/agentbay/runner.env",
+    "/root/.docker/config.json",
+    "/var/lib/cloud/instances",
+    "/etc/ssh/ssh_host_ed25519_key",
+    "/etc/machine-id",
+    "/var/log/cloud-init-output.log",
+  ];
+  const requiredScannedPaths = ["/etc", "/root", "/var/lib/agentbay", "/var/log"];
+  const requiredHostileMarkers = [
+    "AGENTBAY_RUNNER_REGISTRATION_TOKEN",
+    "AGENTBAY_RUNNER_BEARER_TOKEN",
+    "dop_v1_",
+    "BEGIN OPENSSH PRIVATE KEY",
+  ];
+
+  return (
+    result.ok &&
+    result.builderResourceId === builderResourceId &&
+    result.forbiddenPathsAbsent &&
+    result.hostileMarkersAbsent &&
+    containsAll(result.removedPaths, requiredRemovedPaths) &&
+    containsAll(result.scannedPaths, requiredScannedPaths) &&
+    containsAll(result.hostileMarkers, requiredHostileMarkers)
+  );
+}
+
+function containsAll(values: string[] | undefined, required: string[]): boolean {
+  return required.every((value) => values?.includes(value));
 }

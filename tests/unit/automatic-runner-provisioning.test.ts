@@ -8,6 +8,7 @@ import {
   users,
 } from "@/src/server/db/schema";
 import type { DigitalOceanProviderConfig } from "@/src/server/env";
+import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
 import {
   DIGITALOCEAN_PROVIDER,
   type DigitalOceanProvider,
@@ -218,6 +219,20 @@ describe("automatic DigitalOcean runner provisioning", () => {
     });
   });
 
+  it("fails automatic snapshot provisioning before any Droplet create when evidence is invalid", async () => {
+    const provider = new FakeDigitalOceanProvider({ now: () => NOW });
+
+    await expect(
+      advance(connection, provider, 1, undefined, () => NOW, invalidSnapshotAutomaticConfig()),
+    ).resolves.toEqual({
+      ok: false,
+      cleanupRequired: false,
+      terminalCode: "runner_provisioning_unavailable",
+    });
+
+    expect(provider.calls.map((call) => call.step)).not.toContain("create");
+  });
+
   it("fails closed on duplicate exact-tag resources and records only safe cleanup ownership", async () => {
     const provider = new FakeDigitalOceanProvider({ now: () => NOW, idPrefix: "duplicate" });
     for (let index = 0; index < 2; index += 1) {
@@ -414,6 +429,34 @@ function advance(
     context: { signal },
     now,
   });
+}
+
+function invalidSnapshotAutomaticConfig(): DigitalOceanProviderConfig {
+  const runnerImage = `ghcr.io/ametel01/agentbay-runner:abc123@sha256:${"a".repeat(64)}`;
+  const defaultAgentImage = `ghcr.io/ametel01/agentbay-default:abc123@sha256:${"b".repeat(64)}`;
+
+  return {
+    ...providerConfig(),
+    runnerImage,
+    snapshotMode: {
+      mode: "snapshot",
+      manifestBytes: "{}",
+      signature: "bad-signature",
+      publicKeyPem: "bad-public-key",
+      expected: {
+        region: "sfo3",
+        sizeDiskGb: 25,
+        baseImageSlug: "ubuntu-24-04-x64",
+        architecture: "amd64",
+        runnerImage,
+        defaultAgentImage,
+        hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
+        sourceRepository: "ametel01/plingpling",
+        sourceRevision: "1".repeat(40),
+        now: NOW,
+      },
+    },
+  };
 }
 
 function sequenceClock(startIso: string): () => Date {

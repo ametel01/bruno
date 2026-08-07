@@ -92,7 +92,146 @@ describe("runner snapshot manifest", () => {
       }),
     ).toEqual({ ok: false, reason: "manifest_identity_mismatch" });
   });
+
+  it.each([
+    ["wrong schema", () => ({ ...manifest(), schemaVersion: "other" }), "manifest_schema_invalid"],
+    [
+      "future timestamp",
+      () => ({ ...manifest(), availableAt: "2026-08-08T00:00:00.000Z" }),
+      "manifest_not_yet_valid",
+    ],
+    [
+      "reversed timestamps",
+      () => ({
+        ...manifest(),
+        validation: {
+          fullBootFixturePassedAt: "2026-08-06T23:59:00.000Z",
+          sanitationPassedAt: "2026-08-07T00:00:01.000Z",
+        },
+        createdAt: "2026-08-07T00:00:00.000Z",
+      }),
+      "manifest_schema_invalid",
+    ],
+    [
+      "wrong region",
+      () => ({ ...manifest(), snapshot: { ...manifest().snapshot, regions: ["nyc3"] } }),
+      "manifest_region_unavailable",
+    ],
+    [
+      "wrong base",
+      () => ({ ...manifest(), baseImage: { ...manifest().baseImage, slug: "ubuntu-22-04-x64" } }),
+      "manifest_identity_mismatch",
+    ],
+    [
+      "wrong arch",
+      () => ({ ...manifest(), snapshot: { ...manifest().snapshot, architecture: "arm64" } }),
+      "manifest_schema_invalid",
+    ],
+    [
+      "wrong source",
+      () => ({ ...manifest(), source: { ...manifest().source, revision: "2".repeat(40) } }),
+      "manifest_identity_mismatch",
+    ],
+    [
+      "wrong boot contract",
+      () => ({ ...manifest(), bootContractVersion: "plingpling.runner.boot.v0" }),
+      "manifest_schema_invalid",
+    ],
+    [
+      "wrong agent image",
+      () => ({
+        ...manifest(),
+        defaultAgentImage: {
+          reference: AGENT_IMAGE.replace("abc123", "def456"),
+          digest: AGENT_DIGEST,
+        },
+      }),
+      "manifest_identity_mismatch",
+    ],
+    [
+      "minimum disk mismatch",
+      () => ({ ...manifest(), snapshot: { ...manifest().snapshot, minDiskSizeGb: 26 } }),
+      "manifest_min_disk_mismatch",
+    ],
+  ])("fails closed for %s", (_label, mutate, reason) => {
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const privateKeyPem = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+    const rawManifest = mutate() as RunnerSnapshotManifest;
+
+    if (reason === "manifest_schema_invalid") {
+      expect(() =>
+        createRunnerSnapshotAttestation({
+          manifest: rawManifest,
+          privateKeyPem,
+        }),
+      ).toThrow("manifest_schema_invalid");
+      return;
+    }
+
+    const attestation = createRunnerSnapshotAttestation({
+      manifest: rawManifest,
+      privateKeyPem,
+    });
+
+    expect(
+      verifyRunnerSnapshotManifest({
+        manifestBytes: attestation.canonicalBytes,
+        signature: attestation.signature,
+        publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString(),
+        expected: expected(),
+      }),
+    ).toEqual({ ok: false, reason });
+  });
+
+  it("fails closed for wrong signing key and unavailable provider image", async () => {
+    const signing = generateKeyPairSync("ed25519");
+    const wrong = generateKeyPairSync("ed25519");
+    const attestation = createRunnerSnapshotAttestation({
+      manifest: manifest(),
+      privateKeyPem: signing.privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+    });
+
+    expect(
+      verifyRunnerSnapshotManifest({
+        manifestBytes: attestation.canonicalBytes,
+        signature: attestation.signature,
+        publicKeyPem: wrong.publicKey.export({ format: "pem", type: "spki" }).toString(),
+        expected: expected(),
+      }),
+    ).toEqual({ ok: false, reason: "manifest_signature_invalid" });
+
+    const provider = new UnavailableImageProvider();
+    await expect(
+      selectVerifiedRunnerSnapshotImage({
+        manifestBytes: attestation.canonicalBytes,
+        signature: attestation.signature,
+        publicKeyPem: signing.publicKey.export({ format: "pem", type: "spki" }).toString(),
+        expected: expected(),
+        provider,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "provider_image_unavailable" });
+    expect(provider.calls.map((call) => call.step)).toEqual(["readImage"]);
+  });
 });
+
+class UnavailableImageProvider extends FakeDigitalOceanProvider {
+  override async readImageAvailability(
+    input: Parameters<FakeDigitalOceanProvider["readImageAvailability"]>[0],
+  ) {
+    await super.readImageAvailability(input);
+    return {
+      ok: true as const,
+      value: {
+        id: input.imageId,
+        name: "unavailable",
+        regions: ["nyc3"],
+        minDiskSizeGb: 25,
+        architecture: "amd64" as const,
+        status: "available" as const,
+      },
+    };
+  }
+}
 
 function expected(): RunnerSnapshotExpectedIdentities {
   return {

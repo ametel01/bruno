@@ -3,12 +3,12 @@
 ## Active Work
 
 - issue: [#266](https://github.com/ametel01/plingpling/issues/266)
-  owner: checker-agent (`issue_266_checker`)
+  owner: builder-agent (`issue_266_builder`)
   branch: `codex/issue-266-attested-snapshot`
   worktree: `/Users/alexmetelli/source/plingpling-issue-266`
   pr: none
-  phase: checker failed; builder action required before PR/merge
-  cycle: 1/5
+  phase: checker-ready after cycle-2 builder fixes
+  cycle: 2/5
 
 ## Completion Contract
 
@@ -196,6 +196,20 @@
   next-action: Checker should rerun format/lint/typecheck, focused snapshot tests, full unit/build as
     needed, inspect workflow static guarantees, and confirm invalid snapshot evidence creates zero
     Droplet-create calls. Live snapshot acceptance remains authorization-gated.
+- from: builder-agent (`issue_266_builder`)
+  to: checker-agent
+  timestamp: 2026-08-07T08:36:00+08:00
+  request: Re-check #266 cycle 2 fixes. Do not dispatch the protected workflow, contact
+    DigitalOcean, configure secrets/environments, deploy, release, or run billable effects.
+  evidence: Fixed checker gaps by moving temporary-builder Docker/Caddy install ahead of image use,
+    adding builder-local preloaded-image boot evidence and sanitation removal/hostile-marker scan
+    requirements, polling power-off and snapshot actions through `readAction`, enforcing ordered
+    owned firewall-before-Droplet cleanup with absence proof and ambiguous-ownership no-delete
+    evidence, adding manifest artifact provenance attestation before upload, and adding adversarial
+    manifest/provider/workflow/shell/zero-create tests.
+  next-action: Checker should rerun focused snapshot/provisioning tests, inspect the workflow
+    evidence/attestation ordering, verify action polling/cleanup order, and leave local smoke for a
+    serialized run because the Docker Compose namespace is shared.
 
 ## Gates
 
@@ -230,6 +244,22 @@
 - checker local agent smoke: fail — `bun run local:agent:smoke` exited 1 before smoke assertions:
   `Error response from daemon: No such container: agentbay-local-cloud-runner` and
   `Error: docker compose failed with exit 1.`
+- cycle-2 builder focused unit: pass —
+  `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts
+  tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-workflow.test.ts
+  tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts
+  tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
+  tests/unit/digitalocean-provider.test.ts` (8 files, 89 tests).
+- cycle-2 builder format/lint/typecheck: pass — `bun run format:check`, `bun run lint`,
+  `bun run typecheck`.
+- cycle-2 builder full unit: pass — `bun run test` (172 files, 1,663 tests).
+- cycle-2 builder production build: pass — `bun run build`.
+- cycle-2 builder E2E CI: pass — `bun run test:e2e:ci` (26/26 Playwright tests passed).
+- cycle-2 builder cloud-runner repro: pass — `bun run repro:cloud-runner` validated generated
+  stock user-data schema and 11 bash script blocks.
+- cycle-2 builder diff check: pass — `git diff --check`.
+- cycle-2 local agent smoke: skipped by coordinator direction because #265/#266 share the
+  `agentbay-local-cloud-runner` Docker Compose namespace; leave for serialized checker rerun.
 - skipped live/billable: protected snapshot workflow dispatch, DigitalOcean resource/snapshot
   creation or deletion, GitHub environment/secret configuration, production deploy/release, and
   provider-backed Step 6 acceptance.
