@@ -30,8 +30,16 @@ const FOREIGN_RUNNER_ID = "00000000-0000-4000-8000-000000000403";
 const NOW = new Date("2026-08-03T06:00:00.000Z");
 const TOKEN = "123456:abcdefghijklmnopqrstuvwxyz";
 const SECOND_TOKEN = "654321:abcdefghijklmnopqrstuvwxyz";
+const THIRD_TOKEN = "777777:abcdefghijklmnopqrstuvwxyz";
 const OPENAI_KEY_FIXTURE = ["sk", "fixture", "abcdefghijklmnopqrstuvwxyz1234567890"].join("-");
 const RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:${"a".repeat(40)}@sha256:${"b".repeat(64)}`;
+const LOCAL_TWO_AGENT_CAPACITY = {
+  configuredMaxAgents: 2,
+  measuredMaxAgents: 2,
+  perHermesDiskGiB: 10,
+  hostDiskReserveGiB: 10,
+  profile: { vcpus: 2, memoryMiB: 4096, diskGiB: 80 },
+} as const;
 const KEYRING_ENV = {
   AGENTBAY_READY_AGENT_CREATION_ENABLED: "true",
   AGENTBAY_DIGITALOCEAN_TOKEN: "provider-token-present",
@@ -224,11 +232,10 @@ describe("ready agent creation persistence", () => {
     const firstMayContinue = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
-    let firstReserved = () => {};
-    const firstReservationReached = new Promise<void>((resolve) => {
-      firstReserved = resolve;
+    let firstLocked = () => {};
+    const firstCapacityLockAcquired = new Promise<void>((resolve) => {
+      firstLocked = resolve;
     });
-
     try {
       const firstCreate = createAgentForUser(USER_A_ID, readyInput("ready-race-first"), {
         createConnection: () => connection,
@@ -237,15 +244,13 @@ describe("ready agent creation persistence", () => {
         randomBytes: incrementalRandomBytes(),
         telegramBotValidator: telegramValidator(),
         readyCreateTestHooks: {
-          beforeInsertBoundary: async (boundary) => {
-            if (boundary === "config") {
-              firstReserved();
-              await firstMayContinue;
-            }
+          afterCapacityLock: async () => {
+            firstLocked();
+            await firstMayContinue;
           },
         },
       });
-      await firstReservationReached;
+      await firstCapacityLockAcquired;
 
       const secondCreate = createAgentForUser(
         USER_A_ID,
@@ -272,6 +277,60 @@ describe("ready agent creation persistence", () => {
     } finally {
       releaseFirst();
       await secondConnection.close();
+    }
+  });
+
+  it("allows exactly two concurrent ready creates on an injected local two-agent profile", async () => {
+    const runnerId = "00000000-0000-4000-8000-000000000409";
+    await seedOnlineRunner(connection, { runnerId, userId: USER_A_ID });
+    const firstConnection = createDatabaseConnection();
+    const secondConnection = createDatabaseConnection();
+    const thirdConnection = createDatabaseConnection();
+    const barrier = createAsyncBarrier(3);
+
+    try {
+      const results = await Promise.all([
+        createAgentForUser(USER_A_ID, readyInput("ready-capacity-two-a"), {
+          createConnection: () => firstConnection,
+          env: KEYRING_ENV,
+          now: () => NOW,
+          randomBytes: incrementalRandomBytes(),
+          telegramBotValidator: telegramValidator("123456", barrier),
+          runnerPlacementCapacityOptions: LOCAL_TWO_AGENT_CAPACITY,
+        }),
+        createAgentForUser(USER_A_ID, readyInput("ready-capacity-two-b", { token: SECOND_TOKEN }), {
+          createConnection: () => secondConnection,
+          env: KEYRING_ENV,
+          now: () => new Date(NOW.getTime() + 1_000),
+          randomBytes: incrementalRandomBytes(),
+          telegramBotValidator: telegramValidator("654321", barrier),
+          runnerPlacementCapacityOptions: LOCAL_TWO_AGENT_CAPACITY,
+        }),
+        createAgentForUser(USER_A_ID, readyInput("ready-capacity-two-c", { token: THIRD_TOKEN }), {
+          createConnection: () => thirdConnection,
+          env: KEYRING_ENV,
+          now: () => new Date(NOW.getTime() + 2_000),
+          randomBytes: incrementalRandomBytes(),
+          telegramBotValidator: telegramValidator("777777", barrier),
+          runnerPlacementCapacityOptions: LOCAL_TWO_AGENT_CAPACITY,
+        }),
+      ]);
+      const runnerIds = results.map((result) => result.agent.runnerId);
+      const reservations = await connection.db
+        .select({ id: agents.id, desiredStatus: agents.desiredStatus })
+        .from(agents)
+        .where(eq(agents.runnerId, runnerId));
+
+      expect(runnerIds.filter((id) => id === runnerId)).toHaveLength(2);
+      expect(runnerIds.filter((id) => id === null)).toHaveLength(1);
+      expect(reservations).toHaveLength(2);
+      expect(reservations.every((reservation) => reservation.desiredStatus === "running")).toBe(
+        true,
+      );
+    } finally {
+      await firstConnection.close();
+      await secondConnection.close();
+      await thirdConnection.close();
     }
   });
 

@@ -190,6 +190,36 @@ describe("runner replacement handover", () => {
     }
   });
 
+  it("fails handover atomically when effective target capacity is exhausted", async () => {
+    await prepareReassigning(connection);
+    await connection.db
+      .update(runnerHeartbeats)
+      .set({
+        metadata: { metrics: { maxAgents: 2, runningAgents: 1 } },
+        observedAt: NOW,
+      })
+      .where(eq(runnerHeartbeats.runnerId, TARGET_ID));
+    const provider = new FakeDigitalOceanProvider({ now: () => NOW });
+
+    await expect(reconcile(connection, provider)).resolves.toMatchObject({
+      outcome: "failed",
+      state: "failed",
+    });
+
+    expect(await assignedRunnerIds(connection)).toEqual([SOURCE_ID, SOURCE_ID]);
+    await expect(
+      connection.db
+        .select()
+        .from(agentEvents)
+        .where(eq(agentEvents.type, "agent.runner_reassigned")),
+    ).resolves.toHaveLength(0);
+    const deployments = await connection.db
+      .select()
+      .from(agentDeployments)
+      .where(eq(agentDeployments.agentId, RUNNING_AGENT_ID));
+    expect(deployments).toHaveLength(1);
+  });
+
   it("creates one deterministic retry when target deployment convergence terminally fails", async () => {
     await prepareReassigning(connection);
     const provider = new FakeDigitalOceanProvider({ now: () => NOW });

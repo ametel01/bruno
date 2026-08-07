@@ -40,12 +40,20 @@ import {
   confirmCloudRunnerReadiness,
   RUNNER_HEARTBEAT_STALE_THRESHOLD_MS,
 } from "@/src/server/runners/runner-heartbeat";
-import { lockRunnerPlacementCapacityInTransaction } from "@/src/server/runners/runner-placement";
+import {
+  lockRunnerPlacementCapacityInTransaction,
+  selectRunnerPlacementForUserInTransaction,
+  type RunnerPlacementCapacityOptions,
+} from "@/src/server/runners/runner-placement";
 import {
   advanceAutomaticDigitalOceanRunnerProvisioning,
   createConfiguredDigitalOceanProvider,
   digitalOceanRunnerFirewallName,
 } from "@/src/server/runners/runner-provisioning";
+import {
+  parseHermesDockerCpus,
+  parseHermesDockerMemoryMiB,
+} from "@/src/server/runners/runner-resource-profiles";
 import type { RunnerReplacementReason } from "@/src/server/runners/runner-replacement-state";
 import {
   applyClaimedRunnerReplacementTransition,
@@ -620,7 +628,22 @@ async function reconcileReassigning(input: {
         `),
       ]);
       const runningAgents = assigned.filter((agent) => agent.desiredStatus === "running");
-      if (runningAgents.length + Number(targetAssigned) > (input.config.runnerMaxAgents ?? 1)) {
+      const targetPlacement = await selectRunnerPlacementForUserInTransaction(
+        tx,
+        pair.sourceUserId,
+        { runnerId: targetRunnerId },
+        {
+          now: input.now,
+          compatibilityRequirement: runnerReplacementCompatibilityRequirement(input.config),
+          capacityOptions: runnerReplacementPlacementCapacityOptions(input.config),
+        },
+      );
+      if (
+        !targetPlacement.ok ||
+        targetPlacement.runner.capacity.running_agents + runningAgents.length >
+          targetPlacement.runner.capacity.max_agents ||
+        runningAgents.length + Number(targetAssigned) > targetPlacement.runner.capacity.max_agents
+      ) {
         throw new Error("Replacement target no longer has sufficient capacity.");
       }
 
@@ -712,6 +735,38 @@ async function reconcileReassigning(input: {
     (input.dependencies.triggerRuntime ?? scheduleAgentRuntimeReconcileAfterResponse)(agentId);
   }
   return { outcome: "advanced", replacementId: input.claim.id, state: "converging_agents" };
+}
+
+function runnerReplacementPlacementCapacityOptions(
+  config: DigitalOceanProviderConfig,
+): RunnerPlacementCapacityOptions {
+  const perHermesCpu = config.hermesDockerCpus
+    ? parseHermesDockerCpus(config.hermesDockerCpus)
+    : null;
+  const perHermesMemoryMiB = config.hermesDockerMemory
+    ? parseHermesDockerMemoryMiB(config.hermesDockerMemory)
+    : null;
+
+  return {
+    configuredMaxAgents: config.runnerMaxAgents,
+    ...(perHermesCpu === null ? {} : { perHermesCpu }),
+    ...(perHermesMemoryMiB === null ? {} : { perHermesMemoryMiB }),
+  };
+}
+
+function runnerReplacementCompatibilityRequirement(config: DigitalOceanProviderConfig) {
+  const release = parseImmutableRunnerImageReference(config.runnerImage);
+
+  return release
+    ? ({
+        mode: "hosted",
+        release: {
+          version: release.version,
+          imageDigest: release.imageDigest,
+          bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+        },
+      } as const)
+    : ({ mode: "unavailable", release: null } as const);
 }
 
 async function reconcileConvergingAgents(input: {

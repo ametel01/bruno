@@ -215,6 +215,8 @@ export type CreateAgentDependencies = {
   telegramBotValidator?: TelegramBotValidator;
   onReadyDeploymentCommitted?: (deploymentId: string) => void;
   readyCreateTestHooks?: {
+    beforeCapacityLock?: (input: { runnerId: string; userId: string }) => Promise<void> | void;
+    afterCapacityLock?: (input: { runnerId: string; userId: string }) => Promise<void> | void;
     beforeInsertBoundary?: (boundary: ReadyCreateInsertBoundary) => Promise<void> | void;
   };
 };
@@ -1044,11 +1046,19 @@ async function createReadyAgentForUser(
           throw new AgentCreateBlockedError(placement);
         }
       } else {
+        await dependencies.readyCreateTestHooks?.beforeCapacityLock?.({
+          userId,
+          runnerId: placement.runner.id,
+        });
         const locked = await lockRunnerPlacementCapacityInTransaction(tx, {
           userId,
           runnerId: placement.runner.id,
         });
         if (locked) {
+          await dependencies.readyCreateTestHooks?.afterCapacityLock?.({
+            userId,
+            runnerId: placement.runner.id,
+          });
           const confirmed = await selectRunnerPlacementForUserInTransaction(
             tx,
             userId,

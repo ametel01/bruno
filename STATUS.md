@@ -1976,3 +1976,122 @@ Status: ALL GREEN
   - verify cold latency consumers use `cohorts.cold_droplet`, not aggregate ready latency.
   - remaining product/provider blockers are unchanged: approved larger profile, disk budget, and
     authorized provider-backed two-agent trial.
+
+## Checker Review — #270 Commit `51a56b1`
+
+- verdict: **RED — not merge-ready**. The capacity evaluator, owner-aware helper, ready/legacy create
+  reservation path, durable `desired_status = 'running'` counting, max-one service defaults, and
+  cold/reuse cohort separation are present, but three assignment/lifecycle paths still violate the
+  completion contract.
+- findings:
+  1. **P1 — managed-ready Start bypasses the capacity lock and exact-runner revalidation.** In
+     `src/server/agents/lifecycle.ts:1072-1119`, the `managed_ready` branch writes
+     `desired_status = 'running'` and returns an accepted Start before the later
+     `reserveRunnerForAgentStart` path. It takes neither the owner-aware runner lock nor the shared
+     placement/capacity check. Two stopped managed agents assigned to the same max-one runner can
+     therefore both commit durable running reservations; sequentially starting a stopped sibling
+     while another agent is running also returns accepted instead of failing closed. Route this
+     branch through an owner-scoped exact-runner lock and in-lock capacity revalidation in the same
+     transaction as the runtime intent and agent update. Add independent-connection Start races that
+     assert the DB reservation count never exceeds one/two and that only the winner is accepted.
+  2. **P1 — replacement handover does not enforce effective runner capacity.** In
+     `src/server/runners/runner-replacement-reconciler.ts:540-624`, handover proves ownership,
+     readiness, and heartbeat freshness, but its only capacity fence is
+     `source desired-running + target desired-running <= config.runnerMaxAgents`. It ignores the
+     authenticated heartbeat `maxAgents` and `runningAgents`, computed CPU/physical-memory/disk
+     ceiling, and exact measured-profile ceiling used by placement. Once a capacity-above-one
+     profile is authorized, or whenever heartbeat evidence is more restrictive than config, the
+     transaction can move reservations above effective capacity. Revalidate the target with the
+     shared effective-capacity evaluator under the owner locks, conservatively combining heartbeat
+     and DB reservations, before moving agents. Add a handover fixture where configured capacity is
+     two but heartbeat/profile/measured capacity is one and prove the move rolls back atomically.
+  3. **P2 — failed non-managed Starts leak a durable running reservation.** Commit `51a56b1` changes
+     `reserveRunnerForAgentStart` to set `desired_status = 'running'`, but
+     `restoreAgentStartReservation` at `src/server/agents/lifecycle.ts:723-747` restores only status
+     and status reason. A legacy stopped agent whose remote start/setup/finalization fails remains
+     stopped with `desired_status = 'running'`, permanently consuming runner capacity despite the
+     failed Start result. Capture and restore the previous desired status (and keep the existing
+     fenced update), then assert the failed-start row no longer counts as a reservation and another
+     agent can take the released slot.
+- evidence gaps:
+  - The required capacity-two/three-create race is absent. The new max-one ready-create test uses two
+    DB connections, but releases the first transaction immediately after launching the second call;
+    it has no deterministic barrier proving the second has reached the capacity lock.
+  - No focused test races managed-ready Start, failed-Start rollback, Stop/Delete/retry, or replacement
+    handover against capacity reservation. Existing replacement tests do not exercise the effective
+    capacity evaluator.
+  - `bun run local:agent:smoke` was not run, per checker authorization. No local two-agent lifecycle
+    evidence is available from this review, and the builder handoff records that it was skipped.
+- independent gate evidence:
+  - focused DB/unit suite — passed, 10 files / 310 tests:
+    `runner-resource-profiles`, `runner-placement`, ready/legacy create DB, deployment reconciler,
+    creation latency, Hermes readiness, Start route, replacement handover, and runner service.
+  - `bun run format:check` — passed.
+  - `bun run lint` — passed.
+  - `bun run typecheck` — passed.
+  - `git diff --check origin/main...51a56b1` — passed.
+- verified positive scope:
+  - effective selection is the minimum of computed CPU, physical-memory, disk, heartbeat,
+    configured, and explicit measured caps; missing/malformed/unmeasured inputs remain fail-closed
+    at one.
+  - no hosted/profile source default above one was introduced; runner-service omitted fallbacks now
+    share `DEFAULT_HERMES_RUNNER_MAX_AGENTS = 1`.
+  - placement predicates and the replacement pair join are owner-scoped, foreign owner lock attempts
+    fail, and durable stopped/transitional `desired_status = 'running'` rows are counted.
+  - cold-Droplet evidence uses exact deployment operation-key correlation; existing-runner reuse does
+    not attach historical provisioning events; cohort p95 values are separate.
+- remaining non-code blockers are unchanged: no approved larger runner profile, per-Hermes/host disk
+  budget, authorized provider-backed two-agent trial, or hosted `maxAgents > 1` approval. Keep #270
+  open after the repository blockers above are fixed. No provider, QStash, deployment, workflow,
+  snapshot, hosted configuration, smoke, billable, or other external effect was performed.
+
+## Handoff — #270 Cycle 2 Builder Fixes to Checker
+
+- branch/worktree: `codex/issue-270-safe-capacity-reuse` in
+  `/Users/alexmetelli/source/plingpling-issue-270`.
+- commit: pending local Cycle 2 commit at handoff time.
+- findings addressed:
+  - P1 managed-ready Start now routes through the owner-aware exact-runner capacity lock and shared
+    effective placement revalidation before committing runtime intent plus durable
+    `desired_status = 'running'`.
+  - P1 replacement handover now revalidates target runner effective capacity using the shared
+    placement evaluator, including configured limit, heartbeat max/running evidence, measured/default
+    profile cap, CPU, memory, and disk inputs before moving durable reservations.
+  - P2 failed non-managed Start rollback now restores the previous `desiredStatus` as well as
+    status/status reason, so failed starts release durable capacity reservations.
+- tests added/updated:
+  - deterministic managed-ready concurrent Start/max-one race with two DB connections and explicit
+    lock hooks.
+  - injected local two-agent ready-create capacity test where exactly two of three creates reserve
+    the runner without changing the global catalog/default.
+  - failed non-managed Start rollback test proving `desiredStatus` is restored and a sibling can use
+    the released slot.
+  - replacement handover effective-capacity exhaustion test proving the move rolls back atomically.
+  - managed runtime lifecycle action fixture now seeds heartbeat capacity metadata required by the
+    owner-aware managed Start path.
+- gate evidence:
+  - `bun run format:check && bun run lint && bun run typecheck && git diff --check` — passed.
+  - affected plus lifecycle suite —
+    `bun scripts/run-unit-tests.ts tests/unit/agent-runtime-lifecycle-actions-db.test.ts
+    tests/unit/create-agent-ready-db.test.ts tests/unit/create-agent-db.test.ts
+    tests/unit/runner-replacement-handover.test.ts` — passed, 4 files / 163 tests.
+  - reviewer focused suite —
+    `bun scripts/run-unit-tests.ts tests/unit/runner-resource-profiles.test.ts
+    tests/unit/runner-placement.test.ts tests/unit/create-agent-ready-db.test.ts
+    tests/unit/create-agent-db.test.ts tests/unit/agent-deployment-reconciler.test.ts
+    tests/unit/agent-creation-latency.test.ts tests/unit/hermes-readiness.test.ts
+    tests/unit/start-agent-route.test.ts tests/unit/runner-replacement-handover.test.ts
+    tests/unit/runner-service.test.ts` — passed, 10 files / 314 tests.
+  - `bun run test` — passed, 175 files / 1722 tests.
+  - `bun run build` — passed.
+  - `bun run test:e2e:ci` — passed, 26/26.
+  - `bun run repro:cloud-runner` — passed.
+- skipped/forbidden:
+  - `bun run local:agent:smoke` was not run.
+  - no real DigitalOcean, QStash, hosted deploy/config/secret, workflow dispatch, snapshot build,
+    push, PR, merge, hosted `maxAgents > 1`, or billable/external action was performed.
+- checker focus:
+  - verify the managed-ready Start transaction cannot exceed max-one with concurrent stopped siblings.
+  - verify replacement handover combines target heartbeat running count and durable desired-running
+    reservations conservatively.
+  - verify failed-start rollback releases the durable reservation in all non-managed failure paths.

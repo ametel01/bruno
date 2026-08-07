@@ -64,8 +64,10 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import {
   agentApprovals,
   agentConfigs,
+  agentDeployments,
   agentEvents,
   agentLogs,
+  agentRuntimeReconciliations,
   agentUsagePeriods,
   agents,
   appMetadata,
@@ -850,6 +852,132 @@ describe("create agent persistence", () => {
     expect(runningAgents).toHaveLength(1);
     expect(runningAgents[0]?.runnerId).toBe(runner.id);
     expect(calls.filter((call) => call.startsWith("start:"))).toHaveLength(1);
+  });
+
+  it("serializes managed-ready starts through the owner-aware runner capacity lock", async () => {
+    const userId = await ensureDevelopmentUser(connection);
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, userId, {
+      maxAgents: 1,
+      runningAgents: 0,
+    });
+    const agentA = await createAgentForDevelopmentUser(
+      { name: "Managed Start Agent A", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const agentB = await createAgentForDevelopmentUser(
+      { name: "Managed Start Agent B", templateKey: "github_issue_agent" },
+      { createConnection: () => connection },
+    );
+    await seedManagedRuntime(connection, userId, agentA.agent.id);
+    await seedManagedRuntime(connection, userId, agentB.agent.id);
+    const firstConnection = createDatabaseConnection();
+    const secondConnection = createDatabaseConnection();
+    const scheduled: string[] = [];
+    let releaseFirst = () => {};
+    const firstMayContinue = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let firstLocked = () => {};
+    const firstCapacityLockAcquired = new Promise<void>((resolve) => {
+      firstLocked = resolve;
+    });
+    let secondAtLock = () => {};
+    const secondCapacityLockReached = new Promise<void>((resolve) => {
+      secondAtLock = resolve;
+    });
+
+    try {
+      const firstStart = startAgentForDevelopmentUser(agentA.agent.id, {
+        createConnection: () => firstConnection,
+        runnerCapacityTestHooks: {
+          afterCapacityLock: async () => {
+            firstLocked();
+            await firstMayContinue;
+          },
+        },
+        scheduleRuntimeReconcile: (agentId) => scheduled.push(agentId),
+      });
+      await firstCapacityLockAcquired;
+
+      const secondStart = startAgentForDevelopmentUser(agentB.agent.id, {
+        createConnection: () => secondConnection,
+        runnerCapacityTestHooks: {
+          beforeCapacityLock: () => {
+            secondAtLock();
+          },
+        },
+        scheduleRuntimeReconcile: (agentId) => scheduled.push(agentId),
+      });
+      await secondCapacityLockReached;
+      releaseFirst();
+
+      const results = await Promise.all([firstStart, secondStart]);
+      const reservations = await connection.db
+        .select({
+          id: agents.id,
+          status: agents.status,
+          desiredStatus: agents.desiredStatus,
+        })
+        .from(agents)
+        .where(eq(agents.runnerId, runner.id));
+
+      expect(results).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ ok: true, state: "accepted" }),
+          { ok: false, reason: "runner_capacity_reached" },
+        ]),
+      );
+      expect(reservations.filter((agent) => agent.desiredStatus === "running")).toHaveLength(1);
+      expect(reservations.filter((agent) => agent.status === "starting")).toHaveLength(1);
+      expect(scheduled).toHaveLength(1);
+    } finally {
+      releaseFirst();
+      await firstConnection.close();
+      await secondConnection.close();
+    }
+  });
+
+  it("restores desired status when a non-managed runner start fails after reservation", async () => {
+    const created = await createAgentForDevelopmentUser(
+      { name: "Failed Reservation Rollback Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, created.agent.userId, {
+      maxAgents: 1,
+      runningAgents: 0,
+    });
+    const calls: string[] = [];
+
+    const failed = await startAgentForDevelopmentUser(created.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: () =>
+        createManualLifecycleRunnerStub(calls, {
+          runnerId: runner.id,
+          startOk: false,
+        }),
+      runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
+    });
+    const [afterFailedStart] = await connection.db
+      .select({
+        runnerId: agents.runnerId,
+        status: agents.status,
+        desiredStatus: agents.desiredStatus,
+      })
+      .from(agents)
+      .where(eq(agents.id, created.agent.id))
+      .limit(1);
+    const sibling = await createAgentForDevelopmentUser(
+      { name: "Released Capacity Sibling", templateKey: "github_issue_agent" },
+      { createConnection: () => connection },
+    );
+
+    expect(failed).toEqual({ ok: false, reason: "runner_start_failed" });
+    expect(afterFailedStart).toEqual({
+      runnerId: runner.id,
+      status: "stopped",
+      desiredStatus: "stopped",
+    });
+    expect(sibling.agent.runnerId).toBe(runner.id);
   });
 
   it("starts one fail-closed runner reservation and leaves additional implicit capacity users unassigned", async () => {
@@ -9288,7 +9416,7 @@ describe("create agent persistence", () => {
 });
 
 async function resetCreateAgentTables(connection: DatabaseConnection): Promise<void> {
-  await connection.client`truncate table agent_approvals, agent_configs, agent_usage_periods, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runner_heartbeats, runners, app_metadata, users restart identity cascade`;
+  await connection.client`truncate table agent_approvals, agent_configs, agent_runtime_reconciliations, agent_usage_periods, agent_logs, docker_runner_containers, local_runner_processes, agent_events, agents, runner_heartbeats, runners, app_metadata, users restart identity cascade`;
 }
 
 async function ensureDevelopmentUser(connection: DatabaseConnection): Promise<string> {
@@ -9335,6 +9463,43 @@ async function seedOnlineRunnerWithHeartbeat(
   });
 
   return runner;
+}
+
+async function seedManagedRuntime(
+  connection: DatabaseConnection,
+  userId: string,
+  agentId: string,
+): Promise<void> {
+  await connection.db.insert(agentDeployments).values({
+    agentId,
+    userId,
+    stage: "ready",
+    configRevision: `cfg-managed-${agentId.slice(-4)}`,
+    idempotencyKey: `managed-${agentId}`,
+    runnerOperationId: `00000000-0000-4000-8000-${agentId.slice(-12)}`,
+    runnerAcceptedAt: new Date("2026-07-06T04:01:00.000Z"),
+    canaryState: "passed",
+    canaryAttemptedAt: new Date("2026-07-06T04:01:00.000Z"),
+    canaryCompletedAt: new Date("2026-07-06T04:01:00.000Z"),
+    startedAt: new Date("2026-07-06T04:01:00.000Z"),
+    completedAt: new Date("2026-07-06T04:01:00.000Z"),
+    createdAt: new Date("2026-07-06T04:01:00.000Z"),
+    updatedAt: new Date("2026-07-06T04:01:00.000Z"),
+  });
+  await connection.db.insert(agentRuntimeReconciliations).values({
+    agentId,
+    userId,
+    state: "observing",
+    generation: 0,
+    configRevision: `cfg-managed-${agentId.slice(-4)}`,
+    operationId: `00000000-0000-4000-8000-${agentId.slice(-12)}`,
+    stableSince: new Date("2026-07-06T04:01:00.000Z"),
+    lastObservedAt: new Date("2026-07-06T04:01:00.000Z"),
+    lastReadyAt: new Date("2026-07-06T04:01:00.000Z"),
+    nextAttemptAt: new Date("2026-07-06T04:01:00.000Z"),
+    createdAt: new Date("2026-07-06T04:01:00.000Z"),
+    updatedAt: new Date("2026-07-06T04:01:00.000Z"),
+  });
 }
 
 async function createTestApproval(
