@@ -1,18 +1,18 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import {
+  type PublicAgentRuntimePresentation,
   parseSafeRuntimeGetBody,
   runtimePollDelayMs,
-  type PublicAgentRuntimePresentation,
 } from "@/src/shared/agent-runtime-presentation";
 import {
+  type ForegroundPollingWindow,
   foregroundPollingElapsedMs,
   pauseForegroundPollingWindow,
   resumeForegroundPollingWindow,
   startForegroundPollingWindow,
-  type ForegroundPollingWindow,
 } from "@/src/shared/deployment-polling-state";
 
 type AgentRuntimeStatusProps = {
@@ -34,7 +34,16 @@ const SAFE_UNAVAILABLE_RUNTIME: PublicAgentRuntimePresentation = {
   message: "Runtime state could not be verified safely.",
 };
 
-export function AgentRuntimeStatus({ agentId, initialRuntime }: AgentRuntimeStatusProps) {
+export function AgentRuntimeStatus(props: AgentRuntimeStatusProps) {
+  return (
+    <AgentRuntimeStatusState
+      key={JSON.stringify([props.agentId, props.initialRuntime])}
+      {...props}
+    />
+  );
+}
+
+function AgentRuntimeStatusState({ agentId, initialRuntime }: AgentRuntimeStatusProps) {
   const router = useRouter();
   const [runtime, setRuntime] = useState(initialRuntime);
   const [observation, setObservation] = useState<RuntimeObservation>({
@@ -49,7 +58,8 @@ export function AgentRuntimeStatus({ agentId, initialRuntime }: AgentRuntimeStat
   const requestRef = useRef<AbortController | null>(null);
   const requestEpochRef = useRef(0);
   const pollRef = useRef<() => void>(() => {});
-  const foregroundRef = useRef<ForegroundPollingWindow>(startForegroundPollingWindow(Date.now()));
+  const initialForegroundWindow = useMemo(() => startForegroundPollingWindow(Date.now()), []);
+  const foregroundRef = useRef<ForegroundPollingWindow>(initialForegroundWindow);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -170,25 +180,20 @@ export function AgentRuntimeStatus({ agentId, initialRuntime }: AgentRuntimeStat
       if (requestRef.current === controller) {
         requestRef.current = null;
       }
+      setIsFetching(false);
       if (requestEpoch === requestEpochRef.current) {
-        setIsFetching(false);
         schedule();
       }
     }
   }, [agentId, clearTimer, recordFailure, router, schedule]);
 
+  const pollOnResume = useEffectEvent(() => {
+    void poll();
+  });
+
   useEffect(() => {
     pollRef.current = () => void poll();
   }, [poll]);
-
-  useEffect(() => {
-    requestEpochRef.current += 1;
-    runtimeRef.current = initialRuntime;
-    failureCountRef.current = 0;
-    setRuntime(initialRuntime);
-    setObservation({ kind: "current", failures: 0 });
-    resumeForeground(true);
-  }, [initialRuntime, resumeForeground]);
 
   useEffect(() => {
     void poll();
@@ -204,7 +209,7 @@ export function AgentRuntimeStatus({ agentId, initialRuntime }: AgentRuntimeStat
     const resume = () => {
       if (!document.hidden && navigator.onLine) {
         resumeForeground(false);
-        void poll();
+        pollOnResume();
       } else {
         pauseForeground();
         clearTimer();
@@ -219,7 +224,7 @@ export function AgentRuntimeStatus({ agentId, initialRuntime }: AgentRuntimeStat
       window.removeEventListener("online", resume);
       window.removeEventListener("offline", resume);
     };
-  }, [clearTimer, pauseForeground, poll, resumeForeground]);
+  }, [clearTimer, pauseForeground, resumeForeground]);
 
   return (
     <section

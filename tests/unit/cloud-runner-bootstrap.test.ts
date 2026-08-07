@@ -11,6 +11,9 @@ import {
 import {
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+  DEFAULT_HERMES_DOCKER_CPUS,
+  DEFAULT_HERMES_DOCKER_MEMORY,
+  DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
   DEFAULT_HERMES_RUNNER_MAX_AGENTS,
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
@@ -109,6 +112,13 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain(
       `AGENTBAY_HERMES_READINESS_TIMEOUT_MS=${DEFAULT_HERMES_READINESS_TIMEOUT_MS}`,
     );
+    expect(content.userData).toContain(`AGENTBAY_HERMES_DOCKER_CPUS=${DEFAULT_HERMES_DOCKER_CPUS}`);
+    expect(content.userData).toContain(
+      `AGENTBAY_HERMES_DOCKER_MEMORY=${DEFAULT_HERMES_DOCKER_MEMORY}`,
+    );
+    expect(content.userData).toContain(
+      `AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=${DEFAULT_HERMES_DOCKER_PIDS_LIMIT}`,
+    );
     expect(content.userData).toContain(
       `AGENTBAY_RUNNER_MAX_AGENTS=${DEFAULT_HERMES_RUNNER_MAX_AGENTS}`,
     );
@@ -131,7 +141,32 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain("AGENTBAY_BOOTSTRAP_STEP=docker_pull");
     expect(content.userData).toContain("AGENTBAY_BOOTSTRAP_STEP=agent_image_pull");
     expect(content.userData).toContain("AGENTBAY_BOOTSTRAP_STEP=hermes_image_pull");
-    expect(content.userData).toContain("AGENTBAY_BOOTSTRAP_STEP=docker_container_start");
+    expect(content.userData).toContain("AGENTBAY_BOOTSTRAP_STEP=runner_container_start");
+    expect(content.userData).not.toContain("AGENTBAY_BOOTSTRAP_STEP=docker_container_start");
+    expect(content.userData).toContain(
+      '/usr/local/bin/agentbay-bootstrap-event bootstrapping started "Installing cloud runner packages." package_install',
+    );
+    expect(content.userData).toContain(
+      '/usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Cloud runner packages were installed." package_install',
+    );
+    expect(content.userData).toContain(
+      '/usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled cloud runner image." docker_pull',
+    );
+    expect(content.userData).toContain(
+      '/usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled default agent container image." agent_image_pull',
+    );
+    expect(content.userData).toContain(
+      '/usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled Hermes workload image." hermes_image_pull',
+    );
+    expect(content.userData).toContain(
+      '/usr/local/bin/agentbay-bootstrap-event bootstrapping started "Starting runner container." runner_container_start',
+    );
+    expect(content.userData).toContain(
+      '/usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Runner container started." runner_container_start',
+    );
+    expect(content.userData).toContain(
+      '/usr/local/bin/agentbay-bootstrap-event waiting_for_runner started "Runner container started; waiting for registration and heartbeat." runner_registration',
+    );
     expect(content.userData).toContain(`install -m 0710 -d '${DEFAULT_HERMES_STATE_ROOT}'`);
     expect(content.userData).toContain(
       `docker network inspect '${DEFAULT_HERMES_PRIVATE_NETWORK}' >/dev/null 2>&1 || docker network create '${DEFAULT_HERMES_PRIVATE_NETWORK}'`,
@@ -158,6 +193,11 @@ describe.sequential("cloud runner bootstrap content", () => {
       hermesStateRoot: DEFAULT_HERMES_STATE_ROOT,
       hermesPrivateNetwork: DEFAULT_HERMES_PRIVATE_NETWORK,
       hermesReadinessTimeoutMs: DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+      hermesDocker: {
+        cpus: DEFAULT_HERMES_DOCKER_CPUS,
+        memory: DEFAULT_HERMES_DOCKER_MEMORY,
+        pidsLimit: DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
+      },
       runnerMaxAgents: DEFAULT_HERMES_RUNNER_MAX_AGENTS,
       bootModelCanaryEnabled: false,
       registrationToken: BOOTSTRAP_REDACTION,
@@ -181,10 +221,39 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.safeSummary.hermesStateRoot).toBe(DEFAULT_HERMES_STATE_ROOT);
     expect(content.safeSummary.hermesPrivateNetwork).toBe(DEFAULT_HERMES_PRIVATE_NETWORK);
     expect(content.safeSummary.hermesReadinessTimeoutMs).toBe(DEFAULT_HERMES_READINESS_TIMEOUT_MS);
+    expect(content.safeSummary.hermesDocker).toEqual({
+      cpus: DEFAULT_HERMES_DOCKER_CPUS,
+      memory: DEFAULT_HERMES_DOCKER_MEMORY,
+      pidsLimit: DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
+    });
     expect(content.safeSummary.runnerMaxAgents).toBe(DEFAULT_HERMES_RUNNER_MAX_AGENTS);
     expect(content.safeSummary.runnerRelease).toBeNull();
     expect(content.userData).toContain(`AGENTBAY_RUNNER_IMAGE=${DEFAULT_AGENTBAY_RUNNER_IMAGE}`);
     expect(content.userData).not.toContain(RUNNER_EXPECTED_IMAGE_DIGEST_ENV);
+  });
+
+  it("builds snapshot first-boot data without package installation or image pulls", () => {
+    const content = buildCloudRunnerBootstrapContent({
+      appBaseUrl: "https://app.agentbay.test",
+      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      commandBearerToken: "runner-command-token",
+      runnerEndpointUrl: "https://runner.agentbay.test",
+      runnerImage: IMMUTABLE_RUNNER_IMAGE,
+      bootMode: "snapshot",
+    });
+
+    expect(content.userData).toContain("#cloud-config");
+    expect(content.userData).toContain("AGENTBAY_RUNNER_REGISTRATION_TOKEN=");
+    expect(content.userData).toContain("AGENTBAY_RUNNER_BEARER_TOKEN=runner-command-token");
+    expect(content.userData).toContain("snapshot_preloaded_images");
+    expect(content.userData).toContain("docker run --detach");
+    expect(content.userData).toContain("waiting_for_runner");
+    expect(content.userData).not.toContain("package_update:");
+    expect(content.userData).not.toContain("packages:");
+    expect(content.userData).not.toContain("apt-get install");
+    expect(content.userData).not.toContain("docker pull");
+    expect(content.userData).not.toContain("agentbay_pull_image");
+    expect(content.userData).not.toContain("docker_apt_repository");
   });
 
   it("marks local tagged images with the explicit development identity seam", () => {
@@ -212,6 +281,9 @@ describe.sequential("cloud runner bootstrap content", () => {
       hermesStateRoot: "/var/lib/agentbay/custom-agents",
       hermesPrivateNetwork: "agentbay-custom-hermes",
       hermesReadinessTimeoutMs: 240_000,
+      hermesDockerCpus: "1",
+      hermesDockerMemory: "1536m",
+      hermesDockerPidsLimit: "256",
       runnerMaxAgents: 1,
     });
 
@@ -223,6 +295,9 @@ describe.sequential("cloud runner bootstrap content", () => {
     );
     expect(content.userData).toContain("AGENTBAY_HERMES_PRIVATE_NETWORK=agentbay-custom-hermes");
     expect(content.userData).toContain("AGENTBAY_HERMES_READINESS_TIMEOUT_MS=240000");
+    expect(content.userData).toContain("AGENTBAY_HERMES_DOCKER_CPUS=1");
+    expect(content.userData).toContain("AGENTBAY_HERMES_DOCKER_MEMORY=1536m");
+    expect(content.userData).toContain("AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256");
     expect(content.userData).toContain("AGENTBAY_RUNNER_MAX_AGENTS=1");
     expect(content.userData).toContain(
       "agentbay_pull_image 'ghcr.io/ametel01/agentbay-hermes:sha-123'",
@@ -236,8 +311,35 @@ describe.sequential("cloud runner bootstrap content", () => {
       hermesStateRoot: "/var/lib/agentbay/custom-agents",
       hermesPrivateNetwork: "agentbay-custom-hermes",
       hermesReadinessTimeoutMs: 240_000,
+      hermesDocker: {
+        cpus: "1",
+        memory: "1536m",
+        pidsLimit: "256",
+      },
       runnerMaxAgents: 1,
     });
+  });
+
+  it("rejects Hermes runtime settings Docker cannot represent", () => {
+    const base = {
+      appBaseUrl: "https://app.agentbay.test",
+      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      runnerName: "Cloud Runner 1",
+    };
+
+    expect(() =>
+      buildCloudRunnerBootstrapContent({
+        ...base,
+        hermesDockerCpus: "0.0000000001",
+      }),
+    ).toThrow("hermesDockerCpus must be a positive Docker CPU value representable");
+
+    expect(() =>
+      buildCloudRunnerBootstrapContent({
+        ...base,
+        hermesDockerPidsLimit: "4097",
+      }),
+    ).toThrow("hermesDockerPidsLimit must be a positive integer no greater than 4096");
   });
 
   it("rejects loopback runner endpoint URLs for cloud bootstrap registration", () => {

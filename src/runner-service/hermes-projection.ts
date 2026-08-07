@@ -2,13 +2,13 @@ import { randomBytes as cryptoRandomBytes } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { chmod, lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
-import { parseAllDocuments, stringify, visit, type Document, type Node } from "yaml";
+import { type Document, type Node, parseAllDocuments, stringify, visit } from "yaml";
+import { DEFAULT_HERMES_STATE_ROOT } from "@/src/runner-service/constants";
 import {
-  MANAGED_AGENT_LAUNCH_SPEC_VERSION,
   type AgentLaunchSpec,
+  MANAGED_AGENT_LAUNCH_SPEC_VERSION,
   type ManagedAgentLaunchSpec,
 } from "@/src/server/agents/agent-launch-spec";
-import { DEFAULT_HERMES_STATE_ROOT } from "@/src/runner-service/constants";
 
 export type HermesProjectionResult = {
   agentRoot: string;
@@ -140,9 +140,11 @@ async function projectHermesHomeUnchecked(
   const soulPath = resolveManagedPath(hermesHome, "SOUL.md");
   const revisionPath = resolveManagedPath(hermesHome, "agentbay-config-revision.json");
 
-  for (const fileName of GUARDED_FILES) {
-    await assertSafeExistingTarget(resolveManagedPath(hermesHome, fileName));
-  }
+  await Promise.all(
+    GUARDED_FILES.map((fileName) =>
+      assertSafeExistingTarget(resolveManagedPath(hermesHome, fileName)),
+    ),
+  );
 
   const existingConfig = await readExistingRegularFile(configPath, MAX_CONFIG_YAML_BYTES);
 
@@ -759,11 +761,13 @@ async function pruneObsoleteManagedTemps(
   hermesHome: string,
   fs: HermesProjectionFilesystem,
 ): Promise<void> {
-  for (const fileName of GUARDED_FILES) {
-    await fs
-      .rm(resolveManagedPath(hermesHome, `${fileName}.tmp`), { force: true })
-      .catch(() => undefined);
-  }
+  await Promise.all(
+    GUARDED_FILES.map((fileName) =>
+      fs
+        .rm(resolveManagedPath(hermesHome, `${fileName}.tmp`), { force: true })
+        .catch(() => undefined),
+    ),
+  );
 }
 
 async function rejectSymlinkIfExists(path: string): Promise<void> {

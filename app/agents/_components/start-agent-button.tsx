@@ -28,7 +28,13 @@ type StartState =
 
 const STARTABLE_STATUSES = new Set<AgentLifecycleStatus>(["idle", "stopped", "error"]);
 
-export function StartAgentButton({
+export function StartAgentButton(props: StartAgentButtonProps) {
+  const resetKey = props.status === "running" && !props.allowRuntimeStart ? "complete" : "active";
+
+  return <StartAgentButtonStateful key={`${props.agentId}:${resetKey}`} {...props} />;
+}
+
+function StartAgentButtonStateful({
   agentId,
   status,
   allowRuntimeStart = false,
@@ -44,12 +50,6 @@ export function StartAgentButton({
   const requestLatchRef = useRef(false);
 
   useEffect(() => {
-    if (status === "running" && !allowRuntimeStart) {
-      releaseAgentActionRequestLatch(requestLatchRef);
-      setState({ status: "idle" });
-      return;
-    }
-
     if (state.status !== "polling" && status !== "starting") {
       return;
     }
@@ -61,16 +61,18 @@ export function StartAgentButton({
     return () => {
       window.clearInterval(refreshInterval);
     };
-  }, [allowRuntimeStart, router, state.status, status]);
+  }, [router, state.status, status]);
 
   async function handleStart() {
-    if (
-      (!STARTABLE_STATUSES.has(status) && !allowRuntimeStart) ||
-      !acquireAgentActionRequestLatch(requestLatchRef)
-    ) {
+    if ((!STARTABLE_STATUSES.has(status) && !allowRuntimeStart) || requestLatchRef.current) {
       return;
     }
 
+    if (!acquireAgentActionRequestLatch(requestLatchRef)) {
+      return;
+    }
+
+    requestLatchRef.current = true;
     setState({ status: "requesting" });
 
     try {

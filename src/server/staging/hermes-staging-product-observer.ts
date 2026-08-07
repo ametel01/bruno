@@ -511,41 +511,45 @@ export async function observeHermesResourceAbsence(
     return { state: "invalid_input" };
   }
 
-  const [agent] = await db
-    .select({ userId: agents.userId, deletedAt: agents.deletedAt })
-    .from(agents)
-    .where(eq(agents.id, input.agentId))
-    .limit(1);
-  const [runner] = await db
-    .select({ userId: runners.userId, deletedAt: runners.deletedAt })
-    .from(runners)
-    .where(eq(runners.id, input.runnerId))
-    .limit(1);
+  const [[agent], [runner]] = await Promise.all([
+    db
+      .select({ userId: agents.userId, deletedAt: agents.deletedAt })
+      .from(agents)
+      .where(eq(agents.id, input.agentId))
+      .limit(1),
+    db
+      .select({ userId: runners.userId, deletedAt: runners.deletedAt })
+      .from(runners)
+      .where(eq(runners.id, input.runnerId))
+      .limit(1),
+  ]);
 
   if ((agent && agent.userId !== input.userId) || (runner && runner.userId !== input.userId)) {
     return { state: "ownership_mismatch" };
   }
 
-  const [localWorkload] = await db
-    .select({ present: sql<boolean>`true` })
-    .from(localRunnerProcesses)
-    .where(
-      and(
-        eq(localRunnerProcesses.agentId, input.agentId),
-        inArray(localRunnerProcesses.status, ["starting", "running"]),
-      ),
-    )
-    .limit(1);
-  const [dockerWorkload] = await db
-    .select({ present: sql<boolean>`true` })
-    .from(dockerRunnerContainers)
-    .where(
-      and(
-        eq(dockerRunnerContainers.agentId, input.agentId),
-        isNull(dockerRunnerContainers.finishedAt),
-      ),
-    )
-    .limit(1);
+  const [[localWorkload], [dockerWorkload]] = await Promise.all([
+    db
+      .select({ present: sql<boolean>`true` })
+      .from(localRunnerProcesses)
+      .where(
+        and(
+          eq(localRunnerProcesses.agentId, input.agentId),
+          inArray(localRunnerProcesses.status, ["starting", "running"]),
+        ),
+      )
+      .limit(1),
+    db
+      .select({ present: sql<boolean>`true` })
+      .from(dockerRunnerContainers)
+      .where(
+        and(
+          eq(dockerRunnerContainers.agentId, input.agentId),
+          isNull(dockerRunnerContainers.finishedAt),
+        ),
+      )
+      .limit(1),
+  ]);
 
   const workload = localWorkload || dockerWorkload ? "recorded_present" : "recorded_absent";
   const agentPresence = !agent ? "absent" : agent.deletedAt ? "deleted" : "active";

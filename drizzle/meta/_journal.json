@@ -183,6 +183,13 @@
       "when": 1785996493826,
       "tag": "0025_third_scrambler",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1786060934296,
+      "tag": "0026_talented_lady_vermin",
+      "breakpoints": true
     }
-    ]
+  ]
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { AgentBackupSummary } from "@/src/server/backups/list-backups";
 
 type AgentBackupControlsProps = {
@@ -24,10 +24,16 @@ type RestoredAgentLink = {
 
 export function AgentBackupControls({ agentId, backups }: AgentBackupControlsProps) {
   const router = useRouter();
+  const actionInFlightRef = useRef(false);
   const [state, setState] = useState<BackupActionState>({ status: "idle" });
   const creating = state.status === "creating";
 
   async function handleCreateBackup() {
+    if (actionInFlightRef.current) {
+      return;
+    }
+
+    actionInFlightRef.current = true;
     setState({ status: "creating" });
 
     try {
@@ -48,10 +54,17 @@ export function AgentBackupControls({ agentId, backups }: AgentBackupControlsPro
       router.refresh();
     } catch {
       setState({ status: "error", message: "Manual backup could not be created." });
+    } finally {
+      actionInFlightRef.current = false;
     }
   }
 
   async function handleRestoreBackup(backupId: string) {
+    if (actionInFlightRef.current) {
+      return;
+    }
+
+    actionInFlightRef.current = true;
     setState({ status: "restoring", backupId });
 
     try {
@@ -87,6 +100,8 @@ export function AgentBackupControls({ agentId, backups }: AgentBackupControlsPro
       router.refresh();
     } catch {
       setState({ status: "error", message: "Backup could not be restored." });
+    } finally {
+      actionInFlightRef.current = false;
     }
   }
 

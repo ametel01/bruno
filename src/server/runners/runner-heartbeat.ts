@@ -1,23 +1,5 @@
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { runnerCredentials, runnerHeartbeats, runners } from "@/src/server/db/schema";
-import type * as schema from "@/src/server/db/schema";
-import {
-  DIGITALOCEAN_PROVIDER,
-  DIGITALOCEAN_RUNNER_KIND,
-} from "@/src/server/runners/digitalocean-provider";
-import { hashRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
-import {
-  markCloudRunnerFailedAfterAuthenticatedProbe,
-  markCloudRunnerReadyAfterAuthenticatedProbe,
-} from "@/src/server/runners/runner-provisioning-events";
-import {
-  assessRunnerCompatibility,
-  isPersistedRunnerCompatible,
-  readRunnerCompatibilityRequirement,
-  type RunnerCompatibilityRequirement,
-} from "@/src/server/runners/runner-compatibility";
 import {
   parseRunnerReleaseIdentity,
   type RunnerReleaseIdentity,
@@ -26,6 +8,24 @@ import {
   parseRunnerBootSnapshot,
   type RunnerBootSnapshot,
 } from "@/src/runner-service/runner-contracts";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
+import { runnerCredentials, runnerHeartbeats, runners } from "@/src/server/db/schema";
+import {
+  DIGITALOCEAN_PROVIDER,
+  DIGITALOCEAN_RUNNER_KIND,
+} from "@/src/server/runners/digitalocean-provider";
+import { hashRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
+import {
+  assessRunnerCompatibility,
+  isPersistedRunnerCompatible,
+  type RunnerCompatibilityRequirement,
+  readRunnerCompatibilityRequirement,
+} from "@/src/server/runners/runner-compatibility";
+import {
+  markCloudRunnerFailedAfterAuthenticatedProbe,
+  markCloudRunnerReadyAfterAuthenticatedProbe,
+} from "@/src/server/runners/runner-provisioning-events";
 
 export const RUNNER_HEARTBEAT_ONLINE_STATUS = "online";
 export const RUNNER_HEARTBEAT_DEGRADED_STATUS = "degraded";
@@ -107,6 +107,12 @@ export type RunnerHeartbeatTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
 >[0];
 
+export type LatestRunnerHeartbeat = {
+  status: string;
+  metadata: Record<string, unknown>;
+  observedAt: Date;
+};
+
 export type RecordRunnerHeartbeatResult =
   | {
       ok: true;
@@ -156,8 +162,20 @@ export type ConfirmCloudRunnerReadinessResult =
     };
 
 export type ProbeRunnerEndpointReadinessResult =
-  | { ok: true; protocol: "readiness_endpoint"; snapshot: RunnerBootSnapshot }
-  | { ok: false; reason: "runner_not_ready"; snapshot: RunnerBootSnapshot }
+  | {
+      ok: true;
+      protocol: "readiness_endpoint";
+      snapshot: RunnerBootSnapshot;
+      observedStartedAt: Date;
+      observedCompletedAt: Date;
+    }
+  | {
+      ok: false;
+      reason: "runner_not_ready";
+      snapshot: RunnerBootSnapshot;
+      observedStartedAt: Date;
+      observedCompletedAt: Date;
+    }
   | {
       ok: false;
       reason:
@@ -362,6 +380,7 @@ export async function confirmCloudRunnerReadiness(
       runnerBearerToken,
       allowInsecureLoopback,
       ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+      ...(dependencies.now ? { now: dependencies.now } : {}),
       ...(dependencies.timeoutMs === undefined ? {} : { timeoutMs: dependencies.timeoutMs }),
     });
 
@@ -380,6 +399,8 @@ export async function confirmCloudRunnerReadiness(
             runnerId,
             now,
             bootSnapshot,
+            readinessProbeStartedAt: probe.observedStartedAt,
+            readinessProbeCompletedAt: probe.observedCompletedAt,
           }),
         );
         return {
@@ -407,6 +428,8 @@ export async function confirmCloudRunnerReadiness(
         runnerId,
         now,
         bootSnapshot: probe.snapshot,
+        readinessProbeStartedAt: probe.observedStartedAt,
+        readinessProbeCompletedAt: probe.observedCompletedAt,
       }),
     );
 
@@ -425,6 +448,7 @@ export async function probeRunnerEndpointReadiness(input: {
   runnerBearerToken: string | null | undefined;
   allowInsecureLoopback?: boolean;
   fetch?: typeof fetch;
+  now?: () => Date;
   timeoutMs?: number;
 }): Promise<ProbeRunnerEndpointReadinessResult> {
   const runnerBearerToken = input.runnerBearerToken?.trim();
@@ -445,6 +469,7 @@ export async function probeRunnerEndpointReadiness(input: {
     input.timeoutMs ?? RUNNER_READINESS_PROBE_TIMEOUT_MS,
   );
   let response: Response;
+  const observedStartedAt = input.now?.() ?? new Date();
 
   try {
     response = await (input.fetch ?? fetch)(readinessUrl, {
@@ -469,11 +494,18 @@ export async function probeRunnerEndpointReadiness(input: {
   } catch {
     return { ok: false, reason: response.ok ? "response_invalid" : "endpoint_rejected" };
   }
+  const observedCompletedAt = input.now?.() ?? new Date();
 
   const snapshot = parseRunnerBootSnapshot(payload);
   if (!response.ok) {
     if (response.status === 503 && snapshot && snapshot.status !== "ready") {
-      return { ok: false, reason: "runner_not_ready", snapshot };
+      return {
+        ok: false,
+        reason: "runner_not_ready",
+        snapshot,
+        observedStartedAt,
+        observedCompletedAt,
+      };
     }
     if (response.status === 404 && isLegacyAuthenticatedNotFoundPayload(payload)) {
       return { ok: false, reason: "response_invalid" };
@@ -482,7 +514,13 @@ export async function probeRunnerEndpointReadiness(input: {
   }
 
   return snapshot?.status === "ready"
-    ? { ok: true, protocol: "readiness_endpoint", snapshot }
+    ? {
+        ok: true,
+        protocol: "readiness_endpoint",
+        snapshot,
+        observedStartedAt,
+        observedCompletedAt,
+      }
     : { ok: false, reason: "response_invalid" };
 }
 
@@ -593,20 +631,14 @@ export async function reconcileStaleRunnerHeartbeatsInTransaction(
     .select({ id: runners.id })
     .from(runners)
     .where(and(...runnerFilters));
-  const staleRunnerIds: string[] = [];
-
-  for (const candidate of candidateRunners) {
-    const [latestHeartbeat] = await tx
-      .select({ observedAt: runnerHeartbeats.observedAt })
-      .from(runnerHeartbeats)
-      .where(eq(runnerHeartbeats.runnerId, candidate.id))
-      .orderBy(desc(runnerHeartbeats.observedAt))
-      .limit(1);
-
-    if (!latestHeartbeat || latestHeartbeat.observedAt < cutoff) {
-      staleRunnerIds.push(candidate.id);
-    }
-  }
+  const latestHeartbeats = await loadLatestRunnerHeartbeatMap(
+    tx,
+    candidateRunners.map((candidate) => candidate.id),
+  );
+  const staleRunnerIds = candidateRunners.flatMap((candidate) => {
+    const latestHeartbeat = latestHeartbeats.get(candidate.id);
+    return !latestHeartbeat || latestHeartbeat.observedAt < cutoff ? [candidate.id] : [];
+  });
 
   if (staleRunnerIds.length > 0) {
     await tx
@@ -623,6 +655,32 @@ export async function reconcileStaleRunnerHeartbeatsInTransaction(
     runnerIds: staleRunnerIds,
     cutoff: cutoff.toISOString(),
   };
+}
+
+export async function loadLatestRunnerHeartbeatMap(
+  tx: RunnerHeartbeatTransaction,
+  runnerIds: readonly string[],
+): Promise<Map<string, LatestRunnerHeartbeat>> {
+  if (runnerIds.length === 0) {
+    return new Map();
+  }
+
+  const rows = await tx
+    .selectDistinctOn([runnerHeartbeats.runnerId], {
+      runnerId: runnerHeartbeats.runnerId,
+      status: runnerHeartbeats.status,
+      metadata: runnerHeartbeats.metadata,
+      observedAt: runnerHeartbeats.observedAt,
+    })
+    .from(runnerHeartbeats)
+    .where(inArray(runnerHeartbeats.runnerId, [...runnerIds]))
+    .orderBy(
+      runnerHeartbeats.runnerId,
+      desc(runnerHeartbeats.observedAt),
+      desc(runnerHeartbeats.id),
+    );
+
+  return new Map(rows.map(({ runnerId, ...heartbeat }) => [runnerId, heartbeat]));
 }
 
 export function validateRunnerHeartbeatPayload(payload: unknown): RunnerHeartbeatValidation {

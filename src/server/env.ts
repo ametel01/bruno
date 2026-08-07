@@ -10,11 +10,24 @@ import {
 import {
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+  DEFAULT_HERMES_DOCKER_CPUS,
+  DEFAULT_HERMES_DOCKER_MEMORY,
+  DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
   DEFAULT_HERMES_RUNNER_MAX_AGENTS,
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
+  DEFAULT_MANUAL_RUNNER_IMAGE,
 } from "@/src/runner-service/constants";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
+import {
+  findDigitalOceanRunnerResourceProfile,
+  MAX_HERMES_DOCKER_PIDS_LIMIT,
+  parseHermesDockerCpus,
+  parseHermesDockerMemoryMiB,
+  parseHermesDockerPidsLimit,
+  validateDigitalOceanRunnerResourceCompatibility,
+} from "@/src/server/runners/runner-resource-profiles";
+import type { RunnerSnapshotExpectedIdentities } from "@/src/server/runners/runner-snapshot-manifest";
 
 export const DEFAULT_AGENTBAY_RUNNER_IMAGE = "ghcr.io/ametel01/agentbay-runner:main";
 
@@ -37,6 +50,9 @@ export type DigitalOceanProviderConfig = {
   hermesStateRoot?: string;
   hermesPrivateNetwork?: string;
   hermesReadinessTimeoutMs?: number;
+  hermesDockerCpus?: string;
+  hermesDockerMemory?: string;
+  hermesDockerPidsLimit?: string;
   runnerMaxAgents?: number;
   region: string;
   sizeSlug: string;
@@ -48,7 +64,18 @@ export type DigitalOceanProviderConfig = {
   localRunnerContainerName?: string;
   localRunnerStartDelayMs?: number;
   localAgentSmokeMode?: boolean;
+  snapshotMode?: DigitalOceanSnapshotModeConfig;
 };
+
+export type DigitalOceanSnapshotModeConfig =
+  | { mode: "stock" }
+  | {
+      mode: "snapshot";
+      manifestBytes: string;
+      signature: string;
+      publicKeyPem: string;
+      expected: RunnerSnapshotExpectedIdentities;
+    };
 
 export type CronSecretConfig =
   | {
@@ -58,6 +85,24 @@ export type CronSecretConfig =
   | {
       ok: false;
       reason: "cron_configuration_invalid";
+    };
+
+export type DeploymentDispatchConfig =
+  | {
+      ok: true;
+      mode: "cron";
+    }
+  | {
+      ok: true;
+      mode: "qstash";
+      token: string;
+      currentSigningKey: string;
+      nextSigningKey: string;
+      callbackBaseUrl: string;
+    }
+  | {
+      ok: false;
+      reason: "deployment_dispatch_configuration_invalid";
     };
 
 export type HermesStagingAcceptanceConfig =
@@ -134,6 +179,51 @@ export function readCronSecretConfig(
   }
 
   return { ok: true, secret };
+}
+
+export function readDeploymentDispatchConfig(
+  input: Record<string, string | undefined> = process.env,
+): DeploymentDispatchConfig {
+  const rawMode = input.AGENTBAY_DEPLOYMENT_DISPATCH_MODE?.trim();
+  const mode = rawMode === undefined || rawMode === "" ? "cron" : rawMode;
+
+  if (mode === "cron") {
+    return { ok: true, mode };
+  }
+
+  if (mode !== "qstash") {
+    return { ok: false, reason: "deployment_dispatch_configuration_invalid" };
+  }
+
+  const token = input.QSTASH_TOKEN;
+  const currentSigningKey = input.QSTASH_CURRENT_SIGNING_KEY;
+  const nextSigningKey = input.QSTASH_NEXT_SIGNING_KEY;
+  const callbackBaseUrl = parseDeploymentDispatchCallbackBaseUrl(input.NEXT_PUBLIC_APP_URL);
+
+  if (
+    token === undefined ||
+    !isValidDedicatedBearerSecret(token) ||
+    currentSigningKey === undefined ||
+    !isValidDeploymentDispatchSigningKey(currentSigningKey) ||
+    nextSigningKey === undefined ||
+    !isValidDeploymentDispatchSigningKey(nextSigningKey) ||
+    currentSigningKey === nextSigningKey ||
+    callbackBaseUrl === null ||
+    [input.CRON_SECRET, input.AGENTBAY_RUNNER_BEARER_TOKEN, input.AGENTBAY_OPERATOR_PASSWORD].some(
+      (otherSecret) => otherSecret !== undefined && otherSecret === token,
+    )
+  ) {
+    return { ok: false, reason: "deployment_dispatch_configuration_invalid" };
+  }
+
+  return {
+    ok: true,
+    mode,
+    token,
+    currentSigningKey,
+    nextSigningKey,
+    callbackBaseUrl,
+  };
 }
 
 export function isAuthorizedCronRequest(input: {
@@ -218,6 +308,34 @@ export function isAuthorizedHermesStagingAcceptanceRequest(input: {
 
 function isValidDedicatedBearerSecret(value: string): boolean {
   return /^[A-Za-z0-9._~+/=-]{32,256}$/.test(value);
+}
+
+function isValidDeploymentDispatchSigningKey(value: string): boolean {
+  return /^[A-Za-z0-9._~+/=-]{32,512}$/.test(value) && value.trim() === value;
+}
+
+function parseDeploymentDispatchCallbackBaseUrl(value: string | undefined): string | null {
+  if (value === undefined || value.trim() !== value || value.length === 0) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+
+    if (
+      url.protocol !== "https:" ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.search !== "" ||
+      url.hash !== ""
+    ) {
+      return null;
+    }
+
+    return url.origin;
+  } catch {
+    return null;
+  }
 }
 
 function parseHermesStagingAcceptanceBaseUrl(value: string | undefined): string | null {
@@ -327,6 +445,18 @@ export function readDigitalOceanProviderConfig(
       envName: "AGENTBAY_HERMES_READINESS_TIMEOUT_MS",
       defaultValue: DEFAULT_HERMES_READINESS_TIMEOUT_MS,
     }),
+    hermesDockerCpus: readDockerCpuLimit(input.AGENTBAY_HERMES_DOCKER_CPUS, {
+      envName: "AGENTBAY_HERMES_DOCKER_CPUS",
+      defaultValue: DEFAULT_HERMES_DOCKER_CPUS,
+    }),
+    hermesDockerMemory: readDockerMemoryLimit(input.AGENTBAY_HERMES_DOCKER_MEMORY, {
+      envName: "AGENTBAY_HERMES_DOCKER_MEMORY",
+      defaultValue: DEFAULT_HERMES_DOCKER_MEMORY,
+    }),
+    hermesDockerPidsLimit: readDockerPidsLimit(input.AGENTBAY_HERMES_DOCKER_PIDS_LIMIT, {
+      envName: "AGENTBAY_HERMES_DOCKER_PIDS_LIMIT",
+      defaultValue: DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
+    }),
     runnerMaxAgents: readPositiveInteger(input.AGENTBAY_RUNNER_MAX_AGENTS, {
       envName: "AGENTBAY_RUNNER_MAX_AGENTS",
       defaultValue: DEFAULT_HERMES_RUNNER_MAX_AGENTS,
@@ -355,13 +485,111 @@ export function readDigitalOceanProviderConfig(
     ...(localAgentSmokeMode === undefined ? {} : { localAgentSmokeMode: true }),
   };
 
+  const snapshotMode = readDigitalOceanSnapshotMode(input, {
+    region: config.region,
+    sizeSlug: config.sizeSlug,
+    baseImageSlug: config.image,
+    runnerImage: config.runnerImage,
+    hermesImage: config.hermesWorkloadImage ?? DEFAULT_HERMES_WORKLOAD_IMAGE,
+  });
+  config.snapshotMode = snapshotMode;
+
   if (providerMode === "digitalocean" && !parseImmutableRunnerImageReference(runnerImage)) {
     throw new EnvValidationError([
       "AGENTBAY_RUNNER_IMAGE must be an immutable registry image reference with a sha256 digest for hosted DigitalOcean provisioning.",
     ]);
   }
 
+  if (providerMode === "digitalocean" || config.localAgentSmokeMode) {
+    const resourceCompatibility = validateDigitalOceanRunnerResourceCompatibility(config);
+
+    if (!resourceCompatibility.ok) {
+      throw new EnvValidationError(resourceCompatibility.issues.map((issue) => issue.message));
+    }
+  }
+
   return config;
+}
+
+function readDigitalOceanSnapshotMode(
+  input: Record<string, string | undefined>,
+  expectedInput: {
+    region: string;
+    sizeSlug: string;
+    baseImageSlug: string;
+    runnerImage: string;
+    hermesImage: string;
+  },
+): DigitalOceanSnapshotModeConfig {
+  const mode = input.AGENTBAY_DIGITALOCEAN_IMAGE_MODE?.trim() ?? "stock";
+
+  if (mode === "stock") {
+    return { mode: "stock" };
+  }
+
+  if (mode !== "snapshot") {
+    throw new EnvValidationError([
+      "AGENTBAY_DIGITALOCEAN_IMAGE_MODE must be stock or snapshot when set.",
+    ]);
+  }
+
+  const manifestBytes = readRequiredSnapshotSetting(
+    input.AGENTBAY_DIGITALOCEAN_SNAPSHOT_MANIFEST,
+    "AGENTBAY_DIGITALOCEAN_SNAPSHOT_MANIFEST",
+  );
+  const signature = readRequiredSnapshotSetting(
+    input.AGENTBAY_DIGITALOCEAN_SNAPSHOT_SIGNATURE,
+    "AGENTBAY_DIGITALOCEAN_SNAPSHOT_SIGNATURE",
+  );
+  const publicKeyPem = readRequiredSnapshotSetting(
+    input.AGENTBAY_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY,
+    "AGENTBAY_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY",
+  );
+  const sourceRevision = readRequiredSnapshotSetting(
+    input.AGENTBAY_RELEASE_SOURCE_REVISION,
+    "AGENTBAY_RELEASE_SOURCE_REVISION",
+  );
+
+  if (!/^[a-f0-9]{40}$/.test(sourceRevision)) {
+    throw new EnvValidationError([
+      "AGENTBAY_RELEASE_SOURCE_REVISION must be the exact 40-character source commit for snapshot mode.",
+    ]);
+  }
+
+  return {
+    mode: "snapshot",
+    manifestBytes,
+    signature,
+    publicKeyPem,
+    expected: {
+      region: expectedInput.region,
+      sizeDiskGb: diskGbForDigitalOceanSizeSlug(expectedInput.sizeSlug),
+      baseImageSlug: expectedInput.baseImageSlug,
+      architecture: "amd64",
+      runnerImage: expectedInput.runnerImage,
+      defaultAgentImage: readRunnerImage(input.AGENTBAY_DOCKER_RUNNER_IMAGE, {
+        envName: "AGENTBAY_DOCKER_RUNNER_IMAGE",
+        defaultValue: DEFAULT_MANUAL_RUNNER_IMAGE,
+      }),
+      hermesImage: expectedInput.hermesImage,
+      sourceRepository: "ametel01/plingpling",
+      sourceRevision,
+    },
+  };
+}
+
+function readRequiredSnapshotSetting(value: string | undefined, envName: string): string {
+  const normalized = value?.trim();
+
+  if (!normalized) {
+    throw new EnvValidationError([`${envName} is required when snapshot image mode is enabled.`]);
+  }
+
+  return normalized;
+}
+
+function diskGbForDigitalOceanSizeSlug(sizeSlug: string): number {
+  return findDigitalOceanRunnerResourceProfile(sizeSlug)?.diskGiB ?? 25;
 }
 
 export function readHermesWorkloadImage(
@@ -449,6 +677,51 @@ function readDockerNetworkName(
   if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/.test(normalizedValue)) {
     throw new EnvValidationError([
       `${options.envName} must be a Docker network name without whitespace or shell-control characters.`,
+    ]);
+  }
+
+  return normalizedValue;
+}
+
+function readDockerCpuLimit(
+  value: string | undefined,
+  options: { envName: string; defaultValue: string },
+): string {
+  const normalizedValue = readNonEmptyProviderSetting(value, options);
+
+  if (parseHermesDockerCpus(normalizedValue) === null) {
+    throw new EnvValidationError([
+      `${options.envName} must be a positive Docker CPU value representable to Docker NanoCPUs.`,
+    ]);
+  }
+
+  return normalizedValue;
+}
+
+function readDockerMemoryLimit(
+  value: string | undefined,
+  options: { envName: string; defaultValue: string },
+): string {
+  const normalizedValue = readNonEmptyProviderSetting(value, options);
+
+  if (parseHermesDockerMemoryMiB(normalizedValue) === null) {
+    throw new EnvValidationError([
+      `${options.envName} must be a positive whole-MiB Docker memory value such as 1536m or 2g.`,
+    ]);
+  }
+
+  return normalizedValue;
+}
+
+function readDockerPidsLimit(
+  value: string | undefined,
+  options: { envName: string; defaultValue: string },
+): string {
+  const normalizedValue = readNonEmptyProviderSetting(value, options);
+
+  if (parseHermesDockerPidsLimit(normalizedValue) === null) {
+    throw new EnvValidationError([
+      `${options.envName} must be a positive integer no greater than ${MAX_HERMES_DOCKER_PIDS_LIMIT}.`,
     ]);
   }
 

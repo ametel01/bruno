@@ -33,6 +33,7 @@ export function AgentHermesSetup({ agentId, readiness }: AgentHermesSetupProps) 
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XtermTerminal | null>(null);
   const fitAddonRef = useRef<XtermFitAddon | null>(null);
+  const setupInFlightRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
   const [state, setState] = useState<SetupState>({ status: "idle" });
   const sessionActive = ["creating", "connecting", "running"].includes(state.status);
@@ -66,6 +67,11 @@ export function AgentHermesSetup({ agentId, readiness }: AgentHermesSetupProps) 
   }, [sessionActive]);
 
   async function openSetup() {
+    if (setupInFlightRef.current) {
+      return;
+    }
+
+    setupInFlightRef.current = true;
     closeCurrentSession();
     setState({ status: "creating" });
 
@@ -91,6 +97,8 @@ export function AgentHermesSetup({ agentId, readiness }: AgentHermesSetupProps) 
       await connectTerminal(body.session);
     } catch {
       setState({ status: "error", message: "Hermes setup could not be opened." });
+    } finally {
+      setupInFlightRef.current = false;
     }
   }
 

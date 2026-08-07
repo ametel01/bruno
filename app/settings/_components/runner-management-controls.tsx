@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 type RunnerRegistrationSecret = {
   token: string;
@@ -42,9 +42,15 @@ type RunnerCredentialControlsProps = {
 
 export function CreateCloudRunnerControls({ disabled = false }: CreateCloudRunnerControlsProps) {
   const router = useRouter();
+  const requestInFlightRef = useRef(false);
   const [state, setState] = useState<RequestState>({ status: "idle" });
 
   async function handleCreateRunner() {
+    if (requestInFlightRef.current) {
+      return;
+    }
+
+    requestInFlightRef.current = true;
     setState({ status: "loading" });
 
     try {
@@ -93,6 +99,8 @@ export function CreateCloudRunnerControls({ disabled = false }: CreateCloudRunne
         status: "error",
         message: "Cloud runner could not be created. Check the database and try again.",
       });
+    } finally {
+      requestInFlightRef.current = false;
     }
   }
 
@@ -120,9 +128,15 @@ export function CreateCloudRunnerControls({ disabled = false }: CreateCloudRunne
 export function RunnerRegistrationTokenControls({
   disabled = false,
 }: RunnerRegistrationTokenControlsProps) {
+  const requestInFlightRef = useRef(false);
   const [state, setState] = useState<RegistrationState>({ status: "idle" });
 
   async function handleCreateToken() {
+    if (requestInFlightRef.current) {
+      return;
+    }
+
+    requestInFlightRef.current = true;
     setState({ status: "loading" });
 
     try {
@@ -175,6 +189,8 @@ export function RunnerRegistrationTokenControls({
         status: "error",
         message: "Registration token could not be created.",
       });
+    } finally {
+      requestInFlightRef.current = false;
     }
   }
 
@@ -214,11 +230,17 @@ export function RunnerRegistrationTokenControls({
 
 export function RunnerCredentialControls({ runnerId, runnerName }: RunnerCredentialControlsProps) {
   const router = useRouter();
+  const requestInFlightRef = useRef(false);
   const [rotateState, setRotateState] = useState<CredentialState>({ status: "idle" });
   const [revokeState, setRevokeState] = useState<RequestState>({ status: "idle" });
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
 
   async function handleRotateCredential() {
+    if (requestInFlightRef.current) {
+      return;
+    }
+
+    requestInFlightRef.current = true;
     setRotateState({ status: "loading" });
     setConfirmingRevoke(false);
 
@@ -273,10 +295,17 @@ export function RunnerCredentialControls({ runnerId, runnerName }: RunnerCredent
         status: "error",
         message: "Runner credential could not be rotated.",
       });
+    } finally {
+      requestInFlightRef.current = false;
     }
   }
 
   async function handleRevokeCredential() {
+    if (requestInFlightRef.current) {
+      return;
+    }
+
+    requestInFlightRef.current = true;
     setRevokeState({ status: "loading" });
 
     try {
@@ -323,6 +352,8 @@ export function RunnerCredentialControls({ runnerId, runnerName }: RunnerCredent
         status: "error",
         message: "Runner credential could not be revoked.",
       });
+    } finally {
+      requestInFlightRef.current = false;
     }
   }
 

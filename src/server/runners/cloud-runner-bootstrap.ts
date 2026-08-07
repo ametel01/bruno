@@ -3,6 +3,9 @@ import "server-only";
 import {
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+  DEFAULT_HERMES_DOCKER_CPUS,
+  DEFAULT_HERMES_DOCKER_MEMORY,
+  DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
   DEFAULT_HERMES_RUNNER_MAX_AGENTS,
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
@@ -23,6 +26,12 @@ import { DEFAULT_AGENTBAY_RUNNER_IMAGE } from "@/src/server/env";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { DIGITALOCEAN_PROVIDER } from "@/src/server/runners/digitalocean-provider";
 import { markCloudRunnerBootstrapInjected } from "@/src/server/runners/runner-provisioning-events";
+import {
+  MAX_HERMES_DOCKER_PIDS_LIMIT,
+  parseHermesDockerCpus,
+  parseHermesDockerMemoryMiB,
+  parseHermesDockerPidsLimit,
+} from "@/src/server/runners/runner-resource-profiles";
 
 export const DEFAULT_CLOUD_RUNNER_ENV_FILE = "/etc/agentbay/runner.env";
 export const DEFAULT_CLOUD_RUNNER_HOST = "127.0.0.1";
@@ -33,7 +42,7 @@ export const DEFAULT_CLOUD_RUNNER_NAME = "plingpling Cloud Runner";
 export const DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET = "/var/run/docker.sock";
 export const BOOTSTRAP_REDACTION = "[redacted]";
 
-type CloudRunnerBootstrapInput = {
+export type CloudRunnerBootstrapInput = {
   appBaseUrl: string;
   registrationToken: string;
   commandBearerToken?: string;
@@ -49,12 +58,16 @@ type CloudRunnerBootstrapInput = {
   hermesStateRoot?: string;
   hermesPrivateNetwork?: string;
   hermesReadinessTimeoutMs?: number;
+  hermesDockerCpus?: string;
+  hermesDockerMemory?: string;
+  hermesDockerPidsLimit?: string;
   runnerMaxAgents?: number;
   bootModelCanaryEnabled?: boolean;
   envFilePath?: string;
   runnerHost?: string;
   runnerPort?: number;
   releaseIdentityMode?: typeof RUNNER_RELEASE_DEVELOPMENT_MODE;
+  bootMode?: "stock" | "snapshot";
 };
 
 export type CloudRunnerBootstrapContent = {
@@ -68,6 +81,11 @@ export type CloudRunnerBootstrapContent = {
     hermesStateRoot: string;
     hermesPrivateNetwork: string;
     hermesReadinessTimeoutMs: number;
+    hermesDocker: {
+      cpus: string;
+      memory: string;
+      pidsLimit: string;
+    };
     runnerMaxAgents: number;
     bootModelCanaryEnabled: boolean;
     runnerRelease: {
@@ -125,7 +143,7 @@ export function buildCloudRunnerBootstrapContent(
 ): CloudRunnerBootstrapContent {
   const config = normalizeBootstrapInput(input);
   const endpoint = buildEndpointConfig(config);
-  const swapCommands = config.enableSwap ? buildSwapCommands() : "";
+  const swapCommands = config.bootMode === "stock" && config.enableSwap ? buildSwapCommands() : "";
   const bootstrapEventScript = buildBootstrapEventScript(config);
   const envLines = [
     `AGENTBAY_APP_URL=${escapeDockerEnvHereDocValue(config.appBaseUrl)}`,
@@ -139,6 +157,9 @@ export function buildCloudRunnerBootstrapContent(
     `AGENTBAY_RUNNER_BOOT_SELF_TEST_ROOT=${DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT}`,
     `AGENTBAY_HERMES_PRIVATE_NETWORK=${escapeDockerEnvHereDocValue(config.hermesPrivateNetwork)}`,
     `AGENTBAY_HERMES_READINESS_TIMEOUT_MS=${config.hermesReadinessTimeoutMs}`,
+    `AGENTBAY_HERMES_DOCKER_CPUS=${config.hermesDockerCpus}`,
+    `AGENTBAY_HERMES_DOCKER_MEMORY=${config.hermesDockerMemory}`,
+    `AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=${config.hermesDockerPidsLimit}`,
     `AGENTBAY_RUNNER_ENV_FILE=${escapeDockerEnvHereDocValue(config.containerEnvFilePath)}`,
     `AGENTBAY_RUNNER_MAX_AGENTS=${config.runnerMaxAgents}`,
     `${RUNNER_BOOT_MODEL_CANARY_ENABLED_ENV}=${config.bootModelCanaryEnabled}`,
@@ -162,8 +183,9 @@ export function buildCloudRunnerBootstrapContent(
     endpoint.discoveryCommands.length > 0
       ? `${endpoint.discoveryCommands.join("\n      ")}\n      `
       : "";
-  const userData = `#cloud-config
-package_update: true
+  const packageBootstrap =
+    config.bootMode === "stock"
+      ? `package_update: true
 package_upgrade: false
 output:
   all: '| tee -a /var/log/agentbay-bootstrap.log'
@@ -173,7 +195,71 @@ packages:
   - curl
   - gnupg
   - python3
-runcmd:
+`
+      : `output:
+  all: '| tee -a /var/log/agentbay-bootstrap.log'
+`;
+  const stockInstallCommands =
+    config.bootMode === "stock"
+      ? `  -
+    - bash
+    - -lc
+    - |
+      set -euxo pipefail
+      AGENTBAY_BOOTSTRAP_STEP=docker_apt_repository
+      trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
+      install -m 0755 -d /etc/apt/keyrings
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Configuring Docker apt repository." docker_apt_repository
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      chmod a+r /etc/apt/keyrings/docker.gpg
+      sh -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list'
+      apt-get update
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Docker apt repository was configured." docker_apt_repository
+${swapCommands}  -
+    - bash
+    - -lc
+    - |
+      set -euxo pipefail
+      AGENTBAY_BOOTSTRAP_STEP=package_install
+      trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Installing cloud runner packages." package_install
+      apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      apt-get install -y caddy
+      systemctl enable --now docker
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Cloud runner packages were installed." package_install
+`
+      : "";
+  const imagePullCommands =
+    config.bootMode === "stock"
+      ? `      agentbay_pull_image() {
+        local image="$1"
+        local attempt
+        for attempt in 1 2 3; do
+          if docker pull "$image"; then
+            return 0
+          fi
+          if [ "$attempt" -lt 3 ]; then
+            sleep "$((attempt * 2))"
+          fi
+        done
+        return 1
+      }
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling cloud runner image." docker_pull
+      agentbay_pull_image ${shellQuote(config.runnerImage)}
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled cloud runner image." docker_pull
+      AGENTBAY_BOOTSTRAP_STEP=agent_image_pull
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling default agent container image." agent_image_pull
+      agentbay_pull_image ${shellQuote(config.agentImage)}
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled default agent container image." agent_image_pull
+      AGENTBAY_BOOTSTRAP_STEP=hermes_image_pull
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling Hermes workload image." hermes_image_pull
+      agentbay_pull_image ${shellQuote(config.hermesWorkloadImage)}
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled Hermes workload image." hermes_image_pull
+`
+      : `      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Using preloaded snapshot images." snapshot_preloaded_images
+`;
+  const userData = `#cloud-config
+${packageBootstrap}runcmd:
   -
     - bash
     - -lc
@@ -186,23 +272,7 @@ runcmd:
       AGENTBAY_BOOTSTRAP_EVENT_SCRIPT
       chmod 0700 /usr/local/bin/agentbay-bootstrap-event
       /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Cloud runner bootstrap started." bootstrap_started
-  -
-    - bash
-    - -lc
-    - |
-      set -euxo pipefail
-      AGENTBAY_BOOTSTRAP_STEP=docker_apt_repository
-      trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
-      install -m 0755 -d /etc/apt/keyrings
-      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-      chmod a+r /etc/apt/keyrings/docker.gpg
-      sh -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list'
-      apt-get update
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Docker apt repository was configured." docker_apt_repository
-${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-  - apt-get install -y caddy
-  - systemctl enable --now docker
-  - install -m 0700 -d ${shellQuote(dirname(config.envFilePath))}
+${stockInstallCommands}  - install -m 0700 -d ${shellQuote(dirname(config.envFilePath))}
   -
     - bash
     - -lc
@@ -250,31 +320,12 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
       set -euxo pipefail
       AGENTBAY_BOOTSTRAP_STEP=docker_pull
       trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true; docker logs --tail 80 ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} 2>&1 || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
-      agentbay_pull_image() {
-        local image="$1"
-        local attempt
-        for attempt in 1 2 3; do
-          if docker pull "$image"; then
-            return 0
-          fi
-          if [ "$attempt" -lt 3 ]; then
-            sleep "$((attempt * 2))"
-          fi
-        done
-        return 1
-      }
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling cloud runner image." docker_pull
-      agentbay_pull_image ${shellQuote(config.runnerImage)}
-      AGENTBAY_BOOTSTRAP_STEP=agent_image_pull
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling default agent container image." agent_image_pull
-      agentbay_pull_image ${shellQuote(config.agentImage)}
-      AGENTBAY_BOOTSTRAP_STEP=hermes_image_pull
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling Hermes workload image." hermes_image_pull
-      agentbay_pull_image ${shellQuote(config.hermesWorkloadImage)}
-      AGENTBAY_BOOTSTRAP_STEP=docker_container_start
+${imagePullCommands}      AGENTBAY_BOOTSTRAP_STEP=runner_container_start
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Starting runner container." runner_container_start
       docker rm --force ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} || true
       docker run --detach --name ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} --restart always --network ${shellQuote(config.hermesPrivateNetwork)} --env-file ${shellQuote(config.envFilePath)} -v ${shellQuote(`${config.envFilePath}:${config.containerEnvFilePath}`)} -v ${shellQuote(`${config.hermesStateRoot}:${config.hermesStateRoot}`)} -v ${shellQuote(`${DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT}:${DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT}`)} -v ${shellQuote(`${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}:${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}`)} -p ${shellQuote(`${config.runnerHost}:${config.runnerPort}:${config.runnerPort}`)} ${shellQuote(config.runnerImage)}
-      /usr/local/bin/agentbay-bootstrap-event waiting_for_runner started "Runner container started; waiting for registration and heartbeat." docker_container_started
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Runner container started." runner_container_start
+      /usr/local/bin/agentbay-bootstrap-event waiting_for_runner started "Runner container started; waiting for registration and heartbeat." runner_registration
 `;
 
   return {
@@ -288,6 +339,11 @@ ${swapCommands}  - apt-get install -y docker-ce docker-ce-cli containerd.io dock
       hermesStateRoot: config.hermesStateRoot,
       hermesPrivateNetwork: config.hermesPrivateNetwork,
       hermesReadinessTimeoutMs: config.hermesReadinessTimeoutMs,
+      hermesDocker: {
+        cpus: config.hermesDockerCpus,
+        memory: config.hermesDockerMemory,
+        pidsLimit: config.hermesDockerPidsLimit,
+      },
       runnerMaxAgents: config.runnerMaxAgents,
       bootModelCanaryEnabled: config.bootModelCanaryEnabled,
       runnerRelease: config.expectedRelease
@@ -347,6 +403,18 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
       input.hermesReadinessTimeoutMs ?? DEFAULT_HERMES_READINESS_TIMEOUT_MS,
       "hermesReadinessTimeoutMs",
     ),
+    hermesDockerCpus: normalizeDockerCpuLimit(
+      input.hermesDockerCpus?.trim() || DEFAULT_HERMES_DOCKER_CPUS,
+      "hermesDockerCpus",
+    ),
+    hermesDockerMemory: normalizeDockerMemoryLimit(
+      input.hermesDockerMemory?.trim() || DEFAULT_HERMES_DOCKER_MEMORY,
+      "hermesDockerMemory",
+    ),
+    hermesDockerPidsLimit: normalizeDockerPidsLimit(
+      input.hermesDockerPidsLimit?.trim() || DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
+      "hermesDockerPidsLimit",
+    ),
     runnerMaxAgents: normalizePositiveInteger(
       input.runnerMaxAgents ?? DEFAULT_HERMES_RUNNER_MAX_AGENTS,
       "runnerMaxAgents",
@@ -357,6 +425,7 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
     runnerHost: input.runnerHost?.trim() || DEFAULT_CLOUD_RUNNER_HOST,
     runnerContainerHost: DEFAULT_CLOUD_RUNNER_CONTAINER_HOST,
     runnerPort: input.runnerPort ?? DEFAULT_CLOUD_RUNNER_PORT,
+    bootMode: input.bootMode ?? "stock",
   };
 }
 
@@ -397,6 +466,34 @@ function normalizeDockerNetworkName(value: string, field: string): string {
 function normalizePositiveInteger(value: number, field: string): number {
   if (!Number.isInteger(value) || value <= 0) {
     throw new Error(`${field} must be a positive integer.`);
+  }
+
+  return value;
+}
+
+function normalizeDockerCpuLimit(value: string, field: string): string {
+  if (parseHermesDockerCpus(value) === null) {
+    throw new Error(
+      `${field} must be a positive Docker CPU value representable to Docker NanoCPUs.`,
+    );
+  }
+
+  return value;
+}
+
+function normalizeDockerMemoryLimit(value: string, field: string): string {
+  if (parseHermesDockerMemoryMiB(value) === null) {
+    throw new Error(`${field} must be a positive whole-MiB Docker memory value.`);
+  }
+
+  return value;
+}
+
+function normalizeDockerPidsLimit(value: string, field: string): string {
+  if (parseHermesDockerPidsLimit(value) === null) {
+    throw new Error(
+      `${field} must be a positive integer no greater than ${MAX_HERMES_DOCKER_PIDS_LIMIT}.`,
+    );
   }
 
   return value;

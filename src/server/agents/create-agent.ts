@@ -1,38 +1,11 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import { isValidAgentId } from "@/src/server/agents/agent-id";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
   createAgentDeploymentForUser,
   getAgentDeploymentByIdempotencyKeyForUser,
 } from "@/src/server/agents/agent-deployments";
-import type { AgentDeploymentDto } from "@/src/server/agents/deployment-dto";
-import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import type * as schema from "@/src/server/db/schema";
-import { agentConfigs, agentSecrets, agents, runners } from "@/src/server/db/schema";
-import { readDigitalOceanProviderConfig, readReadyAgentCreationFlag } from "@/src/server/env";
-import {
-  getAgentTemplateSnapshot,
-  isSupportedTemplateKey,
-  type AgentTemplateSnapshot,
-  type SupportedAgentTemplateKey,
-} from "@/src/server/agents/templates";
-import { recordAgentEventInTransaction } from "@/src/server/events/agent-events";
-import { type AppLogger, createAppLogger } from "@/src/server/logging/logger";
-import {
-  selectRunnerPlacementForUserInTransaction,
-  type RunnerPlacementResult,
-} from "@/src/server/runners/runner-placement";
-import {
-  verifyRunnerPlacementCandidate,
-  type RunnerPlacementVerificationResult,
-} from "@/src/server/runners/runner-placement-verification";
-import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
-import {
-  createDigitalOceanRunnerForUser,
-  type CreateRunnerProvisioningResult,
-} from "@/src/server/runners/runner-provisioning";
-import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
+import { isValidAgentId } from "@/src/server/agents/agent-id";
 import {
   AgentSecretKeyringError,
   AgentSecretLegacyBackfillRequiredError,
@@ -44,7 +17,6 @@ import {
   parseAgentSecretKeyring,
   prepareAgentSecretRow,
 } from "@/src/server/agents/agent-secrets";
-import { resolveReusableAssistantApiKeyInTransaction } from "@/src/server/agents/model-connections";
 import {
   type AssistantChoice,
   type AssistantProfile,
@@ -53,11 +25,41 @@ import {
   isAssistantChoice,
   validateAssistantApiKey,
 } from "@/src/server/agents/assistant-profiles";
+import type { AgentDeploymentDto } from "@/src/server/agents/deployment-dto";
+import { resolveReusableAssistantApiKeyInTransaction } from "@/src/server/agents/model-connections";
+import {
+  type AgentTemplateSnapshot,
+  getAgentTemplateSnapshot,
+  isSupportedTemplateKey,
+  type SupportedAgentTemplateKey,
+} from "@/src/server/agents/templates";
+import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import type * as schema from "@/src/server/db/schema";
+import { agentConfigs, agentSecrets, agents, runners } from "@/src/server/db/schema";
+import { readDigitalOceanProviderConfig, readReadyAgentCreationFlag } from "@/src/server/env";
+import { recordAgentEventInTransaction } from "@/src/server/events/agent-events";
+import { type AppLogger, createAppLogger } from "@/src/server/logging/logger";
+import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
+import {
+  lockRunnerPlacementCapacityInTransaction,
+  type RunnerPlacementCapacityOptions,
+  type RunnerPlacementResult,
+  selectRunnerPlacementForUserInTransaction,
+} from "@/src/server/runners/runner-placement";
+import {
+  type RunnerPlacementVerificationResult,
+  verifyRunnerPlacementCandidate,
+} from "@/src/server/runners/runner-placement-verification";
+import {
+  type CreateRunnerProvisioningResult,
+  createDigitalOceanRunnerForUser,
+} from "@/src/server/runners/runner-provisioning";
 import {
   type TelegramBotMetadata,
   type TelegramClientDependencies,
   validateTelegramBotTokenWithGetMe,
 } from "@/src/server/telegram/telegram-client";
+import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
 
 const agentCreateLogger = createAppLogger("agent.create");
 
@@ -204,6 +206,7 @@ export type CreateAgentDependencies = {
   verifyRunnerPlacement?: VerifyRunnerPlacement;
   autoProvisionCloudRunner?: boolean;
   planMaxAgents?: number | null;
+  runnerPlacementCapacityOptions?: RunnerPlacementCapacityOptions;
   env?: Record<string, string | undefined>;
   now?: () => Date;
   randomBytes?: (size: number) => Buffer;
@@ -212,6 +215,8 @@ export type CreateAgentDependencies = {
   telegramBotValidator?: TelegramBotValidator;
   onReadyDeploymentCommitted?: (deploymentId: string) => void;
   readyCreateTestHooks?: {
+    beforeCapacityLock?: (input: { runnerId: string; userId: string }) => Promise<void> | void;
+    afterCapacityLock?: (input: { runnerId: string; userId: string }) => Promise<void> | void;
     beforeInsertBoundary?: (boundary: ReadyCreateInsertBoundary) => Promise<void> | void;
   };
 };
@@ -226,6 +231,15 @@ export type ReadyCreateInsertBoundary =
   | "secret:api_server_key"
   | "deployment"
   | "event";
+
+function runnerPlacementOptions(dependencies: CreateAgentDependencies, now?: Date) {
+  return {
+    ...(now ? { now } : {}),
+    ...(dependencies.runnerPlacementCapacityOptions
+      ? { capacityOptions: dependencies.runnerPlacementCapacityOptions }
+      : {}),
+  };
+}
 
 export class AgentPersistenceError extends Error {
   constructor(cause?: unknown) {
@@ -592,10 +606,15 @@ async function createAgentWithUserResolver(
   const templateSnapshot = getAgentTemplateSnapshot(input.templateKey);
   const initial = await connection.db.transaction(async (tx) => {
     const userId = await resolveUserId(tx);
-    const placement = await selectRunnerPlacementForUserInTransaction(tx, userId, {
-      planMaxAgents: dependencies.planMaxAgents,
-      runnerId: input.runnerId,
-    });
+    const placement = await selectRunnerPlacementForUserInTransaction(
+      tx,
+      userId,
+      {
+        planMaxAgents: dependencies.planMaxAgents,
+        runnerId: input.runnerId,
+      },
+      runnerPlacementOptions(dependencies),
+    );
 
     if (
       !placement.ok &&
@@ -632,10 +651,15 @@ async function createAgentWithUserResolver(
       attempt === 1
         ? initial.placement
         : await connection.db.transaction((tx) =>
-            selectRunnerPlacementForUserInTransaction(tx, userId, {
-              planMaxAgents: dependencies.planMaxAgents,
-              runnerId: input.runnerId,
-            }),
+            selectRunnerPlacementForUserInTransaction(
+              tx,
+              userId,
+              {
+                planMaxAgents: dependencies.planMaxAgents,
+                runnerId: input.runnerId,
+              },
+              runnerPlacementOptions(dependencies),
+            ),
           );
 
     logAgentCreate(logger, "placement_checked", {
@@ -653,7 +677,7 @@ async function createAgentWithUserResolver(
 
       if (
         placement.reason === "plan_limit_reached" ||
-        placement.reason === "runner_capacity_reached"
+        (input.runnerId && placement.reason === "runner_capacity_reached")
       ) {
         throw new AgentCreateBlockedError(placement);
       }
@@ -692,8 +716,9 @@ async function createAgentWithUserResolver(
       return response;
     }
 
+    const { id: placementRunnerId } = placement.runner;
     const verification = await verifyRunnerPlacement(connection, {
-      runnerId: placement.runner.id,
+      runnerId: placementRunnerId,
       userId,
     });
 
@@ -705,7 +730,7 @@ async function createAgentWithUserResolver(
           action: verification.action,
           attempt,
           reason: verification.reason,
-          runnerId: placement.runner.id,
+          runnerId: placementRunnerId,
           transitioned: verification.transitioned,
         },
         "warn",
@@ -723,10 +748,25 @@ async function createAgentWithUserResolver(
     }
 
     const created = await connection.db.transaction(async (tx) => {
-      const finalPlacement = await selectRunnerPlacementForUserInTransaction(tx, userId, {
-        planMaxAgents: dependencies.planMaxAgents,
-        runnerId: placement.runner.id,
+      const locked = await lockRunnerPlacementCapacityInTransaction(tx, {
+        userId,
+        runnerId: placementRunnerId,
       });
+      if (!locked) {
+        return {
+          ok: false,
+          placement: { ok: false, reason: "no_online_runner" } as const,
+        } as const;
+      }
+      const finalPlacement = await selectRunnerPlacementForUserInTransaction(
+        tx,
+        userId,
+        {
+          planMaxAgents: dependencies.planMaxAgents,
+          runnerId: placementRunnerId,
+        },
+        runnerPlacementOptions(dependencies),
+      );
 
       if (!finalPlacement.ok) {
         return { ok: false, placement: finalPlacement } as const;
@@ -747,22 +787,58 @@ async function createAgentWithUserResolver(
     });
 
     if (!created.ok) {
+      const { reason } = created.placement;
       logAgentCreate(
         logger,
         "runner_candidate_changed_before_insert",
         {
           attempt,
-          reason: created.placement.reason,
-          runnerId: placement.runner.id,
+          reason,
+          runnerId: placementRunnerId,
         },
         "warn",
       );
 
       if (
-        created.placement.reason === "plan_limit_reached" ||
-        created.placement.reason === "runner_capacity_reached"
+        reason === "plan_limit_reached" ||
+        (input.runnerId && reason === "runner_capacity_reached")
       ) {
         throw new AgentCreateBlockedError(created.placement);
+      }
+
+      if (autoProvisionCloudRunner) {
+        logAgentCreate(logger, "cloud_runner_needed_after_capacity_revalidation", {
+          autoProvisionCloudRunner,
+          requestedRunner: Boolean(input.runnerId),
+        });
+        return createAgentWithProvisionedRunner(connection, {
+          userId,
+          name: input.name,
+          templateKey: input.templateKey,
+          templateSnapshot,
+          insertDefaultAgentConfig,
+          insertCreatedEvent,
+          dependencies,
+          logger,
+        });
+      }
+
+      if (reason === "runner_capacity_reached") {
+        const response = await connection.db.transaction(async (tx) => {
+          await assertActiveAgentPlanAllowsInsert(tx, userId, dependencies.planMaxAgents);
+          return insertCreatedAgentInTransaction(tx, {
+            userId,
+            name: input.name,
+            templateKey: input.templateKey,
+            templateSnapshot,
+            runnerId: null,
+            insertDefaultAgentConfig,
+            insertCreatedEvent,
+          });
+        });
+
+        logAgentCreate(logger, "created_without_runner", { agentId: response.agent.id });
+        return response;
       }
 
       if (input.runnerId) {
@@ -818,7 +894,7 @@ async function createReadyAgentForUser(
         planMaxAgents: dependencies.planMaxAgents,
         runnerId: input.runnerId,
       },
-      { now },
+      runnerPlacementOptions(dependencies, now),
     ),
   );
 
@@ -829,7 +905,7 @@ async function createReadyAgentForUser(
 
     if (
       placementPrecheck.reason === "plan_limit_reached" ||
-      placementPrecheck.reason === "runner_capacity_reached"
+      (input.runnerId && placementPrecheck.reason === "runner_capacity_reached")
     ) {
       throw new AgentCreateBlockedError(placementPrecheck);
     }
@@ -944,8 +1020,6 @@ async function createReadyAgentForUser(
         return replayInTransaction;
       }
 
-      await assertNoUnbackfilledActiveTelegramSecretsInTransaction(tx);
-
       const placement = await selectRunnerPlacementForUserInTransaction(
         tx,
         userId,
@@ -953,7 +1027,7 @@ async function createReadyAgentForUser(
           planMaxAgents: dependencies.planMaxAgents,
           runnerId: input.runnerId,
         },
-        { now },
+        runnerPlacementOptions(dependencies, now),
       );
 
       let runnerId: string | null = null;
@@ -965,13 +1039,47 @@ async function createReadyAgentForUser(
 
         if (
           placement.reason === "plan_limit_reached" ||
-          placement.reason === "runner_capacity_reached"
+          (input.runnerId && placement.reason === "runner_capacity_reached")
         ) {
           throw new AgentCreateBlockedError(placement);
         }
       } else {
-        runnerId = placement.runner.id;
+        await dependencies.readyCreateTestHooks?.beforeCapacityLock?.({
+          userId,
+          runnerId: placement.runner.id,
+        });
+        const locked = await lockRunnerPlacementCapacityInTransaction(tx, {
+          userId,
+          runnerId: placement.runner.id,
+        });
+        if (locked) {
+          await dependencies.readyCreateTestHooks?.afterCapacityLock?.({
+            userId,
+            runnerId: placement.runner.id,
+          });
+          const confirmed = await selectRunnerPlacementForUserInTransaction(
+            tx,
+            userId,
+            {
+              planMaxAgents: dependencies.planMaxAgents,
+              runnerId: placement.runner.id,
+            },
+            runnerPlacementOptions(dependencies, now),
+          );
+          if (confirmed.ok) {
+            runnerId = confirmed.runner.id;
+          } else if (input.runnerId) {
+            if (confirmed.reason === "runner_capacity_reached") {
+              throw new AgentCreateBlockedError(confirmed);
+            }
+            throw new AgentRunnerAssignmentError();
+          }
+        } else if (input.runnerId) {
+          throw new AgentRunnerAssignmentError();
+        }
       }
+
+      await assertNoUnbackfilledActiveTelegramSecretsInTransaction(tx);
 
       const [agent] = await tx
         .insert(agents)
@@ -1010,11 +1118,20 @@ async function createReadyAgentForUser(
         updatedAt: now,
       });
 
-      for (const preparedSecret of preparedSecrets) {
-        await dependencies.readyCreateTestHooks?.beforeInsertBoundary?.(
-          `secret:${preparedSecret.kind}` as ReadyCreateInsertBoundary,
+      const beforeInsertBoundary = dependencies.readyCreateTestHooks?.beforeInsertBoundary;
+      if (preparedSecrets.length > 0 && !beforeInsertBoundary) {
+        await insertPreparedAgentSecretRowsInTransaction(tx, preparedSecrets);
+      } else if (beforeInsertBoundary) {
+        await preparedSecrets.reduce(
+          (previous, preparedSecret) =>
+            previous.then(async () => {
+              await beforeInsertBoundary(
+                `secret:${preparedSecret.kind}` as ReadyCreateInsertBoundary,
+              );
+              await insertPreparedAgentSecretRowsInTransaction(tx, [preparedSecret]);
+            }),
+          Promise.resolve(),
         );
-        await insertPreparedAgentSecretRowsInTransaction(tx, [preparedSecret]);
       }
 
       await dependencies.readyCreateTestHooks?.beforeInsertBoundary?.("deployment");

@@ -310,9 +310,11 @@ function isUuid(value: unknown): value is string {
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
+  const sortedExpected = [...expected].sort();
+
   return (
-    actual.length === expected.length &&
-    actual.every((key, index) => key === [...expected].sort()[index])
+    actual.length === sortedExpected.length &&
+    actual.every((key, index) => key === sortedExpected[index])
   );
 }
 

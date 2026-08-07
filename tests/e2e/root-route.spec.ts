@@ -58,8 +58,10 @@ for (const route of shellRoutes) {
 }
 
 test("/health returns reachable database JSON in the browser", async ({ page }) => {
-  await page.goto("/health");
+  await page.goto("/dashboard");
+  await page.getByRole("link", { name: "Health JSON" }).click();
 
+  await expect(page).toHaveURL(/\/health$/);
   await expect(page.locator("body")).toContainText('"status":"ok"');
   await expect(page.locator("body")).toContainText('"database":"reachable"');
 });

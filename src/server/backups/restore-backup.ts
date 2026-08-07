@@ -92,6 +92,13 @@ const RAW_SECRET_TEXT_PATTERNS = [
   /\bAKIA[A-Z0-9]{12,}\b/,
   /-----BEGIN (?:RSA |EC |OPENSSH |)PRIVATE KEY-----/,
 ] as const;
+const CRON_FIELD_RANGES = [
+  [0, 59],
+  [0, 23],
+  [1, 31],
+  [1, 12],
+  [0, 7],
+] as const;
 
 export async function restoreBackupForUser(
   input: { agentId: string; backupId: string; userId: string },
@@ -590,20 +597,12 @@ function isValidTimezone(timezone: string): boolean {
 function isValidCronExpression(cron: string): boolean {
   const fields = cron.trim().split(/\s+/);
 
-  if (fields.length !== 5) {
+  if (fields.length !== CRON_FIELD_RANGES.length) {
     return false;
   }
 
-  const ranges = [
-    [0, 59],
-    [0, 23],
-    [1, 31],
-    [1, 12],
-    [0, 7],
-  ] as const;
-
   return fields.every((field, index) => {
-    const range = ranges[index];
+    const range = CRON_FIELD_RANGES[index];
 
     if (!range) {
       return false;

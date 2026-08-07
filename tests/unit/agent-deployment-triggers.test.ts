@@ -25,12 +25,12 @@ describe("agent deployment post-response triggers", () => {
     expect(reconcile).toHaveBeenCalledWith(DEPLOYMENT_ID);
   });
 
-  it("continues once after runner initialization so Droplet provisioning starts immediately", async () => {
+  it("delegates the whole post-create fallback to one bounded targeted drain", async () => {
     let callback: (() => void | Promise<void>) | undefined;
-    const reconcile = vi
-      .fn()
-      .mockResolvedValueOnce({ processed: 1 as const, outcome: "advanced" as const })
-      .mockResolvedValueOnce({ processed: 1 as const, outcome: "retry_scheduled" as const });
+    const reconcile = vi.fn(async () => ({
+      processed: 1 as const,
+      outcome: "retry_scheduled" as const,
+    }));
 
     scheduleAgentDeploymentReconcileAfterResponse(DEPLOYMENT_ID, {
       afterScheduler: (registered) => {
@@ -40,9 +40,43 @@ describe("agent deployment post-response triggers", () => {
     });
 
     await callback?.();
-    expect(reconcile).toHaveBeenCalledTimes(2);
-    expect(reconcile).toHaveBeenNthCalledWith(1, DEPLOYMENT_ID);
-    expect(reconcile).toHaveBeenNthCalledWith(2, DEPLOYMENT_ID);
+    expect(reconcile).toHaveBeenCalledOnce();
+    expect(reconcile).toHaveBeenCalledWith(DEPLOYMENT_ID);
+  });
+
+  it("publishes a persisted delayed wakeup instead of reconciling inline when dispatch accepts it", async () => {
+    let callback: (() => void | Promise<void>) | undefined;
+    const publishWakeup = vi.fn(async () => "published" as const);
+    const reconcile = vi.fn(async () => ({ processed: 1 as const, outcome: "advanced" as const }));
+
+    scheduleAgentDeploymentReconcileAfterResponse(DEPLOYMENT_ID, {
+      afterScheduler: (registered) => {
+        callback = registered;
+      },
+      publishWakeup,
+      reconcile,
+    });
+
+    await callback?.();
+    expect(publishWakeup).toHaveBeenCalledWith(DEPLOYMENT_ID);
+    expect(reconcile).not.toHaveBeenCalled();
+  });
+
+  it("falls back to targeted reconciliation when dispatch is cron-mode or unavailable", async () => {
+    let callback: (() => void | Promise<void>) | undefined;
+    const publishWakeup = vi.fn(async () => "cron_mode" as const);
+    const reconcile = vi.fn(async () => ({ processed: 0 as const, outcome: "idle" as const }));
+
+    scheduleAgentDeploymentReconcileAfterResponse(DEPLOYMENT_ID, {
+      afterScheduler: (registered) => {
+        callback = registered;
+      },
+      publishWakeup,
+      reconcile,
+    });
+
+    await callback?.();
+    expect(reconcile).toHaveBeenCalledWith(DEPLOYMENT_ID);
   });
 
   it("leaves dropped callbacks harmless and contains callback failures", async () => {

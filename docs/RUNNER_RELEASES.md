@@ -25,11 +25,15 @@ compatibility; it does not imply that the disabled canary ran.
 
 Production builds also fail before migrations or compilation when ready agent creation is enabled
 without a DigitalOcean token, runner command bearer token, and immutable Git-SHA-plus-digest
-`AGENTBAY_RUNNER_IMAGE`. At runtime, agent creation reuses an eligible runner when one exists. If
-none is available, creation requires that provisioning configuration before persistence, then the
-post-response reconciler performs one initialization slice and one provisioning slice so exactly
-one durable provider attempt starts immediately. Protected cron reconciliation remains the retry
-path. Automated and local tests inject fake providers and never create a Droplet.
+`AGENTBAY_RUNNER_IMAGE`. At runtime, agent creation reuses only an already-running same-user runner
+with fresh authenticated heartbeat evidence, compatible release evidence, and spare capacity
+reserved inside the assignment transaction. Capacity is fail-closed to the minimum of computed
+CPU/physical-memory/disk limits, heartbeat, configured `AGENTBAY_RUNNER_MAX_AGENTS`, and an
+explicit measured profile cap; current hosted profiles remain capped at one. If no same-user
+capacity is available, creation requires provisioning configuration before persistence, then the
+post-response reconciler performs one initialization slice and one provisioning slice so exactly one
+durable provider attempt starts immediately. Protected cron reconciliation remains the retry path.
+Automated and local tests inject fake providers and never create a Droplet.
 
 New production Droplets skip the runner boot model canary so user creation is not delayed by a
 synthetic model round trip. Boot still verifies Docker, release identity, Hermes fixture startup,
@@ -130,3 +134,43 @@ canary bypass is active do not contain this artifact and therefore are not valid
 Do not switch the release workflow to `digitalocean` or add a cloud token to its environment.
 Credential-free runs are expected to exit with `capability_unavailable` and
 `sideEffectsAttempted: false`.
+
+## Protected runner snapshot builds
+
+Runner snapshots are built only through `.github/workflows/build-runner-snapshot.yml`. The workflow
+is `workflow_dispatch` only, uses the protected `snapshot-build` environment, and requires the exact
+cost-authorization sentinel before any DigitalOcean token is exposed to a step. Do not dispatch it
+unless required reviewers are enforced on that environment; an unprotected manual dispatch is
+forbidden.
+
+Snapshot mode is not a warm pool. The workflow creates a short-lived builder Droplet only after
+approval, validates the full boot contract, sanitizes instance state, powers the builder off, creates
+one snapshot, emits an allowlisted signed manifest, and deletes temporary builder resources. It must
+not create user runners, ready capacity, spare Droplets, cross-user capacity, schedules, release
+triggers, or production deployments.
+
+The builder SSH trust chain is intentionally narrow. The workflow resolves the GitHub runner
+controller's public egress identity before any DigitalOcean step and the builder firewall accepts SSH
+only from that exact `/32` IPv4 or `/128` IPv6 CIDR. The build command creates one provider SSH key,
+tracks ownership immediately, and deletes it from both orchestrator and controller cleanup paths. To
+retrieve builder evidence, the provider pins the observed ephemeral SSH host key into a temporary
+`known_hosts` file, optionally compares a supplied `SHA256:` fingerprint, uses
+`StrictHostKeyChecking=yes`, then removes the temporary known-hosts file and private key material.
+`accept-new` and world-open SSH ingress are forbidden.
+
+Production snapshot consumption is configured with:
+
+```text
+AGENTBAY_DIGITALOCEAN_IMAGE_MODE=snapshot
+AGENTBAY_DIGITALOCEAN_SNAPSHOT_MANIFEST=<canonical manifest JSON>
+AGENTBAY_DIGITALOCEAN_SNAPSHOT_SIGNATURE=<base64url Ed25519 signature>
+AGENTBAY_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY=<public verification key>
+AGENTBAY_RELEASE_SOURCE_REVISION=<exact 40-character release commit>
+AGENTBAY_DOCKER_RUNNER_IMAGE=<immutable default-agent image reference>
+```
+
+Every hosted create path verifies the manifest signature, staleness, source revision, base image,
+architecture, region, minimum disk compatibility, runner/default-agent/Hermes identities, and
+authoritative provider image availability before a Droplet-create call. Invalid or unavailable
+evidence fails closed. Set `AGENTBAY_DIGITALOCEAN_IMAGE_MODE=stock` or remove the snapshot variables
+to use the existing complete Ubuntu bootstrap rollback path.

@@ -8,11 +8,13 @@ import {
   users,
 } from "@/src/server/db/schema";
 import type { DigitalOceanProviderConfig } from "@/src/server/env";
+import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
 import {
   DIGITALOCEAN_PROVIDER,
   type DigitalOceanProvider,
   FakeDigitalOceanProvider,
 } from "@/src/server/runners/digitalocean-provider";
+import { LocalDockerDigitalOceanProvider } from "@/src/server/runners/local-docker-digitalocean-provider";
 import {
   advanceAutomaticDigitalOceanRunnerProvisioning,
   digitalOceanRunnerFirewallName,
@@ -38,45 +40,117 @@ describe("automatic DigitalOcean runner provisioning", () => {
     await connection.close();
   });
 
-  it("persists the operation key before create and advances exactly one provider phase per call", async () => {
+  it("drains the normal fake provider path to waiting_for_runner in one bounded call", async () => {
     const provider = new FakeDigitalOceanProvider({ now: () => NOW, idPrefix: "automatic" });
+    const now = sequenceClock("2026-08-03T09:00:00.000Z");
 
-    await expect(advance(connection, provider)).resolves.toEqual({ ok: true, state: "pending" });
+    await expect(advance(connection, provider, 1, undefined, now)).resolves.toEqual({
+      ok: true,
+      state: "pending",
+      disposition: "external_wait",
+    });
 
-    expect(provider.calls.map((call) => call.step)).toEqual(["discover", "create"]);
+    expect(provider.calls.map((call) => call.step)).toEqual(["discover", "create", "firewall"]);
     const createCall = provider.calls.find((call) => call.step === "create");
     expect(createCall?.input).toMatchObject({
       name: OPERATION_KEY,
       tags: expect.arrayContaining([OPERATION_KEY]),
     });
-    const [afterCreate] = await connection.db
+    expect(provider.calls.filter((call) => call.step === "tag")).toHaveLength(0);
+    const [afterDrain] = await connection.db
       .select()
       .from(runners)
       .where(eq(runners.id, RUNNER_ID));
-    expect(afterCreate).toMatchObject({
+    expect(afterDrain).toMatchObject({
       provisioningOperationKey: OPERATION_KEY,
-      provisioningStatus: "tagging",
-      providerResourceId: "automatic-1",
-    });
-
-    provider.calls.length = 0;
-    await expect(advance(connection, provider)).resolves.toEqual({ ok: true, state: "pending" });
-    expect(provider.calls.map((call) => call.step)).toEqual(["tag"]);
-    const [afterTag] = await connection.db.select().from(runners).where(eq(runners.id, RUNNER_ID));
-    expect(afterTag?.provisioningStatus).toBe("firewall_configuring");
-
-    provider.calls.length = 0;
-    await expect(advance(connection, provider)).resolves.toEqual({ ok: true, state: "pending" });
-    expect(provider.calls.map((call) => call.step)).toEqual(["firewall"]);
-    const [afterFirewall] = await connection.db
-      .select()
-      .from(runners)
-      .where(eq(runners.id, RUNNER_ID));
-    expect(afterFirewall).toMatchObject({
       provisioningStatus: "waiting_for_runner",
       status: "registering",
+      providerResourceId: "automatic-1",
       providerFirewallId: "automatic-firewall-1",
+      endpointUrl: "https://203-0-113-10.sslip.io",
     });
+
+    const emitted = await connection.db
+      .select({
+        phase: runnerProvisioningEvents.phase,
+        status: runnerProvisioningEvents.status,
+        createdAt: runnerProvisioningEvents.createdAt,
+      })
+      .from(runnerProvisioningEvents)
+      .where(eq(runnerProvisioningEvents.runnerId, RUNNER_ID))
+      .orderBy(runnerProvisioningEvents.createdAt);
+
+    expect(emitted.map((event) => [event.phase, event.status])).toEqual([
+      ["bootstrapping", "started"],
+      ["creating", "started"],
+      ["creating", "completed"],
+      ["tagging", "started"],
+      ["tagging", "completed"],
+      ["firewall_configuring", "started"],
+      ["firewall_configuring", "completed"],
+      ["waiting_for_runner", "started"],
+    ]);
+
+    for (const phase of ["creating", "tagging", "firewall_configuring"] as const) {
+      const startedAt = emitted.find(
+        (event) => event.phase === phase && event.status === "started",
+      )?.createdAt;
+      const completedAt = emitted.find(
+        (event) => event.phase === phase && event.status === "completed",
+      )?.createdAt;
+
+      expect(startedAt).toBeInstanceOf(Date);
+      expect(completedAt).toBeInstanceOf(Date);
+      expect((completedAt as Date).getTime()).toBeGreaterThan((startedAt as Date).getTime());
+    }
+  });
+
+  it("drains the local Docker provider path to waiting_for_runner in one bounded call", async () => {
+    const dockerCalls: string[][] = [];
+    const provider = new LocalDockerDigitalOceanProvider({
+      endpointUrl: "http://127.0.0.1:3045",
+      now: () => NOW,
+      startDelayMs: 0,
+      docker: async (args) => {
+        dockerCalls.push([...args]);
+        return { stdout: "ok\n", stderr: "" };
+      },
+    });
+
+    await expect(
+      advance(connection, provider, 1, undefined, () => NOW, localDockerProviderConfig()),
+    ).resolves.toEqual({
+      ok: true,
+      state: "pending",
+      disposition: "external_wait",
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const [runner] = await connection.db.select().from(runners).where(eq(runners.id, RUNNER_ID));
+    expect(runner).toMatchObject({
+      providerResourceId: "local-docker-droplet",
+      providerFirewallId: expect.stringMatching(/^local-docker-firewall-/),
+      provisioningStatus: "waiting_for_runner",
+      status: "registering",
+      endpointUrl: "http://127.0.0.1:3045",
+    });
+    const discovered = await provider.discoverResourcesByTag({ tag: OPERATION_KEY });
+    expect(discovered).toMatchObject({
+      ok: true,
+      value: {
+        authoritative: true,
+        resources: [
+          expect.objectContaining({
+            providerResourceId: "local-docker-droplet",
+            firewallApplied: true,
+            providerFirewallName: "agentbay-runners-local-docker-droplet",
+            tags: expect.arrayContaining([OPERATION_KEY, "agentbay", "agentbay-runner"]),
+          }),
+        ],
+      },
+    });
+    expect(dockerCalls.filter((call) => call[0] === "run")).toHaveLength(1);
   });
 
   it("adopts one exact-tag resource after a crash without issuing a second create", async () => {
@@ -84,20 +158,124 @@ describe("automatic DigitalOcean runner provisioning", () => {
     const created = await provider.createRunner({
       name: OPERATION_KEY,
       region: "sfo3",
-      sizeSlug: "s-1vcpu-1gb",
+      sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
       tags: [OPERATION_KEY],
     });
     expect(created.ok).toBe(true);
     provider.calls.length = 0;
 
-    await expect(advance(connection, provider)).resolves.toEqual({ ok: true, state: "pending" });
+    await expect(advance(connection, provider)).resolves.toEqual({
+      ok: true,
+      state: "pending",
+      disposition: "external_wait",
+    });
 
-    expect(provider.calls.map((call) => call.step)).toEqual(["discover"]);
+    expect(provider.calls.map((call) => call.step)).toEqual(["discover", "tag", "firewall"]);
     const [runner] = await connection.db.select().from(runners).where(eq(runners.id, RUNNER_ID));
     expect(runner).toMatchObject({
       providerResourceId: "adopted-1",
-      provisioningStatus: "tagging",
+      provisioningStatus: "waiting_for_runner",
+      status: "registering",
+    });
+  });
+
+  it("resumes after a create effect crash without replaying create", async () => {
+    const provider = new CrashAfterEffectProvider(
+      new FakeDigitalOceanProvider({ now: () => NOW, idPrefix: "crash-create" }),
+      "create",
+    );
+
+    await expect(advance(connection, provider)).rejects.toThrow("crash after create");
+    expect(provider.base.calls.map((call) => call.step)).toEqual(["discover", "create"]);
+
+    provider.crashStep = null;
+    provider.base.calls.length = 0;
+    await expect(advance(connection, provider)).resolves.toEqual({
+      ok: true,
+      state: "pending",
+      disposition: "external_wait",
+    });
+
+    expect(provider.base.calls.filter((call) => call.step === "create")).toHaveLength(0);
+    expect(provider.base.calls.map((call) => call.step)).toEqual(["discover", "firewall"]);
+    const [runner] = await connection.db.select().from(runners).where(eq(runners.id, RUNNER_ID));
+    expect(runner).toMatchObject({
+      providerResourceId: "crash-create-1",
+      providerFirewallId: "crash-create-firewall-1",
+      provisioningStatus: "waiting_for_runner",
+      status: "registering",
+    });
+  });
+
+  it("resumes after a tag effect crash without replaying a completed tag", async () => {
+    const provider = new CrashAfterEffectProvider(
+      new FakeDigitalOceanProvider({ now: () => NOW, idPrefix: "crash-tag" }),
+      "tag",
+    );
+
+    provider.base.createRunner = async (...args) => {
+      const created = await FakeDigitalOceanProvider.prototype.createRunner.apply(
+        provider.base,
+        args,
+      );
+      if (created.ok) {
+        const resource = provider.base.resources.get(created.value.providerResourceId);
+        if (resource) resource.tags = [OPERATION_KEY];
+      }
+      return created;
+    };
+
+    await expect(advance(connection, provider)).rejects.toThrow("crash after tag");
+    expect(provider.base.calls.map((call) => call.step)).toEqual(["discover", "create", "tag"]);
+
+    provider.crashStep = null;
+    provider.base.calls.length = 0;
+    await expect(advance(connection, provider)).resolves.toEqual({
+      ok: true,
+      state: "pending",
+      disposition: "external_wait",
+    });
+
+    expect(provider.base.calls.filter((call) => call.step === "tag")).toHaveLength(0);
+    expect(provider.base.calls.map((call) => call.step)).toEqual(["firewall"]);
+    const [runner] = await connection.db.select().from(runners).where(eq(runners.id, RUNNER_ID));
+    expect(runner).toMatchObject({
+      providerResourceId: "crash-tag-1",
+      providerFirewallId: "crash-tag-firewall-1",
+      provisioningStatus: "waiting_for_runner",
+      status: "registering",
+    });
+  });
+
+  it("resumes after a firewall effect crash without replaying firewall creation", async () => {
+    const provider = new CrashAfterEffectProvider(
+      new FakeDigitalOceanProvider({ now: () => NOW, idPrefix: "crash-firewall" }),
+      "firewall",
+    );
+
+    await expect(advance(connection, provider)).rejects.toThrow("crash after firewall");
+    expect(provider.base.calls.map((call) => call.step)).toEqual([
+      "discover",
+      "create",
+      "firewall",
+    ]);
+
+    provider.crashStep = null;
+    provider.base.calls.length = 0;
+    await expect(advance(connection, provider)).resolves.toEqual({
+      ok: true,
+      state: "pending",
+      disposition: "external_wait",
+    });
+
+    expect(provider.base.calls.filter((call) => call.step === "firewall")).toHaveLength(0);
+    const [runner] = await connection.db.select().from(runners).where(eq(runners.id, RUNNER_ID));
+    expect(runner).toMatchObject({
+      providerResourceId: "crash-firewall-1",
+      providerFirewallId: "crash-firewall-firewall-1",
+      provisioningStatus: "waiting_for_runner",
+      status: "registering",
     });
   });
 
@@ -106,7 +284,7 @@ describe("automatic DigitalOcean runner provisioning", () => {
     const created = await provider.createRunner({
       name: OPERATION_KEY,
       region: "sfo3",
-      sizeSlug: "s-1vcpu-1gb",
+      sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "agentbay-runner", OPERATION_KEY],
     });
@@ -153,13 +331,21 @@ describe("automatic DigitalOcean runner provisioning", () => {
   it("replays one operation tag without duplicating the token or billable create", async () => {
     const provider = new FakeDigitalOceanProvider({ now: () => NOW, idPrefix: "replayed" });
 
-    await expect(advance(connection, provider)).resolves.toEqual({ ok: true, state: "pending" });
+    await expect(advance(connection, provider)).resolves.toEqual({
+      ok: true,
+      state: "pending",
+      disposition: "external_wait",
+    });
     await connection.db
       .update(runners)
       .set({ provisioningStatus: "pending", providerResourceId: null })
       .where(eq(runners.id, RUNNER_ID));
 
-    await expect(advance(connection, provider)).resolves.toEqual({ ok: true, state: "pending" });
+    await expect(advance(connection, provider)).resolves.toEqual({
+      ok: true,
+      state: "pending",
+      disposition: "external_wait",
+    });
 
     const tokens = await connection.db
       .select({ id: runnerRegistrationTokens.id })
@@ -170,8 +356,22 @@ describe("automatic DigitalOcean runner provisioning", () => {
     expect(provider.calls.filter((call) => call.step === "create")).toHaveLength(1);
     expect(runner).toMatchObject({
       providerResourceId: "replayed-1",
-      provisioningStatus: "tagging",
+      provisioningStatus: "waiting_for_runner",
     });
+  });
+
+  it("fails automatic snapshot provisioning before any Droplet create when evidence is invalid", async () => {
+    const provider = new FakeDigitalOceanProvider({ now: () => NOW });
+
+    await expect(
+      advance(connection, provider, 1, undefined, () => NOW, invalidSnapshotAutomaticConfig()),
+    ).resolves.toEqual({
+      ok: false,
+      cleanupRequired: false,
+      terminalCode: "runner_provisioning_unavailable",
+    });
+
+    expect(provider.calls.map((call) => call.step)).not.toContain("create");
   });
 
   it("fails closed on duplicate exact-tag resources and records only safe cleanup ownership", async () => {
@@ -180,7 +380,7 @@ describe("automatic DigitalOcean runner provisioning", () => {
       await provider.createRunner({
         name: `${OPERATION_KEY}-${index}`,
         region: "sfo3",
-        sizeSlug: "s-1vcpu-1gb",
+        sizeSlug: "s-1vcpu-2gb",
         image: "ubuntu-24-04-x64",
         tags: [OPERATION_KEY],
       });
@@ -256,10 +456,12 @@ describe("automatic DigitalOcean runner provisioning", () => {
     await expect(advance(connection, provider, 1)).resolves.toEqual({
       ok: true,
       state: "pending",
+      disposition: "observation_wait",
     });
     await expect(advance(connection, provider, 2)).resolves.toEqual({
       ok: true,
       state: "pending",
+      disposition: "observation_wait",
     });
     await expect(advance(connection, provider, 64)).resolves.toEqual({
       ok: false,
@@ -277,8 +479,48 @@ describe("automatic DigitalOcean runner provisioning", () => {
     await expect(advance(connection, provider, 1, controller.signal)).resolves.toEqual({
       ok: true,
       state: "pending",
+      disposition: "immediate",
     });
     expect(provider.calls).toEqual([]);
+  });
+
+  it("rejects incompatible resources before discovery, SSH lookup, or create", async () => {
+    const provider = new FakeDigitalOceanProvider({ now: () => NOW });
+
+    await expect(
+      advance(connection, provider, 1, undefined, () => NOW, {
+        ...providerConfig(),
+        sizeSlug: "s-1vcpu-512mb-10gb",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      cleanupRequired: false,
+      terminalCode: "runner_provisioning_unavailable",
+    });
+
+    expect(provider.calls).toEqual([]);
+
+    await resetTables(connection);
+    await connection.db.insert(users).values({ id: USER_ID, createdAt: NOW, updatedAt: NOW });
+    await seedProvisioningRunner(connection);
+
+    await expect(
+      advance(connection, provider, 1, undefined, () => NOW, {
+        ...providerConfig(),
+        sizeSlug: "toString",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      cleanupRequired: false,
+      terminalCode: "runner_provisioning_unavailable",
+    });
+    expect(provider.calls).toEqual([]);
+    const [runner] = await connection.db.select().from(runners).where(eq(runners.id, RUNNER_ID));
+    expect(runner).toMatchObject({
+      status: "provision_failed",
+      provisioningStatus: "failed",
+      providerResourceId: null,
+    });
   });
 
   it("honors abort before every fake provider transport phase", async () => {
@@ -294,7 +536,7 @@ describe("automatic DigitalOcean runner provisioning", () => {
         {
           name: "runner",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: [OPERATION_KEY],
         },
@@ -311,11 +553,64 @@ describe("automatic DigitalOcean runner provisioning", () => {
   });
 });
 
+class CrashAfterEffectProvider implements DigitalOceanProvider {
+  constructor(
+    readonly base: FakeDigitalOceanProvider,
+    public crashStep: "create" | "tag" | "firewall" | null,
+  ) {}
+
+  listSshKeys(...args: Parameters<DigitalOceanProvider["listSshKeys"]>) {
+    return this.base.listSshKeys(...args);
+  }
+
+  createSshKey(...args: Parameters<DigitalOceanProvider["createSshKey"]>) {
+    return this.base.createSshKey(...args);
+  }
+
+  discoverResourcesByTag(...args: Parameters<DigitalOceanProvider["discoverResourcesByTag"]>) {
+    return this.base.discoverResourcesByTag(...args);
+  }
+
+  listManagedResources(
+    ...args: Parameters<NonNullable<DigitalOceanProvider["listManagedResources"]>>
+  ) {
+    return this.base.listManagedResources(...args);
+  }
+
+  readResource(...args: Parameters<DigitalOceanProvider["readResource"]>) {
+    return this.base.readResource(...args);
+  }
+
+  async createRunner(...args: Parameters<DigitalOceanProvider["createRunner"]>) {
+    const result = await this.base.createRunner(...args);
+    if (result.ok && this.crashStep === "create") throw new Error("crash after create");
+    return result;
+  }
+
+  async tagResource(...args: Parameters<DigitalOceanProvider["tagResource"]>) {
+    const result = await this.base.tagResource(...args);
+    if (result.ok && this.crashStep === "tag") throw new Error("crash after tag");
+    return result;
+  }
+
+  async applyFirewall(...args: Parameters<DigitalOceanProvider["applyFirewall"]>) {
+    const result = await this.base.applyFirewall(...args);
+    if (result.ok && this.crashStep === "firewall") throw new Error("crash after firewall");
+    return result;
+  }
+
+  cleanupResource(...args: Parameters<DigitalOceanProvider["cleanupResource"]>) {
+    return this.base.cleanupResource(...args);
+  }
+}
+
 function advance(
   connection: DatabaseConnection,
   provider: DigitalOceanProvider,
   attemptCount = 1,
   signal = new AbortController().signal,
+  now: () => Date = () => NOW,
+  config: DigitalOceanProviderConfig = providerConfig(),
 ) {
   return advanceAutomaticDigitalOceanRunnerProvisioning({
     connection,
@@ -324,11 +619,48 @@ function advance(
     operationKey: OPERATION_KEY,
     attemptCount,
     maxAttempts: 64,
-    config: providerConfig(),
+    config,
     provider,
     context: { signal },
-    now: () => NOW,
+    now,
   });
+}
+
+function invalidSnapshotAutomaticConfig(): DigitalOceanProviderConfig {
+  const runnerImage = `ghcr.io/ametel01/agentbay-runner:abc123@sha256:${"a".repeat(64)}`;
+  const defaultAgentImage = `ghcr.io/ametel01/agentbay-default:abc123@sha256:${"b".repeat(64)}`;
+
+  return {
+    ...providerConfig(),
+    runnerImage,
+    snapshotMode: {
+      mode: "snapshot",
+      manifestBytes: "{}",
+      signature: "bad-signature",
+      publicKeyPem: "bad-public-key",
+      expected: {
+        region: "sfo3",
+        sizeDiskGb: 25,
+        baseImageSlug: "ubuntu-24-04-x64",
+        architecture: "amd64",
+        runnerImage,
+        defaultAgentImage,
+        hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
+        sourceRepository: "ametel01/plingpling",
+        sourceRevision: "1".repeat(40),
+        now: NOW,
+      },
+    },
+  };
+}
+
+function sequenceClock(startIso: string): () => Date {
+  let currentMs = new Date(startIso).getTime();
+  return () => {
+    const current = new Date(currentMs);
+    currentMs += 1_000;
+    return current;
+  };
 }
 
 function providerConfig(): DigitalOceanProviderConfig {
@@ -338,11 +670,21 @@ function providerConfig(): DigitalOceanProviderConfig {
     runnerBearerToken: "fake-runner-bearer",
     runnerImage: "agentbay-runner:test",
     region: "sfo3",
-    sizeSlug: "s-1vcpu-1gb",
+    sizeSlug: "s-1vcpu-2gb",
     image: "ubuntu-24-04-x64",
     tags: ["agentbay", "agentbay-runner"],
     sshKeyIds: ["fake-key"],
     sshSourceAddresses: ["203.0.113.5/32"],
+  };
+}
+
+function localDockerProviderConfig(): DigitalOceanProviderConfig {
+  return {
+    ...providerConfig(),
+    token: "local-docker",
+    providerMode: "local_docker",
+    runnerImage: "agentbay-runner:local",
+    localRunnerEndpointUrl: "http://127.0.0.1:3045",
   };
 }
 
@@ -355,7 +697,7 @@ async function seedProvisioningRunner(connection: DatabaseConnection): Promise<v
     status: "provisioning",
     provider: DIGITALOCEAN_PROVIDER,
     region: "sfo3",
-    sizeSlug: "s-1vcpu-1gb",
+    sizeSlug: "s-1vcpu-2gb",
     image: "ubuntu-24-04-x64",
     provisioningStatus: "pending",
     provisioningOperationKey: OPERATION_KEY,

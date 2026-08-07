@@ -4,14 +4,17 @@ import { and, desc, eq, isNull, lt } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { summarizeOperationalText } from "@/src/server/alerts/operational-summaries";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { runnerHeartbeats, runnerProvisioningEvents, runners } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
+import { runnerProvisioningEvents, runners } from "@/src/server/db/schema";
 import {
   DIGITALOCEAN_PROVIDER,
   DIGITALOCEAN_RUNNER_KIND,
   type DigitalOceanProvisioningStatus,
 } from "@/src/server/runners/digitalocean-provider";
-import { reconcileStaleRunnerHeartbeatsInTransaction } from "@/src/server/runners/runner-heartbeat";
+import {
+  loadLatestRunnerHeartbeatMap,
+  reconcileStaleRunnerHeartbeatsInTransaction,
+} from "@/src/server/runners/runner-heartbeat";
 import { getDevelopmentUserId } from "@/src/server/users/development-user";
 
 const DEFAULT_CLOUD_RUNNER_NAME = "DigitalOcean Runner";
@@ -156,23 +159,14 @@ export async function listCloudRunnerProvisioningSummariesForDevelopmentUser(
         .orderBy(desc(runners.updatedAt), desc(runners.createdAt))
         .limit(10);
 
-      const summaries: CloudRunnerProvisioningSummary[] = [];
+      const latestHeartbeats = await loadLatestRunnerHeartbeatMap(
+        tx,
+        rows.map((row) => row.id),
+      );
 
-      for (const row of rows) {
-        const [latestHeartbeat] = await tx
-          .select({
-            status: runnerHeartbeats.status,
-            observedAt: runnerHeartbeats.observedAt,
-          })
-          .from(runnerHeartbeats)
-          .where(eq(runnerHeartbeats.runnerId, row.id))
-          .orderBy(desc(runnerHeartbeats.observedAt))
-          .limit(1);
-
-        summaries.push(toCloudRunnerProvisioningSummary(row, latestHeartbeat ?? null));
-      }
-
-      return summaries;
+      return rows.map((row) =>
+        toCloudRunnerProvisioningSummary(row, latestHeartbeats.get(row.id) ?? null),
+      );
     });
   } catch (error) {
     throw new CloudRunnerProvisioningPersistenceError(error);
@@ -223,23 +217,14 @@ export async function listCloudRunnerProvisioningSummariesForUser(
         .orderBy(desc(runners.updatedAt), desc(runners.createdAt))
         .limit(10);
 
-      const summaries: CloudRunnerProvisioningSummary[] = [];
+      const latestHeartbeats = await loadLatestRunnerHeartbeatMap(
+        tx,
+        rows.map((row) => row.id),
+      );
 
-      for (const row of rows) {
-        const [latestHeartbeat] = await tx
-          .select({
-            status: runnerHeartbeats.status,
-            observedAt: runnerHeartbeats.observedAt,
-          })
-          .from(runnerHeartbeats)
-          .where(eq(runnerHeartbeats.runnerId, row.id))
-          .orderBy(desc(runnerHeartbeats.observedAt))
-          .limit(1);
-
-        summaries.push(toCloudRunnerProvisioningSummary(row, latestHeartbeat ?? null));
-      }
-
-      return summaries;
+      return rows.map((row) =>
+        toCloudRunnerProvisioningSummary(row, latestHeartbeats.get(row.id) ?? null),
+      );
     });
   } catch (error) {
     throw new CloudRunnerProvisioningPersistenceError(error);
@@ -274,40 +259,44 @@ export async function reconcileTimedOutWaitingForRunnerRows(
     )
     .limit(10);
 
-  for (const row of timedOutRows) {
-    const message = timedOutWaitingForRunnerMessage(row.providerResourceId);
+  await Promise.all(
+    timedOutRows.map((row) => {
+      const message = timedOutWaitingForRunnerMessage(row.providerResourceId);
 
-    await tx
-      .update(runners)
-      .set({
-        status: "provision_failed",
-        provisioningStatus: "failed",
-        provisioningError: message,
-        provisioningCompletedAt: now,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(runners.id, row.id),
-          eq(runners.userId, userId),
-          eq(runners.kind, DIGITALOCEAN_RUNNER_KIND),
-          isNull(runners.deletedAt),
-        ),
-      );
-    await tx.insert(runnerProvisioningEvents).values({
-      runnerId: row.id,
-      phase: "failed",
-      status: "failed",
-      message,
-      metadata: {
-        provider: DIGITALOCEAN_PROVIDER,
-        failedPhase: "waiting_for_runner",
-        providerResourceId: row.providerResourceId,
-        timeoutMs: WAITING_FOR_RUNNER_TIMEOUT_MS,
-      },
-      createdAt: now,
-    });
-  }
+      return Promise.all([
+        tx
+          .update(runners)
+          .set({
+            status: "provision_failed",
+            provisioningStatus: "failed",
+            provisioningError: message,
+            provisioningCompletedAt: now,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(runners.id, row.id),
+              eq(runners.userId, userId),
+              eq(runners.kind, DIGITALOCEAN_RUNNER_KIND),
+              isNull(runners.deletedAt),
+            ),
+          ),
+        tx.insert(runnerProvisioningEvents).values({
+          runnerId: row.id,
+          phase: "failed",
+          status: "failed",
+          message,
+          metadata: {
+            provider: DIGITALOCEAN_PROVIDER,
+            failedPhase: "waiting_for_runner",
+            providerResourceId: row.providerResourceId,
+            timeoutMs: WAITING_FOR_RUNNER_TIMEOUT_MS,
+          },
+          createdAt: now,
+        }),
+      ]);
+    }),
+  );
 }
 
 function timedOutWaitingForRunnerMessage(providerResourceId: string | null): string {

@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
@@ -6,6 +6,7 @@ import {
   agentRuntimeReconciliations,
   agents,
   appMetadata,
+  runnerHeartbeats,
   runners,
   users,
 } from "@/src/server/db/schema";
@@ -220,6 +221,128 @@ describe.sequential("runner assignment list", () => {
     expect(persistedAgent?.runnerId).toBe(currentRunner?.id);
     expect(runtime).toMatchObject({ generation: 0, configRevision: "cfg-runner-assignment-0" });
   });
+
+  it("fails closed when assigning a desired-running manual agent to a full max-one runner", async () => {
+    const userId = await seedDevelopmentUser(connection);
+    const [targetRunner] = await connection.db
+      .insert(runners)
+      .values({
+        userId,
+        name: "Full Target Runner",
+        kind: "manual_vps",
+        status: "online",
+        endpointUrl: "https://full-target-runner.example.com",
+      })
+      .returning({ id: runners.id });
+    if (!targetRunner) {
+      throw new Error("Runner insert returned no rows.");
+    }
+    await seedRunnerHeartbeat(connection, targetRunner.id, 1);
+    const [currentAgent, sibling] = await connection.db
+      .insert(agents)
+      .values([
+        {
+          userId,
+          name: "Desired Running Reassignment Agent",
+          templateKey: "research_agent",
+          status: "error",
+          desiredStatus: "running",
+        },
+        {
+          userId,
+          runnerId: targetRunner.id,
+          name: "Target Capacity Sibling",
+          templateKey: "github_issue_agent",
+          status: "running",
+          desiredStatus: "running",
+        },
+      ])
+      .returning({ id: agents.id });
+    if (!currentAgent || !sibling) {
+      throw new Error("Agent inserts returned no rows.");
+    }
+
+    const result = await assignRunnerToActiveAgentForDevelopmentUser(
+      { agentId: currentAgent.id, runnerId: targetRunner.id },
+      { createConnection: () => connection },
+    );
+    const assigned = await connection.db
+      .select({ id: agents.id, runnerId: agents.runnerId })
+      .from(agents);
+
+    expect(result).toEqual({ ok: false, reason: "runner_capacity_reached" });
+    expect(assigned.find((agent) => agent.id === currentAgent.id)?.runnerId).toBeNull();
+    expect(assigned.find((agent) => agent.id === sibling.id)?.runnerId).toBe(targetRunner.id);
+  });
+
+  it("serializes concurrent desired-running manual assignments to one max-one runner", async () => {
+    const userId = await seedDevelopmentUser(connection);
+    const [targetRunner] = await connection.db
+      .insert(runners)
+      .values({
+        userId,
+        name: "Concurrent Assignment Runner",
+        kind: "manual_vps",
+        status: "online",
+        endpointUrl: "https://concurrent-assignment-runner.example.com",
+      })
+      .returning({ id: runners.id });
+    if (!targetRunner) {
+      throw new Error("Runner insert returned no rows.");
+    }
+    await seedRunnerHeartbeat(connection, targetRunner.id, 1);
+    const [agentA, agentB] = await connection.db
+      .insert(agents)
+      .values([
+        {
+          userId,
+          name: "Concurrent Assignment A",
+          templateKey: "research_agent",
+          status: "error",
+          desiredStatus: "running",
+        },
+        {
+          userId,
+          name: "Concurrent Assignment B",
+          templateKey: "github_issue_agent",
+          status: "error",
+          desiredStatus: "running",
+        },
+      ])
+      .returning({ id: agents.id });
+    if (!agentA || !agentB) {
+      throw new Error("Agent inserts returned no rows.");
+    }
+    const secondConnection = createDatabaseConnection();
+
+    try {
+      const results = await Promise.all([
+        assignRunnerToActiveAgentForDevelopmentUser(
+          { agentId: agentA.id, runnerId: targetRunner.id },
+          { createConnection: () => connection },
+        ),
+        assignRunnerToActiveAgentForDevelopmentUser(
+          { agentId: agentB.id, runnerId: targetRunner.id },
+          { createConnection: () => secondConnection },
+        ),
+      ]);
+      const assigned = await connection.db
+        .select({ id: agents.id, runnerId: agents.runnerId, desiredStatus: agents.desiredStatus })
+        .from(agents)
+        .where(eq(agents.runnerId, targetRunner.id));
+
+      expect(results).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ ok: true }),
+          { ok: false, reason: "runner_capacity_reached" },
+        ]),
+      );
+      expect(assigned).toHaveLength(1);
+      expect(assigned[0]?.desiredStatus).toBe("running");
+    } finally {
+      await secondConnection.close();
+    }
+  });
 });
 
 async function seedDevelopmentUser(connection: DatabaseConnection): Promise<string> {
@@ -250,4 +373,18 @@ async function resetTables(connection: DatabaseConnection): Promise<void> {
       users
     restart identity cascade
   `);
+}
+
+async function seedRunnerHeartbeat(
+  connection: DatabaseConnection,
+  runnerId: string,
+  maxAgents: number,
+): Promise<void> {
+  await connection.db.insert(runnerHeartbeats).values({
+    runnerId,
+    status: "online",
+    metadata: { metrics: { maxAgents, runningAgents: 0 } },
+    observedAt: new Date("2099-01-01T00:00:00.000Z"),
+    createdAt: new Date("2099-01-01T00:00:00.000Z"),
+  });
 }

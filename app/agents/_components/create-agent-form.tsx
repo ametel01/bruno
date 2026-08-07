@@ -2,33 +2,21 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, type RefObject, useEffect, useRef, useState } from "react";
+import { type FormEvent, type RefObject, useRef, useState, useSyncExternalStore } from "react";
 import { parseSafeCreate202Body } from "@/src/shared/agent-deployment-presentation";
-import { parseCanonicalTelegramAllowlist } from "@/src/shared/telegram-allowlist";
-
-export type AssistantChoice = "chatgpt" | "claude";
-
-export type ModelConnectionOption = {
-  assistant: AssistantChoice;
-  displayName: "ChatGPT" | "Claude";
-  credentialLabel: "OpenAI API key" | "Anthropic API key";
-  credentialHelpUrl: string;
-  credentialBillingNote: string;
-  status: "connected" | "action_required";
-};
+import {
+  type AssistantChoice,
+  buildReadyCreateRequest,
+  type FieldName,
+  type LogicalSubmission,
+  type ModelConnectionOption,
+} from "./create-agent-form-controller";
 
 type CreateAgentFormProps = {
   maxNameLength: number;
   readyModeEnabled: boolean;
   modelConnections: ModelConnectionOption[];
 };
-
-export type FieldName =
-  | "name"
-  | "assistant"
-  | "modelApiKey"
-  | "telegramBotToken"
-  | "telegramAllowedUserIds";
 
 type SubmitState =
   | { status: "idle" }
@@ -37,24 +25,9 @@ type SubmitState =
   | { status: "error"; message: string; field?: FieldName; definitive: boolean }
   | { status: "ambiguous"; message: string };
 
-export type ReadyEnvelope = {
-  name: string;
-  assistant: AssistantChoice;
-};
-
-export type LogicalSubmission = {
-  idempotencyKey: string;
-  envelope: ReadyEnvelope;
-  envelopeLocked: boolean;
-};
-
-export const READY_SECRET_FIELD_NAMES = [
-  "modelApiKey",
-  "telegramBotToken",
-  "telegramAllowedUserIds",
-] as const;
-
-const DEFAULT_TEMPLATE_KEY = "research_agent";
+const subscribeToHydration = () => () => {};
+const getHydratedSnapshot = () => true;
+const getServerHydratedSnapshot = () => false;
 
 export function CreateAgentForm({
   maxNameLength,
@@ -69,24 +42,16 @@ export function CreateAgentForm({
   const statusRef = useRef<HTMLParagraphElement | null>(null);
   const latchRef = useRef(false);
   const logicalSubmissionRef = useRef<LogicalSubmission | null>(null);
-  const [hydrated, setHydrated] = useState(false);
   const [assistant, setAssistant] = useState<AssistantChoice>(
     modelConnections[0]?.assistant ?? "chatgpt",
   );
   const [state, setState] = useState<SubmitState>({ status: "idle" });
+  const hydrated = useSyncExternalStore(
+    subscribeToHydration,
+    getHydratedSnapshot,
+    getServerHydratedSnapshot,
+  );
   const selectedConnection = modelConnections.find((item) => item.assistant === assistant);
-
-  useEffect(() => setHydrated(true), []);
-
-  useEffect(() => {
-    if (state.status === "error" && state.field) {
-      focusField(state.field, { nameRef, modelKeyRef, telegramTokenRef, allowlistRef });
-    }
-
-    if (state.status === "success") {
-      statusRef.current?.focus();
-    }
-  }, [state]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -109,12 +74,7 @@ export function CreateAgentForm({
     });
 
     if (!prepared.ok) {
-      setState({
-        status: "error",
-        message: prepared.message,
-        field: prepared.field,
-        definitive: true,
-      });
+      showError(prepared.message, true, prepared.field);
       return;
     }
 
@@ -150,7 +110,7 @@ export function CreateAgentForm({
 
       if (definitive) {
         releaseSubmission();
-        setState(errorState(failure.message, true, failure.field));
+        showError(failure.message, true, failure.field);
       } else {
         lockSubmission();
         setState({
@@ -186,7 +146,15 @@ export function CreateAgentForm({
     logicalSubmissionRef.current = null;
     const href = `/agents/${encodeURIComponent(parsed.agentId)}`;
     setState({ status: "success", message: "Your agent is being set up.", href });
+    window.requestAnimationFrame(() => statusRef.current?.focus());
     window.setTimeout(() => router.replace(href), 750);
+  }
+
+  function showError(message: string, definitive: boolean, field?: FieldName) {
+    setState(errorState(message, definitive, field));
+    if (field) {
+      focusField(field, { nameRef, modelKeyRef, telegramTokenRef, allowlistRef });
+    }
   }
 
   function clearCredentialFields() {
@@ -250,119 +218,21 @@ export function CreateAgentForm({
         <FieldError field="name" state={state} />
       </div>
 
-      <fieldset className="assistant-choice-fieldset">
-        <legend>Choose your assistant</legend>
-        <div className="assistant-choice-list">
-          {modelConnections.map((connection) => (
-            <label
-              className="assistant-choice-card"
-              data-selected={assistant === connection.assistant}
-              key={connection.assistant}
-            >
-              <input
-                type="radio"
-                name="assistant"
-                value={connection.assistant}
-                checked={assistant === connection.assistant}
-                disabled={locked}
-                onChange={() => {
-                  setAssistant(connection.assistant);
-                  if (modelKeyRef.current) modelKeyRef.current.value = "";
-                }}
-              />
-              <span>
-                <strong>{connection.displayName}</strong>
-                <small>
-                  {connection.status === "connected" ? "Connected — ready to use" : "Connect once"}
-                </small>
-              </span>
-              <span className="connection-status" data-status={connection.status}>
-                {connection.status === "connected" ? "Connected" : "Setup needed"}
-              </span>
-            </label>
-          ))}
-        </div>
-        <FieldError field="assistant" state={state} />
-      </fieldset>
+      <AssistantConnectionFields
+        assistant={assistant}
+        locked={locked}
+        modelConnections={modelConnections}
+        modelKeyRef={modelKeyRef}
+        onAssistantChange={setAssistant}
+        selectedConnection={selectedConnection}
+        state={state}
+      />
 
-      {selectedConnection?.status === "action_required" ? (
-        <div className="field-group connection-key-field">
-          <label htmlFor="model-api-key">{selectedConnection.credentialLabel}</label>
-          <input
-            id="model-api-key"
-            name="modelApiKey"
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            ref={modelKeyRef}
-            aria-describedby={fieldDescribedBy("model-api-key-hint", "modelApiKey", state)}
-            aria-invalid={fieldHasError("modelApiKey", state)}
-          />
-          <p className="form-helper" id="model-api-key-hint">
-            <a
-              href={selectedConnection.credentialHelpUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-            >
-              Get your key
-            </a>
-            . {selectedConnection.credentialBillingNote} We encrypt it and reuse it only for your
-            agents.
-          </p>
-          <FieldError field="modelApiKey" state={state} />
-        </div>
-      ) : null}
-
-      <fieldset className="ready-credential-fieldset">
-        <legend>Connect Telegram</legend>
-        <div className="field-group">
-          <label htmlFor="telegram-bot-token">Bot token</label>
-          <input
-            id="telegram-bot-token"
-            name="telegramBotToken"
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            ref={telegramTokenRef}
-            aria-describedby={fieldDescribedBy(
-              "telegram-bot-token-hint",
-              "telegramBotToken",
-              state,
-            )}
-            aria-invalid={fieldHasError("telegramBotToken", state)}
-          />
-          <p className="form-helper" id="telegram-bot-token-hint">
-            Open{" "}
-            <a href="https://t.me/BotFather" target="_blank" rel="noreferrer noopener">
-              BotFather
-            </a>
-            , create a bot, then paste the token it gives you.
-          </p>
-          <FieldError field="telegramBotToken" state={state} />
-        </div>
-        <div className="field-group">
-          <label htmlFor="telegram-allowed-user-ids">Who may use this bot?</label>
-          <textarea
-            id="telegram-allowed-user-ids"
-            name="telegramAllowedUserIds"
-            rows={3}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="Your Telegram numeric user ID"
-            ref={allowlistRef}
-            aria-describedby={fieldDescribedBy(
-              "telegram-allowed-user-ids-hint",
-              "telegramAllowedUserIds",
-              state,
-            )}
-            aria-invalid={fieldHasError("telegramAllowedUserIds", state)}
-          />
-          <p className="form-helper" id="telegram-allowed-user-ids-hint">
-            Enter one numeric user ID per line. This keeps the bot private.
-          </p>
-          <FieldError field="telegramAllowedUserIds" state={state} />
-        </div>
-      </fieldset>
+      <TelegramConnectionFields
+        allowlistRef={allowlistRef}
+        state={state}
+        telegramTokenRef={telegramTokenRef}
+      />
 
       <div className="one-click-summary">
         <strong>We handle the rest</strong>
@@ -408,125 +278,148 @@ export function CreateAgentForm({
   );
 }
 
-export type ReadyCreateFormSnapshot = {
-  name: string;
+function AssistantConnectionFields({
+  assistant,
+  locked,
+  modelConnections,
+  modelKeyRef,
+  onAssistantChange,
+  selectedConnection,
+  state,
+}: {
   assistant: AssistantChoice;
-  modelApiKey: string;
-  telegramBotToken: string;
-  telegramAllowedUserIds: string;
-};
+  locked: boolean;
+  modelConnections: ModelConnectionOption[];
+  modelKeyRef: RefObject<HTMLInputElement | null>;
+  onAssistantChange: (assistant: AssistantChoice) => void;
+  selectedConnection: ModelConnectionOption | undefined;
+  state: SubmitState;
+}) {
+  return (
+    <>
+      <fieldset className="assistant-choice-fieldset">
+        <legend>Choose your assistant</legend>
+        <div className="assistant-choice-list">
+          {modelConnections.map((connection) => (
+            <label
+              className="assistant-choice-card"
+              data-selected={assistant === connection.assistant}
+              key={connection.assistant}
+            >
+              <input
+                type="radio"
+                name="assistant"
+                value={connection.assistant}
+                checked={assistant === connection.assistant}
+                disabled={locked}
+                onChange={() => {
+                  onAssistantChange(connection.assistant);
+                  if (modelKeyRef.current) modelKeyRef.current.value = "";
+                }}
+              />
+              <span>
+                <strong>{connection.displayName}</strong>
+                <small>
+                  {connection.status === "connected" ? "Connected — ready to use" : "Connect once"}
+                </small>
+              </span>
+              <span className="connection-status" data-status={connection.status}>
+                {connection.status === "connected" ? "Connected" : "Setup needed"}
+              </span>
+            </label>
+          ))}
+        </div>
+        <FieldError field="assistant" state={state} />
+      </fieldset>
 
-export type ReadyCreateRequestResult =
-  | {
-      ok: true;
-      payload: {
-        name: string;
-        templateKey: typeof DEFAULT_TEMPLATE_KEY;
-        runnerId: null;
-        launchMode: "ready";
-        idempotencyKey: string;
-        assistant: AssistantChoice;
-        modelApiKey?: string;
-        telegramBotToken: string;
-        telegramAllowedUserIds: string[];
-      };
-      nextSubmission: LogicalSubmission;
-      credentialFieldNames: typeof READY_SECRET_FIELD_NAMES;
-    }
-  | { ok: false; message: string; field: FieldName };
-
-export function buildReadyCreateRequest(input: {
-  availableConnections: ModelConnectionOption[];
-  createIdempotencyKey: () => string;
-  currentSubmission: LogicalSubmission | null;
-  form: ReadyCreateFormSnapshot;
-  maxNameLength: number;
-  readyModeEnabled: boolean;
-}): ReadyCreateRequestResult {
-  if (!input.readyModeEnabled || input.availableConnections.length === 0) {
-    return { ok: false, message: "Automatic setup is unavailable.", field: "assistant" };
-  }
-
-  let envelope: ReadyEnvelope;
-  if (input.currentSubmission?.envelopeLocked) {
-    envelope = input.currentSubmission.envelope;
-  } else {
-    const name = input.form.name.trim();
-    if (!name) return { ok: false, message: "Name is required.", field: "name" };
-    if (name.length > input.maxNameLength) {
-      return {
-        ok: false,
-        message: `Name must be ${input.maxNameLength} characters or fewer.`,
-        field: "name",
-      };
-    }
-    if (!input.availableConnections.some((item) => item.assistant === input.form.assistant)) {
-      return { ok: false, message: "Choose ChatGPT or Claude.", field: "assistant" };
-    }
-    envelope = { name, assistant: input.form.assistant };
-  }
-
-  const connection = input.availableConnections.find(
-    (item) => item.assistant === envelope.assistant,
+      {selectedConnection?.status === "action_required" ? (
+        <div className="field-group connection-key-field">
+          <label htmlFor="model-api-key">{selectedConnection.credentialLabel}</label>
+          <input
+            id="model-api-key"
+            name="modelApiKey"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            ref={modelKeyRef}
+            aria-describedby={fieldDescribedBy("model-api-key-hint", "modelApiKey", state)}
+            aria-invalid={fieldHasError("modelApiKey", state)}
+          />
+          <p className="form-helper" id="model-api-key-hint">
+            <a
+              href={selectedConnection.credentialHelpUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              Get your key
+            </a>
+            . {selectedConnection.credentialBillingNote} We encrypt it and reuse it only for your
+            agents.
+          </p>
+          <FieldError field="modelApiKey" state={state} />
+        </div>
+      ) : null}
+    </>
   );
-  const modelApiKey = input.form.modelApiKey.trim();
-  if (connection?.status !== "connected" && !modelApiKey) {
-    return {
-      ok: false,
-      message: `${connection?.credentialLabel ?? "API key"} is required.`,
-      field: "modelApiKey",
-    };
-  }
-
-  const telegramBotToken = input.form.telegramBotToken.trim();
-  if (!telegramBotToken) {
-    return { ok: false, message: "Telegram bot token is required.", field: "telegramBotToken" };
-  }
-
-  const allowlist = parseTelegramAllowlistInput(input.form.telegramAllowedUserIds);
-  if (!allowlist.ok) return allowlist;
-
-  const idempotencyKey =
-    input.currentSubmission?.idempotencyKey ?? input.createIdempotencyKey().toLowerCase();
-  const nextSubmission = {
-    idempotencyKey,
-    envelope,
-    envelopeLocked: input.currentSubmission?.envelopeLocked ?? false,
-  };
-
-  return {
-    ok: true,
-    credentialFieldNames: READY_SECRET_FIELD_NAMES,
-    nextSubmission,
-    payload: {
-      name: envelope.name,
-      templateKey: DEFAULT_TEMPLATE_KEY,
-      runnerId: null,
-      launchMode: "ready",
-      idempotencyKey,
-      assistant: envelope.assistant,
-      ...(modelApiKey ? { modelApiKey } : {}),
-      telegramBotToken,
-      telegramAllowedUserIds: allowlist.values,
-    },
-  };
 }
 
-function parseTelegramAllowlistInput(
-  value: string,
-):
-  | { ok: true; values: string[] }
-  | { ok: false; message: string; field: "telegramAllowedUserIds" } {
-  const result = parseCanonicalTelegramAllowlist(value);
-  if (result.ok) return result;
-  return {
-    ok: false,
-    field: "telegramAllowedUserIds",
-    message:
-      result.reason === "empty" || result.reason === "too_many"
-        ? "Enter one to 100 Telegram user IDs."
-        : "Telegram user IDs must be canonical decimal strings.",
-  };
+function TelegramConnectionFields({
+  allowlistRef,
+  state,
+  telegramTokenRef,
+}: {
+  allowlistRef: RefObject<HTMLTextAreaElement | null>;
+  state: SubmitState;
+  telegramTokenRef: RefObject<HTMLInputElement | null>;
+}) {
+  return (
+    <fieldset className="ready-credential-fieldset">
+      <legend>Connect Telegram</legend>
+      <div className="field-group">
+        <label htmlFor="telegram-bot-token">Bot token</label>
+        <input
+          id="telegram-bot-token"
+          name="telegramBotToken"
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          ref={telegramTokenRef}
+          aria-describedby={fieldDescribedBy("telegram-bot-token-hint", "telegramBotToken", state)}
+          aria-invalid={fieldHasError("telegramBotToken", state)}
+        />
+        <p className="form-helper" id="telegram-bot-token-hint">
+          Open{" "}
+          <a href="https://t.me/BotFather" target="_blank" rel="noreferrer noopener">
+            BotFather
+          </a>
+          , create a bot, then paste the token it gives you.
+        </p>
+        <FieldError field="telegramBotToken" state={state} />
+      </div>
+      <div className="field-group">
+        <label htmlFor="telegram-allowed-user-ids">Who may use this bot?</label>
+        <textarea
+          id="telegram-allowed-user-ids"
+          name="telegramAllowedUserIds"
+          rows={3}
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="Your Telegram numeric user ID"
+          ref={allowlistRef}
+          aria-describedby={fieldDescribedBy(
+            "telegram-allowed-user-ids-hint",
+            "telegramAllowedUserIds",
+            state,
+          )}
+          aria-invalid={fieldHasError("telegramAllowedUserIds", state)}
+        />
+        <p className="form-helper" id="telegram-allowed-user-ids-hint">
+          Enter one numeric user ID per line. This keeps the bot private.
+        </p>
+        <FieldError field="telegramAllowedUserIds" state={state} />
+      </div>
+    </fieldset>
+  );
 }
 
 async function safeCreateFailureMessage(

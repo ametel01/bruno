@@ -3,7 +3,9 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import type { RunnerAgentStatusSnapshot } from "@/src/runner-service/runner-contracts";
+import { replaceDeploymentWakeupInTransaction } from "@/src/server/agents/agent-deployment-dispatch";
 import { buildHermesAgentLaunchSpecForUser } from "@/src/server/agents/agent-launch-builder";
+import { logAgentCreationTerminalCompletion } from "@/src/server/agents/agent-creation-latency";
 import { initializeAgentRuntimeAfterDeploymentReady } from "@/src/server/agents/agent-runtime-store";
 import { scheduleAgentRuntimeReconcileAfterResponse } from "@/src/server/agents/agent-runtime-triggers";
 import { getAssistantProfileForManagedModel } from "@/src/server/agents/assistant-profiles";
@@ -58,6 +60,7 @@ const agentDeploymentLogger = createAppLogger("agent.deployment");
 
 export const DEPLOYMENT_RECONCILE_LEASE_MS = 90_000;
 export const DEPLOYMENT_RECONCILE_ACTION_DEADLINE_MS = 45_000;
+export const DEPLOYMENT_DRAIN_MAX_ITERATIONS = 8;
 export const GATEWAY_START_DEADLINE_MS = 30_000;
 
 const MAX_REPLACEMENTS_PER_DEPLOYMENT = 2;
@@ -79,6 +82,7 @@ const ERROR_STATUS_REASON =
   "Automatic deployment failed. Retry, Stop, or Delete this agent from the deployment controls.";
 
 class LostDeploymentLeaseError extends Error {}
+class DeploymentActionDeadlineExceededError extends Error {}
 
 export type AgentDeploymentReconcileOutcome =
   | "idle"
@@ -101,7 +105,11 @@ export type DeploymentProvisioner = (
 ) => Promise<ProvisionerResult>;
 
 export type ProvisionerResult =
-  | { ok: true; state: "pending" }
+  | {
+      ok: true;
+      state: "pending";
+      disposition?: "immediate" | "external_wait" | "observation_wait";
+    }
   | { ok: true; state: "ready" }
   | {
       ok: false;
@@ -130,6 +138,7 @@ export type AgentDeploymentReconcilerDependencies = {
   randomUUID?: () => string;
   modelCanaryEnabled?: boolean;
   triggerReplacement?: (replacementId: string) => void;
+  scheduleRuntimeAfterReady?: typeof scheduleAgentRuntimeReconcileAfterResponse;
 };
 
 type ReconcilerRunnerAdapter = {
@@ -194,27 +203,121 @@ export function computeDeploymentBackoffMs(attemptCount: number): number {
 export async function reconcileNextAgentDeployment(
   dependencies: AgentDeploymentReconcilerDependencies = {},
 ): Promise<AgentDeploymentReconcileResult> {
-  return reconcileOne({ kind: "global" }, dependencies);
+  return publicReconcileResult(await reconcileOne({ kind: "global" }, dependencies));
 }
 
 export async function reconcileTargetAgentDeployment(
   deploymentId: string,
   dependencies: AgentDeploymentReconcilerDependencies = {},
 ): Promise<AgentDeploymentReconcileResult> {
-  return reconcileOne({ kind: "deployment", deploymentId }, dependencies);
+  return publicReconcileResult(
+    await reconcileOne({ kind: "deployment", deploymentId }, dependencies),
+  );
 }
 
 export async function reconcileTargetRunnerDeployment(
   runnerId: string,
   dependencies: AgentDeploymentReconcilerDependencies = {},
 ): Promise<AgentDeploymentReconcileResult> {
-  return reconcileOne({ kind: "runner", runnerId }, dependencies);
+  return publicReconcileResult(await reconcileOne({ kind: "runner", runnerId }, dependencies));
+}
+
+export async function drainTargetAgentDeployment(
+  deploymentId: string,
+  dependencies: AgentDeploymentReconcilerDependencies = {},
+): Promise<AgentDeploymentReconcileResult> {
+  return drainDeployment({ kind: "deployment", deploymentId }, dependencies);
+}
+
+export async function drainTargetRunnerDeployment(
+  runnerId: string,
+  dependencies: AgentDeploymentReconcilerDependencies = {},
+): Promise<AgentDeploymentReconcileResult> {
+  return drainDeployment(
+    { kind: "runner", runnerId },
+    { ...dependencies, scheduleRuntimeAfterReady: () => undefined },
+  );
+}
+
+type InternalAgentDeploymentReconcileResult = AgentDeploymentReconcileResult & {
+  deploymentId: string | null;
+};
+
+async function drainDeployment(
+  initialTarget: Extract<ReconcileTarget, { kind: "deployment" | "runner" }>,
+  dependencies: AgentDeploymentReconcilerDependencies,
+): Promise<AgentDeploymentReconcileResult> {
+  const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
+  const ownsConnection = !dependencies.createConnection;
+  const now = dependencies.now ?? (() => new Date());
+  const action = createDeploymentActionContext(now);
+  let target: ReconcileTarget = initialTarget;
+  let result: AgentDeploymentReconcileResult = { processed: 0, outcome: "idle" };
+
+  try {
+    for (let iteration = 0; iteration < DEPLOYMENT_DRAIN_MAX_ITERATIONS; iteration += 1) {
+      if (action.context.signal.aborted || action.context.remainingMs() <= 0) {
+        break;
+      }
+
+      const current = await reconcileOne(
+        target,
+        { ...dependencies, createConnection: () => connection, now },
+        action.context,
+      );
+      result = publicReconcileResult(current);
+
+      if (current.processed !== 1 || current.outcome !== "advanced" || !current.deploymentId) {
+        break;
+      }
+
+      target = { kind: "deployment", deploymentId: current.deploymentId };
+    }
+
+    return result;
+  } finally {
+    action.dispose();
+    if (ownsConnection) {
+      await connection.close();
+    }
+  }
+}
+
+function publicReconcileResult(
+  result: InternalAgentDeploymentReconcileResult,
+): AgentDeploymentReconcileResult {
+  return { processed: result.processed, outcome: result.outcome };
+}
+
+function createDeploymentActionContext(now: () => Date): {
+  context: DeploymentActionContext;
+  dispose: () => void;
+} {
+  const deadlineAt = new Date(now().getTime() + DEPLOYMENT_RECONCILE_ACTION_DEADLINE_MS);
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () =>
+      controller.abort(new DOMException("Deployment action deadline exceeded.", "TimeoutError")),
+    DEPLOYMENT_RECONCILE_ACTION_DEADLINE_MS,
+  );
+  const context: DeploymentActionContext = {
+    deadlineAt,
+    signal: controller.signal,
+    remainingMs: () =>
+      Math.max(
+        0,
+        Math.min(DEPLOYMENT_RECONCILE_ACTION_DEADLINE_MS, deadlineAt.getTime() - now().getTime()),
+      ),
+  };
+
+  return { context, dispose: () => clearTimeout(timeout) };
 }
 
 async function reconcileOne(
   target: ReconcileTarget,
   dependencies: AgentDeploymentReconcilerDependencies,
-): Promise<AgentDeploymentReconcileResult> {
+  sharedContext?: DeploymentActionContext,
+): Promise<InternalAgentDeploymentReconcileResult> {
   const hermesWorkloadImage = (dependencies.readHermesWorkloadImage ?? readHermesWorkloadImage)();
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
@@ -243,7 +346,7 @@ async function reconcileOne(
         },
         "debug",
       );
-      return { processed: 0, outcome: "idle" };
+      return { processed: 0, outcome: "idle", deploymentId: null };
     }
 
     const lifecycleMetadata = {
@@ -256,13 +359,35 @@ async function reconcileOne(
       attemptCount: claimed.attemptCount,
     };
     logAgentDeployment("stage_started", lifecycleMetadata);
-    const outcome = await runClaimedStage(
-      connection,
-      claimed,
-      dependencies,
-      hermesWorkloadImage,
-      now,
-    );
+    const action = sharedContext ? null : createDeploymentActionContext(now);
+    const context = sharedContext ?? action?.context;
+    if (!context) {
+      throw new Error("Deployment action context was not initialized.");
+    }
+    let outcome: AgentDeploymentReconcileOutcome;
+    try {
+      assertDeploymentActionActive(context);
+      outcome = await runClaimedStage(
+        connection,
+        claimed,
+        dependencies,
+        hermesWorkloadImage,
+        now,
+        context,
+      );
+    } catch (error) {
+      if (
+        !(error instanceof DeploymentActionDeadlineExceededError) &&
+        !context.signal.aborted &&
+        context.remainingMs() > 0
+      ) {
+        throw error;
+      }
+      await releaseClaimAfterDeadline(connection, claimed, now());
+      return { processed: 0, outcome: "idle", deploymentId: claimed.id };
+    } finally {
+      action?.dispose();
+    }
     logAgentDeployment(
       "stage_completed",
       { ...lifecycleMetadata, outcome, durationMs: Date.now() - startedAt },
@@ -272,6 +397,7 @@ async function reconcileOne(
     return {
       processed: 1,
       outcome,
+      deploymentId: claimed.id,
     };
   } catch (error) {
     logAgentDeploymentError("reconcile_failed", error, {
@@ -296,54 +422,31 @@ async function runClaimedStage(
   dependencies: AgentDeploymentReconcilerDependencies,
   hermesWorkloadImage: string,
   now: () => Date,
+  context: DeploymentActionContext,
 ): Promise<AgentDeploymentReconcileOutcome> {
-  const actionDeadlineAt = new Date(now().getTime() + DEPLOYMENT_RECONCILE_ACTION_DEADLINE_MS);
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () =>
-      controller.abort(new DOMException("Deployment action deadline exceeded.", "TimeoutError")),
-    DEPLOYMENT_RECONCILE_ACTION_DEADLINE_MS,
-  );
-  const context: DeploymentActionContext = {
-    deadlineAt: actionDeadlineAt,
-    signal: controller.signal,
-    remainingMs: () =>
-      Math.max(
-        0,
-        Math.min(
-          DEPLOYMENT_RECONCILE_ACTION_DEADLINE_MS,
-          actionDeadlineAt.getTime() - now().getTime(),
-        ),
-      ),
-  };
-
-  try {
-    switch (work.stage) {
-      case "pending":
-        return reconcilePending(connection, work, dependencies, now);
-      case "provisioning_runner":
-        return reconcileProvisioningRunner(connection, work, dependencies, now, context);
-      case "configuring_hermes":
-        return reconcileConfiguringHermes(
-          connection,
-          work,
-          dependencies,
-          hermesWorkloadImage,
-          now,
-          context,
-        );
-      case "starting_gateway":
-        return reconcileStartingGateway(connection, work, dependencies, now, context);
-      case "verifying_model":
-        return reconcileVerifyingModel(connection, work, dependencies, now, context);
-      case "connecting_telegram":
-        return reconcileConnectingTelegram(connection, work, dependencies, now, context);
-      case "ready":
-      case "failed":
-        return "idle";
-    }
-  } finally {
-    clearTimeout(timeout);
+  switch (work.stage) {
+    case "pending":
+      return reconcilePending(connection, work, dependencies, now);
+    case "provisioning_runner":
+      return reconcileProvisioningRunner(connection, work, dependencies, now, context);
+    case "configuring_hermes":
+      return reconcileConfiguringHermes(
+        connection,
+        work,
+        dependencies,
+        hermesWorkloadImage,
+        now,
+        context,
+      );
+    case "starting_gateway":
+      return reconcileStartingGateway(connection, work, dependencies, now, context);
+    case "verifying_model":
+      return reconcileVerifyingModel(connection, work, dependencies, now, context);
+    case "connecting_telegram":
+      return reconcileConnectingTelegram(connection, work, dependencies, now, context);
+    case "ready":
+    case "failed":
+      return "idle";
   }
 }
 
@@ -368,11 +471,17 @@ async function reconcilePending(
       }
 
       if (owned.agent.runnerId) {
-        await lockRunnerPlacementCapacityInTransaction(tx, owned.agent.runnerId);
+        const locked = await lockRunnerPlacementCapacityInTransaction(tx, {
+          userId: work.userId,
+          runnerId: owned.agent.runnerId,
+        });
+        if (!locked) {
+          return { kind: "retry" as const };
+        }
         const assigned = await selectRunnerPlacementForUserInTransaction(
           tx,
           work.userId,
-          { runnerId: owned.agent.runnerId },
+          { excludeAgentId: work.agentId, runnerId: owned.agent.runnerId },
           { now: now() },
         );
 
@@ -403,7 +512,13 @@ async function reconcilePending(
       );
 
       if (placement.ok) {
-        await lockRunnerPlacementCapacityInTransaction(tx, placement.runner.id);
+        const locked = await lockRunnerPlacementCapacityInTransaction(tx, {
+          userId: work.userId,
+          runnerId: placement.runner.id,
+        });
+        if (!locked) {
+          return { kind: "retry" as const };
+        }
         const confirmed = await selectRunnerPlacementForUserInTransaction(
           tx,
           work.userId,
@@ -501,7 +616,13 @@ async function reconcileProvisioningRunner(
       return "missing" as const;
     }
 
-    await lockRunnerPlacementCapacityInTransaction(tx, runner.id);
+    const locked = await lockRunnerPlacementCapacityInTransaction(tx, {
+      userId: work.userId,
+      runnerId: runner.id,
+    });
+    if (!locked) {
+      return "missing" as const;
+    }
     const placement = await selectRunnerPlacementForUserInTransaction(
       tx,
       work.userId,
@@ -548,6 +669,7 @@ async function reconcileProvisioningRunner(
     dependencies.provisioner ??
     ((connection, work, currentNow, context) =>
       defaultProvisioner(connection, work, currentNow, context, dependencies));
+  assertDeploymentActionActive(context);
   const result = await provisioner(connection, work, now(), context);
 
   if (!result.ok) {
@@ -565,7 +687,9 @@ async function reconcileProvisioningRunner(
       : "retry_scheduled";
   }
 
-  return scheduleRetry(connection, work, "runner_not_ready", now());
+  return result.disposition === "immediate"
+    ? scheduleImmediateRetry(connection, work, "runner_not_ready", now())
+    : scheduleRetry(connection, work, "runner_not_ready", now());
 }
 
 async function reconcileConfiguringHermes(
@@ -850,33 +974,40 @@ async function beginManagedRunnerRecovery(
       return failed ? { kind: "failed" as const } : { kind: "stale" as const };
     }
 
-    const created = await createOrGetRunnerReplacement({
-      db: tx,
-      sourceRunnerId,
-      triggerDeploymentId: work.id,
-      reason: verifiedReason,
-      operationKey: `agentbay-replace-${(dependencies.randomUUID?.() ?? randomUUID()).replaceAll(
-        "-",
-        "",
-      )}`,
+    const [created, [paused]] = await Promise.all([
+      createOrGetRunnerReplacement({
+        db: tx,
+        sourceRunnerId,
+        triggerDeploymentId: work.id,
+        reason: verifiedReason,
+        operationKey: `agentbay-replace-${(dependencies.randomUUID?.() ?? randomUUID()).replaceAll(
+          "-",
+          "",
+        )}`,
+        now: input.now,
+      }),
+      tx.execute<{ id: string }>(sql`
+        update ${agentDeployments}
+        set error_code = 'runner_recovery_in_progress',
+            error_detail = 'Automatic runner recovery is preparing validated capacity.',
+            next_attempt_at = null,
+            lease_owner = null,
+            lease_expires_at = null,
+            updated_at = ${input.now.toISOString()}
+        where ${agentDeployments.id} = ${work.id}
+          and ${agentDeployments.stage} = ${work.stage}
+          and ${agentDeployments.configRevision} = ${work.configRevision}
+          and ${agentDeployments.leaseOwner} = ${work.leaseOwner}
+          and ${agentDeployments.leaseExpiresAt} > ${input.now.toISOString()}
+        returning id
+      `),
+    ]);
+    if (!paused) throw new LostDeploymentLeaseError();
+    await replaceDeploymentWakeupInTransaction(tx, {
+      deploymentId: work.id,
+      dueAt: null,
       now: input.now,
     });
-    const [paused] = await tx.execute<{ id: string }>(sql`
-      update ${agentDeployments}
-      set error_code = 'runner_recovery_in_progress',
-          error_detail = 'Automatic runner recovery is preparing validated capacity.',
-          next_attempt_at = null,
-          lease_owner = null,
-          lease_expires_at = null,
-          updated_at = ${input.now.toISOString()}
-      where ${agentDeployments.id} = ${work.id}
-        and ${agentDeployments.stage} = ${work.stage}
-        and ${agentDeployments.configRevision} = ${work.configRevision}
-        and ${agentDeployments.leaseOwner} = ${work.leaseOwner}
-        and ${agentDeployments.leaseExpiresAt} > ${input.now.toISOString()}
-      returning id
-    `);
-    if (!paused) throw new LostDeploymentLeaseError();
     await tx.execute(sql`
       update ${runners}
       set status = 'degraded', updated_at = ${input.now.toISOString()}
@@ -1143,7 +1274,43 @@ async function reconcileConnectingTelegram(
     return "failed";
   }
 
-  return (await finalizeReady(connection, work, now())) ? "ready" : "retry_scheduled";
+  return (await finalizeReady(connection, work, now(), dependencies)) ? "ready" : "retry_scheduled";
+}
+
+async function releaseClaimAfterDeadline(
+  connection: DatabaseConnection,
+  work: ClaimedDeploymentWork,
+  now: Date,
+): Promise<void> {
+  await connection.db.transaction(async (tx) => {
+    const [updated] = await tx.execute<{ id: string }>(sql`
+      update ${agentDeployments}
+      set lease_owner = null,
+          lease_expires_at = null,
+          updated_at = ${now.toISOString()}
+      where id = ${work.id}
+        and stage = ${work.stage}
+        and config_revision = ${work.configRevision}
+        and lease_owner = ${work.leaseOwner}
+        and lease_expires_at > ${now.toISOString()}
+        and exists (
+          select 1 from ${agents}
+          where ${agents.id} = ${work.agentId}
+            and ${agents.userId} = ${work.userId}
+            and ${agents.deletedAt} is null
+            and ${agents.desiredStatus} = 'running'
+        )
+      returning id
+    `);
+
+    if (updated) {
+      await replaceDeploymentWakeupInTransaction(tx, {
+        deploymentId: work.id,
+        dueAt: now,
+        now,
+      });
+    }
+  });
 }
 
 async function claimOneDeploymentForReconcile(
@@ -1413,6 +1580,12 @@ async function markDeploymentStage(
     return false;
   }
 
+  await replaceDeploymentWakeupInTransaction(tx, {
+    deploymentId: work.id,
+    dueAt: input.now,
+    now: input.now,
+  });
+
   if (input.agentStatus) {
     await tx
       .update(agents)
@@ -1474,6 +1647,12 @@ async function persistRunnerAcceptedAndStage(
     return false;
   }
 
+  await replaceDeploymentWakeupInTransaction(tx, {
+    deploymentId: work.id,
+    dueAt: input.now,
+    now: input.now,
+  });
+
   await writeDeploymentEvents(tx, work, {
     events: ["agent.deployment_stage_changed"],
     fromStage: work.stage,
@@ -1526,27 +1705,39 @@ async function scheduleRetry(
       )
     : proposedAttemptAt;
 
-  await connection.db.execute(sql`
-    update ${agentDeployments}
-    set error_code = ${reason},
-        error_detail = ${detail},
-        next_attempt_at = ${nextAttemptAt.toISOString()},
-        lease_owner = null,
-        lease_expires_at = null,
-        updated_at = ${now.toISOString()}
-    where id = ${work.id}
-      and stage = ${work.stage}
-      and config_revision = ${work.configRevision}
-      and lease_owner = ${work.leaseOwner}
-      and lease_expires_at > ${now.toISOString()}
-      and exists (
-        select 1 from ${agents}
-        where ${agents.id} = ${work.agentId}
-          and ${agents.userId} = ${work.userId}
-          and ${agents.deletedAt} is null
-          and ${agents.desiredStatus} = 'running'
-      )
-  `);
+  await connection.db.transaction(async (tx) => {
+    const [updated] = await tx.execute<{ id: string }>(sql`
+      update ${agentDeployments}
+      set error_code = ${reason},
+          error_detail = ${detail},
+          next_attempt_at = ${nextAttemptAt.toISOString()},
+          lease_owner = null,
+          lease_expires_at = null,
+          updated_at = ${now.toISOString()}
+      where id = ${work.id}
+        and stage = ${work.stage}
+        and config_revision = ${work.configRevision}
+        and lease_owner = ${work.leaseOwner}
+        and lease_expires_at > ${now.toISOString()}
+        and exists (
+          select 1 from ${agents}
+          where ${agents.id} = ${work.agentId}
+            and ${agents.userId} = ${work.userId}
+            and ${agents.deletedAt} is null
+            and ${agents.desiredStatus} = 'running'
+        )
+      returning id
+    `);
+
+    if (updated) {
+      await replaceDeploymentWakeupInTransaction(tx, {
+        deploymentId: work.id,
+        dueAt: nextAttemptAt,
+        now,
+        safeErrorCode: reason,
+      });
+    }
+  });
   logAgentDeployment(
     "retry_scheduled",
     {
@@ -1558,6 +1749,73 @@ async function scheduleRetry(
       reason,
       backoffMs,
       nextAttemptAt,
+    },
+    "warn",
+  );
+  return "retry_scheduled";
+}
+
+async function scheduleImmediateRetry(
+  connection: DatabaseConnection,
+  work: ClaimedDeploymentWork,
+  reason: keyof typeof RETRYABLE_DETAILS,
+  now: Date,
+): Promise<"failed" | "retry_scheduled"> {
+  if (work.attemptCount >= STAGE_RETRY_LIMITS[work.stage]) {
+    await terminallyFailDeployment(connection, work, {
+      code: terminalCodeForRetryExhaustion(work.stage),
+      now,
+    });
+    return "failed";
+  }
+
+  const detail = RETRYABLE_DETAILS[reason];
+
+  await connection.db.transaction(async (tx) => {
+    const [updated] = await tx.execute<{ id: string }>(sql`
+      update ${agentDeployments}
+      set error_code = ${reason},
+          error_detail = ${detail},
+          next_attempt_at = ${now.toISOString()},
+          lease_owner = null,
+          lease_expires_at = null,
+          updated_at = ${now.toISOString()}
+      where id = ${work.id}
+        and stage = ${work.stage}
+        and config_revision = ${work.configRevision}
+        and lease_owner = ${work.leaseOwner}
+        and lease_expires_at > ${now.toISOString()}
+        and exists (
+          select 1 from ${agents}
+          where ${agents.id} = ${work.agentId}
+            and ${agents.userId} = ${work.userId}
+            and ${agents.deletedAt} is null
+            and ${agents.desiredStatus} = 'running'
+        )
+      returning id
+    `);
+
+    if (updated) {
+      await replaceDeploymentWakeupInTransaction(tx, {
+        deploymentId: work.id,
+        dueAt: now,
+        now,
+        safeErrorCode: reason,
+      });
+    }
+  });
+
+  logAgentDeployment(
+    "retry_scheduled",
+    {
+      agentId: work.agentId,
+      deploymentId: work.id,
+      runnerId: work.agentRunnerId,
+      stage: work.stage,
+      attemptCount: work.attemptCount,
+      reason,
+      backoffMs: 0,
+      nextAttemptAt: now,
     },
     "warn",
   );
@@ -1712,6 +1970,12 @@ async function markCanaryPassedAndStage(
     return false;
   }
 
+  await replaceDeploymentWakeupInTransaction(tx, {
+    deploymentId: work.id,
+    dueAt: input.now,
+    now: input.now,
+  });
+
   await writeDeploymentEvents(tx, work, {
     events: ["agent.deployment_stage_changed"],
     fromStage: work.stage,
@@ -1760,6 +2024,12 @@ async function markCanarySkippedAndStage(
       return false;
     }
 
+    await replaceDeploymentWakeupInTransaction(tx, {
+      deploymentId: work.id,
+      dueAt: now,
+      now,
+    });
+
     await writeDeploymentEvents(tx, work, {
       events: ["agent.deployment_stage_changed"],
       fromStage: work.stage,
@@ -1774,6 +2044,7 @@ async function finalizeReady(
   connection: DatabaseConnection,
   work: ClaimedDeploymentWork,
   now: Date,
+  dependencies: AgentDeploymentReconcilerDependencies,
 ): Promise<boolean> {
   const finalized = await connection.db.transaction(async (tx) => {
     const [ownedAgent] = await tx
@@ -1812,6 +2083,12 @@ async function finalizeReady(
     if (!updated) {
       return false;
     }
+
+    await replaceDeploymentWakeupInTransaction(tx, {
+      deploymentId: work.id,
+      dueAt: null,
+      now,
+    });
 
     const [agent] = await tx
       .update(agents)
@@ -1865,7 +2142,20 @@ async function finalizeReady(
   });
 
   if (finalized) {
-    scheduleAgentRuntimeReconcileAfterResponse(work.agentId);
+    (dependencies.scheduleRuntimeAfterReady ?? scheduleAgentRuntimeReconcileAfterResponse)(
+      work.agentId,
+    );
+    await logAgentCreationTerminalCompletion(connection, work.id).catch((error: unknown) => {
+      logAgentDeployment(
+        "terminal_completion_log_failed",
+        {
+          deploymentId: work.id,
+          runnerId: work.agentRunnerId,
+          error: serializeLogError(error),
+        },
+        "warn",
+      );
+    });
   }
 
   return finalized;
@@ -1999,6 +2289,12 @@ async function markDeploymentFailedInTransaction(
     return false;
   }
 
+  await replaceDeploymentWakeupInTransaction(tx, {
+    deploymentId: work.id,
+    dueAt: null,
+    now: input.now,
+  });
+
   await tx
     .update(agents)
     .set({
@@ -2131,12 +2427,19 @@ function createRunnerAdapter(
   dependencies: AgentDeploymentReconcilerDependencies,
   context: DeploymentActionContext,
 ): ReconcilerRunnerAdapter {
+  assertDeploymentActionActive(context);
   const timeoutMs = Math.max(1, context.remainingMs());
 
   return (
     dependencies.manualRunnerAdapter?.(runner, { signal: context.signal, timeoutMs }) ??
     new ManualRunnerAdapter(runner, { signal: context.signal, timeoutMs })
   );
+}
+
+function assertDeploymentActionActive(context: DeploymentActionContext): void {
+  if (context.signal.aborted || context.remainingMs() <= 0) {
+    throw new DeploymentActionDeadlineExceededError();
+  }
 }
 
 function isReadySnapshot(
@@ -2220,7 +2523,32 @@ async function defaultProvisioner(
     provider,
     context,
     now: () => currentNow,
+    canContinue: () => deploymentProvisioningAuthorityStillHeld(connection, work, currentNow),
   });
+}
+
+async function deploymentProvisioningAuthorityStillHeld(
+  connection: DatabaseConnection,
+  work: ClaimedDeploymentWork,
+  now: Date,
+): Promise<boolean> {
+  const [held] = await connection.db.execute<{ id: string }>(sql`
+    select ${agentDeployments.id} as id
+    from ${agentDeployments}
+    inner join ${agents} on ${agents.id} = ${agentDeployments.agentId}
+    where ${agentDeployments.id} = ${work.id}
+      and ${agentDeployments.stage} = 'provisioning_runner'
+      and ${agentDeployments.configRevision} = ${work.configRevision}
+      and ${agentDeployments.leaseOwner} = ${work.leaseOwner}
+      and ${agentDeployments.leaseExpiresAt} > ${now.toISOString()}
+      and ${agents.id} = ${work.agentId}
+      and ${agents.userId} = ${work.userId}
+      and ${agents.deletedAt} is null
+      and ${agents.desiredStatus} = 'running'
+    limit 1
+  `);
+
+  return Boolean(held);
 }
 
 function eventMessage(event: string): string {

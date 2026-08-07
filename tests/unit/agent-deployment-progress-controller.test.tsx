@@ -14,7 +14,7 @@ import {
   retryReplacementIsSafe,
   shouldAcceptDeploymentUpdate,
   shouldRefreshTerminalOnce,
-} from "@/app/agents/_components/agent-deployment-progress";
+} from "@/app/agents/_components/agent-deployment-progress-controller";
 import type { PublicAgentDeployment } from "@/src/shared/agent-deployment-presentation";
 import { parseSafeDeploymentGetBody } from "@/src/shared/agent-deployment-presentation";
 import {
@@ -237,9 +237,13 @@ describe("agent deployment progress controller", () => {
   });
 
   it("maps retry failures without exposing unsafe response bodies", async () => {
-    await expect(retryFailureMessage(Response.json({}, { status: 400 }))).resolves.toBe(
-      "Retry request was invalid.",
-    );
+    const invalidBody = vi.fn(async () => {
+      throw new Error("400 response body should not be read");
+    });
+    await expect(
+      retryFailureMessage({ status: 400, json: invalidBody } as unknown as Response),
+    ).resolves.toBe("Retry request was invalid.");
+    expect(invalidBody).not.toHaveBeenCalled();
     await expect(
       retryFailureMessage(Response.json({ error: { code: "agent_not_found" } }, { status: 404 })),
     ).resolves.toBe("Agent is unavailable.");

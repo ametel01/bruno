@@ -4,14 +4,12 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildDeploymentPresentation,
-  compareDeploymentCreatedAt,
   deploymentExperienceStageLabel,
   deploymentExperienceStageState,
   deploymentStageLabel,
   isTerminalPublicDeploymentStage,
   PUBLIC_AGENT_EXPERIENCE_STAGES,
   type PublicAgentDeployment,
-  type PublicAgentDeploymentStage,
   type PublicAgentDesiredStatus,
   type PublicAgentLifecycleStatus,
   parseSafeDeploymentGetBody,
@@ -24,6 +22,25 @@ import {
   resumeForegroundPollingWindow,
   startForegroundPollingWindow,
 } from "@/src/shared/deployment-polling-state";
+import {
+  acquireDeploymentRetryAttempt,
+  createDeploymentRetryLatch,
+  type DeploymentRetryLatch,
+  deploymentPollDelayMs,
+  nextObservationFailureState,
+  observationStateForPollStatus,
+  type ObservationState,
+  POLL_FOREGROUND_LIMIT_MS,
+  publicNonterminalDeploymentStage,
+  releaseDeploymentRetryAttempt,
+  resetDeploymentRetryAttempt,
+  retryConflictRequiresForcedRead,
+  retryFailureMessage,
+  retryReplacementIsSafe,
+  type RetryState,
+  shouldAcceptDeploymentUpdate,
+  shouldRefreshTerminalOnce,
+} from "./agent-deployment-progress-controller";
 
 type AgentDeploymentProgressProps = {
   agentId: string;
@@ -32,22 +49,22 @@ type AgentDeploymentProgressProps = {
   initialDeployment: PublicAgentDeployment | null;
 };
 
-export type ObservationState =
-  | { status: "idle"; consecutiveFailures: number }
-  | { status: "degraded"; consecutiveFailures: number; message: string }
-  | { status: "auth"; message: string }
-  | { status: "unavailable"; message: string }
-  | { status: "paused"; message: string };
+export function AgentDeploymentProgress(props: AgentDeploymentProgressProps) {
+  return (
+    <AgentDeploymentProgressState
+      key={JSON.stringify([props.agentId, props.initialDeployment])}
+      {...props}
+    />
+  );
+}
 
-export type RetryState =
-  | { status: "idle" }
-  | { status: "requesting" }
-  | { status: "ambiguous"; message: string; idempotencyKey: string }
-  | { status: "error"; message: string; idempotencyKey: string | null };
+function AgentDeploymentProgressState(props: AgentDeploymentProgressProps) {
+  const progress = useAgentDeploymentProgress(props);
 
-export const POLL_FOREGROUND_LIMIT_MS = 30 * 60 * 1000;
+  return <DeploymentProgressView {...progress} />;
+}
 
-export function AgentDeploymentProgress({
+function useAgentDeploymentProgress({
   agentId,
   desiredStatus,
   observedStatus,
@@ -60,16 +77,19 @@ export function AgentDeploymentProgress({
   const inFlightRef = useRef<AbortController | null>(null);
   const timerRef = useRef<number | null>(null);
   const pollDeploymentRef = useRef<() => void>(() => {});
-  const foregroundWindowRef = useRef<ForegroundPollingWindow>(
-    startForegroundPollingWindow(Date.now()),
-  );
+  const initialForegroundWindow = useMemo(() => startForegroundPollingWindow(Date.now()), []);
+  const foregroundWindowRef = useRef<ForegroundPollingWindow>(initialForegroundWindow);
+  const refreshLatchRef = useRef(false);
   const refreshedTerminalRef = useRef(false);
-  const retryLatchRef = useRef<DeploymentRetryLatch>(createDeploymentRetryLatch());
+  const initialRetryLatch = useMemo(createDeploymentRetryLatch, []);
+  const retryLatchRef = useRef<DeploymentRetryLatch>(initialRetryLatch);
+  const retryLatch = retryLatchRef.current;
+  const deploymentRef = useRef(initialDeployment);
   const [deployment, setDeployment] = useState(initialDeployment);
   const [lastObservedStage, setLastObservedStage] = useState<Exclude<
-    PublicAgentDeploymentStage,
+    PublicAgentDeployment["stage"],
     "ready" | "failed"
-  > | null>(toNonterminalStage(initialDeployment?.stage ?? null));
+  > | null>(() => publicNonterminalDeploymentStage(initialDeployment?.stage ?? null));
   const [liveMessage, setLiveMessage] = useState("");
   const [observation, setObservation] = useState<ObservationState>({
     status: "idle",
@@ -213,35 +233,29 @@ export function AgentDeploymentProgress({
         return;
       }
       const nextDeployment = parsed.deployment;
+      const currentDeployment = deploymentRef.current;
+
+      if (!shouldAcceptDeploymentUpdate(currentDeployment, nextDeployment)) {
+        return;
+      }
 
       setObservation({ status: "idle", consecutiveFailures: 0 });
-      setDeployment((current) => {
-        if (!current) {
-          setLiveMessage(deploymentStageLabel(nextDeployment.stage));
-          const nonterminalStage = toNonterminalStage(nextDeployment.stage);
+      deploymentRef.current = nextDeployment;
+      setDeployment(nextDeployment);
 
-          if (nonterminalStage) {
-            setLastObservedStage(nonterminalStage);
-          }
-          return nextDeployment;
-        }
+      if (
+        currentDeployment === null ||
+        nextDeployment.stage !== currentDeployment.stage ||
+        nextDeployment.id !== currentDeployment.id
+      ) {
+        setLiveMessage(deploymentStageLabel(nextDeployment.stage));
+      }
 
-        if (!shouldAcceptDeploymentUpdate(current, nextDeployment)) {
-          return current;
-        }
+      const nonterminalStage = publicNonterminalDeploymentStage(nextDeployment.stage);
 
-        if (nextDeployment.stage !== current.stage || nextDeployment.id !== current.id) {
-          setLiveMessage(deploymentStageLabel(nextDeployment.stage));
-        }
-
-        const nonterminalStage = toNonterminalStage(nextDeployment.stage);
-
-        if (nonterminalStage) {
-          setLastObservedStage(nonterminalStage);
-        }
-
-        return nextDeployment;
-      });
+      if (nonterminalStage) {
+        setLastObservedStage(nonterminalStage);
+      }
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         markObservationFailure();
@@ -262,17 +276,6 @@ export function AgentDeploymentProgress({
       void pollDeployment();
     };
   }, [pollDeployment]);
-
-  useEffect(() => {
-    generationRef.current += 1;
-    resumeForegroundTracking({ reset: true });
-    refreshedTerminalRef.current = false;
-    resetDeploymentRetryAttempt(retryLatchRef.current);
-    setDeployment(initialDeployment);
-    setLastObservedStage(toNonterminalStage(initialDeployment?.stage ?? null));
-    setObservation({ status: "idle", consecutiveFailures: 0 });
-    setRetry({ status: "idle" });
-  }, [initialDeployment, resumeForegroundTracking]);
 
   useEffect(() => {
     if (!shouldPoll) {
@@ -338,7 +341,7 @@ export function AgentDeploymentProgress({
 
     const acquired = acquireDeploymentRetryAttempt({
       createIdempotencyKey: () => crypto.randomUUID().toLowerCase(),
-      latch: retryLatchRef.current,
+      latch: retryLatch,
       retry,
     });
 
@@ -409,9 +412,10 @@ export function AgentDeploymentProgress({
       generationRef.current += 1;
       resumeForegroundTracking({ reset: true });
       refreshedTerminalRef.current = false;
-      resetDeploymentRetryAttempt(retryLatchRef.current);
+      resetDeploymentRetryAttempt(retryLatch);
+      deploymentRef.current = parsed.deployment;
       setDeployment(parsed.deployment);
-      setLastObservedStage(toNonterminalStage(parsed.deployment.stage));
+      setLastObservedStage(publicNonterminalDeploymentStage(parsed.deployment.stage));
       setRetry({ status: "idle" });
       setObservation({ status: "idle", consecutiveFailures: 0 });
       setLiveMessage("Retrying");
@@ -423,17 +427,27 @@ export function AgentDeploymentProgress({
         message: "Retry response was interrupted. Retry the same request.",
       });
     } finally {
-      releaseDeploymentRetryAttempt(retryLatchRef.current);
+      releaseDeploymentRetryAttempt(retryLatch);
     }
   }
 
   async function refreshDeploymentOnce() {
+    if (refreshLatchRef.current) {
+      return;
+    }
+
+    refreshLatchRef.current = true;
     generationRef.current += 1;
     clearTimer();
     inFlightRef.current?.abort();
     inFlightRef.current = null;
-    await forceReadDeploymentOnce();
-    router.refresh();
+
+    try {
+      await forceReadDeploymentOnce();
+      router.refresh();
+    } finally {
+      refreshLatchRef.current = false;
+    }
   }
 
   function resumeUpdates() {
@@ -463,20 +477,21 @@ export function AgentDeploymentProgress({
       }
 
       const nextDeployment = parsed.deployment;
+      const currentDeployment = deploymentRef.current;
+
+      if (!shouldAcceptDeploymentUpdate(currentDeployment, nextDeployment)) {
+        return;
+      }
+
       setObservation({ status: "idle", consecutiveFailures: 0 });
-      setDeployment((current) => {
-        if (current && !shouldAcceptDeploymentUpdate(current, nextDeployment)) {
-          return current;
-        }
+      deploymentRef.current = nextDeployment;
+      setDeployment(nextDeployment);
 
-        const nonterminalStage = toNonterminalStage(nextDeployment.stage);
+      const nonterminalStage = publicNonterminalDeploymentStage(nextDeployment.stage);
 
-        if (nonterminalStage) {
-          setLastObservedStage(nonterminalStage);
-        }
-
-        return nextDeployment;
-      });
+      if (nonterminalStage) {
+        setLastObservedStage(nonterminalStage);
+      }
     } catch {
       markObservationFailure();
     }
@@ -484,6 +499,34 @@ export function AgentDeploymentProgress({
 
   const busy = retry.status === "requesting";
 
+  return {
+    busy,
+    handleRetry,
+    headingRef,
+    liveMessage,
+    observation,
+    presentation,
+    refreshDeploymentOnce,
+    resumeUpdates,
+    retry,
+    shouldPoll,
+    terminalAlertRef,
+  };
+}
+
+function DeploymentProgressView({
+  busy,
+  handleRetry,
+  headingRef,
+  liveMessage,
+  observation,
+  presentation,
+  refreshDeploymentOnce,
+  resumeUpdates,
+  retry,
+  shouldPoll,
+  terminalAlertRef,
+}: ReturnType<typeof useAgentDeploymentProgress>) {
   return (
     <section
       className="agent-deployment-progress-card"
@@ -564,186 +607,4 @@ export function AgentDeploymentProgress({
       </div>
     </section>
   );
-}
-
-export function deploymentPollDelayMs(elapsedMs: number): 2_000 | 5_000 | 15_000 {
-  return elapsedMs < 30_000 ? 2_000 : elapsedMs < 5 * 60_000 ? 5_000 : 15_000;
-}
-
-export function nextObservationFailureState(current: ObservationState): ObservationState {
-  const consecutiveFailures =
-    current.status === "idle" || current.status === "degraded"
-      ? current.consecutiveFailures + 1
-      : 1;
-
-  if (consecutiveFailures >= 3) {
-    return {
-      status: "degraded",
-      consecutiveFailures,
-      message: "Progress updates are temporarily unavailable",
-    };
-  }
-
-  return { status: "idle", consecutiveFailures };
-}
-
-export function observationStateForPollStatus(
-  status: number,
-): Extract<ObservationState, { status: "auth" | "unavailable" }> | null {
-  if (status === 401 || status === 403) {
-    return { status: "auth", message: "Sign in again, then reload progress." };
-  }
-
-  if (status === 404) {
-    return { status: "unavailable", message: "Agent is unavailable." };
-  }
-
-  return null;
-}
-
-export function shouldAcceptDeploymentUpdate(
-  current: PublicAgentDeployment | null,
-  nextDeployment: PublicAgentDeployment,
-): boolean {
-  if (current === null) {
-    return true;
-  }
-
-  if (nextDeployment.id === current.id) {
-    return true;
-  }
-
-  return compareDeploymentCreatedAt(nextDeployment, current) >= 0;
-}
-
-export function isPollResponseCurrent(input: {
-  currentGeneration: number;
-  responseAgentId: string;
-  responseGeneration: number;
-  routeAgentId: string;
-}): boolean {
-  return (
-    input.responseGeneration === input.currentGeneration &&
-    input.responseAgentId === input.routeAgentId
-  );
-}
-
-export function shouldRefreshTerminalOnce(input: {
-  deployment: PublicAgentDeployment | null;
-  refreshedTerminal: boolean;
-}): boolean {
-  return (
-    input.deployment !== null &&
-    isTerminalPublicDeploymentStage(input.deployment.stage) &&
-    !input.refreshedTerminal
-  );
-}
-
-export function retryConflictRequiresForcedRead(status: number): boolean {
-  return status === 409;
-}
-
-export function retryReplacementIsSafe(input: {
-  current: PublicAgentDeployment;
-  replacement: PublicAgentDeployment;
-}): boolean {
-  return (
-    input.replacement.stage === "pending" &&
-    compareDeploymentCreatedAt(input.replacement, input.current) > 0
-  );
-}
-
-export type DeploymentRetryLatch = {
-  inFlight: boolean;
-  idempotencyKey: string | null;
-};
-
-export function createDeploymentRetryLatch(): DeploymentRetryLatch {
-  return { inFlight: false, idempotencyKey: null };
-}
-
-export function acquireDeploymentRetryAttempt(input: {
-  createIdempotencyKey: () => string;
-  latch: DeploymentRetryLatch;
-  retry: RetryState;
-}): { ok: true; idempotencyKey: string } | { ok: false } {
-  if (input.latch.inFlight) {
-    return { ok: false };
-  }
-
-  input.latch.inFlight = true;
-
-  const existingStateKey =
-    input.retry.status === "ambiguous" || input.retry.status === "error"
-      ? input.retry.idempotencyKey
-      : null;
-  const idempotencyKey =
-    existingStateKey ?? input.latch.idempotencyKey ?? input.createIdempotencyKey().toLowerCase();
-
-  if (idempotencyKey.length === 0) {
-    input.latch.inFlight = false;
-    return { ok: false };
-  }
-
-  input.latch.idempotencyKey = idempotencyKey;
-
-  return { ok: true, idempotencyKey };
-}
-
-export function releaseDeploymentRetryAttempt(latch: DeploymentRetryLatch): void {
-  latch.inFlight = false;
-}
-
-export function resetDeploymentRetryAttempt(latch: DeploymentRetryLatch): void {
-  latch.inFlight = false;
-  latch.idempotencyKey = null;
-}
-
-export function publicNonterminalDeploymentStage(
-  stage: PublicAgentDeploymentStage | null,
-): Exclude<PublicAgentDeploymentStage, "ready" | "failed"> | null {
-  return toNonterminalStage(stage);
-}
-
-export async function retryFailureMessage(response: Response): Promise<string> {
-  try {
-    const body: unknown = await response.json();
-    const code = isRecord(body) && isRecord(body.error) ? body.error.code : null;
-
-    if (response.status === 400) {
-      return "Retry request was invalid.";
-    }
-
-    if (response.status === 404 || code === "agent_not_found") {
-      return "Agent is unavailable.";
-    }
-
-    if (code === "deployment_not_retryable") {
-      return "Refresh status before retrying.";
-    }
-  } catch {
-    // Keep retry errors generic when JSON is absent or malformed.
-  }
-
-  return "Automatic setup could not recover. Try again or stop this agent.";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function toNonterminalStage(
-  stage: PublicAgentDeploymentStage | null,
-): Exclude<PublicAgentDeploymentStage, "ready" | "failed"> | null {
-  switch (stage) {
-    case "pending":
-    case "provisioning_runner":
-    case "configuring_hermes":
-    case "starting_gateway":
-    case "verifying_model":
-    case "connecting_telegram":
-      return stage;
-    default:
-      return null;
-  }
 }

@@ -87,13 +87,15 @@ export function RestartAgentButton({
   }, [state.status, status]);
 
   async function handleRestart() {
-    if (
-      (status !== "running" && !allowRuntimeRestart) ||
-      !acquireAgentActionRequestLatch(requestLatchRef)
-    ) {
+    if ((status !== "running" && !allowRuntimeRestart) || requestLatchRef.current) {
       return;
     }
 
+    if (!acquireAgentActionRequestLatch(requestLatchRef)) {
+      return;
+    }
+
+    requestLatchRef.current = true;
     setState({ status: "requesting" });
     observedRestartingRef.current = false;
     requestedAtRef.current = Date.now();

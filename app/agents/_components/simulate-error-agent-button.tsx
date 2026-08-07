@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { AgentLifecycleStatus } from "@/src/server/agents/lifecycle";
 
 type SimulateErrorAgentButtonProps = {
@@ -25,13 +25,15 @@ const SIMULATE_ERROR_STATUSES = new Set<AgentLifecycleStatus>([
 
 export function SimulateErrorAgentButton({ agentId, status }: SimulateErrorAgentButtonProps) {
   const router = useRouter();
+  const requestInFlightRef = useRef(false);
   const [state, setState] = useState<SimulateErrorState>({ status: "idle" });
 
   async function handleSimulateError() {
-    if (!SIMULATE_ERROR_STATUSES.has(status)) {
+    if (!SIMULATE_ERROR_STATUSES.has(status) || requestInFlightRef.current) {
       return;
     }
 
+    requestInFlightRef.current = true;
     setState({ status: "requesting" });
 
     try {
@@ -48,6 +50,8 @@ export function SimulateErrorAgentButton({ agentId, status }: SimulateErrorAgent
       router.refresh();
     } catch {
       setState({ status: "error", message: "Agent error could not be simulated." });
+    } finally {
+      requestInFlightRef.current = false;
     }
   }
 

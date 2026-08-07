@@ -376,6 +376,39 @@ describe("manual runner service HTTP contract", () => {
     });
   });
 
+  it("fails closed when inspect reports extra Hermes Docker capabilities", async () => {
+    const service = createReadyRunnerService({
+      authToken: "test-token",
+      docker: new ManualRunnerDocker({
+        command: testCommand(),
+        docker: createMockDocker({
+          inspectHostConfig: {
+            CapAdd: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID", "SYS_ADMIN"],
+          },
+        }),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: createHermesProjectionForTest,
+        },
+        readiness: {
+          wait: async () => ({ ok: true }),
+        },
+      }),
+    });
+    const response = await service.fetch(
+      authorizedJsonRequest(
+        `/runner/v1/agents/${AGENT_ID}/start`,
+        sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } }),
+      ),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "docker_command_failed" },
+    });
+  });
+
   it("fails closed when Docker inspect exposes managed Telegram allowlist values", async () => {
     const calls: string[][] = [];
     const service = createReadyRunnerService({
@@ -2090,6 +2123,7 @@ function createMockDocker(
     failRemoveIds?: string[];
     execProbeBody?: unknown;
     inspectEnv?: string[];
+    inspectHostConfig?: Partial<ReturnType<typeof readRunHostConfig>>;
     imageInspectStdout?: () => string;
     inspectRestartCount?: () => unknown;
     inspectRestartPolicy?: () => { MaximumRetryCount?: unknown; Name?: unknown } | null | undefined;
@@ -2187,6 +2221,7 @@ function createMockDocker(
           },
           HostConfig: {
             ...readRunHostConfig(container.runArgs),
+            ...(input.inspectHostConfig ?? {}),
             ...(inspectedRestartPolicy === null
               ? { RestartPolicy: undefined }
               : inspectedRestartPolicy

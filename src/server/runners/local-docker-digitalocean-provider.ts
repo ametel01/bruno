@@ -10,6 +10,7 @@ import {
   type DigitalOceanDiscoverByTagInput,
   type DigitalOceanDiscovery,
   type DigitalOceanFirewallInput,
+  type DigitalOceanManagedInventoryInput,
   type DigitalOceanProvider,
   type DigitalOceanProviderRequestContext,
   type DigitalOceanProviderResult,
@@ -20,6 +21,7 @@ import {
   type DigitalOceanTagInput,
 } from "@/src/server/runners/digitalocean-provider";
 import { LOCAL_DOCKER_DIGITALOCEAN_RESOURCE_ID } from "@/src/server/runners/local-docker-provider-constants";
+import { findDigitalOceanRunnerResourceProfile } from "@/src/server/runners/runner-resource-profiles";
 
 const localDockerProviderLogger = createAppLogger("local_docker.provider");
 
@@ -104,6 +106,7 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
       provider: DIGITALOCEAN_PROVIDER,
       providerResourceId: LOCAL_DOCKER_DIGITALOCEAN_RESOURCE_ID,
       providerFirewallId: null,
+      providerFirewallName: null,
       publicIpv4: null,
       publicEndpointUrl: this.#endpointUrl,
       name: input.name,
@@ -132,14 +135,43 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
     if (context?.signal.aborted) {
       return localCancelledResource("discovery_failed");
     }
+    const resources: DigitalOceanResource[] = [];
+
+    for (const resource of this.#resources.values()) {
+      if (resource.deletedAt === null && resource.tags.includes(input.tag)) {
+        resources.push(cloneResource(resource));
+      }
+    }
 
     return {
       ok: true,
       value: {
         authoritative: true,
-        resources: [...this.#resources.values()]
-          .filter((resource) => resource.deletedAt === null && resource.tags.includes(input.tag))
-          .map(cloneResource),
+        resources,
+      },
+    };
+  }
+
+  async listManagedResources(
+    input: DigitalOceanManagedInventoryInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanDiscovery>> {
+    if (context?.signal.aborted) {
+      return localCancelledResource("discovery_failed");
+    }
+    const resources: DigitalOceanResource[] = [];
+
+    for (const resource of this.#resources.values()) {
+      if (resource.deletedAt === null && resource.tags.includes(input.stableTag)) {
+        resources.push(cloneResource(resource));
+      }
+    }
+
+    return {
+      ok: true,
+      value: {
+        authoritative: true,
+        resources,
       },
     };
   }
@@ -189,6 +221,7 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
 
     resource.firewallApplied = true;
     resource.providerFirewallId ??= `local-docker-firewall-${randomUUID()}`;
+    resource.providerFirewallName = input.firewallName;
 
     return { ok: true, value: cloneResource(resource) };
   }
@@ -205,6 +238,9 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
 
     await this.#removeLocalContainers(context);
     resource.deletedAt = this.#now().toISOString();
+    resource.firewallApplied = false;
+    resource.providerFirewallId = null;
+    resource.providerFirewallName = null;
 
     return { ok: true, value: cloneResource(resource) };
   }
@@ -222,12 +258,18 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
         agentSmokeMode: this.#agentSmokeMode,
         localRunnerEndpointUrl: this.#endpointUrl,
       });
+      const agentSmokeProfile = this.#agentSmokeMode
+        ? findDigitalOceanRunnerResourceProfile(input.sizeSlug)
+        : null;
+      if (this.#agentSmokeMode && !agentSmokeProfile) {
+        throw new Error(`Local agent smoke requires a supported size slug: ${input.sizeSlug}.`);
+      }
       const dropletRuntimeArgs = this.#agentSmokeMode
         ? [
             "--cpus",
-            "2",
+            String(agentSmokeProfile?.vcpus ?? 1),
             "--memory",
-            "4g",
+            `${agentSmokeProfile?.memoryMiB ?? 512}m`,
             "--privileged",
             "--cgroupns",
             "host",
@@ -297,26 +339,30 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
   }
 
   async #removeLocalContainers(context?: DigitalOceanProviderRequestContext): Promise<void> {
-    for (const containerName of [this.#containerName, LOCAL_PRODUCTION_RUNNER_CONTAINER_NAME]) {
-      try {
-        await this.#docker(
-          [
-            "rm",
-            "--force",
-            ...(this.#agentSmokeMode && containerName === this.#containerName ? ["--volumes"] : []),
-            containerName,
-          ],
-          context,
-        );
-      } catch (error) {
-        if (process.env.NODE_ENV !== "test") {
-          localDockerProviderLogger.warn("stale_container_cleanup_skipped", {
-            containerName,
-            error,
-          });
+    await Promise.all(
+      [this.#containerName, LOCAL_PRODUCTION_RUNNER_CONTAINER_NAME].map(async (containerName) => {
+        try {
+          await this.#docker(
+            [
+              "rm",
+              "--force",
+              ...(this.#agentSmokeMode && containerName === this.#containerName
+                ? ["--volumes"]
+                : []),
+              containerName,
+            ],
+            context,
+          );
+        } catch (error) {
+          if (process.env.NODE_ENV !== "test") {
+            localDockerProviderLogger.warn("stale_container_cleanup_skipped", {
+              containerName,
+              error,
+            });
+          }
         }
-      }
-    }
+      }),
+    );
   }
 }
 
@@ -326,11 +372,14 @@ function buildLocalCloudInitScript(
 ): string {
   const commands = extractCloudInitRuncmdCommands(userData);
   const commandScripts = commands.flatMap((command, index) => {
+    const skippedBootstrapStep = options.agentSmokeMode
+      ? localAgentSmokeSkippedBootstrapStep(command)
+      : null;
     const scripts = [
       `echo ${shellQuote(`== local cloud-init runcmd ${index + 1}/${commands.length} ==`)}`,
     ];
 
-    if (command.includes("AGENTBAY_BOOTSTRAP_STEP=docker_container_start")) {
+    if (command.includes("AGENTBAY_BOOTSTRAP_STEP=runner_container_start")) {
       scripts.push(buildLocalEndpointBridgeScript(options.agentSmokeMode));
     }
 
@@ -339,8 +388,18 @@ function buildLocalCloudInitScript(
       scripts.push(
         '/usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Swap setup was skipped by the local cloud simulator." swap_setup',
       );
-    } else if (options.agentSmokeMode && isLocalAgentSmokePackageBootstrap(command)) {
+    } else if (skippedBootstrapStep) {
+      scripts.push(
+        `/usr/local/bin/agentbay-bootstrap-event bootstrapping started ${shellQuote(
+          localAgentSmokeSkippedBootstrapStartedMessage(skippedBootstrapStep),
+        )} ${skippedBootstrapStep}`,
+      );
       scripts.push(`echo ${shellQuote("Local agent smoke uses the prepared Droplet image.")}`);
+      scripts.push(
+        `/usr/local/bin/agentbay-bootstrap-event bootstrapping completed ${shellQuote(
+          localAgentSmokeSkippedBootstrapCompletedMessage(skippedBootstrapStep),
+        )} ${skippedBootstrapStep}`,
+      );
     } else {
       scripts.push(`bash -lc ${shellQuote(command)}`);
     }
@@ -479,12 +538,34 @@ function buildLocalDockerShim(agentSmokeMode: boolean): string[] {
   ];
 }
 
-function isLocalAgentSmokePackageBootstrap(command: string): boolean {
-  return (
-    command.includes("AGENTBAY_BOOTSTRAP_STEP=docker_apt_repository") ||
-    command.startsWith("apt-get install -y docker-ce ") ||
-    command === "apt-get install -y caddy"
-  );
+function localAgentSmokeSkippedBootstrapStep(
+  command: string,
+): "docker_apt_repository" | "package_install" | null {
+  if (command.includes("AGENTBAY_BOOTSTRAP_STEP=docker_apt_repository")) {
+    return "docker_apt_repository";
+  }
+
+  if (command.includes("AGENTBAY_BOOTSTRAP_STEP=package_install")) {
+    return "package_install";
+  }
+
+  return null;
+}
+
+function localAgentSmokeSkippedBootstrapStartedMessage(
+  step: "docker_apt_repository" | "package_install",
+): string {
+  return step === "docker_apt_repository"
+    ? "Configuring Docker apt repository."
+    : "Installing cloud runner packages.";
+}
+
+function localAgentSmokeSkippedBootstrapCompletedMessage(
+  step: "docker_apt_repository" | "package_install",
+): string {
+  return step === "docker_apt_repository"
+    ? "Docker apt repository was already configured in the local smoke image."
+    : "Cloud runner packages were already installed in the local smoke image.";
 }
 
 function isLocalSwapSetup(command: string): boolean {

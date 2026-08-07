@@ -95,6 +95,7 @@ describe("E2E capability gates", () => {
         AGENTBAY_DIGITALOCEAN_TOKEN: "synthetic-provider-token",
         AGENTBAY_RUNNER_BEARER_TOKEN: "synthetic-runner-token",
         AGENTBAY_RUNNER_IMAGE: `ghcr.io/ametel01/agentbay-runner:sha-test@sha256:${"a".repeat(64)}`,
+        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
       },
     ],
     [

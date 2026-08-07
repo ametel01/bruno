@@ -602,15 +602,17 @@ function createDefaultPorts(input: {
     observeWorkloadAbsence: async (context, signal) =>
       withConnection(createConnection, async (connection) => {
         if (!hasCoreIds(context)) return "unknown";
-        const observed = await observeHermesResourceAbsence(connection.db, {
-          userId: context.ownerUserId,
-          agentId: context.agentId,
-          runnerId: context.runnerId,
-        });
-        const usage = await observeHermesOpenUsagePeriod(connection.db, {
-          userId: context.ownerUserId,
-          agentId: context.agentId,
-        });
+        const [observed, usage] = await Promise.all([
+          observeHermesResourceAbsence(connection.db, {
+            userId: context.ownerUserId,
+            agentId: context.agentId,
+            runnerId: context.runnerId,
+          }),
+          observeHermesOpenUsagePeriod(connection.db, {
+            userId: context.ownerUserId,
+            agentId: context.agentId,
+          }),
+        ]);
         if (observed.state !== "observed") return "unknown";
         if (observed.agent === "active" || observed.workload !== "recorded_absent")
           return "present";
@@ -1102,12 +1104,13 @@ async function auditAllDiagnostics(
     });
     if (!page.ok) return "unknown";
     if (hasHermesStagingDiagnosticLeak(page.page.events, sensitiveValues)) return "unsafe";
-    if (page.page.nextCursor === null) {
+    const { nextCursor } = page.page;
+    if (nextCursor === null) {
       eventsComplete = true;
       break;
     }
-    if (page.page.nextCursor === cursor) return "unknown";
-    cursor = page.page.nextCursor;
+    if (nextCursor === cursor) return "unknown";
+    cursor = nextCursor;
   }
 
   return eventsComplete ? "safe" : "unknown";
@@ -1124,7 +1127,8 @@ export function hasHermesStagingDiagnosticLeak(
     return true;
   }
   if (Buffer.byteLength(serialized, "utf8") > 8 * 1024 * 1024) return true;
-  if (sensitiveValues.some((secret) => secret.length >= 4 && serialized.includes(secret))) {
+  const serializedIncludes = serialized.includes.bind(serialized);
+  if (sensitiveValues.some((secret) => secret.length >= 4 && serializedIncludes(secret))) {
     return true;
   }
   return (
@@ -1191,9 +1195,9 @@ async function readProviderExpectation(
   };
 }
 
-async function resolveOwnedSetProvider(
+function resolveOwnedSetProvider(
   env: Record<string, string | undefined>,
-): Promise<DigitalOceanOwnedSetProvider | null> {
+): DigitalOceanOwnedSetProvider | null {
   let config: ReturnType<typeof readDigitalOceanProviderConfig>;
   try {
     config = readDigitalOceanProviderConfig(env);
@@ -1222,7 +1226,7 @@ async function deleteProviderResource(
   const expectation = await withConnection(createConnection, (connection) =>
     readProviderExpectation(connection, context),
   );
-  const provider = await resolveOwnedSetProvider(env);
+  const provider = resolveOwnedSetProvider(env);
   if (!expectation || !provider) return "failed";
   const deleted =
     resource === "firewall"
@@ -1247,7 +1251,7 @@ async function observeProviderAbsence(
   const expectation = await withConnection(createConnection, (connection) =>
     readProviderExpectation(connection, context),
   );
-  const provider = await resolveOwnedSetProvider(env);
+  const provider = resolveOwnedSetProvider(env);
   if (!expectation || !provider) return "unknown";
   const observed = await provider.observeOwnedSet(expectation, { signal });
   if (!observed.ok || signal.aborted) return "unknown";

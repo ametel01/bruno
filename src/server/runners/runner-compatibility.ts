@@ -10,12 +10,7 @@ import {
   DIGITALOCEAN_RUNNER_KIND,
 } from "@/src/server/runners/digitalocean-provider";
 
-export const RUNNER_COMPATIBILITY_STATES = [
-  "compatible",
-  "unknown",
-  "outdated",
-  "invalid",
-] as const;
+const RUNNER_COMPATIBILITY_STATES = ["compatible", "unknown", "outdated", "invalid"] as const;
 
 export type RunnerCompatibilityState = (typeof RUNNER_COMPATIBILITY_STATES)[number];
 

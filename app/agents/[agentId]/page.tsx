@@ -60,6 +60,7 @@ type AgentDetailPageProps = {
 type AgentApprovalsResult = Awaited<ReturnType<typeof loadAgentApprovals>>;
 type AgentBackupsResult = Awaited<ReturnType<typeof loadAgentBackups>>;
 type AgentSecretsResult = Awaited<ReturnType<typeof loadAgentSecrets>>;
+type AgentDetailRecord = NonNullable<Awaited<ReturnType<typeof getActiveAgentForUser>>>;
 
 export const dynamic = "force-dynamic";
 
@@ -185,99 +186,13 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
       description="Configure, prepare, and operate this agent from one workspace."
     >
       <div className="agent-detail-page">
-        <section
-          className="placeholder-panel agent-overview-panel"
-          aria-labelledby="agent-record-title"
-        >
-          <div className="agent-overview-header">
-            <div className="agent-overview-heading">
-              <p className="agent-overview-kicker">Agent record</p>
-              <h2 id="agent-record-title">Run readiness</h2>
-              <p>
-                {agent.templateSnapshot.name} <code>{agent.templateKey}</code>
-              </p>
-            </div>
-            <div className="agent-overview-actions">
-              <span>Actions</span>
-              <AgentLifecycleControls
-                agentId={agent.id}
-                deployment={latestDeployment}
-                detailHref={`${agent.href}#${agent.runtime ? "runtime-status-title" : "deployment-progress-title"}`}
-                desiredStatus={desiredStatus}
-                runtime={agent.runtime}
-                restartDisabledReason={
-                  agent.status === "running" ? hermesLifecycleDisabledReason : null
-                }
-                startDisabledReason={startBlocker}
-                status={agent.status}
-              />
-            </div>
-          </div>
-          <fieldset className="agent-readiness-track">
-            <legend className="visually-hidden">Agent run readiness</legend>
-            <div
-              data-state={
-                agent.runtime?.kind === "healthy" || (!agent.runtime && agent.status === "running")
-                  ? "ready"
-                  : agent.runtime?.kind === "attention_required" ||
-                      agent.runtime?.kind === "unavailable"
-                    ? "attention"
-                    : "neutral"
-              }
-            >
-              <span>Agent state</span>
-              <strong>
-                <span className="status-pill">{agent.runtime?.label ?? agent.status}</span>
-              </strong>
-            </div>
-            <div data-state={hermesReadiness.configurationReady ? "ready" : "attention"}>
-              <span>Hermes</span>
-              <strong>
-                {hermesReadiness.configurationReady ? "Configured" : "Setup required"}
-              </strong>
-            </div>
-            <div data-state={runnerReadiness?.status === "ready" ? "ready" : "attention"}>
-              <span>Runner</span>
-              <strong>{runnerReadiness?.status === "ready" ? "Ready" : "Unavailable"}</strong>
-            </div>
-          </fieldset>
-          <dl className="agent-overview-metadata">
-            <div>
-              <dt>Template</dt>
-              <dd>{agent.templateSnapshot.name}</dd>
-            </div>
-            <div>
-              <dt>Template version</dt>
-              <dd>{agent.templateVersion}</dd>
-            </div>
-            <div>
-              <dt>Agent ID</dt>
-              <dd>
-                <code>{agent.id}</code>
-              </dd>
-            </div>
-            <div>
-              <dt>Created</dt>
-              <dd>
-                <time dateTime={agent.createdAt}>{agent.createdAt}</time>
-              </dd>
-            </div>
-            <div>
-              <dt>Updated</dt>
-              <dd>
-                <time dateTime={agent.updatedAt}>{agent.updatedAt}</time>
-              </dd>
-            </div>
-            {agent.statusReason ? (
-              <div className="agent-overview-status-reason">
-                <dt>Status reason</dt>
-                <dd>
-                  {summarizeOperationalText(agent.statusReason, "Status reason unavailable.")}
-                </dd>
-              </div>
-            ) : null}
-          </dl>
-        </section>
+        <AgentOverviewPanel
+          agent={agent}
+          hermesReadiness={hermesReadiness}
+          restartDisabledReason={hermesLifecycleDisabledReason}
+          runnerReady={runnerReadiness?.status === "ready"}
+          startDisabledReason={startBlocker}
+        />
 
         <div className="agent-detail-workspace">
           <main className="agent-detail-primary">
@@ -323,43 +238,7 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
               runnerStateNotice={operationalAlerts.runnerStateNotice}
             />
             <AgentBackupsPanel agentId={agent.id} result={backupsResult} />
-            <details className="placeholder-panel agent-template-panel">
-              <summary>
-                <span>
-                  <strong>Template settings</strong>
-                  <small>{agent.templateSnapshot.name}</small>
-                </span>
-                <span aria-hidden="true">Details</span>
-              </summary>
-              <dl className="definition-list">
-                <div>
-                  <dt>Description</dt>
-                  <dd>{agent.templateSnapshot.description}</dd>
-                </div>
-                <div>
-                  <dt>Default tools</dt>
-                  <dd>{agent.templateSnapshot.defaultTools.join(", ")}</dd>
-                </div>
-                <div>
-                  <dt>Schedule</dt>
-                  <dd>{agent.templateSnapshot.defaultSchedule}</dd>
-                </div>
-                <div>
-                  <dt>Required integrations</dt>
-                  <dd>
-                    {agent.templateSnapshot.requiredIntegrations.length > 0
-                      ? agent.templateSnapshot.requiredIntegrations.join(", ")
-                      : "None"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Default prompt</dt>
-                  <dd className="template-default-prompt">
-                    <p>{agent.templateSnapshot.defaultSystemPrompt}</p>
-                  </dd>
-                </div>
-              </dl>
-            </details>
+            <AgentTemplatePanel agent={agent} />
           </aside>
         </div>
 
@@ -384,6 +263,154 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
         </div>
       </div>
     </ProductShell>
+  );
+}
+
+function AgentOverviewPanel({
+  agent,
+  hermesReadiness,
+  restartDisabledReason,
+  runnerReady,
+  startDisabledReason,
+}: {
+  agent: AgentDetailRecord;
+  hermesReadiness: ReturnType<typeof buildHermesSetupReadiness>;
+  restartDisabledReason: string | null;
+  runnerReady: boolean;
+  startDisabledReason: string | null;
+}) {
+  const { desiredStatus, latestDeployment } = agent;
+
+  return (
+    <section
+      className="placeholder-panel agent-overview-panel"
+      aria-labelledby="agent-record-title"
+    >
+      <div className="agent-overview-header">
+        <div className="agent-overview-heading">
+          <p className="agent-overview-kicker">Agent record</p>
+          <h2 id="agent-record-title">Run readiness</h2>
+          <p>
+            {agent.templateSnapshot.name} <code>{agent.templateKey}</code>
+          </p>
+        </div>
+        <div className="agent-overview-actions">
+          <span>Actions</span>
+          <AgentLifecycleControls
+            agentId={agent.id}
+            deployment={latestDeployment}
+            detailHref={`${agent.href}#${agent.runtime ? "runtime-status-title" : "deployment-progress-title"}`}
+            desiredStatus={desiredStatus}
+            runtime={agent.runtime}
+            restartDisabledReason={agent.status === "running" ? restartDisabledReason : null}
+            startDisabledReason={startDisabledReason}
+            status={agent.status}
+          />
+        </div>
+      </div>
+      <fieldset className="agent-readiness-track">
+        <legend className="visually-hidden">Agent run readiness</legend>
+        <div
+          data-state={
+            agent.runtime?.kind === "healthy" || (!agent.runtime && agent.status === "running")
+              ? "ready"
+              : agent.runtime?.kind === "attention_required" ||
+                  agent.runtime?.kind === "unavailable"
+                ? "attention"
+                : "neutral"
+          }
+        >
+          <span>Agent state</span>
+          <strong>
+            <span className="status-pill">{agent.runtime?.label ?? agent.status}</span>
+          </strong>
+        </div>
+        <div data-state={hermesReadiness.configurationReady ? "ready" : "attention"}>
+          <span>Hermes</span>
+          <strong>{hermesReadiness.configurationReady ? "Configured" : "Setup required"}</strong>
+        </div>
+        <div data-state={runnerReady ? "ready" : "attention"}>
+          <span>Runner</span>
+          <strong>{runnerReady ? "Ready" : "Unavailable"}</strong>
+        </div>
+      </fieldset>
+      <dl className="agent-overview-metadata">
+        <div>
+          <dt>Template</dt>
+          <dd>{agent.templateSnapshot.name}</dd>
+        </div>
+        <div>
+          <dt>Template version</dt>
+          <dd>{agent.templateVersion}</dd>
+        </div>
+        <div>
+          <dt>Agent ID</dt>
+          <dd>
+            <code>{agent.id}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>Created</dt>
+          <dd>
+            <time dateTime={agent.createdAt}>{agent.createdAt}</time>
+          </dd>
+        </div>
+        <div>
+          <dt>Updated</dt>
+          <dd>
+            <time dateTime={agent.updatedAt}>{agent.updatedAt}</time>
+          </dd>
+        </div>
+        {agent.statusReason ? (
+          <div className="agent-overview-status-reason">
+            <dt>Status reason</dt>
+            <dd>{summarizeOperationalText(agent.statusReason, "Status reason unavailable.")}</dd>
+          </div>
+        ) : null}
+      </dl>
+    </section>
+  );
+}
+
+function AgentTemplatePanel({ agent }: { agent: AgentDetailRecord }) {
+  return (
+    <details className="placeholder-panel agent-template-panel">
+      <summary>
+        <span>
+          <strong>Template settings</strong>
+          <small>{agent.templateSnapshot.name}</small>
+        </span>
+        <span aria-hidden="true">Details</span>
+      </summary>
+      <dl className="definition-list">
+        <div>
+          <dt>Description</dt>
+          <dd>{agent.templateSnapshot.description}</dd>
+        </div>
+        <div>
+          <dt>Default tools</dt>
+          <dd>{agent.templateSnapshot.defaultTools.join(", ")}</dd>
+        </div>
+        <div>
+          <dt>Schedule</dt>
+          <dd>{agent.templateSnapshot.defaultSchedule}</dd>
+        </div>
+        <div>
+          <dt>Required integrations</dt>
+          <dd>
+            {agent.templateSnapshot.requiredIntegrations.length > 0
+              ? agent.templateSnapshot.requiredIntegrations.join(", ")
+              : "None"}
+          </dd>
+        </div>
+        <div>
+          <dt>Default prompt</dt>
+          <dd className="template-default-prompt">
+            <p>{agent.templateSnapshot.defaultSystemPrompt}</p>
+          </dd>
+        </div>
+      </dl>
+    </details>
   );
 }
 

@@ -3,19 +3,21 @@ import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { lstat, open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { basename, relative, resolve, sep } from "node:path";
-import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import {
   AGENTBAY_AGENT_ID_LABEL,
-  DEFAULT_HERMES_READINESS_TIMEOUT_MS,
   DEFAULT_HERMES_PRIVATE_NETWORK,
+  DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+  DEFAULT_HERMES_DOCKER_CPUS,
+  DEFAULT_HERMES_DOCKER_MEMORY,
+  DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_MANUAL_RUNNER_IMAGE,
   DOCKER_CLI_TIMEOUT_MS,
 } from "@/src/runner-service/constants";
 import {
-  projectHermesHome,
   type HermesProjectionOptions,
   type HermesProjectionResult,
+  projectHermesHome,
 } from "@/src/runner-service/hermes-projection";
 import {
   MAX_RUNNER_IMAGE_IDENTITY_DIGESTS,
@@ -24,11 +26,11 @@ import {
   RUNNER_CANARY_CONTRACT_VERSION,
   RUNNER_LAUNCH_CONTRACT_VERSION,
   RUNNER_STATUS_CONTRACT_VERSION,
-  runnerTargetFromLaunchSpec,
   type RunnerAgentStatusSnapshot,
   type RunnerCanaryObservation,
   type RunnerCanaryRequest,
   type RunnerCanaryResponse,
+  type RunnerCleanupResponsePayload,
   type RunnerContainerState,
   type RunnerGatewayState,
   type RunnerImageIdentity,
@@ -40,14 +42,16 @@ import {
   type RunnerReadinessReason,
   type RunnerReportedDurableStatusSnapshot,
   type RunnerRestartPolicyName,
-  type RunnerTelegramState,
-  type RunnerCleanupResponsePayload,
   type RunnerStatusResponse,
   type RunnerStopResponsePayload,
+  type RunnerTelegramState,
+  runnerTargetFromLaunchSpec,
 } from "@/src/runner-service/runner-contracts";
+import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import { redactSecretText } from "@/src/shared/secret-redaction";
 
 export { AGENTBAY_AGENT_ID_LABEL, DEFAULT_MANUAL_RUNNER_IMAGE, DOCKER_CLI_TIMEOUT_MS };
+
 const DOCKER_RUNNER_IMAGE_ENV = "AGENTBAY_DOCKER_RUNNER_IMAGE";
 const DOCKER_RUNNER_ARGS_ENV = "AGENTBAY_DOCKER_RUNNER_ARGS_JSON";
 const DOCKER_EXECUTABLE_ENV = "AGENTBAY_RUNNER_DOCKER_EXECUTABLE";
@@ -64,6 +68,9 @@ const AGENTBAY_OPERATION_ACTION_LABEL = "agentbay.operation_action";
 const AGENTBAY_OPERATION_ACCEPTED_AT_LABEL = "agentbay.operation_accepted_at";
 const HERMES_WORKLOAD_UID = 10000;
 const HERMES_WORKLOAD_GID = 10000;
+const HERMES_DOCKER_CAP_DROP = ["ALL"] as const;
+const HERMES_DOCKER_CAP_ADD = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"] as const;
+const HERMES_DOCKER_SECURITY_OPT = ["no-new-privileges"] as const;
 const MAX_HERMES_LOG_BYTES_PER_FILE = 64 * 1024;
 const MAX_HERMES_LOG_LINES = 500;
 const STATUS_PROBE_TIMEOUT_MS = 2_000;
@@ -460,20 +467,28 @@ export class ManualRunnerDocker {
 
     return await this.withAgentLock(agentId, async () => {
       const details = await this.listSelectedContainerDetails(agentId);
-      const runningOperationId = details
-        .filter((container) => container.status === "running" || container.status === "restarting")
-        .map((container) => readOperationFromInspect(container.inspect)?.id ?? null)
-        .find((operationId): operationId is string => operationId !== null);
-      const stopped: RunnerContainer[] = [];
+      let runningOperationId: string | null = null;
 
       for (const container of details) {
         if (container.status === "running" || container.status === "restarting") {
-          await this.runDocker(["stop", "--time", "20", container.id]);
-        }
-        stopped.push(await this.inspectSelectedContainer(container.id, agentId));
-      }
+          const operationId = readOperationFromInspect(container.inspect)?.id ?? null;
 
-      const stoppedDetails = await this.listSelectedContainerDetails(agentId);
+          if (runningOperationId === null && operationId !== null) {
+            runningOperationId = operationId;
+          }
+        }
+      }
+      const [stopped, stoppedDetails] = await Promise.all(
+        details.map(async (container) => {
+          if (container.status === "running" || container.status === "restarting") {
+            await this.runDocker(["stop", "--time", "20", container.id]);
+          }
+          return this.inspectSelectedContainer(container.id, agentId);
+        }),
+      ).then(
+        async (stoppedContainers) =>
+          [stoppedContainers, await this.listSelectedContainerDetails(agentId)] as const,
+      );
       const selected = stoppedDetails.length > 0 ? chooseStatusContainer(stoppedDetails) : null;
       const observedAt = this.now().toISOString();
 
@@ -494,9 +509,9 @@ export class ManualRunnerDocker {
       const selectedOperationId = selected ? readOperationFromInspect(selected.inspect)?.id : null;
       const containers = details.map(({ inspect: _inspect, ...container }) => container);
 
-      for (const container of containers) {
-        await this.runDocker(["rm", "--force", container.id]);
-      }
+      await Promise.all(
+        containers.map((container) => this.runDocker(["rm", "--force", container.id])),
+      );
 
       const observedAt = this.now().toISOString();
 
@@ -577,8 +592,10 @@ export class ManualRunnerDocker {
   async logs(
     agentId: string,
   ): Promise<{ container: RunnerContainer | null; logs: RunnerLogLine[] }> {
-    const [container] = await this.listSelectedContainers(agentId);
-    const gatewayLogs = await readHermesGatewayLogLines(agentId, this.stateRoot);
+    const [[container], gatewayLogs] = await Promise.all([
+      this.listSelectedContainers(agentId),
+      readHermesGatewayLogLines(agentId, this.stateRoot),
+    ]);
 
     if (!container) {
       return { container: null, logs: gatewayLogs };
@@ -1148,27 +1165,28 @@ export class ManualRunnerDocker {
     launchSpec: AgentLaunchSpec,
     projection: HermesProjectionResult,
   ): Promise<InspectedRunnerContainer | null> {
-    const exact: InspectedRunnerContainer[] = [];
+    const exact = (
+      await Promise.all(
+        details.map(async (detail) => {
+          if (detail.status !== "running") {
+            return null;
+          }
 
-    for (const detail of details) {
-      if (detail.status !== "running") {
-        continue;
-      }
+          try {
+            await assertHermesInspectMatchesRuntime(detail.inspect, {
+              launchSpec,
+              projection,
+              runtime: this.hermes,
+            });
 
-      try {
-        await assertHermesInspectMatchesRuntime(detail.inspect, {
-          launchSpec,
-          projection,
-          runtime: this.hermes,
-        });
-
-        if (readOperationFromInspect(detail.inspect)) {
-          exact.push(detail);
-        }
-      } catch {
-        // Stale and mismatched selected containers are replaced below.
-      }
-    }
+            return readOperationFromInspect(detail.inspect) ? detail : null;
+          } catch {
+            // Stale and mismatched selected containers are replaced below.
+            return null;
+          }
+        }),
+      )
+    ).filter((detail): detail is InspectedRunnerContainer => detail !== null);
 
     return exact.sort(compareOperationWinner)[0] ?? null;
   }
@@ -1177,15 +1195,19 @@ export class ManualRunnerDocker {
     containers: readonly InspectedRunnerContainer[],
     token: LaunchToken,
   ): Promise<void> {
-    for (const container of containers) {
-      this.throwIfLaunchTerminated(token);
-      if (container.status === "running" || container.status === "restarting") {
-        await this.runLaunchDocker(token, ["stop", "--time", "20", container.id]);
-        this.throwIfLaunchTerminated(token);
-      }
-      await this.runLaunchDocker(token, ["rm", "--force", container.id]);
-      this.throwIfLaunchTerminated(token);
-    }
+    await containers.reduce(
+      (previous, container) =>
+        previous.then(async () => {
+          this.throwIfLaunchTerminated(token);
+          if (container.status === "running" || container.status === "restarting") {
+            await this.runLaunchDocker(token, ["stop", "--time", "20", container.id]);
+            this.throwIfLaunchTerminated(token);
+          }
+          await this.runLaunchDocker(token, ["rm", "--force", container.id]);
+          this.throwIfLaunchTerminated(token);
+        }),
+      Promise.resolve(),
+    );
   }
 
   private registerLaunchToken(agentId: string, token: LaunchToken): void {
@@ -1362,26 +1384,25 @@ export class ManualRunnerDocker {
       .filter(Boolean)
       .map((line) => parseDockerPsLine(line).ID)
       .filter((id): id is string => Boolean(id?.trim()));
-    const containers: InspectedRunnerContainer[] = [];
-
-    for (const id of ids) {
-      if (token) {
-        this.throwIfLaunchTerminated(token);
-      }
-      const inspect = await this.inspectSelectedContainerRaw(id, agentId, token);
-      containers.push({
-        ...containerFromInspect(inspect, id),
-        inspect,
-      });
-    }
-
-    return containers;
+    return Promise.all(
+      ids.map(async (id) => {
+        if (token) {
+          this.throwIfLaunchTerminated(token);
+        }
+        const inspect = await this.inspectSelectedContainerRaw(id, agentId, token);
+        return {
+          ...containerFromInspect(inspect, id),
+          inspect,
+        };
+      }),
+    );
   }
 
   private async removeSelectedContainers(agentId: string): Promise<void> {
-    for (const container of await this.listSelectedContainers(agentId)) {
-      await this.runDocker(["rm", "--force", container.id]);
-    }
+    const containers = await this.listSelectedContainers(agentId);
+    await Promise.all(
+      containers.map((container) => this.runDocker(["rm", "--force", container.id])),
+    );
   }
 
   private async inspectSelectedContainer(
@@ -1906,11 +1927,9 @@ function hasExactStatusRuntimeEvidence(
     hostPorts: !hasPublishedPort(inspect.HostConfig?.PortBindings),
     networkPorts: !hasPublishedPort(inspect.NetworkSettings?.Ports),
     restartPolicy: hasExactManagedRestartPolicy(inspect),
-    security: inspect.HostConfig?.SecurityOpt?.includes("no-new-privileges") === true,
-    capDrop: inspect.HostConfig?.CapDrop?.includes("ALL") === true,
-    capAdd: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"].every((capability) =>
-      hasDockerCapability(inspect.HostConfig?.CapAdd, capability),
-    ),
+    security: hasExactDockerStringSet(inspect.HostConfig?.SecurityOpt, HERMES_DOCKER_SECURITY_OPT),
+    capDrop: hasExactDockerStringSet(inspect.HostConfig?.CapDrop, HERMES_DOCKER_CAP_DROP),
+    capAdd: hasExactDockerStringSet(inspect.HostConfig?.CapAdd, HERMES_DOCKER_CAP_ADD),
     pids: inspect.HostConfig?.PidsLimit === Number.parseInt(runtime.pidsLimit, 10),
     cpus: inspect.HostConfig?.NanoCpus === parseDockerCpusToNanoCpus(runtime.cpus),
     memory: inspect.HostConfig?.Memory === parseDockerMemoryBytes(runtime.memory),
@@ -2252,18 +2271,16 @@ async function assertHermesInspectMatchesRuntime(
     throw new Error("Docker container unexpectedly publishes ports.");
   }
 
-  if (!inspect.HostConfig.SecurityOpt?.includes("no-new-privileges")) {
+  if (!hasExactDockerStringSet(inspect.HostConfig.SecurityOpt, HERMES_DOCKER_SECURITY_OPT)) {
     throw new Error("Docker container security options mismatch.");
   }
 
-  if (!inspect.HostConfig.CapDrop?.includes("ALL")) {
+  if (!hasExactDockerStringSet(inspect.HostConfig.CapDrop, HERMES_DOCKER_CAP_DROP)) {
     throw new Error("Docker container capability set mismatch.");
   }
 
-  for (const capability of ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]) {
-    if (!hasDockerCapability(inspect.HostConfig.CapAdd, capability)) {
-      throw new Error("Docker container capability set mismatch.");
-    }
+  if (!hasExactDockerStringSet(inspect.HostConfig.CapAdd, HERMES_DOCKER_CAP_ADD)) {
+    throw new Error("Docker container capability set mismatch.");
   }
 
   if (inspect.HostConfig.PidsLimit !== Number.parseInt(input.runtime.pidsLimit, 10)) {
@@ -2349,12 +2366,22 @@ function inspectContainsDockerSocket(inspect: DockerInspectContainer): boolean {
   return values.some((value) => value?.includes("/var/run/docker.sock"));
 }
 
-function hasDockerCapability(
-  capabilities: string[] | null | undefined,
-  capability: string,
+function hasExactDockerStringSet(
+  actual: readonly string[] | null | undefined,
+  expected: readonly string[],
 ): boolean {
-  return (capabilities ?? []).some(
-    (value) => value === capability || value === `CAP_${capability}`,
+  const normalizedActual = new Set(
+    (actual ?? []).map((value) => value.trim().replace(/^CAP_/i, "").toUpperCase()),
+  );
+  const normalizedExpected = new Set(
+    expected.map((value) => value.trim().replace(/^CAP_/i, "").toUpperCase()),
+  );
+
+  return (
+    normalizedActual.size === normalizedExpected.size &&
+    normalizedExpected.size === expected.length &&
+    (actual ?? []).length === normalizedActual.size &&
+    [...normalizedExpected].every((value) => normalizedActual.has(value))
   );
 }
 
@@ -2559,13 +2586,20 @@ function resolveHermesDockerRuntimeOptions(
   overrides: Partial<HermesDockerRuntimeOptions> | undefined,
 ): HermesDockerRuntimeOptions {
   return {
-    cpus: overrides?.cpus ?? process.env[HERMES_DOCKER_CPUS_ENV]?.trim() ?? "1",
-    memory: overrides?.memory ?? process.env[HERMES_DOCKER_MEMORY_ENV]?.trim() ?? "1536m",
+    cpus:
+      overrides?.cpus ?? process.env[HERMES_DOCKER_CPUS_ENV]?.trim() ?? DEFAULT_HERMES_DOCKER_CPUS,
+    memory:
+      overrides?.memory ??
+      process.env[HERMES_DOCKER_MEMORY_ENV]?.trim() ??
+      DEFAULT_HERMES_DOCKER_MEMORY,
     network:
       overrides?.network ??
       process.env[HERMES_PRIVATE_NETWORK_ENV]?.trim() ??
       DEFAULT_HERMES_PRIVATE_NETWORK,
-    pidsLimit: overrides?.pidsLimit ?? process.env[HERMES_DOCKER_PIDS_LIMIT_ENV]?.trim() ?? "256",
+    pidsLimit:
+      overrides?.pidsLimit ??
+      process.env[HERMES_DOCKER_PIDS_LIMIT_ENV]?.trim() ??
+      DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
     readinessPort: readPositiveInteger(
       process.env[HERMES_READINESS_PORT_ENV],
       overrides?.readinessPort ?? 8642,
@@ -2987,14 +3021,20 @@ async function readHermesGatewayLogLines(
   let entries: Array<{ name: string; mtimeMs: number }> = [];
 
   try {
-    entries = await Promise.all(
-      (await readdir(logDirectory))
-        .filter((name) => name === "current" || name.startsWith("current."))
-        .map(async (name) => ({
-          name,
-          mtimeMs: (await stat(resolve(logDirectory, name))).mtimeMs,
-        })),
-    );
+    const entryPromises: Array<Promise<{ name: string; mtimeMs: number }>> = [];
+
+    for (const name of await readdir(logDirectory)) {
+      if (name === "current" || name.startsWith("current.")) {
+        entryPromises.push(
+          (async () => ({
+            name,
+            mtimeMs: (await stat(resolve(logDirectory, name))).mtimeMs,
+          }))(),
+        );
+      }
+    }
+
+    entries = await Promise.all(entryPromises);
   } catch {
     return [];
   }
@@ -3002,13 +3042,13 @@ async function readHermesGatewayLogLines(
   const files = entries
     .sort((left, right) => left.mtimeMs - right.mtimeMs || left.name.localeCompare(right.name))
     .map((entry) => resolve(logDirectory, entry.name));
-  const lines: RunnerLogLine[] = [];
+  const lines = (
+    await Promise.all(files.map((file) => readHermesGatewayLogFile(file, logDirectory)))
+  )
+    .flat()
+    .slice(-MAX_HERMES_LOG_LINES);
 
-  for (const file of files) {
-    lines.push(...(await readHermesGatewayLogFile(file, logDirectory)));
-  }
-
-  return lines.slice(-MAX_HERMES_LOG_LINES);
+  return lines;
 }
 
 async function readHermesGatewayLogFile(

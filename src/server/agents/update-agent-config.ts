@@ -16,6 +16,13 @@ const CONFIG_CHANGED_MESSAGE = "Configuration updated.";
 const DISPLAY_VALUE_MAX_LENGTH = 80;
 const SECRET_KEY_PATTERN =
   /(api[_\s-]*key|apikey|access[_\s-]*token|refresh[_\s-]*token|token|password|secret|credential|private[_\s-]*key|privatekey|bearer|authorization)/i;
+const CRON_FIELD_RANGES = [
+  [0, 59],
+  [0, 23],
+  [1, 31],
+  [1, 12],
+  [0, 7],
+] as const;
 
 const EDITABLE_FIELDS = [
   "name",
@@ -785,20 +792,12 @@ function isValidTimezone(timezone: string): boolean {
 function isValidCronExpression(cron: string): boolean {
   const fields = cron.trim().split(/\s+/);
 
-  if (fields.length !== 5) {
+  if (fields.length !== CRON_FIELD_RANGES.length) {
     return false;
   }
 
-  const ranges = [
-    [0, 59],
-    [0, 23],
-    [1, 31],
-    [1, 12],
-    [0, 7],
-  ] as const;
-
   return fields.every((field, index) => {
-    const range = ranges[index];
+    const range = CRON_FIELD_RANGES[index];
 
     if (!range) {
       return false;

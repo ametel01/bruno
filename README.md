@@ -180,9 +180,12 @@ See [Authentication modes](./docs/AUTHENTICATION.md) and the
 | `AGENTBAY_RUNNER_BEARER_TOKEN` | DigitalOcean or manual runner control | Shared server-side command token used between the control plane and runner service. |
 | `AGENTBAY_RUNNER_IMAGE` | Hosted cloud runners | Immutable runner reference in `registry/path:version@sha256:digest` form. Hosted DigitalOcean configuration rejects mutable or tag-only references; `local_docker` may use a tagged development image. |
 | `AGENTBAY_HERMES_WORKLOAD_IMAGE` | No | Exact Hermes workload image used by deployment and runtime reconciliation; defaults to the source-pinned image and digest. Controlled staging requires the attested untagged GHCR amd64 manifest digest. |
-| `AGENTBAY_RUNNER_MAX_AGENTS` | No | Positive per-runner agent capacity; defaults to `1`. |
+| `AGENTBAY_HERMES_DOCKER_CPUS` | No | Docker CPU limit for each managed Hermes container; defaults to `1` and is validated against the selected runner profile before provider calls. |
+| `AGENTBAY_HERMES_DOCKER_MEMORY` | No | Docker memory limit for each managed Hermes container; defaults to `1536m`. Compatibility counts physical RAM plus the documented runner/OS reserve, never swap. |
+| `AGENTBAY_HERMES_DOCKER_PIDS_LIMIT` | No | Docker PID limit for each managed Hermes container; defaults to `256` and is propagated into runner bootstrap. |
+| `AGENTBAY_RUNNER_MAX_AGENTS` | No | Positive per-runner agent capacity; defaults to `1`. A value above one is accepted only when the exact runner/runtime profile also has approved measured capacity and sufficient CPU, physical memory, and disk evidence; current hosted profiles remain fail-closed to one. |
 | `AGENTBAY_DIGITALOCEAN_REGION` | No | Droplet region; defaults to `sfo3`. |
-| `AGENTBAY_DIGITALOCEAN_SIZE_SLUG` | No | Droplet size; defaults to `s-1vcpu-512mb-10gb`. |
+| `AGENTBAY_DIGITALOCEAN_SIZE_SLUG` | No | Droplet size; legacy default remains `s-1vcpu-512mb-10gb` until authorized evidence selects a replacement, but hosted provisioning rejects profiles that cannot fit the configured Hermes limit plus runner/OS reserve in physical memory. Use an explicit supported profile such as `s-1vcpu-2gb` for managed Hermes trials. |
 | `AGENTBAY_DIGITALOCEAN_IMAGE` | No | Droplet image; defaults to `ubuntu-24-04-x64`. |
 | `AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS` | No | `auto`, `none`, or a comma-separated key-ID list. Omitted values auto-discover account keys. |
 | `AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS` | No | Comma-separated IPs/CIDRs allowed to reach SSH. SSH ingress is closed when this is omitted. |
@@ -435,6 +438,7 @@ enable ready mode by treating mock or local evidence as live acceptance.
 | `bun run verify:e2e` | Run the base verification gate followed by provider-backed E2E. |
 | `bun run agent:image:smoke` | Verify the selected Hermes image contract locally. |
 | `bun run agent:hermes:contract-smoke` | Exercise the pinned Hermes runner/readiness/restart contract locally. |
+| `bun run runner:snapshot:build` | Protected manual runner-snapshot build entrypoint; requires explicit authorization and provider credentials. |
 | `bun run verify:hermes:staging` | Run the capability-gated, interactive-human-attested live Hermes/Telegram acceptance and durable cleanup workflow. |
 | `bun run deploy:prod` | Dispatch the protected full-application production deployment workflow. |
 

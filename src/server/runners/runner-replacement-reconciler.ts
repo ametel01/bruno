@@ -40,19 +40,27 @@ import {
   confirmCloudRunnerReadiness,
   RUNNER_HEARTBEAT_STALE_THRESHOLD_MS,
 } from "@/src/server/runners/runner-heartbeat";
-import { lockRunnerPlacementCapacityInTransaction } from "@/src/server/runners/runner-placement";
+import {
+  lockRunnerPlacementCapacityInTransaction,
+  selectRunnerPlacementForUserInTransaction,
+  type RunnerPlacementCapacityOptions,
+} from "@/src/server/runners/runner-placement";
 import {
   advanceAutomaticDigitalOceanRunnerProvisioning,
   createConfiguredDigitalOceanProvider,
   digitalOceanRunnerFirewallName,
 } from "@/src/server/runners/runner-provisioning";
 import {
+  parseHermesDockerCpus,
+  parseHermesDockerMemoryMiB,
+} from "@/src/server/runners/runner-resource-profiles";
+import type { RunnerReplacementReason } from "@/src/server/runners/runner-replacement-state";
+import {
   applyClaimedRunnerReplacementTransition,
   type ClaimedRunnerReplacement,
   claimNextRunnerReplacement,
   reserveClaimedRunnerReplacementBudget,
 } from "@/src/server/runners/runner-replacement-store";
-import type { RunnerReplacementReason } from "@/src/server/runners/runner-replacement-state";
 
 const DEFAULT_RETRY_MS = 5_000;
 const DEFAULT_MAX_ATTEMPTS = 8;
@@ -321,8 +329,14 @@ async function reconcileProvisioningTarget(input: {
     context: input.context,
     now: () => input.now,
   });
+  if (!result.ok) {
+    return await cleanupFailedTarget({
+      ...input,
+      terminalCode: "target_provisioning_failed",
+    });
+  }
   const refreshed = await readTarget(input.connection, input.claim);
-  if (!result.ok || refreshed?.provisioningStatus === "failed") {
+  if (refreshed?.provisioningStatus === "failed") {
     return await cleanupFailedTarget({
       ...input,
       terminalCode: "target_provisioning_failed",
@@ -453,15 +467,19 @@ async function reconcileFencingSource(input: {
         createConnection: () => input.connection,
         signal: input.context.signal,
       });
-  await Promise.allSettled(
-    assigned
-      .filter((agent) => agent.status !== "stopped")
-      .map((agent) =>
+  const stopAttempts: Array<Promise<unknown> | undefined> = [];
+
+  for (const agent of assigned) {
+    if (agent.status !== "stopped") {
+      stopAttempts.push(
         input.dependencies.stopSourceAgent
           ? input.dependencies.stopSourceAgent(source, agent.id)
           : adapter?.stop(agent.id),
-      ),
-  );
+      );
+    }
+  }
+
+  await Promise.allSettled(stopAttempts);
 
   const advanced = await input.connection.db.transaction(async (tx) => {
     const applied = await applyClaimedRunnerReplacementTransition({
@@ -517,11 +535,9 @@ async function reconcileReassigning(input: {
   let handover: { deploymentIds: string[]; runningAgentIds: string[] };
   try {
     handover = await input.connection.db.transaction(async (tx) => {
-      for (const runnerId of [input.claim.sourceRunnerId, targetRunnerId].sort()) {
-        await lockRunnerPlacementCapacityInTransaction(tx, runnerId);
-      }
       const [pair] = await tx.execute<{
         sourceUserId: string;
+        targetUserId: string;
         sourceStatus: string;
         targetStatus: string;
         targetProvisioningStatus: string | null;
@@ -531,6 +547,7 @@ async function reconcileReassigning(input: {
       }>(sql`
         select
           source_runner.user_id as "sourceUserId",
+          target_runner.user_id as "targetUserId",
           source_runner.status as "sourceStatus",
           target_runner.status as "targetStatus",
           target_runner.provisioning_status as "targetProvisioningStatus",
@@ -554,7 +571,9 @@ async function reconcileReassigning(input: {
         for update of source_runner, target_runner
       `);
       if (
-        pair?.sourceStatus !== "degraded" ||
+        !pair ||
+        pair.sourceUserId !== pair.targetUserId ||
+        pair.sourceStatus !== "degraded" ||
         pair.targetStatus !== "online" ||
         pair.targetProvisioningStatus !== "ready" ||
         pair.targetCompatibilityState !== "compatible" ||
@@ -564,6 +583,18 @@ async function reconcileReassigning(input: {
           RUNNER_HEARTBEAT_STALE_THRESHOLD_MS
       ) {
         throw new Error("Replacement handover runner pair is not fenced and ready.");
+      }
+      const lockInputs = [
+        { userId: pair.sourceUserId, runnerId: input.claim.sourceRunnerId },
+        { userId: pair.sourceUserId, runnerId: targetRunnerId },
+      ].sort((left, right) =>
+        `${left.userId}:${left.runnerId}`.localeCompare(`${right.userId}:${right.runnerId}`),
+      );
+      for (const lockInput of lockInputs) {
+        const locked = await lockRunnerPlacementCapacityInTransaction(tx, lockInput);
+        if (!locked) {
+          throw new Error("Replacement runner pair is not owned by the expected user.");
+        }
       }
       const [authority] = await tx
         .select({ id: runnerCredentials.id })
@@ -577,47 +608,66 @@ async function reconcileReassigning(input: {
         .limit(1);
       if (authority) throw new Error("Replacement source still has command authority.");
 
-      const assigned = await tx
-        .select({
-          id: agents.id,
-          userId: agents.userId,
-          desiredStatus: agents.desiredStatus,
-        })
-        .from(agents)
-        .where(and(eq(agents.runnerId, input.claim.sourceRunnerId), isNull(agents.deletedAt)))
-        .orderBy(agents.id)
-        .for("update");
-      const [{ assigned: targetAssigned = 0 } = { assigned: 0 }] = await tx.execute<{
-        assigned: number;
-      }>(sql`
-        select count(*)::int as assigned
-        from ${agents}
-        where ${agents.runnerId} = ${input.claim.targetRunnerId}
-          and ${agents.deletedAt} is null
-      `);
-      if (assigned.length + Number(targetAssigned) > (input.config.runnerMaxAgents ?? 1)) {
+      const [assigned, [{ assigned: targetAssigned = 0 } = { assigned: 0 }]] = await Promise.all([
+        tx
+          .select({
+            id: agents.id,
+            userId: agents.userId,
+            desiredStatus: agents.desiredStatus,
+          })
+          .from(agents)
+          .where(and(eq(agents.runnerId, input.claim.sourceRunnerId), isNull(agents.deletedAt)))
+          .orderBy(agents.id)
+          .for("update"),
+        tx.execute<{ assigned: number }>(sql`
+          select count(*)::int as assigned
+          from ${agents}
+          where ${agents.runnerId} = ${input.claim.targetRunnerId}
+            and ${agents.desiredStatus} = 'running'
+            and ${agents.deletedAt} is null
+        `),
+      ]);
+      const runningAgents = assigned.filter((agent) => agent.desiredStatus === "running");
+      const targetPlacement = await selectRunnerPlacementForUserInTransaction(
+        tx,
+        pair.sourceUserId,
+        { runnerId: targetRunnerId },
+        {
+          now: input.now,
+          compatibilityRequirement: runnerReplacementCompatibilityRequirement(input.config),
+          capacityOptions: runnerReplacementPlacementCapacityOptions(input.config),
+        },
+      );
+      if (
+        !targetPlacement.ok ||
+        targetPlacement.runner.capacity.running_agents + runningAgents.length >
+          targetPlacement.runner.capacity.max_agents ||
+        runningAgents.length + Number(targetAssigned) > targetPlacement.runner.capacity.max_agents
+      ) {
         throw new Error("Replacement target no longer has sufficient capacity.");
       }
 
-      const deploymentIds: string[] = [];
-      const runningAgentIds: string[] = [];
-      for (const agent of assigned) {
-        if (agent.userId !== pair.sourceUserId) {
-          throw new Error("Replacement agent owner does not match the runner pair.");
-        }
-        if (agent.desiredStatus === "running") {
-          const deployment = await createAgentDeploymentForRunnerReplacement({
+      if (assigned.some((agent) => agent.userId !== pair.sourceUserId)) {
+        throw new Error("Replacement agent owner does not match the runner pair.");
+      }
+      const deployments = await Promise.all(
+        runningAgents.map((agent) =>
+          createAgentDeploymentForRunnerReplacement({
             tx,
             replacementId: input.claim.id,
             agentId: agent.id,
             userId: agent.userId,
             now: input.now,
-          });
-          if (!deployment) throw new Error("Replacement deployment could not be created.");
-          deploymentIds.push(deployment.deploymentId);
-          runningAgentIds.push(agent.id);
-        }
+          }),
+        ),
+      );
+      if (deployments.some((deployment) => deployment === null)) {
+        throw new Error("Replacement deployment could not be created.");
       }
+      const deploymentIds = deployments.flatMap((deployment) =>
+        deployment === null ? [] : [deployment.deploymentId],
+      );
+      const runningAgentIds = runningAgents.map((agent) => agent.id);
 
       if (assigned.length > 0) {
         const assignedIds = assigned.map((agent) => agent.id);
@@ -685,6 +735,38 @@ async function reconcileReassigning(input: {
     (input.dependencies.triggerRuntime ?? scheduleAgentRuntimeReconcileAfterResponse)(agentId);
   }
   return { outcome: "advanced", replacementId: input.claim.id, state: "converging_agents" };
+}
+
+function runnerReplacementPlacementCapacityOptions(
+  config: DigitalOceanProviderConfig,
+): RunnerPlacementCapacityOptions {
+  const perHermesCpu = config.hermesDockerCpus
+    ? parseHermesDockerCpus(config.hermesDockerCpus)
+    : null;
+  const perHermesMemoryMiB = config.hermesDockerMemory
+    ? parseHermesDockerMemoryMiB(config.hermesDockerMemory)
+    : null;
+
+  return {
+    configuredMaxAgents: config.runnerMaxAgents,
+    ...(perHermesCpu === null ? {} : { perHermesCpu }),
+    ...(perHermesMemoryMiB === null ? {} : { perHermesMemoryMiB }),
+  };
+}
+
+function runnerReplacementCompatibilityRequirement(config: DigitalOceanProviderConfig) {
+  const release = parseImmutableRunnerImageReference(config.runnerImage);
+
+  return release
+    ? ({
+        mode: "hosted",
+        release: {
+          version: release.version,
+          imageDigest: release.imageDigest,
+          bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+        },
+      } as const)
+    : ({ mode: "unavailable", release: null } as const);
 }
 
 async function reconcileConvergingAgents(input: {

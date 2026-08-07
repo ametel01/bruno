@@ -3,6 +3,12 @@ import styles from "./runner-cost-context.module.css";
 
 const RAW_COMPUTE_PLAN_CONTEXT =
   "Raw compute estimate only. A plan can cost more because it may also include orchestration, monitoring, backups, support, and margin.";
+const USD_FORMATTER = new Intl.NumberFormat("en-US", {
+  currency: "USD",
+  maximumFractionDigits: 2,
+  minimumFractionDigits: 2,
+  style: "currency",
+});
 
 export type RunnerCostContextResult =
   | { ok: true; estimate: RunnerCostEstimateDto | null }
@@ -94,10 +100,5 @@ function CostMetric({ label, estimate }: { label: string; estimate: CostEstimate
 }
 
 function formatUsdCents(cents: number): string {
-  return new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
-    style: "currency",
-  }).format(cents / 100);
+  return USD_FORMATTER.format(cents / 100);
 }

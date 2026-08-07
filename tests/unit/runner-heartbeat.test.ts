@@ -504,6 +504,8 @@ describe("runner heartbeat persistence", () => {
     });
 
     const requests: Array<{ url: string; authorization: string | null }> = [];
+    const readinessProbeStartedAt = new Date("2026-08-06T00:10:28.000Z");
+    const readinessProbeCompletedAt = new Date("2026-08-06T00:10:30.000Z");
     const successfulProbe = await confirmCloudRunnerReadiness(runner.id, {
       createConnection: () => connection,
       fetch: async (input, init) => {
@@ -513,7 +515,11 @@ describe("runner heartbeat persistence", () => {
         });
         return Response.json(readyRunnerBootSnapshot());
       },
-      now: () => now,
+      now: sequenceDates([
+        readinessProbeStartedAt,
+        readinessProbeCompletedAt,
+        new Date("2026-08-06T00:10:31.000Z"),
+      ]),
       runnerBearerToken: "runner-command-token",
       compatibilityRequirement: HOSTED_COMPATIBILITY_REQUIREMENT,
     });
@@ -546,21 +552,81 @@ describe("runner heartbeat persistence", () => {
     expect(persistedRunner).toMatchObject({
       status: "online",
       provisioningStatus: "ready",
-      provisioningCompletedAt: now,
+      provisioningCompletedAt: readinessProbeCompletedAt,
     });
     expect(events).toEqual([
+      expect.objectContaining({
+        phase: "bootstrapping",
+        status: "started",
+        message: "Runner boot validation started.",
+        metadata: expect.objectContaining({
+          provider: "digitalocean",
+          step: "boot_validation",
+          bootContractVersion: "plingpling.runner.boot-snapshot.v1",
+          bootStatus: "ready",
+        }),
+        createdAt: new Date("2026-08-04T00:00:00.000Z"),
+      }),
+      expect.objectContaining({
+        phase: "bootstrapping",
+        status: "completed",
+        message: "Runner boot validation succeeded.",
+        metadata: {
+          provider: "digitalocean",
+          step: "boot_validation",
+          bootContractVersion: "plingpling.runner.boot-snapshot.v1",
+          bootStatus: "ready",
+          bootComponents: readyRunnerBootSnapshot().components,
+        },
+        createdAt: new Date("2026-08-04T00:00:01.000Z"),
+      }),
+      expect.objectContaining({
+        phase: "ready",
+        status: "started",
+        message: "Runner readiness transition started.",
+        metadata: {
+          provider: "digitalocean",
+          readinessProbe: "authenticated_endpoint",
+        },
+        createdAt: readinessProbeStartedAt,
+      }),
+      expect.objectContaining({
+        phase: "ready",
+        status: "started",
+        message: "Authenticated runner readiness probe started.",
+        metadata: {
+          provider: "digitalocean",
+          step: "authenticated_readiness",
+          heartbeatStatus: "online",
+          readinessProbe: "authenticated_endpoint",
+        },
+        createdAt: readinessProbeStartedAt,
+      }),
+      expect.objectContaining({
+        phase: "ready",
+        status: "completed",
+        message: "Runner readiness transition completed.",
+        metadata: {
+          provider: "digitalocean",
+          heartbeatStatus: "online",
+          readinessProbe: "authenticated_endpoint",
+        },
+        createdAt: readinessProbeCompletedAt,
+      }),
       expect.objectContaining({
         phase: "ready",
         status: "completed",
         message: "Authenticated runner readiness probe succeeded.",
         metadata: {
           provider: "digitalocean",
+          step: "authenticated_readiness",
           heartbeatStatus: "online",
           readinessProbe: "authenticated_endpoint",
           bootContractVersion: "plingpling.runner.boot-snapshot.v1",
           bootStatus: "ready",
           bootComponents: readyRunnerBootSnapshot().components,
         },
+        createdAt: readinessProbeCompletedAt,
       }),
     ]);
     expect(JSON.stringify([persistedRunner, events])).not.toContain(credential.value);
@@ -644,8 +710,18 @@ describe("runner heartbeat persistence", () => {
         endpointUrl: "https://production-cloud-runner.example.com",
         runnerBearerToken: "runner-command-token",
         fetch: async () => Response.json(snapshot),
+        now: sequenceDates([
+          new Date("2026-08-06T00:11:00.000Z"),
+          new Date("2026-08-06T00:11:02.000Z"),
+        ]),
       }),
-    ).resolves.toEqual({ ok: true, protocol: "readiness_endpoint", snapshot });
+    ).resolves.toMatchObject({
+      ok: true,
+      protocol: "readiness_endpoint",
+      snapshot,
+      observedStartedAt: new Date("2026-08-06T00:11:00.000Z"),
+      observedCompletedAt: new Date("2026-08-06T00:11:02.000Z"),
+    });
   });
 
   it("preserves an authenticated failed boot snapshot returned with 503", async () => {
@@ -663,8 +739,18 @@ describe("runner heartbeat persistence", () => {
         endpointUrl: "https://failed-cloud-runner.example.com",
         runnerBearerToken: "runner-command-token",
         fetch: async () => Response.json(snapshot, { status: 503 }),
+        now: sequenceDates([
+          new Date("2026-08-06T00:12:00.000Z"),
+          new Date("2026-08-06T00:12:03.000Z"),
+        ]),
       }),
-    ).resolves.toEqual({ ok: false, reason: "runner_not_ready", snapshot });
+    ).resolves.toMatchObject({
+      ok: false,
+      reason: "runner_not_ready",
+      snapshot,
+      observedStartedAt: new Date("2026-08-06T00:12:00.000Z"),
+      observedCompletedAt: new Date("2026-08-06T00:12:03.000Z"),
+    });
   });
 
   it("fails runner provisioning from an authenticated failed boot snapshot", async () => {
@@ -685,21 +771,24 @@ describe("runner heartbeat persistence", () => {
       failureReason: "fixture_launch_failed",
     });
 
+    const readinessProbeStartedAt = new Date("2026-08-06T00:10:28.000Z");
+    const readinessProbeCompletedAt = new Date("2026-08-06T00:10:31.000Z");
     const result = await confirmCloudRunnerReadiness(runner.id, {
       compatibilityRequirement: HOSTED_COMPATIBILITY_REQUIREMENT,
       createConnection: () => connection,
       fetch: async () => Response.json(snapshot, { status: 503 }),
-      now: () => now,
+      now: sequenceDates([readinessProbeStartedAt, readinessProbeCompletedAt, now]),
       runnerBearerToken: "runner-command-token",
     });
     const [persistedRunner] = await connection.db
       .select()
       .from(runners)
       .where(eq(runners.id, runner.id));
-    const [failureEvent] = await connection.db
+    const events = await connection.db
       .select()
       .from(runnerProvisioningEvents)
       .where(eq(runnerProvisioningEvents.runnerId, runner.id));
+    const failureEvent = events.find((event) => event.phase === "failed");
 
     expect(result).toEqual({
       outcome: "failed",
@@ -711,7 +800,7 @@ describe("runner heartbeat persistence", () => {
       status: "provision_failed",
       provisioningStatus: "failed",
       provisioningError: "Runner boot self-test failed: Hermes fixture launch failed.",
-      provisioningCompletedAt: now,
+      provisioningCompletedAt: readinessProbeCompletedAt,
     });
     expect(failureEvent).toMatchObject({
       phase: "failed",
@@ -726,6 +815,28 @@ describe("runner heartbeat persistence", () => {
         bootFailureReason: "fixture_launch_failed",
       },
     });
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          phase: "bootstrapping",
+          status: "failed",
+          createdAt: new Date("2026-08-04T00:00:01.000Z"),
+          metadata: expect.objectContaining({ step: "boot_validation" }),
+        }),
+        expect.objectContaining({
+          phase: "ready",
+          status: "failed",
+          createdAt: readinessProbeCompletedAt,
+          metadata: expect.objectContaining({ readinessProbe: "authenticated_endpoint" }),
+        }),
+        expect.objectContaining({
+          phase: "ready",
+          status: "failed",
+          createdAt: readinessProbeCompletedAt,
+          metadata: expect.objectContaining({ step: "authenticated_readiness" }),
+        }),
+      ]),
+    );
   });
 
   it("allows insecure loopback readiness only for the explicit local Docker mode", async () => {
@@ -975,6 +1086,18 @@ async function seedHeartbeat(
 
 async function resetRunnerHeartbeatTables(connection: DatabaseConnection): Promise<void> {
   await connection.client`truncate table runner_provisioning_events, runner_heartbeats, runner_credentials, runner_registration_tokens, runners, app_metadata, users restart identity cascade`;
+}
+
+function sequenceDates(dates: readonly Date[]): () => Date {
+  let index = 0;
+  return () => {
+    const date = dates[Math.min(index, dates.length - 1)];
+    index += 1;
+    if (!date) {
+      throw new Error("Expected at least one sequence date.");
+    }
+    return date;
+  };
 }
 
 async function countRows(

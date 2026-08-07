@@ -27,7 +27,7 @@ describe("local Docker DigitalOcean provider", () => {
     const created = await provider.createRunner({
       name: "plingpling Cloud Runner",
       region: "sfo3",
-      sizeSlug: "s-2vcpu-4gb",
+      sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
       tags: ["agentbay"],
       userData: content.userData,
@@ -59,9 +59,9 @@ describe("local Docker DigitalOcean provider", () => {
       "--name",
       "agentbay-local-cloud-runner-test",
       "--cpus",
-      "2",
+      "1",
       "--memory",
-      "4g",
+      "2048m",
       "--privileged",
       "--cgroupns",
       "host",
@@ -112,7 +112,13 @@ describe("local Docker DigitalOcean provider", () => {
     expect(bootstrapScript).toContain("AGENTBAY_BOOTSTRAP_STEP=docker_pull");
     expect(bootstrapScript).toContain("AGENTBAY_BOOTSTRAP_STEP=agent_image_pull");
     expect(bootstrapScript).toContain("AGENTBAY_BOOTSTRAP_STEP=hermes_image_pull");
-    expect(bootstrapScript).toContain("AGENTBAY_BOOTSTRAP_STEP=docker_container_start");
+    expect(bootstrapScript).toContain("AGENTBAY_BOOTSTRAP_STEP=runner_container_start");
+    expect(bootstrapScript).toContain(
+      "/usr/local/bin/agentbay-bootstrap-event bootstrapping started 'Installing cloud runner packages.' package_install",
+    );
+    expect(bootstrapScript).toContain(
+      "/usr/local/bin/agentbay-bootstrap-event bootstrapping completed 'Cloud runner packages were already installed in the local smoke image.' package_install",
+    );
     expect(bootstrapScript).toContain("for attempt in 1 2 3; do");
     expect(bootstrapScript).toContain(
       "Local cloud-init parity check failed: /etc/agentbay/runner.env was not created.",

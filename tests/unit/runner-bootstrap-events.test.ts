@@ -72,6 +72,62 @@ describe.sequential("runner bootstrap event telemetry", () => {
     expect(JSON.stringify(events)).not.toContain(REGISTRATION_TOKEN);
   });
 
+  it("persists paired bootstrap step boundaries without retaining registration secrets", async () => {
+    const runner = await seedCloudRunnerWithRegistrationToken(connection);
+
+    for (const [status, observedAt] of [
+      ["started", "2026-07-07T20:30:10.000Z"],
+      ["completed", "2026-07-07T20:30:20.000Z"],
+    ] as const) {
+      const result = await recordRunnerBootstrapEvent(
+        {
+          registrationToken: REGISTRATION_TOKEN,
+          phase: "bootstrapping",
+          status,
+          message: `Runner bootstrap ${status} docker_package_install.`,
+          metadata: {
+            step: "docker_package_install",
+            command: "apt-get install docker-ce",
+            token: REGISTRATION_TOKEN,
+          },
+        },
+        {
+          createConnection: () => connection,
+          now: () => new Date(observedAt),
+        },
+      );
+
+      expect(result).toEqual({ ok: true, runnerId: runner.id });
+    }
+
+    const events = await connection.db
+      .select()
+      .from(runnerProvisioningEvents)
+      .where(eq(runnerProvisioningEvents.runnerId, runner.id));
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        phase: "bootstrapping",
+        status: "started",
+        metadata: expect.objectContaining({
+          source: "cloud_init",
+          step: "docker_package_install",
+          command: "apt-get install docker-ce",
+        }),
+      }),
+      expect.objectContaining({
+        phase: "bootstrapping",
+        status: "completed",
+        metadata: expect.objectContaining({
+          source: "cloud_init",
+          step: "docker_package_install",
+          command: "apt-get install docker-ce",
+        }),
+      }),
+    ]);
+    expect(JSON.stringify(events)).not.toContain(REGISTRATION_TOKEN);
+  });
+
   it("marks the runner failed when cloud-init reports a bootstrap failure", async () => {
     const runner = await seedCloudRunnerWithRegistrationToken(connection);
 

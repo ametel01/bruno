@@ -8,6 +8,8 @@ import {
   users,
 } from "@/src/server/db/schema";
 import { FakeDigitalOceanProvider } from "@/src/server/runners/digitalocean-provider";
+import type { DigitalOceanProviderConfig } from "@/src/server/env";
+import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
 import { createRunnerRegistrationToken } from "@/src/server/runners/runner-auth-secrets";
 import {
   createDigitalOceanRunnerForDevelopmentUser,
@@ -158,6 +160,18 @@ describe.sequential("runner provisioning service", () => {
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
+    ).toContain("AGENTBAY_HERMES_DOCKER_CPUS=1");
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
+    ).toContain("AGENTBAY_HERMES_DOCKER_MEMORY=1536m");
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
+    ).toContain("AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256");
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
     ).toContain("AGENTBAY_RUNNER_BOOT_MODEL_CANARY_ENABLED=false");
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
@@ -245,7 +259,7 @@ describe.sequential("runner provisioning service", () => {
       status: "provisioning",
       provider: "digitalocean",
       region: "sfo3",
-      sizeSlug: "s-1vcpu-1gb",
+      sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
       provisioningStatus: "creating",
       provisioningStartedAt: new Date("2026-07-06T01:00:00.000Z"),
@@ -263,7 +277,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay"],
         }),
@@ -291,6 +305,26 @@ describe.sequential("runner provisioning service", () => {
     expect(persistedTokens).toEqual([{ userId: owner.id }]);
   });
 
+  it("fails manual snapshot provisioning before any Droplet create when evidence is invalid", async () => {
+    const [owner] = await connection.db.insert(users).values({}).returning({ id: users.id });
+    if (!owner) throw new Error("User insert returned no row.");
+
+    const provider = new FakeDigitalOceanProvider();
+    const result = await createDigitalOceanRunnerForUser(
+      owner.id,
+      { provider: "digitalocean", name: "Snapshot Runner" },
+      {
+        createConnection: () => connection,
+        provider,
+        readConfig: () => invalidSnapshotConfig(),
+        now: sequenceClock("2026-07-06T02:00:00.000Z"),
+      },
+    );
+
+    expect(result).toEqual({ ok: false, reason: "provider_not_configured" });
+    expect(provider.calls.map((call) => call.step)).not.toContain("create");
+  });
+
   it("creates a managed DigitalOcean SSH key before creating a Droplet when the account has none", async () => {
     const provider = new FakeDigitalOceanProvider({ sshKeys: [] });
 
@@ -304,7 +338,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay"],
         }),
@@ -340,7 +374,39 @@ describe.sequential("runner provisioning service", () => {
     expect(JSON.stringify(result)).not.toContain("PRIVATE KEY");
   });
 
-  it("injects swap setup when provisioning the default low-memory DigitalOcean size", async () => {
+  it("passes manual Hermes Docker limits into Droplet bootstrap user-data", async () => {
+    const provider = new FakeDigitalOceanProvider();
+
+    const result = await createDigitalOceanRunnerForDevelopmentUser(
+      { provider: "digitalocean", name: "Custom Hermes Limits Runner" },
+      {
+        createConnection: () => connection,
+        provider,
+        readConfig: () => ({
+          token: "dop_v1_super_secret",
+          runnerBearerToken: "runner-command-token",
+          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          region: "sfo3",
+          sizeSlug: "s-2vcpu-2gb",
+          image: "ubuntu-24-04-x64",
+          tags: ["agentbay"],
+          hermesDockerCpus: "0.5",
+          hermesDockerMemory: "1024m",
+          hermesDockerPidsLimit: "128",
+          runnerMaxAgents: 1,
+        }),
+        now: sequenceClock("2026-07-06T03:00:00.000Z"),
+      },
+    );
+    const createCall = provider.calls.find((call) => call.step === "create");
+
+    expect(result).toMatchObject({ ok: true, duplicate: false });
+    expect(createCall?.input.userData).toContain("AGENTBAY_HERMES_DOCKER_CPUS=0.5");
+    expect(createCall?.input.userData).toContain("AGENTBAY_HERMES_DOCKER_MEMORY=1024m");
+    expect(createCall?.input.userData).toContain("AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=128");
+  });
+
+  it("rejects the low-memory DigitalOcean size before SSH lookup or Droplet creation", async () => {
     const provider = new FakeDigitalOceanProvider();
 
     const result = await createDigitalOceanRunnerForDevelopmentUser(
@@ -360,17 +426,18 @@ describe.sequential("runner provisioning service", () => {
         now: sequenceClock("2026-07-06T06:00:00.000Z"),
       },
     );
-    const userData = (
-      provider.calls.find((call) => call.step === "create")?.input as {
-        userData?: string;
-      }
-    ).userData;
 
-    expect(result).toMatchObject({ ok: true, duplicate: false });
-    expect(userData).toContain("fallocate -l 1G /swapfile");
-    expect(userData).toContain("mkswap /swapfile");
-    expect(userData).toContain("swapon /swapfile");
-    expect(userData).toContain("/var/log/agentbay-bootstrap.log");
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "validation_failed",
+      issues: [
+        expect.objectContaining({
+          field: "AGENTBAY_DIGITALOCEAN_SIZE_SLUG",
+          message: expect.stringContaining("Swap is not counted as compatible memory"),
+        }),
+      ],
+    });
+    expect(provider.calls).toEqual([]);
   });
 
   it("polls DigitalOcean until a Droplet public IPv4 is available", async () => {
@@ -407,7 +474,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-512mb-10gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay", "cloud-runner"],
         }),
@@ -446,7 +513,7 @@ describe.sequential("runner provisioning service", () => {
       runnerBearerToken: "runner-command-token",
       runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
       region: "sfo3",
-      sizeSlug: "s-1vcpu-512mb-10gb",
+      sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "cloud-runner"],
     };
@@ -523,7 +590,7 @@ describe.sequential("runner provisioning service", () => {
       runnerBearerToken: "runner-command-token",
       runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
       region: "sfo3",
-      sizeSlug: "s-1vcpu-512mb-10gb",
+      sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "cloud-runner"],
     };
@@ -598,7 +665,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay"],
         }),
@@ -651,7 +718,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay", "agentbay-runner"],
         }),
@@ -711,7 +778,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay", "agentbay-runner"],
         }),
@@ -773,7 +840,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay"],
         }),
@@ -804,7 +871,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay"],
         }),
@@ -821,7 +888,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay"],
         }),
@@ -843,6 +910,61 @@ describe.sequential("runner provisioning service", () => {
     await expect(countRows(connection, "runner_registration_tokens")).resolves.toBe(1);
   });
 
+  it("validates incompatible duplicate submissions before provider duplicate reuse checks", async () => {
+    const firstProvider = new FakeDigitalOceanProvider({ idPrefix: "first-droplet" });
+    const secondProvider = new FakeDigitalOceanProvider({ idPrefix: "second-droplet" });
+
+    const first = await createDigitalOceanRunnerForDevelopmentUser(
+      { provider: "digitalocean", name: "First Runner" },
+      {
+        createConnection: () => connection,
+        provider: firstProvider,
+        readConfig: () => ({
+          token: "dop_v1_super_secret",
+          runnerBearerToken: "runner-command-token",
+          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          region: "sfo3",
+          sizeSlug: "s-1vcpu-2gb",
+          image: "ubuntu-24-04-x64",
+          tags: ["agentbay"],
+        }),
+        now: sequenceClock("2026-07-06T04:00:00.000Z"),
+      },
+    );
+    const second = await createDigitalOceanRunnerForDevelopmentUser(
+      { provider: "digitalocean", name: "Second Runner" },
+      {
+        createConnection: () => connection,
+        provider: secondProvider,
+        readConfig: () => ({
+          token: "dop_v1_super_secret",
+          runnerBearerToken: "runner-command-token",
+          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          region: "sfo3",
+          sizeSlug: "s-1vcpu-512mb-10gb",
+          image: "ubuntu-24-04-x64",
+          tags: ["agentbay"],
+        }),
+        now: sequenceClock("2026-07-06T04:05:00.000Z"),
+      },
+    );
+
+    expect(first).toMatchObject({ ok: true, duplicate: false });
+    expect(second).toMatchObject({
+      ok: false,
+      reason: "validation_failed",
+      issues: [
+        expect.objectContaining({
+          field: "AGENTBAY_DIGITALOCEAN_SIZE_SLUG",
+          message: expect.stringContaining("Swap is not counted as compatible memory"),
+        }),
+      ],
+    });
+    expect(secondProvider.calls).toEqual([]);
+    await expect(countRows(connection, "runners")).resolves.toBe(1);
+    await expect(countRows(connection, "runner_registration_tokens")).resolves.toBe(1);
+  });
+
   it("reuses an existing in-progress runner before requiring provider config", async () => {
     const firstProvider = new FakeDigitalOceanProvider({ idPrefix: "first-droplet" });
     const secondProvider = new FakeDigitalOceanProvider({ idPrefix: "second-droplet" });
@@ -857,7 +979,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay"],
         }),
@@ -900,6 +1022,40 @@ async function countRows(connection: DatabaseConnection, tableName: string): Pro
   `;
 
   return Number(result?.count ?? 0);
+}
+
+function invalidSnapshotConfig(): DigitalOceanProviderConfig {
+  const runnerImage = `ghcr.io/ametel01/agentbay-runner:abc123@sha256:${"a".repeat(64)}`;
+  const defaultAgentImage = `ghcr.io/ametel01/agentbay-default:abc123@sha256:${"b".repeat(64)}`;
+
+  return {
+    token: "dop_v1_super_secret",
+    providerMode: "digitalocean",
+    runnerBearerToken: "runner-command-token",
+    runnerImage,
+    region: "sfo3",
+    sizeSlug: "s-1vcpu-2gb",
+    image: "ubuntu-24-04-x64",
+    tags: ["agentbay"],
+    snapshotMode: {
+      mode: "snapshot",
+      manifestBytes: "{}",
+      signature: "bad-signature",
+      publicKeyPem: "bad-public-key",
+      expected: {
+        region: "sfo3",
+        sizeDiskGb: 50,
+        baseImageSlug: "ubuntu-24-04-x64",
+        architecture: "amd64",
+        runnerImage,
+        defaultAgentImage,
+        hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
+        sourceRepository: "ametel01/plingpling",
+        sourceRevision: "1".repeat(40),
+        now: new Date("2026-08-07T00:00:00.000Z"),
+      },
+    },
+  };
 }
 
 async function resetTables(connection: DatabaseConnection): Promise<void> {

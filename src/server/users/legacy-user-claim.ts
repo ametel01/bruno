@@ -112,18 +112,20 @@ async function claimLegacyUserInTransaction(
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext('agentbay:legacy-user-claim'))`);
   await lockClerkUserId(tx, input.clerkUserId);
 
-  const [mappedUser] = await tx
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.clerkUserId, input.clerkUserId))
-    .limit(1)
-    .for("update");
-  const legacyCandidates = await tx
-    .select({ id: users.id })
-    .from(users)
-    .where(isNull(users.clerkUserId))
-    .orderBy(asc(users.createdAt), asc(users.id))
-    .for("update");
+  const [[mappedUser], legacyCandidates] = await Promise.all([
+    tx
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.clerkUserId, input.clerkUserId))
+      .limit(1)
+      .for("update"),
+    tx
+      .select({ id: users.id })
+      .from(users)
+      .where(isNull(users.clerkUserId))
+      .orderBy(asc(users.createdAt), asc(users.id))
+      .for("update"),
+  ]);
 
   if (mappedUser) {
     if (legacyCandidates.length > 0) {

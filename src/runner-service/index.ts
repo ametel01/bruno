@@ -1,4 +1,5 @@
 import { createRunnerService } from "@/src/runner-service/server";
+import { DEFAULT_HERMES_RUNNER_MAX_AGENTS } from "@/src/runner-service/constants";
 import {
   createLocalAgentSmokeBootReadiness,
   createLocalAgentSmokeRunnerDocker,
@@ -47,7 +48,6 @@ type BunServerRuntime = {
 declare const Bun: BunServerRuntime;
 
 const DEFAULT_RUNNER_PORT = 3045;
-const DEFAULT_RUNNER_MAX_AGENTS = 3;
 const RUNNER_HOST_ENV = "AGENTBAY_RUNNER_HOST";
 const RUNNER_PORT_ENV = "AGENTBAY_RUNNER_PORT";
 const RUNNER_HEARTBEAT_INTERVAL_ENV = "AGENTBAY_RUNNER_HEARTBEAT_INTERVAL_MS";
@@ -91,7 +91,7 @@ function readHeartbeatOptions(env: NodeJS.ProcessEnv) {
     runnerId,
     credential,
     intervalMs: parsePositiveInteger(env[RUNNER_HEARTBEAT_INTERVAL_ENV], 30_000),
-    maxAgents: parsePositiveInteger(env[RUNNER_MAX_AGENTS_ENV], DEFAULT_RUNNER_MAX_AGENTS),
+    maxAgents: parsePositiveInteger(env[RUNNER_MAX_AGENTS_ENV], DEFAULT_HERMES_RUNNER_MAX_AGENTS),
   };
 }
 

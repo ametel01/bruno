@@ -54,22 +54,32 @@ describe("GET /api/internal/agent-deployments/reconcile", () => {
   });
 
   it("processes at most one item and returns only the safe summary", async () => {
-    const reconcile = vi.fn(async () => ({
-      processed: 1 as const,
-      outcome: "advanced" as const,
-    }));
+    const calls: string[] = [];
+    const sweepWakeups = vi.fn(async () => {
+      calls.push("sweep");
+      return { published: 1 };
+    });
+    const reconcile = vi.fn(async () => {
+      calls.push("reconcile");
+      return {
+        processed: 1 as const,
+        outcome: "advanced" as const,
+      };
+    });
     const response = await GET(
       new Request("http://localhost/api/internal/agent-deployments/reconcile", {
         headers: { authorization: `Bearer ${SECRET}` },
       }),
       undefined,
-      { readConfig: () => ({ ok: true, secret: SECRET }), reconcile },
+      { readConfig: () => ({ ok: true, secret: SECRET }), reconcile, sweepWakeups },
     );
 
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({ ok: true, processed: 1, outcome: "advanced" });
+    expect(sweepWakeups).toHaveBeenCalledOnce();
     expect(reconcile).toHaveBeenCalledOnce();
+    expect(calls).toEqual(["sweep", "reconcile"]);
   });
 
   it("rejects query controls and contains dependency errors without IDs or detail", async () => {

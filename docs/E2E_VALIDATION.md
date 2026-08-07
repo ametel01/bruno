@@ -5,6 +5,68 @@ artifact-backed rollback are documented in [Runner releases](RUNNER_RELEASES.md)
 
 AgentBay keeps two distinct Playwright gates. Both use the unchanged desktop and mobile projects in `playwright.config.ts`.
 
+## Agent creation latency benchmark
+
+Run the read-only benchmark against already persisted deployments:
+
+```bash
+bun run agent:creation:benchmark
+```
+
+The benchmark's SLO boundary is the persisted ready-mode deployment row: start is
+`agent_deployments.created_at`; success latency is
+`agent_deployments.completed_at - agent_deployments.created_at`; failed terminal latency is
+`agent_deployments.failed_at - agent_deployments.created_at`. Failed rows remain in total count,
+success-rate, per-run, and failure-duration evidence. Nonterminal rows are reported explicitly and
+are never counted as successes.
+
+The JSON report is versioned and deterministic. It contains:
+
+- `summary.total`, `ready`, `failed`, `incomplete`, `successRate`;
+- ready and failed terminal latency `p50Ms`, `p95Ms`, and `maxMs`;
+- `cohorts.cold_droplet`, `cohorts.existing_same_user_runner`, and `cohorts.unknown` with
+  separate counts, success rates, ready/failed p50/p95/max latency, invalid-evidence counts, and
+  stage summaries;
+- ordered per-deployment runs with deployment ID, runner ID when known, outcome, terminal timing,
+  latency cohort, total duration, stage timings, and issue counts; and
+- per-stage summaries for agent deployment-stage events and runner provisioning/bootstrap events.
+
+Percentiles use nearest-rank ordering. Rows are ordered by deployment creation timestamp and then
+deployment ID. Stage evidence is derived only from persisted timestamps: durable
+`agent.deployment_stage_changed` events, paired `runner_provisioning_events`, and bootstrapping
+events that carry an allowlisted `metadata.step`. Missing starts, missing terminal events, duplicate
+boundaries, reversed timestamps, ambiguous terminal rows, and invalid timestamps are surfaced as
+invalid evidence; they never become zero-duration successful stages.
+
+Cold-Droplet evidence requires the exact deployment operation-key runner correlation. Existing
+same-user runner reuse is reported as a separate cohort and never borrows historical runner
+provisioning stages. Unknown or ambiguous correlation is invalid evidence. Cold-path SLO decisions
+must read the `cold_droplet` cohort; faster reuse samples cannot improve cold p95.
+
+Default mode is read-only and does not create, mutate, clean up, or contact provider resources.
+Local Docker mode requires the exact zero-cloud sentinels used by `local:agent:smoke`:
+
+```bash
+AGENTBAY_DIGITALOCEAN_PROVIDER_MODE=local_docker \
+AGENTBAY_DIGITALOCEAN_TOKEN=local-docker \
+AGENTBAY_LOCAL_AGENT_SMOKE_MODE=synthetic-external-boundaries \
+bun run agent:creation:benchmark -- --mode local_docker
+```
+
+DigitalOcean-driving benchmark mode is fail-closed. It requires an explicit positive trial count,
+the `--authorize-provider-costs` flag, explicit `--candidate-size-slugs` values, and
+`AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION=authorize-digitalocean-agent-creation-benchmark`.
+Ordinary CI must not run that mode. Provider-backed p95<=60s acceptance is owned by the final SLO
+proof step after operator authorization; this read-only benchmark records evidence but does not
+claim live provider acceptance by itself.
+
+The local full-cycle smoke emits a sanitized `local_agent_cycle_creation_latency` report after the
+deployment reaches durable ready and before its database volume is removed. Reports and terminal
+completion logs project allowlisted fields only: deployment ID, runner ID when present, outcome,
+total duration, bounded stage timing/status, and issue names. They must not retain user identity,
+agent identity, raw credentials, tokens, endpoint URLs, provider resource IDs, provider responses,
+cloud-init output, arbitrary metadata, or serialized environment objects.
+
 ## Credential-free CI gate
 
 Run:

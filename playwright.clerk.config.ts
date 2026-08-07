@@ -1,12 +1,14 @@
 import { defineConfig, devices } from "@playwright/test";
+import { parsePlaywrightBaseUrl } from "@/src/testing/playwright-base-url";
 
 const port = Number(process.env.PORT ?? 3200);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${port}`;
+const baseOrigin = parsePlaywrightBaseUrl(baseURL).origin;
 const operatorUsername = process.env.AGENTBAY_OPERATOR_USERNAME?.trim();
 const operatorPassword = process.env.AGENTBAY_OPERATOR_PASSWORD;
 const httpCredentials =
   operatorUsername && operatorPassword
-    ? { username: operatorUsername, password: operatorPassword, origin: new URL(baseURL).origin }
+    ? { username: operatorUsername, password: operatorPassword, origin: baseOrigin }
     : undefined;
 
 export default defineConfig({
