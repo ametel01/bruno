@@ -471,11 +471,17 @@ async function reconcilePending(
       }
 
       if (owned.agent.runnerId) {
-        await lockRunnerPlacementCapacityInTransaction(tx, owned.agent.runnerId);
+        const locked = await lockRunnerPlacementCapacityInTransaction(tx, {
+          userId: work.userId,
+          runnerId: owned.agent.runnerId,
+        });
+        if (!locked) {
+          return { kind: "retry" as const };
+        }
         const assigned = await selectRunnerPlacementForUserInTransaction(
           tx,
           work.userId,
-          { runnerId: owned.agent.runnerId },
+          { excludeAgentId: work.agentId, runnerId: owned.agent.runnerId },
           { now: now() },
         );
 
@@ -506,7 +512,13 @@ async function reconcilePending(
       );
 
       if (placement.ok) {
-        await lockRunnerPlacementCapacityInTransaction(tx, placement.runner.id);
+        const locked = await lockRunnerPlacementCapacityInTransaction(tx, {
+          userId: work.userId,
+          runnerId: placement.runner.id,
+        });
+        if (!locked) {
+          return { kind: "retry" as const };
+        }
         const confirmed = await selectRunnerPlacementForUserInTransaction(
           tx,
           work.userId,
@@ -604,7 +616,13 @@ async function reconcileProvisioningRunner(
       return "missing" as const;
     }
 
-    await lockRunnerPlacementCapacityInTransaction(tx, runner.id);
+    const locked = await lockRunnerPlacementCapacityInTransaction(tx, {
+      userId: work.userId,
+      runnerId: runner.id,
+    });
+    if (!locked) {
+      return "missing" as const;
+    }
     const placement = await selectRunnerPlacementForUserInTransaction(
       tx,
       work.userId,

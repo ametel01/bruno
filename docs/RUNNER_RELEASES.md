@@ -25,11 +25,15 @@ compatibility; it does not imply that the disabled canary ran.
 
 Production builds also fail before migrations or compilation when ready agent creation is enabled
 without a DigitalOcean token, runner command bearer token, and immutable Git-SHA-plus-digest
-`AGENTBAY_RUNNER_IMAGE`. At runtime, agent creation reuses an eligible runner when one exists. If
-none is available, creation requires that provisioning configuration before persistence, then the
-post-response reconciler performs one initialization slice and one provisioning slice so exactly
-one durable provider attempt starts immediately. Protected cron reconciliation remains the retry
-path. Automated and local tests inject fake providers and never create a Droplet.
+`AGENTBAY_RUNNER_IMAGE`. At runtime, agent creation reuses only an already-running same-user runner
+with fresh authenticated heartbeat evidence, compatible release evidence, and spare capacity
+reserved inside the assignment transaction. Capacity is fail-closed to the minimum of computed
+CPU/physical-memory/disk limits, heartbeat, configured `AGENTBAY_RUNNER_MAX_AGENTS`, and an
+explicit measured profile cap; current hosted profiles remain capped at one. If no same-user
+capacity is available, creation requires provisioning configuration before persistence, then the
+post-response reconciler performs one initialization slice and one provisioning slice so exactly one
+durable provider attempt starts immediately. Protected cron reconciliation remains the retry path.
+Automated and local tests inject fake providers and never create a Droplet.
 
 New production Droplets skip the runner boot model canary so user creation is not delayed by a
 synthetic model round trip. Boot still verifies Docker, release identity, Hermes fixture startup,

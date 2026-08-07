@@ -4,6 +4,7 @@ import { AgentSecretKeyringError } from "@/src/server/agents/agent-secrets";
 import { listModelConnectionsForUser } from "@/src/server/agents/model-connections";
 import {
   AgentPersistenceError,
+  AgentCreateBlockedError,
   AgentRunnerAssignmentError,
   AgentRunnerProvisioningError,
   type ReadyCreateInsertBoundary,
@@ -181,6 +182,125 @@ describe("ready agent creation persistence", () => {
     });
 
     expect(result.agent.runnerId).toBe(runnerId);
+  });
+
+  it("falls back to an unassigned cold-path ready deployment when implicit reuse capacity is exhausted", async () => {
+    const runnerId = "00000000-0000-4000-8000-000000000406";
+    await seedOnlineRunner(connection, { runnerId, userId: USER_A_ID });
+    const first = await createAgentForUser(USER_A_ID, readyInput("ready-capacity-first"), {
+      createConnection: () => connection,
+      env: KEYRING_ENV,
+      now: () => NOW,
+      randomBytes: incrementalRandomBytes(),
+      telegramBotValidator: telegramValidator(),
+    });
+
+    const second = await createAgentForUser(
+      USER_A_ID,
+      readyInput("ready-capacity-second", { token: SECOND_TOKEN }),
+      {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        now: () => new Date(NOW.getTime() + 1_000),
+        randomBytes: incrementalRandomBytes(),
+        telegramBotValidator: telegramValidator("654321"),
+      },
+    );
+
+    expect(first.agent.runnerId).toBe(runnerId);
+    expect(second.agent.runnerId).toBeNull();
+    const assignedReservations = await connection.db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.runnerId, runnerId));
+    expect(assignedReservations).toHaveLength(1);
+  });
+
+  it("serializes concurrent implicit ready creates so one reserves capacity and one stays unassigned", async () => {
+    const runnerId = "00000000-0000-4000-8000-000000000408";
+    await seedOnlineRunner(connection, { runnerId, userId: USER_A_ID });
+    const secondConnection = createDatabaseConnection();
+    let releaseFirst = () => {};
+    const firstMayContinue = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let firstReserved = () => {};
+    const firstReservationReached = new Promise<void>((resolve) => {
+      firstReserved = resolve;
+    });
+
+    try {
+      const firstCreate = createAgentForUser(USER_A_ID, readyInput("ready-race-first"), {
+        createConnection: () => connection,
+        env: KEYRING_ENV,
+        now: () => NOW,
+        randomBytes: incrementalRandomBytes(),
+        telegramBotValidator: telegramValidator(),
+        readyCreateTestHooks: {
+          beforeInsertBoundary: async (boundary) => {
+            if (boundary === "config") {
+              firstReserved();
+              await firstMayContinue;
+            }
+          },
+        },
+      });
+      await firstReservationReached;
+
+      const secondCreate = createAgentForUser(
+        USER_A_ID,
+        readyInput("ready-race-second", { token: SECOND_TOKEN }),
+        {
+          createConnection: () => secondConnection,
+          env: KEYRING_ENV,
+          now: () => new Date(NOW.getTime() + 1_000),
+          randomBytes: incrementalRandomBytes(),
+          telegramBotValidator: telegramValidator("654321"),
+        },
+      );
+      releaseFirst();
+
+      const results = await Promise.all([firstCreate, secondCreate]);
+      expect(results.map((result) => result.agent.runnerId).sort()).toEqual(
+        [runnerId, null].sort(),
+      );
+      const assignedReservations = await connection.db
+        .select({ id: agents.id })
+        .from(agents)
+        .where(eq(agents.runnerId, runnerId));
+      expect(assignedReservations).toHaveLength(1);
+    } finally {
+      releaseFirst();
+      await secondConnection.close();
+    }
+  });
+
+  it("fails closed when an explicit requested runner is already at durable capacity", async () => {
+    const runnerId = "00000000-0000-4000-8000-000000000407";
+    await seedOnlineRunner(connection, { runnerId, userId: USER_A_ID });
+    await createAgentForUser(USER_A_ID, readyInput("ready-explicit-capacity-first", { runnerId }), {
+      createConnection: () => connection,
+      env: KEYRING_ENV,
+      now: () => NOW,
+      randomBytes: incrementalRandomBytes(),
+      telegramBotValidator: telegramValidator(),
+    });
+    const validator = telegramValidator("654321");
+
+    await expect(
+      createAgentForUser(
+        USER_A_ID,
+        readyInput("ready-explicit-capacity-second", { runnerId, token: SECOND_TOKEN }),
+        {
+          createConnection: () => connection,
+          env: KEYRING_ENV,
+          now: () => new Date(NOW.getTime() + 1_000),
+          randomBytes: incrementalRandomBytes(),
+          telegramBotValidator: validator,
+        },
+      ),
+    ).rejects.toBeInstanceOf(AgentCreateBlockedError);
+    expect(validator).not.toHaveBeenCalled();
   });
 
   it("creates Claude with the direct Anthropic binding and encrypted Anthropic key", async () => {

@@ -41,6 +41,8 @@ import { recordAgentEventInTransaction } from "@/src/server/events/agent-events"
 import { type AppLogger, createAppLogger } from "@/src/server/logging/logger";
 import { DIGITALOCEAN_RUNNER_KIND } from "@/src/server/runners/digitalocean-provider";
 import {
+  lockRunnerPlacementCapacityInTransaction,
+  type RunnerPlacementCapacityOptions,
   type RunnerPlacementResult,
   selectRunnerPlacementForUserInTransaction,
 } from "@/src/server/runners/runner-placement";
@@ -204,6 +206,7 @@ export type CreateAgentDependencies = {
   verifyRunnerPlacement?: VerifyRunnerPlacement;
   autoProvisionCloudRunner?: boolean;
   planMaxAgents?: number | null;
+  runnerPlacementCapacityOptions?: RunnerPlacementCapacityOptions;
   env?: Record<string, string | undefined>;
   now?: () => Date;
   randomBytes?: (size: number) => Buffer;
@@ -226,6 +229,15 @@ export type ReadyCreateInsertBoundary =
   | "secret:api_server_key"
   | "deployment"
   | "event";
+
+function runnerPlacementOptions(dependencies: CreateAgentDependencies, now?: Date) {
+  return {
+    ...(now ? { now } : {}),
+    ...(dependencies.runnerPlacementCapacityOptions
+      ? { capacityOptions: dependencies.runnerPlacementCapacityOptions }
+      : {}),
+  };
+}
 
 export class AgentPersistenceError extends Error {
   constructor(cause?: unknown) {
@@ -592,10 +604,15 @@ async function createAgentWithUserResolver(
   const templateSnapshot = getAgentTemplateSnapshot(input.templateKey);
   const initial = await connection.db.transaction(async (tx) => {
     const userId = await resolveUserId(tx);
-    const placement = await selectRunnerPlacementForUserInTransaction(tx, userId, {
-      planMaxAgents: dependencies.planMaxAgents,
-      runnerId: input.runnerId,
-    });
+    const placement = await selectRunnerPlacementForUserInTransaction(
+      tx,
+      userId,
+      {
+        planMaxAgents: dependencies.planMaxAgents,
+        runnerId: input.runnerId,
+      },
+      runnerPlacementOptions(dependencies),
+    );
 
     if (
       !placement.ok &&
@@ -632,10 +649,15 @@ async function createAgentWithUserResolver(
       attempt === 1
         ? initial.placement
         : await connection.db.transaction((tx) =>
-            selectRunnerPlacementForUserInTransaction(tx, userId, {
-              planMaxAgents: dependencies.planMaxAgents,
-              runnerId: input.runnerId,
-            }),
+            selectRunnerPlacementForUserInTransaction(
+              tx,
+              userId,
+              {
+                planMaxAgents: dependencies.planMaxAgents,
+                runnerId: input.runnerId,
+              },
+              runnerPlacementOptions(dependencies),
+            ),
           );
 
     logAgentCreate(logger, "placement_checked", {
@@ -653,7 +675,7 @@ async function createAgentWithUserResolver(
 
       if (
         placement.reason === "plan_limit_reached" ||
-        placement.reason === "runner_capacity_reached"
+        (input.runnerId && placement.reason === "runner_capacity_reached")
       ) {
         throw new AgentCreateBlockedError(placement);
       }
@@ -724,10 +746,25 @@ async function createAgentWithUserResolver(
     }
 
     const created = await connection.db.transaction(async (tx) => {
-      const finalPlacement = await selectRunnerPlacementForUserInTransaction(tx, userId, {
-        planMaxAgents: dependencies.planMaxAgents,
+      const locked = await lockRunnerPlacementCapacityInTransaction(tx, {
+        userId,
         runnerId: placementRunnerId,
       });
+      if (!locked) {
+        return {
+          ok: false,
+          placement: { ok: false, reason: "no_online_runner" } as const,
+        } as const;
+      }
+      const finalPlacement = await selectRunnerPlacementForUserInTransaction(
+        tx,
+        userId,
+        {
+          planMaxAgents: dependencies.planMaxAgents,
+          runnerId: placementRunnerId,
+        },
+        runnerPlacementOptions(dependencies),
+      );
 
       if (!finalPlacement.ok) {
         return { ok: false, placement: finalPlacement } as const;
@@ -760,8 +797,46 @@ async function createAgentWithUserResolver(
         "warn",
       );
 
-      if (reason === "plan_limit_reached" || reason === "runner_capacity_reached") {
+      if (
+        reason === "plan_limit_reached" ||
+        (input.runnerId && reason === "runner_capacity_reached")
+      ) {
         throw new AgentCreateBlockedError(created.placement);
+      }
+
+      if (autoProvisionCloudRunner) {
+        logAgentCreate(logger, "cloud_runner_needed_after_capacity_revalidation", {
+          autoProvisionCloudRunner,
+          requestedRunner: Boolean(input.runnerId),
+        });
+        return createAgentWithProvisionedRunner(connection, {
+          userId,
+          name: input.name,
+          templateKey: input.templateKey,
+          templateSnapshot,
+          insertDefaultAgentConfig,
+          insertCreatedEvent,
+          dependencies,
+          logger,
+        });
+      }
+
+      if (reason === "runner_capacity_reached") {
+        const response = await connection.db.transaction(async (tx) => {
+          await assertActiveAgentPlanAllowsInsert(tx, userId, dependencies.planMaxAgents);
+          return insertCreatedAgentInTransaction(tx, {
+            userId,
+            name: input.name,
+            templateKey: input.templateKey,
+            templateSnapshot,
+            runnerId: null,
+            insertDefaultAgentConfig,
+            insertCreatedEvent,
+          });
+        });
+
+        logAgentCreate(logger, "created_without_runner", { agentId: response.agent.id });
+        return response;
       }
 
       if (input.runnerId) {
@@ -817,7 +892,7 @@ async function createReadyAgentForUser(
         planMaxAgents: dependencies.planMaxAgents,
         runnerId: input.runnerId,
       },
-      { now },
+      runnerPlacementOptions(dependencies, now),
     ),
   );
 
@@ -828,7 +903,7 @@ async function createReadyAgentForUser(
 
     if (
       placementPrecheck.reason === "plan_limit_reached" ||
-      placementPrecheck.reason === "runner_capacity_reached"
+      (input.runnerId && placementPrecheck.reason === "runner_capacity_reached")
     ) {
       throw new AgentCreateBlockedError(placementPrecheck);
     }
@@ -952,7 +1027,7 @@ async function createReadyAgentForUser(
           planMaxAgents: dependencies.planMaxAgents,
           runnerId: input.runnerId,
         },
-        { now },
+        runnerPlacementOptions(dependencies, now),
       );
 
       let runnerId: string | null = null;
@@ -964,12 +1039,36 @@ async function createReadyAgentForUser(
 
         if (
           placement.reason === "plan_limit_reached" ||
-          placement.reason === "runner_capacity_reached"
+          (input.runnerId && placement.reason === "runner_capacity_reached")
         ) {
           throw new AgentCreateBlockedError(placement);
         }
       } else {
-        runnerId = placement.runner.id;
+        const locked = await lockRunnerPlacementCapacityInTransaction(tx, {
+          userId,
+          runnerId: placement.runner.id,
+        });
+        if (locked) {
+          const confirmed = await selectRunnerPlacementForUserInTransaction(
+            tx,
+            userId,
+            {
+              planMaxAgents: dependencies.planMaxAgents,
+              runnerId: placement.runner.id,
+            },
+            runnerPlacementOptions(dependencies, now),
+          );
+          if (confirmed.ok) {
+            runnerId = confirmed.runner.id;
+          } else if (input.runnerId) {
+            if (confirmed.reason === "runner_capacity_reached") {
+              throw new AgentCreateBlockedError(confirmed);
+            }
+            throw new AgentRunnerAssignmentError();
+          }
+        } else if (input.runnerId) {
+          throw new AgentRunnerAssignmentError();
+        }
       }
 
       const [agent] = await tx

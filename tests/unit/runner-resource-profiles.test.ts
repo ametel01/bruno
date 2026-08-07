@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DIGITALOCEAN_RUNNER_HOST_MEMORY_RESERVE_MIB,
   MAX_HERMES_DOCKER_PIDS_LIMIT,
+  computeSelectableRunnerCapacity,
   findDigitalOceanRunnerResourceProfile,
   isSupportedDigitalOceanRunnerSizeSlug,
   listDigitalOceanRunnerResourceProfiles,
@@ -162,6 +163,49 @@ describe("DigitalOcean runner resource profiles", () => {
       issues: expect.arrayContaining([
         expect.objectContaining({ field: "AGENTBAY_RUNNER_MAX_AGENTS" }),
       ]),
+    });
+  });
+
+  it("computes selectable capacity from CPU, physical memory, disk, heartbeat, configured, and measured ceilings", () => {
+    expect(
+      computeSelectableRunnerCapacity({
+        vcpus: 4,
+        memoryMiB: 8192,
+        diskGiB: 80,
+        perHermesCpu: 1,
+        perHermesMemoryMiB: 1536,
+        perHermesDiskGiB: 20,
+        hostMemoryReserveMiB: 384,
+        hostDiskReserveGiB: 10,
+        heartbeatMaxAgents: 3,
+        configuredMaxAgents: 4,
+        measuredMaxAgents: 2,
+      }),
+    ).toMatchObject({
+      cpuMaxAgents: 4,
+      memoryMaxAgents: 5,
+      diskMaxAgents: 3,
+      profileMaxAgents: 3,
+      heartbeatMaxAgents: 3,
+      configuredMaxAgents: 4,
+      measuredMaxAgents: 2,
+      selectableMaxAgents: 2,
+      failClosedReasons: [],
+    });
+
+    expect(
+      computeSelectableRunnerCapacity({
+        vcpus: 4,
+        memoryMiB: 8192,
+        diskGiB: 80,
+        perHermesCpu: 1,
+        perHermesMemoryMiB: 1536,
+        heartbeatMaxAgents: 99,
+        configuredMaxAgents: 99,
+      }),
+    ).toMatchObject({
+      selectableMaxAgents: 1,
+      failClosedReasons: expect.arrayContaining(["per_hermes_disk_gib", "measured_max_agents"]),
     });
   });
 });

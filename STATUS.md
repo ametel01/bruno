@@ -1789,3 +1789,190 @@ Status: ALL GREEN
 
 - Checker verdict: merge-ready for the minimal ready-refresh E2E synchronization change, subject to
   normal coordinator/PR/CI policy. No code-level blocker remains.
+## Completion Contract — #270
+
+- readiness: `ready` for authorization-independent repository/local implementation; `blocked` for
+  enabling hosted `maxAgents > 1`, running the real two-agent trial, or closing #270. Issue #265 is
+  still open: PR #273 merged the fail-closed profile groundwork, not the authorized larger-runner
+  measurement/default selection.
+- outcome: Reuse only already-running, same-user, fresh, compatible, transactionally reserved runner
+  capacity; otherwise leave the new ready deployment unassigned for cold on-demand provisioning
+  after its user request. Compute the allowed capacity from explicit resource/limit evidence, keep
+  every production default and unsupported profile at one, and report reuse latency separately from
+  cold-Droplet latency.
+- capacity-profile contract:
+  - Extend the canonical evaluator to return CPU, physical-memory, and disk maxima plus their minimum:
+    `floor(vCPU/perHermesCPU)`, `floor((memoryMiB-hostReserveMiB)/perHermesMemoryMiB)`, and
+    `floor((diskGiB-hostDiskReserveGiB)/perHermesDiskGiB)`. Swap and momentary unused percentages do
+    not increase capacity. Malformed, missing, zero, or unmeasured inputs fail closed to one.
+  - Final selectable capacity is the minimum of the computed maximum, authenticated heartbeat
+    `maxAgents`, configured `AGENTBAY_RUNNER_MAX_AGENTS`, and an explicitly approved measured maximum
+    for that exact size/runtime profile. Heartbeat claims never raise the profile ceiling.
+  - Preserve `DEFAULT_HERMES_RUNNER_MAX_AGENTS = 1`; align runner-service, bootstrap, env, placement,
+    local provider, and all omitted-value fallbacks to that shared default. Production accepts an
+    explicit value above one only for an exact approved profile; no current catalog profile is such
+    a profile.
+  - Repository fixtures may define an unmistakably local/test-only two-agent measurement to exercise
+    mechanics. It must not enter hosted defaults, production profile allowlists, cost claims, or SLO
+    evidence. Unsupported combinations fail before discovery, create, tagging, firewall, or any
+    other provider effect.
+- placement/authorization invariants:
+  - Candidate SQL must require exact `runners.user_id = requesting user`, nondeleted/online runner,
+    nonnull endpoint, fresh online authenticated heartbeat, compatible required release/boot/image,
+    managed provisioning status `ready`, and computed spare capacity. An explicit foreign runner ID
+    returns no candidate and neither reconciles, locks, updates, nor reveals the foreign runner.
+  - Replace the runner-ID-only capacity lock API with an owner-aware transaction helper. It accepts
+    both user ID and runner ID, proves that exact owned/nondeleted row under the transaction, then
+    takes a stable owner+runner advisory/row lock. No assignment may call a bare runner-ID lock.
+  - Selection may be optimistic, but every mutation that assigns/reserves a runner must, in the same
+    transaction: acquire the owner-aware lock, rerun the full candidate/capacity query for that exact
+    runner, insert/update the agent reservation, and retain the lock through commit. Cover ready and
+    legacy create, lifecycle Start/Restart, Hermes setup, pending deployment placement, and replacement
+    handover; preserve a consistent lock order for multi-runner replacement.
+  - Count durable reservations conservatively: nondeleted agents assigned to the runner with
+    `desired_status = 'running'`, including newly created `stopped` ready-mode agents with active
+    deployments, plus the authenticated runner-reported count; use the greater value. Stop/Delete or
+    terminal cleanup releases capacity only through its existing committed desired-state/assignment
+    mutation. Stale heartbeat counts cannot authorize a placement.
+  - Concurrent implicit creates that exhaust reuse capacity do not oversubscribe and do not return a
+    misleading capacity error: the loser commits unassigned and follows the existing cold on-demand
+    deployment path. An explicit requested runner remains fail-closed at capacity. No Droplet may be
+    created until the corresponding user create request exists; duplicate cold creation remains
+    protected by the existing operation/discovery fences.
+- concurrency/security evidence:
+  - With independent DB connections and deterministic barriers, capacity one plus two simultaneous
+    same-user creates yields exactly one existing-runner reservation and one unassigned cold path;
+    capacity two plus three creates yields exactly two reservations and one cold path. DB reservation
+    count, not heartbeat `runningAgents:0`, must decide the loser.
+  - Race create against Start, Stop/Delete, retry, and replacement handover. Assert no count exceeds
+    the computed ceiling, no stale assignment is resurrected, all acquired locks are owner-scoped,
+    and rollback exposes no half-reservation.
+  - Seed a foreign compatible runner with spare advertised capacity and race both users. Assert the
+    foreign row is absent from candidate/lock/mutation effects and each user can reserve only their
+    own runner. Include malformed/high heartbeat capacity, stale heartbeat, incompatible release,
+    unsupported profile, and explicit foreign-runner cases.
+- latency/evidence contract:
+  - Classify each deployment from durable evidence as `cold_droplet`, `existing_same_user_runner`, or
+    `unknown`. Cold requires the exact deployment operation-key runner correlation; reuse requires
+    an owned assigned runner with no matching provisioning operation. Never attach historical runner
+    provisioning events to a reuse run.
+  - Add separate counts, success rates, p50/p95/max, and stage summaries for cold and reuse cohorts.
+    The cold p95/SLO calculation consumes only `cold_droplet`; faster reuse samples can never enter,
+    relabel, or improve it. Unknown/ambiguous classification is surfaced as invalid evidence.
+  - Local two-agent smoke creates the first agent through one simulated cold Droplet and the second
+    through existing same-user capacity, reports both cohort latencies separately, then verifies
+    independent logs, limits, restart, Stop, delete, container/secret isolation, and cleanup with
+    `digitalOceanRequests:0` and `simulatedDroplets:1`.
+- non-goals / authorization boundary:
+  - No pre-provisioned Droplets, warm/ready pools, onboarding/predictive capacity, cross-user pools or
+    sharing, capacity created before a request, cold-SLO relaxation, or production default change.
+  - Do not run a real DigitalOcean/QStash request, provider size/load trial, snapshot build, workflow
+    dispatch, deployment/release, hosted-secret/config mutation, provider-backed E2E/benchmark, or any
+    billable/externally mutating action.
+- likely touchpoints:
+  - `src/server/runners/runner-resource-profiles.ts`, `src/server/env.ts`, runner-service constants /
+    server/index heartbeat metadata, cloud bootstrap, and local smoke profile plumbing.
+  - `src/server/runners/runner-placement.ts`; assignment callers in `create-agent.ts`,
+    `hermes-setup-runner.ts`, `lifecycle.ts`, `agent-deployment-reconciler.ts`, and replacement
+    handover. A schema change is not expected unless durable evidence cannot be derived safely; stop
+    and escalate before adding one.
+  - `src/server/agents/agent-creation-latency.ts`, benchmark/local-smoke reporting, README and operator
+    docs. Builder updates `PROGRESS.md`/`CHANGELOG.md` only after gates; no changelog entry if behavior
+    remains test/docs-only and hosted capacity stays one.
+- required tests / gates:
+  - Focused: runner resource profiles/env/service/bootstrap/heartbeat/placement/verification;
+    create-agent ready and legacy DB paths; deployment reconciler; Hermes setup; lifecycle/replacement;
+    user isolation; creation latency/benchmark; local smoke source and a real isolated two-agent local
+    semantic path.
+  - Run `bun run format:check`, `bun run lint`, `bun run typecheck`, `bun run test`, `bun run build`,
+    `bun run test:e2e:ci`, `bun run repro:cloud-runner`, and `git diff --check`.
+  - Serialize the enhanced `bun run local:agent:smoke` against other worktrees. It must force
+    `local_docker` plus synthetic boundaries and emit one cold/one reuse sample, one simulated
+    Droplet, zero DigitalOcean requests, verified isolation, limits, and cleanup. This is local
+    behavior evidence only, not proof that any real larger runner is supported.
+- exact blockers to hosted enablement / issue completion:
+  - At default per-Hermes limits, two agents require at least 2 vCPU and 3,456 MiB physical RAM
+    (`2 * 1,536 + 384`); the largest current catalog profile has 2 vCPU and 2,048 MiB. None supports
+    two. #265 still lacks an authorized larger-size comparison and selected measured profile.
+  - No approved per-Hermes disk budget/host disk reserve or sanitized two-agent provider load result
+    exists. Maintainer/product must select those values and an exact larger profile only after an
+    explicitly authorized trial. Until then, hosted maximum/default remains one and #270 stays open.
+  - No product decision blocks the fail-closed repository/local implementation above; it must model
+    missing measurement as unsupported rather than inventing production values.
+- do-not-touch: #269 release-attested readiness, provider-phase/stage drains except adapting lock
+  callers, protected snapshot/release workflows, hosted settings, unrelated PR #262, or
+  `/Users/alexmetelli/source/plingpling-step7-base`.
+
+## Handoff — #270 Spec to Builder
+
+- request: Implement only the authorization-independent contract in
+  `/Users/alexmetelli/source/plingpling-issue-270`: start with capacity math/default unification and
+  owner-aware lock+revalidation, then cover every assignment caller, cohort reporting, and the
+  explicit local-only two-agent fixture. Keep hosted/profile maximum one.
+- evidence: PR #273 provides the catalog and pre-effect validation. Current ready/legacy create paths
+  assign without the owner-aware capacity lock; ready-created stopped/desired-running reservations
+  are not counted; heartbeat maxAgents can exceed the physical profile; runner-service fallbacks are
+  three; latency reporting mixes/misclassifies reuse by looking for runner provisioning stages.
+- stop condition: Hand off after deterministic multi-connection races and local/full gates, or stop
+  earlier for a schema requirement, repeated failure, or any real provider/deploy/billable need.
+
+## Handoff — #270 Builder to Checker
+
+- request: Independently inspect every runner assignment mutation and prove same-user predicate plus
+  owner-aware lock/revalidation through commit; run the capacity-one/two race fixtures, unsupported-
+  profile zero-effect probes, cohort separation checks, and isolated local two-agent lifecycle.
+- stop condition: Accept repository scope only if hosted defaults remain one, cold latency excludes
+  reuse, all gates pass, and no external effect occurred. Do not mark #270 fully complete without the
+  authorized larger-runner/disk evidence listed above.
+
+## Handoff — #270 Builder Implementation to Checker
+
+- branch/worktree: `codex/issue-270-safe-capacity-reuse` in
+  `/Users/alexmetelli/source/plingpling-issue-270`.
+- commit: pending local commit at handoff time.
+- behavior implemented:
+  - selectable runner capacity is the minimum of computed CPU, physical-memory, disk, heartbeat,
+    configured `AGENTBAY_RUNNER_MAX_AGENTS`, and explicit measured profile caps; missing/unmeasured
+    evidence fails closed to one and runner-service omitted fallbacks now use the shared default one.
+  - runner placement counts durable `desired_status = 'running'` reservations, not transient runtime
+    status, and owner-aware transaction locks replace every bare runner-ID capacity lock call.
+  - ready create, legacy create, lifecycle Start, Hermes setup, pending deployment placement, runtime
+    availability, and replacement handover revalidate candidate capacity under the owner-aware lock;
+    implicit ready/legacy capacity losers commit unassigned for the cold path, while explicit
+    requested-runner capacity remains fail-closed.
+  - latency reporting classifies durable evidence as `cold_droplet`,
+    `existing_same_user_runner`, or `unknown`; cold p95 is separated from reuse p95 and reuse never
+    attaches historical runner provisioning events.
+- files changed: runner capacity/profile and placement code; ready/legacy create, lifecycle,
+  deployment reconciler, Hermes setup, runtime reconciler, replacement handover; latency reporting;
+  runner-service defaults; docs/changelog/progress; focused unit tests.
+- gate evidence:
+  - `bun run format:check` — passed.
+  - `bun run lint` — passed.
+  - `bun run typecheck` — passed.
+  - focused suite —
+    `bun scripts/run-unit-tests.ts tests/unit/runner-resource-profiles.test.ts
+    tests/unit/runner-placement.test.ts tests/unit/create-agent-ready-db.test.ts
+    tests/unit/agent-creation-latency.test.ts tests/unit/hermes-readiness.test.ts
+    tests/unit/start-agent-route.test.ts tests/unit/runner-replacement-handover.test.ts
+    tests/unit/runner-service.test.ts` — passed, 8 files / 136 tests.
+  - regression rerun —
+    `bun scripts/run-unit-tests.ts tests/unit/create-agent-db.test.ts
+    tests/unit/agent-deployment-reconciler.test.ts tests/unit/manual-runner-status.test.ts` —
+    passed, 3 files / 191 tests.
+  - `bun run test` — passed, 175 files / 1718 tests.
+  - `bun run build` — passed.
+  - `bun run test:e2e:ci` — passed, 26/26.
+  - `bun run repro:cloud-runner` — passed.
+  - `git diff --check` — passed.
+- skipped: `bun run local:agent:smoke`; coordinator did not grant the serialized smoke slot for this
+  builder run. No real DigitalOcean, QStash, hosted deploy/config/secret, workflow, snapshot, or
+  billable action was performed.
+- checker focus:
+  - inspect every assignment mutation for same-user predicate plus owner-aware lock/revalidation
+    through commit.
+  - verify hosted/default capacity remains one and no approved hosted multi-agent profile was
+    introduced.
+  - verify cold latency consumers use `cohorts.cold_droplet`, not aggregate ready latency.
+  - remaining product/provider blockers are unchanged: approved larger profile, disk budget, and
+    authorized provider-backed two-agent trial.

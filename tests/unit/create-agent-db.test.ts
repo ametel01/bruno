@@ -569,7 +569,7 @@ describe("create agent persistence", () => {
     });
     const afterFailedStart = await connection.db.select().from(agentUsagePeriods);
 
-    expect(failed).toEqual({ ok: false, reason: "runner_start_failed" });
+    expect(failed).toEqual({ ok: false, reason: "runner_capacity_reached" });
     expect(afterFailedStart).toHaveLength(1);
   });
 
@@ -674,24 +674,20 @@ describe("create agent persistence", () => {
     await expect(connection.db.select().from(agents)).resolves.toHaveLength(1);
   });
 
-  it("returns a runner-capacity blocker before creating an agent", async () => {
+  it("creates an unassigned legacy agent when implicit runner capacity is unavailable", async () => {
     const userId = await ensureDevelopmentUser(connection);
     await seedOnlineRunnerWithHeartbeat(connection, userId, {
       maxAgents: 1,
       runningAgents: 1,
     });
 
-    await expect(
-      createAgentForDevelopmentUser(
-        { name: "Blocked Capacity Agent", templateKey: "research_agent" },
-        { createConnection: () => connection },
-      ),
-    ).rejects.toMatchObject({
-      name: "AgentCreateBlockedError",
-      reason: "runner_capacity_reached",
-    } satisfies Partial<AgentCreateBlockedError>);
+    const created = await createAgentForDevelopmentUser(
+      { name: "Blocked Capacity Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
 
-    await expect(connection.db.select().from(agents)).resolves.toHaveLength(0);
+    expect(created.agent.runnerId).toBeNull();
+    await expect(connection.db.select().from(agents)).resolves.toHaveLength(1);
   });
 
   it("assigns an unassigned agent to an online runner before starting", async () => {
@@ -856,7 +852,7 @@ describe("create agent persistence", () => {
     expect(calls.filter((call) => call.startsWith("start:"))).toHaveLength(1);
   });
 
-  it("starts three agents on one runner and blocks a fourth create at capacity", async () => {
+  it("starts one fail-closed runner reservation and leaves additional implicit capacity users unassigned", async () => {
     const userId = await ensureDevelopmentUser(connection);
     const runner = await seedOnlineRunnerWithHeartbeat(connection, userId, {
       maxAgents: 3,
@@ -879,7 +875,7 @@ describe("create agent persistence", () => {
 
     const calls: string[] = [];
 
-    for (const agent of createdAgents) {
+    for (const [index, agent] of createdAgents.entries()) {
       const result = await startAgentForDevelopmentUser(agent.id, {
         createConnection: () => connection,
         manualRunnerAdapter: (assignedRunner) => {
@@ -893,13 +889,17 @@ describe("create agent persistence", () => {
         runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
       });
 
-      expect(result).toMatchObject({
-        ok: true,
-        agent: {
-          id: agent.id,
-          status: "running",
-        },
-      });
+      if (index === 0) {
+        expect(result).toMatchObject({
+          ok: true,
+          agent: {
+            id: agent.id,
+            status: "running",
+          },
+        });
+      } else {
+        expect(result).toEqual({ ok: false, reason: "runner_capacity_reached" });
+      }
     }
 
     const persistedAgents = await connection.db
@@ -912,27 +912,22 @@ describe("create agent persistence", () => {
         ),
       );
 
-    expect(
-      persistedAgents.map((agent) => ({ runnerId: agent.runnerId, status: agent.status })),
-    ).toEqual([
-      { runnerId: runner.id, status: "running" },
-      { runnerId: runner.id, status: "running" },
-      { runnerId: runner.id, status: "running" },
+    expect(new Set(persistedAgents.map((agent) => agent.runnerId))).toEqual(new Set([runner.id]));
+    expect(persistedAgents.map((agent) => agent.status).sort()).toEqual([
+      "running",
+      "stopped",
+      "stopped",
     ]);
-    expect(calls.filter((call) => call.startsWith("start:"))).toEqual(
-      createdAgents.map((agent) => `start:${agent.id}`),
-    );
+    expect(calls.filter((call) => call.startsWith("start:"))).toEqual([
+      `start:${createdAgents[0]?.id}`,
+    ]);
 
-    await expect(
-      createAgentForDevelopmentUser(
-        { name: "Fourth Capacity Agent", templateKey: "research_agent" },
-        { createConnection: () => connection },
-      ),
-    ).rejects.toMatchObject({
-      name: "AgentCreateBlockedError",
-      reason: "runner_capacity_reached",
-    } satisfies Partial<AgentCreateBlockedError>);
-    await expect(connection.db.select().from(agents)).resolves.toHaveLength(3);
+    const fourth = await createAgentForDevelopmentUser(
+      { name: "Fourth Capacity Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    expect(fourth.agent.runnerId).toBeNull();
+    await expect(connection.db.select().from(agents)).resolves.toHaveLength(4);
   });
 
   it("bootstraps one active manual runner idempotently from non-secret env values", async () => {

@@ -954,7 +954,7 @@ describe("agent deployment reconciler", () => {
     await connection.db.insert(agents).values({
       id: otherAgentId,
       userId: USER_ID,
-      runnerId: RUNNER_ID,
+      runnerId: null,
       name: "Second due agent",
       templateKey: "research_agent",
       templateVersion: "1.0.0",

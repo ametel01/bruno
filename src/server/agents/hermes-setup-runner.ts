@@ -60,7 +60,13 @@ export async function assignRunnerForHermesSetup(
       } as const;
     }
 
-    await lockRunnerPlacementCapacityInTransaction(tx, placement.runner.id);
+    const locked = await lockRunnerPlacementCapacityInTransaction(tx, {
+      userId: input.userId,
+      runnerId: placement.runner.id,
+    });
+    if (!locked) {
+      return { ok: false, reason: "no_online_runner" } as const;
+    }
     const confirmed = await selectRunnerPlacementForUserInTransaction(tx, input.userId, {
       runnerId: placement.runner.id,
     });

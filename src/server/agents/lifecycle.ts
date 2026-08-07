@@ -577,6 +577,7 @@ async function reserveRunnerForAgentStart(input: {
       .update(agents)
       .set({
         runnerId: placement.runnerId,
+        desiredStatus: "running",
         status: "starting",
         statusReason: "Start requested.",
         updatedAt: input.now,
@@ -615,7 +616,13 @@ async function selectStartRunnerPlacement(
   | Exclude<StartRunnerReservationResult, { ok: true }>
 > {
   if (input.assignedRunner) {
-    await lockRunnerPlacementCapacityInTransaction(tx, input.assignedRunner.id);
+    const locked = await lockRunnerPlacementCapacityInTransaction(tx, {
+      userId: input.userId,
+      runnerId: input.assignedRunner.id,
+    });
+    if (!locked) {
+      return { ok: false, reason: "no_online_runner" } as const;
+    }
     const placement = await selectRunnerPlacementForUserInTransaction(
       tx,
       input.userId,
@@ -656,7 +663,13 @@ async function selectStartRunnerPlacement(
   );
 
   if (placement.ok) {
-    await lockRunnerPlacementCapacityInTransaction(tx, placement.runner.id);
+    const locked = await lockRunnerPlacementCapacityInTransaction(tx, {
+      userId: input.userId,
+      runnerId: placement.runner.id,
+    });
+    if (!locked) {
+      return { ok: false, reason: "no_online_runner" } as const;
+    }
     const confirmedPlacement = await selectRunnerPlacementForUserInTransaction(
       tx,
       input.userId,

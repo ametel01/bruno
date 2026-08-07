@@ -527,12 +527,9 @@ async function reconcileReassigning(input: {
   let handover: { deploymentIds: string[]; runningAgentIds: string[] };
   try {
     handover = await input.connection.db.transaction(async (tx) => {
-      const [firstRunnerId, secondRunnerId] = [input.claim.sourceRunnerId, targetRunnerId].sort();
-      if (!firstRunnerId || !secondRunnerId) throw new Error("Replacement runner pair is invalid.");
-      await lockRunnerPlacementCapacityInTransaction(tx, firstRunnerId);
-      await lockRunnerPlacementCapacityInTransaction(tx, secondRunnerId);
       const [pair] = await tx.execute<{
         sourceUserId: string;
+        targetUserId: string;
         sourceStatus: string;
         targetStatus: string;
         targetProvisioningStatus: string | null;
@@ -542,6 +539,7 @@ async function reconcileReassigning(input: {
       }>(sql`
         select
           source_runner.user_id as "sourceUserId",
+          target_runner.user_id as "targetUserId",
           source_runner.status as "sourceStatus",
           target_runner.status as "targetStatus",
           target_runner.provisioning_status as "targetProvisioningStatus",
@@ -565,7 +563,9 @@ async function reconcileReassigning(input: {
         for update of source_runner, target_runner
       `);
       if (
-        pair?.sourceStatus !== "degraded" ||
+        !pair ||
+        pair.sourceUserId !== pair.targetUserId ||
+        pair.sourceStatus !== "degraded" ||
         pair.targetStatus !== "online" ||
         pair.targetProvisioningStatus !== "ready" ||
         pair.targetCompatibilityState !== "compatible" ||
@@ -575,6 +575,18 @@ async function reconcileReassigning(input: {
           RUNNER_HEARTBEAT_STALE_THRESHOLD_MS
       ) {
         throw new Error("Replacement handover runner pair is not fenced and ready.");
+      }
+      const lockInputs = [
+        { userId: pair.sourceUserId, runnerId: input.claim.sourceRunnerId },
+        { userId: pair.sourceUserId, runnerId: targetRunnerId },
+      ].sort((left, right) =>
+        `${left.userId}:${left.runnerId}`.localeCompare(`${right.userId}:${right.runnerId}`),
+      );
+      for (const lockInput of lockInputs) {
+        const locked = await lockRunnerPlacementCapacityInTransaction(tx, lockInput);
+        if (!locked) {
+          throw new Error("Replacement runner pair is not owned by the expected user.");
+        }
       }
       const [authority] = await tx
         .select({ id: runnerCredentials.id })
@@ -603,17 +615,18 @@ async function reconcileReassigning(input: {
           select count(*)::int as assigned
           from ${agents}
           where ${agents.runnerId} = ${input.claim.targetRunnerId}
+            and ${agents.desiredStatus} = 'running'
             and ${agents.deletedAt} is null
         `),
       ]);
-      if (assigned.length + Number(targetAssigned) > (input.config.runnerMaxAgents ?? 1)) {
+      const runningAgents = assigned.filter((agent) => agent.desiredStatus === "running");
+      if (runningAgents.length + Number(targetAssigned) > (input.config.runnerMaxAgents ?? 1)) {
         throw new Error("Replacement target no longer has sufficient capacity.");
       }
 
       if (assigned.some((agent) => agent.userId !== pair.sourceUserId)) {
         throw new Error("Replacement agent owner does not match the runner pair.");
       }
-      const runningAgents = assigned.filter((agent) => agent.desiredStatus === "running");
       const deployments = await Promise.all(
         runningAgents.map((agent) =>
           createAgentDeploymentForRunnerReplacement({

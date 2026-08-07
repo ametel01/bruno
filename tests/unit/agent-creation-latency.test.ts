@@ -120,6 +120,46 @@ describe("agent creation latency report", () => {
     expect(JSON.stringify(report)).not.toContain("providerResourceId");
   });
 
+  it("reports cold and existing-runner latency cohorts separately", () => {
+    const report = buildAgentCreationLatencyReport({
+      generatedAt: "2026-08-07T00:00:00.000Z",
+      deployments: [
+        {
+          id: "cold-slow",
+          runnerId: "runner-cold",
+          cohort: "cold_droplet",
+          requiresRunnerEvidence: true,
+          createdAt: "2026-08-07T00:00:00.000Z",
+          completedAt: "2026-08-07T00:02:00.000Z",
+          failedAt: null,
+          agentStageEvents: [],
+          runnerEvents: [],
+        },
+        {
+          id: "reuse-fast",
+          runnerId: "runner-reuse",
+          cohort: "existing_same_user_runner",
+          createdAt: "2026-08-07T00:00:10.000Z",
+          completedAt: "2026-08-07T00:00:25.000Z",
+          failedAt: null,
+          agentStageEvents: [],
+          runnerEvents: [],
+        },
+      ],
+    });
+
+    expect(report.cohorts.cold_droplet).toMatchObject({
+      total: 1,
+      ready: 1,
+      readyLatency: { p50Ms: 120_000, p95Ms: 120_000, maxMs: 120_000 },
+    });
+    expect(report.cohorts.existing_same_user_runner).toMatchObject({
+      total: 1,
+      ready: 1,
+      readyLatency: { p50Ms: 15_000, p95Ms: 15_000, maxMs: 15_000 },
+    });
+  });
+
   it("uses nearest-rank percentiles for ready latencies", () => {
     const report = buildAgentCreationLatencyReport({
       generatedAt: "2026-08-07T00:00:00.000Z",
@@ -218,6 +258,8 @@ describe("agent creation latency report", () => {
         {
           id: "deployment-missing-runner-evidence",
           runnerId: "runner-missing",
+          cohort: "cold_droplet",
+          requiresRunnerEvidence: true,
           createdAt: "2026-08-07T00:00:00.000Z",
           completedAt: "2026-08-07T00:01:00.000Z",
           failedAt: null,
@@ -550,7 +592,21 @@ describe("agent creation latency report", () => {
     expect(report.runs[0]?.stages.some((stage) => stage.name === "agent:ready")).toBe(false);
   });
 
-  it("keeps operation-derived runner correlation authoritative over assigned runner fallback", () => {
+  it("classifies cold and reuse runner correlations without falling back to historical events", () => {
+    expect(
+      resolveAgentCreationRunnerCorrelation({
+        runnerOperationId: "00000000-0000-4000-8000-000000000263",
+        operationRunnerId: "00000000-0000-4000-8000-000000000998",
+        assignedRunnerId: "00000000-0000-4000-8000-000000000999",
+      }),
+    ).toEqual({
+      reportRunnerId: "00000000-0000-4000-8000-000000000998",
+      eventRunnerId: "00000000-0000-4000-8000-000000000998",
+      eventRunnerOperationId: "00000000-0000-4000-8000-000000000263",
+      cohort: "cold_droplet",
+      mode: "operation_key",
+    });
+
     expect(
       resolveAgentCreationRunnerCorrelation({
         runnerOperationId: "00000000-0000-4000-8000-000000000263",
@@ -558,10 +614,11 @@ describe("agent creation latency report", () => {
         assignedRunnerId: "00000000-0000-4000-8000-000000000999",
       }),
     ).toEqual({
-      reportRunnerId: null,
+      reportRunnerId: "00000000-0000-4000-8000-000000000999",
       eventRunnerId: null,
-      eventRunnerOperationId: "00000000-0000-4000-8000-000000000263",
-      mode: "operation_key",
+      eventRunnerOperationId: null,
+      cohort: "existing_same_user_runner",
+      mode: "assigned_runner_reuse",
     });
 
     expect(
@@ -572,9 +629,10 @@ describe("agent creation latency report", () => {
       }),
     ).toEqual({
       reportRunnerId: "00000000-0000-4000-8000-000000000999",
-      eventRunnerId: "00000000-0000-4000-8000-000000000999",
+      eventRunnerId: null,
       eventRunnerOperationId: null,
-      mode: "assigned_runner_legacy_fallback",
+      cohort: "existing_same_user_runner",
+      mode: "assigned_runner_reuse",
     });
   });
 
@@ -668,15 +726,21 @@ describe("agent creation latency report", () => {
 
       expect(run).toMatchObject({
         deploymentId: deployment.id,
-        runnerId: null,
-        evidenceStatus: "invalid",
+        runnerId: historicalRunner.id,
+        cohort: "existing_same_user_runner",
+        evidenceStatus: "valid",
         totalDurationMs: 30_000,
       });
-      expect(creating).toMatchObject({
-        startedAt: null,
-        completedAt: null,
-        durationMs: null,
-        issues: ["missing_started", "missing_terminal"],
+      expect(creating).toBeUndefined();
+      expect(report.cohorts.existing_same_user_runner.readyLatency).toEqual({
+        p50Ms: 30_000,
+        p95Ms: 30_000,
+        maxMs: 30_000,
+      });
+      expect(report.cohorts.cold_droplet.readyLatency).toEqual({
+        p50Ms: null,
+        p95Ms: null,
+        maxMs: null,
       });
       expect(JSON.stringify(report)).not.toContain("Historical creation completed.");
     } finally {

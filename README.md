@@ -183,7 +183,7 @@ See [Authentication modes](./docs/AUTHENTICATION.md) and the
 | `AGENTBAY_HERMES_DOCKER_CPUS` | No | Docker CPU limit for each managed Hermes container; defaults to `1` and is validated against the selected runner profile before provider calls. |
 | `AGENTBAY_HERMES_DOCKER_MEMORY` | No | Docker memory limit for each managed Hermes container; defaults to `1536m`. Compatibility counts physical RAM plus the documented runner/OS reserve, never swap. |
 | `AGENTBAY_HERMES_DOCKER_PIDS_LIMIT` | No | Docker PID limit for each managed Hermes container; defaults to `256` and is propagated into runner bootstrap. |
-| `AGENTBAY_RUNNER_MAX_AGENTS` | No | Positive per-runner agent capacity; defaults to `1`. |
+| `AGENTBAY_RUNNER_MAX_AGENTS` | No | Positive per-runner agent capacity; defaults to `1`. A value above one is accepted only when the exact runner/runtime profile also has approved measured capacity and sufficient CPU, physical memory, and disk evidence; current hosted profiles remain fail-closed to one. |
 | `AGENTBAY_DIGITALOCEAN_REGION` | No | Droplet region; defaults to `sfo3`. |
 | `AGENTBAY_DIGITALOCEAN_SIZE_SLUG` | No | Droplet size; legacy default remains `s-1vcpu-512mb-10gb` until authorized evidence selects a replacement, but hosted provisioning rejects profiles that cannot fit the configured Hermes limit plus runner/OS reserve in physical memory. Use an explicit supported profile such as `s-1vcpu-2gb` for managed Hermes trials. |
 | `AGENTBAY_DIGITALOCEAN_IMAGE` | No | Droplet image; defaults to `ubuntu-24-04-x64`. |

@@ -48,6 +48,7 @@ const BOOTSTRAP_STEP_LABELS = new Set([
 const terminalLogger = createAppLogger("agent.creation.latency");
 
 export type AgentCreationLatencyBoundary = "started" | "completed" | "failed";
+export type AgentCreationLatencyCohort = "cold_droplet" | "existing_same_user_runner" | "unknown";
 
 export type AgentCreationLatencyDeploymentStageEvent = {
   fromStage: string | null;
@@ -65,6 +66,7 @@ export type AgentCreationLatencyRunnerEvent = {
 export type AgentCreationLatencyDeploymentEvidence = {
   id: string;
   runnerId: string | null;
+  cohort?: AgentCreationLatencyCohort;
   requiresRunnerEvidence?: boolean;
   createdAt: Date | string;
   completedAt: Date | string | null;
@@ -82,7 +84,8 @@ export type AgentCreationLatencyIssue =
   | "non_positive_duration"
   | "invalid_timestamp"
   | "ambiguous_terminal"
-  | "unknown_terminal";
+  | "unknown_terminal"
+  | "unknown_latency_cohort";
 
 export type AgentCreationLatencyStageTiming = {
   name: string;
@@ -99,6 +102,7 @@ export type AgentCreationLatencyRunOutcome = "ready" | "failed" | "incomplete";
 export type AgentCreationLatencyRun = {
   deploymentId: string;
   runnerId: string | null;
+  cohort: AgentCreationLatencyCohort;
   outcome: AgentCreationLatencyRunOutcome;
   evidenceStatus: "valid" | "invalid";
   createdAt: string;
@@ -118,6 +122,26 @@ export type AgentCreationLatencyStageSummary = {
   p50Ms: number | null;
   p95Ms: number | null;
   maxMs: number | null;
+};
+
+export type AgentCreationLatencyCohortSummary = {
+  total: number;
+  ready: number;
+  failed: number;
+  incomplete: number;
+  invalidEvidence: number;
+  successRate: number;
+  readyLatency: {
+    p50Ms: number | null;
+    p95Ms: number | null;
+    maxMs: number | null;
+  };
+  failedTerminalLatency: {
+    p50Ms: number | null;
+    p95Ms: number | null;
+    maxMs: number | null;
+  };
+  stageSummaries: AgentCreationLatencyStageSummary[];
 };
 
 export type AgentCreationLatencyReport = {
@@ -146,6 +170,7 @@ export type AgentCreationLatencyReport = {
       maxMs: number | null;
     };
   };
+  cohorts: Record<AgentCreationLatencyCohort, AgentCreationLatencyCohortSummary>;
   runs: AgentCreationLatencyRun[];
   stageSummaries: AgentCreationLatencyStageSummary[];
 };
@@ -172,7 +197,8 @@ export type AgentCreationRunnerCorrelation = {
   reportRunnerId: string | null;
   eventRunnerId: string | null;
   eventRunnerOperationId: string | null;
-  mode: "operation_key" | "assigned_runner_legacy_fallback" | "none";
+  cohort: AgentCreationLatencyCohort;
+  mode: "operation_key" | "assigned_runner_reuse" | "none";
 };
 
 export function buildAgentCreationLatencyReport(
@@ -194,6 +220,7 @@ export function buildAgentCreationLatencyReport(
   const ready = runs.filter((run) => run.outcome === "ready").length;
   const failed = runs.filter((run) => run.outcome === "failed").length;
   const incomplete = runs.filter((run) => run.outcome === "incomplete").length;
+  const cohorts = summarizeCohorts(runs);
 
   return {
     version: AGENT_CREATION_LATENCY_REPORT_VERSION,
@@ -213,6 +240,7 @@ export function buildAgentCreationLatencyReport(
       readyLatency: summarizeDurations(readyDurations),
       failedTerminalLatency: summarizeDurations(failedDurations),
     },
+    cohorts,
     runs,
     stageSummaries: summarizeStages(runs),
   };
@@ -250,6 +278,7 @@ export async function logAgentCreationTerminalCompletion(
   terminalLogger.info("terminal_completion", {
     deploymentId: run.deploymentId,
     runnerId: run.runnerId,
+    cohort: run.cohort,
     outcome: run.outcome,
     totalDurationMs: run.totalDurationMs,
     evidenceStatus: run.evidenceStatus,
@@ -265,24 +294,23 @@ export async function logAgentCreationTerminalCompletion(
 export function resolveAgentCreationRunnerCorrelation(
   input: AgentCreationRunnerCorrelationInput,
 ): AgentCreationRunnerCorrelation {
-  if (input.runnerOperationId) {
+  if (input.runnerOperationId && input.operationRunnerId) {
     return {
       reportRunnerId: input.operationRunnerId,
       eventRunnerId: input.operationRunnerId,
       eventRunnerOperationId: input.runnerOperationId,
+      cohort: "cold_droplet",
       mode: "operation_key",
     };
   }
 
   if (input.assignedRunnerId) {
-    // Legacy deployments that predate runner_operation_id have no immutable operation key.
-    // Only those rows may fall back to the current assigned runner; operation-backed rows
-    // above never OR assigned-runner evidence into the authoritative operation correlation.
     return {
       reportRunnerId: input.assignedRunnerId,
-      eventRunnerId: input.assignedRunnerId,
+      eventRunnerId: null,
       eventRunnerOperationId: null,
-      mode: "assigned_runner_legacy_fallback",
+      cohort: "existing_same_user_runner",
+      mode: "assigned_runner_reuse",
     };
   }
 
@@ -290,11 +318,19 @@ export function resolveAgentCreationRunnerCorrelation(
     reportRunnerId: null,
     eventRunnerId: null,
     eventRunnerOperationId: null,
+    cohort: "unknown",
     mode: "none",
   };
 }
 
 function toLatencyRun(input: AgentCreationLatencyDeploymentEvidence): AgentCreationLatencyRun {
+  const cohort =
+    input.cohort ??
+    (input.runnerEvents.length > 0
+      ? "cold_droplet"
+      : input.runnerId
+        ? "existing_same_user_runner"
+        : "unknown");
   const createdAt = toIso(input.createdAt);
   const completedAt = toIso(input.completedAt);
   const failedAt = toIso(input.failedAt);
@@ -304,13 +340,15 @@ function toLatencyRun(input: AgentCreationLatencyDeploymentEvidence): AgentCreat
     ...buildRunnerStageTimings(
       input.runnerEvents,
       input.requiresRunnerEvidence === true ||
-        input.runnerId !== null ||
+        (cohort === "cold_droplet" && input.runnerId !== null) ||
         input.runnerEvents.length > 0,
     ),
   ].sort(
     (left, right) => left.name.localeCompare(right.name) || left.source.localeCompare(right.source),
   );
-  const issueCounts = countIssues(stages, terminal.issues);
+  const cohortIssues: AgentCreationLatencyIssue[] =
+    cohort === "unknown" ? ["unknown_latency_cohort"] : [];
+  const issueCounts = countIssues(stages, [...terminal.issues, ...cohortIssues]);
   const totalDurationMs =
     createdAt && terminal.at && terminal.issues.length === 0
       ? durationMs(createdAt, terminal.at)
@@ -325,6 +363,7 @@ function toLatencyRun(input: AgentCreationLatencyDeploymentEvidence): AgentCreat
   return {
     deploymentId: input.id,
     runnerId: input.runnerId,
+    cohort,
     outcome: terminal.outcome,
     evidenceStatus,
     createdAt: createdAt ?? "invalid",
@@ -510,6 +549,44 @@ function toBoundaryEvents(event: AgentCreationLatencyRunnerEvent): BoundaryEvent
   return events;
 }
 
+function summarizeCohorts(
+  runs: readonly AgentCreationLatencyRun[],
+): Record<AgentCreationLatencyCohort, AgentCreationLatencyCohortSummary> {
+  return {
+    cold_droplet: summarizeCohort(runs, "cold_droplet"),
+    existing_same_user_runner: summarizeCohort(runs, "existing_same_user_runner"),
+    unknown: summarizeCohort(runs, "unknown"),
+  };
+}
+
+function summarizeCohort(
+  runs: readonly AgentCreationLatencyRun[],
+  cohort: AgentCreationLatencyCohort,
+): AgentCreationLatencyCohortSummary {
+  const cohortRuns = runs.filter((run) => run.cohort === cohort);
+  const ready = cohortRuns.filter((run) => run.outcome === "ready").length;
+  const failed = cohortRuns.filter((run) => run.outcome === "failed").length;
+  const incomplete = cohortRuns.filter((run) => run.outcome === "incomplete").length;
+  const readyDurations = cohortRuns
+    .filter((run) => run.outcome === "ready" && run.totalDurationMs !== null)
+    .map((run) => run.totalDurationMs as number);
+  const failedDurations = cohortRuns
+    .filter((run) => run.outcome === "failed" && run.totalDurationMs !== null)
+    .map((run) => run.totalDurationMs as number);
+
+  return {
+    total: cohortRuns.length,
+    ready,
+    failed,
+    incomplete,
+    invalidEvidence: cohortRuns.filter((run) => run.evidenceStatus === "invalid").length,
+    successRate: cohortRuns.length === 0 ? 0 : ready / cohortRuns.length,
+    readyLatency: summarizeDurations(readyDurations),
+    failedTerminalLatency: summarizeDurations(failedDurations),
+    stageSummaries: summarizeStages(cohortRuns),
+  };
+}
+
 function summarizeStages(
   runs: readonly AgentCreationLatencyRun[],
 ): AgentCreationLatencyStageSummary[] {
@@ -662,7 +739,8 @@ async function readDeploymentEvidence(
       return {
         id: row.id,
         runnerId: correlation.reportRunnerId,
-        requiresRunnerEvidence: correlation.mode !== "none",
+        cohort: correlation.cohort,
+        requiresRunnerEvidence: correlation.cohort === "cold_droplet",
         createdAt: row.createdAt,
         completedAt: row.completedAt,
         failedAt: row.failedAt,
