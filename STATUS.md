@@ -2095,3 +2095,123 @@ Status: ALL GREEN
   - verify replacement handover combines target heartbeat running count and durable desired-running
     reservations conservatively.
   - verify failed-start rollback releases the durable reservation in all non-managed failure paths.
+
+## Checker Review — #270 Cycle 2 Commit `c41e0ee`
+
+- decision: **Request changes / RED — not merge-ready**.
+- prior RED recheck:
+  - fixed: two stopped managed-ready siblings now contend on an owner-aware exact-runner capacity
+    lock, revalidate under that lock, and commit only one max-one reservation.
+  - fixed: replacement handover now calls the shared placement evaluator for the exact owned target
+    under the runner-pair locks and rejects when heartbeat/DB effective capacity cannot absorb the
+    source reservations.
+  - fixed for no-effect/setup/generic failure and successful-cleanup rollback paths: non-managed
+    Start restoration now writes the previous `desiredStatus` together with status/status reason.
+- blocking findings:
+  1. **[Spec][Correctness] Existing desired-running agents reject their own Start recovery.**
+     `src/server/agents/lifecycle.ts:611-708` revalidates assigned Start placement without
+     `excludeAgentId`, while `src/server/runners/runner-placement.ts:288-302` counts every
+     nondeleted assigned `desired_status = 'running'` row. Start explicitly accepts `error` agents,
+     and managed runtime circuit/error states retain `desired_status = 'running'`. At max one, that
+     agent is therefore counted as the occupied slot and its own recovery returns
+     `runner_capacity_reached`; the new managed Start branch at `lifecycle.ts:1121-1135` introduces
+     this regression. Thread the current agent ID through exact-runner Start revalidation and exclude
+     that existing reservation, as the deployment reconciler already does. Add managed and
+     non-managed error/desired-running max-one tests proving self-recovery succeeds while a sibling
+     reservation still blocks.
+  2. **[Spec][Correctness] A runner assignment mutation still bypasses the capacity protocol.**
+     `src/server/runners/manual-runner-persistence.ts:142-229` assigns `runnerId` after only an
+     owner/compatibility lookup and agent row lock. It does not acquire
+     `lockRunnerPlacementCapacityInTransaction`, require fresh online heartbeat/capacity, or rerun
+     exact-runner placement before the update. Because `latest_failed`/manual agents are allowed and
+     can already have `desired_status = 'running'`, concurrent/manual reassignment can reserve a
+     full runner above its effective ceiling. Put the target assignment behind the same owner-aware
+     lock plus exact-runner capacity query in the update transaction and add a desired-running,
+     max-one concurrent/full-target regression. This is the remaining counterexample to the contract
+     that every assignment/reservation mutation follows the shared protocol.
+- important evidence gap:
+  - The managed-ready Start race now has a genuine two-connection second-lock barrier. The ready
+    capacity-one create still releases the first lock immediately after merely launching the second
+    call even though a `beforeCapacityLock` hook now exists, and the capacity-two test synchronizes
+    Telegram validation rather than proving all contenders reached the capacity lock. Required
+    create-vs-Stop/Delete/retry/replacement interleavings also remain absent. Add lock-boundary
+    barriers and durable-count assertions for the contract's remaining races; passing ordinary
+    concurrent scheduling is not deterministic contention evidence.
+- independent gates:
+  - primary focused DB/unit suite — passed, 11 files / 322 tests: resource profiles, placement,
+    ready/legacy create, managed lifecycle actions, deployment reconciler, latency, Hermes readiness,
+    Start route, replacement handover, and runner service.
+  - assignment follow-up — passed, 3 files / 28 tests: runner assignment, manual runner adapter, and
+    Hermes readiness. These tests do not cover desired-running capacity during manual assignment.
+  - `bun run format:check` — passed.
+  - `bun run lint` — passed.
+  - `bun run typecheck` — passed.
+  - `git diff --check origin/main...c41e0ee` — passed.
+- unchanged positive/security evidence:
+  - effective CPU/physical-memory/disk/heartbeat/configured/measured minimum and max-one defaults
+    remain intact; no hosted capacity-above-one profile was introduced.
+  - ready/legacy create, Hermes setup, pending deployment placement, and replacement pair predicates
+    remain owner-scoped; cold and reuse latency cohorts remain separated.
+- authorization/residual scope: smoke remained forbidden and was not run. No provider, QStash,
+  deployment, workflow, snapshot, hosted configuration, billable, or other external effect occurred.
+  Even after repository fixes, keep #270 open for the approved larger profile, disk budget, and
+  authorized provider-backed two-agent trial.
+
+## Handoff — #270 Cycle 3 Builder Fixes to Checker
+
+- branch/worktree: `codex/issue-270-safe-capacity-reuse` in
+  `/Users/alexmetelli/source/plingpling-issue-270`.
+- commit: local Cycle 3 commit containing this handoff.
+- findings addressed:
+  - Existing desired-running Start recovery now threads the current agent ID through assigned and
+    confirmed Start placement revalidation, excluding the agent's own durable reservation while still
+    counting sibling desired-running reservations.
+  - Manual runner assignment for desired-running agents now acquires the owner-aware target capacity
+    lock and reruns exact-runner placement/capacity revalidation before mutating `runnerId`.
+  - Ready-create race coverage now includes simultaneous capacity-one/two create cases with
+    validation barriers, lock-attempt/acquire assertions, durable reservation-count assertions, and
+    Stop/Delete/retry/replacement interleavings.
+- tests added/updated:
+  - managed-ready and non-managed error/desired-running Start self-recovery on max-one runners, plus
+    sibling max-one blocking.
+  - desired-running manual assignment full-target fail-closed and concurrent max-one serialization.
+  - ready create vs retry/replacement reservations consuming capacity before lock, and ready create
+    after durable Stop/Delete releases.
+- gate evidence:
+  - ready race reruns —
+    `bun scripts/run-unit-tests.ts tests/unit/create-agent-ready-db.test.ts -t "serializes concurrent implicit ready creates"` —
+    passed, 1 test; and
+    `bun scripts/run-unit-tests.ts tests/unit/create-agent-ready-db.test.ts -t "allows exactly two concurrent ready creates"` —
+    passed, 1 test.
+  - targeted regressions —
+    `bun scripts/run-unit-tests.ts tests/unit/create-agent-db.test.ts -t "Start recovery"` —
+    passed, 3 tests;
+    `bun scripts/run-unit-tests.ts tests/unit/runner-assignment.test.ts -t "desired-running manual"` —
+    passed, 2 tests; and
+    `bun scripts/run-unit-tests.ts tests/unit/runner-assignment.test.ts -t "serializes concurrent desired-running manual assignments"` —
+    passed, 1 test.
+  - `bun run format:check && bun run lint && bun run typecheck && git diff --check` — passed after
+    final formatting.
+  - affected/focused suite —
+    `bun scripts/run-unit-tests.ts tests/unit/create-agent-db.test.ts tests/unit/create-agent-ready-db.test.ts tests/unit/runner-assignment.test.ts tests/unit/runner-replacement-handover.test.ts tests/unit/agent-runtime-lifecycle-actions-db.test.ts` —
+    passed, 5 files / 175 tests.
+  - reviewer focused suite —
+    `bun scripts/run-unit-tests.ts tests/unit/runner-resource-profiles.test.ts tests/unit/runner-placement.test.ts tests/unit/create-agent-ready-db.test.ts tests/unit/create-agent-db.test.ts tests/unit/agent-deployment-reconciler.test.ts tests/unit/agent-creation-latency.test.ts tests/unit/hermes-readiness.test.ts tests/unit/start-agent-route.test.ts tests/unit/runner-replacement-handover.test.ts tests/unit/runner-service.test.ts` —
+    passed, 10 files / 321 tests.
+  - assignment follow-up —
+    `bun scripts/run-unit-tests.ts tests/unit/runner-assignment.test.ts tests/unit/manual-runner-adapter.test.ts tests/unit/hermes-readiness.test.ts` —
+    passed, 3 files / 30 tests.
+  - `bun run test` — passed, 175 files / 1731 tests.
+  - `bun run build` — passed.
+  - `bun run test:e2e:ci` — passed, 26/26 tests.
+  - `bun run repro:cloud-runner` — passed.
+- skipped/forbidden:
+  - `bun run local:agent:smoke` was not run.
+  - no real DigitalOcean, QStash, hosted deploy/config/secret, workflow dispatch, snapshot build,
+    push, PR, merge, hosted `maxAgents > 1`, or billable/external action was performed.
+- checker focus:
+  - verify self-exclusion is present on every Start exact-runner placement/revalidation path.
+  - verify manual desired-running assignment cannot reserve a full target runner and returns
+    `runner_capacity_reached` instead of overassigning.
+  - verify ready-create race evidence is sufficient for the remaining Stop/Delete/retry/replacement
+    interleavings while hosted defaults remain max one.

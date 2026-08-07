@@ -549,6 +549,7 @@ async function reserveRunnerForAgentStart(input: {
 
   return await input.connection.db.transaction(async (tx) => {
     const placement = await selectStartRunnerPlacement(tx, {
+      agentId: input.agentId,
       userId: input.userId,
       assignedRunner: input.assignedRunner,
       now: input.now,
@@ -611,6 +612,7 @@ async function reserveRunnerForAgentStart(input: {
 async function selectStartRunnerPlacement(
   tx: AgentLifecycleTransaction,
   input: {
+    agentId: string;
     userId: string;
     assignedRunner: ManualRunnerRecord | null;
     now: Date;
@@ -637,6 +639,7 @@ async function selectStartRunnerPlacement(
       tx,
       input.userId,
       {
+        excludeAgentId: input.agentId,
         planMaxAgents: input.planMaxAgents,
         runnerId: input.assignedRunner.id,
       },
@@ -667,6 +670,7 @@ async function selectStartRunnerPlacement(
     tx,
     input.userId,
     {
+      excludeAgentId: input.agentId,
       planMaxAgents: input.planMaxAgents,
     },
     { now: input.now },
@@ -685,6 +689,7 @@ async function selectStartRunnerPlacement(
       tx,
       input.userId,
       {
+        excludeAgentId: input.agentId,
         planMaxAgents: input.planMaxAgents,
         runnerId: placement.runner.id,
       },
@@ -1119,6 +1124,7 @@ export async function startAgentForUser(
         }
 
         const placement = await selectStartRunnerPlacement(tx, {
+          agentId: normalizedAgentId,
           userId,
           assignedRunner,
           now,

@@ -937,6 +937,135 @@ describe("create agent persistence", () => {
     }
   });
 
+  it("allows managed-ready Start recovery to reuse its own max-one desired-running reservation", async () => {
+    const userId = await ensureDevelopmentUser(connection);
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, userId, {
+      maxAgents: 1,
+      runningAgents: 0,
+    });
+    const agent = await createAgentForDevelopmentUser(
+      { name: "Managed Self Recovery Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    await seedManagedRuntime(connection, userId, agent.agent.id);
+    await connection.db
+      .update(agents)
+      .set({
+        runnerId: runner.id,
+        status: "error",
+        desiredStatus: "running",
+        statusReason: "Runtime observation failed.",
+      })
+      .where(eq(agents.id, agent.agent.id));
+    const scheduled: string[] = [];
+
+    const result = await startAgentForDevelopmentUser(agent.agent.id, {
+      createConnection: () => connection,
+      scheduleRuntimeReconcile: (agentId) => scheduled.push(agentId),
+    });
+    const [persisted] = await connection.db
+      .select({
+        runnerId: agents.runnerId,
+        status: agents.status,
+        desiredStatus: agents.desiredStatus,
+      })
+      .from(agents)
+      .where(eq(agents.id, agent.agent.id))
+      .limit(1);
+
+    expect(result).toMatchObject({ ok: true, state: "accepted" });
+    expect(persisted).toEqual({
+      runnerId: runner.id,
+      status: "starting",
+      desiredStatus: "running",
+    });
+    expect(scheduled).toEqual([agent.agent.id]);
+  });
+
+  it("allows non-managed Start recovery to reuse its own max-one desired-running reservation", async () => {
+    const agent = await createAgentForDevelopmentUser(
+      { name: "Manual Self Recovery Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, agent.agent.userId, {
+      maxAgents: 1,
+      runningAgents: 0,
+    });
+    await connection.db
+      .update(agents)
+      .set({
+        runnerId: runner.id,
+        status: "error",
+        desiredStatus: "running",
+        statusReason: "Manual runner failed.",
+      })
+      .where(eq(agents.id, agent.agent.id));
+    const calls: string[] = [];
+
+    const result = await startAgentForDevelopmentUser(agent.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: () => createManualLifecycleRunnerStub(calls, { runnerId: runner.id }),
+      runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
+    });
+    const [persisted] = await connection.db
+      .select({
+        runnerId: agents.runnerId,
+        status: agents.status,
+        desiredStatus: agents.desiredStatus,
+      })
+      .from(agents)
+      .where(eq(agents.id, agent.agent.id))
+      .limit(1);
+
+    expect(result).toMatchObject({ ok: true, agent: { status: "running" } });
+    expect(persisted).toEqual({
+      runnerId: runner.id,
+      status: "running",
+      desiredStatus: "running",
+    });
+    expect(calls.filter((call) => call.startsWith("start:"))).toHaveLength(1);
+  });
+
+  it("blocks desired-running Start recovery when a sibling already reserves the max-one runner", async () => {
+    const self = await createAgentForDevelopmentUser(
+      { name: "Blocked Self Recovery Agent", templateKey: "research_agent" },
+      { createConnection: () => connection },
+    );
+    const sibling = await createAgentForDevelopmentUser(
+      { name: "Sibling Reservation Agent", templateKey: "github_issue_agent" },
+      { createConnection: () => connection },
+    );
+    const runner = await seedOnlineRunnerWithHeartbeat(connection, self.agent.userId, {
+      maxAgents: 1,
+      runningAgents: 0,
+    });
+    await connection.db
+      .update(agents)
+      .set({ runnerId: runner.id, status: "error", desiredStatus: "running" })
+      .where(eq(agents.id, self.agent.id));
+    await connection.db
+      .update(agents)
+      .set({ runnerId: runner.id, status: "running", desiredStatus: "running" })
+      .where(eq(agents.id, sibling.agent.id));
+    const calls: string[] = [];
+
+    const result = await startAgentForDevelopmentUser(self.agent.id, {
+      createConnection: () => connection,
+      manualRunnerAdapter: () => createManualLifecycleRunnerStub(calls, { runnerId: runner.id }),
+      runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
+    });
+    const reservations = await connection.db
+      .select({ id: agents.id, desiredStatus: agents.desiredStatus })
+      .from(agents)
+      .where(eq(agents.runnerId, runner.id));
+
+    expect(result).toEqual({ ok: false, reason: "runner_capacity_reached" });
+    expect(
+      reservations.filter((reservation) => reservation.desiredStatus === "running"),
+    ).toHaveLength(2);
+    expect(calls).toEqual([]);
+  });
+
   it("restores desired status when a non-managed runner start fails after reservation", async () => {
     const created = await createAgentForDevelopmentUser(
       { name: "Failed Reservation Rollback Agent", templateKey: "research_agent" },
