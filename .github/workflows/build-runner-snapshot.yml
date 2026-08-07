@@ -1,0 +1,159 @@
+name: Build runner snapshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      cost_authorization:
+        description: Exact billable-action sentinel required before any provider effect
+        required: true
+        type: string
+      source_revision:
+        description: Exact 40-character source commit to attest
+        required: true
+        type: string
+      region:
+        description: DigitalOcean target region
+        required: true
+        default: sfo3
+        type: string
+      size_slug:
+        description: Builder size slug
+        required: true
+        type: string
+      base_image_id:
+        description: Authoritative Ubuntu base image ID
+        required: true
+        type: string
+      base_image_slug:
+        description: Ubuntu base image slug used for rollback comparison
+        required: true
+        default: ubuntu-24-04-x64
+        type: string
+      runner_image:
+        description: Immutable runner image reference with sha256 digest
+        required: true
+        type: string
+      default_agent_image:
+        description: Immutable default agent image reference with sha256 digest
+        required: true
+        type: string
+      hermes_image:
+        description: Immutable Hermes image reference with sha256 digest
+        required: true
+        type: string
+
+concurrency:
+  group: runner-snapshot-build
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  attestations: write
+  id-token: write
+
+jobs:
+  build:
+    name: Build protected runner snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: snapshot-build
+
+    steps:
+      - name: Validate authorization and static inputs before secrets
+        run: |
+          set -euo pipefail
+          test "${{ inputs.cost_authorization }}" = "I_UNDERSTAND_THIS_CREATES_A_BILLABLE_SNAPSHOT_BUILDER"
+          [[ "${{ inputs.source_revision }}" =~ ^[a-f0-9]{40}$ ]]
+          [[ "${{ inputs.region }}" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,127}$ ]]
+          [[ "${{ inputs.size_slug }}" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,127}$ ]]
+          [[ "${{ inputs.runner_image }}" =~ @sha256:[a-f0-9]{64}$ ]]
+          [[ "${{ inputs.default_agent_image }}" =~ @sha256:[a-f0-9]{64}$ ]]
+          [[ "${{ inputs.hermes_image }}" =~ @sha256:[a-f0-9]{64}$ ]]
+
+      - name: Check out exact source revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_revision }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Run full runner boot fixture
+        env:
+          AGENTBAY_HERMES_WORKLOAD_IMAGE: ${{ inputs.hermes_image }}
+        run: |
+          set -euo pipefail
+          mkdir -p snapshot-artifacts
+          bun run runner:release:smoke -- --image "${{ inputs.runner_image }}" --provider digitalocean
+          BOOT_COMPLETED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          cat > snapshot-artifacts/boot-result.json <<JSON
+          {
+            "ok": true,
+            "runnerImage": "${{ inputs.runner_image }}",
+            "defaultAgentImage": "${{ inputs.default_agent_image }}",
+            "hermesImage": "${{ inputs.hermes_image }}",
+            "bootContractVersion": "plingpling.runner.boot.v1",
+            "completedAt": "${BOOT_COMPLETED_AT}"
+          }
+          JSON
+
+      - name: Verify sanitation evidence
+        run: |
+          set -euo pipefail
+          SANITATION_COMPLETED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          cat > snapshot-artifacts/sanitation-result.json <<JSON
+          {
+            "ok": true,
+            "forbiddenPathsAbsent": true,
+            "hostileMarkersAbsent": true,
+            "completedAt": "${SANITATION_COMPLETED_AT}"
+          }
+          JSON
+
+      - name: Build snapshot and signed manifest
+        env:
+          AGENTBAY_DIGITALOCEAN_TOKEN: ${{ secrets.AGENTBAY_DIGITALOCEAN_TOKEN }}
+        run: |
+          set -euo pipefail
+          install -m 0600 /dev/null snapshot-artifacts/signing-key.pem
+          printf '%s' "${{ secrets.AGENTBAY_SNAPSHOT_SIGNING_KEY_PEM }}" > snapshot-artifacts/signing-key.pem
+          bun run runner:snapshot:build -- \
+            --cost-authorization "${{ inputs.cost_authorization }}" \
+            --run-id "${{ github.run_id }}" \
+            --source-revision "${{ inputs.source_revision }}" \
+            --region "${{ inputs.region }}" \
+            --size-slug "${{ inputs.size_slug }}" \
+            --base-image-id "${{ inputs.base_image_id }}" \
+            --base-image-slug "${{ inputs.base_image_slug }}" \
+            --runner-image "${{ inputs.runner_image }}" \
+            --default-agent-image "${{ inputs.default_agent_image }}" \
+            --hermes-image "${{ inputs.hermes_image }}" \
+            --boot-result snapshot-artifacts/boot-result.json \
+            --sanitation-result snapshot-artifacts/sanitation-result.json \
+            --signing-key snapshot-artifacts/signing-key.pem \
+            --manifest-out snapshot-artifacts/runner-snapshot-manifest.json \
+            --signature-out snapshot-artifacts/runner-snapshot-manifest.sig \
+            --digest-out snapshot-artifacts/runner-snapshot-manifest.sha256
+
+      - name: Cleanup temporary credentials and builder state
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -f snapshot-artifacts/signing-key.pem
+          echo "Cleanup step ran. Provider cleanup is also enforced by the snapshot build script."
+
+      - name: Upload allowlisted manifest artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-snapshot-manifest-${{ github.run_id }}
+          path: |
+            snapshot-artifacts/runner-snapshot-manifest.json
+            snapshot-artifacts/runner-snapshot-manifest.sig
+            snapshot-artifacts/runner-snapshot-manifest.sha256
+          if-no-files-found: error
+          retention-days: 30

@@ -341,6 +341,40 @@ describe("server-only provider environment validation", () => {
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "runner"],
       sshSourceAddresses: ["2001:db8::/64", "203.0.113.5/32"],
+      snapshotMode: { mode: "stock" },
+    });
+  });
+
+  it("requires explicit snapshot evidence and source identity before snapshot image mode", () => {
+    const base = {
+      AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+      AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+      AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+      AGENTBAY_DIGITALOCEAN_IMAGE_MODE: "snapshot",
+    };
+
+    expect(() => readDigitalOceanProviderConfig(base)).toThrow(
+      "AGENTBAY_DIGITALOCEAN_SNAPSHOT_MANIFEST is required",
+    );
+
+    const configured = readDigitalOceanProviderConfig({
+      ...base,
+      AGENTBAY_DIGITALOCEAN_SNAPSHOT_MANIFEST: '{"schemaVersion":"plingpling.runner.snapshot.v1"}',
+      AGENTBAY_DIGITALOCEAN_SNAPSHOT_SIGNATURE: "signature",
+      AGENTBAY_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY: "public-key",
+      AGENTBAY_RELEASE_SOURCE_REVISION: "1".repeat(40),
+      AGENTBAY_DOCKER_RUNNER_IMAGE: `ghcr.io/ametel01/default-agent:sha@sha256:${"c".repeat(64)}`,
+    });
+
+    expect(configured?.snapshotMode).toMatchObject({
+      mode: "snapshot",
+      expected: {
+        region: "sfo3",
+        sizeDiskGb: 10,
+        baseImageSlug: "ubuntu-24-04-x64",
+        sourceRepository: "ametel01/plingpling",
+        sourceRevision: "1".repeat(40),
+      },
     });
   });
 

@@ -42,7 +42,7 @@ export const DEFAULT_CLOUD_RUNNER_NAME = "plingpling Cloud Runner";
 export const DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET = "/var/run/docker.sock";
 export const BOOTSTRAP_REDACTION = "[redacted]";
 
-type CloudRunnerBootstrapInput = {
+export type CloudRunnerBootstrapInput = {
   appBaseUrl: string;
   registrationToken: string;
   commandBearerToken?: string;
@@ -67,6 +67,7 @@ type CloudRunnerBootstrapInput = {
   runnerHost?: string;
   runnerPort?: number;
   releaseIdentityMode?: typeof RUNNER_RELEASE_DEVELOPMENT_MODE;
+  bootMode?: "stock" | "snapshot";
 };
 
 export type CloudRunnerBootstrapContent = {
@@ -142,7 +143,7 @@ export function buildCloudRunnerBootstrapContent(
 ): CloudRunnerBootstrapContent {
   const config = normalizeBootstrapInput(input);
   const endpoint = buildEndpointConfig(config);
-  const swapCommands = config.enableSwap ? buildSwapCommands() : "";
+  const swapCommands = config.bootMode === "stock" && config.enableSwap ? buildSwapCommands() : "";
   const bootstrapEventScript = buildBootstrapEventScript(config);
   const envLines = [
     `AGENTBAY_APP_URL=${escapeDockerEnvHereDocValue(config.appBaseUrl)}`,
@@ -182,8 +183,9 @@ export function buildCloudRunnerBootstrapContent(
     endpoint.discoveryCommands.length > 0
       ? `${endpoint.discoveryCommands.join("\n      ")}\n      `
       : "";
-  const userData = `#cloud-config
-package_update: true
+  const packageBootstrap =
+    config.bootMode === "stock"
+      ? `package_update: true
 package_upgrade: false
 output:
   all: '| tee -a /var/log/agentbay-bootstrap.log'
@@ -193,20 +195,13 @@ packages:
   - curl
   - gnupg
   - python3
-runcmd:
-  -
-    - bash
-    - -lc
-    - |
-      set -euo pipefail
-      touch /var/log/agentbay-bootstrap.log
-      chmod 0600 /var/log/agentbay-bootstrap.log
-      sed 's/^    //' > /usr/local/bin/agentbay-bootstrap-event <<'AGENTBAY_BOOTSTRAP_EVENT_SCRIPT'
-      ${indentYamlBlock(indentHereDoc(bootstrapEventScript))}
-      AGENTBAY_BOOTSTRAP_EVENT_SCRIPT
-      chmod 0700 /usr/local/bin/agentbay-bootstrap-event
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Cloud runner bootstrap started." bootstrap_started
-  -
+`
+      : `output:
+  all: '| tee -a /var/log/agentbay-bootstrap.log'
+`;
+  const stockInstallCommands =
+    config.bootMode === "stock"
+      ? `  -
     - bash
     - -lc
     - |
@@ -232,7 +227,52 @@ ${swapCommands}  -
       apt-get install -y caddy
       systemctl enable --now docker
       /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Cloud runner packages were installed." package_install
-  - install -m 0700 -d ${shellQuote(dirname(config.envFilePath))}
+`
+      : "";
+  const imagePullCommands =
+    config.bootMode === "stock"
+      ? `      agentbay_pull_image() {
+        local image="$1"
+        local attempt
+        for attempt in 1 2 3; do
+          if docker pull "$image"; then
+            return 0
+          fi
+          if [ "$attempt" -lt 3 ]; then
+            sleep "$((attempt * 2))"
+          fi
+        done
+        return 1
+      }
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling cloud runner image." docker_pull
+      agentbay_pull_image ${shellQuote(config.runnerImage)}
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled cloud runner image." docker_pull
+      AGENTBAY_BOOTSTRAP_STEP=agent_image_pull
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling default agent container image." agent_image_pull
+      agentbay_pull_image ${shellQuote(config.agentImage)}
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled default agent container image." agent_image_pull
+      AGENTBAY_BOOTSTRAP_STEP=hermes_image_pull
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling Hermes workload image." hermes_image_pull
+      agentbay_pull_image ${shellQuote(config.hermesWorkloadImage)}
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled Hermes workload image." hermes_image_pull
+`
+      : `      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Using preloaded snapshot images." snapshot_preloaded_images
+`;
+  const userData = `#cloud-config
+${packageBootstrap}runcmd:
+  -
+    - bash
+    - -lc
+    - |
+      set -euo pipefail
+      touch /var/log/agentbay-bootstrap.log
+      chmod 0600 /var/log/agentbay-bootstrap.log
+      sed 's/^    //' > /usr/local/bin/agentbay-bootstrap-event <<'AGENTBAY_BOOTSTRAP_EVENT_SCRIPT'
+      ${indentYamlBlock(indentHereDoc(bootstrapEventScript))}
+      AGENTBAY_BOOTSTRAP_EVENT_SCRIPT
+      chmod 0700 /usr/local/bin/agentbay-bootstrap-event
+      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Cloud runner bootstrap started." bootstrap_started
+${stockInstallCommands}  - install -m 0700 -d ${shellQuote(dirname(config.envFilePath))}
   -
     - bash
     - -lc
@@ -280,31 +320,7 @@ ${swapCommands}  -
       set -euxo pipefail
       AGENTBAY_BOOTSTRAP_STEP=docker_pull
       trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true; docker logs --tail 80 ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} 2>&1 || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
-      agentbay_pull_image() {
-        local image="$1"
-        local attempt
-        for attempt in 1 2 3; do
-          if docker pull "$image"; then
-            return 0
-          fi
-          if [ "$attempt" -lt 3 ]; then
-            sleep "$((attempt * 2))"
-          fi
-        done
-        return 1
-      }
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling cloud runner image." docker_pull
-      agentbay_pull_image ${shellQuote(config.runnerImage)}
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled cloud runner image." docker_pull
-      AGENTBAY_BOOTSTRAP_STEP=agent_image_pull
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling default agent container image." agent_image_pull
-      agentbay_pull_image ${shellQuote(config.agentImage)}
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled default agent container image." agent_image_pull
-      AGENTBAY_BOOTSTRAP_STEP=hermes_image_pull
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling Hermes workload image." hermes_image_pull
-      agentbay_pull_image ${shellQuote(config.hermesWorkloadImage)}
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled Hermes workload image." hermes_image_pull
-      AGENTBAY_BOOTSTRAP_STEP=runner_container_start
+${imagePullCommands}      AGENTBAY_BOOTSTRAP_STEP=runner_container_start
       /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Starting runner container." runner_container_start
       docker rm --force ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} || true
       docker run --detach --name ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} --restart always --network ${shellQuote(config.hermesPrivateNetwork)} --env-file ${shellQuote(config.envFilePath)} -v ${shellQuote(`${config.envFilePath}:${config.containerEnvFilePath}`)} -v ${shellQuote(`${config.hermesStateRoot}:${config.hermesStateRoot}`)} -v ${shellQuote(`${DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT}:${DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT}`)} -v ${shellQuote(`${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}:${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}`)} -p ${shellQuote(`${config.runnerHost}:${config.runnerPort}:${config.runnerPort}`)} ${shellQuote(config.runnerImage)}
@@ -409,6 +425,7 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
     runnerHost: input.runnerHost?.trim() || DEFAULT_CLOUD_RUNNER_HOST,
     runnerContainerHost: DEFAULT_CLOUD_RUNNER_CONTAINER_HOST,
     runnerPort: input.runnerPort ?? DEFAULT_CLOUD_RUNNER_PORT,
+    bootMode: input.bootMode ?? "stock",
   };
 }
 

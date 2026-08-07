@@ -66,7 +66,28 @@ export type DigitalOceanProviderErrorReason =
   | "cleanup_failed"
   | "resource_not_found"
   | "ssh_key_lookup_failed"
-  | "ssh_key_create_failed";
+  | "ssh_key_create_failed"
+  | "image_lookup_failed"
+  | "action_failed"
+  | "action_outcome_unknown";
+
+export type DigitalOceanActionStatus = "in-progress" | "completed" | "errored";
+
+export type DigitalOceanAction = {
+  id: string;
+  status: DigitalOceanActionStatus;
+  type: string;
+  resourceId: string;
+};
+
+export type DigitalOceanImageAvailability = {
+  id: string;
+  name: string | null;
+  regions: string[];
+  minDiskSizeGb: number;
+  architecture: "amd64" | "unknown";
+  status: "available" | "pending" | "deleted" | "unknown";
+};
 
 export type DigitalOceanOwnedSetExpectation = {
   operationTag: string;
@@ -148,6 +169,23 @@ export type DigitalOceanReadInput = {
   providerResourceId: string;
 };
 
+export type DigitalOceanReadImageInput = {
+  imageId: string;
+};
+
+export type DigitalOceanActionInput = {
+  providerResourceId: string;
+};
+
+export type DigitalOceanSnapshotInput = {
+  providerResourceId: string;
+  name: string;
+};
+
+export type DigitalOceanDeleteImageInput = {
+  imageId: string;
+};
+
 export type DigitalOceanCreateSshKeyInput = {
   name: string;
   publicKey: string;
@@ -206,6 +244,26 @@ export interface DigitalOceanProvider {
     input: DigitalOceanCleanupInput,
     context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanResource>>;
+  powerOffResource?(
+    input: DigitalOceanActionInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanAction>>;
+  snapshotResource?(
+    input: DigitalOceanSnapshotInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanAction>>;
+  readAction?(
+    input: { actionId: string },
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanAction>>;
+  readImageAvailability?(
+    input: DigitalOceanReadImageInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanImageAvailability>>;
+  deleteImage?(
+    input: DigitalOceanDeleteImageInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<{ deleted: true }>>;
 }
 
 type FakeProviderStep = "create" | "tag" | "firewall" | "cleanup";
@@ -243,6 +301,27 @@ export type DigitalOceanSdkClient = {
         get?(
           context?: DigitalOceanProviderRequestContext,
         ): Promise<DigitalOceanDropletCreateResponse | undefined>;
+        delete(context?: DigitalOceanProviderRequestContext): Promise<void>;
+        actions?: {
+          post(
+            body: DigitalOceanDropletActionBody,
+            context?: DigitalOceanProviderRequestContext,
+          ): Promise<DigitalOceanActionResponse | undefined>;
+        };
+      };
+    };
+    actions?: {
+      byAction_id(id: number): {
+        get(
+          context?: DigitalOceanProviderRequestContext,
+        ): Promise<DigitalOceanActionReadResponse | undefined>;
+      };
+    };
+    images?: {
+      byImage_id(id: number): {
+        get(
+          context?: DigitalOceanProviderRequestContext,
+        ): Promise<DigitalOceanImageReadResponse | undefined>;
         delete(context?: DigitalOceanProviderRequestContext): Promise<void>;
       };
     };
@@ -299,6 +378,18 @@ type DigitalOceanDropletCreateBody = {
 
 type DigitalOceanDropletCreateResponse = {
   droplet?: DigitalOceanApiDroplet | null;
+};
+
+type DigitalOceanDropletActionBody = { type: "power_off" } | { type: "snapshot"; name: string };
+
+type DigitalOceanActionResponse = {
+  action?: DigitalOceanApiAction | null;
+};
+
+type DigitalOceanActionReadResponse = DigitalOceanActionResponse;
+
+type DigitalOceanImageReadResponse = {
+  image?: DigitalOceanApiImage | null;
 };
 
 type DigitalOceanDropletsListResponse = {
@@ -367,6 +458,24 @@ type DigitalOceanApiDroplet = {
   tags?: string[] | null;
   createdAt?: Date | string | null;
   created_at?: Date | string | null;
+};
+
+type DigitalOceanApiAction = {
+  id?: number | string | null;
+  status?: string | null;
+  type?: string | null;
+  resourceId?: number | string | null;
+  resource_id?: number | string | null;
+};
+
+type DigitalOceanApiImage = {
+  id?: number | string | null;
+  name?: string | null;
+  regions?: string[] | null;
+  minDiskSize?: number | null;
+  min_disk_size?: number | null;
+  distribution?: string | null;
+  status?: string | null;
 };
 
 type DigitalOceanFirewallBody = {
@@ -916,6 +1025,152 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
     return { ok: true, value: cloneResource(resource) };
   }
 
+  async powerOffResource(
+    input: DigitalOceanActionInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanAction>> {
+    return await this.#runDropletAction(input.providerResourceId, { type: "power_off" }, context);
+  }
+
+  async snapshotResource(
+    input: DigitalOceanSnapshotInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanAction>> {
+    return await this.#runDropletAction(
+      input.providerResourceId,
+      { type: "snapshot", name: input.name },
+      context,
+    );
+  }
+
+  async readAction(
+    input: { actionId: string },
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanAction>> {
+    const actionId = Number(input.actionId);
+
+    const actionsClient = this.#client.v2.actions;
+
+    if (!Number.isSafeInteger(actionId) || !actionsClient) {
+      return {
+        ok: false,
+        reason: "action_failed",
+        message: "DigitalOcean action lookup was unavailable.",
+      };
+    }
+
+    const response = await runSdkStep(
+      "action_failed",
+      () => actionsClient.byAction_id(actionId).get(context),
+      context,
+      "action_outcome_unknown",
+    );
+
+    if (!response.ok) return response;
+    const action = apiActionToAction(response.value?.action);
+
+    return action
+      ? { ok: true, value: action }
+      : { ok: false, reason: "action_failed", message: "DigitalOcean action response invalid." };
+  }
+
+  async readImageAvailability(
+    input: DigitalOceanReadImageInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanImageAvailability>> {
+    const imageId = Number(input.imageId);
+
+    const imagesClient = this.#client.v2.images;
+
+    if (!Number.isSafeInteger(imageId) || !imagesClient) {
+      return {
+        ok: false,
+        reason: "image_lookup_failed",
+        message: "DigitalOcean image lookup was unavailable.",
+      };
+    }
+
+    const response = await runSdkStep(
+      "image_lookup_failed",
+      () => imagesClient.byImage_id(imageId).get(context),
+      context,
+    );
+
+    if (!response.ok) return response;
+    const image = apiImageToImageAvailability(response.value?.image);
+
+    return image
+      ? { ok: true, value: image }
+      : { ok: false, reason: "image_lookup_failed", message: "DigitalOcean image invalid." };
+  }
+
+  async deleteImage(
+    input: DigitalOceanDeleteImageInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<{ deleted: true }>> {
+    const imageId = Number(input.imageId);
+
+    const imagesClient = this.#client.v2.images;
+
+    if (!Number.isSafeInteger(imageId) || !imagesClient) {
+      return {
+        ok: false,
+        reason: "cleanup_failed",
+        message: "DigitalOcean image deletion was unavailable.",
+      };
+    }
+
+    const response = await runSdkStep(
+      "cleanup_failed",
+      () => imagesClient.byImage_id(imageId).delete(context),
+      context,
+    );
+
+    return response.ok ? { ok: true, value: { deleted: true } } : response;
+  }
+
+  async #runDropletAction(
+    providerResourceId: string,
+    body: DigitalOceanDropletActionBody,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanAction>> {
+    const dropletId = Number(providerResourceId);
+
+    if (!Number.isSafeInteger(dropletId)) {
+      return {
+        ok: false,
+        reason: "action_failed",
+        message: "DigitalOcean Droplet ID was not usable for action creation.",
+      };
+    }
+
+    const dropletClient = this.#client.v2.droplets.byDroplet_id(dropletId);
+
+    const dropletActions = dropletClient.actions;
+
+    if (!dropletActions) {
+      return {
+        ok: false,
+        reason: "action_failed",
+        message: "DigitalOcean Droplet action creation was unavailable.",
+      };
+    }
+
+    const response = await runSdkStep(
+      "action_failed",
+      () => dropletActions.post(body, context),
+      context,
+      "action_outcome_unknown",
+    );
+
+    if (!response.ok) return response;
+    const action = apiActionToAction(response.value?.action);
+
+    return action
+      ? { ok: true, value: action }
+      : { ok: false, reason: "action_failed", message: "DigitalOcean action response invalid." };
+  }
+
   async #resolveResource(
     providerResourceId: string,
     context?: DigitalOceanProviderRequestContext,
@@ -948,6 +1203,11 @@ export class FakeDigitalOceanProvider
     | { step: "observeOwnedSet"; input: DigitalOceanOwnedSetExpectation }
     | { step: "deleteFirewall"; input: DigitalOceanOwnedSetExpectation }
     | { step: "deleteDroplet"; input: DigitalOceanOwnedSetExpectation }
+    | { step: "powerOff"; input: DigitalOceanActionInput }
+    | { step: "snapshot"; input: DigitalOceanSnapshotInput }
+    | { step: "readAction"; input: { actionId: string } }
+    | { step: "readImage"; input: DigitalOceanReadImageInput }
+    | { step: "deleteImage"; input: DigitalOceanDeleteImageInput }
   > = [];
 
   #counter = 0;
@@ -1263,6 +1523,93 @@ export class FakeDigitalOceanProvider
     return { ok: true, value: cloneResource(resource) };
   }
 
+  async powerOffResource(
+    input: DigitalOceanActionInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanAction>> {
+    const aborted = abortedProviderResult<DigitalOceanAction>("action_outcome_unknown", context);
+    if (aborted) return aborted;
+    this.calls.push({ step: "powerOff", input });
+    return {
+      ok: true,
+      value: {
+        id: `1${this.#counter}01`,
+        status: "completed",
+        type: "power_off",
+        resourceId: input.providerResourceId,
+      },
+    };
+  }
+
+  async snapshotResource(
+    input: DigitalOceanSnapshotInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanAction>> {
+    const aborted = abortedProviderResult<DigitalOceanAction>("action_outcome_unknown", context);
+    if (aborted) return aborted;
+    this.calls.push({ step: "snapshot", input });
+    return {
+      ok: true,
+      value: {
+        id: `1${this.#counter}02`,
+        status: "completed",
+        type: "snapshot",
+        resourceId: input.providerResourceId,
+      },
+    };
+  }
+
+  async readAction(
+    input: { actionId: string },
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanAction>> {
+    const aborted = abortedProviderResult<DigitalOceanAction>("action_outcome_unknown", context);
+    if (aborted) return aborted;
+    this.calls.push({ step: "readAction", input });
+    return {
+      ok: true,
+      value: {
+        id: input.actionId,
+        status: input.actionId.includes("999") ? "errored" : "completed",
+        type: input.actionId.endsWith("02") ? "snapshot" : "power_off",
+        resourceId: input.actionId,
+      },
+    };
+  }
+
+  async readImageAvailability(
+    input: DigitalOceanReadImageInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanImageAvailability>> {
+    const aborted = abortedProviderResult<DigitalOceanImageAvailability>(
+      "image_lookup_failed",
+      context,
+    );
+    if (aborted) return aborted;
+    this.calls.push({ step: "readImage", input });
+    return {
+      ok: true,
+      value: {
+        id: input.imageId,
+        name: `snapshot-${input.imageId}`,
+        regions: ["sfo3"],
+        minDiskSizeGb: 25,
+        architecture: "amd64",
+        status: "available",
+      },
+    };
+  }
+
+  async deleteImage(
+    input: DigitalOceanDeleteImageInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<{ deleted: true }>> {
+    const aborted = abortedProviderResult<{ deleted: true }>("cleanup_failed", context);
+    if (aborted) return aborted;
+    this.calls.push({ step: "deleteImage", input });
+    return { ok: true, value: { deleted: true } };
+  }
+
   #failure(
     step: FakeProviderStep,
     reason: DigitalOceanProviderErrorReason,
@@ -1279,6 +1626,61 @@ function missingResource(): DigitalOceanProviderResult<DigitalOceanResource> {
     reason: "resource_not_found",
     message: "DigitalOcean resource was not found.",
   };
+}
+
+function apiActionToAction(
+  action: DigitalOceanApiAction | null | undefined,
+): DigitalOceanAction | null {
+  const id = action?.id === undefined || action.id === null ? "" : String(action.id).trim();
+  const resourceId =
+    action?.resourceId === undefined && action?.resource_id === undefined
+      ? ""
+      : String(action.resourceId ?? action.resource_id).trim();
+  const status = normalizeApiActionStatus(action?.status);
+  const type = action?.type?.trim() ?? "";
+
+  return id && resourceId && status && type ? { id, status, type, resourceId } : null;
+}
+
+function apiImageToImageAvailability(
+  image: DigitalOceanApiImage | null | undefined,
+): DigitalOceanImageAvailability | null {
+  if (!image) {
+    return null;
+  }
+
+  const id = image.id === undefined || image.id === null ? "" : String(image.id).trim();
+  const minDiskSizeGb = image.minDiskSize ?? image.min_disk_size;
+
+  if (
+    !id ||
+    typeof minDiskSizeGb !== "number" ||
+    !Number.isInteger(minDiskSizeGb) ||
+    minDiskSizeGb <= 0
+  ) {
+    return null;
+  }
+
+  return {
+    id,
+    name: image.name?.trim() || null,
+    regions: (image.regions ?? []).filter((region) => typeof region === "string").sort(),
+    minDiskSizeGb,
+    architecture: image.distribution?.toLowerCase().includes("ubuntu") ? "amd64" : "unknown",
+    status: normalizeApiImageStatus(image.status),
+  };
+}
+
+function normalizeApiActionStatus(
+  value: string | null | undefined,
+): DigitalOceanActionStatus | null {
+  return value === "in-progress" || value === "completed" || value === "errored" ? value : null;
+}
+
+function normalizeApiImageStatus(
+  value: string | null | undefined,
+): DigitalOceanImageAvailability["status"] {
+  return value === "available" || value === "pending" || value === "deleted" ? value : "unknown";
 }
 
 function apiSshKeyToSshKey(

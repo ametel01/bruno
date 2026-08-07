@@ -52,6 +52,7 @@ import {
   isDigitalOceanLowMemorySwapResilienceProfile,
   validateDigitalOceanRunnerResourceCompatibility,
 } from "@/src/server/runners/runner-resource-profiles";
+import { selectVerifiedRunnerSnapshotImage } from "@/src/server/runners/runner-snapshot-manifest";
 import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
 import { createAppLogger } from "@/src/server/logging/logger";
 
@@ -284,6 +285,22 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     };
   }
 
+  const selectedImage = await resolveProvisioningImage({
+    config: input.config,
+    provider: input.provider,
+    context: input.context,
+  });
+
+  if (!selectedImage.ok) {
+    log("snapshot_image_preflight_failed", { reason: selectedImage.reason }, "error");
+    await markAutomaticProvisioningFailed(input, runner.providerResourceId);
+    return {
+      ok: false,
+      cleanupRequired: Boolean(runner.providerResourceId),
+      terminalCode: "runner_provisioning_unavailable",
+    };
+  }
+
   const operationTags = [
     ...new Set([...input.config.tags, DIGITALOCEAN_MANAGED_RUNNER_TAG, input.operationKey]),
   ].sort();
@@ -421,6 +438,7 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
       ...(input.config.providerMode === "local_docker"
         ? { releaseIdentityMode: RUNNER_RELEASE_DEVELOPMENT_MODE }
         : {}),
+      bootMode: input.config.snapshotMode?.mode === "snapshot" ? "snapshot" : "stock",
       sizeSlug: input.config.sizeSlug,
       now: input.now,
       log,
@@ -429,7 +447,7 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
     log("provider_create_started", {
       region: input.config.region,
       sizeSlug: input.config.sizeSlug,
-      image: input.config.image,
+      image: selectedImage.image,
       sshKeyCount: sshAccess.sshKeyIds.length,
     });
     const created = await input.provider.createRunner(
@@ -437,7 +455,7 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
         name: input.operationKey,
         region: input.config.region,
         sizeSlug: input.config.sizeSlug,
-        image: input.config.image,
+        image: selectedImage.image,
         tags: operationTags,
         firewallName: DEFAULT_FIREWALL_NAME,
         sshKeyIds: sshAccess.sshKeyIds,
@@ -896,13 +914,22 @@ export async function createDigitalOceanRunnerForUser(
       return { ok: false, reason: "provider_not_configured" };
     }
 
+    const provider =
+      resolvedProvider ?? dependencies.provider ?? createConfiguredDigitalOceanProvider(config);
+    const selectedImage = await resolveProvisioningImage({ config, provider });
+
+    if (!selectedImage.ok) {
+      log("snapshot_image_preflight_failed", { reason: selectedImage.reason }, "error");
+      return { ok: false, reason: "provider_not_configured" };
+    }
+
     const managedTags = [...new Set([...config.tags, DIGITALOCEAN_MANAGED_RUNNER_TAG])].sort();
     const hermesConfig = resolveHermesDeploymentConfig(config);
 
     log("provider_config_loaded", {
       region: config.region,
       sizeSlug: config.sizeSlug,
-      image: config.image,
+      image: selectedImage.image,
       runnerImage: config.runnerImage,
       hermesWorkloadImage: hermesConfig.hermesWorkloadImage,
       hermesStateRoot: hermesConfig.hermesStateRoot,
@@ -925,8 +952,6 @@ export async function createDigitalOceanRunnerForUser(
             : "disabled",
     });
 
-    const provider =
-      resolvedProvider ?? dependencies.provider ?? createConfiguredDigitalOceanProvider(config);
     const createRegistrationTokenDependency =
       dependencies.createRegistrationToken ?? createRunnerRegistrationToken;
 
@@ -953,7 +978,7 @@ export async function createDigitalOceanRunnerForUser(
           provider: DIGITALOCEAN_PROVIDER,
           region: config.region,
           sizeSlug: config.sizeSlug,
-          image: config.image,
+          image: selectedImage.image,
           requiredRunnerImageDigest: requiredRunnerImageDigestForProvider(config),
           provisioningStatus: "pending",
           provisioningStartedAt: createdAt,
@@ -970,7 +995,7 @@ export async function createDigitalOceanRunnerForUser(
         runnerId: runner.id,
         region: config.region,
         sizeSlug: config.sizeSlug,
-        image: config.image,
+        image: selectedImage.image,
         runnerImage: config.runnerImage,
         hermesWorkloadImage: hermesConfig.hermesWorkloadImage,
         runnerMaxAgents: hermesConfig.runnerMaxAgents,
@@ -1007,7 +1032,7 @@ export async function createDigitalOceanRunnerForUser(
           provider: DIGITALOCEAN_PROVIDER,
           region: config.region,
           sizeSlug: config.sizeSlug,
-          image: config.image,
+          image: selectedImage.image,
           runnerImage: config.runnerImage,
           hermesWorkloadImage: hermesConfig.hermesWorkloadImage,
           hermesPrivateNetwork: hermesConfig.hermesPrivateNetwork,
@@ -1097,6 +1122,7 @@ export async function createDigitalOceanRunnerForUser(
       ...(config.providerMode === "local_docker"
         ? { releaseIdentityMode: RUNNER_RELEASE_DEVELOPMENT_MODE }
         : {}),
+      bootMode: config.snapshotMode?.mode === "snapshot" ? "snapshot" : "stock",
       sizeSlug: initialized.runner.sizeSlug,
       now,
       log,
@@ -1124,7 +1150,7 @@ export async function createDigitalOceanRunnerForUser(
           name: initialized.runner.name,
           region: config.region,
           sizeSlug: config.sizeSlug,
-          image: config.image,
+          image: selectedImage.image,
           tags: managedTags,
           firewallName: firewallNamePrefix,
           sshKeyIds: sshAccess.sshKeyIds,
@@ -1374,6 +1400,27 @@ export function createConfiguredDigitalOceanProvider(
   }
 
   return new DigitalOceanApiProvider({ token: config.token });
+}
+
+async function resolveProvisioningImage(input: {
+  config: DigitalOceanProviderConfig;
+  provider: DigitalOceanProvider;
+  context?: DigitalOceanProviderRequestContext;
+}): Promise<{ ok: true; image: string } | { ok: false; reason: string }> {
+  if (input.config.snapshotMode?.mode !== "snapshot") {
+    return { ok: true, image: input.config.image };
+  }
+
+  const selected = await selectVerifiedRunnerSnapshotImage({
+    manifestBytes: input.config.snapshotMode.manifestBytes,
+    signature: input.config.snapshotMode.signature,
+    publicKeyPem: input.config.snapshotMode.publicKeyPem,
+    expected: input.config.snapshotMode.expected,
+    provider: input.provider,
+    ...(input.context ? { context: input.context } : {}),
+  });
+
+  return selected.ok ? { ok: true, image: selected.image } : selected;
 }
 
 async function runProviderStep(
@@ -1757,6 +1804,7 @@ async function buildProvisioningBootstrap(input: {
   hermesDockerPidsLimit?: string;
   runnerMaxAgents?: number;
   releaseIdentityMode?: typeof RUNNER_RELEASE_DEVELOPMENT_MODE;
+  bootMode?: "stock" | "snapshot";
   sizeSlug: string;
   now: () => Date;
   log: ProvisioningLog;
@@ -1796,6 +1844,7 @@ async function buildProvisioningBootstrap(input: {
         : { hermesDockerPidsLimit: input.hermesDockerPidsLimit }),
       ...(input.runnerMaxAgents === undefined ? {} : { runnerMaxAgents: input.runnerMaxAgents }),
       ...(input.releaseIdentityMode ? { releaseIdentityMode: input.releaseIdentityMode } : {}),
+      ...(input.bootMode ? { bootMode: input.bootMode } : {}),
       bootModelCanaryEnabled: input.releaseIdentityMode === RUNNER_RELEASE_DEVELOPMENT_MODE,
       endpointDiscovery: { type: "digitalocean_metadata" },
       enableSwap: isDigitalOceanLowMemorySwapResilienceProfile(input.sizeSlug),

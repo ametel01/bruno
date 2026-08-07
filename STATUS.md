@@ -3,12 +3,12 @@
 ## Active Work
 
 - issue: [#266](https://github.com/ametel01/plingpling/issues/266)
-  owner: issue-spec-agent (`issue_266_spec`)
+  owner: checker-agent pending coordinator assignment
   branch: `codex/issue-266-attested-snapshot`
   worktree: `/Users/alexmetelli/source/plingpling-issue-266`
   pr: none
-  phase: specification complete; repository implementation ready; final acceptance dependency-blocked
-  cycle: 0/5
+  phase: checker-ready for repository-only scope; final acceptance dependency-blocked
+  cycle: 1/5
 
 ## Completion Contract
 
@@ -186,6 +186,18 @@
   next-action: Coordinator assigns one builder. Builder begins with manifest/provider interfaces and
     fake fail-closed tests, then snapshot first-boot/preflight/workflow. Checker tests the real
     config-to-preflight-to-create sequence and cleanup effect ordering, not isolated parsers.
+- from: builder-agent (`issue_266_builder`)
+  to: checker-agent
+  timestamp: 2026-08-07T08:10:00+08:00
+  request: Verify repository-only #266 implementation against the completion contract. Do not run the
+    protected DigitalOcean workflow or any billable/provider-backed operation.
+  evidence: Implemented signed canonical snapshot manifests, fail-closed snapshot manifest/provider
+    availability selection, protected manual workflow, snapshot build script/orchestrator, fake
+    provider image/action/cleanup tracing, snapshot first-boot mode without apt/package/image pulls,
+    stock rollback, env config, docs, and local gate evidence.
+  next-action: Checker should rerun format/lint/typecheck, focused snapshot tests, full unit/build as
+    needed, inspect workflow static guarantees, and confirm invalid snapshot evidence creates zero
+    Droplet-create calls. Live snapshot acceptance remains authorization-gated.
 
 ## Gates
 
@@ -193,6 +205,18 @@
 - issue graph: pass — #263/#272 resolved; #265 parallel; #269/#271 downstream; no #266 review thread.
 - current-main CI: fail — run `31131392382` lost Docker at `create-agent-db.test.ts:3627`;
   168/169 files and 1,637/1,638 tests otherwise passed.
+- builder targeted unit: pass —
+  `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-manifest.test.ts
+  tests/unit/runner-snapshot-build.test.ts tests/unit/runner-snapshot-workflow.test.ts
+  tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
+  tests/unit/digitalocean-provider.test.ts` (6 files, 50 tests).
+- builder format/lint/typecheck: pass — `bun run format:check`, `bun run lint`,
+  `bun run typecheck`.
+- builder full unit: pass — `bun run test` (172 files, 1,646 tests).
+- builder production build: pass — `bun run build`.
+- skipped live/billable: protected snapshot workflow dispatch, DigitalOcean resource/snapshot
+  creation or deletion, GitHub environment/secret configuration, production deploy/release, and
+  provider-backed Step 6 acceptance.
 
 ## Completed
 
