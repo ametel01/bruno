@@ -5,11 +5,11 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 ## Active Work
 
 - issue: [#267](https://github.com/ametel01/plingpling/issues/267)
-  owner: builder-agent (`issue_264_builder`)
+  owner: checker-agent (`issue_264_checker`)
   branch: `codex/issue-267-provider-phase-drain`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: checker cycle 1 local-smoke blocker fixed; ready for checker
+  phase: checker-ready after clean local smoke
   cycle: 2/5
 
 ## Goal Contract
@@ -17,9 +17,10 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 - outcome: Execute `PLAN.md` through its Definition of Done, including 30 explicitly authorized
   clean cold DigitalOcean trials with at least 95% success and p95 committed-create-to-durable-ready
   latency at or below 60 seconds.
-- current result: Repository work for #263, #265, and #266 is merged. The rebased #264 zero-cloud
-  lifecycle smoke passed at 149.874 seconds with zero DigitalOcean requests, so the SLO is not yet
-  met; #267 is expected to remove the observed 60-second post-readiness provider poll.
+- current result: Repository work for #263-#266 is merged. #267's clean zero-cloud lifecycle smoke
+  passed at 89.513 seconds with zero DigitalOcean requests, down 60.361 seconds from the rebased
+  #264 smoke. The SLO is not yet met; runner boot was 59.628 seconds and post-registration work is
+  addressed by #268.
 - non-goals: No Droplets before a create request; no warm pools, ready capacity, onboarding or
   predictive provisioning, cross-user sharing, or SLO expansion beyond durable `ready`.
 - authorization boundary: Do not spend provider resources, build provider snapshots, configure
@@ -215,8 +216,12 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
   - `bun run format:check`; `bun run lint`; `bun run typecheck`; `git diff --check`; `bun run test`
     — 174 files / 1701 tests; `bun run build`; `bun run test:e2e:ci` — 26 tests;
     `bun run repro:cloud-runner`.
-- skipped: `bun run local:agent:smoke` was intentionally not run; coordinator must serialize the
-  local Docker smoke slot. No real DigitalOcean/QStash/deploy/release/billable action was run.
+- coordinator serialized smoke: PASS after fixing the local provider observation gap and clearing
+  one interrupted-run test-volume collision. Evidence: `cleanupVerified:true`,
+  `digitalOceanRequests:0`, `simulatedDroplets:1`, exact 1 vCPU / 2 GiB runner profile, exact Hermes
+  limits, all lifecycle actions, and valid p95/total `89513ms`. Provider phases drained in one
+  invocation (`creating`, `tagging`, and `firewall_configuring` each recorded at 1ms); runner boot
+  remained 59.628s. No real DigitalOcean/QStash/deploy/release/billable action was run.
 - reviewer focus: verify provider-effect checkpoint ordering, crash adoption without replay, typed
   wakeup persistence, lease/desired-running fence behavior, safe logs/events, and zero external
   effects.
