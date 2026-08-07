@@ -11,7 +11,7 @@ Historical execution evidence:
 - stream: goal-state reconciliation
   owner: coordinator (`root`)
   branch: `codex/goal-status-reconcile`
-  worktree: `/Users/alexmetelli/source/plingpling`
+  worktree: `/Users/alexmetelli/source/bruno`
   phase: compacting hot state and correcting `PROGRESS.md`
   next: merge the tracker-only reconciliation, then spec issue #269 for authorization-independent
     Step 7 implementation; do not merge #269 before issue #266 live snapshot evidence exists.
@@ -31,7 +31,7 @@ Historical execution evidence:
   deployment/release, hosted secret/configuration mutation, or billable benchmark without explicit
   authorization and agreed budget.
 - do-not-touch: unrelated PR #262; dirty user/agent state in the issue #265 worktree; detached
-  `/Users/alexmetelli/source/plingpling-step7-base`.
+  `/Users/alexmetelli/source/bruno-step7-base`.
 
 ## Dependency Graph
 
@@ -115,12 +115,12 @@ Status: FAILED
   result: pass
   evidence: tracker/archive/source files exist; relative links to `PLAN.md`, `STATUS.archive.md`,
     and `STATUS.archive.2026-08-07.md` resolve locally.
-- command: `gh pr view 281 --repo ametel01/plingpling --json closingIssuesReferences,headRefOid,mergeStateStatus,statusCheckRollup`
+- command: `gh pr view 281 --repo ametel01/bruno --json closingIssuesReferences,headRefOid,mergeStateStatus,statusCheckRollup`
   result: pass for tracker contract; PR aggregate not clean
   evidence: `closingIssuesReferences: []`, head `06644597bdf6caef3a357c1de9302ce956e407d2`,
     `mergeStateStatus: UNSTABLE`; GitHub CI, React Doctor, GitGuardian, Socket, CodeRabbit, and
     Vercel Preview Comments are green, but Vercel status context is failure.
-- command: `gh run watch 31164085235 --repo ametel01/plingpling --exit-status --interval 10`
+- command: `gh run watch 31164085235 --repo ametel01/bruno --exit-status --interval 10`
   result: pass
   evidence: CI `Verification gates` completed successfully in 10m24s, including migrations,
     formatting, lint, typecheck, unit tests, build, and E2E smoke tests.
@@ -141,7 +141,7 @@ Status: FAILED
 
 - No provider, QStash, snapshot workflow, deploy/release, secret/configuration mutation, billable
   benchmark, or local smoke was run in this checker pass.
-- `gh pr checks --required 281 --repo ametel01/plingpling` reported no required checks, but the PR
+- `gh pr checks --required 281 --repo ametel01/bruno` reported no required checks, but the PR
   aggregate remains `UNSTABLE` while the Vercel context is red.
 
 ## Next Action
@@ -160,19 +160,19 @@ Status: FAILED
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling`: clean before reconciliation edits; coordinator-owned
+- `/Users/alexmetelli/source/bruno`: clean before reconciliation edits; coordinator-owned
   `codex/goal-status-reconcile`.
-- `/Users/alexmetelli/source/plingpling-e2e-ready-flake`: clean; closed superseded PR #278 branch;
+- `/Users/alexmetelli/source/bruno-e2e-ready-flake`: clean; closed superseded PR #278 branch;
   cleanup candidate after tracker merge.
-- `/Users/alexmetelli/source/plingpling-e2e-ready-refresh`: clean; merged PR #279 branch with deleted
+- `/Users/alexmetelli/source/bruno-e2e-ready-refresh`: clean; merged PR #279 branch with deleted
   remote; cleanup candidate after tracker merge.
-- `/Users/alexmetelli/source/plingpling-issue-265`: dirty `STATUS.md`; preserve without modification.
-- `/Users/alexmetelli/source/plingpling-issue-266`: clean stale `main` worktree at `57e48439`; preserve
+- `/Users/alexmetelli/source/bruno-issue-265`: dirty `STATUS.md`; preserve without modification.
+- `/Users/alexmetelli/source/bruno-issue-266`: clean stale `main` worktree at `57e48439`; preserve
   until cleanup so the primary worktree need not take ownership of `main`.
-- `/Users/alexmetelli/source/plingpling-issue-268`: clean merged PR #277 branch; cleanup candidate.
-- `/Users/alexmetelli/source/plingpling-issue-270`: clean merged PR #280 branch with deleted remote;
+- `/Users/alexmetelli/source/bruno-issue-268`: clean merged PR #277 branch; cleanup candidate.
+- `/Users/alexmetelli/source/bruno-issue-270`: clean merged PR #280 branch with deleted remote;
   cleanup candidate.
-- `/Users/alexmetelli/source/plingpling-step7-base`: detached pre-existing worktree; preserve and do
+- `/Users/alexmetelli/source/bruno-step7-base`: detached pre-existing worktree; preserve and do
   not modify.
 
 ## Decisions And Lessons

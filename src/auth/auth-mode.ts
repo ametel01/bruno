@@ -1,4 +1,4 @@
-const PRODUCTION_HOSTNAME = "plingpling.xyz";
+const PRODUCTION_HOSTNAME = "getbruno.xyz";
 
 export type AuthMode = "clerk" | "development" | "operator";
 

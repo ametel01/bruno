@@ -368,7 +368,7 @@ describe.sequential("runner placement contract", () => {
         requiredRunnerImageDigest: RUNNER_IMAGE_DIGEST,
         observedRunnerImageDigest: RUNNER_IMAGE_DIGEST,
         observedRunnerReleaseVersion: "sha-old",
-        observedRunnerBootContractVersion: "plingpling.runner.boot.v0",
+        observedRunnerBootContractVersion: "bruno.runner.boot.v0",
         compatibilityState: "outdated",
         compatibilityVerifiedAt: new Date("2026-07-06T04:01:00.000Z"),
       })

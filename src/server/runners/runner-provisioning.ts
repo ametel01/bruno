@@ -59,14 +59,14 @@ import { createAppLogger, LOG_REDACTION_CENSOR } from "@/src/server/logging/logg
 const runnerProvisioningLogger = createAppLogger("runner.provisioning");
 const PROVIDER_OPERATION_TAG_LOG_PATTERN = /\bagentbay-(?:deploy|replace)-[0-9a-f]{32}\b/gi;
 
-const DEFAULT_CLOUD_RUNNER_NAME = "plingpling Cloud Runner";
+const DEFAULT_CLOUD_RUNNER_NAME = "bruno Cloud Runner";
 const DEFAULT_FIREWALL_NAME = "agentbay-runners";
 const CLOUD_REGISTRATION_TOKEN_TTL_MS = 60 * 60 * 1000;
 const PUBLIC_ENDPOINT_POLL_ATTEMPTS = 20;
 const PUBLIC_ENDPOINT_POLL_INTERVAL_MS = 3_000;
 const DEFAULT_AUTOMATIC_PROVIDER_DRAIN_ITERATIONS = 8;
 const MAX_RUNNER_NAME_LENGTH = 80;
-const MANAGED_SSH_KEY_NAME = "plingpling managed runner key";
+const MANAGED_SSH_KEY_NAME = "bruno managed runner key";
 
 type RunnerProvisioningTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
@@ -1800,7 +1800,7 @@ function missingProviderResourceMessage(providerResourceId: string): string {
     ? providerResourceId
     : "the recorded provider resource";
 
-  return `DigitalOcean Droplet ${safeResourceId} is no longer available for runner registration. plingpling marked the stale runner failed and will create a new runner.`;
+  return `DigitalOcean Droplet ${safeResourceId} is no longer available for runner registration. bruno marked the stale runner failed and will create a new runner.`;
 }
 
 async function resolveDigitalOceanSshAccess(
@@ -1862,7 +1862,7 @@ async function resolveDigitalOceanSshAccess(
         ok: false,
         reason: "ssh_key_create_failed",
         message:
-          "plingpling could not create a DigitalOcean SSH key for Droplet login. Confirm the provider token has SSH key create permission, then retry Create runner.",
+          "bruno could not create a DigitalOcean SSH key for Droplet login. Confirm the provider token has SSH key create permission, then retry Create runner.",
       };
     }
 
@@ -2533,7 +2533,7 @@ function manualCleanupMessage(providerResourceId: string): string {
     ? providerResourceId
     : "the recorded provider resource";
 
-  return `Automatic cleanup could not confirm deletion for DigitalOcean Droplet ${safeResourceId}. In DigitalOcean, delete only that Droplet after confirming it has the plingpling runner tags, then create a new runner.`;
+  return `Automatic cleanup could not confirm deletion for DigitalOcean Droplet ${safeResourceId}. In DigitalOcean, delete only that Droplet after confirming it has the bruno runner tags, then create a new runner.`;
 }
 
 async function findActiveProvisioningRunner(

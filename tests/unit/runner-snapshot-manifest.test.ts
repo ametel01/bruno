@@ -134,7 +134,7 @@ describe("runner snapshot manifest", () => {
     ],
     [
       "wrong boot contract",
-      () => ({ ...manifest(), bootContractVersion: "plingpling.runner.boot.v0" }),
+      () => ({ ...manifest(), bootContractVersion: "bruno.runner.boot.v0" }),
       "manifest_schema_invalid",
     ],
     [
@@ -242,7 +242,7 @@ function expected(): RunnerSnapshotExpectedIdentities {
     runnerImage: RUNNER_IMAGE,
     defaultAgentImage: AGENT_IMAGE,
     hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
-    sourceRepository: "ametel01/plingpling",
+    sourceRepository: "ametel01/bruno",
     sourceRevision: SOURCE_REVISION,
     now: NOW,
   };
@@ -250,7 +250,7 @@ function expected(): RunnerSnapshotExpectedIdentities {
 
 function manifest(): RunnerSnapshotManifest {
   return {
-    schemaVersion: "plingpling.runner.snapshot.v1",
+    schemaVersion: "bruno.runner.snapshot.v1",
     snapshot: {
       id: "1102",
       name: "agentbay-snapshot-builder-111111111111",
@@ -268,7 +268,7 @@ function manifest(): RunnerSnapshotManifest {
         "sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a",
     },
     bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
-    source: { repository: "ametel01/plingpling", revision: SOURCE_REVISION },
+    source: { repository: "ametel01/bruno", revision: SOURCE_REVISION },
     workflow: { runId: "123456", runAttempt: "1" },
     validation: {
       fullBootFixturePassedAt: "2026-08-06T23:59:00.000Z",

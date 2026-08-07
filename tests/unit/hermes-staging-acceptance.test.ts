@@ -242,9 +242,9 @@ describe("Hermes staging acceptance orchestration", () => {
     });
     expect(challenge).toEqual({
       purpose: "initial",
-      challengeId: "c6ccc7b9-fd04-5a53-8bbd-6e345d65e891",
-      text: "plingpling Hermes initial acceptance c6ccc7b9-fd04-5a53-8bbd-6e345d65e891",
-      digest: "sha256:e1f07e4317992d295897c2b6e225f6c834aa946472b6b2cf305db784c94cefd3",
+      challengeId: "2e401e1b-2eb4-588f-a2e7-c43086352d1a",
+      text: "bruno Hermes initial acceptance 2e401e1b-2eb4-588f-a2e7-c43086352d1a",
+      digest: "sha256:817c3c59180bedf53357117c601d53c2fa3c705d34b4892d08fdf6246606c45a",
       expiresAt: new Date("2026-08-03T10:05:00.000Z"),
     });
     expect(
@@ -254,7 +254,7 @@ describe("Hermes staging acceptance orchestration", () => {
           runId: RUN_ID,
           challenge,
         }),
-    ).toBe("b215271b3a1549fa3e7f68cf2cb221426db450f6381e9edf86f416f76e3be098");
+    ).toBe("6ec390c2878253ffbb488ea23638e7fdf20357ca98ab1c1416c5ceb8a9eed0b7");
   });
 
   it("drops unrelated or premature evidence from an effect result", async () => {

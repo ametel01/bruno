@@ -94,15 +94,15 @@ The update log is append-only.
 
 ## Issue Graph
 
-- Wave 0: [#263](https://github.com/ametel01/plingpling/issues/263)
-- Wave 1: [#264](https://github.com/ametel01/plingpling/issues/264),
-  [#265](https://github.com/ametel01/plingpling/issues/265),
-  [#266](https://github.com/ametel01/plingpling/issues/266)
-- Wave 2: [#267](https://github.com/ametel01/plingpling/issues/267),
-  [#268](https://github.com/ametel01/plingpling/issues/268),
-  [#269](https://github.com/ametel01/plingpling/issues/269),
-  [#270](https://github.com/ametel01/plingpling/issues/270)
-- Wave 3: [#271](https://github.com/ametel01/plingpling/issues/271)
+- Wave 0: [#263](https://github.com/ametel01/bruno/issues/263)
+- Wave 1: [#264](https://github.com/ametel01/bruno/issues/264),
+  [#265](https://github.com/ametel01/bruno/issues/265),
+  [#266](https://github.com/ametel01/bruno/issues/266)
+- Wave 2: [#267](https://github.com/ametel01/bruno/issues/267),
+  [#268](https://github.com/ametel01/bruno/issues/268),
+  [#269](https://github.com/ametel01/bruno/issues/269),
+  [#270](https://github.com/ametel01/bruno/issues/270)
+- Wave 3: [#271](https://github.com/ametel01/bruno/issues/271)
 
 ## Update Log
 

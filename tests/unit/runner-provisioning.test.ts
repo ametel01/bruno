@@ -361,7 +361,7 @@ describe.sequential("runner provisioning service", () => {
     expect(provider.calls[0]).toMatchObject({
       step: "createSshKey",
       input: {
-        name: "plingpling managed runner key",
+        name: "bruno managed runner key",
         publicKey: expect.stringMatching(/^ssh-ed25519 [A-Za-z0-9+/=]+ agentbay-managed-runner$/),
       },
     });
@@ -646,7 +646,7 @@ describe.sequential("runner provisioning service", () => {
       status: "provision_failed",
       provisioningStatus: "failed",
       provisioningError:
-        "DigitalOcean Droplet deleted-droplet-1 is no longer available for runner registration. plingpling marked the stale runner failed and will create a new runner.",
+        "DigitalOcean Droplet deleted-droplet-1 is no longer available for runner registration. bruno marked the stale runner failed and will create a new runner.",
     });
   });
 
@@ -795,7 +795,7 @@ describe.sequential("runner provisioning service", () => {
         provisioning: {
           status: "failed",
           error:
-            "Automatic cleanup could not confirm deletion for DigitalOcean Droplet manual-cleanup-1. In DigitalOcean, delete only that Droplet after confirming it has the plingpling runner tags, then create a new runner.",
+            "Automatic cleanup could not confirm deletion for DigitalOcean Droplet manual-cleanup-1. In DigitalOcean, delete only that Droplet after confirming it has the bruno runner tags, then create a new runner.",
           completedAt: expect.any(String),
         },
       },
@@ -1050,7 +1050,7 @@ function invalidSnapshotConfig(): DigitalOceanProviderConfig {
         runnerImage,
         defaultAgentImage,
         hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
-        sourceRepository: "ametel01/plingpling",
+        sourceRepository: "ametel01/bruno",
         sourceRevision: "1".repeat(40),
         now: new Date("2026-08-07T00:00:00.000Z"),
       },

@@ -331,7 +331,7 @@ test("automatic replacement stays Preparing across refresh and list surfaces wit
       const progress = page.locator(".agent-deployment-progress-card");
       await expectCurrentStage(page, "Preparing your agent");
       await expect(progress).toContainText(
-        "plingpling is preparing replacement capacity automatically.",
+        "bruno is preparing replacement capacity automatically.",
       );
       await expect(progress.locator(".deployment-stage-list li")).toHaveCount(3);
       await expect(progress.locator("[aria-live='polite']")).toHaveCount(1);
@@ -965,7 +965,7 @@ async function deleteFixture(fixture: Fixture): Promise<void> {
 
 async function withDatabase<T>(run: (sql: postgres.Sql) => Promise<T>): Promise<T> {
   const databaseUrl =
-    process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/plingpling";
+    process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
   const sql = postgres(databaseUrl, { connect_timeout: 5, idle_timeout: 60, max: 1 });
 
   try {

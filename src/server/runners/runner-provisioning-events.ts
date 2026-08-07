@@ -469,7 +469,7 @@ export async function markCloudRunnerExternallyDeleted(
     runnerId: input.runnerId,
     phase: "deleted",
     status: "completed",
-    message: "DigitalOcean Droplet was deleted outside plingpling.",
+    message: "DigitalOcean Droplet was deleted outside bruno.",
     metadata: {
       provider: DIGITALOCEAN_PROVIDER,
       deletionSource: "provider_reconciliation",

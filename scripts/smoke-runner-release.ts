@@ -297,8 +297,8 @@ function createRunnerReleaseSmokeSession(
   const operationKey = `agentbay-deploy-${randomUUID().replaceAll("-", "")}`;
   const runnerName =
     plan.providerMode === "local_docker"
-      ? `plingpling release simulation ${plan.release.version.slice(0, 12)}`
-      : `plingpling release canary ${plan.release.version.slice(0, 12)}`;
+      ? `bruno release simulation ${plan.release.version.slice(0, 12)}`
+      : `bruno release canary ${plan.release.version.slice(0, 12)}`;
   const releaseConfig: DigitalOceanProviderConfig = {
     ...config,
     runnerImage: plan.image,

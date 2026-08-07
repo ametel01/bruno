@@ -10,8 +10,8 @@ const REGISTRY_SCOPE = `repository:${REGISTRY_REPOSITORY}:pull`;
 const IMAGE_REFERENCE_PATTERN = /^ghcr\.io\/ametel01\/agentbay-hermes@(sha256:[0-9a-f]{64})$/;
 const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const SOURCE_REVISION_PATTERN = /^[0-9a-f]{40}$/;
-const EXPECTED_SOURCE = "https://github.com/ametel01/plingpling";
-const GITHUB_REPOSITORY = "ametel01/plingpling";
+const EXPECTED_SOURCE = "https://github.com/ametel01/bruno";
+const GITHUB_REPOSITORY = "ametel01/bruno";
 const GITHUB_WORKFLOW_PATH = ".github/workflows/publish-agent-image.yml";
 const GITHUB_WORKFLOW_PATH_AT_MAIN = `${GITHUB_WORKFLOW_PATH}@main`;
 const GITHUB_API_ORIGIN = "https://api.github.com";
@@ -491,7 +491,7 @@ async function verifyWorkflowRun(input: {
     unavailableCode: "github_unavailable",
     extraHeaders: {
       "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "plingpling-hermes-staging-attestor",
+      "User-Agent": "bruno-hermes-staging-attestor",
     },
   });
 

@@ -68,7 +68,7 @@ const server = Bun.serve({
 });
 
 console.log(
-  `plingpling runner service listening on ${server.url?.href ?? `${server.hostname}:${server.port}`}`,
+  `bruno runner service listening on ${server.url?.href ?? `${server.hostname}:${server.port}`}`,
 );
 
 function parsePort(value: string | undefined): number {

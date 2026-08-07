@@ -6,7 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "plingpling",
+  title: "bruno",
   description: "Operational control plane scaffold for managed agents.",
 };
 

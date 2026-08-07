@@ -646,7 +646,7 @@ function invalidSnapshotAutomaticConfig(): DigitalOceanProviderConfig {
         runnerImage,
         defaultAgentImage,
         hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
-        sourceRepository: "ametel01/plingpling",
+        sourceRepository: "ametel01/bruno",
         sourceRevision: "1".repeat(40),
         now: NOW,
       },

@@ -13,8 +13,8 @@ const SHA = "a".repeat(40);
 const DIGEST = `sha256:${"b".repeat(64)}`;
 const IMAGE = `ghcr.io/ametel01/agentbay-runner:${SHA}@${DIGEST}`;
 const VALID_ENV = {
-  DATABASE_URL: "postgres://release.invalid/plingpling",
-  NEXT_PUBLIC_APP_URL: "https://plingpling.example",
+  DATABASE_URL: "postgres://release.invalid/bruno",
+  NEXT_PUBLIC_APP_URL: "https://bruno.example",
   AGENTBAY_DIGITALOCEAN_TOKEN: "release-provider-token",
   AGENTBAY_RUNNER_BEARER_TOKEN: "r".repeat(40),
   AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "digitalocean",
@@ -36,7 +36,7 @@ const EVIDENCE: RunnerReleaseSmokeEvidence = {
   providerMode: "digitalocean",
   releaseVersion: SHA,
   imageDigest: DIGEST,
-  bootContractVersion: "plingpling.runner.boot.v1",
+  bootContractVersion: "bruno.runner.boot.v1",
   bootComponents: ["docker", "hermes_fixture", "config_load", "health", "model_canary", "cleanup"],
   syntheticActions: ["start", "status", "canary", "stop"],
 };

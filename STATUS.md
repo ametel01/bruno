@@ -13,7 +13,7 @@ Historical execution evidence:
 - stream: PR #281 post-merge reconciliation
   owner: coordinator (`root`)
   branch: `codex/goal-postmerge-reconcile`
-  worktree: `/Users/alexmetelli/source/plingpling`
+  worktree: `/Users/alexmetelli/source/bruno`
   phase: remediate PR #282 maintainer finding, then rerun exact-head review and CI
   next: coordinator personally merges this tracker-only reconciliation after all gates pass, then
     assigns issue #269 specification and local implementation. Issue #269 must not merge before
@@ -34,7 +34,7 @@ Historical execution evidence:
   deployment/release, hosted secret/configuration mutation, or billable benchmark without explicit
   authorization and agreed budget.
 - do-not-touch: unrelated PR #262; dirty issue #265 worktree state; detached
-  `/Users/alexmetelli/source/plingpling-step7-base`.
+  `/Users/alexmetelli/source/bruno-step7-base`.
 
 ## Dependency Graph
 
@@ -65,7 +65,7 @@ Historical execution evidence:
   including full unit/build/26 E2E.
 - tracker PR #281 merged at `f79cb143`; exact-head CI `31165042539` passed in 9m22s. Maintainer
   decision APPROVE is recorded in review
-  [#4881587941](https://github.com/ametel01/plingpling/pull/281#pullrequestreview-4881587941).
+  [#4881587941](https://github.com/ametel01/bruno/pull/281#pullrequestreview-4881587941).
 - PR #281 archive identity was independently verified byte-for-byte against its base status:
   SHA-256 `4dbdcd5d8ccd74cb224e7665e8c63bf520befd0278bfaf910bac93c06fdb763c`.
 - Vercel preview failures on #279–#281 are the known environment baseline:
@@ -94,19 +94,19 @@ Historical execution evidence:
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling`: coordinator-owned
+- `/Users/alexmetelli/source/bruno`: coordinator-owned
   `codex/goal-postmerge-reconcile`; clean at PR #282 head before this reviewer-finding correction.
-- `/Users/alexmetelli/source/plingpling-e2e-ready-flake`: clean superseded PR #278 branch; cleanup
+- `/Users/alexmetelli/source/bruno-e2e-ready-flake`: clean superseded PR #278 branch; cleanup
   candidate.
-- `/Users/alexmetelli/source/plingpling-e2e-ready-refresh`: clean merged PR #279 branch with deleted
+- `/Users/alexmetelli/source/bruno-e2e-ready-refresh`: clean merged PR #279 branch with deleted
   remote; cleanup candidate.
-- `/Users/alexmetelli/source/plingpling-issue-265`: dirty `STATUS.md`; preserve without modification.
-- `/Users/alexmetelli/source/plingpling-issue-266`: clean stale `main` worktree at `57e48439`;
+- `/Users/alexmetelli/source/bruno-issue-265`: dirty `STATUS.md`; preserve without modification.
+- `/Users/alexmetelli/source/bruno-issue-266`: clean stale `main` worktree at `57e48439`;
   preserve until cleanup.
-- `/Users/alexmetelli/source/plingpling-issue-268`: clean merged PR #277 branch; cleanup candidate.
-- `/Users/alexmetelli/source/plingpling-issue-270`: clean merged PR #280 branch with deleted remote;
+- `/Users/alexmetelli/source/bruno-issue-268`: clean merged PR #277 branch; cleanup candidate.
+- `/Users/alexmetelli/source/bruno-issue-270`: clean merged PR #280 branch with deleted remote;
   cleanup candidate.
-- `/Users/alexmetelli/source/plingpling-step7-base`: detached pre-existing worktree; preserve and do
+- `/Users/alexmetelli/source/bruno-step7-base`: detached pre-existing worktree; preserve and do
   not modify.
 
 ## Decisions And Lessons

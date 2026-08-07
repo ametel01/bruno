@@ -77,7 +77,7 @@ type RuntimeFault =
   | "telegram-fatal";
 
 export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
-  process.env.DATABASE_URL ??= "postgres://agentbay:agentbay@127.0.0.1:54329/plingpling";
+  process.env.DATABASE_URL ??= "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
   process.env.NEXT_PUBLIC_APP_URL ??= "http://127.0.0.1:3000";
   process.env.AGENTBAY_RUNNER_IMAGE ??= FAKE_RUNNER_IMAGE;
   const connections = Array.from({ length: 4 }, () => createDatabaseConnection());

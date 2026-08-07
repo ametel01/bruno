@@ -42,7 +42,7 @@ export function createAppLogger(
     {
       level: normalizeLogLevel(configuredLevel),
       base: {
-        service: "plingpling",
+        service: "bruno",
         environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "unknown",
         ...(process.env.VERCEL_GIT_COMMIT_SHA
           ? { release: process.env.VERCEL_GIT_COMMIT_SHA }

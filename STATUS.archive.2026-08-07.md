@@ -4,10 +4,10 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 
 ## Active Work
 
-- issue: [#268](https://github.com/ametel01/plingpling/issues/268)
+- issue: [#268](https://github.com/ametel01/bruno/issues/268)
   owner: coordinator (`root`)
   branch: `codex/issue-268-stage-drain`
-  worktree: `/Users/alexmetelli/source/plingpling-issue-268`
+  worktree: `/Users/alexmetelli/source/bruno-issue-268`
   pr: none
   phase: checker-green; opening PR
   cycle: 4/5
@@ -25,7 +25,7 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
   predictive provisioning, cross-user sharing, or SLO expansion beyond durable `ready`.
 - authorization boundary: Do not spend provider resources, build provider snapshots, configure
   production secrets, deploy, or release without explicit authorization.
-- do-not-touch: Preserve `/Users/alexmetelli/source/plingpling-step7-base`, unrelated PR #262, and
+- do-not-touch: Preserve `/Users/alexmetelli/source/bruno-step7-base`, unrelated PR #262, and
   existing changelog history.
 
 ## Dependency Graph
@@ -149,7 +149,7 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
   ownership before continuing; never infer absence from an unsupported or partial provider read.
 - do-not-touch: schema/migrations unless a blocking invariant is first escalated; post-registration
   stage logic, size/snapshot defaults/workflows, benchmark provider authorization, production/release
-  configuration, unrelated PR #262, and `/Users/alexmetelli/source/plingpling-step7-base`.
+  configuration, unrelated PR #262, and `/Users/alexmetelli/source/bruno-step7-base`.
 - open questions: none blocking. Provider observation method names and internal result type names are
   implementation choices, provided the authoritative present/absent/ambiguous semantics above are
   explicit and testable.
@@ -225,7 +225,7 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
   wakeup persistence, lease/desired-running fence behavior, safe logs/events, and zero external
   effects.
 
-- Build #268 only in `/Users/alexmetelli/source/plingpling-issue-268`; do not merge it before #267.
+- Build #268 only in `/Users/alexmetelli/source/bruno-issue-268`; do not merge it before #267.
 - Every checker must exercise runner ingress/delayed-delivery producers through the bounded drain to
   durable `ready`, not only direct stage fixtures.
 - No real DigitalOcean/QStash request, snapshot/workflow dispatch, deploy, secret mutation, or
@@ -324,13 +324,13 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
   existing SQL fences and transaction/order boundaries.
 - do-not-touch: provider provisioning/effect checkpoints except conflict resolution after #267,
   schema/migrations unless escalated, size/snapshot/workflow/provider benchmark paths, unrelated PR
-  #262, or `/Users/alexmetelli/source/plingpling-step7-base`.
+  #262, or `/Users/alexmetelli/source/bruno-step7-base`.
 - open questions: none blocking; drain function names and internal result shape are implementation
   choices if pinned-target, shared-deadline, and exact stop semantics remain testable.
 
 ## Handoff — #268 Spec to Builder
 
-- request: Implement this contract in `/Users/alexmetelli/source/plingpling-issue-268`, beginning
+- request: Implement this contract in `/Users/alexmetelli/source/bruno-issue-268`, beginning
   with the pinned-target drain and shared deadline, then replace all four producer call sites and add
   producer-to-ready/race fixtures. Do not merge before #267; rebase and resolve the reconciler once
   #267 is merged without weakening either contract.
@@ -459,7 +459,7 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
     retry/terminal mode changes must remain safe for rows created under either dispatch mode.
 - do-not-touch: Provider provisioning/effect checkpoints, runner registration/heartbeat drains,
   size/snapshot defaults and workflows, model canary behavior, unrelated PR #262, existing changelog
-  history, and `/Users/alexmetelli/source/plingpling-step7-base`.
+  history, and `/Users/alexmetelli/source/bruno-step7-base`.
 - dependency blockers: none. #263/#272 are merged. PR #272's Vercel failure is the documented
   fail-closed Clerk-preview baseline; if it recurs, compare with main and do not classify it as a
   #264 regression without evidence. #267 and #268 consume this contract and remain downstream.
@@ -518,10 +518,10 @@ Status: FAILED
 - command: `git status --short --branch --untracked-files=all`
   result: branch `codex/issue-264-durable-wakeups`, `M STATUS.md`
   evidence: HEAD `ebd3773 Add durable deployment wakeups`; checker only updated `STATUS.md`.
-- command: `gh issue view 264 --repo ametel01/plingpling --json title,state,body,labels,assignees,comments,url`
+- command: `gh issue view 264 --repo ametel01/bruno --json title,state,body,labels,assignees,comments,url`
   result: PASS
   evidence: issue #264 is open and requires signed delayed QStash delivery plus durable recovery.
-- command: `gh pr list --repo ametel01/plingpling --state open --head codex/issue-264-durable-wakeups --json number,title,url,headRefName,baseRefName,mergeStateStatus,isDraft,reviewDecision,statusCheckRollup,closingIssuesReferences`
+- command: `gh pr list --repo ametel01/bruno --state open --head codex/issue-264-durable-wakeups --json number,title,url,headRefName,baseRefName,mergeStateStatus,isDraft,reviewDecision,statusCheckRollup,closingIssuesReferences`
   result: PASS
   evidence: `[]`; no #264 PR exists yet, so there is nothing merge-ready.
 - command: Upstash primary docs review (`https://upstash.com/docs/qstash/howto/signature`,
@@ -537,7 +537,7 @@ Status: FAILED
   when passed a plain DB handle.
 - command: `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts`
   result: PASS
-  evidence: isolated DB `plingpling_test_76358_482cde9c1d27`; 6 files / 43 tests passed.
+  evidence: isolated DB `bruno_test_76358_482cde9c1d27`; 6 files / 43 tests passed.
 
 ## Failures
 
@@ -667,11 +667,11 @@ Status: FAILED
 - command:
   `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts tests/unit/agent-launch-builder.test.ts`
   result: PASS
-  evidence: isolated DB `plingpling_test_96723_484bbc91adb7`; 7 files / 53 tests passed.
+  evidence: isolated DB `bruno_test_96723_484bbc91adb7`; 7 files / 53 tests passed.
 - command: isolated manual integrated semantic check with fake publisher and real-format signed JWT
   delivery
   result: PASS
-  evidence: isolated DB `plingpling_checker_4352_c0e54f4b9e71`; committed deployment mutation
+  evidence: isolated DB `bruno_checker_4352_c0e54f4b9e71`; committed deployment mutation
   produced pending wakeup; cron outbox sweep published one fake message; signed delivery returned
   `{ok:true, processed:1, outcome:"advanced"}`; duplicate delivery returned
   `{ok:true, processed:0, outcome:"already_claimed"}`; reconcile calls `1`; final wakeup state
@@ -680,7 +680,7 @@ Status: FAILED
   result: PASS
   evidence: `format:check` checked 402 files; `lint` checked 402 files; route typegen and
   `tsc --noEmit` passed; full unit suite passed with isolated DB
-  `plingpling_test_97147_e8fa2ef4a41f`, 170 files / 1,647 tests; production build compiled
+  `bruno_test_97147_e8fa2ef4a41f`, 170 files / 1,647 tests; production build compiled
   successfully.
 - command: `bun run test:e2e:ci`
   result: BLOCKED by local port conflict
@@ -755,7 +755,7 @@ Status: FAILED
     override, host health probe helper, and container-existence guard are wired.
 - tests passed:
   - `bun scripts/run-unit-tests.ts tests/unit/local-agent-cycle-smoke.test.ts` — PASS, 1 file / 5
-    tests, isolated DB `plingpling_test_42904_5cc945f7dade`.
+    tests, isolated DB `bruno_test_42904_5cc945f7dade`.
   - `bun run format:check` — PASS, 402 files.
   - `bun run lint` — PASS, 402 files.
   - `bun run typecheck` — PASS.
@@ -788,7 +788,7 @@ Status: FAILED
   skips nested-Docker diagnostics when `agentbay-local-cloud-runner` does not exist.
 - command: `bun scripts/run-unit-tests.ts tests/unit/local-agent-cycle-smoke.test.ts`
   result: PASS
-  evidence: isolated DB `plingpling_test_43590_2dadf12d3f48`; 1 file / 5 tests passed.
+  evidence: isolated DB `bruno_test_43590_2dadf12d3f48`; 1 file / 5 tests passed.
 - command: dedicated port/namespace preflight
   result: PASS
   evidence: Python bind check reported ports `55300`, `55311`, `55321`, `55331`, and `55341` free;
@@ -850,7 +850,7 @@ Status: FAILED
   serialized slot.
   - command: `bun scripts/run-unit-tests.ts tests/unit/local-agent-cycle-smoke.test.ts`
     result: PASS.
-    evidence: isolated DB `plingpling_test_42904_5cc945f7dade`; 1 file / 5 tests passed.
+    evidence: isolated DB `bruno_test_42904_5cc945f7dade`; 1 file / 5 tests passed.
   - command: `bun run format:check`
     result: PASS.
     evidence: Biome checked 402 files with no fixes.
@@ -869,8 +869,8 @@ Status: FAILED
     signing keys, and safe error handling.
   - prior blocker resolved: deployment mutation helpers now reject plain DB handles before writes and
     require transaction handles for create/release/stage wakeup mutations.
-  - focused tests: PASS, 7 files / 53 tests, isolated DB `plingpling_test_96723_484bbc91adb7`.
-  - integrated semantic check: PASS, isolated DB `plingpling_checker_4352_c0e54f4b9e71`, fake
+  - focused tests: PASS, 7 files / 53 tests, isolated DB `bruno_test_96723_484bbc91adb7`.
+  - integrated semantic check: PASS, isolated DB `bruno_checker_4352_c0e54f4b9e71`, fake
     publisher, signed delivery, duplicate delivery, exactly one targeted reconcile, final state
     `claimed`.
   - full non-smoke gates: `bun run verify` PASS; `PORT=3117 bun run test:e2e:ci` PASS, 26/26.
@@ -885,7 +885,7 @@ Status: FAILED
   - command:
     `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts tests/unit/agent-launch-builder.test.ts`
     result: PASS.
-    evidence: isolated DB `plingpling_test_89132_597bfb5396d4`; 7 files / 53 tests passed.
+    evidence: isolated DB `bruno_test_89132_597bfb5396d4`; 7 files / 53 tests passed.
   - command: `bun run format:check`
     result: PASS.
     evidence: Biome checked 402 files with no fixes.
@@ -894,7 +894,7 @@ Status: FAILED
     evidence: Biome checked 402 files with no fixes.
   - command: `bun run test`
     result: PASS.
-    evidence: isolated DB `plingpling_test_89980_4223127395a1`; 170 files / 1,647 tests passed.
+    evidence: isolated DB `bruno_test_89980_4223127395a1`; 170 files / 1,647 tests passed.
   - command: `bun run build`
     result: PASS.
     evidence: Next.js production build compiled successfully and generated route output.
@@ -908,12 +908,12 @@ Status: FAILED
     evidence: branch HEAD `ebd3773 Add durable deployment wakeups`; no PR exists for
     `codex/issue-264-durable-wakeups`.
   - command:
-    `gh issue view 264 --repo ametel01/plingpling --json title,state,body,labels,assignees,comments,url`
+    `gh issue view 264 --repo ametel01/bruno --json title,state,body,labels,assignees,comments,url`
     result: issue #264 is open and agent-ready.
     evidence: acceptance requires signed delayed delivery, fail-closed queue mode, duplicate/stale
     fencing, lost publication recovery, and no real QStash/provider effects.
   - command:
-    `gh pr list --repo ametel01/plingpling --state open --head codex/issue-264-durable-wakeups --json number,title,url,headRefName,baseRefName,mergeStateStatus,isDraft,reviewDecision,statusCheckRollup,closingIssuesReferences`
+    `gh pr list --repo ametel01/bruno --state open --head codex/issue-264-durable-wakeups --json number,title,url,headRefName,baseRefName,mergeStateStatus,isDraft,reviewDecision,statusCheckRollup,closingIssuesReferences`
     result: `[]`.
     evidence: there is no mergeable PR for #264 yet.
   - command:
@@ -949,7 +949,7 @@ Status: FAILED
   - command:
     `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts`
     result: PASS.
-    evidence: isolated DB `plingpling_test_76358_482cde9c1d27`; 6 files / 43 tests passed.
+    evidence: isolated DB `bruno_test_76358_482cde9c1d27`; 6 files / 43 tests passed.
   - failures:
     - `src/server/agents/agent-deployment-dispatch.ts:56`: signature header is
       `x-agentbay-qstash-signature`; real QStash sends `Upstash-Signature`.
@@ -1003,7 +1003,7 @@ Status: FAILED
   - `gh pr list --head codex/issue-265-runner-sizing --state open --json ...`: `[]`.
   - `gh pr list --head codex/issue-266-attested-snapshot --state open --json ...`: `[]`.
   - `gh pr list --state open --limit 10 --json ...`: only open PR is unrelated
-    [#262](https://github.com/ametel01/plingpling/pull/262) on
+    [#262](https://github.com/ametel01/bruno/pull/262) on
     `docs/ai-integration-opportunities`, `mergeStateStatus: UNSTABLE`, with Vercel `FAILURE`.
   - next action: commit/push/open the #264 PR before any #264 merge; continue #265/#266 checks.
     Do not merge #262 as part of this goal.
@@ -1027,7 +1027,7 @@ Status: ALL GREEN
   result: PASS
   evidence: HEAD `65851f1`, `main`/`origin/main` `57e4843`, merge-base
     `57e4843975175cbb2f04ab45c8f7f6f1d4abcbf6`; branch is rebased on current main.
-- command: `gh pr list --repo ametel01/plingpling --state open --head codex/issue-264-durable-wakeups --json ...`
+- command: `gh pr list --repo ametel01/bruno --state open --head codex/issue-264-durable-wakeups --json ...`
   result: PASS
   evidence: `[]`; no open PR currently exists for this branch.
 - command: `git diff --stat main...HEAD`, `git diff --name-status main...HEAD`, and
@@ -1066,7 +1066,7 @@ Status: ALL GREEN
 - command:
     `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts tests/unit/agent-launch-builder.test.ts tests/unit/local-agent-cycle-smoke.test.ts tests/unit/agent-deployment-reconciler.test.ts`
   result: PASS
-  evidence: isolated DB `plingpling_test_67745_afb2b3694ad0`; migrations applied; 9 files / 99
+  evidence: isolated DB `bruno_test_67745_afb2b3694ad0`; migrations applied; 9 files / 99
     tests passed; DB removed.
 - command: `bun run format:check`
   result: PASS
@@ -1121,7 +1121,7 @@ Status: FAILED
   evidence: merge-base `fa79f4a69b5e684573bd42dcd59f4f9ffe4f1fa6`; scoped #267 diff is 12 files /
     1,214 insertions / 432 deletions across runner provisioning, DigitalOcean/local Docker
     providers, deployment reconciler, docs/status, and focused tests; no diff-check errors.
-- command: `gh pr list --repo ametel01/plingpling --state open --head codex/issue-267-provider-phase-drain --json ...`
+- command: `gh pr list --repo ametel01/bruno --state open --head codex/issue-267-provider-phase-drain --json ...`
   result: PASS
   evidence: `[]`; no open PR object exists for #267 yet.
 - command: source inspection of provider-effect checkpoint ordering and replay fences
@@ -1159,7 +1159,7 @@ Status: FAILED
 - command:
     `bun scripts/run-unit-tests.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/agent-deployment-reconciler.test.ts tests/unit/digitalocean-provider.test.ts tests/unit/runner-infrastructure-reconciler.test.ts tests/unit/runner-replacement-reconciler.test.ts`
   result: PASS
-  evidence: isolated DB `plingpling_test_94522_8312da9da98a`; migrations applied; 6 files / 99
+  evidence: isolated DB `bruno_test_94522_8312da9da98a`; migrations applied; 6 files / 99
     tests passed; DB removed.
 - command: `bun run format:check`
   result: PASS
@@ -1234,11 +1234,11 @@ Status: READY FOR CHECKER
 - command:
     `bun scripts/run-unit-tests.ts tests/unit/runner-provisioning-logging.test.ts tests/unit/automatic-runner-provisioning.test.ts`
   result: PASS
-  evidence: isolated DB `plingpling_test_97966_65b3f33bc8c7`; 2 files / 16 tests passed; DB removed.
+  evidence: isolated DB `bruno_test_97966_65b3f33bc8c7`; 2 files / 16 tests passed; DB removed.
 - command:
     `bun scripts/run-unit-tests.ts tests/unit/runner-provisioning-logging.test.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/agent-deployment-reconciler.test.ts tests/unit/digitalocean-provider.test.ts tests/unit/runner-infrastructure-reconciler.test.ts tests/unit/runner-replacement-reconciler.test.ts`
   result: PASS
-  evidence: isolated DB `plingpling_test_98231_11638b7d8d6b`; 7 files / 100 tests passed; DB removed.
+  evidence: isolated DB `bruno_test_98231_11638b7d8d6b`; 7 files / 100 tests passed; DB removed.
 - command: `bun run format:check`
   result: PASS
   evidence: Biome checked 411 files in 85ms; no fixes applied.
@@ -1321,7 +1321,7 @@ Status: ALL GREEN
 - command:
     `bun scripts/run-unit-tests.ts tests/unit/runner-provisioning-logging.test.ts tests/unit/automatic-runner-provisioning.test.ts`
   result: PASS
-  evidence: isolated DB `plingpling_test_98945_28a4890cbcf1`; migrations applied; 2 files / 16
+  evidence: isolated DB `bruno_test_98945_28a4890cbcf1`; migrations applied; 2 files / 16
     tests passed; DB removed.
 - command: `git diff --check origin/main...HEAD`
   result: PASS
@@ -1413,7 +1413,7 @@ Status: RED
 - command:
     `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-reconciler.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/agent-runtime-triggers.test.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/runner-registration-routes.test.ts tests/unit/runner-heartbeat-route.test.ts tests/unit/agent-deployment-cancellation-db.test.ts tests/unit/agent-deployment-retry-db.test.ts tests/unit/agent-deployment-finalization-race.test.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/runner-provisioning-logging.test.ts`
   result: PASS
-  evidence: isolated DB `plingpling_test_17066_37396b1a1892`; migrations applied; 12 files / 110
+  evidence: isolated DB `bruno_test_17066_37396b1a1892`; migrations applied; 12 files / 110
     tests passed; DB removed.
 - command: `git diff --check origin/main...HEAD`
   result: PASS
@@ -1506,27 +1506,27 @@ Status: RED
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling`: issue #267 branch; coordinator-owned, checker-green.
-- `/Users/alexmetelli/source/plingpling-issue-265`: merged #265 branch; preserve existing state.
-- `/Users/alexmetelli/source/plingpling-issue-266`: main at merged #266; preserve existing state.
-- `/Users/alexmetelli/source/plingpling-issue-268`: issue #268 branch; implementation committed and
+- `/Users/alexmetelli/source/bruno`: issue #267 branch; coordinator-owned, checker-green.
+- `/Users/alexmetelli/source/bruno-issue-265`: merged #265 branch; preserve existing state.
+- `/Users/alexmetelli/source/bruno-issue-266`: main at merged #266; preserve existing state.
+- `/Users/alexmetelli/source/bruno-issue-268`: issue #268 branch; implementation committed and
   waiting for #267-first merge/rebase order.
-- `/Users/alexmetelli/source/plingpling-step7-base`: pre-existing detached user-owned worktree;
+- `/Users/alexmetelli/source/bruno-step7-base`: pre-existing detached user-owned worktree;
   preserve and do not modify.
 
 ## Completed
 
-- issue [#263](https://github.com/ametel01/plingpling/issues/263), PR
-  [#272](https://github.com/ametel01/plingpling/pull/272), merge
+- issue [#263](https://github.com/ametel01/bruno/issues/263), PR
+  [#272](https://github.com/ametel01/bruno/pull/272), merge
   `7d1cb985c06b0007dadcfb0e42c5631c65b7c472`; maker/checker/reviewer accepted.
-- issue [#264](https://github.com/ametel01/plingpling/issues/264), PR
-  [#275](https://github.com/ametel01/plingpling/pull/275), merge
+- issue [#264](https://github.com/ametel01/bruno/issues/264), PR
+  [#275](https://github.com/ametel01/bruno/pull/275), merge
   `fa79f4a69b5e684573bd42dcd59f4f9ffe4f1fa6`; checker and post-merge main CI accepted.
-- repository scope for issue [#265](https://github.com/ametel01/plingpling/issues/265), PR
-  [#273](https://github.com/ametel01/plingpling/pull/273), merge
+- repository scope for issue [#265](https://github.com/ametel01/bruno/issues/265), PR
+  [#273](https://github.com/ametel01/bruno/pull/273), merge
   `84a1860f4030496adda7dfc324ef86acafb19742`; post-merge main CI rerun passed.
-- repository scope for issue [#266](https://github.com/ametel01/plingpling/issues/266), PR
-  [#274](https://github.com/ametel01/plingpling/pull/274), merge
+- repository scope for issue [#266](https://github.com/ametel01/bruno/issues/266), PR
+  [#274](https://github.com/ametel01/bruno/pull/274), merge
   `57e4843975175cbb2f04ab45c8f7f6f1d4abcbf6`; issue remains open for authorized provider proof.
 - retrospective archived; status compaction performed immediately, so no separate process issue is
   needed.
@@ -1588,7 +1588,7 @@ Status: ALL GREEN
 - command:
     `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-reconciler.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/agent-runtime-triggers.test.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/runner-registration-routes.test.ts tests/unit/runner-heartbeat-route.test.ts tests/unit/agent-deployment-cancellation-db.test.ts tests/unit/agent-deployment-retry-db.test.ts tests/unit/agent-deployment-finalization-race.test.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/runner-provisioning-logging.test.ts`
   result: PASS
-  evidence: isolated DB `plingpling_test_23477_b049dc60c615`; migrations applied; 12 files / 111
+  evidence: isolated DB `bruno_test_23477_b049dc60c615`; migrations applied; 12 files / 111
     tests passed; DB removed.
 - command: `git diff --check origin/main...HEAD`
   result: PASS
@@ -1646,7 +1646,7 @@ Status: ALL GREEN
   assertion is the same intermittently failing hosted seam, confirming the local timing did not
   reproduce during this sample.
 - cold-cache exact scenario: PASS, desktop/mobile 2/2 in 12.4s after moving the ignored `.next`
-  cache to `/tmp/plingpling-e2e-ready-refresh-next.ENpBxc/.next`.
+  cache to `/tmp/bruno-e2e-ready-refresh-next.ENpBxc/.next`.
 - post-change exact-scenario stress: PASS, 20/20 total (10 desktop, 10 mobile) in 1.4 minutes.
 - serialized `bun run test:e2e:ci`: PASS, 26/26 twice in 28.0s and 28.3s.
 - static gates: `bun run format:check`, `bun run lint`, `bun run typecheck`, and
@@ -1681,24 +1681,24 @@ Status: NOT GREEN
   WebServer also emitted `error: script "dev" exited with code 143`. Available artifacts do not
   prove whether the timeout was inside `waitForResponse`, `waitForRequest`, route hold, or elsewhere.
 - command:
-  `PORT=3140 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=http://localhost:3140 PLAYWRIGHT_BASE_URL=http://localhost:3140 ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts -g "automatic submission follows persisted progress to ready across refresh, reopen, and a second context"`
+  `PORT=3140 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/bruno} NEXT_PUBLIC_APP_URL=http://localhost:3140 PLAYWRIGHT_BASE_URL=http://localhost:3140 ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts -g "automatic submission follows persisted progress to ready across refresh, reopen, and a second context"`
   result: PASS
   evidence: moved ignored `.next` cache to
-  `/tmp/plingpling-e2e-ready-refresh-next-checker-20260807144628`; cold-cache exact scenario passed
+  `/tmp/bruno-e2e-ready-refresh-next-checker-20260807144628`; cold-cache exact scenario passed
   desktop/mobile 2/2 in 14.0s.
 - command:
-  `PORT=3141 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=http://localhost:3141 PLAYWRIGHT_BASE_URL=http://localhost:3141 ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts -g "automatic submission follows persisted progress to ready across refresh, reopen, and a second context" --repeat-each=5`
+  `PORT=3141 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/bruno} NEXT_PUBLIC_APP_URL=http://localhost:3141 PLAYWRIGHT_BASE_URL=http://localhost:3141 ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts -g "automatic submission follows persisted progress to ready across refresh, reopen, and a second context" --repeat-each=5`
   result: PASS
   evidence: exact scenario passed 10/10 total, 5 desktop and 5 mobile, in 1.0m.
 - command:
-  `PORT=3142 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=http://localhost:3142 PLAYWRIGHT_BASE_URL=http://localhost:3142 bun run test:e2e:ci`
+  `PORT=3142 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/bruno} NEXT_PUBLIC_APP_URL=http://localhost:3142 PLAYWRIGHT_BASE_URL=http://localhost:3142 bun run test:e2e:ci`
   result: FAIL
   evidence: full E2E passed 18/26 before WebServer emitted
   `error: script "dev" exited with code 143`; remaining mobile tests then failed with
   `net::ERR_CONNECTION_REFUSED`/`ECONNREFUSED` against `localhost:3142`. The changed ready-refresh
   scenario passed in both projects before the server exit.
 - command:
-  `PORT=3143 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=http://localhost:3143 PLAYWRIGHT_BASE_URL=http://localhost:3143 bun run test:e2e:ci`
+  `PORT=3143 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/bruno} NEXT_PUBLIC_APP_URL=http://localhost:3143 PLAYWRIGHT_BASE_URL=http://localhost:3143 bun run test:e2e:ci`
   result: FAIL
   evidence: rerun passed 15/26 before WebServer again emitted
   `error: script "dev" exited with code 143`; one mobile retry test first failed waiting for
@@ -1901,12 +1901,12 @@ Status: ALL GREEN
     missing measurement as unsupported rather than inventing production values.
 - do-not-touch: #269 release-attested readiness, provider-phase/stage drains except adapting lock
   callers, protected snapshot/release workflows, hosted settings, unrelated PR #262, or
-  `/Users/alexmetelli/source/plingpling-step7-base`.
+  `/Users/alexmetelli/source/bruno-step7-base`.
 
 ## Handoff — #270 Spec to Builder
 
 - request: Implement only the authorization-independent contract in
-  `/Users/alexmetelli/source/plingpling-issue-270`: start with capacity math/default unification and
+  `/Users/alexmetelli/source/bruno-issue-270`: start with capacity math/default unification and
   owner-aware lock+revalidation, then cover every assignment caller, cohort reporting, and the
   explicit local-only two-agent fixture. Keep hosted/profile maximum one.
 - evidence: PR #273 provides the catalog and pre-effect validation. Current ready/legacy create paths
@@ -1928,7 +1928,7 @@ Status: ALL GREEN
 ## Handoff — #270 Builder Implementation to Checker
 
 - branch/worktree: `codex/issue-270-safe-capacity-reuse` in
-  `/Users/alexmetelli/source/plingpling-issue-270`.
+  `/Users/alexmetelli/source/bruno-issue-270`.
 - commit: pending local commit at handoff time.
 - behavior implemented:
   - selectable runner capacity is the minimum of computed CPU, physical-memory, disk, heartbeat,
@@ -2048,7 +2048,7 @@ Status: ALL GREEN
 ## Handoff — #270 Cycle 2 Builder Fixes to Checker
 
 - branch/worktree: `codex/issue-270-safe-capacity-reuse` in
-  `/Users/alexmetelli/source/plingpling-issue-270`.
+  `/Users/alexmetelli/source/bruno-issue-270`.
 - commit: pending local Cycle 2 commit at handoff time.
 - findings addressed:
   - P1 managed-ready Start now routes through the owner-aware exact-runner capacity lock and shared
@@ -2160,7 +2160,7 @@ Status: ALL GREEN
 ## Handoff — #270 Cycle 3 Builder Fixes to Checker
 
 - branch/worktree: `codex/issue-270-safe-capacity-reuse` in
-  `/Users/alexmetelli/source/plingpling-issue-270`.
+  `/Users/alexmetelli/source/bruno-issue-270`.
 - commit: local Cycle 3 commit containing this handoff.
 - findings addressed:
   - Existing desired-running Start recovery now threads the current agent ID through assigned and
@@ -2268,7 +2268,7 @@ Status: ALL GREEN
 ## Handoff — #270 Cycle 4 Deterministic Race Evidence
 
 - branch/worktree: `codex/issue-270-safe-capacity-reuse` in
-  `/Users/alexmetelli/source/plingpling-issue-270`.
+  `/Users/alexmetelli/source/bruno-issue-270`.
 - commit: this local Cycle 4 commit containing the handoff; no push, PR, or merge was performed.
 - implementation audit/fix:
   - deterministic inspection with the first create paused after acquiring the runner-capacity lock
@@ -2391,7 +2391,7 @@ Status: ALL GREEN
 ## Handoff — #270 Cycle 5 Cross-User Capacity Isolation
 
 - branch/worktree: `codex/issue-270-safe-capacity-reuse` in
-  `/Users/alexmetelli/source/plingpling-issue-270`.
+  `/Users/alexmetelli/source/bruno-issue-270`.
 - commit: this local Cycle 5 commit containing the handoff; no push, PR, or merge was performed.
 - narrow test-only change:
   - `tests/unit/create-agent-ready-db.test.ts` now seeds one compatible spare runner for `USER_A_ID`
@@ -2492,7 +2492,7 @@ Status: ALL GREEN for authorization-independent repository scope
 - `git diff --check origin/main...HEAD` passed after the rebase.
 - `bun run format:check`, `bun run lint`, and `bun run typecheck` passed (411 files where applicable).
 - the independent-review 13-file suite passed after rebase: 13 files / 357 tests against isolated
-  database `plingpling_test_65261_feac7ef7151d`; the database was removed successfully.
+  database `bruno_test_65261_feac7ef7151d`; the database was removed successfully.
 - hosted capacity/defaults remain one and #270 must remain open for the approved larger profile,
   disk budget, and explicitly authorized provider-backed two-agent trial. No smoke, provider,
   QStash, deployment, workflow, snapshot, hosted-configuration, or billable action ran.

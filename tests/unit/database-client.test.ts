@@ -4,13 +4,13 @@ import { normalizePostgresConnectionString } from "@/src/server/db/client";
 describe("database client connection strings", () => {
   it("removes PlanetScale's unsupported system root certificate parameter", () => {
     const normalized = normalizePostgresConnectionString(
-      "postgresql://release:secret@database.example:5432/postgres?sslmode=verify-full&sslrootcert=system&application_name=plingpling",
+      "postgresql://release:secret@database.example:5432/postgres?sslmode=verify-full&sslrootcert=system&application_name=bruno",
     );
     const parsed = new URL(normalized);
 
     expect(parsed.searchParams.get("sslmode")).toBe("verify-full");
     expect(parsed.searchParams.has("sslrootcert")).toBe(false);
-    expect(parsed.searchParams.get("application_name")).toBe("plingpling");
+    expect(parsed.searchParams.get("application_name")).toBe("bruno");
     expect(parsed.username).toBe("release");
     expect(parsed.password).toBe("secret");
   });

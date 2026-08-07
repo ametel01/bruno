@@ -572,7 +572,7 @@ function readDigitalOceanSnapshotMode(
         defaultValue: DEFAULT_MANUAL_RUNNER_IMAGE,
       }),
       hermesImage: expectedInput.hermesImage,
-      sourceRepository: "ametel01/plingpling",
+      sourceRepository: "ametel01/bruno",
       sourceRevision,
     },
   };

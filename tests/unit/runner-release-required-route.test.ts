@@ -6,7 +6,7 @@ const SECRET = "abcdefghijklmnopqrstuvwxyzABCDEF012345";
 const SHA = "a".repeat(40);
 const DIGEST = `sha256:${"b".repeat(64)}`;
 const IMAGE = `ghcr.io/ametel01/agentbay-runner:${SHA}@${DIGEST}`;
-const URL = "https://plingpling.example/api/internal/runner-release/required";
+const URL = "https://bruno.example/api/internal/runner-release/required";
 
 describe("GET /api/internal/runner-release/required", () => {
   it("exports only GET and rejects missing authorization", async () => {
@@ -38,7 +38,7 @@ describe("GET /api/internal/runner-release/required", () => {
         imageReference: IMAGE,
         imageDigest: DIGEST,
         version: SHA,
-        bootContractVersion: "plingpling.runner.boot.v1",
+        bootContractVersion: "bruno.runner.boot.v1",
       },
       rollout: { batchSize: 1, halted: false },
     });

@@ -2,8 +2,8 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 export const HERMES_STAGING_ATTESTATION_CHALLENGE_TTL_MS = 5 * 60_000;
 
-const CHALLENGE_DOMAIN = "plingpling-hermes-staging-challenge-v1";
-const ATTESTATION_DOMAIN = "plingpling-hermes-staging-attestation-v1";
+const CHALLENGE_DOMAIN = "bruno-hermes-staging-challenge-v1";
+const ATTESTATION_DOMAIN = "bruno-hermes-staging-attestation-v1";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const BEARER_PATTERN = /^[A-Za-z0-9._~+/=-]{32,256}$/;
 const TOKEN_PATTERN = /^[a-f0-9]{64}$/;
@@ -34,7 +34,7 @@ export function createHermesStagingAttestationChallenge(input: {
   }
 
   const challengeId = deterministicUuid(`${CHALLENGE_DOMAIN}:${input.runId}:${input.purpose}`);
-  const text = `plingpling Hermes ${input.purpose === "initial" ? "initial" : "post-restart"} acceptance ${challengeId}`;
+  const text = `bruno Hermes ${input.purpose === "initial" ? "initial" : "post-restart"} acceptance ${challengeId}`;
   return {
     purpose: input.purpose,
     challengeId,

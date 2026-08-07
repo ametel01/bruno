@@ -134,7 +134,7 @@ describe("runner release workflow contract", () => {
 
   it("routes the documented production command through the protected release workflow", () => {
     expect(packageJson.scripts["deploy:prod"]).toBe(
-      "gh workflow run deploy-production.yml --repo ametel01/plingpling --ref main --raw-field action=release",
+      "gh workflow run deploy-production.yml --repo ametel01/bruno --ref main --raw-field action=release",
     );
     expect(packageJson.scripts["deploy:prod"]).not.toContain("vercel deploy --prod");
     expect(readme).toContain("Do not run `vercel deploy --prod` directly");

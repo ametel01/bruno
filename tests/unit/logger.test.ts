@@ -22,7 +22,7 @@ describe("production logger", () => {
 
     expect(output.records()).toEqual([
       expect.objectContaining({
-        service: "plingpling",
+        service: "bruno",
         environment: "test",
         component: "runner.provisioning",
         lifecycle: "droplet_creation",
@@ -45,7 +45,7 @@ describe("production logger", () => {
       base: { environment: "test" },
     });
     const cause = new Error(
-      "request used Bearer agb_run_123456 and postgres://admin:password@db.internal/plingpling",
+      "request used Bearer agb_run_123456 and postgres://admin:password@db.internal/bruno",
     );
     const error = new Error("provider token=dop_v1_super_secret failed", { cause });
     Object.assign(error, { registrationToken: "agb_reg_123456", safeCount: 2 });

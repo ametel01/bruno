@@ -7,7 +7,7 @@ import {
   type UnitTestDatabasePlan,
 } from "@/scripts/run-unit-tests";
 
-const BASE_DATABASE_URL = "postgres://agentbay:agentbay@127.0.0.1:54329/plingpling";
+const BASE_DATABASE_URL = "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
 
 describe("isolated unit-test database runner", () => {
   it("derives a disposable loopback database without changing connection credentials", () => {
@@ -18,14 +18,14 @@ describe("isolated unit-test database runner", () => {
       }),
     ).toEqual({
       adminDatabaseUrl: "postgres://agentbay:agentbay@127.0.0.1:54329/postgres",
-      databaseName: "plingpling_test_4242_a1b2c3d4e5f6",
-      databaseUrl: "postgres://agentbay:agentbay@127.0.0.1:54329/plingpling_test_4242_a1b2c3d4e5f6",
+      databaseName: "bruno_test_4242_a1b2c3d4e5f6",
+      databaseUrl: "postgres://agentbay:agentbay@127.0.0.1:54329/bruno_test_4242_a1b2c3d4e5f6",
     });
   });
 
   it.each([
-    "postgres://agentbay:agentbay@database.example/plingpling",
-    "mysql://agentbay:agentbay@127.0.0.1:54329/plingpling",
+    "postgres://agentbay:agentbay@database.example/bruno",
+    "mysql://agentbay:agentbay@127.0.0.1:54329/bruno",
   ])("refuses unsafe base database URL %s", (databaseUrl) => {
     expect(() =>
       planUnitTestDatabase(databaseUrl, {
@@ -85,10 +85,10 @@ describe("isolated unit-test database runner", () => {
       },
     ]);
     expect(events).toEqual([
-      "create:plingpling_test_4242_a1b2c3d4e5f6",
-      "info:Created isolated unit-test database plingpling_test_4242_a1b2c3d4e5f6.",
-      "drop:plingpling_test_4242_a1b2c3d4e5f6",
-      "info:Removed isolated unit-test database plingpling_test_4242_a1b2c3d4e5f6.",
+      "create:bruno_test_4242_a1b2c3d4e5f6",
+      "info:Created isolated unit-test database bruno_test_4242_a1b2c3d4e5f6.",
+      "drop:bruno_test_4242_a1b2c3d4e5f6",
+      "info:Removed isolated unit-test database bruno_test_4242_a1b2c3d4e5f6.",
     ]);
   });
 

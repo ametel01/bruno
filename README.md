@@ -1,6 +1,6 @@
-# plingpling
+# bruno
 
-plingpling is the web control plane for AgentBay: a supervised way to create, configure, run,
+bruno is the web control plane for AgentBay: a supervised way to create, configure, run,
 observe, approve, back up, and recover persistent Hermes agents. The Next.js application owns the
 user-facing dashboard and control APIs; PostgreSQL stores durable state; separate runner services
 execute each agent in an isolated Docker container.
@@ -123,7 +123,7 @@ provisioning.
 Create an ignored `.env.local`:
 
 ```dotenv
-DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/plingpling
+DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/bruno
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 AGENTBAY_AUTH_MODE=development
 ```
@@ -136,8 +136,8 @@ bun run local:up
 
 `local:up` starts PostgreSQL, applies migrations, and launches `next dev`. It does not configure a
 cloud provider, so create-agent flows that need automatic provisioning fail closed. The Compose
-database is named `plingpling`; if you copy `.env.example`, change its database path from
-`/agentbay` to `/plingpling` for this local Compose path.
+database is named `bruno`; if you copy `.env.example`, change its database path from
+`/agentbay` to `/bruno` for this local Compose path.
 
 Useful database commands:
 

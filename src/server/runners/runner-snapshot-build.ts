@@ -306,7 +306,7 @@ export async function buildRunnerSnapshot(
 
     const availableAt = now().toISOString();
     const manifest: RunnerSnapshotManifest = {
-      schemaVersion: "plingpling.runner.snapshot.v1",
+      schemaVersion: "bruno.runner.snapshot.v1",
       snapshot: {
         id: snapshotId,
         name: snapshotName,
@@ -329,7 +329,7 @@ export async function buildRunnerSnapshot(
         amd64ManifestDigest: DEFAULT_HERMES_WORKLOAD_IMAGE_AMD64_MANIFEST_DIGEST,
       },
       bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
-      source: { repository: "ametel01/plingpling", revision: input.sourceRevision },
+      source: { repository: "ametel01/bruno", revision: input.sourceRevision },
       workflow: { runId: input.operationId, runAttempt: "1" },
       validation: {
         fullBootFixturePassedAt: bootResult.completedAt,
