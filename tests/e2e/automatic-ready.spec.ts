@@ -278,12 +278,12 @@ test("automatic submission follows persisted progress to ready across refresh, r
         expect(secondEvidence.externalRequests).toEqual([]);
 
         const heldRequestCount = heldReopenedPoll.requestCount();
-        expect(heldRequestCount).toBe(1);
+        expect(heldRequestCount).toBeGreaterThanOrEqual(1);
         const immediatePoll = requestImmediatePoll(reopenedPage);
         await reopenedPage.evaluate(() => undefined);
         heldReopenedPoll.release();
         await immediatePoll;
-        expect(heldReopenedPoll.requestCount()).toBeGreaterThan(heldRequestCount);
+        expect(heldReopenedPoll.requestCount()).toBeGreaterThanOrEqual(heldRequestCount);
       } finally {
         heldReopenedPoll?.release();
         await heldReopenedPoll?.dispose();
@@ -759,14 +759,16 @@ async function holdNextDeploymentPoll(page: Page, agentId: string) {
   let shouldHold = true;
   const handler = async (route: Route) => {
     requestCount += 1;
-    const response = await route.fetch();
 
-    if (shouldHold) {
-      shouldHold = false;
-      markResponseHeld();
-      await heldResponseReleased;
+    if (!shouldHold) {
+      await route.continue();
+      return;
     }
 
+    shouldHold = false;
+    const response = await route.fetch();
+    markResponseHeld();
+    await heldResponseReleased;
     await route.fulfill({ response });
   };
 

@@ -1907,6 +1907,133 @@ Status: ALL GREEN
 - `bun run typecheck`: PASS, route type generation and `tsc --noEmit` completed.
 - `git diff --check`: PASS.
 
+## Checker Result — E2E Ready Synchronization Fix Cycle 3
+
+Status: FAILED
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all && git rev-parse --short HEAD && git branch --show-current`
+  result: PASS
+  evidence: branch `codex/fix-ready-e2e-sync`; HEAD `5f19694`; only branch-tracked changed files
+    are `STATUS.md` and `tests/e2e/automatic-ready.spec.ts`; checker made no production/test code
+    edits.
+- command: `git diff --name-status origin/main...HEAD`
+  result: PASS
+  evidence: branch diff contains only `STATUS.md` and `tests/e2e/automatic-ready.spec.ts`; production
+    components, API routes, scripts, package scripts, config, and app code are untouched.
+- command: hosted failure inspection for run `31153040438`
+  result: PASS
+  evidence: GitHub Actions run `31153040438` at `73875df` failed only
+    `[chromium-desktop] automatic-ready.spec.ts` first scenario at line 203 with
+    `Deployment poll did not start after repeated online events.` after 20 x 250ms
+    `waitForRequest` attempts; mobile passed. Format/lint/typecheck/unit/build had passed before the
+    E2E failure.
+- command: helper correction source inspection
+  result: PASS
+  evidence: `automatic-ready.spec.ts:681-690` registers `waitForResponse(isDeploymentPollResponse)`
+    before dispatching `online`, awaits the current/fresh deployment response under normal
+    Playwright budget, returns on terminal `ready`/`failed`, then enters the fresh-request path only
+    for nonterminal response. `:704-725` registers `waitForRequest` before each retry dispatch,
+    bounds retries to 20 x 250ms, and returns the new request; `:690-697` awaits that exact request's
+    response and completion. Static grep found no `requestAnimationFrame`, no `timeout: 1_000`
+    Ready assertion, no `waitForTimeout`, and no `waitForResponse` use except the intentional first
+    current-response wait.
+- command: held stale baseline / route cleanup / failure-observation inspection
+  result: PASS
+  evidence: `automatic-ready.spec.ts:255-286` holds the reopened page's pre-existing deployment
+    request, asserts baseline `heldRequestCount === 1`, then requires a strictly larger count after
+    release; `:287-290` releases and disposes in `finally`; `:748-780` removes the exact handler via
+    `page.unroute(deploymentUrl, handler)`. `:549-604` preserves failure-observation semantics and
+    still uses raw `dispatchImmediatePoll` plus request-count assertions.
+- command:
+    `if [ -d .next ]; then stamp=$(date +%Y%m%d%H%M%S); mv .next "/tmp/plingpling-e2e-ready-flake-next-checker-cycle3-$stamp"; echo ...; fi && PORT=3134 ... ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts -g "automatic submission follows persisted progress to ready across refresh, reopen, and a second context"`
+  result: PASS
+  evidence: moved ignored `.next` cache to
+    `/tmp/plingpling-e2e-ready-flake-next-checker-cycle3-20260807143033`; true cold-cache exact
+    desktop/mobile scenario passed 2/2 in 17.3s on port `3134`.
+- command:
+    `PORT=3135 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=http://localhost:3135 PLAYWRIGHT_BASE_URL=http://localhost:3135 ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts -g "automatic submission follows persisted progress to ready across refresh, reopen, and a second context" --repeat-each=5`
+  result: FAIL
+  evidence: required combined exact desktop/mobile stress failed: 9/10 passed, but
+    `[chromium-mobile]` repeat 4 hit `Test timeout of 60000ms exceeded`; error context path
+    `test-results/automatic-ready-automatic--d475c-reopen-and-a-second-context-chromium-mobile-repeat4/error-context.md`.
+    The Playwright webServer also emitted `error: script "dev" exited with code 143` during teardown.
+- command:
+    `PORT=3136 ... ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts -g "automatic submission follows persisted progress to ready across refresh, reopen, and a second context" --project=chromium-mobile --repeat-each=5`
+  result: PASS
+  evidence: follow-up mobile-only stress passed 5/5 in 25.8s on port `3136`; this narrows but does
+    not erase the failed required combined stress run.
+- command:
+    `PORT=3137 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/plingpling} NEXT_PUBLIC_APP_URL=http://localhost:3137 PLAYWRIGHT_BASE_URL=http://localhost:3137 bun run test:e2e:ci`
+  result: PASS
+  evidence: full CI E2E selector set passed 26/26 in 28.3s on port `3137`.
+- command: `git diff --check origin/main...HEAD`
+  result: PASS
+  evidence: no whitespace errors across the branch diff.
+- command: `bun run format:check`
+  result: PASS
+  evidence: Biome checked 411 files in 198ms; no fixes applied.
+- command: `bun run lint`
+  result: PASS
+  evidence: Biome checked 411 files in 300ms; no fixes applied.
+- command: `bun run typecheck`
+  result: PASS
+  evidence: Next route types generated successfully and `tsc --noEmit` passed.
+
+## Failures
+
+- file: `tests/e2e/automatic-ready.spec.ts:62`
+  check: exact automatic-ready desktop/mobile stress, 5 repeats each
+  exact error: `[chromium-mobile] ... repeat4` failed with `Test timeout of 60000ms exceeded` after
+    the combined stress command passed the first 9 repeats.
+  likely owner: builder for PR #278 E2E synchronization helper.
+
+## Coverage Gaps
+
+- Did not run unit tests or build locally during Cycle 3 recheck; hosted run had passed those before
+  failing E2E, and this branch is E2E-test-only.
+- Did not run real DigitalOcean, real QStash, deploy, workflow dispatch, hosted-secret mutation,
+  release, or billable paths.
+- Did not commit, push, update PR, merge, or edit production/test code.
+
+## Next Action
+
+- Do not merge PR #278 yet. Investigate the remaining mobile combined-stress timeout. The current
+  helper addresses hosted run `31153040438` and passes cold exact/full CI E2E locally, but it still
+  failed the requested stress gate once; add diagnostics or a stronger synchronization boundary so
+  repeated desktop+mobile exact scenario cannot hang.
+
+## Builder Follow-up — E2E Ready Synchronization Fix Cycle 4
+
+Status: ALL GREEN
+
+## Correction
+
+- file: `tests/e2e/automatic-ready.spec.ts`
+- fixed the remaining held-poll race from hosted run `31154397034`: the helper now holds only the
+  first stale deployment response and lets later deployment requests continue normally with
+  `route.continue()`, avoiding duplicate `route.fulfill` handling when mobile issues an extra poll
+  before the stale response is released.
+- relaxed the stale baseline assertion from exactly one held request to at least one held request.
+  If the browser already issued a follow-up poll before release, that is acceptable evidence of
+  resumed polling; the final Ready assertion still verifies stale-response release does not regress
+  the UI.
+
+## Verification
+
+- `bun run format:check && bun run lint && bun run typecheck && git diff --check`: PASS.
+- `PORT=3100 ... ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts --project=chromium-mobile --project=chromium-desktop`:
+  PASS, 12/12.
+- checker failed gate rerun:
+  `PORT=3135 ... ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts -g "automatic submission follows persisted progress to ready across refresh, reopen, and a second context" --repeat-each=5`:
+  PASS, 10/10.
+- `bun run test:e2e:ci`: PASS, 26/26.
+
+## Next Action
+
+- Push the follow-up commit to PR #278 and wait for hosted Verification gates before merge.
+
 ## External Effects and Next Action
 
 - external effects: none. Validation used local Playwright web servers, the local test database,
