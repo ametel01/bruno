@@ -54,6 +54,15 @@ The update log is append-only.
   rejection, runtime-limit propagation, and fake-only benchmark candidate validation are implemented
   for issue #265. Full local gates passed. The hosted default is intentionally unchanged pending
   authorized provider evidence.
+- Step 2 focused gates: `bun run format:check`, `bun run lint`, `bun run typecheck`,
+  `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts
+  tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts
+  tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts
+  tests/unit/agent-deployment-migration-fixtures.test.ts`, `bun run test`, `bun run build`, and
+  `git diff --check` passed locally.
+- Step 2 E2E/local smoke gates: `bun run test:e2e:ci` passed 26/26. `bun run local:agent:smoke`
+  passed with `cleanupVerified:true`, `digitalOceanRequests:0`, `issueCounts:{}`, and p95
+  150.725 seconds in this local cold run.
 
 ## Issue Graph
 
@@ -86,17 +95,17 @@ The update log is append-only.
   provider execution remains unimplemented and unauthorized in this step.
 - Wired successful terminal deployment transitions to one sanitized timing log and wired
   `local:agent:smoke` to emit/return `local_agent_cycle_creation_latency` before database volume
-  teardown. The final verified rerun reported `ready=1`, `successRate=1`, `readyLatency.p95Ms=88223`,
-  and `digitalOceanRequests=0`.
+  teardown. The final verified rerun reported a valid 15-stage record with `ready=1`,
+  `successRate=1`, `readyLatency.p95Ms=88760`, `issueCounts:{}`, and `digitalOceanRequests=0`.
 - Added focused regression coverage for report ordering, ready/failed/incomplete rows, nearest-rank
   percentiles, invalid/missing/duplicate/reversed evidence, PostgreSQL timestamp strings, provider
   fail-closed CLI behavior, local zero-cloud guardrails, smoke wiring, and bootstrap boundary
   redaction.
 - Updated `docs/E2E_VALIDATION.md` and `CHANGELOG.md`.
-- Gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; focused unit harness
-  for Step 1 tests; `bun run test` (169 files, 1628 tests); `bun run build`; `bun run test:e2e:ci`
-  (26 tests); `bun run local:agent:smoke`; `bun run agent:creation:benchmark -- --limit 1`.
-- Commit: this Step 1 implementation commit.
+- Gates passed: `bun run verify` (169 files, 1638 tests, production build); focused unit harness
+  (10 files, 95 tests); `bun run test:e2e:ci` (26 tests); `bun run local:agent:smoke`; provider
+  fail-closed guards; and `bun run agent:creation:benchmark -- --limit 1`.
+- Merge: PR #272, commit `7d1cb985c06b0007dadcfb0e42c5631c65b7c472`.
 - Next: Step 2 / issue #264 — durable delayed deployment wakeups.
 
 ### 2026-08-07 — Step 5 authorization-independent implementation in progress
@@ -161,3 +170,23 @@ The update log is append-only.
   `bun run local:agent:smoke` with a local snapshot-equivalent image.
 - Step 6 and issue #266 must remain open until explicit live snapshot authorization proves manifest
   artifact attestation and absence of builder/firewall/credential leftovers.
+
+### 2026-08-07 — Step 2 builder implementation ready for checker
+
+- Added `agent_deployment_wakeups` with generation fencing, publish leases, safe error codes, due
+  indexes, delivery indexes, migration metadata, and migration fixture assertions.
+- Added deployment dispatch configuration with default `cron` mode and fail-closed `qstash` mode
+  requiring `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`, and an HTTPS
+  callback origin.
+- Added the dispatch module, protected signed wakeup route, QStash publisher boundary, cron outbox
+  sweep, and post-response publication path while retaining targeted reconcile fallback in cron or
+  unavailable modes.
+- Wired deployment create, retry, release, stage transition, backoff, runner-recovery pause, ready,
+  failed, and lifecycle cancellation paths so wakeups are scheduled or terminalized in the same DB
+  transaction as the deployment mutation.
+- Added focused coverage for env validation, post-response trigger behavior, signed route delivery,
+  duplicate/early/unsigned delivery, generation terminalization, migration objects, and cron sweep
+  invocation. No real QStash, DigitalOcean, deployment, secret, or billable provider effect was run.
+- Gates additionally passed after tracker updates: `bun run test:e2e:ci` (26/26) and
+  `bun run local:agent:smoke` with zero DigitalOcean requests and verified cleanup. The local smoke
+  p95 was 150.725 seconds, so the overall one-minute SLO remains unmet pending later plan steps.

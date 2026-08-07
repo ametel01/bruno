@@ -46,6 +46,15 @@ export const agentDeploymentStageEnum = pgEnum("agent_deployment_stage", [
   "failed",
 ]);
 
+export const agentDeploymentWakeupStateEnum = pgEnum("agent_deployment_wakeup_state", [
+  "pending",
+  "publishing",
+  "published",
+  "claimed",
+  "terminal",
+  "failed",
+]);
+
 export const agentRuntimeReconciliationStateEnum = pgEnum("agent_runtime_reconciliation_state", [
   "observing",
   "recovering_stop",
@@ -675,6 +684,69 @@ export const agentDeployments = pgTable(
     index("agent_deployments_claim_idx")
       .on(table.nextAttemptAt, table.leaseExpiresAt, table.createdAt)
       .where(sql`${table.stage} NOT IN ('ready', 'failed')`),
+  ],
+);
+
+export const agentDeploymentWakeups = pgTable(
+  "agent_deployment_wakeups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    deploymentId: uuid("deployment_id")
+      .notNull()
+      .references(() => agentDeployments.id, { onDelete: "cascade" }),
+    generation: integer("generation").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    state: agentDeploymentWakeupStateEnum("state").notNull().default("pending"),
+    publishAttemptCount: integer("publish_attempt_count").notNull().default(0),
+    providerMessageId: text("provider_message_id"),
+    publishLeaseOwner: text("publish_lease_owner"),
+    publishLeaseExpiresAt: timestamp("publish_lease_expires_at", { withTimezone: true }),
+    safeErrorCode: text("safe_error_code"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("agent_deployment_wakeups_generation_idx").on(table.deploymentId, table.generation),
+    check("agent_deployment_wakeups_generation_check", sql`${table.generation} >= 1`),
+    check(
+      "agent_deployment_wakeups_publish_attempt_count_check",
+      sql`${table.publishAttemptCount} >= 0`,
+    ),
+    check(
+      "agent_deployment_wakeups_provider_message_id_check",
+      sql`${table.providerMessageId} IS NULL OR (length(trim(${table.providerMessageId})) > 0 AND length(${table.providerMessageId}) <= 256)`,
+    ),
+    check(
+      "agent_deployment_wakeups_publish_lease_owner_check",
+      sql`${table.publishLeaseOwner} IS NULL OR (length(trim(${table.publishLeaseOwner})) > 0 AND length(${table.publishLeaseOwner}) <= 128)`,
+    ),
+    check(
+      "agent_deployment_wakeups_publish_lease_pair_check",
+      sql`(${table.publishLeaseOwner} IS NULL AND ${table.publishLeaseExpiresAt} IS NULL) OR (${table.publishLeaseOwner} IS NOT NULL AND ${table.publishLeaseExpiresAt} IS NOT NULL)`,
+    ),
+    check(
+      "agent_deployment_wakeups_safe_error_code_check",
+      sql`${table.safeErrorCode} IS NULL OR ${table.safeErrorCode} ~ '^[a-z0-9_.:-]{1,64}$'`,
+    ),
+    check(
+      "agent_deployment_wakeups_published_state_check",
+      sql`${table.state} <> 'published' OR (${table.providerMessageId} IS NOT NULL AND ${table.publishedAt} IS NOT NULL)`,
+    ),
+    check(
+      "agent_deployment_wakeups_claimed_state_check",
+      sql`${table.state} <> 'claimed' OR ${table.claimedAt} IS NOT NULL`,
+    ),
+    index("agent_deployment_wakeups_due_idx")
+      .on(table.dueAt, table.updatedAt, table.deploymentId)
+      .where(sql`${table.state} IN ('pending', 'failed')`),
+    index("agent_deployment_wakeups_publish_lease_idx")
+      .on(table.publishLeaseExpiresAt, table.updatedAt)
+      .where(sql`${table.state} = 'publishing'`),
+    index("agent_deployment_wakeups_delivery_idx")
+      .on(table.deploymentId, table.generation, table.dueAt)
+      .where(sql`${table.state} IN ('pending', 'published', 'failed')`),
   ],
 );
 

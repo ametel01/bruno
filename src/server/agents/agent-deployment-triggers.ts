@@ -1,6 +1,7 @@
 import "server-only";
 
 import { after } from "next/server";
+import { publishLatestDeploymentWakeupAfterCommit } from "@/src/server/agents/agent-deployment-dispatch";
 import {
   reconcileTargetAgentDeployment,
   reconcileTargetRunnerDeployment,
@@ -10,6 +11,7 @@ export type AgentDeploymentAfterScheduler = (callback: () => void | Promise<void
 
 export type AgentDeploymentTriggerDependencies = {
   afterScheduler?: AgentDeploymentAfterScheduler;
+  publishWakeup?: typeof publishLatestDeploymentWakeupAfterCommit;
   reconcile?: typeof reconcileTargetAgentDeployment;
   reconcileRunner?: typeof reconcileTargetRunnerDeployment;
 };
@@ -23,7 +25,11 @@ export function scheduleAgentDeploymentReconcileAfterResponse(
 
   try {
     schedule(async () => {
-      await reconcileDeploymentAfterResponse(deploymentId, reconcile).catch(() => {
+      await reconcileDeploymentAfterResponse(
+        deploymentId,
+        reconcile,
+        dependencies.publishWakeup,
+      ).catch(() => {
         // The deployment row remains due for the protected cron reconciler.
       });
     });
@@ -35,7 +41,13 @@ export function scheduleAgentDeploymentReconcileAfterResponse(
 async function reconcileDeploymentAfterResponse(
   deploymentId: string,
   reconcile: typeof reconcileTargetAgentDeployment,
+  publishWakeup: typeof publishLatestDeploymentWakeupAfterCommit = publishLatestDeploymentWakeupAfterCommit,
 ): Promise<void> {
+  const publish = await publishWakeup(deploymentId);
+  if (publish === "published") {
+    return;
+  }
+
   const initialized = await reconcile(deploymentId);
   if (initialized.processed === 1 && initialized.outcome === "advanced") {
     await reconcile(deploymentId);

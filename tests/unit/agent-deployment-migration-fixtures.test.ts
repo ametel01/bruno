@@ -39,6 +39,14 @@ describe("agent deployment migration fixtures", () => {
         "ready",
         "failed",
       ]);
+      await expect(readEnumValues(sql, "agent_deployment_wakeup_state")).resolves.toEqual([
+        "pending",
+        "publishing",
+        "published",
+        "claimed",
+        "terminal",
+        "failed",
+      ]);
       await expect(readColumnNames(sql, "agent_deployments")).resolves.toEqual([
         "id",
         "agent_id",
@@ -63,6 +71,22 @@ describe("agent deployment migration fixtures", () => {
         "canary_attempted_at",
         "canary_completed_at",
       ]);
+      await expect(readColumnNames(sql, "agent_deployment_wakeups")).resolves.toEqual([
+        "id",
+        "deployment_id",
+        "generation",
+        "due_at",
+        "state",
+        "publish_attempt_count",
+        "provider_message_id",
+        "publish_lease_owner",
+        "publish_lease_expires_at",
+        "safe_error_code",
+        "published_at",
+        "claimed_at",
+        "created_at",
+        "updated_at",
+      ]);
       await expect(readAgentsDesiredDefault(sql)).resolves.toEqual({
         column_default: "'stopped'::agent_desired_status",
         is_nullable: "NO",
@@ -78,6 +102,15 @@ describe("agent deployment migration fixtures", () => {
       await expect(readIndexDefinition(sql, "agent_deployments_claim_idx")).resolves.toContain(
         "WHERE (stage <> ALL",
       );
+      await expect(
+        readIndexDefinition(sql, "agent_deployment_wakeups_generation_idx"),
+      ).resolves.toContain("UNIQUE INDEX");
+      await expect(readIndexDefinition(sql, "agent_deployment_wakeups_due_idx")).resolves.toContain(
+        "WHERE (state = ANY",
+      );
+      await expect(
+        readConstraintDefinition(sql, "agent_deployment_wakeups_publish_lease_pair_check"),
+      ).resolves.toContain("publish_lease_owner");
       await expect(
         readConstraintDefinition(sql, "agent_deployments_agent_owner_fk"),
       ).resolves.toContain("FOREIGN KEY (agent_id, user_id) REFERENCES agents(id, user_id)");

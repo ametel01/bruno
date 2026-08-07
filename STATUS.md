@@ -1,827 +1,804 @@
 # Agent Team Status
 
+Cold history: [`STATUS.archive.md`](STATUS.archive.md)
+
 ## Active Work
 
-- issue: [#266](https://github.com/ametel01/plingpling/issues/266)
+- issue: [#264](https://github.com/ametel01/plingpling/issues/264)
   owner: coordinator (`root`)
-  branch: `codex/issue-266-attested-snapshot`
-  worktree: `/Users/alexmetelli/source/plingpling-issue-266`
+  branch: `codex/issue-264-durable-wakeups`
+  worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: repository scope green; PR #274 awaiting remote checks
-  cycle: 4/5
+  phase: checker-green; opening PR
+  cycle: 3/5
 
-## Completion Contract
+## Goal Contract
 
-- issue: [#266](https://github.com/ametel01/plingpling/issues/266), “Publish an attested
-  DigitalOcean runner snapshot.”
-- readiness: Repository-only implementation is ready. Final acceptance is dependency-blocked by the
-  failing current-main CI run and by explicit authorization for the one live, billable snapshot
-  workflow validation. Neither blocker prevents scripts, workflow, provider boundaries, or local
-  tests from being implemented and reviewed now.
-- outcome: Add a protected, manually dispatched, repository-owned snapshot pipeline that creates a
-  temporary non-user builder only after approval, installs Docker/Caddy and immutable images, runs
-  the existing full runner boot contract, removes all credentials and instance identity, powers the
-  builder off, publishes an attested region-available snapshot manifest, and verifies cleanup.
-  Hosted provisioning may select the snapshot only when its evidence exactly matches the requested
-  release; the stock Ubuntu path remains an explicit rollback mode.
+- outcome: Execute `PLAN.md` through its Definition of Done, including 30 explicitly authorized
+  clean cold DigitalOcean trials with at least 95% success and p95 committed-create-to-durable-ready
+  latency at or below 60 seconds.
+- current result: Repository work for #263, #265, and #266 is merged. The rebased #264 zero-cloud
+  lifecycle smoke passed at 149.874 seconds with zero DigitalOcean requests, so the SLO is not yet
+  met; #267 is expected to remove the observed 60-second post-readiness provider poll.
+- non-goals: No Droplets before a create request; no warm pools, ready capacity, onboarding or
+  predictive provisioning, cross-user sharing, or SLO expansion beyond durable `ready`.
+- authorization boundary: Do not spend provider resources, build provider snapshots, configure
+  production secrets, deploy, or release without explicit authorization.
+- do-not-touch: Preserve `/Users/alexmetelli/source/plingpling-step7-base`, unrelated PR #262, and
+  existing changelog history.
+
+## Dependency Graph
+
+- completed repository scope: #263 / PR #272; #265 / PR #273; #266 / PR #274
+- ready now: #264 durable wakeups
+- blocked by #264: #267, #268
+- blocked by #266: #269
+- blocked by #265: #270
+- blocked by #264-#270: #271 provider-backed SLO proof
+
+## Next Assignment Contract
+
+- #264, #265, and #266 are parallel-safe only in separate branches/worktrees with one owner each.
+- Every checker must exercise a real producer-sequence-to-consumer semantic path, not only isolated
+  consumer fixtures.
+- Any stream touching provider/benchmark arguments must probe malformed counts and fail-closed
+  provider mode.
+- #266 may implement repository scripts/workflow and local tests, but actual DigitalOcean snapshot
+  creation is authorization-gated.
+
+## Completion Contract — #264
+
+- readiness: `ready`. Required upstream issue #263 is closed by merged PR #272 at `7d1cb98`; #264
+  has no comments, linked PR, unresolved review thread, or agent-actionable dependency blocker.
+- outcome: Persist a generation-fenced PostgreSQL deployment wakeup in the same transaction as each
+  due-time or terminal deployment mutation, publish due work through a signed delayed-QStash
+  adapter, and retain the minute deployment cron as the authoritative recovery boundary.
 - acceptance criteria:
-  - The build command and narrow snapshot-provider contract are deterministic under a fake provider,
-    accept an `AbortSignal`, use bounded polling/timeouts, and model asynchronous DigitalOcean
-    action states (`in-progress`, `completed`, `errored`, timeout, and outcome unknown).
-  - Inputs require exact source commit, Ubuntu base image identity, `amd64` architecture, target
-    region, runner image digest, default-agent image digest, Hermes index/platform digest, boot
-    contract version, and an affirmative cost-authorization sentinel. Mutable/tag-only image input,
-    malformed IDs, unsupported architecture, or an absent sentinel fails before provider effects.
-  - The builder is uniquely owned by an operation name/tag and is never a user runner or ready
-    capacity. It installs Docker and Caddy, preloads all three exact images, installs generic
-    systemd/bootstrap assets, and contains no user/agent registration or endpoint state.
-  - The existing full boot fixture must pass against the exact preloaded images before sanitation or
-    snapshot creation. A missing, failed, expired, or identity-mismatched fixture result blocks the
-    snapshot action. Do not weaken or replace the full fixture in #266.
-  - Sanitation removes registration and bearer credentials, registry/SSH credentials, agent and
-    fixture state, containers and temporary networks, Docker auth, logs/journal and shell history,
-    cloud-init instance data, SSH host keys, machine/dbus identity, builder metadata, and temporary
-    files. A path scan plus hostile-marker content scan must pass before clean shutdown.
-  - Snapshotting starts only after sanitation evidence and authoritative power-off completion.
-    DigitalOcean snapshot/action completion alone is insufficient: the resulting image must be read
-    back as the expected snapshot and shown available in the configured target region.
-  - The canonical, versioned manifest contains only allowlisted evidence: snapshot ID/name, target
-    region(s), base image ID/slug, architecture/minimum disk data, exact runner/default-agent/Hermes
-    identities, boot contract, source repository/revision, workflow/run identity, validation,
-    sanitation, creation and availability timestamps, and an explicit expiry/staleness boundary.
-  - The manifest is tamper-evident and immutable at consumption time through a documented,
-    offline-verifiable signature/attestation plus canonical digest. Missing signature, unknown key,
-    changed bytes, unsupported schema, future/reversed timestamps, or stale evidence fails closed.
-  - Production snapshot mode validates manifest authenticity, freshness, source/release identities,
-    base image, architecture, region, minimum disk compatibility, and authoritative provider
-    availability before every manual or automatic `createRunner` call. Invalid evidence produces
-    zero Droplet-create calls. A valid selection passes the numeric snapshot ID as the image.
-  - Snapshot first-boot data injects only per-instance endpoint, registration/bearer token, runner
-    name, and runtime configuration, then starts the exact preloaded images. It omits apt repository
-    setup, package installation, and image pulls while retaining current full readiness semantics.
-  - Stock-image mode keeps the current complete bootstrap as a configuration-only rollback. Local
-    `local_docker` mode accepts only its existing exact zero-cloud sentinels and can exercise a
-    snapshot-equivalent image without any DigitalOcean request.
-  - Cleanup is idempotent and ordered. On every safely attributable success, failure, timeout,
-    cancellation, and retry path, revoke/delete ephemeral registration tokens, SSH/registry
-    credentials and keys, firewall, builder Droplet, and failed/partial snapshot artifacts, then
-    prove absence. On ambiguous ownership, do not guess or delete; fail closed with sanitized
-    reconciliation evidence and never claim cleanup succeeded.
-  - `.github/workflows/build-runner-snapshot.yml` has only `workflow_dispatch`, a non-cancelling
-    concurrency group, least-privilege permissions, strict inputs, a protected snapshot-build
-    environment, pre-effect authorization validation, bounded execution, `always()` cleanup, and
-    artifact attestation/upload only after validation. No push, pull-request, schedule, ordinary CI,
-    image-publication, release, or production-deploy trigger may invoke it.
-  - The workflow and logs never expose the DigitalOcean token, registration/bearer token, private
-    key, registry credential, cloud-init output, environment dump, builder IDs, or arbitrary provider
-    responses. Snapshot ID is allowed only in the final manifest/allowlisted summary.
-  - `README.md` and `docs/RUNNER_RELEASES.md` document protected-environment setup, token scope,
-    inputs, manifest/signature promotion, stock rollback, cleanup/reconciliation, and the rule that a
-    manual dispatch without enforceable reviewer protection is forbidden.
-  - `PROGRESS.md` and `CHANGELOG.md` preserve existing history. Repository implementation evidence
-    may be recorded without claiming a live snapshot. Step 6, snapshot identity, cleanup evidence,
-    and issue closure remain pending until an explicitly authorized workflow run succeeds.
+  - Add a Drizzle migration/schema model for bounded wakeup/outbox state: deployment identity,
+    generation, due time, state, publish attempt count, provider message ID, publish lease,
+    allowlisted safe error code, and timestamps, with uniqueness, integrity, and due-work indexes.
+  - All repo-local deployment writers that create, retry, reschedule, supersede, cancel, or
+    terminalize work update the deployment and its authoritative wakeup generation atomically.
+    A failed transaction exposes neither half; terminal or replacement work fences old deliveries.
+  - Add a narrow dispatch interface with `cron` and `qstash` modes. PostgreSQL remains authoritative;
+    post-commit `after()` publication is opportunistic, and an expired/unpublished row can be
+    reclaimed and published by the protected cron sweep.
+  - A fake delayed adapter demonstrates a persisted two-second retry being delivered near its due
+    time without a minute tick. It must not publish before the persisted due time.
+  - The QStash POST route bounds raw body size, verifies the unmodified body with the current/next
+    signing-key rotation pair before JSON parsing, rejects malformed or unsigned input, and accepts
+    only a bounded payload containing deployment ID plus generation/due-time fencing data.
+  - Duplicate, stale, reordered, early, and retried deliveries cannot claim more than one action for
+    a generation. Delivery only invokes targeted reconciliation after the wakeup and deployment
+    fences are atomically claimed; the existing deployment lease remains the final execution fence.
+  - Lost post-response publish, publish rejection, expired publish lease, and queue delivery loss
+    are recoverable through the outbox sweep and existing deployment cron without losing due work.
+  - `AGENTBAY_DEPLOYMENT_DISPATCH_MODE=cron|qstash`, `QSTASH_TOKEN`,
+    `QSTASH_CURRENT_SIGNING_KEY`, and `QSTASH_NEXT_SIGNING_KEY` are validated and documented.
+    `qstash` fails closed unless complete; `cron` performs no external queue publication and can be
+    selected without schema rollback or invalidating active deployments/wakeups.
+  - Logs, rows exposed to logs, payloads, and safe errors contain no token, signing key, cron secret,
+    user ID, runner endpoint, provider credential, raw provider response, or arbitrary exception.
 - non-goals:
-  - No user Droplet, warm pool, spare/ready capacity, onboarding/predictive provisioning,
-    cross-user reuse, or builder reuse. A short-lived approved snapshot builder is the only
-    pre-request infrastructure in scope and is never assignable to an agent.
-  - Do not dispatch the workflow, create/read/delete provider resources, configure GitHub
-    environments/secrets, deploy, release, promote production config, or incur provider cost.
-  - Do not implement #265 runner-size/default/capacity/swap policy or #269 `release_attested`
-    lightweight readiness/release-canary restoration. Per-Droplet full readiness remains active.
-  - Do not change QStash/reconciliation cadence, deployment stages, same-user reuse, the one-minute
-    SLO benchmark/rollout, public UI/API contracts, or add a database migration.
+  - Do not implement the provider-phase drain (#267), post-registration stage drain (#268), runner
+    sizing (#265), snapshots (#266), same-user capacity reuse, or the final provider benchmark.
+  - Do not create or pre-provision a Droplet, add warm/ready capacity, run a real QStash publish,
+    deploy, release, configure hosted secrets, or execute any provider/billable effect.
+  - Do not remove the deployment cron, reuse `CRON_SECRET` as queue authority, change the SLO
+    boundary, weaken deployment/provider idempotency, or make queue delivery authoritative.
 - likely touchpoints:
-  - New snapshot manifest/attestation and build orchestration modules under `src/server/runners/`,
-    `scripts/build-runner-snapshot.ts`, `.github/workflows/build-runner-snapshot.yml`, and focused
-    provider/manifest/workflow/sanitation tests.
-  - `src/server/runners/digitalocean-provider.ts`, `digitalocean-sdk-runtime.js` and `.d.ts` for the
-    narrow droplet actions, action polling, snapshot/image read/transfer/delete, and ephemeral-key
-    cleanup surface; preserve existing runner-provider behavior.
-  - `src/server/env.ts`, `src/server/runners/runner-provisioning.ts`, and
-    `src/server/agents/agent-deployment-reconciler.ts` for pure manifest parsing plus async
-    pre-create availability checks shared by every hosted create path.
-  - `src/server/runners/cloud-runner-bootstrap.ts` for explicit stock versus snapshot-first-boot
-    generation; existing boot-self-test/release-identity modules should be reused, not redesigned.
-  - `src/server/runners/local-docker-digitalocean-provider.ts`, `scripts/repro-cloud-runner-bootstrap.ts`,
-    `scripts/smoke-local-agent-cycle.ts`, `package.json`, `README.md`, `docs/RUNNER_RELEASES.md`,
-    `PROGRESS.md`, and `CHANGELOG.md`.
+  - `src/server/db/schema.ts`, a generated `drizzle/0026_*.sql` plus metadata, and deployment migration
+    fixtures.
+  - New `src/server/agents/agent-deployment-dispatch.ts` and a signed internal App Router POST route;
+    the existing deployment cron route should sweep outbox work and retain global reconciliation.
+  - `src/server/agents/agent-deployment-reconciler.ts`, `agent-deployments.ts`,
+    `agent-deployment-retry.ts`, `agent-deployment-triggers.ts`, and cancellation in `lifecycle.ts`.
+  - `src/server/env.ts`, `.env.example`, README/operator validation docs, `package.json`/`bun.lock`
+    if the official QStash verifier/client is added, `PROGRESS.md`, and `CHANGELOG.md`.
+  - Focused dispatch, signature-route, env, trigger, reconciler, retry, cancellation, migration, and
+    local-smoke tests; preserve existing public API response shapes.
 - required tests / gates:
-  - Manifest fixtures: stable canonical bytes/digest; valid signature; tamper, wrong key/schema,
-    missing fields, wrong region/base/arch/source/boot/image identity, future/reversed/expired times,
-    minimum-disk mismatch, and hostile unknown fields all fail closed without echoing values.
-  - Provider/build fixtures: success; boot failure; sanitation failure; shutdown/action error;
-    timeout/abort; unavailable/wrong-region image; safe retry; duplicate ownership; ambiguous create or
-    delete outcome; partial snapshot removal; ordered token/key/firewall/Droplet cleanup; verified
-    absence. Assert exact effect order and zero unowned deletion.
-  - Provisioning fixtures cover every manual/automatic create entry: invalid or unavailable evidence
-    never calls `createRunner`; valid snapshot uses its numeric ID; stock rollback and exact local
-    sentinels still work; no config path logs secrets or manifest source payloads.
-  - Workflow static tests parse YAML and prove dispatch-only triggering, protected environment,
-    authorization-before-secret/provider work, least privilege, bounded timeouts, non-cancelling
-    concurrency, unconditional cleanup, attested allowlisted artifact, and no DigitalOcean secret in
-    `.github/workflows/ci.yml`, `publish-agent-image.yml`, or `deploy-production.yml`.
-  - Bootstrap/sanitation tests prove snapshot first boot has no apt/package/image-pull work, starts
-    exact preloaded identities, still runs full readiness, and forbids every credential/identity path;
-    stock bootstrap remains covered. Add adversarial secret and shell-injection fixtures.
-  - Focused gate through `bun scripts/run-unit-tests.ts` for new tests plus `server-env`,
-    `digitalocean-provider`, `digitalocean-sdk-runtime`, `cloud-runner-bootstrap`, runner provisioning,
-    automatic provisioning, runner-release workflow/smoke, local-agent smoke, and secret redaction.
-  - Then run `bun run format:check`, `bun run lint`, `bun run typecheck`, `bun run test`,
-    `bun run build`, `bun run test:e2e:ci`, `bun run repro:cloud-runner` with snapshot-mode first-boot
-    data, and `bun run local:agent:smoke` with a local snapshot-equivalent image.
-  - Do not run the protected DigitalOcean workflow. After separate explicit approval, one authorized
-    run must prove manifest/artifact attestation and absence of builder/firewall/credential leftovers
-    before Step 6 or #266 can be marked complete.
-- security / data / migration risks:
-  - Current stock cloud-init contains registration/bearer tokens and instance endpoint data; none may
-    enter the reusable image. Docker auth, cloud-init state, machine identity, SSH keys, logs, and the
-    boot fixture are additional persistence surfaces.
-  - DigitalOcean actions are asynchronous; action completion, snapshot existence, target-region
-    availability, and minimum disk compatibility are separate facts. Outcome-unknown handling must
-    prefer orphan evidence over deleting a possibly unowned resource.
-  - Multi-architecture index digests are not the selected `amd64` manifest digest. The snapshot must
-    attest both where applicable and cannot silently accept a different platform image.
-  - #265 may change size selection in parallel; #266 consumes the selected size/minimum-disk result
-    but must not choose it. Rebase and preserve whichever #265 contract merges first.
-  - External GitHub environment reviewer enforcement cannot be proven by repository YAML alone;
-    docs and live validation must verify it before dispatch. No schema/data migration is expected.
-- do not touch:
-  - Preserve unrelated PR #262, `/Users/alexmetelli/source/plingpling-step7-base`, existing changelog
-    history, provider operation tags/idempotency, fail-closed cleanup ownership, current full boot
-    fixture, production canary bypass state, and ordinary CI/release secret boundaries.
-  - Do not put a DigitalOcean token into CI, `publish-agent-image.yml`, or
-    `deploy-production.yml`; do not make snapshot publication automatic; do not weaken immutable
-    runner/Hermes release checks or leak arbitrary manifest/provider objects into logs.
-- dependency blockers:
-  - Resolved upstream: #263 closed through merged PR #272 at
-    `7d1cb985c06b0007dadcfb0e42c5631c65b7c472`; #266 is based exactly on that `origin/main` commit.
-  - Merge-gate dependency: current-main CI run
-    [31131392382](https://github.com/ametel01/plingpling/actions/runs/31131392382) completed
-    successfully at 2026-08-07T00:22:32Z.
-  - Live-acceptance dependency: explicit user authorization, cost budget, protected environment,
-    scoped DigitalOcean credentials, and signing/attestation key configuration are absent by design.
-    Stop before provider execution; repository implementation is still agent-actionable.
-  - #265 is a parallel coordination stream, not a blocker. #269 and #271 are downstream issues
-    blocked by #266 and must not be pulled into this PR. No open linked PR or review thread exists.
-- open questions:
-  - No blocker for repository implementation. The builder may select the versioned canonical JSON
-    and offline verification mechanism, protected environment name, and bounded snapshot maximum age,
-    but must document them and satisfy every fail-closed/tamper/staleness fixture above.
-  - Before live dispatch, the coordinator must obtain explicit answers for cost ceiling/region,
-    protected reviewers, scoped token/key owners, manifest promotion destination, and orphan-response
-    ownership. Do not infer those operational decisions from merge permission.
+  - Add DB race/failure fixtures for atomic creation/reschedule/terminal fencing, generation rollover,
+    duplicate claims, stale generations, lease expiry, retry bounds, and cron recovery.
+  - Add real-signature fixtures for both signing keys plus invalid signature, oversized body,
+    malformed payload, replay, early delivery, and secret-redaction cases.
+  - Add one integrated producer-to-consumer semantic test: committed deployment mutation -> durable
+    wakeup -> dropped `after()` publish -> cron reclaim -> fake delayed publish -> signed delivery ->
+    one targeted reconciliation under duplicate/reordered delivery.
+  - Run focused new tests and existing deployment cron/trigger/reconciler/retry/cancellation/finalization
+    tests, migration fixtures, `git diff --check`, `bun run verify`, and `bun run test:e2e:ci`.
+  - Run `bun run local:agent:smoke` in default `cron` mode and through a fake delayed adapter; assert
+    zero DigitalOcean requests and no real QStash/provider effect.
+- risks:
+  - Missing one of four deployment-mutator modules can orphan or resurrect work; use one transaction
+    helper and audit every `next_attempt_at`/terminal write.
+  - Publishing before commit, acknowledging the wrong generation, clock skew, or unsafe lease expiry
+    can drop work or duplicate actions. Keep generation and lease predicates in every state change.
+  - Signature verification must use exact raw bytes and a canonical configured callback origin;
+    never accept a payload-provided URL or log verifier/provider errors verbatim.
+  - Migration lock ordering must match deployment-row then wakeup-row ownership to avoid deadlocks;
+    retry/terminal mode changes must remain safe for rows created under either dispatch mode.
+- do-not-touch: Provider provisioning/effect checkpoints, runner registration/heartbeat drains,
+  size/snapshot defaults and workflows, model canary behavior, unrelated PR #262, existing changelog
+  history, and `/Users/alexmetelli/source/plingpling-step7-base`.
+- dependency blockers: none. #263/#272 are merged. PR #272's Vercel failure is the documented
+  fail-closed Clerk-preview baseline; if it recurs, compare with main and do not classify it as a
+  #264 regression without evidence. #267 and #268 consume this contract and remain downstream.
+- open questions: none blocking; route/table naming and cron-sweep composition are internal choices.
 
-## Handoffs
+## Handoff — #264 Spec to Builder
 
-- from: issue-spec-agent (`issue_266_spec`)
-  to: coordinator, then builder-agent
-  timestamp: 2026-08-07T07:42:22+08:00
-  request: Implement only the repository-owned #266 snapshot/manifest/workflow/local-test contract;
-    stop before all provider, secret, environment, deployment, and billable effects.
-  evidence: Issue/dependency graph, PLAN Step 6, merged PR #272, relevant implementation/tests/docs,
-    current-main CI, and provider semantics were inspected at clean `origin/main` `7d1cb98`.
-  next-action: Coordinator assigns one builder. Builder begins with manifest/provider interfaces and
-    fake fail-closed tests, then snapshot first-boot/preflight/workflow. Checker tests the real
-    config-to-preflight-to-create sequence and cleanup effect ordering, not isolated parsers.
-- from: builder-agent (`issue_266_builder`)
-  to: checker-agent
-  timestamp: 2026-08-07T08:10:00+08:00
-  request: Verify repository-only #266 implementation against the completion contract. Do not run the
-    protected DigitalOcean workflow or any billable/provider-backed operation.
-  evidence: Implemented signed canonical snapshot manifests, fail-closed snapshot manifest/provider
-    availability selection, protected manual workflow, snapshot build script/orchestrator, fake
-    provider image/action/cleanup tracing, snapshot first-boot mode without apt/package/image pulls,
-    stock rollback, env config, docs, and local gate evidence.
-  next-action: Checker should rerun format/lint/typecheck, focused snapshot tests, full unit/build as
-    needed, inspect workflow static guarantees, and confirm invalid snapshot evidence creates zero
-    Droplet-create calls. Live snapshot acceptance remains authorization-gated.
-- from: builder-agent (`issue_266_builder`)
-  to: checker-agent
-  timestamp: 2026-08-07T08:36:00+08:00
-  request: Re-check #266 cycle 2 fixes. Do not dispatch the protected workflow, contact
-    DigitalOcean, configure secrets/environments, deploy, release, or run billable effects.
-  evidence: Fixed checker gaps by moving temporary-builder Docker/Caddy install ahead of image use,
-    adding builder-local preloaded-image boot evidence and sanitation removal/hostile-marker scan
-    requirements, polling power-off and snapshot actions through `readAction`, enforcing ordered
-    owned firewall-before-Droplet cleanup with absence proof and ambiguous-ownership no-delete
-    evidence, adding manifest artifact provenance attestation before upload, and adding adversarial
-    manifest/provider/workflow/shell/zero-create tests.
-  next-action: Checker should rerun focused snapshot/provisioning tests, inspect the workflow
-    evidence/attestation ordering, verify action polling/cleanup order, and leave local smoke for a
-    serialized run because the Docker Compose namespace is shared.
-- from: builder-agent (`issue_266_builder`)
-  to: checker-agent
-  timestamp: 2026-08-07T09:00:00+08:00
-  request: Re-check the four cycle-2 orchestration blockers only. Do not dispatch the protected
-    workflow, contact DigitalOcean, configure secrets/environments, deploy, release, or run
-    billable effects.
-  evidence: The snapshot build script now validates static inputs before effects, creates an
-    ephemeral SSH key, creates the builder, retrieves builder-local
-    `/run/agentbay-snapshot-builder/boot-result.json` and `sanitation-result.json` through the
-    provider, writes retrieved evidence artifacts, and validates them after the producer step in the
-    workflow. The orchestrator validates retrieved evidence before poweroff/snapshot, polls actions,
-    resolves the created snapshot image by exact name, rejects action-ID/image-ID conflation, reads
-    authoritative image availability by the resolved image ID, and deletes the ephemeral SSH key in
-    cleanup. Fake provider action IDs and image IDs are now distinct.
-  next-action: Checker should rerun the focused #266 tests and inspect the script/workflow ordering,
-    builder evidence retrieval path, image resolution path, and fake action/image ID separation.
-    Local smoke remains serialized because the Docker Compose namespace is shared.
+- request: Implement only the contract above on `codex/issue-264-durable-wakeups`, beginning with
+  schema/migration invariants and one atomic scheduling helper, then wire fake dispatch and signed
+  delivery without external effects.
+- evidence: Issue #264 and PLAN Step 2 agree on QStash configuration and at-least-once semantics;
+  issue #263/PR #272 provide merged timing evidence; current mutators are confined to reconciler,
+  deployment persistence/retry, and lifecycle cancellation modules.
+- stop condition: Hand off after focused producer-to-consumer evidence and repository gates are
+  recorded, or earlier on a repeated failure, credentials/external-effect requirement, or a needed
+  product decision.
+
+## Handoff — #264 Builder to Checker
+
+- request: Check issue #264 implementation on `codex/issue-264-durable-wakeups`; verify the
+  migration/schema, atomic wakeup writes, signed delivery route, cron recovery sweep, env/docs, and
+  tests. Do not edit code.
+- files changed: `.env.example`, `CHANGELOG.md`, `PROGRESS.md`, `app/api/internal/agent-deployments/reconcile/route.ts`,
+  `app/api/internal/agent-deployments/wakeup/route.ts`, `drizzle/0026_talented_lady_vermin.sql`,
+  `drizzle/meta/_journal.json`, `drizzle/meta/0026_snapshot.json`,
+  `src/server/agents/agent-deployment-dispatch.ts`, `src/server/agents/agent-deployment-reconciler.ts`,
+  `src/server/agents/agent-deployment-retry.ts`, `src/server/agents/agent-deployment-triggers.ts`,
+  `src/server/agents/agent-deployments.ts`, `src/server/agents/lifecycle.ts`,
+  `src/server/db/schema.ts`, `src/server/env.ts`, and focused unit tests.
+- behavior: deployment create/retry/release/stage/backoff/ready/failed/cancel/replacement-pause
+  paths now create or terminalize generation-fenced wakeup rows in the same DB transaction. The
+  post-response trigger publishes the latest pending wakeup in QStash mode and falls back to the
+  existing targeted reconciler in cron/unavailable mode. The protected cron route sweeps one
+  publishable outbox row before the existing one-item reconcile. The new POST route verifies a
+  bounded raw body with current/next signing keys before JSON parsing, atomically claims one due
+  generation, then invokes targeted reconciliation; duplicate/early/stale/terminal deliveries do
+  not execute work.
+- tests passed: `bun run format:check`; `bun run lint`; `bun run typecheck`;
+  `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts`
+  (6 files, 43 tests); `bun run test` (170 files, 1,645 tests); `bun run build`;
+  `bun run test:e2e:ci` (26/26); `bun run local:agent:smoke` (`cleanupVerified:true`,
+  `digitalOceanRequests:0`, p95 150.725s); `git diff --check`.
+- known risks: signature verification uses a dedicated HMAC header over the raw body rather than
+  importing an official QStash verifier package; checker should decide whether that satisfies the
+  contract or should be changed before PR. The real external QStash publish path is implemented but
+  unexercised; no real publish/provider/secret/deployment/billable action was run.
+- stop condition: accept for PR only after checker independently exercises a producer-to-delivery
+  semantic path and either runs or explicitly classifies the pending heavier gates.
+
+## Checker Result — #264 Initial
+
+Status: FAILED
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all`
+  result: branch `codex/issue-264-durable-wakeups`, `M STATUS.md`
+  evidence: HEAD `ebd3773 Add durable deployment wakeups`; checker only updated `STATUS.md`.
+- command: `gh issue view 264 --repo ametel01/plingpling --json title,state,body,labels,assignees,comments,url`
+  result: PASS
+  evidence: issue #264 is open and requires signed delayed QStash delivery plus durable recovery.
+- command: `gh pr list --repo ametel01/plingpling --state open --head codex/issue-264-durable-wakeups --json number,title,url,headRefName,baseRefName,mergeStateStatus,isDraft,reviewDecision,statusCheckRollup,closingIssuesReferences`
+  result: PASS
+  evidence: `[]`; no #264 PR exists yet, so there is nothing merge-ready.
+- command: Upstash primary docs review (`https://upstash.com/docs/qstash/howto/signature`,
+  `https://upstash.com/docs/qstash/sdks/ts/examples/receiver`,
+  `https://upstash.com/docs/qstash/quickstarts/vercel-nextjs`,
+  `https://upstash.com/docs/qstash/howto/roll-signing-keys`)
+  result: FAILED
+  evidence: real QStash deliveries use `Upstash-Signature` JWT verification with raw-body hash and
+  claim checks; implementation uses a bespoke body HMAC in `x-agentbay-qstash-signature`.
+- command: source inspection of deployment mutation + wakeup atomicity
+  result: FAILED
+  evidence: helper APIs can perform deployment mutation and wakeup mutation as separate statements
+  when passed a plain DB handle.
+- command: `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_76358_482cde9c1d27`; 6 files / 43 tests passed.
+
+## Failures
+
+- file: `src/server/agents/agent-deployment-dispatch.ts:56`
+  check: real QStash delivery compatibility
+  exact error: implementation expects `x-agentbay-qstash-signature`, but QStash sends
+  `Upstash-Signature`.
+  likely owner: builder-agent for #264.
+- file: `src/server/agents/agent-deployment-dispatch.ts:72`
+  check: official QStash signature verification
+  exact error: bespoke HMAC over body only; missing JWT signature verification and `iss`, `sub`,
+  `exp`, `nbf`, and raw-body hash claim checks.
+  likely owner: builder-agent for #264.
+- file: `app/api/internal/agent-deployments/wakeup/route.ts:90`
+  check: signed route delivery
+  exact error: route reads the custom header via `deploymentWakeupSafeCodes.signatureHeader`, so a
+  real QStash delivery is rejected before payload parsing.
+  likely owner: builder-agent for #264.
+- file: `tests/unit/agent-deployment-wakeup-route.test.ts:51`
+  check: production-compatible signature fixture
+  exact error: test signs with the same bespoke helper instead of an Upstash-compatible JWT/header
+  fixture.
+  likely owner: builder-agent for #264.
+- file: `src/server/agents/agent-deployments.ts:153`
+  check: atomic deployment mutation and wakeup creation
+  exact error: helper inserts deployment then separately writes wakeup without enforcing an owning
+  transaction at the helper boundary.
+  likely owner: builder-agent for #264.
+
+## Coverage Gaps
+
+- Full gates (`bun run verify`, `bun run test:e2e:ci`, `bun run local:agent:smoke`) were not run
+  after blocking semantic/security failures.
+- No passing test covers real `Upstash-Signature` JWT verification with current/next signing keys,
+  URL subject, expiration, not-before, and raw-body hash.
+- No integrated committed mutation -> durable wakeup -> dropped publish -> cron reclaim -> fake
+  publish -> signed duplicate delivery -> exactly-one targeted reconcile test was found.
+- Cron route tests do not assert the outbox sweep is invoked before reconcile.
+- Fake-delayed local smoke evidence was not found.
+
+## Next Action
+
+- Builder should replace the bespoke HMAC verifier with official/compatible QStash JWT verification,
+  add real signature fixtures and the integrated producer-to-consumer recovery test, and enforce
+  deployment+wakeup atomicity at helper boundaries before checker rerun.
+
+## Handoff — #264 Builder Cycle 1 to Checker
+
+- request: Re-check #264 on `codex/issue-264-durable-wakeups`; checker blockers were fixed without
+  real QStash, DigitalOcean, provider, deployment, or billable effects.
+- behavior changes:
+  - QStash delivery verification now uses `@upstash/qstash` `Receiver.verify` against
+    `Upstash-Signature`, exact raw body bytes, canonical callback URL subject, current/next signing
+    keys, issuer/time claim handling, and optional `Upstash-Region`.
+  - QStash publishing now uses the official `Client.publishJSON` with redaction, retries,
+    deduplication ID, and delayed `notBefore`; tests continue to inject fake publishers.
+  - Deployment create/release/stage mutation helpers now require a Drizzle transaction handle at the
+    type and runtime boundary, and the wakeup helper rejects plain DB handles before any half-state
+    can be exposed.
+  - Deployment creation locks the owned agent row before idempotency/active checks and insert,
+    avoiding transaction-aborting active-index violations while preserving same-key idempotency.
+  - The protected cron route test now asserts wakeup outbox sweep happens before normal reconcile.
+- files changed in cycle 1: `package.json`, `bun.lock`,
+  `app/api/internal/agent-deployments/wakeup/route.ts`,
+  `src/server/agents/agent-deployment-dispatch.ts`, `src/server/agents/agent-deployments.ts`,
+  `tests/unit/agent-deployment-wakeup-route.test.ts`, `tests/unit/agent-deployments-db.test.ts`,
+  `tests/unit/agent-deployment-cron-route.test.ts`, and
+  `tests/unit/agent-launch-builder.test.ts`.
+- regressions added:
+  - Real-format Upstash JWT fixtures for current and next signing keys.
+  - Raw-body hash mismatch, wrong callback subject, expired token, future not-before token, unsigned
+    delivery, duplicate delivery, and early-delivery route coverage.
+  - Plain DB handle rejection proving no deployment row or wakeup row is exposed when the owning
+    transaction boundary is missing.
+  - Cron route ordering coverage for outbox sweep before reconcile.
+- tests passed:
+  - `bun run typecheck` — PASS.
+  - `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts tests/unit/agent-launch-builder.test.ts`
+    — PASS, 7 files / 53 tests.
+  - `bun run format:check` — PASS, 402 files.
+  - `bun run lint` — PASS, 402 files.
+  - `bun run test` — PASS, 170 files / 1,647 tests.
+  - `bun run build` — PASS.
+- not run:
+  - `bun run local:agent:smoke` was intentionally not run in this cycle because the coordinator
+    flagged shared local-smoke namespace collisions across #264/#265/#266; leave smoke to serialized
+    checker/coordinator execution.
+  - `bun run test:e2e:ci` was not rerun in this cycle; previous builder evidence before checker was
+    26/26 passing, and this cycle focused on repository-local signature/transaction blockers.
+- known risks:
+  - The remaining integrated producer-to-consumer recovery path should be checked independently by
+    checker with fake publisher/signed delivery evidence.
+  - Real external QStash publishing remains unexercised by design; no real queue/provider effects
+    were authorized.
+
+## Checker Result — #264 Cycle 1
+
+Status: FAILED
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all && git log --oneline --decorate -6`
+  result: PASS
+  evidence: branch `codex/issue-264-durable-wakeups`; HEAD
+  `29dba9c Fix QStash wakeups and atomic deployment writes`; only `STATUS.md` dirty from checker
+  evidence.
+- command: Upstash primary docs review:
+  `https://upstash.com/docs/qstash/howto/signature`,
+  `https://upstash.com/docs/qstash/sdks/ts/examples/receiver`,
+  `https://upstash.com/docs/qstash/sdks/ts/gettingstarted`
+  result: PASS
+  evidence: docs require `Upstash-Signature`, SDK `Receiver.verify` with raw body and URL, and SDK
+  `Client` for publishing; local `@upstash/qstash` package is `2.11.3`.
+- command: source inspection of `src/server/agents/agent-deployment-dispatch.ts` and
+  `app/api/internal/agent-deployments/wakeup/route.ts`
+  result: PASS
+  evidence: route reads `Upstash-Signature`; verifier constructs official `Receiver` with
+  current/next signing keys and verifies raw body, canonical callback URL, optional Upstash region,
+  and five-second clock tolerance before JSON parsing. Publisher constructs official `Client` and
+  calls `publishJSON` with callback URL, payload, `POST`, `notBefore`, `retries: 3`,
+  generation-scoped `deduplicationId`, and redaction.
+- command: source inspection of deployment mutation+wakeup boundaries
+  result: PASS
+  evidence: `createAgentDeploymentForUser`, `releaseAgentDeploymentLease`, and
+  `transitionAgentDeploymentStage` now require transaction handles and call `assertTransactionHandle`
+  before mutations; repo call sites pass `tx`; plain DB rejection is covered before exposing rows.
+- command:
+  `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts tests/unit/agent-launch-builder.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_96723_484bbc91adb7`; 7 files / 53 tests passed.
+- command: isolated manual integrated semantic check with fake publisher and real-format signed JWT
+  delivery
+  result: PASS
+  evidence: isolated DB `plingpling_checker_4352_c0e54f4b9e71`; committed deployment mutation
+  produced pending wakeup; cron outbox sweep published one fake message; signed delivery returned
+  `{ok:true, processed:1, outcome:"advanced"}`; duplicate delivery returned
+  `{ok:true, processed:0, outcome:"already_claimed"}`; reconcile calls `1`; final wakeup state
+  `claimed`; no real QStash/provider effects.
+- command: `bun run verify`
+  result: PASS
+  evidence: `format:check` checked 402 files; `lint` checked 402 files; route typegen and
+  `tsc --noEmit` passed; full unit suite passed with isolated DB
+  `plingpling_test_97147_e8fa2ef4a41f`, 170 files / 1,647 tests; production build compiled
+  successfully.
+- command: `bun run test:e2e:ci`
+  result: BLOCKED by local port conflict
+  evidence: default `http://localhost:3100` was already used.
+- command: `PORT=3117 bun run test:e2e:ci`
+  result: PASS
+  evidence: 26 Playwright CI tests passed in 25.3s.
+- command: `bun run local:agent:smoke`
+  result: FAILED
+  evidence: first serialized default-cron smoke attempt exited 1 with
+  `Error response from daemon: No such container: agentbay-local-cloud-runner` followed by
+  `Error: docker compose failed with exit 1.` No smoke summary, timing record, zero-provider
+  assertion, or QStash absence proof was produced by the run.
+- command: `bun run local:agent:smoke`
+  result: FAILED
+  evidence: retry failed with the same error:
+  `Error response from daemon: No such container: agentbay-local-cloud-runner`; `Error: docker compose failed with exit 1.`
+- command: cleanup checks after failed smoke
+  result: PASS
+  evidence: `docker ps -a --filter label=agentbay.agent_id --format ...` returned no rows;
+  `docker ps -a --filter name=agentbay --format ...` only showed old `agentbay-postgres-1`
+  exited from 4 days ago.
+
+## Failures
+
+- file: `scripts/smoke-local-agent-cycle.ts`
+  check: serialized default-cron local full-cycle smoke
+  exact error: `Error response from daemon: No such container: agentbay-local-cloud-runner`;
+  `Error: docker compose failed with exit 1.`
+  likely owner: builder-agent for #264 or coordinator/local Docker harness owner.
+
+## Coverage Gaps
+
+- `bun run local:agent:smoke` did not produce a valid timing record, `cleanupVerified:true`,
+  `digitalOceanRequests:0`, or any completed lifecycle summary because it failed during local
+  Docker setup/diagnostics.
+- No dedicated fake-delayed local-smoke command or harness was found in `package.json`,
+  `scripts/smoke-local-agent-cycle.ts`, or repo references to `AGENTBAY_DEPLOYMENT_DISPATCH_MODE`;
+  fake delayed behavior is covered by the already-passed isolated integrated fake
+  producer-consumer check, not by local smoke.
+- Real external QStash publishing remains unexercised by design; no production secrets, real QStash
+  publishes, provider calls, deployments, or billable effects were authorized or intentionally run.
+
+## Next Action
+
+- Builder/coordinator should fix the local smoke harness failure for missing
+  `agentbay-local-cloud-runner`, then rerun `bun run local:agent:smoke` and require a completed
+  summary with `cleanupVerified:true`, `digitalOceanRequests:0`, and a valid creation-latency timing
+  record before PR/review.
+- Coordinator should grant #264 a serialized `bun run local:agent:smoke` slot after the cycle-2
+  commit lands; builder intentionally did not run smoke while #265 may own the shared namespace.
+
+## Handoff — #264 Builder Cycle 2 to Coordinator/Checker
+
+- request: Re-run serialized local smoke for #264 after this branch's harness fix is committed.
+- scope: minimal shared harness fix only; preserved #264 QStash/signature/transaction changes and
+  did not import #265 resource-profile scope.
+- behavior changes:
+  - `compose.yaml` now maps dashboard container port 3000 to
+    `${AGENTBAY_APP_HOST_PORT:-55300}` and sets `NEXT_PUBLIC_APP_URL` to the matching
+    `http://host.docker.internal:${AGENTBAY_APP_HOST_PORT:-55300}` callback origin.
+  - `local:cloud:up` and `local:agent:smoke` scripts expose the same default
+    `AGENTBAY_APP_HOST_PORT=${AGENTBAY_APP_HOST_PORT:-55300}` override.
+  - `scripts/smoke-local-agent-cycle.ts` resolves the app host port once, passes it to compose,
+    sets `NEXT_PUBLIC_APP_URL` accordingly, and probes
+    `http://127.0.0.1:${AGENTBAY_APP_HOST_PORT}/health` instead of hard-coded port 3000.
+  - Smoke diagnostics no longer attempt nested Docker exec when `agentbay-local-cloud-runner` was
+    never created; dashboard logs remain available for startup failures.
+- regressions added:
+  - Unit coverage for default/custom/invalid app host port resolution and callback URL construction.
+  - Source/compose/package assertions proving the compose port mapping, callback URL, package smoke
+    override, host health probe helper, and container-existence guard are wired.
+- tests passed:
+  - `bun scripts/run-unit-tests.ts tests/unit/local-agent-cycle-smoke.test.ts` — PASS, 1 file / 5
+    tests, isolated DB `plingpling_test_42904_5cc945f7dade`.
+  - `bun run format:check` — PASS, 402 files.
+  - `bun run lint` — PASS, 402 files.
+  - `bun run typecheck` — PASS.
+- not run:
+  - `bun run local:agent:smoke` was intentionally not run while #265 builder/checker may own the
+    shared local-smoke namespace. Coordinator should serialize and run it next.
+
+## Checker Result — #264 Cycle 2
+
+Status: FAILED
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all && git log --oneline --decorate -8`
+  result: PASS
+  evidence: branch `codex/issue-264-durable-wakeups`; HEAD
+  `c6e2f28 Fix local smoke app host port isolation`; only `STATUS.md` dirty from checker evidence.
+- command: `git diff --stat 29dba9c..HEAD && git diff --name-status 29dba9c..HEAD && git diff --check 29dba9c..HEAD`
+  result: PASS
+  evidence: cycle-2 diff is scoped to `compose.yaml`, `package.json`,
+  `scripts/smoke-local-agent-cycle.ts`, `tests/unit/local-agent-cycle-smoke.test.ts`, and status;
+  no diff-check whitespace errors.
+- command: source inspection of configurable local smoke port and diagnostics
+  result: PASS
+  evidence: `compose.yaml` maps `${AGENTBAY_APP_HOST_PORT:-55300}:3000` and sets
+  `NEXT_PUBLIC_APP_URL=http://host.docker.internal:${AGENTBAY_APP_HOST_PORT:-55300}`;
+  `package.json` passes `AGENTBAY_APP_HOST_PORT` into `local:cloud:up` and `local:agent:smoke`;
+  `scripts/smoke-local-agent-cycle.ts` resolves `AGENTBAY_APP_HOST_PORT`, uses
+  `http://host.docker.internal:<port>` for app URL, probes `http://127.0.0.1:<port>/health`, and
+  skips nested-Docker diagnostics when `agentbay-local-cloud-runner` does not exist.
+- command: `bun scripts/run-unit-tests.ts tests/unit/local-agent-cycle-smoke.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_43590_2dadf12d3f48`; 1 file / 5 tests passed.
+- command: dedicated port/namespace preflight
+  result: PASS
+  evidence: Python bind check reported ports `55300`, `55311`, `55321`, `55331`, and `55341` free;
+  `docker ps -a --filter label=agentbay.agent_id` returned no rows; broad `name=agentbay` listed
+  only old exited `agentbay-postgres-1`.
+- command: `AGENTBAY_APP_HOST_PORT=55311 bun run local:agent:smoke`
+  result: FAILED
+  evidence: smoke used app callback origin `http://host.docker.internal:55311` and advanced local
+  provisioning through `provider_create_completed`, but failed before ready/cleanup summary. Exact
+  terminal errors: `Error response from daemon: container ... is not running`;
+  `Error response from daemon: removal of container agentbay-local-cloud-runner is already in progress`;
+  `Failed query: select "stage", "error_code", "error_detail" from "agent_deployments" ... <-
+  Error: connect ECONNREFUSED 127.0.0.1:55432`.
+- command: cleanup checks after failed cycle-2 smoke
+  result: PASS
+  evidence: `docker ps -a --filter label=agentbay.agent_id --format ...` returned no rows; broad
+  `docker ps -a --filter name=agentbay --format ...` only listed old exited `agentbay-postgres-1`;
+  bind check reported ports `55311`, `55432`, and `3045` free.
+
+## Failures
+
+- file: `scripts/smoke-local-agent-cycle.ts`
+  check: serialized default-cron local full-cycle smoke on dedicated port
+  exact error: local smoke did not emit the required summary because the simulated Droplet container
+  stopped and cleanup raced with removal; the script then lost its local Postgres connection:
+  `Error: connect ECONNREFUSED 127.0.0.1:55432`.
+  likely owner: builder-agent for #264 or local Docker smoke harness owner.
+
+## Coverage Gaps
+
+- The smoke run did not produce a complete valid creation-latency timing summary,
+  `cleanupVerified:true`, `digitalOceanRequests:0`, or completed proof of no real QStash publish.
+- No dedicated fake-delayed local-smoke command/harness exists. This is non-blocking only for the
+  fake-delay semantic path because the isolated integrated fake producer-consumer check already
+  passed in cycle 1 with fake publisher, signed delivery, duplicate delivery, and exactly one
+  targeted reconcile; it does not replace the failed default local smoke gate.
+- Real external QStash publishing remains unexercised by design; no production secrets, real QStash
+  publishes, provider calls, deployments, or billable effects were authorized or intentionally run.
+
+## Next Action
+
+- Builder/coordinator should fix the remaining local smoke stability failure where the simulated
+  Droplet/local Compose stack exits or is removed before the deployment reaches ready, then rerun
+  `AGENTBAY_APP_HOST_PORT=<free-port> bun run local:agent:smoke` and require a completed summary
+  with valid timing, `cleanupVerified:true`, `digitalOceanRequests:0`, and no real QStash/provider
+  effects before PR/review.
 
 ## Gates
 
-- baseline/branch: pass — clean #266 branch and `origin/main` at `7d1cb985c06b0007dadcfb0e42c5631c65b7c472`.
-- issue graph: pass — #263/#272 resolved; #265 parallel; #269/#271 downstream; no #266 review thread.
-- current-main CI: fail — run `31131392382` lost Docker at `create-agent-db.test.ts:3627`;
-  168/169 files and 1,637/1,638 tests otherwise passed.
-- builder targeted unit: pass —
-  `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-manifest.test.ts
-  tests/unit/runner-snapshot-build.test.ts tests/unit/runner-snapshot-workflow.test.ts
-  tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
-  tests/unit/digitalocean-provider.test.ts` (6 files, 50 tests).
-- builder format/lint/typecheck: pass — `bun run format:check`, `bun run lint`,
-  `bun run typecheck`.
-- builder full unit: pass — `bun run test` (172 files, 1,646 tests).
-- builder production build: pass — `bun run build`.
-- checker targeted unit: pass —
-  `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-manifest.test.ts
-  tests/unit/runner-snapshot-build.test.ts tests/unit/runner-snapshot-workflow.test.ts
-  tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
-  tests/unit/digitalocean-provider.test.ts` (6 files, 50 tests).
-- checker format: pass — `bun run format:check` checked 405 files, no fixes applied.
-- checker lint: pass — `bun run lint` checked 405 files, no fixes applied.
-- checker typecheck: pass — `bun run typecheck` ran `next typegen && tsc --noEmit`.
-- checker full unit: pass — `bun run test` (172 files, 1,646 tests, duration 111.51s).
-- checker production build: pass — `bun run build` completed `next build`.
-- checker E2E CI: pass — `bun run test:e2e:ci` (26/26 Playwright tests passed).
-- checker cloud-runner repro: pass — `bun run repro:cloud-runner` validated stock generated
-  user-data; temp-generated snapshot-mode user-data passed `bun run repro:cloud-runner --
-  --user-data <temp>/snapshot-user-data.yaml` with valid cloud-init schema and 8 bash script
-  blocks checked.
-- checker local agent smoke: fail — `bun run local:agent:smoke` exited 1 before smoke assertions:
-  `Error response from daemon: No such container: agentbay-local-cloud-runner` and
-  `Error: docker compose failed with exit 1.`
-- cycle-2 builder focused unit: pass —
-  `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts
-  tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-workflow.test.ts
-  tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts
-  tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
-  tests/unit/digitalocean-provider.test.ts` (8 files, 89 tests).
-- cycle-2 builder format/lint/typecheck: pass — `bun run format:check`, `bun run lint`,
-  `bun run typecheck`.
-- cycle-2 builder full unit: pass — `bun run test` (172 files, 1,663 tests).
-- cycle-2 builder production build: pass — `bun run build`.
-- cycle-2 builder E2E CI: pass — `bun run test:e2e:ci` (26/26 Playwright tests passed).
-- cycle-2 builder cloud-runner repro: pass — `bun run repro:cloud-runner` validated generated
-  stock user-data schema and 11 bash script blocks.
-- cycle-2 builder diff check: pass — `git diff --check`.
-- cycle-2 local agent smoke: skipped by coordinator direction because #265/#266 share the
-  `agentbay-local-cloud-runner` Docker Compose namespace; leave for serialized checker rerun.
-- cycle-2 checker static review: fail — workflow requires
-  `snapshot-artifacts/boot-result.json` and `snapshot-artifacts/sanitation-result.json` before the
-  build script creates the builder, and the snapshot manifest path uses DigitalOcean action ID as the
-  snapshot image ID.
-- cycle-2 checker focused unit: pass —
-  `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts
-  tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-workflow.test.ts
-  tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts
-  tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
-  tests/unit/digitalocean-provider.test.ts` (8 files, 89 tests).
-- cycle-2 checker format/lint/typecheck: pass — `bun run format:check`, `bun run lint`,
-  `bun run typecheck`.
-- cycle-2 checker production build: pass — `bun run build`.
-- cycle-2 checker full unit: fail — `bun run test` failed 2 tests by 5s timeout:
-  `tests/unit/create-agent-db.test.ts:3652` and `tests/unit/create-agent-db.test.ts:4469`
-  (1 failed file, 171 passed files, 2 failed tests, 1,661 passed tests). Focused rerun
-  `bun scripts/run-unit-tests.ts tests/unit/create-agent-db.test.ts` passed (127 tests).
-- cycle-2 checker E2E CI: pass — `bun run test:e2e:ci` (26/26 Playwright tests passed).
-- cycle-2 checker cloud-runner repro: pass — `bun run repro:cloud-runner` validated generated
-  stock user-data schema and 11 bash script blocks; temp-generated snapshot-mode user-data passed
-  `bun run repro:cloud-runner -- --user-data <temp>/snapshot-user-data.yaml` with valid cloud-init
-  schema and 8 bash script blocks checked.
-- cycle-2 checker local agent smoke: skipped by instruction because #265 owns the shared Docker
-  Compose namespace.
-- cycle-3 builder focused unit: pass —
-  `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts
-  tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-workflow.test.ts
-  tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts
-  tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
-  tests/unit/digitalocean-provider.test.ts` (8 files, 92 tests).
-- cycle-3 builder format/lint/typecheck: pass — `bun run format:check`, `bun run lint`,
-  `bun run typecheck`.
-- cycle-3 builder production build: pass — `bun run build`.
-- cycle-3 builder full unit: pass — `bun run test` (172 files, 1,666 tests).
-- cycle-3 builder E2E CI: pass — `bun run test:e2e:ci` (26/26 Playwright tests passed).
-- cycle-3 builder cloud-runner repro: pass — `bun run repro:cloud-runner` validated generated
-  stock user-data schema and 11 bash script blocks.
-- cycle-3 builder diff check: pass — `git diff --check`.
-- cycle-3 local agent smoke: skipped by coordinator direction because #265/#266 share the
-  `agentbay-local-cloud-runner` Docker Compose namespace; leave for serialized checker rerun.
-- cycle-3 checker prior-blocker review: partial pass — controller now creates an ephemeral key,
-  workflow ordering is producer-then-validation, builder evidence is read before poweroff/snapshot,
-  and fake action/image IDs are distinct; fail on pre-effect/provider-effect ordering and open SSH
-  firewall exposure.
-- cycle-3 checker focused unit: pass —
-  `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts
-  tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-workflow.test.ts
-  tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts
-  tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
-  tests/unit/digitalocean-provider.test.ts` (8 files, 92 tests).
-- cycle-3 checker format/lint/typecheck: pass — `bun run format:check`, `bun run lint`,
-  `bun run typecheck`.
-- cycle-3 checker full unit: pass — `bun run test` (172 files, 1,666 tests).
-- cycle-3 checker production build: pass — `bun run build`.
-- cycle-3 checker E2E CI: pass — `bun run test:e2e:ci` (26/26 Playwright tests passed).
-- cycle-3 checker cloud-runner repro: pass — `bun run repro:cloud-runner` validated generated
-  stock user-data schema and 11 bash script blocks; temp-generated snapshot-mode user-data passed
-  `bun run repro:cloud-runner -- --user-data <temp>/snapshot-user-data.yaml` with valid cloud-init
-  schema and 8 bash script blocks checked.
-- cycle-3 checker local agent smoke: skipped by instruction because #265 owns the shared Docker
-  Compose namespace.
-- skipped live/billable: protected snapshot workflow dispatch, DigitalOcean resource/snapshot
-  creation or deletion, GitHub environment/secret configuration, production deploy/release, and
-  provider-backed Step 6 acceptance.
+- #264 checker cycle-2 result (2026-08-07, `issue_264_checker`): FAILED at `c6e2f28`.
+  - port isolation/diagnostics regression: PASS via source inspection and
+    `bun scripts/run-unit-tests.ts tests/unit/local-agent-cycle-smoke.test.ts` (1 file / 5 tests).
+  - dedicated smoke preflight: PASS; port `55311` free and no agent-labeled containers before run.
+  - smoke gate: FAILED with simulated Droplet container not running/removal in progress and local DB
+    `ECONNREFUSED 127.0.0.1:55432`; no completed timing/provider/cleanup summary emitted.
+  - cleanup after failure: PASS; no agent-labeled containers remained, and ports `55311`, `55432`,
+    `3045` were free.
+- #264 builder cycle-2 harness gates (2026-08-07, `issue_264_builder`): PASS locally; smoke pending
+  serialized slot.
+  - command: `bun scripts/run-unit-tests.ts tests/unit/local-agent-cycle-smoke.test.ts`
+    result: PASS.
+    evidence: isolated DB `plingpling_test_42904_5cc945f7dade`; 1 file / 5 tests passed.
+  - command: `bun run format:check`
+    result: PASS.
+    evidence: Biome checked 402 files with no fixes.
+  - command: `bun run lint`
+    result: PASS.
+    evidence: Biome checked 402 files with no fixes.
+  - command: `bun run typecheck`
+    result: PASS.
+    evidence: Next route types generated successfully and `tsc --noEmit` passed.
+  - skipped: `bun run local:agent:smoke`
+    reason: shared local-smoke namespace must be serialized; coordinator should run it after
+    cycle-2 commit.
+- #264 checker cycle-1 result (2026-08-07, `issue_264_checker`): FAILED at `29dba9c`.
+  - prior blocker resolved: QStash verification now uses official `@upstash/qstash` `Receiver` and
+    `Upstash-Signature` with raw body, callback URL subject, time claims, body hash, current/next
+    signing keys, and safe error handling.
+  - prior blocker resolved: deployment mutation helpers now reject plain DB handles before writes and
+    require transaction handles for create/release/stage wakeup mutations.
+  - focused tests: PASS, 7 files / 53 tests, isolated DB `plingpling_test_96723_484bbc91adb7`.
+  - integrated semantic check: PASS, isolated DB `plingpling_checker_4352_c0e54f4b9e71`, fake
+    publisher, signed delivery, duplicate delivery, exactly one targeted reconcile, final state
+    `claimed`.
+  - full non-smoke gates: `bun run verify` PASS; `PORT=3117 bun run test:e2e:ci` PASS, 26/26.
+  - smoke gate: `bun run local:agent:smoke` FAILED twice with missing
+    `agentbay-local-cloud-runner`; no completed timing/cleanup/provider summary was emitted.
+  - cleanup check after failure: no containers with `agentbay.agent_id` label remained; only old
+    exited `agentbay-postgres-1` was listed by the broad `name=agentbay` filter.
+- #264 builder cycle-1 fix gates (2026-08-07, `issue_264_builder`): PASS locally.
+  - command: `bun run typecheck`
+    result: PASS.
+    evidence: Next route types generated successfully and `tsc --noEmit` passed.
+  - command:
+    `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts tests/unit/agent-launch-builder.test.ts`
+    result: PASS.
+    evidence: isolated DB `plingpling_test_89132_597bfb5396d4`; 7 files / 53 tests passed.
+  - command: `bun run format:check`
+    result: PASS.
+    evidence: Biome checked 402 files with no fixes.
+  - command: `bun run lint`
+    result: PASS.
+    evidence: Biome checked 402 files with no fixes.
+  - command: `bun run test`
+    result: PASS.
+    evidence: isolated DB `plingpling_test_89980_4223127395a1`; 170 files / 1,647 tests passed.
+  - command: `bun run build`
+    result: PASS.
+    evidence: Next.js production build compiled successfully and generated route output.
+  - skipped: `bun run local:agent:smoke`
+    reason: coordinator reported shared local-smoke namespace collisions; reserved for serialized
+    checker/coordinator execution.
+- #264 checker result (2026-08-07, `issue_264_checker`): FAILED at `ebd3773`.
+  - command:
+    `git status --short --branch --untracked-files=all`
+    result: `## codex/issue-264-durable-wakeups` with `M STATUS.md` before checker update.
+    evidence: branch HEAD `ebd3773 Add durable deployment wakeups`; no PR exists for
+    `codex/issue-264-durable-wakeups`.
+  - command:
+    `gh issue view 264 --repo ametel01/plingpling --json title,state,body,labels,assignees,comments,url`
+    result: issue #264 is open and agent-ready.
+    evidence: acceptance requires signed delayed delivery, fail-closed queue mode, duplicate/stale
+    fencing, lost publication recovery, and no real QStash/provider effects.
+  - command:
+    `gh pr list --repo ametel01/plingpling --state open --head codex/issue-264-durable-wakeups --json number,title,url,headRefName,baseRefName,mergeStateStatus,isDraft,reviewDecision,statusCheckRollup,closingIssuesReferences`
+    result: `[]`.
+    evidence: there is no mergeable PR for #264 yet.
+  - command:
+    Upstash primary docs review:
+    `https://upstash.com/docs/qstash/howto/signature`,
+    `https://upstash.com/docs/qstash/sdks/ts/examples/receiver`,
+    `https://upstash.com/docs/qstash/quickstarts/vercel-nextjs`,
+    `https://upstash.com/docs/qstash/howto/roll-signing-keys`.
+    result: blocking contract mismatch.
+    evidence: QStash delivery verification uses a JWT in `Upstash-Signature`; official verification
+    requires raw-body verification plus JWT claim checks including issuer, subject URL, expiration,
+    not-before, and body hash. The implementation instead defines
+    `SIGNATURE_HEADER = "x-agentbay-qstash-signature"` at
+    `src/server/agents/agent-deployment-dispatch.ts:56`, creates a bespoke HMAC at
+    `src/server/agents/agent-deployment-dispatch.ts:72-74`, verifies only that HMAC at
+    `src/server/agents/agent-deployment-dispatch.ts:109-123`, and reads that custom header in
+    `app/api/internal/agent-deployments/wakeup/route.ts:85-95`. Real QStash deliveries would be
+    rejected; non-QStash clients with the signing key could be accepted without JWT issuer/subject,
+    expiry, not-before, or body-hash claim validation.
+  - command:
+    source inspection of deployment mutation atomicity.
+    result: contract not satisfied at helper boundaries.
+    evidence: `createAgentDeploymentForUser` inserts a deployment at
+    `src/server/agents/agent-deployments.ts:153-175` and then writes the wakeup separately at
+    `src/server/agents/agent-deployments.ts:179-184`; `releaseAgentDeploymentLease` mutates the
+    deployment at `src/server/agents/agent-deployments.ts:396-407` and then writes the wakeup at
+    `src/server/agents/agent-deployments.ts:409-414`; `transitionAgentDeploymentStage` mutates the
+    deployment at `src/server/agents/agent-deployments.ts:523-540` and then writes the wakeup at
+    `src/server/agents/agent-deployments.ts:542-547`. These helpers accept a plain DB handle, so
+    atomicity depends on every caller wrapping them in a transaction; a wakeup-write failure after
+    the deployment mutation can expose only half the state. The contract requires the mutation and
+    authoritative wakeup generation to be atomic.
+  - command:
+    `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts`
+    result: PASS.
+    evidence: isolated DB `plingpling_test_76358_482cde9c1d27`; 6 files / 43 tests passed.
+  - failures:
+    - `src/server/agents/agent-deployment-dispatch.ts:56`: signature header is
+      `x-agentbay-qstash-signature`; real QStash sends `Upstash-Signature`.
+    - `src/server/agents/agent-deployment-dispatch.ts:72-123`: signature verification is bespoke
+      HMAC over body only; missing official QStash JWT verification and required `iss`, `sub`,
+      `exp`, `nbf`, and body-hash checks.
+    - `app/api/internal/agent-deployments/wakeup/route.ts:85-95`: route reads the custom header and
+      cannot accept a real QStash delivery.
+    - `tests/unit/agent-deployment-wakeup-route.test.ts:51-54` and
+      `tests/unit/agent-deployment-wakeup-route.test.ts:159-165`: tests generate the same bespoke
+      HMAC instead of an Upstash-compatible JWT/header fixture, so they do not prove the production
+      queue contract.
+    - `src/server/agents/agent-deployments.ts:153-184`,
+      `src/server/agents/agent-deployments.ts:396-414`, and
+      `src/server/agents/agent-deployments.ts:523-547`: deployment mutation and wakeup mutation are
+      not enforced as one transaction by the helper API.
+  - coverage gaps:
+    - Did not run `bun run verify`, `bun run test:e2e:ci`, `bun run local:agent:smoke`, or build
+      gates after the blocking semantic/security failures above.
+    - No passing test covers a real Upstash/QStash JWT in `Upstash-Signature` with current/next key
+      rotation, URL subject validation, expiration, not-before, and body-hash claim validation.
+    - No integrated committed mutation -> durable wakeup -> dropped post-commit publish -> cron
+      reclaim -> fake publish -> signed duplicate delivery -> exactly-one targeted reconcile test
+      was found.
+    - `tests/unit/agent-deployment-cron-route.test.ts` does not assert the outbox sweep is invoked
+      before the cron reconcile path.
+    - No fake-delayed local smoke evidence was found; the builder smoke was default cron-only.
+  - next action:
+    Builder should replace the bespoke HMAC verifier with the official QStash verifier/compatible
+    JWT verification against `Upstash-Signature`, add real signature fixtures and the integrated
+    producer-to-consumer recovery test, and enforce deployment+wakeup atomicity at the helper
+    boundary before checker rerun.
+- #263 checker result: ALL GREEN at implementation `49c872a`.
+- focused: 10 files / 95 tests passed.
+- full: `bun run verify` passed with 169 unit files / 1,638 tests and production build.
+- E2E: 26/26 passed.
+- zero-cloud smoke: valid 15-stage record, `issueCounts:{}`, `digitalOceanRequests:0`,
+  `cleanupVerified:true`, and p95 88.760 seconds.
+- provider mode: failed closed; no billable provider action ran.
+- remote: CodeRabbit, GitGuardian, and Socket passed. Vercel failed at the same fail-closed Clerk
+  preview baseline as unrelated PR #262 and was accepted as non-blocking.
+- #264 builder: format, lint, typecheck, focused unit, full unit, build, E2E, local zero-cloud
+  smoke, and diff-check passed locally. Local smoke p95 was 150.725s, so the overall SLO remains
+  unmet pending later steps.
+- merge request check (2026-08-07):
+  - result: PARTIAL; #264 branch is checker-green below, but no PR is open; no PR object can be
+    merged yet.
+  - `git status --short --branch --untracked-files=all`: current worktree is
+    `codex/issue-264-durable-wakeups` with only `STATUS.md` modified by checker evidence.
+  - `gh pr list --head codex/issue-264-durable-wakeups --state open --json ...`: `[]`.
+  - `gh pr list --head codex/issue-265-runner-sizing --state open --json ...`: `[]`.
+  - `gh pr list --head codex/issue-266-attested-snapshot --state open --json ...`: `[]`.
+  - `gh pr list --state open --limit 10 --json ...`: only open PR is unrelated
+    [#262](https://github.com/ametel01/plingpling/pull/262) on
+    `docs/ai-integration-opportunities`, `mergeStateStatus: UNSTABLE`, with Vercel `FAILURE`.
+  - next action: commit/push/open the #264 PR before any #264 merge; continue #265/#266 checks.
+    Do not merge #262 as part of this goal.
 
 ## Checker Result
 
-Status: FAILED
+Status: ALL GREEN
 
 ## Commands
 
+- command: required skill load
+  result: PASS
+  evidence: loaded `checker-agent`, `agent-team-status-protocol`, `testing-standards`,
+    `ci-quality-gates`, and `ci-security-gates`; `test-workflow-standards` was requested by the
+    coordinator but is not present in `/Users/alexmetelli/.agents/skills`, so
+    `testing-standards` is the available test-workflow substitute.
 - command: `git status --short --branch --untracked-files=all`
-  result: pass
-  evidence: branch `codex/issue-266-attested-snapshot` is ahead of `origin/main` by 2; only
-    `STATUS.md` is modified by checker evidence.
-- command: `gh pr list --repo ametel01/plingpling --head codex/issue-266-attested-snapshot --json ...`
-  result: blocked
-  evidence: returned `[]`; there is no PR to merge.
-- command: `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-build.test.ts tests/unit/runner-snapshot-workflow.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts tests/unit/digitalocean-provider.test.ts`
-  result: pass
-  evidence: 6 files, 50 tests passed.
+  result: PASS
+  evidence: branch `codex/issue-264-durable-wakeups`; no source files dirty before checker update.
+- command: `git rev-parse --short HEAD && git rev-parse --short main && git rev-parse --short origin/main && git merge-base HEAD main`
+  result: PASS
+  evidence: HEAD `65851f1`, `main`/`origin/main` `57e4843`, merge-base
+    `57e4843975175cbb2f04ab45c8f7f6f1d4abcbf6`; branch is rebased on current main.
+- command: `gh pr list --repo ametel01/plingpling --state open --head codex/issue-264-durable-wakeups --json ...`
+  result: PASS
+  evidence: `[]`; no open PR currently exists for this branch.
+- command: `git diff --stat main...HEAD`, `git diff --name-status main...HEAD`, and
+    `git diff --check main...HEAD`
+  result: PASS
+  evidence: scoped #264 diff is 27 files / 8,646 insertions / 895 deletions, covering env/docs,
+    wakeup route, dispatch module, migration/schema, deployment mutators, QStash dependency, and
+    focused tests; no diff-check errors.
+- command: source inspection of producer mutation -> transactional wakeup -> dropped post-commit
+    publish -> cron reclaim -> signed duplicate/stale delivery -> exactly-one targeted reconcile
+  result: PASS
+  evidence: `agent-deployments.ts:137`, `:385`, and `:480` require transaction handles before
+    create/release/transition writes; `agent-deployment-dispatch.ts:170-235` locks the deployment
+    row and terminalizes/replaces generation-fenced wakeups in the same transaction;
+    `publishLatestDeploymentWakeupAfterCommit` at `agent-deployment-dispatch.ts:319-349` publishes
+    only committed pending/failed wakeups; `sweepDeploymentWakeupOutbox` at
+    `agent-deployment-dispatch.ts:355-407` reclaims due unpublished/failed work in QStash mode;
+    `claimDeploymentWakeupDelivery` at `agent-deployment-dispatch.ts:409-478` atomically claims only
+    due latest-generation rows and returns duplicate/stale/terminal outcomes without executing
+    reconciliation; `wakeup/route.ts:38-78` verifies the raw body before parsing, claims inside a
+    transaction, and invokes `reconcileTargetAgentDeployment` only after a successful claim.
+- command: source inspection of official QStash compatibility and no provider/queue authority
+  result: PASS
+  evidence: `agent-deployment-dispatch.ts:3` imports `Client` and `Receiver` from
+    `@upstash/qstash`; `:56-57` uses `Upstash-Signature`/`Upstash-Region`; `:106-135` verifies with
+    `Receiver.verify` using current/next signing keys, callback URL subject, raw body, region, and
+    clock tolerance; `:480-500` publishes with `Client.publishJSON`, `notBefore`, retries,
+    deduplication ID, and redaction. `readDeploymentDispatchConfig` defaults to cron unless QStash
+    config is complete; `package.json` local smoke forces `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE=local_docker`.
+- command: ambient secret/effect preflight
+  result: PASS
+  evidence: environment variable names checked without printing values:
+    `AGENTBAY_DEPLOYMENT_DISPATCH_MODE`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`,
+    `QSTASH_NEXT_SIGNING_KEY`, `DIGITALOCEAN_ACCESS_TOKEN`, and
+    `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE` are all unset in the checker shell.
+- command:
+    `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts tests/unit/agent-launch-builder.test.ts tests/unit/local-agent-cycle-smoke.test.ts tests/unit/agent-deployment-reconciler.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_67745_afb2b3694ad0`; migrations applied; 9 files / 99
+    tests passed; DB removed.
 - command: `bun run format:check`
-  result: pass
-  evidence: 405 files checked, no fixes applied.
+  result: PASS
+  evidence: Biome checked 410 files in 108ms; no fixes applied.
 - command: `bun run lint`
-  result: pass
-  evidence: 405 files checked, no fixes applied.
-- command: `bun run typecheck`
-  result: pass
-  evidence: `next typegen && tsc --noEmit` completed.
-- command: `bun run test`
-  result: pass
-  evidence: 172 files, 1,646 tests passed.
-- command: `bun run build`
-  result: pass
-  evidence: `next build` completed successfully.
-- command: `bun run test:e2e:ci`
-  result: pass
-  evidence: 26/26 Playwright tests passed.
-- command: `bun run repro:cloud-runner`
-  result: pass
-  evidence: stock generated user-data passed cloud-init schema and bash syntax validation.
-- command: `bun run repro:cloud-runner -- --user-data <temp>/snapshot-user-data.yaml`
-  result: pass
-  evidence: snapshot-mode user-data passed cloud-init schema and 8 bash script blocks checked.
-- command: `bun run local:agent:smoke`
-  result: failed
-  evidence: exited 1 with `No such container: agentbay-local-cloud-runner`; Docker daemon was
-    reachable (`docker info --format '{{.ServerVersion}}'` returned `29.3.1`).
+  result: PASS
+  evidence: Biome checked 410 files in 215ms; no fixes applied.
+- command: coordinator gate evidence supplied for final rebased head `65851f1`
+  result: PASS
+  evidence: coordinator reported focused 9 files / 106 tests, format/lint/typecheck/build, full
+    unit 174 files / 1,696 tests, E2E 26/26, exact local smoke
+    `cleanupVerified:true`, `digitalOceanRequests:0`, p95 `149874ms`, and clean ports; checker did
+    not rerun the shared local smoke stack to avoid introducing provider/namespace effects.
 
 ## Failures
 
-- file: `.github/workflows/build-runner-snapshot.yml:86`
-  check: full boot fixture must pass against the exact preloaded builder image before sanitation or
-    snapshot creation.
-  exact error: workflow runs `bun run runner:release:smoke -- --image "${{ inputs.runner_image }}"
-    --provider digitalocean` on the GitHub runner before `scripts/build-runner-snapshot.ts` creates
-    the builder Droplet, so it does not validate the actual builder, preloaded image set, or snapshot
-    candidate.
-  likely owner: builder-agent (`issue_266_builder`).
-- file: `.github/workflows/build-runner-snapshot.yml:105`
-  check: sanitation must remove credentials/identity/logs/state and prove absence with path and
-    hostile-marker scans.
-  exact error: workflow synthesizes `sanitation-result.json` with `"ok": true`,
-    `"forbiddenPathsAbsent": true`, and `"hostileMarkersAbsent": true`; no sanitation command or scan
-    is executed.
-  likely owner: builder-agent (`issue_266_builder`).
-- file: `src/server/runners/runner-snapshot-build.ts:265`
-  check: builder bootstrap must install Docker/Caddy and preload exact images.
-  exact error: `buildSnapshotBuilderBootstrap` lists `caddy` packages and then executes `docker pull`
-    at lines 280-282, but it never installs/enables Docker (`docker-ce`, Docker repo apt source, or
-    equivalent) before using `docker`.
-  likely owner: builder-agent (`issue_266_builder`).
-- file: `src/server/runners/runner-snapshot-build.ts:156`
-  check: DigitalOcean power-off/snapshot actions require bounded polling of asynchronous action
-    states.
-  exact error: implementation directly requires `powerOffResource(...).value.status === "completed"`
-    and `snapshotResource(...).value.status === "completed"` and never calls the provider
-    `readAction` method required by the contract for `in-progress`, completed, errored, timeout, or
-    unknown outcomes.
-  likely owner: builder-agent (`issue_266_builder`).
-- file: `src/server/runners/runner-snapshot-build.ts:249`
-  check: cleanup must be ordered/idempotent and cover SSH/registry credentials, firewall, Droplet,
-    partial snapshots, safe absence, ambiguous ownership, abort, and unknown outcomes.
-  exact error: finalizer only calls `deleteImage` for a tracked partial snapshot and
-    `cleanupResource` for the builder; it has no firewall/key/credential cleanup, absence proof,
-    ambiguous ownership guard, or action-outcome reconciliation.
-  likely owner: builder-agent (`issue_266_builder`).
-- file: `.github/workflows/build-runner-snapshot.yml:150`
-  check: manifest artifact must be attested/uploaded only after validation.
-  exact error: workflow grants `attestations: write` and `id-token: write` but has no
-    `actions/attest-build-provenance` or equivalent attestation step before upload.
-  likely owner: builder-agent (`issue_266_builder`).
-- file: `tests/unit/runner-snapshot-manifest.test.ts:51`
-  check: required negative fixtures must cover wrong key/schema/time/region/base/arch/source/boot
-    image/min-disk/unknown-field/provider-unavailable and zero Droplet creates on every manual and
-    automatic create path.
-  exact error: tests cover only tamper, unknown top-level field, stale evidence, and one runner
-    identity mismatch; no tests exercise `createDigitalOceanRunnerForUser` or
-    `advanceAutomaticDigitalOceanRunnerProvisioning` with invalid snapshot evidence and assert zero
-    `createRunner` calls.
-  likely owner: builder-agent (`issue_266_builder`).
+- none.
 
 ## Coverage Gaps
 
-- Protected DigitalOcean workflow was not dispatched; no live Droplet/snapshot/secret/environment
-  effects were authorized.
-- GitHub protected environment reviewer enforcement cannot be proven from repository YAML alone.
-- Current-main CI run `31131392382` was still in progress at 2026-08-07T00:22:38Z.
-- `bun run local:agent:smoke` failed in local Docker Compose setup before reaching the snapshot
-  equivalence assertions.
+- No open PR exists for `codex/issue-264-durable-wakeups`; there is nothing for the checker to
+  merge or verify as a PR object yet.
+- Real external QStash publishing and real DigitalOcean provisioning were intentionally not run and
+  remain outside #264 authorization. The checked path uses fakes/local Docker plus coordinator smoke
+  evidence with `digitalOceanRequests:0`.
+- #264 is merge-ready for durable wakeups, but it does not by itself prove the overall one-minute
+  creation target; the recorded local smoke p95 is ~150 seconds, and provider-backed 30-trial SLO
+  proof remains downstream.
 
 ## Next Action
 
-- Builder must fix the contract failures above and add adversarial tests for the missing semantic
-  cases before coordinator pushes/opens/merges any PR. There is currently no GitHub PR for this
-  branch, and checker verdict is not merge-ready.
+- Open/push the #264 PR from `codex/issue-264-durable-wakeups`, then merge only after normal PR
+  review/CI policy is satisfied. Checker verdict on the branch head: merge-ready for #264.
 
-## Checker Result - Cycle 2
+## Review Threads
 
-Status: FAILED
+- none. Reviews #4878363214 and #4878490254 were fixed and accepted by review #4878725523.
 
-## Commands
+## Decisions And Lessons
 
-- command: `git status --short --branch --untracked-files=all`
-  result: pass
-  evidence: branch `codex/issue-266-attested-snapshot` is ahead of `origin/main` by 4; only
-    `STATUS.md` is modified by checker evidence.
-- command: `gh pr list --repo ametel01/plingpling --head codex/issue-266-attested-snapshot --json ...`
-  result: blocked
-  evidence: returned `[]`; there is still no PR to merge.
-- command: `gh run view 31131392382 --repo ametel01/plingpling --json status,conclusion,url,updatedAt,jobs`
-  result: pass
-  evidence: current-main CI run `31131392382` conclusion `success`; job `Verification gates`
-    completed successfully.
-- command: `git diff --check`
-  result: pass
-  evidence: no whitespace errors reported.
-- command: `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-workflow.test.ts tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts tests/unit/digitalocean-provider.test.ts`
-  result: pass
-  evidence: 8 files, 89 tests passed.
-- command: `bun run format:check`
-  result: pass
-  evidence: 405 files checked, no fixes applied.
-- command: `bun run lint`
-  result: pass
-  evidence: 405 files checked, no fixes applied.
-- command: `bun run typecheck`
-  result: pass
-  evidence: `next typegen && tsc --noEmit` completed.
-- command: `bun run test`
-  result: failed
-  evidence: 1 failed file, 171 passed files, 2 failed tests, 1,661 passed tests. Timeouts:
-    `tests/unit/create-agent-db.test.ts:3652` and `tests/unit/create-agent-db.test.ts:4469`.
-- command: `bun scripts/run-unit-tests.ts tests/unit/create-agent-db.test.ts`
-  result: pass
-  evidence: focused rerun passed 1 file, 127 tests.
-- command: `bun run build`
-  result: pass
-  evidence: `next build` completed successfully.
-- command: `bun run test:e2e:ci`
-  result: pass
-  evidence: 26/26 Playwright tests passed.
-- command: `bun run repro:cloud-runner`
-  result: pass
-  evidence: stock generated user-data passed cloud-init schema and 11 bash script blocks.
-- command: `bun run repro:cloud-runner -- --user-data <temp>/snapshot-user-data.yaml`
-  result: pass
-  evidence: snapshot-mode user-data passed cloud-init schema and 8 bash script blocks.
-- command: `bun run local:agent:smoke`
-  result: skipped
-  evidence: coordinator directed checker not to run local smoke while #265 owns the shared
-    `agentbay-local-cloud-runner` Docker Compose namespace.
+- 2026-08-07:
+  signal: The one-minute target cannot rely on capacity created before the user request.
+  rule: Optimize cold on-demand dispatch, orchestration, size, images, readiness, and same-user reuse.
+- 2026-08-07:
+  signal: Consumer-only timing fixtures missed duplicate and synthetic producer evidence.
+  rule: Require an integrated producer-sequence-to-report semantic fixture before checker acceptance.
+- 2026-08-07:
+  signal: Provider trials and snapshot builds can incur cost and touch external infrastructure.
+  rule: Stop for explicit authorization before any billable provider execution.
+- 2026-08-07:
+  signal: Hot status exceeded 1,000 lines after three review cycles.
+  rule: Archive completed contracts, logs, and review transcripts after each merge.
 
-## Failures
+## Worktrees
 
-- file: `.github/workflows/build-runner-snapshot.yml:89`
-  check: workflow must produce real builder/preloaded boot evidence before snapshot creation.
-  exact error: workflow checks `snapshot-artifacts/boot-result.json` at line 96 before
-    `scripts/build-runner-snapshot.ts` runs at line 142. No prior step creates, downloads, or
-    retrieves that file from the temporary builder, so the protected workflow is not executable.
-  likely owner: builder-agent (`issue_266_builder`).
-- file: `.github/workflows/build-runner-snapshot.yml:112`
-  check: workflow must produce real sanitation/removal/hostile-marker evidence before snapshot
-    creation.
-  exact error: workflow checks `snapshot-artifacts/sanitation-result.json` at line 115 before the
-    build script creates the builder, and no step retrieves `/run/agentbay-snapshot-builder/*` from
-    the builder. This fails closed before any manifest can be built.
-  likely owner: builder-agent (`issue_266_builder`).
-- file: `scripts/build-runner-snapshot.ts:24`
-  check: build command should create the builder, collect actual builder-local boot/sanitation
-    evidence, then validate it.
-  exact error: script reads local `--boot-result` and `--sanitation-result` files before calling
-    `buildRunnerSnapshot`; it has no SSH/metadata/provider path to fetch the evidence generated by
-    `buildSnapshotBuilderBootstrap`.
-  likely owner: builder-agent (`issue_266_builder`).
-- file: `src/server/runners/runner-snapshot-build.ts:245`
-  check: manifest snapshot ID must be the resulting DigitalOcean image ID, not the action ID.
-  exact error: implementation sets `snapshotId = snapshot.action.id`, then reads
-    `readImageAvailability({ imageId: snapshotId })` and emits that value in the manifest. The
-    DigitalOcean provider returns action IDs from `snapshotResource`/`readAction`; the fake provider
-    masks this by accepting any image ID.
-  likely owner: builder-agent (`issue_266_builder`).
-- file: `tests/unit/runner-snapshot-workflow.test.ts:24`
-  check: workflow static tests should prove evidence is produced/retrieved before validation, not
-    only that validation strings exist.
-  exact error: test asserts the workflow contains `Require builder-produced boot evidence` and
-    `Require builder-produced sanitation evidence`, but does not fail when those files have no
-    producer step.
-  likely owner: builder-agent (`issue_266_builder`).
-- file: `tests/unit/runner-snapshot-build.test.ts:51`
-  check: fake provider tests should distinguish snapshot action IDs from image IDs.
-  exact error: success path expects manifest image `"1102"` because fake `snapshotResource` action
-    ID and fake `readImageAvailability` image ID are conflated; no test asserts the manifest uses a
-    provider-confirmed snapshot image ID.
-  likely owner: builder-agent (`issue_266_builder`).
-- file: `tests/unit/create-agent-db.test.ts:3652`
-  check: aggregate full unit gate.
-  exact error: `bun run test` timed out this test after 5000ms. Focused rerun of
-    `tests/unit/create-agent-db.test.ts` passed, so this is likely load/timing-sensitive, but the
-    aggregate gate is not green.
-  likely owner: shared test/gate stability; coordinator or builder if it repeats after semantic
-    fixes.
-- file: `tests/unit/create-agent-db.test.ts:4469`
-  check: aggregate full unit gate.
-  exact error: `bun run test` timed out this test after 5000ms. Focused rerun of
-    `tests/unit/create-agent-db.test.ts` passed.
-  likely owner: shared test/gate stability; coordinator or builder if it repeats after semantic
-    fixes.
-
-## Coverage Gaps
-
-- Protected DigitalOcean workflow was not dispatched; no live Droplet/snapshot/secret/environment
-  effects were authorized.
-- GitHub protected environment reviewer enforcement cannot be proven from repository YAML alone.
-- Local agent smoke was intentionally skipped because #265 owns the shared Docker Compose namespace.
-- The current fake provider does not model a separate action ID and snapshot image ID, so snapshot
-  image identity selection is not verified.
-
-## Next Action
-
-- Builder must make the snapshot workflow/build script executable end-to-end in repository scope:
-  create the builder, retrieve the actual builder-local boot/sanitation evidence, validate it, poll
-  the snapshot action, discover/read the resulting image ID, and update tests so fake action IDs and
-  image IDs cannot be conflated. Do not open or merge a PR yet.
-
-## Checker Result - Cycle 3
-
-Status: FAILED
-
-## Commands
-
-- command: `git status --short --branch --untracked-files=all`
-  result: pass
-  evidence: branch `codex/issue-266-attested-snapshot` is ahead of `origin/main` by 6; only
-    `STATUS.md` is modified by checker evidence.
-- command: `gh pr list --repo ametel01/plingpling --head codex/issue-266-attested-snapshot --json ...`
-  result: blocked
-  evidence: returned `[]`; there is still no PR to merge.
-- command: `git diff --check`
-  result: pass
-  evidence: no whitespace errors reported.
-- command: `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-workflow.test.ts tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts tests/unit/digitalocean-provider.test.ts`
-  result: pass
-  evidence: 8 files, 92 tests passed.
-- command: `bun run format:check`
-  result: pass
-  evidence: 405 files checked, no fixes applied.
-- command: `bun run lint`
-  result: pass
-  evidence: 405 files checked, no fixes applied.
-- command: `bun run typecheck`
-  result: pass
-  evidence: `next typegen && tsc --noEmit` completed.
-- command: `bun run test`
-  result: pass
-  evidence: 172 files, 1,666 tests passed.
-- command: `bun run build`
-  result: pass
-  evidence: `next build` completed successfully.
-- command: `bun run test:e2e:ci`
-  result: pass
-  evidence: 26/26 Playwright tests passed.
-- command: `bun run repro:cloud-runner`
-  result: pass
-  evidence: stock generated user-data passed cloud-init schema and 11 bash script blocks.
-- command: `bun run repro:cloud-runner -- --user-data <temp>/snapshot-user-data.yaml`
-  result: pass
-  evidence: snapshot-mode user-data passed cloud-init schema and 8 bash script blocks.
-- command: `bun run local:agent:smoke`
-  result: skipped
-  evidence: coordinator directed checker not to run local smoke while #265 owns the shared
-    `agentbay-local-cloud-runner` Docker Compose namespace.
-
-## Failures
-
-- file: `scripts/build-runner-snapshot.ts:31`
-  check: all pre-effect authorization validation must happen before provider effects, and cleanup
-    must cover failure after any created ephemeral credential.
-  exact error: script validates the CLI sentinel in `validatePreEffectArgs`, but then creates a
-    DigitalOcean SSH key at lines 31-37 before calling `buildRunnerSnapshot`, whose own sentinel and
-    provider contract checks run later. If `buildRunnerSnapshot` rejects after this point, the local
-    temp key is removed by `rm(tempDir)`, but the provider SSH key created in the controller script is
-    not deleted by the controller; cleanup is delegated to a function that may never receive control
-    if the controller throws between lines 31 and 43.
-  likely owner: builder-agent (`issue_266_builder`).
-- file: `src/server/runners/runner-snapshot-build.ts:176`
-  check: temporary builder SSH exposure should be least-privilege/bounded for evidence retrieval.
-  exact error: builder firewall is opened to `sshSourceAddresses: ["0.0.0.0/0", "::/0"]` for the
-    snapshot builder. The contract requires protected/manual/least-privilege behavior and careful
-    secret handling; world-open root SSH on a billable snapshot builder is not acceptable without a
-    runner-IP restriction or other narrower retrieval channel.
-  likely owner: builder-agent (`issue_266_builder`).
-- file: `src/server/runners/digitalocean-provider.ts:1253`
-  check: SSH evidence retrieval should avoid trust-on-first-use ambiguity where practical for a
-    security-sensitive snapshot builder.
-  exact error: retrieval uses `StrictHostKeyChecking=accept-new` with a temp known-hosts file. This
-    avoids host-key persistence but still accepts the first host key over a world-open SSH path; no
-    host key fingerprint/source restriction is asserted.
-  likely owner: builder-agent (`issue_266_builder`).
-- file: `tests/unit/runner-snapshot-workflow.test.ts:59`
-  check: tests should fail on provider SSH key leak and world-open builder SSH exposure.
-  exact error: workflow/build tests assert `ssh-keygen`, `provider.createSshKey`, and evidence output
-    paths exist, but no test asserts `deleteSshKey` runs if creation succeeds and later validation
-    fails, and no test rejects `0.0.0.0/0` / `::/0` in the snapshot-builder firewall path.
-  likely owner: builder-agent (`issue_266_builder`).
-
-## Coverage Gaps
-
-- Protected DigitalOcean workflow was not dispatched; no live Droplet/snapshot/secret/environment
-  effects were authorized.
-- GitHub protected environment reviewer enforcement cannot be proven from repository YAML alone.
-- Local agent smoke was intentionally skipped because #265 owns the shared Docker Compose namespace.
-- Evidence retrieval over SSH is only statically/fake-provider validated; no live host-key or network
-  behavior was exercised.
-
-## Next Action
-
-- Builder should move provider SSH key cleanup responsibility into controller-level `finally` or
-  otherwise prove no created key can leak before `buildRunnerSnapshot` takes ownership, restrict the
-  snapshot-builder evidence retrieval path to a least-privilege source or non-SSH provider channel,
-  and add tests that fail on world-open SSH and leaked provider keys. Do not open or merge a PR yet.
-
-## Builder Handoff - Cycle 4
-
-- request: Re-check the SSH security fixes for #266. Do not dispatch the protected workflow, contact
-  DigitalOcean, configure secrets/environments, deploy, release, or run billable effects.
-- files changed: `.github/workflows/build-runner-snapshot.yml`,
-  `scripts/build-runner-snapshot.ts`, `src/server/runners/runner-snapshot-build.ts`,
-  `src/server/runners/digitalocean-provider.ts`, `docs/RUNNER_RELEASES.md`,
-  `tests/unit/runner-snapshot-build.test.ts`, `tests/unit/runner-snapshot-workflow.test.ts`, and
-  `tests/unit/digitalocean-provider.test.ts`.
-- behavior: The protected workflow now resolves the GitHub runner controller egress identity before
-  the DigitalOcean-token step and passes only an exact `/32` IPv4 or `/128` IPv6 CIDR to the
-  snapshot builder. The build script validates `--controller-cidr` before provider effects, tracks
-  the provider-created SSH key immediately, and deletes it in a controller-level `finally` if the
-  orchestrator did not record deletion. The snapshot builder firewall uses that controller CIDR for
-  SSH and disables public web ingress. Provider evidence retrieval pins an ephemeral host key into a
-  temporary `known_hosts`, optionally enforces a `SHA256:` fingerprint, uses
-  `StrictHostKeyChecking=yes`, and removes temp known-hosts material. Cleanup evidence now records
-  SSH-key deletion success or failure without claiming success on provider cleanup failure.
-- tests added: adversarial coverage for controller failure after provider key creation, SSH-key
-  deletion failure evidence, world-open/non-exact/invalid/injected CIDRs, host-key mismatch,
-  fingerprint injection, no unowned Droplet deletion, strict known-host source assertions, and
-  workflow controller-CIDR ordering.
-- gates passed: `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts
-  tests/unit/runner-snapshot-workflow.test.ts tests/unit/digitalocean-provider.test.ts` (3 files,
-  34 tests); `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts
-  tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-workflow.test.ts
-  tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts
-  tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
-  tests/unit/digitalocean-provider.test.ts` (8 files, 99 tests); `bun run format:check`;
-  `bun run lint`; `bun run typecheck`; `bun run test` (172 files, 1,673 tests); `bun run build`;
-  `PORT=3118 bun run test:e2e:ci` (26/26); `bun run repro:cloud-runner`; `git diff --check`.
-- skipped: `bun run local:agent:smoke`, per coordinator serialization of the shared
-  `agentbay-local-cloud-runner` Docker Compose namespace. No live DigitalOcean/provider,
-  GitHub-environment, secret, deploy, release, or workflow-dispatch effect was run.
-- next-action: Checker should inspect the controller/provider cleanup ownership, CIDR validation and
-  firewall inputs, strict host-key evidence retrieval, docs trust chain, and the new adversarial
-  tests. Local smoke remains serialized.
-
-## Checker Result - Cycle 4
-
-- status: BLOCKED — no code/security blocker found at `2bdc4ea`; the only remaining unchecked gate is
-  the serialized `bun run local:agent:smoke` gate for the shared
-  `agentbay-local-cloud-runner` Docker Compose namespace.
-- checked at: 2026-08-07 09:28:53 PST.
-- PR state: `gh pr list --head codex/issue-266-attested-snapshot --json
-  number,title,state,url,headRefName,baseRefName --limit 5` returned `[]`; no PR exists to merge from
-  this worktree.
-- security evidence:
-  - `.github/workflows/build-runner-snapshot.yml:86` resolves controller egress before the
-    DigitalOcean-token step at line 112 and passes `--controller-cidr
-    "$AGENTBAY_SNAPSHOT_CONTROLLER_CIDR"` at line 130.
-  - `scripts/build-runner-snapshot.ts:19` validates static/pre-effect args before reading provider
-    token at line 21; `scripts/build-runner-snapshot.ts:129` requires exact `/32` IPv4 or `/128`
-    IPv6 controller CIDR; `scripts/build-runner-snapshot.ts:45` records the provider SSH key ID
-    immediately after creation and `scripts/build-runner-snapshot.ts:87` retries deletion in the
-    controller `finally` if the orchestrator did not record deletion.
-  - `src/server/runners/runner-snapshot-build.ts:183` applies the builder firewall with
-    `sshSourceAddresses: [input.controllerSshSourceCidr]` and `webSourceAddresses: []`; provider
-    web-rule generation at `src/server/runners/digitalocean-provider.ts:2384` returns no web ingress
-    for explicit `[]`.
-  - `src/server/runners/runner-snapshot-build.ts:362` records SSH-key deletion success/failure in
-    cleanup evidence without claiming success on provider cleanup failure.
-  - `src/server/runners/digitalocean-provider.ts:1240` pins the observed builder host key into a
-    temp `known_hosts`; `src/server/runners/digitalocean-provider.ts:1270` uses
-    `StrictHostKeyChecking=yes`; `src/server/runners/digitalocean-provider.ts:1439` fails closed on
-    optional `SHA256:` fingerprint mismatch; temp known-host material is removed in the provider
-    `finally`.
-- adversarial test evidence:
-  - `tests/unit/runner-snapshot-build.test.ts:128` rejects world-open, non-exact, invalid, and
-    injected controller CIDRs before provider effects.
-  - `tests/unit/runner-snapshot-build.test.ts:171` records provider SSH-key deletion failure without
-    claiming success.
-  - `tests/unit/runner-snapshot-build.test.ts:242` rejects injected host-key fingerprints before
-    provider effects, and `tests/unit/runner-snapshot-build.test.ts:306` avoids unowned builder
-    deletion.
-  - `tests/unit/runner-snapshot-workflow.test.ts:91` checks controller-finally SSH-key cleanup after
-    creation, and `tests/unit/digitalocean-provider.test.ts:266` checks strict known-host behavior
-    and absence of `StrictHostKeyChecking=accept-new`.
-- gates passed:
-  - `git diff --check main...HEAD`.
-  - `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts
-    tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-workflow.test.ts
-    tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts
-    tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
-    tests/unit/digitalocean-provider.test.ts` — 8 files, 99 tests.
-  - `bun run format:check` — checked 405 files, no fixes applied.
-  - `bun run lint` — checked 405 files, no fixes applied.
-  - `bun run typecheck` — `next typegen && tsc --noEmit`, passed.
-  - `bun run test` — 172 files, 1,673 tests.
-  - `bun run build` — Next.js 16.2.10 production build passed.
-  - `PORT=3118 bun run test:e2e:ci` — 26/26 passed.
-  - `bun run repro:cloud-runner` — generated current user-data, schema valid, 11 runcmd bash blocks
-    valid.
-  - Snapshot-mode `bun run repro:cloud-runner -- --user-data <generated snapshot-user-data.yaml>` —
-    schema valid, 8 runcmd bash blocks valid.
-- gates not run:
-  - `bun run local:agent:smoke` — intentionally skipped until the coordinator releases the shared
-    Docker Compose namespace.
-  - Protected GitHub workflow dispatch, live DigitalOcean snapshot/Droplet effects,
-    secret/environment configuration, deploy, and release were not authorized or run.
-- next-action: run the serialized `bun run local:agent:smoke` gate when the shared namespace is
-  released; if it passes, this checker has no remaining code/security objection to opening/merging
-  the branch.
+- `/Users/alexmetelli/source/plingpling`: issue #264 branch; coordinator-owned, checker-green.
+- `/Users/alexmetelli/source/plingpling-issue-265`: merged #265 branch; preserve existing state.
+- `/Users/alexmetelli/source/plingpling-issue-266`: main at merged #266; preserve existing state.
+- `/Users/alexmetelli/source/plingpling-step7-base`: pre-existing detached user-owned worktree;
+  preserve and do not modify.
 
 ## Completed
 
-### 2026-08-07 — Coordinator rebase integration verification
-
-- Rebased all #266 commits onto merged PR #273 / `origin/main` at `84a1860`, preserving both the
-  canonical runner resource-profile guardrails and the attested-snapshot path.
-- Fixed a combined-branch defect where snapshot disk attestation parsed the `2gb` RAM segment from
-  `s-1vcpu-2gb` as a 2 GB disk. Snapshot expectations now use the canonical profile's 50 GiB disk
-  metadata, and snapshot test fixtures use the compatible 2 GB runner profile.
-- Passed: combined focused suite (9 files, 109 tests); `bun run format:check`; `bun run lint`;
-  `bun run typecheck`; `bun run build`; `bun run test` (173 files, 1,687 tests);
-  `PORT=3119 bun run test:e2e:ci` (26/26); `bun run repro:cloud-runner`; `git diff --check`.
-- Remaining repository gate: serialized `bun run local:agent:smoke` after the #264 harness owner
-  releases the shared Docker Compose namespace. No live DigitalOcean/provider, workflow dispatch,
-  secrets, deploy, release, or billable effect was run.
-
-### 2026-08-07 — CI concurrency-test diagnosis
-
-- PR #274 CI exposed a pre-existing nondeterministic assertion in the runner-replacement concurrency
-  test. The isolated original test reproduced the exact failure on iteration 18/30: one target row
-  was associated but the shared fake provider had no create call yet.
-- Root cause: each reconcile advances one durable workflow phase. If both concurrent claim attempts
-  begin while the pending row is locked, the `SKIP LOCKED` loser legitimately returns idle before
-  the winner commits the target association; provider creation belongs to a later reconcile.
-- The regression now performs that explicit later reconcile and still asserts one target plus exactly
-  one provider create. The isolated corrected test passed 30/30 stress iterations.
-
-### 2026-08-07 — Coordinator local smoke acceptance
-
-- `bun run local:agent:smoke` passed after removing nine verified exited `busybox:1.36`
-  `agentbay.agent_id` test artifacts left by prior local test runs.
-- Evidence: `agentCreated:true`, `agentDeleted:true`, `cleanupVerified:true`,
-  `digitalOceanRequests:0`, `simulatedDroplets:1`, `sizeSlug:"s-1vcpu-2gb"`, 1 vCPU / 2048 MiB
-  host profile, and Hermes limits of 1 CPU / 1536m / 256 PIDs / one agent.
-- The full create, ready, restart, stop, delete cycle completed with valid single-run synthetic p95
-  `89283` ms. This is local behavior evidence only, not DigitalOcean SLO or live snapshot evidence.
-- Post-cleanup verification found no agent-labeled/smoke containers and ports 3045, 55300, and 55432
-  were free. The protected workflow and all live DigitalOcean/provider effects remained untouched.
-
-- [#263](https://github.com/ametel01/plingpling/issues/263) / merged
-  [PR #272](https://github.com/ametel01/plingpling/pull/272) at `7d1cb98`; prior evidence is in history.
+- issue [#263](https://github.com/ametel01/plingpling/issues/263), PR
+  [#272](https://github.com/ametel01/plingpling/pull/272), merge
+  `7d1cb985c06b0007dadcfb0e42c5631c65b7c472`; maker/checker/reviewer accepted.
+- repository scope for issue [#265](https://github.com/ametel01/plingpling/issues/265), PR
+  [#273](https://github.com/ametel01/plingpling/pull/273), merge
+  `84a1860f4030496adda7dfc324ef86acafb19742`; post-merge main CI rerun passed.
+- repository scope for issue [#266](https://github.com/ametel01/plingpling/issues/266), PR
+  [#274](https://github.com/ametel01/plingpling/pull/274), merge
+  `57e4843975175cbb2f04ab45c8f7f6f1d4abcbf6`; issue remains open for authorized provider proof.
+- retrospective archived; status compaction performed immediately, so no separate process issue is
+  needed.

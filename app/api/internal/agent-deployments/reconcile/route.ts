@@ -1,3 +1,4 @@
+import { sweepDeploymentWakeupOutbox } from "@/src/server/agents/agent-deployment-dispatch";
 import { reconcileNextAgentDeployment } from "@/src/server/agents/agent-deployment-reconciler";
 import { isAuthorizedCronRequest, readCronSecretConfig } from "@/src/server/env";
 
@@ -8,6 +9,7 @@ type CronRouteDependencies = {
   readConfig?: typeof readCronSecretConfig;
   authorize?: typeof isAuthorizedCronRequest;
   reconcile?: typeof reconcileNextAgentDeployment;
+  sweepWakeups?: typeof sweepDeploymentWakeupOutbox;
 };
 
 export async function GET(
@@ -44,6 +46,7 @@ export async function GET(
   }
 
   try {
+    await (dependencies.sweepWakeups ?? sweepDeploymentWakeupOutbox)();
     const result = await (dependencies.reconcile ?? reconcileNextAgentDeployment)();
 
     return Response.json(

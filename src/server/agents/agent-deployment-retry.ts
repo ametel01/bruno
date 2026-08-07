@@ -3,6 +3,7 @@ import "server-only";
 import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
+import { replaceDeploymentWakeupInTransaction } from "@/src/server/agents/agent-deployment-dispatch";
 import {
   type AgentDeploymentDto,
   mapAgentDeploymentRowToDto,
@@ -116,6 +117,12 @@ export async function createAgentDeploymentForRunnerReplacement(input: {
     })
     .returning({ id: agentDeployments.id });
   if (!created) return null;
+
+  await replaceDeploymentWakeupInTransaction(input.tx, {
+    deploymentId: created.id,
+    dueAt: input.now,
+    now: input.now,
+  });
 
   await input.tx.insert(agentEvents).values({
     agentId: input.agentId,
@@ -308,6 +315,12 @@ export async function retryAgentDeploymentForUser(input: {
       }
 
       insertedDeploymentId = created.id;
+
+      await replaceDeploymentWakeupInTransaction(tx, {
+        deploymentId: created.id,
+        dueAt: now,
+        now,
+      });
 
       await tx.insert(agentEvents).values({
         agentId,

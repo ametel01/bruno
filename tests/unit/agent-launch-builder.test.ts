@@ -121,8 +121,7 @@ describe("Hermes launch spec builder", () => {
     await configureManagedHermes(connection, created.agent.userId, created.agent.id, {
       createDeployment: false,
     });
-    const firstDeployment = await createAgentDeploymentForUser({
-      db: connection.db,
+    const firstDeployment = await createDeploymentInTransaction(connection, {
       userId: created.agent.userId,
       agentId: created.agent.id,
       configRevision: firstRevision,
@@ -145,8 +144,7 @@ describe("Hermes launch spec builder", () => {
       .update(agentConfigs)
       .set({ updatedAt: new Date("2026-08-03T00:01:00.000Z") })
       .where(eq(agentConfigs.agentId, created.agent.id));
-    await createAgentDeploymentForUser({
-      db: connection.db,
+    await createDeploymentInTransaction(connection, {
       userId: created.agent.userId,
       agentId: created.agent.id,
       configRevision: newestRevision,
@@ -251,8 +249,7 @@ describe("Hermes launch spec builder", () => {
       .update(agentConfigs)
       .set({ modelProvider: "not_configured", modelName: "not_configured" })
       .where(eq(agentConfigs.agentId, created.agent.id));
-    await createAgentDeploymentForUser({
-      db: connection.db,
+    await createDeploymentInTransaction(connection, {
       userId: created.agent.userId,
       agentId: created.agent.id,
       configRevision: "cfg-stale-deployment",
@@ -419,8 +416,7 @@ async function configureManagedHermes(
     randomBytes: (size) => Buffer.alloc(size, 5),
   });
   if (options.createDeployment ?? true) {
-    await createAgentDeploymentForUser({
-      db: connection.db,
+    await createDeploymentInTransaction(connection, {
       userId,
       agentId,
       configRevision: "cfg-managed-revision",
@@ -432,4 +428,11 @@ async function configureManagedHermes(
 
 async function resetLaunchBuilderTables(connection: DatabaseConnection): Promise<void> {
   await connection.client`truncate table agent_secrets, agent_configs, agent_events, agents, app_metadata, users restart identity cascade`;
+}
+
+function createDeploymentInTransaction(
+  connection: DatabaseConnection,
+  input: Omit<Parameters<typeof createAgentDeploymentForUser>[0], "db">,
+) {
+  return connection.db.transaction((tx) => createAgentDeploymentForUser({ db: tx, ...input }));
 }
