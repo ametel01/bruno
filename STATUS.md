@@ -5,11 +5,11 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 ## Active Work
 
 - issue: [#264](https://github.com/ametel01/plingpling/issues/264)
-  owner: builder-agent (`issue_264_builder`)
+  owner: checker-agent (`issue_264_checker`)
   branch: `codex/issue-264-durable-wakeups`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: checker-ready after cycle-1 fixes
+  phase: failed serialized local smoke
   cycle: 1/5
 - issue: [#265](https://github.com/ametel01/plingpling/issues/265)
   owner: checker-agent (`issue_265_checker`)
@@ -183,7 +183,7 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 - stop condition: accept for PR only after checker independently exercises a producer-to-delivery
   semantic path and either runs or explicitly classifies the pending heavier gates.
 
-## Checker Result
+## Checker Result — #264 Initial
 
 Status: FAILED
 
@@ -307,8 +307,121 @@ Status: FAILED
   - Real external QStash publishing remains unexercised by design; no real queue/provider effects
     were authorized.
 
+## Checker Result
+
+Status: FAILED
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all && git log --oneline --decorate -6`
+  result: PASS
+  evidence: branch `codex/issue-264-durable-wakeups`; HEAD
+  `29dba9c Fix QStash wakeups and atomic deployment writes`; only `STATUS.md` dirty from checker
+  evidence.
+- command: Upstash primary docs review:
+  `https://upstash.com/docs/qstash/howto/signature`,
+  `https://upstash.com/docs/qstash/sdks/ts/examples/receiver`,
+  `https://upstash.com/docs/qstash/sdks/ts/gettingstarted`
+  result: PASS
+  evidence: docs require `Upstash-Signature`, SDK `Receiver.verify` with raw body and URL, and SDK
+  `Client` for publishing; local `@upstash/qstash` package is `2.11.3`.
+- command: source inspection of `src/server/agents/agent-deployment-dispatch.ts` and
+  `app/api/internal/agent-deployments/wakeup/route.ts`
+  result: PASS
+  evidence: route reads `Upstash-Signature`; verifier constructs official `Receiver` with
+  current/next signing keys and verifies raw body, canonical callback URL, optional Upstash region,
+  and five-second clock tolerance before JSON parsing. Publisher constructs official `Client` and
+  calls `publishJSON` with callback URL, payload, `POST`, `notBefore`, `retries: 3`,
+  generation-scoped `deduplicationId`, and redaction.
+- command: source inspection of deployment mutation+wakeup boundaries
+  result: PASS
+  evidence: `createAgentDeploymentForUser`, `releaseAgentDeploymentLease`, and
+  `transitionAgentDeploymentStage` now require transaction handles and call `assertTransactionHandle`
+  before mutations; repo call sites pass `tx`; plain DB rejection is covered before exposing rows.
+- command:
+  `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts tests/unit/agent-launch-builder.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_96723_484bbc91adb7`; 7 files / 53 tests passed.
+- command: isolated manual integrated semantic check with fake publisher and real-format signed JWT
+  delivery
+  result: PASS
+  evidence: isolated DB `plingpling_checker_4352_c0e54f4b9e71`; committed deployment mutation
+  produced pending wakeup; cron outbox sweep published one fake message; signed delivery returned
+  `{ok:true, processed:1, outcome:"advanced"}`; duplicate delivery returned
+  `{ok:true, processed:0, outcome:"already_claimed"}`; reconcile calls `1`; final wakeup state
+  `claimed`; no real QStash/provider effects.
+- command: `bun run verify`
+  result: PASS
+  evidence: `format:check` checked 402 files; `lint` checked 402 files; route typegen and
+  `tsc --noEmit` passed; full unit suite passed with isolated DB
+  `plingpling_test_97147_e8fa2ef4a41f`, 170 files / 1,647 tests; production build compiled
+  successfully.
+- command: `bun run test:e2e:ci`
+  result: BLOCKED by local port conflict
+  evidence: default `http://localhost:3100` was already used.
+- command: `PORT=3117 bun run test:e2e:ci`
+  result: PASS
+  evidence: 26 Playwright CI tests passed in 25.3s.
+- command: `bun run local:agent:smoke`
+  result: FAILED
+  evidence: first serialized default-cron smoke attempt exited 1 with
+  `Error response from daemon: No such container: agentbay-local-cloud-runner` followed by
+  `Error: docker compose failed with exit 1.` No smoke summary, timing record, zero-provider
+  assertion, or QStash absence proof was produced by the run.
+- command: `bun run local:agent:smoke`
+  result: FAILED
+  evidence: retry failed with the same error:
+  `Error response from daemon: No such container: agentbay-local-cloud-runner`; `Error: docker compose failed with exit 1.`
+- command: cleanup checks after failed smoke
+  result: PASS
+  evidence: `docker ps -a --filter label=agentbay.agent_id --format ...` returned no rows;
+  `docker ps -a --filter name=agentbay --format ...` only showed old `agentbay-postgres-1`
+  exited from 4 days ago.
+
+## Failures
+
+- file: `scripts/smoke-local-agent-cycle.ts`
+  check: serialized default-cron local full-cycle smoke
+  exact error: `Error response from daemon: No such container: agentbay-local-cloud-runner`;
+  `Error: docker compose failed with exit 1.`
+  likely owner: builder-agent for #264 or coordinator/local Docker harness owner.
+
+## Coverage Gaps
+
+- `bun run local:agent:smoke` did not produce a valid timing record, `cleanupVerified:true`,
+  `digitalOceanRequests:0`, or any completed lifecycle summary because it failed during local
+  Docker setup/diagnostics.
+- No dedicated fake-delayed local-smoke command or harness was found in `package.json`,
+  `scripts/smoke-local-agent-cycle.ts`, or repo references to `AGENTBAY_DEPLOYMENT_DISPATCH_MODE`;
+  fake delayed behavior is covered by the already-passed isolated integrated fake
+  producer-consumer check, not by local smoke.
+- Real external QStash publishing remains unexercised by design; no production secrets, real QStash
+  publishes, provider calls, deployments, or billable effects were authorized or intentionally run.
+
+## Next Action
+
+- Builder/coordinator should fix the local smoke harness failure for missing
+  `agentbay-local-cloud-runner`, then rerun `bun run local:agent:smoke` and require a completed
+  summary with `cleanupVerified:true`, `digitalOceanRequests:0`, and a valid creation-latency timing
+  record before PR/review.
+
 ## Gates
 
+- #264 checker cycle-1 result (2026-08-07, `issue_264_checker`): FAILED at `29dba9c`.
+  - prior blocker resolved: QStash verification now uses official `@upstash/qstash` `Receiver` and
+    `Upstash-Signature` with raw body, callback URL subject, time claims, body hash, current/next
+    signing keys, and safe error handling.
+  - prior blocker resolved: deployment mutation helpers now reject plain DB handles before writes and
+    require transaction handles for create/release/stage wakeup mutations.
+  - focused tests: PASS, 7 files / 53 tests, isolated DB `plingpling_test_96723_484bbc91adb7`.
+  - integrated semantic check: PASS, isolated DB `plingpling_checker_4352_c0e54f4b9e71`, fake
+    publisher, signed delivery, duplicate delivery, exactly one targeted reconcile, final state
+    `claimed`.
+  - full non-smoke gates: `bun run verify` PASS; `PORT=3117 bun run test:e2e:ci` PASS, 26/26.
+  - smoke gate: `bun run local:agent:smoke` FAILED twice with missing
+    `agentbay-local-cloud-runner`; no completed timing/cleanup/provider summary was emitted.
+  - cleanup check after failure: no containers with `agentbay.agent_id` label remained; only old
+    exited `agentbay-postgres-1` was listed by the broad `name=agentbay` filter.
 - #264 builder cycle-1 fix gates (2026-08-07, `issue_264_builder`): PASS locally.
   - command: `bun run typecheck`
     result: PASS.
