@@ -145,6 +145,15 @@ one snapshot, emits an allowlisted signed manifest, and deletes temporary builde
 not create user runners, ready capacity, spare Droplets, cross-user capacity, schedules, release
 triggers, or production deployments.
 
+The builder SSH trust chain is intentionally narrow. The workflow resolves the GitHub runner
+controller's public egress identity before any DigitalOcean step and the builder firewall accepts SSH
+only from that exact `/32` IPv4 or `/128` IPv6 CIDR. The build command creates one provider SSH key,
+tracks ownership immediately, and deletes it from both orchestrator and controller cleanup paths. To
+retrieve builder evidence, the provider pins the observed ephemeral SSH host key into a temporary
+`known_hosts` file, optionally compares a supplied `SHA256:` fingerprint, uses
+`StrictHostKeyChecking=yes`, then removes the temporary known-hosts file and private key material.
+`accept-new` and world-open SSH ingress are forbidden.
+
 Production snapshot consumption is configured with:
 
 ```text

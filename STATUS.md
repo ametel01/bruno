@@ -7,8 +7,8 @@
   branch: `codex/issue-266-attested-snapshot`
   worktree: `/Users/alexmetelli/source/plingpling-issue-266`
   pr: none
-  phase: checker failed cycle 3; builder security fixes required before PR/merge
-  cycle: 3/5
+  phase: checker-ready after cycle-4 SSH security fixes
+  cycle: 4/5
 
 ## Completion Contract
 
@@ -679,6 +679,44 @@ Status: FAILED
   otherwise prove no created key can leak before `buildRunnerSnapshot` takes ownership, restrict the
   snapshot-builder evidence retrieval path to a least-privilege source or non-SSH provider channel,
   and add tests that fail on world-open SSH and leaked provider keys. Do not open or merge a PR yet.
+
+## Builder Handoff - Cycle 4
+
+- request: Re-check the SSH security fixes for #266. Do not dispatch the protected workflow, contact
+  DigitalOcean, configure secrets/environments, deploy, release, or run billable effects.
+- files changed: `.github/workflows/build-runner-snapshot.yml`,
+  `scripts/build-runner-snapshot.ts`, `src/server/runners/runner-snapshot-build.ts`,
+  `src/server/runners/digitalocean-provider.ts`, `docs/RUNNER_RELEASES.md`,
+  `tests/unit/runner-snapshot-build.test.ts`, `tests/unit/runner-snapshot-workflow.test.ts`, and
+  `tests/unit/digitalocean-provider.test.ts`.
+- behavior: The protected workflow now resolves the GitHub runner controller egress identity before
+  the DigitalOcean-token step and passes only an exact `/32` IPv4 or `/128` IPv6 CIDR to the
+  snapshot builder. The build script validates `--controller-cidr` before provider effects, tracks
+  the provider-created SSH key immediately, and deletes it in a controller-level `finally` if the
+  orchestrator did not record deletion. The snapshot builder firewall uses that controller CIDR for
+  SSH and disables public web ingress. Provider evidence retrieval pins an ephemeral host key into a
+  temporary `known_hosts`, optionally enforces a `SHA256:` fingerprint, uses
+  `StrictHostKeyChecking=yes`, and removes temp known-hosts material. Cleanup evidence now records
+  SSH-key deletion success or failure without claiming success on provider cleanup failure.
+- tests added: adversarial coverage for controller failure after provider key creation, SSH-key
+  deletion failure evidence, world-open/non-exact/invalid/injected CIDRs, host-key mismatch,
+  fingerprint injection, no unowned Droplet deletion, strict known-host source assertions, and
+  workflow controller-CIDR ordering.
+- gates passed: `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts
+  tests/unit/runner-snapshot-workflow.test.ts tests/unit/digitalocean-provider.test.ts` (3 files,
+  34 tests); `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts
+  tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-workflow.test.ts
+  tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts
+  tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
+  tests/unit/digitalocean-provider.test.ts` (8 files, 99 tests); `bun run format:check`;
+  `bun run lint`; `bun run typecheck`; `bun run test` (172 files, 1,673 tests); `bun run build`;
+  `PORT=3118 bun run test:e2e:ci` (26/26); `bun run repro:cloud-runner`; `git diff --check`.
+- skipped: `bun run local:agent:smoke`, per coordinator serialization of the shared
+  `agentbay-local-cloud-runner` Docker Compose namespace. No live DigitalOcean/provider,
+  GitHub-environment, secret, deploy, release, or workflow-dispatch effect was run.
+- next-action: Checker should inspect the controller/provider cleanup ownership, CIDR validation and
+  firewall inputs, strict host-key evidence retrieval, docs trust chain, and the new adversarial
+  tests. Local smoke remains serialized.
 
 ## Completed
 

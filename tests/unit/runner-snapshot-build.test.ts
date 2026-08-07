@@ -62,6 +62,8 @@ describe("runner snapshot build orchestration", () => {
       cleanup: {
         deletedDropletId: "do-fake-1",
         deletedFirewallId: "do-fake-firewall-1",
+        deletedSshKeyId: null,
+        sshKeyDeletionFailed: false,
         deletedSnapshotId: null,
         absenceVerified: true,
       },
@@ -85,6 +87,17 @@ describe("runner snapshot build orchestration", () => {
       "observeOwnedSet",
       "observeOwnedSet",
     ]);
+    expect(provider.calls).toEqual(
+      expect.arrayContaining([
+        {
+          step: "firewall",
+          input: expect.objectContaining({
+            sshSourceAddresses: ["203.0.113.7/32"],
+            webSourceAddresses: [],
+          }),
+        },
+      ]),
+    );
     expect(JSON.stringify(result)).not.toContain("dop_v1_super_secret");
   });
 
@@ -102,12 +115,76 @@ describe("runner snapshot build orchestration", () => {
         deletedSnapshotId: null,
         deletedDropletId: null,
         deletedFirewallId: null,
+        deletedSshKeyId: null,
+        sshKeyDeletionFailed: false,
         ambiguousOwnership: false,
         absenceVerified: false,
         steps: [],
       },
     });
     expect(provider.calls).toEqual([]);
+  });
+
+  it("fails before provider effects on world-open, non-exact, invalid, or injected controller CIDRs", async () => {
+    for (const controllerSshSourceCidr of [
+      "0.0.0.0/0",
+      "0.0.0.0/32",
+      "::/0",
+      "::/128",
+      "203.0.113.7/24",
+      "bad/32",
+      "203.0.113.7/32; touch /tmp/pwned",
+    ]) {
+      const provider = new FakeDigitalOceanProvider();
+      const result = await buildRunnerSnapshot({
+        ...baseInput(provider),
+        controllerSshSourceCidr,
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        reason: "input_invalid",
+      });
+      expect(provider.calls).toEqual([]);
+    }
+  });
+
+  it("records ephemeral SSH key deletion success in cleanup evidence", async () => {
+    const provider = new FakeDigitalOceanProvider();
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      builderSshKeyId: "ssh-key-123",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      cleanup: {
+        deletedSshKeyId: "ssh-key-123",
+        sshKeyDeletionFailed: false,
+      },
+    });
+    expect(provider.calls).toEqual(
+      expect.arrayContaining([{ step: "deleteSshKey", input: { id: "ssh-key-123" } }]),
+    );
+  });
+
+  it("records provider SSH key deletion failure without claiming success", async () => {
+    const provider = new FakeDigitalOceanProvider({ fail: { deleteSshKey: "delete denied" } });
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      builderSshKeyId: "ssh-key-123",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      cleanup: {
+        deletedSshKeyId: null,
+        sshKeyDeletionFailed: true,
+      },
+    });
+    expect(provider.calls).toEqual(
+      expect.arrayContaining([{ step: "deleteSshKey", input: { id: "ssh-key-123" } }]),
+    );
   });
 
   it("deletes the builder when retrieved sanitation evidence fails after creation", async () => {
@@ -138,6 +215,42 @@ describe("runner snapshot build orchestration", () => {
       "observeOwnedSet",
       "observeOwnedSet",
     ]);
+  });
+
+  it("fails closed when the expected builder host key does not match the pinned identity", async () => {
+    const provider = new FakeDigitalOceanProvider({
+      builderHostKeySha256: "SHA256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    });
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      expectedBuilderHostKeySha256: "SHA256:ccccccccccccccccccccccccccccccccccccccccccc",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "boot_fixture_failed",
+      cleanup: {
+        deletedDropletId: "do-fake-1",
+        deletedFirewallId: "do-fake-firewall-1",
+        absenceVerified: true,
+      },
+    });
+    expect(provider.calls.map((call) => call.step)).toContain("readBuilderEvidence");
+    expect(provider.calls.map((call) => call.step)).not.toContain("powerOff");
+  });
+
+  it("rejects invalid expected builder host-key fingerprints before provider effects", async () => {
+    const provider = new FakeDigitalOceanProvider();
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      expectedBuilderHostKeySha256: "SHA256:bad; touch /tmp/pwned",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "input_invalid",
+    });
+    expect(provider.calls).toEqual([]);
   });
 
   it("fails closed on asynchronous action errors and removes the partial snapshot", async () => {
@@ -288,6 +401,7 @@ function baseInput(provider: FakeDigitalOceanProvider) {
     runnerImage: RUNNER_IMAGE,
     defaultAgentImage: AGENT_IMAGE,
     hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
+    controllerSshSourceCidr: "203.0.113.7/32",
     privateKeyPem: generateKeyPairSync("ed25519")
       .privateKey.export({ format: "pem", type: "pkcs8" })
       .toString(),

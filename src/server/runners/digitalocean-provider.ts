@@ -1,7 +1,8 @@
 import "server-only";
 
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -165,6 +166,7 @@ export type DigitalOceanFirewallInput = {
   providerResourceId: string;
   firewallName: string;
   sshSourceAddresses?: string[];
+  webSourceAddresses?: string[];
 };
 
 export type DigitalOceanCleanupInput = {
@@ -187,6 +189,7 @@ export type DigitalOceanReadSnapshotBuilderEvidenceInput = {
   providerResourceId: string;
   privateKeyPath?: string;
   remoteDirectory?: string;
+  expectedHostKeySha256?: string;
 };
 
 export type DigitalOceanSnapshotBuilderEvidence = {
@@ -303,7 +306,7 @@ export interface DigitalOceanProvider {
   ): Promise<DigitalOceanProviderResult<{ deleted: true }>>;
 }
 
-type FakeProviderStep = "create" | "tag" | "firewall" | "cleanup";
+type FakeProviderStep = "create" | "tag" | "firewall" | "cleanup" | "deleteSshKey";
 
 export type FakeDigitalOceanProviderOptions = {
   fail?: Partial<Record<FakeProviderStep, string>>;
@@ -311,6 +314,7 @@ export type FakeDigitalOceanProviderOptions = {
   idPrefix?: string;
   publicIpv4?: string | null;
   sshKeys?: DigitalOceanSshKey[];
+  builderHostKeySha256?: string;
 };
 
 export type DigitalOceanApiProviderOptions = {
@@ -903,8 +907,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
             dropletIds: [dropletId],
             inboundRules: [
               ...sshInboundRules(input.sshSourceAddresses),
-              tcpInboundRule("80"),
-              tcpInboundRule("443"),
+              ...webInboundRules(input.webSourceAddresses),
             ],
             outboundRules: [outboundRule("tcp"), outboundRule("udp"), outboundRule("icmp")],
           },
@@ -1234,6 +1237,20 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
     const tempKnownHosts = await mkdtemp(join(tmpdir(), "agentbay-snapshot-known-hosts-"));
 
     try {
+      const knownHostsPath = join(tempKnownHosts, "known_hosts");
+      const pinnedHostKey = await pinSnapshotBuilderHostKey({
+        host: resource.value.publicIpv4,
+        knownHostsPath,
+        ...(input.expectedHostKeySha256 === undefined
+          ? {}
+          : { expectedHostKeySha256: input.expectedHostKeySha256 }),
+        ...(context === undefined ? {} : { context }),
+      });
+
+      if (!pinnedHostKey.ok) {
+        return pinnedHostKey;
+      }
+
       const command = [
         "set -euo pipefail",
         `cat ${shellPath(`${remoteDirectory}/boot-result.json`)}`,
@@ -1250,9 +1267,9 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
           "-o",
           "IdentitiesOnly=yes",
           "-o",
-          "StrictHostKeyChecking=accept-new",
+          "StrictHostKeyChecking=yes",
           "-o",
-          `UserKnownHostsFile=${join(tempKnownHosts, "known_hosts")}`,
+          `UserKnownHostsFile=${knownHostsPath}`,
           `root@${resource.value.publicIpv4}`,
           command,
         ],
@@ -1377,6 +1394,68 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
   }
 }
 
+async function pinSnapshotBuilderHostKey(input: {
+  host: string;
+  knownHostsPath: string;
+  expectedHostKeySha256?: string;
+  context?: DigitalOceanProviderRequestContext;
+}): Promise<DigitalOceanProviderResult<{ fingerprint: string }>> {
+  if (
+    input.expectedHostKeySha256 !== undefined &&
+    !isSha256SshFingerprint(input.expectedHostKeySha256)
+  ) {
+    return {
+      ok: false,
+      reason: "resource_not_found",
+      message: "Snapshot builder host-key fingerprint was invalid.",
+    };
+  }
+
+  try {
+    const { stdout } = await execFileAsync(
+      "ssh-keyscan",
+      ["-T", "15", "-t", "ed25519", input.host],
+      {
+        encoding: "utf8",
+        maxBuffer: 16 * 1024,
+        signal: input.context?.signal,
+        timeout: 20_000,
+      },
+    );
+    const line = stdout
+      .split("\n")
+      .map((value) => value.trim())
+      .find((value) => value && !value.startsWith("#") && value.includes("ssh-ed25519"));
+    const fingerprint = line ? sshHostKeySha256Fingerprint(line) : null;
+
+    if (!line || !fingerprint) {
+      return {
+        ok: false,
+        reason: "resource_not_found",
+        message: "Snapshot builder host key was unavailable.",
+      };
+    }
+
+    if (input.expectedHostKeySha256 && fingerprint !== input.expectedHostKeySha256) {
+      return {
+        ok: false,
+        reason: "resource_not_found",
+        message: "Snapshot builder host key did not match the expected identity.",
+      };
+    }
+
+    await writeFile(input.knownHostsPath, `${line}\n`, { mode: 0o600 });
+
+    return { ok: true, value: { fingerprint } };
+  } catch {
+    return {
+      ok: false,
+      reason: "resource_not_found",
+      message: "Snapshot builder host key could not be pinned.",
+    };
+  }
+}
+
 export class FakeDigitalOceanProvider
   implements DigitalOceanProvider, DigitalOceanOwnedSetProvider
 {
@@ -1408,6 +1487,7 @@ export class FakeDigitalOceanProvider
   readonly #idPrefix: string;
   readonly #publicIpv4: string | null;
   readonly #sshKeys: DigitalOceanSshKey[];
+  readonly #builderHostKeySha256: string;
   readonly #snapshotImagesByName = new Map<string, DigitalOceanImageAvailability>();
   readonly #resourceUserData = new Map<string, string>();
 
@@ -1416,6 +1496,8 @@ export class FakeDigitalOceanProvider
     this.#now = options.now ?? (() => new Date());
     this.#idPrefix = options.idPrefix ?? "do-fake";
     this.#publicIpv4 = options.publicIpv4 === undefined ? "203.0.113.10" : options.publicIpv4;
+    this.#builderHostKeySha256 =
+      options.builderHostKeySha256 ?? "SHA256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     this.#sshKeys = options.sshKeys ?? [
       {
         id: "52830696",
@@ -1463,6 +1545,12 @@ export class FakeDigitalOceanProvider
     const aborted = abortedProviderResult<{ deleted: true }>("cleanup_failed", context);
     if (aborted) return aborted;
     this.calls.push({ step: "deleteSshKey", input });
+    const failure = this.#failure<{ deleted: true }>("deleteSshKey", "cleanup_failed");
+
+    if (failure) {
+      return failure;
+    }
+
     const index = this.#sshKeys.findIndex((key) => key.id === input.id);
 
     if (index >= 0) {
@@ -1484,7 +1572,7 @@ export class FakeDigitalOceanProvider
 
     this.calls.push({ step: "create", input });
 
-    const failure = this.#failure("create", "create_failed");
+    const failure = this.#failure<DigitalOceanResource>("create", "create_failed");
 
     if (failure) {
       return failure;
@@ -1571,7 +1659,7 @@ export class FakeDigitalOceanProvider
     if (aborted) return aborted;
     this.calls.push({ step: "tag", input });
 
-    const failure = this.#failure("tag", "tag_failed");
+    const failure = this.#failure<DigitalOceanResource>("tag", "tag_failed");
 
     if (failure) {
       return failure;
@@ -1596,7 +1684,7 @@ export class FakeDigitalOceanProvider
     if (aborted) return aborted;
     this.calls.push({ step: "firewall", input });
 
-    const failure = this.#failure("firewall", "firewall_failed");
+    const failure = this.#failure<DigitalOceanResource>("firewall", "firewall_failed");
 
     if (failure) {
       return failure;
@@ -1717,7 +1805,7 @@ export class FakeDigitalOceanProvider
     if (aborted) return aborted;
     this.calls.push({ step: "cleanup", input });
 
-    const failure = this.#failure("cleanup", "cleanup_failed");
+    const failure = this.#failure<DigitalOceanResource>("cleanup", "cleanup_failed");
 
     if (failure) {
       return failure;
@@ -1876,6 +1964,16 @@ export class FakeDigitalOceanProvider
         message: "DigitalOcean resource was not found.",
       };
     }
+    if (
+      input.expectedHostKeySha256 !== undefined &&
+      input.expectedHostKeySha256 !== this.#builderHostKeySha256
+    ) {
+      return {
+        ok: false,
+        reason: "resource_not_found",
+        message: "Snapshot builder host key did not match the expected identity.",
+      };
+    }
 
     const userData = this.#resourceUserData.get(input.providerResourceId) ?? "";
     const runnerImageMatch = userData.match(/"runnerImage":\s*"([^"]+)"/);
@@ -1934,10 +2032,10 @@ export class FakeDigitalOceanProvider
     return { ok: true, value: { deleted: true } };
   }
 
-  #failure(
+  #failure<T>(
     step: FakeProviderStep,
     reason: DigitalOceanProviderErrorReason,
-  ): DigitalOceanProviderResult<DigitalOceanResource> | null {
+  ): DigitalOceanProviderResult<T> | null {
     const message = this.#fail[step];
 
     return message ? { ok: false, reason, message } : null;
@@ -2283,6 +2381,15 @@ function sshInboundRules(addresses: string[] | undefined): DigitalOceanFirewallI
   return sourceAddresses.length > 0 ? [tcpInboundRule("22", sourceAddresses)] : [];
 }
 
+function webInboundRules(addresses: string[] | undefined): DigitalOceanFirewallInboundRule[] {
+  const sourceAddresses =
+    addresses === undefined ? ["0.0.0.0/0", "::/0"] : normalizeFirewallAddresses(addresses);
+
+  return sourceAddresses.length > 0
+    ? [tcpInboundRule("80", sourceAddresses), tcpInboundRule("443", sourceAddresses)]
+    : [];
+}
+
 function tcpInboundRule(
   port: string,
   addresses: string[] = ["0.0.0.0/0", "::/0"],
@@ -2301,6 +2408,26 @@ function normalizeFirewallAddresses(addresses: string[] | undefined): string[] {
     if (normalizedAddress) normalizedAddresses.add(normalizedAddress);
   }
   return [...normalizedAddresses].sort();
+}
+
+function sshHostKeySha256Fingerprint(knownHostLine: string): string | null {
+  const [, keyType, keyBlob] = knownHostLine.trim().split(/\s+/, 3);
+
+  if (keyType !== "ssh-ed25519" || !keyBlob) {
+    return null;
+  }
+
+  try {
+    const digest = createHash("sha256").update(Buffer.from(keyBlob, "base64")).digest("base64");
+
+    return `SHA256:${digest.replace(/=+$/, "")}`;
+  } catch {
+    return null;
+  }
+}
+
+function isSha256SshFingerprint(value: string): boolean {
+  return /^SHA256:[A-Za-z0-9+/]{43}$/.test(value.trim());
 }
 
 function outboundRule(protocol: "icmp" | "tcp" | "udp"): DigitalOceanFirewallOutboundRule {

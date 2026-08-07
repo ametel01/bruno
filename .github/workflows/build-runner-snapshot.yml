@@ -83,6 +83,29 @@ jobs:
       - name: Install frozen dependencies
         run: bun install --frozen-lockfile --ignore-scripts
 
+      - name: Resolve controller SSH CIDR before provider effects
+        run: |
+          set -euo pipefail
+          CONTROLLER_IP="$(curl -fsS --max-time 10 https://api64.ipify.org)"
+          CONTROLLER_CIDR="$(
+            CONTROLLER_IP="$CONTROLLER_IP" bun -e '
+              import { isIP } from "node:net";
+              const ip = process.env.CONTROLLER_IP?.trim() ?? "";
+              if (ip === "0.0.0.0" || ip === "::" || ip === "") {
+                throw new Error("controller egress identity was not explicit");
+              }
+              const family = isIP(ip);
+              if (family === 4) {
+                console.log(`${ip}/32`);
+              } else if (family === 6) {
+                console.log(`${ip}/128`);
+              } else {
+                throw new Error("controller egress identity was invalid");
+              }
+            '
+          )"
+          echo "AGENTBAY_SNAPSHOT_CONTROLLER_CIDR=$CONTROLLER_CIDR" >> "$GITHUB_ENV"
+
       - name: Prepare allowlisted artifact directory
         run: install -m 0750 -d snapshot-artifacts
 
@@ -104,6 +127,7 @@ jobs:
             --runner-image "${{ inputs.runner_image }}" \
             --default-agent-image "${{ inputs.default_agent_image }}" \
             --hermes-image "${{ inputs.hermes_image }}" \
+            --controller-cidr "$AGENTBAY_SNAPSHOT_CONTROLLER_CIDR" \
             --boot-result-out snapshot-artifacts/boot-result.json \
             --sanitation-result-out snapshot-artifacts/sanitation-result.json \
             --signing-key snapshot-artifacts/signing-key.pem \

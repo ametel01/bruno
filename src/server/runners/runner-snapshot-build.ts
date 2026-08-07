@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isIP } from "node:net";
 import {
   createRunnerSnapshotAttestation,
   type RunnerSnapshotManifest,
@@ -37,8 +38,10 @@ export type BuildRunnerSnapshotInput = {
   runnerImage: string;
   defaultAgentImage?: string;
   hermesImage?: string;
+  controllerSshSourceCidr: string;
   builderSshKeyId?: string;
   builderSshPrivateKeyPath?: string;
+  expectedBuilderHostKeySha256?: string;
   privateKeyPem: string;
   provider: DigitalOceanProvider;
   context: DigitalOceanProviderRequestContext;
@@ -101,6 +104,8 @@ export type SnapshotCleanupEvidence = {
   deletedSnapshotId: string | null;
   deletedDropletId: string | null;
   deletedFirewallId: string | null;
+  deletedSshKeyId: string | null;
+  sshKeyDeletionFailed: boolean;
   ambiguousOwnership: boolean;
   absenceVerified: boolean;
   steps: string[];
@@ -113,6 +118,8 @@ export async function buildRunnerSnapshot(
     deletedSnapshotId: null,
     deletedDropletId: null,
     deletedFirewallId: null,
+    deletedSshKeyId: null,
+    sshKeyDeletionFailed: false,
     ambiguousOwnership: false,
     absenceVerified: false,
     steps: [],
@@ -177,7 +184,8 @@ export async function buildRunnerSnapshot(
       {
         providerResourceId: builder.providerResourceId,
         firewallName,
-        sshSourceAddresses: ["0.0.0.0/0", "::/0"],
+        sshSourceAddresses: [input.controllerSshSourceCidr],
+        webSourceAddresses: [],
       },
       input.context,
     );
@@ -194,6 +202,9 @@ export async function buildRunnerSnapshot(
         providerResourceId: builder.providerResourceId,
         ...(input.builderSshPrivateKeyPath
           ? { privateKeyPath: input.builderSshPrivateKeyPath }
+          : {}),
+        ...(input.expectedBuilderHostKeySha256
+          ? { expectedHostKeySha256: input.expectedBuilderHostKeySha256 }
           : {}),
       },
       input.context,
@@ -349,7 +360,18 @@ export async function buildRunnerSnapshot(
     cleanup.steps.push("revoke_ephemeral_registration_token");
     cleanup.steps.push("revoke_ephemeral_registry_credential");
     if (input.builderSshKeyId && input.provider.deleteSshKey) {
-      await input.provider.deleteSshKey({ id: input.builderSshKeyId }, input.context);
+      const deleted = await input.provider.deleteSshKey(
+        { id: input.builderSshKeyId },
+        input.context,
+      );
+      if (deleted.ok) {
+        cleanup.deletedSshKeyId = input.builderSshKeyId;
+      } else {
+        cleanup.sshKeyDeletionFailed = true;
+      }
+      cleanup.steps.push("delete_ephemeral_ssh_key");
+    } else if (input.builderSshKeyId) {
+      cleanup.sshKeyDeletionFailed = true;
       cleanup.steps.push("delete_ephemeral_ssh_key");
     } else {
       cleanup.steps.push("delete_ephemeral_ssh_key");
@@ -624,6 +646,9 @@ function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
     !/^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/.test(input.sizeSlug) ||
     !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.baseImageId) ||
     !/^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/.test(input.baseImageSlug) ||
+    !isExplicitControllerCidr(input.controllerSshSourceCidr) ||
+    (input.expectedBuilderHostKeySha256 !== undefined &&
+      !isSha256SshFingerprint(input.expectedBuilderHostKeySha256)) ||
     input.hermesImage === undefined ||
     !hermesImage.includes("@sha256:")
   ) {
@@ -692,4 +717,22 @@ function sanitationPassed(result: SnapshotSanitationResult, builderResourceId: s
 
 function containsAll(values: string[] | undefined, required: string[]): boolean {
   return required.every((value) => values?.includes(value));
+}
+
+function isExplicitControllerCidr(value: string): boolean {
+  const [address, prefix, extra] = value.trim().split("/");
+
+  if (!address || !prefix || extra !== undefined) {
+    return false;
+  }
+
+  if (value === "0.0.0.0/0" || value === "::/0" || address === "0.0.0.0" || address === "::") {
+    return false;
+  }
+
+  return (prefix === "32" && isIP(address) === 4) || (prefix === "128" && isIP(address) === 6);
+}
+
+function isSha256SshFingerprint(value: string): boolean {
+  return /^SHA256:[A-Za-z0-9+/]{43}$/.test(value.trim());
 }

@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
   DIGITALOCEAN_PROVIDER,
@@ -260,6 +261,17 @@ describe("DigitalOcean API provider", () => {
     expect(() => new DigitalOceanApiProvider({ token: "unused" })).toThrow(
       "DigitalOcean network access is disabled in test processes.",
     );
+  });
+
+  it("pins snapshot-builder SSH host identity with strict known-host checking", async () => {
+    const source = await readFile("src/server/runners/digitalocean-provider.ts", "utf8");
+
+    expect(source).toContain("ssh-keyscan");
+    expect(source).toContain("known_hosts");
+    expect(source).toContain("expectedHostKeySha256");
+    expect(source).toContain("StrictHostKeyChecking=yes");
+    expect(source).toContain("UserKnownHostsFile=");
+    expect(source).not.toContain("StrictHostKeyChecking=accept-new");
   });
 
   it("joins complete firewall inventory onto authoritative managed Droplets", async () => {

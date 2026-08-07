@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { isIP } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -11,12 +12,14 @@ const args = parseArgs(process.argv.slice(2));
 const controller = new AbortController();
 const timeout = setTimeout(() => controller.abort(), 55 * 60 * 1000);
 const tempDir = await mkdtemp(join(tmpdir(), "agentbay-runner-snapshot-"));
+let provider: DigitalOceanApiProvider | null = null;
+let builderSshKeyId: string | null = null;
 
 try {
   validatePreEffectArgs(args);
   const privateKeyPem = await readRequiredFile(args.signingKeyPath, "signing key");
   const token = readRequiredEnv("AGENTBAY_DIGITALOCEAN_TOKEN");
-  const provider = new DigitalOceanApiProvider({ token });
+  provider = new DigitalOceanApiProvider({ token });
   const builderSshPrivateKeyPath = join(tempDir, "builder_ssh_key");
 
   await execFileAsync(
@@ -39,6 +42,7 @@ try {
   if (!builderSshKey.ok) {
     throw new Error("Snapshot build failed closed: builder SSH key creation failed.");
   }
+  builderSshKeyId = builderSshKey.value.id;
 
   const result = await buildRunnerSnapshot({
     costAuthorization: args.costAuthorization,
@@ -51,12 +55,16 @@ try {
     runnerImage: args.runnerImage,
     defaultAgentImage: args.defaultAgentImage,
     hermesImage: args.hermesImage,
-    builderSshKeyId: builderSshKey.value.id,
+    controllerSshSourceCidr: args.controllerCidr,
+    builderSshKeyId,
     builderSshPrivateKeyPath,
     privateKeyPem,
     provider,
     context: { signal: controller.signal },
   });
+  if (result.cleanup.deletedSshKeyId === builderSshKeyId) {
+    builderSshKeyId = null;
+  }
 
   if (!result.ok) {
     throw new Error(`Snapshot build failed closed: ${result.reason}.`);
@@ -76,6 +84,18 @@ try {
   process.stdout.write("Runner snapshot manifest written with allowlisted evidence only.\n");
 } finally {
   clearTimeout(timeout);
+  if (builderSshKeyId && provider) {
+    const cleanupController = new AbortController();
+    const cleanupTimeout = setTimeout(() => cleanupController.abort(), 30_000);
+    try {
+      await provider.deleteSshKey({ id: builderSshKeyId }, { signal: cleanupController.signal });
+    } catch {
+      // The provider cleanup result is intentionally not logged: key ID and provider errors are
+      // reconciliation-sensitive evidence. The orchestrator also records deletion failures.
+    } finally {
+      clearTimeout(cleanupTimeout);
+    }
+  }
   await rm(tempDir, { recursive: true, force: true });
 }
 
@@ -106,6 +126,9 @@ function validatePreEffectArgs(input: ReturnType<typeof parseArgs>): void {
   ] as const) {
     if (!/@sha256:[a-f0-9]{64}$/.test(value)) throw new Error(`--${key} is invalid.`);
   }
+  if (!isExplicitControllerCidr(input.controllerCidr)) {
+    throw new Error("--controller-cidr must be an explicit controller /32 IPv4 or /128 IPv6 CIDR.");
+  }
 }
 
 function parseArgs(values: string[]) {
@@ -131,6 +154,7 @@ function parseArgs(values: string[]) {
     runnerImage: requiredArg(parsed, "runner-image"),
     defaultAgentImage: requiredArg(parsed, "default-agent-image"),
     hermesImage: requiredArg(parsed, "hermes-image"),
+    controllerCidr: requiredArg(parsed, "controller-cidr"),
     signingKeyPath: requiredArg(parsed, "signing-key"),
     bootResultOut: requiredArg(parsed, "boot-result-out"),
     sanitationResultOut: requiredArg(parsed, "sanitation-result-out"),
@@ -156,4 +180,18 @@ async function readRequiredFile(path: string, label: string): Promise<string> {
   const value = await readFile(path, "utf8");
   if (!value.trim()) throw new Error(`${label} file was empty.`);
   return value;
+}
+
+function isExplicitControllerCidr(value: string): boolean {
+  const [address, prefix, extra] = value.trim().split("/");
+
+  if (!address || !prefix || extra !== undefined) {
+    return false;
+  }
+
+  if (value === "0.0.0.0/0" || value === "::/0" || address === "0.0.0.0" || address === "::") {
+    return false;
+  }
+
+  return (prefix === "32" && isIP(address) === 4) || (prefix === "128" && isIP(address) === 6);
 }

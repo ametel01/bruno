@@ -20,6 +20,16 @@ describe("runner snapshot workflow", () => {
     expect(
       workflow.indexOf("Validate authorization and static inputs before secrets"),
     ).toBeLessThan(workflow.indexOf("AGENTBAY_DIGITALOCEAN_TOKEN"));
+    expect(workflow).toContain("Resolve controller SSH CIDR before provider effects");
+    expect(workflow.indexOf("Resolve controller SSH CIDR before provider effects")).toBeLessThan(
+      workflow.indexOf("AGENTBAY_DIGITALOCEAN_TOKEN"),
+    );
+    expect(workflow).toContain("AGENTBAY_SNAPSHOT_CONTROLLER_CIDR");
+    expect(workflow).toContain('--controller-cidr "$AGENTBAY_SNAPSHOT_CONTROLLER_CIDR"');
+    expect(workflow).toContain("/32");
+    expect(workflow).toContain("/128");
+    expect(workflow).not.toContain("0.0.0.0/0");
+    expect(workflow).not.toContain("::/0");
     expect(workflow).toContain("if: always()");
     expect(workflow).toContain("Build snapshot and signed manifest");
     expect(workflow).toContain("Validate retrieved builder evidence");
@@ -61,13 +71,37 @@ describe("runner snapshot workflow", () => {
 
     expect(script).toContain("ssh-keygen");
     expect(script).toContain("provider.createSshKey");
+    expect(script.indexOf("builderSshKeyId = builderSshKey.value.id")).toBeLessThan(
+      script.indexOf("const result = await buildRunnerSnapshot"),
+    );
+    expect(script).toContain("provider.deleteSshKey({ id: builderSshKeyId }");
     expect(script).toContain("builderSshKeyId");
     expect(script).toContain("builderSshPrivateKeyPath");
+    expect(script).toContain("controllerCidr");
+    expect(script).toContain('requiredArg(parsed, "controller-cidr")');
+    expect(script).toContain("isExplicitControllerCidr");
     expect(script).toContain("bootResultOut");
     expect(script).toContain("sanitationResultOut");
     expect(script).not.toContain("bootResultPath");
     expect(script).not.toContain("sanitationResultPath");
     expect(script).not.toContain('requiredArg(parsed, "boot-result")');
     expect(script).not.toContain('requiredArg(parsed, "sanitation-result")');
+  });
+
+  it("build script cleans up a provider SSH key if the controller fails after creation", async () => {
+    const script = await readFile("scripts/build-runner-snapshot.ts", "utf8");
+
+    expect(script.indexOf("let builderSshKeyId: string | null = null")).toBeLessThan(
+      script.indexOf("provider.createSshKey"),
+    );
+    expect(script.indexOf("builderSshKeyId = builderSshKey.value.id")).toBeLessThan(
+      script.indexOf("const result = await buildRunnerSnapshot"),
+    );
+    expect(script.indexOf("} finally {")).toBeLessThan(
+      script.indexOf("provider.deleteSshKey({ id: builderSshKeyId }"),
+    );
+    expect(script).toContain("new AbortController()");
+    expect(script).toContain("builderSshKeyId = null");
+    expect(script).not.toContain("process.env.AGENTBAY_DIGITALOCEAN_TOKEN");
   });
 });
