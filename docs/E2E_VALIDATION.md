@@ -46,7 +46,7 @@ bun run agent:creation:benchmark -- --mode local_docker
 ```
 
 DigitalOcean-driving benchmark mode is fail-closed. It requires an explicit positive trial count,
-the `--authorize-provider-costs` flag, and
+the `--authorize-provider-costs` flag, explicit `--candidate-size-slugs` values, and
 `AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION=authorize-digitalocean-agent-creation-benchmark`.
 Ordinary CI must not run that mode. Provider-backed p95<=60s acceptance is owned by the final SLO
 proof step after operator authorization; this read-only benchmark records evidence but does not

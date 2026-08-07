@@ -11,6 +11,7 @@ describe("agent creation benchmark command", () => {
       limit: 100,
       trials: 0,
       providerAuthorized: false,
+      candidateSizeSlugs: [],
     });
   });
 
@@ -30,6 +31,26 @@ describe("agent creation benchmark command", () => {
       deploymentId: "00000000-0000-4000-8000-000000000001",
       trials: 0,
       providerAuthorized: false,
+      candidateSizeSlugs: [],
+    });
+  });
+
+  it("parses deterministic explicit candidate size slugs for fake-only comparison setup", () => {
+    expect(
+      parseBenchmarkOptions([
+        "--mode",
+        "digitalocean",
+        "--trials",
+        "3",
+        "--authorize-provider-costs",
+        "--candidate-size-slugs",
+        "s-2vcpu-2gb,s-1vcpu-2gb",
+      ]),
+    ).toMatchObject({
+      mode: "digitalocean",
+      trials: 3,
+      providerAuthorized: true,
+      candidateSizeSlugs: ["s-1vcpu-2gb", "s-2vcpu-2gb"],
     });
   });
 
@@ -51,6 +72,21 @@ describe("agent creation benchmark command", () => {
     expect(() => parseBenchmarkOptions(["--mode", "digitalocean", "--trials", "31"])).toThrow(
       /--trials must be a positive integer no greater than 30/,
     );
+  });
+
+  it("rejects duplicate or unknown candidate size slugs before provider execution", () => {
+    expect(() =>
+      parseBenchmarkOptions([
+        "--mode",
+        "digitalocean",
+        "--candidate-size-slugs",
+        "s-1vcpu-2gb,s-1vcpu-2gb",
+      ]),
+    ).toThrow(/must not include duplicate/);
+
+    expect(() =>
+      parseBenchmarkOptions(["--mode", "digitalocean", "--candidate-size-slugs", "s-4vcpu-8gb"]),
+    ).toThrow(/Unsupported candidate DigitalOcean size slug/);
   });
 
   it("requires exact bounded positive-integer syntax for report limits", () => {

@@ -180,9 +180,12 @@ See [Authentication modes](./docs/AUTHENTICATION.md) and the
 | `AGENTBAY_RUNNER_BEARER_TOKEN` | DigitalOcean or manual runner control | Shared server-side command token used between the control plane and runner service. |
 | `AGENTBAY_RUNNER_IMAGE` | Hosted cloud runners | Immutable runner reference in `registry/path:version@sha256:digest` form. Hosted DigitalOcean configuration rejects mutable or tag-only references; `local_docker` may use a tagged development image. |
 | `AGENTBAY_HERMES_WORKLOAD_IMAGE` | No | Exact Hermes workload image used by deployment and runtime reconciliation; defaults to the source-pinned image and digest. Controlled staging requires the attested untagged GHCR amd64 manifest digest. |
+| `AGENTBAY_HERMES_DOCKER_CPUS` | No | Docker CPU limit for each managed Hermes container; defaults to `1` and is validated against the selected runner profile before provider calls. |
+| `AGENTBAY_HERMES_DOCKER_MEMORY` | No | Docker memory limit for each managed Hermes container; defaults to `1536m`. Compatibility counts physical RAM plus the documented runner/OS reserve, never swap. |
+| `AGENTBAY_HERMES_DOCKER_PIDS_LIMIT` | No | Docker PID limit for each managed Hermes container; defaults to `256` and is propagated into runner bootstrap. |
 | `AGENTBAY_RUNNER_MAX_AGENTS` | No | Positive per-runner agent capacity; defaults to `1`. |
 | `AGENTBAY_DIGITALOCEAN_REGION` | No | Droplet region; defaults to `sfo3`. |
-| `AGENTBAY_DIGITALOCEAN_SIZE_SLUG` | No | Droplet size; defaults to `s-1vcpu-512mb-10gb`. |
+| `AGENTBAY_DIGITALOCEAN_SIZE_SLUG` | No | Droplet size; legacy default remains `s-1vcpu-512mb-10gb` until authorized evidence selects a replacement, but hosted provisioning rejects profiles that cannot fit the configured Hermes limit plus runner/OS reserve in physical memory. Use an explicit supported profile such as `s-1vcpu-2gb` for managed Hermes trials. |
 | `AGENTBAY_DIGITALOCEAN_IMAGE` | No | Droplet image; defaults to `ubuntu-24-04-x64`. |
 | `AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS` | No | `auto`, `none`, or a comma-separated key-ID list. Omitted values auto-discover account keys. |
 | `AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS` | No | Comma-separated IPs/CIDRs allowed to reach SSH. SSH ingress is closed when this is omitted. |

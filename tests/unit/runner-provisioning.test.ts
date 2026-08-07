@@ -158,6 +158,18 @@ describe.sequential("runner provisioning service", () => {
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
+    ).toContain("AGENTBAY_HERMES_DOCKER_CPUS=1");
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
+    ).toContain("AGENTBAY_HERMES_DOCKER_MEMORY=1536m");
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
+    ).toContain("AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256");
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
     ).toContain("AGENTBAY_RUNNER_BOOT_MODEL_CANARY_ENABLED=false");
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
@@ -245,7 +257,7 @@ describe.sequential("runner provisioning service", () => {
       status: "provisioning",
       provider: "digitalocean",
       region: "sfo3",
-      sizeSlug: "s-1vcpu-1gb",
+      sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
       provisioningStatus: "creating",
       provisioningStartedAt: new Date("2026-07-06T01:00:00.000Z"),
@@ -263,7 +275,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay"],
         }),
@@ -304,7 +316,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay"],
         }),
@@ -340,7 +352,7 @@ describe.sequential("runner provisioning service", () => {
     expect(JSON.stringify(result)).not.toContain("PRIVATE KEY");
   });
 
-  it("injects swap setup when provisioning the default low-memory DigitalOcean size", async () => {
+  it("rejects the low-memory DigitalOcean size before SSH lookup or Droplet creation", async () => {
     const provider = new FakeDigitalOceanProvider();
 
     const result = await createDigitalOceanRunnerForDevelopmentUser(
@@ -360,17 +372,18 @@ describe.sequential("runner provisioning service", () => {
         now: sequenceClock("2026-07-06T06:00:00.000Z"),
       },
     );
-    const userData = (
-      provider.calls.find((call) => call.step === "create")?.input as {
-        userData?: string;
-      }
-    ).userData;
 
-    expect(result).toMatchObject({ ok: true, duplicate: false });
-    expect(userData).toContain("fallocate -l 1G /swapfile");
-    expect(userData).toContain("mkswap /swapfile");
-    expect(userData).toContain("swapon /swapfile");
-    expect(userData).toContain("/var/log/agentbay-bootstrap.log");
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "validation_failed",
+      issues: [
+        expect.objectContaining({
+          field: "AGENTBAY_DIGITALOCEAN_SIZE_SLUG",
+          message: expect.stringContaining("Swap is not counted as compatible memory"),
+        }),
+      ],
+    });
+    expect(provider.calls).toEqual([]);
   });
 
   it("polls DigitalOcean until a Droplet public IPv4 is available", async () => {
@@ -407,7 +420,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-512mb-10gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay", "cloud-runner"],
         }),
@@ -446,7 +459,7 @@ describe.sequential("runner provisioning service", () => {
       runnerBearerToken: "runner-command-token",
       runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
       region: "sfo3",
-      sizeSlug: "s-1vcpu-512mb-10gb",
+      sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "cloud-runner"],
     };
@@ -523,7 +536,7 @@ describe.sequential("runner provisioning service", () => {
       runnerBearerToken: "runner-command-token",
       runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
       region: "sfo3",
-      sizeSlug: "s-1vcpu-512mb-10gb",
+      sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "cloud-runner"],
     };
@@ -598,7 +611,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay"],
         }),
@@ -651,7 +664,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay", "agentbay-runner"],
         }),
@@ -711,7 +724,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay", "agentbay-runner"],
         }),
@@ -773,7 +786,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay"],
         }),
@@ -804,7 +817,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay"],
         }),
@@ -821,7 +834,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay"],
         }),
@@ -857,7 +870,7 @@ describe.sequential("runner provisioning service", () => {
           runnerBearerToken: "runner-command-token",
           runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: ["agentbay"],
         }),

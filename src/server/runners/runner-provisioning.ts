@@ -6,6 +6,9 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+  DEFAULT_HERMES_DOCKER_CPUS,
+  DEFAULT_HERMES_DOCKER_MEMORY,
+  DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
   DEFAULT_HERMES_RUNNER_MAX_AGENTS,
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
@@ -45,6 +48,10 @@ import {
   type GeneratedRunnerSecret,
 } from "@/src/server/runners/runner-auth-secrets";
 import { requiredRunnerImageDigestForProvider } from "@/src/server/runners/runner-compatibility";
+import {
+  isDigitalOceanLowMemorySwapResilienceProfile,
+  validateDigitalOceanRunnerResourceCompatibility,
+} from "@/src/server/runners/runner-resource-profiles";
 import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
 import { createAppLogger } from "@/src/server/logging/logger";
 
@@ -55,7 +62,6 @@ const DEFAULT_FIREWALL_NAME = "agentbay-runners";
 const CLOUD_REGISTRATION_TOKEN_TTL_MS = 60 * 60 * 1000;
 const PUBLIC_ENDPOINT_POLL_ATTEMPTS = 20;
 const PUBLIC_ENDPOINT_POLL_INTERVAL_MS = 3_000;
-const LOW_MEMORY_DIGITALOCEAN_SIZE_SLUGS = new Set(["s-1vcpu-512mb-10gb"]);
 const MAX_RUNNER_NAME_LENGTH = 80;
 const MANAGED_SSH_KEY_NAME = "plingpling managed runner key";
 
@@ -218,6 +224,25 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
   if (runner.provisioningStatus === "ready") {
     log("completed", { provisioningStatus: runner.provisioningStatus });
     return { ok: true, state: "ready" };
+  }
+
+  const validatedResources = validateDigitalOceanProvisioningResources(input.config);
+  if (!validatedResources.ok) {
+    log(
+      "provider_config_rejected",
+      {
+        issueCount: validatedResources.issues.length,
+        sizeSlug: input.config.sizeSlug,
+        runnerMaxAgents: input.config.runnerMaxAgents,
+      },
+      "error",
+    );
+    await markAutomaticProvisioningFailed(input, runner.providerResourceId);
+    return {
+      ok: false,
+      cleanupRequired: Boolean(runner.providerResourceId),
+      terminalCode: "runner_provisioning_unavailable",
+    };
   }
 
   if (runner.provisioningStatus === "failed" || runner.provisioningStatus === "deleted") {
@@ -389,6 +414,9 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
       hermesStateRoot: hermes.hermesStateRoot,
       hermesPrivateNetwork: hermes.hermesPrivateNetwork,
       hermesReadinessTimeoutMs: hermes.hermesReadinessTimeoutMs,
+      hermesDockerCpus: hermes.hermesDockerCpus,
+      hermesDockerMemory: hermes.hermesDockerMemory,
+      hermesDockerPidsLimit: hermes.hermesDockerPidsLimit,
       runnerMaxAgents: hermes.runnerMaxAgents,
       ...(input.config.providerMode === "local_docker"
         ? { releaseIdentityMode: RUNNER_RELEASE_DEVELOPMENT_MODE }
@@ -848,6 +876,24 @@ export async function createDigitalOceanRunnerForUser(
       return { ok: false, reason: "provider_not_configured" };
     }
 
+    const validatedResources = validateDigitalOceanProvisioningResources(config);
+    if (!validatedResources.ok) {
+      log(
+        "provider_config_rejected",
+        {
+          issueCount: validatedResources.issues.length,
+          sizeSlug: config.sizeSlug,
+          runnerMaxAgents: config.runnerMaxAgents,
+        },
+        "error",
+      );
+      return {
+        ok: false,
+        reason: "validation_failed",
+        issues: validatedResources.issues,
+      };
+    }
+
     const managedTags = [...new Set([...config.tags, DIGITALOCEAN_MANAGED_RUNNER_TAG])].sort();
     const hermesConfig = resolveHermesDeploymentConfig(config);
 
@@ -860,6 +906,9 @@ export async function createDigitalOceanRunnerForUser(
       hermesStateRoot: hermesConfig.hermesStateRoot,
       hermesPrivateNetwork: hermesConfig.hermesPrivateNetwork,
       hermesReadinessTimeoutMs: hermesConfig.hermesReadinessTimeoutMs,
+      hermesDockerCpus: hermesConfig.hermesDockerCpus,
+      hermesDockerMemory: hermesConfig.hermesDockerMemory,
+      hermesDockerPidsLimit: hermesConfig.hermesDockerPidsLimit,
       runnerMaxAgents: hermesConfig.runnerMaxAgents,
       releaseIdentityMode:
         config.providerMode === "local_docker" ? RUNNER_RELEASE_DEVELOPMENT_MODE : undefined,
@@ -1627,6 +1676,9 @@ function resolveHermesDeploymentConfig(config: DigitalOceanProviderConfig): {
   hermesStateRoot: string;
   hermesPrivateNetwork: string;
   hermesReadinessTimeoutMs: number;
+  hermesDockerCpus: string;
+  hermesDockerMemory: string;
+  hermesDockerPidsLimit: string;
   runnerMaxAgents: number;
 } {
   return {
@@ -1635,7 +1687,42 @@ function resolveHermesDeploymentConfig(config: DigitalOceanProviderConfig): {
     hermesPrivateNetwork: config.hermesPrivateNetwork ?? DEFAULT_HERMES_PRIVATE_NETWORK,
     hermesReadinessTimeoutMs:
       config.hermesReadinessTimeoutMs ?? DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+    hermesDockerCpus: config.hermesDockerCpus ?? DEFAULT_HERMES_DOCKER_CPUS,
+    hermesDockerMemory: config.hermesDockerMemory ?? DEFAULT_HERMES_DOCKER_MEMORY,
+    hermesDockerPidsLimit: config.hermesDockerPidsLimit ?? DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
     runnerMaxAgents: config.runnerMaxAgents ?? DEFAULT_HERMES_RUNNER_MAX_AGENTS,
+  };
+}
+
+function validateDigitalOceanProvisioningResources(
+  config: DigitalOceanProviderConfig,
+): { ok: true } | { ok: false; issues: CreateRunnerProvisioningValidationIssue[] } {
+  if (config.providerMode === "local_docker") {
+    return { ok: true };
+  }
+
+  const compatibility = validateDigitalOceanRunnerResourceCompatibility({
+    sizeSlug: config.sizeSlug,
+    ...(config.runnerMaxAgents === undefined ? {} : { runnerMaxAgents: config.runnerMaxAgents }),
+    ...(config.hermesDockerCpus === undefined ? {} : { hermesDockerCpus: config.hermesDockerCpus }),
+    ...(config.hermesDockerMemory === undefined
+      ? {}
+      : { hermesDockerMemory: config.hermesDockerMemory }),
+    ...(config.hermesDockerPidsLimit === undefined
+      ? {}
+      : { hermesDockerPidsLimit: config.hermesDockerPidsLimit }),
+  });
+
+  if (compatibility.ok) {
+    return { ok: true };
+  }
+
+  return {
+    ok: false,
+    issues: compatibility.issues.map((issue) => ({
+      field: issue.field,
+      message: issue.message,
+    })),
   };
 }
 
@@ -1660,6 +1747,9 @@ async function buildProvisioningBootstrap(input: {
   hermesStateRoot?: string;
   hermesPrivateNetwork?: string;
   hermesReadinessTimeoutMs?: number;
+  hermesDockerCpus?: string;
+  hermesDockerMemory?: string;
+  hermesDockerPidsLimit?: string;
   runnerMaxAgents?: number;
   releaseIdentityMode?: typeof RUNNER_RELEASE_DEVELOPMENT_MODE;
   sizeSlug: string;
@@ -1692,11 +1782,18 @@ async function buildProvisioningBootstrap(input: {
       ...(input.hermesReadinessTimeoutMs === undefined
         ? {}
         : { hermesReadinessTimeoutMs: input.hermesReadinessTimeoutMs }),
+      ...(input.hermesDockerCpus === undefined ? {} : { hermesDockerCpus: input.hermesDockerCpus }),
+      ...(input.hermesDockerMemory === undefined
+        ? {}
+        : { hermesDockerMemory: input.hermesDockerMemory }),
+      ...(input.hermesDockerPidsLimit === undefined
+        ? {}
+        : { hermesDockerPidsLimit: input.hermesDockerPidsLimit }),
       ...(input.runnerMaxAgents === undefined ? {} : { runnerMaxAgents: input.runnerMaxAgents }),
       ...(input.releaseIdentityMode ? { releaseIdentityMode: input.releaseIdentityMode } : {}),
       bootModelCanaryEnabled: input.releaseIdentityMode === RUNNER_RELEASE_DEVELOPMENT_MODE,
       endpointDiscovery: { type: "digitalocean_metadata" },
-      enableSwap: LOW_MEMORY_DIGITALOCEAN_SIZE_SLUGS.has(input.sizeSlug),
+      enableSwap: isDigitalOceanLowMemorySwapResilienceProfile(input.sizeSlug),
       runnerName: input.runnerName,
       createConnection: () => input.connection,
       now: input.now,

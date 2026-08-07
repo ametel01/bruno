@@ -8,6 +8,7 @@ import {
   LOCAL_AGENT_SMOKE_MODE_ENV,
   LOCAL_AGENT_SMOKE_MODE_VALUE,
 } from "@/src/runner-service/local-agent-smoke";
+import { findDigitalOceanRunnerResourceProfile } from "@/src/server/runners/runner-resource-profiles";
 
 const DIGITALOCEAN_AUTHORIZATION_SENTINEL = "authorize-digitalocean-agent-creation-benchmark";
 const MAX_REPORT_LIMIT = 1_000;
@@ -21,6 +22,7 @@ type BenchmarkOptions = {
   deploymentId?: string;
   trials: number;
   providerAuthorized: boolean;
+  candidateSizeSlugs: string[];
 };
 
 export async function runAgentCreationBenchmark(
@@ -57,6 +59,7 @@ export function parseBenchmarkOptions(argv: readonly string[]): BenchmarkOptions
   let deploymentId: string | undefined;
   let trials = 0;
   let providerAuthorized = false;
+  let candidateSizeSlugs: string[] = [];
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -92,6 +95,11 @@ export function parseBenchmarkOptions(argv: readonly string[]): BenchmarkOptions
       providerAuthorized = true;
       continue;
     }
+    if (arg === "--candidate-size-slugs") {
+      candidateSizeSlugs = readCandidateSizeSlugs(readRequiredValue(argv, index));
+      index += 1;
+      continue;
+    }
     if (arg === "--help" || arg === "-h") {
       throw new Error(usage());
     }
@@ -104,6 +112,7 @@ export function parseBenchmarkOptions(argv: readonly string[]): BenchmarkOptions
     ...(deploymentId ? { deploymentId } : {}),
     trials,
     providerAuthorized,
+    candidateSizeSlugs,
   };
 }
 
@@ -114,11 +123,12 @@ function assertDigitalOceanBenchmarkAuthorized(
   if (
     options.trials <= 0 ||
     !options.providerAuthorized ||
+    options.candidateSizeSlugs.length === 0 ||
     env.AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION !==
       DIGITALOCEAN_AUTHORIZATION_SENTINEL
   ) {
     throw new Error(
-      `DigitalOcean benchmark mode is fail-closed. It requires --trials N, --authorize-provider-costs, and AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION=${DIGITALOCEAN_AUTHORIZATION_SENTINEL}.`,
+      `DigitalOcean benchmark mode is fail-closed. It requires --trials N, --authorize-provider-costs, --candidate-size-slugs slug[,slug], and AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION=${DIGITALOCEAN_AUTHORIZATION_SENTINEL}.`,
     );
   }
 }
@@ -162,10 +172,33 @@ function readBoundedPositiveInteger(value: string, label: string, max: number): 
   return parsed;
 }
 
+function readCandidateSizeSlugs(value: string): string[] {
+  const slugs = value
+    .split(",")
+    .map((slug) => slug.trim())
+    .filter(Boolean);
+
+  if (slugs.length === 0 || slugs.length > 4) {
+    throw new Error("--candidate-size-slugs must include 1 to 4 explicit supported size slugs.");
+  }
+
+  const unique = [...new Set(slugs)];
+  if (unique.length !== slugs.length) {
+    throw new Error("--candidate-size-slugs must not include duplicate size slugs.");
+  }
+
+  const unknown = unique.find((slug) => !findDigitalOceanRunnerResourceProfile(slug));
+  if (unknown) {
+    throw new Error(`Unsupported candidate DigitalOcean size slug: ${unknown}.`);
+  }
+
+  return unique.sort();
+}
+
 function usage(): string {
   return [
-    "Usage: bun --conditions react-server scripts/benchmark-agent-creation.ts [--mode existing|local_docker|digitalocean] [--limit N] [--deployment-id UUID]",
-    "Default mode is read-only existing-run reporting. DigitalOcean mode is fail-closed and not used by ordinary CI.",
+    "Usage: bun --conditions react-server scripts/benchmark-agent-creation.ts [--mode existing|local_docker|digitalocean] [--limit N] [--deployment-id UUID] [--candidate-size-slugs slug[,slug]]",
+    "Default mode is read-only existing-run reporting. DigitalOcean mode is fail-closed, requires explicit candidate size slugs, and is not used by ordinary CI.",
   ].join("\n");
 }
 

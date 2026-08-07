@@ -3,6 +3,9 @@ import "server-only";
 import {
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+  DEFAULT_HERMES_DOCKER_CPUS,
+  DEFAULT_HERMES_DOCKER_MEMORY,
+  DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
   DEFAULT_HERMES_RUNNER_MAX_AGENTS,
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
@@ -49,6 +52,9 @@ type CloudRunnerBootstrapInput = {
   hermesStateRoot?: string;
   hermesPrivateNetwork?: string;
   hermesReadinessTimeoutMs?: number;
+  hermesDockerCpus?: string;
+  hermesDockerMemory?: string;
+  hermesDockerPidsLimit?: string;
   runnerMaxAgents?: number;
   bootModelCanaryEnabled?: boolean;
   envFilePath?: string;
@@ -68,6 +74,11 @@ export type CloudRunnerBootstrapContent = {
     hermesStateRoot: string;
     hermesPrivateNetwork: string;
     hermesReadinessTimeoutMs: number;
+    hermesDocker: {
+      cpus: string;
+      memory: string;
+      pidsLimit: string;
+    };
     runnerMaxAgents: number;
     bootModelCanaryEnabled: boolean;
     runnerRelease: {
@@ -139,6 +150,9 @@ export function buildCloudRunnerBootstrapContent(
     `AGENTBAY_RUNNER_BOOT_SELF_TEST_ROOT=${DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT}`,
     `AGENTBAY_HERMES_PRIVATE_NETWORK=${escapeDockerEnvHereDocValue(config.hermesPrivateNetwork)}`,
     `AGENTBAY_HERMES_READINESS_TIMEOUT_MS=${config.hermesReadinessTimeoutMs}`,
+    `AGENTBAY_HERMES_DOCKER_CPUS=${config.hermesDockerCpus}`,
+    `AGENTBAY_HERMES_DOCKER_MEMORY=${config.hermesDockerMemory}`,
+    `AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=${config.hermesDockerPidsLimit}`,
     `AGENTBAY_RUNNER_ENV_FILE=${escapeDockerEnvHereDocValue(config.containerEnvFilePath)}`,
     `AGENTBAY_RUNNER_MAX_AGENTS=${config.runnerMaxAgents}`,
     `${RUNNER_BOOT_MODEL_CANARY_ENABLED_ENV}=${config.bootModelCanaryEnabled}`,
@@ -303,6 +317,11 @@ ${swapCommands}  -
       hermesStateRoot: config.hermesStateRoot,
       hermesPrivateNetwork: config.hermesPrivateNetwork,
       hermesReadinessTimeoutMs: config.hermesReadinessTimeoutMs,
+      hermesDocker: {
+        cpus: config.hermesDockerCpus,
+        memory: config.hermesDockerMemory,
+        pidsLimit: config.hermesDockerPidsLimit,
+      },
       runnerMaxAgents: config.runnerMaxAgents,
       bootModelCanaryEnabled: config.bootModelCanaryEnabled,
       runnerRelease: config.expectedRelease
@@ -362,6 +381,18 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
       input.hermesReadinessTimeoutMs ?? DEFAULT_HERMES_READINESS_TIMEOUT_MS,
       "hermesReadinessTimeoutMs",
     ),
+    hermesDockerCpus: normalizeDockerCpuLimit(
+      input.hermesDockerCpus?.trim() || DEFAULT_HERMES_DOCKER_CPUS,
+      "hermesDockerCpus",
+    ),
+    hermesDockerMemory: normalizeDockerMemoryLimit(
+      input.hermesDockerMemory?.trim() || DEFAULT_HERMES_DOCKER_MEMORY,
+      "hermesDockerMemory",
+    ),
+    hermesDockerPidsLimit: normalizePositiveIntegerString(
+      input.hermesDockerPidsLimit?.trim() || DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
+      "hermesDockerPidsLimit",
+    ),
     runnerMaxAgents: normalizePositiveInteger(
       input.runnerMaxAgents ?? DEFAULT_HERMES_RUNNER_MAX_AGENTS,
       "runnerMaxAgents",
@@ -412,6 +443,30 @@ function normalizeDockerNetworkName(value: string, field: string): string {
 function normalizePositiveInteger(value: number, field: string): number {
   if (!Number.isInteger(value) || value <= 0) {
     throw new Error(`${field} must be a positive integer.`);
+  }
+
+  return value;
+}
+
+function normalizePositiveIntegerString(value: string, field: string): string {
+  if (!/^[1-9][0-9]*$/.test(value)) {
+    throw new Error(`${field} must be a positive integer.`);
+  }
+
+  return value;
+}
+
+function normalizeDockerCpuLimit(value: string, field: string): string {
+  if (!/^[0-9]+(?:\.[0-9]+)?$/.test(value) || Number(value) <= 0) {
+    throw new Error(`${field} must be a positive Docker CPU value.`);
+  }
+
+  return value;
+}
+
+function normalizeDockerMemoryLimit(value: string, field: string): string {
+  if (!/^[1-9][0-9]*[bkmg]?$/i.test(value)) {
+    throw new Error(`${field} must be a positive Docker memory value.`);
   }
 
   return value;

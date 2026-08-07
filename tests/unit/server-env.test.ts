@@ -271,11 +271,20 @@ describe("server-only provider environment validation", () => {
       }),
     ).toThrow("AGENTBAY_RUNNER_IMAGE must be an immutable registry image reference");
 
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+      }),
+    ).toThrow("Swap is not counted as compatible memory");
+
     expect(
       readDigitalOceanProviderConfig({
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
         AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
         AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
       }),
     ).toMatchObject({
       runnerBearerToken: "runner-command-token",
@@ -284,9 +293,12 @@ describe("server-only provider environment validation", () => {
       hermesStateRoot: DEFAULT_HERMES_STATE_ROOT,
       hermesPrivateNetwork: DEFAULT_HERMES_PRIVATE_NETWORK,
       hermesReadinessTimeoutMs: DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+      hermesDockerCpus: "1",
+      hermesDockerMemory: "1536m",
+      hermesDockerPidsLimit: "256",
       runnerMaxAgents: DEFAULT_HERMES_RUNNER_MAX_AGENTS,
       region: "sfo3",
-      sizeSlug: "s-1vcpu-512mb-10gb",
+      sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "agentbay-runner"],
       sshSourceAddresses: [],
@@ -303,6 +315,9 @@ describe("server-only provider environment validation", () => {
       AGENTBAY_HERMES_STATE_ROOT: " /var/lib/agentbay/custom-agents ",
       AGENTBAY_HERMES_PRIVATE_NETWORK: " agentbay-custom-hermes ",
       AGENTBAY_HERMES_READINESS_TIMEOUT_MS: "240000",
+      AGENTBAY_HERMES_DOCKER_CPUS: "1",
+      AGENTBAY_HERMES_DOCKER_MEMORY: "1536m",
+      AGENTBAY_HERMES_DOCKER_PIDS_LIMIT: "256",
       AGENTBAY_RUNNER_MAX_AGENTS: "1",
       AGENTBAY_DIGITALOCEAN_TAGS: "runner, agentbay, runner",
       AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS: "203.0.113.5, 2001:db8::/64",
@@ -317,6 +332,9 @@ describe("server-only provider environment validation", () => {
       hermesStateRoot: "/var/lib/agentbay/custom-agents",
       hermesPrivateNetwork: "agentbay-custom-hermes",
       hermesReadinessTimeoutMs: 240_000,
+      hermesDockerCpus: "1",
+      hermesDockerMemory: "1536m",
+      hermesDockerPidsLimit: "256",
       runnerMaxAgents: 1,
       region: "nyc3",
       sizeSlug: "s-2vcpu-2gb",
@@ -376,6 +394,7 @@ describe("server-only provider environment validation", () => {
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
         AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
         AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
         AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "52830696, c3:2a:31",
         AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS: "203.0.113.5/32, 2001:db8::/64",
       }),
@@ -389,6 +408,7 @@ describe("server-only provider environment validation", () => {
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
         AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
         AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
         AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "auto",
       }),
     ).not.toHaveProperty("sshKeyIds");
@@ -398,6 +418,7 @@ describe("server-only provider environment validation", () => {
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
         AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
         AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
         AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "none",
       }),
     ).toMatchObject({ sshKeyIds: [] });
@@ -409,6 +430,7 @@ describe("server-only provider environment validation", () => {
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
         AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
         AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
       }),
     ).toMatchObject({ sshSourceAddresses: [] });
 
@@ -417,6 +439,7 @@ describe("server-only provider environment validation", () => {
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
         AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
         AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
         AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH: "true",
       }),
     ).toMatchObject({ sshSourceAddresses: ["0.0.0.0/0", "::/0"] });
@@ -426,6 +449,7 @@ describe("server-only provider environment validation", () => {
         AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
         AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
         AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
         AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH: "false",
       }),
     ).toMatchObject({ sshSourceAddresses: [] });

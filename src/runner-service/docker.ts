@@ -7,6 +7,9 @@ import {
   AGENTBAY_AGENT_ID_LABEL,
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+  DEFAULT_HERMES_DOCKER_CPUS,
+  DEFAULT_HERMES_DOCKER_MEMORY,
+  DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_MANUAL_RUNNER_IMAGE,
   DOCKER_CLI_TIMEOUT_MS,
@@ -2574,13 +2577,20 @@ function resolveHermesDockerRuntimeOptions(
   overrides: Partial<HermesDockerRuntimeOptions> | undefined,
 ): HermesDockerRuntimeOptions {
   return {
-    cpus: overrides?.cpus ?? process.env[HERMES_DOCKER_CPUS_ENV]?.trim() ?? "1",
-    memory: overrides?.memory ?? process.env[HERMES_DOCKER_MEMORY_ENV]?.trim() ?? "1536m",
+    cpus:
+      overrides?.cpus ?? process.env[HERMES_DOCKER_CPUS_ENV]?.trim() ?? DEFAULT_HERMES_DOCKER_CPUS,
+    memory:
+      overrides?.memory ??
+      process.env[HERMES_DOCKER_MEMORY_ENV]?.trim() ??
+      DEFAULT_HERMES_DOCKER_MEMORY,
     network:
       overrides?.network ??
       process.env[HERMES_PRIVATE_NETWORK_ENV]?.trim() ??
       DEFAULT_HERMES_PRIVATE_NETWORK,
-    pidsLimit: overrides?.pidsLimit ?? process.env[HERMES_DOCKER_PIDS_LIMIT_ENV]?.trim() ?? "256",
+    pidsLimit:
+      overrides?.pidsLimit ??
+      process.env[HERMES_DOCKER_PIDS_LIMIT_ENV]?.trim() ??
+      DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
     readinessPort: readPositiveInteger(
       process.env[HERMES_READINESS_PORT_ENV],
       overrides?.readinessPort ?? 8642,

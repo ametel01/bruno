@@ -128,7 +128,7 @@ describe("automatic DigitalOcean runner provisioning", () => {
     const created = await provider.createRunner({
       name: OPERATION_KEY,
       region: "sfo3",
-      sizeSlug: "s-1vcpu-1gb",
+      sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
       tags: [OPERATION_KEY],
     });
@@ -150,7 +150,7 @@ describe("automatic DigitalOcean runner provisioning", () => {
     const created = await provider.createRunner({
       name: OPERATION_KEY,
       region: "sfo3",
-      sizeSlug: "s-1vcpu-1gb",
+      sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
       tags: ["agentbay", "agentbay-runner", OPERATION_KEY],
     });
@@ -224,7 +224,7 @@ describe("automatic DigitalOcean runner provisioning", () => {
       await provider.createRunner({
         name: `${OPERATION_KEY}-${index}`,
         region: "sfo3",
-        sizeSlug: "s-1vcpu-1gb",
+        sizeSlug: "s-1vcpu-2gb",
         image: "ubuntu-24-04-x64",
         tags: [OPERATION_KEY],
       });
@@ -325,6 +325,29 @@ describe("automatic DigitalOcean runner provisioning", () => {
     expect(provider.calls).toEqual([]);
   });
 
+  it("rejects incompatible resources before discovery, SSH lookup, or create", async () => {
+    const provider = new FakeDigitalOceanProvider({ now: () => NOW });
+
+    await expect(
+      advance(connection, provider, 1, undefined, () => NOW, {
+        ...providerConfig(),
+        sizeSlug: "s-1vcpu-512mb-10gb",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      cleanupRequired: false,
+      terminalCode: "runner_provisioning_unavailable",
+    });
+
+    expect(provider.calls).toEqual([]);
+    const [runner] = await connection.db.select().from(runners).where(eq(runners.id, RUNNER_ID));
+    expect(runner).toMatchObject({
+      status: "provision_failed",
+      provisioningStatus: "failed",
+      providerResourceId: null,
+    });
+  });
+
   it("honors abort before every fake provider transport phase", async () => {
     const provider = new FakeDigitalOceanProvider({ now: () => NOW });
     const controller = new AbortController();
@@ -338,7 +361,7 @@ describe("automatic DigitalOcean runner provisioning", () => {
         {
           name: "runner",
           region: "sfo3",
-          sizeSlug: "s-1vcpu-1gb",
+          sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
           tags: [OPERATION_KEY],
         },
@@ -361,6 +384,7 @@ function advance(
   attemptCount = 1,
   signal = new AbortController().signal,
   now: () => Date = () => NOW,
+  config: DigitalOceanProviderConfig = providerConfig(),
 ) {
   return advanceAutomaticDigitalOceanRunnerProvisioning({
     connection,
@@ -369,7 +393,7 @@ function advance(
     operationKey: OPERATION_KEY,
     attemptCount,
     maxAttempts: 64,
-    config: providerConfig(),
+    config,
     provider,
     context: { signal },
     now,
@@ -392,7 +416,7 @@ function providerConfig(): DigitalOceanProviderConfig {
     runnerBearerToken: "fake-runner-bearer",
     runnerImage: "agentbay-runner:test",
     region: "sfo3",
-    sizeSlug: "s-1vcpu-1gb",
+    sizeSlug: "s-1vcpu-2gb",
     image: "ubuntu-24-04-x64",
     tags: ["agentbay", "agentbay-runner"],
     sshKeyIds: ["fake-key"],
@@ -409,7 +433,7 @@ async function seedProvisioningRunner(connection: DatabaseConnection): Promise<v
     status: "provisioning",
     provider: DIGITALOCEAN_PROVIDER,
     region: "sfo3",
-    sizeSlug: "s-1vcpu-1gb",
+    sizeSlug: "s-1vcpu-2gb",
     image: "ubuntu-24-04-x64",
     provisioningStatus: "pending",
     provisioningOperationKey: OPERATION_KEY,

@@ -3,11 +3,11 @@
 ## Active Work
 
 - issue: [#265](https://github.com/ametel01/plingpling/issues/265)
-  owner: issue-spec-agent (`issue_265_spec`), ready for coordinator reassignment
+  owner: builder-agent (`issue_265_builder`)
   branch: `codex/issue-265-runner-sizing`
   worktree: `/Users/alexmetelli/source/plingpling-issue-265`
   pr: none
-  phase: specified; code-ready; merge dependency-blocked on main CI; provider evidence unauthorized
+  phase: checker-ready for authorization-independent scope; merge dependency-blocked on main CI/provider evidence
   cycle: 0/5
 
 ## Completion Contract
@@ -181,6 +181,18 @@
   next-action: Coordinator records/assigns the main-CI blocker, commits this contract, and may assign
     a builder for code/fake-provider gates. Stop at provider authorization and before merge until CI
     is green or independently classified with an accepted upstream fix.
+- from: builder-agent (`issue_265_builder`)
+  to: checker-agent
+  timestamp: 2026-08-07T08:10:00+08:00
+  request: Verify the authorization-independent #265 implementation and gates. Do not treat it as
+    final #265 acceptance because the default-size switch and provider-backed SLO proof remain
+    authorization-gated.
+  evidence: Canonical resource profiles, pre-provider compatibility rejection, exact Hermes runtime
+    propagation, guarded candidate slug benchmark validation, operator docs, and unit/e2e/build/local
+    smoke gates are implemented. Hosted default slug remains unchanged without provider evidence.
+  next-action: Review diff and gate evidence; if accepted, coordinator may open/refresh the PR but
+    should not merge until required main CI is green or accepted upstream-blocked and provider
+    evidence/default-selection authorization is resolved.
 
 ## Gates
 
@@ -191,6 +203,33 @@
 - command: `gh run view 31131392382 --repo ametel01/plingpling`
   result: fail; unit tests report 168 files/1,637 tests passed, then the required real-Docker fixture
     fails because `docker info` cannot reach the daemon. This is the exact current merge blocker.
+- command: `bun --conditions react-server scripts/run-unit-tests.ts tests/unit/runner-resource-profiles.test.ts tests/unit/cost-prices.test.ts tests/unit/server-env.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/agent-creation-benchmark.test.ts`
+  result: pass on 2026-08-07; 7 files, 65 tests.
+- command: `bun run format:check`
+  result: pass on 2026-08-07.
+- command: `bun run lint`
+  result: pass on 2026-08-07.
+- command: `bun run typecheck`
+  result: pass on 2026-08-07.
+- command: `bun run test`
+  result: pass on 2026-08-07; 170 files, 1,645 tests.
+- command: `bun run build`
+  result: pass on 2026-08-07.
+- command: `AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-2gb AGENTBAY_HERMES_DOCKER_CPUS=1 AGENTBAY_HERMES_DOCKER_MEMORY=1536m AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256 bun run repro:cloud-runner`
+  result: pass on 2026-08-07; generated cloud-init user-data, schema valid, bash syntax OK.
+- command: `docker info --format '{{.ServerVersion}}'`
+  result: pass on 2026-08-07; Docker server version 29.3.1.
+- command: `bun run test:e2e:ci`
+  result: pass on 2026-08-07; 26 tests.
+- command: `AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-2gb AGENTBAY_HERMES_DOCKER_CPUS=1 AGENTBAY_HERMES_DOCKER_MEMORY=1536m AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256 bun run local:agent:smoke`
+  result: pass on 2026-08-07; local Docker boundary only, 0 DigitalOcean requests, agent
+    created/deleted, cleanup verified, p95 161,323 ms for the single synthetic local trial.
+- command: `DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/plingpling NEXT_PUBLIC_APP_URL=http://localhost:3000 bun run agent:creation:benchmark -- --limit 1`
+  result: completed on 2026-08-07; passive read-only report returned the latest local DB row as
+    incomplete/invalid, so it is not SLO evidence.
+- command: `AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION=authorize-digitalocean-agent-creation-benchmark bun run agent:creation:benchmark -- --mode digitalocean --trials 1 --authorize-provider-costs --candidate-size-slugs s-1vcpu-2gb`
+  result: expected fail-closed stop on 2026-08-07; candidate/authorization gate parsed, then provider
+    trial execution remained reserved/unimplemented with no provider effects.
 
 ## Decisions And Lessons
 
