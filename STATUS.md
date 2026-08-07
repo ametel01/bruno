@@ -4,13 +4,13 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 
 ## Active Work
 
-- issue: [#264](https://github.com/ametel01/plingpling/issues/264)
+- issue: [#267](https://github.com/ametel01/plingpling/issues/267)
   owner: coordinator (`root`)
-  branch: `codex/issue-264-durable-wakeups`
+  branch: `codex/issue-267-provider-phase-drain`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: checker-green; opening PR
-  cycle: 3/5
+  phase: completion contract ready; assign builder
+  cycle: 0/5
 
 ## Goal Contract
 
@@ -29,22 +29,154 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 
 ## Dependency Graph
 
-- completed repository scope: #263 / PR #272; #265 / PR #273; #266 / PR #274
-- ready now: #264 durable wakeups
-- blocked by #264: #267, #268
-- blocked by #266: #269
-- blocked by #265: #270
+- completed repository scope: #263 / PR #272; #264 / PR #275; #265 / PR #273; #266 / PR #274
+- ready now: #267 provider-phase drain; #268 post-registration stage drain
+- #267 and #268 are parallel-safe only in isolated worktrees and both touch
+  `src/server/agents/agent-deployment-reconciler.ts`; coordinate merge order.
+- #269 remains downstream of #266's authorization-independent repository work; #270 remains
+  downstream of #265's authorization-independent repository work.
 - blocked by #264-#270: #271 provider-backed SLO proof
 
 ## Next Assignment Contract
 
-- #264, #265, and #266 are parallel-safe only in separate branches/worktrees with one owner each.
-- Every checker must exercise a real producer-sequence-to-consumer semantic path, not only isolated
-  consumer fixtures.
-- Any stream touching provider/benchmark arguments must probe malformed counts and fail-closed
-  provider mode.
-- #266 may implement repository scripts/workflow and local tests, but actual DigitalOcean snapshot
-  creation is authorization-gated.
+- Assign one builder to #267 on `codex/issue-267-provider-phase-drain`; the implementation must stay
+  inside fake providers, injected SDK clients, and the isolated `local_docker` smoke boundary.
+- Every checker must exercise the real deployment-trigger -> lease claim -> provider drain ->
+  persisted wakeup path, not only direct provisioner fixtures.
+- Provider-effect recovery must prove authoritative observation before any replay after an ambiguous
+  create, tag, or firewall outcome.
+- No real DigitalOcean/QStash request, snapshot build, workflow dispatch, deployment, hosted-secret
+  mutation, or billable action is authorized for #267.
+
+## Completion Contract — #267
+
+- readiness: `ready`. Issue #264 is closed by merged PR #275 at `fa79f4a`; #267 has no comments,
+  linked PR, unresolved review thread, credential need, or remaining agent-actionable dependency.
+- outcome: In one deployment action, drain the cold on-demand runner through authoritative
+  discovery, at most one Droplet create, tag confirmation/correction, firewall confirmation/create,
+  and endpoint persistence until `waiting_for_runner`, while preserving a durable checkpoint around
+  every provider effect and the existing user/operation/cleanup fences.
+- acceptance criteria and invariants:
+  - The normal `FakeDigitalOceanProvider` path reaches persisted runner status `registering` /
+    provisioning status `waiting_for_runner` in one call to
+    `advanceAutomaticDigitalOceanRunnerProvisioning`, with one authoritative discovery, exactly one
+    create, no redundant tag POST when the create response already proves all required tags, exactly
+    one firewall, a persisted endpoint/firewall ID, and ordered started/completed phase events.
+  - Keep the operation key durably stored before the first provider request. Before every subsequent
+    phase/effect, reload or fence the owned runner by runner ID, user ID, operation key, non-deleted
+    state, active deployment lease/config revision, and agent desired-running state. A concurrent
+    Stop/Delete/lost lease may finish checkpointing an effect already in flight but starts no later
+    provider effect.
+  - Persist each successful provider result transactionally before continuing: provider resource
+    ID, firewall ID when known, endpoint when known, next provisioning phase, and the safe completed
+    event. A failed checkpoint stops the drain; it must never fall through to the next effect.
+  - Create recovery stays fail-closed: `pending` may create only after authoritative exact-operation-
+    tag discovery proves zero matches. `creating`, an unknown create outcome, a crash after create,
+    non-authoritative discovery, or discovery transport failure never issues another create. One
+    exact owned match is adopted; multiple/mismatched matches terminalize as
+    `runner_provisioning_outcome_unknown` with cleanup ownership retained.
+  - The create request contains the full normalized tag set. In `tagging`, an authoritative provider
+    observation that already contains that set advances without `tagResource`; a correction is sent
+    only for authoritatively missing tags. Unknown/ambiguous tag results stop for observation, and a
+    crash after an applied tag resumes without replaying it.
+  - Firewall recovery uses the deterministic firewall name plus Droplet attachment/ownership. An
+    authoritative exact match is adopted and checkpointed, authoritative absence may create once,
+    and missing observation support, multiple/mismatched matches, or an unknown effect outcome stops
+    without another firewall create. A crash after firewall application resumes with the same
+    firewall ID and exact cleanup ownership.
+  - After firewall completion, persist an endpoint from authoritative provider state and enter
+    `waiting_for_runner`. If no public endpoint exists, persist `bootstrapping` and stop; do not poll
+    or consume repeated provider phases inside the same action.
+  - Use a named default drain bound of eight state-machine iterations (with a smaller injectable test
+    bound); never execute a ninth. Check the existing 45-second action deadline/abort signal before
+    every provider transport and pass the same signal through. Stop on cancellation, lost authority,
+    abort/deadline, bound, retryable transport failure, provider ambiguity, missing endpoint,
+    `waiting_for_runner`, or any terminal runner/deployment state.
+  - Return a typed stop disposition so the reconciler persists the precise wakeup: unfinished but
+    immediately executable work stopped only by the iteration/deadline bound is due immediately;
+    `waiting_for_runner`, missing endpoint, or a safe retryable observation failure uses the bounded
+    external-wait retry; ambiguous effects permit observation/discovery only and eventually fail at
+    the existing attempt limit. Do not apply exponential `runner_not_ready` delay between successful
+    immediately executable phases.
+  - Duplicate/reordered targeted triggers retain the deployment lease as the execution fence and
+    produce at most one create, one required tag correction, and one firewall. Safe events/logs must
+    not expose operation tags, registration/bearer/provider/QStash secrets, raw provider responses,
+    endpoint credentials, or arbitrary exception text.
+- crash/failure semantics required by tests:
+  - Inject a crash after each create, tag, and firewall fake effect but before its completion
+    checkpoint; the next invocation must authoritatively adopt the same effect, reach
+    `waiting_for_runner`, keep one Droplet/firewall, and retain exact cleanup ownership.
+  - Inject a crash after each committed phase checkpoint; resume at the next phase without replay.
+  - Inject checkpoint persistence failure, cancellation/lost lease between phases, duplicate
+    triggers, deadline abort, iteration exhaustion, non-authoritative/failed observation, unknown
+    create/tag/firewall outcome, missing endpoint, and multiple discovered resources; assert the
+    stop disposition, wakeup timing, provider call counts, terminal code, and cleanup flag.
+- non-goals / authorization boundary:
+  - No pre-provisioned Droplets, warm/ready pools, predictive provisioning, cross-user sharing, or
+    capacity created before the user's committed create request.
+  - Do not implement #268 post-registration draining, #265 size-default selection, #266 snapshot
+    execution, #269/#270, or #271 provider SLO proof; do not change the durable-ready SLO boundary.
+  - Do not make a real DigitalOcean or QStash request; build/run a provider snapshot; run provider-
+    backed `test:e2e`, benchmark trials, or reconcile scripts; configure secrets; dispatch a GitHub
+    workflow; deploy/release; or perform any billable action.
+- likely touchpoints:
+  - `src/server/runners/runner-provisioning.ts` for the bounded drain, phase reload/fences, typed stop
+    disposition, and checkpoint-before-continue behavior.
+  - `src/server/runners/digitalocean-provider.ts` and
+    `src/server/runners/local-docker-digitalocean-provider.ts` only as needed for authoritative
+    tag/firewall observation and idempotent fake/local behavior; all API tests use injected SDK
+    clients and no network.
+  - `src/server/agents/agent-deployment-reconciler.ts` for immediate versus external-wait wakeups
+    without weakening deployment leases or transactional wakeup replacement.
+  - `tests/unit/automatic-runner-provisioning.test.ts`,
+    `tests/unit/agent-deployment-reconciler.test.ts`, `tests/unit/digitalocean-provider.test.ts`,
+    `tests/unit/local-docker-digitalocean-provider.test.ts`, cancellation/finalization race tests,
+    and local-smoke timing assertions. `PROGRESS.md`/`CHANGELOG.md` updates belong to the builder only
+    after gates pass; no schema/migration change is expected.
+- required tests / gates:
+  - Focused provider/provisioner/reconciler/cancellation/finalization/local-smoke unit tests, including
+    one concurrent real producer path: committed deployment -> targeted claim -> bounded drain ->
+    durable precise wakeup, with fake call-count and checkpoint assertions.
+  - `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test`; `bun run build`;
+    `bun run test:e2e:ci`; `bun run repro:cloud-runner`; `git diff --check`.
+  - Run `bun run local:agent:smoke` only with its package-script-enforced `local_docker`, local token,
+    and synthetic-boundary sentinels. Require `digitalOceanRequests:0`, `simulatedDroplets:1`,
+    `cleanupVerified:true`, one provider-phase invocation to `waiting_for_runner`, and before/after
+    orchestration timing versus the Step 1 baseline. This is local behavior evidence, not SLO proof.
+- risks: Provider reads that are cached/non-authoritative can incorrectly authorize replay; firewall
+  POST can succeed before a transport failure; concurrent cancellation can race an in-flight effect;
+  and an unconditional loop can overrun the 45-second lease/deadline. Fail closed and checkpoint
+  ownership before continuing; never infer absence from an unsupported or partial provider read.
+- do-not-touch: schema/migrations unless a blocking invariant is first escalated; post-registration
+  stage logic, size/snapshot defaults/workflows, benchmark provider authorization, production/release
+  configuration, unrelated PR #262, and `/Users/alexmetelli/source/plingpling-step7-base`.
+- open questions: none blocking. Provider observation method names and internal result type names are
+  implementation choices, provided the authoritative present/absent/ambiguous semantics above are
+  explicit and testable.
+
+## Handoff — #267 Spec to Builder
+
+- request: Implement only the #267 contract on `codex/issue-267-provider-phase-drain`, starting with
+  crash fixtures and authoritative tag/firewall observation, then add the bounded loop and precise
+  reconciler wakeup disposition.
+- evidence: Issue #267 and PLAN Step 3 match; current code returns after each successful provider
+  phase and `reconcileProvisioningRunner` always schedules `runner_not_ready` backoff. Create already
+  carries the complete tags, while DigitalOcean firewall creation lacks crash-safe authoritative
+  adoption and therefore needs special review.
+- stop condition: Hand off after fake/injected/local gates and before/after orchestration evidence are
+  recorded, or earlier on repeated failure, a required schema/product decision, or any need for real
+  provider/QStash/deployment/billable authority.
+
+## Handoff — #267 Builder to Checker
+
+- request: Independently verify the normal one-invocation fake path, all three after-effect crash
+  recoveries, concurrent duplicate/cancellation fences, bound/deadline behavior, precise wakeups,
+  safe logs, and zero external effects. Do not edit code.
+- reviewer focus: Every provider effect must map to a persisted before/after checkpoint; absence must
+  be authoritative before create/correction; unknown outcomes must enter observation, not replay;
+  completed immediate phases must not incur scheduler backoff.
+- required evidence: focused semantic tests, repository gates, credential-free E2E, cloud bootstrap
+  repro, and isolated local smoke with `digitalOceanRequests:0` and cleanup verified.
 
 ## Completion Contract — #264
 
