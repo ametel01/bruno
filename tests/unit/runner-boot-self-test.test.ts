@@ -283,7 +283,7 @@ async function createHarness(
 }
 
 async function temporaryRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "plingpling-runner-boot-"));
+  const root = await mkdtemp(join(tmpdir(), "bruno-runner-boot-"));
   roots.push(root);
   return root;
 }

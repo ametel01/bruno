@@ -38,7 +38,7 @@ describe("authentication mode policy", () => {
       resolveAuthMode({
         AGENTBAY_AUTH_MODE: "development",
         AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: "true",
-        NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+        NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
         VERCEL_ENV: "production",
       }),
     ).toEqual({ mode: "development" });
@@ -48,7 +48,7 @@ describe("authentication mode policy", () => {
         resolveAuthMode({
           AGENTBAY_AUTH_MODE: "development",
           AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: optIn,
-          NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+          NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
           VERCEL_ENV: "production",
         }),
       ).toEqual({ mode: "invalid", code: "development_auth_not_allowed" });
@@ -60,7 +60,7 @@ describe("authentication mode policy", () => {
       resolveAuthMode({
         AGENTBAY_AUTH_MODE: "operator",
         AGENTBAY_OPERATOR_PASSWORD: "operator-password-present",
-        NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+        NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
         VERCEL_ENV: "production",
       }),
     ).toEqual({ mode: "operator" });
@@ -70,7 +70,7 @@ describe("authentication mode policy", () => {
         resolveAuthMode({
           AGENTBAY_AUTH_MODE: "operator",
           AGENTBAY_OPERATOR_PASSWORD: password,
-          NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+          NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
           VERCEL_ENV: "production",
         }),
       ).toEqual({ mode: "invalid", code: "operator_auth_not_configured" });
@@ -195,7 +195,7 @@ describe("authentication mode policy", () => {
   it.each([
     ["mismatched current deployment", "https://other.example.vercel.app"],
     ["custom preview hostname", "https://preview.example.com"],
-    ["production hostname", "https://plingpling.xyz"],
+    ["production hostname", "https://getbruno.xyz"],
   ])("refuses preview development mode for a %s", (_label, appUrl) => {
     expect(
       resolveAuthMode({
@@ -225,8 +225,8 @@ describe("authentication mode policy", () => {
 
   it.each([
     ["Vercel production", { VERCEL_ENV: "production", NEXT_PUBLIC_APP_URL: "http://localhost" }],
-    ["production domain", { NEXT_PUBLIC_APP_URL: "https://plingpling.xyz" }],
-    ["production subdomain", { NEXT_PUBLIC_APP_URL: "https://www.plingpling.xyz" }],
+    ["production domain", { NEXT_PUBLIC_APP_URL: "https://getbruno.xyz" }],
+    ["production subdomain", { NEXT_PUBLIC_APP_URL: "https://www.getbruno.xyz" }],
     ["custom hostname", { NEXT_PUBLIC_APP_URL: "https://agentbay.example.com" }],
     [
       "configured Vercel production hostname",
@@ -252,7 +252,7 @@ describe("authentication mode policy", () => {
     expect(
       resolveAuthMode({
         AGENTBAY_AUTH_MODE: "development",
-        NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+        NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
         NODE_ENV: "development",
       }),
     ).toEqual({ mode: "invalid", code: "development_auth_not_allowed" });
@@ -271,7 +271,7 @@ describe("authentication mode policy", () => {
     expect(() =>
       requireValidAuthMode({
         AGENTBAY_AUTH_MODE: "clerk",
-        NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+        NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: secret,
       }),
     ).toThrowError(AuthModeConfigurationError);
@@ -279,7 +279,7 @@ describe("authentication mode policy", () => {
     try {
       requireValidAuthMode({
         AGENTBAY_AUTH_MODE: "clerk",
-        NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+        NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: secret,
       });
     } catch (error) {

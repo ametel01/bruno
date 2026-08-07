@@ -88,7 +88,7 @@ export type LocalHermesContractSmokeSummary = {
 };
 
 export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmokeSummary> {
-  process.env.DATABASE_URL ??= "postgres://agentbay:agentbay@127.0.0.1:54329/plingpling";
+  process.env.DATABASE_URL ??= "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
   process.env.NEXT_PUBLIC_APP_URL ??= "http://127.0.0.1:3000";
   const startedAt = Date.now();
   const suffix = randomUUID().replaceAll("-", "").slice(0, 12);

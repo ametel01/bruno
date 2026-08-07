@@ -108,7 +108,7 @@ describe("evaluateOperatorAccess", () => {
         env: {
           AGENTBAY_AUTH_MODE: "development",
           AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: "true",
-          NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+          NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
           VERCEL: "1",
           VERCEL_ENV: "production",
         },
@@ -212,7 +212,7 @@ describe("operator access proxy responses", () => {
         const body = await response.json();
 
         expect(response.status).toBe(401);
-        expect(response.headers.get("WWW-Authenticate")).toBe('Basic realm="plingpling"');
+        expect(response.headers.get("WWW-Authenticate")).toBe('Basic realm="bruno"');
         expect(body).toEqual({
           error: {
             code: "operator_auth_required",
@@ -234,7 +234,7 @@ describe("operator access proxy responses", () => {
         );
 
         expect(response.status).toBe(401);
-        expect(response.headers.get("WWW-Authenticate")).toBe('Basic realm="plingpling"');
+        expect(response.headers.get("WWW-Authenticate")).toBe('Basic realm="bruno"');
         expect(await response.text()).toBe("Operator credentials are required.");
       },
     );

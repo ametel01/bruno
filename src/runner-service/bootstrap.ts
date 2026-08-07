@@ -67,7 +67,7 @@ export async function bootstrapRegisteredRunner(
   const writeEnvFile = input.writeEnvFile ?? defaultWriteEnvFile;
   const appBaseUrl = normalizeBaseUrl(env.AGENTBAY_APP_URL);
   const endpointUrl = env.AGENTBAY_RUNNER_ENDPOINT_URL?.trim();
-  const runnerName = env.AGENTBAY_RUNNER_NAME?.trim() || "plingpling Cloud Runner";
+  const runnerName = env.AGENTBAY_RUNNER_NAME?.trim() || "bruno Cloud Runner";
   const envFilePath = env.AGENTBAY_RUNNER_ENV_FILE?.trim();
   let runnerId = env.AGENTBAY_RUNNER_ID?.trim() ?? "";
   let credential = env.AGENTBAY_RUNNER_CREDENTIAL?.trim() ?? "";
@@ -221,11 +221,11 @@ if (import.meta.main) {
   const result = await bootstrapRegisteredRunner();
 
   if (!result.ok) {
-    console.error(`plingpling runner bootstrap failed: ${result.reason}`);
+    console.error(`bruno runner bootstrap failed: ${result.reason}`);
     process.exit(1);
   }
 
-  console.log(`plingpling runner bootstrap completed for runner ${result.runnerId}.`);
+  console.log(`bruno runner bootstrap completed for runner ${result.runnerId}.`);
 }
 
 function normalizeBaseUrl(value: string | undefined): string | null {

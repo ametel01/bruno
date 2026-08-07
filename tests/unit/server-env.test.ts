@@ -403,7 +403,7 @@ describe("server-only provider environment validation", () => {
 
     const configured = readDigitalOceanProviderConfig({
       ...base,
-      AGENTBAY_DIGITALOCEAN_SNAPSHOT_MANIFEST: '{"schemaVersion":"plingpling.runner.snapshot.v1"}',
+      AGENTBAY_DIGITALOCEAN_SNAPSHOT_MANIFEST: '{"schemaVersion":"bruno.runner.snapshot.v1"}',
       AGENTBAY_DIGITALOCEAN_SNAPSHOT_SIGNATURE: "signature",
       AGENTBAY_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY: "public-key",
       AGENTBAY_RELEASE_SOURCE_REVISION: "1".repeat(40),
@@ -416,7 +416,7 @@ describe("server-only provider environment validation", () => {
         region: "sfo3",
         sizeDiskGb: 50,
         baseImageSlug: "ubuntu-24-04-x64",
-        sourceRepository: "ametel01/plingpling",
+        sourceRepository: "ametel01/bruno",
         sourceRevision: "1".repeat(40),
       },
     });

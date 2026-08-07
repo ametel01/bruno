@@ -2020,7 +2020,7 @@ export class FakeDigitalOceanProvider
           runnerImage: runnerImageMatch?.[1] ?? "",
           defaultAgentImage: defaultAgentImageMatch?.[1] ?? "",
           hermesImage: hermesImageMatch?.[1] ?? "",
-          bootContractVersion: "plingpling.runner.boot.v1",
+          bootContractVersion: "bruno.runner.boot.v1",
           preloadedImages:
             preloadMatches[0]?.[1]?.split(",").map((value) => value.trim().replace(/^"|"$/g, "")) ??
             [],

@@ -63,7 +63,7 @@ function context(
     challenge: {
       purpose: "initial",
       challengeId: "challenge-1",
-      text: "plingpling staging challenge",
+      text: "bruno staging challenge",
       digest: `sha256:${"b".repeat(64)}`,
       expiresAt: new Date(NOW.getTime() + 60_000),
     },

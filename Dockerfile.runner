@@ -2,7 +2,7 @@ FROM oven/bun:1-alpine
 
 ARG RUNNER_RELEASE_VERSION=development
 ARG RUNNER_RELEASE_REVISION=development
-ARG RUNNER_SOURCE_URL=https://github.com/ametel01/plingpling
+ARG RUNNER_SOURCE_URL=https://github.com/ametel01/bruno
 
 LABEL org.opencontainers.image.source="${RUNNER_SOURCE_URL}"
 LABEL org.opencontainers.image.revision="${RUNNER_RELEASE_REVISION}"

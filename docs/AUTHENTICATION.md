@@ -74,7 +74,7 @@ ownership acceptance passes.
 
 ## Clerk mode
 
-Production, `plingpling.xyz`, Vercel production, and any current custom application hostname use
+Production, `getbruno.xyz`, Vercel production, and any current custom application hostname use
 the temporary `operator` mode above or, after cutover:
 
 ```dotenv

@@ -2,11 +2,11 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: plingpling
+      POSTGRES_DB: bruno
       POSTGRES_PASSWORD: agentbay
       POSTGRES_USER: agentbay
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agentbay -d plingpling"]
+      test: ["CMD-SHELL", "pg_isready -U agentbay -d bruno"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -29,7 +29,7 @@ services:
       AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: ${AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION:-}
       AGENTBAY_AGENT_SECRET_KEYS_JSON: ${AGENTBAY_AGENT_SECRET_KEYS_JSON:-}
       AGENTBAY_AUTH_MODE: development
-      DATABASE_URL: postgres://agentbay:agentbay@postgres:5432/plingpling
+      DATABASE_URL: postgres://agentbay:agentbay@postgres:5432/bruno
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://host.docker.internal:3000}
       AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: local_docker
       AGENTBAY_DIGITALOCEAN_TOKEN: local-docker

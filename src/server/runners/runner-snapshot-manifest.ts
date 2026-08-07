@@ -13,7 +13,7 @@ import type {
   DigitalOceanProviderRequestContext,
 } from "@/src/server/runners/digitalocean-provider";
 
-export const RUNNER_SNAPSHOT_MANIFEST_SCHEMA_VERSION = "plingpling.runner.snapshot.v1";
+export const RUNNER_SNAPSHOT_MANIFEST_SCHEMA_VERSION = "bruno.runner.snapshot.v1";
 
 const MAX_MANIFEST_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 const SHA256_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
@@ -432,7 +432,7 @@ function isSource(value: unknown): value is RunnerSnapshotManifest["source"] {
   return (
     isRecord(value) &&
     !hasUnknownKeys(value, ["repository", "revision"]) &&
-    value.repository === "ametel01/plingpling" &&
+    value.repository === "ametel01/bruno" &&
     typeof value.revision === "string" &&
     /^[a-f0-9]{40}$/.test(value.revision)
   );

@@ -60,7 +60,7 @@ const POSTGRES_HOST_PORT = readPositiveInteger(
   process.env.AGENTBAY_LOCAL_AGENT_CYCLE_POSTGRES_HOST_PORT,
   55_432,
 );
-const DATABASE_URL = `postgres://agentbay:agentbay@127.0.0.1:${POSTGRES_HOST_PORT}/plingpling`;
+const DATABASE_URL = `postgres://agentbay:agentbay@127.0.0.1:${POSTGRES_HOST_PORT}/bruno`;
 const APP_URL = `http://host.docker.internal:${APP_HOST_PORT}`;
 const RUNNER_ENDPOINT_URL = "http://host.docker.internal:3045";
 const TIMEOUT_MS = readPositiveInteger(

@@ -68,7 +68,7 @@ function createFixture(options: FixtureOptions = {}) {
     config: {
       Labels: {
         "org.opencontainers.image.source":
-          options.sourceLabel ?? "https://github.com/ametel01/plingpling",
+          options.sourceLabel ?? "https://github.com/ametel01/bruno",
         "org.opencontainers.image.revision": options.revisionLabel ?? SOURCE_REVISION,
       },
     },
@@ -127,7 +127,7 @@ function createFixture(options: FixtureOptions = {}) {
     event: "push",
     status: "completed",
     conclusion: "success",
-    repository: { full_name: "ametel01/plingpling" },
+    repository: { full_name: "ametel01/bruno" },
     ...options.workflow,
   };
   const calls: FetchCall[] = [];
@@ -180,8 +180,7 @@ function createFixture(options: FixtureOptions = {}) {
     }
 
     if (
-      requestUrl ===
-      `https://api.github.com/repos/ametel01/plingpling/actions/runs/${WORKFLOW_RUN_ID}`
+      requestUrl === `https://api.github.com/repos/ametel01/bruno/actions/runs/${WORKFLOW_RUN_ID}`
     ) {
       return Response.json(workflow);
     }
@@ -226,7 +225,7 @@ describe("Hermes staging published-image attestor", () => {
       `https://ghcr.io/v2/ametel01/agentbay-hermes/manifests/${fixture.releaseDigest}`,
       `https://ghcr.io/v2/ametel01/agentbay-hermes/manifests/${fixture.manifestDigest}`,
       expect.stringContaining("https://ghcr.io/v2/ametel01/agentbay-hermes/blobs/"),
-      `https://api.github.com/repos/ametel01/plingpling/actions/runs/${WORKFLOW_RUN_ID}`,
+      `https://api.github.com/repos/ametel01/bruno/actions/runs/${WORKFLOW_RUN_ID}`,
     ]);
 
     for (const { init } of fixture.calls) {
@@ -423,7 +422,7 @@ describe("Hermes staging published-image attestor", () => {
 
   it.each([
     ["https://github.com/other/repo", SOURCE_REVISION],
-    ["https://github.com/ametel01/plingpling", "f".repeat(40)],
+    ["https://github.com/ametel01/bruno", "f".repeat(40)],
   ])("requires exact source and revision labels", async (sourceLabel, revisionLabel) => {
     const fixture = createFixture({ sourceLabel, revisionLabel });
     await expect(

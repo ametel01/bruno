@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const BASE_DATABASE_URL =
-  process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/plingpling";
+  process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
 const CREATED_DATABASES: string[] = [];
 
 describe("Hermes staging acceptance migration", () => {
@@ -198,7 +198,7 @@ describe("Hermes staging acceptance migration", () => {
   });
 
   it("has no generated schema drift in an isolated migration output", async () => {
-    const temporaryRoot = await mkdtemp(join(tmpdir(), "plingpling-step10-drizzle-"));
+    const temporaryRoot = await mkdtemp(join(tmpdir(), "bruno-step10-drizzle-"));
     const migrationCopy = join(temporaryRoot, "drizzle");
     try {
       await cp("drizzle", migrationCopy, { recursive: true });
@@ -279,8 +279,7 @@ async function readTrigger(db: postgres.Sql): Promise<{ enabled: string } | unde
 }
 
 async function createDisposableDatabaseUrl(label: string): Promise<string> {
-  const database =
-    `plingpling_step10_migration_${label}_${process.pid}_${Date.now()}`.toLowerCase();
+  const database = `bruno_step10_migration_${label}_${process.pid}_${Date.now()}`.toLowerCase();
   const admin = postgres(adminDatabaseUrl(), { max: 1 });
   try {
     await admin.unsafe(`create database ${quoteIdentifier(database)}`);

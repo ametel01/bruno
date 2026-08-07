@@ -7,7 +7,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const BASE_DATABASE_URL =
-  process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/plingpling";
+  process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
 const createdDatabases: string[] = [];
 const RUNNER_IMAGE = `ghcr.io/example/runner@sha256:${"6".repeat(64)}`;
 
@@ -233,7 +233,7 @@ function splitMigrationStatements(migrationSql: string): string[] {
 }
 
 async function createDisposableDatabase(label: string): Promise<string> {
-  const databaseName = `plingpling_replacement_${label}_${process.pid}_${Date.now()}`.toLowerCase();
+  const databaseName = `bruno_replacement_${label}_${process.pid}_${Date.now()}`.toLowerCase();
   const admin = postgres(adminDatabaseUrl(), { max: 1 });
   try {
     await admin.unsafe(`create database ${quoteIdentifier(databaseName)}`);

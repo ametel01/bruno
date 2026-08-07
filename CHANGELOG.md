@@ -48,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic Hermes agents now receive a complete managed `config.yaml`, `.env`, `SOUL.md`, workspace, and revision projection from a fresh runner state root without requiring native `hermes setup`.
 - Opt-in `202 Accepted` ready-mode agent creation for ChatGPT or Claude and Telegram inputs.
 - Exact `AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT=true` opt-in for temporarily exposing a Vercel production-target deployment with the shared development user while keeping hosted development fail-closed by default and preserving runner-machine authentication.
-- Renamed the user-facing application and local package/database defaults from AgentBay to plingpling while retaining the established `AGENTBAY_*` runtime compatibility namespace.
+- Renamed the user-facing application and local package/database defaults from AgentBay to bruno while retaining the established `AGENTBAY_*` runtime compatibility namespace.
 - Credential-free local Hermes contract smoke command (`agent:hermes:contract-smoke`) that launches the pinned workload image with a fake OpenAI-compatible provider, private API auth checks, durable log ingestion, restart/state persistence, managed-state backup/restore, and cleanup without claiming external Telegram network behavior.
 - Durable Hermes gateway log ingestion from the runner-managed `/opt/data` log stream, with source classification for gateway output versus container bootstrap diagnostics.
 - Safe Hermes runtime diagnostics for runner log transport, app-side log persistence, and assigned-runner cleanup.
@@ -142,7 +142,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Managed desired-running Hermes gateways now recover through a durable, leased runtime reconciler with bounded observation, restart backoff, Telegram diagnostics, usage segmentation, and a circuit breaker across runner and Docker restarts.
 - Agent lifecycle controls now follow persisted desired and deployment state: managed setup can be stopped or retried, ready agents need no Start action, and manual Hermes setup is secondary advanced recovery.
 - Managed Hermes runner start/restart now return asynchronous launch acceptance with typed observed status and canary contracts, so the control plane no longer treats Docker launch as application readiness.
-- Native/manual Hermes agents retain the launch-spec v2 compatibility path and still require existing Hermes setup state, while managed direct-provider deployments bypass that setup gate and reapply plingpling-owned provider, Telegram, API-server, terminal, browser, safety, and prompt settings on start/restart.
+- Native/manual Hermes agents retain the launch-spec v2 compatibility path and still require existing Hermes setup state, while managed direct-provider deployments bypass that setup gate and reapply bruno-owned provider, Telegram, API-server, terminal, browser, safety, and prompt settings on start/restart.
 - Agent records now persist explicit stopped/running desired state, and owners can read the latest deployment operation through `GET /api/agents/:agentId/deployment` without exposing leases, idempotency keys, or ownership internals.
 - Split deterministic local verification from provider-backed acceptance: `bun run verify` now ends after the production build, while `bun run verify:e2e` adds the full E2E suite.
 

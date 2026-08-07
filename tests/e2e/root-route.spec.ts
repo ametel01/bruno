@@ -42,10 +42,10 @@ const shellRoutes = [
 ] as const;
 
 for (const route of shellRoutes) {
-  test(`${route.path} renders the plingpling shell`, async ({ page }) => {
+  test(`${route.path} renders the bruno shell`, async ({ page }) => {
     await page.goto(route.path);
 
-    await expect(page.getByRole("link", { name: "plingpling dashboard" })).toHaveAttribute(
+    await expect(page.getByRole("link", { name: "bruno dashboard" })).toHaveAttribute(
       "href",
       "/dashboard",
     );
@@ -3547,7 +3547,7 @@ async function expectPageNotHorizontallyOverflowing(page: Page): Promise<void> {
 
 async function withDatabase<T>(run: (sql: postgres.Sql) => Promise<T>): Promise<T> {
   const databaseUrl =
-    process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/plingpling";
+    process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
   const sql = postgres(databaseUrl, {
     connect_timeout: 5,
     idle_timeout: 5,

@@ -98,7 +98,7 @@ async function seedDigitalOceanRunner(
     .insert(runners)
     .values({
       userId: input.userId,
-      name: "plingpling Cloud Runner",
+      name: "bruno Cloud Runner",
       kind: "digitalocean",
       endpointUrl: input.endpointUrl,
       status: input.status,

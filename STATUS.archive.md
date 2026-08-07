@@ -2,17 +2,17 @@
 
 ## Active Work
 
-- none. Issue [#263](https://github.com/ametel01/plingpling/issues/263) closed by merged PR
-  [#272](https://github.com/ametel01/plingpling/pull/272). Coordinator next action is to compact
+- none. Issue [#263](https://github.com/ametel01/bruno/issues/263) closed by merged PR
+  [#272](https://github.com/ametel01/bruno/pull/272). Coordinator next action is to compact
   this hot status and open the next eligible wave: #264, #265, and #266.
 
 ## Completion Contract
 
-- issue: [#263](https://github.com/ametel01/plingpling/issues/263)
+- issue: [#263](https://github.com/ametel01/bruno/issues/263)
 - readiness: ready. The issue has no comments, linked PR, upstream issue, failed required main-branch
   check, credential dependency, schema dependency, or unresolved product decision. Main CI passed at
   `55a9731e4e1c8149f1f5f928c8dc5f2aae346307` in
-  [run 31127582633](https://github.com/ametel01/plingpling/actions/runs/31127582633).
+  [run 31127582633](https://github.com/ametel01/bruno/actions/runs/31127582633).
 - outcome: Add a sanitized, deterministic evidence contract and repository-owned benchmark command
   for cold agent creation. It measures each persisted deployment from `agent_deployments.created_at`
   to `completed_at` (`ready`) or `failed_at` (`failed`), correlates deployment-stage and managed-runner
@@ -94,7 +94,7 @@
   - Free-form metadata and cloud-init failure detail are hostile secret surfaces; summaries and logs
     must project allowlisted fields rather than serialize source objects.
 - do-not-touch:
-  - Preserve `/Users/alexmetelli/source/plingpling-step7-base`, unrelated PR #262, existing changelog
+  - Preserve `/Users/alexmetelli/source/bruno-step7-base`, unrelated PR #262, existing changelog
     history, protected cron behavior, create/provision idempotency, leases, provider tags, and cleanup
     ownership. Avoid a database migration unless the builder proves existing durable events cannot
     satisfy an acceptance criterion and escalates before adding one.
@@ -192,7 +192,7 @@
 - command: `bun run test`
   result: pass on 2026-08-07
   evidence: 169 files and 1628 tests passed after all fixes in isolated unit-test database
-    `plingpling_test_81485_2ff5ae0a25f9`.
+    `bruno_test_81485_2ff5ae0a25f9`.
 - command: `bun run build`
   result: pass on 2026-08-07
   evidence: Next.js production build completed successfully after the operation-key correlation fix.
@@ -210,7 +210,7 @@
 - command: `git rev-parse --short HEAD && git rev-parse --abbrev-ref HEAD`
   result: pass on 2026-08-07
   evidence: `05569ba` on `codex/issue-263-creation-latency-evidence`.
-- command: `gh issue view 263 --repo ametel01/plingpling --json number,title,state,labels,body,url`
+- command: `gh issue view 263 --repo ametel01/bruno --json number,title,state,labels,body,url`
   result: pass on 2026-08-07
   evidence: Issue #263 is open, agent-ready, and requires sanitized latency evidence without
     pre-provisioning or provider execution.
@@ -222,7 +222,7 @@
     are allowlisted/sanitized rather than projecting hostile metadata into report/log stage names.
 - command: `bun scripts/run-unit-tests.ts tests/unit/agent-creation-latency.test.ts tests/unit/agent-creation-benchmark.test.ts tests/unit/local-agent-cycle-smoke.test.ts tests/unit/runner-bootstrap-events.test.ts`
   result: pass on checker rerun, 2026-08-07
-  evidence: Created isolated unit-test database `plingpling_test_84646_e677405148e8`; 4 files and
+  evidence: Created isolated unit-test database `bruno_test_84646_e677405148e8`; 4 files and
     17 tests passed; database removed.
 - command: `bun run format:check`
   result: pass on checker rerun, 2026-08-07
@@ -241,7 +241,7 @@
   result: pass on checker rerun, 2026-08-07
   evidence: Read-only existing-run mode returned a valid empty JSON report with `total:0` and no
     provider effects.
-- command: `gh pr list --repo ametel01/plingpling --head codex/issue-263-creation-latency-evidence --json number,url,state,headRefName,statusCheckRollup`
+- command: `gh pr list --repo ametel01/bruno --head codex/issue-263-creation-latency-evidence --json number,url,state,headRefName,statusCheckRollup`
   result: pass on 2026-08-07
   evidence: `[]`; no PR checks exist for this branch yet.
 - command: `git cat-file -e origin/main:src/server/agents/agent-creation-latency.ts; echo exit:$?`
@@ -254,7 +254,7 @@
     invalid timestamp check prints `true`.
 - command: `bun scripts/run-unit-tests.ts tests/unit/agent-creation-latency.test.ts tests/unit/agent-creation-benchmark.test.ts tests/unit/local-agent-cycle-smoke.test.ts tests/unit/runner-bootstrap-events.test.ts`
   result: pass after builder fix, 2026-08-07
-  evidence: 4 files and 19 tests passed in isolated database `plingpling_test_85600_d636545ec08a`.
+  evidence: 4 files and 19 tests passed in isolated database `bruno_test_85600_d636545ec08a`.
 - command: `bun run format:check`
   result: pass after builder fix, 2026-08-07
   evidence: Biome checked 399 files with no fixes applied.
@@ -286,7 +286,7 @@ Status: FAILED
     then `false`.
 - command: `bun scripts/run-unit-tests.ts tests/unit/agent-creation-latency.test.ts tests/unit/agent-creation-benchmark.test.ts tests/unit/local-agent-cycle-smoke.test.ts tests/unit/runner-bootstrap-events.test.ts`
   result: pass
-  evidence: 4 files, 17 tests passed in isolated database `plingpling_test_84646_e677405148e8`.
+  evidence: 4 files, 17 tests passed in isolated database `bruno_test_84646_e677405148e8`.
 - command: `bun run format:check`
   result: pass
   evidence: Biome checked 399 files with no fixes applied.
@@ -302,7 +302,7 @@ Status: FAILED
 - command: `bun run agent:creation:benchmark -- --limit 1`
   result: pass
   evidence: Read-only mode returned a valid empty report and did not invoke provider work.
-- command: `gh pr list --repo ametel01/plingpling --head codex/issue-263-creation-latency-evidence --json number,url,state,headRefName,statusCheckRollup`
+- command: `gh pr list --repo ametel01/bruno --head codex/issue-263-creation-latency-evidence --json number,url,state,headRefName,statusCheckRollup`
   result: pass
   evidence: No PR exists, so no remote PR checks are available.
 
@@ -378,7 +378,7 @@ Status: ALL GREEN
     invalid timestamp check prints `true`; run issue counts include `invalid_timestamp:1`.
 - command: `bun scripts/run-unit-tests.ts tests/unit/agent-creation-latency.test.ts tests/unit/agent-creation-benchmark.test.ts tests/unit/local-agent-cycle-smoke.test.ts tests/unit/runner-bootstrap-events.test.ts`
   result: pass
-  evidence: Created isolated database `plingpling_test_86599_b904ac3c0281`; 4 files and 19 tests
+  evidence: Created isolated database `bruno_test_86599_b904ac3c0281`; 4 files and 19 tests
     passed; database removed.
 - command: `bun run format:check`
   result: pass
@@ -392,7 +392,7 @@ Status: ALL GREEN
 - command: `bun run test`
   result: pass
   evidence: 169 files and 1630 tests passed in isolated database
-    `plingpling_test_86674_296674b51b52`; database removed.
+    `bruno_test_86674_296674b51b52`; database removed.
 - command: `bun run build`
   result: pass
   evidence: Next.js production build completed successfully.
@@ -413,7 +413,7 @@ Status: ALL GREEN
     cleanup with `ready=1`, `successRate=1`, `readyLatency.p95Ms=89344`, sanitized allowlisted
     stage names, explicit invalid runner/bootstrap evidence, `digitalOceanRequests=0`, and
     `local_agent_cycle_smoke_passed` with `cleanupVerified=true`.
-- command: `gh pr list --repo ametel01/plingpling --head codex/issue-263-creation-latency-evidence --json number,url,state,headRefName,statusCheckRollup`
+- command: `gh pr list --repo ametel01/bruno --head codex/issue-263-creation-latency-evidence --json number,url,state,headRefName,statusCheckRollup`
   result: pass
   evidence: `[]`; no PR exists yet.
 
@@ -467,7 +467,7 @@ Status: ALL GREEN
 
 - decision: REQUEST_CHANGES
 - GitHub event: COMMENTED because authenticated identity `ametel01` is also the PR author.
-- review: [#4878363214](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878363214)
+- review: [#4878363214](https://github.com/ametel01/bruno/pull/272#pullrequestreview-4878363214)
 - PR context preflight: pass. The body includes the primary issue, related/downstream issues, no
   stacked PR, behavior scope, validation evidence, skipped provider checks, risks, and merge notes.
 - blocking actionable findings:
@@ -498,7 +498,7 @@ Status: ALL GREEN
   request: Return issue #263 to the builder for the four actionable findings, then rerun independent
     checker verification and maintainer review.
   evidence: Review
-    [#4878363214](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878363214)
+    [#4878363214](https://github.com/ametel01/bruno/pull/272#pullrequestreview-4878363214)
     records exact file/line evidence, smallest acceptable fixes, gates, and baseline Vercel status.
   next-action: Coordinator changes ownership and increments the implementation/review cycle. Do not
     merge PR #272 or execute provider effects until the blocking findings are fixed and reaccepted.
@@ -542,7 +542,7 @@ Status: ALL GREEN
 
 ## Review Threads
 
-- thread: [maintainer review #4878363214](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878363214)
+- thread: [maintainer review #4878363214](https://github.com/ametel01/bruno/pull/272#pullrequestreview-4878363214)
   status: fixed
   owner: coordinator
   evidence: Cycle 2 fixed findings 2-4. Finding 1 is only partially fixed: absent-stage invalidity
@@ -550,8 +550,8 @@ Status: ALL GREEN
     duplicate or synthetic zero-duration evidence. Cycle 3 fixed the remainder with one producer
     pair per logical stage, observed boot/readiness timestamps, positive provider-phase boundaries,
     an integrated 15-stage regression, and a valid issue-free local smoke record. Accepted in
-    [review #4878725523](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878725523).
-- thread: [cycle-2 maintainer review #4878490254](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878490254)
+    [review #4878725523](https://github.com/ametel01/bruno/pull/272#pullrequestreview-4878725523).
+- thread: [cycle-2 maintainer review #4878490254](https://github.com/ametel01/bruno/pull/272#pullrequestreview-4878490254)
   status: fixed
   owner: coordinator
   evidence: REQUEST_CHANGES for the remaining producer timing defect and stale PR body; submitted as
@@ -559,7 +559,7 @@ Status: ALL GREEN
     producer timing defect and substantively refreshed the PR body. The only remaining body edit is
     administrative: replace the stale cycle-3 E2E-pending phrase with the completed 26/26 result.
     Accepted in
-    [review #4878725523](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878725523).
+    [review #4878725523](https://github.com/ametel01/bruno/pull/272#pullrequestreview-4878725523).
 
 ## Cycle 2 Checker Handoff
 
@@ -582,17 +582,17 @@ Status: ALL GREEN
 - command: `git rev-parse --short HEAD && git rev-parse --abbrev-ref HEAD`
   result: pass
   evidence: `e956a47` on `codex/issue-263-creation-latency-evidence`.
-- command: `gh pr view 272 --repo ametel01/plingpling --json number,state,isDraft,headRefOid,mergeable,reviewDecision,statusCheckRollup,closingIssuesReferences,latestReviews`
+- command: `gh pr view 272 --repo ametel01/bruno --json number,state,isDraft,headRefOid,mergeable,reviewDecision,statusCheckRollup,closingIssuesReferences,latestReviews`
   result: pass
   evidence: PR #272 is open draft, head `e956a47228d99bbd0a1364d68ebb0ce1fe422760`,
     mergeable `MERGEABLE`, merge state later checked as `UNSTABLE`, closing issue references contain
     exactly #263, and no latest reviews exist after the cycle-2 fix.
-- command: `gh pr checks 272 --repo ametel01/plingpling --watch=false`
+- command: `gh pr checks 272 --repo ametel01/bruno --watch=false`
   result: non-blocking external baseline failure
   evidence: Vercel fails at deployment `8wH9FtgVww1cSV6mVgFeKFrf5dDx`; CodeRabbit passes but says
     review skipped because draft; GitGuardian, Socket project report, Socket PR alerts, and Vercel
     Preview Comments pass.
-- command: `gh pr checks 262 --repo ametel01/plingpling --watch=false`
+- command: `gh pr checks 262 --repo ametel01/bruno --watch=false`
   result: matching external baseline signal
   evidence: Unrelated PR #262 also has failing Vercel deployment `Cq5HTYz7vrNVy9SM4RhobRb8fwTe`
     while CodeRabbit, GitGuardian, Socket, and Vercel Preview Comments pass.
@@ -617,7 +617,7 @@ Status: ALL GREEN
 - command: `bun scripts/run-unit-tests.ts tests/unit/agent-creation-latency.test.ts tests/unit/agent-creation-benchmark.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/runner-registration.test.ts tests/unit/runner-heartbeat.test.ts`
   result: pass
   evidence: 6 files and 63 tests passed in isolated database
-    `plingpling_test_98372_12c44ed45d0d`; database removed. This includes the DB correlation fixture
+    `bruno_test_98372_12c44ed45d0d`; database removed. This includes the DB correlation fixture
     that proves same-owner historical assigned-runner events are not attributed when an operation key
     is authoritative.
 - command: `git diff --check origin/main...HEAD`
@@ -635,7 +635,7 @@ Status: ALL GREEN
 - command: `bun run test`
   result: pass
   evidence: 169 files and 1636 tests passed in isolated database
-    `plingpling_test_98496_b90d5be7021f`; database removed.
+    `bruno_test_98496_b90d5be7021f`; database removed.
 - command: `bun run build`
   result: pass
   evidence: Next.js production build completed successfully.
@@ -693,7 +693,7 @@ Status: ALL GREEN
 
 - decision: REQUEST_CHANGES
 - GitHub event: COMMENTED because authenticated identity `ametel01` is also the PR author.
-- review: [#4878490254](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878490254)
+- review: [#4878490254](https://github.com/ametel01/bruno/pull/272#pullrequestreview-4878490254)
 - prior finding classification:
   - production pairs / absent-stage evidence: partially fixed and still blocking. Entirely absent
     stages are invalid and package/image/container pairs exist, but registration produces duplicate
@@ -722,7 +722,7 @@ Status: ALL GREEN
   request: Return #263 to builder for one producer-timing fix and a PR body refresh, then rerun the
     focused checker semantics and maintainer review.
   evidence: Review
-    [#4878490254](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878490254)
+    [#4878490254](https://github.com/ametel01/bruno/pull/272#pullrequestreview-4878490254)
     records exact files, the reproducible duplicate/zero-duration output, and smallest fixes.
   next-action: Give each logical stage one real start and terminal timestamp, ensure local smoke
     exercises or faithfully synthesizes a complete required record, add an integrated sequence-to-
@@ -783,18 +783,18 @@ Status: ALL GREEN
   result: pass
   evidence: branch `codex/issue-263-creation-latency-evidence` at `49c872a`; only `STATUS.md` is
     dirty, as permitted for checker evidence.
-- command: `gh pr view 272 --repo ametel01/plingpling --json number,title,state,url,headRefName,headRefOid,baseRefName,mergeable,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup,closingIssuesReferences,latestReviews,comments,files,commits,body`
+- command: `gh pr view 272 --repo ametel01/bruno --json number,title,state,url,headRefName,headRefOid,baseRefName,mergeable,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup,closingIssuesReferences,latestReviews,comments,files,commits,body`
   result: pass
   evidence: PR #272 is open draft, head `49c872ad1f181c6fe2ec5ad73c19801666578c15`,
     mergeable `MERGEABLE`, merge state `UNSTABLE`, and closing issue references contain exactly
     #263. PR body now states cycle-3 scope/counts, no provider trial, valid local smoke evidence,
     and that the local cold simulation remains above the 60-second target.
-- command: `gh pr checks 272 --repo ametel01/plingpling --watch=false`
+- command: `gh pr checks 272 --repo ametel01/bruno --watch=false`
   result: non-blocking external baseline failure
   evidence: Vercel fails at deployment `HdXdj3TZE7cq2RVNpym5GuRVFpba`; CodeRabbit passes with draft
     review skipped; GitGuardian, Socket project report, Socket PR alerts, and Vercel Preview
     Comments pass.
-- command: `gh pr checks 262 --repo ametel01/plingpling --watch=false`
+- command: `gh pr checks 262 --repo ametel01/bruno --watch=false`
   result: matching external baseline signal
   evidence: unrelated PR #262 also has failing Vercel deployment `Cq5HTYz7vrNVy9SM4RhobRb8fwTe`
     while CodeRabbit, GitGuardian, Socket, and Vercel Preview Comments pass.
@@ -827,13 +827,13 @@ Status: ALL GREEN
   evidence: no whitespace errors.
 - command: `bun scripts/run-unit-tests.ts tests/unit/agent-creation-latency.test.ts tests/unit/agent-creation-benchmark.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/runner-registration.test.ts tests/unit/runner-heartbeat.test.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/runner-provisioning.test.ts tests/unit/runner-bootstrap-events.test.ts tests/unit/local-agent-cycle-smoke.test.ts`
   result: pass
-  evidence: 10 files and 95 tests passed in isolated database `plingpling_test_25658_d212cbd5e9f8`;
+  evidence: 10 files and 95 tests passed in isolated database `bruno_test_25658_d212cbd5e9f8`;
     database removed.
 - command: `bun run verify`
   result: pass
   evidence: format check and lint checked 399 files with no fixes applied; `next typegen &&
     tsc --noEmit` passed; full unit suite passed with 169 files and 1638 tests in isolated database
-    `plingpling_test_25759_2a9ac9d8f513`; database removed; Next.js production build completed
+    `bruno_test_25759_2a9ac9d8f513`; database removed; Next.js production build completed
     successfully.
 - command: `bun run test:e2e:ci`
   result: pass
@@ -897,14 +897,14 @@ Status: APPROVE
 - reviewer: maintainer-reviewer (`issue_263_reviewer`)
 - implementation: `49c872ad1f181c6fe2ec5ad73c19801666578c15`
 - reviewed head: `a044ef4c52693bcc952c35b03c20606ac5686fb1`
-- review: [#4878725523](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878725523)
+- review: [#4878725523](https://github.com/ametel01/bruno/pull/272#pullrequestreview-4878725523)
 - GitHub event: COMMENT because the authenticated reviewer is also the PR author; this status records
   the explicit maintainer APPROVE decision.
 - prior threads:
-  - [#4878363214](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878363214):
+  - [#4878363214](https://github.com/ametel01/bruno/pull/272#pullrequestreview-4878363214):
     fixed in full. Production pairs/absent stages, prior-stage attribution, operation-key authority,
     and strict bounded count parsing all satisfy the completion contract.
-  - [#4878490254](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878490254):
+  - [#4878490254](https://github.com/ametel01/bruno/pull/272#pullrequestreview-4878490254):
     fixed in full. Registration/waiting duplicates and synthetic zero-duration readiness evidence
     are removed; source timestamps, positive provider boundaries, the integrated regression, valid
     local record, and refreshed PR scope/counts are present.
@@ -933,8 +933,8 @@ Status: APPROVE
 
 ## Process Retrospective
 
-Work Item: issue [#263](https://github.com/ametel01/plingpling/issues/263), PR
-[#272](https://github.com/ametel01/plingpling/pull/272)
+Work Item: issue [#263](https://github.com/ametel01/bruno/issues/263), PR
+[#272](https://github.com/ametel01/bruno/pull/272)
 
 Trigger: merged-pr
 
@@ -945,14 +945,14 @@ Signals:
   impact: The checker added useful adversarial coverage, but the initial builder implementation had
     relied too heavily on focused fixtures that did not model hostile or malformed persisted events.
 - evidence: Maintainer review
-    [#4878363214](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878363214)
+    [#4878363214](https://github.com/ametel01/bruno/pull/272#pullrequestreview-4878363214)
     found missing expected-stage evidence, wrong `toStage` interval attribution, ambiguous
     operation-or-runner correlation, and loose `parseInt` provider-count parsing after the checker
     had reported ALL GREEN.
   impact: Checker missed contract-level production semantics that later issues depend on for
     trustworthy optimization data.
 - evidence: Maintainer review
-    [#4878490254](https://github.com/ametel01/plingpling/pull/272#pullrequestreview-4878490254)
+    [#4878490254](https://github.com/ametel01/bruno/pull/272#pullrequestreview-4878490254)
     found duplicate registration/waiting starts, synthetic zero-duration readiness evidence, and
     stale PR validation text after cycle 2.
   impact: Reviewer independence prevented merging a benchmark that would have hidden the cold-path
@@ -967,7 +967,7 @@ Signals:
     coordinator compacts before assigning #264-#266.
 - evidence: PR #272 was merged with the known Vercel Clerk-preview baseline documented, local build
     and E2E passing, but GitHub still reports the PR `Verification gates` run
-    [31131305981](https://github.com/ametel01/plingpling/actions/runs/31131305981) as in progress
+    [31131305981](https://github.com/ametel01/bruno/actions/runs/31131305981) as in progress
     on the merged head.
   impact: This is not a #263 implementation blocker because equivalent local gates passed, but future
     merge records should explicitly separate accepted external baselines from any repository-owned
@@ -1042,15 +1042,15 @@ Recommendations:
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling`: `main` after PR #272 merge; STATUS.md is dirty only for
+- `/Users/alexmetelli/source/bruno`: `main` after PR #272 merge; STATUS.md is dirty only for
   post-merge retrospective state.
-- `/Users/alexmetelli/source/plingpling-step7-base`: pre-existing detached user-owned worktree;
+- `/Users/alexmetelli/source/bruno-step7-base`: pre-existing detached user-owned worktree;
   preserve and do not modify.
 
 ## Completed
 
-- planning: `PLAN.md`; issues [#263](https://github.com/ametel01/plingpling/issues/263) through
-  [#271](https://github.com/ametel01/plingpling/issues/271) published on 2026-08-07.
-- issue: [#263](https://github.com/ametel01/plingpling/issues/263) closed by PR
-  [#272](https://github.com/ametel01/plingpling/pull/272), merged as
+- planning: `PLAN.md`; issues [#263](https://github.com/ametel01/bruno/issues/263) through
+  [#271](https://github.com/ametel01/bruno/issues/271) published on 2026-08-07.
+- issue: [#263](https://github.com/ametel01/bruno/issues/263) closed by PR
+  [#272](https://github.com/ametel01/bruno/pull/272), merged as
   `7d1cb985c06b0007dadcfb0e42c5631c65b7c472` on 2026-08-06T23:30:36Z.

@@ -7,7 +7,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const BASE_DATABASE_URL =
-  process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/plingpling";
+  process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
 let createdDatabase: string | null = null;
 
 describe("agent runtime reconciliation migration", () => {
@@ -238,7 +238,7 @@ async function createDisposableDatabase(label: string): Promise<string> {
     await dropDisposableDatabase(createdDatabase);
   }
 
-  const database = `plingpling_step9_${label}_${process.pid}_${Date.now()}`.toLowerCase();
+  const database = `bruno_step9_${label}_${process.pid}_${Date.now()}`.toLowerCase();
   const admin = postgres(adminDatabaseUrl(), { max: 1 });
 
   try {

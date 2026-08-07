@@ -23,7 +23,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const BASE_DATABASE_URL =
-  process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/plingpling";
+  process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
 const USER_ID = "00000000-0000-4000-8000-000000005001";
 const SOURCE_ID = "00000000-0000-4000-8000-000000005101";
 const TARGET_ID = "00000000-0000-4000-8000-000000005102";
@@ -439,7 +439,7 @@ async function createDisposableDatabase(): Promise<{
   databaseName: string;
   databaseUrl: string;
 }> {
-  const databaseName = `plingpling_runner_replacement_${process.pid}_${Date.now()}`.toLowerCase();
+  const databaseName = `bruno_runner_replacement_${process.pid}_${Date.now()}`.toLowerCase();
   const admin = postgres(adminDatabaseUrl(), { max: 1 });
   try {
     await admin.unsafe(`create database ${quoteIdentifier(databaseName)}`);

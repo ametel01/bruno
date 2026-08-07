@@ -71,7 +71,7 @@ describe("local full agent-cycle smoke", () => {
     expect(() =>
       resolveLocalAgentSmokeMode({
         [LOCAL_AGENT_SMOKE_MODE_ENV]: LOCAL_AGENT_SMOKE_MODE_VALUE,
-        AGENTBAY_APP_URL: "https://plingpling.example.com",
+        AGENTBAY_APP_URL: "https://bruno.example.com",
         AGENTBAY_RUNNER_ENDPOINT_URL: "http://host.docker.internal:3045",
       }),
     ).toThrow(/isolated local HTTP URL/);

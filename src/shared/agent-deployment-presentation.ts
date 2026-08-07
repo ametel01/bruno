@@ -188,12 +188,12 @@ const PROGRESS_DESCRIPTIONS: Record<
   Exclude<PublicAgentDeploymentStage, "ready" | "failed">,
   string
 > = {
-  pending: "plingpling is preparing everything this agent needs.",
-  provisioning_runner: "plingpling is preparing everything this agent needs.",
-  configuring_hermes: "plingpling is preparing everything this agent needs.",
-  starting_gateway: "plingpling is preparing everything this agent needs.",
-  verifying_model: "plingpling is preparing everything this agent needs.",
-  connecting_telegram: "plingpling is connecting the dedicated Telegram bot.",
+  pending: "bruno is preparing everything this agent needs.",
+  provisioning_runner: "bruno is preparing everything this agent needs.",
+  configuring_hermes: "bruno is preparing everything this agent needs.",
+  starting_gateway: "bruno is preparing everything this agent needs.",
+  verifying_model: "bruno is preparing everything this agent needs.",
+  connecting_telegram: "bruno is connecting the dedicated Telegram bot.",
 };
 
 export const PUBLIC_AGENT_EXPERIENCE_STAGES = [
@@ -491,7 +491,7 @@ export function buildDeploymentPresentation(input: {
       terminal: false,
       canRetry: false,
       canStopSetup: true,
-      description: "plingpling is preparing replacement capacity automatically.",
+      description: "bruno is preparing replacement capacity automatically.",
     };
   }
 

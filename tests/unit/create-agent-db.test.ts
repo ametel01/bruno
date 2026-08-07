@@ -286,7 +286,7 @@ describe("create agent persistence", () => {
           .insert(runners)
           .values({
             userId,
-            name: "plingpling Cloud Runner",
+            name: "bruno Cloud Runner",
             kind: "digitalocean",
             status: "provisioning",
             provider: "digitalocean",

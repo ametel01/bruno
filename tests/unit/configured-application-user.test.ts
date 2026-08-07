@@ -27,7 +27,7 @@ describe("configured application user adapter", () => {
         env: {
           AGENTBAY_AUTH_MODE: "operator",
           AGENTBAY_OPERATOR_PASSWORD: "operator-password-present",
-          NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+          NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
           VERCEL_ENV: "production",
         },
         getClerkUserId,
@@ -66,7 +66,7 @@ describe("configured application user adapter", () => {
       requireConfiguredApplicationUser({
         env: {
           AGENTBAY_AUTH_MODE: "development",
-          NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+          NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
         },
         getClerkUserId,
         requireUser,

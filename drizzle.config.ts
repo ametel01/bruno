@@ -1,6 +1,6 @@
 import { defineConfig } from "drizzle-kit";
 
-const localDatabaseUrl = "postgres://agentbay:agentbay@127.0.0.1:54329/plingpling";
+const localDatabaseUrl = "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
 
 export default defineConfig({
   schema: "./src/server/db/schema.ts",

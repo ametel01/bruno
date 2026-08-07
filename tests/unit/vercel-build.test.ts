@@ -57,7 +57,7 @@ describe("Vercel build workflow", () => {
       planVercelBuildCommands({
         AGENTBAY_AUTH_MODE: "development",
         AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: "true",
-        NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+        NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
         VERCEL_ENV: "production",
         DATABASE_URL: "postgres://production.example/agentbay",
       }),
@@ -96,7 +96,7 @@ describe("Vercel build workflow", () => {
         AGENTBAY_READY_AGENT_CREATION_ENABLED: "true",
         AGENTBAY_DIGITALOCEAN_TOKEN: "provider-token-present",
         AGENTBAY_RUNNER_BEARER_TOKEN: "runner-token-present",
-        NEXT_PUBLIC_APP_URL: "https://plingpling.xyz",
+        NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
         VERCEL_ENV: "production",
         DATABASE_URL: "postgres://production.example/agentbay",
       }),

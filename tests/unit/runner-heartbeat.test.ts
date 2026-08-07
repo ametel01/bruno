@@ -562,7 +562,7 @@ describe("runner heartbeat persistence", () => {
         metadata: expect.objectContaining({
           provider: "digitalocean",
           step: "boot_validation",
-          bootContractVersion: "plingpling.runner.boot-snapshot.v1",
+          bootContractVersion: "bruno.runner.boot-snapshot.v1",
           bootStatus: "ready",
         }),
         createdAt: new Date("2026-08-04T00:00:00.000Z"),
@@ -574,7 +574,7 @@ describe("runner heartbeat persistence", () => {
         metadata: {
           provider: "digitalocean",
           step: "boot_validation",
-          bootContractVersion: "plingpling.runner.boot-snapshot.v1",
+          bootContractVersion: "bruno.runner.boot-snapshot.v1",
           bootStatus: "ready",
           bootComponents: readyRunnerBootSnapshot().components,
         },
@@ -622,7 +622,7 @@ describe("runner heartbeat persistence", () => {
           step: "authenticated_readiness",
           heartbeatStatus: "online",
           readinessProbe: "authenticated_endpoint",
-          bootContractVersion: "plingpling.runner.boot-snapshot.v1",
+          bootContractVersion: "bruno.runner.boot-snapshot.v1",
           bootStatus: "ready",
           bootComponents: readyRunnerBootSnapshot().components,
         },
