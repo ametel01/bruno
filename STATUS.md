@@ -9,7 +9,7 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
   branch: `codex/issue-267-provider-phase-drain`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: checker-ready after clean local smoke
+  phase: checker-ready after operation-tag log redaction fix
   cycle: 2/5
 
 ## Goal Contract
@@ -849,7 +849,7 @@ Status: FAILED
   - next action: commit/push/open the #264 PR before any #264 merge; continue #265/#266 checks.
     Do not merge #262 as part of this goal.
 
-## Checker Result
+## Checker Result — #264 Final
 
 Status: ALL GREEN
 
@@ -941,6 +941,176 @@ Status: ALL GREEN
 
 - Open/push the #264 PR from `codex/issue-264-durable-wakeups`, then merge only after normal PR
   review/CI policy is satisfied. Checker verdict on the branch head: merge-ready for #264.
+
+## Checker Result
+
+Status: FAILED
+
+## Commands
+
+- command: required skill load
+  result: PASS
+  evidence: loaded `checker-agent`, `agent-team-status-protocol`, `testing-standards`,
+    `ci-quality-gates`, and `ci-security-gates`; followed read-only checker scope except this
+    `STATUS.md` update.
+- command: `git status --short --branch --untracked-files=all && git rev-parse --short HEAD && git branch --show-current`
+  result: PASS
+  evidence: branch `codex/issue-267-provider-phase-drain`; HEAD `075d55d`; worktree clean before
+    checker evidence.
+- command: `git merge-base HEAD origin/main && git diff --stat origin/main...HEAD && git diff --name-status origin/main...HEAD && git diff --check origin/main...HEAD`
+  result: PASS
+  evidence: merge-base `fa79f4a69b5e684573bd42dcd59f4f9ffe4f1fa6`; scoped #267 diff is 12 files /
+    1,214 insertions / 432 deletions across runner provisioning, DigitalOcean/local Docker
+    providers, deployment reconciler, docs/status, and focused tests; no diff-check errors.
+- command: `gh pr list --repo ametel01/plingpling --state open --head codex/issue-267-provider-phase-drain --json ...`
+  result: PASS
+  evidence: `[]`; no open PR object exists for #267 yet.
+- command: source inspection of provider-effect checkpoint ordering and replay fences
+  result: PASS
+  evidence: `runner-provisioning.ts:215-717` drains at bounded iterations; `:311-508` discovers
+    authoritatively before create/adoption and persists create completion before continuing;
+    `:520-581` observes tags and skips redundant tag POSTs when tags are complete;
+    `:584-672` observes/adopts or creates firewall once and persists firewall/endpoint before
+    returning; `:752-759` checks abort plus `canContinue`; `agent-deployment-reconciler.ts:2334-2365`
+    passes the deployment authority predicate; `:2368-2390` fences deployment stage, config revision,
+    lease owner/expiry, user, non-deleted agent, and desired-running state.
+- command: source inspection of precise wakeup dispositions
+  result: PASS
+  evidence: provisioner returns `immediate`, `external_wait`, and `observation_wait` dispositions;
+    `agent-deployment-reconciler.ts:574-576` maps `immediate` to `scheduleImmediateRetry`;
+    `:1528-1588` persists external retry wakeups with backoff through
+    `replaceDeploymentWakeupInTransaction`; `:1606-1654` persists immediate wakeups at `now` with
+    the same lease/config/desired-running fences.
+- command: source inspection of authoritative LocalDocker managed inventory semantics
+  result: PASS
+  evidence: `local-docker-digitalocean-provider.ts:132-176` returns authoritative tag and managed
+    inventory; `:195-227` applies tags and stable firewall metadata; `:229-247` clears cleanup state;
+    focused local tests cover authoritative inventory and stable firewall IDs.
+- command: source inspection of safe logs/events
+  result: FAILED
+  evidence: `runner-provisioning.ts:194-200` constructs provisioning logger bindings with
+    `lifecycleId: input.operationKey`; `operationKey` is the provider operation tag
+    `agentbay-deploy-<deployment-id-without-dashes>` from
+    `agent-deployment-reconciler.ts:2330-2331`; `createRunnerProvisioningLog` only suppresses logs
+    in `NODE_ENV=test` at `runner-provisioning.ts:2692-2695`. `logger.ts:126-128`, `:140-164`,
+    `:261-285`, and `:288-300` sanitize sensitive keys/text but do not redact `lifecycleId` or the
+    `agentbay-deploy-...` operation-tag pattern. Non-test logs therefore expose the operation tag,
+    contrary to the #267 contract's explicit "Safe events/logs must not expose operation tags"
+    invariant.
+- command:
+    `bun scripts/run-unit-tests.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/agent-deployment-reconciler.test.ts tests/unit/digitalocean-provider.test.ts tests/unit/runner-infrastructure-reconciler.test.ts tests/unit/runner-replacement-reconciler.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_94522_8312da9da98a`; migrations applied; 6 files / 99
+    tests passed; DB removed.
+- command: `bun run format:check`
+  result: PASS
+  evidence: Biome checked 410 files in 99ms; no fixes applied.
+- command: `bun run lint`
+  result: PASS
+  evidence: Biome checked 410 files in 200ms; no fixes applied.
+- command: `bun run typecheck`
+  result: PASS
+  evidence: Next route types generated successfully and `tsc --noEmit` passed.
+- command: `bun run repro:cloud-runner`
+  result: PASS
+  evidence: generated local user-data in a temp path; Docker/cloud-init schema validation passed;
+    runcmd bash syntax OK for 11 script blocks.
+- command: ambient external-effect preflight
+  result: PASS
+  evidence: environment variable names checked without printing values:
+    `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE`, `AGENTBAY_DIGITALOCEAN_TOKEN`,
+    `DIGITALOCEAN_ACCESS_TOKEN`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`,
+    `QSTASH_NEXT_SIGNING_KEY`, `AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION`, and
+    `AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION` are all unset.
+- command: coordinator serialized smoke evidence for `075d55d`
+  result: PASS
+  evidence: coordinator reported clean local smoke at `89513ms`, `cleanupVerified:true`,
+    `digitalOceanRequests:0`, `simulatedDroplets:1`, one provider-phase invocation to
+    `waiting_for_runner`, exact 1 vCPU / 2 GiB profile, exact Hermes limits, all lifecycle actions,
+    and no real DigitalOcean/QStash/deploy/release/billable effect; checker did not rerun smoke by
+    assignment.
+
+## Failures
+
+- file: `src/server/runners/runner-provisioning.ts:194`
+  check: safe provider provisioning logs must not expose operation tags
+  exact error: logger child binding sets `lifecycleId: input.operationKey`; `input.operationKey` is
+    the provider operation tag `agentbay-deploy-<deployment-id-without-dashes>`, and the app logger
+    does not redact `lifecycleId` or `agentbay-deploy-...` values in non-test logs.
+  likely owner: builder-agent for #267 / runner provisioning logging.
+
+## Coverage Gaps
+
+- Did not rerun `bun run local:agent:smoke`; coordinator already provided serialized smoke evidence
+  and assignment explicitly said not to rerun it.
+- Did not run real DigitalOcean, real QStash, deploy, release, workflow dispatch, or billable paths;
+  those effects are outside #267 authorization.
+- No focused test currently asserts provisioning logs/events omit operation tags; the static
+  inspection failure above should be covered by a regression test or logger sanitizer test.
+
+## Next Action
+
+- Redact or replace the provisioning log `lifecycleId` value so non-test logs cannot expose
+  `agentbay-deploy-...` operation tags, add regression coverage, then rerun focused provider/
+  reconciler gates and lightweight quality gates. Do not merge #267 until this is fixed.
+
+## Builder Result — #267 Log Redaction Fix
+
+Status: READY FOR CHECKER
+
+## Changes
+
+- `src/server/runners/runner-provisioning.ts` now binds automatic provisioning lifecycle logs with
+  the runner ID instead of the provider operation tag and no longer binds user IDs to provisioning
+  child loggers.
+- Added a provisioning-log redaction guard that strips the full provider operation tag plus the
+  derived compact/dashed deployment identifier forms from provisioning log bindings, metadata, and
+  errors before forwarding to the app logger.
+- Added `tests/unit/runner-provisioning-logging.test.ts`, which forces `NODE_ENV=production` and
+  captures logger child bindings/metadata so the regression cannot pass because of test-mode log
+  suppression.
+
+## Commands
+
+- command:
+    `bun scripts/run-unit-tests.ts tests/unit/runner-provisioning-logging.test.ts tests/unit/automatic-runner-provisioning.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_97966_65b3f33bc8c7`; 2 files / 16 tests passed; DB removed.
+- command:
+    `bun scripts/run-unit-tests.ts tests/unit/runner-provisioning-logging.test.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/local-docker-digitalocean-provider.test.ts tests/unit/agent-deployment-reconciler.test.ts tests/unit/digitalocean-provider.test.ts tests/unit/runner-infrastructure-reconciler.test.ts tests/unit/runner-replacement-reconciler.test.ts`
+  result: PASS
+  evidence: isolated DB `plingpling_test_98231_11638b7d8d6b`; 7 files / 100 tests passed; DB removed.
+- command: `bun run format:check`
+  result: PASS
+  evidence: Biome checked 411 files in 85ms; no fixes applied.
+- command: `bun run lint`
+  result: PASS
+  evidence: Biome checked 411 files in 202ms; no fixes applied.
+- command: `bun run typecheck`
+  result: PASS
+  evidence: Next route types generated successfully and `tsc --noEmit` passed.
+- command: `git diff --check`
+  result: PASS
+  evidence: no whitespace errors.
+- command: `bun run repro:cloud-runner`
+  result: PASS
+  evidence: generated current user-data in a temp path; schema validation passed; runcmd bash syntax
+    OK for 11 script blocks.
+- command:
+    `if rg -n "lifecycleId:\s*(input\.operationKey|operationKey)|log\([^\n]*(operationKey|provisioningOperationKey|operationTag|deploymentId)" src/server/runners src/server/agents; then exit 1; else echo ...; fi`
+  result: PASS
+  evidence: no direct provisioning operation identifiers in logger lifecycle bindings or direct log
+    calls under `src/server/runners` / `src/server/agents`.
+- command: `bun run build`
+  result: PASS
+  evidence: Next.js production build compiled, typechecked, generated static pages, and finalized
+    route output successfully.
+
+## Coverage Gaps
+
+- Did not rerun `bun run local:agent:smoke`; coordinator said no smoke rerun was required for this
+  logging-only fix.
+- Did not run real DigitalOcean, real QStash, deploy, release, workflow dispatch, or billable paths.
 
 ## Review Threads
 

@@ -54,9 +54,10 @@ import {
 } from "@/src/server/runners/runner-resource-profiles";
 import { selectVerifiedRunnerSnapshotImage } from "@/src/server/runners/runner-snapshot-manifest";
 import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
-import { createAppLogger } from "@/src/server/logging/logger";
+import { createAppLogger, LOG_REDACTION_CENSOR } from "@/src/server/logging/logger";
 
 const runnerProvisioningLogger = createAppLogger("runner.provisioning");
+const PROVIDER_OPERATION_TAG_LOG_PATTERN = /\bagentbay-(?:deploy|replace)-[0-9a-f]{32}\b/gi;
 
 const DEFAULT_CLOUD_RUNNER_NAME = "plingpling Cloud Runner";
 const DEFAULT_FIREWALL_NAME = "agentbay-runners";
@@ -191,13 +192,17 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
   maxDrainIterations?: number;
   canContinue?: () => Promise<boolean>;
 }): Promise<AutomaticRunnerProvisioningResult> {
-  const log = createRunnerProvisioningLog({
-    lifecycle: "droplet_creation",
-    lifecycleId: input.operationKey,
-    operationMode: "automatic",
-    runnerId: input.runnerId,
-    userId: input.userId,
-  });
+  const log = createRunnerProvisioningLog(
+    {
+      lifecycle: "droplet_creation",
+      lifecycleId: input.runnerId,
+      operationMode: "automatic",
+      runnerId: input.runnerId,
+    },
+    {
+      redactedValues: provisioningOperationLogRedactedValues(input.operationKey),
+    },
+  );
 
   const operationTags = [
     ...new Set([...input.config.tags, DIGITALOCEAN_MANAGED_RUNNER_TAG, input.operationKey]),
@@ -1004,7 +1009,6 @@ export async function createDigitalOceanRunnerForUser(
     lifecycle: "droplet_creation",
     lifecycleId,
     operationMode: "manual",
-    userId,
   });
   const lifecycleStartedAt = Date.now();
 
@@ -2686,26 +2690,157 @@ async function toRunnerProvisioningDto(
   };
 }
 
-function createRunnerProvisioningLog(bindings: Record<string, unknown>): ProvisioningLog {
-  const logger = runnerProvisioningLogger.child(bindings);
+function createRunnerProvisioningLog(
+  bindings: Record<string, unknown>,
+  options: { redactedValues?: readonly string[] } = {},
+): ProvisioningLog {
+  const redactedValues = options.redactedValues ?? [];
+  const logger = runnerProvisioningLogger.child(
+    redactProvisioningLogRecord(bindings, redactedValues),
+  );
 
   return (event, metadata = {}, level = "info", error) => {
     if (process.env.NODE_ENV === "test") {
       return;
     }
 
+    const safeMetadata = redactProvisioningLogRecord(metadata, redactedValues);
+
     if (error !== undefined) {
-      logger.error(event, error, metadata);
+      logger.error(event, redactProvisioningLogValue(error, redactedValues), safeMetadata);
       return;
     }
 
     if (level === "error") {
-      logger.errorEvent(event, metadata);
+      logger.errorEvent(event, safeMetadata);
       return;
     }
 
-    logger[level](event, metadata);
+    logger[level](event, safeMetadata);
   };
+}
+
+function provisioningOperationLogRedactedValues(operationKey: string): string[] {
+  const values = new Set<string>([operationKey]);
+  const match = /^agentbay-(?:deploy|replace)-([0-9a-f]{32})$/i.exec(operationKey);
+
+  if (match?.[1]) {
+    const compactIdentifier = match[1].toLowerCase();
+    values.add(compactIdentifier);
+    values.add(dashedUuidFromCompactUuid(compactIdentifier));
+  }
+
+  return [...values];
+}
+
+function dashedUuidFromCompactUuid(value: string): string {
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(
+    16,
+    20,
+  )}-${value.slice(20)}`;
+}
+
+function redactProvisioningLogRecord(
+  record: Record<string, unknown>,
+  redactedValues: readonly string[],
+): Record<string, unknown> {
+  return redactProvisioningLogValue(record, redactedValues) as Record<string, unknown>;
+}
+
+function redactProvisioningLogValue(
+  value: unknown,
+  redactedValues: readonly string[],
+  seen = new WeakSet<object>(),
+): unknown {
+  if (typeof value === "string") {
+    return redactProvisioningLogText(value, redactedValues);
+  }
+
+  if (
+    value === null ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "undefined" ||
+    typeof value === "bigint"
+  ) {
+    return value;
+  }
+
+  if (value instanceof Date) {
+    return value;
+  }
+
+  if (value instanceof Error) {
+    return redactProvisioningLogError(value, redactedValues, seen);
+  }
+
+  if (Array.isArray(value)) {
+    if (seen.has(value)) return "[CIRCULAR]";
+    seen.add(value);
+    const redacted = value.map((item) => redactProvisioningLogValue(item, redactedValues, seen));
+    seen.delete(value);
+    return redacted;
+  }
+
+  if (typeof value === "object") {
+    if (seen.has(value)) return { circular: true };
+    seen.add(value);
+    const redacted: Record<string, unknown> = {};
+    for (const [key, nestedValue] of Object.entries(value)) {
+      redacted[key] = redactProvisioningLogValue(nestedValue, redactedValues, seen);
+    }
+    seen.delete(value);
+    return redacted;
+  }
+
+  return value;
+}
+
+function redactProvisioningLogError(
+  error: Error,
+  redactedValues: readonly string[],
+  seen: WeakSet<object>,
+): Error {
+  if (seen.has(error)) {
+    return new Error("[CIRCULAR ERROR CAUSE]");
+  }
+
+  seen.add(error);
+  const redacted = new Error(redactProvisioningLogText(error.message, redactedValues), {
+    ...(error.cause === undefined
+      ? {}
+      : { cause: redactProvisioningLogValue(error.cause, redactedValues, seen) }),
+  });
+  redacted.name = error.name;
+  if (error.stack) {
+    redacted.stack = redactProvisioningLogText(error.stack, redactedValues);
+  }
+
+  for (const [key, nestedValue] of Object.entries(error)) {
+    if (key === "name" || key === "message" || key === "stack" || key === "cause") {
+      continue;
+    }
+
+    (redacted as unknown as Record<string, unknown>)[key] = redactProvisioningLogValue(
+      nestedValue,
+      redactedValues,
+      seen,
+    );
+  }
+
+  seen.delete(error);
+  return redacted;
+}
+
+function redactProvisioningLogText(value: string, redactedValues: readonly string[]): string {
+  let redacted = value.replace(PROVIDER_OPERATION_TAG_LOG_PATTERN, LOG_REDACTION_CENSOR);
+
+  for (const rawValue of redactedValues) {
+    if (rawValue.length === 0) continue;
+    redacted = redacted.replaceAll(rawValue, LOG_REDACTION_CENSOR);
+  }
+
+  return redacted;
 }
 
 function logRunnerProvisioning(
