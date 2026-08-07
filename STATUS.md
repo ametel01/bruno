@@ -15,18 +15,17 @@ Historical execution evidence:
   branch: `codex/goal-postmerge-reconcile`
   worktree: `/Users/alexmetelli/source/bruno`
   phase: remediate PR #282 maintainer finding, then rerun exact-head review and CI
-  next: coordinator personally merges this tracker-only reconciliation after all gates pass, then
-    assigns issue #269 specification and local implementation. Issue #269 must not merge before
-    issue #266 live snapshot evidence exists.
+  next: execute rebased phase R1 from `PLAN.md`; release-attested readiness remains downstream of
+    live snapshot evidence.
 
 ## Goal Contract
 
 - source: [`PLAN.md`](PLAN.md)
-- outcome: at least 30 explicitly authorized clean cold DigitalOcean trials in the configured
-  production region, at least 95% success, and p95 committed `POST /api/agents` request to durable
-  `ready` at or below 60 seconds, with failures included and cleanup verified.
-- current result: repository/local work for Steps 0–4 and the authorization-independent portions of
-  Steps 5, 6, and 8 is merged. Provider-backed cold SLO evidence is absent; the goal is incomplete.
+- outcome: at least 95 of the latest 100 eligible production Cold Deployments reach durable Ready
+  Deployment within 60 seconds of the accepted transaction boundary. A signed immutable 30-slot
+  provider cohort with at least 95% request acceptance and ready-within-60 results gates rollout.
+- current result: merged foundations are preserved in `PROGRESS.md`; phases R1–R6 remain. Provider
+  acceptance and the production cohort are absent, so the goal is incomplete.
 - non-goals: no Droplets before a user create request; no warm pools, unassigned ready capacity,
   onboarding/predictive provisioning, cross-user sharing, or success boundary short of durable
   `ready`.
@@ -48,14 +47,18 @@ Historical execution evidence:
     authorized provider-size evidence.
   - #266 / PR #274 / `57e48439` — protected snapshot workflow and attestation code; live snapshot
     build/cleanup evidence not authorized or run.
-  - #270 / PR #280 / `d07ecf97` — fail-closed same-user reuse; hosted capacity remains one pending
-    measured profile, disk budget, and authorized two-agent provider trial.
-- dependency-blocked but repository-actionable:
-  - #269 / Step 7 — specification and local implementation may proceed, but merge is prohibited
-    until #266 produces verified live snapshot evidence.
-- final provider gate:
-  - #271 / Step 9 — blocked by #265, #266, #269, #270 acceptance plus explicit rollout, provider,
-    and budget authorization.
+  - #270 / PR #280 / `d07ecf97` — capacity-one Same-Owner Reuse safety foundation; multi-agent
+    enablement now belongs to the separate Milestone 14 workstream.
+- rebased remaining path:
+  - R1–R2 — correct measurement/cohort accounting and harden dispatch recovery.
+  - R3 — complete #265 size promotion and replace #266 manifest v1 with attestation v2, then obtain
+    separately authorized live snapshot evidence.
+  - R4 / successor to #269 — restore verified releases and implement release-attested readiness
+    after R3 live snapshot evidence.
+  - R5 / successor to #271 — run the immutable 30-slot provider cohort and guarded rollout under
+    explicit authorization.
+  - R6 — observe the latest 100 eligible production Cold Deployments; this cannot be filled with
+    synthetic trials.
 - unrelated: PR #262 and issues #239/#240 are outside this goal and must not be mutated.
 
 ## Current Evidence And Gates
@@ -72,8 +75,8 @@ Historical execution evidence:
   `AuthModeConfigurationError` code `clerk_auth_not_configured`; no hosted configuration changed.
 - latest local simulated cold smoke is safety-only: one simulated Droplet, zero DigitalOcean
   requests, cleanup verified, and roughly 153 seconds commit-to-ready.
-- no provider-backed size, snapshot, release-attested readiness, two-agent load, rollout, or 30-run
-  cold benchmark evidence exists.
+- no provider-backed size, snapshot, release-attested readiness, rollout, immutable 30-slot cohort,
+  or rolling 100-deployment production evidence exists.
 
 ## Authorization Blockers
 

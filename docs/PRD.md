@@ -102,6 +102,9 @@ The core product primitive is a supervised agent operation: a user creates an ag
 - The first automated cloud provider should be DigitalOcean because Droplets are simple and predictable.
 - Automated runner provisioning should use cloud-init or an equivalent bootstrapping path to install dependencies, start the runner, and register it with AgentBay.
 - Multiple agents should run on one runner before multiple runners become a priority.
+- Until the dedicated multi-agent resource and isolation workstream is complete, hosted placement
+  must remain fail-closed at one agent per runner. Cold-deployment performance work must not claim
+  this product requirement complete or mix Same-Owner Reuse results into the cold SLO.
 - Runner capacity should expose maximum agents, memory, CPU, disk, and current running-agent count.
 - Backups should start with agent config, system prompt, skills, memory files, and logs metadata. Full infrastructure snapshots are not required first.
 - Cost tracking should begin with infrastructure cost and uptime, then later expand to token/model spend.

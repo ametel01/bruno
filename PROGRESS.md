@@ -1,4 +1,4 @@
-# One-Minute Cold Agent Creation Progress
+# One-Minute Cold Agent Deployment Progress
 
 Source: [`PLAN.md`](PLAN.md)
 
@@ -8,13 +8,13 @@ The update log is append-only.
 
 ## Status
 
-- Current step: Step 7 — authorization-independent release-attested readiness preparation; merge is
-  blocked until Step 6 live snapshot evidence is explicitly authorized and verified
+- Current phase: R1 — reconcile measurement boundaries and cohort accounting
 - Overall status: in progress
-- SLO target: at least 95% success and p95 committed-create-to-durable-ready latency at or below 60
-  seconds across 30 clean cold DigitalOcean trials
+- SLO target: at least 95 of the latest 100 eligible production Cold Deployments reach durable Ready
+  Deployment within 60 seconds of the accepted transaction boundary
 - Provider acceptance: authorization-gated; not yet authorized or run
-- Capacity policy: no pre-provisioned Droplets, warm pools, predictive capacity, or cross-user sharing
+- Capacity policy: no pre-created capacity or cross-Owner sharing; hosted Same-Owner Reuse remains
+  fail-closed at one pending a separate multi-agent workstream
 
 ## Checklist
 
@@ -28,6 +28,21 @@ The update log is append-only.
 - [ ] Step 7 — Release-attested lightweight per-Droplet readiness
 - [ ] Step 8 — Safe same-user capacity reuse
 - [ ] Step 9 — Provider-backed SLO proof and rollout
+
+The checklist above is preserved as historical execution evidence for the original plan.
+
+## Rebased Remaining Checklist — 2026-08-08
+
+- [ ] R1 — Reconcile measurement boundaries and cohort accounting
+- [ ] R2 — Harden delayed dispatch recovery and poison handling
+- [ ] R3 — Promote a compatible runner size and snapshot attestation v2
+- [ ] R4 — Restore verified releases and release-attested readiness
+- [ ] R5 — Run authorized provider acceptance and guarded rollout
+- [ ] R6 — Observe the rolling 100-deployment production cohort
+
+R1–R6 are the active checklist. Existing Step 0–9 entries and their append-only log remain the
+evidence for merged foundations; incomplete multi-agent capacity expansion is no longer part of this
+cold-deployment plan.
 
 ## Validation Summary
 
@@ -285,3 +300,18 @@ The update log is append-only.
   isolation/load trial and required local smoke.
 - Next authorization-independent work: specify and prepare Step 7 / issue #269 locally. Do not merge
   it before Step 6 live snapshot evidence exists. Steps 5, 6, 8, and 9 remain provider-gated.
+
+### 2026-08-08 — Plan rebased after domain-model grilling
+
+- Preserved the original Step 0–9 checklist and execution log, then adopted R1–R6 as the remaining
+  checklist after reconciling the plan with merged repository work.
+- Defined the decisive SLO as ready-within-60 counts, with a conservative database acceptance
+  boundary, immutable cohorts, separate API-acceptance availability, an immutable 30-slot provider
+  ledger, and a continuously evaluated latest-100 production cohort.
+- Recorded the no-precreated-capacity, snapshot trust, and rollout-configuration decisions in
+  `CONTEXT.md` and ADRs 0001–0003.
+- Moved hosted multi-agent capacity expansion to a separate required workstream while preserving
+  capacity-one Same-Owner Reuse safety.
+- No implementation behavior, provider resource, hosted configuration, credential, deployment, or
+  billable action changed. No changelog entry was added because this was planning and documentation.
+- Current phase: R1. Provider-backed work remains blocked on phase-specific explicit authorization.

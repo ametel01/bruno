@@ -694,6 +694,11 @@ Goal: Automatically create a DigitalOcean runner without exposing cloud setup to
 
 Goal: A user can run multiple agents on one runner with separated status, logs, and capacity.
 
+Status: This remains a separate required workstream. Existing owner-aware reservation and
+fail-closed resource-profile foundations do not complete the milestone; hosted capacity stays at one
+until CPU, memory, disk, isolation, and provider-backed multi-agent evidence satisfy the criteria
+below. Same-Owner Reuse measurements must remain separate from the Cold-Deployment SLO.
+
 ### Technical implementation
 
 - Add runner placement logic:
