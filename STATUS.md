@@ -3,11 +3,11 @@
 ## Active Work
 
 - issue: [#265](https://github.com/ametel01/plingpling/issues/265)
-  owner: checker-agent (`issue_265_checker`)
+  owner: maintainer-reviewer (`issue_265_reviewer`)
   branch: `codex/issue-265-runner-sizing`
   worktree: `/Users/alexmetelli/source/plingpling-issue-265`
-  pr: none
-  phase: checker accepted authorization-independent scope; provider evidence/default switch still unauthorized
+  pr: [#273](https://github.com/ametel01/plingpling/pull/273)
+  phase: maintainer review of authorization-independent scope
   cycle: 2/5
 
 ## Completion Contract
