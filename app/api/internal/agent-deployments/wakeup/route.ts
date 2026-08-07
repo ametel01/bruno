@@ -1,5 +1,6 @@
 import {
   claimDeploymentWakeupDelivery,
+  deploymentWakeupCallbackUrl,
   deploymentWakeupSafeCodes,
   parseDeploymentWakeupPayload,
   readBoundedDeploymentWakeupBody,
@@ -39,7 +40,7 @@ export async function POST(
     return safeError(400, "deployment_wakeup_request_invalid");
   }
 
-  if (!isSigned(config, request, raw.body)) {
+  if (!(await isSigned(config, request, raw.body))) {
     return safeError(401, "deployment_wakeup_unauthorized");
   }
 
@@ -86,10 +87,12 @@ function isSigned(
   config: Extract<DeploymentDispatchConfig, { mode: "qstash" }>,
   request: Request,
   body: string,
-): boolean {
+): Promise<boolean> {
   return verifyDeploymentWakeupSignature({
     body,
     signatureHeader: request.headers.get(deploymentWakeupSafeCodes.signatureHeader),
+    callbackUrl: deploymentWakeupCallbackUrl(config),
+    upstashRegionHeader: request.headers.get(deploymentWakeupSafeCodes.regionHeader),
     currentSigningKey: config.currentSigningKey,
     nextSigningKey: config.nextSigningKey,
   });

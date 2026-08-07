@@ -5,12 +5,12 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 ## Active Work
 
 - issue: [#264](https://github.com/ametel01/plingpling/issues/264)
-  owner: checker-agent (`issue_264_checker`)
+  owner: builder-agent (`issue_264_builder`)
   branch: `codex/issue-264-durable-wakeups`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: checking
-  cycle: 0/5
+  phase: checker-ready after cycle-1 fixes
+  cycle: 1/5
 - issue: [#265](https://github.com/ametel01/plingpling/issues/265)
   owner: checker-agent (`issue_265_checker`)
   branch: `codex/issue-265-runner-sizing`
@@ -258,8 +258,80 @@ Status: FAILED
   add real signature fixtures and the integrated producer-to-consumer recovery test, and enforce
   deployment+wakeup atomicity at helper boundaries before checker rerun.
 
+## Handoff — #264 Builder Cycle 1 to Checker
+
+- request: Re-check #264 on `codex/issue-264-durable-wakeups`; checker blockers were fixed without
+  real QStash, DigitalOcean, provider, deployment, or billable effects.
+- behavior changes:
+  - QStash delivery verification now uses `@upstash/qstash` `Receiver.verify` against
+    `Upstash-Signature`, exact raw body bytes, canonical callback URL subject, current/next signing
+    keys, issuer/time claim handling, and optional `Upstash-Region`.
+  - QStash publishing now uses the official `Client.publishJSON` with redaction, retries,
+    deduplication ID, and delayed `notBefore`; tests continue to inject fake publishers.
+  - Deployment create/release/stage mutation helpers now require a Drizzle transaction handle at the
+    type and runtime boundary, and the wakeup helper rejects plain DB handles before any half-state
+    can be exposed.
+  - Deployment creation locks the owned agent row before idempotency/active checks and insert,
+    avoiding transaction-aborting active-index violations while preserving same-key idempotency.
+  - The protected cron route test now asserts wakeup outbox sweep happens before normal reconcile.
+- files changed in cycle 1: `package.json`, `bun.lock`,
+  `app/api/internal/agent-deployments/wakeup/route.ts`,
+  `src/server/agents/agent-deployment-dispatch.ts`, `src/server/agents/agent-deployments.ts`,
+  `tests/unit/agent-deployment-wakeup-route.test.ts`, `tests/unit/agent-deployments-db.test.ts`,
+  `tests/unit/agent-deployment-cron-route.test.ts`, and
+  `tests/unit/agent-launch-builder.test.ts`.
+- regressions added:
+  - Real-format Upstash JWT fixtures for current and next signing keys.
+  - Raw-body hash mismatch, wrong callback subject, expired token, future not-before token, unsigned
+    delivery, duplicate delivery, and early-delivery route coverage.
+  - Plain DB handle rejection proving no deployment row or wakeup row is exposed when the owning
+    transaction boundary is missing.
+  - Cron route ordering coverage for outbox sweep before reconcile.
+- tests passed:
+  - `bun run typecheck` — PASS.
+  - `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts tests/unit/agent-launch-builder.test.ts`
+    — PASS, 7 files / 53 tests.
+  - `bun run format:check` — PASS, 402 files.
+  - `bun run lint` — PASS, 402 files.
+  - `bun run test` — PASS, 170 files / 1,647 tests.
+  - `bun run build` — PASS.
+- not run:
+  - `bun run local:agent:smoke` was intentionally not run in this cycle because the coordinator
+    flagged shared local-smoke namespace collisions across #264/#265/#266; leave smoke to serialized
+    checker/coordinator execution.
+  - `bun run test:e2e:ci` was not rerun in this cycle; previous builder evidence before checker was
+    26/26 passing, and this cycle focused on repository-local signature/transaction blockers.
+- known risks:
+  - The remaining integrated producer-to-consumer recovery path should be checked independently by
+    checker with fake publisher/signed delivery evidence.
+  - Real external QStash publishing remains unexercised by design; no real queue/provider effects
+    were authorized.
+
 ## Gates
 
+- #264 builder cycle-1 fix gates (2026-08-07, `issue_264_builder`): PASS locally.
+  - command: `bun run typecheck`
+    result: PASS.
+    evidence: Next route types generated successfully and `tsc --noEmit` passed.
+  - command:
+    `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts tests/unit/agent-launch-builder.test.ts`
+    result: PASS.
+    evidence: isolated DB `plingpling_test_89132_597bfb5396d4`; 7 files / 53 tests passed.
+  - command: `bun run format:check`
+    result: PASS.
+    evidence: Biome checked 402 files with no fixes.
+  - command: `bun run lint`
+    result: PASS.
+    evidence: Biome checked 402 files with no fixes.
+  - command: `bun run test`
+    result: PASS.
+    evidence: isolated DB `plingpling_test_89980_4223127395a1`; 170 files / 1,647 tests passed.
+  - command: `bun run build`
+    result: PASS.
+    evidence: Next.js production build compiled successfully and generated route output.
+  - skipped: `bun run local:agent:smoke`
+    reason: coordinator reported shared local-smoke namespace collisions; reserved for serialized
+    checker/coordinator execution.
 - #264 checker result (2026-08-07, `issue_264_checker`): FAILED at `ebd3773`.
   - command:
     `git status --short --branch --untracked-files=all`

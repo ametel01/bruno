@@ -3,7 +3,10 @@ import "server-only";
 import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
-import { replaceDeploymentWakeupInTransaction } from "@/src/server/agents/agent-deployment-dispatch";
+import {
+  assertTransactionHandle,
+  replaceDeploymentWakeupInTransaction,
+} from "@/src/server/agents/agent-deployment-dispatch";
 import {
   mapAgentDeploymentRowToDto,
   type AgentDeploymentDto,
@@ -24,7 +27,7 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import { agentDeployments, agents } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
 
-type AgentDeploymentTransaction = Parameters<
+export type AgentDeploymentTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
 >[0];
 
@@ -124,13 +127,15 @@ const DEPLOYMENT_RETURNING_SQL = sql`
 `;
 
 export async function createAgentDeploymentForUser(input: {
-  db: AgentDeploymentDatabase;
+  db: AgentDeploymentTransaction;
   userId: string;
   agentId: string;
   configRevision: string;
   idempotencyKey: string;
   now?: Date;
 }): Promise<CreateAgentDeploymentResult> {
+  assertTransactionHandle(input.db);
+
   const normalizedAgentId = input.agentId.trim();
 
   if (!isValidAgentId(normalizedAgentId)) {
@@ -151,15 +156,47 @@ export async function createAgentDeploymentForUser(input: {
   const nowIso = toTimestampParameter(now);
 
   try {
+    const ownedAgent = await input.db.execute<{ id: string }>(sql`
+      select ${agents.id} as id
+      from ${agents}
+      where ${agents.id} = ${normalizedAgentId}
+        and ${agents.userId} = ${input.userId}
+        and ${agents.deletedAt} is null
+      limit 1
+      for update
+    `);
+
+    if (!ownedAgent[0]) {
+      return { ok: false, reason: "agent_not_found" };
+    }
+
+    const existing = await selectDeploymentByIdempotencyKey(
+      input.db,
+      input.userId,
+      normalizedKey.value,
+    );
+
+    if (existing) {
+      return {
+        ok: true,
+        deployment: mapAgentDeploymentRowToDto(existing),
+        inserted: false,
+      };
+    }
+
+    const activeDeployment = await input.db.execute<{ id: string }>(sql`
+      select ${agentDeployments.id} as id
+      from ${agentDeployments}
+      where ${agentDeployments.agentId} = ${normalizedAgentId}
+        and ${agentDeployments.stage} not in ('ready', 'failed')
+      limit 1
+    `);
+
+    if (activeDeployment[0]) {
+      return { ok: false, reason: "active_deployment_exists" };
+    }
+
     const insertedRows = await input.db.execute<AgentDeploymentSqlRow>(sql`
-      with owned_agent as (
-        select ${agents.id} as id, ${agents.userId} as user_id
-        from ${agents}
-        where ${agents.id} = ${normalizedAgentId}
-          and ${agents.userId} = ${input.userId}
-          and ${agents.deletedAt} is null
-        limit 1
-      )
       insert into ${agentDeployments} (
         agent_id,
         user_id,
@@ -168,8 +205,14 @@ export async function createAgentDeploymentForUser(input: {
         created_at,
         updated_at
       )
-      select id, user_id, ${input.configRevision}, ${normalizedKey.value}, ${nowIso}, ${nowIso}
-      from owned_agent
+      values (
+        ${normalizedAgentId},
+        ${input.userId},
+        ${input.configRevision},
+        ${normalizedKey.value},
+        ${nowIso},
+        ${nowIso}
+      )
       on conflict (user_id, idempotency_key) do nothing
       returning ${DEPLOYMENT_RETURNING_SQL}
     `);
@@ -190,48 +233,9 @@ export async function createAgentDeploymentForUser(input: {
       };
     }
 
-    const existing = await selectDeploymentByIdempotencyKey(
-      input.db,
-      input.userId,
-      normalizedKey.value,
-    );
-
-    if (existing) {
-      return {
-        ok: true,
-        deployment: mapAgentDeploymentRowToDto(existing),
-        inserted: false,
-      };
-    }
-
-    const ownedAgent = await input.db.execute<{ id: string }>(sql`
-      select ${agents.id} as id
-      from ${agents}
-      where ${agents.id} = ${normalizedAgentId}
-        and ${agents.userId} = ${input.userId}
-        and ${agents.deletedAt} is null
-      limit 1
-    `);
-
-    return ownedAgent[0]
-      ? { ok: false, reason: "active_deployment_exists" }
-      : { ok: false, reason: "agent_not_found" };
+    return { ok: false, reason: "active_deployment_exists" };
   } catch (error) {
     if (isPostgresConstraintViolation(error, "agent_deployments_active_agent_idx")) {
-      const existing = await selectDeploymentByIdempotencyKey(
-        input.db,
-        input.userId,
-        normalizedKey.value,
-      );
-
-      if (existing) {
-        return {
-          ok: true,
-          deployment: mapAgentDeploymentRowToDto(existing),
-          inserted: false,
-        };
-      }
-
       return { ok: false, reason: "active_deployment_exists" };
     }
 
@@ -372,12 +376,14 @@ export async function claimNextAgentDeployment(input: {
 }
 
 export async function releaseAgentDeploymentLease(input: {
-  db: AgentDeploymentDatabase;
+  db: AgentDeploymentTransaction;
   deploymentId: string;
   leaseOwner: string;
   now: Date;
   nextAttemptAt?: Date | null;
 }): Promise<LeaseMutationResult> {
+  assertTransactionHandle(input.db);
+
   if (!validateDeploymentLeaseOwner(input.leaseOwner)) {
     return { ok: false, reason: "invalid_lease" };
   }
@@ -462,7 +468,7 @@ export async function renewAgentDeploymentLease(input: {
 }
 
 export async function transitionAgentDeploymentStage(input: {
-  db: AgentDeploymentDatabase;
+  db: AgentDeploymentTransaction;
   deploymentId: string;
   leaseOwner: string;
   expectedStage: AgentDeploymentStage;
@@ -471,6 +477,8 @@ export async function transitionAgentDeploymentStage(input: {
   errorCode?: string;
   errorDetail?: string | null;
 }): Promise<DeploymentTransitionResult> {
+  assertTransactionHandle(input.db);
+
   const transition = checkAgentDeploymentTransition(input.expectedStage, input.nextStage);
 
   if (!transition.ok) {
@@ -630,6 +638,7 @@ function isPostgresConstraintViolation(error: unknown, constraint: string, depth
   }
 
   const code = "code" in error ? error.code : undefined;
+  const message = "message" in error ? error.message : undefined;
   const constraintName =
     "constraint_name" in error
       ? error.constraint_name
@@ -637,7 +646,11 @@ function isPostgresConstraintViolation(error: unknown, constraint: string, depth
         ? error.constraint
         : undefined;
 
-  if (code === "23505" && constraintName === constraint) {
+  if (
+    code === "23505" &&
+    (constraintName === constraint ||
+      (typeof message === "string" && message.includes(`"${constraint}"`)))
+  ) {
     return true;
   }
 

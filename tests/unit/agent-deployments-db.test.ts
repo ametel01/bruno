@@ -43,8 +43,7 @@ describe("agent deployment persistence and leases", () => {
     try {
       const [firstResult, secondResult] = await Promise.all([
         runAfterBarrier(barrier, () =>
-          createAgentDeploymentForUser({
-            db: first.db,
+          createDeploymentInTransaction(first, {
             userId: USER_A_ID,
             agentId: AGENT_A_ID,
             configRevision: "cfg-Same-1",
@@ -53,8 +52,7 @@ describe("agent deployment persistence and leases", () => {
           }),
         ),
         runAfterBarrier(barrier, () =>
-          createAgentDeploymentForUser({
-            db: second.db,
+          createDeploymentInTransaction(second, {
             userId: USER_A_ID,
             agentId: AGENT_A_ID,
             configRevision: "cfg-Same-1",
@@ -87,16 +85,14 @@ describe("agent deployment persistence and leases", () => {
   });
 
   it("allows different users to reuse keys but rejects different active keys for one agent", async () => {
-    const reusedByA = await createAgentDeploymentForUser({
-      db: connection.db,
+    const reusedByA = await createDeploymentInTransaction(connection, {
       userId: USER_A_ID,
       agentId: AGENT_A_ID,
       configRevision: "cfg-owner-a",
       idempotencyKey: "shared-key",
       now: NOW,
     });
-    const reusedByB = await createAgentDeploymentForUser({
-      db: connection.db,
+    const reusedByB = await createDeploymentInTransaction(connection, {
       userId: USER_B_ID,
       agentId: AGENT_B_ID,
       configRevision: "cfg-owner-b",
@@ -107,8 +103,7 @@ describe("agent deployment persistence and leases", () => {
     expect(reusedByA.ok).toBe(true);
     expect(reusedByB.ok).toBe(true);
 
-    const competing = await createAgentDeploymentForUser({
-      db: connection.db,
+    const competing = await createDeploymentInTransaction(connection, {
       userId: USER_A_ID,
       agentId: AGENT_A_ID,
       configRevision: "cfg-owner-a-2",
@@ -129,8 +124,7 @@ describe("agent deployment persistence and leases", () => {
         .where(eq(agentDeployments.id, reusedByA.deployment.id));
     }
 
-    const later = await createAgentDeploymentForUser({
-      db: connection.db,
+    const later = await createDeploymentInTransaction(connection, {
       userId: USER_A_ID,
       agentId: AGENT_A_ID,
       configRevision: "cfg-owner-a-3",
@@ -140,8 +134,7 @@ describe("agent deployment persistence and leases", () => {
 
     expect(later).toMatchObject({ ok: true, inserted: true });
 
-    const oldKey = await createAgentDeploymentForUser({
-      db: connection.db,
+    const oldKey = await createDeploymentInTransaction(connection, {
       userId: USER_A_ID,
       agentId: AGENT_A_ID,
       configRevision: "cfg-owner-a-ignored",
@@ -259,8 +252,7 @@ describe("agent deployment persistence and leases", () => {
       }),
     ).resolves.toEqual({ ok: false, reason: "lease_not_held" });
     await expect(
-      releaseAgentDeploymentLease({
-        db: connection.db,
+      releaseDeploymentInTransaction(connection, {
         deploymentId: deployment.id,
         leaseOwner: LEASE_OWNER_A,
         now: new Date(NOW.getTime() + 1_000),
@@ -277,8 +269,7 @@ describe("agent deployment persistence and leases", () => {
     });
     expect(renewed.ok).toBe(true);
 
-    const released = await releaseAgentDeploymentLease({
-      db: connection.db,
+    const released = await releaseDeploymentInTransaction(connection, {
       deploymentId: deployment.id,
       leaseOwner: LEASE_OWNER_A,
       now: new Date(NOW.getTime() + 2_000),
@@ -323,8 +314,7 @@ describe("agent deployment persistence and leases", () => {
     try {
       const [firstTransition, secondTransition] = await Promise.all([
         runAfterBarrier(barrier, () =>
-          transitionAgentDeploymentStage({
-            db: first.db,
+          transitionDeploymentInTransaction(first, {
             deploymentId: deployment.id,
             leaseOwner: LEASE_OWNER_A,
             expectedStage: "pending",
@@ -333,8 +323,7 @@ describe("agent deployment persistence and leases", () => {
           }),
         ),
         runAfterBarrier(barrier, () =>
-          transitionAgentDeploymentStage({
-            db: second.db,
+          transitionDeploymentInTransaction(second, {
             deploymentId: deployment.id,
             leaseOwner: LEASE_OWNER_A,
             expectedStage: "pending",
@@ -353,8 +342,7 @@ describe("agent deployment persistence and leases", () => {
       await Promise.all([first.close(), second.close()]);
     }
 
-    const sameStageNoLease = await transitionAgentDeploymentStage({
-      db: connection.db,
+    const sameStageNoLease = await transitionDeploymentInTransaction(connection, {
       deploymentId: deployment.id,
       leaseOwner: LEASE_OWNER_A,
       expectedStage: "provisioning_runner",
@@ -375,8 +363,7 @@ describe("agent deployment persistence and leases", () => {
       .where(eq(agentDeployments.id, deployment.id));
 
     await expect(
-      transitionAgentDeploymentStage({
-        db: connection.db,
+      transitionDeploymentInTransaction(connection, {
         deploymentId: deployment.id,
         leaseOwner: LEASE_OWNER_A,
         expectedStage: "failed",
@@ -404,8 +391,7 @@ describe("agent deployment persistence and leases", () => {
     expect(claimed?.id).toBe(deployment.id);
 
     await expect(
-      transitionAgentDeploymentStage({
-        db: connection.db,
+      transitionDeploymentInTransaction(connection, {
         deploymentId: deployment.id,
         leaseOwner: LEASE_OWNER_A,
         expectedStage: "pending",
@@ -422,9 +408,28 @@ describe("agent deployment persistence and leases", () => {
     expect(terminalWakeups).toMatchObject([{ generation: 1, state: "terminal" }]);
   });
 
+  it("rejects plain database handles before exposing half of a deployment and wakeup mutation", async () => {
+    await expect(
+      createAgentDeploymentForUser({
+        db: connection.db as never,
+        userId: USER_A_ID,
+        agentId: AGENT_A_ID,
+        configRevision: "cfg-plain-db-rejected",
+        idempotencyKey: "plain-db-rejected",
+        now: NOW,
+      }),
+    ).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: "Deployment wakeup writes require an owning transaction.",
+      }),
+    });
+
+    await expect(connection.db.select().from(agentDeployments)).resolves.toEqual([]);
+    await expect(connection.db.select().from(agentDeploymentWakeups)).resolves.toEqual([]);
+  });
+
   async function insertDeployment(idempotencyKey: string) {
-    const result = await createAgentDeploymentForUser({
-      db: connection.db,
+    const result = await createDeploymentInTransaction(connection, {
       userId: USER_A_ID,
       agentId: AGENT_A_ID,
       configRevision: `cfg-${idempotencyKey}`,
@@ -462,6 +467,27 @@ async function seedDeploymentOwners(connection: DatabaseConnection): Promise<voi
 
 async function resetDeploymentTables(connection: DatabaseConnection): Promise<void> {
   await connection.client`truncate table agent_deployments, agents, users restart identity cascade`;
+}
+
+function createDeploymentInTransaction(
+  connection: DatabaseConnection,
+  input: Omit<Parameters<typeof createAgentDeploymentForUser>[0], "db">,
+) {
+  return connection.db.transaction((tx) => createAgentDeploymentForUser({ db: tx, ...input }));
+}
+
+function releaseDeploymentInTransaction(
+  connection: DatabaseConnection,
+  input: Omit<Parameters<typeof releaseAgentDeploymentLease>[0], "db">,
+) {
+  return connection.db.transaction((tx) => releaseAgentDeploymentLease({ db: tx, ...input }));
+}
+
+function transitionDeploymentInTransaction(
+  connection: DatabaseConnection,
+  input: Omit<Parameters<typeof transitionAgentDeploymentStage>[0], "db">,
+) {
+  return connection.db.transaction((tx) => transitionAgentDeploymentStage({ db: tx, ...input }));
 }
 
 function createBarrier(parties: number): () => Promise<void> {

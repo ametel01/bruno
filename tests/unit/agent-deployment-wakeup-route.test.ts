@@ -1,10 +1,11 @@
+import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { SignJWT } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/internal/agent-deployments/wakeup/route";
 import { createAgentDeploymentForUser } from "@/src/server/agents/agent-deployments";
 import {
   deploymentWakeupSafeCodes,
-  signDeploymentWakeupBody,
   type DeploymentWakeupPayload,
 } from "@/src/server/agents/agent-deployment-dispatch";
 import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
@@ -16,6 +17,7 @@ const AGENT_ID = "00000000-0000-4000-8000-000000000e11";
 const NOW = new Date("2026-08-07T02:00:00.000Z");
 const CURRENT_SIGNING_KEY = "current_signing_key_abcdefghijklmnopqrstuvwxyz012345";
 const NEXT_SIGNING_KEY = "next_signing_key_abcdefghijklmnopqrstuvwxyz012345";
+const CALLBACK_URL = "https://app.example.test/api/internal/agent-deployments/wakeup";
 
 describe("POST /api/internal/agent-deployments/wakeup", () => {
   let connection: DatabaseConnection;
@@ -48,10 +50,10 @@ describe("POST /api/internal/agent-deployments/wakeup", () => {
       new Request("https://app.example.test/api/internal/agent-deployments/wakeup", {
         method: "POST",
         headers: {
-          [deploymentWakeupSafeCodes.signatureHeader]: signDeploymentWakeupBody(
-            `${body} `,
-            CURRENT_SIGNING_KEY,
-          ),
+          [deploymentWakeupSafeCodes.signatureHeader]: await signQstashBody(`${body} `, {
+            signingKey: CURRENT_SIGNING_KEY,
+            subject: CALLBACK_URL,
+          }),
         },
         body,
       }),
@@ -79,7 +81,7 @@ describe("POST /api/internal/agent-deployments/wakeup", () => {
     const body = JSON.stringify(payload);
     const reconcile = vi.fn(async () => ({ processed: 1 as const, outcome: "advanced" as const }));
 
-    const request = signedRequest(body, CURRENT_SIGNING_KEY);
+    const request = await signedRequest(body, CURRENT_SIGNING_KEY);
     const response = await POST(request, undefined, {
       readConfig: readQstashConfig,
       createConnection: () => connection,
@@ -92,7 +94,7 @@ describe("POST /api/internal/agent-deployments/wakeup", () => {
     expect(reconcile).toHaveBeenCalledOnce();
     expect(reconcile).toHaveBeenCalledWith(payload.deploymentId);
 
-    const duplicate = await POST(signedRequest(body, NEXT_SIGNING_KEY), undefined, {
+    const duplicate = await POST(await signedRequest(body, NEXT_SIGNING_KEY), undefined, {
       readConfig: readQstashConfig,
       createConnection: () => connection,
       reconcile,
@@ -109,12 +111,67 @@ describe("POST /api/internal/agent-deployments/wakeup", () => {
     expect(wakeup).toMatchObject({ state: "claimed", generation: payload.generation });
   });
 
+  it("rejects QStash JWTs with the wrong callback subject or invalid time claims", async () => {
+    const payload = await createWakeupPayload();
+    const body = JSON.stringify(payload);
+    const reconcile = vi.fn();
+
+    for (const signature of [
+      await signQstashBody(body, {
+        signingKey: CURRENT_SIGNING_KEY,
+        subject: "https://app.example.test/api/internal/agent-deployments/other",
+      }),
+      await signQstashBody(body, {
+        signingKey: CURRENT_SIGNING_KEY,
+        subject: CALLBACK_URL,
+        expiresInSeconds: -60,
+      }),
+      await signQstashBody(body, {
+        signingKey: CURRENT_SIGNING_KEY,
+        subject: CALLBACK_URL,
+        notBeforeOffsetSeconds: 60,
+      }),
+    ]) {
+      const response = await POST(
+        new Request(CALLBACK_URL, {
+          method: "POST",
+          headers: {
+            [deploymentWakeupSafeCodes.signatureHeader]: signature,
+          },
+          body,
+        }),
+        undefined,
+        {
+          readConfig: readQstashConfig,
+          createConnection: () => connection,
+          reconcile,
+          now: () => NOW,
+        },
+      );
+
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({
+        error: {
+          code: "deployment_wakeup_unauthorized",
+          message: "Deployment wakeup delivery failed safely.",
+        },
+      });
+    }
+
+    expect(reconcile).not.toHaveBeenCalled();
+    const [wakeup] = await connection.db
+      .select()
+      .from(agentDeploymentWakeups)
+      .where(eq(agentDeploymentWakeups.deploymentId, payload.deploymentId));
+    expect(wakeup).toMatchObject({ state: "pending" });
+  });
+
   it("rejects early deliveries without claiming or reconciling", async () => {
     const payload = await createWakeupPayload(new Date(NOW.getTime() + 2_000));
     const body = JSON.stringify(payload);
     const reconcile = vi.fn();
 
-    const response = await POST(signedRequest(body, CURRENT_SIGNING_KEY), undefined, {
+    const response = await POST(await signedRequest(body, CURRENT_SIGNING_KEY), undefined, {
       readConfig: readQstashConfig,
       createConnection: () => connection,
       reconcile,
@@ -126,14 +183,16 @@ describe("POST /api/internal/agent-deployments/wakeup", () => {
   });
 
   async function createWakeupPayload(dueAt = NOW): Promise<DeploymentWakeupPayload> {
-    const created = await createAgentDeploymentForUser({
-      db: connection.db,
-      userId: USER_ID,
-      agentId: AGENT_ID,
-      configRevision: "cfg-wakeup",
-      idempotencyKey: `wakeup-${dueAt.getTime()}`,
-      now: dueAt,
-    });
+    const created = await connection.db.transaction((tx) =>
+      createAgentDeploymentForUser({
+        db: tx,
+        userId: USER_ID,
+        agentId: AGENT_ID,
+        configRevision: "cfg-wakeup",
+        idempotencyKey: `wakeup-${dueAt.getTime()}`,
+        now: dueAt,
+      }),
+    );
 
     if (!created.ok) {
       throw new Error(`Deployment creation failed: ${created.reason}`);
@@ -156,14 +215,38 @@ describe("POST /api/internal/agent-deployments/wakeup", () => {
   }
 });
 
-function signedRequest(body: string, signingKey: string): Request {
-  return new Request("https://app.example.test/api/internal/agent-deployments/wakeup", {
+async function signedRequest(body: string, signingKey: string): Promise<Request> {
+  return new Request(CALLBACK_URL, {
     method: "POST",
     headers: {
-      [deploymentWakeupSafeCodes.signatureHeader]: signDeploymentWakeupBody(body, signingKey),
+      [deploymentWakeupSafeCodes.signatureHeader]: await signQstashBody(body, {
+        signingKey,
+        subject: CALLBACK_URL,
+      }),
     },
     body,
   });
+}
+
+async function signQstashBody(
+  body: string,
+  input: {
+    signingKey: string;
+    subject: string;
+    now?: Date;
+    notBeforeOffsetSeconds?: number;
+    expiresInSeconds?: number;
+  },
+): Promise<string> {
+  const issuedAt = Math.floor((input.now ?? new Date()).getTime() / 1000);
+  return await new SignJWT({ body: createHash("sha256").update(body).digest("base64url") })
+    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setIssuer("Upstash")
+    .setSubject(input.subject)
+    .setIssuedAt(issuedAt)
+    .setNotBefore(issuedAt + (input.notBeforeOffsetSeconds ?? -1))
+    .setExpirationTime(issuedAt + (input.expiresInSeconds ?? 60))
+    .sign(new TextEncoder().encode(input.signingKey));
 }
 
 function readQstashConfig() {

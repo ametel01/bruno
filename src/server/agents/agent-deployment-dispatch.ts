@@ -1,6 +1,7 @@
 import "server-only";
 
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { Client, Receiver } from "@upstash/qstash";
+import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
@@ -45,7 +46,6 @@ export type DeploymentWakeupDispatchDependencies = {
   publisher?: DeploymentWakeupPublisher;
   now?: () => Date;
   randomUUID?: () => string;
-  fetch?: typeof fetch;
 };
 
 const MAX_WAKEUP_BODY_BYTES = 4096;
@@ -53,7 +53,8 @@ const PUBLISH_LEASE_MS = 30_000;
 const SAFE_PUBLISH_REJECTION_CODE = "publish_rejected";
 const SAFE_DELIVERY_REJECTION_CODE = "delivery_rejected";
 const WAKEUP_ROUTE_PATH = "/api/internal/agent-deployments/wakeup";
-const SIGNATURE_HEADER = "x-agentbay-qstash-signature";
+const UPSTASH_SIGNATURE_HEADER = "Upstash-Signature";
+const UPSTASH_REGION_HEADER = "Upstash-Region";
 
 export class AgentDeploymentDispatchError extends Error {
   constructor(cause?: unknown) {
@@ -67,10 +68,6 @@ export function deploymentWakeupCallbackUrl(
   config: Extract<DeploymentDispatchConfig, { mode: "qstash" }>,
 ): string {
   return new URL(WAKEUP_ROUTE_PATH, config.callbackBaseUrl).toString();
-}
-
-export function signDeploymentWakeupBody(body: string, signingKey: string): string {
-  return createHmac("sha256", signingKey).update(body).digest("base64url");
 }
 
 export async function readBoundedDeploymentWakeupBody(
@@ -106,21 +103,35 @@ export async function readBoundedDeploymentWakeupBody(
   return { ok: true, body: Buffer.concat(chunks).toString("utf8") };
 }
 
-export function verifyDeploymentWakeupSignature(input: {
+export async function verifyDeploymentWakeupSignature(input: {
   body: string;
   signatureHeader: string | null;
+  callbackUrl: string;
+  upstashRegionHeader?: string | null;
   currentSigningKey: string;
   nextSigningKey: string;
-}): boolean {
+}): Promise<boolean> {
   const signature = input.signatureHeader;
 
-  if (!signature || !/^[A-Za-z0-9_-]{32,256}$/.test(signature)) {
+  if (!signature || signature.trim() !== signature || signature.length > 4096) {
     return false;
   }
 
-  return [input.currentSigningKey, input.nextSigningKey].some((key) =>
-    safeEqual(signDeploymentWakeupBody(input.body, key), signature),
-  );
+  try {
+    return await new Receiver({
+      currentSigningKey: input.currentSigningKey,
+      nextSigningKey: input.nextSigningKey,
+      devMode: false,
+    }).verify({
+      signature,
+      body: input.body,
+      url: input.callbackUrl,
+      clockTolerance: 5,
+      ...(input.upstashRegionHeader ? { upstashRegion: input.upstashRegionHeader } : {}),
+    });
+  } catch {
+    return false;
+  }
 }
 
 export function parseDeploymentWakeupPayload(
@@ -157,7 +168,7 @@ export function parseDeploymentWakeupPayload(
 }
 
 export async function replaceDeploymentWakeupInTransaction(
-  db: DeploymentDispatchDatabase,
+  db: DeploymentDispatchTransaction,
   input: {
     deploymentId: string;
     dueAt: Date | null;
@@ -165,6 +176,8 @@ export async function replaceDeploymentWakeupInTransaction(
     safeErrorCode?: string | null;
   },
 ): Promise<DeploymentWakeupPayload | null> {
+  assertTransactionHandle(db);
+
   if (!isUuid(input.deploymentId) || Number.isNaN(input.now.getTime())) {
     throw new AgentDeploymentDispatchError(new Error("Invalid deployment wakeup input."));
   }
@@ -261,12 +274,7 @@ export async function publishDeploymentWakeupAfterCommit(
   const now = dependencies.now?.() ?? new Date();
   const leaseOwner = `publish:${dependencies.randomUUID?.() ?? randomUUID()}`;
   const publisher =
-    dependencies.publisher ??
-    createQstashDeploymentWakeupPublisher(
-      dependencies.fetch
-        ? { token: config.token, fetch: dependencies.fetch }
-        : { token: config.token },
-    );
+    dependencies.publisher ?? createQstashDeploymentWakeupPublisher({ token: config.token });
 
   try {
     const claimed = await connection.db.transaction((tx) =>
@@ -357,12 +365,7 @@ export async function sweepDeploymentWakeupOutbox(
   const now = dependencies.now?.() ?? new Date();
   const leaseOwner = `publish:${dependencies.randomUUID?.() ?? randomUUID()}`;
   const publisher =
-    dependencies.publisher ??
-    createQstashDeploymentWakeupPublisher(
-      dependencies.fetch
-        ? { token: config.token, fetch: dependencies.fetch }
-        : { token: config.token },
-    );
+    dependencies.publisher ?? createQstashDeploymentWakeupPublisher({ token: config.token });
 
   try {
     const claimed = await connection.db.transaction((tx) =>
@@ -476,33 +479,23 @@ export async function claimDeploymentWakeupDelivery(
 
 export function createQstashDeploymentWakeupPublisher(input: {
   token: string;
-  fetch?: typeof fetch;
 }): DeploymentWakeupPublisher {
+  const client = new Client({ token: input.token, devMode: false });
+
   return {
     async publish({ payload, dueAt, callbackUrl }) {
-      const body = JSON.stringify(payload);
-      const request = input.fetch ?? fetch;
       const notBefore = Math.max(Math.floor(dueAt.getTime() / 1000), Math.floor(Date.now() / 1000));
-      const response = await request(
-        `https://qstash.upstash.io/v2/publish/${encodeURIComponent(callbackUrl)}`,
-        {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${input.token}`,
-            "content-type": "application/json",
-            "upstash-not-before": String(notBefore),
-          },
-          body,
-        },
-      );
+      const published = await client.publishJSON({
+        url: callbackUrl,
+        body: payload,
+        method: "POST",
+        notBefore,
+        retries: 3,
+        deduplicationId: `${payload.deploymentId}:${payload.generation}`,
+        redact: { body: true, header: true },
+      });
 
-      if (!response.ok) {
-        throw new Error(SAFE_PUBLISH_REJECTION_CODE);
-      }
-
-      const parsed = (await response.json().catch(() => ({}))) as { messageId?: unknown };
-      const messageId = typeof parsed.messageId === "string" ? parsed.messageId : randomUUID();
-      return { messageId };
+      return { messageId: published.messageId };
     },
   };
 }
@@ -640,15 +633,6 @@ async function markDeploymentWakeupPublishFailed(
   `);
 }
 
-function safeEqual(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-
-  return (
-    leftBuffer.byteLength === rightBuffer.byteLength && timingSafeEqual(leftBuffer, rightBuffer)
-  );
-}
-
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -665,5 +649,15 @@ function toIso(value: Date | string): string {
 export const deploymentWakeupSafeCodes = {
   publishRejected: SAFE_PUBLISH_REJECTION_CODE,
   deliveryRejected: SAFE_DELIVERY_REJECTION_CODE,
-  signatureHeader: SIGNATURE_HEADER,
+  signatureHeader: UPSTASH_SIGNATURE_HEADER,
+  regionHeader: UPSTASH_REGION_HEADER,
 } as const;
+
+export function assertTransactionHandle(db: DeploymentDispatchTransaction): void {
+  const runtime = db as object;
+  if ("$client" in runtime && !("nestedIndex" in runtime)) {
+    throw new AgentDeploymentDispatchError(
+      new Error("Deployment wakeup writes require an owning transaction."),
+    );
+  }
+}
