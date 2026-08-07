@@ -16,15 +16,18 @@ import {
   DEFAULT_HERMES_RUNNER_MAX_AGENTS,
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
+  DEFAULT_MANUAL_RUNNER_IMAGE,
 } from "@/src/runner-service/constants";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
 import {
+  findDigitalOceanRunnerResourceProfile,
   MAX_HERMES_DOCKER_PIDS_LIMIT,
   parseHermesDockerCpus,
   parseHermesDockerMemoryMiB,
   parseHermesDockerPidsLimit,
   validateDigitalOceanRunnerResourceCompatibility,
 } from "@/src/server/runners/runner-resource-profiles";
+import type { RunnerSnapshotExpectedIdentities } from "@/src/server/runners/runner-snapshot-manifest";
 
 export const DEFAULT_AGENTBAY_RUNNER_IMAGE = "ghcr.io/ametel01/agentbay-runner:main";
 
@@ -61,7 +64,18 @@ export type DigitalOceanProviderConfig = {
   localRunnerContainerName?: string;
   localRunnerStartDelayMs?: number;
   localAgentSmokeMode?: boolean;
+  snapshotMode?: DigitalOceanSnapshotModeConfig;
 };
+
+export type DigitalOceanSnapshotModeConfig =
+  | { mode: "stock" }
+  | {
+      mode: "snapshot";
+      manifestBytes: string;
+      signature: string;
+      publicKeyPem: string;
+      expected: RunnerSnapshotExpectedIdentities;
+    };
 
 export type CronSecretConfig =
   | {
@@ -380,6 +394,15 @@ export function readDigitalOceanProviderConfig(
     ...(localAgentSmokeMode === undefined ? {} : { localAgentSmokeMode: true }),
   };
 
+  const snapshotMode = readDigitalOceanSnapshotMode(input, {
+    region: config.region,
+    sizeSlug: config.sizeSlug,
+    baseImageSlug: config.image,
+    runnerImage: config.runnerImage,
+    hermesImage: config.hermesWorkloadImage ?? DEFAULT_HERMES_WORKLOAD_IMAGE,
+  });
+  config.snapshotMode = snapshotMode;
+
   if (providerMode === "digitalocean" && !parseImmutableRunnerImageReference(runnerImage)) {
     throw new EnvValidationError([
       "AGENTBAY_RUNNER_IMAGE must be an immutable registry image reference with a sha256 digest for hosted DigitalOcean provisioning.",
@@ -395,6 +418,87 @@ export function readDigitalOceanProviderConfig(
   }
 
   return config;
+}
+
+function readDigitalOceanSnapshotMode(
+  input: Record<string, string | undefined>,
+  expectedInput: {
+    region: string;
+    sizeSlug: string;
+    baseImageSlug: string;
+    runnerImage: string;
+    hermesImage: string;
+  },
+): DigitalOceanSnapshotModeConfig {
+  const mode = input.AGENTBAY_DIGITALOCEAN_IMAGE_MODE?.trim() ?? "stock";
+
+  if (mode === "stock") {
+    return { mode: "stock" };
+  }
+
+  if (mode !== "snapshot") {
+    throw new EnvValidationError([
+      "AGENTBAY_DIGITALOCEAN_IMAGE_MODE must be stock or snapshot when set.",
+    ]);
+  }
+
+  const manifestBytes = readRequiredSnapshotSetting(
+    input.AGENTBAY_DIGITALOCEAN_SNAPSHOT_MANIFEST,
+    "AGENTBAY_DIGITALOCEAN_SNAPSHOT_MANIFEST",
+  );
+  const signature = readRequiredSnapshotSetting(
+    input.AGENTBAY_DIGITALOCEAN_SNAPSHOT_SIGNATURE,
+    "AGENTBAY_DIGITALOCEAN_SNAPSHOT_SIGNATURE",
+  );
+  const publicKeyPem = readRequiredSnapshotSetting(
+    input.AGENTBAY_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY,
+    "AGENTBAY_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY",
+  );
+  const sourceRevision = readRequiredSnapshotSetting(
+    input.AGENTBAY_RELEASE_SOURCE_REVISION,
+    "AGENTBAY_RELEASE_SOURCE_REVISION",
+  );
+
+  if (!/^[a-f0-9]{40}$/.test(sourceRevision)) {
+    throw new EnvValidationError([
+      "AGENTBAY_RELEASE_SOURCE_REVISION must be the exact 40-character source commit for snapshot mode.",
+    ]);
+  }
+
+  return {
+    mode: "snapshot",
+    manifestBytes,
+    signature,
+    publicKeyPem,
+    expected: {
+      region: expectedInput.region,
+      sizeDiskGb: diskGbForDigitalOceanSizeSlug(expectedInput.sizeSlug),
+      baseImageSlug: expectedInput.baseImageSlug,
+      architecture: "amd64",
+      runnerImage: expectedInput.runnerImage,
+      defaultAgentImage: readRunnerImage(input.AGENTBAY_DOCKER_RUNNER_IMAGE, {
+        envName: "AGENTBAY_DOCKER_RUNNER_IMAGE",
+        defaultValue: DEFAULT_MANUAL_RUNNER_IMAGE,
+      }),
+      hermesImage: expectedInput.hermesImage,
+      sourceRepository: "ametel01/plingpling",
+      sourceRevision,
+    },
+  };
+}
+
+function readRequiredSnapshotSetting(value: string | undefined, envName: string): string {
+  const normalized = value?.trim();
+
+  if (!normalized) {
+    throw new EnvValidationError([`${envName} is required when snapshot image mode is enabled.`]);
+  }
+
+  return normalized;
+}
+
+function diskGbForDigitalOceanSizeSlug(sizeSlug: string): number {
+  return findDigitalOceanRunnerResourceProfile(sizeSlug)?.diskGiB ?? 25;
 }
 
 export function readHermesWorkloadImage(

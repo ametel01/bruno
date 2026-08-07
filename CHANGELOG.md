@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   metadata, reject incompatible Hermes CPU/memory/capacity combinations before provider effects,
   propagate exact Hermes Docker CPU/memory/PID limits through cloud bootstrap, and keep provider
   size-comparison benchmarks fail-closed behind explicit candidate slugs and authorization.
+- Protected manual runner snapshot build plumbing with signed manifest verification, fake-provider
+  cleanup/order coverage, snapshot-mode first boot, stock rollback, and fail-closed snapshot evidence
+  validation before hosted Droplet creation.
 - Read-only agent creation latency benchmark reporting with deterministic p50/p95 summaries,
   invalid-evidence surfacing, local smoke timing output before cleanup, and fail-closed provider
   benchmark authorization.

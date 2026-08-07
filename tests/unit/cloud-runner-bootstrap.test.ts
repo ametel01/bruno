@@ -232,6 +232,30 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).not.toContain(RUNNER_EXPECTED_IMAGE_DIGEST_ENV);
   });
 
+  it("builds snapshot first-boot data without package installation or image pulls", () => {
+    const content = buildCloudRunnerBootstrapContent({
+      appBaseUrl: "https://app.agentbay.test",
+      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      commandBearerToken: "runner-command-token",
+      runnerEndpointUrl: "https://runner.agentbay.test",
+      runnerImage: IMMUTABLE_RUNNER_IMAGE,
+      bootMode: "snapshot",
+    });
+
+    expect(content.userData).toContain("#cloud-config");
+    expect(content.userData).toContain("AGENTBAY_RUNNER_REGISTRATION_TOKEN=");
+    expect(content.userData).toContain("AGENTBAY_RUNNER_BEARER_TOKEN=runner-command-token");
+    expect(content.userData).toContain("snapshot_preloaded_images");
+    expect(content.userData).toContain("docker run --detach");
+    expect(content.userData).toContain("waiting_for_runner");
+    expect(content.userData).not.toContain("package_update:");
+    expect(content.userData).not.toContain("packages:");
+    expect(content.userData).not.toContain("apt-get install");
+    expect(content.userData).not.toContain("docker pull");
+    expect(content.userData).not.toContain("agentbay_pull_image");
+    expect(content.userData).not.toContain("docker_apt_repository");
+  });
+
   it("marks local tagged images with the explicit development identity seam", () => {
     const content = buildCloudRunnerBootstrapContent({
       appBaseUrl: "https://app.agentbay.test",

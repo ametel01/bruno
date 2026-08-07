@@ -44,6 +44,11 @@ The update log is append-only.
   tests/unit/runner-bootstrap-events.test.ts`, `bun run test`, `bun run build`,
   `bun run test:e2e:ci`, `bun run local:agent:smoke`, and
   `bun run agent:creation:benchmark -- --limit 1`.
+- Step 6 repository implementation: Added protected manual snapshot workflow, local build
+  orchestrator, signed manifest verification, snapshot-mode pre-create evidence validation,
+  snapshot first-boot bootstrap mode, fake-provider action/image surfaces, docs, and tests. Step 6
+  remains unchecked because live DigitalOcean snapshot execution and cleanup acceptance are explicitly
+  authorization-gated and have not run.
 - Provider-backed acceptance gate: pending explicit authorization.
 - Step 5 authorization-independent subset: canonical runner profile validation, pre-provider
   rejection, runtime-limit propagation, and fake-only benchmark candidate validation are implemented
@@ -133,3 +138,26 @@ The update log is append-only.
   the existing reserved/unimplemented provider-trial boundary. No provider resources were created.
 - Next: checker review. Merge/default selection remains blocked on green required main CI or accepted
   upstream classification plus explicit provider evidence authorization.
+
+### 2026-08-07 — Step 6 repository implementation ready for review
+
+- Implemented repository-local runner snapshot support for issue #266 without pre-provisioning user
+  Droplets or dispatching the protected workflow.
+- Added signed canonical snapshot manifests, fail-closed snapshot evidence selection, narrow
+  DigitalOcean image/action/provider interfaces, fake-provider cleanup/effect tracing, snapshot-mode
+  first boot without apt/package/image pulls, and stock-image rollback behavior.
+- Added `.github/workflows/build-runner-snapshot.yml` as a protected `workflow_dispatch`-only
+  workflow with pre-secret authorization validation, non-cancelling concurrency, least-privilege
+  permissions, unconditional cleanup, and allowlisted manifest artifacts.
+- Updated `docs/RUNNER_RELEASES.md`, `README.md`, and `CHANGELOG.md`.
+- Gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`;
+  `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-manifest.test.ts
+  tests/unit/runner-snapshot-build.test.ts tests/unit/runner-snapshot-workflow.test.ts
+  tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
+  tests/unit/digitalocean-provider.test.ts`; `bun run test` (172 files, 1,646 tests);
+  `bun run build`.
+- Skipped by design: protected DigitalOcean workflow dispatch, provider resource creation/deletion,
+  environment/secrets configuration, `bun run test:e2e:ci`, `bun run repro:cloud-runner`, and
+  `bun run local:agent:smoke` with a local snapshot-equivalent image.
+- Step 6 and issue #266 must remain open until explicit live snapshot authorization proves manifest
+  artifact attestation and absence of builder/firewall/credential leftovers.

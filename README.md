@@ -438,6 +438,7 @@ enable ready mode by treating mock or local evidence as live acceptance.
 | `bun run verify:e2e` | Run the base verification gate followed by provider-backed E2E. |
 | `bun run agent:image:smoke` | Verify the selected Hermes image contract locally. |
 | `bun run agent:hermes:contract-smoke` | Exercise the pinned Hermes runner/readiness/restart contract locally. |
+| `bun run runner:snapshot:build` | Protected manual runner-snapshot build entrypoint; requires explicit authorization and provider credentials. |
 | `bun run verify:hermes:staging` | Run the capability-gated, interactive-human-attested live Hermes/Telegram acceptance and durable cleanup workflow. |
 | `bun run deploy:prod` | Dispatch the protected full-application production deployment workflow. |
 

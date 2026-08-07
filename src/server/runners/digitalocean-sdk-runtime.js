@@ -7,9 +7,10 @@ import { FetchRequestAdapter } from "@microsoft/kiota-http-fetchlibrary";
 export function createDigitalOceanSdkClient(token, apiBaseUrl) {
   const authProvider = new DigitalOceanApiKeyAuthenticationProvider(token);
   const adapter = new FetchRequestAdapter(authProvider);
+  const baseUrl = (apiBaseUrl ?? "https://api.digitalocean.com").replace(/\/v2\/?$/, "");
 
   if (apiBaseUrl) {
-    adapter.baseUrl = apiBaseUrl.replace(/\/v2\/?$/, "");
+    adapter.baseUrl = baseUrl;
   }
 
   const client = createDigitalOceanClient(adapter);
@@ -40,6 +41,51 @@ export function createDigitalOceanSdkClient(token, apiBaseUrl) {
               client.v2.droplets.byDroplet_id(id).toDeleteRequestInformation(),
               context,
             ),
+          actions: {
+            post: (body, context) =>
+              sendRestJson(
+                token,
+                baseUrl,
+                `/v2/droplets/${encodeURIComponent(String(id))}/actions`,
+                {
+                  method: "POST",
+                  body,
+                  context,
+                },
+              ),
+          },
+        }),
+      },
+      actions: {
+        byAction_id: (id) => ({
+          get: (context) =>
+            sendRestJson(token, baseUrl, `/v2/actions/${encodeURIComponent(String(id))}`, {
+              method: "GET",
+              context,
+            }),
+        }),
+      },
+      images: {
+        get: (input, context) => {
+          const searchParams = new URLSearchParams();
+          if (input.privateImages) searchParams.set("private", "true");
+          searchParams.set("per_page", String(input.perPage));
+          return sendRestJson(token, baseUrl, `/v2/images?${searchParams.toString()}`, {
+            method: "GET",
+            context,
+          });
+        },
+        byImage_id: (id) => ({
+          get: (context) =>
+            sendRestJson(token, baseUrl, `/v2/images/${encodeURIComponent(String(id))}`, {
+              method: "GET",
+              context,
+            }),
+          delete: (context) =>
+            sendRestNoContent(token, baseUrl, `/v2/images/${encodeURIComponent(String(id))}`, {
+              method: "DELETE",
+              context,
+            }),
         }),
       },
       account: {
@@ -48,6 +94,18 @@ export function createDigitalOceanSdkClient(token, apiBaseUrl) {
             sendJson(adapter, client.v2.account.keys.toGetRequestInformation(), context),
           post: (body, context) =>
             sendJson(adapter, client.v2.account.keys.toPostRequestInformation(body), context),
+          bySsh_key_id: (id) => ({
+            delete: (context) =>
+              sendRestNoContent(
+                token,
+                baseUrl,
+                `/v2/account/keys/${encodeURIComponent(String(id))}`,
+                {
+                  method: "DELETE",
+                  context,
+                },
+              ),
+          }),
         },
       },
       firewalls: {
@@ -90,6 +148,38 @@ export function createDigitalOceanSdkClient(token, apiBaseUrl) {
       },
     },
   };
+}
+
+async function sendRestJson(token, baseUrl, path, options) {
+  const response = await sendRest(token, baseUrl, path, options);
+
+  if (response.status === 204) {
+    return undefined;
+  }
+
+  return response.json();
+}
+
+async function sendRestNoContent(token, baseUrl, path, options) {
+  await sendRest(token, baseUrl, path, options);
+}
+
+async function sendRest(token, baseUrl, path, options) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: options.method,
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    signal: options.context?.signal,
+  });
+
+  if (!response.ok) {
+    throw await createDigitalOceanHttpError(response);
+  }
+
+  return response;
 }
 
 async function sendJson(adapter, requestInfo, context) {
