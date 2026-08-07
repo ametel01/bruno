@@ -20,6 +20,7 @@ import {
 } from "@/src/runner-service/constants";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
 import {
+  findDigitalOceanRunnerResourceProfile,
   MAX_HERMES_DOCKER_PIDS_LIMIT,
   parseHermesDockerCpus,
   parseHermesDockerMemoryMiB,
@@ -471,7 +472,7 @@ function readDigitalOceanSnapshotMode(
     publicKeyPem,
     expected: {
       region: expectedInput.region,
-      sizeDiskGb: diskGbFromDigitalOceanSizeSlug(expectedInput.sizeSlug),
+      sizeDiskGb: diskGbForDigitalOceanSizeSlug(expectedInput.sizeSlug),
       baseImageSlug: expectedInput.baseImageSlug,
       architecture: "amd64",
       runnerImage: expectedInput.runnerImage,
@@ -496,9 +497,8 @@ function readRequiredSnapshotSetting(value: string | undefined, envName: string)
   return normalized;
 }
 
-function diskGbFromDigitalOceanSizeSlug(sizeSlug: string): number {
-  const match = /-(\d+)gb(?:-|$)/.exec(sizeSlug.toLowerCase());
-  return match?.[1] ? Number(match[1]) : 25;
+function diskGbForDigitalOceanSizeSlug(sizeSlug: string): number {
+  return findDigitalOceanRunnerResourceProfile(sizeSlug)?.diskGiB ?? 25;
 }
 
 export function readHermesWorkloadImage(

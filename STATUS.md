@@ -3,11 +3,11 @@
 ## Active Work
 
 - issue: [#266](https://github.com/ametel01/plingpling/issues/266)
-  owner: checker-agent (`issue_266_checker`)
+  owner: coordinator (`root`)
   branch: `codex/issue-266-attested-snapshot`
   worktree: `/Users/alexmetelli/source/plingpling-issue-266`
   pr: none
-  phase: checker-ready after cycle-4 SSH security fixes
+  phase: rebased onto merged #265; awaiting serialized local smoke
   cycle: 4/5
 
 ## Completion Contract
@@ -785,6 +785,20 @@ Status: FAILED
   the branch.
 
 ## Completed
+
+### 2026-08-07 — Coordinator rebase integration verification
+
+- Rebased all #266 commits onto merged PR #273 / `origin/main` at `84a1860`, preserving both the
+  canonical runner resource-profile guardrails and the attested-snapshot path.
+- Fixed a combined-branch defect where snapshot disk attestation parsed the `2gb` RAM segment from
+  `s-1vcpu-2gb` as a 2 GB disk. Snapshot expectations now use the canonical profile's 50 GiB disk
+  metadata, and snapshot test fixtures use the compatible 2 GB runner profile.
+- Passed: combined focused suite (9 files, 109 tests); `bun run format:check`; `bun run lint`;
+  `bun run typecheck`; `bun run build`; `bun run test` (173 files, 1,687 tests);
+  `PORT=3119 bun run test:e2e:ci` (26/26); `bun run repro:cloud-runner`; `git diff --check`.
+- Remaining repository gate: serialized `bun run local:agent:smoke` after the #264 harness owner
+  releases the shared Docker Compose namespace. No live DigitalOcean/provider, workflow dispatch,
+  secrets, deploy, release, or billable effect was run.
 
 - [#263](https://github.com/ametel01/plingpling/issues/263) / merged
   [PR #272](https://github.com/ametel01/plingpling/pull/272) at `7d1cb98`; prior evidence is in history.

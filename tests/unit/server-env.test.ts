@@ -350,6 +350,7 @@ describe("server-only provider environment validation", () => {
       AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
       AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
       AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+      AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
       AGENTBAY_DIGITALOCEAN_IMAGE_MODE: "snapshot",
     };
 
@@ -370,7 +371,7 @@ describe("server-only provider environment validation", () => {
       mode: "snapshot",
       expected: {
         region: "sfo3",
-        sizeDiskGb: 10,
+        sizeDiskGb: 50,
         baseImageSlug: "ubuntu-24-04-x64",
         sourceRepository: "ametel01/plingpling",
         sourceRevision: "1".repeat(40),

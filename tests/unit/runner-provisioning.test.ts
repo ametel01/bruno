@@ -1034,7 +1034,7 @@ function invalidSnapshotConfig(): DigitalOceanProviderConfig {
     runnerBearerToken: "runner-command-token",
     runnerImage,
     region: "sfo3",
-    sizeSlug: "s-1vcpu-1gb",
+    sizeSlug: "s-1vcpu-2gb",
     image: "ubuntu-24-04-x64",
     tags: ["agentbay"],
     snapshotMode: {
@@ -1044,7 +1044,7 @@ function invalidSnapshotConfig(): DigitalOceanProviderConfig {
       publicKeyPem: "bad-public-key",
       expected: {
         region: "sfo3",
-        sizeDiskGb: 25,
+        sizeDiskGb: 50,
         baseImageSlug: "ubuntu-24-04-x64",
         architecture: "amd64",
         runnerImage,
