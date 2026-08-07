@@ -9,7 +9,7 @@ import {
 } from "@/src/server/agents/agent-deployments";
 import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { agentDeployments, agents, users } from "@/src/server/db/schema";
+import { agentDeploymentWakeups, agentDeployments, agents, users } from "@/src/server/db/schema";
 
 const USER_A_ID = "00000000-0000-4000-8000-000000000d01";
 const USER_B_ID = "00000000-0000-4000-8000-000000000d02";
@@ -294,6 +294,16 @@ describe("agent deployment persistence and leases", () => {
     const [row] = await connection.db.select().from(agentDeployments);
     expect(row?.leaseOwner).toBeNull();
     expect(row?.leaseExpiresAt).toBeNull();
+
+    const wakeups = await connection.db
+      .select()
+      .from(agentDeploymentWakeups)
+      .where(eq(agentDeploymentWakeups.deploymentId, deployment.id))
+      .orderBy(agentDeploymentWakeups.generation);
+    expect(wakeups).toMatchObject([
+      { generation: 1, state: "terminal", dueAt: NOW },
+      { generation: 2, state: "pending", dueAt: new Date(NOW.getTime() + 30_000) },
+    ]);
   });
 
   it("uses compare-and-set transitions and keeps terminal deployments immutable", async () => {
@@ -375,6 +385,41 @@ describe("agent deployment persistence and leases", () => {
         errorCode: "runner_unavailable",
       }),
     ).resolves.toEqual({ ok: false, reason: "terminal_deployment" });
+  });
+
+  it("creates generation-fenced wakeups atomically with create and terminal transitions", async () => {
+    const deployment = await insertDeployment("wakeup-key");
+    const initialWakeups = await connection.db
+      .select()
+      .from(agentDeploymentWakeups)
+      .where(eq(agentDeploymentWakeups.deploymentId, deployment.id));
+    expect(initialWakeups).toMatchObject([{ generation: 1, state: "pending", dueAt: NOW }]);
+
+    const claimed = await claimNextAgentDeployment({
+      db: connection.db,
+      leaseOwner: LEASE_OWNER_A,
+      leaseDurationMs: LEASE_MS,
+      now: NOW,
+    });
+    expect(claimed?.id).toBe(deployment.id);
+
+    await expect(
+      transitionAgentDeploymentStage({
+        db: connection.db,
+        deploymentId: deployment.id,
+        leaseOwner: LEASE_OWNER_A,
+        expectedStage: "pending",
+        nextStage: "failed",
+        now: new Date(NOW.getTime() + 1_000),
+        errorCode: "runner_unavailable",
+      }),
+    ).resolves.toMatchObject({ ok: true });
+
+    const terminalWakeups = await connection.db
+      .select()
+      .from(agentDeploymentWakeups)
+      .where(eq(agentDeploymentWakeups.deploymentId, deployment.id));
+    expect(terminalWakeups).toMatchObject([{ generation: 1, state: "terminal" }]);
   });
 
   async function insertDeployment(idempotencyKey: string) {

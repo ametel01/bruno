@@ -13,6 +13,7 @@ import {
   isAuthorizedCronRequest,
   isAuthorizedHermesStagingAcceptanceRequest,
   readCronSecretConfig,
+  readDeploymentDispatchConfig,
   readDigitalOceanProviderConfig,
   readHermesStagingAcceptanceConfig,
   readHermesWorkloadImage,
@@ -113,6 +114,48 @@ describe("server-only provider environment validation", () => {
     expect(() => readRunnerRolloutBatchSize({ AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE: "2" })).toThrow(
       "must be 0 (halted) or 1 (gradual)",
     );
+  });
+
+  it("keeps deployment wakeup dispatch in cron mode unless QStash is fully configured", () => {
+    const token = "qstash_token_abcdefghijklmnopqrstuvwxyz012345";
+    const currentSigningKey = "current_signing_key_abcdefghijklmnopqrstuvwxyz012345";
+    const nextSigningKey = "next_signing_key_abcdefghijklmnopqrstuvwxyz012345";
+    const configured = {
+      AGENTBAY_DEPLOYMENT_DISPATCH_MODE: "qstash",
+      QSTASH_TOKEN: token,
+      QSTASH_CURRENT_SIGNING_KEY: currentSigningKey,
+      QSTASH_NEXT_SIGNING_KEY: nextSigningKey,
+      NEXT_PUBLIC_APP_URL: "https://app.example.test",
+    };
+
+    expect(readDeploymentDispatchConfig({})).toEqual({ ok: true, mode: "cron" });
+    expect(readDeploymentDispatchConfig({ AGENTBAY_DEPLOYMENT_DISPATCH_MODE: "cron" })).toEqual({
+      ok: true,
+      mode: "cron",
+    });
+    expect(readDeploymentDispatchConfig(configured)).toEqual({
+      ok: true,
+      mode: "qstash",
+      token,
+      currentSigningKey,
+      nextSigningKey,
+      callbackBaseUrl: "https://app.example.test",
+    });
+
+    for (const partial of [
+      { ...configured, QSTASH_TOKEN: undefined },
+      { ...configured, QSTASH_CURRENT_SIGNING_KEY: undefined },
+      { ...configured, QSTASH_NEXT_SIGNING_KEY: undefined },
+      { ...configured, NEXT_PUBLIC_APP_URL: "http://app.example.test" },
+      { ...configured, QSTASH_NEXT_SIGNING_KEY: currentSigningKey },
+      { ...configured, CRON_SECRET: token },
+      { AGENTBAY_DEPLOYMENT_DISPATCH_MODE: "queue" },
+    ]) {
+      expect(readDeploymentDispatchConfig(partial)).toEqual({
+        ok: false,
+        reason: "deployment_dispatch_configuration_invalid",
+      });
+    }
   });
 
   it("keeps staging acceptance exactly default-off with a dedicated HTTPS transport", () => {

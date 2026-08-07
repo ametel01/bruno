@@ -45,6 +45,41 @@ describe("agent deployment post-response triggers", () => {
     expect(reconcile).toHaveBeenNthCalledWith(2, DEPLOYMENT_ID);
   });
 
+  it("publishes a persisted delayed wakeup instead of reconciling inline when dispatch accepts it", async () => {
+    let callback: (() => void | Promise<void>) | undefined;
+    const publishWakeup = vi.fn(async () => "published" as const);
+    const reconcile = vi.fn(async () => ({ processed: 1 as const, outcome: "advanced" as const }));
+
+    scheduleAgentDeploymentReconcileAfterResponse(DEPLOYMENT_ID, {
+      afterScheduler: (registered) => {
+        callback = registered;
+      },
+      publishWakeup,
+      reconcile,
+    });
+
+    await callback?.();
+    expect(publishWakeup).toHaveBeenCalledWith(DEPLOYMENT_ID);
+    expect(reconcile).not.toHaveBeenCalled();
+  });
+
+  it("falls back to targeted reconciliation when dispatch is cron-mode or unavailable", async () => {
+    let callback: (() => void | Promise<void>) | undefined;
+    const publishWakeup = vi.fn(async () => "cron_mode" as const);
+    const reconcile = vi.fn(async () => ({ processed: 0 as const, outcome: "idle" as const }));
+
+    scheduleAgentDeploymentReconcileAfterResponse(DEPLOYMENT_ID, {
+      afterScheduler: (registered) => {
+        callback = registered;
+      },
+      publishWakeup,
+      reconcile,
+    });
+
+    await callback?.();
+    expect(reconcile).toHaveBeenCalledWith(DEPLOYMENT_ID);
+  });
+
   it("leaves dropped callbacks harmless and contains callback failures", async () => {
     const reconcile = vi.fn(async () => {
       throw new Error("private dependency detail");

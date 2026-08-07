@@ -5,25 +5,25 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 ## Active Work
 
 - issue: [#264](https://github.com/ametel01/plingpling/issues/264)
-  owner: issue-spec-agent (`issue_264_spec`)
+  owner: builder-agent (`issue_264_builder`)
   branch: `codex/issue-264-durable-wakeups`
   worktree: `/Users/alexmetelli/source/plingpling`
   pr: none
-  phase: specifying
+  phase: checker-ready
   cycle: 0/5
 - issue: [#265](https://github.com/ametel01/plingpling/issues/265)
-  owner: issue-spec-agent (`issue_265_spec`)
+  owner: builder-agent (`issue_265_builder`)
   branch: `codex/issue-265-runner-sizing`
   worktree: `/Users/alexmetelli/source/plingpling-issue-265`
   pr: none
-  phase: specifying
+  phase: implementing authorization-independent scope
   cycle: 0/5
 - issue: [#266](https://github.com/ametel01/plingpling/issues/266)
-  owner: issue-spec-agent (`issue_266_spec`)
+  owner: builder-agent (`issue_266_builder`)
   branch: `codex/issue-266-attested-snapshot`
   worktree: `/Users/alexmetelli/source/plingpling-issue-266`
   pr: none
-  phase: specifying
+  phase: implementing repository-only scope
   cycle: 0/5
 
 ## Goal Contract
@@ -151,6 +151,38 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
   recorded, or earlier on a repeated failure, credentials/external-effect requirement, or a needed
   product decision.
 
+## Handoff — #264 Builder to Checker
+
+- request: Check issue #264 implementation on `codex/issue-264-durable-wakeups`; verify the
+  migration/schema, atomic wakeup writes, signed delivery route, cron recovery sweep, env/docs, and
+  tests. Do not edit code.
+- files changed: `.env.example`, `CHANGELOG.md`, `PROGRESS.md`, `app/api/internal/agent-deployments/reconcile/route.ts`,
+  `app/api/internal/agent-deployments/wakeup/route.ts`, `drizzle/0026_talented_lady_vermin.sql`,
+  `drizzle/meta/_journal.json`, `drizzle/meta/0026_snapshot.json`,
+  `src/server/agents/agent-deployment-dispatch.ts`, `src/server/agents/agent-deployment-reconciler.ts`,
+  `src/server/agents/agent-deployment-retry.ts`, `src/server/agents/agent-deployment-triggers.ts`,
+  `src/server/agents/agent-deployments.ts`, `src/server/agents/lifecycle.ts`,
+  `src/server/db/schema.ts`, `src/server/env.ts`, and focused unit tests.
+- behavior: deployment create/retry/release/stage/backoff/ready/failed/cancel/replacement-pause
+  paths now create or terminalize generation-fenced wakeup rows in the same DB transaction. The
+  post-response trigger publishes the latest pending wakeup in QStash mode and falls back to the
+  existing targeted reconciler in cron/unavailable mode. The protected cron route sweeps one
+  publishable outbox row before the existing one-item reconcile. The new POST route verifies a
+  bounded raw body with current/next signing keys before JSON parsing, atomically claims one due
+  generation, then invokes targeted reconciliation; duplicate/early/stale/terminal deliveries do
+  not execute work.
+- tests passed: `bun run format:check`; `bun run lint`; `bun run typecheck`;
+  `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts`
+  (6 files, 43 tests); `bun run test` (170 files, 1,645 tests); `bun run build`;
+  `bun run test:e2e:ci` (26/26); `bun run local:agent:smoke` (`cleanupVerified:true`,
+  `digitalOceanRequests:0`, p95 150.725s); `git diff --check`.
+- known risks: signature verification uses a dedicated HMAC header over the raw body rather than
+  importing an official QStash verifier package; checker should decide whether that satisfies the
+  contract or should be changed before PR. The real external QStash publish path is implemented but
+  unexercised; no real publish/provider/secret/deployment/billable action was run.
+- stop condition: accept for PR only after checker independently exercises a producer-to-delivery
+  semantic path and either runs or explicitly classifies the pending heavier gates.
+
 ## Gates
 
 - #263 checker result: ALL GREEN at implementation `49c872a`.
@@ -162,6 +194,21 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 - provider mode: failed closed; no billable provider action ran.
 - remote: CodeRabbit, GitGuardian, and Socket passed. Vercel failed at the same fail-closed Clerk
   preview baseline as unrelated PR #262 and was accepted as non-blocking.
+- #264 builder: format, lint, typecheck, focused unit, full unit, build, E2E, local zero-cloud
+  smoke, and diff-check passed locally. Local smoke p95 was 150.725s, so the overall SLO remains
+  unmet pending later steps.
+- merge request check (2026-08-07):
+  - result: BLOCKED; no fast-agent-creation PR is open or merge-ready.
+  - `git status --short --branch --untracked-files=all`: current worktree is
+    `codex/issue-264-durable-wakeups` with uncommitted #264 implementation changes.
+  - `gh pr list --head codex/issue-264-durable-wakeups --state open --json ...`: `[]`.
+  - `gh pr list --head codex/issue-265-runner-sizing --state open --json ...`: `[]`.
+  - `gh pr list --head codex/issue-266-attested-snapshot --state open --json ...`: `[]`.
+  - `gh pr list --state open --limit 10 --json ...`: only open PR is unrelated
+    [#262](https://github.com/ametel01/plingpling/pull/262) on
+    `docs/ai-integration-opportunities`, `mergeStateStatus: UNSTABLE`, with Vercel `FAILURE`.
+  - next action: wait for checker verdicts, then commit/push/open the relevant issue PR before any
+    merge. Do not merge #262 as part of this goal.
 
 ## Review Threads
 
@@ -184,7 +231,7 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 
 ## Worktrees
 
-- `/Users/alexmetelli/source/plingpling`: issue #264 branch; spec-owned.
+- `/Users/alexmetelli/source/plingpling`: issue #264 branch; builder-owned, checker-ready.
 - `/Users/alexmetelli/source/plingpling-issue-265`: issue #265 branch; spec-owned.
 - `/Users/alexmetelli/source/plingpling-issue-266`: issue #266 branch; spec-owned.
 - `/Users/alexmetelli/source/plingpling-step7-base`: pre-existing detached user-owned worktree;

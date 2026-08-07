@@ -3,6 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import type { RunnerAgentStatusSnapshot } from "@/src/runner-service/runner-contracts";
+import { replaceDeploymentWakeupInTransaction } from "@/src/server/agents/agent-deployment-dispatch";
 import { buildHermesAgentLaunchSpecForUser } from "@/src/server/agents/agent-launch-builder";
 import { logAgentCreationTerminalCompletion } from "@/src/server/agents/agent-creation-latency";
 import { initializeAgentRuntimeAfterDeploymentReady } from "@/src/server/agents/agent-runtime-store";
@@ -880,6 +881,11 @@ async function beginManagedRunnerRecovery(
       `),
     ]);
     if (!paused) throw new LostDeploymentLeaseError();
+    await replaceDeploymentWakeupInTransaction(tx, {
+      deploymentId: work.id,
+      dueAt: null,
+      now: input.now,
+    });
     await tx.execute(sql`
       update ${runners}
       set status = 'degraded', updated_at = ${input.now.toISOString()}
@@ -1416,6 +1422,12 @@ async function markDeploymentStage(
     return false;
   }
 
+  await replaceDeploymentWakeupInTransaction(tx, {
+    deploymentId: work.id,
+    dueAt: input.now,
+    now: input.now,
+  });
+
   if (input.agentStatus) {
     await tx
       .update(agents)
@@ -1477,6 +1489,12 @@ async function persistRunnerAcceptedAndStage(
     return false;
   }
 
+  await replaceDeploymentWakeupInTransaction(tx, {
+    deploymentId: work.id,
+    dueAt: input.now,
+    now: input.now,
+  });
+
   await writeDeploymentEvents(tx, work, {
     events: ["agent.deployment_stage_changed"],
     fromStage: work.stage,
@@ -1529,27 +1547,39 @@ async function scheduleRetry(
       )
     : proposedAttemptAt;
 
-  await connection.db.execute(sql`
-    update ${agentDeployments}
-    set error_code = ${reason},
-        error_detail = ${detail},
-        next_attempt_at = ${nextAttemptAt.toISOString()},
-        lease_owner = null,
-        lease_expires_at = null,
-        updated_at = ${now.toISOString()}
-    where id = ${work.id}
-      and stage = ${work.stage}
-      and config_revision = ${work.configRevision}
-      and lease_owner = ${work.leaseOwner}
-      and lease_expires_at > ${now.toISOString()}
-      and exists (
-        select 1 from ${agents}
-        where ${agents.id} = ${work.agentId}
-          and ${agents.userId} = ${work.userId}
-          and ${agents.deletedAt} is null
-          and ${agents.desiredStatus} = 'running'
-      )
-  `);
+  await connection.db.transaction(async (tx) => {
+    const [updated] = await tx.execute<{ id: string }>(sql`
+      update ${agentDeployments}
+      set error_code = ${reason},
+          error_detail = ${detail},
+          next_attempt_at = ${nextAttemptAt.toISOString()},
+          lease_owner = null,
+          lease_expires_at = null,
+          updated_at = ${now.toISOString()}
+      where id = ${work.id}
+        and stage = ${work.stage}
+        and config_revision = ${work.configRevision}
+        and lease_owner = ${work.leaseOwner}
+        and lease_expires_at > ${now.toISOString()}
+        and exists (
+          select 1 from ${agents}
+          where ${agents.id} = ${work.agentId}
+            and ${agents.userId} = ${work.userId}
+            and ${agents.deletedAt} is null
+            and ${agents.desiredStatus} = 'running'
+        )
+      returning id
+    `);
+
+    if (updated) {
+      await replaceDeploymentWakeupInTransaction(tx, {
+        deploymentId: work.id,
+        dueAt: nextAttemptAt,
+        now,
+        safeErrorCode: reason,
+      });
+    }
+  });
   logAgentDeployment(
     "retry_scheduled",
     {
@@ -1715,6 +1745,12 @@ async function markCanaryPassedAndStage(
     return false;
   }
 
+  await replaceDeploymentWakeupInTransaction(tx, {
+    deploymentId: work.id,
+    dueAt: input.now,
+    now: input.now,
+  });
+
   await writeDeploymentEvents(tx, work, {
     events: ["agent.deployment_stage_changed"],
     fromStage: work.stage,
@@ -1762,6 +1798,12 @@ async function markCanarySkippedAndStage(
     if (!updated) {
       return false;
     }
+
+    await replaceDeploymentWakeupInTransaction(tx, {
+      deploymentId: work.id,
+      dueAt: now,
+      now,
+    });
 
     await writeDeploymentEvents(tx, work, {
       events: ["agent.deployment_stage_changed"],
@@ -1815,6 +1857,12 @@ async function finalizeReady(
     if (!updated) {
       return false;
     }
+
+    await replaceDeploymentWakeupInTransaction(tx, {
+      deploymentId: work.id,
+      dueAt: null,
+      now,
+    });
 
     const [agent] = await tx
       .update(agents)
@@ -2012,6 +2060,12 @@ async function markDeploymentFailedInTransaction(
   if (!updated) {
     return false;
   }
+
+  await replaceDeploymentWakeupInTransaction(tx, {
+    deploymentId: work.id,
+    dueAt: null,
+    now: input.now,
+  });
 
   await tx
     .update(agents)

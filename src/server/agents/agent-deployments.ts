@@ -3,6 +3,7 @@ import "server-only";
 import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
+import { replaceDeploymentWakeupInTransaction } from "@/src/server/agents/agent-deployment-dispatch";
 import {
   mapAgentDeploymentRowToDto,
   type AgentDeploymentDto,
@@ -176,6 +177,12 @@ export async function createAgentDeploymentForUser(input: {
     const inserted = insertedRows[0];
 
     if (inserted) {
+      await replaceDeploymentWakeupInTransaction(input.db, {
+        deploymentId: inserted.id,
+        dueAt: now,
+        now,
+      });
+
       return {
         ok: true,
         deployment: mapAgentDeploymentRowToDto(inserted),
@@ -399,6 +406,14 @@ export async function releaseAgentDeploymentLease(input: {
       returning ${DEPLOYMENT_RETURNING_SQL}
     `);
 
+    if (released) {
+      await replaceDeploymentWakeupInTransaction(input.db, {
+        deploymentId: released.id,
+        dueAt: input.nextAttemptAt ?? input.now,
+        now: input.now,
+      });
+    }
+
     return released
       ? { ok: true, deployment: mapAgentDeploymentRowToDto(released) }
       : { ok: false, reason: "lease_not_held" };
@@ -525,6 +540,12 @@ export async function transitionAgentDeploymentStage(input: {
     `);
 
     if (transitioned) {
+      await replaceDeploymentWakeupInTransaction(input.db, {
+        deploymentId: transitioned.id,
+        dueAt: isTerminalAgentDeploymentStage(input.nextStage) ? null : input.now,
+        now: input.now,
+      });
+
       return {
         ok: true,
         deployment: mapAgentDeploymentRowToDto(transitioned),

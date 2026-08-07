@@ -87,6 +87,24 @@ export type CronSecretConfig =
       reason: "cron_configuration_invalid";
     };
 
+export type DeploymentDispatchConfig =
+  | {
+      ok: true;
+      mode: "cron";
+    }
+  | {
+      ok: true;
+      mode: "qstash";
+      token: string;
+      currentSigningKey: string;
+      nextSigningKey: string;
+      callbackBaseUrl: string;
+    }
+  | {
+      ok: false;
+      reason: "deployment_dispatch_configuration_invalid";
+    };
+
 export type HermesStagingAcceptanceConfig =
   | {
       ok: true;
@@ -161,6 +179,51 @@ export function readCronSecretConfig(
   }
 
   return { ok: true, secret };
+}
+
+export function readDeploymentDispatchConfig(
+  input: Record<string, string | undefined> = process.env,
+): DeploymentDispatchConfig {
+  const rawMode = input.AGENTBAY_DEPLOYMENT_DISPATCH_MODE?.trim();
+  const mode = rawMode === undefined || rawMode === "" ? "cron" : rawMode;
+
+  if (mode === "cron") {
+    return { ok: true, mode };
+  }
+
+  if (mode !== "qstash") {
+    return { ok: false, reason: "deployment_dispatch_configuration_invalid" };
+  }
+
+  const token = input.QSTASH_TOKEN;
+  const currentSigningKey = input.QSTASH_CURRENT_SIGNING_KEY;
+  const nextSigningKey = input.QSTASH_NEXT_SIGNING_KEY;
+  const callbackBaseUrl = parseDeploymentDispatchCallbackBaseUrl(input.NEXT_PUBLIC_APP_URL);
+
+  if (
+    token === undefined ||
+    !isValidDedicatedBearerSecret(token) ||
+    currentSigningKey === undefined ||
+    !isValidDeploymentDispatchSigningKey(currentSigningKey) ||
+    nextSigningKey === undefined ||
+    !isValidDeploymentDispatchSigningKey(nextSigningKey) ||
+    currentSigningKey === nextSigningKey ||
+    callbackBaseUrl === null ||
+    [input.CRON_SECRET, input.AGENTBAY_RUNNER_BEARER_TOKEN, input.AGENTBAY_OPERATOR_PASSWORD].some(
+      (otherSecret) => otherSecret !== undefined && otherSecret === token,
+    )
+  ) {
+    return { ok: false, reason: "deployment_dispatch_configuration_invalid" };
+  }
+
+  return {
+    ok: true,
+    mode,
+    token,
+    currentSigningKey,
+    nextSigningKey,
+    callbackBaseUrl,
+  };
 }
 
 export function isAuthorizedCronRequest(input: {
@@ -245,6 +308,34 @@ export function isAuthorizedHermesStagingAcceptanceRequest(input: {
 
 function isValidDedicatedBearerSecret(value: string): boolean {
   return /^[A-Za-z0-9._~+/=-]{32,256}$/.test(value);
+}
+
+function isValidDeploymentDispatchSigningKey(value: string): boolean {
+  return /^[A-Za-z0-9._~+/=-]{32,512}$/.test(value) && value.trim() === value;
+}
+
+function parseDeploymentDispatchCallbackBaseUrl(value: string | undefined): string | null {
+  if (value === undefined || value.trim() !== value || value.length === 0) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+
+    if (
+      url.protocol !== "https:" ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.search !== "" ||
+      url.hash !== ""
+    ) {
+      return null;
+    }
+
+    return url.origin;
+  } catch {
+    return null;
+  }
 }
 
 function parseHermesStagingAcceptanceBaseUrl(value: string | undefined): string | null {

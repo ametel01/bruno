@@ -10,6 +10,7 @@ import {
   type AgentLaunchSpecBuilderDependencies,
   buildHermesAgentLaunchSpecForUser,
 } from "@/src/server/agents/agent-launch-builder";
+import { replaceDeploymentWakeupInTransaction } from "@/src/server/agents/agent-deployment-dispatch";
 import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import {
   classifyManagedRuntimeForUpdate,
@@ -3083,6 +3084,12 @@ async function cancelActiveAutomaticDeploymentInTransaction(
   if (!cancelled) {
     throw new Error("Automatic deployment cancellation lost its locked row.");
   }
+
+  await replaceDeploymentWakeupInTransaction(tx, {
+    deploymentId: input.deployment.id,
+    dueAt: null,
+    now: input.now,
+  });
 
   await closeLatestOpenAgentUsagePeriodInTransaction(tx, {
     agentId: input.agentId,
