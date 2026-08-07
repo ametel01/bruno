@@ -11,6 +11,7 @@ Historical execution evidence:
 - stream: goal-state reconciliation
   owner: coordinator (`root`)
   branch: `codex/goal-status-reconcile`
+
   worktree: `/Users/alexmetelli/source/bruno`
   phase: compacting hot state and correcting `PROGRESS.md`
   next: merge the tracker-only reconciliation, then spec issue #269 for authorization-independent
@@ -32,6 +33,8 @@ Historical execution evidence:
   authorization and agreed budget.
 - do-not-touch: unrelated PR #262; dirty user/agent state in the issue #265 worktree; detached
   `/Users/alexmetelli/source/bruno-step7-base`.
+
+
 
 ## Dependency Graph
 
@@ -116,7 +119,6 @@ Status: FAILED
   evidence: tracker/archive/source files exist; relative links to `PLAN.md`, `STATUS.archive.md`,
     and `STATUS.archive.2026-08-07.md` resolve locally.
 - command: `gh pr view 281 --repo ametel01/bruno --json closingIssuesReferences,headRefOid,mergeStateStatus,statusCheckRollup`
-  result: pass for tracker contract; PR aggregate not clean
   evidence: `closingIssuesReferences: []`, head `06644597bdf6caef3a357c1de9302ce956e407d2`,
     `mergeStateStatus: UNSTABLE`; GitHub CI, React Doctor, GitGuardian, Socket, CodeRabbit, and
     Vercel Preview Comments are green, but Vercel status context is failure.
@@ -159,7 +161,6 @@ Status: FAILED
   `f8b3c282`; GitHub recorded COMMENTED review `4881587941` because same-author approval is forbidden.
 
 ## Worktrees
-
 - `/Users/alexmetelli/source/bruno`: clean before reconciliation edits; coordinator-owned
   `codex/goal-status-reconcile`.
 - `/Users/alexmetelli/source/bruno-e2e-ready-flake`: clean; closed superseded PR #278 branch;
