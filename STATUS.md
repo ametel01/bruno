@@ -4,13 +4,13 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 
 ## Active Work
 
-- issue: [#267](https://github.com/ametel01/plingpling/issues/267)
-  owner: checker-agent (`issue_264_checker`)
-  branch: `codex/issue-267-provider-phase-drain`
-  worktree: `/Users/alexmetelli/source/plingpling`
+- issue: [#268](https://github.com/ametel01/plingpling/issues/268)
+  owner: coordinator (`root`)
+  branch: `codex/issue-268-stage-drain`
+  worktree: `/Users/alexmetelli/source/plingpling-issue-268`
   pr: none
-  phase: checker-green; merge-ready after PR/review/CI policy
-  cycle: 3/5
+  phase: rebasing implementation onto merged #267
+  cycle: 1/5
 
 ## Goal Contract
 
@@ -31,9 +31,8 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 ## Dependency Graph
 
 - completed repository scope: #263 / PR #272; #264 / PR #275; #265 / PR #273; #266 / PR #274
-- ready now: #267 provider-phase drain; #268 post-registration stage drain
-- #267 and #268 are parallel-safe only in isolated worktrees and both touch
-  `src/server/agents/agent-deployment-reconciler.ts`; coordinate merge order.
+- completed: #267 / PR #276
+- ready now: #268 post-registration stage drain
 - #269 remains downstream of #266's authorization-independent repository work; #270 remains
   downstream of #265's authorization-independent repository work.
 - blocked by #264-#270: #271 provider-backed SLO proof
@@ -225,6 +224,131 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
 - reviewer focus: verify provider-effect checkpoint ordering, crash adoption without replay, typed
   wakeup persistence, lease/desired-running fence behavior, safe logs/events, and zero external
   effects.
+
+- Build #268 only in `/Users/alexmetelli/source/plingpling-issue-268`; do not merge it before #267.
+- Every checker must exercise runner ingress/delayed-delivery producers through the bounded drain to
+  durable `ready`, not only direct stage fixtures.
+- No real DigitalOcean/QStash request, snapshot/workflow dispatch, deploy, secret mutation, or
+  billable action is authorized.
+
+## Completion Contract — #268
+
+- readiness: `ready-for-build`, with merge-order dependency only. #264 is closed by PR #275 at
+  `fa79f4a`; #268 has no comments or missing product decision. Implement in this isolated worktree,
+  but merge #267 first and rebase #268 because both change the deployment reconciler.
+- outcome: Add a targeted bounded drain that takes one selected deployment from fresh runner
+  readiness through every immediately executable Hermes/gateway/model/Telegram transition to
+  durable `ready`, without heartbeat/cron-sized gaps and without weakening leases, generation
+  fencing, cancellation, replacement, or deployment-before-runtime ordering.
+- acceptance criteria / invariants:
+  - A named targeted drain pins one deployment ID for its entire run; a runner-targeted ingress may
+    select at most one due deployment and must not switch to another deployment between iterations.
+    Continue only when the prior stage returned `processed:1, outcome:"advanced"`.
+  - Reclaim the same deployment under the existing stage/config-revision/lease/desired-running
+    predicates on each iteration. Stop immediately on `idle`, future `next_attempt_at`, external
+    wait/retry, terminal `ready`/`failed`, recovery/replacement, lost lease, cancellation/Stop/Delete,
+    superseded config, or any outcome other than `advanced`.
+  - Use one outer 45-second action deadline and abort signal for the whole drain; do not reset the
+    deadline per stage. Check remaining time before each claim/runner call and pass the same signal
+    and remaining timeout to adapters. Use a named default bound of eight stage iterations and never
+    start a ninth; bound/deadline exhaustion leaves the unfinished deployment durably due without
+    spinning in the request.
+  - Every `advanced` transition atomically persists the new stage, clears the old lease, replaces
+    the generation-fenced wakeup at the precise due time, and emits the ordered stage event before
+    the drain may reclaim. A persistence failure or lost transition fence stops; no next-stage side
+    effect may run.
+  - A ready fake runner can progress in one drain through `provisioning_runner ->
+    configuring_hermes -> starting_gateway -> connecting_telegram -> ready` in production-style
+    canary-skipped mode. If canary mode is enabled, `verifying_model` remains subject to its existing
+    dispatch/outcome-unknown rules; the drain must not replay a canary.
+  - After an accepted gateway start, perform at most one immediate status observation. If not ready,
+    persist the existing short readiness poll (initially 2 seconds, capped by the 30-second gateway
+    deadline) and its wakeup in the same transaction, stop, and let delayed delivery revisit it at
+    that exact due time. Never poll before `next_attempt_at` or rely on a heartbeat/minute cron for
+    normal delivery; cron remains dropped-delivery recovery.
+  - QStash delivery, cron/post-create fallback, runner registration, and runner heartbeat use the
+    drain entry points. Duplicate/stale QStash generations and concurrent heartbeat/post-create
+    kicks still perform at most one stage action because wakeup-generation and deployment-lease
+    claims remain authoritative.
+  - Runner registration/heartbeat keeps strict ordering: finish/stop the selected deployment drain
+    first, then issue at most one runtime reconcile kick. Finalizing deployment `ready` commits the
+    deployment, agent status, runtime initialization, usage period, terminal wakeup, and events
+    before runtime reconciliation can observe it.
+  - Stop/Delete/cancellation, explicit retry, runner replacement, config supersession, and terminal
+    cleanup atomically replace or terminalize the wakeup generation. A queued old generation or a
+    drain iteration racing those mutations must become idle/stale and must not resurrect work,
+    finalize ready, start Hermes, or schedule an obsolete retry.
+- required semantic tests:
+  - Producer-to-ready: committed ready-mode deployment plus current fake runner heartbeat -> runner
+    ingress or signed fake delayed delivery -> one pinned drain -> ordered stage/event sequence ->
+    exactly one gateway start -> durable ready/runtime row, with no intermediate scheduler tick.
+  - Accepted-but-not-ready gateway -> exact 2-second persisted wakeup -> no early claim -> fake
+    delivery at due time -> Telegram finalization without heartbeat; dropped publication must remain
+    recoverable through outbox/cron.
+  - Future retry, external wait, iteration 8, outer deadline/abort, terminal row, lost lease, stale
+    config, replacement pause, Stop/Delete/cancellation, explicit retry generation, duplicate queue
+    delivery, concurrent heartbeat, and finalization race all stop safely with exact call counts and
+    no stale ready transition.
+  - Verify registration and heartbeat callbacks preserve `deployment` before `runtime`, even when
+    the deployment drain throws/stops, and do not drain a second deployment for the same runner.
+- non-goals / authorization boundary:
+  - No pre-provisioned Droplets, warm/ready pools, predictive provisioning, cross-user sharing, or
+    capacity before a user's committed create request.
+  - Do not implement #267 provider-phase draining, change model-canary policy, runner placement,
+    size/snapshot defaults, runtime recovery semantics, durable-ready definition, or #271 SLO proof.
+  - Do not make real DigitalOcean/QStash requests, build a snapshot, dispatch a workflow, run
+    provider-backed E2E/benchmark/reconcile commands, configure hosted secrets, deploy/release, or
+    perform any billable action.
+- likely touchpoints:
+  - `src/server/agents/agent-deployment-reconciler.ts` for pinned agent/runner drains and shared
+    deadline/bound; `agent-deployment-triggers.ts` for post-create fallback; `agent-runtime-triggers.ts`
+    for ordered runner ingress; the signed wakeup route for delivery-to-drain wiring.
+  - Focused trigger, wakeup-route, reconciler, registration-route, heartbeat-route, cancellation,
+    retry, and finalization-race tests. No schema/migration change is expected. Builder updates
+    `PROGRESS.md`/`CHANGELOG.md` only after behavior and gates pass.
+- required gates:
+  - Focused: `tests/unit/agent-deployment-reconciler.test.ts`,
+    `agent-deployment-triggers.test.ts`, `agent-runtime-triggers.test.ts`,
+    `agent-deployment-wakeup-route.test.ts`, `runner-registration-routes.test.ts`,
+    `runner-heartbeat-route.test.ts`, `agent-deployment-cancellation-db.test.ts`,
+    `agent-deployment-retry-db.test.ts`, and `agent-deployment-finalization-race.test.ts`.
+  - `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test`; `bun run build`;
+    `bun run test:e2e:ci`; `git diff --check`.
+  - Serialize `bun run local:agent:smoke` against other worktrees. Require package-script-enforced
+    `local_docker`, `digitalOceanRequests:0`, one simulated Droplet, cleanup verified, the full
+    producer-to-ready stage sequence, and before/after complete local latency versus Step 1. This is
+    local behavior evidence, not provider SLO evidence.
+- risks: Reclaiming by runner rather than pinned deployment can starve other work; resetting the
+  deadline per iteration can monopolize a request; treating `idle` as progress can spin; and a drain
+  can race terminal generation replacement or expose runtime before ready commit. Preserve the
+  existing SQL fences and transaction/order boundaries.
+- do-not-touch: provider provisioning/effect checkpoints except conflict resolution after #267,
+  schema/migrations unless escalated, size/snapshot/workflow/provider benchmark paths, unrelated PR
+  #262, or `/Users/alexmetelli/source/plingpling-step7-base`.
+- open questions: none blocking; drain function names and internal result shape are implementation
+  choices if pinned-target, shared-deadline, and exact stop semantics remain testable.
+
+## Handoff — #268 Spec to Builder
+
+- request: Implement this contract in `/Users/alexmetelli/source/plingpling-issue-268`, beginning
+  with the pinned-target drain and shared deadline, then replace all four producer call sites and add
+  producer-to-ready/race fixtures. Do not merge before #267; rebase and resolve the reconciler once
+  #267 is merged without weakening either contract.
+- evidence: Current post-create fallback performs at most two reconciles, QStash/runner ingress call
+  one reconcile, and each reconcile creates a fresh 45-second deadline. Stage transitions already
+  replace wakeups transactionally; accepted gateway polling already computes a 2-second bounded due
+  time, so the work is orchestration plus regression coverage rather than a schema change.
+- stop condition: Hand off after fake/local evidence and all gates, or earlier on repeated failure,
+  a schema/product decision, merge conflict that changes #267 invariants, or any request for real
+  provider/QStash/workflow/deploy/billable authority.
+
+## Handoff — #268 Builder to Checker
+
+- request: Verify the pinned single-deployment drain, shared deadline/bound, exact external-wait
+  wakeup, all producer wiring, generation/lease/cancellation races, deployment-before-runtime order,
+  and zero external effects. Do not edit code.
+- stop condition: Accept only with producer-to-ready evidence, focused/full gates, serialized local
+  smoke, and confirmation that the branch was rebased after merged #267.
 
 ## Completion Contract — #264
 
