@@ -7,7 +7,7 @@
   branch: `codex/issue-265-runner-sizing`
   worktree: `/Users/alexmetelli/source/plingpling-issue-265`
   pr: [#273](https://github.com/ametel01/plingpling/pull/273)
-  phase: maintainer review of authorization-independent scope
+  phase: changes requested on authorization-independent scope
   cycle: 2/5
 
 ## Completion Contract
@@ -216,6 +216,47 @@
     leftovers from the owned smoke slot.
   next-action: Verify the narrow diff and gates. Do not treat local p95 as DigitalOcean evidence and
     do not merge as complete until provider evidence/default-selection authorization is resolved.
+
+## Maintainer Review — Cycle 2
+
+- decision: `Request changes` for the authorization-independent PR scope. Submitted as a GitHub
+  comment because authenticated reviewer identity and PR author are both `ametel01`, so GitHub cannot
+  accept a formal self-review decision.
+- review: [PR #273 comment](https://github.com/ametel01/plingpling/pull/273#issuecomment-5211054319)
+- timestamp: 2026-08-07T09:41:55+08:00
+- blocking findings:
+  - `src/server/runners/runner-resource-profiles.ts:116` uses inherited-property membership, so
+    `toString`/`constructor` pass as supported profiles; reviewer reproduction returned `ok:true`
+    with missing physical resources, and price metadata returned `$NaN`.
+  - `src/server/runners/runner-provisioning.ts:829` handles duplicates before compatibility; a
+    waiting duplicate can issue `readResource` and be reused under an incompatible manual config.
+  - `src/server/runners/runner-provisioning.ts:1079` omits validated custom Hermes CPU, memory, and
+    PID values from the manual bootstrap call while the automatic path propagates them.
+  - `src/server/runners/local-docker-digitalocean-provider.ts:230` runs the claimed 2 GiB smoke in a
+    hard-coded 2-CPU/4-GiB simulated host; slug propagation is not equivalent physical-envelope
+    evidence.
+  - `src/runner-service/docker.ts:1928` and `:2277` accept unexpected extra added capabilities as long
+    as the five required capabilities are also present; inspect verification is not exact.
+  - required PR CI run
+    [31138264268](https://github.com/ametel01/plingpling/actions/runs/31138264268) failed E2E 25/26 at
+    `tests/e2e/automatic-ready.spec.ts:473` / helper `:647`. Current main and the local checker passed
+    26/26, so rerun evidence may classify a flake, but the red required check is not mergeable.
+- important finding: canonical validation accepts sub-NanoCPU values that round to zero and an
+  effectively unbounded safe-integer PID value; define and test representable bounds.
+- PR-text fixes: refresh 1,645 to the observed 1,646 full-unit count and reconcile the claimed latest
+  local latency with checker evidence (`89443` and later `152276` ms). Neither is provider SLO proof.
+- verified boundaries: `closingIssuesReferences` is empty; `Part of #265` is correct; #265 and #270
+  remain open; #266 overlap is accurately disclosed; hosted default/max-agents remain unchanged; no
+  provider, preprovisioning, warm-pool, cross-user, deployment, release, secret, or migration effect
+  occurred. DigitalOcean catalog numeric rows match the current official Basic Droplet pricing table.
+- gates: reviewer focused 8-file / 127-test run passed; `git diff --check` passed; GitGuardian,
+  Socket, and React Doctor passed. Vercel failed with the known fail-closed
+  `clerk_auth_not_configured` preview baseline and is not a #265 regression.
+- next-action: builder fixes all blocking findings and tests, updates PR text, reruns focused/full
+  gates including an actual equivalent 2-GiB smoke and green remote CI, then hands back to checker.
+  Do not merge PR #273 yet. Even after the partial PR is accepted, do not close #265 until authorized
+  provider comparison, sanitized cleanup evidence, measured default selection, and final acceptance
+  are complete.
 
 ## Gates
 
