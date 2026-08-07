@@ -45,6 +45,10 @@ The update log is append-only.
   `bun run test:e2e:ci`, `bun run local:agent:smoke`, and
   `bun run agent:creation:benchmark -- --limit 1`.
 - Provider-backed acceptance gate: pending explicit authorization.
+- Step 5 authorization-independent subset: canonical runner profile validation, pre-provider
+  rejection, runtime-limit propagation, and fake-only benchmark candidate validation are implemented
+  for issue #265. Full local gates passed. The hosted default is intentionally unchanged pending
+  authorized provider evidence.
 
 ## Issue Graph
 
@@ -89,3 +93,43 @@ The update log is append-only.
   (26 tests); `bun run local:agent:smoke`; `bun run agent:creation:benchmark -- --limit 1`.
 - Commit: this Step 1 implementation commit.
 - Next: Step 2 / issue #264 — durable delayed deployment wakeups.
+
+### 2026-08-07 — Step 5 authorization-independent implementation in progress
+
+- Added a canonical DigitalOcean managed-runner resource-profile catalog with vCPU, physical memory,
+  disk, monthly price metadata, the documented 384 MiB runner/OS reserve, and the explicit
+  low-memory swap-resilience marker.
+- Wired hosted config and manual/automatic provisioning through fail-closed compatibility checks for
+  supported slugs, CPU, physical memory, PID syntax, and one-agent capacity. Rejected configurations
+  stop before SSH-key lookup, Droplet creation/read, firewall mutation, tagging, or cleanup calls.
+- Propagated validated Hermes Docker CPU, memory, and PID limits into cloud bootstrap env and runner
+  service defaults while preserving Docker hardening enforcement.
+- Extended the benchmark CLI to require explicit supported candidate slugs before DigitalOcean
+  benchmark authorization can proceed. Provider execution remains unimplemented and unauthorized.
+- Updated operator docs, `.env.example`, and changelog. The default Droplet slug remains unchanged
+  until explicit provider evidence authorizes a replacement.
+- Focused gates passed: `bun --conditions react-server scripts/run-unit-tests.ts
+  tests/unit/runner-resource-profiles.test.ts tests/unit/cost-prices.test.ts
+  tests/unit/server-env.test.ts tests/unit/cloud-runner-bootstrap.test.ts
+  tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts
+  tests/unit/agent-creation-benchmark.test.ts` after `bun install` restored missing local tooling.
+
+### 2026-08-07 — Step 5 authorization-independent checker handoff
+
+- Kept the DigitalOcean default slug unchanged because provider-backed size evidence is still not
+  authorized. Hosted compatibility now fails closed for the legacy 512 MiB default unless an explicit
+  supported physical profile such as `s-1vcpu-2gb` is configured with the canonical Hermes limits.
+- Full gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test`
+  (170 files, 1,645 tests); `bun run build`; `bun run test:e2e:ci` (26 tests);
+  `AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-2gb AGENTBAY_HERMES_DOCKER_CPUS=1
+  AGENTBAY_HERMES_DOCKER_MEMORY=1536m AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256 bun run
+  repro:cloud-runner`; and equivalent `bun run local:agent:smoke`.
+- The local agent smoke stayed inside the synthetic local Docker boundary: `digitalOceanRequests=0`,
+  one simulated Droplet, agent created/deleted, cleanup verified, and single-run local p95
+  `161323` ms. This is behavior evidence only, not DigitalOcean SLO evidence.
+- Read-only `bun run agent:creation:benchmark -- --limit 1` completed against the local DB but the
+  latest row was incomplete/invalid, so it is not SLO evidence.
+- DigitalOcean benchmark mode parsed the explicit authorized candidate slug gate and then stopped at
+  the existing reserved/unimplemented provider-trial boundary. No provider resources were created.
+- Next: checker review. Merge/default selection remains blocked on green required main CI or accepted
+  upstream classification plus explicit provider evidence authorization.

@@ -45,14 +45,23 @@ import {
   LOCAL_AGENT_SMOKE_IMAGE_BUNDLE_PATH,
   LOCAL_DOCKER_DROPLET_CONTAINER_NAME,
 } from "@/src/server/runners/local-docker-digitalocean-provider";
+import { findDigitalOceanRunnerResourceProfile } from "@/src/server/runners/runner-resource-profiles";
 import { ManualRunnerAdapter } from "@/src/server/runners/manual-runner-adapter";
 import type { ManualRunnerRecord } from "@/src/server/runners/manual-runner-persistence";
 import { createConfiguredDigitalOceanProvider } from "@/src/server/runners/runner-provisioning";
 
 const COMPOSE_PROJECT = "agentbay-agent-smoke";
 const DASHBOARD_CONTAINER = `${COMPOSE_PROJECT}-dashboard-1`;
-const DATABASE_URL = "postgres://agentbay:agentbay@127.0.0.1:55432/plingpling";
-const APP_URL = "http://host.docker.internal:3000";
+const APP_HOST_PORT = readPositiveInteger(
+  process.env.AGENTBAY_LOCAL_AGENT_CYCLE_APP_HOST_PORT,
+  55_300,
+);
+const POSTGRES_HOST_PORT = readPositiveInteger(
+  process.env.AGENTBAY_LOCAL_AGENT_CYCLE_POSTGRES_HOST_PORT,
+  55_432,
+);
+const DATABASE_URL = `postgres://agentbay:agentbay@127.0.0.1:${POSTGRES_HOST_PORT}/plingpling`;
+const APP_URL = `http://host.docker.internal:${APP_HOST_PORT}`;
 const RUNNER_ENDPOINT_URL = "http://host.docker.internal:3045";
 const TIMEOUT_MS = readPositiveInteger(
   process.env.AGENTBAY_LOCAL_AGENT_CYCLE_TIMEOUT_MS,
@@ -60,6 +69,7 @@ const TIMEOUT_MS = readPositiveInteger(
 );
 const POLL_MS = readPositiveInteger(process.env.AGENTBAY_LOCAL_AGENT_CYCLE_POLL_MS, 1_000);
 const SECRET_KEY = Buffer.alloc(32, 73).toString("base64url");
+const DEFAULT_LOCAL_AGENT_CYCLE_SIZE_SLUG = "s-1vcpu-2gb";
 const MANAGED_CONTAINER_NAMES = [
   LOCAL_DOCKER_DROPLET_CONTAINER_NAME,
   "agentbay-runner",
@@ -80,10 +90,22 @@ export type LocalAgentCycleSmokeSummary = {
   hermesGatewayLiveInsideDroplet: true;
   hermesInstalledInsideDroplet: true;
   nestedDocker: true;
+  resourceProfile: {
+    memoryMiB: number;
+    sizeSlug: string;
+    vcpus: number;
+  };
+  hermesDocker: {
+    cpus: string;
+    memory: string;
+    pidsLimit: string;
+    runnerMaxAgents: number;
+  };
   runnerId: string;
   runnerProvisioned: true;
   runtimeRestarted: true;
   runtimeStopped: true;
+  sizeSlug: string;
   simulatedDroplets: 1;
   telegramBoundary: "synthetic-local-health";
 };
@@ -128,6 +150,10 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
     const config = readDigitalOceanProviderConfig(smokeEnv);
     if (config?.providerMode !== "local_docker" || !config.localAgentSmokeMode) {
       throw new Error("Local agent cycle provider configuration did not remain isolated.");
+    }
+    const resourceProfile = findDigitalOceanRunnerResourceProfile(config.sizeSlug);
+    if (!resourceProfile) {
+      throw new Error("Local agent cycle selected an unsupported managed-runner profile.");
     }
     provider = createConfiguredDigitalOceanProvider(config);
 
@@ -232,11 +258,23 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
       fakeModelBoundary: true,
       hermesGatewayLiveInsideDroplet: true,
       hermesInstalledInsideDroplet: true,
+      hermesDocker: {
+        cpus: config.hermesDockerCpus ?? "1",
+        memory: config.hermesDockerMemory ?? "1536m",
+        pidsLimit: config.hermesDockerPidsLimit ?? "256",
+        runnerMaxAgents: config.runnerMaxAgents ?? 1,
+      },
       nestedDocker: true,
+      resourceProfile: {
+        memoryMiB: resourceProfile.memoryMiB,
+        sizeSlug: resourceProfile.sizeSlug,
+        vcpus: resourceProfile.vcpus,
+      },
       runnerId,
       runnerProvisioned: true,
       runtimeRestarted: true,
       runtimeStopped: true,
+      sizeSlug: config.sizeSlug,
       simulatedDroplets: 1,
       telegramBoundary: "synthetic-local-health",
     };
@@ -247,6 +285,7 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
     if (agentId) {
       await cleanupAgentContainers(agentId).catch((error) => cleanupErrors.push(error));
     }
+    await cleanupLabeledAgentContainers().catch((error) => cleanupErrors.push(error));
     if (connection && runnerId && provider) {
       await cleanupRunner(connection, runnerId, provider).catch((error) =>
         cleanupErrors.push(error),
@@ -268,7 +307,10 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
     }).catch((error) => cleanupErrors.push(error));
     restoreProcessEnv(previousEnv);
 
-    const containersRemain = await listManagedContainers();
+    const containersRemain = [
+      ...(await listManagedContainers()),
+      ...(await listLabeledAgentContainers()),
+    ];
     if (containersRemain.length > 0) {
       cleanupErrors.push(new Error("Local agent cycle cleanup left managed containers behind."));
     }
@@ -607,7 +649,7 @@ async function assertPersistedCleanup(
 async function waitForControlPlane(): Promise<void> {
   const deadline = Date.now() + TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const response = await fetch("http://127.0.0.1:3000/health").catch(() => null);
+    const response = await fetch(`http://127.0.0.1:${APP_HOST_PORT}/health`).catch(() => null);
     if (response?.ok) return;
     const dashboard = await docker(
       ["inspect", "--format", "{{.State.Status}}", DASHBOARD_CONTAINER],
@@ -703,12 +745,27 @@ async function prepareNestedImageBundle(): Promise<void> {
 }
 
 async function assertNoManagedContainers(): Promise<void> {
-  const existing = await listManagedContainers();
+  const existing = [...(await listManagedContainers()), ...(await listLabeledAgentContainers())];
   if (existing.length > 0) {
     throw new Error(
       `Local agent cycle refuses to replace existing local runner containers: ${existing.join(", ")}.`,
     );
   }
+}
+
+async function listLabeledAgentContainers(): Promise<string[]> {
+  const listed = await docker([
+    "ps",
+    "--all",
+    "--filter",
+    "label=agentbay.agent_id",
+    "--format",
+    "{{.Names}}",
+  ]);
+  return listed.stdout
+    .split("\n")
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 async function listManagedContainers(): Promise<string[]> {
@@ -750,7 +807,27 @@ async function cleanupAgentContainers(agentId: string): Promise<void> {
   }
 }
 
+async function cleanupLabeledAgentContainers(): Promise<void> {
+  const listed = await docker([
+    "ps",
+    "--all",
+    "--filter",
+    "label=agentbay.agent_id",
+    "--format",
+    "{{.ID}}",
+  ]);
+  const containerIds = listed.stdout
+    .split("\n")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (containerIds.length > 0) {
+    await docker(["rm", "--force", ...containerIds]);
+  }
+}
+
 function buildSmokeEnv(env: Record<string, string | undefined>): Record<string, string> {
+  const selectedSizeSlug = resolveLocalAgentCycleSizeSlug(env);
+
   return {
     ...Object.fromEntries(
       Object.entries(env).filter((entry): entry is [string, string] => !!entry[1]),
@@ -758,22 +835,36 @@ function buildSmokeEnv(env: Record<string, string | undefined>): Record<string, 
     AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "local-smoke-v1",
     AGENTBAY_AGENT_SECRET_KEYS_JSON: JSON.stringify({ "local-smoke-v1": SECRET_KEY }),
     AGENTBAY_AUTH_MODE: "development",
+    AGENTBAY_APP_HOST_PORT: String(APP_HOST_PORT),
     AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
     AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "none",
     AGENTBAY_DIGITALOCEAN_TOKEN: "local-docker",
-    AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-2vcpu-4gb",
+    AGENTBAY_DIGITALOCEAN_SIZE_SLUG: selectedSizeSlug,
     AGENTBAY_HERMES_PRIVATE_NETWORK: "agentbay-hermes",
     AGENTBAY_HERMES_WORKLOAD_IMAGE: DEFAULT_LOCAL_HERMES_IMAGE,
     AGENTBAY_LOCAL_AGENT_SMOKE_MODE: LOCAL_AGENT_SMOKE_MODE_VALUE,
     AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: RUNNER_ENDPOINT_URL,
     AGENTBAY_LOCAL_CLOUD_RUNNER_START_DELAY_MS: "100",
-    AGENTBAY_POSTGRES_HOST_PORT: "55432",
+    AGENTBAY_POSTGRES_HOST_PORT: String(POSTGRES_HOST_PORT),
     AGENTBAY_READY_AGENT_CREATION_ENABLED: "true",
     AGENTBAY_RUNNER_BEARER_TOKEN: "local-runner-command-token",
     AGENTBAY_RUNNER_IMAGE: "agentbay-runner:local",
     DATABASE_URL,
     NEXT_PUBLIC_APP_URL: APP_URL,
   };
+}
+
+export function resolveLocalAgentCycleSizeSlug(env: Record<string, string | undefined>): string {
+  const requestedSizeSlug = env.AGENTBAY_DIGITALOCEAN_SIZE_SLUG?.trim();
+  const selectedSizeSlug = requestedSizeSlug || DEFAULT_LOCAL_AGENT_CYCLE_SIZE_SLUG;
+
+  if (!findDigitalOceanRunnerResourceProfile(selectedSizeSlug)) {
+    throw new Error(
+      `Local agent cycle smoke requires a supported managed-runner size slug; received ${selectedSizeSlug}.`,
+    );
+  }
+
+  return selectedSizeSlug;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

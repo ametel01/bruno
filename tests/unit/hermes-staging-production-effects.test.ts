@@ -32,6 +32,7 @@ function env(): Record<string, string> {
     AGENTBAY_DIGITALOCEAN_TOKEN: "digitalocean-provider-token-0000000001",
     AGENTBAY_RUNNER_BEARER_TOKEN: "runner-bearer-credential-000000001",
     AGENTBAY_RUNNER_IMAGE: `ghcr.io/ametel01/agentbay-runner:sha-staging@${DIGEST}`,
+    AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
     AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
     AGENTBAY_AGENT_SECRET_KEYS_JSON: JSON.stringify({
       v1: Buffer.alloc(32, 7).toString("base64"),

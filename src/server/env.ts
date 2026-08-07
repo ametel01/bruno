@@ -10,11 +10,21 @@ import {
 import {
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+  DEFAULT_HERMES_DOCKER_CPUS,
+  DEFAULT_HERMES_DOCKER_MEMORY,
+  DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
   DEFAULT_HERMES_RUNNER_MAX_AGENTS,
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
 } from "@/src/runner-service/constants";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
+import {
+  MAX_HERMES_DOCKER_PIDS_LIMIT,
+  parseHermesDockerCpus,
+  parseHermesDockerMemoryMiB,
+  parseHermesDockerPidsLimit,
+  validateDigitalOceanRunnerResourceCompatibility,
+} from "@/src/server/runners/runner-resource-profiles";
 
 export const DEFAULT_AGENTBAY_RUNNER_IMAGE = "ghcr.io/ametel01/agentbay-runner:main";
 
@@ -37,6 +47,9 @@ export type DigitalOceanProviderConfig = {
   hermesStateRoot?: string;
   hermesPrivateNetwork?: string;
   hermesReadinessTimeoutMs?: number;
+  hermesDockerCpus?: string;
+  hermesDockerMemory?: string;
+  hermesDockerPidsLimit?: string;
   runnerMaxAgents?: number;
   region: string;
   sizeSlug: string;
@@ -327,6 +340,18 @@ export function readDigitalOceanProviderConfig(
       envName: "AGENTBAY_HERMES_READINESS_TIMEOUT_MS",
       defaultValue: DEFAULT_HERMES_READINESS_TIMEOUT_MS,
     }),
+    hermesDockerCpus: readDockerCpuLimit(input.AGENTBAY_HERMES_DOCKER_CPUS, {
+      envName: "AGENTBAY_HERMES_DOCKER_CPUS",
+      defaultValue: DEFAULT_HERMES_DOCKER_CPUS,
+    }),
+    hermesDockerMemory: readDockerMemoryLimit(input.AGENTBAY_HERMES_DOCKER_MEMORY, {
+      envName: "AGENTBAY_HERMES_DOCKER_MEMORY",
+      defaultValue: DEFAULT_HERMES_DOCKER_MEMORY,
+    }),
+    hermesDockerPidsLimit: readDockerPidsLimit(input.AGENTBAY_HERMES_DOCKER_PIDS_LIMIT, {
+      envName: "AGENTBAY_HERMES_DOCKER_PIDS_LIMIT",
+      defaultValue: DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
+    }),
     runnerMaxAgents: readPositiveInteger(input.AGENTBAY_RUNNER_MAX_AGENTS, {
       envName: "AGENTBAY_RUNNER_MAX_AGENTS",
       defaultValue: DEFAULT_HERMES_RUNNER_MAX_AGENTS,
@@ -359,6 +384,14 @@ export function readDigitalOceanProviderConfig(
     throw new EnvValidationError([
       "AGENTBAY_RUNNER_IMAGE must be an immutable registry image reference with a sha256 digest for hosted DigitalOcean provisioning.",
     ]);
+  }
+
+  if (providerMode === "digitalocean" || config.localAgentSmokeMode) {
+    const resourceCompatibility = validateDigitalOceanRunnerResourceCompatibility(config);
+
+    if (!resourceCompatibility.ok) {
+      throw new EnvValidationError(resourceCompatibility.issues.map((issue) => issue.message));
+    }
   }
 
   return config;
@@ -449,6 +482,51 @@ function readDockerNetworkName(
   if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/.test(normalizedValue)) {
     throw new EnvValidationError([
       `${options.envName} must be a Docker network name without whitespace or shell-control characters.`,
+    ]);
+  }
+
+  return normalizedValue;
+}
+
+function readDockerCpuLimit(
+  value: string | undefined,
+  options: { envName: string; defaultValue: string },
+): string {
+  const normalizedValue = readNonEmptyProviderSetting(value, options);
+
+  if (parseHermesDockerCpus(normalizedValue) === null) {
+    throw new EnvValidationError([
+      `${options.envName} must be a positive Docker CPU value representable to Docker NanoCPUs.`,
+    ]);
+  }
+
+  return normalizedValue;
+}
+
+function readDockerMemoryLimit(
+  value: string | undefined,
+  options: { envName: string; defaultValue: string },
+): string {
+  const normalizedValue = readNonEmptyProviderSetting(value, options);
+
+  if (parseHermesDockerMemoryMiB(normalizedValue) === null) {
+    throw new EnvValidationError([
+      `${options.envName} must be a positive whole-MiB Docker memory value such as 1536m or 2g.`,
+    ]);
+  }
+
+  return normalizedValue;
+}
+
+function readDockerPidsLimit(
+  value: string | undefined,
+  options: { envName: string; defaultValue: string },
+): string {
+  const normalizedValue = readNonEmptyProviderSetting(value, options);
+
+  if (parseHermesDockerPidsLimit(normalizedValue) === null) {
+    throw new EnvValidationError([
+      `${options.envName} must be a positive integer no greater than ${MAX_HERMES_DOCKER_PIDS_LIMIT}.`,
     ]);
   }
 

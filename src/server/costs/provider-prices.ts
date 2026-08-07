@@ -4,6 +4,12 @@ import {
   DIGITALOCEAN_PROVIDER,
   type DigitalOceanProviderName,
 } from "@/src/server/runners/digitalocean-provider";
+import {
+  findDigitalOceanRunnerResourceProfile,
+  isSupportedDigitalOceanRunnerSizeSlug,
+  listDigitalOceanRunnerResourceProfiles,
+  type SupportedDigitalOceanRunnerSizeSlug,
+} from "@/src/server/runners/runner-resource-profiles";
 
 const ESTIMATE_DAYS_PER_MONTH = 30;
 const ESTIMATE_HOURS_PER_MONTH = ESTIMATE_DAYS_PER_MONTH * 24;
@@ -14,27 +20,13 @@ const USD_FORMATTER = new Intl.NumberFormat("en-US", {
   style: "currency",
 });
 
-const DIGITALOCEAN_RUNNER_PRICES = {
-  "s-1vcpu-512mb-10gb": {
-    monthlyCents: 400,
-  },
-  "s-1vcpu-1gb": {
-    monthlyCents: 600,
-  },
-  "s-1vcpu-2gb": {
-    monthlyCents: 1200,
-  },
-  "s-2vcpu-2gb": {
-    monthlyCents: 1800,
-  },
-} as const satisfies Record<string, { monthlyCents: number }>;
-
-export type SupportedDigitalOceanRunnerSizeSlug = keyof typeof DIGITALOCEAN_RUNNER_PRICES;
-
 export type AvailableRunnerPriceMetadata = {
   available: true;
   provider: DigitalOceanProviderName;
   sizeSlug: SupportedDigitalOceanRunnerSizeSlug;
+  vcpus: number;
+  memoryMiB: number;
+  diskGiB: number;
   monthlyCents: number;
   dailyEstimateCents: number;
   hourlyEstimateCents: number;
@@ -74,7 +66,19 @@ export function getDigitalOceanRunnerPriceMetadata(
     };
   }
 
-  const { monthlyCents } = DIGITALOCEAN_RUNNER_PRICES[normalizedSizeSlug];
+  const profile = findDigitalOceanRunnerResourceProfile(normalizedSizeSlug);
+
+  if (!profile) {
+    return {
+      available: false,
+      provider: DIGITALOCEAN_PROVIDER,
+      sizeSlug: normalizedSizeSlug,
+      reason: "unsupported_size",
+      display: unavailableDisplay(),
+    };
+  }
+
+  const { monthlyCents } = profile;
   const dailyEstimateCents = Math.round(monthlyCents / ESTIMATE_DAYS_PER_MONTH);
   const hourlyEstimateCents = Math.round(monthlyCents / ESTIMATE_HOURS_PER_MONTH);
 
@@ -82,6 +86,9 @@ export function getDigitalOceanRunnerPriceMetadata(
     available: true,
     provider: DIGITALOCEAN_PROVIDER,
     sizeSlug: normalizedSizeSlug,
+    vcpus: profile.vcpus,
+    memoryMiB: profile.memoryMiB,
+    diskGiB: profile.diskGiB,
     monthlyCents,
     dailyEstimateCents,
     hourlyEstimateCents,
@@ -94,23 +101,15 @@ export function getDigitalOceanRunnerPriceMetadata(
 }
 
 export function listSupportedDigitalOceanRunnerPriceMetadata(): AvailableRunnerPriceMetadata[] {
-  return (Object.keys(DIGITALOCEAN_RUNNER_PRICES) as SupportedDigitalOceanRunnerSizeSlug[]).map(
-    (sizeSlug) => {
-      const metadata = getDigitalOceanRunnerPriceMetadata(sizeSlug);
+  return listDigitalOceanRunnerResourceProfiles().map(({ sizeSlug }) => {
+    const metadata = getDigitalOceanRunnerPriceMetadata(sizeSlug);
 
-      if (!metadata.available) {
-        throw new Error(`Supported DigitalOcean size ${sizeSlug} did not resolve to metadata.`);
-      }
+    if (!metadata.available) {
+      throw new Error(`Supported DigitalOcean size ${sizeSlug} did not resolve to metadata.`);
+    }
 
-      return metadata;
-    },
-  );
-}
-
-function isSupportedDigitalOceanRunnerSizeSlug(
-  sizeSlug: string | null,
-): sizeSlug is SupportedDigitalOceanRunnerSizeSlug {
-  return sizeSlug !== null && sizeSlug in DIGITALOCEAN_RUNNER_PRICES;
+    return metadata;
+  });
 }
 
 function normalizeSizeSlug(sizeSlug: string | null | undefined): string | null {

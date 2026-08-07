@@ -20,6 +20,7 @@ import {
   type DigitalOceanTagInput,
 } from "@/src/server/runners/digitalocean-provider";
 import { LOCAL_DOCKER_DIGITALOCEAN_RESOURCE_ID } from "@/src/server/runners/local-docker-provider-constants";
+import { findDigitalOceanRunnerResourceProfile } from "@/src/server/runners/runner-resource-profiles";
 
 const localDockerProviderLogger = createAppLogger("local_docker.provider");
 
@@ -227,12 +228,18 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
         agentSmokeMode: this.#agentSmokeMode,
         localRunnerEndpointUrl: this.#endpointUrl,
       });
+      const agentSmokeProfile = this.#agentSmokeMode
+        ? findDigitalOceanRunnerResourceProfile(input.sizeSlug)
+        : null;
+      if (this.#agentSmokeMode && !agentSmokeProfile) {
+        throw new Error(`Local agent smoke requires a supported size slug: ${input.sizeSlug}.`);
+      }
       const dropletRuntimeArgs = this.#agentSmokeMode
         ? [
             "--cpus",
-            "2",
+            String(agentSmokeProfile?.vcpus ?? 1),
             "--memory",
-            "4g",
+            `${agentSmokeProfile?.memoryMiB ?? 512}m`,
             "--privileged",
             "--cgroupns",
             "host",

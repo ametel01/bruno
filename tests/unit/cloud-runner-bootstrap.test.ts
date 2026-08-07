@@ -11,6 +11,9 @@ import {
 import {
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+  DEFAULT_HERMES_DOCKER_CPUS,
+  DEFAULT_HERMES_DOCKER_MEMORY,
+  DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
   DEFAULT_HERMES_RUNNER_MAX_AGENTS,
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
@@ -109,6 +112,13 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain(
       `AGENTBAY_HERMES_READINESS_TIMEOUT_MS=${DEFAULT_HERMES_READINESS_TIMEOUT_MS}`,
     );
+    expect(content.userData).toContain(`AGENTBAY_HERMES_DOCKER_CPUS=${DEFAULT_HERMES_DOCKER_CPUS}`);
+    expect(content.userData).toContain(
+      `AGENTBAY_HERMES_DOCKER_MEMORY=${DEFAULT_HERMES_DOCKER_MEMORY}`,
+    );
+    expect(content.userData).toContain(
+      `AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=${DEFAULT_HERMES_DOCKER_PIDS_LIMIT}`,
+    );
     expect(content.userData).toContain(
       `AGENTBAY_RUNNER_MAX_AGENTS=${DEFAULT_HERMES_RUNNER_MAX_AGENTS}`,
     );
@@ -183,6 +193,11 @@ describe.sequential("cloud runner bootstrap content", () => {
       hermesStateRoot: DEFAULT_HERMES_STATE_ROOT,
       hermesPrivateNetwork: DEFAULT_HERMES_PRIVATE_NETWORK,
       hermesReadinessTimeoutMs: DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+      hermesDocker: {
+        cpus: DEFAULT_HERMES_DOCKER_CPUS,
+        memory: DEFAULT_HERMES_DOCKER_MEMORY,
+        pidsLimit: DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
+      },
       runnerMaxAgents: DEFAULT_HERMES_RUNNER_MAX_AGENTS,
       bootModelCanaryEnabled: false,
       registrationToken: BOOTSTRAP_REDACTION,
@@ -206,6 +221,11 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.safeSummary.hermesStateRoot).toBe(DEFAULT_HERMES_STATE_ROOT);
     expect(content.safeSummary.hermesPrivateNetwork).toBe(DEFAULT_HERMES_PRIVATE_NETWORK);
     expect(content.safeSummary.hermesReadinessTimeoutMs).toBe(DEFAULT_HERMES_READINESS_TIMEOUT_MS);
+    expect(content.safeSummary.hermesDocker).toEqual({
+      cpus: DEFAULT_HERMES_DOCKER_CPUS,
+      memory: DEFAULT_HERMES_DOCKER_MEMORY,
+      pidsLimit: DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
+    });
     expect(content.safeSummary.runnerMaxAgents).toBe(DEFAULT_HERMES_RUNNER_MAX_AGENTS);
     expect(content.safeSummary.runnerRelease).toBeNull();
     expect(content.userData).toContain(`AGENTBAY_RUNNER_IMAGE=${DEFAULT_AGENTBAY_RUNNER_IMAGE}`);
@@ -237,6 +257,9 @@ describe.sequential("cloud runner bootstrap content", () => {
       hermesStateRoot: "/var/lib/agentbay/custom-agents",
       hermesPrivateNetwork: "agentbay-custom-hermes",
       hermesReadinessTimeoutMs: 240_000,
+      hermesDockerCpus: "1",
+      hermesDockerMemory: "1536m",
+      hermesDockerPidsLimit: "256",
       runnerMaxAgents: 1,
     });
 
@@ -248,6 +271,9 @@ describe.sequential("cloud runner bootstrap content", () => {
     );
     expect(content.userData).toContain("AGENTBAY_HERMES_PRIVATE_NETWORK=agentbay-custom-hermes");
     expect(content.userData).toContain("AGENTBAY_HERMES_READINESS_TIMEOUT_MS=240000");
+    expect(content.userData).toContain("AGENTBAY_HERMES_DOCKER_CPUS=1");
+    expect(content.userData).toContain("AGENTBAY_HERMES_DOCKER_MEMORY=1536m");
+    expect(content.userData).toContain("AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256");
     expect(content.userData).toContain("AGENTBAY_RUNNER_MAX_AGENTS=1");
     expect(content.userData).toContain(
       "agentbay_pull_image 'ghcr.io/ametel01/agentbay-hermes:sha-123'",
@@ -261,8 +287,35 @@ describe.sequential("cloud runner bootstrap content", () => {
       hermesStateRoot: "/var/lib/agentbay/custom-agents",
       hermesPrivateNetwork: "agentbay-custom-hermes",
       hermesReadinessTimeoutMs: 240_000,
+      hermesDocker: {
+        cpus: "1",
+        memory: "1536m",
+        pidsLimit: "256",
+      },
       runnerMaxAgents: 1,
     });
+  });
+
+  it("rejects Hermes runtime settings Docker cannot represent", () => {
+    const base = {
+      appBaseUrl: "https://app.agentbay.test",
+      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      runnerName: "Cloud Runner 1",
+    };
+
+    expect(() =>
+      buildCloudRunnerBootstrapContent({
+        ...base,
+        hermesDockerCpus: "0.0000000001",
+      }),
+    ).toThrow("hermesDockerCpus must be a positive Docker CPU value representable");
+
+    expect(() =>
+      buildCloudRunnerBootstrapContent({
+        ...base,
+        hermesDockerPidsLimit: "4097",
+      }),
+    ).toThrow("hermesDockerPidsLimit must be a positive integer no greater than 4096");
   });
 
   it("rejects loopback runner endpoint URLs for cloud bootstrap registration", () => {

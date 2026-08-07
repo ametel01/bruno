@@ -7,6 +7,9 @@ import {
   AGENTBAY_AGENT_ID_LABEL,
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_READINESS_TIMEOUT_MS,
+  DEFAULT_HERMES_DOCKER_CPUS,
+  DEFAULT_HERMES_DOCKER_MEMORY,
+  DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_MANUAL_RUNNER_IMAGE,
   DOCKER_CLI_TIMEOUT_MS,
@@ -65,6 +68,9 @@ const AGENTBAY_OPERATION_ACTION_LABEL = "agentbay.operation_action";
 const AGENTBAY_OPERATION_ACCEPTED_AT_LABEL = "agentbay.operation_accepted_at";
 const HERMES_WORKLOAD_UID = 10000;
 const HERMES_WORKLOAD_GID = 10000;
+const HERMES_DOCKER_CAP_DROP = ["ALL"] as const;
+const HERMES_DOCKER_CAP_ADD = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"] as const;
+const HERMES_DOCKER_SECURITY_OPT = ["no-new-privileges"] as const;
 const MAX_HERMES_LOG_BYTES_PER_FILE = 64 * 1024;
 const MAX_HERMES_LOG_LINES = 500;
 const STATUS_PROBE_TIMEOUT_MS = 2_000;
@@ -1921,11 +1927,9 @@ function hasExactStatusRuntimeEvidence(
     hostPorts: !hasPublishedPort(inspect.HostConfig?.PortBindings),
     networkPorts: !hasPublishedPort(inspect.NetworkSettings?.Ports),
     restartPolicy: hasExactManagedRestartPolicy(inspect),
-    security: inspect.HostConfig?.SecurityOpt?.includes("no-new-privileges") === true,
-    capDrop: inspect.HostConfig?.CapDrop?.includes("ALL") === true,
-    capAdd: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"].every((capability) =>
-      hasDockerCapability(inspect.HostConfig?.CapAdd, capability),
-    ),
+    security: hasExactDockerStringSet(inspect.HostConfig?.SecurityOpt, HERMES_DOCKER_SECURITY_OPT),
+    capDrop: hasExactDockerStringSet(inspect.HostConfig?.CapDrop, HERMES_DOCKER_CAP_DROP),
+    capAdd: hasExactDockerStringSet(inspect.HostConfig?.CapAdd, HERMES_DOCKER_CAP_ADD),
     pids: inspect.HostConfig?.PidsLimit === Number.parseInt(runtime.pidsLimit, 10),
     cpus: inspect.HostConfig?.NanoCpus === parseDockerCpusToNanoCpus(runtime.cpus),
     memory: inspect.HostConfig?.Memory === parseDockerMemoryBytes(runtime.memory),
@@ -2267,18 +2271,16 @@ async function assertHermesInspectMatchesRuntime(
     throw new Error("Docker container unexpectedly publishes ports.");
   }
 
-  if (!inspect.HostConfig.SecurityOpt?.includes("no-new-privileges")) {
+  if (!hasExactDockerStringSet(inspect.HostConfig.SecurityOpt, HERMES_DOCKER_SECURITY_OPT)) {
     throw new Error("Docker container security options mismatch.");
   }
 
-  if (!inspect.HostConfig.CapDrop?.includes("ALL")) {
+  if (!hasExactDockerStringSet(inspect.HostConfig.CapDrop, HERMES_DOCKER_CAP_DROP)) {
     throw new Error("Docker container capability set mismatch.");
   }
 
-  for (const capability of ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]) {
-    if (!hasDockerCapability(inspect.HostConfig.CapAdd, capability)) {
-      throw new Error("Docker container capability set mismatch.");
-    }
+  if (!hasExactDockerStringSet(inspect.HostConfig.CapAdd, HERMES_DOCKER_CAP_ADD)) {
+    throw new Error("Docker container capability set mismatch.");
   }
 
   if (inspect.HostConfig.PidsLimit !== Number.parseInt(input.runtime.pidsLimit, 10)) {
@@ -2364,12 +2366,22 @@ function inspectContainsDockerSocket(inspect: DockerInspectContainer): boolean {
   return values.some((value) => value?.includes("/var/run/docker.sock"));
 }
 
-function hasDockerCapability(
-  capabilities: string[] | null | undefined,
-  capability: string,
+function hasExactDockerStringSet(
+  actual: readonly string[] | null | undefined,
+  expected: readonly string[],
 ): boolean {
-  return (capabilities ?? []).some(
-    (value) => value === capability || value === `CAP_${capability}`,
+  const normalizedActual = new Set(
+    (actual ?? []).map((value) => value.trim().replace(/^CAP_/i, "").toUpperCase()),
+  );
+  const normalizedExpected = new Set(
+    expected.map((value) => value.trim().replace(/^CAP_/i, "").toUpperCase()),
+  );
+
+  return (
+    normalizedActual.size === normalizedExpected.size &&
+    normalizedExpected.size === expected.length &&
+    (actual ?? []).length === normalizedActual.size &&
+    [...normalizedExpected].every((value) => normalizedActual.has(value))
   );
 }
 
@@ -2574,13 +2586,20 @@ function resolveHermesDockerRuntimeOptions(
   overrides: Partial<HermesDockerRuntimeOptions> | undefined,
 ): HermesDockerRuntimeOptions {
   return {
-    cpus: overrides?.cpus ?? process.env[HERMES_DOCKER_CPUS_ENV]?.trim() ?? "1",
-    memory: overrides?.memory ?? process.env[HERMES_DOCKER_MEMORY_ENV]?.trim() ?? "1536m",
+    cpus:
+      overrides?.cpus ?? process.env[HERMES_DOCKER_CPUS_ENV]?.trim() ?? DEFAULT_HERMES_DOCKER_CPUS,
+    memory:
+      overrides?.memory ??
+      process.env[HERMES_DOCKER_MEMORY_ENV]?.trim() ??
+      DEFAULT_HERMES_DOCKER_MEMORY,
     network:
       overrides?.network ??
       process.env[HERMES_PRIVATE_NETWORK_ENV]?.trim() ??
       DEFAULT_HERMES_PRIVATE_NETWORK,
-    pidsLimit: overrides?.pidsLimit ?? process.env[HERMES_DOCKER_PIDS_LIMIT_ENV]?.trim() ?? "256",
+    pidsLimit:
+      overrides?.pidsLimit ??
+      process.env[HERMES_DOCKER_PIDS_LIMIT_ENV]?.trim() ??
+      DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
     readinessPort: readPositiveInteger(
       process.env[HERMES_READINESS_PORT_ENV],
       overrides?.readinessPort ?? 8642,
