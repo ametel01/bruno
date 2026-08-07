@@ -3,11 +3,11 @@
 ## Active Work
 
 - issue: [#266](https://github.com/ametel01/plingpling/issues/266)
-  owner: builder-agent (`issue_266_builder`)
+  owner: checker-agent (`issue_266_checker`)
   branch: `codex/issue-266-attested-snapshot`
   worktree: `/Users/alexmetelli/source/plingpling-issue-266`
   pr: none
-  phase: checker-ready after cycle-2 builder fixes
+  phase: checker failed cycle 2; builder action required before PR/merge
   cycle: 2/5
 
 ## Completion Contract
@@ -157,8 +157,8 @@
   - Resolved upstream: #263 closed through merged PR #272 at
     `7d1cb985c06b0007dadcfb0e42c5631c65b7c472`; #266 is based exactly on that `origin/main` commit.
   - Merge-gate dependency: current-main CI run
-    [31131392382](https://github.com/ametel01/plingpling/actions/runs/31131392382) is in progress as
-    of 2026-08-07T00:22:38Z. Steps through build passed; E2E was still running when checked.
+    [31131392382](https://github.com/ametel01/plingpling/actions/runs/31131392382) completed
+    successfully at 2026-08-07T00:22:32Z.
   - Live-acceptance dependency: explicit user authorization, cost budget, protected environment,
     scoped DigitalOcean credentials, and signing/attestation key configuration are absent by design.
     Stop before provider execution; repository implementation is still agent-actionable.
@@ -260,6 +260,30 @@
 - cycle-2 builder diff check: pass — `git diff --check`.
 - cycle-2 local agent smoke: skipped by coordinator direction because #265/#266 share the
   `agentbay-local-cloud-runner` Docker Compose namespace; leave for serialized checker rerun.
+- cycle-2 checker static review: fail — workflow requires
+  `snapshot-artifacts/boot-result.json` and `snapshot-artifacts/sanitation-result.json` before the
+  build script creates the builder, and the snapshot manifest path uses DigitalOcean action ID as the
+  snapshot image ID.
+- cycle-2 checker focused unit: pass —
+  `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts
+  tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-workflow.test.ts
+  tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts
+  tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts
+  tests/unit/digitalocean-provider.test.ts` (8 files, 89 tests).
+- cycle-2 checker format/lint/typecheck: pass — `bun run format:check`, `bun run lint`,
+  `bun run typecheck`.
+- cycle-2 checker production build: pass — `bun run build`.
+- cycle-2 checker full unit: fail — `bun run test` failed 2 tests by 5s timeout:
+  `tests/unit/create-agent-db.test.ts:3652` and `tests/unit/create-agent-db.test.ts:4469`
+  (1 failed file, 171 passed files, 2 failed tests, 1,661 passed tests). Focused rerun
+  `bun scripts/run-unit-tests.ts tests/unit/create-agent-db.test.ts` passed (127 tests).
+- cycle-2 checker E2E CI: pass — `bun run test:e2e:ci` (26/26 Playwright tests passed).
+- cycle-2 checker cloud-runner repro: pass — `bun run repro:cloud-runner` validated generated
+  stock user-data schema and 11 bash script blocks; temp-generated snapshot-mode user-data passed
+  `bun run repro:cloud-runner -- --user-data <temp>/snapshot-user-data.yaml` with valid cloud-init
+  schema and 8 bash script blocks checked.
+- cycle-2 checker local agent smoke: skipped by instruction because #265 owns the shared Docker
+  Compose namespace.
 - skipped live/billable: protected snapshot workflow dispatch, DigitalOcean resource/snapshot
   creation or deletion, GitHub environment/secret configuration, production deploy/release, and
   provider-backed Step 6 acceptance.
@@ -376,6 +400,134 @@ Status: FAILED
 - Builder must fix the contract failures above and add adversarial tests for the missing semantic
   cases before coordinator pushes/opens/merges any PR. There is currently no GitHub PR for this
   branch, and checker verdict is not merge-ready.
+
+## Checker Result - Cycle 2
+
+Status: FAILED
+
+## Commands
+
+- command: `git status --short --branch --untracked-files=all`
+  result: pass
+  evidence: branch `codex/issue-266-attested-snapshot` is ahead of `origin/main` by 4; only
+    `STATUS.md` is modified by checker evidence.
+- command: `gh pr list --repo ametel01/plingpling --head codex/issue-266-attested-snapshot --json ...`
+  result: blocked
+  evidence: returned `[]`; there is still no PR to merge.
+- command: `gh run view 31131392382 --repo ametel01/plingpling --json status,conclusion,url,updatedAt,jobs`
+  result: pass
+  evidence: current-main CI run `31131392382` conclusion `success`; job `Verification gates`
+    completed successfully.
+- command: `git diff --check`
+  result: pass
+  evidence: no whitespace errors reported.
+- command: `bun scripts/run-unit-tests.ts tests/unit/runner-snapshot-build.test.ts tests/unit/runner-snapshot-manifest.test.ts tests/unit/runner-snapshot-workflow.test.ts tests/unit/runner-provisioning.test.ts tests/unit/automatic-runner-provisioning.test.ts tests/unit/cloud-runner-bootstrap.test.ts tests/unit/server-env.test.ts tests/unit/digitalocean-provider.test.ts`
+  result: pass
+  evidence: 8 files, 89 tests passed.
+- command: `bun run format:check`
+  result: pass
+  evidence: 405 files checked, no fixes applied.
+- command: `bun run lint`
+  result: pass
+  evidence: 405 files checked, no fixes applied.
+- command: `bun run typecheck`
+  result: pass
+  evidence: `next typegen && tsc --noEmit` completed.
+- command: `bun run test`
+  result: failed
+  evidence: 1 failed file, 171 passed files, 2 failed tests, 1,661 passed tests. Timeouts:
+    `tests/unit/create-agent-db.test.ts:3652` and `tests/unit/create-agent-db.test.ts:4469`.
+- command: `bun scripts/run-unit-tests.ts tests/unit/create-agent-db.test.ts`
+  result: pass
+  evidence: focused rerun passed 1 file, 127 tests.
+- command: `bun run build`
+  result: pass
+  evidence: `next build` completed successfully.
+- command: `bun run test:e2e:ci`
+  result: pass
+  evidence: 26/26 Playwright tests passed.
+- command: `bun run repro:cloud-runner`
+  result: pass
+  evidence: stock generated user-data passed cloud-init schema and 11 bash script blocks.
+- command: `bun run repro:cloud-runner -- --user-data <temp>/snapshot-user-data.yaml`
+  result: pass
+  evidence: snapshot-mode user-data passed cloud-init schema and 8 bash script blocks.
+- command: `bun run local:agent:smoke`
+  result: skipped
+  evidence: coordinator directed checker not to run local smoke while #265 owns the shared
+    `agentbay-local-cloud-runner` Docker Compose namespace.
+
+## Failures
+
+- file: `.github/workflows/build-runner-snapshot.yml:89`
+  check: workflow must produce real builder/preloaded boot evidence before snapshot creation.
+  exact error: workflow checks `snapshot-artifacts/boot-result.json` at line 96 before
+    `scripts/build-runner-snapshot.ts` runs at line 142. No prior step creates, downloads, or
+    retrieves that file from the temporary builder, so the protected workflow is not executable.
+  likely owner: builder-agent (`issue_266_builder`).
+- file: `.github/workflows/build-runner-snapshot.yml:112`
+  check: workflow must produce real sanitation/removal/hostile-marker evidence before snapshot
+    creation.
+  exact error: workflow checks `snapshot-artifacts/sanitation-result.json` at line 115 before the
+    build script creates the builder, and no step retrieves `/run/agentbay-snapshot-builder/*` from
+    the builder. This fails closed before any manifest can be built.
+  likely owner: builder-agent (`issue_266_builder`).
+- file: `scripts/build-runner-snapshot.ts:24`
+  check: build command should create the builder, collect actual builder-local boot/sanitation
+    evidence, then validate it.
+  exact error: script reads local `--boot-result` and `--sanitation-result` files before calling
+    `buildRunnerSnapshot`; it has no SSH/metadata/provider path to fetch the evidence generated by
+    `buildSnapshotBuilderBootstrap`.
+  likely owner: builder-agent (`issue_266_builder`).
+- file: `src/server/runners/runner-snapshot-build.ts:245`
+  check: manifest snapshot ID must be the resulting DigitalOcean image ID, not the action ID.
+  exact error: implementation sets `snapshotId = snapshot.action.id`, then reads
+    `readImageAvailability({ imageId: snapshotId })` and emits that value in the manifest. The
+    DigitalOcean provider returns action IDs from `snapshotResource`/`readAction`; the fake provider
+    masks this by accepting any image ID.
+  likely owner: builder-agent (`issue_266_builder`).
+- file: `tests/unit/runner-snapshot-workflow.test.ts:24`
+  check: workflow static tests should prove evidence is produced/retrieved before validation, not
+    only that validation strings exist.
+  exact error: test asserts the workflow contains `Require builder-produced boot evidence` and
+    `Require builder-produced sanitation evidence`, but does not fail when those files have no
+    producer step.
+  likely owner: builder-agent (`issue_266_builder`).
+- file: `tests/unit/runner-snapshot-build.test.ts:51`
+  check: fake provider tests should distinguish snapshot action IDs from image IDs.
+  exact error: success path expects manifest image `"1102"` because fake `snapshotResource` action
+    ID and fake `readImageAvailability` image ID are conflated; no test asserts the manifest uses a
+    provider-confirmed snapshot image ID.
+  likely owner: builder-agent (`issue_266_builder`).
+- file: `tests/unit/create-agent-db.test.ts:3652`
+  check: aggregate full unit gate.
+  exact error: `bun run test` timed out this test after 5000ms. Focused rerun of
+    `tests/unit/create-agent-db.test.ts` passed, so this is likely load/timing-sensitive, but the
+    aggregate gate is not green.
+  likely owner: shared test/gate stability; coordinator or builder if it repeats after semantic
+    fixes.
+- file: `tests/unit/create-agent-db.test.ts:4469`
+  check: aggregate full unit gate.
+  exact error: `bun run test` timed out this test after 5000ms. Focused rerun of
+    `tests/unit/create-agent-db.test.ts` passed.
+  likely owner: shared test/gate stability; coordinator or builder if it repeats after semantic
+    fixes.
+
+## Coverage Gaps
+
+- Protected DigitalOcean workflow was not dispatched; no live Droplet/snapshot/secret/environment
+  effects were authorized.
+- GitHub protected environment reviewer enforcement cannot be proven from repository YAML alone.
+- Local agent smoke was intentionally skipped because #265 owns the shared Docker Compose namespace.
+- The current fake provider does not model a separate action ID and snapshot image ID, so snapshot
+  image identity selection is not verified.
+
+## Next Action
+
+- Builder must make the snapshot workflow/build script executable end-to-end in repository scope:
+  create the builder, retrieve the actual builder-local boot/sanitation evidence, validate it, poll
+  the snapshot action, discover/read the resulting image ID, and update tests so fake action IDs and
+  image IDs cannot be conflated. Do not open or merge a PR yet.
 
 ## Completed
 
