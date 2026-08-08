@@ -193,6 +193,9 @@ bun run test:e2e:ci
 
 This is the repository-owned GitHub CI command. It runs only the health route, shell routes, browser health response, and invalid create-input selectors that do not require a configured cloud-runner provider. The selector list is single-sourced in `scripts/run-e2e.ts`; CI calls the package command rather than duplicating it.
 
+The package command pins `BRUNO_AUTH_MODE=development`, so operator or Clerk settings in a local
+`.env.local` cannot put the credential-free browser suite behind an unrelated authentication gate.
+
 The command still requires the normal test database and application URL. Package defaults target the local PostgreSQL service on port `54329` and the Next.js test server on port `3100`; parallel runs should override `DATABASE_URL`, `NEXT_PUBLIC_APP_URL`, and `PORT` with isolated values.
 
 ## Optional hosted Clerk development smoke
@@ -255,6 +258,9 @@ same configuration contract used by `readDigitalOceanProviderConfig`. At minimum
 `BRUNO_DIGITALOCEAN_TOKEN` and `BRUNO_RUNNER_BEARER_TOKEN` must be nonblank; any optional
 provider settings must also be valid. The preflight reports only capability and variable names,
 never configured values.
+
+Like the CI surface, the full non-hosted suite pins development authentication independently of
+local `.env.local` authentication settings.
 
 With the default `digitalocean` mode, the full suite may create and delete billable provider resources. Use an approved development account with usable network, image, SSH, and runner prerequisites. Do not use synthetic values for a real full-suite run.
 
