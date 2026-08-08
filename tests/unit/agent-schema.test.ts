@@ -8,6 +8,8 @@ import {
   agentDeploymentReplacementBudgets,
   agentDeploymentStageEnum,
   agentDeployments,
+  agentDeploymentWakeups,
+  agentDeploymentWakeupStateEnum,
   agentDesiredStatusEnum,
   agentEvents,
   agentLogs,
@@ -48,6 +50,7 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(getTableName(agentConfigs)).toBe("agent_configs");
     expect(getTableName(agentSecrets)).toBe("agent_secrets");
     expect(getTableName(agentDeployments)).toBe("agent_deployments");
+    expect(getTableName(agentDeploymentWakeups)).toBe("agent_deployment_wakeups");
     expect(getTableName(providerTrialCohorts)).toBe("provider_trial_cohorts");
     expect(getTableName(providerTrialSlots)).toBe("provider_trial_slots");
     expect(getTableName(agentDeploymentReplacementBudgets)).toBe(
@@ -88,6 +91,15 @@ describe("Milestone 1 agent persistence schema", () => {
       "connecting_telegram",
       "ready",
       "failed",
+    ]);
+    expect(agentDeploymentWakeupStateEnum.enumValues).toEqual([
+      "pending",
+      "publishing",
+      "published",
+      "claimed",
+      "terminal",
+      "failed",
+      "exhausted",
     ]);
     expect(runnerReplacementStateEnum.enumValues).toEqual([
       "pending",
@@ -133,6 +145,32 @@ describe("Milestone 1 agent persistence schema", () => {
       "exited",
       "failed",
     ]);
+  });
+
+  it("retains sanitized exhaustion evidence on deployment wakeups", () => {
+    const columns = getTableColumns(agentDeploymentWakeups);
+
+    expect(Object.keys(columns)).toEqual([
+      "id",
+      "deploymentId",
+      "generation",
+      "dueAt",
+      "state",
+      "publishAttemptCount",
+      "providerMessageId",
+      "publishLeaseOwner",
+      "publishLeaseExpiresAt",
+      "safeErrorCode",
+      "publishedAt",
+      "claimedAt",
+      "exhaustedAt",
+      "createdAt",
+      "updatedAt",
+    ]);
+    expect(columns.exhaustedAt.notNull).toBe(false);
+    expect(Object.keys(columns)).not.toEqual(
+      expect.arrayContaining(["error", "errorDetail", "payload", "token", "endpoint"]),
+    );
   });
 
   it("keeps internal UUID users and stores only a nullable Clerk identity", () => {

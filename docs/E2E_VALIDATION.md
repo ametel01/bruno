@@ -124,6 +124,44 @@ stage timing/status, and issue names. They must not retain user identity,
 agent identity, raw credentials, tokens, endpoint URLs, provider resource IDs, provider responses,
 cloud-init output, arbitrary metadata, or serialized environment objects.
 
+## Exhausted deployment wakeups
+
+QStash publication is a bounded hint over PostgreSQL state. Known authentication (`401`, `403`) or
+payload (`400`, `413`, `422`) rejection exhausts the delivery generation after its first atomic
+attempt. Other publication failures consume
+`BRUNO_DEPLOYMENT_WAKEUP_MAX_PUBLISH_ATTEMPTS`, which defaults to 12 and accepts only integers from
+1 through 100. Expired publication leases at the bound become exhausted without another provider
+effect. Exhausted generations are absent from normal publication and delivery claims, and ordinary
+deployment reconciliation cannot silently replace them.
+
+An operator with the dedicated `CRON_SECRET` bearer authority can list sanitized evidence:
+
+```bash
+curl --fail-with-body \
+  --header "Authorization: Bearer ${CRON_SECRET}" \
+  "${BRUNO_APP_URL}/api/internal/agent-deployments/wakeups/exhausted"
+```
+
+Inspect or replay one returned wakeup ID through its exact resource path:
+
+```bash
+curl --fail-with-body \
+  --header "Authorization: Bearer ${CRON_SECRET}" \
+  "${BRUNO_APP_URL}/api/internal/agent-deployments/wakeups/exhausted/${WAKEUP_ID}"
+
+curl --fail-with-body --request POST \
+  --header "Authorization: Bearer ${CRON_SECRET}" \
+  "${BRUNO_APP_URL}/api/internal/agent-deployments/wakeups/exhausted/${WAKEUP_ID}"
+```
+
+The evidence contains only wakeup and deployment IDs, generation, due/exhausted timestamps,
+attempt count, terminal state, and a closed safe reason. It omits Owner and Agent identity, provider
+message bodies/details, tokens, endpoints, and credentials. Replay succeeds only while the Agent
+Deployment is active and the exhausted identity is still its latest generation. The transaction
+terminalizes that identity and inserts exactly one new pending generation before publication is
+attempted. Duplicate or concurrent replay, terminal deployments, and superseded generations fail
+closed.
+
 ## Credential-free CI gate
 
 Run:

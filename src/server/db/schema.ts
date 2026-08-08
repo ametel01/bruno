@@ -53,6 +53,7 @@ export const agentDeploymentWakeupStateEnum = pgEnum("agent_deployment_wakeup_st
   "claimed",
   "terminal",
   "failed",
+  "exhausted",
 ]);
 
 export const agentRuntimeReconciliationStateEnum = pgEnum("agent_runtime_reconciliation_state", [
@@ -840,6 +841,7 @@ export const agentDeploymentWakeups = pgTable(
     safeErrorCode: text("safe_error_code"),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    exhaustedAt: timestamp("exhausted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -874,6 +876,14 @@ export const agentDeploymentWakeups = pgTable(
       "agent_deployment_wakeups_claimed_state_check",
       sql`${table.state} <> 'claimed' OR ${table.claimedAt} IS NOT NULL`,
     ),
+    check(
+      "agent_deployment_wakeups_exhausted_evidence_check",
+      sql`${table.exhaustedAt} IS NULL OR ${table.safeErrorCode} IS NOT NULL`,
+    ),
+    check(
+      "agent_deployment_wakeups_exhausted_state_check",
+      sql`${table.state}::text <> 'exhausted' OR (${table.exhaustedAt} IS NOT NULL AND ${table.publishLeaseOwner} IS NULL AND ${table.publishLeaseExpiresAt} IS NULL)`,
+    ),
     index("agent_deployment_wakeups_due_idx")
       .on(table.dueAt, table.updatedAt, table.deploymentId)
       .where(sql`${table.state} IN ('pending', 'failed')`),
@@ -883,6 +893,9 @@ export const agentDeploymentWakeups = pgTable(
     index("agent_deployment_wakeups_delivery_idx")
       .on(table.deploymentId, table.generation, table.dueAt)
       .where(sql`${table.state} IN ('pending', 'published', 'failed')`),
+    index("agent_deployment_wakeups_exhausted_idx")
+      .on(table.exhaustedAt, table.deploymentId, table.generation)
+      .where(sql`${table.exhaustedAt} IS NOT NULL`),
   ],
 );
 

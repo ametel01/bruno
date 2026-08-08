@@ -192,7 +192,12 @@ See [Authentication modes](./docs/AUTHENTICATION.md) and the
 | `BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION` | Hermes BYOK setup | Active encryption-key label, for example `v1`. |
 | `BRUNO_AGENT_SECRET_KEYS_JSON` | Hermes BYOK setup | JSON object mapping key versions to 32-byte base64url keys. Keep old keys during rotation so existing secrets remain decryptable. |
 | `BRUNO_READY_AGENT_CREATION_ENABLED` | Controlled ready-mode rollout | Must be exactly `true` to offer common one-click creation. Unset, blank, or `false` makes new setup unavailable; any other value fails closed. |
-| `CRON_SECRET` | Hosted reconciliation | A 32–256 character bearer-safe secret used by Vercel to authorize both deployment and runtime reconciliation routes. |
+| `CRON_SECRET` | Hosted reconciliation and wakeup operations | A 32–256 character bearer-safe secret used by Vercel to authorize deployment/runtime reconciliation and operator-only exhausted-wakeup inspection/replay routes. |
+| `BRUNO_DEPLOYMENT_DISPATCH_MODE` | No | `cron` by default; set exactly `qstash` only with the complete dedicated QStash configuration. PostgreSQL remains authoritative. |
+| `BRUNO_DEPLOYMENT_WAKEUP_MAX_PUBLISH_ATTEMPTS` | No | Atomic retryable QStash publication bound from 1 through 100; defaults to `12`. Authentication and payload rejections exhaust immediately. |
+| `QSTASH_TOKEN` | QStash dispatch | Dedicated publication token; must not reuse Bruno operator, cron, or runner credentials. |
+| `QSTASH_CURRENT_SIGNING_KEY` | QStash dispatch | Current callback verification key. |
+| `QSTASH_NEXT_SIGNING_KEY` | QStash dispatch | Distinct next callback verification key for rotation. |
 
 The default-disabled staging acceptance controller additionally requires the
 16 exact capabilities documented in [E2E validation](./docs/E2E_VALIDATION.md),

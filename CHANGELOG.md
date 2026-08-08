@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Bounded poison-wakeup handling now exhausts permanent QStash authentication/payload failures
+  immediately and retryable publication failures after an atomic configurable attempt limit of 12
+  by default. Exhausted generations leave ordinary claims, retain only sanitized operational
+  evidence, and can be inspected or transactionally replayed through bearer-protected operator
+  routes only while their Agent Deployment remains active and the generation remains current.
 - An immutable 30-slot Provider Trial Cohort ledger that pre-creates numbered attempts, retains one
   pre-commit or exact deployment-linked request outcome and one terminal outcome per slot, prevents
   membership replacement after start, reports API acceptance separately from failure-inclusive

@@ -138,7 +138,14 @@ describe("server-only provider environment validation", () => {
       currentSigningKey,
       nextSigningKey,
       callbackBaseUrl: "https://app.example.test",
+      maxPublishAttempts: 12,
     });
+    expect(
+      readDeploymentDispatchConfig({
+        ...configured,
+        BRUNO_DEPLOYMENT_WAKEUP_MAX_PUBLISH_ATTEMPTS: "7",
+      }),
+    ).toMatchObject({ ok: true, mode: "qstash", maxPublishAttempts: 7 });
 
     for (const partial of [
       { ...configured, QSTASH_TOKEN: undefined },
@@ -147,6 +154,9 @@ describe("server-only provider environment validation", () => {
       { ...configured, NEXT_PUBLIC_APP_URL: "http://app.example.test" },
       { ...configured, QSTASH_NEXT_SIGNING_KEY: currentSigningKey },
       { ...configured, CRON_SECRET: token },
+      { ...configured, BRUNO_DEPLOYMENT_WAKEUP_MAX_PUBLISH_ATTEMPTS: "0" },
+      { ...configured, BRUNO_DEPLOYMENT_WAKEUP_MAX_PUBLISH_ATTEMPTS: "12.5" },
+      { ...configured, BRUNO_DEPLOYMENT_WAKEUP_MAX_PUBLISH_ATTEMPTS: "101" },
       { BRUNO_DEPLOYMENT_DISPATCH_MODE: "queue" },
     ]) {
       expect(readDeploymentDispatchConfig(partial)).toEqual({

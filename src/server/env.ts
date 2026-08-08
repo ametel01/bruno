@@ -30,6 +30,7 @@ import {
 import type { RunnerSnapshotExpectedIdentities } from "@/src/server/runners/runner-snapshot-manifest";
 
 export const DEFAULT_BRUNO_RUNNER_IMAGE = "ghcr.io/ametel01/bruno-runner:main";
+export const DEFAULT_DEPLOYMENT_WAKEUP_MAX_PUBLISH_ATTEMPTS = 12;
 
 export type ReadyAgentCreationFlag =
   | {
@@ -99,6 +100,7 @@ export type DeploymentDispatchConfig =
       currentSigningKey: string;
       nextSigningKey: string;
       callbackBaseUrl: string;
+      maxPublishAttempts: number;
     }
   | {
       ok: false;
@@ -199,6 +201,9 @@ export function readDeploymentDispatchConfig(
   const currentSigningKey = input.QSTASH_CURRENT_SIGNING_KEY;
   const nextSigningKey = input.QSTASH_NEXT_SIGNING_KEY;
   const callbackBaseUrl = parseDeploymentDispatchCallbackBaseUrl(input.NEXT_PUBLIC_APP_URL);
+  const maxPublishAttempts = parseDeploymentWakeupMaxPublishAttempts(
+    input.BRUNO_DEPLOYMENT_WAKEUP_MAX_PUBLISH_ATTEMPTS,
+  );
 
   if (
     token === undefined ||
@@ -209,6 +214,7 @@ export function readDeploymentDispatchConfig(
     !isValidDeploymentDispatchSigningKey(nextSigningKey) ||
     currentSigningKey === nextSigningKey ||
     callbackBaseUrl === null ||
+    maxPublishAttempts === null ||
     [input.CRON_SECRET, input.BRUNO_RUNNER_BEARER_TOKEN, input.BRUNO_OPERATOR_PASSWORD].some(
       (otherSecret) => otherSecret !== undefined && otherSecret === token,
     )
@@ -223,7 +229,21 @@ export function readDeploymentDispatchConfig(
     currentSigningKey,
     nextSigningKey,
     callbackBaseUrl,
+    maxPublishAttempts,
   };
+}
+
+function parseDeploymentWakeupMaxPublishAttempts(value: string | undefined): number | null {
+  if (value === undefined) {
+    return DEFAULT_DEPLOYMENT_WAKEUP_MAX_PUBLISH_ATTEMPTS;
+  }
+
+  const normalized = value.trim();
+  if (!/^(?:[1-9]|[1-9][0-9]|100)$/.test(normalized)) {
+    return null;
+  }
+
+  return Number(normalized);
 }
 
 export function isAuthorizedCronRequest(input: {

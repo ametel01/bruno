@@ -1,0 +1,5 @@
+ALTER TYPE "public"."agent_deployment_wakeup_state" ADD VALUE 'exhausted';--> statement-breakpoint
+ALTER TABLE "agent_deployment_wakeups" ADD COLUMN "exhausted_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "agent_deployment_wakeups_exhausted_idx" ON "agent_deployment_wakeups" USING btree ("exhausted_at","deployment_id","generation") WHERE "agent_deployment_wakeups"."exhausted_at" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "agent_deployment_wakeups" ADD CONSTRAINT "agent_deployment_wakeups_exhausted_evidence_check" CHECK ("agent_deployment_wakeups"."exhausted_at" IS NULL OR "agent_deployment_wakeups"."safe_error_code" IS NOT NULL);--> statement-breakpoint
+ALTER TABLE "agent_deployment_wakeups" ADD CONSTRAINT "agent_deployment_wakeups_exhausted_state_check" CHECK ("agent_deployment_wakeups"."state"::text <> 'exhausted' OR ("agent_deployment_wakeups"."exhausted_at" IS NOT NULL AND "agent_deployment_wakeups"."publish_lease_owner" IS NULL AND "agent_deployment_wakeups"."publish_lease_expires_at" IS NULL));

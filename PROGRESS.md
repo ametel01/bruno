@@ -411,3 +411,23 @@ cold-deployment plan.
 - No DigitalOcean request, provider trial, hosted configuration change, secret mutation, deployment,
   or billable effect ran. Live cohort driving remains separately owned by issue #298 and requires
   its exact authorization.
+
+### 2026-08-08 — Issue #289 poison wakeup exhaustion and replay implemented
+
+- Added migration 0032 with durable exhausted wakeup state and sanitized exhaustion timing/reason
+  evidence. Known QStash authentication and payload rejections exhaust immediately; retryable
+  failures consume an atomic configurable publication bound whose default is 12. Expired leases at
+  the bound terminalize without another provider effect, and exhausted identities are excluded
+  from ordinary publication, delivery, and replacement paths.
+- Added `CRON_SECRET`-protected list, inspection, and replay routes. Evidence exposes only wakeup and
+  deployment IDs, generation, bounded attempt count, state, timestamps, and a closed safe reason.
+  Replay locks the wakeup plus active Agent Deployment, rejects terminal or superseded work,
+  terminalizes the exhausted identity, inserts one new fenced generation transactionally, and
+  publishes only after commit.
+- Focused environment, schema, migration, route, redaction, exhaustion-bound, duplicate/reordered
+  delivery, concurrency, lease, stale-deployment, and replay coverage passed 93 tests against
+  isolated PostgreSQL 17. `bun run verify` passed formatting, lint, type checking, 178 unit files /
+  1,795 tests, and the production build. Credential-free browser E2E passed 26/26 with explicit
+  development authentication after migrating the disposable database.
+- No QStash request, provider resource, hosted configuration change, secret mutation, deployment,
+  or billable effect ran.

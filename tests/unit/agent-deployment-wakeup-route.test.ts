@@ -405,6 +405,7 @@ function readQstashConfig() {
     currentSigningKey: CURRENT_SIGNING_KEY,
     nextSigningKey: NEXT_SIGNING_KEY,
     callbackBaseUrl: "https://app.example.test",
+    maxPublishAttempts: 12,
   } as const;
 }
 

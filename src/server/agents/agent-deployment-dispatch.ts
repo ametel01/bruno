@@ -32,6 +32,25 @@ type PublishableWakeupRow = DeploymentWakeupRow & {
   publishLeaseExpiresAt: Date | string;
 };
 
+export type ExhaustedDeploymentWakeupEvidence = {
+  wakeupId: string;
+  deploymentId: string;
+  generation: number;
+  dueAt: string;
+  state: "exhausted" | "terminal";
+  publishAttemptCount: number;
+  safeReason: string;
+  exhaustedAt: string;
+};
+
+type ExhaustedDeploymentWakeupEvidenceRow = Omit<
+  ExhaustedDeploymentWakeupEvidence,
+  "dueAt" | "exhaustedAt"
+> & {
+  dueAt: Date | string;
+  exhaustedAt: Date | string;
+};
+
 export type DeploymentWakeupPublisher = {
   publish(input: {
     payload: DeploymentWakeupPayload;
@@ -51,6 +70,9 @@ export type DeploymentWakeupDispatchDependencies = {
 const MAX_WAKEUP_BODY_BYTES = 4096;
 const PUBLISH_LEASE_MS = 30_000;
 const SAFE_PUBLISH_REJECTION_CODE = "publish_rejected";
+const SAFE_PUBLISH_AUTHENTICATION_REJECTION_CODE = "publish_authentication_rejected";
+const SAFE_PUBLISH_PAYLOAD_REJECTION_CODE = "publish_payload_rejected";
+const SAFE_PUBLISH_ATTEMPTS_EXHAUSTED_CODE = "publish_attempts_exhausted";
 const SAFE_DELIVERY_REJECTION_CODE = "delivery_rejected";
 const WAKEUP_ROUTE_PATH = "/api/internal/agent-deployments/wakeup";
 const UPSTASH_SIGNATURE_HEADER = "Upstash-Signature";
@@ -245,6 +267,12 @@ export async function replaceDeploymentWakeupInTransaction(
       ${nowIso},
       ${nowIso}
     from locked_deployment, next_generation
+    where not exists (
+      select 1
+      from ${agentDeploymentWakeups}
+      where ${agentDeploymentWakeups.deploymentId} = locked_deployment.id
+        and ${agentDeploymentWakeups.state} = 'exhausted'
+    )
     returning
       id,
       deployment_id as "deploymentId",
@@ -282,6 +310,7 @@ export async function publishDeploymentWakeupAfterCommit(
         payload,
         leaseOwner,
         now,
+        maxPublishAttempts: config.maxPublishAttempts,
       }),
     );
 
@@ -293,19 +322,28 @@ export async function publishDeploymentWakeupAfterCommit(
         dueAt: new Date(payload.dueAt),
         callbackUrl: deploymentWakeupCallbackUrl(config),
       });
-      await markDeploymentWakeupPublished(connection.db, {
-        wakeupId: claimed.id,
-        leaseOwner,
-        messageId: published.messageId,
-        now: dependencies.now?.() ?? new Date(),
+      await connection.db.transaction(async (tx) => {
+        await lockDeploymentForWakeupCompletion(tx, claimed);
+        await markDeploymentWakeupPublished(tx, {
+          wakeupId: claimed.id,
+          leaseOwner,
+          messageId: published.messageId,
+          now: dependencies.now?.() ?? new Date(),
+        });
       });
       return "published";
-    } catch {
-      await markDeploymentWakeupPublishFailed(connection.db, {
-        wakeupId: claimed.id,
-        leaseOwner,
-        now: dependencies.now?.() ?? new Date(),
-        safeErrorCode: SAFE_PUBLISH_REJECTION_CODE,
+    } catch (error) {
+      const failure = classifyDeploymentWakeupPublishFailure(error);
+      await connection.db.transaction(async (tx) => {
+        await lockDeploymentForWakeupCompletion(tx, claimed);
+        await markDeploymentWakeupPublishFailed(tx, {
+          wakeupId: claimed.id,
+          leaseOwner,
+          now: dependencies.now?.() ?? new Date(),
+          safeErrorCode: failure.safeErrorCode,
+          exhaustImmediately: failure.exhaustImmediately,
+          maxPublishAttempts: config.maxPublishAttempts,
+        });
       });
       return "unavailable";
     }
@@ -369,7 +407,11 @@ export async function sweepDeploymentWakeupOutbox(
 
   try {
     const claimed = await connection.db.transaction((tx) =>
-      claimNextDeploymentWakeupForPublish(tx, { leaseOwner, now }),
+      claimNextDeploymentWakeupForPublish(tx, {
+        leaseOwner,
+        now,
+        maxPublishAttempts: config.maxPublishAttempts,
+      }),
     );
     if (!claimed) return { published: 0 };
 
@@ -383,19 +425,28 @@ export async function sweepDeploymentWakeupOutbox(
         dueAt: new Date(claimed.dueAt),
         callbackUrl: deploymentWakeupCallbackUrl(config),
       });
-      await markDeploymentWakeupPublished(connection.db, {
-        wakeupId: claimed.id,
-        leaseOwner,
-        messageId: published.messageId,
-        now: dependencies.now?.() ?? new Date(),
+      await connection.db.transaction(async (tx) => {
+        await lockDeploymentForWakeupCompletion(tx, claimed);
+        await markDeploymentWakeupPublished(tx, {
+          wakeupId: claimed.id,
+          leaseOwner,
+          messageId: published.messageId,
+          now: dependencies.now?.() ?? new Date(),
+        });
       });
       return { published: 1 };
-    } catch {
-      await markDeploymentWakeupPublishFailed(connection.db, {
-        wakeupId: claimed.id,
-        leaseOwner,
-        now: dependencies.now?.() ?? new Date(),
-        safeErrorCode: SAFE_PUBLISH_REJECTION_CODE,
+    } catch (error) {
+      const failure = classifyDeploymentWakeupPublishFailure(error);
+      await connection.db.transaction(async (tx) => {
+        await lockDeploymentForWakeupCompletion(tx, claimed);
+        await markDeploymentWakeupPublishFailed(tx, {
+          wakeupId: claimed.id,
+          leaseOwner,
+          now: dependencies.now?.() ?? new Date(),
+          safeErrorCode: failure.safeErrorCode,
+          exhaustImmediately: failure.exhaustImmediately,
+          maxPublishAttempts: config.maxPublishAttempts,
+        });
       });
       return { published: 0 };
     }
@@ -470,11 +521,167 @@ export async function claimDeploymentWakeupDelivery(
   `);
 
   if (!current) return { ok: false, reason: "stale" };
-  if (current.stage === "ready" || current.stage === "failed" || current.state === "terminal") {
+  if (
+    current.stage === "ready" ||
+    current.stage === "failed" ||
+    current.state === "terminal" ||
+    current.state === "exhausted"
+  ) {
     return { ok: false, reason: "terminal" };
   }
   if (current.state === "claimed") return { ok: false, reason: "already_claimed" };
   return { ok: false, reason: "stale" };
+}
+
+export async function listExhaustedDeploymentWakeups(
+  db: DeploymentDispatchDatabase,
+  input: { limit?: number } = {},
+): Promise<ExhaustedDeploymentWakeupEvidence[]> {
+  const limit = input.limit ?? 50;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    throw new AgentDeploymentDispatchError(new Error("Invalid exhausted wakeup list limit."));
+  }
+
+  const rows = await db.execute<ExhaustedDeploymentWakeupEvidenceRow>(sql`
+    select
+      ${agentDeploymentWakeups.id} as "wakeupId",
+      ${agentDeploymentWakeups.deploymentId} as "deploymentId",
+      ${agentDeploymentWakeups.generation} as generation,
+      ${agentDeploymentWakeups.dueAt} as "dueAt",
+      ${agentDeploymentWakeups.state} as state,
+      ${agentDeploymentWakeups.publishAttemptCount} as "publishAttemptCount",
+      ${agentDeploymentWakeups.safeErrorCode} as "safeReason",
+      ${agentDeploymentWakeups.exhaustedAt} as "exhaustedAt"
+    from ${agentDeploymentWakeups}
+    where ${agentDeploymentWakeups.exhaustedAt} is not null
+    order by ${agentDeploymentWakeups.exhaustedAt} desc,
+      ${agentDeploymentWakeups.deploymentId},
+      ${agentDeploymentWakeups.generation} desc
+    limit ${limit}
+  `);
+
+  return rows.map(toExhaustedDeploymentWakeupEvidence);
+}
+
+export async function inspectExhaustedDeploymentWakeup(
+  db: DeploymentDispatchDatabase,
+  wakeupId: string,
+): Promise<ExhaustedDeploymentWakeupEvidence | null> {
+  if (!isUuid(wakeupId)) return null;
+
+  const [row] = await db.execute<ExhaustedDeploymentWakeupEvidenceRow>(sql`
+    select
+      ${agentDeploymentWakeups.id} as "wakeupId",
+      ${agentDeploymentWakeups.deploymentId} as "deploymentId",
+      ${agentDeploymentWakeups.generation} as generation,
+      ${agentDeploymentWakeups.dueAt} as "dueAt",
+      ${agentDeploymentWakeups.state} as state,
+      ${agentDeploymentWakeups.publishAttemptCount} as "publishAttemptCount",
+      ${agentDeploymentWakeups.safeErrorCode} as "safeReason",
+      ${agentDeploymentWakeups.exhaustedAt} as "exhaustedAt"
+    from ${agentDeploymentWakeups}
+    where ${agentDeploymentWakeups.id} = ${wakeupId}
+      and ${agentDeploymentWakeups.exhaustedAt} is not null
+    limit 1
+  `);
+
+  return row ? toExhaustedDeploymentWakeupEvidence(row) : null;
+}
+
+export async function replayExhaustedDeploymentWakeupInTransaction(
+  db: DeploymentDispatchTransaction,
+  input: { wakeupId: string; now: Date },
+): Promise<
+  | { ok: true; exhaustedWakeupId: string; wakeup: DeploymentWakeupPayload }
+  | {
+      ok: false;
+      reason: "not_found" | "not_exhausted" | "deployment_terminal" | "superseded";
+    }
+> {
+  assertTransactionHandle(db);
+  if (!isUuid(input.wakeupId) || Number.isNaN(input.now.getTime())) {
+    return { ok: false, reason: "not_found" };
+  }
+
+  const [locked] = await db.execute<{
+    deploymentId: string;
+    generation: number;
+    maxGeneration: number;
+    state: string;
+    stage: string;
+  }>(sql`
+    select
+      ${agentDeploymentWakeups.deploymentId} as "deploymentId",
+      ${agentDeploymentWakeups.generation} as generation,
+      (
+        select max(candidate.generation)
+        from agent_deployment_wakeups candidate
+        where candidate.deployment_id = ${agentDeploymentWakeups.deploymentId}
+      ) as "maxGeneration",
+      ${agentDeploymentWakeups.state} as state,
+      ${agentDeployments.stage} as stage
+    from ${agentDeploymentWakeups}
+    inner join ${agentDeployments}
+      on ${agentDeployments.id} = ${agentDeploymentWakeups.deploymentId}
+    where ${agentDeploymentWakeups.id} = ${input.wakeupId}
+    for update of ${agentDeploymentWakeups}, ${agentDeployments}
+  `);
+
+  if (!locked) return { ok: false, reason: "not_found" };
+  if (locked.state !== "exhausted") return { ok: false, reason: "not_exhausted" };
+  if (locked.stage === "ready" || locked.stage === "failed") {
+    return { ok: false, reason: "deployment_terminal" };
+  }
+  if (locked.generation !== locked.maxGeneration) {
+    return { ok: false, reason: "superseded" };
+  }
+
+  const nowIso = input.now.toISOString();
+  const [terminalized] = await db.execute<{ id: string }>(sql`
+    update ${agentDeploymentWakeups}
+    set state = 'terminal',
+        updated_at = ${nowIso}
+    where ${agentDeploymentWakeups.id} = ${input.wakeupId}
+      and ${agentDeploymentWakeups.state} = 'exhausted'
+    returning ${agentDeploymentWakeups.id} as id
+  `);
+  if (!terminalized) return { ok: false, reason: "not_exhausted" };
+
+  const [inserted] = await db.execute<DeploymentWakeupRow>(sql`
+    insert into ${agentDeploymentWakeups} (
+      deployment_id,
+      generation,
+      due_at,
+      state,
+      created_at,
+      updated_at
+    ) values (
+      ${locked.deploymentId},
+      ${locked.generation + 1},
+      ${nowIso},
+      'pending',
+      ${nowIso},
+      ${nowIso}
+    )
+    returning
+      id,
+      deployment_id as "deploymentId",
+      generation,
+      due_at as "dueAt"
+  `);
+  if (!inserted) {
+    throw new AgentDeploymentDispatchError(new Error("Wakeup replay insert returned no row."));
+  }
+
+  return {
+    ok: true,
+    exhaustedWakeupId: terminalized.id,
+    wakeup: {
+      deploymentId: inserted.deploymentId,
+      generation: inserted.generation,
+      dueAt: toIso(inserted.dueAt),
+    },
+  };
 }
 
 export function createQstashDeploymentWakeupPublisher(input: {
@@ -506,11 +713,27 @@ async function claimDeploymentWakeupForPublish(
     payload: DeploymentWakeupPayload;
     leaseOwner: string;
     now: Date;
+    maxPublishAttempts: number;
   },
 ): Promise<PublishableWakeupRow | null> {
   const leaseExpiresAt = new Date(input.now.getTime() + PUBLISH_LEASE_MS).toISOString();
   const nowIso = input.now.toISOString();
   const [claimed] = await db.execute<PublishableWakeupRow>(sql`
+    with exhausted_at_bound as (
+      update ${agentDeploymentWakeups}
+      set state = 'exhausted',
+          safe_error_code = ${SAFE_PUBLISH_ATTEMPTS_EXHAUSTED_CODE},
+          exhausted_at = ${nowIso},
+          publish_lease_owner = null,
+          publish_lease_expires_at = null,
+          updated_at = ${nowIso}
+      where ${agentDeploymentWakeups.deploymentId} = ${input.payload.deploymentId}
+        and ${agentDeploymentWakeups.generation} = ${input.payload.generation}
+        and ${agentDeploymentWakeups.dueAt} = ${input.payload.dueAt}
+        and ${agentDeploymentWakeups.state} in ('pending', 'failed')
+        and ${agentDeploymentWakeups.publishAttemptCount} >= ${input.maxPublishAttempts}
+      returning ${agentDeploymentWakeups.id}
+    )
     update ${agentDeploymentWakeups}
     set state = 'publishing',
         publish_attempt_count = ${agentDeploymentWakeups.publishAttemptCount} + 1,
@@ -522,6 +745,7 @@ async function claimDeploymentWakeupForPublish(
       and ${agentDeploymentWakeups.generation} = ${input.payload.generation}
       and ${agentDeploymentWakeups.dueAt} = ${input.payload.dueAt}
       and ${agentDeploymentWakeups.state} in ('pending', 'failed')
+      and ${agentDeploymentWakeups.publishAttemptCount} < ${input.maxPublishAttempts}
     returning
       id,
       deployment_id as "deploymentId",
@@ -544,12 +768,30 @@ async function claimNextDeploymentWakeupForPublish(
   input: {
     leaseOwner: string;
     now: Date;
+    maxPublishAttempts: number;
   },
 ): Promise<PublishableWakeupRow | null> {
   const leaseExpiresAt = new Date(input.now.getTime() + PUBLISH_LEASE_MS).toISOString();
   const nowIso = input.now.toISOString();
   const [claimed] = await db.execute<PublishableWakeupRow>(sql`
-    with next_wakeup as (
+    with exhausted_at_bound as (
+      update ${agentDeploymentWakeups}
+      set state = 'exhausted',
+          safe_error_code = ${SAFE_PUBLISH_ATTEMPTS_EXHAUSTED_CODE},
+          exhausted_at = ${nowIso},
+          publish_lease_owner = null,
+          publish_lease_expires_at = null,
+          updated_at = ${nowIso}
+      where ${agentDeploymentWakeups.publishAttemptCount} >= ${input.maxPublishAttempts}
+        and (
+          ${agentDeploymentWakeups.state} in ('pending', 'failed')
+          or (
+            ${agentDeploymentWakeups.state} = 'publishing'
+            and ${agentDeploymentWakeups.publishLeaseExpiresAt} <= ${nowIso}
+          )
+        )
+      returning ${agentDeploymentWakeups.id}
+    ), next_wakeup as (
       select ${agentDeploymentWakeups.id} as id
       from ${agentDeploymentWakeups}
       where (
@@ -559,6 +801,7 @@ async function claimNextDeploymentWakeupForPublish(
             and ${agentDeploymentWakeups.publishLeaseExpiresAt} <= ${nowIso}
           )
         )
+        and ${agentDeploymentWakeups.publishAttemptCount} < ${input.maxPublishAttempts}
       order by ${agentDeploymentWakeups.dueAt}, ${agentDeploymentWakeups.updatedAt}, ${agentDeploymentWakeups.id}
       for update skip locked
       limit 1
@@ -611,6 +854,21 @@ async function markDeploymentWakeupPublished(
   `);
 }
 
+async function lockDeploymentForWakeupCompletion(
+  db: DeploymentDispatchTransaction,
+  wakeup: Pick<DeploymentWakeupRow, "id" | "deploymentId">,
+): Promise<void> {
+  await db.execute(sql`
+    select ${agentDeployments.id}
+    from ${agentDeployments}
+    inner join ${agentDeploymentWakeups}
+      on ${agentDeploymentWakeups.deploymentId} = ${agentDeployments.id}
+    where ${agentDeploymentWakeups.id} = ${wakeup.id}
+      and ${agentDeployments.id} = ${wakeup.deploymentId}
+    for update of ${agentDeployments}
+  `);
+}
+
 async function markDeploymentWakeupPublishFailed(
   db: DeploymentDispatchDatabase,
   input: {
@@ -618,19 +876,63 @@ async function markDeploymentWakeupPublishFailed(
     leaseOwner: string;
     now: Date;
     safeErrorCode: string;
+    exhaustImmediately: boolean;
+    maxPublishAttempts: number;
   },
 ): Promise<void> {
+  const nowIso = input.now.toISOString();
   await db.execute(sql`
     update ${agentDeploymentWakeups}
-    set state = 'failed',
-        safe_error_code = ${input.safeErrorCode},
+    set state = case
+          when ${input.exhaustImmediately}
+            or ${agentDeploymentWakeups.publishAttemptCount} >= ${input.maxPublishAttempts}
+            then 'exhausted'::agent_deployment_wakeup_state
+          else 'failed'::agent_deployment_wakeup_state
+        end,
+        safe_error_code = case
+          when not ${input.exhaustImmediately}
+            and ${agentDeploymentWakeups.publishAttemptCount} >= ${input.maxPublishAttempts}
+            then ${SAFE_PUBLISH_ATTEMPTS_EXHAUSTED_CODE}
+          else ${input.safeErrorCode}
+        end,
+        exhausted_at = case
+          when ${input.exhaustImmediately}
+            or ${agentDeploymentWakeups.publishAttemptCount} >= ${input.maxPublishAttempts}
+            then ${nowIso}::timestamptz
+          else null
+        end,
         publish_lease_owner = null,
         publish_lease_expires_at = null,
-        updated_at = ${input.now.toISOString()}
+        updated_at = ${nowIso}
     where ${agentDeploymentWakeups.id} = ${input.wakeupId}
       and ${agentDeploymentWakeups.publishLeaseOwner} = ${input.leaseOwner}
       and ${agentDeploymentWakeups.state} = 'publishing'
   `);
+}
+
+function classifyDeploymentWakeupPublishFailure(error: unknown): {
+  safeErrorCode: string;
+  exhaustImmediately: boolean;
+} {
+  const status =
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    typeof error.status === "number"
+      ? error.status
+      : null;
+
+  if (status === 401 || status === 403) {
+    return {
+      safeErrorCode: SAFE_PUBLISH_AUTHENTICATION_REJECTION_CODE,
+      exhaustImmediately: true,
+    };
+  }
+  if (status === 400 || status === 413 || status === 422) {
+    return { safeErrorCode: SAFE_PUBLISH_PAYLOAD_REJECTION_CODE, exhaustImmediately: true };
+  }
+
+  return { safeErrorCode: SAFE_PUBLISH_REJECTION_CODE, exhaustImmediately: false };
 }
 
 function isUuid(value: string): boolean {
@@ -646,8 +948,21 @@ function toIso(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
+function toExhaustedDeploymentWakeupEvidence(
+  row: ExhaustedDeploymentWakeupEvidenceRow,
+): ExhaustedDeploymentWakeupEvidence {
+  return {
+    ...row,
+    dueAt: toIso(row.dueAt),
+    exhaustedAt: toIso(row.exhaustedAt),
+  };
+}
+
 export const deploymentWakeupSafeCodes = {
   publishRejected: SAFE_PUBLISH_REJECTION_CODE,
+  publishAuthenticationRejected: SAFE_PUBLISH_AUTHENTICATION_REJECTION_CODE,
+  publishPayloadRejected: SAFE_PUBLISH_PAYLOAD_REJECTION_CODE,
+  publishAttemptsExhausted: SAFE_PUBLISH_ATTEMPTS_EXHAUSTED_CODE,
   deliveryRejected: SAFE_DELIVERY_REJECTION_CODE,
   signatureHeader: UPSTASH_SIGNATURE_HEADER,
   regionHeader: UPSTASH_REGION_HEADER,

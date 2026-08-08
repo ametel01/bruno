@@ -46,6 +46,7 @@ describe("agent deployment migration fixtures", () => {
         "claimed",
         "terminal",
         "failed",
+        "exhausted",
       ]);
       await expect(readColumnNames(sql, "agent_deployments")).resolves.toEqual([
         "id",
@@ -92,6 +93,7 @@ describe("agent deployment migration fixtures", () => {
         "claimed_at",
         "created_at",
         "updated_at",
+        "exhausted_at",
       ]);
       await expect(readColumnNames(sql, "provider_trial_cohorts")).resolves.toEqual([
         "id",
