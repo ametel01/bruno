@@ -22,7 +22,16 @@ export class OrasRunnerSnapshotRegistryAdapter implements RunnerSnapshotRegistry
   constructor(private readonly runOras: OrasCommandRunner = runOrasCommand) {}
 
   async listTags(repository: string): Promise<string[]> {
-    const { stdout } = await this.runOras(["repo", "tags", repository, "--format", "json"], {});
+    let stdout: string;
+
+    try {
+      ({ stdout } = await this.runOras(["repo", "tags", repository, "--format", "json"], {}));
+    } catch (error) {
+      if (isMissingRepositoryError(error)) {
+        return [];
+      }
+      throw error;
+    }
     let raw: unknown;
 
     try {
@@ -156,4 +165,10 @@ function parseOciManifest(value: string): {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isMissingRepositoryError(error: unknown): boolean {
+  return (
+    isRecord(error) && typeof error.stderr === "string" && /\bname[_ ]unknown\b/i.test(error.stderr)
+  );
 }

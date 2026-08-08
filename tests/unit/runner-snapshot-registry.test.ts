@@ -273,6 +273,22 @@ describe("runner snapshot registry", () => {
     ]);
   });
 
+  it("treats only OCI NAME_UNKNOWN as an empty repository during bootstrap", async () => {
+    const missing = new OrasRunnerSnapshotRegistryAdapter(async () => {
+      throw Object.assign(new Error("ORAS failed"), {
+        stderr: "Error response from registry: name unknown: repository name not known to registry",
+      });
+    });
+    const denied = new OrasRunnerSnapshotRegistryAdapter(async () => {
+      throw Object.assign(new Error("ORAS failed"), {
+        stderr: "Error response from registry: denied: requested access to the resource is denied",
+      });
+    });
+
+    await expect(missing.listTags(OCI_REPOSITORY)).resolves.toEqual([]);
+    await expect(denied.listTags(OCI_REPOSITORY)).rejects.toThrow("ORAS failed");
+  });
+
   it("rejects non-allowlisted evidence and never publishes private signing material", async () => {
     const signing = generateKeyPairSync("ed25519");
     const attestation = attest(manifest("123456"), "snapshot-current", signing.privateKey);
