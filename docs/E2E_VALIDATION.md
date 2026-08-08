@@ -13,6 +13,33 @@ Run the read-only benchmark against already persisted deployments:
 bun run agent:deployment:benchmark
 ```
 
+Report one exact Provider Trial Cohort ledger by its durable cohort ID:
+
+```bash
+bun run agent:deployment:benchmark -- \
+  --provider-trial-cohort-id 00000000-0000-4000-8000-000000000288
+```
+
+Creating a Provider Trial Cohort atomically creates all 30 numbered slots before the cohort can
+start. Starting a slot assigns one immutable request-attempt identity. The slot then retains exactly
+one `committed` outcome linked to its exact operator-trial Agent Deployment, or one
+`pre_commit_failure` outcome with no invented deployment. Once the first request starts, database
+constraints prevent slot insertion, deletion, renumbering, request-outcome replacement, deployment
+relinking, and terminal-outcome replacement.
+
+The versioned `bruno.provider-trial-cohort.v1` report selects slots only by the supplied cohort ID
+and orders them by their original number. `apiAcceptance` counts committed requests, pre-commit
+failures, pending slots, and availability across all 30 slots. `readiness` separately counts
+ready-within-60 outcomes, all-slot misses, pending outcomes, and the committed-deployment pass rate.
+The gate remains false until every slot has a terminal outcome, at least 29 requests committed, at
+least 29 of all 30 slots reached ready within 60 seconds, and at least 95 percent of committed
+deployments did so. Reports expose only cohort configuration, numbered outcomes, a closed vocabulary
+of mapped safe codes, and exact deployment IDs; request-attempt IDs, raw deployment errors, Owner
+identity, Telegram data, credentials, tokens, endpoints, and arbitrary provider metadata are omitted.
+The server report boundary supports
+canonical SHA-256 digesting and Ed25519 signing with an identified key, and verification rejects
+tampered or internally inconsistent summaries.
+
 Version 4 of the benchmark uses the immutable database-clock
 `agent_deployments.accepted_at` boundary. New Agent Deployments capture this timestamp inside the
 request transaction after the earlier persistence work, so transaction commit latency remains in

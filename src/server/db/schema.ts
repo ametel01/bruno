@@ -718,6 +718,111 @@ export const agentDeployments = pgTable(
   ],
 );
 
+export const providerTrialCohorts = pgTable(
+  "provider_trial_cohorts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cohortKey: text("cohort_key").notNull(),
+    region: text("region").notNull(),
+    runnerSizeSlug: text("runner_size_slug").notNull(),
+    rolloutConfigurationGeneration: integer("rollout_configuration_generation").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("provider_trial_cohorts_key_idx").on(table.cohortKey),
+    check(
+      "provider_trial_cohorts_key_check",
+      sql`${table.cohortKey} ~ '^[a-z0-9][a-z0-9._:-]{7,127}$'`,
+    ),
+    check(
+      "provider_trial_cohorts_region_check",
+      sql`${table.region} ~ '^[a-z0-9][a-z0-9-]{0,63}$'`,
+    ),
+    check(
+      "provider_trial_cohorts_runner_size_slug_check",
+      sql`${table.runnerSizeSlug} ~ '^[a-z0-9][a-z0-9-]{0,127}$'`,
+    ),
+    check(
+      "provider_trial_cohorts_rollout_generation_check",
+      sql`${table.rolloutConfigurationGeneration} >= 1`,
+    ),
+  ],
+);
+
+export const providerTrialSlots = pgTable(
+  "provider_trial_slots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cohortId: uuid("cohort_id")
+      .notNull()
+      .references(() => providerTrialCohorts.id, { onDelete: "restrict" }),
+    slotNumber: integer("slot_number").notNull(),
+    requestAttemptId: uuid("request_attempt_id"),
+    requestStartedAt: timestamp("request_started_at", { withTimezone: true }),
+    requestOutcome: text("request_outcome"),
+    requestSafeCode: text("request_safe_code"),
+    requestOutcomeRecordedAt: timestamp("request_outcome_recorded_at", { withTimezone: true }),
+    deploymentId: uuid("deployment_id").references(() => agentDeployments.id, {
+      onDelete: "restrict",
+    }),
+    terminalOutcome: text("terminal_outcome"),
+    terminalSafeCode: text("terminal_safe_code"),
+    terminalRecordedAt: timestamp("terminal_recorded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("provider_trial_slots_cohort_number_idx").on(table.cohortId, table.slotNumber),
+    uniqueIndex("provider_trial_slots_request_attempt_idx").on(table.requestAttemptId),
+    uniqueIndex("provider_trial_slots_deployment_idx").on(table.deploymentId),
+    check("provider_trial_slots_number_check", sql`${table.slotNumber} BETWEEN 1 AND 30`),
+    check(
+      "provider_trial_slots_request_started_pair_check",
+      sql`(${table.requestAttemptId} IS NULL AND ${table.requestStartedAt} IS NULL) OR (${table.requestAttemptId} IS NOT NULL AND ${table.requestStartedAt} IS NOT NULL)`,
+    ),
+    check(
+      "provider_trial_slots_request_outcome_check",
+      sql`${table.requestOutcome} IS NULL OR ${table.requestOutcome} IN ('committed', 'pre_commit_failure')`,
+    ),
+    check(
+      "provider_trial_slots_request_safe_code_check",
+      sql`${table.requestSafeCode} IS NULL OR ${table.requestSafeCode} IN ('deployment_failed', 'ready_timeout', 'request_failed', 'request_outcome_unknown', 'request_rejected', 'request_validation_failed', 'safety_failure')`,
+    ),
+    check(
+      "provider_trial_slots_request_outcome_shape_check",
+      sql`(${table.requestOutcome} IS NULL AND ${table.requestOutcomeRecordedAt} IS NULL AND ${table.requestSafeCode} IS NULL AND ${table.deploymentId} IS NULL) OR (${table.requestOutcome} = 'committed' AND ${table.requestOutcomeRecordedAt} IS NOT NULL AND ${table.requestSafeCode} IS NULL AND ${table.deploymentId} IS NOT NULL) OR (${table.requestOutcome} = 'pre_commit_failure' AND ${table.requestOutcomeRecordedAt} IS NOT NULL AND ${table.requestSafeCode} IS NOT NULL AND ${table.deploymentId} IS NULL)`,
+    ),
+    check(
+      "provider_trial_slots_request_outcome_after_start_check",
+      sql`${table.requestOutcome} IS NULL OR (${table.requestAttemptId} IS NOT NULL AND ${table.requestStartedAt} IS NOT NULL AND ${table.requestOutcomeRecordedAt} >= ${table.requestStartedAt})`,
+    ),
+    check(
+      "provider_trial_slots_request_start_boundary_check",
+      sql`${table.requestStartedAt} IS NULL OR ${table.requestStartedAt} >= ${table.createdAt}`,
+    ),
+    check(
+      "provider_trial_slots_terminal_outcome_check",
+      sql`${table.terminalOutcome} IS NULL OR ${table.terminalOutcome} IN ('pre_commit_failure', 'ready_within_60', 'ready_after_60', 'deployment_failed', 'timed_out', 'safety_failure')`,
+    ),
+    check(
+      "provider_trial_slots_terminal_safe_code_check",
+      sql`${table.terminalSafeCode} IS NULL OR ${table.terminalSafeCode} IN ('deployment_failed', 'ready_timeout', 'request_failed', 'request_outcome_unknown', 'request_rejected', 'request_validation_failed', 'safety_failure')`,
+    ),
+    check(
+      "provider_trial_slots_terminal_outcome_shape_check",
+      sql`(${table.terminalOutcome} IS NULL AND ${table.terminalRecordedAt} IS NULL AND ${table.terminalSafeCode} IS NULL) OR (${table.terminalOutcome} = 'pre_commit_failure' AND ${table.terminalRecordedAt} IS NOT NULL AND ${table.terminalSafeCode} IS NOT NULL AND ${table.requestOutcome} = 'pre_commit_failure') OR (${table.terminalOutcome} IN ('ready_within_60', 'ready_after_60') AND ${table.terminalRecordedAt} IS NOT NULL AND ${table.terminalSafeCode} IS NULL AND ${table.requestOutcome} = 'committed') OR (${table.terminalOutcome} IN ('deployment_failed', 'timed_out', 'safety_failure') AND ${table.terminalRecordedAt} IS NOT NULL AND ${table.terminalSafeCode} IS NOT NULL AND ${table.requestOutcome} = 'committed')`,
+    ),
+    check(
+      "provider_trial_slots_terminal_after_request_check",
+      sql`${table.terminalOutcome} IS NULL OR ${table.terminalRecordedAt} >= ${table.requestOutcomeRecordedAt}`,
+    ),
+    check(
+      "provider_trial_slots_precommit_code_match_check",
+      sql`${table.terminalOutcome} <> 'pre_commit_failure' OR ${table.terminalSafeCode} = ${table.requestSafeCode}`,
+    ),
+  ],
+);
+
 export const agentDeploymentWakeups = pgTable(
   "agent_deployment_wakeups",
   {

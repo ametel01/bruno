@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- An immutable 30-slot Provider Trial Cohort ledger that pre-creates numbered attempts, retains one
+  pre-commit or exact deployment-linked request outcome and one terminal outcome per slot, prevents
+  membership replacement after start, reports API acceptance separately from failure-inclusive
+  ready-within-60 results, and supports deterministic sanitized Ed25519-signed evidence by exact
+  cohort ID.
 - Immutable database-clock Agent Deployment acceptance boundaries, origin, initial cohort,
   environment, Owner-cancellation evidence, and rollout-configuration generation with a versioned
   sanitized report that selects the latest 100 Eligible Cold Deployments before gating. Unknown

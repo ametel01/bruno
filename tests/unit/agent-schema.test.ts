@@ -23,6 +23,8 @@ import {
   dockerRunnerContainers,
   localRunnerProcesses,
   localRunnerProcessStatusEnum,
+  providerTrialCohorts,
+  providerTrialSlots,
   runnerCredentials,
   runnerHeartbeats,
   runnerInfrastructureOrphans,
@@ -46,6 +48,8 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(getTableName(agentConfigs)).toBe("agent_configs");
     expect(getTableName(agentSecrets)).toBe("agent_secrets");
     expect(getTableName(agentDeployments)).toBe("agent_deployments");
+    expect(getTableName(providerTrialCohorts)).toBe("provider_trial_cohorts");
+    expect(getTableName(providerTrialSlots)).toBe("provider_trial_slots");
     expect(getTableName(agentDeploymentReplacementBudgets)).toBe(
       "agent_deployment_replacement_budgets",
     );
@@ -417,6 +421,45 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(migration).toContain("agent_deployments_idempotency_key_check");
     expect(migration).toContain("agent_deployments_lease_pair_check");
     expect(migration).toContain("agent_deployments_terminal_clear_work_check");
+    expect(migration).not.toMatch(/DROP TABLE|DROP COLUMN|ALTER COLUMN|(?:^|\n)UPDATE /);
+  });
+
+  it("defines an exact immutable Provider Trial Cohort ledger", async () => {
+    const cohortColumns = getTableColumns(providerTrialCohorts);
+    const slotColumns = getTableColumns(providerTrialSlots);
+    const migration = await readFile("drizzle/0031_neat_screwball.sql", "utf8");
+
+    expect(Object.keys(cohortColumns)).toEqual([
+      "id",
+      "cohortKey",
+      "region",
+      "runnerSizeSlug",
+      "rolloutConfigurationGeneration",
+      "startedAt",
+      "createdAt",
+    ]);
+    expect(Object.keys(slotColumns)).toEqual([
+      "id",
+      "cohortId",
+      "slotNumber",
+      "requestAttemptId",
+      "requestStartedAt",
+      "requestOutcome",
+      "requestSafeCode",
+      "requestOutcomeRecordedAt",
+      "deploymentId",
+      "terminalOutcome",
+      "terminalSafeCode",
+      "terminalRecordedAt",
+      "createdAt",
+    ]);
+    expect(migration).toContain('CREATE TABLE "provider_trial_cohorts"');
+    expect(migration).toContain('CREATE TABLE "provider_trial_slots"');
+    expect(migration).toContain("provider_trial_cohorts_start_requires_slots_check");
+    expect(migration).toContain("provider_trial_slots_membership_immutable_check");
+    expect(migration).toContain("provider_trial_slots_outcome_immutable_check");
+    expect(migration).toContain("provider_trial_slots_deployment_identity_check");
+    expect(migration).toContain('CREATE UNIQUE INDEX "provider_trial_slots_deployment_idx"');
     expect(migration).not.toMatch(/DROP TABLE|DROP COLUMN|ALTER COLUMN|(?:^|\n)UPDATE /);
   });
 

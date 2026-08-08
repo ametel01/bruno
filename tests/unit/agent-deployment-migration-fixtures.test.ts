@@ -93,6 +93,30 @@ describe("agent deployment migration fixtures", () => {
         "created_at",
         "updated_at",
       ]);
+      await expect(readColumnNames(sql, "provider_trial_cohorts")).resolves.toEqual([
+        "id",
+        "cohort_key",
+        "region",
+        "runner_size_slug",
+        "rollout_configuration_generation",
+        "started_at",
+        "created_at",
+      ]);
+      await expect(readColumnNames(sql, "provider_trial_slots")).resolves.toEqual([
+        "id",
+        "cohort_id",
+        "slot_number",
+        "request_attempt_id",
+        "request_started_at",
+        "request_outcome",
+        "request_safe_code",
+        "request_outcome_recorded_at",
+        "deployment_id",
+        "terminal_outcome",
+        "terminal_safe_code",
+        "terminal_recorded_at",
+        "created_at",
+      ]);
       await expect(readAgentsDesiredDefault(sql)).resolves.toEqual({
         column_default: "'stopped'::agent_desired_status",
         is_nullable: "NO",
@@ -110,6 +134,12 @@ describe("agent deployment migration fixtures", () => {
       );
       await expect(
         readIndexDefinition(sql, "agent_deployment_wakeups_generation_idx"),
+      ).resolves.toContain("UNIQUE INDEX");
+      await expect(
+        readIndexDefinition(sql, "provider_trial_slots_cohort_number_idx"),
+      ).resolves.toContain("UNIQUE INDEX");
+      await expect(
+        readIndexDefinition(sql, "provider_trial_slots_deployment_idx"),
       ).resolves.toContain("UNIQUE INDEX");
       await expect(readIndexDefinition(sql, "agent_deployment_wakeups_due_idx")).resolves.toContain(
         "WHERE (state = ANY",
@@ -138,6 +168,12 @@ describe("agent deployment migration fixtures", () => {
       await expect(
         readTriggerDefinition(sql, "agent_deployments_slo_identity_immutable_trigger"),
       ).resolves.toContain("BEFORE UPDATE");
+      await expect(
+        readTriggerDefinition(sql, "provider_trial_cohorts_preserve_identity_trigger"),
+      ).resolves.toContain("BEFORE INSERT OR DELETE OR UPDATE");
+      await expect(
+        readTriggerDefinition(sql, "provider_trial_slots_preserve_evidence_trigger"),
+      ).resolves.toContain("BEFORE INSERT OR DELETE OR UPDATE");
       await expect(readConstraintDefinition(sql, "agents_id_user_id_unique")).resolves.toContain(
         "UNIQUE (id, user_id)",
       );

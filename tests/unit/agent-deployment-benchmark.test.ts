@@ -35,6 +35,27 @@ describe("Agent Deployment benchmark command", () => {
     });
   });
 
+  it("selects one exact Provider Trial Cohort ledger without reconstructing membership", () => {
+    expect(
+      parseBenchmarkOptions(["--provider-trial-cohort-id", "00000000-0000-4000-8000-000000000288"]),
+    ).toEqual({
+      mode: "existing",
+      limit: 100,
+      providerTrialCohortId: "00000000-0000-4000-8000-000000000288",
+      trials: 0,
+      providerAuthorized: false,
+      candidateSizeSlugs: [],
+    });
+    expect(() =>
+      parseBenchmarkOptions([
+        "--provider-trial-cohort-id",
+        "00000000-0000-4000-8000-000000000288",
+        "--deployment-id",
+        "00000000-0000-4000-8000-000000000001",
+      ]),
+    ).toThrow(/cannot be combined/);
+  });
+
   it("parses deterministic explicit candidate size slugs for fake-only comparison setup", () => {
     expect(
       parseBenchmarkOptions([

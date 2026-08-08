@@ -387,3 +387,27 @@ cold-deployment plan.
   non-production deployment reached Ready in 148.970 seconds and remained a diagnostic slow-ready
   SLO Miss; no provider-backed action, hosted configuration change, secret mutation, or billable
   effect ran.
+
+### 2026-08-08 — Issue #288 immutable Provider Trial accounting implemented
+
+- Added migration 0031 for an exact 30-slot Provider Trial Cohort ledger. Cohort creation persists
+  every numbered slot before start; database constraints and triggers prevent post-start insertion,
+  deletion, renumbering, request replacement, deployment relinking, and terminal-outcome mutation.
+- Added exclusive request-attempt starts, immutable pre-commit failure accounting without invented
+  Agent Deployments, and exact committed links restricted to the matching request-attempt
+  idempotency key, operator-trial origin, and cohort Rollout Configuration generation. Cohort
+  membership changes serialize with cohort start so an uncommitted start cannot race deletion.
+- Added the versioned `bruno.provider-trial-cohort.v1` report and exact-cohort benchmark selection.
+  API-acceptance availability and failure-inclusive ready-within-60 results remain separate and
+  readiness is derived from durable deployment stage/timestamps. The
+  29-of-30 and 95-percent committed gates are explicit, and canonical Ed25519 signing rejects
+  tampering or inconsistent summaries without exposing request-attempt, Owner, credential, token,
+  Telegram, endpoint, raw deployment error, or arbitrary provider metadata. Safe outcome codes use
+  a database-enforced closed vocabulary.
+- Focused benchmark, schema, migration, concurrency, selection, signing, and redaction coverage
+  passed 59 tests against isolated PostgreSQL 17. `bun run verify` passed formatting, lint, type
+  checking, 176 unit files / 1,772 tests, and the production build. Credential-free browser E2E
+  passed 26/26 with explicit development authentication after migrating the disposable database.
+- No DigitalOcean request, provider trial, hosted configuration change, secret mutation, deployment,
+  or billable effect ran. Live cohort driving remains separately owned by issue #298 and requires
+  its exact authorization.

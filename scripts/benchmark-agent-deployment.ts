@@ -3,6 +3,10 @@ import {
   buildAgentDeploymentLatencyReportForDatabase,
   type AgentDeploymentLatencyReport,
 } from "@/src/server/agents/agent-deployment-latency";
+import {
+  buildProviderTrialCohortReport,
+  type ProviderTrialCohortReport,
+} from "@/src/server/agents/provider-trial-cohort";
 import { createDatabaseConnection } from "@/src/server/db/client";
 import {
   LOCAL_AGENT_SMOKE_MODE_ENV,
@@ -20,6 +24,7 @@ type BenchmarkOptions = {
   mode: BenchmarkMode;
   limit: number;
   deploymentId?: string;
+  providerTrialCohortId?: string;
   trials: number;
   providerAuthorized: boolean;
   candidateSizeSlugs: string[];
@@ -28,7 +33,7 @@ type BenchmarkOptions = {
 export async function runAgentDeploymentBenchmark(
   argv: readonly string[],
   env: Record<string, string | undefined> = process.env,
-): Promise<AgentDeploymentLatencyReport> {
+): Promise<AgentDeploymentLatencyReport | ProviderTrialCohortReport> {
   const options = parseBenchmarkOptions(argv);
 
   if (options.mode === "digitalocean") {
@@ -44,6 +49,9 @@ export async function runAgentDeploymentBenchmark(
 
   const connection = createDatabaseConnection();
   try {
+    if (options.providerTrialCohortId) {
+      return await buildProviderTrialCohortReport(connection, options.providerTrialCohortId);
+    }
     return await buildAgentDeploymentLatencyReportForDatabase(connection, {
       limit: options.limit,
       ...(options.deploymentId ? { deploymentId: options.deploymentId } : {}),
@@ -57,6 +65,7 @@ export function parseBenchmarkOptions(argv: readonly string[]): BenchmarkOptions
   let mode: BenchmarkMode = "existing";
   let limit = 100;
   let deploymentId: string | undefined;
+  let providerTrialCohortId: string | undefined;
   let trials = 0;
   let providerAuthorized = false;
   let candidateSizeSlugs: string[] = [];
@@ -79,6 +88,11 @@ export function parseBenchmarkOptions(argv: readonly string[]): BenchmarkOptions
     }
     if (arg === "--deployment-id") {
       deploymentId = readRequiredValue(argv, index);
+      index += 1;
+      continue;
+    }
+    if (arg === "--provider-trial-cohort-id") {
+      providerTrialCohortId = readUuid(readRequiredValue(argv, index), arg);
       index += 1;
       continue;
     }
@@ -106,10 +120,17 @@ export function parseBenchmarkOptions(argv: readonly string[]): BenchmarkOptions
     throw new Error(`Unknown Agent Deployment benchmark argument: ${arg ?? ""}\n${usage()}`);
   }
 
+  if (providerTrialCohortId && (mode !== "existing" || deploymentId)) {
+    throw new Error(
+      "--provider-trial-cohort-id is an existing-ledger report and cannot be combined with provider execution or --deployment-id.",
+    );
+  }
+
   return {
     mode,
     limit,
     ...(deploymentId ? { deploymentId } : {}),
+    ...(providerTrialCohortId ? { providerTrialCohortId } : {}),
     trials,
     providerAuthorized,
     candidateSizeSlugs,
@@ -195,10 +216,17 @@ function readCandidateSizeSlugs(value: string): string[] {
   return unique.sort();
 }
 
+function readUuid(value: string, label: string): string {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    throw new Error(`${label} must be a UUID.`);
+  }
+  return value.toLowerCase();
+}
+
 function usage(): string {
   return [
-    "Usage: bun --conditions react-server scripts/benchmark-agent-deployment.ts [--mode existing|local_docker|digitalocean] [--limit N] [--deployment-id UUID] [--candidate-size-slugs slug[,slug]]",
-    "Default mode is read-only existing-run reporting. DigitalOcean mode is fail-closed, requires explicit candidate size slugs, and is not used by ordinary CI.",
+    "Usage: bun --conditions react-server scripts/benchmark-agent-deployment.ts [--mode existing|local_docker|digitalocean] [--limit N] [--deployment-id UUID] [--provider-trial-cohort-id UUID] [--candidate-size-slugs slug[,slug]]",
+    "Default mode is read-only existing-run reporting. An exact Provider Trial Cohort ledger can be reported by ID. DigitalOcean mode is fail-closed, requires explicit candidate size slugs, and is not used by ordinary CI.",
   ].join("\n");
 }
 
