@@ -62,6 +62,11 @@ describe("Hermes agent workload image", () => {
     expect(workflow).toContain("aquasecurity/trivy-action");
     expect(workflow).toContain("severity: CRITICAL");
     expect(workflow).toContain("Digest verification");
+    expect(workflow).toContain("oven-sh/setup-bun@v2");
+    expect(workflow).toContain("bun-version-file: .bun-version");
+    expect(workflow.indexOf("Set up Bun")).toBeLessThan(
+      workflow.indexOf("Smoke local workload image"),
+    );
     expect(workflow).not.toContain("Dockerfile.runner");
     expect(workflow).not.toContain("bruno-runner");
   });

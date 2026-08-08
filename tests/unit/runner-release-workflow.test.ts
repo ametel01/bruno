@@ -98,6 +98,7 @@ describe("runner release workflow contract", () => {
       "vercel@$" + '{VERCEL_CLI_VERSION} promote "$' + '{CANDIDATE_DEPLOYMENT_URL}"',
     );
     expect(workflowSource).not.toContain("RUNNER_RELEASE_CONTROL_PLANE_URL");
+    expect(workflowSource.match(/BRUNO_AUTH_MODE=clerk/g)).toHaveLength(4);
   });
 
   it("targets the linked Vercel project with explicitly authorized CLI token authentication", () => {
