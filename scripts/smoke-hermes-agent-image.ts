@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, chmod } from "node:fs/promises";
+import { mkdtemp, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -14,6 +14,8 @@ export const HERMES_VERSION_FRAGMENT = "Hermes Agent v0.18.2 (2026.7.7.2)";
 export const HERMES_RUNTIME_UID_GID = "10000:10000";
 
 const SAFE_IMAGE_REFERENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,254}$/;
+const HERMES_DATA_DIR_PREFIX = join(tmpdir(), "bruno-hermes-data-");
+const HERMES_DATA_DIR_SUFFIX_PATTERN = /^[A-Za-z0-9_-]+$/;
 const GATEWAY_START_TIMEOUT_MS = 15_000;
 const SECRET_HISTORY_CANARIES = [
   "OPENROUTER_API_KEY=",
@@ -138,14 +140,25 @@ function assertSafeImageReference(image: string) {
 }
 
 async function withPreparedDataDir<T>(callback: (dataDir: string) => Promise<T>): Promise<T> {
-  const dataDir = await mkdtemp(join(tmpdir(), "bruno-hermes-data-"));
+  const dataDir = await mkdtemp(HERMES_DATA_DIR_PREFIX);
 
   try {
     await chmod(dataDir, 0o777);
     return await callback(dataDir);
   } finally {
-    await rm(dataDir, { force: true, recursive: true });
+    await removePreparedDataDir(dataDir);
   }
+}
+
+export async function removePreparedDataDir(dataDir: string) {
+  const suffix = dataDir.slice(HERMES_DATA_DIR_PREFIX.length);
+
+  if (!dataDir.startsWith(HERMES_DATA_DIR_PREFIX) || !HERMES_DATA_DIR_SUFFIX_PATTERN.test(suffix)) {
+    throw new Error(`Refusing to remove unmanaged Hermes data directory: ${dataDir}`);
+  }
+
+  const cleanup = await runCommand("/bin/rm", ["-rf", "--", dataDir]);
+  assertExitCode(cleanup, "Hermes prepared data directory cleanup");
 }
 
 function assertExitCode(result: CommandResult, label: string) {

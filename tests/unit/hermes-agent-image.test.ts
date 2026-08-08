@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -8,6 +9,7 @@ import {
   HERMES_UPSTREAM_IMAGE,
   HERMES_UPSTREAM_INDEX_DIGEST,
   HERMES_VERSION_FRAGMENT,
+  removePreparedDataDir,
 } from "@/scripts/smoke-hermes-agent-image";
 
 describe("Hermes agent workload image", () => {
@@ -45,6 +47,20 @@ describe("Hermes agent workload image", () => {
     expect(smokeScript).toContain("--user");
     expect(smokeScript).toContain("gateway");
     expect(smokeScript).toContain("history");
+  });
+
+  it("removes only managed Hermes bind-mount directories with the system cleanup command", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "bruno-hermes-data-"));
+    const nestedDir = join(dataDir, "gateway");
+    await mkdir(nestedDir);
+    await writeFile(join(nestedDir, "state.json"), "{}");
+
+    await removePreparedDataDir(dataDir);
+
+    await expect(access(dataDir)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(removePreparedDataDir(tmpdir())).rejects.toThrow(
+      "Refusing to remove unmanaged Hermes data directory",
+    );
   });
 
   it("publishes the workload image through a separate scanned GHCR workflow", async () => {
