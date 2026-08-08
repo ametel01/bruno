@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   parseBenchmarkOptions,
-  runAgentCreationBenchmark,
-} from "@/scripts/benchmark-agent-creation";
+  runAgentDeploymentBenchmark,
+} from "@/scripts/benchmark-agent-deployment";
 
-describe("agent creation benchmark command", () => {
+describe("Agent Deployment benchmark command", () => {
   it("defaults to read-only existing-run reporting", () => {
     expect(parseBenchmarkOptions([])).toEqual({
       mode: "existing",
@@ -56,8 +56,8 @@ describe("agent creation benchmark command", () => {
 
   it("fails closed before any DigitalOcean benchmark execution", async () => {
     await expect(
-      runAgentCreationBenchmark(["--mode", "digitalocean"], {
-        BRUNO_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION: undefined,
+      runAgentDeploymentBenchmark(["--mode", "digitalocean"], {
+        BRUNO_AGENT_DEPLOYMENT_BENCHMARK_DIGITALOCEAN_AUTHORIZATION: undefined,
       }),
     ).rejects.toThrow(/DigitalOcean benchmark mode is fail-closed/);
   });
@@ -104,7 +104,7 @@ describe("agent creation benchmark command", () => {
 
   it("requires exact local Docker sentinels for local benchmark mode", async () => {
     await expect(
-      runAgentCreationBenchmark(["--mode", "local_docker"], {
+      runAgentDeploymentBenchmark(["--mode", "local_docker"], {
         BRUNO_DIGITALOCEAN_PROVIDER_MODE: "digitalocean",
         BRUNO_DIGITALOCEAN_TOKEN: "local-docker",
         BRUNO_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",

@@ -5,7 +5,7 @@ import { sql } from "drizzle-orm";
 import type { RunnerAgentStatusSnapshot } from "@/src/runner-service/runner-contracts";
 import { replaceDeploymentWakeupInTransaction } from "@/src/server/agents/agent-deployment-dispatch";
 import { buildHermesAgentLaunchSpecForUser } from "@/src/server/agents/agent-launch-builder";
-import { logAgentCreationTerminalCompletion } from "@/src/server/agents/agent-creation-latency";
+import { logAgentDeploymentTerminalCompletion } from "@/src/server/agents/agent-deployment-latency";
 import { initializeAgentRuntimeAfterDeploymentReady } from "@/src/server/agents/agent-runtime-store";
 import { scheduleAgentRuntimeReconcileAfterResponse } from "@/src/server/agents/agent-runtime-triggers";
 import { getAssistantProfileForManagedModel } from "@/src/server/agents/assistant-profiles";
@@ -2145,7 +2145,7 @@ async function finalizeReady(
     (dependencies.scheduleRuntimeAfterReady ?? scheduleAgentRuntimeReconcileAfterResponse)(
       work.agentId,
     );
-    await logAgentCreationTerminalCompletion(connection, work.id).catch((error: unknown) => {
+    await logAgentDeploymentTerminalCompletion(connection, work.id).catch((error: unknown) => {
       logAgentDeployment(
         "terminal_completion_log_failed",
         {

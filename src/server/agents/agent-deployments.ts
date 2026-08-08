@@ -23,6 +23,11 @@ import {
   validateDeploymentLeaseDurationMs,
   validateDeploymentLeaseOwner,
 } from "@/src/server/agents/deployment-state";
+import {
+  type AgentDeploymentEnvironment,
+  deploymentEnvironmentForRuntime,
+  initialCohortForAssignedRunner,
+} from "@/src/server/agents/deployment-slo-identity";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentDeployments, agents } from "@/src/server/db/schema";
 import type * as schema from "@/src/server/db/schema";
@@ -133,6 +138,7 @@ export async function createAgentDeploymentForUser(input: {
   agentId: string;
   configRevision: string;
   idempotencyKey: string;
+  deploymentEnvironment?: AgentDeploymentEnvironment;
   now?: Date;
 }): Promise<CreateAgentDeploymentResult> {
   assertTransactionHandle(input.db);
@@ -157,8 +163,8 @@ export async function createAgentDeploymentForUser(input: {
   const nowIso = toTimestampParameter(now);
 
   try {
-    const ownedAgent = await input.db.execute<{ id: string }>(sql`
-      select ${agents.id} as id
+    const ownedAgent = await input.db.execute<{ id: string; runnerId: string | null }>(sql`
+      select ${agents.id} as id, ${agents.runnerId} as "runnerId"
       from ${agents}
       where ${agents.id} = ${normalizedAgentId}
         and ${agents.userId} = ${input.userId}
@@ -204,6 +210,9 @@ export async function createAgentDeploymentForUser(input: {
         config_revision,
         idempotency_key,
         accepted_at,
+        origin,
+        initial_cohort,
+        deployment_environment,
         created_at,
         updated_at
       )
@@ -213,6 +222,9 @@ export async function createAgentDeploymentForUser(input: {
         ${input.configRevision},
         ${normalizedKey.value},
         clock_timestamp(),
+        'owner_request',
+        ${initialCohortForAssignedRunner(ownedAgent[0].runnerId)},
+        ${input.deploymentEnvironment ?? deploymentEnvironmentForRuntime()},
         ${nowIso},
         ${nowIso}
       )

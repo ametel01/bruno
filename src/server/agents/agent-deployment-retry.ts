@@ -12,6 +12,10 @@ import {
   normalizeDeploymentIdempotencyKey,
   validateDeploymentConfigRevision,
 } from "@/src/server/agents/deployment-state";
+import {
+  deploymentEnvironmentForRuntime,
+  initialCohortForAssignedRunner,
+} from "@/src/server/agents/deployment-slo-identity";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
 import { agentDeployments, agentEvents, agents } from "@/src/server/db/schema";
@@ -113,6 +117,9 @@ export async function createAgentDeploymentForRunnerReplacement(input: {
       idempotencyKey,
       nextAttemptAt: input.now,
       acceptedAt: sql`clock_timestamp()`,
+      origin: "runner_replacement",
+      initialCohort: "unknown",
+      deploymentEnvironment: deploymentEnvironmentForRuntime(),
       createdAt: input.now,
       updatedAt: input.now,
     })
@@ -189,8 +196,12 @@ export async function retryAgentDeploymentForUser(input: {
 
   try {
     const row = await connection.db.transaction(async (tx) => {
-      const [agent] = await tx.execute<{ id: string; desiredStatus: string }>(sql`
-        select id, desired_status as "desiredStatus"
+      const [agent] = await tx.execute<{
+        id: string;
+        desiredStatus: string;
+        runnerId: string | null;
+      }>(sql`
+        select id, desired_status as "desiredStatus", runner_id as "runnerId"
         from ${agents}
         where id = ${agentId}
           and user_id = ${input.userId}
@@ -287,6 +298,9 @@ export async function retryAgentDeploymentForUser(input: {
           config_revision,
           idempotency_key,
           accepted_at,
+          origin,
+          initial_cohort,
+          deployment_environment,
           created_at,
           updated_at
         )
@@ -296,6 +310,9 @@ export async function retryAgentDeploymentForUser(input: {
           ${latest.configRevision},
           ${normalizedKey.value},
           clock_timestamp(),
+          'owner_request',
+          ${initialCohortForAssignedRunner(agent.runnerId)},
+          ${deploymentEnvironmentForRuntime()},
           ${now.toISOString()},
           ${now.toISOString()}
         )

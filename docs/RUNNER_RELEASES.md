@@ -23,25 +23,25 @@ rollback jobs are the only repository-owned paths that supply that marker, preve
 bypassing the publish, scan, and staging path. The marker name is retained temporarily for
 compatibility; it does not imply that the disabled canary ran.
 
-Production builds also fail before migrations or compilation when ready agent creation is enabled
-without a DigitalOcean token, runner command bearer token, and immutable Git-SHA-plus-digest
-`BRUNO_RUNNER_IMAGE`. At runtime, agent creation reuses only an already-running same-user runner
-with fresh authenticated heartbeat evidence, compatible release evidence, and spare capacity
+Production builds also fail before migrations or compilation when automatic Agent Deployments are
+enabled without a DigitalOcean token, runner command bearer token, and immutable
+Git-SHA-plus-digest `BRUNO_RUNNER_IMAGE`. At runtime, Same-Owner Reuse selects only an already-running
+runner with fresh authenticated heartbeat evidence, compatible release evidence, and spare capacity
 reserved inside the assignment transaction. Capacity is fail-closed to the minimum of computed
 CPU/physical-memory/disk limits, heartbeat, configured `BRUNO_RUNNER_MAX_AGENTS`, and an
-explicit measured profile cap; current hosted profiles remain capped at one. If no same-user
-capacity is available, creation requires provisioning configuration before persistence, then the
-post-response reconciler performs one initialization slice and one provisioning slice so exactly one
-durable provider attempt starts immediately. Protected cron reconciliation remains the retry path.
-Automated and local tests inject fake providers and never create a Droplet.
+explicit measured profile cap; current hosted profiles remain capped at one. If no Same-Owner
+capacity is available, the Agent Deployment requires provisioning configuration before persistence.
+The post-response reconciler then performs one initialization slice and one provisioning slice so
+exactly one durable provider attempt starts immediately. Protected cron reconciliation remains the
+retry path. Automated and local tests inject fake providers and never create a Droplet.
 
-New production Droplets skip the runner boot model canary so user creation is not delayed by a
+New production Droplets skip the runner boot model canary so an Owner request is not delayed by a
 synthetic model round trip. Boot still verifies Docker, release identity, Hermes fixture startup,
 detailed health, Telegram configuration loading, and cleanup. The local runner release smoke keeps
 the model canary enabled before an image is selected for production.
 
-Production agent creation does not dispatch the later agent-specific model canary either. After the
-real Hermes gateway reports ready, the deployment records the canary as skipped and proceeds to
+Production Agent Deployments do not dispatch the later agent-specific model canary either. After
+the real Hermes gateway reports ready, the deployment records the canary as skipped and proceeds to
 Telegram verification. Local release and contract smoke paths retain model-path coverage.
 
 Release workflow runs share one non-cancelling concurrency group. Automated tests and release runs

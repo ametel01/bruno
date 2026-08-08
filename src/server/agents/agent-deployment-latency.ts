@@ -1,10 +1,14 @@
 import "server-only";
 
 import { sql } from "drizzle-orm";
+import type {
+  AgentDeploymentEnvironment,
+  AgentDeploymentOrigin,
+} from "@/src/server/agents/deployment-slo-identity";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import { createAppLogger } from "@/src/server/logging/logger";
 
-export const AGENT_CREATION_LATENCY_REPORT_VERSION = 2;
+export const AGENT_DEPLOYMENT_LATENCY_REPORT_VERSION = 3;
 
 const DEFAULT_REPORT_LIMIT = 100;
 const MAX_REPORT_LIMIT = 1_000;
@@ -48,38 +52,41 @@ const BOOTSTRAP_STEP_LABELS = new Set([
   "runner_registration",
 ]);
 
-const terminalLogger = createAppLogger("agent.creation.latency");
+const terminalLogger = createAppLogger("agent.deployment.latency");
 
-export type AgentCreationLatencyBoundary = "started" | "completed" | "failed";
-export type AgentCreationLatencyCohort = "cold_droplet" | "existing_same_user_runner" | "unknown";
+export type AgentDeploymentLatencyBoundary = "started" | "completed" | "failed";
+export type AgentDeploymentLatencyCohort = "cold_deployment" | "same_owner_reuse" | "unknown";
 
-export type AgentCreationLatencyDeploymentStageEvent = {
+export type AgentDeploymentLatencyDeploymentStageEvent = {
   fromStage: string | null;
   toStage: string | null;
   createdAt: Date | string;
 };
 
-export type AgentCreationLatencyRunnerEvent = {
+export type AgentDeploymentLatencyRunnerEvent = {
   phase: string;
-  status: AgentCreationLatencyBoundary;
+  status: AgentDeploymentLatencyBoundary;
   createdAt: Date | string;
   metadata?: Record<string, unknown>;
 };
 
-export type AgentCreationLatencyDeploymentEvidence = {
+export type AgentDeploymentLatencyDeploymentEvidence = {
   id: string;
   runnerId: string | null;
-  cohort?: AgentCreationLatencyCohort;
+  cohort?: AgentDeploymentLatencyCohort;
+  origin?: AgentDeploymentOrigin | null;
+  deploymentEnvironment?: AgentDeploymentEnvironment | null;
+  ownerCancelledAt?: Date | string | null;
   requiresRunnerEvidence?: boolean;
   acceptedAt?: Date | string | null | undefined;
   createdAt: Date | string;
   completedAt: Date | string | null;
   failedAt: Date | string | null;
-  agentStageEvents: readonly AgentCreationLatencyDeploymentStageEvent[];
-  runnerEvents: readonly AgentCreationLatencyRunnerEvent[];
+  agentStageEvents: readonly AgentDeploymentLatencyDeploymentStageEvent[];
+  runnerEvents: readonly AgentDeploymentLatencyRunnerEvent[];
 };
 
-export type AgentCreationLatencyIssue =
+export type AgentDeploymentLatencyIssue =
   | "missing_started"
   | "missing_terminal"
   | "duplicate_started"
@@ -91,28 +98,26 @@ export type AgentCreationLatencyIssue =
   | "unknown_terminal"
   | "unknown_latency_cohort";
 
-export type AgentCreationLatencyStageTiming = {
+export type AgentDeploymentLatencyStageTiming = {
   name: string;
   source: "agent_event" | "runner_provisioning_event";
   status: "complete" | "failed" | "missing" | "invalid";
   startedAt: string | null;
   completedAt: string | null;
   durationMs: number | null;
-  issues: AgentCreationLatencyIssue[];
+  issues: AgentDeploymentLatencyIssue[];
 };
 
-export type AgentCreationLatencyRunOutcome = "ready" | "failed" | "incomplete";
-export type AgentCreationLatencySloClassification =
+export type AgentDeploymentLatencyRunOutcome = "ready" | "failed" | "incomplete";
+export type AgentDeploymentLatencySloClassification =
   | "ready_within_60"
   | "slo_miss"
-  | "terminal_failure"
-  | "timeout"
   | "pending"
   | "missing_boundary"
   | "legacy_boundary"
   | "invalid_event_ordering";
 
-export type AgentCreationLatencySloSummary = {
+export type AgentDeploymentLatencySloSummary = {
   sampleSize: number;
   requiredSampleSize: 100;
   requiredReadyWithin60: 95;
@@ -124,24 +129,37 @@ export type AgentCreationLatencySloSummary = {
   passesGate: boolean;
 };
 
-export type AgentCreationLatencyRun = {
+export type AgentDeploymentLatencyRun = {
   deploymentId: string;
   runnerId: string | null;
-  cohort: AgentCreationLatencyCohort;
-  outcome: AgentCreationLatencyRunOutcome;
+  cohort: AgentDeploymentLatencyCohort;
+  origin: AgentDeploymentOrigin | null;
+  deploymentEnvironment: AgentDeploymentEnvironment | null;
+  eligible: boolean;
+  eligibilityReason:
+    | "eligible"
+    | "legacy_identity"
+    | "non_production"
+    | "operator_trial"
+    | "runner_replacement"
+    | "not_cold_deployment"
+    | "owner_cancelled_before_boundary"
+    | "diagnostic_evidence";
+  outcome: AgentDeploymentLatencyRunOutcome;
   evidenceStatus: "valid" | "invalid";
   acceptedAt: string | null;
   createdAt: string;
   terminalAt: string | null;
   totalDurationMs: number | null;
   durationBoundary: "accepted_at" | "legacy_created_at" | null;
-  sloClassification: AgentCreationLatencySloClassification;
+  sloClassification: AgentDeploymentLatencySloClassification;
+  sloMissCause: "slow_ready" | "terminal_failure" | "not_ready_at_boundary" | null;
   sloStatus: "pass" | "miss" | "pending" | "diagnostic";
-  stages: AgentCreationLatencyStageTiming[];
-  issueCounts: Partial<Record<AgentCreationLatencyIssue, number>>;
+  stages: AgentDeploymentLatencyStageTiming[];
+  issueCounts: Partial<Record<AgentDeploymentLatencyIssue, number>>;
 };
 
-export type AgentCreationLatencyStageSummary = {
+export type AgentDeploymentLatencyStageSummary = {
   name: string;
   source: "agent_event" | "runner_provisioning_event";
   sampleCount: number;
@@ -153,14 +171,14 @@ export type AgentCreationLatencyStageSummary = {
   maxMs: number | null;
 };
 
-export type AgentCreationLatencyCohortSummary = {
+export type AgentDeploymentLatencyCohortSummary = {
   total: number;
   ready: number;
   failed: number;
   incomplete: number;
   invalidEvidence: number;
   successRate: number;
-  slo: AgentCreationLatencySloSummary;
+  slo: AgentDeploymentLatencySloSummary;
   readyLatency: {
     p50Ms: number | null;
     p95Ms: number | null;
@@ -171,11 +189,11 @@ export type AgentCreationLatencyCohortSummary = {
     p95Ms: number | null;
     maxMs: number | null;
   };
-  stageSummaries: AgentCreationLatencyStageSummary[];
+  stageSummaries: AgentDeploymentLatencyStageSummary[];
 };
 
-export type AgentCreationLatencyReport = {
-  version: typeof AGENT_CREATION_LATENCY_REPORT_VERSION;
+export type AgentDeploymentLatencyReport = {
+  version: typeof AGENT_DEPLOYMENT_LATENCY_REPORT_VERSION;
   generatedAt: string;
   boundary: {
     sloStart: "agent_deployments.accepted_at";
@@ -184,7 +202,7 @@ export type AgentCreationLatencyReport = {
     failed: "agent_deployments.failed_at";
   };
   percentileRule: "nearest_rank";
-  slo: AgentCreationLatencySloSummary;
+  slo: AgentDeploymentLatencySloSummary;
   summary: {
     total: number;
     ready: number;
@@ -202,40 +220,40 @@ export type AgentCreationLatencyReport = {
       maxMs: number | null;
     };
   };
-  cohorts: Record<AgentCreationLatencyCohort, AgentCreationLatencyCohortSummary>;
-  runs: AgentCreationLatencyRun[];
-  stageSummaries: AgentCreationLatencyStageSummary[];
+  cohorts: Record<AgentDeploymentLatencyCohort, AgentDeploymentLatencyCohortSummary>;
+  runs: AgentDeploymentLatencyRun[];
+  stageSummaries: AgentDeploymentLatencyStageSummary[];
 };
 
 type BuildReportInput = {
-  deployments: readonly AgentCreationLatencyDeploymentEvidence[];
+  deployments: readonly AgentDeploymentLatencyDeploymentEvidence[];
   generatedAt?: Date | string;
 };
 
 type BoundaryEvent = {
   name: string;
   source: "runner_provisioning_event";
-  status: AgentCreationLatencyBoundary;
+  status: AgentDeploymentLatencyBoundary;
   at: string | null;
 };
 
-export type AgentCreationRunnerCorrelationInput = {
+export type AgentDeploymentRunnerCorrelationInput = {
+  cohort: AgentDeploymentLatencyCohort;
   runnerOperationId: string | null;
   operationRunnerId: string | null;
   assignedRunnerId: string | null;
 };
 
-export type AgentCreationRunnerCorrelation = {
+export type AgentDeploymentRunnerCorrelation = {
   reportRunnerId: string | null;
   eventRunnerId: string | null;
   eventRunnerOperationId: string | null;
-  cohort: AgentCreationLatencyCohort;
-  mode: "operation_key" | "assigned_runner_reuse" | "none";
+  mode: "operation_key" | "same_owner_reuse" | "none";
 };
 
-export function buildAgentCreationLatencyReport(
+export function buildAgentDeploymentLatencyReport(
   input: BuildReportInput,
-): AgentCreationLatencyReport {
+): AgentDeploymentLatencyReport {
   const generatedAt = toIso(input.generatedAt ?? new Date()) ?? new Date(0).toISOString();
   const runs = [...input.deployments]
     .sort(
@@ -256,7 +274,7 @@ export function buildAgentCreationLatencyReport(
   const cohorts = summarizeCohorts(runs);
 
   return {
-    version: AGENT_CREATION_LATENCY_REPORT_VERSION,
+    version: AGENT_DEPLOYMENT_LATENCY_REPORT_VERSION,
     generatedAt,
     boundary: {
       sloStart: "agent_deployments.accepted_at",
@@ -265,7 +283,7 @@ export function buildAgentCreationLatencyReport(
       failed: "agent_deployments.failed_at",
     },
     percentileRule: "nearest_rank",
-    slo: summarizeSlo(runs.filter((run) => run.cohort === "cold_droplet")),
+    slo: summarizeSlo(runs.filter((run) => run.cohort === "cold_deployment")),
     summary: {
       total: runs.length,
       ready,
@@ -281,28 +299,28 @@ export function buildAgentCreationLatencyReport(
   };
 }
 
-export async function buildAgentCreationLatencyReportForDatabase(
+export async function buildAgentDeploymentLatencyReportForDatabase(
   connection: DatabaseConnection,
   options: {
     deploymentId?: string;
     limit?: number;
     generatedAt?: Date;
   } = {},
-): Promise<AgentCreationLatencyReport> {
+): Promise<AgentDeploymentLatencyReport> {
   const limit = Math.min(Math.max(options.limit ?? DEFAULT_REPORT_LIMIT, 1), MAX_REPORT_LIMIT);
   const deployments = await readDeploymentEvidence(connection, options.deploymentId, limit);
 
-  return buildAgentCreationLatencyReport({
+  return buildAgentDeploymentLatencyReport({
     deployments,
     ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
   });
 }
 
-export async function logAgentCreationTerminalCompletion(
+export async function logAgentDeploymentTerminalCompletion(
   connection: DatabaseConnection,
   deploymentId: string,
 ): Promise<void> {
-  const report = await buildAgentCreationLatencyReportForDatabase(connection, {
+  const report = await buildAgentDeploymentLatencyReportForDatabase(connection, {
     deploymentId,
     limit: 1,
   });
@@ -319,7 +337,10 @@ export async function logAgentCreationTerminalCompletion(
     totalDurationMs: run.totalDurationMs,
     durationBoundary: run.durationBoundary,
     sloClassification: run.sloClassification,
+    sloMissCause: run.sloMissCause,
     sloStatus: run.sloStatus,
+    eligible: run.eligible,
+    eligibilityReason: run.eligibilityReason,
     evidenceStatus: run.evidenceStatus,
     stages: run.stages.slice(0, MAX_LOG_STAGE_COUNT).map((stage) => ({
       name: stage.name,
@@ -330,26 +351,24 @@ export async function logAgentCreationTerminalCompletion(
   });
 }
 
-export function resolveAgentCreationRunnerCorrelation(
-  input: AgentCreationRunnerCorrelationInput,
-): AgentCreationRunnerCorrelation {
-  if (input.runnerOperationId && input.operationRunnerId) {
+export function resolveAgentDeploymentRunnerCorrelation(
+  input: AgentDeploymentRunnerCorrelationInput,
+): AgentDeploymentRunnerCorrelation {
+  if (input.cohort === "cold_deployment" && input.runnerOperationId && input.operationRunnerId) {
     return {
       reportRunnerId: input.operationRunnerId,
       eventRunnerId: input.operationRunnerId,
       eventRunnerOperationId: input.runnerOperationId,
-      cohort: "cold_droplet",
       mode: "operation_key",
     };
   }
 
-  if (input.assignedRunnerId) {
+  if (input.cohort === "same_owner_reuse" && input.assignedRunnerId) {
     return {
       reportRunnerId: input.assignedRunnerId,
       eventRunnerId: null,
       eventRunnerOperationId: null,
-      cohort: "existing_same_user_runner",
-      mode: "assigned_runner_reuse",
+      mode: "same_owner_reuse",
     };
   }
 
@@ -357,22 +376,15 @@ export function resolveAgentCreationRunnerCorrelation(
     reportRunnerId: null,
     eventRunnerId: null,
     eventRunnerOperationId: null,
-    cohort: "unknown",
     mode: "none",
   };
 }
 
 function toLatencyRun(
-  input: AgentCreationLatencyDeploymentEvidence,
+  input: AgentDeploymentLatencyDeploymentEvidence,
   generatedAt: string,
-): AgentCreationLatencyRun {
-  const cohort =
-    input.cohort ??
-    (input.runnerEvents.length > 0
-      ? "cold_droplet"
-      : input.runnerId
-        ? "existing_same_user_runner"
-        : "unknown");
+): AgentDeploymentLatencyRun {
+  const cohort = input.cohort ?? "unknown";
   const createdAt = toIso(input.createdAt);
   const acceptedAt = toIso(input.acceptedAt);
   const completedAt = toIso(input.completedAt);
@@ -385,13 +397,13 @@ function toLatencyRun(
     ...buildRunnerStageTimings(
       input.runnerEvents,
       input.requiresRunnerEvidence === true ||
-        (cohort === "cold_droplet" && input.runnerId !== null) ||
+        (cohort === "cold_deployment" && input.runnerId !== null) ||
         input.runnerEvents.length > 0,
     ),
   ].sort(
     (left, right) => left.name.localeCompare(right.name) || left.source.localeCompare(right.source),
   );
-  const cohortIssues: AgentCreationLatencyIssue[] =
+  const cohortIssues: AgentDeploymentLatencyIssue[] =
     cohort === "unknown" ? ["unknown_latency_cohort"] : [];
   const issueCounts = countIssues(stages, [...terminal.issues, ...cohortIssues]);
   const boundary = selectDurationBoundary(
@@ -419,6 +431,14 @@ function toLatencyRun(
     generatedAt,
     boundaryOrderInvalid,
   });
+  const eligibilityReason = classifyEligibility({
+    origin: input.origin,
+    deploymentEnvironment: input.deploymentEnvironment,
+    cohort,
+    ownerCancelledAt: toIso(input.ownerCancelledAt),
+    acceptedAt,
+    sloStatus: slo.status,
+  });
   const evidenceStatus =
     totalDurationMs !== null &&
     Object.values(issueCounts).every((count) => count === 0) &&
@@ -430,6 +450,10 @@ function toLatencyRun(
     deploymentId: input.id,
     runnerId: input.runnerId,
     cohort,
+    origin: input.origin ?? null,
+    deploymentEnvironment: input.deploymentEnvironment ?? null,
+    eligible: eligibilityReason === "eligible",
+    eligibilityReason,
     outcome: terminal.outcome,
     evidenceStatus,
     acceptedAt,
@@ -438,6 +462,7 @@ function toLatencyRun(
     totalDurationMs,
     durationBoundary: boundary.kind,
     sloClassification: slo.classification,
+    sloMissCause: slo.missCause,
     sloStatus: slo.status,
     stages,
     issueCounts,
@@ -445,13 +470,13 @@ function toLatencyRun(
 }
 
 function selectDurationBoundary(
-  acceptedInput: AgentCreationLatencyDeploymentEvidence["acceptedAt"],
+  acceptedInput: AgentDeploymentLatencyDeploymentEvidence["acceptedAt"],
   acceptedBoundaryMissing: boolean,
   acceptedAt: string | null,
   createdAt: string | null,
 ): {
   at: string | null;
-  kind: AgentCreationLatencyRun["durationBoundary"];
+  kind: AgentDeploymentLatencyRun["durationBoundary"];
 } {
   if (acceptedAt) return { at: acceptedAt, kind: "accepted_at" };
   if (!acceptedBoundaryMissing && (acceptedInput === null || acceptedInput === undefined)) {
@@ -461,7 +486,7 @@ function selectDurationBoundary(
 }
 
 function classifySlo(input: {
-  acceptedInput: AgentCreationLatencyDeploymentEvidence["acceptedAt"];
+  acceptedInput: AgentDeploymentLatencyDeploymentEvidence["acceptedAt"];
   acceptedBoundaryMissing: boolean;
   acceptedAt: string | null;
   createdAt: string | null;
@@ -469,30 +494,54 @@ function classifySlo(input: {
   generatedAt: string;
   boundaryOrderInvalid: boolean;
 }): {
-  classification: AgentCreationLatencySloClassification;
-  status: AgentCreationLatencyRun["sloStatus"];
+  classification: AgentDeploymentLatencySloClassification;
+  status: AgentDeploymentLatencyRun["sloStatus"];
+  missCause: AgentDeploymentLatencyRun["sloMissCause"];
 } {
   if (input.acceptedBoundaryMissing || (input.acceptedInput !== null && !input.acceptedAt)) {
-    return { classification: "missing_boundary", status: "diagnostic" };
+    return { classification: "missing_boundary", status: "diagnostic", missCause: null };
   }
   if (!input.acceptedAt) {
-    return { classification: "legacy_boundary", status: "diagnostic" };
+    return { classification: "legacy_boundary", status: "diagnostic", missCause: null };
   }
   const terminalOrderInvalid = input.terminal.issues.some((issue) => issue !== "unknown_terminal");
   if (!input.createdAt || input.boundaryOrderInvalid || terminalOrderInvalid) {
-    return { classification: "invalid_event_ordering", status: "diagnostic" };
+    return { classification: "invalid_event_ordering", status: "diagnostic", missCause: null };
   }
   if (input.terminal.outcome === "failed") {
-    return { classification: "terminal_failure", status: "miss" };
+    return { classification: "slo_miss", status: "miss", missCause: "terminal_failure" };
   }
   if (input.terminal.outcome === "ready" && input.terminal.at) {
     return durationMs(input.acceptedAt, input.terminal.at) <= READY_WITHIN_MS
-      ? { classification: "ready_within_60", status: "pass" }
-      : { classification: "slo_miss", status: "miss" };
+      ? { classification: "ready_within_60", status: "pass", missCause: null }
+      : { classification: "slo_miss", status: "miss", missCause: "slow_ready" };
   }
   return durationMs(input.acceptedAt, input.generatedAt) >= READY_WITHIN_MS
-    ? { classification: "timeout", status: "miss" }
-    : { classification: "pending", status: "pending" };
+    ? { classification: "slo_miss", status: "miss", missCause: "not_ready_at_boundary" }
+    : { classification: "pending", status: "pending", missCause: null };
+}
+
+function classifyEligibility(input: {
+  origin: AgentDeploymentOrigin | null | undefined;
+  deploymentEnvironment: AgentDeploymentEnvironment | null | undefined;
+  cohort: AgentDeploymentLatencyCohort;
+  ownerCancelledAt: string | null;
+  acceptedAt: string | null;
+  sloStatus: AgentDeploymentLatencyRun["sloStatus"];
+}): AgentDeploymentLatencyRun["eligibilityReason"] {
+  if (!input.origin || !input.deploymentEnvironment) return "legacy_identity";
+  if (input.origin === "operator_trial") return "operator_trial";
+  if (input.origin === "runner_replacement") return "runner_replacement";
+  if (input.deploymentEnvironment !== "production") return "non_production";
+  if (input.cohort !== "cold_deployment") return "not_cold_deployment";
+  if (input.sloStatus === "diagnostic" || !input.acceptedAt) return "diagnostic_evidence";
+  if (
+    input.ownerCancelledAt &&
+    durationMs(input.acceptedAt, input.ownerCancelledAt) < READY_WITHIN_MS
+  ) {
+    return "owner_cancelled_before_boundary";
+  }
+  return "eligible";
 }
 
 function selectTerminal(
@@ -500,9 +549,9 @@ function selectTerminal(
   completedAt: string | null,
   failedAt: string | null,
 ): {
-  outcome: AgentCreationLatencyRunOutcome;
+  outcome: AgentDeploymentLatencyRunOutcome;
   at: string | null;
-  issues: AgentCreationLatencyIssue[];
+  issues: AgentDeploymentLatencyIssue[];
 } {
   if (!createdAt) return { outcome: "incomplete", at: null, issues: ["invalid_timestamp"] };
   if (completedAt && failedAt)
@@ -526,8 +575,8 @@ function selectTerminal(
 
 function buildAgentStageTimings(
   createdAt: string | null,
-  events: readonly AgentCreationLatencyDeploymentStageEvent[],
-): AgentCreationLatencyStageTiming[] {
+  events: readonly AgentDeploymentLatencyDeploymentStageEvent[],
+): AgentDeploymentLatencyStageTiming[] {
   if (!createdAt) return [];
 
   const ordered = events
@@ -543,13 +592,13 @@ function buildAgentStageTimings(
         (left.fromStage ?? "").localeCompare(right.fromStage ?? ""),
     );
   const seen = new Set<string>();
-  const timings: AgentCreationLatencyStageTiming[] = [];
+  const timings: AgentDeploymentLatencyStageTiming[] = [];
   let cursor = createdAt;
 
   for (const event of ordered) {
     if (!event.fromStage) continue;
     const name = `agent:${event.fromStage}`;
-    const issues: AgentCreationLatencyIssue[] = [];
+    const issues: AgentDeploymentLatencyIssue[] = [];
 
     if (seen.has(name)) issues.push("duplicate_terminal");
     if (!event.at) issues.push("invalid_timestamp");
@@ -573,9 +622,9 @@ function buildAgentStageTimings(
 }
 
 function buildRunnerStageTimings(
-  events: readonly AgentCreationLatencyRunnerEvent[],
+  events: readonly AgentDeploymentLatencyRunnerEvent[],
   requireExpectedStages: boolean,
-): AgentCreationLatencyStageTiming[] {
+): AgentDeploymentLatencyStageTiming[] {
   const boundaryEvents = events.flatMap(toBoundaryEvents);
   const byName = new Map<string, BoundaryEvent[]>();
 
@@ -598,7 +647,7 @@ function buildRunnerStageTimings(
     );
     const validStarts = startedEvents.filter((event) => event.at);
     const validTerminals = terminalEvents.filter((event) => event.at);
-    const issues: AgentCreationLatencyIssue[] = [];
+    const issues: AgentDeploymentLatencyIssue[] = [];
 
     if (startedEvents.length === 0) issues.push("missing_started");
     if (startedEvents.length > 1) issues.push("duplicate_started");
@@ -634,7 +683,7 @@ function buildRunnerStageTimings(
   });
 }
 
-function toBoundaryEvents(event: AgentCreationLatencyRunnerEvent): BoundaryEvent[] {
+function toBoundaryEvents(event: AgentDeploymentLatencyRunnerEvent): BoundaryEvent[] {
   const at = toIso(event.createdAt);
   const phase = normalizeLabel(event.phase);
   const rawStep = normalizeLabel(event.metadata?.step);
@@ -671,19 +720,19 @@ function toBoundaryEvents(event: AgentCreationLatencyRunnerEvent): BoundaryEvent
 }
 
 function summarizeCohorts(
-  runs: readonly AgentCreationLatencyRun[],
-): Record<AgentCreationLatencyCohort, AgentCreationLatencyCohortSummary> {
+  runs: readonly AgentDeploymentLatencyRun[],
+): Record<AgentDeploymentLatencyCohort, AgentDeploymentLatencyCohortSummary> {
   return {
-    cold_droplet: summarizeCohort(runs, "cold_droplet"),
-    existing_same_user_runner: summarizeCohort(runs, "existing_same_user_runner"),
+    cold_deployment: summarizeCohort(runs, "cold_deployment"),
+    same_owner_reuse: summarizeCohort(runs, "same_owner_reuse"),
     unknown: summarizeCohort(runs, "unknown"),
   };
 }
 
 function summarizeCohort(
-  runs: readonly AgentCreationLatencyRun[],
-  cohort: AgentCreationLatencyCohort,
-): AgentCreationLatencyCohortSummary {
+  runs: readonly AgentDeploymentLatencyRun[],
+  cohort: AgentDeploymentLatencyCohort,
+): AgentDeploymentLatencyCohortSummary {
   const cohortRuns = runs.filter((run) => run.cohort === cohort);
   const ready = cohortRuns.filter((run) => run.outcome === "ready").length;
   const failed = cohortRuns.filter((run) => run.outcome === "failed").length;
@@ -709,8 +758,17 @@ function summarizeCohort(
   };
 }
 
-function summarizeSlo(runs: readonly AgentCreationLatencyRun[]): AgentCreationLatencySloSummary {
-  const eligibleRuns = runs.filter((run) => run.sloStatus !== "diagnostic");
+function summarizeSlo(
+  runs: readonly AgentDeploymentLatencyRun[],
+): AgentDeploymentLatencySloSummary {
+  const eligibleRuns = runs
+    .filter((run) => run.eligible && run.sloStatus !== "diagnostic")
+    .sort(
+      (left, right) =>
+        compareIso(right.acceptedAt, left.acceptedAt) ||
+        right.deploymentId.localeCompare(left.deploymentId),
+    )
+    .slice(0, COLD_DEPLOYMENT_SAMPLE_SIZE);
   const readyWithin60 = eligibleRuns.filter((run) => run.sloStatus === "pass").length;
   const misses = eligibleRuns.filter((run) => run.sloStatus === "miss").length;
   const pending = eligibleRuns.filter((run) => run.sloStatus === "pending").length;
@@ -733,9 +791,9 @@ function summarizeSlo(runs: readonly AgentCreationLatencyRun[]): AgentCreationLa
 }
 
 function summarizeStages(
-  runs: readonly AgentCreationLatencyRun[],
-): AgentCreationLatencyStageSummary[] {
-  const byName = new Map<string, AgentCreationLatencyStageTiming[]>();
+  runs: readonly AgentDeploymentLatencyRun[],
+): AgentDeploymentLatencyStageSummary[] {
+  const byName = new Map<string, AgentDeploymentLatencyStageTiming[]>();
 
   for (const stage of runs.flatMap((run) => run.stages)) {
     const list = byName.get(stageKey(stage)) ?? [];
@@ -745,7 +803,7 @@ function summarizeStages(
 
   return [...byName.values()]
     .map((stages) => {
-      const first = stages[0] as AgentCreationLatencyStageTiming;
+      const first = stages[0] as AgentDeploymentLatencyStageTiming;
       const durations = stages
         .filter((stage) => stage.durationMs !== null)
         .map((stage) => stage.durationMs as number);
@@ -798,17 +856,17 @@ function nearestRank(sortedDurations: readonly number[], percentile: number): nu
 }
 
 function countIssues(
-  stages: readonly AgentCreationLatencyStageTiming[],
-  terminalIssues: readonly AgentCreationLatencyIssue[],
-): Partial<Record<AgentCreationLatencyIssue, number>> {
-  const counts: Partial<Record<AgentCreationLatencyIssue, number>> = {};
+  stages: readonly AgentDeploymentLatencyStageTiming[],
+  terminalIssues: readonly AgentDeploymentLatencyIssue[],
+): Partial<Record<AgentDeploymentLatencyIssue, number>> {
+  const counts: Partial<Record<AgentDeploymentLatencyIssue, number>> = {};
   for (const issue of [...terminalIssues, ...stages.flatMap((stage) => stage.issues)]) {
     counts[issue] = (counts[issue] ?? 0) + 1;
   }
   return counts;
 }
 
-function stageKey(stage: AgentCreationLatencyStageTiming): string {
+function stageKey(stage: AgentDeploymentLatencyStageTiming): string {
   return `${stage.source}:${stage.name}`;
 }
 
@@ -840,14 +898,29 @@ async function readDeploymentEvidence(
   connection: DatabaseConnection,
   deploymentId: string | undefined,
   limit: number,
-): Promise<AgentCreationLatencyDeploymentEvidence[]> {
-  const deploymentFilter = deploymentId ? sql`d.id = ${deploymentId}::uuid` : sql`true`;
+): Promise<AgentDeploymentLatencyDeploymentEvidence[]> {
+  const deploymentFilter = deploymentId
+    ? sql`d.id = ${deploymentId}::uuid`
+    : sql`
+        d.origin = 'owner_request'
+        and d.initial_cohort = 'cold_deployment'
+        and d.deployment_environment = 'production'
+        and d.accepted_at is not null
+        and (
+          d.owner_cancelled_at is null
+          or d.owner_cancelled_at >= d.accepted_at + interval '60 seconds'
+        )
+      `;
   const rows = await connection.db.execute<{
     id: string;
     operationRunnerId: string | null;
     assignedRunnerId: string | null;
     userId: string;
     provisioningOperationId: string;
+    origin: AgentDeploymentOrigin | null;
+    initialCohort: AgentDeploymentLatencyCohort | null;
+    deploymentEnvironment: AgentDeploymentEnvironment | null;
+    ownerCancelledAt: Date | null;
     createdAt: Date;
     acceptedAt: Date | null;
     completedAt: Date | null;
@@ -859,6 +932,10 @@ async function readDeploymentEvidence(
       a.runner_id as "assignedRunnerId",
       d.user_id as "userId",
       d.id as "provisioningOperationId",
+      d.origin,
+      d.initial_cohort as "initialCohort",
+      d.deployment_environment as "deploymentEnvironment",
+      d.owner_cancelled_at as "ownerCancelledAt",
       d.created_at as "createdAt",
       d.accepted_at as "acceptedAt",
       d.completed_at as "completedAt",
@@ -871,13 +948,14 @@ async function readDeploymentEvidence(
       on operation_runner.user_id = d.user_id
      and operation_runner.provisioning_operation_key = concat('bruno-deploy-', replace(d.id::text, '-', ''))
     where ${deploymentFilter}
-    order by d.created_at desc, d.id desc
+    order by d.accepted_at desc nulls last, d.id desc
     limit ${limit}
   `);
 
   return await Promise.all(
     rows.map(async (row) => {
-      const correlation = resolveAgentCreationRunnerCorrelation({
+      const correlation = resolveAgentDeploymentRunnerCorrelation({
+        cohort: row.initialCohort ?? "unknown",
         runnerOperationId: row.provisioningOperationId,
         operationRunnerId: row.operationRunnerId,
         assignedRunnerId: row.assignedRunnerId,
@@ -886,8 +964,11 @@ async function readDeploymentEvidence(
       return {
         id: row.id,
         runnerId: correlation.reportRunnerId,
-        cohort: correlation.cohort,
-        requiresRunnerEvidence: correlation.cohort === "cold_droplet",
+        cohort: row.initialCohort ?? "unknown",
+        origin: row.origin,
+        deploymentEnvironment: row.deploymentEnvironment,
+        ownerCancelledAt: row.ownerCancelledAt,
+        requiresRunnerEvidence: row.initialCohort === "cold_deployment",
         createdAt: row.createdAt,
         acceptedAt: row.acceptedAt,
         completedAt: row.completedAt,
@@ -906,7 +987,7 @@ async function readDeploymentEvidence(
 async function readAgentStageEvents(
   connection: DatabaseConnection,
   deploymentId: string,
-): Promise<AgentCreationLatencyDeploymentStageEvent[]> {
+): Promise<AgentDeploymentLatencyDeploymentStageEvent[]> {
   const rows = await connection.db.execute<{
     fromStage: string | null;
     toStage: string | null;
@@ -932,7 +1013,7 @@ async function readRunnerEvents(
     runnerId: string | null;
     runnerOperationId: string | null;
   },
-): Promise<AgentCreationLatencyRunnerEvent[]> {
+): Promise<AgentDeploymentLatencyRunnerEvent[]> {
   const operationKey = input.runnerOperationId
     ? toProvisioningOperationKey(input.runnerOperationId)
     : null;
@@ -943,7 +1024,7 @@ async function readRunnerEvents(
       : sql`false`;
   const rows = await connection.db.execute<{
     phase: string;
-    status: AgentCreationLatencyBoundary;
+    status: AgentDeploymentLatencyBoundary;
     createdAt: Date;
     metadata: Record<string, unknown>;
   }>(sql`

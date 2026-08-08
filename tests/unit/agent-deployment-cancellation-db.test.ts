@@ -55,6 +55,7 @@ describe("automatic deployment lifecycle cancellation", () => {
         leaseExpiresAt: null,
         nextAttemptAt: null,
         failedAt: NOW,
+        ownerCancelledAt: NOW,
       });
       const [usage] = await connection.db.select().from(agentUsagePeriods);
       expect(usage?.stoppedAt).toEqual(NOW);
@@ -100,7 +101,11 @@ describe("automatic deployment lifecycle cancellation", () => {
     expect(result).toMatchObject({ ok: true, agent: { status: "stopped" } });
     expect(runnerStop).not.toHaveBeenCalled();
     const [deployment] = await connection.db.select().from(agentDeployments);
-    expect(deployment).toMatchObject({ stage: "failed", errorCode: "deployment_cancelled" });
+    expect(deployment).toMatchObject({
+      stage: "failed",
+      errorCode: "deployment_cancelled",
+      ownerCancelledAt: NOW,
+    });
   });
 
   it("lets an owner stop after automatic setup reaches a terminal error", async () => {
@@ -235,6 +240,7 @@ async function seedActiveDeployment(
     leaseOwner: "reconcile:11111111-1111-4111-8111-111111111111",
     leaseExpiresAt: new Date(NOW.getTime() + 60_000),
     nextAttemptAt: new Date(NOW.getTime() + 30_000),
+    acceptedAt: new Date(NOW.getTime() - 1_000),
   });
 }
 

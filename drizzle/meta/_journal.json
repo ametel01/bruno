@@ -204,6 +204,13 @@
       "when": 1786155790430,
       "tag": "0028_conscious_random",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1786165313216,
+      "tag": "0029_solid_shard",
+      "breakpoints": true
     }
   ]
 }

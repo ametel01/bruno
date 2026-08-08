@@ -71,6 +71,10 @@ describe("agent deployment migration fixtures", () => {
         "canary_attempted_at",
         "canary_completed_at",
         "accepted_at",
+        "origin",
+        "initial_cohort",
+        "deployment_environment",
+        "owner_cancelled_at",
       ]);
       await expect(readColumnNames(sql, "agent_deployment_wakeups")).resolves.toEqual([
         "id",
@@ -127,6 +131,12 @@ describe("agent deployment migration fixtures", () => {
       await expect(
         readTriggerDefinition(sql, "agent_deployments_accepted_at_required_trigger"),
       ).resolves.toContain("BEFORE INSERT");
+      await expect(
+        readTriggerDefinition(sql, "agent_deployments_slo_identity_required_trigger"),
+      ).resolves.toContain("BEFORE INSERT");
+      await expect(
+        readTriggerDefinition(sql, "agent_deployments_slo_identity_immutable_trigger"),
+      ).resolves.toContain("BEFORE UPDATE");
       await expect(readConstraintDefinition(sql, "agents_id_user_id_unique")).resolves.toContain(
         "UNIQUE (id, user_id)",
       );
@@ -170,14 +180,28 @@ describe("agent deployment migration fixtures", () => {
       `).rejects.toMatchObject({
         constraint_name: "agent_deployments_accepted_at_required_check",
       });
-      await expect(sql<{ accepted_at: Date }[]>`
+      await expect(sql<
+        {
+          accepted_at: Date;
+          origin: string;
+          initial_cohort: string;
+          deployment_environment: string;
+        }[]
+      >`
         insert into agent_deployments (
           agent_id, user_id, config_revision, idempotency_key
         ) values (
           ${agent.id}, ${owner.id}, 'cfg-defaulted-boundary', 'defaulted-boundary-fixture'
         )
-        returning accepted_at
-      `).resolves.toEqual([{ accepted_at: expect.any(Date) }]);
+        returning accepted_at, origin, initial_cohort, deployment_environment
+      `).resolves.toEqual([
+        {
+          accepted_at: expect.any(Date),
+          origin: "operator_trial",
+          initial_cohort: "unknown",
+          deployment_environment: "non_production",
+        },
+      ]);
 
       await expect(sql`
         insert into runners (
@@ -273,8 +297,15 @@ describe("agent deployment migration fixtures", () => {
       await runDbMigrate(databaseUrl);
 
       await expect(
-        sql`select accepted_at from agent_deployments where idempotency_key = 'historical-boundary'`,
-      ).resolves.toEqual([{ accepted_at: null }]);
+        sql`select accepted_at, origin, initial_cohort, deployment_environment from agent_deployments where idempotency_key = 'historical-boundary'`,
+      ).resolves.toEqual([
+        {
+          accepted_at: null,
+          origin: null,
+          initial_cohort: null,
+          deployment_environment: null,
+        },
+      ]);
       await expect(sql`
         insert into agent_deployments (
           agent_id, user_id, config_revision, idempotency_key, accepted_at

@@ -90,6 +90,7 @@ describe("agent deployment persistence and leases", () => {
       agentId: AGENT_A_ID,
       configRevision: "cfg-durable-acceptance",
       idempotencyKey: "durable-acceptance",
+      deploymentEnvironment: "production",
       now: NOW,
     });
 
@@ -105,6 +106,19 @@ describe("agent deployment persistence and leases", () => {
     expect(new Date(result.deployment.acceptedAt ?? Number.NaN).getTime()).toBeGreaterThan(
       NOW.getTime(),
     );
+    const [measured] = await connection.db
+      .select({
+        origin: agentDeployments.origin,
+        initialCohort: agentDeployments.initialCohort,
+        deploymentEnvironment: agentDeployments.deploymentEnvironment,
+      })
+      .from(agentDeployments)
+      .where(eq(agentDeployments.id, result.deployment.id));
+    expect(measured).toEqual({
+      origin: "owner_request",
+      initialCohort: "cold_deployment",
+      deploymentEnvironment: "production",
+    });
 
     await expect(
       connection.db
@@ -113,6 +127,15 @@ describe("agent deployment persistence and leases", () => {
         .where(eq(agentDeployments.id, result.deployment.id)),
     ).rejects.toMatchObject({
       cause: { constraint_name: "agent_deployments_accepted_at_immutable_check" },
+    });
+
+    await expect(
+      connection.db
+        .update(agentDeployments)
+        .set({ initialCohort: "same_owner_reuse" })
+        .where(eq(agentDeployments.id, result.deployment.id)),
+    ).rejects.toMatchObject({
+      cause: { constraint_name: "agent_deployments_slo_identity_immutable_check" },
     });
 
     await expect(
@@ -135,8 +158,18 @@ describe("agent deployment persistence and leases", () => {
         configRevision: "cfg-defaulted-acceptance",
         idempotencyKey: "defaulted-acceptance",
       })
-      .returning({ acceptedAt: agentDeployments.acceptedAt });
+      .returning({
+        acceptedAt: agentDeployments.acceptedAt,
+        origin: agentDeployments.origin,
+        initialCohort: agentDeployments.initialCohort,
+        deploymentEnvironment: agentDeployments.deploymentEnvironment,
+      });
     expect(defaulted?.acceptedAt).toBeInstanceOf(Date);
+    expect(defaulted).toMatchObject({
+      origin: "operator_trial",
+      initialCohort: "unknown",
+      deploymentEnvironment: "non_production",
+    });
   });
 
   it("allows different users to reuse keys but rejects different active keys for one agent", async () => {

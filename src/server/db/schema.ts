@@ -569,6 +569,10 @@ export const agentDeployments = pgTable(
     runnerOperationId: uuid("runner_operation_id"),
     runnerAcceptedAt: timestamp("runner_accepted_at", { withTimezone: true }),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }).default(sql`clock_timestamp()`),
+    origin: text("origin").default("operator_trial"),
+    initialCohort: text("initial_cohort").default("unknown"),
+    deploymentEnvironment: text("deployment_environment").default("non_production"),
+    ownerCancelledAt: timestamp("owner_cancelled_at", { withTimezone: true }),
     canaryState: text("canary_state").notNull().default("not_started"),
     canaryAttemptedAt: timestamp("canary_attempted_at", { withTimezone: true }),
     canaryCompletedAt: timestamp("canary_completed_at", { withTimezone: true }),
@@ -616,6 +620,22 @@ export const agentDeployments = pgTable(
     check(
       "agent_deployments_runner_operation_pair_check",
       sql`(${table.runnerOperationId} IS NULL AND ${table.runnerAcceptedAt} IS NULL) OR (${table.runnerOperationId} IS NOT NULL AND ${table.runnerAcceptedAt} IS NOT NULL)`,
+    ),
+    check(
+      "agent_deployments_origin_check",
+      sql`${table.origin} IS NULL OR ${table.origin} IN ('owner_request', 'operator_trial', 'runner_replacement')`,
+    ),
+    check(
+      "agent_deployments_initial_cohort_check",
+      sql`${table.initialCohort} IS NULL OR ${table.initialCohort} IN ('cold_deployment', 'same_owner_reuse', 'unknown')`,
+    ),
+    check(
+      "agent_deployments_environment_check",
+      sql`${table.deploymentEnvironment} IS NULL OR ${table.deploymentEnvironment} IN ('production', 'non_production')`,
+    ),
+    check(
+      "agent_deployments_owner_cancelled_after_acceptance_check",
+      sql`${table.ownerCancelledAt} IS NULL OR ${table.acceptedAt} IS NULL OR ${table.ownerCancelledAt} >= ${table.acceptedAt}`,
     ),
     check(
       "agent_deployments_stage_runner_operation_check",
@@ -685,6 +705,11 @@ export const agentDeployments = pgTable(
     index("agent_deployments_claim_idx")
       .on(table.nextAttemptAt, table.leaseExpiresAt, table.createdAt)
       .where(sql`${table.stage} NOT IN ('ready', 'failed')`),
+    index("agent_deployments_slo_selection_idx")
+      .on(table.acceptedAt, table.id)
+      .where(
+        sql`${table.origin} = 'owner_request' AND ${table.initialCohort} = 'cold_deployment' AND ${table.deploymentEnvironment} = 'production'`,
+      ),
   ],
 );
 

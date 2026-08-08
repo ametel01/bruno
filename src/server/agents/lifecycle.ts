@@ -3159,6 +3159,7 @@ async function cancelActiveAutomaticDeploymentInTransaction(
         lease_expires_at = null,
         completed_at = null,
         failed_at = ${input.now.toISOString()},
+        owner_cancelled_at = coalesce(owner_cancelled_at, ${input.now.toISOString()}),
         updated_at = ${input.now.toISOString()}
     where id = ${input.deployment.id}
       and agent_id = ${input.agentId}

@@ -1,8 +1,8 @@
 import { pathToFileURL } from "node:url";
 import {
-  buildAgentCreationLatencyReportForDatabase,
-  type AgentCreationLatencyReport,
-} from "@/src/server/agents/agent-creation-latency";
+  buildAgentDeploymentLatencyReportForDatabase,
+  type AgentDeploymentLatencyReport,
+} from "@/src/server/agents/agent-deployment-latency";
 import { createDatabaseConnection } from "@/src/server/db/client";
 import {
   LOCAL_AGENT_SMOKE_MODE_ENV,
@@ -10,7 +10,7 @@ import {
 } from "@/src/runner-service/local-agent-smoke";
 import { findDigitalOceanRunnerResourceProfile } from "@/src/server/runners/runner-resource-profiles";
 
-const DIGITALOCEAN_AUTHORIZATION_SENTINEL = "authorize-digitalocean-agent-creation-benchmark";
+const DIGITALOCEAN_AUTHORIZATION_SENTINEL = "authorize-digitalocean-agent-deployment-benchmark";
 const MAX_REPORT_LIMIT = 1_000;
 const MAX_PROVIDER_TRIALS = 30;
 
@@ -25,10 +25,10 @@ type BenchmarkOptions = {
   candidateSizeSlugs: string[];
 };
 
-export async function runAgentCreationBenchmark(
+export async function runAgentDeploymentBenchmark(
   argv: readonly string[],
   env: Record<string, string | undefined> = process.env,
-): Promise<AgentCreationLatencyReport> {
+): Promise<AgentDeploymentLatencyReport> {
   const options = parseBenchmarkOptions(argv);
 
   if (options.mode === "digitalocean") {
@@ -44,7 +44,7 @@ export async function runAgentCreationBenchmark(
 
   const connection = createDatabaseConnection();
   try {
-    return await buildAgentCreationLatencyReportForDatabase(connection, {
+    return await buildAgentDeploymentLatencyReportForDatabase(connection, {
       limit: options.limit,
       ...(options.deploymentId ? { deploymentId: options.deploymentId } : {}),
     });
@@ -103,7 +103,7 @@ export function parseBenchmarkOptions(argv: readonly string[]): BenchmarkOptions
     if (arg === "--help" || arg === "-h") {
       throw new Error(usage());
     }
-    throw new Error(`Unknown agent creation benchmark argument: ${arg ?? ""}\n${usage()}`);
+    throw new Error(`Unknown Agent Deployment benchmark argument: ${arg ?? ""}\n${usage()}`);
   }
 
   return {
@@ -124,11 +124,11 @@ function assertDigitalOceanBenchmarkAuthorized(
     options.trials <= 0 ||
     !options.providerAuthorized ||
     options.candidateSizeSlugs.length === 0 ||
-    env.BRUNO_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION !==
+    env.BRUNO_AGENT_DEPLOYMENT_BENCHMARK_DIGITALOCEAN_AUTHORIZATION !==
       DIGITALOCEAN_AUTHORIZATION_SENTINEL
   ) {
     throw new Error(
-      `DigitalOcean benchmark mode is fail-closed. It requires --trials N, --authorize-provider-costs, --candidate-size-slugs slug[,slug], and BRUNO_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION=${DIGITALOCEAN_AUTHORIZATION_SENTINEL}.`,
+      `DigitalOcean benchmark mode is fail-closed. It requires --trials N, --authorize-provider-costs, --candidate-size-slugs slug[,slug], and BRUNO_AGENT_DEPLOYMENT_BENCHMARK_DIGITALOCEAN_AUTHORIZATION=${DIGITALOCEAN_AUTHORIZATION_SENTINEL}.`,
     );
   }
 }
@@ -197,13 +197,13 @@ function readCandidateSizeSlugs(value: string): string[] {
 
 function usage(): string {
   return [
-    "Usage: bun --conditions react-server scripts/benchmark-agent-creation.ts [--mode existing|local_docker|digitalocean] [--limit N] [--deployment-id UUID] [--candidate-size-slugs slug[,slug]]",
+    "Usage: bun --conditions react-server scripts/benchmark-agent-deployment.ts [--mode existing|local_docker|digitalocean] [--limit N] [--deployment-id UUID] [--candidate-size-slugs slug[,slug]]",
     "Default mode is read-only existing-run reporting. DigitalOcean mode is fail-closed, requires explicit candidate size slugs, and is not used by ordinary CI.",
   ].join("\n");
 }
 
 async function main(): Promise<void> {
-  const report = await runAgentCreationBenchmark(process.argv.slice(2));
+  const report = await runAgentDeploymentBenchmark(process.argv.slice(2));
   process.stdout.write(`${JSON.stringify(report)}\n`);
 }
 

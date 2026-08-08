@@ -351,3 +351,19 @@ cold-deployment plan.
   requests, and reported a 147.852-second slow-success SLO miss. Immutable cohort identity and
   production latest-100 selection remain owned by issues #287 and #301, respectively, rather than
   being inferred from mutable runner assignment in issue #286.
+
+### 2026-08-08 — Durable Eligible Cold Deployment review fixes
+
+- Added migration 0029 for immutable Agent Deployment origin, initial cohort, and deployment
+  environment plus set-once Owner-cancellation evidence. Historical deployments remain unclassified,
+  and future direct/operator inserts fail closed to non-production trial identity by default.
+- Versioned the sanitized Agent Deployment latency report to v3. The default database query now
+  filters durable eligibility before selecting by `accepted_at`, and the in-memory gate uses only
+  the latest 100 Eligible Cold Deployments.
+- Replaced creation/same-user terminology with Agent Deployment and Same-Owner language. Every miss
+  remains the domain `slo_miss`; `slow_ready`, `terminal_failure`, and `not_ready_at_boundary` are
+  separate allowlisted diagnostic causes.
+- Focused migration, persistence, retry, cancellation, latency, benchmark, and local-smoke contract
+  tests passed against an isolated PostgreSQL 17 database. `bun run verify` passed formatting,
+  lint, type checking, 175 unit files / 1,758 tests, and the production build; credential-free
+  browser E2E passed 26/26 in the workflow's development-auth mode.

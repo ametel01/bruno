@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildAgentCreationLatencyReport,
-  buildAgentCreationLatencyReportForDatabase,
-  resolveAgentCreationRunnerCorrelation,
-} from "@/src/server/agents/agent-creation-latency";
+  buildAgentDeploymentLatencyReport,
+  buildAgentDeploymentLatencyReportForDatabase,
+  resolveAgentDeploymentRunnerCorrelation,
+} from "@/src/server/agents/agent-deployment-latency";
 import { createDatabaseConnection } from "@/src/server/db/client";
 import {
   agentDeployments,
@@ -13,9 +13,9 @@ import {
   users,
 } from "@/src/server/db/schema";
 
-describe("agent creation latency report", () => {
+describe("Agent Deployment latency report", () => {
   it("uses durable acceptance for the failure-inclusive ready-within-60 gate", () => {
-    const report = buildAgentCreationLatencyReport({
+    const report = buildAgentDeploymentLatencyReport({
       generatedAt: "2026-08-07T00:02:00.000Z",
       deployments: [
         latencyDeployment("ready-within-60", {
@@ -30,7 +30,7 @@ describe("agent creation latency report", () => {
           acceptedAt: "2026-08-07T00:00:20.000Z",
           failedAt: "2026-08-07T00:00:30.000Z",
         }),
-        latencyDeployment("timeout", {
+        latencyDeployment("not-ready-at-boundary", {
           acceptedAt: "2026-08-07T00:00:30.000Z",
         }),
         latencyDeployment("pending", {
@@ -51,7 +51,7 @@ describe("agent creation latency report", () => {
       ],
     });
 
-    expect(report.version).toBe(2);
+    expect(report.version).toBe(3);
     expect(report.boundary).toEqual({
       sloStart: "agent_deployments.accepted_at",
       legacyDiagnosticStart: "agent_deployments.created_at",
@@ -73,12 +73,18 @@ describe("agent creation latency report", () => {
       ["invalid-order", "invalid_event_ordering"],
       ["legacy-boundary", "legacy_boundary"],
       ["missing-boundary", "missing_boundary"],
+      ["not-ready-at-boundary", "slo_miss"],
       ["pending", "pending"],
       ["ready-within-60", "ready_within_60"],
       ["slow-ready", "slo_miss"],
-      ["terminal-failure", "terminal_failure"],
-      ["timeout", "timeout"],
+      ["terminal-failure", "slo_miss"],
     ]);
+    expect(report.runs.find((run) => run.deploymentId === "terminal-failure")).toMatchObject({
+      sloMissCause: "terminal_failure",
+    });
+    expect(report.runs.find((run) => run.deploymentId === "not-ready-at-boundary")).toMatchObject({
+      sloMissCause: "not_ready_at_boundary",
+    });
     expect(report.runs.find((run) => run.deploymentId === "ready-within-60")).toMatchObject({
       acceptedAt: "2026-08-07T00:00:10.000Z",
       totalDurationMs: 60_000,
@@ -93,7 +99,7 @@ describe("agent creation latency report", () => {
   });
 
   it("does not claim the Cold-Deployment SLO before a complete 100-deployment cohort", () => {
-    const report = buildAgentCreationLatencyReport({
+    const report = buildAgentDeploymentLatencyReport({
       generatedAt: "2026-08-07T00:02:00.000Z",
       deployments: Array.from({ length: 95 }, (_, index) =>
         latencyDeployment(`ready-${String(index).padStart(3, "0")}`, {
@@ -111,8 +117,75 @@ describe("agent creation latency report", () => {
     });
   });
 
+  it("uses only the latest 100 Eligible Cold Deployments", () => {
+    const deployments = Array.from({ length: 105 }, (_, index) => {
+      const acceptedAt = new Date(Date.UTC(2026, 7, 7, 0, 0, index)).toISOString();
+      const readyWithin60 = index < 99;
+      return latencyDeployment(`deployment-${String(index).padStart(3, "0")}`, {
+        acceptedAt,
+        completedAt: new Date(
+          new Date(acceptedAt).getTime() + (readyWithin60 ? 30_000 : 61_000),
+        ).toISOString(),
+      });
+    });
+    const report = buildAgentDeploymentLatencyReport({
+      generatedAt: "2026-08-07T00:10:00.000Z",
+      deployments,
+    });
+
+    expect(report.slo).toMatchObject({
+      sampleSize: 100,
+      readyWithin60: 94,
+      misses: 6,
+      passesGate: false,
+    });
+  });
+
+  it("excludes non-production, operator, reuse, and pre-boundary cancellation evidence", () => {
+    const report = buildAgentDeploymentLatencyReport({
+      generatedAt: "2026-08-07T00:02:00.000Z",
+      deployments: [
+        latencyDeployment("eligible", {
+          acceptedAt: "2026-08-07T00:00:00.000Z",
+          completedAt: "2026-08-07T00:00:30.000Z",
+        }),
+        latencyDeployment("operator", {
+          origin: "operator_trial",
+          acceptedAt: "2026-08-07T00:00:00.000Z",
+          completedAt: "2026-08-07T00:00:30.000Z",
+        }),
+        latencyDeployment("non-production", {
+          deploymentEnvironment: "non_production",
+          acceptedAt: "2026-08-07T00:00:00.000Z",
+          completedAt: "2026-08-07T00:00:30.000Z",
+        }),
+        latencyDeployment("reuse", {
+          cohort: "same_owner_reuse",
+          acceptedAt: "2026-08-07T00:00:00.000Z",
+          completedAt: "2026-08-07T00:00:30.000Z",
+        }),
+        latencyDeployment("cancelled", {
+          acceptedAt: "2026-08-07T00:00:00.000Z",
+          ownerCancelledAt: "2026-08-07T00:00:59.999Z",
+          failedAt: "2026-08-07T00:00:59.999Z",
+        }),
+      ],
+    });
+
+    expect(report.slo).toMatchObject({ sampleSize: 1, eligible: 1, readyWithin60: 1 });
+    expect(
+      Object.fromEntries(report.runs.map((run) => [run.deploymentId, run.eligibilityReason])),
+    ).toMatchObject({
+      eligible: "eligible",
+      operator: "operator_trial",
+      "non-production": "non_production",
+      reuse: "not_cold_deployment",
+      cancelled: "owner_cancelled_before_boundary",
+    });
+  });
+
   it("summarizes ready, failed, and nonterminal deployments with deterministic ordering", () => {
-    const report = buildAgentCreationLatencyReport({
+    const report = buildAgentDeploymentLatencyReport({
       generatedAt: "2026-08-07T00:00:00.000Z",
       deployments: [
         {
@@ -218,13 +291,13 @@ describe("agent creation latency report", () => {
   });
 
   it("reports cold and existing-runner latency cohorts separately", () => {
-    const report = buildAgentCreationLatencyReport({
+    const report = buildAgentDeploymentLatencyReport({
       generatedAt: "2026-08-07T00:00:00.000Z",
       deployments: [
         {
           id: "cold-slow",
           runnerId: "runner-cold",
-          cohort: "cold_droplet",
+          cohort: "cold_deployment",
           requiresRunnerEvidence: true,
           createdAt: "2026-08-07T00:00:00.000Z",
           completedAt: "2026-08-07T00:02:00.000Z",
@@ -235,7 +308,7 @@ describe("agent creation latency report", () => {
         {
           id: "reuse-fast",
           runnerId: "runner-reuse",
-          cohort: "existing_same_user_runner",
+          cohort: "same_owner_reuse",
           createdAt: "2026-08-07T00:00:10.000Z",
           completedAt: "2026-08-07T00:00:25.000Z",
           failedAt: null,
@@ -245,12 +318,12 @@ describe("agent creation latency report", () => {
       ],
     });
 
-    expect(report.cohorts.cold_droplet).toMatchObject({
+    expect(report.cohorts.cold_deployment).toMatchObject({
       total: 1,
       ready: 1,
       readyLatency: { p50Ms: 120_000, p95Ms: 120_000, maxMs: 120_000 },
     });
-    expect(report.cohorts.existing_same_user_runner).toMatchObject({
+    expect(report.cohorts.same_owner_reuse).toMatchObject({
       total: 1,
       ready: 1,
       readyLatency: { p50Ms: 15_000, p95Ms: 15_000, maxMs: 15_000 },
@@ -258,7 +331,7 @@ describe("agent creation latency report", () => {
   });
 
   it("uses nearest-rank percentiles for ready latencies", () => {
-    const report = buildAgentCreationLatencyReport({
+    const report = buildAgentDeploymentLatencyReport({
       generatedAt: "2026-08-07T00:00:00.000Z",
       deployments: Array.from({ length: 20 }, (_, index) => ({
         id: `deployment-${String(index).padStart(2, "0")}`,
@@ -279,7 +352,7 @@ describe("agent creation latency report", () => {
   });
 
   it("surfaces missing, duplicate, and reversed runner evidence instead of zero durations", () => {
-    const report = buildAgentCreationLatencyReport({
+    const report = buildAgentDeploymentLatencyReport({
       generatedAt: "2026-08-07T00:00:00.000Z",
       deployments: [
         {
@@ -349,13 +422,13 @@ describe("agent creation latency report", () => {
   });
 
   it("surfaces entirely absent required runner and bootstrap stages as missing evidence", () => {
-    const report = buildAgentCreationLatencyReport({
+    const report = buildAgentDeploymentLatencyReport({
       generatedAt: "2026-08-07T00:00:00.000Z",
       deployments: [
         {
           id: "deployment-missing-runner-evidence",
           runnerId: "runner-missing",
-          cohort: "cold_droplet",
+          cohort: "cold_deployment",
           requiresRunnerEvidence: true,
           createdAt: "2026-08-07T00:00:00.000Z",
           completedAt: "2026-08-07T00:01:00.000Z",
@@ -397,7 +470,7 @@ describe("agent creation latency report", () => {
   });
 
   it("rejects zero-duration runner evidence as synthetic invalid timing", () => {
-    const report = buildAgentCreationLatencyReport({
+    const report = buildAgentDeploymentLatencyReport({
       generatedAt: "2026-08-07T00:00:00.000Z",
       deployments: [
         {
@@ -429,12 +502,13 @@ describe("agent creation latency report", () => {
   });
 
   it("accepts the integrated production runner/bootstrap event sequence without duplicate or zero-duration synthetic evidence", () => {
-    const report = buildAgentCreationLatencyReport({
+    const report = buildAgentDeploymentLatencyReport({
       generatedAt: "2026-08-07T00:00:00.000Z",
       deployments: [
         {
           id: "deployment-complete-runner-evidence",
           runnerId: "runner-complete",
+          cohort: "cold_deployment",
           createdAt: "2026-08-07T00:00:00.000Z",
           completedAt: "2026-08-07T00:01:20.000Z",
           failedAt: null,
@@ -553,7 +627,7 @@ describe("agent creation latency report", () => {
   });
 
   it("ignores hostile bootstrap step labels without projecting them into runner evidence", () => {
-    const report = buildAgentCreationLatencyReport({
+    const report = buildAgentDeploymentLatencyReport({
       generatedAt: "2026-08-07T00:00:00.000Z",
       deployments: [
         {
@@ -613,7 +687,7 @@ describe("agent creation latency report", () => {
   });
 
   it("surfaces invalid agent-stage timestamps instead of dropping the stage", () => {
-    const report = buildAgentCreationLatencyReport({
+    const report = buildAgentDeploymentLatencyReport({
       generatedAt: "2026-08-07T00:00:00.000Z",
       deployments: [
         {
@@ -650,7 +724,7 @@ describe("agent creation latency report", () => {
   });
 
   it("attributes agent-stage intervals to the stage being exited", () => {
-    const report = buildAgentCreationLatencyReport({
+    const report = buildAgentDeploymentLatencyReport({
       generatedAt: "2026-08-07T00:00:00.000Z",
       deployments: [
         {
@@ -689,9 +763,10 @@ describe("agent creation latency report", () => {
     expect(report.runs[0]?.stages.some((stage) => stage.name === "agent:ready")).toBe(false);
   });
 
-  it("classifies cold and reuse runner correlations without falling back to historical events", () => {
+  it("uses the immutable cohort when resolving runner evidence", () => {
     expect(
-      resolveAgentCreationRunnerCorrelation({
+      resolveAgentDeploymentRunnerCorrelation({
+        cohort: "cold_deployment",
         runnerOperationId: "00000000-0000-4000-8000-000000000263",
         operationRunnerId: "00000000-0000-4000-8000-000000000998",
         assignedRunnerId: "00000000-0000-4000-8000-000000000999",
@@ -700,12 +775,12 @@ describe("agent creation latency report", () => {
       reportRunnerId: "00000000-0000-4000-8000-000000000998",
       eventRunnerId: "00000000-0000-4000-8000-000000000998",
       eventRunnerOperationId: "00000000-0000-4000-8000-000000000263",
-      cohort: "cold_droplet",
       mode: "operation_key",
     });
 
     expect(
-      resolveAgentCreationRunnerCorrelation({
+      resolveAgentDeploymentRunnerCorrelation({
+        cohort: "same_owner_reuse",
         runnerOperationId: "00000000-0000-4000-8000-000000000263",
         operationRunnerId: null,
         assignedRunnerId: "00000000-0000-4000-8000-000000000999",
@@ -714,12 +789,12 @@ describe("agent creation latency report", () => {
       reportRunnerId: "00000000-0000-4000-8000-000000000999",
       eventRunnerId: null,
       eventRunnerOperationId: null,
-      cohort: "existing_same_user_runner",
-      mode: "assigned_runner_reuse",
+      mode: "same_owner_reuse",
     });
 
     expect(
-      resolveAgentCreationRunnerCorrelation({
+      resolveAgentDeploymentRunnerCorrelation({
+        cohort: "same_owner_reuse",
         runnerOperationId: null,
         operationRunnerId: null,
         assignedRunnerId: "00000000-0000-4000-8000-000000000999",
@@ -728,9 +803,59 @@ describe("agent creation latency report", () => {
       reportRunnerId: "00000000-0000-4000-8000-000000000999",
       eventRunnerId: null,
       eventRunnerOperationId: null,
-      cohort: "existing_same_user_runner",
-      mode: "assigned_runner_reuse",
+      mode: "same_owner_reuse",
     });
+  });
+
+  it("filters durable eligibility before applying the database report limit", async () => {
+    const connection = createDatabaseConnection();
+    try {
+      await resetLatencyFixtureTables(connection);
+      const [user] = await connection.db.insert(users).values({}).returning({ id: users.id });
+      if (!user) throw new Error("Expected user fixture.");
+      const [agent] = await connection.db
+        .insert(agents)
+        .values({ userId: user.id, name: "Eligible cohort", templateKey: "research_agent" })
+        .returning({ id: agents.id });
+      if (!agent) throw new Error("Expected agent fixture.");
+
+      const inserted = await connection.db
+        .insert(agentDeployments)
+        .values([
+          databaseLatencyDeployment(agent.id, user.id, "eligible-oldest", 0, {
+            origin: "owner_request",
+            deploymentEnvironment: "production",
+          }),
+          databaseLatencyDeployment(agent.id, user.id, "eligible-newest", 1, {
+            origin: "owner_request",
+            deploymentEnvironment: "production",
+          }),
+          databaseLatencyDeployment(agent.id, user.id, "operator-newer", 2, {
+            origin: "operator_trial",
+            deploymentEnvironment: "production",
+          }),
+          databaseLatencyDeployment(agent.id, user.id, "non-production-newest", 3, {
+            origin: "owner_request",
+            deploymentEnvironment: "non_production",
+          }),
+        ])
+        .returning({ id: agentDeployments.id, idempotencyKey: agentDeployments.idempotencyKey });
+
+      const report = await buildAgentDeploymentLatencyReportForDatabase(connection, {
+        limit: 2,
+        generatedAt: new Date("2026-08-07T00:10:00.000Z"),
+      });
+      const expectedIds = inserted
+        .filter((row) => row.idempotencyKey.startsWith("eligible-"))
+        .map((row) => row.id)
+        .sort();
+
+      expect(report.runs.map((run) => run.deploymentId).sort()).toEqual(expectedIds);
+      expect(report.slo).toMatchObject({ sampleSize: 2, eligible: 2, misses: 2 });
+    } finally {
+      await resetLatencyFixtureTables(connection);
+      await connection.close();
+    }
   });
 
   it("does not attribute same-owner historical runner events when an operation key is authoritative", async () => {
@@ -789,6 +914,9 @@ describe("agent creation latency report", () => {
           runnerOperationId,
           runnerAcceptedAt: new Date("2026-08-07T00:00:03.000Z"),
           acceptedAt: now,
+          origin: "owner_request",
+          initialCohort: "same_owner_reuse",
+          deploymentEnvironment: "production",
           canaryState: "skipped",
           completedAt: new Date("2026-08-07T00:00:30.000Z"),
           createdAt: now,
@@ -815,7 +943,7 @@ describe("agent creation latency report", () => {
         },
       ]);
 
-      const report = await buildAgentCreationLatencyReportForDatabase(connection, {
+      const report = await buildAgentDeploymentLatencyReportForDatabase(connection, {
         deploymentId: deployment.id,
         generatedAt: new Date("2026-08-07T00:01:00.000Z"),
       });
@@ -825,17 +953,17 @@ describe("agent creation latency report", () => {
       expect(run).toMatchObject({
         deploymentId: deployment.id,
         runnerId: historicalRunner.id,
-        cohort: "existing_same_user_runner",
+        cohort: "same_owner_reuse",
         evidenceStatus: "valid",
         totalDurationMs: 30_000,
       });
       expect(creating).toBeUndefined();
-      expect(report.cohorts.existing_same_user_runner.readyLatency).toEqual({
+      expect(report.cohorts.same_owner_reuse.readyLatency).toEqual({
         p50Ms: 30_000,
         p95Ms: 30_000,
         maxMs: 30_000,
       });
-      expect(report.cohorts.cold_droplet.readyLatency).toEqual({
+      expect(report.cohorts.cold_deployment.readyLatency).toEqual({
         p50Ms: null,
         p95Ms: null,
         maxMs: null,
@@ -848,7 +976,7 @@ describe("agent creation latency report", () => {
   });
 
   it("keeps ambiguous terminal timestamps invalid", () => {
-    const report = buildAgentCreationLatencyReport({
+    const report = buildAgentDeploymentLatencyReport({
       generatedAt: "2026-08-07T00:00:00.000Z",
       deployments: [
         {
@@ -873,7 +1001,7 @@ describe("agent creation latency report", () => {
   });
 
   it("normalizes PostgreSQL timestamp strings before computing terminal latency", () => {
-    const report = buildAgentCreationLatencyReport({
+    const report = buildAgentDeploymentLatencyReport({
       generatedAt: "2026-08-07T00:00:00.000Z",
       deployments: [
         {
@@ -933,18 +1061,52 @@ function completeStage(name: string, durationMs: number) {
   });
 }
 
+function databaseLatencyDeployment(
+  agentId: string,
+  userId: string,
+  idempotencyKey: string,
+  acceptedOffsetSeconds: number,
+  identity: {
+    origin: "owner_request" | "operator_trial";
+    deploymentEnvironment: "production" | "non_production";
+  },
+) {
+  const acceptedAt = new Date(Date.UTC(2026, 7, 7, 0, 0, acceptedOffsetSeconds));
+  return {
+    agentId,
+    userId,
+    stage: "failed" as const,
+    configRevision: `cfg-${idempotencyKey}`,
+    idempotencyKey,
+    errorCode: "runner_unavailable",
+    acceptedAt,
+    origin: identity.origin,
+    initialCohort: "cold_deployment",
+    deploymentEnvironment: identity.deploymentEnvironment,
+    failedAt: new Date(acceptedAt.getTime() + 1_000),
+    createdAt: acceptedAt,
+    updatedAt: new Date(acceptedAt.getTime() + 1_000),
+  };
+}
+
 function latencyDeployment(
   id: string,
   input: {
     acceptedAt?: string | null | undefined;
     completedAt?: string | null;
     failedAt?: string | null;
+    origin?: "owner_request" | "operator_trial" | "runner_replacement";
+    deploymentEnvironment?: "production" | "non_production";
+    cohort?: "cold_deployment" | "same_owner_reuse" | "unknown";
+    ownerCancelledAt?: string | null;
   },
 ) {
   return {
     id,
     runnerId: null,
-    cohort: "cold_droplet" as const,
+    origin: input.origin ?? ("owner_request" as const),
+    deploymentEnvironment: input.deploymentEnvironment ?? ("production" as const),
+    cohort: input.cohort ?? ("cold_deployment" as const),
     createdAt: "2026-08-07T00:00:00.000Z",
     ...input,
     completedAt: input.completedAt ?? null,

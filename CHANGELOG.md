@@ -9,9 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Immutable database-clock Agent Deployment acceptance boundaries and versioned, sanitized
-  ready-within-60 evidence that counts slow readiness, terminal failures, and timeouts as
-  Cold-Deployment SLO misses while retaining unbackfilled historical rows as diagnostics.
+- Immutable database-clock Agent Deployment acceptance boundaries, origin, initial cohort,
+  environment, and Owner-cancellation evidence with a versioned sanitized report that selects the
+  latest 100 Eligible Cold Deployments before gating. Slow readiness, terminal failure, and absence
+  of readiness at the boundary remain diagnostic causes of the canonical SLO Miss, while
+  unbackfilled historical rows remain diagnostic.
 - Bounded automatic DigitalOcean provider-phase draining now reaches `waiting_for_runner` in one
   fake/injected provider action, skips redundant tag writes when create already proves the required
   tags, adopts crash-completed create/tag/firewall effects through authoritative observation, and
@@ -20,10 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   immediately executable stages under one 45-second abort budget, preserve generation/lease fences,
   publish exact external-wait wakeups, and finish runner-ingress deployment work before one runtime
   reconciliation kick.
-- Safe same-user runner reuse now fails closed to measured CPU, physical-memory, disk, heartbeat,
+- Safe Same-Owner Reuse now fails closed to measured CPU, physical-memory, disk, heartbeat,
   configured, and explicit profile-cap evidence, reserves capacity under owner-aware transaction
-  locks, falls implicit capacity losers back to cold provisioning, and reports cold-Droplet latency
-  separately from existing-runner reuse.
+  locks, falls implicit capacity losers back to Cold Deployment, and reports Cold-Deployment latency
+  separately from Same-Owner Reuse.
 - Canonical DigitalOcean managed-runner resource profiles now couple price and physical resource
   metadata, reject incompatible Hermes CPU/memory/capacity combinations before provider effects,
   propagate exact Hermes Docker CPU/memory/PID limits through cloud bootstrap, and keep provider
@@ -34,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Generation-fenced deployment wakeups with a PostgreSQL outbox, protected signed internal delivery
   route, QStash fail-closed configuration, cron recovery sweep, and regression coverage for
   duplicate, early, unsigned, and stale delivery behavior.
-- Read-only agent creation latency benchmark reporting with deterministic p50/p95 summaries,
+- Read-only Agent Deployment latency benchmark reporting with deterministic p50/p95 summaries,
   invalid-evidence surfacing, local smoke timing output before cleanup, and fail-closed provider
   benchmark authorization.
 - Production Pino JSON logging with configurable levels, recursive credential redaction, normalized errors, correlated agent/Droplet/deployment lifecycle fields, and targeted provider, runner-ingress, retry, terminal-failure, and cleanup instrumentation.
