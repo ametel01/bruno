@@ -122,6 +122,7 @@ const DEPLOYMENT_RETURNING_SQL = sql`
   started_at as "startedAt",
   completed_at as "completedAt",
   failed_at as "failedAt",
+  accepted_at as "acceptedAt",
   created_at as "createdAt",
   updated_at as "updatedAt"
 `;
@@ -202,6 +203,7 @@ export async function createAgentDeploymentForUser(input: {
         user_id,
         config_revision,
         idempotency_key,
+        accepted_at,
         created_at,
         updated_at
       )
@@ -210,6 +212,7 @@ export async function createAgentDeploymentForUser(input: {
         ${input.userId},
         ${input.configRevision},
         ${normalizedKey.value},
+        clock_timestamp(),
         ${nowIso},
         ${nowIso}
       )

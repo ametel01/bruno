@@ -72,6 +72,7 @@ describe("agent deployment retry persistence", () => {
             configRevision: "cfg-retry-1",
             idempotencyKey: "Retry-Key-Case",
             attemptCount: 0,
+            acceptedAt: expect.any(Date),
           }),
         ]),
       );

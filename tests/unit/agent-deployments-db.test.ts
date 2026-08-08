@@ -84,6 +84,61 @@ describe("agent deployment persistence and leases", () => {
     }
   });
 
+  it("captures the accepted boundary from the database clock and keeps it immutable", async () => {
+    const result = await createDeploymentInTransaction(connection, {
+      userId: USER_A_ID,
+      agentId: AGENT_A_ID,
+      configRevision: "cfg-durable-acceptance",
+      idempotencyKey: "durable-acceptance",
+      now: NOW,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      inserted: true,
+      deployment: {
+        createdAt: NOW.toISOString(),
+        acceptedAt: expect.any(String),
+      },
+    });
+    if (!result.ok) throw new Error("Expected deployment creation to succeed.");
+    expect(new Date(result.deployment.acceptedAt ?? Number.NaN).getTime()).toBeGreaterThan(
+      NOW.getTime(),
+    );
+
+    await expect(
+      connection.db
+        .update(agentDeployments)
+        .set({ acceptedAt: new Date("2026-08-08T00:00:00.000Z") })
+        .where(eq(agentDeployments.id, result.deployment.id)),
+    ).rejects.toMatchObject({
+      cause: { constraint_name: "agent_deployments_accepted_at_immutable_check" },
+    });
+
+    await expect(
+      connection.db.insert(agentDeployments).values({
+        userId: USER_B_ID,
+        agentId: AGENT_B_ID,
+        configRevision: "cfg-missing-acceptance",
+        idempotencyKey: "missing-acceptance",
+        acceptedAt: null,
+      }),
+    ).rejects.toMatchObject({
+      cause: { constraint_name: "agent_deployments_accepted_at_required_check" },
+    });
+
+    const [defaulted] = await connection.db
+      .insert(agentDeployments)
+      .values({
+        userId: USER_B_ID,
+        agentId: AGENT_B_ID,
+        configRevision: "cfg-defaulted-acceptance",
+        idempotencyKey: "defaulted-acceptance",
+      })
+      .returning({ acceptedAt: agentDeployments.acceptedAt });
+    expect(defaulted?.acceptedAt).toBeInstanceOf(Date);
+  });
+
   it("allows different users to reuse keys but rejects different active keys for one agent", async () => {
     const reusedByA = await createDeploymentInTransaction(connection, {
       userId: USER_A_ID,

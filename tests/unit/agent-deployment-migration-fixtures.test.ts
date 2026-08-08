@@ -70,6 +70,7 @@ describe("agent deployment migration fixtures", () => {
         "canary_state",
         "canary_attempted_at",
         "canary_completed_at",
+        "accepted_at",
       ]);
       await expect(readColumnNames(sql, "agent_deployment_wakeups")).resolves.toEqual([
         "id",
@@ -120,6 +121,12 @@ describe("agent deployment migration fixtures", () => {
       await expect(
         readConstraintDefinition(sql, "agent_deployments_telegram_ready_canary_check"),
       ).resolves.toContain("'skipped'::text");
+      await expect(
+        readTriggerDefinition(sql, "agent_deployments_accepted_at_immutable_trigger"),
+      ).resolves.toContain("BEFORE UPDATE");
+      await expect(
+        readTriggerDefinition(sql, "agent_deployments_accepted_at_required_trigger"),
+      ).resolves.toContain("BEFORE INSERT");
       await expect(readConstraintDefinition(sql, "agents_id_user_id_unique")).resolves.toContain(
         "UNIQUE (id, user_id)",
       );
@@ -147,6 +154,30 @@ describe("agent deployment migration fixtures", () => {
       if (!owner) {
         throw new Error("Migration fixture owner insert returned no row.");
       }
+
+      const [agent] = await sql<{ id: string }[]>`
+        insert into agents (user_id, name, template_key)
+        values (${owner.id}, 'Legacy boundary fixture', 'research_agent')
+        returning id
+      `;
+      if (!agent) throw new Error("Migration fixture agent insert returned no row.");
+      await expect(sql`
+        insert into agent_deployments (
+          agent_id, user_id, config_revision, idempotency_key, accepted_at
+        ) values (
+          ${agent.id}, ${owner.id}, 'cfg-missing-boundary', 'missing-boundary-fixture', null
+        )
+      `).rejects.toMatchObject({
+        constraint_name: "agent_deployments_accepted_at_required_check",
+      });
+      await expect(sql<{ accepted_at: Date }[]>`
+        insert into agent_deployments (
+          agent_id, user_id, config_revision, idempotency_key
+        ) values (
+          ${agent.id}, ${owner.id}, 'cfg-defaulted-boundary', 'defaulted-boundary-fixture'
+        )
+        returning accepted_at
+      `).resolves.toEqual([{ accepted_at: expect.any(Date) }]);
 
       await expect(sql`
         insert into runners (
@@ -217,6 +248,50 @@ describe("agent deployment migration fixtures", () => {
       await sql.end();
     }
   });
+
+  it("keeps pre-boundary deployments as legacy rows while requiring the boundary on new inserts", async () => {
+    const database = await createDisposableDatabase("accepted_boundary_upgrade");
+    const databaseUrl = databaseUrlFor(database);
+    const sql = postgres(databaseUrl, { max: 1 });
+
+    try {
+      await applyMigrationsThrough0026(sql);
+      await seedHistoricalAgents(sql);
+      await sql`
+        insert into agent_deployments (
+          agent_id, user_id, config_revision, idempotency_key, created_at, updated_at
+        ) values (
+          '00000000-0000-4000-8000-00000000f101',
+          '00000000-0000-4000-8000-00000000f001',
+          'cfg-historical-boundary',
+          'historical-boundary',
+          '2026-08-03T01:05:00Z',
+          '2026-08-03T01:05:00Z'
+        )
+      `;
+
+      await runDbMigrate(databaseUrl);
+
+      await expect(
+        sql`select accepted_at from agent_deployments where idempotency_key = 'historical-boundary'`,
+      ).resolves.toEqual([{ accepted_at: null }]);
+      await expect(sql`
+        insert into agent_deployments (
+          agent_id, user_id, config_revision, idempotency_key, accepted_at
+        ) values (
+          '00000000-0000-4000-8000-00000000f101',
+          '00000000-0000-4000-8000-00000000f001',
+          'cfg-missing-boundary',
+          'missing-boundary-after-upgrade',
+          null
+        )
+      `).rejects.toMatchObject({
+        constraint_name: "agent_deployments_accepted_at_required_check",
+      });
+    } finally {
+      await sql.end();
+    }
+  });
 });
 
 async function createDisposableDatabase(label: string): Promise<string> {
@@ -278,6 +353,10 @@ async function applyMigrationsThrough0015(sql: postgres.Sql): Promise<void> {
 
 async function applyMigrationsThrough0017(sql: postgres.Sql): Promise<void> {
   await applyMigrationsThrough(sql, 17);
+}
+
+async function applyMigrationsThrough0026(sql: postgres.Sql): Promise<void> {
+  await applyMigrationsThrough(sql, 26);
 }
 
 async function applyMigrationsThrough(sql: postgres.Sql, lastIndex: number): Promise<void> {
@@ -537,6 +616,17 @@ async function readConstraintDefinition(
     select pg_get_constraintdef(oid) as definition
     from pg_constraint
     where conname = ${constraintName}
+  `;
+
+  return row?.definition ?? "";
+}
+
+async function readTriggerDefinition(sql: postgres.Sql, triggerName: string): Promise<string> {
+  const [row] = await sql<{ definition: string }[]>`
+    select pg_get_triggerdef(oid) as definition
+    from pg_trigger
+    where tgname = ${triggerName}
+      and not tgisinternal
   `;
 
   return row?.definition ?? "";

@@ -144,7 +144,11 @@ describe("ready agent creation persistence", () => {
       configRevision: `cfg-${NOW.getTime()}`,
       stage: "pending",
       attemptCount: 0,
+      acceptedAt: expect.any(Date),
     });
+    expect("deployment" in result ? result.deployment.acceptedAt : null).toBe(
+      deployment?.acceptedAt?.toISOString(),
+    );
     expect(event).toMatchObject({
       actorUserId: USER_A_ID,
       type: "agent.created",

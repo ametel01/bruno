@@ -568,6 +568,7 @@ export const agentDeployments = pgTable(
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
     runnerOperationId: uuid("runner_operation_id"),
     runnerAcceptedAt: timestamp("runner_accepted_at", { withTimezone: true }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }).default(sql`clock_timestamp()`),
     canaryState: text("canary_state").notNull().default("not_started"),
     canaryAttemptedAt: timestamp("canary_attempted_at", { withTimezone: true }),
     canaryCompletedAt: timestamp("canary_completed_at", { withTimezone: true }),

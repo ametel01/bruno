@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Immutable database-clock Agent Deployment acceptance boundaries and versioned, sanitized
+  ready-within-60 evidence that counts slow readiness, terminal failures, and timeouts as
+  Cold-Deployment SLO misses while retaining unbackfilled historical rows as diagnostics.
 - Bounded automatic DigitalOcean provider-phase draining now reaches `waiting_for_runner` in one
   fake/injected provider action, skips redundant tag writes when create already proves the required
   tags, adopts crash-completed create/tag/firewall effects through authoritative observation, and

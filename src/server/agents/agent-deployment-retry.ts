@@ -112,6 +112,7 @@ export async function createAgentDeploymentForRunnerReplacement(input: {
       configRevision: latest.configRevision,
       idempotencyKey,
       nextAttemptAt: input.now,
+      acceptedAt: sql`clock_timestamp()`,
       createdAt: input.now,
       updatedAt: input.now,
     })
@@ -158,6 +159,7 @@ type RetryDeploymentRow = {
   startedAt: Date | string | null;
   completedAt: Date | string | null;
   failedAt: Date | string | null;
+  acceptedAt: Date | string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
 };
@@ -218,6 +220,7 @@ export async function retryAgentDeploymentForUser(input: {
           started_at as "startedAt",
           completed_at as "completedAt",
           failed_at as "failedAt",
+          accepted_at as "acceptedAt",
           created_at as "createdAt",
           updated_at as "updatedAt",
           exists (
@@ -283,6 +286,7 @@ export async function retryAgentDeploymentForUser(input: {
           user_id,
           config_revision,
           idempotency_key,
+          accepted_at,
           created_at,
           updated_at
         )
@@ -291,6 +295,7 @@ export async function retryAgentDeploymentForUser(input: {
           ${input.userId},
           ${latest.configRevision},
           ${normalizedKey.value},
+          clock_timestamp(),
           ${now.toISOString()},
           ${now.toISOString()}
         )
@@ -306,6 +311,7 @@ export async function retryAgentDeploymentForUser(input: {
           started_at as "startedAt",
           completed_at as "completedAt",
           failed_at as "failedAt",
+          accepted_at as "acceptedAt",
           created_at as "createdAt",
           updated_at as "updatedAt"
       `);

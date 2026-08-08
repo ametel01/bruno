@@ -21,6 +21,7 @@ export type AgentDeploymentRowForDto = {
   startedAt: Date | string | null;
   completedAt: Date | string | null;
   failedAt: Date | string | null;
+  acceptedAt?: Date | string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
 };
@@ -39,6 +40,7 @@ export type AgentDeploymentDto = {
   startedAt: string | null;
   completedAt: string | null;
   failedAt: string | null;
+  acceptedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -81,6 +83,7 @@ export function mapAgentDeploymentRowToDto(row: AgentDeploymentRowForDto): Agent
     startedAt: timestampToIso(row.startedAt),
     completedAt: timestampToIso(row.completedAt),
     failedAt: timestampToIso(row.failedAt),
+    acceptedAt: timestampToIso(row.acceptedAt ?? null),
     createdAt: timestampToIso(row.createdAt) ?? unreachableTimestamp(),
     updatedAt: timestampToIso(row.updatedAt) ?? unreachableTimestamp(),
   };

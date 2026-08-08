@@ -13,22 +13,36 @@ Run the read-only benchmark against already persisted deployments:
 bun run agent:creation:benchmark
 ```
 
-The benchmark's SLO boundary is the persisted ready-mode deployment row: start is
-`agent_deployments.created_at`; success latency is
-`agent_deployments.completed_at - agent_deployments.created_at`; failed terminal latency is
-`agent_deployments.failed_at - agent_deployments.created_at`. Failed rows remain in total count,
-success-rate, per-run, and failure-duration evidence. Nonterminal rows are reported explicitly and
-are never counted as successes.
+Version 2 of the benchmark uses the immutable database-clock
+`agent_deployments.accepted_at` boundary. New Agent Deployments capture this timestamp inside the
+request transaction after the earlier persistence work, so transaction commit latency remains in
+the measurement. `created_at` remains audit and ordering metadata, and `runner_accepted_at` keeps
+its runner-operation meaning. The migration does not backfill historical rows: a null boundary is
+reported as `legacy_boundary` and remains available only as a `created_at`-based diagnostic. After
+the column is added, its database-clock default covers future inserts that omit the field; a trigger
+rejects an explicit null and later mutation, so missing-boundary regressions fail at persistence
+instead of being mislabeled as historical data.
+
+The binary Cold-Deployment gate is failure-inclusive. A Ready Deployment at or before 60 seconds
+is `ready_within_60`; a slower Ready Deployment is `slo_miss`; terminal failures and deployments
+still incomplete at the 60-second observation boundary are `terminal_failure` and `timeout`, and
+both count as misses. A deployment observed before its deadline is `pending`. Missing boundaries
+and invalid event ordering fail visibly as diagnostic evidence instead of being assigned a zero
+duration or silently admitted to the SLO cohort.
 
 The JSON report is versioned and deterministic. It contains:
 
-- `summary.total`, `ready`, `failed`, `incomplete`, `successRate`;
+- `slo.sampleSize`, `requiredSampleSize`, `requiredReadyWithin60`, `eligible`, `readyWithin60`,
+  `misses`, `pending`, `passRate`, and `passesGate` for the `cold_droplet` cohort; `passesGate`
+  remains false until all 100 observations are decided and at least 95 are ready within 60 seconds;
+- `summary.total`, `ready`, `failed`, `incomplete`, and diagnostic `successRate`;
 - ready and failed terminal latency `p50Ms`, `p95Ms`, and `maxMs`;
 - `cohorts.cold_droplet`, `cohorts.existing_same_user_runner`, and `cohorts.unknown` with
   separate counts, success rates, ready/failed p50/p95/max latency, invalid-evidence counts, and
   stage summaries;
-- ordered per-deployment runs with deployment ID, runner ID when known, outcome, terminal timing,
-  latency cohort, total duration, stage timings, and issue counts; and
+- ordered per-deployment runs with deployment ID, runner ID when known, accepted and terminal
+  timing, latency cohort, duration boundary, SLO classification/status, total duration, stage
+  timings, and issue counts; and
 - per-stage summaries for agent deployment-stage events and runner provisioning/bootstrap events.
 
 Percentiles use nearest-rank ordering. Rows are ordered by deployment creation timestamp and then
@@ -41,7 +55,8 @@ invalid evidence; they never become zero-duration successful stages.
 Cold-Droplet evidence requires the exact deployment operation-key runner correlation. Existing
 same-user runner reuse is reported as a separate cohort and never borrows historical runner
 provisioning stages. Unknown or ambiguous correlation is invalid evidence. Cold-path SLO decisions
-must read the `cold_droplet` cohort; faster reuse samples cannot improve cold p95.
+must read the `slo` counts for the `cold_droplet` cohort; faster reuse samples and
+successful-only latency percentiles cannot improve the binary gate.
 
 Default mode is read-only and does not create, mutate, clean up, or contact provider resources.
 Local Docker mode requires the exact zero-cloud sentinels used by `local:agent:smoke`:
@@ -56,14 +71,17 @@ bun run agent:creation:benchmark -- --mode local_docker
 DigitalOcean-driving benchmark mode is fail-closed. It requires an explicit positive trial count,
 the `--authorize-provider-costs` flag, explicit `--candidate-size-slugs` values, and
 `AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION=authorize-digitalocean-agent-creation-benchmark`.
-Ordinary CI must not run that mode. Provider-backed p95<=60s acceptance is owned by the final SLO
-proof step after operator authorization; this read-only benchmark records evidence but does not
-claim live provider acceptance by itself.
+Ordinary CI must not run that mode. Provider-backed ready-within-60 acceptance is owned by the
+final SLO proof step after operator authorization; this read-only benchmark records evidence but
+does not claim live provider acceptance by itself.
 
 The local full-cycle smoke emits a sanitized `local_agent_cycle_creation_latency` report after the
-deployment reaches durable ready and before its database volume is removed. Reports and terminal
-completion logs project allowlisted fields only: deployment ID, runner ID when present, outcome,
-total duration, bounded stage timing/status, and issue names. They must not retain user identity,
+deployment reaches durable ready and before its database volume is removed. The smoke fails unless
+the report contains `acceptedAt`, uses `accepted_at` as its duration boundary, and produces a
+non-diagnostic SLO result. The report exposes the sanitized ready-within-60 result. Reports and
+terminal completion logs project allowlisted fields only: deployment ID, runner ID when present,
+accepted timestamp, duration boundary, outcome, SLO classification/status, total duration, bounded
+stage timing/status, and issue names. They must not retain user identity,
 agent identity, raw credentials, tokens, endpoint URLs, provider resource IDs, provider responses,
 cloud-init output, arbitrary metadata, or serialized environment objects.
 

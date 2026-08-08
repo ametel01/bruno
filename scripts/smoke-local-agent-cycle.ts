@@ -204,6 +204,14 @@ export async function smokeLocalAgentCycle(): Promise<LocalAgentCycleSmokeSummar
       deploymentId: created.deployment.id,
       limit: 1,
     });
+    const creationLatencyRun = creationLatencyReport.runs[0];
+    if (
+      !creationLatencyRun?.acceptedAt ||
+      creationLatencyRun.durationBoundary !== "accepted_at" ||
+      creationLatencyRun.sloStatus === "diagnostic"
+    ) {
+      throw new Error("Local agent cycle did not verify the durable acceptance boundary.");
+    }
     process.stdout.write(
       `${JSON.stringify({
         event: "local_agent_cycle_creation_latency",

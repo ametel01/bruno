@@ -14,6 +14,103 @@ import {
 } from "@/src/server/db/schema";
 
 describe("agent creation latency report", () => {
+  it("uses durable acceptance for the failure-inclusive ready-within-60 gate", () => {
+    const report = buildAgentCreationLatencyReport({
+      generatedAt: "2026-08-07T00:02:00.000Z",
+      deployments: [
+        latencyDeployment("ready-within-60", {
+          acceptedAt: "2026-08-07T00:00:10.000Z",
+          completedAt: "2026-08-07T00:01:10.000Z",
+        }),
+        latencyDeployment("slow-ready", {
+          acceptedAt: "2026-08-07T00:00:10.000Z",
+          completedAt: "2026-08-07T00:01:10.001Z",
+        }),
+        latencyDeployment("terminal-failure", {
+          acceptedAt: "2026-08-07T00:00:20.000Z",
+          failedAt: "2026-08-07T00:00:30.000Z",
+        }),
+        latencyDeployment("timeout", {
+          acceptedAt: "2026-08-07T00:00:30.000Z",
+        }),
+        latencyDeployment("pending", {
+          acceptedAt: "2026-08-07T00:01:30.001Z",
+        }),
+        latencyDeployment("legacy-boundary", {
+          acceptedAt: null,
+          completedAt: "2026-08-07T00:00:20.000Z",
+        }),
+        latencyDeployment("missing-boundary", {
+          acceptedAt: undefined,
+          completedAt: "2026-08-07T00:00:20.000Z",
+        }),
+        latencyDeployment("invalid-order", {
+          acceptedAt: "2026-08-06T23:59:59.999Z",
+          completedAt: "2026-08-07T00:00:20.000Z",
+        }),
+      ],
+    });
+
+    expect(report.version).toBe(2);
+    expect(report.boundary).toEqual({
+      sloStart: "agent_deployments.accepted_at",
+      legacyDiagnosticStart: "agent_deployments.created_at",
+      ready: "agent_deployments.completed_at",
+      failed: "agent_deployments.failed_at",
+    });
+    expect(report.slo).toEqual({
+      sampleSize: 5,
+      requiredSampleSize: 100,
+      requiredReadyWithin60: 95,
+      eligible: 5,
+      readyWithin60: 1,
+      misses: 3,
+      pending: 1,
+      passRate: 1 / 4,
+      passesGate: false,
+    });
+    expect(report.runs.map((run) => [run.deploymentId, run.sloClassification])).toEqual([
+      ["invalid-order", "invalid_event_ordering"],
+      ["legacy-boundary", "legacy_boundary"],
+      ["missing-boundary", "missing_boundary"],
+      ["pending", "pending"],
+      ["ready-within-60", "ready_within_60"],
+      ["slow-ready", "slo_miss"],
+      ["terminal-failure", "terminal_failure"],
+      ["timeout", "timeout"],
+    ]);
+    expect(report.runs.find((run) => run.deploymentId === "ready-within-60")).toMatchObject({
+      acceptedAt: "2026-08-07T00:00:10.000Z",
+      totalDurationMs: 60_000,
+      durationBoundary: "accepted_at",
+      sloStatus: "pass",
+    });
+    expect(report.runs.find((run) => run.deploymentId === "legacy-boundary")).toMatchObject({
+      totalDurationMs: 20_000,
+      durationBoundary: "legacy_created_at",
+      sloStatus: "diagnostic",
+    });
+  });
+
+  it("does not claim the Cold-Deployment SLO before a complete 100-deployment cohort", () => {
+    const report = buildAgentCreationLatencyReport({
+      generatedAt: "2026-08-07T00:02:00.000Z",
+      deployments: Array.from({ length: 95 }, (_, index) =>
+        latencyDeployment(`ready-${String(index).padStart(3, "0")}`, {
+          acceptedAt: "2026-08-07T00:00:01.000Z",
+          completedAt: "2026-08-07T00:00:31.000Z",
+        }),
+      ),
+    });
+
+    expect(report.slo).toMatchObject({
+      sampleSize: 95,
+      readyWithin60: 95,
+      misses: 0,
+      passesGate: false,
+    });
+  });
+
   it("summarizes ready, failed, and nonterminal deployments with deterministic ordering", () => {
     const report = buildAgentCreationLatencyReport({
       generatedAt: "2026-08-07T00:00:00.000Z",
@@ -691,6 +788,7 @@ describe("agent creation latency report", () => {
           idempotencyKey: "issue-263-operation-authority",
           runnerOperationId,
           runnerAcceptedAt: new Date("2026-08-07T00:00:03.000Z"),
+          acceptedAt: now,
           canaryState: "skipped",
           completedAt: new Date("2026-08-07T00:00:30.000Z"),
           createdAt: now,
@@ -833,4 +931,25 @@ function completeStage(name: string, durationMs: number) {
     durationMs,
     issues: [],
   });
+}
+
+function latencyDeployment(
+  id: string,
+  input: {
+    acceptedAt?: string | null | undefined;
+    completedAt?: string | null;
+    failedAt?: string | null;
+  },
+) {
+  return {
+    id,
+    runnerId: null,
+    cohort: "cold_droplet" as const,
+    createdAt: "2026-08-07T00:00:00.000Z",
+    ...input,
+    completedAt: input.completedAt ?? null,
+    failedAt: input.failedAt ?? null,
+    agentStageEvents: [],
+    runnerEvents: [],
+  };
 }

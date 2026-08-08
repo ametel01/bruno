@@ -4,13 +4,16 @@ import { sql } from "drizzle-orm";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import { createAppLogger } from "@/src/server/logging/logger";
 
-export const AGENT_CREATION_LATENCY_REPORT_VERSION = 1;
+export const AGENT_CREATION_LATENCY_REPORT_VERSION = 2;
 
 const DEFAULT_REPORT_LIMIT = 100;
 const MAX_REPORT_LIMIT = 1_000;
 const NEAREST_RANK_P95 = 95;
 const NEAREST_RANK_P50 = 50;
 const MAX_LOG_STAGE_COUNT = 20;
+const READY_WITHIN_MS = 60_000;
+const COLD_DEPLOYMENT_SAMPLE_SIZE = 100;
+const COLD_DEPLOYMENT_READY_REQUIRED = 95;
 const REQUIRED_RUNNER_STAGE_NAMES = [
   "runner:creating",
   "runner:tagging",
@@ -68,6 +71,7 @@ export type AgentCreationLatencyDeploymentEvidence = {
   runnerId: string | null;
   cohort?: AgentCreationLatencyCohort;
   requiresRunnerEvidence?: boolean;
+  acceptedAt?: Date | string | null | undefined;
   createdAt: Date | string;
   completedAt: Date | string | null;
   failedAt: Date | string | null;
@@ -98,6 +102,27 @@ export type AgentCreationLatencyStageTiming = {
 };
 
 export type AgentCreationLatencyRunOutcome = "ready" | "failed" | "incomplete";
+export type AgentCreationLatencySloClassification =
+  | "ready_within_60"
+  | "slo_miss"
+  | "terminal_failure"
+  | "timeout"
+  | "pending"
+  | "missing_boundary"
+  | "legacy_boundary"
+  | "invalid_event_ordering";
+
+export type AgentCreationLatencySloSummary = {
+  sampleSize: number;
+  requiredSampleSize: 100;
+  requiredReadyWithin60: 95;
+  eligible: number;
+  readyWithin60: number;
+  misses: number;
+  pending: number;
+  passRate: number;
+  passesGate: boolean;
+};
 
 export type AgentCreationLatencyRun = {
   deploymentId: string;
@@ -105,9 +130,13 @@ export type AgentCreationLatencyRun = {
   cohort: AgentCreationLatencyCohort;
   outcome: AgentCreationLatencyRunOutcome;
   evidenceStatus: "valid" | "invalid";
+  acceptedAt: string | null;
   createdAt: string;
   terminalAt: string | null;
   totalDurationMs: number | null;
+  durationBoundary: "accepted_at" | "legacy_created_at" | null;
+  sloClassification: AgentCreationLatencySloClassification;
+  sloStatus: "pass" | "miss" | "pending" | "diagnostic";
   stages: AgentCreationLatencyStageTiming[];
   issueCounts: Partial<Record<AgentCreationLatencyIssue, number>>;
 };
@@ -131,6 +160,7 @@ export type AgentCreationLatencyCohortSummary = {
   incomplete: number;
   invalidEvidence: number;
   successRate: number;
+  slo: AgentCreationLatencySloSummary;
   readyLatency: {
     p50Ms: number | null;
     p95Ms: number | null;
@@ -148,11 +178,13 @@ export type AgentCreationLatencyReport = {
   version: typeof AGENT_CREATION_LATENCY_REPORT_VERSION;
   generatedAt: string;
   boundary: {
-    start: "agent_deployments.created_at";
+    sloStart: "agent_deployments.accepted_at";
+    legacyDiagnosticStart: "agent_deployments.created_at";
     ready: "agent_deployments.completed_at";
     failed: "agent_deployments.failed_at";
   };
   percentileRule: "nearest_rank";
+  slo: AgentCreationLatencySloSummary;
   summary: {
     total: number;
     ready: number;
@@ -204,13 +236,14 @@ export type AgentCreationRunnerCorrelation = {
 export function buildAgentCreationLatencyReport(
   input: BuildReportInput,
 ): AgentCreationLatencyReport {
+  const generatedAt = toIso(input.generatedAt ?? new Date()) ?? new Date(0).toISOString();
   const runs = [...input.deployments]
     .sort(
       (left, right) =>
         compareIso(toIso(left.createdAt), toIso(right.createdAt)) ||
         left.id.localeCompare(right.id),
     )
-    .map(toLatencyRun);
+    .map((deployment) => toLatencyRun(deployment, generatedAt));
   const readyDurations = runs
     .filter((run) => run.outcome === "ready" && run.totalDurationMs !== null)
     .map((run) => run.totalDurationMs as number);
@@ -224,13 +257,15 @@ export function buildAgentCreationLatencyReport(
 
   return {
     version: AGENT_CREATION_LATENCY_REPORT_VERSION,
-    generatedAt: toIso(input.generatedAt ?? new Date()) ?? new Date(0).toISOString(),
+    generatedAt,
     boundary: {
-      start: "agent_deployments.created_at",
+      sloStart: "agent_deployments.accepted_at",
+      legacyDiagnosticStart: "agent_deployments.created_at",
       ready: "agent_deployments.completed_at",
       failed: "agent_deployments.failed_at",
     },
     percentileRule: "nearest_rank",
+    slo: summarizeSlo(runs.filter((run) => run.cohort === "cold_droplet")),
     summary: {
       total: runs.length,
       ready,
@@ -280,7 +315,11 @@ export async function logAgentCreationTerminalCompletion(
     runnerId: run.runnerId,
     cohort: run.cohort,
     outcome: run.outcome,
+    acceptedAt: run.acceptedAt,
     totalDurationMs: run.totalDurationMs,
+    durationBoundary: run.durationBoundary,
+    sloClassification: run.sloClassification,
+    sloStatus: run.sloStatus,
     evidenceStatus: run.evidenceStatus,
     stages: run.stages.slice(0, MAX_LOG_STAGE_COUNT).map((stage) => ({
       name: stage.name,
@@ -323,7 +362,10 @@ export function resolveAgentCreationRunnerCorrelation(
   };
 }
 
-function toLatencyRun(input: AgentCreationLatencyDeploymentEvidence): AgentCreationLatencyRun {
+function toLatencyRun(
+  input: AgentCreationLatencyDeploymentEvidence,
+  generatedAt: string,
+): AgentCreationLatencyRun {
   const cohort =
     input.cohort ??
     (input.runnerEvents.length > 0
@@ -332,8 +374,11 @@ function toLatencyRun(input: AgentCreationLatencyDeploymentEvidence): AgentCreat
         ? "existing_same_user_runner"
         : "unknown");
   const createdAt = toIso(input.createdAt);
+  const acceptedAt = toIso(input.acceptedAt);
   const completedAt = toIso(input.completedAt);
   const failedAt = toIso(input.failedAt);
+  const acceptedBoundaryMissing =
+    Object.hasOwn(input, "acceptedAt") && input.acceptedAt === undefined;
   const terminal = selectTerminal(createdAt, completedAt, failedAt);
   const stages = [
     ...buildAgentStageTimings(createdAt, input.agentStageEvents),
@@ -349,10 +394,31 @@ function toLatencyRun(input: AgentCreationLatencyDeploymentEvidence): AgentCreat
   const cohortIssues: AgentCreationLatencyIssue[] =
     cohort === "unknown" ? ["unknown_latency_cohort"] : [];
   const issueCounts = countIssues(stages, [...terminal.issues, ...cohortIssues]);
+  const boundary = selectDurationBoundary(
+    input.acceptedAt,
+    acceptedBoundaryMissing,
+    acceptedAt,
+    createdAt,
+  );
+  const boundaryOrderInvalid = Boolean(
+    acceptedAt &&
+      createdAt &&
+      (compareIso(acceptedAt, createdAt) < 0 ||
+        (terminal.at && compareIso(terminal.at, acceptedAt) < 0)),
+  );
   const totalDurationMs =
-    createdAt && terminal.at && terminal.issues.length === 0
-      ? durationMs(createdAt, terminal.at)
+    boundary.at && terminal.at && terminal.issues.length === 0 && !boundaryOrderInvalid
+      ? durationMs(boundary.at, terminal.at)
       : null;
+  const slo = classifySlo({
+    acceptedInput: input.acceptedAt,
+    acceptedBoundaryMissing,
+    acceptedAt,
+    createdAt,
+    terminal,
+    generatedAt,
+    boundaryOrderInvalid,
+  });
   const evidenceStatus =
     totalDurationMs !== null &&
     Object.values(issueCounts).every((count) => count === 0) &&
@@ -366,12 +432,67 @@ function toLatencyRun(input: AgentCreationLatencyDeploymentEvidence): AgentCreat
     cohort,
     outcome: terminal.outcome,
     evidenceStatus,
+    acceptedAt,
     createdAt: createdAt ?? "invalid",
     terminalAt: terminal.at,
     totalDurationMs,
+    durationBoundary: boundary.kind,
+    sloClassification: slo.classification,
+    sloStatus: slo.status,
     stages,
     issueCounts,
   };
+}
+
+function selectDurationBoundary(
+  acceptedInput: AgentCreationLatencyDeploymentEvidence["acceptedAt"],
+  acceptedBoundaryMissing: boolean,
+  acceptedAt: string | null,
+  createdAt: string | null,
+): {
+  at: string | null;
+  kind: AgentCreationLatencyRun["durationBoundary"];
+} {
+  if (acceptedAt) return { at: acceptedAt, kind: "accepted_at" };
+  if (!acceptedBoundaryMissing && (acceptedInput === null || acceptedInput === undefined)) {
+    return { at: createdAt, kind: "legacy_created_at" };
+  }
+  return { at: null, kind: null };
+}
+
+function classifySlo(input: {
+  acceptedInput: AgentCreationLatencyDeploymentEvidence["acceptedAt"];
+  acceptedBoundaryMissing: boolean;
+  acceptedAt: string | null;
+  createdAt: string | null;
+  terminal: ReturnType<typeof selectTerminal>;
+  generatedAt: string;
+  boundaryOrderInvalid: boolean;
+}): {
+  classification: AgentCreationLatencySloClassification;
+  status: AgentCreationLatencyRun["sloStatus"];
+} {
+  if (input.acceptedBoundaryMissing || (input.acceptedInput !== null && !input.acceptedAt)) {
+    return { classification: "missing_boundary", status: "diagnostic" };
+  }
+  if (!input.acceptedAt) {
+    return { classification: "legacy_boundary", status: "diagnostic" };
+  }
+  const terminalOrderInvalid = input.terminal.issues.some((issue) => issue !== "unknown_terminal");
+  if (!input.createdAt || input.boundaryOrderInvalid || terminalOrderInvalid) {
+    return { classification: "invalid_event_ordering", status: "diagnostic" };
+  }
+  if (input.terminal.outcome === "failed") {
+    return { classification: "terminal_failure", status: "miss" };
+  }
+  if (input.terminal.outcome === "ready" && input.terminal.at) {
+    return durationMs(input.acceptedAt, input.terminal.at) <= READY_WITHIN_MS
+      ? { classification: "ready_within_60", status: "pass" }
+      : { classification: "slo_miss", status: "miss" };
+  }
+  return durationMs(input.acceptedAt, input.generatedAt) >= READY_WITHIN_MS
+    ? { classification: "timeout", status: "miss" }
+    : { classification: "pending", status: "pending" };
 }
 
 function selectTerminal(
@@ -581,9 +702,33 @@ function summarizeCohort(
     incomplete,
     invalidEvidence: cohortRuns.filter((run) => run.evidenceStatus === "invalid").length,
     successRate: cohortRuns.length === 0 ? 0 : ready / cohortRuns.length,
+    slo: summarizeSlo(cohortRuns),
     readyLatency: summarizeDurations(readyDurations),
     failedTerminalLatency: summarizeDurations(failedDurations),
     stageSummaries: summarizeStages(cohortRuns),
+  };
+}
+
+function summarizeSlo(runs: readonly AgentCreationLatencyRun[]): AgentCreationLatencySloSummary {
+  const eligibleRuns = runs.filter((run) => run.sloStatus !== "diagnostic");
+  const readyWithin60 = eligibleRuns.filter((run) => run.sloStatus === "pass").length;
+  const misses = eligibleRuns.filter((run) => run.sloStatus === "miss").length;
+  const pending = eligibleRuns.filter((run) => run.sloStatus === "pending").length;
+  const decided = readyWithin60 + misses;
+
+  return {
+    sampleSize: eligibleRuns.length,
+    requiredSampleSize: COLD_DEPLOYMENT_SAMPLE_SIZE,
+    requiredReadyWithin60: COLD_DEPLOYMENT_READY_REQUIRED,
+    eligible: eligibleRuns.length,
+    readyWithin60,
+    misses,
+    pending,
+    passRate: decided === 0 ? 0 : readyWithin60 / decided,
+    passesGate:
+      eligibleRuns.length === COLD_DEPLOYMENT_SAMPLE_SIZE &&
+      pending === 0 &&
+      readyWithin60 >= COLD_DEPLOYMENT_READY_REQUIRED,
   };
 }
 
@@ -704,6 +849,7 @@ async function readDeploymentEvidence(
     userId: string;
     provisioningOperationId: string;
     createdAt: Date;
+    acceptedAt: Date | null;
     completedAt: Date | null;
     failedAt: Date | null;
   }>(sql`
@@ -714,6 +860,7 @@ async function readDeploymentEvidence(
       d.user_id as "userId",
       d.id as "provisioningOperationId",
       d.created_at as "createdAt",
+      d.accepted_at as "acceptedAt",
       d.completed_at as "completedAt",
       d.failed_at as "failedAt"
     from agent_deployments d
@@ -742,6 +889,7 @@ async function readDeploymentEvidence(
         cohort: correlation.cohort,
         requiresRunnerEvidence: correlation.cohort === "cold_droplet",
         createdAt: row.createdAt,
+        acceptedAt: row.acceptedAt,
         completedAt: row.completedAt,
         failedAt: row.failedAt,
         agentStageEvents: await readAgentStageEvents(connection, row.id),

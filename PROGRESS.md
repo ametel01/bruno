@@ -315,3 +315,39 @@ cold-deployment plan.
 - No implementation behavior, provider resource, hosted configuration, credential, deployment, or
   billable action changed. No changelog entry was added because this was planning and documentation.
 - Current phase: R1. Provider-backed work remains blocked on phase-specific explicit authorization.
+
+### 2026-08-08 — Issue #286 durable acceptance boundary implemented
+
+- Added nullable `agent_deployments.accepted_at` in migration 0027 with a database trigger that
+  rejects mutation and backfill. New Owner-create, explicit retry, and runner-replacement Agent
+  Deployments capture the boundary from PostgreSQL `clock_timestamp()` while preserving
+  `created_at` and `runner_accepted_at` semantics.
+- Versioned the sanitized latency report to v2. Cold-Deployment evidence now uses `accepted_at`,
+  classifies ready-within-60, slow-success SLO miss, terminal failure, timeout, pending, missing
+  boundary, legacy boundary, and invalid ordering, and cannot pass before exactly 100 eligible
+  observations contain at least 95 ready-within-60 results. Successful-only percentiles remain
+  diagnostic.
+- Focused migration, deployment creation, retry, latency, schema, DTO, and local-smoke contract
+  tests passed. `bun run verify` passed formatting, lint, typecheck, 175 unit files / 1,736 tests,
+  and the production build. `bun run test:e2e:ci` passed 26/26 browser tests.
+- `bun run local:agent:smoke` passed the complete simulated-Droplet lifecycle and cleanup with one
+  simulated Droplet and zero DigitalOcean requests. The sanitized v2 report measured 147.374
+  seconds from durable acceptance to Ready Deployment and correctly classified the slow success as
+  an SLO miss; this local evidence does not prove the production Cold-Deployment SLO.
+- R1 remains in progress for the separately tracked immutable cohort/origin, cancellation,
+  rollout-configuration, API-acceptance, provider-trial-ledger, and latest-100 aggregation work.
+  No provider-backed action, hosted configuration change, secret mutation, or billable effect ran.
+
+### 2026-08-08 — Issue #286 review corrections
+
+- Strengthened migration 0027 so pre-migration null boundaries remain legacy diagnostics while a
+  database-clock default supplies omitted future values, explicit nulls fail closed, and the
+  existing immutability trigger still blocks later mutation or backfill.
+- Made the complete local Agent Deployment smoke assert the sanitized report's accepted timestamp,
+  `accepted_at` duration boundary, and non-diagnostic SLO result before continuing.
+- Re-ran focused migration, schema, deployment-database, latency, and local-smoke contract tests;
+  `bun run verify` passed 175 files / 1,737 tests and the production build, and browser E2E passed
+  26/26. The complete local smoke asserted the boundary, passed cleanup with zero DigitalOcean
+  requests, and reported a 147.852-second slow-success SLO miss. Immutable cohort identity and
+  production latest-100 selection remain owned by issues #287 and #301, respectively, rather than
+  being inferred from mutable runner assignment in issue #286.
