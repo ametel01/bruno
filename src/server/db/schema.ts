@@ -573,6 +573,7 @@ export const agentDeployments = pgTable(
     initialCohort: text("initial_cohort").default("unknown"),
     deploymentEnvironment: text("deployment_environment").default("non_production"),
     ownerCancelledAt: timestamp("owner_cancelled_at", { withTimezone: true }),
+    rolloutConfigurationGeneration: integer("rollout_configuration_generation").default(1),
     canaryState: text("canary_state").notNull().default("not_started"),
     canaryAttemptedAt: timestamp("canary_attempted_at", { withTimezone: true }),
     canaryCompletedAt: timestamp("canary_completed_at", { withTimezone: true }),
@@ -636,6 +637,10 @@ export const agentDeployments = pgTable(
     check(
       "agent_deployments_owner_cancelled_after_acceptance_check",
       sql`${table.ownerCancelledAt} IS NULL OR ${table.acceptedAt} IS NULL OR ${table.ownerCancelledAt} >= ${table.acceptedAt}`,
+    ),
+    check(
+      "agent_deployments_rollout_configuration_generation_check",
+      sql`${table.rolloutConfigurationGeneration} IS NULL OR ${table.rolloutConfigurationGeneration} >= 1`,
     ),
     check(
       "agent_deployments_stage_runner_operation_check",

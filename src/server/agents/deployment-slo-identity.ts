@@ -18,6 +18,12 @@ export const AGENT_DEPLOYMENT_ENVIRONMENTS = ["production", "non_production"] as
 
 export type AgentDeploymentEnvironment = (typeof AGENT_DEPLOYMENT_ENVIRONMENTS)[number];
 
+export const CURRENT_ROLLOUT_CONFIGURATION_GENERATION = 1;
+
+export function isRolloutConfigurationGeneration(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) >= 1;
+}
+
 export function deploymentEnvironmentForRuntime(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): AgentDeploymentEnvironment {

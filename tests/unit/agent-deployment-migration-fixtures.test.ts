@@ -75,6 +75,7 @@ describe("agent deployment migration fixtures", () => {
         "initial_cohort",
         "deployment_environment",
         "owner_cancelled_at",
+        "rollout_configuration_generation",
       ]);
       await expect(readColumnNames(sql, "agent_deployment_wakeups")).resolves.toEqual([
         "id",
@@ -186,6 +187,7 @@ describe("agent deployment migration fixtures", () => {
           origin: string;
           initial_cohort: string;
           deployment_environment: string;
+          rollout_configuration_generation: number;
         }[]
       >`
         insert into agent_deployments (
@@ -193,15 +195,28 @@ describe("agent deployment migration fixtures", () => {
         ) values (
           ${agent.id}, ${owner.id}, 'cfg-defaulted-boundary', 'defaulted-boundary-fixture'
         )
-        returning accepted_at, origin, initial_cohort, deployment_environment
+        returning accepted_at, origin, initial_cohort, deployment_environment,
+          rollout_configuration_generation
       `).resolves.toEqual([
         {
           accepted_at: expect.any(Date),
           origin: "operator_trial",
           initial_cohort: "unknown",
           deployment_environment: "non_production",
+          rollout_configuration_generation: 1,
         },
       ]);
+
+      await expect(sql`
+        insert into agent_deployments (
+          agent_id, user_id, config_revision, idempotency_key,
+          rollout_configuration_generation
+        ) values (
+          ${agent.id}, ${owner.id}, 'cfg-missing-rollout', 'missing-rollout-fixture', null
+        )
+      `).rejects.toMatchObject({
+        constraint_name: "agent_deployments_slo_identity_required_check",
+      });
 
       await expect(sql`
         insert into runners (
@@ -297,13 +312,17 @@ describe("agent deployment migration fixtures", () => {
       await runDbMigrate(databaseUrl);
 
       await expect(
-        sql`select accepted_at, origin, initial_cohort, deployment_environment from agent_deployments where idempotency_key = 'historical-boundary'`,
+        sql`select accepted_at, origin, initial_cohort, deployment_environment,
+          rollout_configuration_generation
+        from agent_deployments
+        where idempotency_key = 'historical-boundary'`,
       ).resolves.toEqual([
         {
           accepted_at: null,
           origin: null,
           initial_cohort: null,
           deployment_environment: null,
+          rollout_configuration_generation: null,
         },
       ]);
       await expect(sql`

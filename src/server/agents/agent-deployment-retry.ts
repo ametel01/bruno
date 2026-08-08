@@ -13,7 +13,9 @@ import {
   validateDeploymentConfigRevision,
 } from "@/src/server/agents/deployment-state";
 import {
+  CURRENT_ROLLOUT_CONFIGURATION_GENERATION,
   deploymentEnvironmentForRuntime,
+  isRolloutConfigurationGeneration,
   initialCohortForAssignedRunner,
 } from "@/src/server/agents/deployment-slo-identity";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
@@ -83,8 +85,12 @@ export async function createAgentDeploymentForRunnerReplacement(input: {
   `);
   if (replayed) return { deploymentId: replayed.id, created: false };
 
-  const [latest] = await input.tx.execute<{ configRevision: string }>(sql`
-    select config_revision as "configRevision"
+  const [latest] = await input.tx.execute<{
+    configRevision: string;
+    rolloutConfigurationGeneration: number | null;
+  }>(sql`
+    select config_revision as "configRevision",
+      rollout_configuration_generation as "rolloutConfigurationGeneration"
     from ${agentDeployments}
     where user_id = ${input.userId}
       and agent_id = ${input.agentId}
@@ -120,6 +126,11 @@ export async function createAgentDeploymentForRunnerReplacement(input: {
       origin: "runner_replacement",
       initialCohort: "unknown",
       deploymentEnvironment: deploymentEnvironmentForRuntime(),
+      rolloutConfigurationGeneration: isRolloutConfigurationGeneration(
+        latest.rolloutConfigurationGeneration,
+      )
+        ? latest.rolloutConfigurationGeneration
+        : CURRENT_ROLLOUT_CONFIGURATION_GENERATION,
       createdAt: input.now,
       updatedAt: input.now,
     })
@@ -301,6 +312,7 @@ export async function retryAgentDeploymentForUser(input: {
           origin,
           initial_cohort,
           deployment_environment,
+          rollout_configuration_generation,
           created_at,
           updated_at
         )
@@ -313,6 +325,7 @@ export async function retryAgentDeploymentForUser(input: {
           'owner_request',
           ${initialCohortForAssignedRunner(agent.runnerId)},
           ${deploymentEnvironmentForRuntime()},
+          ${CURRENT_ROLLOUT_CONFIGURATION_GENERATION},
           ${now.toISOString()},
           ${now.toISOString()}
         )

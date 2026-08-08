@@ -51,7 +51,7 @@ describe("Agent Deployment latency report", () => {
       ],
     });
 
-    expect(report.version).toBe(3);
+    expect(report.version).toBe(4);
     expect(report.boundary).toEqual({
       sloStart: "agent_deployments.accepted_at",
       legacyDiagnosticStart: "agent_deployments.created_at",
@@ -87,6 +87,7 @@ describe("Agent Deployment latency report", () => {
     });
     expect(report.runs.find((run) => run.deploymentId === "ready-within-60")).toMatchObject({
       acceptedAt: "2026-08-07T00:00:10.000Z",
+      rolloutConfigurationGeneration: 1,
       totalDurationMs: 60_000,
       durationBoundary: "accepted_at",
       sloStatus: "pass",
@@ -181,6 +182,48 @@ describe("Agent Deployment latency report", () => {
       "non-production": "non_production",
       reuse: "not_cold_deployment",
       cancelled: "owner_cancelled_before_boundary",
+    });
+  });
+
+  it("fails visibly when Owner cancellation predates durable acceptance", () => {
+    const report = buildAgentDeploymentLatencyReport({
+      generatedAt: "2026-08-07T00:02:00.000Z",
+      deployments: [
+        latencyDeployment("contradictory-cancellation", {
+          acceptedAt: "2026-08-07T00:00:10.000Z",
+          ownerCancelledAt: "2026-08-07T00:00:09.999Z",
+          failedAt: "2026-08-07T00:00:20.000Z",
+        }),
+      ],
+    });
+
+    expect(report.runs[0]).toMatchObject({
+      eligible: false,
+      eligibilityReason: "contradictory_cancellation_evidence",
+      evidenceStatus: "invalid",
+      issueCounts: { invalid_owner_cancellation_order: 1 },
+    });
+    expect(report.slo).toMatchObject({ sampleSize: 0, eligible: 0 });
+  });
+
+  it("fails visibly when otherwise eligible evidence has no rollout configuration", () => {
+    const report = buildAgentDeploymentLatencyReport({
+      generatedAt: "2026-08-07T00:02:00.000Z",
+      deployments: [
+        latencyDeployment("unknown-rollout", {
+          acceptedAt: "2026-08-07T00:00:10.000Z",
+          completedAt: "2026-08-07T00:00:20.000Z",
+          rolloutConfigurationGeneration: null,
+        }),
+      ],
+    });
+
+    expect(report.runs[0]).toMatchObject({
+      eligible: false,
+      eligibilityReason: "unknown_rollout_configuration",
+      rolloutConfigurationGeneration: null,
+      evidenceStatus: "invalid",
+      issueCounts: { unknown_rollout_configuration: 1 },
     });
   });
 
@@ -838,6 +881,13 @@ describe("Agent Deployment latency report", () => {
             origin: "owner_request",
             deploymentEnvironment: "non_production",
           }),
+          {
+            ...databaseLatencyDeployment(agent.id, user.id, "unknown-cohort", 4, {
+              origin: "owner_request",
+              deploymentEnvironment: "production",
+            }),
+            initialCohort: "unknown",
+          },
         ])
         .returning({ id: agentDeployments.id, idempotencyKey: agentDeployments.idempotencyKey });
 
@@ -850,7 +900,15 @@ describe("Agent Deployment latency report", () => {
         .map((row) => row.id)
         .sort();
 
-      expect(report.runs.map((run) => run.deploymentId).sort()).toEqual(expectedIds);
+      const unknownId = inserted.find((row) => row.idempotencyKey === "unknown-cohort")?.id;
+      expect(report.runs.map((run) => run.deploymentId).sort()).toEqual(
+        [...expectedIds, unknownId].filter((id): id is string => Boolean(id)).sort(),
+      );
+      expect(report.runs.find((run) => run.deploymentId === unknownId)).toMatchObject({
+        eligible: false,
+        evidenceStatus: "invalid",
+        issueCounts: { unknown_latency_cohort: 1 },
+      });
       expect(report.slo).toMatchObject({ sampleSize: 2, eligible: 2, misses: 2 });
     } finally {
       await resetLatencyFixtureTables(connection);
@@ -1099,6 +1157,7 @@ function latencyDeployment(
     deploymentEnvironment?: "production" | "non_production";
     cohort?: "cold_deployment" | "same_owner_reuse" | "unknown";
     ownerCancelledAt?: string | null;
+    rolloutConfigurationGeneration?: number | null;
   },
 ) {
   return {
@@ -1107,6 +1166,7 @@ function latencyDeployment(
     origin: input.origin ?? ("owner_request" as const),
     deploymentEnvironment: input.deploymentEnvironment ?? ("production" as const),
     cohort: input.cohort ?? ("cold_deployment" as const),
+    rolloutConfigurationGeneration: input.rolloutConfigurationGeneration ?? 1,
     createdAt: "2026-08-07T00:00:00.000Z",
     ...input,
     completedAt: input.completedAt ?? null,

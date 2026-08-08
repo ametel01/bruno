@@ -13,7 +13,7 @@ Run the read-only benchmark against already persisted deployments:
 bun run agent:deployment:benchmark
 ```
 
-Version 3 of the benchmark uses the immutable database-clock
+Version 4 of the benchmark uses the immutable database-clock
 `agent_deployments.accepted_at` boundary. New Agent Deployments capture this timestamp inside the
 request transaction after the earlier persistence work, so transaction commit latency remains in
 the measurement. `created_at` remains audit and ordering metadata, and `runner_accepted_at` keeps
@@ -30,11 +30,14 @@ allowlisted `sloMissCause` distinguishes `slow_ready`, `terminal_failure`, and
 its deadline is `pending`. Missing boundaries and invalid event ordering fail visibly as diagnostic
 evidence instead of being assigned a zero duration or silently admitted to the SLO cohort.
 
-Each new Agent Deployment also persists immutable origin, initial cohort, and deployment environment
-evidence. Only production Owner requests in the `cold_deployment` cohort are eligible. Operator
-trials, non-production deployments, Same-Owner Reuse, runner-replacement work, and explicit Owner
-cancellation before the 60-second boundary are excluded. Historical rows without immutable identity
-remain diagnostic. The default query applies these durable eligibility rules before selecting the
+Each new Agent Deployment also persists immutable origin, initial cohort, deployment environment,
+and rollout-configuration generation evidence. Runner-replacement recovery inherits the triggering
+deployment's generation instead of reading a later default. Only production Owner requests in the
+`cold_deployment` cohort are eligible. Operator trials, non-production deployments, Same-Owner
+Reuse, runner-replacement work, and explicit Owner cancellation before the 60-second boundary are
+excluded. Historical rows without immutable identity remain diagnostic. A missing rollout
+generation and cancellation timestamp before durable acceptance are reported as invalid evidence,
+not silently excluded. The default query applies the durable eligibility rules before selecting the
 latest observations by `accepted_at` and deployment ID.
 
 The JSON report is versioned and deterministic. It contains:
@@ -48,8 +51,9 @@ The JSON report is versioned and deterministic. It contains:
   separate counts, success rates, ready/failed p50/p95/max latency, invalid-evidence counts, and
   stage summaries;
 - ordered per-deployment runs with deployment ID, runner ID when known, accepted and terminal
-  timing, immutable cohort, eligibility reason, duration boundary, SLO classification/status and
-  miss cause, total duration, stage timings, and issue counts; and
+  timing, immutable cohort and rollout-configuration generation, eligibility reason, duration
+  boundary, SLO classification/status and miss cause, total duration, stage timings, and issue
+  counts; and
 - per-stage summaries for agent deployment-stage events and runner provisioning/bootstrap events.
 
 Percentiles use nearest-rank ordering. The default SLO cohort is ordered by immutable acceptance

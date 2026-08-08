@@ -5,10 +5,11 @@ import type {
   AgentDeploymentEnvironment,
   AgentDeploymentOrigin,
 } from "@/src/server/agents/deployment-slo-identity";
+import { isRolloutConfigurationGeneration } from "@/src/server/agents/deployment-slo-identity";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import { createAppLogger } from "@/src/server/logging/logger";
 
-export const AGENT_DEPLOYMENT_LATENCY_REPORT_VERSION = 3;
+export const AGENT_DEPLOYMENT_LATENCY_REPORT_VERSION = 4;
 
 const DEFAULT_REPORT_LIMIT = 100;
 const MAX_REPORT_LIMIT = 1_000;
@@ -77,6 +78,7 @@ export type AgentDeploymentLatencyDeploymentEvidence = {
   origin?: AgentDeploymentOrigin | null;
   deploymentEnvironment?: AgentDeploymentEnvironment | null;
   ownerCancelledAt?: Date | string | null;
+  rolloutConfigurationGeneration?: number | null;
   requiresRunnerEvidence?: boolean;
   acceptedAt?: Date | string | null | undefined;
   createdAt: Date | string;
@@ -96,7 +98,9 @@ export type AgentDeploymentLatencyIssue =
   | "invalid_timestamp"
   | "ambiguous_terminal"
   | "unknown_terminal"
-  | "unknown_latency_cohort";
+  | "unknown_latency_cohort"
+  | "unknown_rollout_configuration"
+  | "invalid_owner_cancellation_order";
 
 export type AgentDeploymentLatencyStageTiming = {
   name: string;
@@ -135,6 +139,7 @@ export type AgentDeploymentLatencyRun = {
   cohort: AgentDeploymentLatencyCohort;
   origin: AgentDeploymentOrigin | null;
   deploymentEnvironment: AgentDeploymentEnvironment | null;
+  rolloutConfigurationGeneration: number | null;
   eligible: boolean;
   eligibilityReason:
     | "eligible"
@@ -144,6 +149,8 @@ export type AgentDeploymentLatencyRun = {
     | "runner_replacement"
     | "not_cold_deployment"
     | "owner_cancelled_before_boundary"
+    | "contradictory_cancellation_evidence"
+    | "unknown_rollout_configuration"
     | "diagnostic_evidence";
   outcome: AgentDeploymentLatencyRunOutcome;
   evidenceStatus: "valid" | "invalid";
@@ -389,6 +396,7 @@ function toLatencyRun(
   const acceptedAt = toIso(input.acceptedAt);
   const completedAt = toIso(input.completedAt);
   const failedAt = toIso(input.failedAt);
+  const ownerCancelledAt = toIso(input.ownerCancelledAt);
   const acceptedBoundaryMissing =
     Object.hasOwn(input, "acceptedAt") && input.acceptedAt === undefined;
   const terminal = selectTerminal(createdAt, completedAt, failedAt);
@@ -405,7 +413,19 @@ function toLatencyRun(
   );
   const cohortIssues: AgentDeploymentLatencyIssue[] =
     cohort === "unknown" ? ["unknown_latency_cohort"] : [];
-  const issueCounts = countIssues(stages, [...terminal.issues, ...cohortIssues]);
+  const identityIssues: AgentDeploymentLatencyIssue[] = [...cohortIssues];
+  if (
+    input.origin &&
+    input.deploymentEnvironment &&
+    !isRolloutConfigurationGeneration(input.rolloutConfigurationGeneration)
+  ) {
+    identityIssues.push("unknown_rollout_configuration");
+  }
+  const cancellationOrderInvalid = Boolean(
+    acceptedAt && ownerCancelledAt && compareIso(ownerCancelledAt, acceptedAt) < 0,
+  );
+  if (cancellationOrderInvalid) identityIssues.push("invalid_owner_cancellation_order");
+  const issueCounts = countIssues(stages, [...terminal.issues, ...identityIssues]);
   const boundary = selectDurationBoundary(
     input.acceptedAt,
     acceptedBoundaryMissing,
@@ -434,10 +454,12 @@ function toLatencyRun(
   const eligibilityReason = classifyEligibility({
     origin: input.origin,
     deploymentEnvironment: input.deploymentEnvironment,
+    rolloutConfigurationGeneration: input.rolloutConfigurationGeneration,
     cohort,
-    ownerCancelledAt: toIso(input.ownerCancelledAt),
+    ownerCancelledAt,
     acceptedAt,
     sloStatus: slo.status,
+    cancellationOrderInvalid,
   });
   const evidenceStatus =
     totalDurationMs !== null &&
@@ -452,6 +474,11 @@ function toLatencyRun(
     cohort,
     origin: input.origin ?? null,
     deploymentEnvironment: input.deploymentEnvironment ?? null,
+    rolloutConfigurationGeneration: isRolloutConfigurationGeneration(
+      input.rolloutConfigurationGeneration,
+    )
+      ? input.rolloutConfigurationGeneration
+      : null,
     eligible: eligibilityReason === "eligible",
     eligibilityReason,
     outcome: terminal.outcome,
@@ -524,17 +551,23 @@ function classifySlo(input: {
 function classifyEligibility(input: {
   origin: AgentDeploymentOrigin | null | undefined;
   deploymentEnvironment: AgentDeploymentEnvironment | null | undefined;
+  rolloutConfigurationGeneration: number | null | undefined;
   cohort: AgentDeploymentLatencyCohort;
   ownerCancelledAt: string | null;
   acceptedAt: string | null;
   sloStatus: AgentDeploymentLatencyRun["sloStatus"];
+  cancellationOrderInvalid: boolean;
 }): AgentDeploymentLatencyRun["eligibilityReason"] {
   if (!input.origin || !input.deploymentEnvironment) return "legacy_identity";
+  if (!isRolloutConfigurationGeneration(input.rolloutConfigurationGeneration)) {
+    return "unknown_rollout_configuration";
+  }
   if (input.origin === "operator_trial") return "operator_trial";
   if (input.origin === "runner_replacement") return "runner_replacement";
   if (input.deploymentEnvironment !== "production") return "non_production";
   if (input.cohort !== "cold_deployment") return "not_cold_deployment";
   if (input.sloStatus === "diagnostic" || !input.acceptedAt) return "diagnostic_evidence";
+  if (input.cancellationOrderInvalid) return "contradictory_cancellation_evidence";
   if (
     input.ownerCancelledAt &&
     durationMs(input.acceptedAt, input.ownerCancelledAt) < READY_WITHIN_MS
@@ -899,16 +932,48 @@ async function readDeploymentEvidence(
   deploymentId: string | undefined,
   limit: number,
 ): Promise<AgentDeploymentLatencyDeploymentEvidence[]> {
+  const eligibleFilter = sql`
+    d.origin = 'owner_request'
+    and d.initial_cohort = 'cold_deployment'
+    and d.deployment_environment = 'production'
+    and d.rollout_configuration_generation is not null
+    and d.accepted_at is not null
+    and (
+      d.owner_cancelled_at is null
+      or d.owner_cancelled_at >= d.accepted_at + interval '60 seconds'
+    )
+  `;
+  const invalidIdentityFilter = sql`
+    d.origin = 'owner_request'
+    and d.deployment_environment = 'production'
+    and d.accepted_at is not null
+    and (
+      d.initial_cohort = 'unknown'
+      or (
+        d.initial_cohort = 'cold_deployment'
+        and (
+          d.rollout_configuration_generation is null
+          or d.owner_cancelled_at < d.accepted_at
+        )
+      )
+    )
+  `;
   const deploymentFilter = deploymentId
     ? sql`d.id = ${deploymentId}::uuid`
     : sql`
-        d.origin = 'owner_request'
-        and d.initial_cohort = 'cold_deployment'
-        and d.deployment_environment = 'production'
-        and d.accepted_at is not null
-        and (
-          d.owner_cancelled_at is null
-          or d.owner_cancelled_at >= d.accepted_at + interval '60 seconds'
+        d.id in (
+          select ranked.id
+          from (
+            select
+              d.id,
+              row_number() over (
+                partition by case when ${eligibleFilter} then 'eligible' else 'diagnostic' end
+                order by d.accepted_at desc, d.id desc
+              ) as report_rank
+            from agent_deployments d
+            where (${eligibleFilter}) or (${invalidIdentityFilter})
+          ) ranked
+          where ranked.report_rank <= ${limit}
         )
       `;
   const rows = await connection.db.execute<{
@@ -921,6 +986,7 @@ async function readDeploymentEvidence(
     initialCohort: AgentDeploymentLatencyCohort | null;
     deploymentEnvironment: AgentDeploymentEnvironment | null;
     ownerCancelledAt: Date | null;
+    rolloutConfigurationGeneration: number | null;
     createdAt: Date;
     acceptedAt: Date | null;
     completedAt: Date | null;
@@ -936,6 +1002,7 @@ async function readDeploymentEvidence(
       d.initial_cohort as "initialCohort",
       d.deployment_environment as "deploymentEnvironment",
       d.owner_cancelled_at as "ownerCancelledAt",
+      d.rollout_configuration_generation as "rolloutConfigurationGeneration",
       d.created_at as "createdAt",
       d.accepted_at as "acceptedAt",
       d.completed_at as "completedAt",
@@ -949,7 +1016,6 @@ async function readDeploymentEvidence(
      and operation_runner.provisioning_operation_key = concat('bruno-deploy-', replace(d.id::text, '-', ''))
     where ${deploymentFilter}
     order by d.accepted_at desc nulls last, d.id desc
-    limit ${limit}
   `);
 
   return await Promise.all(
@@ -968,6 +1034,7 @@ async function readDeploymentEvidence(
         origin: row.origin,
         deploymentEnvironment: row.deploymentEnvironment,
         ownerCancelledAt: row.ownerCancelledAt,
+        rolloutConfigurationGeneration: row.rolloutConfigurationGeneration,
         requiresRunnerEvidence: row.initialCohort === "cold_deployment",
         createdAt: row.createdAt,
         acceptedAt: row.acceptedAt,

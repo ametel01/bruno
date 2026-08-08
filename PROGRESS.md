@@ -367,3 +367,23 @@ cold-deployment plan.
   tests passed against an isolated PostgreSQL 17 database. `bun run verify` passed formatting,
   lint, type checking, 175 unit files / 1,758 tests, and the production build; credential-free
   browser E2E passed 26/26 in the workflow's development-auth mode.
+
+### 2026-08-08 — Issue #287 immutable rollout identity completed
+
+- Added migration 0030 for a nullable historical and required-on-new
+  `rollout_configuration_generation`. The existing SLO-identity trigger now prevents later
+  mutation, Owner creates and explicit retries pin generation 1, and runner-replacement recovery
+  inherits the triggering deployment's generation.
+- Versioned the sanitized Agent Deployment latency report to v4. Per-deployment evidence includes
+  the rollout generation; missing configuration, unknown cohort, and Owner cancellation before
+  durable acceptance are visible invalid evidence. Eligible and diagnostic rows are ranked
+  separately so diagnostics cannot displace the deterministic latest Eligible Cold Deployments.
+- Focused migration, persistence, retry, cancellation, latency, schema, and local-smoke contract
+  coverage passed 85 tests. `bun run verify` passed formatting, lint, type checking, 175 unit files
+  / 1,761 tests, and the production build; credential-free browser E2E passed 26/26 in explicit
+  development-auth mode.
+- `bun run local:agent:smoke` passed the complete simulated-Droplet lifecycle and cleanup with
+  report v4, rollout generation 1, one simulated Droplet, and zero DigitalOcean requests. The
+  non-production deployment reached Ready in 148.970 seconds and remained a diagnostic slow-ready
+  SLO Miss; no provider-backed action, hosted configuration change, secret mutation, or billable
+  effect ran.

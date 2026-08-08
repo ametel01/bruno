@@ -111,6 +111,7 @@ describe("agent deployment persistence and leases", () => {
         origin: agentDeployments.origin,
         initialCohort: agentDeployments.initialCohort,
         deploymentEnvironment: agentDeployments.deploymentEnvironment,
+        rolloutConfigurationGeneration: agentDeployments.rolloutConfigurationGeneration,
       })
       .from(agentDeployments)
       .where(eq(agentDeployments.id, result.deployment.id));
@@ -118,6 +119,7 @@ describe("agent deployment persistence and leases", () => {
       origin: "owner_request",
       initialCohort: "cold_deployment",
       deploymentEnvironment: "production",
+      rolloutConfigurationGeneration: 1,
     });
 
     await expect(
@@ -133,6 +135,15 @@ describe("agent deployment persistence and leases", () => {
       connection.db
         .update(agentDeployments)
         .set({ initialCohort: "same_owner_reuse" })
+        .where(eq(agentDeployments.id, result.deployment.id)),
+    ).rejects.toMatchObject({
+      cause: { constraint_name: "agent_deployments_slo_identity_immutable_check" },
+    });
+
+    await expect(
+      connection.db
+        .update(agentDeployments)
+        .set({ rolloutConfigurationGeneration: 2 })
         .where(eq(agentDeployments.id, result.deployment.id)),
     ).rejects.toMatchObject({
       cause: { constraint_name: "agent_deployments_slo_identity_immutable_check" },
@@ -163,12 +174,14 @@ describe("agent deployment persistence and leases", () => {
         origin: agentDeployments.origin,
         initialCohort: agentDeployments.initialCohort,
         deploymentEnvironment: agentDeployments.deploymentEnvironment,
+        rolloutConfigurationGeneration: agentDeployments.rolloutConfigurationGeneration,
       });
     expect(defaulted?.acceptedAt).toBeInstanceOf(Date);
     expect(defaulted).toMatchObject({
       origin: "operator_trial",
       initialCohort: "unknown",
       deploymentEnvironment: "non_production",
+      rolloutConfigurationGeneration: 1,
     });
   });
 

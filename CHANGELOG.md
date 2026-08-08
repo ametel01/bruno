@@ -10,10 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Immutable database-clock Agent Deployment acceptance boundaries, origin, initial cohort,
-  environment, and Owner-cancellation evidence with a versioned sanitized report that selects the
-  latest 100 Eligible Cold Deployments before gating. Slow readiness, terminal failure, and absence
-  of readiness at the boundary remain diagnostic causes of the canonical SLO Miss, while
-  unbackfilled historical rows remain diagnostic.
+  environment, Owner-cancellation evidence, and rollout-configuration generation with a versioned
+  sanitized report that selects the latest 100 Eligible Cold Deployments before gating. Unknown
+  configuration and contradictory cancellation evidence fail visibly. Slow readiness, terminal
+  failure, and absence of readiness at the boundary remain diagnostic causes of the canonical SLO
+  Miss, while unbackfilled historical rows remain diagnostic.
 - Bounded automatic DigitalOcean provider-phase draining now reaches `waiting_for_runner` in one
   fake/injected provider action, skips redundant tag writes when create already proves the required
   tags, adopts crash-completed create/tag/firewall effects through authoritative observation, and

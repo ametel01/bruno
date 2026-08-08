@@ -24,6 +24,7 @@ import {
   validateDeploymentLeaseOwner,
 } from "@/src/server/agents/deployment-state";
 import {
+  CURRENT_ROLLOUT_CONFIGURATION_GENERATION,
   type AgentDeploymentEnvironment,
   deploymentEnvironmentForRuntime,
   initialCohortForAssignedRunner,
@@ -213,6 +214,7 @@ export async function createAgentDeploymentForUser(input: {
         origin,
         initial_cohort,
         deployment_environment,
+        rollout_configuration_generation,
         created_at,
         updated_at
       )
@@ -225,6 +227,7 @@ export async function createAgentDeploymentForUser(input: {
         'owner_request',
         ${initialCohortForAssignedRunner(ownedAgent[0].runnerId)},
         ${input.deploymentEnvironment ?? deploymentEnvironmentForRuntime()},
+        ${CURRENT_ROLLOUT_CONFIGURATION_GENERATION},
         ${nowIso},
         ${nowIso}
       )

@@ -348,6 +348,7 @@ describe("Milestone 1 agent persistence schema", () => {
       "initialCohort",
       "deploymentEnvironment",
       "ownerCancelledAt",
+      "rolloutConfigurationGeneration",
       "canaryState",
       "canaryAttemptedAt",
       "canaryCompletedAt",

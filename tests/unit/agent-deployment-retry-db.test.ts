@@ -1,6 +1,9 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { retryAgentDeploymentForUser } from "@/src/server/agents/agent-deployment-retry";
+import {
+  createAgentDeploymentForRunnerReplacement,
+  retryAgentDeploymentForUser,
+} from "@/src/server/agents/agent-deployment-retry";
 import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentDeployments, agentEvents, agents, users } from "@/src/server/db/schema";
@@ -73,6 +76,7 @@ describe("agent deployment retry persistence", () => {
             idempotencyKey: "Retry-Key-Case",
             attemptCount: 0,
             acceptedAt: expect.any(Date),
+            rolloutConfigurationGeneration: 1,
           }),
         ]),
       );
@@ -163,6 +167,33 @@ describe("agent deployment retry persistence", () => {
     await expect(connection.db.select().from(agentDeployments)).resolves.toHaveLength(1);
     await expect(connection.db.select().from(agentEvents)).resolves.toHaveLength(0);
   });
+
+  it("pins runner-replacement recovery to the triggering rollout configuration", async () => {
+    await seedFailedDeployment(connection, AGENT_A_ID, USER_A_ID, {
+      rolloutConfigurationGeneration: 7,
+    });
+
+    const result = await connection.db.transaction((tx) =>
+      createAgentDeploymentForRunnerReplacement({
+        tx,
+        replacementId: "00000000-0000-4000-8000-000000000797",
+        agentId: AGENT_A_ID,
+        userId: USER_A_ID,
+        now: NOW,
+      }),
+    );
+
+    expect(result).toMatchObject({ created: true });
+    const rows = await connection.db.select().from(agentDeployments);
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          origin: "runner_replacement",
+          rolloutConfigurationGeneration: 7,
+        }),
+      ]),
+    );
+  });
 });
 
 async function seedOwners(connection: DatabaseConnection): Promise<void> {
@@ -193,7 +224,7 @@ async function seedFailedDeployment(
   connection: DatabaseConnection,
   agentId: string,
   userId: string,
-  options: { id?: string; key?: string } = {},
+  options: { id?: string; key?: string; rolloutConfigurationGeneration?: number } = {},
 ): Promise<void> {
   await connection.db.insert(agentDeployments).values({
     id: options.id ?? FAILED_DEPLOYMENT_ID,
@@ -202,6 +233,7 @@ async function seedFailedDeployment(
     stage: "failed",
     configRevision: "cfg-retry-1",
     idempotencyKey: options.key ?? "Failed-Key-001",
+    rolloutConfigurationGeneration: options.rolloutConfigurationGeneration ?? 1,
     errorCode: "runner_start_failed",
     failedAt: new Date(NOW.getTime() - 1_000),
     createdAt: new Date(NOW.getTime() - 2_000),
