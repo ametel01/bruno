@@ -1,5 +1,6 @@
 import {
   isClerkAuthPagePath,
+  isInternalServiceAuthPath,
   isPublicInfrastructurePath,
   isRunnerMachineAuthPath,
 } from "@/src/auth/clerk-transition";
@@ -61,7 +62,7 @@ export function evaluateOperatorAccess(input: {
 }
 
 export function isOperatorProtectedPath(pathname: string): boolean {
-  if (isOperatorPublicPath(pathname)) {
+  if (isOperatorBypassPath(pathname)) {
     return false;
   }
 
@@ -74,9 +75,10 @@ export function isOperatorProtectedPath(pathname: string): boolean {
   );
 }
 
-function isOperatorPublicPath(pathname: string): boolean {
+function isOperatorBypassPath(pathname: string): boolean {
   return (
     isClerkAuthPagePath(pathname) ||
+    isInternalServiceAuthPath(pathname) ||
     isRunnerMachineAuthPath(pathname) ||
     isPublicInfrastructurePath(pathname)
   );

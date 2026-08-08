@@ -34,10 +34,16 @@ describe("operator access path decisions", () => {
     "/runner/v1/register",
     "/runner/v1/heartbeat",
     "/runner/v1/bootstrap-events",
+    "/api/internal/runner-release/required",
+    "/api/internal/agent-deployments/reconcile",
     "/robots.txt",
     "/images/logo.svg",
-  ])("leaves public path %s outside the operator gate", (pathname) => {
+  ])("leaves independently authenticated path %s outside the operator gate", (pathname) => {
     expect(isOperatorProtectedPath(pathname)).toBe(false);
+  });
+
+  it("keeps unknown internal API routes behind the operator gate", () => {
+    expect(isOperatorProtectedPath("/api/internal/future")).toBe(true);
   });
 });
 

@@ -190,6 +190,8 @@ describe("Clerk session proxy", () => {
     "/runner/v1/register",
     "/runner/v1/heartbeat",
     "/runner/v1/bootstrap-events",
+    "/api/internal/runner-release/required",
+    "/api/internal/agent-runtime/reconcile",
   ])("bypasses Clerk entirely for infrastructure or machine route %s", async (pathname) => {
     process.env.BRUNO_AUTH_MODE = "invalid";
     delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;

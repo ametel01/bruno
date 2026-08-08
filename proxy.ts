@@ -9,6 +9,7 @@ import {
 import {
   isBrowserApiPath,
   isClerkAuthPagePath,
+  isInternalServiceAuthPath,
   isPublicInfrastructurePath,
   isRunnerMachineAuthPath,
 } from "@/src/auth/clerk-transition";
@@ -35,6 +36,7 @@ export async function proxy(request: NextRequest, event: NextFetchEvent): Promis
 
   if (
     isRunnerMachineAuthPath(pathname) ||
+    isInternalServiceAuthPath(pathname) ||
     isPublicInfrastructurePath(pathname) ||
     isClerkAuthPagePath(pathname)
   ) {

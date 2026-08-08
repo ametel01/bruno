@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   isBrowserApiPath,
   isClerkAuthPagePath,
+  isInternalServiceAuthPath,
   isPublicInfrastructurePath,
   isRunnerMachineAuthPath,
 } from "@/src/auth/clerk-transition";
@@ -31,6 +32,27 @@ describe("Clerk route matrix", () => {
     "/runner/v2/heartbeat",
   ])("does not broaden the runner bypass to %s", (pathname) => {
     expect(isRunnerMachineAuthPath(pathname)).toBe(false);
+  });
+
+  it.each([
+    "/api/internal/agent-deployments/reconcile",
+    "/api/internal/agent-deployments/wakeup",
+    "/api/internal/agent-runtime/reconcile",
+    "/api/internal/hermes-staging/acceptance",
+    "/api/internal/hermes-staging/reconcile",
+    "/api/internal/runner-infrastructure/reconcile",
+    "/api/internal/runner-release/required",
+    "/api/internal/runner-replacements/reconcile",
+  ])("recognizes independently authenticated internal route %s", (pathname) => {
+    expect(isInternalServiceAuthPath(pathname)).toBe(true);
+  });
+
+  it.each([
+    "/api/internal",
+    "/api/internal/future",
+    "/api/internal/runner-release/required/extra",
+  ])("does not broaden the internal service bypass to %s", (pathname) => {
+    expect(isInternalServiceAuthPath(pathname)).toBe(false);
   });
 
   it.each([
