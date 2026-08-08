@@ -176,6 +176,43 @@ The `snapshot-build` protected environment also defines the non-secret
 through the operator-managed trust set. Keep the current and previous public keys in the set during
 rotation so retained rollback evidence remains independently verifiable.
 
+The same protected environment must define `BRUNO_SNAPSHOT_TRUST_SET` as the JSON map of trusted
+Ed25519 public keys used for publication verification. When an earlier candidate exists, set both
+`BRUNO_SNAPSHOT_PREVIOUS_OCI_REFERENCE` and `BRUNO_SNAPSHOT_PREVIOUS_BUNDLE_DIGEST` to its exact
+digest-addressed GHCR reference and canonical bundle digest. The pair is fail-closed: setting only
+one value stops publication. On the first publication, the new candidate fills both retention roles;
+before the next publication, move that candidate's two identities into the previous-candidate
+variables.
+
+After provider cleanup, the workflow publishes three allowlisted OCI layers to
+`ghcr.io/<owner>/bruno-runner-snapshot-bundles`: the canonical bundle JSON, its `sha256:` bundle
+digest, and the identified Ed25519 public key. It then pulls the artifact by its returned OCI
+manifest digest and re-verifies the artifact type, exact file allowlist, bundle bytes, bundle digest,
+signature, signing key, and active/previous retention pair. The sanitized
+`runner-snapshot-oci-publication.json` convenience copy records both identities:
+
+```json
+{
+  "schemaVersion": "bruno.runner.snapshot.oci-publication.v1",
+  "artifactType": "application/vnd.bruno.runner.snapshot.bundle.v2",
+  "active": {
+    "ociReference": "ghcr.io/example/bruno-runner-snapshot-bundles@sha256:<oci-manifest-digest>",
+    "bundleDigest": "sha256:<canonical-bundle-digest>",
+    "signingKeyId": "<trusted-key-id>"
+  },
+  "previous": {
+    "ociReference": "ghcr.io/example/bruno-runner-snapshot-bundles@sha256:<oci-manifest-digest>",
+    "bundleDigest": "sha256:<canonical-bundle-digest>",
+    "signingKeyId": "<trusted-key-id>"
+  }
+}
+```
+
+Use `active.ociReference` for retrieval and require `active.bundleDigest` when configuring approval.
+The GitHub Actions artifact is retained for operator convenience only; its run ID and artifact name
+are never production identity. Do not delete either digest-addressed active or previous OCI artifact,
+and do not remove either signing key from the trust set while rollback may select it.
+
 Every hosted create path requires the configured approval digest to match the exact canonical
 bundle, resolves its identified signing key from the trust set, verifies its signature, rejects v1,
 and checks exact runner profile, disk, base OS, architecture, region,

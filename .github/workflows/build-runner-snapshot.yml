@@ -48,8 +48,6 @@ concurrency:
 
 permissions:
   contents: read
-  attestations: write
-  id-token: write
 
 jobs:
   build:
@@ -57,6 +55,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: snapshot-build
+    permissions:
+      contents: read
 
     steps:
       - name: Validate authorization and static inputs before secrets
@@ -91,6 +91,7 @@ jobs:
           bun --conditions react-server node_modules/.bin/vitest run --no-file-parallelism
           tests/unit/runner-snapshot-manifest.test.ts
           tests/unit/runner-snapshot-build.test.ts
+          tests/unit/runner-snapshot-registry.test.ts
           tests/unit/runner-snapshot-workflow.test.ts
           tests/unit/server-env.test.ts
 
@@ -194,12 +195,82 @@ jobs:
           rm -f snapshot-artifacts/signing-key.pem
           echo "Cleanup step ran. Provider cleanup is also enforced by the snapshot build script."
 
+      - name: Upload signed snapshot publication input
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-snapshot-publication-input-${{ github.run_id }}
+          path: |
+            snapshot-artifacts/runner-snapshot-bundle.json
+            snapshot-artifacts/runner-snapshot-bundle.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish protected snapshot bundle
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: snapshot-build
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+
+    steps:
+      - name: Check out trusted publication code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Set up ORAS
+        uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6 # v1
+        with:
+          version: 1.3.3
+
+      - name: Download signed snapshot publication input
+        uses: actions/download-artifact@v4
+        with:
+          name: runner-snapshot-publication-input-${{ github.run_id }}
+          path: snapshot-artifacts
+
+      - name: Log in to GHCR for snapshot bundle publication
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Publish and re-verify digest-addressed snapshot bundle
+        env:
+          BRUNO_SNAPSHOT_TRUST_SET: ${{ vars.BRUNO_SNAPSHOT_TRUST_SET }}
+          BRUNO_SNAPSHOT_PREVIOUS_OCI_REFERENCE: ${{ vars.BRUNO_SNAPSHOT_PREVIOUS_OCI_REFERENCE }}
+          BRUNO_SNAPSHOT_PREVIOUS_BUNDLE_DIGEST: ${{ vars.BRUNO_SNAPSHOT_PREVIOUS_BUNDLE_DIGEST }}
+        run: |
+          set -euo pipefail
+          bun run runner:snapshot:registry -- publish \
+            --repository "ghcr.io/${{ github.repository_owner }}/bruno-runner-snapshot-bundles" \
+            --bundle snapshot-artifacts/runner-snapshot-bundle.json \
+            --digest snapshot-artifacts/runner-snapshot-bundle.sha256 \
+            --public-key-out snapshot-artifacts/runner-snapshot-signing-key.pem \
+            --publication-out snapshot-artifacts/runner-snapshot-oci-publication.json
+
       - name: Attest allowlisted bundle artifacts
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
             snapshot-artifacts/runner-snapshot-bundle.json
             snapshot-artifacts/runner-snapshot-bundle.sha256
+            snapshot-artifacts/runner-snapshot-signing-key.pem
+            snapshot-artifacts/runner-snapshot-oci-publication.json
 
       - name: Upload allowlisted bundle artifacts
         uses: actions/upload-artifact@v4
@@ -208,5 +279,7 @@ jobs:
           path: |
             snapshot-artifacts/runner-snapshot-bundle.json
             snapshot-artifacts/runner-snapshot-bundle.sha256
+            snapshot-artifacts/runner-snapshot-signing-key.pem
+            snapshot-artifacts/runner-snapshot-oci-publication.json
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90

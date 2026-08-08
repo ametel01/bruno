@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 describe("runner snapshot workflow", () => {
   it("is protected, manually dispatched only, and keeps provider secrets out of ordinary CI", async () => {
@@ -14,8 +14,10 @@ describe("runner snapshot workflow", () => {
     expect(workflow).toContain("cancel-in-progress: false");
     expect(workflow).toContain("permissions:");
     expect(workflow).toContain("contents: read");
+    expect(workflow).toContain("packages: write");
     expect(workflow).toContain("attestations: write");
     expect(workflow).toContain("id-token: write");
+    expect(workflow).not.toContain("actions: write");
     expect(workflow).toContain("Validate authorization and static inputs before secrets");
     expect(
       workflow.indexOf("Validate authorization and static inputs before secrets"),
@@ -72,6 +74,71 @@ describe("runner snapshot workflow", () => {
       ".github/workflows/deploy-production.yml",
     ]) {
       expect(await readFile(file, "utf8")).not.toContain("BRUNO_DIGITALOCEAN_TOKEN");
+    }
+  });
+
+  it("publishes and retrieves the exact signed bundle as a digest-addressed GHCR artifact", async () => {
+    const workflow = await readFile(".github/workflows/build-runner-snapshot.yml", "utf8");
+    const parsed = parse(workflow) as {
+      jobs: Record<string, { needs?: string; permissions?: Record<string, string> }>;
+    };
+    const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
+      scripts: Record<string, string>;
+    };
+
+    expect(parsed.jobs.build?.permissions).toEqual({ contents: "read" });
+    expect(parsed.jobs.publish?.needs).toBe("build");
+    expect(parsed.jobs.publish?.permissions).toEqual({
+      contents: "read",
+      packages: "write",
+      attestations: "write",
+      "id-token": "write",
+    });
+    expect(workflow).toContain("oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6");
+    expect(workflow).toContain("version: 1.3.3");
+    expect(workflow).toContain("docker/login-action@v3");
+    expect(workflow).toContain("registry: ghcr.io");
+    expect(workflow).toContain("password: $" + "{{ github.token }}");
+    expect(workflow).toContain(
+      "ghcr.io/$" + "{{ github.repository_owner }}/bruno-runner-snapshot-bundles",
+    );
+    expect(workflow).toContain("Publish and re-verify digest-addressed snapshot bundle");
+    expect(workflow).toContain("bun run runner:snapshot:registry -- publish");
+    expect(workflow).toContain("runner-snapshot-oci-publication.json");
+    expect(workflow.indexOf("Validate retrieved builder evidence")).toBeLessThan(
+      workflow.indexOf("Publish and re-verify digest-addressed snapshot bundle"),
+    );
+    expect(workflow).toContain("Upload signed snapshot publication input");
+    expect(workflow).toContain("Download signed snapshot publication input");
+    expect(packageJson.scripts["runner:snapshot:registry"]).toContain(
+      "scripts/publish-runner-snapshot-bundle.ts",
+    );
+  });
+
+  it("keeps active and previous approval candidates independently verifiable", async () => {
+    const workflow = await readFile(".github/workflows/build-runner-snapshot.yml", "utf8");
+
+    expect(workflow).toContain("BRUNO_SNAPSHOT_TRUST_SET");
+    expect(workflow).toContain("BRUNO_SNAPSHOT_PREVIOUS_OCI_REFERENCE");
+    expect(workflow).toContain("BRUNO_SNAPSHOT_PREVIOUS_BUNDLE_DIGEST");
+    expect(workflow).toContain("runner-snapshot-signing-key.pem");
+    expect(workflow).toContain("runner-snapshot-oci-publication.json");
+    expect(workflow).toContain("retention-days: 90");
+    expect(workflow).not.toContain("delete-package-version");
+    expect(workflow).not.toContain("oras manifest delete");
+  });
+
+  it("does not let ordinary CI or credential-free release workflows dispatch provider work", async () => {
+    for (const file of [
+      ".github/workflows/ci.yml",
+      ".github/workflows/publish-agent-image.yml",
+      ".github/workflows/deploy-production.yml",
+    ]) {
+      const workflow = await readFile(file, "utf8");
+      expect(workflow).not.toContain("actions: write");
+      expect(workflow).not.toContain("build-runner-snapshot.yml");
+      expect(workflow).not.toContain("runner:snapshot:build");
+      expect(workflow).not.toContain("runner:snapshot:registry");
     }
   });
 

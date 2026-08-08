@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Protected snapshot builds now publish each sanitized signed Snapshot Attestation v2 bundle to
+  GHCR as an OCI artifact, return only its immutable OCI manifest reference plus exact bundle
+  digest, re-pull and verify both identities, retain the signing public key with the bundle, and
+  verify active and previous approval candidates without granting ordinary CI or release workflows
+  provider-dispatch authority.
 - Snapshot Attestation v2 now binds exact immutable runner, default-agent, Hermes, boot-contract,
   base OS, architecture, region, disk, and provider-availability identities in a canonical signed
   bundle. Production selects one exact revocable digest, verifies the bundle through an overlapping
