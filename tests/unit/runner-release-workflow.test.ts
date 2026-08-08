@@ -85,7 +85,7 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).not.toMatch(/cloud-init.*GITHUB_STEP_SUMMARY/i);
   });
 
-  it("stages a compatible production candidate and promotes that exact deployment", () => {
+  it("stages an operator-protected production candidate and promotes that exact deployment", () => {
     expect(workflowSource).toContain("stage-control-plane:");
     expect(workflowSource).toContain("outputs:\n      deployment-url:");
     expect(workflowSource).toContain("deploy --prod --skip-domain --yes");
@@ -98,7 +98,8 @@ describe("runner release workflow contract", () => {
       "vercel@$" + '{VERCEL_CLI_VERSION} promote "$' + '{CANDIDATE_DEPLOYMENT_URL}"',
     );
     expect(workflowSource).not.toContain("RUNNER_RELEASE_CONTROL_PLANE_URL");
-    expect(workflowSource.match(/BRUNO_AUTH_MODE=clerk/g)).toHaveLength(4);
+    expect(workflowSource.match(/BRUNO_AUTH_MODE=operator/g)).toHaveLength(4);
+    expect(workflowSource).not.toContain("BRUNO_AUTH_MODE=clerk");
   });
 
   it("targets the linked Vercel project with explicitly authorized CLI token authentication", () => {

@@ -162,10 +162,10 @@ jobs:
           set -euo pipefail
           CANDIDATE_DEPLOYMENT_URL="$(bunx vercel@${VERCEL_CLI_VERSION} deploy --prod --skip-domain --yes \
             --token="${VERCEL_TOKEN}" \
-            --env "BRUNO_AUTH_MODE=clerk" \
+            --env "BRUNO_AUTH_MODE=operator" \
             --env "BRUNO_RUNNER_IMAGE=${IMMUTABLE_IMAGE}" \
             --env "BRUNO_RUNNER_ROLLOUT_BATCH_SIZE=1" \
-            --build-env "BRUNO_AUTH_MODE=clerk" \
+            --build-env "BRUNO_AUTH_MODE=operator" \
             --build-env "BRUNO_CANARY_VERIFIED_DEPLOY=true" \
             --build-env "BRUNO_RUNNER_IMAGE=${IMMUTABLE_IMAGE}" \
             --build-env "BRUNO_RUNNER_ROLLOUT_BATCH_SIZE=1")"
@@ -290,10 +290,10 @@ jobs:
           set -euo pipefail
           bunx vercel@${VERCEL_CLI_VERSION} deploy --prod --yes \
             --token="${VERCEL_TOKEN}" \
-            --env "BRUNO_AUTH_MODE=clerk" \
+            --env "BRUNO_AUTH_MODE=operator" \
             --env "BRUNO_RUNNER_IMAGE=${ROLLBACK_IMAGE}" \
             --env "BRUNO_RUNNER_ROLLOUT_BATCH_SIZE=0" \
-            --build-env "BRUNO_AUTH_MODE=clerk" \
+            --build-env "BRUNO_AUTH_MODE=operator" \
             --build-env "BRUNO_CANARY_VERIFIED_DEPLOY=true" \
             --build-env "BRUNO_RUNNER_IMAGE=${ROLLBACK_IMAGE}" \
             --build-env "BRUNO_RUNNER_ROLLOUT_BATCH_SIZE=0"
