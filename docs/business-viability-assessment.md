@@ -198,7 +198,7 @@ service model.
 
 Before the experiment, complete only what is necessary to deliver and observe one real workflow:
 
-- Live Hermes plus Telegram acceptance on the intended $4 runner.
+- Live Hermes plus Telegram acceptance on the provisional $12 2 GiB runner.
 - Reliable provider authentication and recovery.
 - A single role-specific onboarding path.
 - First-job instrumentation, runtime health, and a support intervention log.
@@ -226,7 +226,7 @@ apps, marketplaces, and advanced plan structures.
 - The first useful outcome occurs within 30 minutes of beginning onboarding.
 - After the first two pilots, founder-assisted onboarding falls below 20 minutes.
 - Recurring support trends toward less than ten minutes per user per month.
-- The $4 or $6 runner tier operates reliably for the validated workflow.
+- The provisional $12 2 GiB runner operates reliably for the validated workflow.
 - At least one user asks Bruno to take on additional recurring work.
 
 ### Reposition or stop criteria
