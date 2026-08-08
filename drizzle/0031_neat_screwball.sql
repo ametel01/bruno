@@ -107,6 +107,19 @@ DECLARE
 	deployment_idempotency_key text;
 BEGIN
 	IF TG_OP = 'INSERT' THEN
+		IF NEW.request_attempt_id IS NOT NULL
+			OR NEW.request_started_at IS NOT NULL
+			OR NEW.request_outcome IS NOT NULL
+			OR NEW.request_safe_code IS NOT NULL
+			OR NEW.request_outcome_recorded_at IS NOT NULL
+			OR NEW.deployment_id IS NOT NULL
+			OR NEW.terminal_outcome IS NOT NULL
+			OR NEW.terminal_safe_code IS NOT NULL
+			OR NEW.terminal_recorded_at IS NOT NULL THEN
+			RAISE EXCEPTION 'Provider Trial slot membership must exist before request evidence'
+				USING ERRCODE = '23514', CONSTRAINT = 'provider_trial_slots_insert_evidence_check';
+		END IF;
+
 		SELECT started_at INTO cohort_started_at
 		FROM provider_trial_cohorts
 		WHERE id = NEW.cohort_id

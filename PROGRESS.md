@@ -405,8 +405,8 @@ cold-deployment plan.
   Telegram, endpoint, raw deployment error, or arbitrary provider metadata. Safe outcome codes use
   a database-enforced closed vocabulary.
 - Focused benchmark, schema, migration, concurrency, selection, signing, and redaction coverage
-  passed 59 tests against isolated PostgreSQL 17. `bun run verify` passed formatting, lint, type
-  checking, 176 unit files / 1,772 tests, and the production build. Credential-free browser E2E
+  passed 60 tests against isolated PostgreSQL 17. Formatting, lint, type checking, 176 unit files /
+  1,773 tests, and the production build passed. Credential-free browser E2E
   passed 26/26 with explicit development authentication after migrating the disposable database.
 - No DigitalOcean request, provider trial, hosted configuration change, secret mutation, deployment,
   or billable effect ran. Live cohort driving remains separately owned by issue #298 and requires

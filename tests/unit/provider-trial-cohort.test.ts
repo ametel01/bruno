@@ -144,6 +144,56 @@ describe("Provider Trial Cohort ledger", () => {
     });
   });
 
+  it("rejects evidence-bearing slot inserts before a cohort starts", async () => {
+    const cohort = await createCohort(connection);
+    const [slot] = await connection.db
+      .select()
+      .from(providerTrialSlots)
+      .where(eq(providerTrialSlots.cohortId, cohort.id))
+      .limit(1);
+    if (!slot) throw new Error("Provider Trial fixture has no slot to replace.");
+
+    await connection.db.delete(providerTrialSlots).where(eq(providerTrialSlots.id, slot.id));
+
+    await expect(
+      connection.db.insert(providerTrialSlots).values({
+        cohortId: cohort.id,
+        slotNumber: slot.slotNumber,
+        requestAttemptId: UNRELATED_REQUEST_ATTEMPT_ID,
+        requestStartedAt: new Date(Date.now() + 1_000),
+      }),
+    ).rejects.toMatchObject({
+      cause: { constraint_name: "provider_trial_slots_insert_evidence_check" },
+    });
+
+    await seedDeployment(connection, {
+      id: DEPLOYMENT_ID,
+      requestAttemptId: UNRELATED_REQUEST_ATTEMPT_ID,
+      stage: "pending",
+    });
+    const requestStartedAt = new Date(Date.now() + 1_000);
+    await expect(
+      connection.db.insert(providerTrialSlots).values({
+        cohortId: cohort.id,
+        slotNumber: slot.slotNumber,
+        requestAttemptId: UNRELATED_REQUEST_ATTEMPT_ID,
+        requestStartedAt,
+        requestOutcome: "committed",
+        requestOutcomeRecordedAt: new Date(requestStartedAt.getTime() + 1_000),
+        deploymentId: DEPLOYMENT_ID,
+      }),
+    ).rejects.toMatchObject({
+      cause: { constraint_name: "provider_trial_slots_insert_evidence_check" },
+    });
+
+    await expect(
+      connection.db.insert(providerTrialSlots).values({
+        cohortId: cohort.id,
+        slotNumber: slot.slotNumber,
+      }),
+    ).resolves.toBeDefined();
+  });
+
   it("links a committed request to its exact operator-trial deployment and retains its terminal outcome", async () => {
     const cohort = await createCohort(connection);
     const attempt = await beginProviderTrialSlot(connection, {
