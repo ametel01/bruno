@@ -59,6 +59,7 @@ try {
     builderSshKeyId,
     builderSshPrivateKeyPath,
     privateKeyPem,
+    signingKeyId: args.signingKeyId,
     provider,
     context: { signal: controller.signal },
   });
@@ -78,10 +79,9 @@ try {
     `${JSON.stringify(result.sanitationResult, null, 2)}\n`,
     { mode: 0o600 },
   );
-  await writeFile(args.manifestOut, result.manifestBytes, { mode: 0o600 });
-  await writeFile(args.signatureOut, `${result.signature}\n`, { mode: 0o600 });
+  await writeFile(args.bundleOut, result.bundleBytes, { mode: 0o600 });
   await writeFile(args.digestOut, `${result.digest}\n`, { mode: 0o600 });
-  process.stdout.write("Runner snapshot manifest written with allowlisted evidence only.\n");
+  process.stdout.write("Runner snapshot v2 bundle written with allowlisted evidence only.\n");
 } finally {
   clearTimeout(timeout);
   if (builderSshKeyId && provider) {
@@ -106,6 +106,9 @@ function validatePreEffectArgs(input: ReturnType<typeof parseArgs>): void {
   if (!/^[1-9][0-9]{0,18}$/.test(input.runId)) throw new Error("--run-id is invalid.");
   if (!/^[a-f0-9]{40}$/.test(input.sourceRevision)) {
     throw new Error("--source-revision is invalid.");
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.signingKeyId)) {
+    throw new Error("--signing-key-id is invalid.");
   }
   for (const [key, value] of [
     ["region", input.region],
@@ -156,10 +159,10 @@ function parseArgs(values: string[]) {
     hermesImage: requiredArg(parsed, "hermes-image"),
     controllerCidr: requiredArg(parsed, "controller-cidr"),
     signingKeyPath: requiredArg(parsed, "signing-key"),
+    signingKeyId: requiredArg(parsed, "signing-key-id"),
     bootResultOut: requiredArg(parsed, "boot-result-out"),
     sanitationResultOut: requiredArg(parsed, "sanitation-result-out"),
-    manifestOut: requiredArg(parsed, "manifest-out"),
-    signatureOut: requiredArg(parsed, "signature-out"),
+    bundleOut: requiredArg(parsed, "bundle-out"),
     digestOut: requiredArg(parsed, "digest-out"),
   };
 }

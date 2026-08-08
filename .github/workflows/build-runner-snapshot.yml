@@ -60,6 +60,8 @@ jobs:
 
     steps:
       - name: Validate authorization and static inputs before secrets
+        env:
+          BRUNO_SNAPSHOT_SIGNING_KEY_ID: ${{ vars.BRUNO_SNAPSHOT_SIGNING_KEY_ID }}
         run: |
           set -euo pipefail
           test "${{ inputs.cost_authorization }}" = "I_UNDERSTAND_THIS_CREATES_A_BILLABLE_SNAPSHOT_BUILDER"
@@ -69,6 +71,7 @@ jobs:
           [[ "${{ inputs.runner_image }}" =~ @sha256:[a-f0-9]{64}$ ]]
           [[ "${{ inputs.default_agent_image }}" =~ @sha256:[a-f0-9]{64}$ ]]
           [[ "${{ inputs.hermes_image }}" =~ @sha256:[a-f0-9]{64}$ ]]
+          [[ "$BRUNO_SNAPSHOT_SIGNING_KEY_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]
 
       - name: Check out exact source revision
         uses: actions/checkout@v4
@@ -109,9 +112,10 @@ jobs:
       - name: Prepare allowlisted artifact directory
         run: install -m 0750 -d snapshot-artifacts
 
-      - name: Build snapshot and signed manifest
+      - name: Build signed snapshot bundle
         env:
           BRUNO_DIGITALOCEAN_TOKEN: ${{ secrets.BRUNO_DIGITALOCEAN_TOKEN }}
+          BRUNO_SNAPSHOT_SIGNING_KEY_ID: ${{ vars.BRUNO_SNAPSHOT_SIGNING_KEY_ID }}
         run: |
           set -euo pipefail
           install -m 0600 /dev/null snapshot-artifacts/signing-key.pem
@@ -131,9 +135,9 @@ jobs:
             --boot-result-out snapshot-artifacts/boot-result.json \
             --sanitation-result-out snapshot-artifacts/sanitation-result.json \
             --signing-key snapshot-artifacts/signing-key.pem \
-            --manifest-out snapshot-artifacts/runner-snapshot-manifest.json \
-            --signature-out snapshot-artifacts/runner-snapshot-manifest.sig \
-            --digest-out snapshot-artifacts/runner-snapshot-manifest.sha256
+            --signing-key-id "$BRUNO_SNAPSHOT_SIGNING_KEY_ID" \
+            --bundle-out snapshot-artifacts/runner-snapshot-bundle.json \
+            --digest-out snapshot-artifacts/runner-snapshot-bundle.sha256
 
       - name: Validate retrieved builder evidence
         env:
@@ -182,21 +186,19 @@ jobs:
           rm -f snapshot-artifacts/signing-key.pem
           echo "Cleanup step ran. Provider cleanup is also enforced by the snapshot build script."
 
-      - name: Attest allowlisted manifest artifacts
+      - name: Attest allowlisted bundle artifacts
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
-            snapshot-artifacts/runner-snapshot-manifest.json
-            snapshot-artifacts/runner-snapshot-manifest.sig
-            snapshot-artifacts/runner-snapshot-manifest.sha256
+            snapshot-artifacts/runner-snapshot-bundle.json
+            snapshot-artifacts/runner-snapshot-bundle.sha256
 
-      - name: Upload allowlisted manifest artifacts
+      - name: Upload allowlisted bundle artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: runner-snapshot-manifest-${{ github.run_id }}
+          name: runner-snapshot-bundle-${{ github.run_id }}
           path: |
-            snapshot-artifacts/runner-snapshot-manifest.json
-            snapshot-artifacts/runner-snapshot-manifest.sig
-            snapshot-artifacts/runner-snapshot-manifest.sha256
+            snapshot-artifacts/runner-snapshot-bundle.json
+            snapshot-artifacts/runner-snapshot-bundle.sha256
           if-no-files-found: error
           retention-days: 30

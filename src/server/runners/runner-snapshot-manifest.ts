@@ -13,20 +13,30 @@ import type {
   DigitalOceanProviderRequestContext,
 } from "@/src/server/runners/digitalocean-provider";
 
-export const RUNNER_SNAPSHOT_MANIFEST_SCHEMA_VERSION = "bruno.runner.snapshot.v1";
+export const RUNNER_SNAPSHOT_MANIFEST_SCHEMA_VERSION = "bruno.runner.snapshot.v2";
+export const RUNNER_SNAPSHOT_BUNDLE_SCHEMA_VERSION = "bruno.runner.snapshot.bundle.v1";
 
-const MAX_MANIFEST_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+const SNAPSHOT_SIGNATURE_ALGORITHM = "Ed25519";
 const SHA256_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const SNAPSHOT_ID_PATTERN = /^[1-9][0-9]{0,18}$/;
 const DIGITALOCEAN_SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/;
 const SAFE_IDENTITY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,254}$/;
+const SIGNING_KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 
 export type RunnerSnapshotManifest = {
   schemaVersion: typeof RUNNER_SNAPSHOT_MANIFEST_SCHEMA_VERSION;
+  runner: {
+    region: string;
+    sizeSlug: string;
+    diskSizeGb: number;
+    architecture: "amd64";
+  };
   snapshot: {
+    provider: "digitalocean";
     id: string;
     name: string;
+    status: "available";
     regions: string[];
     minDiskSizeGb: number;
     architecture: "amd64";
@@ -63,52 +73,96 @@ export type RunnerSnapshotManifest = {
   };
   createdAt: string;
   availableAt: string;
-  expiresAt: string;
+};
+
+export type RunnerSnapshotBundle = {
+  schemaVersion: typeof RUNNER_SNAPSHOT_BUNDLE_SCHEMA_VERSION;
+  manifest: RunnerSnapshotManifest;
+  signature: {
+    algorithm: typeof SNAPSHOT_SIGNATURE_ALGORITHM;
+    keyId: string;
+    value: string;
+  };
 };
 
 export type RunnerSnapshotAttestation = {
-  manifest: RunnerSnapshotManifest;
-  canonicalBytes: string;
+  bundle: RunnerSnapshotBundle;
+  bundleBytes: string;
   digest: string;
-  signature: string;
 };
 
 export type RunnerSnapshotManifestFailureReason =
-  | "manifest_json_invalid"
+  | "bundle_json_invalid"
+  | "bundle_schema_invalid"
   | "manifest_schema_invalid"
   | "manifest_signature_invalid"
+  | "manifest_signing_key_untrusted"
+  | "manifest_not_approved"
   | "manifest_identity_mismatch"
-  | "manifest_stale"
-  | "manifest_not_yet_valid"
   | "manifest_region_unavailable"
   | "manifest_min_disk_mismatch"
   | "provider_image_lookup_unavailable"
   | "provider_image_unavailable";
 
 export type RunnerSnapshotManifestCheck =
-  | { ok: true; manifest: RunnerSnapshotManifest; digest: string }
+  | {
+      ok: true;
+      manifest: RunnerSnapshotManifest;
+      bundle: RunnerSnapshotBundle;
+      digest: string;
+      signingKeyId: string;
+    }
   | { ok: false; reason: RunnerSnapshotManifestFailureReason };
 
 export type RunnerSnapshotExpectedIdentities = {
   region: string;
+  sizeSlug: string;
   sizeDiskGb: number;
   baseImageSlug: string;
   architecture: "amd64";
   runnerImage: string;
   defaultAgentImage: string;
   hermesImage: string;
-  sourceRepository: string;
-  sourceRevision: string;
   bootContractVersion?: string;
-  now?: Date;
 };
 
+export type RunnerSnapshotTrustedPublicKeys = Readonly<Record<string, string>>;
+
 export type RunnerSnapshotManifestSelection =
-  | { ok: true; image: string; manifest: RunnerSnapshotManifest; digest: string }
+  | {
+      ok: true;
+      image: string;
+      manifest: RunnerSnapshotManifest;
+      bundle: RunnerSnapshotBundle;
+      digest: string;
+      signingKeyId: string;
+    }
   | { ok: false; reason: RunnerSnapshotManifestFailureReason };
+
+type ParsedRunnerSnapshotManifest =
+  | { ok: true; manifest: RunnerSnapshotManifest }
+  | { ok: false; reason: "manifest_schema_invalid" };
+
+type ParsedRunnerSnapshotBundle =
+  | { ok: true; bundle: RunnerSnapshotBundle; digest: string }
+  | {
+      ok: false;
+      reason: "bundle_json_invalid" | "bundle_schema_invalid" | "manifest_schema_invalid";
+    };
+
+type RunnerSnapshotIdentityCheck =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        | "manifest_identity_mismatch"
+        | "manifest_region_unavailable"
+        | "manifest_min_disk_mismatch";
+    };
 
 export function createRunnerSnapshotAttestation(input: {
   manifest: RunnerSnapshotManifest;
+  signingKeyId: string;
   privateKeyPem: string;
 }): RunnerSnapshotAttestation {
   const parsed = parseRunnerSnapshotManifest(input.manifest);
@@ -116,53 +170,74 @@ export function createRunnerSnapshotAttestation(input: {
   if (!parsed.ok) {
     throw new Error(`Runner snapshot manifest is invalid: ${parsed.reason}.`);
   }
+  if (!SIGNING_KEY_ID_PATTERN.test(input.signingKeyId)) {
+    throw new Error("Runner snapshot signing key ID is invalid.");
+  }
 
   const canonicalBytes = canonicalJson(parsed.manifest);
   const signature = sign(null, Buffer.from(canonicalBytes), input.privateKeyPem).toString(
     "base64url",
   );
+  const bundle: RunnerSnapshotBundle = {
+    schemaVersion: RUNNER_SNAPSHOT_BUNDLE_SCHEMA_VERSION,
+    manifest: parsed.manifest,
+    signature: {
+      algorithm: SNAPSHOT_SIGNATURE_ALGORITHM,
+      keyId: input.signingKeyId,
+      value: signature,
+    },
+  };
+  const bundleBytes = canonicalJson(bundle);
 
   return {
-    manifest: parsed.manifest,
-    canonicalBytes,
-    digest: digestCanonicalBytes(canonicalBytes),
-    signature,
+    bundle,
+    bundleBytes,
+    digest: digestCanonicalBytes(bundleBytes),
   };
 }
 
-export function verifyRunnerSnapshotManifest(input: {
-  manifestBytes: string;
-  signature: string;
-  publicKeyPem: string;
+export function verifyRunnerSnapshotBundle(input: {
+  bundleBytes: string;
+  approvedDigest?: string;
+  trustedPublicKeys: RunnerSnapshotTrustedPublicKeys;
   expected: RunnerSnapshotExpectedIdentities;
 }): RunnerSnapshotManifestCheck {
-  let raw: unknown;
-
-  try {
-    raw = JSON.parse(input.manifestBytes);
-  } catch {
-    return { ok: false, reason: "manifest_json_invalid" };
-  }
-
-  const parsed = parseRunnerSnapshotManifest(raw);
+  const parsed = parseRunnerSnapshotBundle(input.bundleBytes);
 
   if (!parsed.ok) {
     return parsed;
   }
+  if (input.approvedDigest !== parsed.digest) {
+    return { ok: false, reason: "manifest_not_approved" };
+  }
 
-  const canonicalBytes = canonicalJson(parsed.manifest);
-  const verified = verify(
-    null,
-    Buffer.from(canonicalBytes),
-    input.publicKeyPem,
-    Buffer.from(input.signature, "base64url"),
-  );
+  const { bundle } = parsed;
+  const publicKeyPem = Object.hasOwn(input.trustedPublicKeys, bundle.signature.keyId)
+    ? input.trustedPublicKeys[bundle.signature.keyId]
+    : undefined;
+
+  if (!publicKeyPem) {
+    return { ok: false, reason: "manifest_signing_key_untrusted" };
+  }
+
+  let verified = false;
+
+  try {
+    verified = verify(
+      null,
+      Buffer.from(canonicalJson(bundle.manifest)),
+      publicKeyPem,
+      Buffer.from(bundle.signature.value, "base64url"),
+    );
+  } catch {
+    return { ok: false, reason: "manifest_signature_invalid" };
+  }
 
   if (!verified) {
     return { ok: false, reason: "manifest_signature_invalid" };
   }
 
-  const identity = checkManifestIdentities(parsed.manifest, input.expected);
+  const identity = checkManifestIdentities(bundle.manifest, input.expected);
 
   if (!identity.ok) {
     return identity;
@@ -170,34 +245,35 @@ export function verifyRunnerSnapshotManifest(input: {
 
   return {
     ok: true,
-    manifest: parsed.manifest,
-    digest: digestCanonicalBytes(canonicalBytes),
+    manifest: bundle.manifest,
+    bundle,
+    digest: parsed.digest,
+    signingKeyId: bundle.signature.keyId,
   };
 }
 
-export async function selectVerifiedRunnerSnapshotImage(input: {
-  manifestBytes?: string;
-  signature?: string;
-  publicKeyPem?: string;
+export async function selectApprovedRunnerSnapshotImage(input: {
+  bundleBytes?: string;
+  approvedDigest?: string;
+  trustedPublicKeys: RunnerSnapshotTrustedPublicKeys;
   expected: RunnerSnapshotExpectedIdentities;
   provider: DigitalOceanProvider;
   context?: DigitalOceanProviderRequestContext;
 }): Promise<RunnerSnapshotManifestSelection> {
-  if (!input.manifestBytes || !input.signature || !input.publicKeyPem) {
-    return { ok: false, reason: "manifest_schema_invalid" };
+  if (!input.bundleBytes) {
+    return { ok: false, reason: "bundle_schema_invalid" };
   }
 
-  const verified = verifyRunnerSnapshotManifest({
-    manifestBytes: input.manifestBytes,
-    signature: input.signature,
-    publicKeyPem: input.publicKeyPem,
+  const verified = verifyRunnerSnapshotBundle({
+    bundleBytes: input.bundleBytes,
+    ...(input.approvedDigest ? { approvedDigest: input.approvedDigest } : {}),
+    trustedPublicKeys: input.trustedPublicKeys,
     expected: input.expected,
   });
 
   if (!verified.ok) {
     return verified;
   }
-
   if (!input.provider.readImageAvailability) {
     return { ok: false, reason: "provider_image_lookup_unavailable" };
   }
@@ -207,7 +283,7 @@ export async function selectVerifiedRunnerSnapshotImage(input: {
     input.context,
   );
 
-  if (!image.ok || !imageAvailableForManifest(image.value, verified.manifest, input.expected)) {
+  if (!image.ok || !imageAvailableForManifest(image.value, verified.manifest)) {
     return { ok: false, reason: "provider_image_unavailable" };
   }
 
@@ -215,15 +291,56 @@ export async function selectVerifiedRunnerSnapshotImage(input: {
     ok: true,
     image: verified.manifest.snapshot.id,
     manifest: verified.manifest,
+    bundle: verified.bundle,
     digest: verified.digest,
+    signingKeyId: verified.signingKeyId,
   };
 }
 
-export function parseRunnerSnapshotManifest(raw: unknown): RunnerSnapshotManifestCheck {
+export function parseRunnerSnapshotBundle(bundleBytes: string): ParsedRunnerSnapshotBundle {
+  let raw: unknown;
+
+  try {
+    raw = JSON.parse(bundleBytes);
+  } catch {
+    return { ok: false, reason: "bundle_json_invalid" };
+  }
+
+  if (
+    !isRecord(raw) ||
+    hasUnknownKeys(raw, ["schemaVersion", "manifest", "signature"]) ||
+    raw.schemaVersion !== RUNNER_SNAPSHOT_BUNDLE_SCHEMA_VERSION ||
+    !isBundleSignature(raw.signature)
+  ) {
+    return { ok: false, reason: "bundle_schema_invalid" };
+  }
+
+  const manifest = parseRunnerSnapshotManifest(raw.manifest);
+
+  if (!manifest.ok) {
+    return manifest;
+  }
+
+  const bundle: RunnerSnapshotBundle = {
+    schemaVersion: RUNNER_SNAPSHOT_BUNDLE_SCHEMA_VERSION,
+    manifest: manifest.manifest,
+    signature: raw.signature,
+  };
+  const canonicalBytes = canonicalJson(bundle);
+
+  return {
+    ok: true,
+    bundle,
+    digest: digestCanonicalBytes(canonicalBytes),
+  };
+}
+
+export function parseRunnerSnapshotManifest(raw: unknown): ParsedRunnerSnapshotManifest {
   if (!isRecord(raw) || hasUnknownKeys(raw, RUNNER_SNAPSHOT_MANIFEST_KEYS)) {
     return { ok: false, reason: "manifest_schema_invalid" };
   }
 
+  const runner = raw.runner;
   const snapshot = raw.snapshot;
   const baseImage = raw.baseImage;
   const runnerImage = raw.runnerImage;
@@ -235,6 +352,7 @@ export function parseRunnerSnapshotManifest(raw: unknown): RunnerSnapshotManifes
 
   if (
     raw.schemaVersion !== RUNNER_SNAPSHOT_MANIFEST_SCHEMA_VERSION ||
+    !isRunner(runner) ||
     !isSnapshot(snapshot) ||
     !isBaseImage(baseImage) ||
     !isDigestImage(runnerImage) ||
@@ -245,24 +363,18 @@ export function parseRunnerSnapshotManifest(raw: unknown): RunnerSnapshotManifes
     !isWorkflow(workflow) ||
     !isValidation(validation) ||
     !isIsoTimestamp(raw.createdAt) ||
-    !isIsoTimestamp(raw.availableAt) ||
-    !isIsoTimestamp(raw.expiresAt)
+    !isIsoTimestamp(raw.availableAt)
   ) {
     return { ok: false, reason: "manifest_schema_invalid" };
   }
 
   const manifest = raw as RunnerSnapshotManifest;
-  const ordered = checkTimestampOrder(manifest);
 
-  if (!ordered.ok) {
-    return ordered;
+  if (!timestampsAreOrdered(manifest)) {
+    return { ok: false, reason: "manifest_schema_invalid" };
   }
 
-  return {
-    ok: true,
-    manifest,
-    digest: digestCanonicalBytes(canonicalJson(manifest)),
-  };
+  return { ok: true, manifest };
 }
 
 export function canonicalJson(value: unknown): string {
@@ -272,31 +384,21 @@ export function canonicalJson(value: unknown): string {
 function checkManifestIdentities(
   manifest: RunnerSnapshotManifest,
   expected: RunnerSnapshotExpectedIdentities,
-): RunnerSnapshotManifestCheck {
-  const now = expected.now ?? new Date();
-  const createdAt = new Date(manifest.createdAt).getTime();
-  const availableAt = new Date(manifest.availableAt).getTime();
-  const expiresAt = new Date(manifest.expiresAt).getTime();
+): RunnerSnapshotIdentityCheck {
   const runner = parseImmutableRunnerImageReference(expected.runnerImage);
   const agent = parseImmutableRunnerImageReference(expected.defaultAgentImage);
-
-  if (createdAt > now.getTime() || availableAt > now.getTime()) {
-    return { ok: false, reason: "manifest_not_yet_valid" };
-  }
-
-  if (expiresAt <= now.getTime() || now.getTime() - availableAt > MAX_MANIFEST_AGE_MS) {
-    return { ok: false, reason: "manifest_stale" };
-  }
 
   if (!manifest.snapshot.regions.includes(expected.region)) {
     return { ok: false, reason: "manifest_region_unavailable" };
   }
-
   if (manifest.snapshot.minDiskSizeGb > expected.sizeDiskGb) {
     return { ok: false, reason: "manifest_min_disk_mismatch" };
   }
-
   if (
+    manifest.runner.region !== expected.region ||
+    manifest.runner.sizeSlug !== expected.sizeSlug ||
+    manifest.runner.diskSizeGb !== expected.sizeDiskGb ||
+    manifest.runner.architecture !== expected.architecture ||
     manifest.snapshot.architecture !== expected.architecture ||
     manifest.baseImage.slug !== expected.baseImageSlug ||
     manifest.runnerImage.reference !== expected.runnerImage ||
@@ -307,48 +409,43 @@ function checkManifestIdentities(
     manifest.hermesImage.indexDigest !== DEFAULT_HERMES_WORKLOAD_IMAGE_INDEX_DIGEST ||
     manifest.hermesImage.amd64ManifestDigest !==
       DEFAULT_HERMES_WORKLOAD_IMAGE_AMD64_MANIFEST_DIGEST ||
-    manifest.source.repository !== expected.sourceRepository ||
-    manifest.source.revision !== expected.sourceRevision ||
     manifest.bootContractVersion !== (expected.bootContractVersion ?? RUNNER_BOOT_CONTRACT_VERSION)
   ) {
     return { ok: false, reason: "manifest_identity_mismatch" };
   }
 
-  return { ok: true, manifest, digest: digestCanonicalBytes(canonicalJson(manifest)) };
+  return { ok: true };
 }
 
 function imageAvailableForManifest(
   image: DigitalOceanImageAvailability,
   manifest: RunnerSnapshotManifest,
-  expected: RunnerSnapshotExpectedIdentities,
 ): boolean {
   return (
     image.id === manifest.snapshot.id &&
-    image.status === "available" &&
-    image.architecture === expected.architecture &&
-    image.minDiskSizeGb <= expected.sizeDiskGb &&
-    image.regions.includes(expected.region)
+    image.name === manifest.snapshot.name &&
+    image.status === manifest.snapshot.status &&
+    image.architecture === manifest.snapshot.architecture &&
+    image.minDiskSizeGb === manifest.snapshot.minDiskSizeGb &&
+    sameStringSet(image.regions, manifest.snapshot.regions)
   );
 }
 
-function checkTimestampOrder(manifest: RunnerSnapshotManifest): RunnerSnapshotManifestCheck {
-  const fullBoot = new Date(manifest.validation.fullBootFixturePassedAt).getTime();
-  const sanitation = new Date(manifest.validation.sanitationPassedAt).getTime();
-  const created = new Date(manifest.createdAt).getTime();
-  const available = new Date(manifest.availableAt).getTime();
-  const expires = new Date(manifest.expiresAt).getTime();
+function timestampsAreOrdered(manifest: RunnerSnapshotManifest): boolean {
+  const values = [
+    manifest.validation.fullBootFixturePassedAt,
+    manifest.validation.sanitationPassedAt,
+    manifest.createdAt,
+    manifest.availableAt,
+  ].map((value) => new Date(value).getTime());
 
-  if (
-    ![fullBoot, sanitation, created, available, expires].every(Number.isFinite) ||
-    fullBoot > sanitation ||
-    sanitation > created ||
-    created > available ||
-    available >= expires
-  ) {
-    return { ok: false, reason: "manifest_schema_invalid" };
-  }
-
-  return { ok: true, manifest, digest: digestCanonicalBytes(canonicalJson(manifest)) };
+  return (
+    values.every(Number.isFinite) &&
+    values.every((value, index) => {
+      const previous = values[index - 1];
+      return previous === undefined || previous <= value;
+    })
+  );
 }
 
 function digestCanonicalBytes(value: string): string {
@@ -359,7 +456,6 @@ function toCanonicalValue(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(toCanonicalValue);
   }
-
   if (isRecord(value)) {
     return Object.fromEntries(
       Object.keys(value)
@@ -367,8 +463,24 @@ function toCanonicalValue(value: unknown): unknown {
         .map((key) => [key, toCanonicalValue(value[key])]),
     );
   }
-
   return value;
+}
+
+function isRunner(value: unknown): value is RunnerSnapshotManifest["runner"] {
+  const diskSizeGb = isRecord(value) ? value.diskSizeGb : null;
+
+  return (
+    isRecord(value) &&
+    !hasUnknownKeys(value, ["region", "sizeSlug", "diskSizeGb", "architecture"]) &&
+    typeof value.region === "string" &&
+    DIGITALOCEAN_SLUG_PATTERN.test(value.region) &&
+    typeof value.sizeSlug === "string" &&
+    DIGITALOCEAN_SLUG_PATTERN.test(value.sizeSlug) &&
+    typeof diskSizeGb === "number" &&
+    Number.isInteger(diskSizeGb) &&
+    diskSizeGb > 0 &&
+    value.architecture === "amd64"
+  );
 }
 
 function isSnapshot(value: unknown): value is RunnerSnapshotManifest["snapshot"] {
@@ -376,16 +488,22 @@ function isSnapshot(value: unknown): value is RunnerSnapshotManifest["snapshot"]
 
   return (
     isRecord(value) &&
-    !hasUnknownKeys(value, ["id", "name", "regions", "minDiskSizeGb", "architecture"]) &&
+    !hasUnknownKeys(value, [
+      "provider",
+      "id",
+      "name",
+      "status",
+      "regions",
+      "minDiskSizeGb",
+      "architecture",
+    ]) &&
+    value.provider === "digitalocean" &&
     typeof value.id === "string" &&
     SNAPSHOT_ID_PATTERN.test(value.id) &&
     typeof value.name === "string" &&
     SAFE_IDENTITY_PATTERN.test(value.name) &&
-    Array.isArray(value.regions) &&
-    value.regions.length > 0 &&
-    value.regions.every(
-      (region) => typeof region === "string" && DIGITALOCEAN_SLUG_PATTERN.test(region),
-    ) &&
+    value.status === "available" &&
+    isUniqueSlugList(value.regions) &&
     typeof minDiskSizeGb === "number" &&
     Number.isInteger(minDiskSizeGb) &&
     minDiskSizeGb > 0 &&
@@ -458,6 +576,36 @@ function isValidation(value: unknown): value is RunnerSnapshotManifest["validati
   );
 }
 
+function isBundleSignature(value: unknown): value is RunnerSnapshotBundle["signature"] {
+  if (
+    !isRecord(value) ||
+    hasUnknownKeys(value, ["algorithm", "keyId", "value"]) ||
+    value.algorithm !== SNAPSHOT_SIGNATURE_ALGORITHM ||
+    typeof value.keyId !== "string" ||
+    !SIGNING_KEY_ID_PATTERN.test(value.keyId) ||
+    typeof value.value !== "string" ||
+    !/^[A-Za-z0-9_-]+$/.test(value.value)
+  ) {
+    return false;
+  }
+
+  const decoded = Buffer.from(value.value, "base64url");
+  return decoded.byteLength === 64 && decoded.toString("base64url") === value.value;
+}
+
+function isUniqueSlugList(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((entry) => typeof entry === "string" && DIGITALOCEAN_SLUG_PATTERN.test(entry)) &&
+    new Set(value).size === value.length
+  );
+}
+
+function sameStringSet(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value) => right.includes(value));
+}
+
 function isIsoTimestamp(value: unknown): value is string {
   return typeof value === "string" && ISO_TIMESTAMP_PATTERN.test(value);
 }
@@ -473,6 +621,7 @@ function hasUnknownKeys(value: Record<string, unknown>, keys: readonly string[])
 
 const RUNNER_SNAPSHOT_MANIFEST_KEYS = [
   "schemaVersion",
+  "runner",
   "snapshot",
   "baseImage",
   "runnerImage",
@@ -484,5 +633,4 @@ const RUNNER_SNAPSHOT_MANIFEST_KEYS = [
   "validation",
   "createdAt",
   "availableAt",
-  "expiresAt",
 ] as const;

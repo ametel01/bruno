@@ -399,7 +399,7 @@ describe("server-only provider environment validation", () => {
     });
   });
 
-  it("requires explicit snapshot evidence and source identity before snapshot image mode", () => {
+  it("requires an exact approved snapshot bundle and overlapping operator trust set", () => {
     const base = {
       BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
       BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
@@ -409,15 +409,17 @@ describe("server-only provider environment validation", () => {
     };
 
     expect(() => readDigitalOceanProviderConfig(base)).toThrow(
-      "BRUNO_DIGITALOCEAN_SNAPSHOT_MANIFEST is required",
+      "BRUNO_DIGITALOCEAN_SNAPSHOT_BUNDLE is required",
     );
 
     const configured = readDigitalOceanProviderConfig({
       ...base,
-      BRUNO_DIGITALOCEAN_SNAPSHOT_MANIFEST: '{"schemaVersion":"bruno.runner.snapshot.v1"}',
-      BRUNO_DIGITALOCEAN_SNAPSHOT_SIGNATURE: "signature",
-      BRUNO_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY: "public-key",
-      BRUNO_RELEASE_SOURCE_REVISION: "1".repeat(40),
+      BRUNO_DIGITALOCEAN_SNAPSHOT_BUNDLE: '{"schemaVersion":"bruno.runner.snapshot.bundle.v1"}',
+      BRUNO_DIGITALOCEAN_APPROVED_SNAPSHOT_DIGEST: `sha256:${"a".repeat(64)}`,
+      BRUNO_DIGITALOCEAN_SNAPSHOT_TRUST_SET: JSON.stringify({
+        "snapshot-previous": "previous-public-key",
+        "snapshot-current": "current-public-key",
+      }),
       BRUNO_DOCKER_RUNNER_IMAGE: `ghcr.io/ametel01/default-agent:sha@sha256:${"c".repeat(64)}`,
     });
 
@@ -425,12 +427,32 @@ describe("server-only provider environment validation", () => {
       mode: "snapshot",
       expected: {
         region: "sfo3",
+        sizeSlug: "s-1vcpu-2gb",
         sizeDiskGb: 50,
         baseImageSlug: "ubuntu-24-04-x64",
-        sourceRepository: "ametel01/bruno",
-        sourceRevision: "1".repeat(40),
+      },
+      approvedDigest: `sha256:${"a".repeat(64)}`,
+      trustedPublicKeys: {
+        "snapshot-previous": "previous-public-key",
+        "snapshot-current": "current-public-key",
       },
     });
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        ...base,
+        BRUNO_DIGITALOCEAN_SNAPSHOT_BUNDLE: "{}",
+      }),
+    ).toThrow("BRUNO_DIGITALOCEAN_APPROVED_SNAPSHOT_DIGEST is required");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        ...base,
+        BRUNO_DIGITALOCEAN_SNAPSHOT_BUNDLE: "{}",
+        BRUNO_DIGITALOCEAN_APPROVED_SNAPSHOT_DIGEST: `sha256:${"a".repeat(64)}`,
+        BRUNO_DIGITALOCEAN_SNAPSHOT_TRUST_SET: "[]",
+      }),
+    ).toThrow("must be a JSON object of signing key IDs");
   });
 
   it("parses local Docker provider mode for manual cloud-runner smoke tests", () => {

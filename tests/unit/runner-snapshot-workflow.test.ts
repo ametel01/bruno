@@ -31,9 +31,11 @@ describe("runner snapshot workflow", () => {
     expect(workflow).not.toContain("0.0.0.0/0");
     expect(workflow).not.toContain("::/0");
     expect(workflow).toContain("if: always()");
-    expect(workflow).toContain("Build snapshot and signed manifest");
+    expect(workflow).toContain("Build signed snapshot bundle");
+    expect(workflow).toContain("BRUNO_SNAPSHOT_SIGNING_KEY_ID");
+    expect(workflow).toContain('--signing-key-id "$BRUNO_SNAPSHOT_SIGNING_KEY_ID"');
     expect(workflow).toContain("Validate retrieved builder evidence");
-    expect(workflow.indexOf("Build snapshot and signed manifest")).toBeLessThan(
+    expect(workflow.indexOf("Build signed snapshot bundle")).toBeLessThan(
       workflow.indexOf("Validate retrieved builder evidence"),
     );
     expect(workflow.indexOf("--boot-result-out snapshot-artifacts/boot-result.json")).toBeLessThan(
@@ -50,10 +52,11 @@ describe("runner snapshot workflow", () => {
     expect(workflow).not.toContain("bun run runner:release:smoke -- --image");
     expect(workflow).not.toContain('"ok": true');
     expect(workflow).toContain("actions/attest-build-provenance@v2");
-    expect(workflow.indexOf("Attest allowlisted manifest artifacts")).toBeLessThan(
-      workflow.indexOf("Upload allowlisted manifest artifacts"),
+    expect(workflow.indexOf("Attest allowlisted bundle artifacts")).toBeLessThan(
+      workflow.indexOf("Upload allowlisted bundle artifacts"),
     );
-    expect(workflow).toContain("runner-snapshot-manifest.json");
+    expect(workflow).toContain("runner-snapshot-bundle.json");
+    expect(workflow).not.toContain("runner-snapshot-manifest.sig");
     expect(workflow).not.toContain("on:\n  push");
     expect(workflow).not.toContain("pull_request");
 
@@ -78,6 +81,9 @@ describe("runner snapshot workflow", () => {
     expect(script).toContain("builderSshKeyId");
     expect(script).toContain("builderSshPrivateKeyPath");
     expect(script).toContain("controllerCidr");
+    expect(script).toContain("signingKeyId");
+    expect(script).toContain('requiredArg(parsed, "signing-key-id")');
+    expect(script).toContain("bundleOut");
     expect(script).toContain('requiredArg(parsed, "controller-cidr")');
     expect(script).toContain("isExplicitControllerCidr");
     expect(script).toContain("bootResultOut");

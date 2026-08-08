@@ -57,7 +57,23 @@ describe("runner snapshot build orchestration", () => {
     expect(result).toMatchObject({
       ok: true,
       manifest: {
-        snapshot: { id: "9102", regions: ["sfo3"], architecture: "amd64" },
+        schemaVersion: "bruno.runner.snapshot.v2",
+        runner: {
+          region: "sfo3",
+          sizeSlug: "s-1vcpu-2gb",
+          diskSizeGb: 50,
+          architecture: "amd64",
+        },
+        snapshot: {
+          provider: "digitalocean",
+          id: "9102",
+          status: "available",
+          regions: ["sfo3"],
+          architecture: "amd64",
+        },
+      },
+      bundle: {
+        signature: { algorithm: "Ed25519", keyId: "snapshot-test-key" },
       },
       cleanup: {
         deletedDropletId: "do-fake-1",
@@ -99,6 +115,8 @@ describe("runner snapshot build orchestration", () => {
       ]),
     );
     expect(JSON.stringify(result)).not.toContain("dop_v1_super_secret");
+    expect(JSON.stringify(result)).not.toContain("BEGIN PRIVATE KEY");
+    expect(JSON.stringify(result)).not.toContain("expiresAt");
   });
 
   it("fails before provider effects without the cost authorization sentinel", async () => {
@@ -405,6 +423,7 @@ function baseInput(provider: FakeDigitalOceanProvider) {
     privateKeyPem: generateKeyPairSync("ed25519")
       .privateKey.export({ format: "pem", type: "pkcs8" })
       .toString(),
+    signingKeyId: "snapshot-test-key",
     provider,
     context: { signal: new AbortController().signal },
     now: () => new Date("2026-08-07T00:00:03.000Z"),

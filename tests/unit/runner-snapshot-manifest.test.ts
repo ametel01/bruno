@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_HERMES_WORKLOAD_IMAGE,
@@ -7,8 +7,8 @@ import {
 import { FakeDigitalOceanProvider } from "@/src/server/runners/digitalocean-provider";
 import {
   createRunnerSnapshotAttestation,
-  selectVerifiedRunnerSnapshotImage,
-  verifyRunnerSnapshotManifest,
+  selectApprovedRunnerSnapshotImage,
+  verifyRunnerSnapshotBundle,
   type RunnerSnapshotExpectedIdentities,
   type RunnerSnapshotManifest,
 } from "@/src/server/runners/runner-snapshot-manifest";
@@ -17,202 +17,387 @@ const RUNNER_DIGEST = `sha256:${"a".repeat(64)}`;
 const AGENT_DIGEST = `sha256:${"b".repeat(64)}`;
 const RUNNER_IMAGE = `ghcr.io/ametel01/bruno-runner:abc123@${RUNNER_DIGEST}`;
 const AGENT_IMAGE = `ghcr.io/ametel01/bruno-default:abc123@${AGENT_DIGEST}`;
-const NOW = new Date("2026-08-07T00:00:00.000Z");
 const SOURCE_REVISION = "1".repeat(40);
 
 describe("runner snapshot manifest", () => {
-  it("verifies canonical signed manifest bytes and provider region availability", async () => {
-    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-    const attestation = createRunnerSnapshotAttestation({
-      manifest: manifest(),
-      privateKeyPem: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
-    });
+  it("verifies an approved v2 bundle through its identified trusted key without time expiry", () => {
+    const signing = generateKeyPairSync("ed25519");
+    const attestation = attest(manifest(), "snapshot-2026-08", signing.privateKey);
 
     expect(
-      verifyRunnerSnapshotManifest({
-        manifestBytes: attestation.canonicalBytes,
-        signature: attestation.signature,
-        publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString(),
+      verifyRunnerSnapshotBundle({
+        bundleBytes: attestation.bundleBytes,
+        approvedDigest: attestation.digest,
+        trustedPublicKeys: {
+          "snapshot-2026-08": publicKeyPem(signing.publicKey),
+        },
         expected: expected(),
       }),
-    ).toMatchObject({ ok: true, digest: attestation.digest });
-
-    await expect(
-      selectVerifiedRunnerSnapshotImage({
-        manifestBytes: attestation.canonicalBytes,
-        signature: attestation.signature,
-        publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString(),
-        expected: expected(),
-        provider: new FakeDigitalOceanProvider(),
-      }),
-    ).resolves.toMatchObject({ ok: true, image: "1102" });
+    ).toMatchObject({
+      ok: true,
+      digest: attestation.digest,
+      signingKeyId: "snapshot-2026-08",
+      manifest: {
+        source: { repository: "ametel01/bruno", revision: SOURCE_REVISION },
+        createdAt: "2020-01-01T00:00:00.000Z",
+      },
+    });
   });
 
-  it("fails closed for tampering, unknown fields, stale evidence, and wrong identity", () => {
-    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-    const privateKeyPem = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
-    const publicKeyPem = publicKey.export({ format: "pem", type: "spki" }).toString();
-    const attestation = createRunnerSnapshotAttestation({
-      manifest: manifest(),
-      privateKeyPem,
-    });
-
-    const tampered = attestation.canonicalBytes.replace("sfo3", "nyc3");
-    expect(
-      verifyRunnerSnapshotManifest({
-        manifestBytes: tampered,
-        signature: attestation.signature,
-        publicKeyPem,
-        expected: expected(),
-      }),
-    ).toEqual({ ok: false, reason: "manifest_signature_invalid" });
+  it("rejects manifest v1 and unknown evidence fields before approval", () => {
+    const signing = generateKeyPairSync("ed25519");
+    const v1 = {
+      ...manifest(),
+      schemaVersion: "bruno.runner.snapshot.v1",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    };
 
     expect(() =>
-      createRunnerSnapshotAttestation({
-        manifest: { ...manifest(), hostile: true } as unknown as RunnerSnapshotManifest,
-        privateKeyPem,
-      }),
+      attest(v1 as unknown as RunnerSnapshotManifest, "snapshot-old", signing.privateKey),
     ).toThrow("manifest_schema_invalid");
-
-    expect(
-      verifyRunnerSnapshotManifest({
-        manifestBytes: attestation.canonicalBytes,
-        signature: attestation.signature,
-        publicKeyPem,
-        expected: { ...expected(), now: new Date("2026-09-01T00:00:00.000Z") },
-      }),
-    ).toEqual({ ok: false, reason: "manifest_stale" });
-
-    expect(
-      verifyRunnerSnapshotManifest({
-        manifestBytes: attestation.canonicalBytes,
-        signature: attestation.signature,
-        publicKeyPem,
-        expected: { ...expected(), runnerImage: RUNNER_IMAGE.replace("abc123", "def456") },
-      }),
-    ).toEqual({ ok: false, reason: "manifest_identity_mismatch" });
+    expect(() =>
+      attest(
+        { ...manifest(), ownerToken: "secret" } as unknown as RunnerSnapshotManifest,
+        "snapshot-current",
+        signing.privateKey,
+      ),
+    ).toThrow("manifest_schema_invalid");
+    expect(() =>
+      attest(
+        {
+          ...manifest(),
+          validation: {
+            ...manifest().validation,
+            sanitationPassedAt: "2020-01-01T00:00:02.000Z",
+          },
+        },
+        "snapshot-current",
+        signing.privateKey,
+      ),
+    ).toThrow("manifest_schema_invalid");
+    expect(() => attest(manifest(), "bad key id", signing.privateKey)).toThrow(
+      "signing key ID is invalid",
+    );
+    expect(() =>
+      attest(
+        {
+          ...manifest(),
+          runner: { ...manifest().runner, architecture: "arm64" },
+        } as unknown as RunnerSnapshotManifest,
+        "snapshot-current",
+        signing.privateKey,
+      ),
+    ).toThrow("manifest_schema_invalid");
   });
 
   it.each([
-    ["wrong schema", () => ({ ...manifest(), schemaVersion: "other" }), "manifest_schema_invalid"],
+    ["runner profile", { sizeSlug: "s-2vcpu-4gb" }, "manifest_identity_mismatch"],
+    ["runner disk", { sizeDiskGb: 60 }, "manifest_identity_mismatch"],
+    ["base OS", { baseImageSlug: "ubuntu-22-04-x64" }, "manifest_identity_mismatch"],
     [
-      "future timestamp",
-      () => ({ ...manifest(), availableAt: "2026-08-08T00:00:00.000Z" }),
-      "manifest_not_yet_valid",
-    ],
-    [
-      "reversed timestamps",
-      () => ({
-        ...manifest(),
-        validation: {
-          fullBootFixturePassedAt: "2026-08-06T23:59:00.000Z",
-          sanitationPassedAt: "2026-08-07T00:00:01.000Z",
-        },
-        createdAt: "2026-08-07T00:00:00.000Z",
-      }),
-      "manifest_schema_invalid",
-    ],
-    [
-      "wrong region",
-      () => ({ ...manifest(), snapshot: { ...manifest().snapshot, regions: ["nyc3"] } }),
-      "manifest_region_unavailable",
-    ],
-    [
-      "wrong base",
-      () => ({ ...manifest(), baseImage: { ...manifest().baseImage, slug: "ubuntu-22-04-x64" } }),
+      "runner image",
+      { runnerImage: RUNNER_IMAGE.replace("abc123", "def456") },
       "manifest_identity_mismatch",
     ],
     [
-      "wrong arch",
-      () => ({ ...manifest(), snapshot: { ...manifest().snapshot, architecture: "arm64" } }),
-      "manifest_schema_invalid",
-    ],
-    [
-      "wrong source",
-      () => ({ ...manifest(), source: { ...manifest().source, revision: "2".repeat(40) } }),
+      "default-agent image",
+      { defaultAgentImage: AGENT_IMAGE.replace("abc123", "def456") },
       "manifest_identity_mismatch",
     ],
     [
-      "wrong boot contract",
-      () => ({ ...manifest(), bootContractVersion: "bruno.runner.boot.v0" }),
-      "manifest_schema_invalid",
-    ],
-    [
-      "wrong agent image",
-      () => ({
-        ...manifest(),
-        defaultAgentImage: {
-          reference: AGENT_IMAGE.replace("abc123", "def456"),
-          digest: AGENT_DIGEST,
-        },
-      }),
+      "Hermes image",
+      { hermesImage: `${DEFAULT_HERMES_WORKLOAD_IMAGE}-other` },
       "manifest_identity_mismatch",
     ],
     [
-      "minimum disk mismatch",
-      () => ({ ...manifest(), snapshot: { ...manifest().snapshot, minDiskSizeGb: 26 } }),
-      "manifest_min_disk_mismatch",
+      "boot contract",
+      { bootContractVersion: "bruno.runner.boot.v0" },
+      "manifest_identity_mismatch",
     ],
-  ])("fails closed for %s", (_label, mutate, reason) => {
-    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-    const privateKeyPem = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
-    const rawManifest = mutate() as RunnerSnapshotManifest;
-
-    if (reason === "manifest_schema_invalid") {
-      expect(() =>
-        createRunnerSnapshotAttestation({
-          manifest: rawManifest,
-          privateKeyPem,
-        }),
-      ).toThrow("manifest_schema_invalid");
-      return;
-    }
-
-    const attestation = createRunnerSnapshotAttestation({
-      manifest: rawManifest,
-      privateKeyPem,
-    });
+    ["region", { region: "nyc3" }, "manifest_region_unavailable"],
+  ])("rejects an exact %s mismatch", (_label, changedExpected, reason) => {
+    const signing = generateKeyPairSync("ed25519");
+    const attestation = attest(manifest(), "snapshot-current", signing.privateKey);
 
     expect(
-      verifyRunnerSnapshotManifest({
-        manifestBytes: attestation.canonicalBytes,
-        signature: attestation.signature,
-        publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString(),
-        expected: expected(),
+      verifyRunnerSnapshotBundle({
+        bundleBytes: attestation.bundleBytes,
+        approvedDigest: attestation.digest,
+        trustedPublicKeys: { "snapshot-current": publicKeyPem(signing.publicKey) },
+        expected: { ...expected(), ...changedExpected },
       }),
     ).toEqual({ ok: false, reason });
   });
 
-  it("fails closed for wrong signing key and unavailable provider image", async () => {
-    const signing = generateKeyPairSync("ed25519");
-    const wrong = generateKeyPairSync("ed25519");
-    const attestation = createRunnerSnapshotAttestation({
-      manifest: manifest(),
-      privateKeyPem: signing.privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
-    });
+  it("supports overlapping trusted keys and fails closed after a signing key is removed", () => {
+    const previous = generateKeyPairSync("ed25519");
+    const current = generateKeyPairSync("ed25519");
+    const previousBundle = attest(manifest(), "snapshot-previous", previous.privateKey);
+    const currentBundle = attest(
+      { ...manifest(), workflow: { runId: "123457", runAttempt: "1" } },
+      "snapshot-current",
+      current.privateKey,
+    );
+    const overlap = {
+      "snapshot-previous": publicKeyPem(previous.publicKey),
+      "snapshot-current": publicKeyPem(current.publicKey),
+    };
+
+    for (const attestation of [previousBundle, currentBundle]) {
+      expect(
+        verifyRunnerSnapshotBundle({
+          bundleBytes: attestation.bundleBytes,
+          approvedDigest: attestation.digest,
+          trustedPublicKeys: overlap,
+          expected: expected(),
+        }),
+      ).toMatchObject({ ok: true });
+    }
 
     expect(
-      verifyRunnerSnapshotManifest({
-        manifestBytes: attestation.canonicalBytes,
-        signature: attestation.signature,
-        publicKeyPem: wrong.publicKey.export({ format: "pem", type: "spki" }).toString(),
+      verifyRunnerSnapshotBundle({
+        bundleBytes: previousBundle.bundleBytes,
+        approvedDigest: previousBundle.digest,
+        trustedPublicKeys: { "snapshot-current": publicKeyPem(current.publicKey) },
         expected: expected(),
       }),
-    ).toEqual({ ok: false, reason: "manifest_signature_invalid" });
+    ).toEqual({ ok: false, reason: "manifest_signing_key_untrusted" });
+  });
+
+  it("rejects a snapshot minimum disk larger than the exact runner disk", () => {
+    const signing = generateKeyPairSync("ed25519");
+    const attestation = attest(
+      {
+        ...manifest(),
+        snapshot: { ...manifest().snapshot, minDiskSizeGb: 51 },
+      },
+      "snapshot-current",
+      signing.privateKey,
+    );
+
+    expect(
+      verifyRunnerSnapshotBundle({
+        bundleBytes: attestation.bundleBytes,
+        approvedDigest: attestation.digest,
+        trustedPublicKeys: { "snapshot-current": publicKeyPem(signing.publicKey) },
+        expected: expected(),
+      }),
+    ).toEqual({ ok: false, reason: "manifest_min_disk_mismatch" });
+  });
+
+  it("promotes, revokes, and rolls back exact retained bundle digests without rewriting attestations", () => {
+    const signing = generateKeyPairSync("ed25519");
+    const retained = attest(manifest(), "snapshot-retained", signing.privateKey);
+    const promoted = attest(
+      { ...manifest(), workflow: { runId: "123457", runAttempt: "1" } },
+      "snapshot-retained",
+      signing.privateKey,
+    );
+    const trustSet = { "snapshot-retained": publicKeyPem(signing.publicKey) };
+
+    expect(
+      verifyRunnerSnapshotBundle({
+        bundleBytes: retained.bundleBytes,
+        approvedDigest: promoted.digest,
+        trustedPublicKeys: trustSet,
+        expected: expected(),
+      }),
+    ).toEqual({ ok: false, reason: "manifest_not_approved" });
+    expect(
+      verifyRunnerSnapshotBundle({
+        bundleBytes: promoted.bundleBytes,
+        trustedPublicKeys: trustSet,
+        expected: expected(),
+      }),
+    ).toEqual({ ok: false, reason: "manifest_not_approved" });
+    expect(
+      verifyRunnerSnapshotBundle({
+        bundleBytes: retained.bundleBytes,
+        approvedDigest: retained.digest,
+        trustedPublicKeys: trustSet,
+        expected: expected(),
+      }),
+    ).toMatchObject({ ok: true, digest: retained.digest });
+    expect(retained.bundleBytes).toContain(SOURCE_REVISION);
+  });
+
+  it("checks exact authoritative provider availability only after trust and approval", async () => {
+    const signing = generateKeyPairSync("ed25519");
+    const attestation = attest(manifest(), "snapshot-current", signing.privateKey);
+    const trustedPublicKeys = { "snapshot-current": publicKeyPem(signing.publicKey) };
+    const matchingProvider = new MatchingImageProvider();
+
+    await expect(
+      selectApprovedRunnerSnapshotImage({
+        bundleBytes: attestation.bundleBytes,
+        approvedDigest: attestation.digest,
+        trustedPublicKeys,
+        expected: expected(),
+        provider: matchingProvider,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      image: "1102",
+      digest: attestation.digest,
+      signingKeyId: "snapshot-current",
+    });
+    expect(matchingProvider.calls.map((call) => call.step)).toEqual(["readImage"]);
 
     const provider = new UnavailableImageProvider();
+
     await expect(
-      selectVerifiedRunnerSnapshotImage({
-        manifestBytes: attestation.canonicalBytes,
-        signature: attestation.signature,
-        publicKeyPem: signing.publicKey.export({ format: "pem", type: "spki" }).toString(),
+      selectApprovedRunnerSnapshotImage({
+        bundleBytes: attestation.bundleBytes,
+        approvedDigest: attestation.digest,
+        trustedPublicKeys,
         expected: expected(),
         provider,
       }),
     ).resolves.toEqual({ ok: false, reason: "provider_image_unavailable" });
     expect(provider.calls.map((call) => call.step)).toEqual(["readImage"]);
+
+    const unapprovedProvider = new UnavailableImageProvider();
+    await expect(
+      selectApprovedRunnerSnapshotImage({
+        bundleBytes: attestation.bundleBytes,
+        approvedDigest: `sha256:${"f".repeat(64)}`,
+        trustedPublicKeys,
+        expected: expected(),
+        provider: unapprovedProvider,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "manifest_not_approved" });
+    expect(unapprovedProvider.calls).toEqual([]);
+
+    const v1Provider = new MatchingImageProvider();
+    await expect(
+      selectApprovedRunnerSnapshotImage({
+        bundleBytes: attestation.bundleBytes.replace(
+          "bruno.runner.snapshot.v2",
+          "bruno.runner.snapshot.v1",
+        ),
+        approvedDigest: attestation.digest,
+        trustedPublicKeys,
+        expected: expected(),
+        provider: v1Provider,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "manifest_schema_invalid" });
+    expect(v1Provider.calls).toEqual([]);
+  });
+
+  it("fails closed for tampering, malformed bundles, invalid signatures, and untrusted keys", () => {
+    const signing = generateKeyPairSync("ed25519");
+    const wrong = generateKeyPairSync("ed25519");
+    const attestation = attest(manifest(), "snapshot-current", signing.privateKey);
+    const base = {
+      approvedDigest: attestation.digest,
+      trustedPublicKeys: { "snapshot-current": publicKeyPem(signing.publicKey) },
+      expected: expected(),
+    };
+
+    expect(verifyRunnerSnapshotBundle({ ...base, bundleBytes: "{" })).toEqual({
+      ok: false,
+      reason: "bundle_json_invalid",
+    });
+    expect(
+      verifyRunnerSnapshotBundle({
+        ...base,
+        bundleBytes: attestation.bundleBytes.replace("sfo3", "nyc3"),
+      }),
+    ).toEqual({ ok: false, reason: "manifest_not_approved" });
+    expect(
+      verifyRunnerSnapshotBundle({
+        ...base,
+        trustedPublicKeys: { "snapshot-current": publicKeyPem(wrong.publicKey) },
+        bundleBytes: attestation.bundleBytes,
+      }),
+    ).toEqual({ ok: false, reason: "manifest_signature_invalid" });
+    expect(
+      verifyRunnerSnapshotBundle({
+        ...base,
+        trustedPublicKeys: {},
+        bundleBytes: attestation.bundleBytes,
+      }),
+    ).toEqual({ ok: false, reason: "manifest_signing_key_untrusted" });
+
+    const unknownBundle = JSON.parse(attestation.bundleBytes) as Record<string, unknown>;
+    unknownBundle.ownerToken = "secret";
+    expect(
+      verifyRunnerSnapshotBundle({ ...base, bundleBytes: JSON.stringify(unknownBundle) }),
+    ).toEqual({ ok: false, reason: "bundle_schema_invalid" });
+
+    const malformedSignature = JSON.parse(attestation.bundleBytes) as {
+      signature: { value: string };
+    };
+    malformedSignature.signature.value = "not-a-valid-ed25519-signature";
+    expect(
+      verifyRunnerSnapshotBundle({ ...base, bundleBytes: JSON.stringify(malformedSignature) }),
+    ).toEqual({ ok: false, reason: "bundle_schema_invalid" });
   });
 });
+
+function attest(manifestValue: RunnerSnapshotManifest, keyId: string, privateKey: KeyObject) {
+  return createRunnerSnapshotAttestation({
+    manifest: manifestValue,
+    signingKeyId: keyId,
+    privateKeyPem: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+  });
+}
+
+function publicKeyPem(publicKey: KeyObject): string {
+  return publicKey.export({ format: "pem", type: "spki" }).toString();
+}
+
+function expected(): RunnerSnapshotExpectedIdentities {
+  return {
+    region: "sfo3",
+    sizeSlug: "s-1vcpu-2gb",
+    sizeDiskGb: 50,
+    baseImageSlug: "ubuntu-24-04-x64",
+    architecture: "amd64",
+    runnerImage: RUNNER_IMAGE,
+    defaultAgentImage: AGENT_IMAGE,
+    hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
+  };
+}
+
+function manifest(): RunnerSnapshotManifest {
+  return {
+    schemaVersion: "bruno.runner.snapshot.v2",
+    runner: {
+      region: "sfo3",
+      sizeSlug: "s-1vcpu-2gb",
+      diskSizeGb: 50,
+      architecture: "amd64",
+    },
+    snapshot: {
+      provider: "digitalocean",
+      id: "1102",
+      name: "bruno-snapshot-builder-111111111111",
+      status: "available",
+      regions: ["sfo3"],
+      minDiskSizeGb: 25,
+      architecture: "amd64",
+    },
+    baseImage: { id: "ubuntu-24-04-x64-20200101", slug: "ubuntu-24-04-x64" },
+    runnerImage: { reference: RUNNER_IMAGE, digest: RUNNER_DIGEST },
+    defaultAgentImage: { reference: AGENT_IMAGE, digest: AGENT_DIGEST },
+    hermesImage: {
+      reference: DEFAULT_HERMES_WORKLOAD_IMAGE,
+      indexDigest: "sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973",
+      amd64ManifestDigest:
+        "sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a",
+    },
+    bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+    source: { repository: "ametel01/bruno", revision: SOURCE_REVISION },
+    workflow: { runId: "123456", runAttempt: "1" },
+    validation: {
+      fullBootFixturePassedAt: "2019-12-31T23:59:00.000Z",
+      sanitationPassedAt: "2019-12-31T23:59:30.000Z",
+    },
+    createdAt: "2020-01-01T00:00:00.000Z",
+    availableAt: "2020-01-01T00:00:01.000Z",
+  };
+}
 
 class UnavailableImageProvider extends FakeDigitalOceanProvider {
   override async readImageAvailability(
@@ -233,49 +418,21 @@ class UnavailableImageProvider extends FakeDigitalOceanProvider {
   }
 }
 
-function expected(): RunnerSnapshotExpectedIdentities {
-  return {
-    region: "sfo3",
-    sizeDiskGb: 25,
-    baseImageSlug: "ubuntu-24-04-x64",
-    architecture: "amd64",
-    runnerImage: RUNNER_IMAGE,
-    defaultAgentImage: AGENT_IMAGE,
-    hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
-    sourceRepository: "ametel01/bruno",
-    sourceRevision: SOURCE_REVISION,
-    now: NOW,
-  };
-}
-
-function manifest(): RunnerSnapshotManifest {
-  return {
-    schemaVersion: "bruno.runner.snapshot.v1",
-    snapshot: {
-      id: "1102",
-      name: "bruno-snapshot-builder-111111111111",
-      regions: ["sfo3"],
-      minDiskSizeGb: 25,
-      architecture: "amd64",
-    },
-    baseImage: { id: "ubuntu-24-04-x64-20260801", slug: "ubuntu-24-04-x64" },
-    runnerImage: { reference: RUNNER_IMAGE, digest: RUNNER_DIGEST },
-    defaultAgentImage: { reference: AGENT_IMAGE, digest: AGENT_DIGEST },
-    hermesImage: {
-      reference: DEFAULT_HERMES_WORKLOAD_IMAGE,
-      indexDigest: "sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973",
-      amd64ManifestDigest:
-        "sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a",
-    },
-    bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
-    source: { repository: "ametel01/bruno", revision: SOURCE_REVISION },
-    workflow: { runId: "123456", runAttempt: "1" },
-    validation: {
-      fullBootFixturePassedAt: "2026-08-06T23:59:00.000Z",
-      sanitationPassedAt: "2026-08-06T23:59:30.000Z",
-    },
-    createdAt: "2026-08-06T23:59:31.000Z",
-    availableAt: "2026-08-07T00:00:00.000Z",
-    expiresAt: "2026-08-14T00:00:00.000Z",
-  };
+class MatchingImageProvider extends FakeDigitalOceanProvider {
+  override async readImageAvailability(
+    input: Parameters<FakeDigitalOceanProvider["readImageAvailability"]>[0],
+  ) {
+    await super.readImageAvailability(input);
+    return {
+      ok: true as const,
+      value: {
+        id: input.imageId,
+        name: "bruno-snapshot-builder-111111111111",
+        regions: ["sfo3"],
+        minDiskSizeGb: 25,
+        architecture: "amd64" as const,
+        status: "available" as const,
+      },
+    };
+  }
 }

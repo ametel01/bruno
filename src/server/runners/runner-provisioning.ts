@@ -52,7 +52,7 @@ import {
   isDigitalOceanLowMemorySwapResilienceProfile,
   validateDigitalOceanRunnerResourceCompatibility,
 } from "@/src/server/runners/runner-resource-profiles";
-import { selectVerifiedRunnerSnapshotImage } from "@/src/server/runners/runner-snapshot-manifest";
+import { selectApprovedRunnerSnapshotImage } from "@/src/server/runners/runner-snapshot-manifest";
 import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-user";
 import { createAppLogger, LOG_REDACTION_CENSOR } from "@/src/server/logging/logger";
 
@@ -1601,10 +1601,10 @@ async function resolveProvisioningImage(input: {
     return { ok: true, image: input.config.image };
   }
 
-  const selected = await selectVerifiedRunnerSnapshotImage({
-    manifestBytes: input.config.snapshotMode.manifestBytes,
-    signature: input.config.snapshotMode.signature,
-    publicKeyPem: input.config.snapshotMode.publicKeyPem,
+  const selected = await selectApprovedRunnerSnapshotImage({
+    bundleBytes: input.config.snapshotMode.bundleBytes,
+    approvedDigest: input.config.snapshotMode.approvedDigest,
+    trustedPublicKeys: input.config.snapshotMode.trustedPublicKeys,
     expected: input.config.snapshotMode.expected,
     provider: input.provider,
     ...(input.context ? { context: input.context } : {}),

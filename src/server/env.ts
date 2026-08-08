@@ -28,7 +28,10 @@ import {
   parseHermesDockerPidsLimit,
   validateDigitalOceanRunnerResourceCompatibility,
 } from "@/src/server/runners/runner-resource-profiles";
-import type { RunnerSnapshotExpectedIdentities } from "@/src/server/runners/runner-snapshot-manifest";
+import type {
+  RunnerSnapshotExpectedIdentities,
+  RunnerSnapshotTrustedPublicKeys,
+} from "@/src/server/runners/runner-snapshot-manifest";
 
 export const DEFAULT_BRUNO_RUNNER_IMAGE = "ghcr.io/ametel01/bruno-runner:main";
 export const DEFAULT_DEPLOYMENT_WAKEUP_MAX_PUBLISH_ATTEMPTS = 12;
@@ -73,9 +76,9 @@ export type DigitalOceanSnapshotModeConfig =
   | { mode: "stock" }
   | {
       mode: "snapshot";
-      manifestBytes: string;
-      signature: string;
-      publicKeyPem: string;
+      bundleBytes: string;
+      approvedDigest: string;
+      trustedPublicKeys: RunnerSnapshotTrustedPublicKeys;
       expected: RunnerSnapshotExpectedIdentities;
     };
 
@@ -554,36 +557,33 @@ function readDigitalOceanSnapshotMode(
     ]);
   }
 
-  const manifestBytes = readRequiredSnapshotSetting(
-    input.BRUNO_DIGITALOCEAN_SNAPSHOT_MANIFEST,
-    "BRUNO_DIGITALOCEAN_SNAPSHOT_MANIFEST",
+  const bundleBytes = readRequiredSnapshotSetting(
+    input.BRUNO_DIGITALOCEAN_SNAPSHOT_BUNDLE,
+    "BRUNO_DIGITALOCEAN_SNAPSHOT_BUNDLE",
   );
-  const signature = readRequiredSnapshotSetting(
-    input.BRUNO_DIGITALOCEAN_SNAPSHOT_SIGNATURE,
-    "BRUNO_DIGITALOCEAN_SNAPSHOT_SIGNATURE",
+  const approvedDigest = readRequiredSnapshotSetting(
+    input.BRUNO_DIGITALOCEAN_APPROVED_SNAPSHOT_DIGEST,
+    "BRUNO_DIGITALOCEAN_APPROVED_SNAPSHOT_DIGEST",
   );
-  const publicKeyPem = readRequiredSnapshotSetting(
-    input.BRUNO_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY,
-    "BRUNO_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY",
+  const trustSetBytes = readRequiredSnapshotSetting(
+    input.BRUNO_DIGITALOCEAN_SNAPSHOT_TRUST_SET,
+    "BRUNO_DIGITALOCEAN_SNAPSHOT_TRUST_SET",
   );
-  const sourceRevision = readRequiredSnapshotSetting(
-    input.BRUNO_RELEASE_SOURCE_REVISION,
-    "BRUNO_RELEASE_SOURCE_REVISION",
-  );
-
-  if (!/^[a-f0-9]{40}$/.test(sourceRevision)) {
+  if (!/^sha256:[a-f0-9]{64}$/.test(approvedDigest)) {
     throw new EnvValidationError([
-      "BRUNO_RELEASE_SOURCE_REVISION must be the exact 40-character source commit for snapshot mode.",
+      "BRUNO_DIGITALOCEAN_APPROVED_SNAPSHOT_DIGEST must be an exact sha256 digest for snapshot mode.",
     ]);
   }
+  const trustedPublicKeys = readSnapshotTrustSet(trustSetBytes);
 
   return {
     mode: "snapshot",
-    manifestBytes,
-    signature,
-    publicKeyPem,
+    bundleBytes,
+    approvedDigest,
+    trustedPublicKeys,
     expected: {
       region: expectedInput.region,
+      sizeSlug: expectedInput.sizeSlug,
       sizeDiskGb: diskGbForDigitalOceanSizeSlug(expectedInput.sizeSlug),
       baseImageSlug: expectedInput.baseImageSlug,
       architecture: "amd64",
@@ -593,10 +593,47 @@ function readDigitalOceanSnapshotMode(
         defaultValue: DEFAULT_MANUAL_RUNNER_IMAGE,
       }),
       hermesImage: expectedInput.hermesImage,
-      sourceRepository: "ametel01/bruno",
-      sourceRevision,
     },
   };
+}
+
+function readSnapshotTrustSet(value: string): RunnerSnapshotTrustedPublicKeys {
+  let raw: unknown;
+
+  try {
+    raw = JSON.parse(value);
+  } catch {
+    throw new EnvValidationError([
+      "BRUNO_DIGITALOCEAN_SNAPSHOT_TRUST_SET must be a JSON object of signing key IDs to Ed25519 public keys.",
+    ]);
+  }
+
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new EnvValidationError([
+      "BRUNO_DIGITALOCEAN_SNAPSHOT_TRUST_SET must be a JSON object of signing key IDs to Ed25519 public keys.",
+    ]);
+  }
+
+  const entries = Object.entries(raw);
+  if (
+    entries.length === 0 ||
+    entries.length > 16 ||
+    entries.some(
+      ([keyId, publicKey]) =>
+        !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(keyId) ||
+        typeof publicKey !== "string" ||
+        publicKey.trim().length === 0 ||
+        publicKey.length > 8192,
+    )
+  ) {
+    throw new EnvValidationError([
+      "BRUNO_DIGITALOCEAN_SNAPSHOT_TRUST_SET must contain 1 to 16 valid signing key IDs mapped to public keys.",
+    ]);
+  }
+
+  return Object.fromEntries(
+    entries.map(([keyId, publicKey]) => [keyId, (publicKey as string).trim()]),
+  );
 }
 
 function readRequiredSnapshotSetting(value: string | undefined, envName: string): string {

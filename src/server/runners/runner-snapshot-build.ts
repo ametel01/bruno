@@ -3,6 +3,7 @@ import "server-only";
 import { isIP } from "node:net";
 import {
   createRunnerSnapshotAttestation,
+  type RunnerSnapshotBundle,
   type RunnerSnapshotManifest,
 } from "./runner-snapshot-manifest";
 import {
@@ -13,6 +14,7 @@ import {
   RUNNER_BOOT_CONTRACT_VERSION,
 } from "@/src/runner-service/constants";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
+import { findDigitalOceanRunnerResourceProfile } from "@/src/server/runners/runner-resource-profiles";
 import type {
   DigitalOceanAction,
   DigitalOceanOwnedSetExpectation,
@@ -43,6 +45,7 @@ export type BuildRunnerSnapshotInput = {
   builderSshPrivateKeyPath?: string;
   expectedBuilderHostKeySha256?: string;
   privateKeyPem: string;
+  signingKeyId: string;
   provider: DigitalOceanProvider;
   context: DigitalOceanProviderRequestContext;
   now?: () => Date;
@@ -76,9 +79,9 @@ export type BuildRunnerSnapshotResult =
   | {
       ok: true;
       manifest: RunnerSnapshotManifest;
-      manifestBytes: string;
+      bundle: RunnerSnapshotBundle;
+      bundleBytes: string;
       digest: string;
-      signature: string;
       bootResult: SnapshotBootFixtureResult;
       sanitationResult: SnapshotSanitationResult;
       cleanup: SnapshotCleanupEvidence;
@@ -306,10 +309,18 @@ export async function buildRunnerSnapshot(
 
     const availableAt = now().toISOString();
     const manifest: RunnerSnapshotManifest = {
-      schemaVersion: "bruno.runner.snapshot.v1",
+      schemaVersion: "bruno.runner.snapshot.v2",
+      runner: {
+        region: input.region,
+        sizeSlug: input.sizeSlug,
+        diskSizeGb: validated.runnerDiskGiB,
+        architecture: "amd64",
+      },
       snapshot: {
+        provider: "digitalocean",
         id: snapshotId,
         name: snapshotName,
+        status: "available",
         regions: availability.value.regions,
         minDiskSizeGb: availability.value.minDiskSizeGb,
         architecture: "amd64",
@@ -337,10 +348,10 @@ export async function buildRunnerSnapshot(
       },
       createdAt: sanitationResult.completedAt,
       availableAt,
-      expiresAt: new Date(new Date(availableAt).getTime() + 14 * 24 * 60 * 60 * 1000).toISOString(),
     };
     const attestation = createRunnerSnapshotAttestation({
       manifest,
+      signingKeyId: input.signingKeyId,
       privateKeyPem: input.privateKeyPem,
     });
 
@@ -349,9 +360,9 @@ export async function buildRunnerSnapshot(
     return {
       ok: true,
       manifest,
-      manifestBytes: attestation.canonicalBytes,
+      bundle: attestation.bundle,
+      bundleBytes: attestation.bundleBytes,
       digest: attestation.digest,
-      signature: attestation.signature,
       bootResult,
       sanitationResult,
       cleanup,
@@ -626,6 +637,7 @@ function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
       defaultAgentImage: string;
       defaultAgentDigest: string;
       hermesImage: string;
+      runnerDiskGiB: number;
     }
   | { ok: false; reason: "authorization_missing" | "input_invalid" } {
   if (input.costAuthorization !== SNAPSHOT_AUTHORIZATION_SENTINEL) {
@@ -636,10 +648,12 @@ function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
   const defaultAgentImage = input.defaultAgentImage ?? DEFAULT_MANUAL_RUNNER_IMAGE;
   const defaultAgent = parseImmutableRunnerImageReference(defaultAgentImage);
   const hermesImage = input.hermesImage ?? DEFAULT_HERMES_WORKLOAD_IMAGE;
+  const runnerProfile = findDigitalOceanRunnerResourceProfile(input.sizeSlug);
 
   if (
     !runner ||
     !defaultAgent ||
+    !runnerProfile ||
     !/^[1-9][0-9]{0,18}$/.test(input.operationId) ||
     !/^[a-f0-9]{40}$/.test(input.sourceRevision) ||
     !/^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/.test(input.region) ||
@@ -650,7 +664,8 @@ function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
     (input.expectedBuilderHostKeySha256 !== undefined &&
       !isSha256SshFingerprint(input.expectedBuilderHostKeySha256)) ||
     input.hermesImage === undefined ||
-    !hermesImage.includes("@sha256:")
+    !hermesImage.includes("@sha256:") ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.signingKeyId)
   ) {
     return { ok: false, reason: "input_invalid" };
   }
@@ -661,6 +676,7 @@ function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
     defaultAgentImage,
     defaultAgentDigest: defaultAgent.imageDigest,
     hermesImage,
+    runnerDiskGiB: runnerProfile.diskGiB,
   };
 }
 

@@ -145,7 +145,8 @@ forbidden.
 
 Snapshot mode is not a warm pool. The workflow creates a short-lived builder Droplet only after
 approval, validates the full boot contract, sanitizes instance state, powers the builder off, creates
-one snapshot, emits an allowlisted signed manifest, and deletes temporary builder resources. It must
+one snapshot, emits an allowlisted signed Snapshot Attestation v2 bundle, and deletes temporary
+builder resources. It must
 not create user runners, ready capacity, spare Droplets, cross-user capacity, schedules, release
 triggers, or production deployments.
 
@@ -162,15 +163,28 @@ Production snapshot consumption is configured with:
 
 ```text
 BRUNO_DIGITALOCEAN_IMAGE_MODE=snapshot
-BRUNO_DIGITALOCEAN_SNAPSHOT_MANIFEST=<canonical manifest JSON>
-BRUNO_DIGITALOCEAN_SNAPSHOT_SIGNATURE=<base64url Ed25519 signature>
-BRUNO_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY=<public verification key>
-BRUNO_RELEASE_SOURCE_REVISION=<exact 40-character release commit>
+BRUNO_DIGITALOCEAN_SNAPSHOT_BUNDLE=<canonical Snapshot Attestation v2 bundle JSON>
+BRUNO_DIGITALOCEAN_APPROVED_SNAPSHOT_DIGEST=<exact sha256 bundle digest>
+BRUNO_DIGITALOCEAN_SNAPSHOT_TRUST_SET=<JSON object mapping key IDs to Ed25519 public keys>
 BRUNO_DOCKER_RUNNER_IMAGE=<immutable default-agent image reference>
 ```
 
-Every hosted create path verifies the manifest signature, staleness, source revision, base image,
-architecture, region, minimum disk compatibility, runner/default-agent/Hermes identities, and
-authoritative provider image availability before a Droplet-create call. Invalid or unavailable
-evidence fails closed. Set `BRUNO_DIGITALOCEAN_IMAGE_MODE=stock` or remove the snapshot variables
-to use the existing complete Ubuntu bootstrap rollback path.
+The `snapshot-build` protected environment also defines the non-secret
+`BRUNO_SNAPSHOT_SIGNING_KEY_ID` variable for the Ed25519 private key held in
+`BRUNO_SNAPSHOT_SIGNING_KEY_PEM`. The bundle carries that key ID, and production resolves it only
+through the operator-managed trust set. Keep the current and previous public keys in the set during
+rotation so retained rollback evidence remains independently verifiable.
+
+Every hosted create path requires the configured approval digest to match the exact canonical
+bundle, resolves its identified signing key from the trust set, verifies its signature, rejects v1,
+and checks exact runner profile, disk, base OS, architecture, region,
+runner/default-agent/Hermes/boot-contract, and authoritative provider image-availability identities
+before a Droplet-create call. Source repository, revision, workflow identity, and timestamps remain
+signed provenance; they do not expire an otherwise compatible bundle and do not couple snapshot
+compatibility to a control-plane revision.
+
+Promotion atomically selects a new retained bundle and its exact digest. Removing the approved
+digest revokes snapshot selection and makes snapshot-mode configuration fail closed. Rollback
+restores a retained compatible bundle and digest without rewriting the attestation; its signing key
+must still be present in the trust set. Set `BRUNO_DIGITALOCEAN_IMAGE_MODE=stock` to use the existing
+complete Ubuntu bootstrap rollback path.

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Snapshot Attestation v2 now binds exact immutable runner, default-agent, Hermes, boot-contract,
+  base OS, architecture, region, disk, and provider-availability identities in a canonical signed
+  bundle. Production selects one exact revocable digest, verifies the bundle through an overlapping
+  operator-managed Ed25519 key-ID trust set, rejects v1, keeps source and timestamps as non-expiring
+  provenance, and can restore a retained compatible digest without rewriting its attestation.
 - Bounded deployment recovery now drains at most 25 due items under one shared 40-second cron
   deadline, preserves PostgreSQL-first progress during QStash outages, aborts stalled hint
   publication while its delivery generation remains fenced, and reports only the active
