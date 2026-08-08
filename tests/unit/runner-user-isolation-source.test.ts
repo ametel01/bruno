@@ -110,7 +110,7 @@ describe("runner user-isolation source boundaries", () => {
       "utf8",
     );
 
-    expect(adapterSource).toContain("AGENTBAY_RUNNER_BEARER_TOKEN");
+    expect(adapterSource).toContain("BRUNO_RUNNER_BEARER_TOKEN");
     expect(adapterSource).toContain("Authorization");
     expect(runnerServiceSource).toMatch(/authorization !== `Bearer \$\{authToken\}`/);
   });

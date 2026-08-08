@@ -20,9 +20,9 @@ import {
   projectHermesHome,
 } from "@/src/runner-service/hermes-projection";
 
-export const LOCAL_AGENT_SMOKE_MODE_ENV = "AGENTBAY_LOCAL_AGENT_SMOKE_MODE";
+export const LOCAL_AGENT_SMOKE_MODE_ENV = "BRUNO_LOCAL_AGENT_SMOKE_MODE";
 export const LOCAL_AGENT_SMOKE_MODE_VALUE = "synthetic-external-boundaries";
-export const LOCAL_AGENT_SMOKE_FAKE_MODEL_CONTAINER = "agentbay-local-agent-fake-model";
+export const LOCAL_AGENT_SMOKE_FAKE_MODEL_CONTAINER = "bruno-local-agent-fake-model";
 export const LOCAL_AGENT_SMOKE_MODEL_ALIAS = "gpt-5.4";
 
 const LOCAL_HOSTNAME = "host.docker.internal";
@@ -81,8 +81,8 @@ export function resolveLocalAgentSmokeMode(
     throw new Error(`${LOCAL_AGENT_SMOKE_MODE_ENV} has an invalid value.`);
   }
 
-  assertLocalUrl(env.AGENTBAY_APP_URL, "AGENTBAY_APP_URL", [LOCAL_HOSTNAME]);
-  assertLocalUrl(env.AGENTBAY_RUNNER_ENDPOINT_URL, "AGENTBAY_RUNNER_ENDPOINT_URL", [
+  assertLocalUrl(env.BRUNO_APP_URL, "BRUNO_APP_URL", [LOCAL_HOSTNAME]);
+  assertLocalUrl(env.BRUNO_RUNNER_ENDPOINT_URL, "BRUNO_RUNNER_ENDPOINT_URL", [
     LOCAL_HOSTNAME,
     "127.0.0.1",
   ]);
@@ -103,7 +103,7 @@ export function createLocalAgentSmokeRunnerDocker(
   }
 
   const runtime = resolveRuntime(env);
-  const hermesImage = env.AGENTBAY_HERMES_WORKLOAD_IMAGE?.trim() || "agentbay-hermes:local";
+  const hermesImage = env.BRUNO_HERMES_WORKLOAD_IMAGE?.trim() || "bruno-hermes:local";
   const requestHealth = async (input: {
     apiServerKey: string;
     containerName: string;
@@ -128,7 +128,7 @@ export function createLocalAgentSmokeRunnerDocker(
         await ensureLocalAgentSmokeFakeModel(hermesImage, runtime.network);
         const projection = await projectHermesHome(spec, {
           ownership: { uid: 10_000, gid: 10_000 },
-          ...(env.AGENTBAY_HERMES_STATE_ROOT ? { stateRoot: env.AGENTBAY_HERMES_STATE_ROOT } : {}),
+          ...(env.BRUNO_HERMES_STATE_ROOT ? { stateRoot: env.BRUNO_HERMES_STATE_ROOT } : {}),
         });
         await applyLocalAgentSmokeProjection(projection, mode.fakeModelBaseUrl);
         return projection;
@@ -161,7 +161,7 @@ export function createLocalAgentSmokeRunnerDocker(
       wait: createHermesReadinessWaiter(runtime, {
         requestHealth,
         requireTelegram: true,
-        timeoutMs: readPositiveInteger(env.AGENTBAY_HERMES_READINESS_TIMEOUT_MS, 180_000),
+        timeoutMs: readPositiveInteger(env.BRUNO_HERMES_READINESS_TIMEOUT_MS, 180_000),
       }),
     },
   });
@@ -182,7 +182,7 @@ async function ensureLocalAgentSmokeFakeModel(image: string, network: string): P
     "--name",
     LOCAL_AGENT_SMOKE_FAKE_MODEL_CONTAINER,
     "--label",
-    "agentbay.smoke=local-agent-cycle",
+    "bruno.smoke=local-agent-cycle",
     "--network",
     network,
     "--entrypoint",
@@ -307,11 +307,11 @@ async function applyLocalAgentSmokeProjection(
 
 function resolveRuntime(env: Record<string, string | undefined>): HermesDockerRuntimeOptions {
   return {
-    cpus: env.AGENTBAY_HERMES_DOCKER_CPUS?.trim() || "1",
-    memory: env.AGENTBAY_HERMES_DOCKER_MEMORY?.trim() || "1536m",
-    network: env.AGENTBAY_HERMES_PRIVATE_NETWORK?.trim() || "agentbay-hermes",
-    pidsLimit: env.AGENTBAY_HERMES_DOCKER_PIDS_LIMIT?.trim() || "256",
-    readinessPort: readPositiveInteger(env.AGENTBAY_HERMES_READINESS_PORT, 8642),
+    cpus: env.BRUNO_HERMES_DOCKER_CPUS?.trim() || "1",
+    memory: env.BRUNO_HERMES_DOCKER_MEMORY?.trim() || "1536m",
+    network: env.BRUNO_HERMES_PRIVATE_NETWORK?.trim() || "bruno-hermes",
+    pidsLimit: env.BRUNO_HERMES_DOCKER_PIDS_LIMIT?.trim() || "256",
+    readinessPort: readPositiveInteger(env.BRUNO_HERMES_READINESS_PORT, 8642),
   };
 }
 
@@ -429,7 +429,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._json(200, {"ok": True, "provider": "agentbay-local-fake-openai"})
+            self._json(200, {"ok": True, "provider": "bruno-local-fake-openai"})
             return
         self._json(404, {"error": "not_found"})
 
@@ -441,11 +441,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         model = str(body.get("model") or "unknown")
         self._json(200, {
-            "id": "chatcmpl-agentbay-local-agent-smoke",
+            "id": "chatcmpl-bruno-local-agent-smoke",
             "object": "chat.completion",
             "created": 1784000000,
             "model": model,
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": "agentbay local fake model response"}, "finish_reason": "stop"}],
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "bruno local fake model response"}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
         })
 

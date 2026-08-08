@@ -26,7 +26,7 @@ import type { ManualRunnerRecord } from "@/src/server/runners/manual-runner-pers
 
 const execFileAsync = promisify(execFile);
 const BASE_DATABASE_URL =
-  process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
+  process.env.DATABASE_URL ?? "postgres://bruno:bruno@127.0.0.1:54329/bruno";
 const USER_ID = "00000000-0000-4000-8000-000000009501";
 const RUNNER_ID = "00000000-0000-4000-8000-000000009502";
 const AGENT_ID = "00000000-0000-4000-8000-000000009503";

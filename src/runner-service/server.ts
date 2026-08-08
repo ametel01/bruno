@@ -34,7 +34,7 @@ import {
 } from "@/src/runner-service/release-identity";
 import { DEFAULT_HERMES_RUNNER_MAX_AGENTS } from "@/src/runner-service/constants";
 
-const RUNNER_TOKEN_ENV = "AGENTBAY_RUNNER_BEARER_TOKEN";
+const RUNNER_TOKEN_ENV = "BRUNO_RUNNER_BEARER_TOKEN";
 
 type RunnerAction = "start" | "stop" | "restart" | "status" | "logs" | "cleanup" | "canary";
 
@@ -460,7 +460,7 @@ export function startRunnerHeartbeatLoop(options: RunnerHeartbeatLoopOptions): {
         body: JSON.stringify({
           runnerId: options.runnerId,
           status: cachedReleaseEvidence.expectedMatch === false ? "degraded" : "online",
-          version: "agentbay-runner/service",
+          version: "bruno-runner/service",
           release: cachedReleaseEvidence.release,
           metrics: {
             maxAgents: normalizePositiveInteger(

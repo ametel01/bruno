@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import {
-  AGENTBAY_AGENT_ID_LABEL,
+  BRUNO_AGENT_ID_LABEL,
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
@@ -12,8 +12,8 @@ import { prepareHermesState } from "@/src/runner-service/hermes-projection";
 const execFileAsync = promisify(execFile);
 const DEFAULT_SESSION_TTL_MS = 15 * 60 * 1_000;
 const MAX_CLIENT_MESSAGE_BYTES = 64 * 1024;
-const SETUP_SESSION_LABEL = "agentbay.hermes_setup_session";
-const SETUP_PROTOCOL_PREFIX = "agentbay.hermes.setup.";
+const SETUP_SESSION_LABEL = "bruno.hermes_setup_session";
+const SETUP_PROTOCOL_PREFIX = "bruno.hermes.setup.";
 const SETUP_COMMAND = [
   "hermes setup &&",
   "hermes config set terminal.cwd /workspace &&",
@@ -107,19 +107,17 @@ export class HermesSetupSessionManager {
     this.#docker = options.docker ?? createDockerExec(this.#dockerExecutable);
     this.#image =
       options.image ??
-      process.env.AGENTBAY_HERMES_WORKLOAD_IMAGE?.trim() ??
+      process.env.BRUNO_HERMES_WORKLOAD_IMAGE?.trim() ??
       DEFAULT_HERMES_WORKLOAD_IMAGE;
     this.#network =
       options.network ??
-      process.env.AGENTBAY_HERMES_PRIVATE_NETWORK?.trim() ??
+      process.env.BRUNO_HERMES_PRIVATE_NETWORK?.trim() ??
       DEFAULT_HERMES_PRIVATE_NETWORK;
     this.#now = options.now ?? Date.now;
     this.#sessionTtlMs = options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
     this.#spawn = options.spawn ?? defaultSpawn;
     this.#stateRoot =
-      options.stateRoot ??
-      process.env.AGENTBAY_HERMES_STATE_ROOT?.trim() ??
-      DEFAULT_HERMES_STATE_ROOT;
+      options.stateRoot ?? process.env.BRUNO_HERMES_STATE_ROOT?.trim() ?? DEFAULT_HERMES_STATE_ROOT;
   }
 
   async create(agentId: string): Promise<HermesSetupSessionDescriptor> {
@@ -133,7 +131,7 @@ export class HermesSetupSessionManager {
       "ps",
       "--quiet",
       "--filter",
-      `label=${AGENTBAY_AGENT_ID_LABEL}=${agentId}`,
+      `label=${BRUNO_AGENT_ID_LABEL}=${agentId}`,
       "--filter",
       "status=running",
     ]);
@@ -150,7 +148,7 @@ export class HermesSetupSessionManager {
     const protocol = `${SETUP_PROTOCOL_PREFIX}${token}`;
     const session: SetupSession = {
       agentId,
-      containerName: `agentbay-hermes-setup-${id.replaceAll("-", "").slice(0, 20)}`,
+      containerName: `bruno-hermes-setup-${id.replaceAll("-", "").slice(0, 20)}`,
       createdAt,
       expiresAt,
       expiryTimer: null,
@@ -294,7 +292,7 @@ export class HermesSetupSessionManager {
       "--name",
       session.containerName,
       "--label",
-      `${AGENTBAY_AGENT_ID_LABEL}=${session.agentId}`,
+      `${BRUNO_AGENT_ID_LABEL}=${session.agentId}`,
       "--label",
       `${SETUP_SESSION_LABEL}=${session.id}`,
       "--network",

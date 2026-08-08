@@ -17,13 +17,13 @@ import {
 } from "@/src/runner-service/constants";
 
 const SAFE_PUBLISHED_IMAGE =
-  "ghcr.io/ametel01/agentbay-hermes@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  "ghcr.io/ametel01/bruno-hermes@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const SOURCE_REVISION = "0123456789abcdef0123456789abcdef01234567";
 
 const SECRET_VALUES = {
   acceptanceBearerSecret: "staging_acceptance_abcdefghijklmnopqrstuvwxyz012345",
   digitalOceanToken: `dop_v1_${"a".repeat(64)}`,
-  runnerBearerToken: "agb_run_secret1234567890123456789012345678901234567890123",
+  runnerBearerToken: "bruno_run_secret1234567890123456789012345678901234567890123",
   openAiKey: "sk-openai-secret12345678901234567890",
   telegramToken: "123456789:abcdefghijklmnopqrstuvwxyzABCDE",
   telegramUserId: "123456789",
@@ -32,23 +32,23 @@ const SECRET_VALUES = {
 
 function completeEnv(): Record<string, string | undefined> {
   return {
-    AGENTBAY_HERMES_STAGING_PUBLISHED_IMAGE_REF: SAFE_PUBLISHED_IMAGE,
-    AGENTBAY_HERMES_WORKLOAD_IMAGE: SAFE_PUBLISHED_IMAGE,
-    AGENTBAY_HERMES_STAGING_IMAGE_SOURCE_REVISION: SOURCE_REVISION,
-    AGENTBAY_HERMES_STAGING_PUBLISH_WORKFLOW_RUN_ID: "987654321",
-    AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED: "true",
-    AGENTBAY_HERMES_STAGING_ACCEPTANCE_BASE_URL: "https://staging.example.test",
-    AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: SECRET_VALUES.acceptanceBearerSecret,
-    AGENTBAY_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION:
+    BRUNO_HERMES_STAGING_PUBLISHED_IMAGE_REF: SAFE_PUBLISHED_IMAGE,
+    BRUNO_HERMES_WORKLOAD_IMAGE: SAFE_PUBLISHED_IMAGE,
+    BRUNO_HERMES_STAGING_IMAGE_SOURCE_REVISION: SOURCE_REVISION,
+    BRUNO_HERMES_STAGING_PUBLISH_WORKFLOW_RUN_ID: "987654321",
+    BRUNO_HERMES_STAGING_ACCEPTANCE_ENABLED: "true",
+    BRUNO_HERMES_STAGING_ACCEPTANCE_BASE_URL: "https://staging.example.test",
+    BRUNO_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: SECRET_VALUES.acceptanceBearerSecret,
+    BRUNO_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION:
       HERMES_STAGING_DIGITALOCEAN_BUDGET_SENTINEL,
-    AGENTBAY_DIGITALOCEAN_TOKEN: SECRET_VALUES.digitalOceanToken,
-    AGENTBAY_RUNNER_BEARER_TOKEN: SECRET_VALUES.runnerBearerToken,
-    AGENTBAY_HERMES_STAGING_ASSISTANT: "chatgpt",
-    AGENTBAY_HERMES_STAGING_OPENAI_API_KEY: SECRET_VALUES.openAiKey,
-    AGENTBAY_HERMES_STAGING_TELEGRAM_BOT_TOKEN: SECRET_VALUES.telegramToken,
-    AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_USER_ID: SECRET_VALUES.telegramUserId,
-    AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID: SECRET_VALUES.telegramChatId,
-    AGENTBAY_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION: HERMES_STAGING_LIVE_SIDE_EFFECT_SENTINEL,
+    BRUNO_DIGITALOCEAN_TOKEN: SECRET_VALUES.digitalOceanToken,
+    BRUNO_RUNNER_BEARER_TOKEN: SECRET_VALUES.runnerBearerToken,
+    BRUNO_HERMES_STAGING_ASSISTANT: "chatgpt",
+    BRUNO_HERMES_STAGING_OPENAI_API_KEY: SECRET_VALUES.openAiKey,
+    BRUNO_HERMES_STAGING_TELEGRAM_BOT_TOKEN: SECRET_VALUES.telegramToken,
+    BRUNO_HERMES_STAGING_TELEGRAM_TEST_USER_ID: SECRET_VALUES.telegramUserId,
+    BRUNO_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID: SECRET_VALUES.telegramChatId,
+    BRUNO_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION: HERMES_STAGING_LIVE_SIDE_EFFECT_SENTINEL,
   };
 }
 
@@ -71,29 +71,29 @@ describe("Hermes staging verification gate", () => {
     expect(plan.capabilities).toHaveLength(16);
     expect(plan.capabilities.every((capability) => capability.state === "missing")).toBe(true);
     expect(report).toContain('"sideEffectsAttempted": false');
-    expect(report).toContain("AGENTBAY_HERMES_STAGING_PUBLISHED_IMAGE_REF");
+    expect(report).toContain("BRUNO_HERMES_STAGING_PUBLISHED_IMAGE_REF");
     expect(report).not.toContain("process.env");
   });
 
   it("fails blank, placeholder, malformed, tag-only, and source-pinned inputs closed", () => {
     const malformedEnv = {
       ...completeEnv(),
-      AGENTBAY_HERMES_STAGING_PUBLISHED_IMAGE_REF: "ghcr.io/ametel01/agentbay-hermes:staging",
-      AGENTBAY_HERMES_WORKLOAD_IMAGE: "nousresearch/hermes-agent:latest",
-      AGENTBAY_HERMES_STAGING_IMAGE_SOURCE_REVISION: "A".repeat(40),
-      AGENTBAY_HERMES_STAGING_PUBLISH_WORKFLOW_RUN_ID: "0",
-      AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED: "yes",
-      AGENTBAY_HERMES_STAGING_ACCEPTANCE_BASE_URL: "http://staging.example.test/private",
-      AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: "too-short",
-      AGENTBAY_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION: "true",
-      AGENTBAY_DIGITALOCEAN_TOKEN: "replace-with-digitalocean-token",
-      AGENTBAY_RUNNER_BEARER_TOKEN: "runner credential with spaces",
-      AGENTBAY_HERMES_STAGING_ASSISTANT: "other",
-      AGENTBAY_HERMES_STAGING_OPENAI_API_KEY: " ",
-      AGENTBAY_HERMES_STAGING_TELEGRAM_BOT_TOKEN: "not-a-token",
-      AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_USER_ID: "user-123",
-      AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID: "0",
-      AGENTBAY_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION: "yes",
+      BRUNO_HERMES_STAGING_PUBLISHED_IMAGE_REF: "ghcr.io/ametel01/bruno-hermes:staging",
+      BRUNO_HERMES_WORKLOAD_IMAGE: "nousresearch/hermes-agent:latest",
+      BRUNO_HERMES_STAGING_IMAGE_SOURCE_REVISION: "A".repeat(40),
+      BRUNO_HERMES_STAGING_PUBLISH_WORKFLOW_RUN_ID: "0",
+      BRUNO_HERMES_STAGING_ACCEPTANCE_ENABLED: "yes",
+      BRUNO_HERMES_STAGING_ACCEPTANCE_BASE_URL: "http://staging.example.test/private",
+      BRUNO_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: "too-short",
+      BRUNO_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION: "true",
+      BRUNO_DIGITALOCEAN_TOKEN: "replace-with-digitalocean-token",
+      BRUNO_RUNNER_BEARER_TOKEN: "runner credential with spaces",
+      BRUNO_HERMES_STAGING_ASSISTANT: "other",
+      BRUNO_HERMES_STAGING_OPENAI_API_KEY: " ",
+      BRUNO_HERMES_STAGING_TELEGRAM_BOT_TOKEN: "not-a-token",
+      BRUNO_HERMES_STAGING_TELEGRAM_TEST_USER_ID: "user-123",
+      BRUNO_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID: "0",
+      BRUNO_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION: "yes",
     };
 
     const capabilities = evaluateHermesStagingCapabilities(malformedEnv);
@@ -141,8 +141,8 @@ describe("Hermes staging verification gate", () => {
     ]) {
       const sourcePinned = evaluateHermesStagingCapabilities({
         ...completeEnv(),
-        AGENTBAY_HERMES_STAGING_PUBLISHED_IMAGE_REF: `ghcr.io/ametel01/agentbay-hermes@${digest}`,
-        AGENTBAY_HERMES_WORKLOAD_IMAGE: `ghcr.io/ametel01/agentbay-hermes@${digest}`,
+        BRUNO_HERMES_STAGING_PUBLISHED_IMAGE_REF: `ghcr.io/ametel01/bruno-hermes@${digest}`,
+        BRUNO_HERMES_WORKLOAD_IMAGE: `ghcr.io/ametel01/bruno-hermes@${digest}`,
       });
 
       expect(sourcePinned[0]).toMatchObject({
@@ -156,8 +156,8 @@ describe("Hermes staging verification gate", () => {
   it("requires exact budget and live side-effect sentinels", () => {
     const capabilities = evaluateHermesStagingCapabilities({
       ...completeEnv(),
-      AGENTBAY_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION: `${HERMES_STAGING_DIGITALOCEAN_BUDGET_SENTINEL} `,
-      AGENTBAY_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION:
+      BRUNO_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION: `${HERMES_STAGING_DIGITALOCEAN_BUDGET_SENTINEL} `,
+      BRUNO_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION:
         HERMES_STAGING_LIVE_SIDE_EFFECT_SENTINEL.toUpperCase(),
     });
 
@@ -179,18 +179,18 @@ describe("Hermes staging verification gate", () => {
 
   it("selects exactly one assistant-matched direct model key", () => {
     const claudeEnv = completeEnv();
-    claudeEnv.AGENTBAY_HERMES_STAGING_ASSISTANT = "claude";
-    delete claudeEnv.AGENTBAY_HERMES_STAGING_OPENAI_API_KEY;
-    claudeEnv.AGENTBAY_HERMES_STAGING_ANTHROPIC_API_KEY = `sk-ant-${"a".repeat(32)}`;
+    claudeEnv.BRUNO_HERMES_STAGING_ASSISTANT = "claude";
+    delete claudeEnv.BRUNO_HERMES_STAGING_OPENAI_API_KEY;
+    claudeEnv.BRUNO_HERMES_STAGING_ANTHROPIC_API_KEY = `sk-ant-${"a".repeat(32)}`;
 
     expect(
       evaluateHermesStagingCapabilities(claudeEnv).find(({ name }) => name === "model_api_key"),
     ).toMatchObject({
-      envName: "AGENTBAY_HERMES_STAGING_ANTHROPIC_API_KEY",
+      envName: "BRUNO_HERMES_STAGING_ANTHROPIC_API_KEY",
       state: "configured",
     });
 
-    claudeEnv.AGENTBAY_HERMES_STAGING_OPENAI_API_KEY = SECRET_VALUES.openAiKey;
+    claudeEnv.BRUNO_HERMES_STAGING_OPENAI_API_KEY = SECRET_VALUES.openAiKey;
     expect(
       evaluateHermesStagingCapabilities(claudeEnv).find(({ name }) => name === "model_api_key"),
     ).toMatchObject({ state: "malformed", detail: "unselected_model_api_key_must_be_unset" });
@@ -205,7 +205,7 @@ describe("Hermes staging verification gate", () => {
     ]) {
       const capability = evaluateHermesStagingCapabilities({
         ...completeEnv(),
-        AGENTBAY_HERMES_STAGING_ACCEPTANCE_BASE_URL: baseUrl,
+        BRUNO_HERMES_STAGING_ACCEPTANCE_BASE_URL: baseUrl,
       }).find(({ name }) => name === "acceptance_base_url");
       expect(capability).toMatchObject({
         state: "malformed",
@@ -216,12 +216,12 @@ describe("Hermes staging verification gate", () => {
     const sharedSecret = "shared_authority_abcdefghijklmnopqrstuvwxyz012345";
     for (const envName of [
       "CRON_SECRET",
-      "AGENTBAY_RUNNER_BEARER_TOKEN",
-      "AGENTBAY_OPERATOR_PASSWORD",
+      "BRUNO_RUNNER_BEARER_TOKEN",
+      "BRUNO_OPERATOR_PASSWORD",
     ] as const) {
       const capability = evaluateHermesStagingCapabilities({
         ...completeEnv(),
-        AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: sharedSecret,
+        BRUNO_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: sharedSecret,
         [envName]: sharedSecret,
       }).find(({ name }) => name === "acceptance_bearer_secret");
       expect(capability).toMatchObject({
@@ -239,13 +239,13 @@ describe("Hermes staging verification gate", () => {
     });
 
     for (const imageRef of [
-      "ghcr.io/ametel01/agentbay-hermes:staging@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "ghcr.io/ametel01/agentbay-hermes-evil:staging@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "ghcr.io/ametel01/agentbay-hermes/other:staging@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ghcr.io/ametel01/bruno-hermes:staging@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ghcr.io/ametel01/bruno-hermes-evil:staging@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ghcr.io/ametel01/bruno-hermes/other:staging@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     ]) {
       const [imageCapability] = evaluateHermesStagingCapabilities({
         ...completeEnv(),
-        AGENTBAY_HERMES_STAGING_PUBLISHED_IMAGE_REF: imageRef,
+        BRUNO_HERMES_STAGING_PUBLISHED_IMAGE_REF: imageRef,
       });
 
       expect(imageCapability).toMatchObject({
@@ -259,8 +259,8 @@ describe("Hermes staging verification gate", () => {
   it("requires the configured workload to equal the attested release and exact provenance shapes", () => {
     const mismatchedImage = evaluateHermesStagingCapabilities({
       ...completeEnv(),
-      AGENTBAY_HERMES_WORKLOAD_IMAGE:
-        "ghcr.io/ametel01/agentbay-hermes@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      BRUNO_HERMES_WORKLOAD_IMAGE:
+        "ghcr.io/ametel01/bruno-hermes@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     }).find(({ name }) => name === "configured_workload_image");
     expect(mismatchedImage).toMatchObject({
       state: "malformed",
@@ -271,7 +271,7 @@ describe("Hermes staging verification gate", () => {
       expect(
         evaluateHermesStagingCapabilities({
           ...completeEnv(),
-          AGENTBAY_HERMES_STAGING_IMAGE_SOURCE_REVISION: sourceRevision,
+          BRUNO_HERMES_STAGING_IMAGE_SOURCE_REVISION: sourceRevision,
         }).find(({ name }) => name === "image_source_revision"),
       ).toMatchObject({ state: "malformed", detail: "lowercase_40_hex_revision_required" });
     }
@@ -280,7 +280,7 @@ describe("Hermes staging verification gate", () => {
       expect(
         evaluateHermesStagingCapabilities({
           ...completeEnv(),
-          AGENTBAY_HERMES_STAGING_PUBLISH_WORKFLOW_RUN_ID: workflowRunId,
+          BRUNO_HERMES_STAGING_PUBLISH_WORKFLOW_RUN_ID: workflowRunId,
         }).find(({ name }) => name === "publish_workflow_run_id"),
       ).toMatchObject({
         state: "malformed",
@@ -292,7 +292,7 @@ describe("Hermes staging verification gate", () => {
       expect(
         evaluateHermesStagingCapabilities({
           ...completeEnv(),
-          AGENTBAY_HERMES_STAGING_PUBLISH_WORKFLOW_RUN_ID: workflowRunId,
+          BRUNO_HERMES_STAGING_PUBLISH_WORKFLOW_RUN_ID: workflowRunId,
         }).find(({ name }) => name === "publish_workflow_run_id"),
       ).toMatchObject({ state: "configured" });
     }
@@ -366,7 +366,7 @@ describe("Hermes staging verification gate", () => {
       nextAction: {
         kind: "operator_telegram",
         challengeId: initialChallengeId,
-        text: `bruno Hermes initial acceptance ${initialChallengeId}`,
+        text: `Bruno Hermes initial acceptance ${initialChallengeId}`,
         purpose: "initial",
         expiresAt: "2030-01-01T00:05:00.000Z",
       },
@@ -388,7 +388,7 @@ describe("Hermes staging verification gate", () => {
         nextAction: {
           kind: "operator_telegram",
           challengeId: restartChallengeId,
-          text: `bruno Hermes post-restart acceptance ${restartChallengeId}`,
+          text: `Bruno Hermes post-restart acceptance ${restartChallengeId}`,
           purpose: "post_restart",
           expiresAt: "2030-01-01T00:10:00.000Z",
         },
@@ -479,7 +479,7 @@ describe("Hermes staging verification gate", () => {
         nextAction: {
           kind: "operator_telegram",
           challengeId,
-          text: `bruno Hermes initial acceptance ${challengeId}`,
+          text: `Bruno Hermes initial acceptance ${challengeId}`,
           purpose: "initial",
           expiresAt: "2030-01-01T00:05:00.000Z",
         },

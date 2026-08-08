@@ -45,7 +45,7 @@ describe("POST /runner/v1/bootstrap-events route", () => {
       new Request("http://localhost/runner/v1/bootstrap-events", {
         method: "POST",
         body: JSON.stringify({
-          registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+          registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
           phase: "bootstrapping",
           status: "completed",
           message: "Docker apt repository was configured.",
@@ -64,7 +64,7 @@ describe("POST /runner/v1/bootstrap-events route", () => {
       },
     });
     expect(mocks.recordRunnerBootstrapEvent).toHaveBeenCalledWith({
-      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
       phase: "bootstrapping",
       status: "completed",
       message: "Docker apt repository was configured.",
@@ -88,8 +88,8 @@ describe("POST /runner/v1/bootstrap-events route", () => {
         status: "completed",
       }),
     );
-    expect(JSON.stringify(body)).not.toContain("agb_reg_");
-    expect(JSON.stringify(ingressLogs)).not.toContain("agb_reg_");
+    expect(JSON.stringify(body)).not.toContain("bruno_reg_");
+    expect(JSON.stringify(ingressLogs)).not.toContain("bruno_reg_");
   });
 
   it("returns safe validation failures", async () => {
@@ -99,7 +99,7 @@ describe("POST /runner/v1/bootstrap-events route", () => {
       new Request("http://localhost/runner/v1/bootstrap-events", {
         method: "POST",
         body: JSON.stringify({
-          registrationToken: "agb_run_wrong",
+          registrationToken: "bruno_run_wrong",
           phase: "creating",
           status: "done",
           message: "",
@@ -116,7 +116,7 @@ describe("POST /runner/v1/bootstrap-events route", () => {
       },
     });
     expect(mocks.recordRunnerBootstrapEvent).not.toHaveBeenCalled();
-    expect(JSON.stringify(body)).not.toContain("agb_run_wrong");
+    expect(JSON.stringify(body)).not.toContain("bruno_run_wrong");
   });
 
   it("returns a generic unauthorized response for unknown registration tokens", async () => {
@@ -130,7 +130,7 @@ describe("POST /runner/v1/bootstrap-events route", () => {
       new Request("http://localhost/runner/v1/bootstrap-events", {
         method: "POST",
         body: JSON.stringify({
-          registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+          registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
           phase: "bootstrapping",
           status: "failed",
           message: "Cloud runner bootstrap failed during docker_container_start.",
@@ -148,7 +148,7 @@ describe("POST /runner/v1/bootstrap-events route", () => {
       },
     });
     expect(JSON.stringify(body)).not.toContain(
-      "agb_reg_1234567890123456789012345678901234567890123",
+      "bruno_reg_1234567890123456789012345678901234567890123",
     );
   });
 });

@@ -11,24 +11,24 @@ import {
 } from "@/src/runner-service/release-identity";
 
 type RunnerBootstrapEnv = {
-  AGENTBAY_APP_URL?: string;
-  AGENTBAY_RUNNER_REGISTRATION_TOKEN?: string;
-  AGENTBAY_RUNNER_ENDPOINT_URL?: string;
-  AGENTBAY_RUNNER_NAME?: string;
-  AGENTBAY_RUNNER_ID?: string;
-  AGENTBAY_RUNNER_CREDENTIAL?: string;
-  AGENTBAY_RUNNER_ENV_FILE?: string;
-  AGENTBAY_RUNNER_HOST?: string;
-  AGENTBAY_RUNNER_PORT?: string;
-  AGENTBAY_RUNNER_BEARER_TOKEN?: string;
-  AGENTBAY_DOCKER_RUNNER_IMAGE?: string;
-  AGENTBAY_RUNNER_CONTAINER_ID?: string;
-  AGENTBAY_RUNNER_EXPECTED_RELEASE_VERSION?: string;
-  AGENTBAY_RUNNER_EXPECTED_IMAGE_DIGEST?: string;
-  AGENTBAY_RUNNER_EXPECTED_BOOT_CONTRACT_VERSION?: string;
-  AGENTBAY_RUNNER_RELEASE_IDENTITY_MODE?: string;
-  AGENTBAY_RUNNER_BOOT_MODEL_CANARY_ENABLED?: string;
-  AGENTBAY_LOCAL_AGENT_SMOKE_MODE?: string;
+  BRUNO_APP_URL?: string;
+  BRUNO_RUNNER_REGISTRATION_TOKEN?: string;
+  BRUNO_RUNNER_ENDPOINT_URL?: string;
+  BRUNO_RUNNER_NAME?: string;
+  BRUNO_RUNNER_ID?: string;
+  BRUNO_RUNNER_CREDENTIAL?: string;
+  BRUNO_RUNNER_ENV_FILE?: string;
+  BRUNO_RUNNER_HOST?: string;
+  BRUNO_RUNNER_PORT?: string;
+  BRUNO_RUNNER_BEARER_TOKEN?: string;
+  BRUNO_DOCKER_RUNNER_IMAGE?: string;
+  BRUNO_RUNNER_CONTAINER_ID?: string;
+  BRUNO_RUNNER_EXPECTED_RELEASE_VERSION?: string;
+  BRUNO_RUNNER_EXPECTED_IMAGE_DIGEST?: string;
+  BRUNO_RUNNER_EXPECTED_BOOT_CONTRACT_VERSION?: string;
+  BRUNO_RUNNER_RELEASE_IDENTITY_MODE?: string;
+  BRUNO_RUNNER_BOOT_MODEL_CANARY_ENABLED?: string;
+  BRUNO_LOCAL_AGENT_SMOKE_MODE?: string;
 };
 
 type WriteRunnerEnvFile = (
@@ -65,19 +65,19 @@ export async function bootstrapRegisteredRunner(
   const env = (input.env ?? process.env) as RunnerBootstrapEnv;
   const fetchImplementation = input.fetch ?? fetch;
   const writeEnvFile = input.writeEnvFile ?? defaultWriteEnvFile;
-  const appBaseUrl = normalizeBaseUrl(env.AGENTBAY_APP_URL);
-  const endpointUrl = env.AGENTBAY_RUNNER_ENDPOINT_URL?.trim();
-  const runnerName = env.AGENTBAY_RUNNER_NAME?.trim() || "bruno Cloud Runner";
-  const envFilePath = env.AGENTBAY_RUNNER_ENV_FILE?.trim();
-  let runnerId = env.AGENTBAY_RUNNER_ID?.trim() ?? "";
-  let credential = env.AGENTBAY_RUNNER_CREDENTIAL?.trim() ?? "";
+  const appBaseUrl = normalizeBaseUrl(env.BRUNO_APP_URL);
+  const endpointUrl = env.BRUNO_RUNNER_ENDPOINT_URL?.trim();
+  const runnerName = env.BRUNO_RUNNER_NAME?.trim() || "Bruno Cloud Runner";
+  const envFilePath = env.BRUNO_RUNNER_ENV_FILE?.trim();
+  let runnerId = env.BRUNO_RUNNER_ID?.trim() ?? "";
+  let credential = env.BRUNO_RUNNER_CREDENTIAL?.trim() ?? "";
 
   if (!appBaseUrl || !endpointUrl) {
     return { ok: false, reason: "not_configured" };
   }
 
   if (!runnerId || !credential) {
-    const registrationToken = env.AGENTBAY_RUNNER_REGISTRATION_TOKEN?.trim();
+    const registrationToken = env.BRUNO_RUNNER_REGISTRATION_TOKEN?.trim();
 
     if (!registrationToken) {
       return { ok: false, reason: "not_configured" };
@@ -97,7 +97,7 @@ export async function bootstrapRegisteredRunner(
   }
 
   if (!runnerId || !credential) {
-    const registrationToken = env.AGENTBAY_RUNNER_REGISTRATION_TOKEN?.trim();
+    const registrationToken = env.BRUNO_RUNNER_REGISTRATION_TOKEN?.trim();
 
     if (!registrationToken) return { ok: false, reason: "not_configured" };
 
@@ -150,7 +150,7 @@ export async function bootstrapRegisteredRunner(
     body: JSON.stringify({
       runnerId,
       status: releaseEvidence.expectedMatch === false ? "degraded" : "online",
-      version: "agentbay-runner/bootstrap",
+      version: "bruno-runner/bootstrap",
       release: releaseEvidence.release,
     }),
   });
@@ -179,25 +179,25 @@ function buildPersistedRunnerEnv(input: {
   credential: string;
 }): string {
   const lines = [
-    envLine("AGENTBAY_APP_URL", input.appBaseUrl),
-    envLine("AGENTBAY_RUNNER_ENDPOINT_URL", input.endpointUrl),
-    envLine("AGENTBAY_RUNNER_NAME", input.runnerName),
-    envLine("AGENTBAY_RUNNER_ID", input.runnerId),
-    envLine("AGENTBAY_RUNNER_CREDENTIAL", input.credential),
+    envLine("BRUNO_APP_URL", input.appBaseUrl),
+    envLine("BRUNO_RUNNER_ENDPOINT_URL", input.endpointUrl),
+    envLine("BRUNO_RUNNER_NAME", input.runnerName),
+    envLine("BRUNO_RUNNER_ID", input.runnerId),
+    envLine("BRUNO_RUNNER_CREDENTIAL", input.credential),
   ];
 
   for (const key of [
-    "AGENTBAY_RUNNER_HOST",
-    "AGENTBAY_RUNNER_PORT",
-    "AGENTBAY_RUNNER_BEARER_TOKEN",
-    "AGENTBAY_DOCKER_RUNNER_IMAGE",
+    "BRUNO_RUNNER_HOST",
+    "BRUNO_RUNNER_PORT",
+    "BRUNO_RUNNER_BEARER_TOKEN",
+    "BRUNO_DOCKER_RUNNER_IMAGE",
     RUNNER_CONTAINER_ID_ENV,
     RUNNER_EXPECTED_RELEASE_VERSION_ENV,
     RUNNER_EXPECTED_IMAGE_DIGEST_ENV,
     RUNNER_EXPECTED_BOOT_CONTRACT_VERSION_ENV,
     RUNNER_RELEASE_IDENTITY_MODE_ENV,
     RUNNER_BOOT_MODEL_CANARY_ENABLED_ENV,
-    "AGENTBAY_LOCAL_AGENT_SMOKE_MODE",
+    "BRUNO_LOCAL_AGENT_SMOKE_MODE",
   ] as const) {
     const value = input.env[key]?.trim();
 

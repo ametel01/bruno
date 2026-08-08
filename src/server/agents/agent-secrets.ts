@@ -227,18 +227,18 @@ export function isUserManagedAgentSecretKind(value: unknown): value is UserManag
 export function parseAgentSecretKeyring(
   env: Record<string, string | undefined> = process.env,
 ): AgentSecretKeyring {
-  const activeVersion = env.AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION?.trim();
-  const serializedKeys = env.AGENTBAY_AGENT_SECRET_KEYS_JSON?.trim();
+  const activeVersion = env.BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION?.trim();
+  const serializedKeys = env.BRUNO_AGENT_SECRET_KEYS_JSON?.trim();
 
   if (!activeVersion) {
     throw new AgentSecretKeyringError(
-      "AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION is required for agent secret writes.",
+      "BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION is required for agent secret writes.",
     );
   }
 
   if (!serializedKeys) {
     throw new AgentSecretKeyringError(
-      "AGENTBAY_AGENT_SECRET_KEYS_JSON is required for agent secret writes.",
+      "BRUNO_AGENT_SECRET_KEYS_JSON is required for agent secret writes.",
     );
   }
 
@@ -247,12 +247,12 @@ export function parseAgentSecretKeyring(
   try {
     parsed = JSON.parse(serializedKeys);
   } catch {
-    throw new AgentSecretKeyringError("AGENTBAY_AGENT_SECRET_KEYS_JSON must be valid JSON.");
+    throw new AgentSecretKeyringError("BRUNO_AGENT_SECRET_KEYS_JSON must be valid JSON.");
   }
 
   if (!isRecord(parsed) || Array.isArray(parsed)) {
     throw new AgentSecretKeyringError(
-      "AGENTBAY_AGENT_SECRET_KEYS_JSON must be a JSON object of key version to key material.",
+      "BRUNO_AGENT_SECRET_KEYS_JSON must be a JSON object of key version to key material.",
     );
   }
 
@@ -280,7 +280,7 @@ export function parseAgentSecretKeyring(
 
   if (keys.size === 0 || !keys.has(activeVersion)) {
     throw new AgentSecretKeyringError(
-      "AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION must exist in AGENTBAY_AGENT_SECRET_KEYS_JSON.",
+      "BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION must exist in BRUNO_AGENT_SECRET_KEYS_JSON.",
     );
   }
 
@@ -752,7 +752,7 @@ export function prepareAgentSecretRow(input: {
 }
 
 export function createGeneratedApiServerKey(randomBytesFn: (size: number) => Buffer): string {
-  return `agb_agent_${randomBytesFn(32).toString("base64url")}`;
+  return `bruno_agent_${randomBytesFn(32).toString("base64url")}`;
 }
 
 export async function insertPreparedAgentSecretRowsInTransaction(
@@ -776,7 +776,7 @@ export async function insertPreparedAgentSecretRowsInTransaction(
 
 export function fingerprintTelegramBotTokenForUniqueness(token: string): string {
   return createHash("sha256")
-    .update("agentbay.telegram_bot_token.uniqueness.v1")
+    .update("bruno.telegram_bot_token.uniqueness.v1")
     .update("\0")
     .update(token)
     .digest("hex");
@@ -1016,7 +1016,7 @@ function validateAgentSecretValue(
     };
   }
 
-  if (kind === "api_server_key" && !/^agb_agent_[A-Za-z0-9_-]{32,}$/.test(normalized.value)) {
+  if (kind === "api_server_key" && !/^bruno_agent_[A-Za-z0-9_-]{32,}$/.test(normalized.value)) {
     return {
       ok: false,
       issues: [{ field: "value", message: "Agent API server key format is invalid." }],
@@ -1288,7 +1288,7 @@ function parseTelegramTokenSubjectId(token: string): string | null {
 
 async function takeTelegramUniquenessBackfillLock(tx: AgentSecretsTransaction): Promise<void> {
   await tx.execute(sql`
-    select pg_advisory_xact_lock(hashtextextended('agentbay:telegram-secret-uniqueness:v1', 0))
+    select pg_advisory_xact_lock(hashtextextended('bruno:telegram-secret-uniqueness:v1', 0))
   `);
 }
 

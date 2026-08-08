@@ -29,7 +29,7 @@ describe("AgentLaunchSpec", () => {
   it("rejects stale versions, unknown fields, legacy secret fields, and oversized JSON", () => {
     const stale = {
       ...sampleLaunchSpec(),
-      version: "agentbay.hermes.launch.v0",
+      version: "bruno.hermes.launch.v0",
       unexpected: true,
       secrets: {
         ...sampleLaunchSpec().secrets,
@@ -60,7 +60,7 @@ describe("AgentLaunchSpec", () => {
 
     expect(parsed).toEqual({ ok: true, spec });
     expect(JSON.parse(serializeAgentLaunchSpec(spec))).toMatchObject({
-      version: "agentbay.hermes.launch.v3",
+      version: "bruno.hermes.launch.v3",
       platforms: {
         required: ["api_server", "telegram"],
       },

@@ -70,14 +70,14 @@ type ManualRunnerTransaction = Parameters<
 export function readManualRunnerBootstrapConfig(
   input: Record<string, string | undefined> = process.env,
 ): ManualRunnerBootstrapConfig | null {
-  const rawEndpointUrl = input.AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL;
+  const rawEndpointUrl = input.BRUNO_MANUAL_RUNNER_ENDPOINT_URL;
 
   if (rawEndpointUrl === undefined) {
     return null;
   }
 
   const endpointUrl = validateManualRunnerEndpointUrl(rawEndpointUrl);
-  const name = input.AGENTBAY_MANUAL_RUNNER_NAME?.trim() || DEFAULT_MANUAL_RUNNER_NAME;
+  const name = input.BRUNO_MANUAL_RUNNER_NAME?.trim() || DEFAULT_MANUAL_RUNNER_NAME;
 
   return {
     name,

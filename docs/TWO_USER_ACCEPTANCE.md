@@ -21,8 +21,8 @@ the protected row, audit trail, runtime adapter, object store, or provider fake 
 | Approvals | Owner approve/deny writes one owned audit event | `tests/unit/user-operations-isolation.test.ts` compares foreign/missing responses and verifies no decision or audit write |
 | Backups and restores | Object keys include the internal user namespace and owner restore creates an owned stopped agent | `tests/unit/user-operations-isolation.test.ts` proves foreign/missing restore performs no object-store download and exposes no backup ID or URI |
 | Runner reads and placement | Settings, health, capacity, placement, and reconciliation receive the request user's UUID | `tests/unit/runner-placement.test.ts`, `tests/unit/cloud-runner-provisioning.test.ts`, and `tests/unit/runner-user-isolation-source.test.ts` prove foreign runners are neither selected nor reconciled |
-| Registration tokens | Browser creation binds `agb_reg_*` material to one user and stores only its hash | `tests/unit/runner-registration.test.ts` and `tests/unit/runner-registration-routes.test.ts` prove one-time owner binding and signed-out rejection |
-| Credentials and heartbeat | Rotate/revoke requires the runner owner; heartbeat uses `agb_run_*` independently | `tests/unit/runner-credential-lifecycle.test.ts` compares foreign/missing results, preserves the foreign credential, and proves old/revoked credentials fail heartbeat |
+| Registration tokens | Browser creation binds `bruno_reg_*` material to one user and stores only its hash | `tests/unit/runner-registration.test.ts` and `tests/unit/runner-registration-routes.test.ts` prove one-time owner binding and signed-out rejection |
+| Credentials and heartbeat | Rotate/revoke requires the runner owner; heartbeat uses `bruno_run_*` independently | `tests/unit/runner-credential-lifecycle.test.ts` compares foreign/missing results, preserves the foreign credential, and proves old/revoked credentials fail heartbeat |
 | Provisioning | Browser provisioning creates rows and fake-provider calls only for the request user | `tests/unit/runner-provisioning.test.ts`, `tests/unit/runner-provisioning-route.test.ts`, and `tests/unit/cloud-runner-provisioning.test.ts` cover owner binding, fail-before-provider auth, safe failures, and user-scoped reconciliation |
 
 ## Signed-out and machine boundaries
@@ -34,7 +34,7 @@ the protected row, audit trail, runtime adapter, object store, or provider fake 
   `/runner/v1/register`, `/runner/v1/heartbeat`, and `/runner/v1/bootstrap-events` paths bypass
   Clerk; a future `/runner/v1/*` route is protected by default.
 - `tests/unit/runner-registration-routes.test.ts`, `tests/unit/runner-heartbeat-route.test.ts`, and
-  `tests/unit/runner-bootstrap-events-route.test.ts` preserve `agb_reg_*` and `agb_run_*` request
+  `tests/unit/runner-bootstrap-events-route.test.ts` preserve `bruno_reg_*` and `bruno_run_*` request
   contracts without a Clerk session.
 - `tests/unit/manual-runner-adapter.test.ts` and `tests/unit/runner-service.test.ts` prove agent
   lifecycle HTTP calls use the separate server-side bearer token and reject missing or invalid
@@ -59,7 +59,7 @@ flow cannot be claimed from those component tests.
 
 Email-code, Google, Apple, current-user, and sign-out browser success remain part of issue #239's
 hosted development acceptance. Issue #232 completed the prerequisite development setup: a dedicated
-AgentBay development Clerk app is explicitly linked, verified email-code and development
+Bruno development Clerk app is explicitly linked, verified email-code and development
 Google/Apple provider configuration are enabled, required local `.env.local` variable names are
 present, and the sanitized `clerk doctor --json` gate passed for that linked development app. That
 setup evidence is not hosted provider-flow success. Hosted smoke still requires a supported browser
@@ -121,7 +121,7 @@ clerk doctor --json
 capability gate is expected to stop before Playwright when approved provider credentials are
 absent. Base `bun run verify` deliberately excludes provider-backed E2E.
 
-On 2026-07-12, the dedicated AgentBay development Clerk setup from issue #232 is complete and its
+On 2026-07-12, the dedicated Bruno development Clerk setup from issue #232 is complete and its
 sanitized `clerk doctor --json` gate passes. The optional repository harness is implemented but
 has not run against the linked development instance. Issue #239 remains open because hosted browser
 email-code, Google, Apple, current-user, and sign-out smoke still need approved isolated identities

@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import postgres from "postgres";
 
-const DEFAULT_DATABASE_URL = "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
+const DEFAULT_DATABASE_URL = "postgres://bruno:bruno@127.0.0.1:54329/bruno";
 const DEFAULT_APP_URL = "http://localhost:3000";
 const DATABASE_URL_ERROR = "Unit tests require a loopback PostgreSQL DATABASE_URL.";
 

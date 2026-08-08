@@ -5,7 +5,7 @@ import {
 } from "@/src/auth/clerk-transition";
 import { resolveAuthMode } from "@/src/auth/auth-mode";
 
-const DEFAULT_OPERATOR_USERNAME = "agentbay";
+const DEFAULT_OPERATOR_USERNAME = "bruno";
 
 export type OperatorAccessDecision =
   | { ok: true }
@@ -28,7 +28,7 @@ export function evaluateOperatorAccess(input: {
     return { ok: true };
   }
 
-  const password = configuredValue(input.env.AGENTBAY_OPERATOR_PASSWORD);
+  const password = configuredValue(input.env.BRUNO_OPERATOR_PASSWORD);
 
   if (!password) {
     if (isProductionLikeEnvironment(input.env)) {
@@ -43,8 +43,7 @@ export function evaluateOperatorAccess(input: {
   }
 
   const credentials = parseBasicAuthorization(input.authorizationHeader);
-  const username =
-    configuredValue(input.env.AGENTBAY_OPERATOR_USERNAME) ?? DEFAULT_OPERATOR_USERNAME;
+  const username = configuredValue(input.env.BRUNO_OPERATOR_USERNAME) ?? DEFAULT_OPERATOR_USERNAME;
 
   if (
     credentials &&

@@ -79,7 +79,7 @@ import {
 
 const LIVE_SENTINEL = "send-telegram-and-spend-digitalocean-staging";
 const BUDGET_SENTINEL = "authorize-basic-4usd-digitalocean-staging";
-const CANONICAL_IMAGE_PATTERN = /^ghcr\.io\/ametel01\/agentbay-hermes@(sha256:[0-9a-f]{64})$/;
+const CANONICAL_IMAGE_PATTERN = /^ghcr\.io\/ametel01\/bruno-hermes@(sha256:[0-9a-f]{64})$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LOCATOR_PATTERN = /^[A-Za-z0-9_.:-]{1,120}$/;
 const SOURCE_REVISION_PATTERN = /^[0-9a-f]{40}$/;
@@ -449,7 +449,7 @@ function createDefaultPorts(input: {
           telegramAllowedUserIds: [fixture.telegramAllowedUserId],
         },
         {
-          env: { ...input.env, AGENTBAY_READY_AGENT_CREATION_ENABLED: "true" },
+          env: { ...input.env, BRUNO_READY_AGENT_CREATION_ENABLED: "true" },
           createConnection,
           now: input.now,
         },
@@ -705,19 +705,19 @@ function readFixtureConfig(
       secretValues: string[];
     }
   | { ok: false } {
-  const canonicalRef = env.AGENTBAY_HERMES_STAGING_PUBLISHED_IMAGE_REF;
+  const canonicalRef = env.BRUNO_HERMES_STAGING_PUBLISHED_IMAGE_REF;
   const imageMatch = canonicalRef ? CANONICAL_IMAGE_PATTERN.exec(canonicalRef) : null;
-  const assistant = env.AGENTBAY_HERMES_STAGING_ASSISTANT;
-  const openAiApiKey = env.AGENTBAY_HERMES_STAGING_OPENAI_API_KEY;
-  const anthropicApiKey = env.AGENTBAY_HERMES_STAGING_ANTHROPIC_API_KEY;
+  const assistant = env.BRUNO_HERMES_STAGING_ASSISTANT;
+  const openAiApiKey = env.BRUNO_HERMES_STAGING_OPENAI_API_KEY;
+  const anthropicApiKey = env.BRUNO_HERMES_STAGING_ANTHROPIC_API_KEY;
   const assistantProfile = isAssistantChoice(assistant) ? getAssistantProfile(assistant) : null;
   const modelApiKey = assistant === "claude" ? anthropicApiKey : openAiApiKey;
-  const telegramBotToken = env.AGENTBAY_HERMES_STAGING_TELEGRAM_BOT_TOKEN;
-  const telegramAllowedUserId = env.AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_USER_ID;
-  const telegramChatId = env.AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID;
-  const acceptanceBearer = env.AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET;
-  const runnerBearer = env.AGENTBAY_RUNNER_BEARER_TOKEN;
-  const providerToken = env.AGENTBAY_DIGITALOCEAN_TOKEN;
+  const telegramBotToken = env.BRUNO_HERMES_STAGING_TELEGRAM_BOT_TOKEN;
+  const telegramAllowedUserId = env.BRUNO_HERMES_STAGING_TELEGRAM_TEST_USER_ID;
+  const telegramChatId = env.BRUNO_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID;
+  const acceptanceBearer = env.BRUNO_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET;
+  const runnerBearer = env.BRUNO_RUNNER_BEARER_TOKEN;
+  const providerToken = env.BRUNO_DIGITALOCEAN_TOKEN;
   let workloadImage: string;
 
   try {
@@ -727,9 +727,9 @@ function readFixtureConfig(
   }
 
   if (
-    env.AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED !== "true" ||
-    env.AGENTBAY_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION !== BUDGET_SENTINEL ||
-    env.AGENTBAY_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION !== LIVE_SENTINEL ||
+    env.BRUNO_HERMES_STAGING_ACCEPTANCE_ENABLED !== "true" ||
+    env.BRUNO_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION !== BUDGET_SENTINEL ||
+    env.BRUNO_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION !== LIVE_SENTINEL ||
     !imageMatch ||
     imageMatch[1] !== context.expectedImageDigest ||
     workloadImage !== canonicalRef ||
@@ -793,7 +793,7 @@ function readFixtureConfig(
 function verifyManualRollback(env: Record<string, string | undefined>): "passed" | "failed" {
   const disabled = readReadyAgentCreationFlag({
     ...env,
-    AGENTBAY_READY_AGENT_CREATION_ENABLED: "false",
+    BRUNO_READY_AGENT_CREATION_ENABLED: "false",
   });
   const stoppedPayload = validateCreateAgentPayload({
     name: "Hermes rollback fixture",
@@ -1041,7 +1041,7 @@ async function auditAllDiagnostics(
   signal: AbortSignal,
 ): Promise<"safe" | "unsafe" | "unknown"> {
   if (!context.agentId || !context.runnerId || signal.aborted) return "unknown";
-  const assistant = env.AGENTBAY_HERMES_STAGING_ASSISTANT;
+  const assistant = env.BRUNO_HERMES_STAGING_ASSISTANT;
   if (!isAssistantChoice(assistant)) return "unknown";
   const modelSecretKind = getAssistantProfile(assistant).secretKind;
 

@@ -169,37 +169,37 @@ export function validateDigitalOceanRunnerResourceCompatibility(
 
   if (!profile) {
     issues.push({
-      field: "AGENTBAY_DIGITALOCEAN_SIZE_SLUG",
+      field: "BRUNO_DIGITALOCEAN_SIZE_SLUG",
       message:
-        "AGENTBAY_DIGITALOCEAN_SIZE_SLUG must be one of the supported managed-runner resource profiles.",
+        "BRUNO_DIGITALOCEAN_SIZE_SLUG must be one of the supported managed-runner resource profiles.",
     });
   }
 
   if (!Number.isInteger(runnerMaxAgents) || runnerMaxAgents <= 0) {
     issues.push({
-      field: "AGENTBAY_RUNNER_MAX_AGENTS",
-      message: "AGENTBAY_RUNNER_MAX_AGENTS must be a positive integer.",
+      field: "BRUNO_RUNNER_MAX_AGENTS",
+      message: "BRUNO_RUNNER_MAX_AGENTS must be a positive integer.",
     });
   }
 
   if (parsedCpus === null) {
     issues.push({
-      field: "AGENTBAY_HERMES_DOCKER_CPUS",
-      message: "AGENTBAY_HERMES_DOCKER_CPUS must be a positive Docker CPU value.",
+      field: "BRUNO_HERMES_DOCKER_CPUS",
+      message: "BRUNO_HERMES_DOCKER_CPUS must be a positive Docker CPU value.",
     });
   }
 
   if (parsedMemoryMiB === null) {
     issues.push({
-      field: "AGENTBAY_HERMES_DOCKER_MEMORY",
-      message: "AGENTBAY_HERMES_DOCKER_MEMORY must be a positive whole-MiB Docker memory value.",
+      field: "BRUNO_HERMES_DOCKER_MEMORY",
+      message: "BRUNO_HERMES_DOCKER_MEMORY must be a positive whole-MiB Docker memory value.",
     });
   }
 
   if (parsedPidsLimit === null) {
     issues.push({
-      field: "AGENTBAY_HERMES_DOCKER_PIDS_LIMIT",
-      message: "AGENTBAY_HERMES_DOCKER_PIDS_LIMIT must be a positive integer.",
+      field: "BRUNO_HERMES_DOCKER_PIDS_LIMIT",
+      message: "BRUNO_HERMES_DOCKER_PIDS_LIMIT must be a positive integer.",
     });
   }
 
@@ -225,7 +225,7 @@ export function validateDigitalOceanRunnerResourceCompatibility(
 
   if (runnerMaxAgents > capacity.cpuMaxAgents) {
     issues.push({
-      field: "AGENTBAY_HERMES_DOCKER_CPUS",
+      field: "BRUNO_HERMES_DOCKER_CPUS",
       message: `Hermes CPU capacity (${parsedCpus * runnerMaxAgents}) exceeds ${profile.sizeSlug}'s ${profile.vcpus} vCPU profile.`,
     });
   }
@@ -234,16 +234,16 @@ export function validateDigitalOceanRunnerResourceCompatibility(
     parsedMemoryMiB * runnerMaxAgents + DIGITALOCEAN_RUNNER_HOST_MEMORY_RESERVE_MIB;
   if (runnerMaxAgents > capacity.memoryMaxAgents) {
     issues.push({
-      field: "AGENTBAY_DIGITALOCEAN_SIZE_SLUG",
+      field: "BRUNO_DIGITALOCEAN_SIZE_SLUG",
       message: `${profile.sizeSlug} has ${profile.memoryMiB} MiB physical RAM, but ${runnerMaxAgents} Hermes agent(s) require ${requiredPhysicalMemoryMiB} MiB including the ${DIGITALOCEAN_RUNNER_HOST_MEMORY_RESERVE_MIB} MiB runner/OS reserve. Swap is not counted as compatible memory.`,
     });
   }
 
   if (runnerMaxAgents > capacity.selectableMaxAgents) {
     issues.push({
-      field: "AGENTBAY_RUNNER_MAX_AGENTS",
+      field: "BRUNO_RUNNER_MAX_AGENTS",
       message:
-        "AGENTBAY_RUNNER_MAX_AGENTS above 1 is blocked until an exact measured CPU, memory, and disk capacity profile is approved.",
+        "BRUNO_RUNNER_MAX_AGENTS above 1 is blocked until an exact measured CPU, memory, and disk capacity profile is approved.",
     });
   }
 

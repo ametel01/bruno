@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import {
-  AGENTBAY_AGENT_ID_LABEL,
+  BRUNO_AGENT_ID_LABEL,
   createHermesReadinessWaiter,
   evaluateHermesReadyResponse,
   isHermesReadyResponse,
@@ -99,8 +99,8 @@ describe("manual runner service HTTP contract", () => {
       }),
       heartbeat: {
         runnerId: "00000000-0000-4000-8000-000000000153",
-        credential: "agb_run_1234567890123456789012345678901234567890123",
-        appBaseUrl: "https://app.agentbay.test",
+        credential: "bruno_run_1234567890123456789012345678901234567890123",
+        appBaseUrl: "https://app.bruno.test",
         start(input: { runnerId: string; credential: string; appBaseUrl: string }) {
           starts.push(input);
           return { stop() {} };
@@ -120,8 +120,8 @@ describe("manual runner service HTTP contract", () => {
     expect(starts).toEqual([
       {
         runnerId: "00000000-0000-4000-8000-000000000153",
-        credential: "agb_run_1234567890123456789012345678901234567890123",
-        appBaseUrl: "https://app.agentbay.test",
+        credential: "bruno_run_1234567890123456789012345678901234567890123",
+        appBaseUrl: "https://app.bruno.test",
       },
     ]);
   });
@@ -136,8 +136,8 @@ describe("manual runner service HTTP contract", () => {
       }),
       heartbeat: {
         runnerId: "00000000-0000-4000-8000-000000000153",
-        credential: "agb_run_1234567890123456789012345678901234567890123",
-        appBaseUrl: "https://app.agentbay.test/",
+        credential: "bruno_run_1234567890123456789012345678901234567890123",
+        appBaseUrl: "https://app.bruno.test/",
         intervalMs: 60_000,
         maxAgents: 5,
         releaseEvidence: {
@@ -160,11 +160,11 @@ describe("manual runner service HTTP contract", () => {
 
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
-      url: "https://app.agentbay.test/runner/v1/heartbeat",
+      url: "https://app.bruno.test/runner/v1/heartbeat",
       init: {
         method: "POST",
         headers: {
-          authorization: "Bearer agb_run_1234567890123456789012345678901234567890123",
+          authorization: "Bearer bruno_run_1234567890123456789012345678901234567890123",
           "content-type": "application/json",
         },
       },
@@ -172,7 +172,7 @@ describe("manual runner service HTTP contract", () => {
     expect(JSON.parse(String(requests[0]?.init.body))).toEqual({
       runnerId: "00000000-0000-4000-8000-000000000153",
       status: "online",
-      version: "agentbay-runner/service",
+      version: "bruno-runner/service",
       release: {
         version: "release-sha",
         imageDigest: `sha256:${"a".repeat(64)}`,
@@ -222,7 +222,7 @@ describe("manual runner service HTTP contract", () => {
     });
     expect(await status.json()).toMatchObject({
       ok: true,
-      contractVersion: "agentbay.runner.status.v3",
+      contractVersion: "bruno.runner.status.v3",
       snapshot: {
         container: { id: "container-001", state: "running" },
         phase: "failed",
@@ -241,13 +241,13 @@ describe("manual runner service HTTP contract", () => {
       "run",
       "--detach",
       "--name",
-      expect.stringContaining(`agentbay-runner-${AGENT_ID}`),
+      expect.stringContaining(`bruno-runner-${AGENT_ID}`),
       "--label",
-      `${AGENTBAY_AGENT_ID_LABEL}=${AGENT_ID}`,
+      `${BRUNO_AGENT_ID_LABEL}=${AGENT_ID}`,
       "--env",
-      `AGENTBAY_AGENT_ID=${AGENT_ID}`,
-      "agentbay/runner:test",
-      "agentbay-runner",
+      `BRUNO_AGENT_ID=${AGENT_ID}`,
+      "bruno/runner:test",
+      "bruno-runner",
       "--serve",
     ]);
     expect(calls.find((args) => args[0] === "run")).not.toContain("--restart");
@@ -288,7 +288,7 @@ describe("manual runner service HTTP contract", () => {
     const invalid = await service.fetch(
       authorizedJsonRequest(`/runner/v1/agents/${AGENT_ID}/start`, {
         ...sampleLaunchSpec(),
-        version: "agentbay.hermes.launch.v0",
+        version: "bruno.hermes.launch.v0",
       }),
     );
 
@@ -312,7 +312,7 @@ describe("manual runner service HTTP contract", () => {
     const validBody = await valid.json();
     expect(validBody).toMatchObject({
       ok: true,
-      contractVersion: "agentbay.runner.launch.v2",
+      contractVersion: "bruno.runner.launch.v2",
       operation: { state: "accepted", disposition: "created" },
       snapshot: { phase: "accepted", readinessReason: "launch_accepted" },
     });
@@ -332,7 +332,7 @@ describe("manual runner service HTTP contract", () => {
     expect(calls).toContainEqual(
       expect.arrayContaining([
         "--network",
-        "agentbay-hermes",
+        "bruno-hermes",
         "--mount",
         expect.stringMatching(/^type=bind,source=.+\/hermes,target=\/opt\/data$/),
         "--mount",
@@ -470,7 +470,7 @@ describe("manual runner service HTTP contract", () => {
     expect(readiness).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
-      contractVersion: "agentbay.runner.launch.v2",
+      contractVersion: "bruno.runner.launch.v2",
       snapshot: { phase: "accepted", readinessReason: "launch_accepted" },
     });
   });
@@ -502,7 +502,7 @@ describe("manual runner service HTTP contract", () => {
     expect(response.status).toBe(202);
     await expect(status.json()).resolves.toMatchObject({
       ok: true,
-      contractVersion: "agentbay.runner.status.v3",
+      contractVersion: "bruno.runner.status.v3",
       snapshot: { container: { id: "container-001", state: "running" } },
     });
     expect(calls).not.toContainEqual(["rm", "--force", "container-001"]);
@@ -760,7 +760,7 @@ describe("manual runner service HTTP contract", () => {
       containers: [],
       snapshot: { phase: "stopped" },
     });
-    expect(calls).toContainEqual(["rm", "--force", `agentbay-runner-${AGENT_ID}-unit001`]);
+    expect(calls).toContainEqual(["rm", "--force", `bruno-runner-${AGENT_ID}-unit001`]);
     await expect(docker.status(AGENT_ID)).resolves.toMatchObject({
       snapshot: { phase: "idle", container: { state: "absent" } },
     });
@@ -876,7 +876,7 @@ describe("manual runner service HTTP contract", () => {
       const status = await docker.status(AGENT_ID);
 
       expect(status).toMatchObject({
-        contractVersion: "agentbay.runner.status.v3",
+        contractVersion: "bruno.runner.status.v3",
         snapshot: {
           phase: "ready",
           readinessReason: null,
@@ -896,7 +896,7 @@ describe("manual runner service HTTP contract", () => {
       expect(probeCalls).toEqual([
         {
           apiServerKey: spec.secrets.apiServerKey,
-          containerName: `agentbay-runner-${AGENT_ID}-unit001`,
+          containerName: `bruno-runner-${AGENT_ID}-unit001`,
         },
       ]);
       expect(dockerCalls).toContainEqual([
@@ -948,7 +948,7 @@ describe("manual runner service HTTP contract", () => {
       expect(requestHealth).toHaveBeenCalledOnce();
       const execProbe = dockerCalls.find((args) => args[0] === "exec");
       expect(execProbe).toEqual(
-        expect.arrayContaining(["exec", `agentbay-runner-${AGENT_ID}-unit001`, "python", "8642"]),
+        expect.arrayContaining(["exec", `bruno-runner-${AGENT_ID}-unit001`, "python", "8642"]),
       );
       expect(JSON.stringify(execProbe)).not.toContain(spec.secrets.apiServerKey);
       expect(JSON.stringify(status)).not.toContain("sk-proj-runner-probe-secret");
@@ -1138,7 +1138,7 @@ describe("manual runner service HTTP contract", () => {
         Object.defineProperty(body, "status", {
           enumerable: true,
           get() {
-            throw new Error("API_SERVER_KEY=agb_agent_hostile_probe_secret");
+            throw new Error("API_SERVER_KEY=bruno_agent_hostile_probe_secret");
           },
         });
         return { ok: true, body };
@@ -1162,12 +1162,7 @@ describe("manual runner service HTTP contract", () => {
       });
       expect(JSON.stringify(hostile)).not.toContain("hostile_probe_secret");
 
-      const envPath = join(
-        String(process.env.AGENTBAY_HERMES_STATE_ROOT),
-        AGENT_ID,
-        "hermes",
-        ".env",
-      );
+      const envPath = join(String(process.env.BRUNO_HERMES_STATE_ROOT), AGENT_ID, "hermes", ".env");
       await writeFile(
         envPath,
         `API_SERVER_KEY="${spec.secrets.apiServerKey}"\nAPI_SERVER_KEY="${spec.secrets.apiServerKey}"\n`,
@@ -1211,12 +1206,7 @@ describe("manual runner service HTTP contract", () => {
         authorizedJsonRequest(`/runner/v1/agents/${AGENT_ID}/start`, spec),
       );
       const accepted = await acceptedResponse.json();
-      const envPath = join(
-        String(process.env.AGENTBAY_HERMES_STATE_ROOT),
-        AGENT_ID,
-        "hermes",
-        ".env",
-      );
+      const envPath = join(String(process.env.BRUNO_HERMES_STATE_ROOT), AGENT_ID, "hermes", ".env");
 
       await rm(envPath);
       await execFileAsync("mkfifo", [envPath]);
@@ -1381,7 +1371,7 @@ describe("manual runner service HTTP contract", () => {
       const readyBody = await ready.json();
       expect(readyBody).toMatchObject({
         ok: true,
-        contractVersion: "agentbay.runner.canary.v1",
+        contractVersion: "bruno.runner.canary.v1",
         observation: { state: "passed", reason: null },
       });
       expect(stale.status).toBe(409);
@@ -1433,7 +1423,7 @@ describe("manual runner service HTTP contract", () => {
         expect(JSON.stringify(canary)).not.toContain("hostile provider output");
         expect(requests).toHaveLength(1);
         expect(requests[0]?.input).toBe(
-          `http://agentbay-runner-${AGENT_ID}-unit001:8642/v1/chat/completions`,
+          `http://bruno-runner-${AGENT_ID}-unit001:8642/v1/chat/completions`,
         );
         expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
           model: spec.model.model,
@@ -1557,7 +1547,7 @@ describe("manual runner service HTTP contract", () => {
       reason: "revision_mismatch",
     });
     await expect(docker.status(AGENT_ID)).resolves.toMatchObject({
-      contractVersion: "agentbay.runner.status.v3",
+      contractVersion: "bruno.runner.status.v3",
       snapshot: { phase: "idle", readinessReason: "container_absent" },
     });
     await expect(docker.status(OTHER_AGENT_ID)).resolves.toMatchObject({
@@ -1569,8 +1559,8 @@ describe("manual runner service HTTP contract", () => {
   });
 
   it("returns redacted durable Hermes gateway logs before bootstrap diagnostics", async () => {
-    const previousStateRoot = process.env.AGENTBAY_HERMES_STATE_ROOT;
-    const stateRoot = join(tmpdir(), `agentbay-runner-logs-${Date.now()}`);
+    const previousStateRoot = process.env.BRUNO_HERMES_STATE_ROOT;
+    const stateRoot = join(tmpdir(), `bruno-runner-logs-${Date.now()}`);
     const logDir = join(stateRoot, AGENT_ID, "hermes", "logs", "gateways", "default");
 
     await mkdir(logDir, { recursive: true });
@@ -1586,13 +1576,13 @@ describe("manual runner service HTTP contract", () => {
       join(logDir, "current"),
       [
         "2026-07-05T00:00:03.000Z telegram 123456:abcdefghijklmnopqrstuvwxyz",
-        "2026-07-05T00:00:04.000Z authorization: Bearer agb_agent_secret123456789",
+        "2026-07-05T00:00:04.000Z authorization: Bearer bruno_agent_secret123456789",
         "",
       ].join("\n"),
     );
 
     try {
-      process.env.AGENTBAY_HERMES_STATE_ROOT = stateRoot;
+      process.env.BRUNO_HERMES_STATE_ROOT = stateRoot;
       const service = createTestService({
         docker: createMockDocker({
           containers: [{ id: "container-001", agentId: AGENT_ID, status: "running" }],
@@ -1610,7 +1600,7 @@ describe("manual runner service HTTP contract", () => {
       expect(JSON.stringify(body)).not.toContain("sk-or-v1-secret");
       expect(JSON.stringify(body)).not.toContain("sk-or-v1-bootstrap");
       expect(JSON.stringify(body)).not.toContain("123456:abcdefghijklmnopqrstuvwxyz");
-      expect(JSON.stringify(body)).not.toContain("agb_agent_secret123456789");
+      expect(JSON.stringify(body)).not.toContain("bruno_agent_secret123456789");
       expect(body.logs).toEqual([
         expect.objectContaining({
           source: "hermes_gateway",
@@ -1635,17 +1625,17 @@ describe("manual runner service HTTP contract", () => {
       ]);
     } finally {
       if (previousStateRoot === undefined) {
-        delete process.env.AGENTBAY_HERMES_STATE_ROOT;
+        delete process.env.BRUNO_HERMES_STATE_ROOT;
       } else {
-        process.env.AGENTBAY_HERMES_STATE_ROOT = previousStateRoot;
+        process.env.BRUNO_HERMES_STATE_ROOT = previousStateRoot;
       }
       await rm(stateRoot, { force: true, recursive: true });
     }
   });
 
   it("cleans selected containers and the exact Hermes agent root idempotently", async () => {
-    const previousStateRoot = process.env.AGENTBAY_HERMES_STATE_ROOT;
-    const stateRoot = join(tmpdir(), `agentbay-runner-cleanup-${Date.now()}`);
+    const previousStateRoot = process.env.BRUNO_HERMES_STATE_ROOT;
+    const stateRoot = join(tmpdir(), `bruno-runner-cleanup-${Date.now()}`);
     const agentRoot = join(stateRoot, AGENT_ID);
     const unrelatedAgentRoot = join(stateRoot, OTHER_AGENT_ID);
     const calls: string[][] = [];
@@ -1654,7 +1644,7 @@ describe("manual runner service HTTP contract", () => {
     await mkdir(join(unrelatedAgentRoot, "workspace"), { recursive: true });
 
     try {
-      process.env.AGENTBAY_HERMES_STATE_ROOT = stateRoot;
+      process.env.BRUNO_HERMES_STATE_ROOT = stateRoot;
       const service = createTestService({
         docker: createMockDocker({
           calls,
@@ -1679,25 +1669,25 @@ describe("manual runner service HTTP contract", () => {
       expect(calls).not.toContainEqual(["rm", "--force", "unrelated-container"]);
     } finally {
       if (previousStateRoot === undefined) {
-        delete process.env.AGENTBAY_HERMES_STATE_ROOT;
+        delete process.env.BRUNO_HERMES_STATE_ROOT;
       } else {
-        process.env.AGENTBAY_HERMES_STATE_ROOT = previousStateRoot;
+        process.env.BRUNO_HERMES_STATE_ROOT = previousStateRoot;
       }
       await rm(stateRoot, { force: true, recursive: true });
     }
   });
 
   it("fails cleanup closed when the managed agent root is a symlink", async () => {
-    const previousStateRoot = process.env.AGENTBAY_HERMES_STATE_ROOT;
-    const stateRoot = join(tmpdir(), `agentbay-runner-symlink-${Date.now()}`);
-    const targetRoot = join(tmpdir(), `agentbay-runner-symlink-target-${Date.now()}`);
+    const previousStateRoot = process.env.BRUNO_HERMES_STATE_ROOT;
+    const stateRoot = join(tmpdir(), `bruno-runner-symlink-${Date.now()}`);
+    const targetRoot = join(tmpdir(), `bruno-runner-symlink-target-${Date.now()}`);
 
     await mkdir(stateRoot, { recursive: true });
     await mkdir(targetRoot, { recursive: true });
     await symlink(targetRoot, join(stateRoot, AGENT_ID));
 
     try {
-      process.env.AGENTBAY_HERMES_STATE_ROOT = stateRoot;
+      process.env.BRUNO_HERMES_STATE_ROOT = stateRoot;
       const service = createTestService({ docker: createMockDocker() });
       const response = await service.fetch(
         authorizedRequest(`/runner/v1/agents/${AGENT_ID}/cleanup`, "POST"),
@@ -1711,9 +1701,9 @@ describe("manual runner service HTTP contract", () => {
       await expect(lstat(join(stateRoot, AGENT_ID))).resolves.toMatchObject({});
     } finally {
       if (previousStateRoot === undefined) {
-        delete process.env.AGENTBAY_HERMES_STATE_ROOT;
+        delete process.env.BRUNO_HERMES_STATE_ROOT;
       } else {
-        process.env.AGENTBAY_HERMES_STATE_ROOT = previousStateRoot;
+        process.env.BRUNO_HERMES_STATE_ROOT = previousStateRoot;
       }
       await rm(stateRoot, { force: true, recursive: true });
       await rm(targetRoot, { force: true, recursive: true });
@@ -1918,7 +1908,7 @@ describe("Hermes detailed readiness contract", () => {
       {
         cpus: "1",
         memory: "1536m",
-        network: "agentbay-hermes",
+        network: "bruno-hermes",
         pidsLimit: "256",
         readinessPort: 8642,
       },
@@ -1939,9 +1929,9 @@ describe("Hermes detailed readiness contract", () => {
     await expect(
       waiter({
         agentId: AGENT_ID,
-        apiServerKey: "agb_agent_key",
+        apiServerKey: "bruno_agent_key",
         configRevision: "cfg-1",
-        containerName: "agentbay-runner-test",
+        containerName: "bruno-runner-test",
       }),
     ).resolves.toEqual({ ok: false, reason: "telegram_not_connected" });
   });
@@ -1952,7 +1942,7 @@ describe("Hermes detailed readiness contract", () => {
       {
         cpus: "1",
         memory: "1536m",
-        network: "agentbay-hermes",
+        network: "bruno-hermes",
         pidsLimit: "256",
         readinessPort: 8642,
       },
@@ -1973,9 +1963,9 @@ describe("Hermes detailed readiness contract", () => {
     await expect(
       waiter({
         agentId: AGENT_ID,
-        apiServerKey: "agb_agent_key",
+        apiServerKey: "bruno_agent_key",
         configRevision: "cfg-1",
-        containerName: "agentbay-runner-test",
+        containerName: "bruno-runner-test",
       }),
     ).resolves.toEqual({ ok: false, reason: "timeout" });
   });
@@ -1992,12 +1982,12 @@ async function createHermesProjectionForTest(
   if (options.signal?.aborted) {
     throw new DOMException("Aborted", "AbortError");
   }
-  const agentRoot = process.env.AGENTBAY_HERMES_STATE_ROOT
-    ? join(process.env.AGENTBAY_HERMES_STATE_ROOT, spec.agent.id)
-    : join(tmpdir(), `agentbay-runner-projection-${Date.now()}-${Math.random()}`);
+  const agentRoot = process.env.BRUNO_HERMES_STATE_ROOT
+    ? join(process.env.BRUNO_HERMES_STATE_ROOT, spec.agent.id)
+    : join(tmpdir(), `bruno-runner-projection-${Date.now()}-${Math.random()}`);
   const hermesHome = join(agentRoot, "hermes");
   const workspace = join(agentRoot, "workspace");
-  const revisionPath = join(hermesHome, "agentbay-config-revision.json");
+  const revisionPath = join(hermesHome, "bruno-config-revision.json");
 
   await mkdir(hermesHome, { recursive: true });
   await mkdir(workspace, { recursive: true });
@@ -2028,17 +2018,17 @@ async function createHermesProjectionForTest(
 }
 
 async function withHermesStateRootForTest<T>(run: () => Promise<T>): Promise<T> {
-  const previousStateRoot = process.env.AGENTBAY_HERMES_STATE_ROOT;
-  const stateRoot = join(tmpdir(), `agentbay-runner-state-${Date.now()}-${Math.random()}`);
+  const previousStateRoot = process.env.BRUNO_HERMES_STATE_ROOT;
+  const stateRoot = join(tmpdir(), `bruno-runner-state-${Date.now()}-${Math.random()}`);
 
   try {
-    process.env.AGENTBAY_HERMES_STATE_ROOT = stateRoot;
+    process.env.BRUNO_HERMES_STATE_ROOT = stateRoot;
     return await run();
   } finally {
     if (previousStateRoot === undefined) {
-      delete process.env.AGENTBAY_HERMES_STATE_ROOT;
+      delete process.env.BRUNO_HERMES_STATE_ROOT;
     } else {
-      process.env.AGENTBAY_HERMES_STATE_ROOT = previousStateRoot;
+      process.env.BRUNO_HERMES_STATE_ROOT = previousStateRoot;
     }
     await rm(stateRoot, { force: true, recursive: true });
   }
@@ -2102,8 +2092,8 @@ function authorizedJsonRequest(path: string, body: unknown): Request {
 
 function testCommand() {
   return {
-    image: "agentbay/runner:test",
-    args: ["agentbay-runner", "--serve"],
+    image: "bruno/runner:test",
+    args: ["bruno-runner", "--serve"],
   };
 }
 
@@ -2142,7 +2132,7 @@ function createMockDocker(
 
     if (args[0] === "ps") {
       const filter = String(args[args.indexOf("--filter") + 1]);
-      const agentId = filter.split(`${AGENTBAY_AGENT_ID_LABEL}=`)[1] ?? "";
+      const agentId = filter.split(`${BRUNO_AGENT_ID_LABEL}=`)[1] ?? "";
       const rows = (
         input.psIds ?? [
           ...[...containers.values()]
@@ -2213,9 +2203,9 @@ function createMockDocker(
             Cmd: readContainerCommandArgs(container.runArgs),
             Entrypoint: null,
             Env: input.inspectEnv ?? [],
-            Image: container.image ?? "agentbay/runner:test",
+            Image: container.image ?? "bruno/runner:test",
             Labels: {
-              [AGENTBAY_AGENT_ID_LABEL]: container.agentId,
+              [BRUNO_AGENT_ID_LABEL]: container.agentId,
               ...(container.labels ?? {}),
             },
           },
@@ -2287,7 +2277,7 @@ function createMockDocker(
 function readLabelAgentId(args: readonly string[]): string {
   const label = String(args[args.indexOf("--label") + 1]);
 
-  return label.split(`${AGENTBAY_AGENT_ID_LABEL}=`)[1] ?? "";
+  return label.split(`${BRUNO_AGENT_ID_LABEL}=`)[1] ?? "";
 }
 
 function readRunImage(args: readonly string[]): string {
@@ -2295,7 +2285,7 @@ function readRunImage(args: readonly string[]): string {
     return String(args.at(-3));
   }
 
-  return "agentbay/runner:test";
+  return "bruno/runner:test";
 }
 
 function readRunLabels(args: readonly string[]): Record<string, string> {

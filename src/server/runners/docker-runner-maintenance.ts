@@ -8,7 +8,7 @@ import {
   recordDockerRunnerContainerForUser,
 } from "@/src/server/runners/docker-runner-state";
 
-const AGENTBAY_AGENT_ID_LABEL = "agentbay.agent_id";
+const BRUNO_AGENT_ID_LABEL = "bruno.agent_id";
 const DOCKER_CLI_TIMEOUT_MS = 15_000;
 
 export type DockerCliResult = {
@@ -199,7 +199,7 @@ export class DockerRunnerMaintenanceAdapter {
       return { ok: false, reason: "docker_inspect_failed" };
     }
 
-    if (inspect.Config?.Labels?.[AGENTBAY_AGENT_ID_LABEL] !== agentId) {
+    if (inspect.Config?.Labels?.[BRUNO_AGENT_ID_LABEL] !== agentId) {
       return { ok: false, reason: "label_mismatch" };
     }
 

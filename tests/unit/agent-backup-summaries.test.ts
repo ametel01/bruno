@@ -33,7 +33,7 @@ describe("agent backup summaries", () => {
         agentId: created.agent.id,
         runnerId: null,
         status: "ready",
-        storageUri: `s3://agentbay-backups/agents/${created.agent.id}/backups/ready.json`,
+        storageUri: `s3://bruno-backups/agents/${created.agent.id}/backups/ready.json`,
         manifestJson: validManifest({ agentId: created.agent.id, name: created.agent.name }),
         createdBy: created.agent.userId,
         createdAt: createdAtReady,
@@ -50,7 +50,7 @@ describe("agent backup summaries", () => {
         agentId: created.agent.id,
         runnerId: null,
         status: "restored",
-        storageUri: `s3://agentbay-backups/agents/${created.agent.id}/backups/restored.json`,
+        storageUri: `s3://bruno-backups/agents/${created.agent.id}/backups/restored.json`,
         manifestJson: validManifest({ agentId: created.agent.id, name: created.agent.name }),
         createdBy: created.agent.userId,
         createdAt: createdAtRestored,
@@ -89,7 +89,7 @@ describe("agent backup summaries", () => {
       },
     ]);
     expect(JSON.stringify(summaries)).not.toContain("s3://");
-    expect(JSON.stringify(summaries)).not.toContain("agentbay-backups");
+    expect(JSON.stringify(summaries)).not.toContain("bruno-backups");
     expect(JSON.stringify(summaries)).not.toContain("manifestJson");
     expect(JSON.stringify(summaries)).not.toContain("storageUri");
     expect(JSON.stringify(summaries)).not.toContain("sk-");
@@ -107,7 +107,7 @@ describe("agent backup summaries", () => {
     await connection.db.insert(backups).values({
       agentId: created.agent.id,
       status: "ready",
-      storageUri: `s3://agentbay-backups/agents/${created.agent.id}/backups/ready.json`,
+      storageUri: `s3://bruno-backups/agents/${created.agent.id}/backups/ready.json`,
       manifestJson: validManifest({ agentId: created.agent.id, name: created.agent.name }),
       createdBy: created.agent.userId,
     });

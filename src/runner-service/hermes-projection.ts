@@ -59,7 +59,7 @@ type PlainYamlRecord = {
 const DIRECTORY_MODE = 0o700;
 const ENV_MODE = 0o600;
 const PUBLIC_FILE_MODE = 0o644;
-const GUARDED_FILES = ["config.yaml", ".env", "SOUL.md", "agentbay-config-revision.json"] as const;
+const GUARDED_FILES = ["config.yaml", ".env", "SOUL.md", "bruno-config-revision.json"] as const;
 const MANAGED_ENV_KEYS = [
   "OPENROUTER_API_KEY",
   "OPENAI_API_KEY",
@@ -91,7 +91,7 @@ const OPENROUTER_KEY_PATTERN = /^sk-or-v1-[A-Za-z0-9_-]{20,}$/;
 const OPENAI_KEY_PATTERN = /^sk-(?!ant-|or-v1-)[A-Za-z0-9_-]{20,}$/;
 const ANTHROPIC_KEY_PATTERN = /^sk-ant-[A-Za-z0-9_-]{20,}$/;
 const TELEGRAM_BOT_TOKEN_PATTERN = /^[1-9][0-9]{5,19}:[A-Za-z0-9_-]{20,}$/;
-const API_SERVER_KEY_PATTERN = /^agb_agent_[A-Za-z0-9_-]{32,}$/;
+const API_SERVER_KEY_PATTERN = /^bruno_agent_[A-Za-z0-9_-]{32,}$/;
 const NODE_FS: HermesProjectionFilesystem = {
   chmod,
   async chown(path, uid, gid) {
@@ -138,7 +138,7 @@ async function projectHermesHomeUnchecked(
   const configPath = resolveManagedPath(hermesHome, "config.yaml");
   const envPath = resolveManagedPath(hermesHome, ".env");
   const soulPath = resolveManagedPath(hermesHome, "SOUL.md");
-  const revisionPath = resolveManagedPath(hermesHome, "agentbay-config-revision.json");
+  const revisionPath = resolveManagedPath(hermesHome, "bruno-config-revision.json");
 
   await Promise.all(
     GUARDED_FILES.map((fileName) =>
@@ -223,7 +223,7 @@ export async function prepareHermesState(
   }
 
   const configuredStateRoot = resolve(
-    options.stateRoot ?? process.env.AGENTBAY_HERMES_STATE_ROOT ?? DEFAULT_HERMES_STATE_ROOT,
+    options.stateRoot ?? process.env.BRUNO_HERMES_STATE_ROOT ?? DEFAULT_HERMES_STATE_ROOT,
   );
 
   if (!configuredStateRoot.startsWith(sep)) {

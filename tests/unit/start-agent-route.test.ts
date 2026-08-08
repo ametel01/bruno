@@ -66,7 +66,7 @@ describe("POST /api/agents/[agentId]/actions/start route", () => {
         action: "start",
         target: {
           image: "hermes@example",
-          launchSpecVersion: "agentbay.hermes.launch.v3",
+          launchSpecVersion: "bruno.hermes.launch.v3",
           configRevision: "cfg-route",
         },
         acceptedAt: "2026-08-03T05:00:00.000Z",

@@ -57,10 +57,10 @@ import { getOrCreateDevelopmentUserId } from "@/src/server/users/development-use
 import { createAppLogger, LOG_REDACTION_CENSOR } from "@/src/server/logging/logger";
 
 const runnerProvisioningLogger = createAppLogger("runner.provisioning");
-const PROVIDER_OPERATION_TAG_LOG_PATTERN = /\bagentbay-(?:deploy|replace)-[0-9a-f]{32}\b/gi;
+const PROVIDER_OPERATION_TAG_LOG_PATTERN = /\bbruno-(?:deploy|replace)-[0-9a-f]{32}\b/gi;
 
-const DEFAULT_CLOUD_RUNNER_NAME = "bruno Cloud Runner";
-const DEFAULT_FIREWALL_NAME = "agentbay-runners";
+const DEFAULT_CLOUD_RUNNER_NAME = "Bruno Cloud Runner";
+const DEFAULT_FIREWALL_NAME = "bruno-runners";
 const CLOUD_REGISTRATION_TOKEN_TTL_MS = 60 * 60 * 1000;
 const PUBLIC_ENDPOINT_POLL_ATTEMPTS = 20;
 const PUBLIC_ENDPOINT_POLL_INTERVAL_MS = 3_000;
@@ -1800,7 +1800,7 @@ function missingProviderResourceMessage(providerResourceId: string): string {
     ? providerResourceId
     : "the recorded provider resource";
 
-  return `DigitalOcean Droplet ${safeResourceId} is no longer available for runner registration. bruno marked the stale runner failed and will create a new runner.`;
+  return `DigitalOcean Droplet ${safeResourceId} is no longer available for runner registration. Bruno marked the stale runner failed and will create a new runner.`;
 }
 
 async function resolveDigitalOceanSshAccess(
@@ -1862,7 +1862,7 @@ async function resolveDigitalOceanSshAccess(
         ok: false,
         reason: "ssh_key_create_failed",
         message:
-          "bruno could not create a DigitalOcean SSH key for Droplet login. Confirm the provider token has SSH key create permission, then retry Create runner.",
+          "Bruno could not create a DigitalOcean SSH key for Droplet login. Confirm the provider token has SSH key create permission, then retry Create runner.",
       };
     }
 
@@ -1897,7 +1897,7 @@ function createManagedSshKeyInput(): { name: string; publicKey: string } {
 
   return {
     name: MANAGED_SSH_KEY_NAME,
-    publicKey: `ssh-ed25519 ${opensshKey} agentbay-managed-runner`,
+    publicKey: `ssh-ed25519 ${opensshKey} bruno-managed-runner`,
   };
 }
 
@@ -2533,7 +2533,7 @@ function manualCleanupMessage(providerResourceId: string): string {
     ? providerResourceId
     : "the recorded provider resource";
 
-  return `Automatic cleanup could not confirm deletion for DigitalOcean Droplet ${safeResourceId}. In DigitalOcean, delete only that Droplet after confirming it has the bruno runner tags, then create a new runner.`;
+  return `Automatic cleanup could not confirm deletion for DigitalOcean Droplet ${safeResourceId}. In DigitalOcean, delete only that Droplet after confirming it has the Bruno runner tags, then create a new runner.`;
 }
 
 async function findActiveProvisioningRunner(
@@ -2722,7 +2722,7 @@ function createRunnerProvisioningLog(
 
 function provisioningOperationLogRedactedValues(operationKey: string): string[] {
   const values = new Set<string>([operationKey]);
-  const match = /^agentbay-(?:deploy|replace)-([0-9a-f]{32})$/i.exec(operationKey);
+  const match = /^bruno-(?:deploy|replace)-([0-9a-f]{32})$/i.exec(operationKey);
 
   if (match?.[1]) {
     const compactIdentifier = match[1].toLowerCase();

@@ -32,7 +32,7 @@ export const RUNNER_REPLACEMENT_BUDGET_WINDOW_MS = 24 * 60 * 60 * 1_000;
 export const MAX_DEPLOYMENT_REPLACEMENTS_PER_WINDOW = 2;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const OPERATION_KEY_PATTERN = /^agentbay-replace-[0-9a-f]{32}$/;
+const OPERATION_KEY_PATTERN = /^bruno-replace-[0-9a-f]{32}$/;
 const LEASE_OWNER_PATTERN =
   /^runner-replacement:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const MAX_COUNTER = 2_147_483_647;

@@ -34,7 +34,7 @@ CREATE TABLE "runner_replacements" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "runner_replacements_source_target_check" CHECK ("runner_replacements"."target_runner_id" IS NULL OR "runner_replacements"."target_runner_id" <> "runner_replacements"."source_runner_id"),
-	CONSTRAINT "runner_replacements_operation_key_check" CHECK ("runner_replacements"."operation_key" ~ '^agentbay-replace-[0-9a-f]{32}$'),
+	CONSTRAINT "runner_replacements_operation_key_check" CHECK ("runner_replacements"."operation_key" ~ '^bruno-replace-[0-9a-f]{32}$'),
 	CONSTRAINT "runner_replacements_generation_check" CHECK ("runner_replacements"."generation" >= 0),
 	CONSTRAINT "runner_replacements_attempt_count_check" CHECK ("runner_replacements"."attempt_count" >= 0),
 	CONSTRAINT "runner_replacements_replacement_count_check" CHECK ("runner_replacements"."replacement_count" BETWEEN 0 AND 2),

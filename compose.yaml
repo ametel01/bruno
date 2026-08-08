@@ -3,15 +3,15 @@ services:
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: bruno
-      POSTGRES_PASSWORD: agentbay
-      POSTGRES_USER: agentbay
+      POSTGRES_PASSWORD: bruno
+      POSTGRES_USER: bruno
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agentbay -d bruno"]
+      test: ["CMD-SHELL", "pg_isready -U bruno -d bruno"]
       interval: 5s
       timeout: 5s
       retries: 10
     ports:
-      - "${AGENTBAY_POSTGRES_HOST_PORT:-54329}:5432"
+      - "${BRUNO_POSTGRES_HOST_PORT:-54329}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
@@ -26,21 +26,21 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: ${AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION:-}
-      AGENTBAY_AGENT_SECRET_KEYS_JSON: ${AGENTBAY_AGENT_SECRET_KEYS_JSON:-}
-      AGENTBAY_AUTH_MODE: development
-      DATABASE_URL: postgres://agentbay:agentbay@postgres:5432/bruno
+      BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION: ${BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION:-}
+      BRUNO_AGENT_SECRET_KEYS_JSON: ${BRUNO_AGENT_SECRET_KEYS_JSON:-}
+      BRUNO_AUTH_MODE: development
+      DATABASE_URL: postgres://bruno:bruno@postgres:5432/bruno
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://host.docker.internal:3000}
-      AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: local_docker
-      AGENTBAY_DIGITALOCEAN_TOKEN: local-docker
-      AGENTBAY_DIGITALOCEAN_SIZE_SLUG: ${AGENTBAY_DIGITALOCEAN_SIZE_SLUG:-s-1vcpu-2gb}
-      AGENTBAY_HERMES_WORKLOAD_IMAGE: ${AGENTBAY_HERMES_WORKLOAD_IMAGE:-agentbay-hermes:local}
-      AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: none
-      AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: http://host.docker.internal:3045
-      AGENTBAY_RUNNER_BEARER_TOKEN: local-runner-command-token
-      AGENTBAY_RUNNER_IMAGE: agentbay-runner:local
+      BRUNO_DIGITALOCEAN_PROVIDER_MODE: local_docker
+      BRUNO_DIGITALOCEAN_TOKEN: local-docker
+      BRUNO_DIGITALOCEAN_SIZE_SLUG: ${BRUNO_DIGITALOCEAN_SIZE_SLUG:-s-1vcpu-2gb}
+      BRUNO_HERMES_WORKLOAD_IMAGE: ${BRUNO_HERMES_WORKLOAD_IMAGE:-bruno-hermes:local}
+      BRUNO_DIGITALOCEAN_SSH_KEY_IDS: none
+      BRUNO_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: http://host.docker.internal:3045
+      BRUNO_RUNNER_BEARER_TOKEN: local-runner-command-token
+      BRUNO_RUNNER_IMAGE: bruno-runner:local
     ports:
-      - "${AGENTBAY_APP_HOST_PORT:-3000}:3000"
+      - "${BRUNO_APP_HOST_PORT:-3000}:3000"
     profiles:
       - local-cloud
     volumes:
@@ -50,7 +50,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
   local-cloud-runner-image:
-    image: agentbay-runner:local
+    image: bruno-runner:local
     platform: linux/amd64
     build:
       context: .

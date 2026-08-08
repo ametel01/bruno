@@ -29,7 +29,7 @@ import type { RunnerReplacementReason } from "@/src/server/runners/runner-replac
 import { createOrGetRunnerReplacement } from "@/src/server/runners/runner-replacement-store";
 
 const SCOPE_KEY = "global";
-const OPERATION_TAG_PATTERN = /^agentbay-deploy-[0-9a-f]{32}$/;
+const OPERATION_TAG_PATTERN = /^bruno-deploy-[0-9a-f]{32}$/;
 const DEFAULT_LEASE_MS = 90_000;
 const DEFAULT_RETRY_MS = 5_000;
 const DEFAULT_ORPHAN_GRACE_MS = 10 * 60 * 1_000;
@@ -431,7 +431,7 @@ async function startRunnerReplacement(
         sourceRunnerId: current.id,
         triggerDeploymentId: null,
         reason: dependencies.reason,
-        operationKey: `agentbay-replace-${dependencies.randomUUID().replaceAll("-", "")}`,
+        operationKey: `bruno-replace-${dependencies.randomUUID().replaceAll("-", "")}`,
         now,
       }),
       tx

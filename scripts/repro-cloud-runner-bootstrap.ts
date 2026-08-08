@@ -4,7 +4,7 @@ import { basename, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { buildCloudRunnerBootstrapContent } from "@/src/server/runners/cloud-runner-bootstrap";
 
-const REPRO_IMAGE = "agentbay-cloud-init-repro:ubuntu-24.04";
+const REPRO_IMAGE = "bruno-cloud-init-repro:ubuntu-24.04";
 
 type Target = {
   label: string;
@@ -13,7 +13,7 @@ type Target = {
 
 const options = parseArgs(process.argv.slice(2));
 const targets: Target[] = [];
-const tempRoot = mkdtempSync(join(tmpdir(), "agentbay-cloud-runner-repro-"));
+const tempRoot = mkdtempSync(join(tmpdir(), "bruno-cloud-runner-repro-"));
 
 for (const userDataPath of options.userDataPaths) {
   targets.push({
@@ -25,21 +25,21 @@ for (const userDataPath of options.userDataPaths) {
 if (options.generateCurrent || targets.length === 0) {
   const generatedPath = resolve(options.outPath ?? join(tempRoot, "current-user-data.yaml"));
   const content = buildCloudRunnerBootstrapContent({
-    appBaseUrl: process.env.AGENTBAY_REPRO_APP_URL ?? "https://agentbay-tau.vercel.app",
+    appBaseUrl: process.env.BRUNO_REPRO_APP_URL ?? "https://bruno-tau.vercel.app",
     registrationToken:
-      process.env.AGENTBAY_REPRO_REGISTRATION_TOKEN ??
-      "agb_reg_LOCAL_REPRO_123456789012345678901234567890",
-    ...(process.env.AGENTBAY_REPRO_BEARER_TOKEN
-      ? { commandBearerToken: process.env.AGENTBAY_REPRO_BEARER_TOKEN }
+      process.env.BRUNO_REPRO_REGISTRATION_TOKEN ??
+      "bruno_reg_LOCAL_REPRO_123456789012345678901234567890",
+    ...(process.env.BRUNO_REPRO_BEARER_TOKEN
+      ? { commandBearerToken: process.env.BRUNO_REPRO_BEARER_TOKEN }
       : { commandBearerToken: "local-runner-command-token" }),
-    ...(process.env.AGENTBAY_REPRO_RUNNER_IMAGE
-      ? { runnerImage: process.env.AGENTBAY_REPRO_RUNNER_IMAGE }
+    ...(process.env.BRUNO_REPRO_RUNNER_IMAGE
+      ? { runnerImage: process.env.BRUNO_REPRO_RUNNER_IMAGE }
       : {}),
-    ...(process.env.AGENTBAY_REPRO_ENDPOINT_URL
-      ? { runnerEndpointUrl: process.env.AGENTBAY_REPRO_ENDPOINT_URL }
+    ...(process.env.BRUNO_REPRO_ENDPOINT_URL
+      ? { runnerEndpointUrl: process.env.BRUNO_REPRO_ENDPOINT_URL }
       : { endpointDiscovery: { type: "digitalocean_metadata" as const } }),
-    enableSwap: process.env.AGENTBAY_REPRO_ENABLE_SWAP !== "false",
-    runnerName: process.env.AGENTBAY_REPRO_RUNNER_NAME ?? "AgentBay Cloud Runner",
+    enableSwap: process.env.BRUNO_REPRO_ENABLE_SWAP !== "false",
+    runnerName: process.env.BRUNO_REPRO_RUNNER_NAME ?? "Bruno Cloud Runner",
   });
 
   writeFileSync(generatedPath, content.userData, { mode: 0o600 });
@@ -118,7 +118,7 @@ function assertReadablePath(path: string): string {
 }
 
 function buildReproImage() {
-  if (process.env.AGENTBAY_REPRO_REBUILD_IMAGE !== "true") {
+  if (process.env.BRUNO_REPRO_REBUILD_IMAGE !== "true") {
     const inspect = spawnSync("docker", ["image", "inspect", REPRO_IMAGE], {
       encoding: "utf8",
       stdio: "ignore",
@@ -229,12 +229,12 @@ function printHelp() {
   bun run repro:cloud-runner -- --user-data /path/to/metadata_v1_user-data
 
 Environment for --current:
-  AGENTBAY_REPRO_APP_URL
-  AGENTBAY_REPRO_REGISTRATION_TOKEN
-  AGENTBAY_REPRO_BEARER_TOKEN
-  AGENTBAY_REPRO_RUNNER_IMAGE
-  AGENTBAY_REPRO_ENDPOINT_URL
-  AGENTBAY_REPRO_ENABLE_SWAP=false
-  AGENTBAY_REPRO_RUNNER_NAME
+  BRUNO_REPRO_APP_URL
+  BRUNO_REPRO_REGISTRATION_TOKEN
+  BRUNO_REPRO_BEARER_TOKEN
+  BRUNO_REPRO_RUNNER_IMAGE
+  BRUNO_REPRO_ENDPOINT_URL
+  BRUNO_REPRO_ENABLE_SWAP=false
+  BRUNO_REPRO_RUNNER_NAME
 `);
 }

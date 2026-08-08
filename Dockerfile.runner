@@ -20,8 +20,8 @@ COPY src/server/agents/agent-launch-spec.ts ./src/server/agents/agent-launch-spe
 COPY src/shared/secret-redaction.ts ./src/shared/secret-redaction.ts
 
 ENV NODE_ENV=production
-ENV AGENTBAY_RUNNER_HOST=0.0.0.0
+ENV BRUNO_RUNNER_HOST=0.0.0.0
 
 EXPOSE 3045
 
-CMD ["sh", "-c", "bun run runner:bootstrap && set -a && . \"${AGENTBAY_RUNNER_ENV_FILE:-/etc/agentbay/runner.env}\" && set +a && exec bun run runner:service"]
+CMD ["sh", "-c", "bun run runner:bootstrap && set -a && . \"${BRUNO_RUNNER_ENV_FILE:-/etc/bruno/runner.env}\" && set +a && exec bun run runner:service"]

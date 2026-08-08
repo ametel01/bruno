@@ -16,8 +16,8 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ametel01/agentbay-hermes
-  LOCAL_IMAGE: agentbay-hermes:ci
+  IMAGE_NAME: ametel01/bruno-hermes
+  LOCAL_IMAGE: bruno-hermes:ci
   UPSTREAM_IMAGE: nousresearch/hermes-agent:v2026.7.7.2
   UPSTREAM_INDEX_DIGEST: sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973
 
@@ -51,7 +51,7 @@ jobs:
 
       - name: Smoke local workload image
         env:
-          AGENTBAY_HERMES_IMAGE: ${{ env.LOCAL_IMAGE }}
+          BRUNO_HERMES_IMAGE: ${{ env.LOCAL_IMAGE }}
         run: bun scripts/smoke-hermes-agent-image.ts
 
       - name: Scan critical fixable vulnerabilities

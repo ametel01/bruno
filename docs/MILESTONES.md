@@ -1,15 +1,15 @@
-# AgentBay Milestones
+# Bruno Milestones
 
 Source documents:
 
 - `conversation_dump.md`: original product exploration, surface-area decisions, and milestone sequence.
 - `PRD.md`: consolidated product requirements, user stories, implementation decisions, testing decisions, and out-of-scope items.
 
-This document turns the conversation milestone outline into implementation-ready build chunks. It assumes AgentBay is a desktop-first web SaaS with a mobile-responsive operations surface for managing hosted Hermes agents. The source documents intentionally leave the app stack open; the technical details below assume a TypeScript web app, Postgres-compatible database, background jobs, and a runner service boundary. Equivalent frameworks are acceptable if they preserve the same domain model, contracts, and validation behavior.
+This document turns the conversation milestone outline into implementation-ready build chunks. It assumes Bruno is a desktop-first web SaaS with a mobile-responsive operations surface for managing hosted Hermes agents. The source documents intentionally leave the app stack open; the technical details below assume a TypeScript web app, Postgres-compatible database, background jobs, and a runner service boundary. Equivalent frameworks are acceptable if they preserve the same domain model, contracts, and validation behavior.
 
 ## Product Direction
 
-AgentBay should not compete as commodity "Hermes hosting." The wedge is a control plane for supervised agent operations:
+Bruno should not compete as commodity "Hermes hosting." The wedge is a control plane for supervised agent operations:
 
 - Create agents from job-oriented templates.
 - Configure lifecycle, model settings, schedules, budgets, and approval behavior.
@@ -543,7 +543,7 @@ Goal: Each agent runs in its own container.
 ### Technical implementation
 
 - Add a Docker runner implementation behind the same runner adapter interface.
-- Use container names or labels such as `agentbay.agent_id=<agentId>`.
+- Use container names or labels such as `bruno.agent_id=<agentId>`.
 - Mount per-agent config into the container read-only where possible.
 - Mount a per-agent workspace volume for mutable data.
 - Apply initial resource limits for memory and CPU.
@@ -668,7 +668,7 @@ Goal: Automatically create a DigitalOcean runner without exposing cloud setup to
   - creates a Droplet with tags
   - applies firewall rules
   - injects cloud-init to install Docker and runner service
-  - runner registers itself with AgentBay
+  - runner registers itself with Bruno
   - dashboard marks runner ready only after an online heartbeat and an authenticated probe through the runner's public endpoint
 - Persist every provisioning phase so refreshes show progress.
 - Add rollback or cleanup for failed provisioning where safe.
@@ -838,7 +838,7 @@ Goal: Charge for the product and enforce plan limits.
 ### Acceptance criteria
 
 - Test user can complete checkout.
-- Subscription status syncs into AgentBay.
+- Subscription status syncs into Bruno.
 - Free or unpaid user cannot create resources beyond allowed limits.
 - Paid user can create resources within plan limits.
 - Cancelled user is blocked from creating new paid resources while existing cleanup behavior is explicit.
@@ -902,7 +902,7 @@ deferred; the implemented first-release path is direct OpenAI/Anthropic API-key 
 - Hermes boots inside the runner environment.
 - Agent can respond through Telegram.
 - BYOK model config is used without exposing the key.
-- Logs appear in AgentBay.
+- Logs appear in Bruno.
 - Stop and restart work.
 - Failure to boot Hermes creates an `agent.error` event with safe diagnostic detail.
 
@@ -915,7 +915,7 @@ deferred; the implemented first-release path is direct OpenAI/Anthropic API-key 
 
 ## Milestone 19: Public Beta Version
 
-Goal: Make AgentBay usable by 5 to 10 real users without founder-assisted setup.
+Goal: Make Bruno usable by 5 to 10 real users without founder-assisted setup.
 
 ### Delivery status (2026-08-03)
 

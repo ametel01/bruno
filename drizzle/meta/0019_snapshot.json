@@ -3006,7 +3006,7 @@
         },
         "runners_provisioning_operation_key_check": {
           "name": "runners_provisioning_operation_key_check",
-          "value": "\"runners\".\"provisioning_operation_key\" IS NULL OR (\"runners\".\"kind\" = 'digitalocean' AND \"runners\".\"provisioning_operation_key\" ~ '^agentbay-deploy-[0-9a-f]{32}$')"
+          "value": "\"runners\".\"provisioning_operation_key\" IS NULL OR (\"runners\".\"kind\" = 'digitalocean' AND \"runners\".\"provisioning_operation_key\" ~ '^bruno-deploy-[0-9a-f]{32}$')"
         }
       },
       "isRLSEnabled": false

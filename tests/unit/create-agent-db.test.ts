@@ -112,7 +112,7 @@ import { FakeDigitalOceanProvider } from "@/src/server/runners/digitalocean-prov
 import { verifyRunnerPlacementCandidate } from "@/src/server/runners/runner-placement-verification";
 import type { CreateRunnerProvisioningResult } from "@/src/server/runners/runner-provisioning";
 import {
-  AGENTBAY_AGENT_ID_LABEL,
+  BRUNO_AGENT_ID_LABEL,
   DEFAULT_DOCKER_RUNNER_IMAGE,
   DockerRunnerAdapter,
   type DockerCliRunner,
@@ -143,14 +143,14 @@ import {
 import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
 
 const HERMES_KEYRING_ENV = {
-  AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
-  AGENTBAY_AGENT_SECRET_KEYS_JSON: JSON.stringify({
+  BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
+  BRUNO_AGENT_SECRET_KEYS_JSON: JSON.stringify({
     v1: Buffer.alloc(32, 29).toString("base64url"),
   }),
 };
 const TEST_RUNNER_IMAGE_DIGEST = `sha256:${"e".repeat(64)}`;
 const TEST_RUNNER_RELEASE_VERSION = "sha-current";
-const TEST_RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:${TEST_RUNNER_RELEASE_VERSION}@${TEST_RUNNER_IMAGE_DIGEST}`;
+const TEST_RUNNER_IMAGE = `ghcr.io/ametel01/bruno-runner:${TEST_RUNNER_RELEASE_VERSION}@${TEST_RUNNER_IMAGE_DIGEST}`;
 const TEST_COMPATIBILITY_REQUIREMENT = {
   mode: "hosted",
   release: {
@@ -159,20 +159,20 @@ const TEST_COMPATIBILITY_REQUIREMENT = {
     bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
   },
 } as const;
-const ORIGINAL_RUNNER_IMAGE = process.env.AGENTBAY_RUNNER_IMAGE;
+const ORIGINAL_RUNNER_IMAGE = process.env.BRUNO_RUNNER_IMAGE;
 
 describe("create agent persistence", () => {
   let connection: DatabaseConnection;
 
   beforeAll(() => {
-    process.env.AGENTBAY_RUNNER_IMAGE = TEST_RUNNER_IMAGE;
+    process.env.BRUNO_RUNNER_IMAGE = TEST_RUNNER_IMAGE;
   });
 
   afterAll(() => {
     if (ORIGINAL_RUNNER_IMAGE === undefined) {
-      delete process.env.AGENTBAY_RUNNER_IMAGE;
+      delete process.env.BRUNO_RUNNER_IMAGE;
     } else {
-      process.env.AGENTBAY_RUNNER_IMAGE = ORIGINAL_RUNNER_IMAGE;
+      process.env.BRUNO_RUNNER_IMAGE = ORIGINAL_RUNNER_IMAGE;
     }
   });
 
@@ -286,7 +286,7 @@ describe("create agent persistence", () => {
           .insert(runners)
           .values({
             userId,
-            name: "bruno Cloud Runner",
+            name: "Bruno Cloud Runner",
             kind: "digitalocean",
             status: "provisioning",
             provider: "digitalocean",
@@ -460,7 +460,7 @@ describe("create agent persistence", () => {
               region: "sfo3",
               sizeSlug: "s-1vcpu-512mb-10gb",
               image: "ubuntu-24-04-x64",
-              tags: ["agentbay"],
+              tags: ["bruno"],
             }),
           }),
       },
@@ -1193,16 +1193,16 @@ describe("create agent persistence", () => {
     const first = await bootstrapManualRunnerForDevelopmentUser({
       createConnection: () => connection,
       env: {
-        AGENTBAY_MANUAL_RUNNER_NAME: "Runner A",
-        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "https://runner.example.com",
+        BRUNO_MANUAL_RUNNER_NAME: "Runner A",
+        BRUNO_MANUAL_RUNNER_ENDPOINT_URL: "https://runner.example.com",
       },
       now: () => createdAt,
     });
     const second = await bootstrapManualRunnerForDevelopmentUser({
       createConnection: () => connection,
       env: {
-        AGENTBAY_MANUAL_RUNNER_NAME: "Runner A Updated",
-        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "https://runner.example.com",
+        BRUNO_MANUAL_RUNNER_NAME: "Runner A Updated",
+        BRUNO_MANUAL_RUNNER_ENDPOINT_URL: "https://runner.example.com",
       },
       now: () => updatedAt,
     });
@@ -1240,8 +1240,8 @@ describe("create agent persistence", () => {
     const runner = await bootstrapManualRunnerForDevelopmentUser({
       createConnection: () => connection,
       env: {
-        AGENTBAY_MANUAL_RUNNER_NAME: "Dev Runner",
-        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "http://127.0.0.1:8787",
+        BRUNO_MANUAL_RUNNER_NAME: "Dev Runner",
+        BRUNO_MANUAL_RUNNER_ENDPOINT_URL: "http://127.0.0.1:8787",
       },
       now: () => new Date("2026-07-05T01:00:00.000Z"),
     });
@@ -1394,8 +1394,8 @@ describe("create agent persistence", () => {
     const runner = await bootstrapManualRunnerForDevelopmentUser({
       createConnection: () => connection,
       env: {
-        AGENTBAY_MANUAL_RUNNER_NAME: "Manual Lifecycle Runner",
-        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "http://127.0.0.1:8787",
+        BRUNO_MANUAL_RUNNER_NAME: "Manual Lifecycle Runner",
+        BRUNO_MANUAL_RUNNER_ENDPOINT_URL: "http://127.0.0.1:8787",
       },
     });
     const calls: string[] = [];
@@ -1467,7 +1467,7 @@ describe("create agent persistence", () => {
     const runner = await bootstrapManualRunnerForDevelopmentUser({
       createConnection: () => connection,
       env: {
-        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "http://127.0.0.1:8788",
+        BRUNO_MANUAL_RUNNER_ENDPOINT_URL: "http://127.0.0.1:8788",
       },
     });
     const calls: string[] = [];
@@ -1520,7 +1520,7 @@ describe("create agent persistence", () => {
     const runner = await bootstrapManualRunnerForDevelopmentUser({
       createConnection: () => connection,
       env: {
-        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "http://127.0.0.1:8789",
+        BRUNO_MANUAL_RUNNER_ENDPOINT_URL: "http://127.0.0.1:8789",
       },
     });
     const calls: string[] = [];
@@ -1683,7 +1683,7 @@ describe("create agent persistence", () => {
         runnerAdapter: createFailingLifecycleRunnerStub("local fallback should not run"),
       });
       const startLogs = infoSpy.mock.calls
-        .filter(([scope]) => scope === "[agentbay] agent.start")
+        .filter(([scope]) => scope === "[bruno] agent.start")
         .map(([, payload]) => payload);
 
       expect(result).toEqual({ ok: false, reason: "no_online_runner" });
@@ -1799,7 +1799,7 @@ describe("create agent persistence", () => {
         .where(eq(runners.id, cloudRunner.id))
         .limit(1);
       const startLogs = infoSpy.mock.calls
-        .filter(([scope]) => scope === "[agentbay] agent.start")
+        .filter(([scope]) => scope === "[bruno] agent.start")
         .map(([, payload]) => payload);
 
       expect(result).toEqual({ ok: false, reason: "no_online_runner" });
@@ -1858,13 +1858,13 @@ describe("create agent persistence", () => {
     const activeRunner = await bootstrapManualRunnerForDevelopmentUser({
       createConnection: () => connection,
       env: {
-        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "https://active-runner.example.com",
+        BRUNO_MANUAL_RUNNER_ENDPOINT_URL: "https://active-runner.example.com",
       },
     });
     const deletedRunner = await bootstrapManualRunnerForDevelopmentUser({
       createConnection: () => connection,
       env: {
-        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: "https://deleted-runner.example.com",
+        BRUNO_MANUAL_RUNNER_ENDPOINT_URL: "https://deleted-runner.example.com",
       },
     });
     const [otherUser] = await connection.db.insert(users).values({}).returning({ id: users.id });
@@ -3609,7 +3609,7 @@ describe("create agent persistence", () => {
         return dockerInspectResult({
           agentId: created.agent.id,
           containerId,
-          image: "agentbay/dummy-runner:test",
+          image: "bruno/dummy-runner:test",
           status: "exited",
         });
       }
@@ -3622,7 +3622,7 @@ describe("create agent persistence", () => {
     };
     const runnerAdapter = new DockerRunnerAdapter({
       command: {
-        image: "agentbay/dummy-runner:test",
+        image: "bruno/dummy-runner:test",
         args: ["sh", "-c", "printf fast-exit; exit 0"],
       },
       createConnection: () => connection,
@@ -3885,7 +3885,7 @@ describe("create agent persistence", () => {
         throw new Error(readiness.reason);
       }
 
-      console.info("[agentbay] Docker route fixture ready", {
+      console.info("[bruno] Docker route fixture ready", {
         sourceImage: DEFAULT_DOCKER_RUNNER_IMAGE,
         imageInspectMs: readiness.inspectMs,
         imageAcquisitionMs: readiness.acquisitionMs,
@@ -3949,8 +3949,8 @@ describe("create agent persistence", () => {
         const deletedAgentId = deletedAgent?.id ?? "";
         routeAgentId = stoppedAgentId;
         routeWorkspacePath = resolve(
-          process.env.AGENTBAY_DOCKER_WORKSPACE_ROOT?.trim() ||
-            join(tmpdir(), "agentbay-docker-workspaces"),
+          process.env.BRUNO_DOCKER_WORKSPACE_ROOT?.trim() ||
+            join(tmpdir(), "bruno-docker-workspaces"),
           stoppedAgentId,
         );
 
@@ -4035,7 +4035,7 @@ describe("create agent persistence", () => {
           Config: {
             Image: DEFAULT_DOCKER_RUNNER_IMAGE,
             Labels: {
-              [AGENTBAY_AGENT_ID_LABEL]: stoppedAgentId,
+              [BRUNO_AGENT_ID_LABEL]: stoppedAgentId,
             },
           },
           State: {
@@ -4276,8 +4276,8 @@ describe("create agent persistence", () => {
       db: connection.db,
       agentId: created.agent.id,
       containerId: "mock-existing-restart",
-      containerName: "agentbay-existing-restart",
-      image: "agentbay/dummy-runner:test",
+      containerName: "bruno-existing-restart",
+      image: "bruno/dummy-runner:test",
       observedStatus: "running",
       observedAt: new Date("2026-07-04T07:59:00.000Z"),
     });
@@ -4293,7 +4293,7 @@ describe("create agent persistence", () => {
         return dockerInspectResult({
           agentId: created.agent.id,
           containerId: "mock-existing-restart",
-          image: "agentbay/dummy-runner:test",
+          image: "bruno/dummy-runner:test",
           status: existingInspectCount === 1 ? "running" : "exited",
         });
       }
@@ -4310,7 +4310,7 @@ describe("create agent persistence", () => {
         return dockerInspectResult({
           agentId: created.agent.id,
           containerId: replacementContainerId,
-          image: "agentbay/dummy-runner:test",
+          image: "bruno/dummy-runner:test",
           status: "exited",
         });
       }
@@ -4323,7 +4323,7 @@ describe("create agent persistence", () => {
     };
     const runnerAdapter = new DockerRunnerAdapter({
       command: {
-        image: "agentbay/dummy-runner:test",
+        image: "bruno/dummy-runner:test",
         args: ["sh", "-c", "printf fast-exit; exit 0"],
       },
       createConnection: () => connection,
@@ -4394,8 +4394,8 @@ describe("create agent persistence", () => {
       db: connection.db,
       agentId: created.agent.id,
       containerId: "mock-existing-run-failure",
-      containerName: "agentbay-existing-run-failure",
-      image: "agentbay/dummy-runner:test",
+      containerName: "bruno-existing-run-failure",
+      image: "bruno/dummy-runner:test",
       observedStatus: "running",
       observedAt: new Date("2026-07-04T08:09:00.000Z"),
     });
@@ -4410,7 +4410,7 @@ describe("create agent persistence", () => {
         return dockerInspectResult({
           agentId: created.agent.id,
           containerId: "mock-existing-run-failure",
-          image: "agentbay/dummy-runner:test",
+          image: "bruno/dummy-runner:test",
           status: existingInspectCount === 1 ? "running" : "exited",
         });
       }
@@ -4427,7 +4427,7 @@ describe("create agent persistence", () => {
     };
     const runnerAdapter = new DockerRunnerAdapter({
       command: {
-        image: "agentbay/dummy-runner:test",
+        image: "bruno/dummy-runner:test",
         args: ["sh", "-c", "while true; do sleep 1; done"],
       },
       createConnection: () => connection,
@@ -6779,7 +6779,7 @@ describe("create agent persistence", () => {
       commandMetadata: {
         command: "bun",
         args: ["run", "agent"],
-        cwd: "/Users/alexmetelli/source/agentbay",
+        cwd: "/Users/alexmetelli/source/bruno",
         envKeys: ["NODE_ENV", "DATABASE_URL"],
       },
       startedAt,
@@ -6791,7 +6791,7 @@ describe("create agent persistence", () => {
       commandMetadata: {
         command: "bun",
         args: ["run", "agent"],
-        cwd: "/Users/alexmetelli/source/agentbay",
+        cwd: "/Users/alexmetelli/source/bruno",
         envKeys: ["NODE_ENV", "DATABASE_URL"],
       },
       status: "running",
@@ -6807,7 +6807,7 @@ describe("create agent persistence", () => {
       processId: processRow?.id ?? "",
       stoppedAt,
       exitCode: 1,
-      lastError: new Error("DATABASE_URL=postgres://agentbay:secret@127.0.0.1/agentbay failed"),
+      lastError: new Error("DATABASE_URL=postgres://bruno:secret@127.0.0.1/bruno failed"),
     });
     const persistedProcesses = await connection.db.select().from(localRunnerProcesses);
 
@@ -6836,18 +6836,18 @@ describe("create agent persistence", () => {
       agentId: created.agent.id,
       pid: 43217,
       commandMetadata: {
-        command: "DATABASE_URL=postgres://agentbay:pg-password@127.0.0.1/agentbay bun run local",
+        command: "DATABASE_URL=postgres://bruno:pg-password@127.0.0.1/bruno bun run local",
         args: [
           "run",
           "local",
-          "--database-url=postgres://agentbay:another-password@127.0.0.1/agentbay",
+          "--database-url=postgres://bruno:another-password@127.0.0.1/bruno",
           "--token",
           "raw-token-value",
           "--api-key=raw-api-key-value",
           "--safe-name",
           "research-agent",
         ],
-        cwd: "/tmp/postgres://agentbay:cwd-password@127.0.0.1/agentbay",
+        cwd: "/tmp/postgres://bruno:cwd-password@127.0.0.1/bruno",
       },
       startedAt: new Date("2026-07-04T06:00:00.000Z"),
     });
@@ -6990,15 +6990,15 @@ describe("create agent persistence", () => {
       db: connection.db,
       agentId: agentA.agent.id,
       containerId: "sha256:docker-agent-a-container",
-      containerName: "agentbay-agent-a",
-      image: "agentbay/runner:issue-77",
+      containerName: "bruno-agent-a",
+      image: "bruno/runner:issue-77",
       observedStatus: "running",
       metadata: {
         labels: {
-          "agentbay.agent_id": agentA.agent.id,
+          "bruno.agent_id": agentA.agent.id,
           safe: "visible-safe-metadata",
         },
-        config: "DATABASE_URL=postgres://agentbay:secret@127.0.0.1/agentbay --token=raw-token",
+        config: "DATABASE_URL=postgres://bruno:secret@127.0.0.1/bruno --token=raw-token",
       },
       observedAt,
       startedAt: new Date("2026-07-04T06:59:59.000Z"),
@@ -7007,18 +7007,18 @@ describe("create agent persistence", () => {
       db: connection.db,
       agentId: agentB.agent.id,
       containerId: "sha256:docker-agent-b-container",
-      containerName: "agentbay-agent-b",
-      image: "agentbay/runner:issue-77",
+      containerName: "bruno-agent-b",
+      image: "bruno/runner:issue-77",
       observedStatus: "running",
-      metadata: { labels: { "agentbay.agent_id": agentB.agent.id } },
+      metadata: { labels: { "bruno.agent_id": agentB.agent.id } },
       observedAt,
     });
     const mismatchedContainer = await recordDockerRunnerContainerForDevelopmentUser({
       db: connection.db,
       agentId: agentA.agent.id,
       containerId: "sha256:docker-agent-b-container",
-      containerName: "agentbay-agent-b",
-      image: "agentbay/runner:issue-77",
+      containerName: "bruno-agent-b",
+      image: "bruno/runner:issue-77",
       observedStatus: "running",
       observedAt,
     });
@@ -7074,8 +7074,8 @@ describe("create agent persistence", () => {
     expect(containerA).toMatchObject({
       agentId: agentA.agent.id,
       containerId: "sha256:docker-agent-a-container",
-      containerName: "agentbay-agent-a",
-      image: "agentbay/runner:issue-77",
+      containerName: "bruno-agent-a",
+      image: "bruno/runner:issue-77",
       observedStatus: "running",
       observedAt: "2026-07-04T07:00:00.000Z",
       startedAt: "2026-07-04T06:59:59.000Z",
@@ -7083,7 +7083,7 @@ describe("create agent persistence", () => {
     });
     expect(containerA?.metadata).toMatchObject({
       labels: {
-        "agentbay.agent_id": agentA.agent.id,
+        "bruno.agent_id": agentA.agent.id,
         safe: "visible-safe-metadata",
       },
       config: `DATABASE_URL=${DOCKER_RUNNER_METADATA_REDACTION} --token=${DOCKER_RUNNER_METADATA_REDACTION}`,
@@ -7133,8 +7133,8 @@ describe("create agent persistence", () => {
       db: connection.db,
       agentId: created.agent.id,
       containerId: "sha256:deleted-agent-container",
-      containerName: "agentbay-deleted-agent",
-      image: "agentbay/runner:issue-77",
+      containerName: "bruno-deleted-agent",
+      image: "bruno/runner:issue-77",
       observedStatus: "running",
       observedAt: new Date("2026-07-04T07:10:00.000Z"),
     });
@@ -7176,10 +7176,10 @@ describe("create agent persistence", () => {
   });
 
   it("docker runner adapter builds docker run as argv with labels, limits, and isolated mounts", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentbay-docker-adapter-test-"));
+    const tempRoot = await mkdtemp(join(tmpdir(), "bruno-docker-adapter-test-"));
 
     try {
-      const configPath = join(tempRoot, "agentbay-config.json");
+      const configPath = join(tempRoot, "bruno-config.json");
       const workspaceRoot = join(tempRoot, "workspaces");
       await writeFile(configPath, JSON.stringify({ fixture: true }));
       const created = await createAgentForDevelopmentUser(
@@ -7199,7 +7199,7 @@ describe("create agent persistence", () => {
           return dockerInspectResult({
             agentId: created.agent.id,
             containerId,
-            image: "agentbay/dummy-runner:test",
+            image: "bruno/dummy-runner:test",
             status: "running",
           });
         }
@@ -7208,7 +7208,7 @@ describe("create agent persistence", () => {
       };
       const adapter = new DockerRunnerAdapter({
         command: {
-          image: "agentbay/dummy-runner:test",
+          image: "bruno/dummy-runner:test",
           args: ["run", "agent; rm -rf /", "$(whoami)"],
         },
         createConnection: () => connection,
@@ -7232,7 +7232,7 @@ describe("create agent persistence", () => {
         container: {
           agentId: created.agent.id,
           containerId,
-          containerName: `agentbay-${created.agent.id}-fixed001`,
+          containerName: `bruno-${created.agent.id}-fixed001`,
           observedStatus: "running",
         },
       });
@@ -7241,9 +7241,9 @@ describe("create agent persistence", () => {
         "run",
         "--detach",
         "--name",
-        `agentbay-${created.agent.id}-fixed001`,
+        `bruno-${created.agent.id}-fixed001`,
         "--label",
-        `${AGENTBAY_AGENT_ID_LABEL}=${created.agent.id}`,
+        `${BRUNO_AGENT_ID_LABEL}=${created.agent.id}`,
         "--cpus",
         "0.5",
         "--memory",
@@ -7253,14 +7253,14 @@ describe("create agent persistence", () => {
         "--workdir",
         "/workspace",
         "--env",
-        `AGENTBAY_AGENT_ID=${created.agent.id}`,
+        `BRUNO_AGENT_ID=${created.agent.id}`,
         "--env",
-        "AGENTBAY_WORKSPACE=/workspace",
+        "BRUNO_WORKSPACE=/workspace",
         "--mount",
-        `type=bind,source=${configPath},target=/etc/agentbay/config-${created.agent.id},readonly`,
+        `type=bind,source=${configPath},target=/etc/bruno/config-${created.agent.id},readonly`,
         "--env",
-        `AGENTBAY_CONFIG_PATH=/etc/agentbay/config-${created.agent.id}`,
-        "agentbay/dummy-runner:test",
+        `BRUNO_CONFIG_PATH=/etc/bruno/config-${created.agent.id}`,
+        "bruno/dummy-runner:test",
         "run",
         "agent; rm -rf /",
         "$(whoami)",
@@ -7270,7 +7270,7 @@ describe("create agent persistence", () => {
       const [persistedContainer] = await connection.db.select().from(dockerRunnerContainers);
       expect(persistedContainer?.metadata).toMatchObject({
         labels: {
-          [AGENTBAY_AGENT_ID_LABEL]: created.agent.id,
+          [BRUNO_AGENT_ID_LABEL]: created.agent.id,
         },
         resources: {
           cpus: "0.5",
@@ -7278,7 +7278,7 @@ describe("create agent persistence", () => {
         },
         mounts: {
           configSource: configPath,
-          configTarget: `/etc/agentbay/config-${created.agent.id}`,
+          configTarget: `/etc/bruno/config-${created.agent.id}`,
           configReadonly: true,
           workspaceSource: join(workspaceRoot, created.agent.id),
           workspaceTarget: "/workspace",
@@ -7308,7 +7308,7 @@ describe("create agent persistence", () => {
         return dockerInspectResult({
           agentId: created.agent.id,
           containerId,
-          image: "agentbay/dummy-runner:test",
+          image: "bruno/dummy-runner:test",
           status: "exited",
         });
       }
@@ -7321,7 +7321,7 @@ describe("create agent persistence", () => {
     };
     const adapter = new DockerRunnerAdapter({
       command: {
-        image: "agentbay/dummy-runner:test",
+        image: "bruno/dummy-runner:test",
         args: ["sh", "-c", "printf fast-exit; exit 0"],
       },
       createConnection: () => connection,
@@ -7353,8 +7353,8 @@ describe("create agent persistence", () => {
       db: connection.db,
       agentId: created.agent.id,
       containerId: "stored-container-id",
-      containerName: "agentbay-stored-container",
-      image: "agentbay/dummy-runner:test",
+      containerName: "bruno-stored-container",
+      image: "bruno/dummy-runner:test",
       observedStatus: "running",
     });
     const dockerCalls: string[][] = [];
@@ -7365,7 +7365,7 @@ describe("create agent persistence", () => {
         return dockerInspectResult({
           agentId: "00000000-0000-4000-8000-000000000999",
           containerId: "stored-container-id",
-          image: "agentbay/dummy-runner:test",
+          image: "bruno/dummy-runner:test",
           status: "running",
         });
       }
@@ -7393,8 +7393,8 @@ describe("create agent persistence", () => {
       db: connection.db,
       agentId: created.agent.id,
       containerId: "already-stopped-container",
-      containerName: "agentbay-already-stopped",
-      image: "agentbay/dummy-runner:test",
+      containerName: "bruno-already-stopped",
+      image: "bruno/dummy-runner:test",
       observedStatus: "running",
     });
     const dockerCalls: string[][] = [];
@@ -7405,7 +7405,7 @@ describe("create agent persistence", () => {
         return dockerInspectResult({
           agentId: created.agent.id,
           containerId: "already-stopped-container",
-          image: "agentbay/dummy-runner:test",
+          image: "bruno/dummy-runner:test",
           status: "exited",
         });
       }
@@ -7451,8 +7451,8 @@ describe("create agent persistence", () => {
       db: connection.db,
       agentId: created.agent.id,
       containerId: "replacement-running-container",
-      containerName: "agentbay-replacement-running",
-      image: "agentbay/dummy-runner:test",
+      containerName: "bruno-replacement-running",
+      image: "bruno/dummy-runner:test",
       observedAt: new Date("2026-07-04T08:00:00.000Z"),
       observedStatus: "running",
     });
@@ -7460,8 +7460,8 @@ describe("create agent persistence", () => {
       db: connection.db,
       agentId: created.agent.id,
       containerId: "previous-exited-container",
-      containerName: "agentbay-previous-exited",
-      image: "agentbay/dummy-runner:test",
+      containerName: "bruno-previous-exited",
+      image: "bruno/dummy-runner:test",
       observedAt: new Date("2026-07-04T08:01:00.000Z"),
       observedStatus: "exited",
     });
@@ -7474,7 +7474,7 @@ describe("create agent persistence", () => {
         return dockerInspectResult({
           agentId: created.agent.id,
           containerId: "replacement-running-container",
-          image: "agentbay/dummy-runner:test",
+          image: "bruno/dummy-runner:test",
           status: replacementStopped ? "exited" : "running",
         });
       }
@@ -7538,16 +7538,16 @@ describe("create agent persistence", () => {
       db: connection.db,
       agentId: agentA.agent.id,
       containerId: "cleanup-agent-a-container",
-      containerName: "agentbay-cleanup-a",
-      image: "agentbay/dummy-runner:test",
+      containerName: "bruno-cleanup-a",
+      image: "bruno/dummy-runner:test",
       observedStatus: "exited",
     });
     await recordDockerRunnerContainerForDevelopmentUser({
       db: connection.db,
       agentId: agentB.agent.id,
       containerId: "cleanup-agent-b-container",
-      containerName: "agentbay-cleanup-b",
-      image: "agentbay/dummy-runner:test",
+      containerName: "bruno-cleanup-b",
+      image: "bruno/dummy-runner:test",
       observedStatus: "running",
     });
     const dockerCalls: string[][] = [];
@@ -7558,7 +7558,7 @@ describe("create agent persistence", () => {
         return dockerInspectResult({
           agentId: agentA.agent.id,
           containerId: "cleanup-agent-a-container",
-          image: "agentbay/dummy-runner:test",
+          image: "bruno/dummy-runner:test",
           status: "exited",
         });
       }
@@ -7623,16 +7623,16 @@ describe("create agent persistence", () => {
       db: connection.db,
       agentId: agentA.agent.id,
       containerId: "stop-agent-a-container",
-      containerName: "agentbay-stop-a",
-      image: "agentbay/dummy-runner:test",
+      containerName: "bruno-stop-a",
+      image: "bruno/dummy-runner:test",
       observedStatus: "running",
     });
     const containerB = await recordDockerRunnerContainerForDevelopmentUser({
       db: connection.db,
       agentId: agentB.agent.id,
       containerId: "stop-agent-b-container",
-      containerName: "agentbay-stop-b",
-      image: "agentbay/dummy-runner:test",
+      containerName: "bruno-stop-b",
+      image: "bruno/dummy-runner:test",
       observedStatus: "running",
     });
     const dockerCalls: string[][] = [];
@@ -7646,7 +7646,7 @@ describe("create agent persistence", () => {
         return dockerInspectResult({
           agentId: agentA.agent.id,
           containerId: "stop-agent-a-container",
-          image: "agentbay/dummy-runner:test",
+          image: "bruno/dummy-runner:test",
           status: stopped ? "exited" : "running",
         });
       }
@@ -7740,8 +7740,8 @@ describe("create agent persistence", () => {
       db: connection.db,
       agentId: created.agent.id,
       containerId: "cleanup-mismatch-container",
-      containerName: "agentbay-cleanup-mismatch",
-      image: "agentbay/dummy-runner:test",
+      containerName: "bruno-cleanup-mismatch",
+      image: "bruno/dummy-runner:test",
       observedStatus: "running",
     });
     const dockerCalls: string[][] = [];
@@ -7752,7 +7752,7 @@ describe("create agent persistence", () => {
         return dockerInspectResult({
           agentId: "00000000-0000-4000-8000-000000000999",
           containerId: "cleanup-mismatch-container",
-          image: "agentbay/dummy-runner:test",
+          image: "bruno/dummy-runner:test",
           status: "running",
         });
       }
@@ -7785,8 +7785,8 @@ describe("create agent persistence", () => {
       db: connection.db,
       agentId: created.agent.id,
       containerId: "log-container-id",
-      containerName: "agentbay-log-container",
-      image: "agentbay/dummy-runner:test",
+      containerName: "bruno-log-container",
+      image: "bruno/dummy-runner:test",
       observedStatus: "running",
     });
     const dockerCalls: string[][] = [];
@@ -7797,7 +7797,7 @@ describe("create agent persistence", () => {
         return dockerInspectResult({
           agentId: created.agent.id,
           containerId: "log-container-id",
-          image: "agentbay/dummy-runner:test",
+          image: "bruno/dummy-runner:test",
           status: "running",
         });
       }
@@ -7855,16 +7855,16 @@ describe("create agent persistence", () => {
       db: connection.db,
       agentId: agentA.agent.id,
       containerId: "crash-agent-a-container",
-      containerName: "agentbay-crash-a",
-      image: "agentbay/dummy-runner:test",
+      containerName: "bruno-crash-a",
+      image: "bruno/dummy-runner:test",
       observedStatus: "running",
     });
     const containerB = await recordDockerRunnerContainerForDevelopmentUser({
       db: connection.db,
       agentId: agentB.agent.id,
       containerId: "crash-agent-b-container",
-      containerName: "agentbay-crash-b",
-      image: "agentbay/dummy-runner:test",
+      containerName: "bruno-crash-b",
+      image: "bruno/dummy-runner:test",
       observedStatus: "running",
     });
     const dockerCalls: string[][] = [];
@@ -7876,7 +7876,7 @@ describe("create agent persistence", () => {
           agentId: agentA.agent.id,
           containerId: "crash-agent-a-container",
           exitCode: 137,
-          image: "agentbay/dummy-runner:test",
+          image: "bruno/dummy-runner:test",
           oomKilled: true,
           status: "exited",
         });
@@ -7988,8 +7988,8 @@ describe("create agent persistence", () => {
       db: connection.db,
       agentId: created.agent.id,
       containerId: "clean-exit-container",
-      containerName: "agentbay-clean-exit",
-      image: "agentbay/dummy-runner:test",
+      containerName: "bruno-clean-exit",
+      image: "bruno/dummy-runner:test",
       observedStatus: "running",
     });
     const dockerCli: DockerCliRunner = async (args) => {
@@ -7997,7 +7997,7 @@ describe("create agent persistence", () => {
         return dockerInspectResult({
           agentId: created.agent.id,
           containerId: "clean-exit-container",
-          image: "agentbay/dummy-runner:test",
+          image: "bruno/dummy-runner:test",
           status: "exited",
         });
       }
@@ -8046,7 +8046,7 @@ describe("create agent persistence", () => {
       return;
     }
 
-    const tempRoot = await mkdtemp(join(tmpdir(), "agentbay-real-docker-adapter-test-"));
+    const tempRoot = await mkdtemp(join(tmpdir(), "bruno-real-docker-adapter-test-"));
     let containerId: string | null = null;
 
     try {
@@ -8088,10 +8088,10 @@ describe("create agent persistence", () => {
       const logs = await waitForDockerLogs(
         adapter,
         created.agent.id,
-        "agentbay docker dummy runner started",
+        "bruno docker dummy runner started",
       );
       expect(logs.logs.map((log) => log.message).join("\n")).toContain(
-        `agentbay docker dummy runner started for ${created.agent.id}`,
+        `bruno docker dummy runner started for ${created.agent.id}`,
       );
 
       await expect(adapter.stop(created.agent.id)).resolves.toMatchObject({
@@ -8404,7 +8404,7 @@ describe("create agent persistence", () => {
         stdio: "pipe",
       });
       expect(spawnCalls[0]?.[2].env).toMatchObject({
-        AGENTBAY_AGENT_ID: created.agent.id,
+        BRUNO_AGENT_ID: created.agent.id,
         HERMES_MODE: "local",
       });
     } finally {
@@ -9808,11 +9808,11 @@ function dockerInspectResult(input: {
   return {
     stdout: `${JSON.stringify({
       Id: input.containerId,
-      Name: `/agentbay-${input.agentId}`,
+      Name: `/bruno-${input.agentId}`,
       Config: {
         Image: input.image,
         Labels: {
-          [AGENTBAY_AGENT_ID_LABEL]: input.agentId,
+          [BRUNO_AGENT_ID_LABEL]: input.agentId,
         },
       },
       State: {
@@ -9868,7 +9868,7 @@ async function listDockerContainerIdsForAgent(agentId: string): Promise<string[]
     "--all",
     "--quiet",
     "--filter",
-    `label=${AGENTBAY_AGENT_ID_LABEL}=${agentId}`,
+    `label=${BRUNO_AGENT_ID_LABEL}=${agentId}`,
   ]);
 
   return result.stdout
@@ -9884,7 +9884,7 @@ async function removeDockerContainersForAgent(agentId: string): Promise<void> {
     const label = await runDocker([
       "inspect",
       "--format",
-      `{{index .Config.Labels "${AGENTBAY_AGENT_ID_LABEL}"}}`,
+      `{{index .Config.Labels "${BRUNO_AGENT_ID_LABEL}"}}`,
       containerId,
     ]);
 

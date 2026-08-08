@@ -24,7 +24,7 @@ import { reconcileNextRunnerReplacement } from "@/src/server/runners/runner-repl
 
 const execFileAsync = promisify(execFile);
 const BASE_DATABASE_URL =
-  process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
+  process.env.DATABASE_URL ?? "postgres://bruno:bruno@127.0.0.1:54329/bruno";
 const USER_ID = "00000000-0000-4000-8000-000000007001";
 const OTHER_USER_ID = "00000000-0000-4000-8000-000000007002";
 const SOURCE_ID = "00000000-0000-4000-8000-000000007101";
@@ -39,10 +39,10 @@ const LEASE_A = "runner-replacement:11111111-1111-4111-8111-111111111111";
 const LEASE_B = "runner-replacement:22222222-2222-4222-8222-222222222222";
 const NOW = new Date("2026-08-04T10:00:00.000Z");
 const IMAGE_DIGEST = `sha256:${"7".repeat(64)}`;
-const RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:step7@${IMAGE_DIGEST}`;
-const SOURCE_OPERATION_KEY = `agentbay-deploy-${"7".repeat(32)}`;
-const TARGET_OPERATION_KEY = `agentbay-deploy-${"8".repeat(32)}`;
-const REPLACEMENT_OPERATION_KEY = `agentbay-replace-${"7".repeat(32)}`;
+const RUNNER_IMAGE = `ghcr.io/ametel01/bruno-runner:step7@${IMAGE_DIGEST}`;
+const SOURCE_OPERATION_KEY = `bruno-deploy-${"7".repeat(32)}`;
+const TARGET_OPERATION_KEY = `bruno-deploy-${"8".repeat(32)}`;
+const REPLACEMENT_OPERATION_KEY = `bruno-replace-${"7".repeat(32)}`;
 
 describe("runner replacement handover", () => {
   let databaseName: string;
@@ -379,7 +379,7 @@ function providerConfig(): DigitalOceanProviderConfig {
     region: "sfo3",
     sizeSlug: "s-1vcpu-2gb",
     image: "ubuntu-24-04-x64",
-    tags: ["agentbay", "agentbay-runner"],
+    tags: ["bruno", "bruno-runner"],
     sshKeyIds: ["fake-key"],
     sshSourceAddresses: ["203.0.113.5/32"],
   };
@@ -622,7 +622,7 @@ async function seedFixture(
   await connection.db.insert(runnerCredentials).values({
     runnerId: SOURCE_ID,
     credentialHash: "step7-source-credential-hash",
-    credentialPrefix: "agb_run_step7",
+    credentialPrefix: "bruno_run_step7",
     createdAt: NOW,
     updatedAt: NOW,
   });

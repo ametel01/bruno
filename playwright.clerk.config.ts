@@ -4,8 +4,8 @@ import { parsePlaywrightBaseUrl } from "@/src/testing/playwright-base-url";
 const port = Number(process.env.PORT ?? 3200);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${port}`;
 const baseOrigin = parsePlaywrightBaseUrl(baseURL).origin;
-const operatorUsername = process.env.AGENTBAY_OPERATOR_USERNAME?.trim();
-const operatorPassword = process.env.AGENTBAY_OPERATOR_PASSWORD;
+const operatorUsername = process.env.BRUNO_OPERATOR_USERNAME?.trim();
+const operatorPassword = process.env.BRUNO_OPERATOR_PASSWORD;
 const httpCredentials =
   operatorUsername && operatorPassword
     ? { username: operatorUsername, password: operatorPassword, origin: baseOrigin }

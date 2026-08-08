@@ -188,8 +188,8 @@ describe("runner boot self-test", () => {
       join(validRoot, "fixture.json"),
       JSON.stringify({
         agentId: "00000000-0000-4000-8000-000000000333",
-        fakeModelContainer: "agentbay-boot-abcdef012345-model",
-        network: "agentbay-boot-abcdef012345",
+        fakeModelContainer: "bruno-boot-abcdef012345-model",
+        network: "bruno-boot-abcdef012345",
       }),
     );
     await writeFile(
@@ -218,9 +218,9 @@ describe("runner boot self-test", () => {
       "--all",
       "--quiet",
       "--filter",
-      "label=agentbay.agent_id=00000000-0000-4000-8000-000000000333",
+      "label=bruno.agent_id=00000000-0000-4000-8000-000000000333",
       "--filter",
-      "label=agentbay.boot_fixture=v1",
+      "label=bruno.boot_fixture=v1",
     ]);
     expect(JSON.stringify(calls)).not.toContain("user-container");
     expect(JSON.stringify(calls)).not.toContain("bridge");
@@ -239,8 +239,8 @@ async function createHarness(
   const fixture = {
     agentId: "00000000-0000-4000-8000-000000000123",
     configRevision: "boot-test",
-    fakeModelContainer: "agentbay-boot-abcdef012345-model",
-    network: "agentbay-boot-abcdef012345",
+    fakeModelContainer: "bruno-boot-abcdef012345-model",
+    network: "bruno-boot-abcdef012345",
     operationId: "00000000-0000-4000-8000-000000000456",
     root,
     runner: {} as RunnerBootFixture["runner"],

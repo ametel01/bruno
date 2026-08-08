@@ -145,7 +145,7 @@
   evidence: Implemented deterministic creation-latency reporting, read-only benchmark CLI,
     sanitized terminal-completion logging, local smoke timing output before cleanup, E2E docs, and
     changelog/progress updates. Final implementation also normalizes PostgreSQL timestamp strings
-    and correlates runner evidence through the deployment-derived `agentbay-deploy-*` operation key
+    and correlates runner evidence through the deployment-derived `bruno-deploy-*` operation key
     with owner-safe joins, using current assignment only as fallback. DigitalOcean/provider execution
     was not run or authorized. Implementation commit: this checker-ready branch commit.
   next-action: Check diff, issue contract, gates, and redaction/provider guardrails. If accepted,

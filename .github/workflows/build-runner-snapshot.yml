@@ -104,18 +104,18 @@ jobs:
               }
             '
           )"
-          echo "AGENTBAY_SNAPSHOT_CONTROLLER_CIDR=$CONTROLLER_CIDR" >> "$GITHUB_ENV"
+          echo "BRUNO_SNAPSHOT_CONTROLLER_CIDR=$CONTROLLER_CIDR" >> "$GITHUB_ENV"
 
       - name: Prepare allowlisted artifact directory
         run: install -m 0750 -d snapshot-artifacts
 
       - name: Build snapshot and signed manifest
         env:
-          AGENTBAY_DIGITALOCEAN_TOKEN: ${{ secrets.AGENTBAY_DIGITALOCEAN_TOKEN }}
+          BRUNO_DIGITALOCEAN_TOKEN: ${{ secrets.BRUNO_DIGITALOCEAN_TOKEN }}
         run: |
           set -euo pipefail
           install -m 0600 /dev/null snapshot-artifacts/signing-key.pem
-          printf '%s' "${{ secrets.AGENTBAY_SNAPSHOT_SIGNING_KEY_PEM }}" > snapshot-artifacts/signing-key.pem
+          printf '%s' "${{ secrets.BRUNO_SNAPSHOT_SIGNING_KEY_PEM }}" > snapshot-artifacts/signing-key.pem
           bun run runner:snapshot:build -- \
             --cost-authorization "${{ inputs.cost_authorization }}" \
             --run-id "${{ github.run_id }}" \
@@ -127,7 +127,7 @@ jobs:
             --runner-image "${{ inputs.runner_image }}" \
             --default-agent-image "${{ inputs.default_agent_image }}" \
             --hermes-image "${{ inputs.hermes_image }}" \
-            --controller-cidr "$AGENTBAY_SNAPSHOT_CONTROLLER_CIDR" \
+            --controller-cidr "$BRUNO_SNAPSHOT_CONTROLLER_CIDR" \
             --boot-result-out snapshot-artifacts/boot-result.json \
             --sanitation-result-out snapshot-artifacts/sanitation-result.json \
             --signing-key snapshot-artifacts/signing-key.pem \
@@ -161,13 +161,13 @@ jobs:
             const removed = new Set(sanitation?.removedPaths ?? []);
             const scanned = new Set(sanitation?.scannedPaths ?? []);
             const markers = new Set(sanitation?.hostileMarkers ?? []);
-            for (const value of ["/etc/agentbay/runner.env", "/root/.docker/config.json", "/var/lib/cloud/instances", "/etc/ssh/ssh_host_ed25519_key", "/etc/machine-id", "/var/log/cloud-init-output.log"]) {
+            for (const value of ["/etc/bruno/runner.env", "/root/.docker/config.json", "/var/lib/cloud/instances", "/etc/ssh/ssh_host_ed25519_key", "/etc/machine-id", "/var/log/cloud-init-output.log"]) {
               if (!removed.has(value)) throw new Error("missing sanitation removal evidence");
             }
-            for (const value of ["/etc", "/root", "/var/lib/agentbay", "/var/log"]) {
+            for (const value of ["/etc", "/root", "/var/lib/bruno", "/var/log"]) {
               if (!scanned.has(value)) throw new Error("missing sanitation scan evidence");
             }
-            for (const value of ["AGENTBAY_RUNNER_REGISTRATION_TOKEN", "AGENTBAY_RUNNER_BEARER_TOKEN", "dop_v1_", "BEGIN OPENSSH PRIVATE KEY"]) {
+            for (const value of ["BRUNO_RUNNER_REGISTRATION_TOKEN", "BRUNO_RUNNER_BEARER_TOKEN", "dop_v1_", "BEGIN OPENSSH PRIVATE KEY"]) {
               if (!markers.has(value)) throw new Error("missing hostile marker evidence");
             }
             if (sanitation?.ok !== true || sanitation.forbiddenPathsAbsent !== true || sanitation.hostileMarkersAbsent !== true) {

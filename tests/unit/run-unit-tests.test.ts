@@ -7,7 +7,7 @@ import {
   type UnitTestDatabasePlan,
 } from "@/scripts/run-unit-tests";
 
-const BASE_DATABASE_URL = "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
+const BASE_DATABASE_URL = "postgres://bruno:bruno@127.0.0.1:54329/bruno";
 
 describe("isolated unit-test database runner", () => {
   it("derives a disposable loopback database without changing connection credentials", () => {
@@ -17,15 +17,15 @@ describe("isolated unit-test database runner", () => {
         suffix: "a1b2c3d4e5f6",
       }),
     ).toEqual({
-      adminDatabaseUrl: "postgres://agentbay:agentbay@127.0.0.1:54329/postgres",
+      adminDatabaseUrl: "postgres://bruno:bruno@127.0.0.1:54329/postgres",
       databaseName: "bruno_test_4242_a1b2c3d4e5f6",
-      databaseUrl: "postgres://agentbay:agentbay@127.0.0.1:54329/bruno_test_4242_a1b2c3d4e5f6",
+      databaseUrl: "postgres://bruno:bruno@127.0.0.1:54329/bruno_test_4242_a1b2c3d4e5f6",
     });
   });
 
   it.each([
-    "postgres://agentbay:agentbay@database.example/bruno",
-    "mysql://agentbay:agentbay@127.0.0.1:54329/bruno",
+    "postgres://bruno:bruno@database.example/bruno",
+    "mysql://bruno:bruno@127.0.0.1:54329/bruno",
   ])("refuses unsafe base database URL %s", (databaseUrl) => {
     expect(() =>
       planUnitTestDatabase(databaseUrl, {

@@ -12,7 +12,7 @@ export const CI_E2E_SELECTORS = [
 ] as const;
 
 export const FULL_E2E_CAPABILITY_MESSAGE =
-  "Full E2E capability unavailable. Configure a valid DigitalOcean or local Docker runner with AGENTBAY_DIGITALOCEAN_TOKEN and AGENTBAY_RUNNER_BEARER_TOKEN; see docs/E2E_VALIDATION.md.";
+  "Full E2E capability unavailable. Configure a valid DigitalOcean or local Docker runner with BRUNO_DIGITALOCEAN_TOKEN and BRUNO_RUNNER_BEARER_TOKEN; see docs/E2E_VALIDATION.md.";
 
 export type E2EMode = "ci" | "full";
 

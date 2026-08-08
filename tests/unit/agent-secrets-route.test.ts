@@ -141,7 +141,7 @@ describe("/api/agents/[agentId]/secrets route", () => {
     const rejected = await PUT(
       new Request(`http://localhost/api/agents/${AGENT_ID}/secrets`, {
         method: "PUT",
-        body: JSON.stringify({ kind: "api_server_key", value: "agb_agent_client_supplied" }),
+        body: JSON.stringify({ kind: "api_server_key", value: "bruno_agent_client_supplied" }),
       }),
       { params: Promise.resolve({ agentId: AGENT_ID }) },
     );
@@ -200,7 +200,7 @@ describe("/api/agents/[agentId]/secrets route", () => {
         fingerprint: "fedcba9876543210",
       },
     });
-    expect(JSON.stringify(body)).not.toContain("agb_agent_");
+    expect(JSON.stringify(body)).not.toContain("bruno_agent_");
     expect(mocks.generateApiServerKeyForUser).toHaveBeenCalledWith(USER_ID, AGENT_ID);
   });
 

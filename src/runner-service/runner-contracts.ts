@@ -1,9 +1,9 @@
 import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 
-export const RUNNER_LAUNCH_CONTRACT_VERSION = "agentbay.runner.launch.v2" as const;
-export const LEGACY_RUNNER_STATUS_CONTRACT_VERSION = "agentbay.runner.status.v2" as const;
-export const RUNNER_STATUS_CONTRACT_VERSION = "agentbay.runner.status.v3" as const;
-export const RUNNER_CANARY_CONTRACT_VERSION = "agentbay.runner.canary.v1" as const;
+export const RUNNER_LAUNCH_CONTRACT_VERSION = "bruno.runner.launch.v2" as const;
+export const LEGACY_RUNNER_STATUS_CONTRACT_VERSION = "bruno.runner.status.v2" as const;
+export const RUNNER_STATUS_CONTRACT_VERSION = "bruno.runner.status.v3" as const;
+export const RUNNER_CANARY_CONTRACT_VERSION = "bruno.runner.canary.v1" as const;
 export const RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION = "bruno.runner.boot-snapshot.v1" as const;
 export const MAX_RUNNER_RESTART_COUNT = 2_147_483_647;
 export const MAX_RUNNER_IMAGE_IDENTITY_DIGESTS = 16;

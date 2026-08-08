@@ -40,10 +40,10 @@ import {
 } from "@/src/server/db/schema";
 
 const FAKE_MODEL_ALIAS = "gpt-5.4";
-const SMOKE_IMAGE = process.env.AGENTBAY_HERMES_IMAGE?.trim() || DEFAULT_LOCAL_HERMES_IMAGE;
+const SMOKE_IMAGE = process.env.BRUNO_HERMES_IMAGE?.trim() || DEFAULT_LOCAL_HERMES_IMAGE;
 const LOCAL_DOCKER_PID_HELPER_IMAGE = "busybox:1.36";
-const TIMEOUT_MS = readPositiveInteger(process.env.AGENTBAY_HERMES_CONTRACT_TIMEOUT_MS, 240_000);
-const POLL_MS = readPositiveInteger(process.env.AGENTBAY_HERMES_CONTRACT_POLL_MS, 1_000);
+const TIMEOUT_MS = readPositiveInteger(process.env.BRUNO_HERMES_CONTRACT_TIMEOUT_MS, 240_000);
+const POLL_MS = readPositiveInteger(process.env.BRUNO_HERMES_CONTRACT_POLL_MS, 1_000);
 
 type CommandResult = {
   exitCode: number | null;
@@ -88,23 +88,23 @@ export type LocalHermesContractSmokeSummary = {
 };
 
 export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmokeSummary> {
-  process.env.DATABASE_URL ??= "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
+  process.env.DATABASE_URL ??= "postgres://bruno:bruno@127.0.0.1:54329/bruno";
   process.env.NEXT_PUBLIC_APP_URL ??= "http://127.0.0.1:3000";
   const startedAt = Date.now();
   const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
   const agentId = randomUUID();
   const network =
-    process.env.AGENTBAY_HERMES_CONTRACT_NETWORK?.trim() ||
+    process.env.BRUNO_HERMES_CONTRACT_NETWORK?.trim() ||
     `${DEFAULT_HERMES_PRIVATE_NETWORK}-smoke-${suffix}`;
-  const fakeModelContainer = `agentbay-hermes-fake-model-${suffix}`;
-  const stateRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-contract-"));
+  const fakeModelContainer = `bruno-hermes-fake-model-${suffix}`;
+  const stateRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-contract-"));
   const backupRoot = resolve(stateRoot, `${agentId}.backup`);
-  const previousStateRoot = process.env.AGENTBAY_HERMES_STATE_ROOT;
+  const previousStateRoot = process.env.BRUNO_HERMES_STATE_ROOT;
   let networkCreated = false;
   let projection: HermesProjectionResult | null = null;
   let projectionRoot: string | null = null;
 
-  process.env.AGENTBAY_HERMES_STATE_ROOT = stateRoot;
+  process.env.BRUNO_HERMES_STATE_ROOT = stateRoot;
 
   try {
     await docker(["image", "inspect", SMOKE_IMAGE]);
@@ -335,9 +335,9 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
     ) {
       throw new Error("Hermes restart did not reuse the exact running operation and container.");
     }
-    const sentinelPath = join(activeProjection.workspace, "agentbay-contract-sentinel.txt");
+    const sentinelPath = join(activeProjection.workspace, "bruno-contract-sentinel.txt");
 
-    await writeFile(sentinelPath, "agentbay local hermes contract persisted\n", "utf8");
+    await writeFile(sentinelPath, "bruno local hermes contract persisted\n", "utf8");
     const firstLogs = await waitForHermesGatewayLogs(restartedRunnerService, agentId);
 
     const stopped = await restartedRunnerService.stop(agentId);
@@ -354,7 +354,7 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
     const restarted = await restartedRunnerService.restart(agentId, spec);
     const sentinel = await readFile(sentinelPath, "utf8");
 
-    if (!sentinel.includes("agentbay local hermes contract persisted")) {
+    if (!sentinel.includes("bruno local hermes contract persisted")) {
       throw new Error("Hermes workspace state did not survive backup/restore and restart.");
     }
 
@@ -422,9 +422,9 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
       await docker(["network", "rm", network], { allowFailure: true });
     }
     if (previousStateRoot === undefined) {
-      delete process.env.AGENTBAY_HERMES_STATE_ROOT;
+      delete process.env.BRUNO_HERMES_STATE_ROOT;
     } else {
-      process.env.AGENTBAY_HERMES_STATE_ROOT = previousStateRoot;
+      process.env.BRUNO_HERMES_STATE_ROOT = previousStateRoot;
     }
   }
 }
@@ -657,7 +657,7 @@ function buildSmokeLaunchSpec(input: {
       timezone: "UTC",
     },
     prompt: {
-      soul: "Reply tersely for the AgentBay local Hermes contract smoke.",
+      soul: "Reply tersely for the Bruno local Hermes contract smoke.",
     },
     runtime: {
       dataDir: "/opt/data",
@@ -682,7 +682,7 @@ function buildSmokeLaunchSpec(input: {
       modelApiKey: "sk-contractsmokelocalfakemodelkey123456",
       telegramBotToken: "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ12",
       telegramAllowedUsers: ["1"],
-      apiServerKey: `agb_agent_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`,
+      apiServerKey: `bruno_agent_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`,
     },
   };
 }
@@ -849,7 +849,7 @@ async function runHermesModelTurn(containerName: string, apiServerKey: string): 
       messages: [
         {
           role: "user",
-          content: "Reply with the deterministic AgentBay local contract phrase.",
+          content: "Reply with the deterministic Bruno local contract phrase.",
         },
       ],
       stream: false,
@@ -864,7 +864,7 @@ async function runHermesModelTurn(containerName: string, apiServerKey: string): 
 
   const content = readChatCompletionContent(response.body);
 
-  if (!content.includes("agentbay fake model response")) {
+  if (!content.includes("bruno fake model response")) {
     throw new Error(`Hermes model turn did not use the fake provider: ${content}`);
   }
 
@@ -954,7 +954,7 @@ async function assertOneSelectedContainer(agentId: string): Promise<string> {
     "--all",
     "--no-trunc",
     "--filter",
-    `label=agentbay.agent_id=${agentId}`,
+    `label=bruno.agent_id=${agentId}`,
     "--format",
     "{{.ID}}",
   ]);
@@ -1010,7 +1010,7 @@ async function assertNoSelectedContainers(agentId: string): Promise<void> {
     "ps",
     "--all",
     "--filter",
-    `label=agentbay.agent_id=${agentId}`,
+    `label=bruno.agent_id=${agentId}`,
     "--format",
     "{{.ID}}",
   ]);
@@ -1025,7 +1025,7 @@ async function removeLabeledAgentContainers(agentId: string): Promise<void> {
     "ps",
     "--all",
     "--filter",
-    `label=agentbay.agent_id=${agentId}`,
+    `label=bruno.agent_id=${agentId}`,
     "--format",
     "{{.ID}}",
   ]);
@@ -1181,7 +1181,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._json(200, {"ok": True, "provider": "agentbay-fake-openai"})
+            self._json(200, {"ok": True, "provider": "bruno-fake-openai"})
             return
         if self.path == "/v1/models":
             self._json(200, {"object": "list", "data": [{"id": "openai/gpt-4.1-mini", "object": "model"}]})
@@ -1193,16 +1193,16 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(length) or b"{}")
         if self.path == "/v1/responses":
             model = str(body.get("model") or "unknown")
-            content = f"agentbay fake model response provider=openai-compatible model={model}"
+            content = f"bruno fake model response provider=openai-compatible model={model}"
             message = {
-                "id": "msg_agentbay_local_smoke",
+                "id": "msg_bruno_local_smoke",
                 "type": "message",
                 "status": "completed",
                 "role": "assistant",
                 "content": [{"type": "output_text", "annotations": [], "text": content}],
             }
             response = {
-                "id": "resp_agentbay_local_smoke",
+                "id": "resp_bruno_local_smoke",
                 "object": "response",
                 "created_at": 1784000000,
                 "status": "completed",
@@ -1251,21 +1251,21 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not_found", "path": self.path})
             return
         model = str(body.get("model") or "unknown")
-        content = f"agentbay fake model response provider=openai-compatible model={model}"
+        content = f"bruno fake model response provider=openai-compatible model={model}"
         if body.get("stream"):
             self.send_response(200)
             self.send_header("content-type", "text/event-stream")
             self.send_header("cache-control", "no-cache")
             self.end_headers()
             chunk = {
-                "id": "chatcmpl-agentbay-local-smoke",
+                "id": "chatcmpl-bruno-local-smoke",
                 "object": "chat.completion.chunk",
                 "created": 1784000000,
                 "model": model,
                 "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
             }
             done = {
-                "id": "chatcmpl-agentbay-local-smoke",
+                "id": "chatcmpl-bruno-local-smoke",
                 "object": "chat.completion.chunk",
                 "created": 1784000000,
                 "model": model,
@@ -1277,7 +1277,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
             return
         self._json(200, {
-            "id": "chatcmpl-agentbay-local-smoke",
+            "id": "chatcmpl-bruno-local-smoke",
             "object": "chat.completion",
             "created": 1784000000,
             "model": model,

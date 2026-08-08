@@ -103,7 +103,7 @@ type CapabilitySpec = {
 };
 
 const PLACEHOLDER_PATTERN = /^(?:replace-|example|placeholder|test-|changeme|todo|xxx)/i;
-const IMAGE_DIGEST_PATTERN = /^ghcr\.io\/ametel01\/agentbay-hermes@sha256:[a-f0-9]{64}$/;
+const IMAGE_DIGEST_PATTERN = /^ghcr\.io\/ametel01\/bruno-hermes@sha256:[a-f0-9]{64}$/;
 const SOURCE_REVISION_PATTERN = /^[a-f0-9]{40}$/;
 const WORKFLOW_RUN_ID_PATTERN = /^[1-9]\d{0,19}$/;
 const DEDICATED_BEARER_PATTERN = /^[A-Za-z0-9._~+/=-]{32,256}$/;
@@ -131,82 +131,82 @@ export type HermesStagingRemoteAdapter = {
 const CAPABILITY_SPECS: CapabilitySpec[] = [
   {
     name: "published_image",
-    envName: "AGENTBAY_HERMES_STAGING_PUBLISHED_IMAGE_REF",
+    envName: "BRUNO_HERMES_STAGING_PUBLISHED_IMAGE_REF",
     validate: validatePublishedImage,
   },
   {
     name: "configured_workload_image",
-    envName: "AGENTBAY_HERMES_WORKLOAD_IMAGE",
+    envName: "BRUNO_HERMES_WORKLOAD_IMAGE",
     validate: validatePublishedImage,
   },
   {
     name: "image_source_revision",
-    envName: "AGENTBAY_HERMES_STAGING_IMAGE_SOURCE_REVISION",
+    envName: "BRUNO_HERMES_STAGING_IMAGE_SOURCE_REVISION",
     validate: validateImageSourceRevision,
   },
   {
     name: "publish_workflow_run_id",
-    envName: "AGENTBAY_HERMES_STAGING_PUBLISH_WORKFLOW_RUN_ID",
+    envName: "BRUNO_HERMES_STAGING_PUBLISH_WORKFLOW_RUN_ID",
     validate: validatePublishWorkflowRunId,
   },
   {
     name: "acceptance_enabled",
-    envName: "AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED",
+    envName: "BRUNO_HERMES_STAGING_ACCEPTANCE_ENABLED",
     validate: exactValueValidator("true"),
   },
   {
     name: "acceptance_base_url",
-    envName: "AGENTBAY_HERMES_STAGING_ACCEPTANCE_BASE_URL",
+    envName: "BRUNO_HERMES_STAGING_ACCEPTANCE_BASE_URL",
     validate: validateStagingAcceptanceBaseUrl,
   },
   {
     name: "acceptance_bearer_secret",
-    envName: "AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET",
+    envName: "BRUNO_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET",
     validate: validateDedicatedBearerSecret,
   },
   {
     name: "digitalocean_budget_authorization",
-    envName: "AGENTBAY_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION",
+    envName: "BRUNO_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION",
     validate: exactValueValidator(HERMES_STAGING_DIGITALOCEAN_BUDGET_SENTINEL),
   },
   {
     name: "digitalocean_token",
-    envName: "AGENTBAY_DIGITALOCEAN_TOKEN",
+    envName: "BRUNO_DIGITALOCEAN_TOKEN",
     validate: validateDigitalOceanToken,
   },
   {
     name: "runner_bearer_token",
-    envName: "AGENTBAY_RUNNER_BEARER_TOKEN",
+    envName: "BRUNO_RUNNER_BEARER_TOKEN",
     validate: validateOpaqueCredential,
   },
   {
     name: "assistant",
-    envName: "AGENTBAY_HERMES_STAGING_ASSISTANT",
+    envName: "BRUNO_HERMES_STAGING_ASSISTANT",
     validate: validateAssistant,
   },
   {
     name: "model_api_key",
-    envName: "AGENTBAY_HERMES_STAGING_OPENAI_API_KEY",
+    envName: "BRUNO_HERMES_STAGING_OPENAI_API_KEY",
     validate: validateDirectModelKey,
   },
   {
     name: "telegram_bot_token",
-    envName: "AGENTBAY_HERMES_STAGING_TELEGRAM_BOT_TOKEN",
+    envName: "BRUNO_HERMES_STAGING_TELEGRAM_BOT_TOKEN",
     validate: validateTelegramBotToken,
   },
   {
     name: "telegram_test_user_id",
-    envName: "AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_USER_ID",
+    envName: "BRUNO_HERMES_STAGING_TELEGRAM_TEST_USER_ID",
     validate: validatePositiveInteger,
   },
   {
     name: "telegram_test_chat_id",
-    envName: "AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID",
+    envName: "BRUNO_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID",
     validate: validateSignedInteger,
   },
   {
     name: "live_side_effect_confirmation",
-    envName: "AGENTBAY_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION",
+    envName: "BRUNO_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION",
     validate: exactValueValidator(HERMES_STAGING_LIVE_SIDE_EFFECT_SENTINEL),
   },
 ];
@@ -215,17 +215,17 @@ export function evaluateHermesStagingCapabilities(
   env: Record<string, string | undefined>,
 ): HermesStagingCapability[] {
   return CAPABILITY_SPECS.map((spec) => {
-    const assistant = env.AGENTBAY_HERMES_STAGING_ASSISTANT?.trim();
+    const assistant = env.BRUNO_HERMES_STAGING_ASSISTANT?.trim();
     const envName =
       spec.name === "model_api_key" && assistant === "claude"
-        ? "AGENTBAY_HERMES_STAGING_ANTHROPIC_API_KEY"
+        ? "BRUNO_HERMES_STAGING_ANTHROPIC_API_KEY"
         : spec.envName;
     const rawValue = env[envName];
     const unusedModelKey =
       spec.name === "model_api_key"
         ? assistant === "claude"
-          ? env.AGENTBAY_HERMES_STAGING_OPENAI_API_KEY
-          : env.AGENTBAY_HERMES_STAGING_ANTHROPIC_API_KEY
+          ? env.BRUNO_HERMES_STAGING_OPENAI_API_KEY
+          : env.BRUNO_HERMES_STAGING_ANTHROPIC_API_KEY
         : undefined;
 
     if (unusedModelKey?.trim()) {
@@ -281,7 +281,7 @@ export function evaluateHermesStagingCapabilities(
 
     if (
       spec.name === "acceptance_bearer_secret" &&
-      [env.CRON_SECRET, env.AGENTBAY_RUNNER_BEARER_TOKEN, env.AGENTBAY_OPERATOR_PASSWORD].some(
+      [env.CRON_SECRET, env.BRUNO_RUNNER_BEARER_TOKEN, env.BRUNO_OPERATOR_PASSWORD].some(
         (otherSecret) => otherSecret !== undefined && otherSecret === rawValue,
       )
     ) {
@@ -295,7 +295,7 @@ export function evaluateHermesStagingCapabilities(
 
     if (
       spec.name === "configured_workload_image" &&
-      rawValue !== env.AGENTBAY_HERMES_STAGING_PUBLISHED_IMAGE_REF
+      rawValue !== env.BRUNO_HERMES_STAGING_PUBLISHED_IMAGE_REF
     ) {
       return {
         name: spec.name,
@@ -381,11 +381,11 @@ export async function runHermesStagingVerification(
     dependencies = { ...dependencies, confirmTelegramReply: confirm };
   }
 
-  const bearerSecret = env.AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET as string;
+  const bearerSecret = env.BRUNO_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET as string;
   const adapter =
     dependencies.remoteAdapter ??
     createHermesStagingRemoteAdapter({
-      baseUrl: env.AGENTBAY_HERMES_STAGING_ACCEPTANCE_BASE_URL as string,
+      baseUrl: env.BRUNO_HERMES_STAGING_ACCEPTANCE_BASE_URL as string,
       bearerSecret,
     });
   const now = dependencies.now ?? (() => new Date());

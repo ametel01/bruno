@@ -33,15 +33,15 @@ import {
   MANAGED_AGENT_LAUNCH_SPEC_VERSION,
 } from "@/src/server/agents/agent-launch-spec";
 
-export const RUNNER_BOOT_SNAPSHOT_PATH_ENV = "AGENTBAY_RUNNER_BOOT_SNAPSHOT_PATH";
-export const RUNNER_BOOT_SELF_TEST_ROOT_ENV = "AGENTBAY_RUNNER_BOOT_SELF_TEST_ROOT";
-export const DEFAULT_RUNNER_BOOT_SNAPSHOT_PATH = "/var/lib/agentbay/boot-readiness.json";
+export const RUNNER_BOOT_SNAPSHOT_PATH_ENV = "BRUNO_RUNNER_BOOT_SNAPSHOT_PATH";
+export const RUNNER_BOOT_SELF_TEST_ROOT_ENV = "BRUNO_RUNNER_BOOT_SELF_TEST_ROOT";
+export const DEFAULT_RUNNER_BOOT_SNAPSHOT_PATH = "/var/lib/bruno/boot-readiness.json";
 export const DEFAULT_RUNNER_BOOT_SELF_TEST_TIMEOUT_MS = 180_000;
 export const DEFAULT_RUNNER_BOOT_CLEANUP_TIMEOUT_MS = 30_000;
 export const DEFAULT_RUNNER_BOOT_CANARY_ATTEMPTS = 3;
 export const DEFAULT_RUNNER_BOOT_CANARY_RETRY_DELAY_MS = 2_000;
 
-const FIXTURE_LABEL = "agentbay.boot_fixture";
+const FIXTURE_LABEL = "bruno.boot_fixture";
 const FIXTURE_LABEL_VALUE = "v1";
 const FAKE_MODEL_ALIAS = "openai/gpt-4.1-mini";
 const execFileAsync = promisify(execFile);
@@ -414,7 +414,7 @@ async function launchDockerFixture(input: {
   const id = randomUUID();
   const suffix = id.replaceAll("-", "").slice(0, 12);
   const agentId = randomUUID();
-  const network = `agentbay-boot-${suffix}`;
+  const network = `bruno-boot-${suffix}`;
   const fakeModelContainer = `${network}-model`;
   const fixtureRoot = join(input.root, "fixtures", id);
   const stateRoot = join(fixtureRoot, "state");
@@ -582,7 +582,7 @@ async function removeExactFixtureResources(
       "--all",
       "--quiet",
       "--filter",
-      `label=agentbay.agent_id=${fixture.agentId}`,
+      `label=bruno.agent_id=${fixture.agentId}`,
       "--filter",
       `label=${FIXTURE_LABEL}=${FIXTURE_LABEL_VALUE}`,
     ],
@@ -690,7 +690,7 @@ export function buildRunnerBootLaunchSpec(input: {
       modelApiKey: ["sk", "runnerbootlocalfixturekey1234567890"].join("-"),
       telegramBotToken: "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ12",
       telegramAllowedUsers: ["1"],
-      apiServerKey: `agb_agent_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`,
+      apiServerKey: `bruno_agent_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`,
     },
   };
 }
@@ -758,9 +758,9 @@ function isFixtureDescriptor(
     typeof value.agentId === "string" &&
     /^[0-9a-f-]{36}$/.test(value.agentId) &&
     typeof value.fakeModelContainer === "string" &&
-    /^agentbay-boot-[a-f0-9]{12}-model$/.test(value.fakeModelContainer) &&
+    /^bruno-boot-[a-f0-9]{12}-model$/.test(value.fakeModelContainer) &&
     typeof value.network === "string" &&
-    /^agentbay-boot-[a-f0-9]{12}$/.test(value.network)
+    /^bruno-boot-[a-f0-9]{12}$/.test(value.network)
   );
 }
 

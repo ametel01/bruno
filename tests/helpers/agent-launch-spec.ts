@@ -47,7 +47,7 @@ export function sampleLaunchSpec(
     },
     secrets: {
       kind: "inline",
-      apiServerKey: "agb_agent_abcdefghijklmnopqrstuvwxyz1234567890ABCDEFG",
+      apiServerKey: "bruno_agent_abcdefghijklmnopqrstuvwxyz1234567890ABCDEFG",
     },
     ...overrides,
   };
@@ -140,7 +140,7 @@ export function sampleManagedLaunchSpec(
       openrouterApiKey: "sk-or-v1-abcdefghijklmnopqrstuvwxyz1234567890",
       telegramBotToken: "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ12",
       telegramAllowedUsers: ["1", "222222"],
-      apiServerKey: "agb_agent_abcdefghijklmnopqrstuvwxyz1234567890ABCDEFG",
+      apiServerKey: "bruno_agent_abcdefghijklmnopqrstuvwxyz1234567890ABCDEFG",
     },
     ...overrides,
   };

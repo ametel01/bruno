@@ -20,20 +20,20 @@ export function planVercelBuildCommands(env: VercelBuildEnvironment): VercelBuil
       throw new Error("DATABASE_URL is required for production Vercel migrations.");
     }
 
-    if (env.AGENTBAY_READY_AGENT_CREATION_ENABLED?.trim() === "true") {
-      if (!env.AGENTBAY_DIGITALOCEAN_TOKEN?.trim()) {
+    if (env.BRUNO_READY_AGENT_CREATION_ENABLED?.trim() === "true") {
+      if (!env.BRUNO_DIGITALOCEAN_TOKEN?.trim()) {
         throw new Error(
           "DigitalOcean runner provisioning is required when ready agent creation is enabled in production.",
         );
       }
-      if (!env.AGENTBAY_RUNNER_BEARER_TOKEN?.trim()) {
+      if (!env.BRUNO_RUNNER_BEARER_TOKEN?.trim()) {
         throw new Error(
-          "AGENTBAY_RUNNER_BEARER_TOKEN is required when ready agent creation is enabled in production.",
+          "BRUNO_RUNNER_BEARER_TOKEN is required when ready agent creation is enabled in production.",
         );
       }
-      if (!parseImmutableRunnerImageReference(env.AGENTBAY_RUNNER_IMAGE?.trim() ?? "")) {
+      if (!parseImmutableRunnerImageReference(env.BRUNO_RUNNER_IMAGE?.trim() ?? "")) {
         throw new Error(
-          "AGENTBAY_RUNNER_IMAGE must be an immutable registry image reference with a sha256 digest for hosted DigitalOcean provisioning.",
+          "BRUNO_RUNNER_IMAGE must be an immutable registry image reference with a sha256 digest for hosted DigitalOcean provisioning.",
         );
       }
     }

@@ -248,11 +248,11 @@ function readConfig() {
   return {
     token: "digitalocean-test-token",
     runnerBearerToken: "runner-command-token",
-    runnerImage: `ghcr.io/ametel01/agentbay-runner:sha-current@${RUNNER_IMAGE_DIGEST}`,
+    runnerImage: `ghcr.io/ametel01/bruno-runner:sha-current@${RUNNER_IMAGE_DIGEST}`,
     region: "sfo3",
     sizeSlug: "s-1vcpu-512mb-10gb",
     image: "ubuntu-24-04-x64",
-    tags: ["agentbay"],
+    tags: ["bruno"],
   };
 }
 
@@ -304,7 +304,7 @@ async function createProviderResource(provider: FakeDigitalOceanProvider) {
     region: "sfo3",
     sizeSlug: "s-1vcpu-512mb-10gb",
     image: "ubuntu-24-04-x64",
-    tags: ["agentbay"],
+    tags: ["bruno"],
   });
   if (!result.ok) throw new Error("Provider resource creation failed.");
   return result.value;

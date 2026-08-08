@@ -26,7 +26,7 @@ describe.sequential("runner credential lifecycle", () => {
   });
 
   it("rotates a runner credential once, stores only the new hash, and rejects the old credential through heartbeat auth", async () => {
-    const oldCredential = "agb_run_oldcredential_123456789012345678901234567890";
+    const oldCredential = "bruno_run_oldcredential_123456789012345678901234567890";
     const runner = await seedDevelopmentRunnerCredential(connection, {
       credentialValue: oldCredential,
     });
@@ -56,7 +56,7 @@ describe.sequential("runner credential lifecycle", () => {
       ok: true,
       runner: { id: runner.id },
       credential: {
-        token: expect.stringMatching(/^agb_run_/),
+        token: expect.stringMatching(/^bruno_run_/),
         prefix: expect.any(String),
         rotatedAt: "2026-07-05T08:01:00.000Z",
       },
@@ -127,7 +127,7 @@ describe.sequential("runner credential lifecycle", () => {
   });
 
   it("revokes active runner credentials and rejects revoked credentials through heartbeat auth", async () => {
-    const credential = "agb_run_revokedcredential_123456789012345678901234567890";
+    const credential = "bruno_run_revokedcredential_123456789012345678901234567890";
     const runner = await seedDevelopmentRunnerCredential(connection, {
       credentialValue: credential,
     });
@@ -180,7 +180,7 @@ describe.sequential("runner credential lifecycle", () => {
 
   it("returns safe management failures for malformed runner IDs, missing runners, and already-revoked credentials", async () => {
     const runner = await seedDevelopmentRunnerCredential(connection, {
-      credentialValue: "agb_run_alreadyrevoked_123456789012345678901234567890",
+      credentialValue: "bruno_run_alreadyrevoked_123456789012345678901234567890",
       credentialOverrides: {
         status: "revoked",
         revokedAt: new Date("2026-07-05T10:00:00.000Z"),
@@ -223,7 +223,7 @@ describe.sequential("runner credential lifecycle", () => {
       throw new Error("Test user inserts returned no rows.");
     }
 
-    const credential = "agb_run_foreigncredential_123456789012345678901234567890";
+    const credential = "bruno_run_foreigncredential_123456789012345678901234567890";
     const foreignRunner = await seedRunnerCredentialForUser(connection, foreignUser.id, {
       credentialValue: credential,
       updatedAt: new Date("2026-07-05T10:00:00.000Z"),

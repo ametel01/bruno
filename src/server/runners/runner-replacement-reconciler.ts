@@ -1404,7 +1404,7 @@ async function failClaim(
 }
 
 function provisioningOperationKeyFor(operationKey: string): string {
-  return `agentbay-deploy-${operationKey.slice("agentbay-replace-".length)}`;
+  return `bruno-deploy-${operationKey.slice("bruno-replace-".length)}`;
 }
 
 function isInfrastructureReplacementSourceEligible(

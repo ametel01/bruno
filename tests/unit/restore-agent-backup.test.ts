@@ -20,8 +20,8 @@ import {
 } from "@/src/server/db/schema";
 
 const KEYRING_ENV = {
-  AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
-  AGENTBAY_AGENT_SECRET_KEYS_JSON: JSON.stringify({
+  BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
+  BRUNO_AGENT_SECRET_KEYS_JSON: JSON.stringify({
     v1: Buffer.alloc(32, 31).toString("base64url"),
   }),
 };
@@ -40,7 +40,7 @@ describe("backup restore creation", () => {
   });
 
   it("restores a ready backup artifact into a new stopped agent and writes backup.restored", async () => {
-    const storage = new FakeBackupObjectStorage("agentbay-backups");
+    const storage = new FakeBackupObjectStorage("bruno-backups");
     const original = await createAgentForDevelopmentUser(
       {
         name: "Restore Source",
@@ -174,7 +174,7 @@ describe("backup restore creation", () => {
   });
 
   it("fails safely and marks the backup failed when the artifact is missing", async () => {
-    const storage = new FakeBackupObjectStorage("agentbay-backups");
+    const storage = new FakeBackupObjectStorage("bruno-backups");
     const original = await createAgentForDevelopmentUser(
       { name: "Missing Artifact Source", templateKey: "research_agent" },
       { createConnection: () => connection },
@@ -187,7 +187,7 @@ describe("backup restore creation", () => {
         agentId: original.agent.id,
         runnerId: null,
         status: "ready",
-        storageUri: `s3://agentbay-backups/${backupArtifactKey(original.agent.userId, original.agent.id, missingBackupId)}`,
+        storageUri: `s3://bruno-backups/${backupArtifactKey(original.agent.userId, original.agent.id, missingBackupId)}`,
         manifestJson: validManifest(),
         createdBy: original.agent.userId,
       })
@@ -224,11 +224,11 @@ describe("backup restore creation", () => {
     });
     expect(restoredAgents).toHaveLength(0);
     expect(failedBackup).toMatchObject({ status: "failed", restoredAt: null });
-    expect(JSON.stringify(result)).not.toContain("agentbay:agentbay");
+    expect(JSON.stringify(result)).not.toContain("bruno:bruno");
   });
 
   it("does not restore a backup that is already in a non-ready state", async () => {
-    const storage = new FakeBackupObjectStorage("agentbay-backups");
+    const storage = new FakeBackupObjectStorage("bruno-backups");
     const original = await createAgentForDevelopmentUser(
       { name: "Already Restoring Source", templateKey: "research_agent" },
       { createConnection: () => connection },
@@ -239,7 +239,7 @@ describe("backup restore creation", () => {
         agentId: original.agent.id,
         runnerId: null,
         status: "restoring",
-        storageUri: `s3://agentbay-backups/users/${original.agent.userId}/agents/${original.agent.id}/backups/restoring.json`,
+        storageUri: `s3://bruno-backups/users/${original.agent.userId}/agents/${original.agent.id}/backups/restoring.json`,
         manifestJson: validManifest(),
         createdBy: original.agent.userId,
       })
@@ -272,7 +272,7 @@ describe("backup restore creation", () => {
   });
 
   it("fails safely without restoring an agent when the artifact manifest is invalid or unsafe", async () => {
-    const storage = new FakeBackupObjectStorage("agentbay-backups");
+    const storage = new FakeBackupObjectStorage("bruno-backups");
     const original = await createAgentForDevelopmentUser(
       { name: "Unsafe Artifact Source", templateKey: "research_agent" },
       { createConnection: () => connection },
@@ -290,7 +290,7 @@ describe("backup restore creation", () => {
     await storage.upload({
       key: backupArtifactKey(original.agent.userId, original.agent.id, backup.id),
       body: new TextEncoder().encode(JSON.stringify(unsafeArtifactManifest, null, 2)),
-      contentType: "application/vnd.agentbay.backup-manifest+json",
+      contentType: "application/vnd.bruno.backup-manifest+json",
     });
 
     const result = await restoreBackupForDevelopmentUser(
@@ -330,7 +330,7 @@ describe("backup restore creation", () => {
   });
 
   it("fails safely before inserting config when artifact schedule metadata is invalid", async () => {
-    const storage = new FakeBackupObjectStorage("agentbay-backups");
+    const storage = new FakeBackupObjectStorage("bruno-backups");
     const original = await createAgentForDevelopmentUser(
       { name: "Invalid Schedule Source", templateKey: "research_agent" },
       { createConnection: () => connection },
@@ -352,7 +352,7 @@ describe("backup restore creation", () => {
     await storage.upload({
       key: backupArtifactKey(original.agent.userId, original.agent.id, backup.id),
       body: new TextEncoder().encode(JSON.stringify(invalidScheduleManifest, null, 2)),
-      contentType: "application/vnd.agentbay.backup-manifest+json",
+      contentType: "application/vnd.bruno.backup-manifest+json",
     });
 
     const result = await restoreBackupForDevelopmentUser(
@@ -385,7 +385,7 @@ describe("backup restore creation", () => {
   });
 
   it("fails safely before restoring when artifact cron or timezone metadata is invalid", async () => {
-    const storage = new FakeBackupObjectStorage("agentbay-backups");
+    const storage = new FakeBackupObjectStorage("bruno-backups");
 
     for (const manifest of [
       validManifest({
@@ -417,7 +417,7 @@ describe("backup restore creation", () => {
       await storage.upload({
         key: backupArtifactKey(recreated.agent.userId, recreated.agent.id, backup.id),
         body: new TextEncoder().encode(JSON.stringify(manifest, null, 2)),
-        contentType: "application/vnd.agentbay.backup-manifest+json",
+        contentType: "application/vnd.bruno.backup-manifest+json",
       });
 
       const result = await restoreBackupForDevelopmentUser(
@@ -478,7 +478,7 @@ async function seedReadyBackup(input: {
   const upload = await input.storage.upload({
     key: backupArtifactKey(input.userId, input.agentId, backup.id),
     body: new TextEncoder().encode(JSON.stringify(input.manifest, null, 2)),
-    contentType: "application/vnd.agentbay.backup-manifest+json",
+    contentType: "application/vnd.bruno.backup-manifest+json",
   });
 
   if (!upload.ok) {

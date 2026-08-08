@@ -11,20 +11,20 @@ const execFileAsync = promisify(execFile);
 const args = parseArgs(process.argv.slice(2));
 const controller = new AbortController();
 const timeout = setTimeout(() => controller.abort(), 55 * 60 * 1000);
-const tempDir = await mkdtemp(join(tmpdir(), "agentbay-runner-snapshot-"));
+const tempDir = await mkdtemp(join(tmpdir(), "bruno-runner-snapshot-"));
 let provider: DigitalOceanApiProvider | null = null;
 let builderSshKeyId: string | null = null;
 
 try {
   validatePreEffectArgs(args);
   const privateKeyPem = await readRequiredFile(args.signingKeyPath, "signing key");
-  const token = readRequiredEnv("AGENTBAY_DIGITALOCEAN_TOKEN");
+  const token = readRequiredEnv("BRUNO_DIGITALOCEAN_TOKEN");
   provider = new DigitalOceanApiProvider({ token });
   const builderSshPrivateKeyPath = join(tempDir, "builder_ssh_key");
 
   await execFileAsync(
     "ssh-keygen",
-    ["-t", "ed25519", "-N", "", "-C", "agentbay-snapshot-builder", "-f", builderSshPrivateKeyPath],
+    ["-t", "ed25519", "-N", "", "-C", "bruno-snapshot-builder", "-f", builderSshPrivateKeyPath],
     { signal: controller.signal },
   );
   const builderSshPublicKey = await readRequiredFile(
@@ -33,7 +33,7 @@ try {
   );
   const builderSshKey = await provider.createSshKey(
     {
-      name: `agentbay-snapshot-builder-${args.runId}`,
+      name: `bruno-snapshot-builder-${args.runId}`,
       publicKey: builderSshPublicKey,
     },
     { signal: controller.signal },

@@ -136,7 +136,7 @@ function assignedRunner(input: {
       diskTotalMb: null,
       blocker: input.capacityBlocker,
     },
-    version: "agentbay-runner/2.3.0",
+    version: "bruno-runner/2.3.0",
     lastSeenAt: "2026-07-14T01:00:00.000Z",
     updatedAt: "2026-07-14T01:00:00.000Z",
     provisioningStatus: "ready",

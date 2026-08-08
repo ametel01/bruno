@@ -344,7 +344,7 @@ async function runRealClaimCli(args: string[]): Promise<{
         cwd: process.cwd(),
         env: {
           ...process.env,
-          DATABASE_URL: "postgres://agentbay:agentbay@127.0.0.1:1/bruno",
+          DATABASE_URL: "postgres://bruno:bruno@127.0.0.1:1/bruno",
         },
       },
     );

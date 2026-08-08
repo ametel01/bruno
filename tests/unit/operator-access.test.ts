@@ -58,8 +58,8 @@ describe("evaluateOperatorAccess", () => {
         pathname: "/dashboard",
         authorizationHeader: null,
         env: {
-          AGENTBAY_AUTH_MODE: "development",
-          AGENTBAY_OPERATOR_PASSWORD: "stored-production-password",
+          BRUNO_AUTH_MODE: "development",
+          BRUNO_OPERATOR_PASSWORD: "stored-production-password",
           NEXT_PUBLIC_APP_URL: "http://localhost:3000",
           NODE_ENV: "development",
         },
@@ -73,8 +73,8 @@ describe("evaluateOperatorAccess", () => {
         pathname: "/dashboard",
         authorizationHeader: null,
         env: {
-          AGENTBAY_AUTH_MODE: "development",
-          AGENTBAY_OPERATOR_PASSWORD: "stored-production-password",
+          BRUNO_AUTH_MODE: "development",
+          BRUNO_OPERATOR_PASSWORD: "stored-production-password",
           NEXT_PUBLIC_APP_URL: "http://host.docker.internal:3000",
           NODE_ENV: "production",
         },
@@ -88,8 +88,8 @@ describe("evaluateOperatorAccess", () => {
         pathname: "/dashboard",
         authorizationHeader: null,
         env: {
-          AGENTBAY_AUTH_MODE: "development",
-          AGENTBAY_OPERATOR_PASSWORD: "stored-production-password",
+          BRUNO_AUTH_MODE: "development",
+          BRUNO_OPERATOR_PASSWORD: "stored-production-password",
           VERCEL: "1",
         },
       }),
@@ -106,8 +106,8 @@ describe("evaluateOperatorAccess", () => {
         pathname: "/dashboard",
         authorizationHeader: null,
         env: {
-          AGENTBAY_AUTH_MODE: "development",
-          AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: "true",
+          BRUNO_AUTH_MODE: "development",
+          BRUNO_ALLOW_PUBLIC_DEVELOPMENT: "true",
           NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
           VERCEL: "1",
           VERCEL_ENV: "production",
@@ -148,8 +148,8 @@ describe("evaluateOperatorAccess", () => {
     expect(
       evaluateOperatorAccess({
         pathname: "/settings",
-        authorizationHeader: basicAuth("agentbay", "correct horse battery staple"),
-        env: { AGENTBAY_OPERATOR_PASSWORD: "correct horse battery staple", VERCEL: "1" },
+        authorizationHeader: basicAuth("bruno", "correct horse battery staple"),
+        env: { BRUNO_OPERATOR_PASSWORD: "correct horse battery staple", VERCEL: "1" },
       }),
     ).toEqual({ ok: true });
   });
@@ -160,8 +160,8 @@ describe("evaluateOperatorAccess", () => {
         pathname: "/api/agents",
         authorizationHeader: basicAuth("operator", "secret"),
         env: {
-          AGENTBAY_OPERATOR_USERNAME: "operator",
-          AGENTBAY_OPERATOR_PASSWORD: "secret",
+          BRUNO_OPERATOR_USERNAME: "operator",
+          BRUNO_OPERATOR_PASSWORD: "secret",
           VERCEL_ENV: "production",
         },
       }),
@@ -172,15 +172,15 @@ describe("evaluateOperatorAccess", () => {
     ["missing credentials", null],
     ["bad scheme", "Bearer token"],
     ["malformed base64", "Basic !!!"],
-    ["missing separator", `Basic ${globalThis.btoa("agentbay")}`],
+    ["missing separator", `Basic ${globalThis.btoa("bruno")}`],
     ["wrong username", basicAuth("other", "secret")],
-    ["wrong password", basicAuth("agentbay", "wrong")],
+    ["wrong password", basicAuth("bruno", "wrong")],
   ])("requires operator auth for %s", (_label, authorizationHeader) => {
     expect(
       evaluateOperatorAccess({
         pathname: "/api/runners",
         authorizationHeader,
-        env: { AGENTBAY_OPERATOR_PASSWORD: "secret", VERCEL: "1" },
+        env: { BRUNO_OPERATOR_PASSWORD: "secret", VERCEL: "1" },
       }),
     ).toEqual({
       ok: false,
@@ -202,46 +202,40 @@ describe("evaluateOperatorAccess", () => {
 
 describe("operator access proxy responses", () => {
   it("returns safe JSON 401 responses for protected API paths", async () => {
-    await withOperatorEnv(
-      { AGENTBAY_OPERATOR_PASSWORD: "test-password", VERCEL: "1" },
-      async () => {
-        const response = await proxy(
-          new NextRequest("http://localhost/api/agents"),
-          {} as NextFetchEvent,
-        );
-        const body = await response.json();
+    await withOperatorEnv({ BRUNO_OPERATOR_PASSWORD: "test-password", VERCEL: "1" }, async () => {
+      const response = await proxy(
+        new NextRequest("http://localhost/api/agents"),
+        {} as NextFetchEvent,
+      );
+      const body = await response.json();
 
-        expect(response.status).toBe(401);
-        expect(response.headers.get("WWW-Authenticate")).toBe('Basic realm="bruno"');
-        expect(body).toEqual({
-          error: {
-            code: "operator_auth_required",
-            message: "Operator credentials are required.",
-          },
-        });
-        expect(JSON.stringify(body)).not.toContain("test-password");
-      },
-    );
+      expect(response.status).toBe(401);
+      expect(response.headers.get("WWW-Authenticate")).toBe('Basic realm="bruno"');
+      expect(body).toEqual({
+        error: {
+          code: "operator_auth_required",
+          message: "Operator credentials are required.",
+        },
+      });
+      expect(JSON.stringify(body)).not.toContain("test-password");
+    });
   });
 
   it("returns safe 401 text responses for protected page paths", async () => {
-    await withOperatorEnv(
-      { AGENTBAY_OPERATOR_PASSWORD: "test-password", VERCEL: "1" },
-      async () => {
-        const response = await proxy(
-          new NextRequest("http://localhost/dashboard"),
-          {} as NextFetchEvent,
-        );
+    await withOperatorEnv({ BRUNO_OPERATOR_PASSWORD: "test-password", VERCEL: "1" }, async () => {
+      const response = await proxy(
+        new NextRequest("http://localhost/dashboard"),
+        {} as NextFetchEvent,
+      );
 
-        expect(response.status).toBe(401);
-        expect(response.headers.get("WWW-Authenticate")).toBe('Basic realm="bruno"');
-        expect(await response.text()).toBe("Operator credentials are required.");
-      },
-    );
+      expect(response.status).toBe(401);
+      expect(response.headers.get("WWW-Authenticate")).toBe('Basic realm="bruno"');
+      expect(await response.text()).toBe("Operator credentials are required.");
+    });
   });
 
   it("returns safe 503 responses when production operator access is not configured", async () => {
-    await withOperatorEnv({ AGENTBAY_OPERATOR_PASSWORD: undefined, VERCEL: "1" }, async () => {
+    await withOperatorEnv({ BRUNO_OPERATOR_PASSWORD: undefined, VERCEL: "1" }, async () => {
       const response = await proxy(
         new NextRequest("http://localhost/api/runners"),
         {} as NextFetchEvent,
@@ -262,14 +256,14 @@ describe("operator access proxy responses", () => {
   it("passes authenticated operator-mode requests to the shared application", async () => {
     await withOperatorEnv(
       {
-        AGENTBAY_AUTH_MODE: "operator",
-        AGENTBAY_OPERATOR_PASSWORD: "test-password",
+        BRUNO_AUTH_MODE: "operator",
+        BRUNO_OPERATOR_PASSWORD: "test-password",
         VERCEL: "1",
       },
       async () => {
         const response = await proxy(
           new NextRequest("http://localhost/dashboard", {
-            headers: { authorization: basicAuth("agentbay", "test-password") },
+            headers: { authorization: basicAuth("bruno", "test-password") },
           }),
           {} as NextFetchEvent,
         );
@@ -287,33 +281,33 @@ function basicAuth(username: string, password: string): string {
 
 async function withOperatorEnv(
   values: {
-    AGENTBAY_AUTH_MODE?: string | undefined;
-    AGENTBAY_OPERATOR_PASSWORD?: string | undefined;
+    BRUNO_AUTH_MODE?: string | undefined;
+    BRUNO_OPERATOR_PASSWORD?: string | undefined;
     VERCEL?: string | undefined;
   },
   callback: () => Promise<void>,
 ) {
   const original = {
-    AGENTBAY_AUTH_MODE: process.env.AGENTBAY_AUTH_MODE,
-    AGENTBAY_OPERATOR_PASSWORD: process.env.AGENTBAY_OPERATOR_PASSWORD,
+    BRUNO_AUTH_MODE: process.env.BRUNO_AUTH_MODE,
+    BRUNO_OPERATOR_PASSWORD: process.env.BRUNO_OPERATOR_PASSWORD,
     VERCEL: process.env.VERCEL,
   };
 
-  setOptionalEnv("AGENTBAY_AUTH_MODE", values.AGENTBAY_AUTH_MODE);
-  setOptionalEnv("AGENTBAY_OPERATOR_PASSWORD", values.AGENTBAY_OPERATOR_PASSWORD);
+  setOptionalEnv("BRUNO_AUTH_MODE", values.BRUNO_AUTH_MODE);
+  setOptionalEnv("BRUNO_OPERATOR_PASSWORD", values.BRUNO_OPERATOR_PASSWORD);
   setOptionalEnv("VERCEL", values.VERCEL);
 
   try {
     await callback();
   } finally {
-    setOptionalEnv("AGENTBAY_AUTH_MODE", original.AGENTBAY_AUTH_MODE);
-    setOptionalEnv("AGENTBAY_OPERATOR_PASSWORD", original.AGENTBAY_OPERATOR_PASSWORD);
+    setOptionalEnv("BRUNO_AUTH_MODE", original.BRUNO_AUTH_MODE);
+    setOptionalEnv("BRUNO_OPERATOR_PASSWORD", original.BRUNO_OPERATOR_PASSWORD);
     setOptionalEnv("VERCEL", original.VERCEL);
   }
 }
 
 function setOptionalEnv(
-  name: "AGENTBAY_AUTH_MODE" | "AGENTBAY_OPERATOR_PASSWORD" | "VERCEL",
+  name: "BRUNO_AUTH_MODE" | "BRUNO_OPERATOR_PASSWORD" | "VERCEL",
   value: string | undefined,
 ) {
   if (value === undefined) {

@@ -126,13 +126,13 @@ describe("DigitalOcean runner price metadata", () => {
     );
 
     expect(serializedKnownPrice).not.toContain("token");
-    expect(serializedKnownPrice).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN");
+    expect(serializedKnownPrice).not.toContain("BRUNO_DIGITALOCEAN_TOKEN");
     expect(serializedKnownPrice).not.toContain("dop_v1");
     expect(serializedKnownPrice).not.toContain("endpoint");
     expect(serializedUnknownPrice).not.toContain("dop_v1");
     expect(serializedInheritedKeyPrice).not.toContain("NaN");
     expect(serializedUnknownPrice).not.toContain("token");
-    expect(serializedUnknownPrice).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN");
+    expect(serializedUnknownPrice).not.toContain("BRUNO_DIGITALOCEAN_TOKEN");
     expect(serializedUnknownPrice).not.toContain("endpoint");
     expect(getDigitalOceanRunnerPriceMetadata("dop_v1_super_secret")).toMatchObject({
       available: false,

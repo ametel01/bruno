@@ -11,23 +11,23 @@ import {
 
 const SHA = "a".repeat(40);
 const DIGEST = `sha256:${"b".repeat(64)}`;
-const IMAGE = `ghcr.io/ametel01/agentbay-runner:${SHA}@${DIGEST}`;
+const IMAGE = `ghcr.io/ametel01/bruno-runner:${SHA}@${DIGEST}`;
 const VALID_ENV = {
   DATABASE_URL: "postgres://release.invalid/bruno",
   NEXT_PUBLIC_APP_URL: "https://bruno.example",
-  AGENTBAY_DIGITALOCEAN_TOKEN: "release-provider-token",
-  AGENTBAY_RUNNER_BEARER_TOKEN: "r".repeat(40),
-  AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "digitalocean",
-  AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
-  AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "disabled",
-  AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION: RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION,
+  BRUNO_DIGITALOCEAN_TOKEN: "release-provider-token",
+  BRUNO_RUNNER_BEARER_TOKEN: "r".repeat(40),
+  BRUNO_DIGITALOCEAN_PROVIDER_MODE: "digitalocean",
+  BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
+  BRUNO_DIGITALOCEAN_SSH_KEY_IDS: "disabled",
+  BRUNO_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION: RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION,
 };
 const LOCAL_VALID_ENV = {
   ...VALID_ENV,
   NEXT_PUBLIC_APP_URL: "http://host.docker.internal:3000",
-  AGENTBAY_DIGITALOCEAN_TOKEN: "local-docker",
-  AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
-  AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION: undefined,
+  BRUNO_DIGITALOCEAN_TOKEN: "local-docker",
+  BRUNO_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
+  BRUNO_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION: undefined,
 };
 const DIGITALOCEAN_ARGS = ["--image", IMAGE, "--provider", "digitalocean"] as const;
 const LOCAL_DOCKER_ARGS = ["--image", IMAGE, "--provider", "local_docker"] as const;
@@ -63,7 +63,7 @@ describe("runner release smoke", () => {
     });
 
     const mutable = planRunnerReleaseSmoke(
-      ["--image", "ghcr.io/ametel01/agentbay-runner:main", "--provider", "digitalocean"],
+      ["--image", "ghcr.io/ametel01/bruno-runner:main", "--provider", "digitalocean"],
       VALID_ENV,
     );
     expect(mutable).toMatchObject({ ok: false, code: "capability_unavailable" });
@@ -97,12 +97,12 @@ describe("runner release smoke", () => {
 
     const withCloudToken = planRunnerReleaseSmoke(LOCAL_DOCKER_ARGS, {
       ...LOCAL_VALID_ENV,
-      AGENTBAY_DIGITALOCEAN_TOKEN: "looks-like-a-real-cloud-token",
+      BRUNO_DIGITALOCEAN_TOKEN: "looks-like-a-real-cloud-token",
     });
     expect(withCloudToken).toMatchObject({ ok: false, code: "capability_unavailable" });
     expect(withCloudToken.ok ? [] : withCloudToken.capabilities).toContainEqual({
       name: "local_docker_isolation",
-      envName: "AGENTBAY_DIGITALOCEAN_TOKEN",
+      envName: "BRUNO_DIGITALOCEAN_TOKEN",
       state: "malformed",
     });
 
@@ -123,7 +123,7 @@ describe("runner release smoke", () => {
       },
     });
 
-    expect(sessionEnv?.AGENTBAY_RUNNER_IMAGE).toBe(IMAGE);
+    expect(sessionEnv?.BRUNO_RUNNER_IMAGE).toBe(IMAGE);
   });
 
   it("always cleans and verifies exact absence after a passing smoke", async () => {
@@ -163,7 +163,7 @@ describe("runner release smoke", () => {
     });
     expect(JSON.stringify(result)).not.toMatch(/cloud-init|credential/i);
     expect(JSON.stringify(error.mock.calls)).not.toMatch(/cloud-init|credential/i);
-    expect(error).toHaveBeenCalledWith("[agentbay] runner.release_smoke", {
+    expect(error).toHaveBeenCalledWith("[bruno] runner.release_smoke", {
       event: "run_failed",
       errorName: "Error",
       errorCode: null,
@@ -194,7 +194,7 @@ describe("runner release smoke", () => {
       DIGITALOCEAN_ARGS,
       {
         ...VALID_ENV,
-        AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION: undefined,
+        BRUNO_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION: undefined,
       },
       { createSession },
     );

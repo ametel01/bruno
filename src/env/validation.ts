@@ -1,8 +1,8 @@
 export type RequiredEnv = {
   DATABASE_URL: string;
   NEXT_PUBLIC_APP_URL: string;
-  AGENTBAY_MANUAL_RUNNER_NAME?: string;
-  AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL?: string;
+  BRUNO_MANUAL_RUNNER_NAME?: string;
+  BRUNO_MANUAL_RUNNER_ENDPOINT_URL?: string;
 };
 
 export class EnvValidationError extends Error {
@@ -21,7 +21,7 @@ export function validateManualRunnerEndpointUrl(value: string): string {
   const endpointUrl = value.trim();
 
   if (!endpointUrl) {
-    throw new EnvValidationError(["AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL cannot be blank."]);
+    throw new EnvValidationError(["BRUNO_MANUAL_RUNNER_ENDPOINT_URL cannot be blank."]);
   }
 
   let parsedEndpointUrl: URL;
@@ -29,7 +29,7 @@ export function validateManualRunnerEndpointUrl(value: string): string {
   try {
     parsedEndpointUrl = new URL(endpointUrl);
   } catch {
-    throw new EnvValidationError(["AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL must be a valid URL."]);
+    throw new EnvValidationError(["BRUNO_MANUAL_RUNNER_ENDPOINT_URL must be a valid URL."]);
   }
 
   if (parsedEndpointUrl.protocol === "https:") {
@@ -41,7 +41,7 @@ export function validateManualRunnerEndpointUrl(value: string): string {
   }
 
   throw new EnvValidationError([
-    "AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL must use https:// unless it targets a loopback host.",
+    "BRUNO_MANUAL_RUNNER_ENDPOINT_URL must use https:// unless it targets a loopback host.",
   ]);
 }
 
@@ -49,8 +49,8 @@ export function validateRequiredEnv(input: EnvInput): RequiredEnv {
   const issues: string[] = [];
   const databaseUrl = input.DATABASE_URL?.trim();
   const appUrl = input.NEXT_PUBLIC_APP_URL?.trim();
-  const manualRunnerName = input.AGENTBAY_MANUAL_RUNNER_NAME?.trim();
-  const manualRunnerEndpointUrl = input.AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL?.trim();
+  const manualRunnerName = input.BRUNO_MANUAL_RUNNER_NAME?.trim();
+  const manualRunnerEndpointUrl = input.BRUNO_MANUAL_RUNNER_ENDPOINT_URL?.trim();
 
   if (!databaseUrl) {
     issues.push("DATABASE_URL is required.");
@@ -97,7 +97,7 @@ export function validateRequiredEnv(input: EnvInput): RequiredEnv {
   }
 
   if (manualRunnerName !== undefined && manualRunnerName.length === 0) {
-    throw new EnvValidationError(["AGENTBAY_MANUAL_RUNNER_NAME cannot be blank."]);
+    throw new EnvValidationError(["BRUNO_MANUAL_RUNNER_NAME cannot be blank."]);
   }
 
   if (!databaseUrl || !appUrl) {
@@ -107,9 +107,9 @@ export function validateRequiredEnv(input: EnvInput): RequiredEnv {
   return {
     DATABASE_URL: databaseUrl,
     NEXT_PUBLIC_APP_URL: appUrl,
-    ...(manualRunnerName ? { AGENTBAY_MANUAL_RUNNER_NAME: manualRunnerName } : {}),
+    ...(manualRunnerName ? { BRUNO_MANUAL_RUNNER_NAME: manualRunnerName } : {}),
     ...(validatedManualRunnerEndpointUrl
-      ? { AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: validatedManualRunnerEndpointUrl }
+      ? { BRUNO_MANUAL_RUNNER_ENDPOINT_URL: validatedManualRunnerEndpointUrl }
       : {}),
   };
 }

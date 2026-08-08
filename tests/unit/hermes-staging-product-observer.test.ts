@@ -207,7 +207,7 @@ describe.sequential("Hermes staging product observer", () => {
       await tx.insert(runnerCredentials).values({
         runnerId: fixture.runnerId,
         credentialHash: "a".repeat(64),
-        credentialPrefix: "agb_run_observe",
+        credentialPrefix: "bruno_run_observe",
         status: "revoked",
         revokedAt: now,
         createdAt: now,

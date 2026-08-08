@@ -25,8 +25,8 @@ describe("configured application user adapter", () => {
     await expect(
       requireConfiguredApplicationUser({
         env: {
-          AGENTBAY_AUTH_MODE: "operator",
-          AGENTBAY_OPERATOR_PASSWORD: "operator-password-present",
+          BRUNO_AUTH_MODE: "operator",
+          BRUNO_OPERATOR_PASSWORD: "operator-password-present",
           NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
           VERCEL_ENV: "production",
         },
@@ -46,7 +46,7 @@ describe("configured application user adapter", () => {
     await expect(
       requireConfiguredApplicationUser({
         env: {
-          AGENTBAY_AUTH_MODE: "clerk",
+          BRUNO_AUTH_MODE: "clerk",
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "publishable-key-present",
           CLERK_SECRET_KEY: "secret-key-present",
         },
@@ -65,7 +65,7 @@ describe("configured application user adapter", () => {
     await expect(
       requireConfiguredApplicationUser({
         env: {
-          AGENTBAY_AUTH_MODE: "development",
+          BRUNO_AUTH_MODE: "development",
           NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
         },
         getClerkUserId,

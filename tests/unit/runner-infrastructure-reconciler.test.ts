@@ -23,14 +23,14 @@ import { digitalOceanRunnerFirewallName } from "@/src/server/runners/runner-prov
 
 const execFileAsync = promisify(execFile);
 const BASE_DATABASE_URL =
-  process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
+  process.env.DATABASE_URL ?? "postgres://bruno:bruno@127.0.0.1:54329/bruno";
 const USER_ID = "00000000-0000-4000-8000-000000008001";
 const RUNNER_ID = "00000000-0000-4000-8000-000000008101";
 const AGENT_ID = "00000000-0000-4000-8000-000000008201";
 const SECOND_RUNNER_ID = "00000000-0000-4000-8000-000000008102";
 const UUID = "88888888-8888-4888-8888-888888888888";
-const OPERATION_TAG = `agentbay-deploy-${"8".repeat(32)}`;
-const SECOND_OPERATION_TAG = `agentbay-deploy-${"9".repeat(32)}`;
+const OPERATION_TAG = `bruno-deploy-${"8".repeat(32)}`;
+const SECOND_OPERATION_TAG = `bruno-deploy-${"9".repeat(32)}`;
 const DIGEST = `sha256:${"8".repeat(64)}`;
 const NOW = new Date("2026-08-04T12:00:00.000Z");
 const ORIGINAL_DATABASE_URL = process.env.DATABASE_URL;
@@ -439,11 +439,11 @@ function providerConfig(): DigitalOceanProviderConfig {
     token: "fake-provider-token",
     providerMode: "digitalocean",
     runnerBearerToken: "fake-runner-bearer",
-    runnerImage: `ghcr.io/ametel01/agentbay-runner:step8@${DIGEST}`,
+    runnerImage: `ghcr.io/ametel01/bruno-runner:step8@${DIGEST}`,
     region: "sfo3",
     sizeSlug: "s-1vcpu-2gb",
     image: "ubuntu-24-04-x64",
-    tags: ["agentbay", DIGITALOCEAN_MANAGED_RUNNER_TAG],
+    tags: ["bruno", DIGITALOCEAN_MANAGED_RUNNER_TAG],
   };
 }
 

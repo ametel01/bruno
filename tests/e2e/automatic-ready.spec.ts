@@ -964,8 +964,7 @@ async function deleteFixture(fixture: Fixture): Promise<void> {
 }
 
 async function withDatabase<T>(run: (sql: postgres.Sql) => Promise<T>): Promise<T> {
-  const databaseUrl =
-    process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
+  const databaseUrl = process.env.DATABASE_URL ?? "postgres://bruno:bruno@127.0.0.1:54329/bruno";
   const sql = postgres(databaseUrl, { connect_timeout: 5, idle_timeout: 60, max: 1 });
 
   try {

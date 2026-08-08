@@ -17,7 +17,7 @@ describe("database health", () => {
 
   it("returns an unreachable result when the database cannot be reached", async () => {
     const health = await checkDatabaseHealth({
-      DATABASE_URL: "postgres://agentbay:agentbay@127.0.0.1:1/bruno",
+      DATABASE_URL: "postgres://bruno:bruno@127.0.0.1:1/bruno",
       NEXT_PUBLIC_APP_URL: "http://localhost:3000",
     });
 

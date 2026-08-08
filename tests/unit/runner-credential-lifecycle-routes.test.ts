@@ -49,8 +49,8 @@ describe("POST /api/runners/:runnerId/credentials/rotate route", () => {
       ok: true,
       runner: { id: "00000000-0000-4000-8000-000000000131" },
       credential: {
-        token: "agb_run_newvisibleonce_123456789012345678901234567890",
-        prefix: "agb_run_newvisib",
+        token: "bruno_run_newvisibleonce_123456789012345678901234567890",
+        prefix: "bruno_run_newvisib",
         rotatedAt: "2026-07-05T08:01:00.000Z",
       },
     });
@@ -70,8 +70,8 @@ describe("POST /api/runners/:runnerId/credentials/rotate route", () => {
       ok: true,
       runner: { id: "00000000-0000-4000-8000-000000000131" },
       credential: {
-        token: "agb_run_newvisibleonce_123456789012345678901234567890",
-        prefix: "agb_run_newvisib",
+        token: "bruno_run_newvisibleonce_123456789012345678901234567890",
+        prefix: "bruno_run_newvisib",
         rotatedAt: "2026-07-05T08:01:00.000Z",
       },
     });
@@ -81,7 +81,7 @@ describe("POST /api/runners/:runnerId/credentials/rotate route", () => {
     expect(JSON.stringify(body)).not.toContain("credentialHash");
     expect(JSON.stringify(body)).not.toContain("tokenHash");
     expect(JSON.stringify(body)).not.toContain(
-      "agb_run_oldvisibleonce_123456789012345678901234567890",
+      "bruno_run_oldvisibleonce_123456789012345678901234567890",
     );
   });
 
@@ -218,7 +218,7 @@ describe("POST /api/runners/:runnerId/credentials/revoke route", () => {
     expect(mocks.revokeRunnerCredentialForUser).toHaveBeenCalledWith(USER_ID, {
       runnerId: "00000000-0000-4000-8000-000000000131",
     });
-    expect(JSON.stringify(body)).not.toContain("agb_run_");
+    expect(JSON.stringify(body)).not.toContain("bruno_run_");
     expect(JSON.stringify(body)).not.toContain("credentialHash");
     expect(JSON.stringify(body)).not.toContain("tokenHash");
   });
@@ -264,7 +264,7 @@ describe("POST /api/runners/:runnerId/credentials/revoke route", () => {
           code: expectedCode,
         },
       });
-      expect(JSON.stringify(body)).not.toContain("agb_run_");
+      expect(JSON.stringify(body)).not.toContain("bruno_run_");
       expect(JSON.stringify(body)).not.toContain("credentialHash");
     }
   });

@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const BASE_DATABASE_URL =
-  process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
+  process.env.DATABASE_URL ?? "postgres://bruno:bruno@127.0.0.1:54329/bruno";
 const CREATED_DATABASES: string[] = [];
 
 describe("Hermes staging acceptance migration", () => {

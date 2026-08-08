@@ -8,33 +8,33 @@ import {
 
 const NOW = new Date("2026-08-03T10:00:00.000Z");
 const DIGEST = `sha256:${"a".repeat(64)}`;
-const IMAGE = `ghcr.io/ametel01/agentbay-hermes@${DIGEST}`;
+const IMAGE = `ghcr.io/ametel01/bruno-hermes@${DIGEST}`;
 const AGENT_ID = "11111111-1111-4111-8111-111111111111";
 const DEPLOYMENT_ID = "22222222-2222-4222-8222-222222222222";
 const RUNNER_ID = "33333333-3333-4333-8333-333333333333";
 
 function env(): Record<string, string> {
   return {
-    AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED: "true",
-    AGENTBAY_HERMES_STAGING_ACCEPTANCE_BASE_URL: "https://staging.example.com",
-    AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: "acceptance-bearer-credential-00001",
-    AGENTBAY_HERMES_STAGING_PUBLISHED_IMAGE_REF: IMAGE,
-    AGENTBAY_HERMES_WORKLOAD_IMAGE: IMAGE,
-    AGENTBAY_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION:
+    BRUNO_HERMES_STAGING_ACCEPTANCE_ENABLED: "true",
+    BRUNO_HERMES_STAGING_ACCEPTANCE_BASE_URL: "https://staging.example.com",
+    BRUNO_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: "acceptance-bearer-credential-00001",
+    BRUNO_HERMES_STAGING_PUBLISHED_IMAGE_REF: IMAGE,
+    BRUNO_HERMES_WORKLOAD_IMAGE: IMAGE,
+    BRUNO_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION:
       "authorize-basic-4usd-digitalocean-staging",
-    AGENTBAY_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION:
+    BRUNO_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION:
       "send-telegram-and-spend-digitalocean-staging",
-    AGENTBAY_HERMES_STAGING_ASSISTANT: "chatgpt",
-    AGENTBAY_HERMES_STAGING_OPENAI_API_KEY: "sk-abcdefghijklmnopqrstuvwxyz123456",
-    AGENTBAY_HERMES_STAGING_TELEGRAM_BOT_TOKEN: "123456789:abcdefghijklmnopqrstuvwxyz123456",
-    AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_USER_ID: "123456789",
-    AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID: "-123456789",
-    AGENTBAY_DIGITALOCEAN_TOKEN: "digitalocean-provider-token-0000000001",
-    AGENTBAY_RUNNER_BEARER_TOKEN: "runner-bearer-credential-000000001",
-    AGENTBAY_RUNNER_IMAGE: `ghcr.io/ametel01/agentbay-runner:sha-staging@${DIGEST}`,
-    AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
-    AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
-    AGENTBAY_AGENT_SECRET_KEYS_JSON: JSON.stringify({
+    BRUNO_HERMES_STAGING_ASSISTANT: "chatgpt",
+    BRUNO_HERMES_STAGING_OPENAI_API_KEY: "sk-abcdefghijklmnopqrstuvwxyz123456",
+    BRUNO_HERMES_STAGING_TELEGRAM_BOT_TOKEN: "123456789:abcdefghijklmnopqrstuvwxyz123456",
+    BRUNO_HERMES_STAGING_TELEGRAM_TEST_USER_ID: "123456789",
+    BRUNO_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID: "-123456789",
+    BRUNO_DIGITALOCEAN_TOKEN: "digitalocean-provider-token-0000000001",
+    BRUNO_RUNNER_BEARER_TOKEN: "runner-bearer-credential-000000001",
+    BRUNO_RUNNER_IMAGE: `ghcr.io/ametel01/bruno-runner:sha-staging@${DIGEST}`,
+    BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
+    BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
+    BRUNO_AGENT_SECRET_KEYS_JSON: JSON.stringify({
       v1: Buffer.alloc(32, 7).toString("base64"),
     }),
   };
@@ -169,7 +169,7 @@ describe("production Hermes staging acceptance effects", () => {
   it("fails preflight closed before any product boundary when exact live capabilities mismatch", async () => {
     const allPorts = ports();
     const malformed = env();
-    malformed.AGENTBAY_HERMES_WORKLOAD_IMAGE = `${IMAGE}-other`;
+    malformed.BRUNO_HERMES_WORKLOAD_IMAGE = `${IMAGE}-other`;
     const effect = createProductionHermesStagingAcceptanceEffectExecutor({
       env: malformed,
       now: () => NOW,
@@ -185,7 +185,7 @@ describe("production Hermes staging acceptance effects", () => {
   it("rejects an invalid Telegram token fixture without contacting Telegram", async () => {
     const allPorts = ports();
     const malformed = env();
-    malformed.AGENTBAY_HERMES_STAGING_TELEGRAM_BOT_TOKEN = "invalid-token";
+    malformed.BRUNO_HERMES_STAGING_TELEGRAM_BOT_TOKEN = "invalid-token";
     const effect = createProductionHermesStagingAcceptanceEffectExecutor({
       env: malformed,
       now: () => NOW,

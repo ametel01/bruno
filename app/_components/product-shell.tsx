@@ -23,12 +23,12 @@ export function ProductShell({ active, eyebrow, title, description, children }: 
     <div className="app-shell">
       <aside className="app-sidebar" aria-label="Primary navigation">
         <div className="brand-block">
-          <Link className="brand-mark" href="/dashboard" aria-label="bruno dashboard">
+          <Link className="brand-mark" href="/dashboard" aria-label="Bruno dashboard">
             B
           </Link>
           <div>
-            <p className="brand-name">bruno</p>
-            <p className="brand-subtitle">Milestone 6</p>
+            <p className="brand-name">Bruno</p>
+            <p className="brand-subtitle">Always-on AI assistants</p>
           </div>
         </div>
         <nav className="nav-list" aria-label="Product routes">

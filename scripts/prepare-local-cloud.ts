@@ -4,7 +4,7 @@ import postgres from "postgres";
 import { runners } from "@/src/server/db/schema";
 import { LOCAL_DOCKER_DIGITALOCEAN_RESOURCE_ID } from "@/src/server/runners/local-docker-provider-constants";
 
-if (process.env.AGENTBAY_DIGITALOCEAN_PROVIDER_MODE !== "local_docker") {
+if (process.env.BRUNO_DIGITALOCEAN_PROVIDER_MODE !== "local_docker") {
   console.log(
     JSON.stringify({
       event: "local_cloud_prepare_skipped",

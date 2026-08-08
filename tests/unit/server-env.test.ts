@@ -22,7 +22,7 @@ import {
 } from "@/src/server/env";
 
 const HOSTED_RUNNER_DIGEST = `sha256:${"a".repeat(64)}`;
-const HOSTED_RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:sha-test@${HOSTED_RUNNER_DIGEST}`;
+const HOSTED_RUNNER_IMAGE = `ghcr.io/ametel01/bruno-runner:sha-test@${HOSTED_RUNNER_DIGEST}`;
 
 describe("server-only provider environment validation", () => {
   it("parses cron secrets exactly and authorizes only a single bearer credential", () => {
@@ -87,21 +87,19 @@ describe("server-only provider environment validation", () => {
 
   it("parses ready agent creation as an exact default-off lowercase flag", () => {
     expect(readReadyAgentCreationFlag({})).toEqual({ ok: true, enabled: false });
-    expect(readReadyAgentCreationFlag({ AGENTBAY_READY_AGENT_CREATION_ENABLED: "false" })).toEqual({
+    expect(readReadyAgentCreationFlag({ BRUNO_READY_AGENT_CREATION_ENABLED: "false" })).toEqual({
       ok: true,
       enabled: false,
     });
-    expect(readReadyAgentCreationFlag({ AGENTBAY_READY_AGENT_CREATION_ENABLED: " true " })).toEqual(
-      {
-        ok: true,
-        enabled: true,
-      },
-    );
-    expect(readReadyAgentCreationFlag({ AGENTBAY_READY_AGENT_CREATION_ENABLED: "TRUE" })).toEqual({
+    expect(readReadyAgentCreationFlag({ BRUNO_READY_AGENT_CREATION_ENABLED: " true " })).toEqual({
+      ok: true,
+      enabled: true,
+    });
+    expect(readReadyAgentCreationFlag({ BRUNO_READY_AGENT_CREATION_ENABLED: "TRUE" })).toEqual({
       ok: false,
       reason: "invalid_ready_agent_creation_flag",
     });
-    expect(readReadyAgentCreationFlag({ AGENTBAY_READY_AGENT_CREATION_ENABLED: "yes" })).toEqual({
+    expect(readReadyAgentCreationFlag({ BRUNO_READY_AGENT_CREATION_ENABLED: "yes" })).toEqual({
       ok: false,
       reason: "invalid_ready_agent_creation_flag",
     });
@@ -109,9 +107,9 @@ describe("server-only provider environment validation", () => {
 
   it("keeps managed runner rollout gradual by default and supports an exact halt", () => {
     expect(readRunnerRolloutBatchSize({})).toBe(1);
-    expect(readRunnerRolloutBatchSize({ AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE: "1" })).toBe(1);
-    expect(readRunnerRolloutBatchSize({ AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE: " 0 " })).toBe(0);
-    expect(() => readRunnerRolloutBatchSize({ AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE: "2" })).toThrow(
+    expect(readRunnerRolloutBatchSize({ BRUNO_RUNNER_ROLLOUT_BATCH_SIZE: "1" })).toBe(1);
+    expect(readRunnerRolloutBatchSize({ BRUNO_RUNNER_ROLLOUT_BATCH_SIZE: " 0 " })).toBe(0);
+    expect(() => readRunnerRolloutBatchSize({ BRUNO_RUNNER_ROLLOUT_BATCH_SIZE: "2" })).toThrow(
       "must be 0 (halted) or 1 (gradual)",
     );
   });
@@ -121,7 +119,7 @@ describe("server-only provider environment validation", () => {
     const currentSigningKey = "current_signing_key_abcdefghijklmnopqrstuvwxyz012345";
     const nextSigningKey = "next_signing_key_abcdefghijklmnopqrstuvwxyz012345";
     const configured = {
-      AGENTBAY_DEPLOYMENT_DISPATCH_MODE: "qstash",
+      BRUNO_DEPLOYMENT_DISPATCH_MODE: "qstash",
       QSTASH_TOKEN: token,
       QSTASH_CURRENT_SIGNING_KEY: currentSigningKey,
       QSTASH_NEXT_SIGNING_KEY: nextSigningKey,
@@ -129,7 +127,7 @@ describe("server-only provider environment validation", () => {
     };
 
     expect(readDeploymentDispatchConfig({})).toEqual({ ok: true, mode: "cron" });
-    expect(readDeploymentDispatchConfig({ AGENTBAY_DEPLOYMENT_DISPATCH_MODE: "cron" })).toEqual({
+    expect(readDeploymentDispatchConfig({ BRUNO_DEPLOYMENT_DISPATCH_MODE: "cron" })).toEqual({
       ok: true,
       mode: "cron",
     });
@@ -149,7 +147,7 @@ describe("server-only provider environment validation", () => {
       { ...configured, NEXT_PUBLIC_APP_URL: "http://app.example.test" },
       { ...configured, QSTASH_NEXT_SIGNING_KEY: currentSigningKey },
       { ...configured, CRON_SECRET: token },
-      { AGENTBAY_DEPLOYMENT_DISPATCH_MODE: "queue" },
+      { BRUNO_DEPLOYMENT_DISPATCH_MODE: "queue" },
     ]) {
       expect(readDeploymentDispatchConfig(partial)).toEqual({
         ok: false,
@@ -161,15 +159,15 @@ describe("server-only provider environment validation", () => {
   it("keeps staging acceptance exactly default-off with a dedicated HTTPS transport", () => {
     const bearerSecret = "staging_acceptance_abcdefghijklmnopqrstuvwxyz012345";
     const configured = {
-      AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED: "true",
-      AGENTBAY_HERMES_STAGING_ACCEPTANCE_BASE_URL: "https://staging.example.test/",
-      AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: bearerSecret,
+      BRUNO_HERMES_STAGING_ACCEPTANCE_ENABLED: "true",
+      BRUNO_HERMES_STAGING_ACCEPTANCE_BASE_URL: "https://staging.example.test/",
+      BRUNO_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: bearerSecret,
     };
 
     expect(readHermesStagingAcceptanceConfig({})).toEqual({ ok: true, enabled: false });
     expect(
       readHermesStagingAcceptanceConfig({
-        AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED: "false",
+        BRUNO_HERMES_STAGING_ACCEPTANCE_ENABLED: "false",
       }),
     ).toEqual({ ok: true, enabled: false });
     expect(readHermesStagingAcceptanceConfig(configured)).toEqual({
@@ -183,7 +181,7 @@ describe("server-only provider environment validation", () => {
       expect(
         readHermesStagingAcceptanceConfig({
           ...configured,
-          AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED: enabled,
+          BRUNO_HERMES_STAGING_ACCEPTANCE_ENABLED: enabled,
         }),
       ).toEqual({
         ok: false,
@@ -202,7 +200,7 @@ describe("server-only provider environment validation", () => {
       expect(
         readHermesStagingAcceptanceConfig({
           ...configured,
-          AGENTBAY_HERMES_STAGING_ACCEPTANCE_BASE_URL: baseUrl,
+          BRUNO_HERMES_STAGING_ACCEPTANCE_BASE_URL: baseUrl,
         }),
       ).toEqual({
         ok: false,
@@ -214,15 +212,15 @@ describe("server-only provider environment validation", () => {
   it("requires a distinct 32-256 character staging bearer and compares it in constant time", () => {
     const bearerSecret = "staging_acceptance_abcdefghijklmnopqrstuvwxyz012345";
     const configured = {
-      AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED: "true",
-      AGENTBAY_HERMES_STAGING_ACCEPTANCE_BASE_URL: "https://staging.example.test",
-      AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: bearerSecret,
+      BRUNO_HERMES_STAGING_ACCEPTANCE_ENABLED: "true",
+      BRUNO_HERMES_STAGING_ACCEPTANCE_BASE_URL: "https://staging.example.test",
+      BRUNO_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: bearerSecret,
     };
 
     for (const conflictingName of [
       "CRON_SECRET",
-      "AGENTBAY_RUNNER_BEARER_TOKEN",
-      "AGENTBAY_OPERATOR_PASSWORD",
+      "BRUNO_RUNNER_BEARER_TOKEN",
+      "BRUNO_OPERATOR_PASSWORD",
     ] as const) {
       expect(
         readHermesStagingAcceptanceConfig({
@@ -239,7 +237,7 @@ describe("server-only provider environment validation", () => {
       expect(
         readHermesStagingAcceptanceConfig({
           ...configured,
-          AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: invalidSecret,
+          BRUNO_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: invalidSecret,
         }),
       ).toEqual({
         ok: false,
@@ -251,7 +249,7 @@ describe("server-only provider environment validation", () => {
       expect(
         readHermesStagingAcceptanceConfig({
           ...configured,
-          AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: boundarySecret,
+          BRUNO_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET: boundarySecret,
         }),
       ).toMatchObject({ ok: true, enabled: true, bearerSecret: boundarySecret });
     }
@@ -292,16 +290,16 @@ describe("server-only provider environment validation", () => {
 
   it("reads the same validated Hermes workload image independently of provider credentials", () => {
     const customImage =
-      "ghcr.io/ametel01/agentbay-hermes@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      "ghcr.io/ametel01/bruno-hermes@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     expect(readHermesWorkloadImage({})).toBe(DEFAULT_HERMES_WORKLOAD_IMAGE);
-    expect(readHermesWorkloadImage({ AGENTBAY_HERMES_WORKLOAD_IMAGE: ` ${customImage} ` })).toBe(
+    expect(readHermesWorkloadImage({ BRUNO_HERMES_WORKLOAD_IMAGE: ` ${customImage} ` })).toBe(
       customImage,
     );
 
     for (const value of ["", " ", "image with spaces", "image;docker pull attacker/image"]) {
-      expect(() => readHermesWorkloadImage({ AGENTBAY_HERMES_WORKLOAD_IMAGE: value })).toThrow(
-        /AGENTBAY_HERMES_WORKLOAD_IMAGE/,
+      expect(() => readHermesWorkloadImage({ BRUNO_HERMES_WORKLOAD_IMAGE: value })).toThrow(
+        /BRUNO_HERMES_WORKLOAD_IMAGE/,
       );
     }
   });
@@ -309,25 +307,25 @@ describe("server-only provider environment validation", () => {
   it("validates DigitalOcean token and non-secret provisioning defaults on the server path", () => {
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
       }),
-    ).toThrow("AGENTBAY_RUNNER_IMAGE must be an immutable registry image reference");
+    ).toThrow("BRUNO_RUNNER_IMAGE must be an immutable registry image reference");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
       }),
     ).toThrow("Swap is not counted as compatible memory");
 
     expect(
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
-        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
       }),
     ).toMatchObject({
       runnerBearerToken: "runner-command-token",
@@ -343,27 +341,27 @@ describe("server-only provider environment validation", () => {
       region: "sfo3",
       sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
-      tags: ["agentbay", "agentbay-runner"],
+      tags: ["bruno", "bruno-runner"],
       sshSourceAddresses: [],
     });
 
     const config = readDigitalOceanProviderConfig({
-      AGENTBAY_DIGITALOCEAN_TOKEN: " dop_v1_test_token ",
-      AGENTBAY_RUNNER_BEARER_TOKEN: " runner-command-token ",
-      AGENTBAY_DIGITALOCEAN_REGION: " nyc3 ",
-      AGENTBAY_DIGITALOCEAN_SIZE_SLUG: " s-2vcpu-2gb ",
-      AGENTBAY_DIGITALOCEAN_IMAGE: " ubuntu-24-04-x64 ",
-      AGENTBAY_RUNNER_IMAGE: ` ${HOSTED_RUNNER_IMAGE} `,
-      AGENTBAY_HERMES_WORKLOAD_IMAGE: " ghcr.io/ametel01/agentbay-hermes:sha-123 ",
-      AGENTBAY_HERMES_STATE_ROOT: " /var/lib/agentbay/custom-agents ",
-      AGENTBAY_HERMES_PRIVATE_NETWORK: " agentbay-custom-hermes ",
-      AGENTBAY_HERMES_READINESS_TIMEOUT_MS: "240000",
-      AGENTBAY_HERMES_DOCKER_CPUS: "1",
-      AGENTBAY_HERMES_DOCKER_MEMORY: "1536m",
-      AGENTBAY_HERMES_DOCKER_PIDS_LIMIT: "256",
-      AGENTBAY_RUNNER_MAX_AGENTS: "1",
-      AGENTBAY_DIGITALOCEAN_TAGS: "runner, agentbay, runner",
-      AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS: "203.0.113.5, 2001:db8::/64",
+      BRUNO_DIGITALOCEAN_TOKEN: " dop_v1_test_token ",
+      BRUNO_RUNNER_BEARER_TOKEN: " runner-command-token ",
+      BRUNO_DIGITALOCEAN_REGION: " nyc3 ",
+      BRUNO_DIGITALOCEAN_SIZE_SLUG: " s-2vcpu-2gb ",
+      BRUNO_DIGITALOCEAN_IMAGE: " ubuntu-24-04-x64 ",
+      BRUNO_RUNNER_IMAGE: ` ${HOSTED_RUNNER_IMAGE} `,
+      BRUNO_HERMES_WORKLOAD_IMAGE: " ghcr.io/ametel01/bruno-hermes:sha-123 ",
+      BRUNO_HERMES_STATE_ROOT: " /var/lib/bruno/custom-agents ",
+      BRUNO_HERMES_PRIVATE_NETWORK: " bruno-custom-hermes ",
+      BRUNO_HERMES_READINESS_TIMEOUT_MS: "240000",
+      BRUNO_HERMES_DOCKER_CPUS: "1",
+      BRUNO_HERMES_DOCKER_MEMORY: "1536m",
+      BRUNO_HERMES_DOCKER_PIDS_LIMIT: "256",
+      BRUNO_RUNNER_MAX_AGENTS: "1",
+      BRUNO_DIGITALOCEAN_TAGS: "runner, bruno, runner",
+      BRUNO_DIGITALOCEAN_SSH_SOURCE_CIDRS: "203.0.113.5, 2001:db8::/64",
     });
 
     expect(config).toEqual({
@@ -371,9 +369,9 @@ describe("server-only provider environment validation", () => {
       providerMode: "digitalocean",
       runnerBearerToken: "runner-command-token",
       runnerImage: HOSTED_RUNNER_IMAGE,
-      hermesWorkloadImage: "ghcr.io/ametel01/agentbay-hermes:sha-123",
-      hermesStateRoot: "/var/lib/agentbay/custom-agents",
-      hermesPrivateNetwork: "agentbay-custom-hermes",
+      hermesWorkloadImage: "ghcr.io/ametel01/bruno-hermes:sha-123",
+      hermesStateRoot: "/var/lib/bruno/custom-agents",
+      hermesPrivateNetwork: "bruno-custom-hermes",
       hermesReadinessTimeoutMs: 240_000,
       hermesDockerCpus: "1",
       hermesDockerMemory: "1536m",
@@ -382,7 +380,7 @@ describe("server-only provider environment validation", () => {
       region: "nyc3",
       sizeSlug: "s-2vcpu-2gb",
       image: "ubuntu-24-04-x64",
-      tags: ["agentbay", "runner"],
+      tags: ["bruno", "runner"],
       sshSourceAddresses: ["2001:db8::/64", "203.0.113.5/32"],
       snapshotMode: { mode: "stock" },
     });
@@ -390,24 +388,24 @@ describe("server-only provider environment validation", () => {
 
   it("requires explicit snapshot evidence and source identity before snapshot image mode", () => {
     const base = {
-      AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-      AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-      AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
-      AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
-      AGENTBAY_DIGITALOCEAN_IMAGE_MODE: "snapshot",
+      BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+      BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+      BRUNO_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+      BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
+      BRUNO_DIGITALOCEAN_IMAGE_MODE: "snapshot",
     };
 
     expect(() => readDigitalOceanProviderConfig(base)).toThrow(
-      "AGENTBAY_DIGITALOCEAN_SNAPSHOT_MANIFEST is required",
+      "BRUNO_DIGITALOCEAN_SNAPSHOT_MANIFEST is required",
     );
 
     const configured = readDigitalOceanProviderConfig({
       ...base,
-      AGENTBAY_DIGITALOCEAN_SNAPSHOT_MANIFEST: '{"schemaVersion":"bruno.runner.snapshot.v1"}',
-      AGENTBAY_DIGITALOCEAN_SNAPSHOT_SIGNATURE: "signature",
-      AGENTBAY_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY: "public-key",
-      AGENTBAY_RELEASE_SOURCE_REVISION: "1".repeat(40),
-      AGENTBAY_DOCKER_RUNNER_IMAGE: `ghcr.io/ametel01/default-agent:sha@sha256:${"c".repeat(64)}`,
+      BRUNO_DIGITALOCEAN_SNAPSHOT_MANIFEST: '{"schemaVersion":"bruno.runner.snapshot.v1"}',
+      BRUNO_DIGITALOCEAN_SNAPSHOT_SIGNATURE: "signature",
+      BRUNO_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY: "public-key",
+      BRUNO_RELEASE_SOURCE_REVISION: "1".repeat(40),
+      BRUNO_DOCKER_RUNNER_IMAGE: `ghcr.io/ametel01/default-agent:sha@sha256:${"c".repeat(64)}`,
     });
 
     expect(configured?.snapshotMode).toMatchObject({
@@ -425,59 +423,59 @@ describe("server-only provider environment validation", () => {
   it("parses local Docker provider mode for manual cloud-runner smoke tests", () => {
     expect(
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
-        AGENTBAY_DIGITALOCEAN_TOKEN: "local-docker",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_RUNNER_IMAGE: "agentbay-runner:local",
-        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
-        AGENTBAY_HERMES_DOCKER_CPUS: "1",
-        AGENTBAY_HERMES_DOCKER_MEMORY: "1536m",
-        AGENTBAY_HERMES_DOCKER_PIDS_LIMIT: "256",
-        AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: "http://host.docker.internal:3045",
-        AGENTBAY_LOCAL_CLOUD_RUNNER_CONTAINER_NAME: "agentbay-local-cloud-runner",
-        AGENTBAY_LOCAL_CLOUD_RUNNER_START_DELAY_MS: "0",
-        AGENTBAY_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
+        BRUNO_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
+        BRUNO_DIGITALOCEAN_TOKEN: "local-docker",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_RUNNER_IMAGE: "bruno-runner:local",
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
+        BRUNO_HERMES_DOCKER_CPUS: "1",
+        BRUNO_HERMES_DOCKER_MEMORY: "1536m",
+        BRUNO_HERMES_DOCKER_PIDS_LIMIT: "256",
+        BRUNO_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: "http://host.docker.internal:3045",
+        BRUNO_LOCAL_CLOUD_RUNNER_CONTAINER_NAME: "bruno-local-cloud-runner",
+        BRUNO_LOCAL_CLOUD_RUNNER_START_DELAY_MS: "0",
+        BRUNO_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
       }),
     ).toMatchObject({
       token: "local-docker",
       providerMode: "local_docker",
       runnerBearerToken: "runner-command-token",
-      runnerImage: "agentbay-runner:local",
+      runnerImage: "bruno-runner:local",
       sizeSlug: "s-1vcpu-2gb",
       localRunnerEndpointUrl: "http://host.docker.internal:3045",
-      localRunnerContainerName: "agentbay-local-cloud-runner",
+      localRunnerContainerName: "bruno-local-cloud-runner",
       localRunnerStartDelayMs: 0,
       localAgentSmokeMode: true,
     });
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "digitalocean",
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
-        AGENTBAY_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
+        BRUNO_DIGITALOCEAN_PROVIDER_MODE: "digitalocean",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        BRUNO_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
       }),
     ).toThrow(EnvValidationError);
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
-        AGENTBAY_DIGITALOCEAN_TOKEN: "not-the-local-sentinel",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_RUNNER_IMAGE: "agentbay-runner:local",
-        AGENTBAY_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
+        BRUNO_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
+        BRUNO_DIGITALOCEAN_TOKEN: "not-the-local-sentinel",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_RUNNER_IMAGE: "bruno-runner:local",
+        BRUNO_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
       }),
     ).toThrow(EnvValidationError);
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
-        AGENTBAY_DIGITALOCEAN_TOKEN: "local-docker",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_RUNNER_IMAGE: "agentbay-runner:local",
-        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-512mb-10gb",
-        AGENTBAY_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
+        BRUNO_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
+        BRUNO_DIGITALOCEAN_TOKEN: "local-docker",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_RUNNER_IMAGE: "bruno-runner:local",
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-512mb-10gb",
+        BRUNO_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
       }),
     ).toThrow("Swap is not counted as compatible memory");
   });
@@ -485,12 +483,12 @@ describe("server-only provider environment validation", () => {
   it("parses DigitalOcean SSH access configuration for Droplet creation", () => {
     expect(
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
-        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
-        AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "52830696, c3:2a:31",
-        AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS: "203.0.113.5/32, 2001:db8::/64",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
+        BRUNO_DIGITALOCEAN_SSH_KEY_IDS: "52830696, c3:2a:31",
+        BRUNO_DIGITALOCEAN_SSH_SOURCE_CIDRS: "203.0.113.5/32, 2001:db8::/64",
       }),
     ).toMatchObject({
       sshKeyIds: ["52830696", "c3:2a:31"],
@@ -499,21 +497,21 @@ describe("server-only provider environment validation", () => {
 
     expect(
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
-        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
-        AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "auto",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
+        BRUNO_DIGITALOCEAN_SSH_KEY_IDS: "auto",
       }),
     ).not.toHaveProperty("sshKeyIds");
 
     expect(
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
-        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
-        AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "none",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
+        BRUNO_DIGITALOCEAN_SSH_KEY_IDS: "none",
       }),
     ).toMatchObject({ sshKeyIds: [] });
   });
@@ -521,98 +519,98 @@ describe("server-only provider environment validation", () => {
   it("requires explicit public SSH source access opt-in", () => {
     expect(
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
-        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
       }),
     ).toMatchObject({ sshSourceAddresses: [] });
 
     expect(
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
-        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
-        AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH: "true",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
+        BRUNO_DIGITALOCEAN_ALLOW_PUBLIC_SSH: "true",
       }),
     ).toMatchObject({ sshSourceAddresses: ["0.0.0.0/0", "::/0"] });
 
     expect(
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
-        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
-        AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH: "false",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
+        BRUNO_DIGITALOCEAN_ALLOW_PUBLIC_SSH: "false",
       }),
     ).toMatchObject({ sshSourceAddresses: [] });
   });
 
   it("rejects malformed cloud runner provider settings without echoing raw values", () => {
-    const invalidRunnerImage = "ghcr.io/ametel01/agentbay-runner:latest;rm";
+    const invalidRunnerImage = "ghcr.io/ametel01/bruno-runner:latest;rm";
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_RUNNER_IMAGE: invalidRunnerImage,
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_RUNNER_IMAGE: invalidRunnerImage,
       }),
-    ).toThrow("AGENTBAY_RUNNER_IMAGE must be a valid container image reference");
+    ).toThrow("BRUNO_RUNNER_IMAGE must be a valid container image reference");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_HERMES_WORKLOAD_IMAGE: "ghcr.io/ametel01/agentbay-hermes:latest;rm",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_HERMES_WORKLOAD_IMAGE: "ghcr.io/ametel01/bruno-hermes:latest;rm",
       }),
-    ).toThrow("AGENTBAY_HERMES_WORKLOAD_IMAGE must be a valid container image reference");
+    ).toThrow("BRUNO_HERMES_WORKLOAD_IMAGE must be a valid container image reference");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_HERMES_STATE_ROOT: "../agentbay",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_HERMES_STATE_ROOT: "../bruno",
       }),
-    ).toThrow("AGENTBAY_HERMES_STATE_ROOT must be an absolute runtime path");
+    ).toThrow("BRUNO_HERMES_STATE_ROOT must be an absolute runtime path");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_HERMES_PRIVATE_NETWORK: "agentbay hermes",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_HERMES_PRIVATE_NETWORK: "bruno hermes",
       }),
-    ).toThrow("AGENTBAY_HERMES_PRIVATE_NETWORK must be a Docker network name");
+    ).toThrow("BRUNO_HERMES_PRIVATE_NETWORK must be a Docker network name");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_HERMES_READINESS_TIMEOUT_MS: "0",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_HERMES_READINESS_TIMEOUT_MS: "0",
       }),
-    ).toThrow("AGENTBAY_HERMES_READINESS_TIMEOUT_MS must be a positive integer");
+    ).toThrow("BRUNO_HERMES_READINESS_TIMEOUT_MS must be a positive integer");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_HERMES_DOCKER_CPUS: "0.0000000001",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_HERMES_DOCKER_CPUS: "0.0000000001",
       }),
-    ).toThrow("AGENTBAY_HERMES_DOCKER_CPUS must be a positive Docker CPU value representable");
+    ).toThrow("BRUNO_HERMES_DOCKER_CPUS must be a positive Docker CPU value representable");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_HERMES_DOCKER_PIDS_LIMIT: "4097",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_HERMES_DOCKER_PIDS_LIMIT: "4097",
       }),
-    ).toThrow("AGENTBAY_HERMES_DOCKER_PIDS_LIMIT must be a positive integer no greater than 4096");
+    ).toThrow("BRUNO_HERMES_DOCKER_PIDS_LIMIT must be a positive integer no greater than 4096");
 
     try {
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_RUNNER_IMAGE: invalidRunnerImage,
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_RUNNER_IMAGE: invalidRunnerImage,
       });
     } catch (error) {
       expect(error).toBeInstanceOf(EnvValidationError);
@@ -621,127 +619,127 @@ describe("server-only provider environment validation", () => {
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_DIGITALOCEAN_REGION: "nyc 3",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_DIGITALOCEAN_REGION: "nyc 3",
       }),
-    ).toThrow("AGENTBAY_DIGITALOCEAN_REGION must be a DigitalOcean slug");
+    ).toThrow("BRUNO_DIGITALOCEAN_REGION must be a DigitalOcean slug");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s/1vcpu",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: "s/1vcpu",
       }),
-    ).toThrow("AGENTBAY_DIGITALOCEAN_SIZE_SLUG must be a DigitalOcean slug");
+    ).toThrow("BRUNO_DIGITALOCEAN_SIZE_SLUG must be a DigitalOcean slug");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_DIGITALOCEAN_IMAGE: "ubuntu,24",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_DIGITALOCEAN_IMAGE: "ubuntu,24",
       }),
-    ).toThrow("AGENTBAY_DIGITALOCEAN_IMAGE must be a DigitalOcean slug");
+    ).toThrow("BRUNO_DIGITALOCEAN_IMAGE must be a DigitalOcean slug");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_DIGITALOCEAN_TAGS: "agentbay,pre beta",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_DIGITALOCEAN_TAGS: "bruno,pre beta",
       }),
-    ).toThrow("AGENTBAY_DIGITALOCEAN_TAGS entries must not contain whitespace");
+    ).toThrow("BRUNO_DIGITALOCEAN_TAGS entries must not contain whitespace");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "52830696, bad key",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_DIGITALOCEAN_SSH_KEY_IDS: "52830696, bad key",
       }),
-    ).toThrow("AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS entries must not contain whitespace");
+    ).toThrow("BRUNO_DIGITALOCEAN_SSH_KEY_IDS entries must not contain whitespace");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS: "example.com",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_DIGITALOCEAN_SSH_SOURCE_CIDRS: "example.com",
       }),
-    ).toThrow("AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must be valid");
+    ).toThrow("BRUNO_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must be valid");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS: "203.0.113.5/33",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_DIGITALOCEAN_SSH_SOURCE_CIDRS: "203.0.113.5/33",
       }),
-    ).toThrow("AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must use a valid");
+    ).toThrow("BRUNO_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must use a valid");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH: "yes",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_DIGITALOCEAN_ALLOW_PUBLIC_SSH: "yes",
       }),
-    ).toThrow("AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH must be true");
+    ).toThrow("BRUNO_DIGITALOCEAN_ALLOW_PUBLIC_SSH must be true");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS: "203.0.113.5/32",
-        AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH: "yes",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_DIGITALOCEAN_SSH_SOURCE_CIDRS: "203.0.113.5/32",
+        BRUNO_DIGITALOCEAN_ALLOW_PUBLIC_SSH: "yes",
       }),
-    ).toThrow("AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH must be true");
+    ).toThrow("BRUNO_DIGITALOCEAN_ALLOW_PUBLIC_SSH must be true");
   });
 
   it("rejects blank DigitalOcean provider configuration", () => {
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: " ",
+        BRUNO_DIGITALOCEAN_TOKEN: " ",
       }),
     ).toThrowError(EnvValidationError);
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_RUNNER_IMAGE: " ",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_RUNNER_IMAGE: " ",
       }),
-    ).toThrow("AGENTBAY_RUNNER_IMAGE cannot be blank when DigitalOcean is set.");
+    ).toThrow("BRUNO_RUNNER_IMAGE cannot be blank when DigitalOcean is set.");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_DIGITALOCEAN_REGION: " ",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_DIGITALOCEAN_REGION: " ",
       }),
-    ).toThrow("AGENTBAY_DIGITALOCEAN_REGION cannot be blank when DigitalOcean is set.");
+    ).toThrow("BRUNO_DIGITALOCEAN_REGION cannot be blank when DigitalOcean is set.");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
-        AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: " ",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_DIGITALOCEAN_SSH_KEY_IDS: " ",
       }),
-    ).toThrow("AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS cannot be blank when set.");
+    ).toThrow("BRUNO_DIGITALOCEAN_SSH_KEY_IDS cannot be blank when set.");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
       }),
-    ).toThrow("AGENTBAY_RUNNER_BEARER_TOKEN is required when DigitalOcean provisioning is set.");
+    ).toThrow("BRUNO_RUNNER_BEARER_TOKEN is required when DigitalOcean provisioning is set.");
 
     expect(() =>
       readDigitalOceanProviderConfig({
-        AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "fake",
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-command-token",
+        BRUNO_DIGITALOCEAN_PROVIDER_MODE: "fake",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
       }),
-    ).toThrow("AGENTBAY_DIGITALOCEAN_PROVIDER_MODE must be digitalocean or local_docker");
+    ).toThrow("BRUNO_DIGITALOCEAN_PROVIDER_MODE must be digitalocean or local_docker");
   });
 
   it("keeps DigitalOcean provider tokens out of shared validation and client components", async () => {
     await expect(readFile("src/env/validation.ts", "utf8")).resolves.not.toContain(
-      "AGENTBAY_DIGITALOCEAN_TOKEN",
+      "BRUNO_DIGITALOCEAN_TOKEN",
     );
     await expect(readFile("src/server/env.ts", "utf8")).resolves.toContain('import "server-only";');
     await expect(
@@ -755,7 +753,7 @@ describe("server-only provider environment validation", () => {
         continue;
       }
 
-      expect(source).not.toContain("AGENTBAY_DIGITALOCEAN");
+      expect(source).not.toContain("BRUNO_DIGITALOCEAN");
       expect(source).not.toContain("@/src/server/env");
       expect(source).not.toContain("@/src/server/runners/digitalocean-provider");
     }

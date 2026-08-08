@@ -38,7 +38,7 @@ export async function GET(
   }
 
   const release = parseImmutableRunnerImageReference(
-    dependencies.runnerImage ?? process.env.AGENTBAY_RUNNER_IMAGE ?? "",
+    dependencies.runnerImage ?? process.env.BRUNO_RUNNER_IMAGE ?? "",
   );
   let rolloutBatchSize: 0 | 1;
   try {

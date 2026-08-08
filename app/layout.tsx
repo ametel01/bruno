@@ -6,8 +6,8 @@ import "@xterm/xterm/css/xterm.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "bruno",
-  description: "Operational control plane scaffold for managed agents.",
+  title: "Bruno",
+  description: "Easy deployment and hosting for always-on AI personal assistants.",
 };
 
 export default function RootLayout({

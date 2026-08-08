@@ -18,17 +18,17 @@ image.
 
 The linked Git repository does not deploy `main` directly to production. `vercel.json` skips an
 automatic production build unless the release workflow supplies its non-secret
-`AGENTBAY_CANARY_VERIFIED_DEPLOY=true` build marker. Preview builds remain enabled. The release and
+`BRUNO_CANARY_VERIFIED_DEPLOY=true` build marker. Preview builds remain enabled. The release and
 rollback jobs are the only repository-owned paths that supply that marker, preventing a push from
 bypassing the publish, scan, and staging path. The marker name is retained temporarily for
 compatibility; it does not imply that the disabled canary ran.
 
 Production builds also fail before migrations or compilation when ready agent creation is enabled
 without a DigitalOcean token, runner command bearer token, and immutable Git-SHA-plus-digest
-`AGENTBAY_RUNNER_IMAGE`. At runtime, agent creation reuses only an already-running same-user runner
+`BRUNO_RUNNER_IMAGE`. At runtime, agent creation reuses only an already-running same-user runner
 with fresh authenticated heartbeat evidence, compatible release evidence, and spare capacity
 reserved inside the assignment transaction. Capacity is fail-closed to the minimum of computed
-CPU/physical-memory/disk limits, heartbeat, configured `AGENTBAY_RUNNER_MAX_AGENTS`, and an
+CPU/physical-memory/disk limits, heartbeat, configured `BRUNO_RUNNER_MAX_AGENTS`, and an
 explicit measured profile cap; current hosted profiles remain capped at one. If no same-user
 capacity is available, creation requires provisioning configuration before persistence, then the
 post-response reconciler performs one initialization slice and one provisioning slice so exactly one
@@ -73,7 +73,7 @@ If the repository's GitHub plan cannot enforce required environment reviewers, d
 release. Upgrade the plan or add an equivalently protected approval boundary first; a plain manual
 dispatch is not a substitute for the required review.
 
-The simulation injects `AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS=disabled`; it neither creates an account
+The simulation injects `BRUNO_DIGITALOCEAN_SSH_KEY_IDS=disabled`; it neither creates an account
 SSH key nor opens SSH ingress.
 
 ## Temporarily disabled canary contract
@@ -83,7 +83,7 @@ the deployment workflow does not currently run it:
 
 ```sh
 bun run runner:release:smoke -- --image \
-  ghcr.io/ametel01/agentbay-runner:<40-character-git-sha>@sha256:<64-hex-digest> \
+  ghcr.io/ametel01/bruno-runner:<40-character-git-sha>@sha256:<64-hex-digest> \
   --provider local_docker
 ```
 
@@ -115,8 +115,8 @@ The workflow stages the exact published commit using Vercel's production
 configuration and `--prod --skip-domain`, with:
 
 ```text
-AGENTBAY_RUNNER_IMAGE=<tested immutable Git-SHA-plus-digest reference>
-AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=1
+BRUNO_RUNNER_IMAGE=<tested immutable Git-SHA-plus-digest reference>
+BRUNO_RUNNER_ROLLOUT_BATCH_SIZE=1
 ```
 
 The staged deployment URL is never assigned a production domain during staging. While the canary is
@@ -161,16 +161,16 @@ retrieve builder evidence, the provider pins the observed ephemeral SSH host key
 Production snapshot consumption is configured with:
 
 ```text
-AGENTBAY_DIGITALOCEAN_IMAGE_MODE=snapshot
-AGENTBAY_DIGITALOCEAN_SNAPSHOT_MANIFEST=<canonical manifest JSON>
-AGENTBAY_DIGITALOCEAN_SNAPSHOT_SIGNATURE=<base64url Ed25519 signature>
-AGENTBAY_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY=<public verification key>
-AGENTBAY_RELEASE_SOURCE_REVISION=<exact 40-character release commit>
-AGENTBAY_DOCKER_RUNNER_IMAGE=<immutable default-agent image reference>
+BRUNO_DIGITALOCEAN_IMAGE_MODE=snapshot
+BRUNO_DIGITALOCEAN_SNAPSHOT_MANIFEST=<canonical manifest JSON>
+BRUNO_DIGITALOCEAN_SNAPSHOT_SIGNATURE=<base64url Ed25519 signature>
+BRUNO_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY=<public verification key>
+BRUNO_RELEASE_SOURCE_REVISION=<exact 40-character release commit>
+BRUNO_DOCKER_RUNNER_IMAGE=<immutable default-agent image reference>
 ```
 
 Every hosted create path verifies the manifest signature, staleness, source revision, base image,
 architecture, region, minimum disk compatibility, runner/default-agent/Hermes identities, and
 authoritative provider image availability before a Droplet-create call. Invalid or unavailable
-evidence fails closed. Set `AGENTBAY_DIGITALOCEAN_IMAGE_MODE=stock` or remove the snapshot variables
+evidence fails closed. Set `BRUNO_DIGITALOCEAN_IMAGE_MODE=stock` or remove the snapshot variables
 to use the existing complete Ubuntu bootstrap rollback path.

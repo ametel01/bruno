@@ -18,7 +18,7 @@ describe("fake DigitalOcean provider", () => {
       region: "sfo3",
       sizeSlug: "s-1vcpu-1gb",
       image: "ubuntu-24-04-x64",
-      tags: ["agentbay-runner", "agentbay-deploy-88888888888888888888888888888888"],
+      tags: ["bruno-runner", "bruno-deploy-88888888888888888888888888888888"],
     });
     await provider.createRunner({
       name: "unmanaged-runner",
@@ -29,7 +29,7 @@ describe("fake DigitalOcean provider", () => {
     });
 
     await expect(
-      provider.listManagedResources({ stableTag: "agentbay-runner" }),
+      provider.listManagedResources({ stableTag: "bruno-runner" }),
     ).resolves.toMatchObject({
       ok: true,
       value: {
@@ -37,7 +37,7 @@ describe("fake DigitalOcean provider", () => {
         resources: [
           {
             providerResourceId: "inventory-1",
-            tags: ["agentbay-deploy-88888888888888888888888888888888", "agentbay-runner"],
+            tags: ["bruno-deploy-88888888888888888888888888888888", "bruno-runner"],
             createdAt: "2026-08-04T12:00:00.000Z",
             deletedAt: null,
           },
@@ -53,12 +53,12 @@ describe("fake DigitalOcean provider", () => {
     });
 
     const created = await provider.createRunner({
-      name: "bruno Cloud Runner",
+      name: "Bruno Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-1gb",
       image: "ubuntu-24-04-x64",
-      tags: ["agentbay", "runner", "agentbay"],
-      firewallName: "agentbay-runners",
+      tags: ["bruno", "runner", "bruno"],
+      firewallName: "bruno-runners",
     });
 
     expect(created).toEqual({
@@ -69,11 +69,11 @@ describe("fake DigitalOcean provider", () => {
         providerFirewallId: null,
         providerFirewallName: null,
         publicIpv4: "203.0.113.10",
-        name: "bruno Cloud Runner",
+        name: "Bruno Cloud Runner",
         region: "sfo3",
         sizeSlug: "s-1vcpu-1gb",
         image: "ubuntu-24-04-x64",
-        tags: ["agentbay", "runner"],
+        tags: ["bruno", "runner"],
         firewallApplied: false,
         createdAt: "2026-07-06T02:00:00.000Z",
         deletedAt: null,
@@ -90,7 +90,7 @@ describe("fake DigitalOcean provider", () => {
     });
     const firewalled = await provider.applyFirewall({
       providerResourceId: created.value.providerResourceId,
-      firewallName: "agentbay-runners",
+      firewallName: "bruno-runners",
       sshSourceAddresses: ["203.0.113.5/32"],
     });
     const cleaned = await provider.cleanupResource({
@@ -99,7 +99,7 @@ describe("fake DigitalOcean provider", () => {
 
     expect(tagged).toMatchObject({
       ok: true,
-      value: { tags: ["agentbay", "cloud", "runner"] },
+      value: { tags: ["bruno", "cloud", "runner"] },
     });
     expect(firewalled).toMatchObject({
       ok: true,
@@ -127,11 +127,11 @@ describe("fake DigitalOcean provider", () => {
 
     await expect(
       createFailure.createRunner({
-        name: "bruno Cloud Runner",
+        name: "Bruno Cloud Runner",
         region: "sfo3",
         sizeSlug: "s-1vcpu-1gb",
         image: "ubuntu-24-04-x64",
-        tags: ["agentbay"],
+        tags: ["bruno"],
       }),
     ).resolves.toEqual({
       ok: false,
@@ -150,7 +150,7 @@ describe("fake DigitalOcean provider", () => {
     await expect(
       new FakeDigitalOceanProvider().tagResource({
         providerResourceId: "unknown-droplet",
-        tags: ["agentbay"],
+        tags: ["bruno"],
       }),
     ).resolves.toEqual({
       ok: false,
@@ -162,7 +162,7 @@ describe("fake DigitalOcean provider", () => {
   it("models exact owned-set observation and ordered cleanup", async () => {
     const provider = new FakeDigitalOceanProvider({ idPrefix: "7654321" });
     const created = await provider.createRunner({
-      name: "agentbay-staging-operation",
+      name: "bruno-staging-operation",
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
@@ -172,7 +172,7 @@ describe("fake DigitalOcean provider", () => {
 
     const firewalled = await provider.applyFirewall({
       providerResourceId: created.value.providerResourceId,
-      firewallName: "agentbay-runners-7654321-1",
+      firewallName: "bruno-runners-7654321-1",
     });
     if (!firewalled.ok || !firewalled.value.providerFirewallId) {
       throw new Error("Expected fake firewall creation to succeed.");
@@ -182,10 +182,10 @@ describe("fake DigitalOcean provider", () => {
       operationTag: "operation-unique-tag",
       providerResourceId: created.value.providerResourceId,
       providerFirewallId: firewalled.value.providerFirewallId,
-      expectedName: "agentbay-staging-operation",
+      expectedName: "bruno-staging-operation",
       expectedRegion: "sfo3",
       expectedSizeSlug: "s-1vcpu-512mb-10gb",
-      expectedFirewallName: "agentbay-runners-7654321-1",
+      expectedFirewallName: "bruno-runners-7654321-1",
     };
 
     await expect(provider.observeOwnedSet(ownedSet)).resolves.toMatchObject({
@@ -221,7 +221,7 @@ describe("fake DigitalOcean provider", () => {
   it("fails owned-set cleanup closed when an operation tag identifies multiple Droplets", async () => {
     const provider = new FakeDigitalOceanProvider({ idPrefix: "duplicate" });
     const spec = {
-      name: "agentbay-staging-operation",
+      name: "bruno-staging-operation",
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
@@ -232,7 +232,7 @@ describe("fake DigitalOcean provider", () => {
     if (!first.ok) throw new Error("Expected fake provider creation to succeed.");
     const firewalled = await provider.applyFirewall({
       providerResourceId: first.value.providerResourceId,
-      firewallName: "agentbay-runners-duplicate-1",
+      firewallName: "bruno-runners-duplicate-1",
     });
     if (!firewalled.ok || !firewalled.value.providerFirewallId) {
       throw new Error("Expected fake firewall creation to succeed.");
@@ -245,7 +245,7 @@ describe("fake DigitalOcean provider", () => {
       expectedName: spec.name,
       expectedRegion: spec.region,
       expectedSizeSlug: spec.sizeSlug,
-      expectedFirewallName: "agentbay-runners-duplicate-1",
+      expectedFirewallName: "bruno-runners-duplicate-1",
     });
 
     expect(result).toMatchObject({
@@ -285,11 +285,11 @@ describe("DigitalOcean API provider", () => {
               droplets: [
                 {
                   id: 123456,
-                  name: "agentbay-deploy-88888888888888888888888888888888",
+                  name: "bruno-deploy-88888888888888888888888888888888",
                   region: { slug: "sfo3" },
                   sizeSlug: "s-1vcpu-1gb",
                   image: { slug: "ubuntu-24-04-x64" },
-                  tags: ["agentbay-runner", "agentbay-deploy-88888888888888888888888888888888"],
+                  tags: ["bruno-runner", "bruno-deploy-88888888888888888888888888888888"],
                   createdAt: "2026-08-04T12:00:00.000Z",
                 },
               ],
@@ -307,7 +307,7 @@ describe("DigitalOcean API provider", () => {
           firewalls: {
             get: async () => ({
               firewalls: [
-                { id: "firewall-123", name: "agentbay-runners-123456", dropletIds: [123456] },
+                { id: "firewall-123", name: "bruno-runners-123456", dropletIds: [123456] },
               ],
               meta: { total: 1 },
             }),
@@ -321,7 +321,7 @@ describe("DigitalOcean API provider", () => {
     });
 
     await expect(
-      provider.listManagedResources({ stableTag: "agentbay-runner" }),
+      provider.listManagedResources({ stableTag: "bruno-runner" }),
     ).resolves.toMatchObject({
       ok: true,
       value: {
@@ -349,7 +349,7 @@ describe("DigitalOcean API provider", () => {
             return {
               droplet: {
                 id: 123456,
-                name: body.name ?? "agentbay-cloud-runner",
+                name: body.name ?? "bruno-cloud-runner",
                 region: { slug: "sfo3" },
                 sizeSlug: "s-1vcpu-512mb-10gb",
                 image: { slug: "ubuntu-24-04-x64" },
@@ -359,7 +359,7 @@ describe("DigitalOcean API provider", () => {
                     { ipAddress: "203.0.113.42", type: "public" },
                   ],
                 },
-                tags: ["agentbay"],
+                tags: ["bruno"],
                 createdAt: new Date("2026-07-06T05:00:01.000Z"),
               },
             };
@@ -415,12 +415,12 @@ describe("DigitalOcean API provider", () => {
     });
 
     const created = await provider.createRunner({
-      name: "bruno Cloud Runner",
+      name: "Bruno Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
-      tags: ["agentbay", "agentbay-runner"],
-      firewallName: "agentbay-runners",
+      tags: ["bruno", "bruno-runner"],
+      firewallName: "bruno-runners",
       sshKeyIds: ["52830696"],
     });
 
@@ -443,11 +443,11 @@ describe("DigitalOcean API provider", () => {
 
     const tagged = await provider.tagResource({
       providerResourceId: created.value.providerResourceId,
-      tags: ["agentbay-runner"],
+      tags: ["bruno-runner"],
     });
     const firewalled = await provider.applyFirewall({
       providerResourceId: created.value.providerResourceId,
-      firewallName: "agentbay-runners",
+      firewallName: "bruno-runners",
       sshSourceAddresses: ["203.0.113.5/32"],
     });
     const cleaned = await provider.cleanupResource({
@@ -456,7 +456,7 @@ describe("DigitalOcean API provider", () => {
 
     expect(tagged).toMatchObject({
       ok: true,
-      value: { tags: ["agentbay", "agentbay-runner"] },
+      value: { tags: ["bruno", "bruno-runner"] },
     });
     expect(firewalled).toMatchObject({
       ok: true,
@@ -477,18 +477,18 @@ describe("DigitalOcean API provider", () => {
       region: "sfo3",
       size: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
-      tags: ["agentbay", "agentbay-runner"],
+      tags: ["bruno", "bruno-runner"],
       monitoring: true,
       sshKeys: ["52830696"],
     });
     expect(calls[1]).toMatchObject({
-      tag: "agentbay-runner",
+      tag: "bruno-runner",
       body: {
         resources: [{ resourceId: "123456", resourceType: "droplet" }],
       },
     });
     expect(calls[2]?.body).toMatchObject({
-      name: "agentbay-runners",
+      name: "bruno-runners",
       dropletIds: [123456],
       inboundRules: [
         { protocol: "tcp", ports: "22", sources: { addresses: ["203.0.113.5/32"] } },
@@ -545,7 +545,7 @@ describe("DigitalOcean API provider", () => {
 
     const result = await provider.createSshKey({
       name: "bruno managed runner key",
-      publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKey agentbay-managed-runner",
+      publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKey bruno-managed-runner",
     });
 
     expect(result).toEqual({
@@ -561,7 +561,7 @@ describe("DigitalOcean API provider", () => {
         step: "account.keys.post",
         body: {
           name: "bruno managed runner key",
-          publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKey agentbay-managed-runner",
+          publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKey bruno-managed-runner",
         },
       },
     ]);
@@ -580,11 +580,11 @@ describe("DigitalOcean API provider", () => {
               return {
                 droplet: {
                   id: 123456,
-                  name: "agentbay-deploy-operation",
+                  name: "bruno-deploy-operation",
                   region: { slug: "sfo3" },
                   size_slug: "s-1vcpu-512mb-10gb",
                   image: { slug: "ubuntu-24-04-x64" },
-                  tags: ["agentbay-deploy-operation"],
+                  tags: ["bruno-deploy-operation"],
                 },
               };
             },
@@ -619,7 +619,7 @@ describe("DigitalOcean API provider", () => {
     await expect(
       taggingProcess.tagResource({
         providerResourceId: "123456",
-        tags: ["agentbay-deploy-operation"],
+        tags: ["bruno-deploy-operation"],
       }),
     ).resolves.toMatchObject({ ok: true, value: { providerResourceId: "123456" } });
 
@@ -627,7 +627,7 @@ describe("DigitalOcean API provider", () => {
     await expect(
       firewallProcess.applyFirewall({
         providerResourceId: "123456",
-        firewallName: "agentbay-runners-123456",
+        firewallName: "bruno-runners-123456",
       }),
     ).resolves.toMatchObject({
       ok: true,
@@ -670,11 +670,11 @@ describe("DigitalOcean API provider", () => {
     });
 
     const result = await provider.createRunner({
-      name: "bruno Cloud Runner",
+      name: "Bruno Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-1gb",
       image: "ubuntu-24-04-x64",
-      tags: ["agentbay"],
+      tags: ["bruno"],
     });
 
     expect(result).toEqual({
@@ -694,11 +694,11 @@ describe("DigitalOcean API provider", () => {
             post: async () => ({
               droplet: {
                 id: 123456,
-                name: "agentbay-runner",
+                name: "bruno-runner",
                 region: "sfo3",
                 size_slug: "s-1vcpu-512mb-10gb",
                 image: "ubuntu-24-04-x64",
-                tags: ["agentbay"],
+                tags: ["bruno"],
               },
             }),
             byDroplet_id: () => ({ delete: async () => {} }),
@@ -715,18 +715,18 @@ describe("DigitalOcean API provider", () => {
       },
     });
     const created = await provider.createRunner({
-      name: "agentbay-runner",
+      name: "bruno-runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
-      tags: ["agentbay"],
+      tags: ["bruno"],
     });
     if (!created.ok) throw new Error("Expected Droplet creation to succeed.");
 
     await expect(
       provider.applyFirewall({
         providerResourceId: created.value.providerResourceId,
-        firewallName: "agentbay-runners-123456",
+        firewallName: "bruno-runners-123456",
       }),
     ).resolves.toEqual({
       ok: false,
@@ -745,12 +745,12 @@ describe("DigitalOcean API provider", () => {
             post: async () => ({
               droplet: {
                 id: 456789,
-                name: "agentbay-cloud-runner",
+                name: "bruno-cloud-runner",
                 region: { slug: "sfo3" },
                 size_slug: "s-1vcpu-512mb-10gb",
                 image: { slug: "ubuntu-24-04-x64" },
                 networks: { v4: [] },
-                tags: ["agentbay"],
+                tags: ["bruno"],
                 created_at: "2026-07-06T08:00:00.000Z",
               },
             }),
@@ -761,7 +761,7 @@ describe("DigitalOcean API provider", () => {
                 return {
                   droplet: {
                     id,
-                    name: "agentbay-cloud-runner",
+                    name: "bruno-cloud-runner",
                     region: { slug: "sfo3" },
                     size_slug: "s-1vcpu-512mb-10gb",
                     image: { slug: "ubuntu-24-04-x64" },
@@ -771,7 +771,7 @@ describe("DigitalOcean API provider", () => {
                         { ip_address: "203.0.113.88", type: "public" },
                       ],
                     },
-                    tags: ["agentbay"],
+                    tags: ["bruno"],
                     created_at: "2026-07-06T08:00:00.000Z",
                   },
                 };
@@ -796,11 +796,11 @@ describe("DigitalOcean API provider", () => {
     });
 
     const created = await provider.createRunner({
-      name: "bruno Cloud Runner",
+      name: "Bruno Cloud Runner",
       region: "sfo3",
       sizeSlug: "s-1vcpu-512mb-10gb",
       image: "ubuntu-24-04-x64",
-      tags: ["agentbay"],
+      tags: ["bruno"],
     });
 
     if (!created.ok) {
@@ -837,10 +837,10 @@ describe("DigitalOcean API provider", () => {
               ? [
                   {
                     id: 7654321,
-                    name: "agentbay-staging-operation",
+                    name: "bruno-staging-operation",
                     region: { slug: "sfo3" },
                     size_slug: "s-1vcpu-512mb-10gb",
-                    tags: ["agentbay", "operation-unique-tag"],
+                    tags: ["bruno", "operation-unique-tag"],
                   },
                 ]
               : [],
@@ -852,10 +852,10 @@ describe("DigitalOcean API provider", () => {
               return {
                 droplet: {
                   id: 7654321,
-                  name: "agentbay-staging-operation",
+                  name: "bruno-staging-operation",
                   region: { slug: "sfo3" },
                   size_slug: "s-1vcpu-512mb-10gb",
-                  tags: ["agentbay", "operation-unique-tag"],
+                  tags: ["bruno", "operation-unique-tag"],
                 },
               };
             },
@@ -880,7 +880,7 @@ describe("DigitalOcean API provider", () => {
               return {
                 firewall: {
                   id: "owned-firewall",
-                  name: "agentbay-runners-7654321",
+                  name: "bruno-runners-7654321",
                   droplet_ids: [7654321],
                 },
               };
@@ -902,10 +902,10 @@ describe("DigitalOcean API provider", () => {
       operationTag: "operation-unique-tag",
       providerResourceId: "7654321",
       providerFirewallId: "owned-firewall",
-      expectedName: "agentbay-staging-operation",
+      expectedName: "bruno-staging-operation",
       expectedRegion: "sfo3",
       expectedSizeSlug: "s-1vcpu-512mb-10gb",
-      expectedFirewallName: "agentbay-runners-7654321",
+      expectedFirewallName: "bruno-runners-7654321",
     };
 
     await expect(provider.observeOwnedSet(ownedSet)).resolves.toEqual({
@@ -982,7 +982,7 @@ describe("DigitalOcean API provider", () => {
               get: async () => ({
                 firewall: {
                   id: "owned-firewall",
-                  name: "agentbay-runners-7654321",
+                  name: "bruno-runners-7654321",
                   droplet_ids: [7654321, 9999999],
                 },
               }),
@@ -999,10 +999,10 @@ describe("DigitalOcean API provider", () => {
       operationTag: "operation-unique-tag",
       providerResourceId: "7654321",
       providerFirewallId: "owned-firewall",
-      expectedName: "agentbay-staging-operation",
+      expectedName: "bruno-staging-operation",
       expectedRegion: "sfo3",
       expectedSizeSlug: "s-1vcpu-512mb-10gb",
-      expectedFirewallName: "agentbay-runners-7654321",
+      expectedFirewallName: "bruno-runners-7654321",
     };
 
     await expect(provider.deleteFirewall(ownedSet)).resolves.toEqual({
@@ -1030,7 +1030,7 @@ describe("DigitalOcean API provider", () => {
               droplets: [
                 {
                   id: 7654321,
-                  name: "agentbay-staging-operation",
+                  name: "bruno-staging-operation",
                   region: "sfo3",
                   size_slug: "s-1vcpu-512mb-10gb",
                   tags: ["operation-unique-tag"],
@@ -1041,7 +1041,7 @@ describe("DigitalOcean API provider", () => {
               get: async () => ({
                 droplet: {
                   id: 7654321,
-                  name: "agentbay-staging-operation",
+                  name: "bruno-staging-operation",
                   region: "sfo3",
                   size_slug: "s-1vcpu-512mb-10gb",
                   tags: ["operation-unique-tag"],
@@ -1066,7 +1066,7 @@ describe("DigitalOcean API provider", () => {
                 return {
                   firewall: {
                     id: "owned-firewall",
-                    name: "agentbay-runners-7654321",
+                    name: "bruno-runners-7654321",
                     dropletIds: [7654321],
                   },
                 };
@@ -1086,10 +1086,10 @@ describe("DigitalOcean API provider", () => {
         operationTag: "operation-unique-tag",
         providerResourceId: "7654321",
         providerFirewallId: "owned-firewall",
-        expectedName: "agentbay-staging-operation",
+        expectedName: "bruno-staging-operation",
         expectedRegion: "sfo3",
         expectedSizeSlug: "s-1vcpu-512mb-10gb",
-        expectedFirewallName: "agentbay-runners-7654321",
+        expectedFirewallName: "bruno-runners-7654321",
       }),
     ).resolves.toEqual({
       ok: false,

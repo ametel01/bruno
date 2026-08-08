@@ -183,7 +183,7 @@ function assignedRunner(): AssignedManualRunnerStatusSummary {
       diskTotalMb: null,
       blocker: null,
     },
-    version: "agentbay-runner/2.2.6",
+    version: "bruno-runner/2.2.6",
     lastSeenAt: "2026-07-10T01:00:00.000Z",
     updatedAt: "2026-07-10T01:00:00.000Z",
     provisioningStatus: "ready",

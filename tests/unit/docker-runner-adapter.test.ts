@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  AGENTBAY_AGENT_ID_LABEL,
+  BRUNO_AGENT_ID_LABEL,
   buildDockerRunPlan,
   DEFAULT_DOCKER_RUNNER_IMAGE,
   parseDockerLogOutput,
@@ -16,34 +16,34 @@ describe("Docker runner command configuration", () => {
   it("defaults to a deterministic dummy runner command and parses configured argv JSON", () => {
     expect(resolveDockerRunnerCommand({})).toMatchObject({
       image: DEFAULT_DOCKER_RUNNER_IMAGE,
-      args: ["sh", "-c", expect.stringContaining("agentbay docker dummy runner started")],
+      args: ["sh", "-c", expect.stringContaining("bruno docker dummy runner started")],
     });
     expect(
       resolveDockerRunnerCommand({
-        AGENTBAY_DOCKER_RUNNER_IMAGE: "agentbay/hermes:test",
-        AGENTBAY_DOCKER_RUNNER_ARGS_JSON: '["hermes","run","--agent-id","demo"]',
+        BRUNO_DOCKER_RUNNER_IMAGE: "bruno/hermes:test",
+        BRUNO_DOCKER_RUNNER_ARGS_JSON: '["hermes","run","--agent-id","demo"]',
       }),
     ).toEqual({
-      image: "agentbay/hermes:test",
+      image: "bruno/hermes:test",
       args: ["hermes", "run", "--agent-id", "demo"],
     });
     expect(() =>
       resolveDockerRunnerCommand({
-        AGENTBAY_DOCKER_RUNNER_ARGS_JSON: '"hermes run --agent-id demo"',
+        BRUNO_DOCKER_RUNNER_ARGS_JSON: '"hermes run --agent-id demo"',
       }),
-    ).toThrow("AGENTBAY_DOCKER_RUNNER_ARGS_JSON must be a JSON string array.");
+    ).toThrow("BRUNO_DOCKER_RUNNER_ARGS_JSON must be a JSON string array.");
   });
 
   it("builds plans without shell interpolation and parses timestamped Docker logs", () => {
     const plan = buildDockerRunPlan({
       agentId: "00000000-0000-4000-8000-000000000201",
       command: {
-        image: "agentbay/hermes:test",
+        image: "bruno/hermes:test",
         args: ["hermes", "run", "agent && echo unsafe"],
       },
       mounts: resolveDockerRunnerMounts({
-        configPath: "/tmp/agentbay/config.json",
-        workspaceRoot: "/tmp/agentbay/workspaces",
+        configPath: "/tmp/bruno/config.json",
+        workspaceRoot: "/tmp/bruno/workspaces",
       }),
       nameSuffix: "unit001",
       resources: {
@@ -54,10 +54,10 @@ describe("Docker runner command configuration", () => {
 
     expect(plan.args).toContain("agent && echo unsafe");
     expect(plan.args).toContain(
-      "type=bind,source=/tmp/agentbay/config.json,target=/etc/agentbay/config-00000000-0000-4000-8000-000000000201,readonly",
+      "type=bind,source=/tmp/bruno/config.json,target=/etc/bruno/config-00000000-0000-4000-8000-000000000201,readonly",
     );
     expect(plan.args).toContain(
-      "type=bind,source=/tmp/agentbay/workspaces/00000000-0000-4000-8000-000000000201,target=/workspace",
+      "type=bind,source=/tmp/bruno/workspaces/00000000-0000-4000-8000-000000000201,target=/workspace",
     );
     expect(
       parseDockerLogOutput({
@@ -80,12 +80,12 @@ describe("Docker runner command configuration", () => {
       buildDockerRunPlan({
         agentId,
         command: {
-          image: "agentbay/hermes:test",
+          image: "bruno/hermes:test",
           args: ["hermes", "run"],
         },
         mounts: resolveDockerRunnerMounts({
-          configPath: "/tmp/agentbay/config.json",
-          workspaceRoot: "/tmp/agentbay/workspaces",
+          configPath: "/tmp/bruno/config.json",
+          workspaceRoot: "/tmp/bruno/workspaces",
         }),
         nameSuffix: "same-runner",
         resources: {
@@ -106,17 +106,17 @@ describe("Docker runner command configuration", () => {
     for (const [index, plan] of plans.entries()) {
       const agentId = agentIds[index];
 
-      expect(plan.containerName).toBe(`agentbay-${agentId}-same-runner`);
-      expect(plan.workspacePath).toBe(`/tmp/agentbay/workspaces/${agentId}`);
-      expect(plan.configTargetPath).toBe(`/etc/agentbay/config-${agentId}`);
-      expect(plan.args).toContain(`${AGENTBAY_AGENT_ID_LABEL}=${agentId}`);
-      expect(plan.args).toContain(`AGENTBAY_AGENT_ID=${agentId}`);
-      expect(plan.args).toContain(`AGENTBAY_CONFIG_PATH=/etc/agentbay/config-${agentId}`);
+      expect(plan.containerName).toBe(`bruno-${agentId}-same-runner`);
+      expect(plan.workspacePath).toBe(`/tmp/bruno/workspaces/${agentId}`);
+      expect(plan.configTargetPath).toBe(`/etc/bruno/config-${agentId}`);
+      expect(plan.args).toContain(`${BRUNO_AGENT_ID_LABEL}=${agentId}`);
+      expect(plan.args).toContain(`BRUNO_AGENT_ID=${agentId}`);
+      expect(plan.args).toContain(`BRUNO_CONFIG_PATH=/etc/bruno/config-${agentId}`);
       expect(plan.args).toContain(
-        `type=bind,source=/tmp/agentbay/config.json,target=/etc/agentbay/config-${agentId},readonly`,
+        `type=bind,source=/tmp/bruno/config.json,target=/etc/bruno/config-${agentId},readonly`,
       );
       expect(plan.args).toContain(
-        `type=bind,source=/tmp/agentbay/workspaces/${agentId},target=/workspace`,
+        `type=bind,source=/tmp/bruno/workspaces/${agentId},target=/workspace`,
       );
     }
   });

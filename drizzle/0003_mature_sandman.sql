@@ -28,7 +28,7 @@ INSERT INTO "agent_configs" (
 )
 SELECT
 	"agents"."id",
-	'You are an AgentBay agent. Follow the operator''s instructions and keep responses concise.',
+	'You are an Bruno agent. Follow the operator''s instructions and keep responses concise.',
 	'not_configured',
 	'not_configured',
 	0,

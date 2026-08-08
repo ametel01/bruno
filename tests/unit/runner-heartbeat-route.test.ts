@@ -50,7 +50,7 @@ describe("POST /runner/v1/heartbeat route", () => {
     const response = await POST(
       new Request("http://localhost/runner/v1/heartbeat", {
         method: "POST",
-        headers: { authorization: "Bearer agb_run_secret" },
+        headers: { authorization: "Bearer bruno_run_secret" },
         body: JSON.stringify({ runnerId: "00000000-0000-4000-8000-000000000130" }),
       }),
       undefined,
@@ -69,7 +69,7 @@ describe("POST /runner/v1/heartbeat route", () => {
       },
     });
     expect(mocks.recordRunnerHeartbeat).toHaveBeenCalledWith({
-      authorizationHeader: "Bearer agb_run_secret",
+      authorizationHeader: "Bearer bruno_run_secret",
       payload: { runnerId: "00000000-0000-4000-8000-000000000130" },
     });
     expect(mocks.confirmCloudRunnerReadiness).toHaveBeenCalledWith(
@@ -102,8 +102,8 @@ describe("POST /runner/v1/heartbeat route", () => {
         observedAt: "2026-07-05T08:00:00.000Z",
       }),
     );
-    expect(JSON.stringify(body)).not.toContain("agb_run_secret");
-    expect(JSON.stringify(ingressLogs)).not.toContain("agb_run_secret");
+    expect(JSON.stringify(body)).not.toContain("bruno_run_secret");
+    expect(JSON.stringify(ingressLogs)).not.toContain("bruno_run_secret");
   });
 
   it("logs a safe authenticated boot self-test failure reason", async () => {
@@ -128,7 +128,7 @@ describe("POST /runner/v1/heartbeat route", () => {
     const response = await POST(
       new Request("http://localhost/runner/v1/heartbeat", {
         method: "POST",
-        headers: { authorization: "Bearer agb_run_secret" },
+        headers: { authorization: "Bearer bruno_run_secret" },
         body: JSON.stringify({ runnerId: "00000000-0000-4000-8000-000000000130" }),
       }),
       undefined,
@@ -149,7 +149,7 @@ describe("POST /runner/v1/heartbeat route", () => {
       }),
     );
     expect(scheduleReconciliations).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000130");
-    expect(JSON.stringify(ingressLogs)).not.toContain("agb_run_secret");
+    expect(JSON.stringify(ingressLogs)).not.toContain("bruno_run_secret");
   });
 
   it.each([
@@ -164,7 +164,7 @@ describe("POST /runner/v1/heartbeat route", () => {
     const response = await POST(
       new Request("http://localhost/runner/v1/heartbeat", {
         method: "POST",
-        headers: { authorization: "Bearer agb_run_secret" },
+        headers: { authorization: "Bearer bruno_run_secret" },
         body: JSON.stringify({ runnerId: "00000000-0000-4000-8000-000000000130" }),
       }),
     );
@@ -172,12 +172,12 @@ describe("POST /runner/v1/heartbeat route", () => {
 
     expect(response.status).toBe(status);
     expect(body.error.code).toBe(code);
-    expect(JSON.stringify(body)).not.toContain("agb_run_secret");
+    expect(JSON.stringify(body)).not.toContain("bruno_run_secret");
   });
 
   it.each([
     ["missing authorization", undefined],
-    ["malformed authorization", "Basic agb_run_secret"],
+    ["malformed authorization", "Basic bruno_run_secret"],
   ])("returns safe 401 before parsing malformed JSON with %s", async (_label, authorization) => {
     const { POST } = await import("@/app/runner/v1/heartbeat/route");
 
@@ -198,7 +198,7 @@ describe("POST /runner/v1/heartbeat route", () => {
       },
     });
     expect(mocks.recordRunnerHeartbeat).not.toHaveBeenCalled();
-    expect(JSON.stringify(body)).not.toContain("agb_run_secret");
+    expect(JSON.stringify(body)).not.toContain("bruno_run_secret");
   });
 
   it("returns validation JSON for malformed request bodies", async () => {
@@ -207,7 +207,7 @@ describe("POST /runner/v1/heartbeat route", () => {
     const response = await POST(
       new Request("http://localhost/runner/v1/heartbeat", {
         method: "POST",
-        headers: { authorization: "Bearer agb_run_secret" },
+        headers: { authorization: "Bearer bruno_run_secret" },
         body: "{",
       }),
     );
@@ -231,7 +231,7 @@ describe("POST /runner/v1/heartbeat route", () => {
     const response = await POST(
       new Request("http://localhost/runner/v1/heartbeat", {
         method: "POST",
-        headers: { authorization: "Bearer agb_run_secret" },
+        headers: { authorization: "Bearer bruno_run_secret" },
         body: JSON.stringify({ runnerId: "00000000-0000-4000-8000-000000000130" }),
       }),
     );
@@ -245,6 +245,6 @@ describe("POST /runner/v1/heartbeat route", () => {
       },
     });
     expect(JSON.stringify(body)).not.toContain("postgres://");
-    expect(JSON.stringify(body)).not.toContain("agb_run_secret");
+    expect(JSON.stringify(body)).not.toContain("bruno_run_secret");
   });
 });

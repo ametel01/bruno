@@ -3,11 +3,11 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 const REGISTRY_ORIGIN = "https://ghcr.io";
-const REGISTRY_REPOSITORY = "ametel01/agentbay-hermes";
+const REGISTRY_REPOSITORY = "ametel01/bruno-hermes";
 const REGISTRY_AUTH_URL = "https://ghcr.io/token";
 const REGISTRY_SERVICE = "ghcr.io";
 const REGISTRY_SCOPE = `repository:${REGISTRY_REPOSITORY}:pull`;
-const IMAGE_REFERENCE_PATTERN = /^ghcr\.io\/ametel01\/agentbay-hermes@(sha256:[0-9a-f]{64})$/;
+const IMAGE_REFERENCE_PATTERN = /^ghcr\.io\/ametel01\/bruno-hermes@(sha256:[0-9a-f]{64})$/;
 const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const SOURCE_REVISION_PATTERN = /^[0-9a-f]{40}$/;
 const EXPECTED_SOURCE = "https://github.com/ametel01/bruno";

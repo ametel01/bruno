@@ -36,7 +36,7 @@ export function createAppLogger(
 ): AppLogger {
   const configuredLevel =
     options.level ??
-    process.env.AGENTBAY_LOG_LEVEL ??
+    process.env.BRUNO_LOG_LEVEL ??
     (process.env.NODE_ENV === "test" ? "silent" : undefined);
   const logger = pino(
     {
@@ -297,7 +297,7 @@ function redactSensitiveText(value: string): string {
       `$1=${LOG_REDACTION_CENSOR}`,
     )
     .replace(/\b(?:dop_v1_|sk-)[A-Za-z0-9._~+/=-]+/gi, LOG_REDACTION_CENSOR)
-    .replace(/\bagb_(?:reg|run)_[A-Za-z0-9._~+/=-]+/gi, LOG_REDACTION_CENSOR);
+    .replace(/\bbruno_(?:reg|run)_[A-Za-z0-9._~+/=-]+/gi, LOG_REDACTION_CENSOR);
 }
 
 function toSafeString(value: unknown): string {

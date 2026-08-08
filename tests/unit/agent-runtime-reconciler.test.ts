@@ -29,7 +29,7 @@ const DEPLOYMENT_ID = "00000000-0000-4000-8000-000000009301";
 const OPERATION_ID = "00000000-0000-4000-8000-000000009401";
 const REVISION = "cfg-runtime-9";
 const CUSTOM_HERMES_IMAGE =
-  "ghcr.io/ametel01/agentbay-hermes@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  "ghcr.io/ametel01/bruno-hermes@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 const runner: ManualRunnerRecord = {
   id: RUNNER_ID,

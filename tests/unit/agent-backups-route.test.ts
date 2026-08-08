@@ -57,7 +57,7 @@ describe("POST /api/agents/[agentId]/backups route", () => {
     });
     expect(JSON.stringify(body)).not.toContain("storageUri");
     expect(JSON.stringify(body)).not.toContain("s3://");
-    expect(JSON.stringify(body)).not.toContain("agentbay-backups");
+    expect(JSON.stringify(body)).not.toContain("bruno-backups");
     expect(JSON.stringify(body)).not.toContain("manifestJson");
     expect(mocks.createManualBackupForUser).toHaveBeenCalledWith({
       agentId: ACTIVE_AGENT_ID,
@@ -110,7 +110,7 @@ describe("POST /api/agents/[agentId]/backups route", () => {
     });
     expect(JSON.stringify(body)).not.toContain("storageUri");
     expect(JSON.stringify(body)).not.toContain("s3://");
-    expect(JSON.stringify(body)).not.toContain("agentbay-backups");
+    expect(JSON.stringify(body)).not.toContain("bruno-backups");
   });
 });
 
@@ -122,7 +122,7 @@ function backupDto(status: "ready" | "failed") {
     status,
     storageUri:
       status === "ready"
-        ? "s3://agentbay-backups/agents/00000000-0000-4000-8000-000000000165/backups/00000000-0000-4000-8000-000000000265.json"
+        ? "s3://bruno-backups/agents/00000000-0000-4000-8000-000000000165/backups/00000000-0000-4000-8000-000000000265.json"
         : null,
     createdAt: "2026-07-06T04:30:00.000Z",
     restoredAt: null,

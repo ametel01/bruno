@@ -18,8 +18,8 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import { agentConfigs, agentEvents, agentLogs, backups } from "@/src/server/db/schema";
 
 const KEYRING_ENV = {
-  AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
-  AGENTBAY_AGENT_SECRET_KEYS_JSON: JSON.stringify({
+  BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
+  BRUNO_AGENT_SECRET_KEYS_JSON: JSON.stringify({
     v1: Buffer.alloc(32, 23).toString("base64url"),
   }),
 };
@@ -38,7 +38,7 @@ describe("manual agent backup creation", () => {
   });
 
   it("uploads a sanitized manual backup manifest, records a ready backup, and writes backup.created", async () => {
-    const storage = new FakeBackupObjectStorage("agentbay-backups");
+    const storage = new FakeBackupObjectStorage("bruno-backups");
     const created = await createAgentForDevelopmentUser(
       {
         name: "Manual Backup Agent",
@@ -93,7 +93,7 @@ describe("manual agent backup creation", () => {
         agentId: created.agent.id,
         status: "ready",
         storageUri: expect.stringMatching(
-          /^s3:\/\/agentbay-backups\/users\/.+\/agents\/.+\/backups\/.+\.json$/,
+          /^s3:\/\/bruno-backups\/users\/.+\/agents\/.+\/backups\/.+\.json$/,
         ),
       },
       event: { type: BACKUP_CREATED_EVENT_TYPE },
@@ -179,7 +179,7 @@ describe("manual agent backup creation", () => {
     expect(artifact).toMatchObject({
       ok: true,
       storageUri: result.backup.storageUri,
-      contentType: "application/vnd.agentbay.backup-manifest+json",
+      contentType: "application/vnd.bruno.backup-manifest+json",
     });
 
     if (!artifact.ok) {

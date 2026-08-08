@@ -11,7 +11,7 @@ const SECRET_REDACTION_RULES: Array<[RegExp, string]> = [
   [/\bsk-ant-[A-Za-z0-9_-]+\b/g, "[redacted-anthropic-key]"],
   [/\bsk-(?!or-v1-|ant-)[A-Za-z0-9_-]+\b/g, "[redacted-openai-key]"],
   [/\b\d{6,}:[A-Za-z0-9_-]{20,}\b/g, "[redacted-telegram-token]"],
-  [/\bagb_(?:agent|reg|run)_[A-Za-z0-9_-]+\b/g, "[redacted-agentbay-token]"],
+  [/\bbruno_(?:agent|reg|run)_[A-Za-z0-9_-]+\b/g, "[redacted-bruno-token]"],
   [/(authorization\s*[:=]\s*Bearer\s+)[^\s,;]+/gi, "$1[redacted-bearer-token]"],
   [/(Bearer\s+)[A-Za-z0-9._~+/=-]{16,}/g, "$1[redacted-bearer-token]"],
   [
@@ -19,7 +19,7 @@ const SECRET_REDACTION_RULES: Array<[RegExp, string]> = [
     "$1=[redacted-env-value]",
   ],
   [/([?&](?:api[_-]?key|authorization|key|secret|token)=)[^&\s]+/gi, "$1[redacted-url-secret]"],
-  [/agentbay-secret-canary-[A-Za-z0-9_-]+/g, "[redacted-secret-canary]"],
+  [/bruno-secret-canary-[A-Za-z0-9_-]+/g, "[redacted-secret-canary]"],
 ];
 
 export function redactSecretText(value: string): string {

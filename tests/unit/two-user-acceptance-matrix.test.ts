@@ -67,7 +67,7 @@ describe("two-user acceptance evidence matrix", () => {
     expect(matrix).toContain("sanitized `clerk doctor --json` gate passed");
     expect(matrix).toContain("Hosted smoke still requires a supported browser");
     expect(matrix).toContain("not hosted provider-flow success");
-    expect(matrix).not.toMatch(/(?:pk_test|sk_test|agb_reg|agb_run)_[A-Za-z0-9_-]{16,}/);
+    expect(matrix).not.toMatch(/(?:pk_test|sk_test|bruno_reg|bruno_run)_[A-Za-z0-9_-]{16,}/);
     expect(matrix).not.toMatch(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
   });
 
@@ -75,7 +75,7 @@ describe("two-user acceptance evidence matrix", () => {
     [
       "explicit local development",
       {
-        AGENTBAY_AUTH_MODE: "development",
+        BRUNO_AUTH_MODE: "development",
         NEXT_PUBLIC_APP_URL: "http://127.0.0.1:3139",
       },
       "on-first-retry",
@@ -88,7 +88,7 @@ describe("two-user acceptance evidence matrix", () => {
     [
       "explicit Clerk",
       {
-        AGENTBAY_AUTH_MODE: "clerk",
+        BRUNO_AUTH_MODE: "clerk",
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "synthetic-publishable-presence",
         CLERK_SECRET_KEY: "synthetic-secret-presence",
       },
@@ -114,7 +114,7 @@ describe("two-user acceptance evidence matrix", () => {
     [
       "disallowed development on a hosted domain",
       {
-        AGENTBAY_AUTH_MODE: "development",
+        BRUNO_AUTH_MODE: "development",
         NEXT_PUBLIC_APP_URL: "https://hosted.example.test",
       },
       "off",
@@ -122,7 +122,7 @@ describe("two-user acceptance evidence matrix", () => {
     [
       "invalid explicit mode",
       {
-        AGENTBAY_AUTH_MODE: "unexpected",
+        BRUNO_AUTH_MODE: "unexpected",
         NEXT_PUBLIC_APP_URL: "http://localhost:3139",
       },
       "off",

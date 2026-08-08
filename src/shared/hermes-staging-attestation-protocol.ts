@@ -34,7 +34,7 @@ export function createHermesStagingAttestationChallenge(input: {
   }
 
   const challengeId = deterministicUuid(`${CHALLENGE_DOMAIN}:${input.runId}:${input.purpose}`);
-  const text = `bruno Hermes ${input.purpose === "initial" ? "initial" : "post-restart"} acceptance ${challengeId}`;
+  const text = `Bruno Hermes ${input.purpose === "initial" ? "initial" : "post-restart"} acceptance ${challengeId}`;
   return {
     purpose: input.purpose,
     challengeId,

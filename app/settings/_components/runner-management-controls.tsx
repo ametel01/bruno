@@ -168,7 +168,7 @@ export function RunnerRegistrationTokenControls({
           ? body.registrationToken.expiresAt
           : "";
 
-      if (!token.startsWith("agb_reg_") || !expiresAt) {
+      if (!token.startsWith("bruno_reg_") || !expiresAt) {
         setState({
           status: "error",
           message: "Registration token could not be displayed safely.",
@@ -273,7 +273,7 @@ export function RunnerCredentialControls({ runnerId, runnerName }: RunnerCredent
       const rotatedAt =
         typeof body.credential?.rotatedAt === "string" ? body.credential.rotatedAt : "";
 
-      if (!token.startsWith("agb_run_") || !rotatedAt) {
+      if (!token.startsWith("bruno_run_") || !rotatedAt) {
         setRotateState({
           status: "error",
           message: "Runner credential could not be displayed safely.",

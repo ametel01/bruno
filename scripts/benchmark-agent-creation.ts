@@ -124,19 +124,19 @@ function assertDigitalOceanBenchmarkAuthorized(
     options.trials <= 0 ||
     !options.providerAuthorized ||
     options.candidateSizeSlugs.length === 0 ||
-    env.AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION !==
+    env.BRUNO_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION !==
       DIGITALOCEAN_AUTHORIZATION_SENTINEL
   ) {
     throw new Error(
-      `DigitalOcean benchmark mode is fail-closed. It requires --trials N, --authorize-provider-costs, --candidate-size-slugs slug[,slug], and AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION=${DIGITALOCEAN_AUTHORIZATION_SENTINEL}.`,
+      `DigitalOcean benchmark mode is fail-closed. It requires --trials N, --authorize-provider-costs, --candidate-size-slugs slug[,slug], and BRUNO_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION=${DIGITALOCEAN_AUTHORIZATION_SENTINEL}.`,
     );
   }
 }
 
 function assertLocalDockerBenchmarkIsolation(env: Record<string, string | undefined>): void {
   if (
-    env.AGENTBAY_DIGITALOCEAN_PROVIDER_MODE !== "local_docker" ||
-    env.AGENTBAY_DIGITALOCEAN_TOKEN !== "local-docker" ||
+    env.BRUNO_DIGITALOCEAN_PROVIDER_MODE !== "local_docker" ||
+    env.BRUNO_DIGITALOCEAN_TOKEN !== "local-docker" ||
     env[LOCAL_AGENT_SMOKE_MODE_ENV] !== LOCAL_AGENT_SMOKE_MODE_VALUE
   ) {
     throw new Error(

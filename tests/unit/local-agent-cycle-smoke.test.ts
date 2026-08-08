@@ -16,21 +16,21 @@ describe("local full agent-cycle smoke", () => {
   it("accepts only the zero-cloud provider sentinel", () => {
     expect(() =>
       assertLocalAgentCycleIsolation({
-        AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
-        AGENTBAY_DIGITALOCEAN_TOKEN: "local-docker",
+        BRUNO_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
+        BRUNO_DIGITALOCEAN_TOKEN: "local-docker",
         [LOCAL_AGENT_SMOKE_MODE_ENV]: LOCAL_AGENT_SMOKE_MODE_VALUE,
       }),
     ).not.toThrow();
 
     for (const env of [
       {
-        AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "digitalocean",
-        AGENTBAY_DIGITALOCEAN_TOKEN: "local-docker",
+        BRUNO_DIGITALOCEAN_PROVIDER_MODE: "digitalocean",
+        BRUNO_DIGITALOCEAN_TOKEN: "local-docker",
         [LOCAL_AGENT_SMOKE_MODE_ENV]: LOCAL_AGENT_SMOKE_MODE_VALUE,
       },
       {
-        AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
-        AGENTBAY_DIGITALOCEAN_TOKEN: "dop_v1_live",
+        BRUNO_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
+        BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_live",
         [LOCAL_AGENT_SMOKE_MODE_ENV]: LOCAL_AGENT_SMOKE_MODE_VALUE,
       },
     ]) {
@@ -42,18 +42,18 @@ describe("local full agent-cycle smoke", () => {
     expect(resolveLocalAgentCycleSizeSlug({})).toBe("s-1vcpu-2gb");
     expect(
       resolveLocalAgentCycleSizeSlug({
-        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: " s-1vcpu-2gb ",
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: " s-1vcpu-2gb ",
       }),
     ).toBe("s-1vcpu-2gb");
 
     expect(() =>
       resolveLocalAgentCycleSizeSlug({
-        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-2vcpu-4gb",
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-2vcpu-4gb",
       }),
     ).toThrow(/supported managed-runner size slug/);
     expect(() =>
       resolveLocalAgentCycleSizeSlug({
-        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "toString",
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: "toString",
       }),
     ).toThrow(/supported managed-runner size slug/);
   });
@@ -63,16 +63,16 @@ describe("local full agent-cycle smoke", () => {
     expect(
       resolveLocalAgentSmokeMode({
         [LOCAL_AGENT_SMOKE_MODE_ENV]: LOCAL_AGENT_SMOKE_MODE_VALUE,
-        AGENTBAY_APP_URL: "http://host.docker.internal:3000",
-        AGENTBAY_RUNNER_ENDPOINT_URL: "http://127.0.0.1:3045",
+        BRUNO_APP_URL: "http://host.docker.internal:3000",
+        BRUNO_RUNNER_ENDPOINT_URL: "http://127.0.0.1:3045",
       }),
     ).toMatchObject({ enabled: true });
 
     expect(() =>
       resolveLocalAgentSmokeMode({
         [LOCAL_AGENT_SMOKE_MODE_ENV]: LOCAL_AGENT_SMOKE_MODE_VALUE,
-        AGENTBAY_APP_URL: "https://bruno.example.com",
-        AGENTBAY_RUNNER_ENDPOINT_URL: "http://host.docker.internal:3045",
+        BRUNO_APP_URL: "https://bruno.example.com",
+        BRUNO_RUNNER_ENDPOINT_URL: "http://host.docker.internal:3045",
       }),
     ).toThrow(/isolated local HTTP URL/);
   });
@@ -109,18 +109,18 @@ describe("local full agent-cycle smoke", () => {
     const compose = await readFile(join(process.cwd(), "compose.yaml"), "utf8");
 
     expect(packageJson.scripts["local:agent:smoke"]).toContain(
-      "AGENTBAY_DIGITALOCEAN_PROVIDER_MODE=local_docker",
+      "BRUNO_DIGITALOCEAN_PROVIDER_MODE=local_docker",
     );
     expect(packageJson.scripts["local:agent:smoke"]).toContain(
-      "AGENTBAY_DIGITALOCEAN_TOKEN=local-docker",
+      "BRUNO_DIGITALOCEAN_TOKEN=local-docker",
     );
     expect(source).toContain("createAgentForUser");
     expect(source).toContain("reconcileTargetAgentDeployment");
     expect(source).toContain("buildAgentCreationLatencyReportForDatabase");
-    expect(source).toContain("AGENTBAY_LOCAL_AGENT_CYCLE_APP_HOST_PORT");
-    expect(source).toContain("AGENTBAY_APP_HOST_PORT: String(APP_HOST_PORT)");
+    expect(source).toContain("BRUNO_LOCAL_AGENT_CYCLE_APP_HOST_PORT");
+    expect(source).toContain("BRUNO_APP_HOST_PORT: String(APP_HOST_PORT)");
     expect(source).toContain('DEFAULT_LOCAL_AGENT_CYCLE_SIZE_SLUG = "s-1vcpu-2gb"');
-    expect(source).toContain("AGENTBAY_DIGITALOCEAN_SIZE_SLUG: selectedSizeSlug");
+    expect(source).toContain("BRUNO_DIGITALOCEAN_SIZE_SLUG: selectedSizeSlug");
     expect(source).toContain("sizeSlug: config.sizeSlug");
     expect(source).toContain("resourceProfile: {");
     expect(source).toContain("memoryMiB: resourceProfile.memoryMiB");
@@ -161,13 +161,13 @@ describe("local full agent-cycle smoke", () => {
       compose.indexOf("bun run local:cloud:prepare"),
     );
     expect(compose).toMatch(/NEXT_PUBLIC_APP_URL: \$\{NEXT_PUBLIC_APP_URL:-/);
-    expect(compose).toMatch(/"\$\{AGENTBAY_APP_HOST_PORT:-3000\}:3000"/);
+    expect(compose).toMatch(/"\$\{BRUNO_APP_HOST_PORT:-3000\}:3000"/);
     expect(compose).toMatch(
-      /AGENTBAY_DIGITALOCEAN_SIZE_SLUG: \$\{AGENTBAY_DIGITALOCEAN_SIZE_SLUG:-s-1vcpu-2gb\}/,
+      /BRUNO_DIGITALOCEAN_SIZE_SLUG: \$\{BRUNO_DIGITALOCEAN_SIZE_SLUG:-s-1vcpu-2gb\}/,
     );
     expect(compose).toContain("platform: linux/amd64");
-    expect(compose).toContain("AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION");
-    expect(compose).toContain("AGENTBAY_AGENT_SECRET_KEYS_JSON");
-    expect(compose).toContain("AGENTBAY_HERMES_WORKLOAD_IMAGE");
+    expect(compose).toContain("BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION");
+    expect(compose).toContain("BRUNO_AGENT_SECRET_KEYS_JSON");
+    expect(compose).toContain("BRUNO_HERMES_WORKLOAD_IMAGE");
   });
 });

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const BASE_DATABASE_URL =
-  process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
+  process.env.DATABASE_URL ?? "postgres://bruno:bruno@127.0.0.1:54329/bruno";
 const CREATED_DATABASES: string[] = [];
 
 describe("agent deployment migration fixtures", () => {
@@ -184,7 +184,7 @@ describe("agent deployment migration fixtures", () => {
           user_id, name, kind, endpoint_url, provisioning_operation_key
         ) values (
           ${owner.id}, 'manual-key-blocked', 'manual_vps', 'http://127.0.0.1:3045',
-          'agentbay-deploy-11111111111141118111111111111111'
+          'bruno-deploy-11111111111141118111111111111111'
         )
       `).rejects.toMatchObject({ constraint_name: "runners_provisioning_operation_key_check" });
       await expect(sql`
@@ -194,7 +194,7 @@ describe("agent deployment migration fixtures", () => {
         ) values (
           ${owner.id}, 'automatic-cloud-runner', 'digitalocean', 'digitalocean', 'sfo3',
           's-1vcpu-512mb-10gb', 'ubuntu-24-04-x64', 'pending',
-          'agentbay-deploy-11111111111141118111111111111111'
+          'bruno-deploy-11111111111141118111111111111111'
         )
       `).resolves.toBeDefined();
     } finally {

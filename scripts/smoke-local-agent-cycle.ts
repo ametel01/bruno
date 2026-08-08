@@ -50,29 +50,26 @@ import { ManualRunnerAdapter } from "@/src/server/runners/manual-runner-adapter"
 import type { ManualRunnerRecord } from "@/src/server/runners/manual-runner-persistence";
 import { createConfiguredDigitalOceanProvider } from "@/src/server/runners/runner-provisioning";
 
-const COMPOSE_PROJECT = "agentbay-agent-smoke";
+const COMPOSE_PROJECT = "bruno-agent-smoke";
 const DASHBOARD_CONTAINER = `${COMPOSE_PROJECT}-dashboard-1`;
 const APP_HOST_PORT = readPositiveInteger(
-  process.env.AGENTBAY_LOCAL_AGENT_CYCLE_APP_HOST_PORT,
+  process.env.BRUNO_LOCAL_AGENT_CYCLE_APP_HOST_PORT,
   55_300,
 );
 const POSTGRES_HOST_PORT = readPositiveInteger(
-  process.env.AGENTBAY_LOCAL_AGENT_CYCLE_POSTGRES_HOST_PORT,
+  process.env.BRUNO_LOCAL_AGENT_CYCLE_POSTGRES_HOST_PORT,
   55_432,
 );
-const DATABASE_URL = `postgres://agentbay:agentbay@127.0.0.1:${POSTGRES_HOST_PORT}/bruno`;
+const DATABASE_URL = `postgres://bruno:bruno@127.0.0.1:${POSTGRES_HOST_PORT}/bruno`;
 const APP_URL = `http://host.docker.internal:${APP_HOST_PORT}`;
 const RUNNER_ENDPOINT_URL = "http://host.docker.internal:3045";
-const TIMEOUT_MS = readPositiveInteger(
-  process.env.AGENTBAY_LOCAL_AGENT_CYCLE_TIMEOUT_MS,
-  12 * 60_000,
-);
-const POLL_MS = readPositiveInteger(process.env.AGENTBAY_LOCAL_AGENT_CYCLE_POLL_MS, 1_000);
+const TIMEOUT_MS = readPositiveInteger(process.env.BRUNO_LOCAL_AGENT_CYCLE_TIMEOUT_MS, 12 * 60_000);
+const POLL_MS = readPositiveInteger(process.env.BRUNO_LOCAL_AGENT_CYCLE_POLL_MS, 1_000);
 const SECRET_KEY = Buffer.alloc(32, 73).toString("base64url");
 const DEFAULT_LOCAL_AGENT_CYCLE_SIZE_SLUG = "s-1vcpu-2gb";
 const MANAGED_CONTAINER_NAMES = [
   LOCAL_DOCKER_DROPLET_CONTAINER_NAME,
-  "agentbay-runner",
+  "bruno-runner",
   LOCAL_AGENT_SMOKE_FAKE_MODEL_CONTAINER,
   DASHBOARD_CONTAINER,
   `${COMPOSE_PROJECT}-postgres-1`,
@@ -112,8 +109,8 @@ export type LocalAgentCycleSmokeSummary = {
 
 export function assertLocalAgentCycleIsolation(env: Record<string, string | undefined>): void {
   if (
-    env.AGENTBAY_DIGITALOCEAN_PROVIDER_MODE !== "local_docker" ||
-    env.AGENTBAY_DIGITALOCEAN_TOKEN !== "local-docker" ||
+    env.BRUNO_DIGITALOCEAN_PROVIDER_MODE !== "local_docker" ||
+    env.BRUNO_DIGITALOCEAN_TOKEN !== "local-docker" ||
     env[LOCAL_AGENT_SMOKE_MODE_ENV] !== LOCAL_AGENT_SMOKE_MODE_VALUE
   ) {
     throw new Error(
@@ -420,7 +417,7 @@ async function listAgentContainersInsideDroplet(
     "ps",
     ...(includeStopped ? ["--all"] : []),
     "--filter",
-    `label=agentbay.agent_id=${agentId}`,
+    `label=bruno.agent_id=${agentId}`,
     "--format",
     "{{.Names}}",
   ]);
@@ -685,7 +682,7 @@ async function printFailureDiagnostics(): Promise<void> {
       LOCAL_DOCKER_DROPLET_CONTAINER_NAME,
       "sh",
       "-lc",
-      "docker ps -a; docker logs --tail 80 agentbay-runner 2>&1; tail -n 80 /var/log/agentbay-local-dockerd.log",
+      "docker ps -a; docker logs --tail 80 bruno-runner 2>&1; tail -n 80 /var/log/bruno-local-dockerd.log",
     ],
     { allowFailure: true },
   );
@@ -744,7 +741,7 @@ async function prepareNestedImageBundle(): Promise<void> {
       "save",
       "--output",
       LOCAL_AGENT_SMOKE_IMAGE_BUNDLE_PATH,
-      "agentbay-runner:local",
+      "bruno-runner:local",
       DEFAULT_LOCAL_HERMES_IMAGE,
       "busybox:1.36",
     ],
@@ -766,7 +763,7 @@ async function listLabeledAgentContainers(): Promise<string[]> {
     "ps",
     "--all",
     "--filter",
-    "label=agentbay.agent_id",
+    "label=bruno.agent_id",
     "--format",
     "{{.Names}}",
   ]);
@@ -790,7 +787,7 @@ async function assertNoAgentContainers(agentId: string): Promise<void> {
     "ps",
     "--all",
     "--filter",
-    `label=agentbay.agent_id=${agentId}`,
+    `label=bruno.agent_id=${agentId}`,
     "--format",
     "{{.ID}}",
   ]);
@@ -802,7 +799,7 @@ async function cleanupAgentContainers(agentId: string): Promise<void> {
     "ps",
     "--all",
     "--filter",
-    `label=agentbay.agent_id=${agentId}`,
+    `label=bruno.agent_id=${agentId}`,
     "--format",
     "{{.ID}}",
   ]);
@@ -820,7 +817,7 @@ async function cleanupLabeledAgentContainers(): Promise<void> {
     "ps",
     "--all",
     "--filter",
-    "label=agentbay.agent_id",
+    "label=bruno.agent_id",
     "--format",
     "{{.ID}}",
   ]);
@@ -840,30 +837,30 @@ function buildSmokeEnv(env: Record<string, string | undefined>): Record<string, 
     ...Object.fromEntries(
       Object.entries(env).filter((entry): entry is [string, string] => !!entry[1]),
     ),
-    AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "local-smoke-v1",
-    AGENTBAY_AGENT_SECRET_KEYS_JSON: JSON.stringify({ "local-smoke-v1": SECRET_KEY }),
-    AGENTBAY_AUTH_MODE: "development",
-    AGENTBAY_APP_HOST_PORT: String(APP_HOST_PORT),
-    AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
-    AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS: "none",
-    AGENTBAY_DIGITALOCEAN_TOKEN: "local-docker",
-    AGENTBAY_DIGITALOCEAN_SIZE_SLUG: selectedSizeSlug,
-    AGENTBAY_HERMES_PRIVATE_NETWORK: "agentbay-hermes",
-    AGENTBAY_HERMES_WORKLOAD_IMAGE: DEFAULT_LOCAL_HERMES_IMAGE,
-    AGENTBAY_LOCAL_AGENT_SMOKE_MODE: LOCAL_AGENT_SMOKE_MODE_VALUE,
-    AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: RUNNER_ENDPOINT_URL,
-    AGENTBAY_LOCAL_CLOUD_RUNNER_START_DELAY_MS: "100",
-    AGENTBAY_POSTGRES_HOST_PORT: String(POSTGRES_HOST_PORT),
-    AGENTBAY_READY_AGENT_CREATION_ENABLED: "true",
-    AGENTBAY_RUNNER_BEARER_TOKEN: "local-runner-command-token",
-    AGENTBAY_RUNNER_IMAGE: "agentbay-runner:local",
+    BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION: "local-smoke-v1",
+    BRUNO_AGENT_SECRET_KEYS_JSON: JSON.stringify({ "local-smoke-v1": SECRET_KEY }),
+    BRUNO_AUTH_MODE: "development",
+    BRUNO_APP_HOST_PORT: String(APP_HOST_PORT),
+    BRUNO_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
+    BRUNO_DIGITALOCEAN_SSH_KEY_IDS: "none",
+    BRUNO_DIGITALOCEAN_TOKEN: "local-docker",
+    BRUNO_DIGITALOCEAN_SIZE_SLUG: selectedSizeSlug,
+    BRUNO_HERMES_PRIVATE_NETWORK: "bruno-hermes",
+    BRUNO_HERMES_WORKLOAD_IMAGE: DEFAULT_LOCAL_HERMES_IMAGE,
+    BRUNO_LOCAL_AGENT_SMOKE_MODE: LOCAL_AGENT_SMOKE_MODE_VALUE,
+    BRUNO_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: RUNNER_ENDPOINT_URL,
+    BRUNO_LOCAL_CLOUD_RUNNER_START_DELAY_MS: "100",
+    BRUNO_POSTGRES_HOST_PORT: String(POSTGRES_HOST_PORT),
+    BRUNO_READY_AGENT_CREATION_ENABLED: "true",
+    BRUNO_RUNNER_BEARER_TOKEN: "local-runner-command-token",
+    BRUNO_RUNNER_IMAGE: "bruno-runner:local",
     DATABASE_URL,
     NEXT_PUBLIC_APP_URL: APP_URL,
   };
 }
 
 export function resolveLocalAgentCycleSizeSlug(env: Record<string, string | undefined>): string {
-  const requestedSizeSlug = env.AGENTBAY_DIGITALOCEAN_SIZE_SLUG?.trim();
+  const requestedSizeSlug = env.BRUNO_DIGITALOCEAN_SIZE_SLUG?.trim();
   const selectedSizeSlug = requestedSizeSlug || DEFAULT_LOCAL_AGENT_CYCLE_SIZE_SLUG;
 
   if (!findDigitalOceanRunnerResourceProfile(selectedSizeSlug)) {

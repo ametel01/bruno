@@ -3637,7 +3637,7 @@
         },
         "runner_infrastructure_orphans_operation_check": {
           "name": "runner_infrastructure_orphans_operation_check",
-          "value": "\"runner_infrastructure_orphans\".\"operation_tag\" ~ '^agentbay-deploy-[0-9a-f]{32}$'"
+          "value": "\"runner_infrastructure_orphans\".\"operation_tag\" ~ '^bruno-deploy-[0-9a-f]{32}$'"
         },
         "runner_infrastructure_orphans_firewall_check": {
           "name": "runner_infrastructure_orphans_firewall_check",
@@ -4358,7 +4358,7 @@
         },
         "runner_replacements_operation_key_check": {
           "name": "runner_replacements_operation_key_check",
-          "value": "\"runner_replacements\".\"operation_key\" ~ '^agentbay-replace-[0-9a-f]{32}$'"
+          "value": "\"runner_replacements\".\"operation_key\" ~ '^bruno-replace-[0-9a-f]{32}$'"
         },
         "runner_replacements_generation_check": {
           "name": "runner_replacements_generation_check",
@@ -4828,7 +4828,7 @@
         },
         "runners_provisioning_operation_key_check": {
           "name": "runners_provisioning_operation_key_check",
-          "value": "\"runners\".\"provisioning_operation_key\" IS NULL OR (\"runners\".\"kind\" = 'digitalocean' AND \"runners\".\"provisioning_operation_key\" ~ '^agentbay-deploy-[0-9a-f]{32}$')"
+          "value": "\"runners\".\"provisioning_operation_key\" IS NULL OR (\"runners\".\"kind\" = 'digitalocean' AND \"runners\".\"provisioning_operation_key\" ~ '^bruno-deploy-[0-9a-f]{32}$')"
         },
         "runners_required_runner_image_digest_check": {
           "name": "runners_required_runner_image_digest_check",

@@ -100,10 +100,10 @@ describe("POST /api/runners route", () => {
       name: "DigitalOcean Runner",
     });
     expect(JSON.stringify(body)).not.toContain("registrationToken");
-    expect(JSON.stringify(body)).not.toContain("agb_reg_");
-    expect(JSON.stringify(body)).not.toContain("agb_run_");
+    expect(JSON.stringify(body)).not.toContain("bruno_reg_");
+    expect(JSON.stringify(body)).not.toContain("bruno_run_");
     expect(JSON.stringify(body)).not.toContain("credentialHash");
-    expect(JSON.stringify(body)).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN");
+    expect(JSON.stringify(body)).not.toContain("BRUNO_DIGITALOCEAN_TOKEN");
   });
 
   it("returns duplicate create runner state safely", async () => {
@@ -143,7 +143,7 @@ describe("POST /api/runners route", () => {
     mocks.createDigitalOceanRunnerForUser.mockRejectedValueOnce(
       new mocks.RunnerProvisioningPersistenceError({
         code: "ECONNREFUSED",
-        message: "postgres://user:pass@localhost/db agb_reg_should_not_render",
+        message: "postgres://user:pass@localhost/db bruno_reg_should_not_render",
       }),
     );
     const { POST } = await import("@/app/api/runners/route");
@@ -166,6 +166,6 @@ describe("POST /api/runners route", () => {
       },
     });
     expect(JSON.stringify(body)).not.toContain("postgres://");
-    expect(JSON.stringify(body)).not.toContain("agb_reg_should_not_render");
+    expect(JSON.stringify(body)).not.toContain("bruno_reg_should_not_render");
   });
 });

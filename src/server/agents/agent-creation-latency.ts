@@ -869,7 +869,7 @@ async function readDeploymentEvidence(
      and a.user_id = d.user_id
     left join runners operation_runner
       on operation_runner.user_id = d.user_id
-     and operation_runner.provisioning_operation_key = concat('agentbay-deploy-', replace(d.id::text, '-', ''))
+     and operation_runner.provisioning_operation_key = concat('bruno-deploy-', replace(d.id::text, '-', ''))
     where ${deploymentFilter}
     order by d.created_at desc, d.id desc
     limit ${limit}
@@ -960,5 +960,5 @@ async function readRunnerEvents(
 }
 
 function toProvisioningOperationKey(operationId: string): string {
-  return `agentbay-deploy-${operationId.replaceAll("-", "")}`;
+  return `bruno-deploy-${operationId.replaceAll("-", "")}`;
 }

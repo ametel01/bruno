@@ -214,7 +214,7 @@ async function seedOperationalPageUsers(connection: DatabaseConnection): Promise
       processLog(LOG_B_ID, AGENT_B_ID, MANUAL_RUNNER_B_ID, "B-ONLY-PROCESS-LOG"),
     ]);
 
-  const storage = new FakeBackupObjectStorage("agentbay-page-isolation");
+  const storage = new FakeBackupObjectStorage("bruno-page-isolation");
   for (const input of [
     { userId: USER_A_ID, agentId: AGENT_A_ID },
     { userId: USER_B_ID, agentId: AGENT_B_ID },

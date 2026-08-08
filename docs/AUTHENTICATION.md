@@ -1,6 +1,6 @@
 # Authentication modes
 
-AgentBay resolves one server-only `AGENTBAY_AUTH_MODE` policy before browser requests reach the
+Bruno resolves one server-only `BRUNO_AUTH_MODE` policy before browser requests reach the
 application user resolver. Request hosts and forwarded headers never select the mode.
 
 Browser runner settings and APIs resolve that configured application user once, then scope runner
@@ -30,7 +30,7 @@ runner-credential contracts and never use Clerk:
 - `/runner/v1/heartbeat`
 - `/runner/v1/bootstrap-events`
 
-Set `AGENTBAY_AUTH_MODE=development` when an explicit local mode is preferable. Blank, whitespace,
+Set `BRUNO_AUTH_MODE=development` when an explicit local mode is preferable. Blank, whitespace,
 case-variant, or unknown values fail closed. Explicit development mode on a non-Vercel loopback or
 `host.docker.internal` URL does not activate the Basic-auth prompt even when a production operator
 password is present in a local ignored environment file. `bun run local:up` and the local cloud
@@ -42,8 +42,8 @@ A Vercel production deployment may temporarily use the shared development user w
 authentication only when both settings are explicit:
 
 ```dotenv
-AGENTBAY_AUTH_MODE=development
-AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT=true
+BRUNO_AUTH_MODE=development
+BRUNO_ALLOW_PUBLIC_DEVELOPMENT=true
 ```
 
 This exception is accepted only when `VERCEL_ENV=production` and `NEXT_PUBLIC_APP_URL` is a valid
@@ -54,7 +54,7 @@ runner lifecycle credentials.
 Public development exposes every browser page and app-side API—including agent lifecycle,
 runner provisioning, credential rotation, backups, and approval controls—to anyone who can reach
 the deployment. Use it only for a temporary development environment. Remove
-`AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT` and switch back to `operator` or `clerk` before sharing the
+`BRUNO_ALLOW_PUBLIC_DEVELOPMENT` and switch back to `operator` or `clerk` before sharing the
 deployment or using production data and cloud credentials.
 
 ## Operator mode
@@ -63,8 +63,8 @@ Until the production Clerk cutover is complete, an existing production deploymen
 shared internal user only behind the Basic-auth operator gate:
 
 ```dotenv
-AGENTBAY_AUTH_MODE=operator
-AGENTBAY_OPERATOR_PASSWORD=replace-with-strong-operator-password
+BRUNO_AUTH_MODE=operator
+BRUNO_OPERATOR_PASSWORD=replace-with-strong-operator-password
 ```
 
 Operator mode is explicit and fails closed when the password is absent or blank. It does not enable
@@ -78,7 +78,7 @@ Production, `getbruno.xyz`, Vercel production, and any current custom applicatio
 the temporary `operator` mode above or, after cutover:
 
 ```dotenv
-AGENTBAY_AUTH_MODE=clerk
+BRUNO_AUTH_MODE=clerk
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=replace-with-development-publishable-key
 CLERK_SECRET_KEY=replace-with-development-secret-key
 ```
@@ -93,8 +93,8 @@ The safe default for previews is Clerk mode. A registration-free Vercel preview 
 when all of these are true:
 
 1. `VERCEL_ENV=preview` and the configured application hostname matches the current `VERCEL_URL`.
-2. `AGENTBAY_AUTH_MODE=development` is explicit.
-3. `AGENTBAY_PREVIEW_PROTECTION_VERIFIED=true` is exact.
+2. `BRUNO_AUTH_MODE=development` is explicit.
+3. `BRUNO_PREVIEW_PROTECTION_VERIFIED=true` is exact.
 4. An operator has verified through the Vercel project API that Deployment Protection requires SSO
    and that no preview exceptions, share links, or automation-bypass paths expose the deployment.
 

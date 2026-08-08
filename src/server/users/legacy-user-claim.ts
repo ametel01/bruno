@@ -109,7 +109,7 @@ async function claimLegacyUserInTransaction(
     apply: boolean;
   },
 ): Promise<LegacyUserClaimResult> {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('agentbay:legacy-user-claim'))`);
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('bruno:legacy-user-claim'))`);
   await lockClerkUserId(tx, input.clerkUserId);
 
   const [[mappedUser], legacyCandidates] = await Promise.all([

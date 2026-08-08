@@ -549,11 +549,11 @@ describe.sequential("runner placement contract", () => {
           readConfig: () => ({
             token: "fake-provider-token",
             runnerBearerToken: "fake-runner-token",
-            runnerImage: "agentbay-runner:test",
+            runnerImage: "bruno-runner:test",
             region: "sfo3",
             sizeSlug: "s-1vcpu-512mb-10gb",
             image: "ubuntu-24-04-x64",
-            tags: ["agentbay"],
+            tags: ["bruno"],
           }),
         },
       ),

@@ -1,10 +1,10 @@
 FROM nousresearch/hermes-agent:v2026.7.7.2@sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973
 
-LABEL org.opencontainers.image.title="AgentBay Hermes workload"
-LABEL org.opencontainers.image.description="Pinned Hermes Agent workload image for one AgentBay-managed agent."
-LABEL org.opencontainers.image.source="https://github.com/ametel01/agentbay"
+LABEL org.opencontainers.image.title="Bruno Hermes workload"
+LABEL org.opencontainers.image.description="Pinned Hermes Agent workload image for one Bruno-managed agent."
+LABEL org.opencontainers.image.source="https://github.com/ametel01/bruno"
 LABEL org.opencontainers.image.base.name="docker.io/nousresearch/hermes-agent:v2026.7.7.2"
 LABEL org.opencontainers.image.base.digest="sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973"
-LABEL io.agentbay.hermes.version="v0.18.2"
-LABEL io.agentbay.hermes.release="v2026.7.7.2"
-LABEL io.agentbay.hermes.amd64-manifest="sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a"
+LABEL io.bruno.hermes.version="v0.18.2"
+LABEL io.bruno.hermes.release="v2026.7.7.2"
+LABEL io.bruno.hermes.amd64-manifest="sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a"

@@ -980,7 +980,7 @@ async function beginManagedRunnerRecovery(
         sourceRunnerId,
         triggerDeploymentId: work.id,
         reason: verifiedReason,
-        operationKey: `agentbay-replace-${(dependencies.randomUUID?.() ?? randomUUID()).replaceAll(
+        operationKey: `bruno-replace-${(dependencies.randomUUID?.() ?? randomUUID()).replaceAll(
           "-",
           "",
         )}`,
@@ -1482,7 +1482,7 @@ async function initializeProvisioningRunner(
     .insert(runners)
     .values({
       userId: work.userId,
-      name: "bruno Deployment Runner",
+      name: "Bruno Deployment Runner",
       kind: DIGITALOCEAN_RUNNER_KIND,
       status: "provisioning",
       provider: DIGITALOCEAN_PROVIDER,
@@ -2490,7 +2490,7 @@ function requiresStartConvergence(
 }
 
 function provisioningOperationKeyForDeployment(deploymentId: string): string {
-  return `agentbay-deploy-${deploymentId.replaceAll("-", "").toLowerCase()}`;
+  return `bruno-deploy-${deploymentId.replaceAll("-", "").toLowerCase()}`;
 }
 
 async function defaultProvisioner(

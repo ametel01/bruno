@@ -3,7 +3,7 @@
 Runner-image publication, disposable-Droplet canary requirements, gradual promotion, and
 artifact-backed rollback are documented in [Runner releases](RUNNER_RELEASES.md).
 
-AgentBay keeps two distinct Playwright gates. Both use the unchanged desktop and mobile projects in `playwright.config.ts`.
+Bruno keeps two distinct Playwright gates. Both use the unchanged desktop and mobile projects in `playwright.config.ts`.
 
 ## Agent creation latency benchmark
 
@@ -62,15 +62,15 @@ Default mode is read-only and does not create, mutate, clean up, or contact prov
 Local Docker mode requires the exact zero-cloud sentinels used by `local:agent:smoke`:
 
 ```bash
-AGENTBAY_DIGITALOCEAN_PROVIDER_MODE=local_docker \
-AGENTBAY_DIGITALOCEAN_TOKEN=local-docker \
-AGENTBAY_LOCAL_AGENT_SMOKE_MODE=synthetic-external-boundaries \
+BRUNO_DIGITALOCEAN_PROVIDER_MODE=local_docker \
+BRUNO_DIGITALOCEAN_TOKEN=local-docker \
+BRUNO_LOCAL_AGENT_SMOKE_MODE=synthetic-external-boundaries \
 bun run agent:creation:benchmark -- --mode local_docker
 ```
 
 DigitalOcean-driving benchmark mode is fail-closed. It requires an explicit positive trial count,
 the `--authorize-provider-costs` flag, explicit `--candidate-size-slugs` values, and
-`AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION=authorize-digitalocean-agent-creation-benchmark`.
+`BRUNO_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION=authorize-digitalocean-agent-creation-benchmark`.
 Ordinary CI must not run that mode. Provider-backed ready-within-60 acceptance is owned by the
 final SLO proof step after operator authorization; this read-only benchmark records evidence but
 does not claim live provider acceptance by itself.
@@ -118,14 +118,14 @@ The optional gate requires these capability names, supplied only through the loc
 - `CLERK_PUBLISHABLE_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`;
 - `CLERK_SECRET_KEY` for the app and Clerk setup; an optional pre-created
   `CLERK_TESTING_TOKEN` may be supplied to reuse a testing token; and
-- `AGENTBAY_OPERATOR_USERNAME` and `AGENTBAY_OPERATOR_PASSWORD` for the
+- `BRUNO_OPERATOR_USERNAME` and `BRUNO_OPERATOR_PASSWORD` for the
   development Basic-auth shell, which remains enabled until production cutover; and
 - `E2E_CLERK_TEST_USER_A_EMAIL` and `E2E_CLERK_TEST_USER_B_EMAIL`, both approved development
   `+clerk_test` identities.
 
 Its sanitized preflight reports missing capability names and exits before starting the app or
 browser. Playwright supplies the operator credentials only as in-memory HTTP credentials scoped
-to the local AgentBay origin, so the test can reach the protected development pages without
+to the local Bruno origin, so the test can reach the protected development pages without
 sending Basic credentials to Clerk's cross-origin requests; they are never printed or persisted.
 The package script pins both Playwright and Next.js to the same `localhost` port because Next.js
 16's development render proxy resolves that hostname internally; keep the script's loopback
@@ -154,13 +154,13 @@ bun run verify:e2e
 local verification. `test:e2e` remains the canonical, unfiltered Playwright suite, while
 `verify:e2e` runs the base gate before it. Before Playwright starts, the launcher validates the
 same configuration contract used by `readDigitalOceanProviderConfig`. At minimum, both
-`AGENTBAY_DIGITALOCEAN_TOKEN` and `AGENTBAY_RUNNER_BEARER_TOKEN` must be nonblank; any optional
+`BRUNO_DIGITALOCEAN_TOKEN` and `BRUNO_RUNNER_BEARER_TOKEN` must be nonblank; any optional
 provider settings must also be valid. The preflight reports only capability and variable names,
 never configured values.
 
 With the default `digitalocean` mode, the full suite may create and delete billable provider resources. Use an approved development account with usable network, image, SSH, and runner prerequisites. Do not use synthetic values for a real full-suite run.
 
-For local Docker validation, set `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE=local_docker` and prepare the repository's local cloud-runner stack and its required runner token, image, endpoint, container, and Docker prerequisites. The same provider parser validates local-mode settings before Playwright starts.
+For local Docker validation, set `BRUNO_DIGITALOCEAN_PROVIDER_MODE=local_docker` and prepare the repository's local cloud-runner stack and its required runner token, image, endpoint, container, and Docker prerequisites. The same provider parser validates local-mode settings before Playwright starts.
 
 An unconfigured or invalid full-suite run exits once with the sanitized capability message before any browser or provider-backed scenario begins. This fail-fast result does not replace provider-backed acceptance: use `test:e2e:ci` for the credential-free CI surface and run `test:e2e` whenever full provider capability is available and required.
 
@@ -182,40 +182,40 @@ flag resumes cleanup from the database ledger rather than relying on a local
 
 The preflight requires these capability names:
 
-- `AGENTBAY_HERMES_STAGING_PUBLISHED_IMAGE_REF`: scanned GHCR release-candidate
+- `BRUNO_HERMES_STAGING_PUBLISHED_IMAGE_REF`: scanned GHCR release-candidate
   Hermes workload image as the exact untagged
-  `ghcr.io/ametel01/agentbay-hermes@sha256:...` linux/amd64 manifest. This must
+  `ghcr.io/ametel01/bruno-hermes@sha256:...` linux/amd64 manifest. This must
   be the published artifact, not the upstream source-pinned digest or an OCI
   index.
-- `AGENTBAY_HERMES_WORKLOAD_IMAGE`: the exact same untagged digest. Deployment
+- `BRUNO_HERMES_WORKLOAD_IMAGE`: the exact same untagged digest. Deployment
   and runtime reconciliation use this configured image.
-- `AGENTBAY_HERMES_STAGING_IMAGE_SOURCE_REVISION`: lowercase 40-hex source
+- `BRUNO_HERMES_STAGING_IMAGE_SOURCE_REVISION`: lowercase 40-hex source
   revision embedded in the image config.
-- `AGENTBAY_HERMES_STAGING_PUBLISH_WORKFLOW_RUN_ID`: positive safe-integer ID of
+- `BRUNO_HERMES_STAGING_PUBLISH_WORKFLOW_RUN_ID`: positive safe-integer ID of
   the successful completed main-branch publish workflow run.
-- `AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED`: exact value `true` during the
+- `BRUNO_HERMES_STAGING_ACCEPTANCE_ENABLED`: exact value `true` during the
   authorized window. `false` or unset prevents forward work but does not stop
   cleanup reconciliation for an existing run.
-- `AGENTBAY_HERMES_STAGING_ACCEPTANCE_BASE_URL`: exact HTTPS origin ending in
+- `BRUNO_HERMES_STAGING_ACCEPTANCE_BASE_URL`: exact HTTPS origin ending in
   `/`, with no credentials, path, query, or fragment.
-- `AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET`: dedicated 32–256 character
+- `BRUNO_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET`: dedicated 32–256 character
   bearer-safe secret distinct from cron, runner, and operator authorities.
-- `AGENTBAY_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION`: exact value
+- `BRUNO_HERMES_STAGING_DIGITALOCEAN_BUDGET_AUTHORIZATION`: exact value
   `authorize-basic-4usd-digitalocean-staging`.
-- `AGENTBAY_DIGITALOCEAN_TOKEN`: DigitalOcean staging token for the approved
+- `BRUNO_DIGITALOCEAN_TOKEN`: DigitalOcean staging token for the approved
   account.
-- `AGENTBAY_RUNNER_BEARER_TOKEN`: staging runner command bearer credential.
-- `AGENTBAY_HERMES_STAGING_ASSISTANT`: exactly `chatgpt` or `claude`.
-- The matching direct model key: `AGENTBAY_HERMES_STAGING_OPENAI_API_KEY` for
-  ChatGPT or `AGENTBAY_HERMES_STAGING_ANTHROPIC_API_KEY` for Claude. Configure
+- `BRUNO_RUNNER_BEARER_TOKEN`: staging runner command bearer credential.
+- `BRUNO_HERMES_STAGING_ASSISTANT`: exactly `chatgpt` or `claude`.
+- The matching direct model key: `BRUNO_HERMES_STAGING_OPENAI_API_KEY` for
+  ChatGPT or `BRUNO_HERMES_STAGING_ANTHROPIC_API_KEY` for Claude. Configure
   exactly one. API usage is billed separately from consumer subscriptions.
-- `AGENTBAY_HERMES_STAGING_TELEGRAM_BOT_TOKEN`: dedicated staging Telegram bot
+- `BRUNO_HERMES_STAGING_TELEGRAM_BOT_TOKEN`: dedicated staging Telegram bot
   token. Do not reuse a bot that is active elsewhere.
-- `AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_USER_ID`: numeric allowed Telegram test
+- `BRUNO_HERMES_STAGING_TELEGRAM_TEST_USER_ID`: numeric allowed Telegram test
   user identifier.
-- `AGENTBAY_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID`: numeric Telegram chat
+- `BRUNO_HERMES_STAGING_TELEGRAM_TEST_CHAT_ID`: numeric Telegram chat
   identifier for the live smoke.
-- `AGENTBAY_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION`: exact value
+- `BRUNO_HERMES_STAGING_LIVE_SIDE_EFFECT_CONFIRMATION`: exact value
   `send-telegram-and-spend-digitalocean-staging`.
 
 The command reports only capability names, configured/missing/malformed state,
@@ -232,7 +232,7 @@ sentinel value is a blocker, not a passing smoke.
    prompts for a staging-only name and username, and copy the resulting token
    directly into an ignored local or hosted secret store. Bot creation,
    privacy-mode changes, and Telegram account management are not automated by
-   AgentBay. If the token is exposed, revoke it in BotFather before continuing.
+   Bruno. If the token is exposed, revoke it in BotFather before continuing.
 2. Ensure no other running agent, gateway, webhook, or polling process uses that
    bot. Ready-mode creation rejects a token fingerprint already active for
    another agent, and concurrent polling with one token is unsupported.
@@ -296,7 +296,7 @@ identifiers; never manually delete an uncertain resource merely to make the
 report green.
 
 Only after this live run passes may the controlled environment set
-`AGENTBAY_READY_AGENT_CREATION_ENABLED=true`. Roll back by setting it to `false`
+`BRUNO_READY_AGENT_CREATION_ENABLED=true`. Roll back by setting it to `false`
 or removing it and redeploying; this disables the common setup UI. The stopped-create API remains
 only as a legacy operator compatibility path. Stop existing agents explicitly because disabling
 the flag does not change their persisted desired state.

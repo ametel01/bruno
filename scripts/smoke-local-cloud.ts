@@ -64,7 +64,7 @@ export type LocalCloudSmokeSummary = {
 
 const FAKE_RUNNER_IMAGE_DIGEST = `sha256:${"9".repeat(64)}`;
 const FAKE_RUNNER_RELEASE_VERSION = "sha-local-smoke";
-const FAKE_RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:${FAKE_RUNNER_RELEASE_VERSION}@${FAKE_RUNNER_IMAGE_DIGEST}`;
+const FAKE_RUNNER_IMAGE = `ghcr.io/ametel01/bruno-runner:${FAKE_RUNNER_RELEASE_VERSION}@${FAKE_RUNNER_IMAGE_DIGEST}`;
 
 type RuntimeFault =
   | "healthy"
@@ -77,9 +77,9 @@ type RuntimeFault =
   | "telegram-fatal";
 
 export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
-  process.env.DATABASE_URL ??= "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
+  process.env.DATABASE_URL ??= "postgres://bruno:bruno@127.0.0.1:54329/bruno";
   process.env.NEXT_PUBLIC_APP_URL ??= "http://127.0.0.1:3000";
-  process.env.AGENTBAY_RUNNER_IMAGE ??= FAKE_RUNNER_IMAGE;
+  process.env.BRUNO_RUNNER_IMAGE ??= FAKE_RUNNER_IMAGE;
   const connections = Array.from({ length: 4 }, () => createDatabaseConnection());
   const inspection = createDatabaseConnection();
   const runtimeConnection = (index: number): DatabaseConnection => {
@@ -153,7 +153,7 @@ export async function smokeLocalCloud(): Promise<LocalCloudSmokeSummary> {
         runner,
         response: {
           ok: true as const,
-          contractVersion: "agentbay.runner.canary.v1" as const,
+          contractVersion: "bruno.runner.canary.v1" as const,
           agentId,
           action: "canary" as const,
           operationId: runtimeOperationId,
@@ -688,7 +688,7 @@ function fakeProviderConfig(): DigitalOceanProviderConfig {
     region: "sfo3",
     sizeSlug: "s-1vcpu-1gb",
     image: "ubuntu-24-04-x64",
-    tags: ["agentbay", "local-fake"],
+    tags: ["bruno", "local-fake"],
     sshKeyIds: ["52830696"],
     sshSourceAddresses: ["203.0.113.5/32"],
   };
@@ -734,7 +734,7 @@ function buildFakeLaunchSpec(agentId: string, configRevision: string): AgentLaun
       modelApiKey: "sk-localfakesmoke12345678901234567890",
       telegramBotToken: "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ12",
       telegramAllowedUsers: ["1"],
-      apiServerKey: `agb_agent_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`,
+      apiServerKey: `bruno_agent_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`,
     },
   };
 }

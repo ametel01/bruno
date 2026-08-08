@@ -139,12 +139,12 @@ function createFixture(options: FixtureOptions = {}) {
 
     if (
       requestUrl ===
-      "https://ghcr.io/token?service=ghcr.io&scope=repository%3Aametel01%2Fagentbay-hermes%3Apull"
+      "https://ghcr.io/token?service=ghcr.io&scope=repository%3Aametel01%2Fbruno-hermes%3Apull"
     ) {
       return Response.json({ token: TOKEN });
     }
 
-    if (requestUrl === `https://ghcr.io/v2/ametel01/agentbay-hermes/manifests/${releaseDigest}`) {
+    if (requestUrl === `https://ghcr.io/v2/ametel01/bruno-hermes/manifests/${releaseDigest}`) {
       if (options.requireAuth && !challenged) {
         challenged = true;
         return new Response(null, {
@@ -152,7 +152,7 @@ function createFixture(options: FixtureOptions = {}) {
           headers: {
             "www-authenticate":
               options.authChallenge ??
-              'Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:ametel01/agentbay-hermes:pull"',
+              'Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:ametel01/bruno-hermes:pull"',
           },
         });
       }
@@ -164,7 +164,7 @@ function createFixture(options: FixtureOptions = {}) {
 
     if (
       !options.directManifest &&
-      requestUrl === `https://ghcr.io/v2/ametel01/agentbay-hermes/manifests/${manifestDigest}`
+      requestUrl === `https://ghcr.io/v2/ametel01/bruno-hermes/manifests/${manifestDigest}`
     ) {
       return jsonResponse(manifestBody, {
         contentType: manifestMediaType,
@@ -172,7 +172,7 @@ function createFixture(options: FixtureOptions = {}) {
       });
     }
 
-    if (requestUrl === `https://ghcr.io/v2/ametel01/agentbay-hermes/blobs/${configDigest}`) {
+    if (requestUrl === `https://ghcr.io/v2/ametel01/bruno-hermes/blobs/${configDigest}`) {
       return jsonResponse(configBody, {
         contentType: "application/octet-stream",
         contentDigest: configDigest,
@@ -189,7 +189,7 @@ function createFixture(options: FixtureOptions = {}) {
   }) as typeof fetch;
 
   const input: AttestHermesStagingPublishedImageInput = {
-    canonicalRef: `ghcr.io/ametel01/agentbay-hermes@${releaseDigest}`,
+    canonicalRef: `ghcr.io/ametel01/bruno-hermes@${releaseDigest}`,
     sourceRevision: SOURCE_REVISION,
     workflowRunId: WORKFLOW_RUN_ID,
     signal: new AbortController().signal,
@@ -220,11 +220,11 @@ describe("Hermes staging published-image attestor", () => {
       workflowRunId: WORKFLOW_RUN_ID,
     });
     expect(fixture.calls.map(({ url }) => url)).toEqual([
-      `https://ghcr.io/v2/ametel01/agentbay-hermes/manifests/${fixture.releaseDigest}`,
-      "https://ghcr.io/token?service=ghcr.io&scope=repository%3Aametel01%2Fagentbay-hermes%3Apull",
-      `https://ghcr.io/v2/ametel01/agentbay-hermes/manifests/${fixture.releaseDigest}`,
-      `https://ghcr.io/v2/ametel01/agentbay-hermes/manifests/${fixture.manifestDigest}`,
-      expect.stringContaining("https://ghcr.io/v2/ametel01/agentbay-hermes/blobs/"),
+      `https://ghcr.io/v2/ametel01/bruno-hermes/manifests/${fixture.releaseDigest}`,
+      "https://ghcr.io/token?service=ghcr.io&scope=repository%3Aametel01%2Fbruno-hermes%3Apull",
+      `https://ghcr.io/v2/ametel01/bruno-hermes/manifests/${fixture.releaseDigest}`,
+      `https://ghcr.io/v2/ametel01/bruno-hermes/manifests/${fixture.manifestDigest}`,
+      expect.stringContaining("https://ghcr.io/v2/ametel01/bruno-hermes/blobs/"),
       `https://api.github.com/repos/ametel01/bruno/actions/runs/${WORKFLOW_RUN_ID}`,
     ]);
 
@@ -279,7 +279,7 @@ describe("Hermes staging published-image attestor", () => {
     const fixture = createFixture({
       requireAuth: true,
       authChallenge:
-        'Bearer scope="repository:ametel01/agentbay-hermes:pull",realm="https://ghcr.io/token",service="ghcr.io"',
+        'Bearer scope="repository:ametel01/bruno-hermes:pull",realm="https://ghcr.io/token",service="ghcr.io"',
     });
     await expect(
       attestHermesStagingPublishedImage(fixture.input, { fetchImpl: fixture.fetchImpl }),
@@ -291,22 +291,22 @@ describe("Hermes staging published-image attestor", () => {
 
     for (const input of [
       {
-        canonicalRef: `ghcr.io/ametel01/agentbay-hermes:staging@sha256:${"a".repeat(64)}`,
+        canonicalRef: `ghcr.io/ametel01/bruno-hermes:staging@sha256:${"a".repeat(64)}`,
         sourceRevision: SOURCE_REVISION,
         workflowRunId: WORKFLOW_RUN_ID,
       },
       {
-        canonicalRef: `ghcr.io/other/agentbay-hermes@sha256:${"a".repeat(64)}`,
+        canonicalRef: `ghcr.io/other/bruno-hermes@sha256:${"a".repeat(64)}`,
         sourceRevision: SOURCE_REVISION,
         workflowRunId: WORKFLOW_RUN_ID,
       },
       {
-        canonicalRef: `ghcr.io/ametel01/agentbay-hermes@sha256:${"a".repeat(64)}`,
+        canonicalRef: `ghcr.io/ametel01/bruno-hermes@sha256:${"a".repeat(64)}`,
         sourceRevision: "A".repeat(40),
         workflowRunId: WORKFLOW_RUN_ID,
       },
       {
-        canonicalRef: `ghcr.io/ametel01/agentbay-hermes@sha256:${"a".repeat(64)}`,
+        canonicalRef: `ghcr.io/ametel01/bruno-hermes@sha256:${"a".repeat(64)}`,
         sourceRevision: SOURCE_REVISION,
         workflowRunId: 0,
       },
@@ -361,7 +361,7 @@ describe("Hermes staging published-image attestor", () => {
     const challengeFixture = createFixture({
       requireAuth: true,
       authChallenge:
-        'Bearer realm="https://tokens.evil.example/token",service="ghcr.io",scope="repository:ametel01/agentbay-hermes:pull"',
+        'Bearer realm="https://tokens.evil.example/token",service="ghcr.io",scope="repository:ametel01/bruno-hermes:pull"',
     });
     await expect(
       attestHermesStagingPublishedImage(challengeFixture.input, {
@@ -403,7 +403,7 @@ describe("Hermes staging published-image attestor", () => {
     const body = "{";
     const releaseDigest = digest(body);
     const input: AttestHermesStagingPublishedImageInput = {
-      canonicalRef: `ghcr.io/ametel01/agentbay-hermes@${releaseDigest}`,
+      canonicalRef: `ghcr.io/ametel01/bruno-hermes@${releaseDigest}`,
       sourceRevision: SOURCE_REVISION,
       workflowRunId: WORKFLOW_RUN_ID,
       signal: new AbortController().signal,

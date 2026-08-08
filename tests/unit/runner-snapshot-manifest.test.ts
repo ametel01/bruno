@@ -15,8 +15,8 @@ import {
 
 const RUNNER_DIGEST = `sha256:${"a".repeat(64)}`;
 const AGENT_DIGEST = `sha256:${"b".repeat(64)}`;
-const RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:abc123@${RUNNER_DIGEST}`;
-const AGENT_IMAGE = `ghcr.io/ametel01/agentbay-default:abc123@${AGENT_DIGEST}`;
+const RUNNER_IMAGE = `ghcr.io/ametel01/bruno-runner:abc123@${RUNNER_DIGEST}`;
+const AGENT_IMAGE = `ghcr.io/ametel01/bruno-default:abc123@${AGENT_DIGEST}`;
 const NOW = new Date("2026-08-07T00:00:00.000Z");
 const SOURCE_REVISION = "1".repeat(40);
 
@@ -253,7 +253,7 @@ function manifest(): RunnerSnapshotManifest {
     schemaVersion: "bruno.runner.snapshot.v1",
     snapshot: {
       id: "1102",
-      name: "agentbay-snapshot-builder-111111111111",
+      name: "bruno-snapshot-builder-111111111111",
       regions: ["sfo3"],
       minDiskSizeGb: 25,
       architecture: "amd64",

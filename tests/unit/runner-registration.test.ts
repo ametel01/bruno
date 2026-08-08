@@ -43,7 +43,7 @@ describe.sequential("runner registration service", () => {
       now: () => new Date("2026-07-05T08:00:00.000Z"),
     });
 
-    expect(result.registrationToken.token).toMatch(/^agb_reg_/);
+    expect(result.registrationToken.token).toMatch(/^bruno_reg_/);
     expect(result.registrationToken.prefix).toBe(result.registrationToken.token.slice(0, 16));
     expect(result.registrationToken.expiresAt).toBe("2026-07-05T08:15:00.000Z");
 
@@ -78,7 +78,7 @@ describe.sequential("runner registration service", () => {
       .select({ userId: runnerRegistrationTokens.userId })
       .from(runnerRegistrationTokens);
 
-    expect(result.registrationToken.token).toMatch(/^agb_reg_/);
+    expect(result.registrationToken.token).toMatch(/^bruno_reg_/);
     expect(persistedTokens).toEqual([{ userId: owner.id }]);
     expect(persistedTokens).not.toContainEqual({ userId: foreignUser.id });
   });
@@ -107,7 +107,7 @@ describe.sequential("runner registration service", () => {
         id: expect.any(String),
       },
       credential: {
-        token: expect.stringMatching(/^agb_run_/),
+        token: expect.stringMatching(/^bruno_run_/),
         prefix: expect.any(String),
       },
     });
@@ -148,9 +148,9 @@ describe.sequential("runner registration service", () => {
 
   it("fails safely for missing, malformed, wrong-prefix, unknown, expired, revoked, and used tokens", async () => {
     await expectExchangeReason("   ", "missing_registration_token");
-    await expectExchangeReason("agb_reg_short", "malformed_registration_token");
+    await expectExchangeReason("bruno_reg_short", "malformed_registration_token");
     await expectExchangeReason(
-      "agb_run_1234567890123456789012345678901234567890123",
+      "bruno_run_1234567890123456789012345678901234567890123",
       "wrong_registration_token_prefix",
     );
     await expectExchangeReason(createRunnerRegistrationToken().value, "unknown_registration_token");
@@ -274,7 +274,7 @@ describe.sequential("runner registration service", () => {
         id: cloudRunner.id,
       },
       credential: {
-        token: expect.stringMatching(/^agb_run_/),
+        token: expect.stringMatching(/^bruno_run_/),
         prefix: expect.any(String),
       },
     });

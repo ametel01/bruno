@@ -22,7 +22,7 @@ describe("Hermes setup session route", () => {
           session: {
             id: "00000000-0000-4000-8000-000000000789",
             websocketPath: "/runner/v1/hermes-setup-sessions/00000000-0000-4000-8000-000000000789",
-            websocketProtocol: "agentbay.hermes.setup.one-time-token",
+            websocketProtocol: "bruno.hermes.setup.one-time-token",
             expiresAt: "2026-07-14T06:00:00.000Z",
           },
         },
@@ -42,7 +42,7 @@ describe("Hermes setup session route", () => {
           ok: true,
           secrets: [activeApiServerKeyStatus()],
         }),
-        env: { AGENTBAY_RUNNER_BEARER_TOKEN: "runner-control-token" },
+        env: { BRUNO_RUNNER_BEARER_TOKEN: "runner-control-token" },
         fetch: fetchRunner as typeof fetch,
       },
     );
@@ -54,7 +54,7 @@ describe("Hermes setup session route", () => {
         id: "00000000-0000-4000-8000-000000000789",
         websocketUrl:
           "wss://runner.example.com/runner/v1/hermes-setup-sessions/00000000-0000-4000-8000-000000000789",
-        websocketProtocol: "agentbay.hermes.setup.one-time-token",
+        websocketProtocol: "bruno.hermes.setup.one-time-token",
         expiresAt: "2026-07-14T06:00:00.000Z",
       },
     });
@@ -77,7 +77,7 @@ describe("Hermes setup session route", () => {
         getAssignedRunner: async () => sampleRunner(),
         listSecretStatuses: async () => ({ ok: true, secrets: [] }),
         generateApiServerKey,
-        env: { AGENTBAY_RUNNER_BEARER_TOKEN: "runner-control-token" },
+        env: { BRUNO_RUNNER_BEARER_TOKEN: "runner-control-token" },
         fetch: async () =>
           Response.json(
             {
@@ -86,7 +86,7 @@ describe("Hermes setup session route", () => {
                 id: "00000000-0000-4000-8000-000000000789",
                 websocketPath:
                   "/runner/v1/hermes-setup-sessions/00000000-0000-4000-8000-000000000789",
-                websocketProtocol: "agentbay.hermes.setup.one-time-token",
+                websocketProtocol: "bruno.hermes.setup.one-time-token",
                 expiresAt: "2026-07-14T06:00:00.000Z",
               },
             },

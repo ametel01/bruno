@@ -8,9 +8,9 @@ const SYNTHETIC_SECRET_KEY = ["sk", "test", "synthetic"].join("_");
 
 describe("real Clerk SDK proxy configuration", () => {
   const originalEnv = {
-    AGENTBAY_AUTH_MODE: process.env.AGENTBAY_AUTH_MODE,
-    AGENTBAY_OPERATOR_PASSWORD: process.env.AGENTBAY_OPERATOR_PASSWORD,
-    AGENTBAY_PREVIEW_PROTECTION_VERIFIED: process.env.AGENTBAY_PREVIEW_PROTECTION_VERIFIED,
+    BRUNO_AUTH_MODE: process.env.BRUNO_AUTH_MODE,
+    BRUNO_OPERATOR_PASSWORD: process.env.BRUNO_OPERATOR_PASSWORD,
+    BRUNO_PREVIEW_PROTECTION_VERIFIED: process.env.BRUNO_PREVIEW_PROTECTION_VERIFIED,
     CLERK_ENCRYPTION_KEY: process.env.CLERK_ENCRYPTION_KEY,
     CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY,
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
@@ -23,12 +23,9 @@ describe("real Clerk SDK proxy configuration", () => {
   };
 
   afterEach(() => {
-    restoreEnv("AGENTBAY_AUTH_MODE", originalEnv.AGENTBAY_AUTH_MODE);
-    restoreEnv("AGENTBAY_OPERATOR_PASSWORD", originalEnv.AGENTBAY_OPERATOR_PASSWORD);
-    restoreEnv(
-      "AGENTBAY_PREVIEW_PROTECTION_VERIFIED",
-      originalEnv.AGENTBAY_PREVIEW_PROTECTION_VERIFIED,
-    );
+    restoreEnv("BRUNO_AUTH_MODE", originalEnv.BRUNO_AUTH_MODE);
+    restoreEnv("BRUNO_OPERATOR_PASSWORD", originalEnv.BRUNO_OPERATOR_PASSWORD);
+    restoreEnv("BRUNO_PREVIEW_PROTECTION_VERIFIED", originalEnv.BRUNO_PREVIEW_PROTECTION_VERIFIED);
     restoreEnv("CLERK_ENCRYPTION_KEY", originalEnv.CLERK_ENCRYPTION_KEY);
     restoreEnv("CLERK_SECRET_KEY", originalEnv.CLERK_SECRET_KEY);
     restoreEnv("NEXT_PUBLIC_APP_URL", originalEnv.NEXT_PUBLIC_APP_URL);
@@ -45,13 +42,13 @@ describe("real Clerk SDK proxy configuration", () => {
   });
 
   it("serves the public sign-in request with only standard publishable and secret keys", async () => {
-    process.env.AGENTBAY_AUTH_MODE = "clerk";
+    process.env.BRUNO_AUTH_MODE = "clerk";
     process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = SYNTHETIC_PUBLISHABLE_KEY;
     process.env.NEXT_PUBLIC_CLERK_TELEMETRY_DISABLED = "1";
     process.env.CLERK_SECRET_KEY = SYNTHETIC_SECRET_KEY;
     delete process.env.CLERK_ENCRYPTION_KEY;
-    delete process.env.AGENTBAY_OPERATOR_PASSWORD;
+    delete process.env.BRUNO_OPERATOR_PASSWORD;
     delete process.env.VERCEL;
     delete process.env.VERCEL_ENV;
     delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
@@ -65,17 +62,17 @@ describe("real Clerk SDK proxy configuration", () => {
   });
 
   it("uses complete standard Clerk keys for an unset Vercel preview", async () => {
-    delete process.env.AGENTBAY_AUTH_MODE;
-    process.env.NEXT_PUBLIC_APP_URL = "https://agentbay-git-feature.example.vercel.app";
+    delete process.env.BRUNO_AUTH_MODE;
+    process.env.NEXT_PUBLIC_APP_URL = "https://bruno-git-feature.example.vercel.app";
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = SYNTHETIC_PUBLISHABLE_KEY;
     process.env.NEXT_PUBLIC_CLERK_TELEMETRY_DISABLED = "1";
     process.env.CLERK_SECRET_KEY = SYNTHETIC_SECRET_KEY;
     delete process.env.CLERK_ENCRYPTION_KEY;
-    delete process.env.AGENTBAY_OPERATOR_PASSWORD;
+    delete process.env.BRUNO_OPERATOR_PASSWORD;
     process.env.VERCEL = "1";
     process.env.VERCEL_ENV = "preview";
     delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
-    process.env.VERCEL_URL = "agentbay-git-feature.example.vercel.app";
+    process.env.VERCEL_URL = "bruno-git-feature.example.vercel.app";
     vi.resetModules();
 
     const { proxy } = await import("@/proxy");
@@ -88,13 +85,13 @@ describe("real Clerk SDK proxy configuration", () => {
   });
 
   it("serves a local development request without Clerk keys or SDK network work", async () => {
-    process.env.AGENTBAY_AUTH_MODE = "development";
+    process.env.BRUNO_AUTH_MODE = "development";
     process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
     delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
     delete process.env.CLERK_SECRET_KEY;
     delete process.env.CLERK_ENCRYPTION_KEY;
-    delete process.env.AGENTBAY_OPERATOR_PASSWORD;
-    delete process.env.AGENTBAY_PREVIEW_PROTECTION_VERIFIED;
+    delete process.env.BRUNO_OPERATOR_PASSWORD;
+    delete process.env.BRUNO_PREVIEW_PROTECTION_VERIFIED;
     delete process.env.VERCEL;
     delete process.env.VERCEL_ENV;
     delete process.env.VERCEL_PROJECT_PRODUCTION_URL;

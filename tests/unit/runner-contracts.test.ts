@@ -16,15 +16,15 @@ const OPERATION_ID = "11111111-1111-4111-8111-111111111111";
 const OBSERVED_AT = "2026-08-03T04:30:00.000Z";
 const IMAGE_DIGEST = `sha256:${"a".repeat(64)}`;
 const OTHER_IMAGE_DIGEST = `sha256:${"b".repeat(64)}`;
-const IMAGE_REF = `ghcr.io/ametel01/agentbay-hermes:staging@${IMAGE_DIGEST}`;
-const IMAGE_REPO_DIGEST = `ghcr.io/ametel01/agentbay-hermes@${IMAGE_DIGEST}`;
+const IMAGE_REF = `ghcr.io/ametel01/bruno-hermes:staging@${IMAGE_DIGEST}`;
+const IMAGE_REPO_DIGEST = `ghcr.io/ametel01/bruno-hermes@${IMAGE_DIGEST}`;
 const IMAGE_ID = `sha256:${"c".repeat(64)}`;
 
 describe("runner contract parsers", () => {
   it("accepts exact launch/status/canary contracts", () => {
     const launch = {
       ok: true,
-      contractVersion: "agentbay.runner.launch.v2",
+      contractVersion: "bruno.runner.launch.v2",
       agentId: AGENT_ID,
       action: "start",
       operation: {
@@ -41,7 +41,7 @@ describe("runner contract parsers", () => {
     expect(
       parseRunnerStatus({
         ok: true,
-        contractVersion: "agentbay.runner.status.v3",
+        contractVersion: "bruno.runner.status.v3",
         agentId: AGENT_ID,
         action: "status",
         snapshot: durableSnapshot("ready", null),
@@ -50,7 +50,7 @@ describe("runner contract parsers", () => {
     expect(
       parseRunnerCanary({
         ok: true,
-        contractVersion: "agentbay.runner.canary.v1",
+        contractVersion: "bruno.runner.canary.v1",
         agentId: AGENT_ID,
         action: "canary",
         operationId: OPERATION_ID,
@@ -69,7 +69,7 @@ describe("runner contract parsers", () => {
     expect(
       parseRunnerStatus({
         ok: true,
-        contractVersion: "agentbay.runner.status.v3",
+        contractVersion: "bruno.runner.status.v3",
         agentId: AGENT_ID,
         action: "status",
         snapshot: { ...durableSnapshot("ready", null), extra: true },
@@ -78,7 +78,7 @@ describe("runner contract parsers", () => {
     expect(
       parseRunnerStatus({
         ok: true,
-        contractVersion: "agentbay.runner.status.v3",
+        contractVersion: "bruno.runner.status.v3",
         agentId: AGENT_ID,
         action: "status",
         snapshot: durableSnapshot("ready", "launch_accepted"),
@@ -87,7 +87,7 @@ describe("runner contract parsers", () => {
     expect(
       parseRunnerCanary({
         ok: true,
-        contractVersion: "agentbay.runner.canary.v1",
+        contractVersion: "bruno.runner.canary.v1",
         agentId: AGENT_ID,
         action: "canary",
         operationId: OPERATION_ID,
@@ -155,7 +155,7 @@ describe("runner contract parsers", () => {
     expect(
       parseRunnerStatus({
         ok: true,
-        contractVersion: "agentbay.runner.status.v3",
+        contractVersion: "bruno.runner.status.v3",
         agentId: AGENT_ID,
         action: "status",
         snapshot: invalidTimestamp,
@@ -170,7 +170,7 @@ describe("runner contract parsers", () => {
     expect(
       parseRunnerLaunchAccepted({
         ok: true,
-        contractVersion: "agentbay.runner.launch.v2",
+        contractVersion: "bruno.runner.launch.v2",
         agentId: AGENT_ID,
         action: "start",
         operation: {
@@ -188,7 +188,7 @@ describe("runner contract parsers", () => {
   it("normalizes old v2 status as explicit unknown durability evidence", () => {
     const parsed = parseRunnerStatus({
       ok: true,
-      contractVersion: "agentbay.runner.status.v2",
+      contractVersion: "bruno.runner.status.v2",
       agentId: AGENT_ID,
       action: "status",
       snapshot: snapshot("ready", null),
@@ -198,7 +198,7 @@ describe("runner contract parsers", () => {
       ok: true,
       response: {
         ok: true,
-        contractVersion: "agentbay.runner.status.v2",
+        contractVersion: "bruno.runner.status.v2",
         agentId: AGENT_ID,
         action: "status",
         snapshot: {
@@ -224,7 +224,7 @@ describe("runner contract parsers", () => {
     wrongPolicy.container.restartPolicy = { name: "always", maximumRetryCount: 0 };
     const parsedWrong = parseRunnerStatus({
       ok: true,
-      contractVersion: "agentbay.runner.status.v3",
+      contractVersion: "bruno.runner.status.v3",
       agentId: AGENT_ID,
       action: "status",
       snapshot: wrongPolicy,
@@ -238,7 +238,7 @@ describe("runner contract parsers", () => {
 
     const exact = parseRunnerStatus({
       ok: true,
-      contractVersion: "agentbay.runner.status.v3",
+      contractVersion: "bruno.runner.status.v3",
       agentId: AGENT_ID,
       action: "status",
       snapshot: durableSnapshot("ready", null),
@@ -266,7 +266,7 @@ describe("runner contract parsers", () => {
   it("fails staging attestation closed for old v3 while retaining normal ready compatibility", () => {
     const oldV3 = {
       ok: true,
-      contractVersion: "agentbay.runner.status.v3",
+      contractVersion: "bruno.runner.status.v3",
       agentId: AGENT_ID,
       action: "status",
       snapshot: durableSnapshot("ready", null),
@@ -287,7 +287,7 @@ describe("runner contract parsers", () => {
 
   it("reports only safe image mismatch codes", () => {
     const status = attestedStatus();
-    const otherRef = `ghcr.io/ametel01/agentbay-hermes:staging@${OTHER_IMAGE_DIGEST}`;
+    const otherRef = `ghcr.io/ametel01/bruno-hermes:staging@${OTHER_IMAGE_DIGEST}`;
     const wrongRepo = attestedStatus();
     wrongRepo.snapshot.container.imageIdentity = {
       imageId: IMAGE_ID,
@@ -401,7 +401,7 @@ describe("runner contract parsers", () => {
     expect(
       parseRunnerStatus({
         ok: true,
-        contractVersion: "agentbay.runner.status.v3",
+        contractVersion: "bruno.runner.status.v3",
         agentId: AGENT_ID,
         action: "status",
         snapshot: candidate,
@@ -419,7 +419,7 @@ describe("runner contract parsers", () => {
     expect(
       parseRunnerStatus({
         ok: true,
-        contractVersion: "agentbay.runner.status.v3",
+        contractVersion: "bruno.runner.status.v3",
         agentId: AGENT_ID,
         action: "status",
         snapshot: candidate,
@@ -436,7 +436,7 @@ describe("runner contract parsers", () => {
     expect(
       parseRunnerStatus({
         ok: true,
-        contractVersion: "agentbay.runner.status.v3",
+        contractVersion: "bruno.runner.status.v3",
         agentId: AGENT_ID,
         action: "status",
         snapshot: candidate,
@@ -448,7 +448,7 @@ describe("runner contract parsers", () => {
 function target() {
   return {
     image: "nousresearch/hermes-agent:test@sha256:abc",
-    launchSpecVersion: "agentbay.hermes.launch.v3",
+    launchSpecVersion: "bruno.hermes.launch.v3",
     configRevision: "cfg-1",
   };
 }
@@ -467,7 +467,7 @@ function snapshot(
     },
     container: {
       id: "container-001",
-      name: "agentbay-runner",
+      name: "bruno-runner",
       image: target().image,
       state: "running",
       startedAt: OBSERVED_AT,
@@ -516,7 +516,7 @@ function attestedStatus() {
     action: "start",
     target: {
       image: IMAGE_REF,
-      launchSpecVersion: "agentbay.hermes.launch.v3",
+      launchSpecVersion: "bruno.hermes.launch.v3",
       configRevision: "cfg-1",
     },
     acceptedAt: OBSERVED_AT,
@@ -529,7 +529,7 @@ function attestedStatus() {
 
   return {
     ok: true as const,
-    contractVersion: "agentbay.runner.status.v3" as const,
+    contractVersion: "bruno.runner.status.v3" as const,
     agentId: AGENT_ID,
     action: "status" as const,
     snapshot: value,

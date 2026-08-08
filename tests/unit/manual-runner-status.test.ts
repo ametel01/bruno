@@ -91,7 +91,7 @@ describe("manual runner status summaries", () => {
       latestHeartbeat: {
         status: "online",
         metadata: {
-          version: "agentbay-runner/1.2.3",
+          version: "bruno-runner/1.2.3",
           metrics: {
             maxAgents: 5,
             runningAgents: 2,
@@ -122,7 +122,7 @@ describe("manual runner status summaries", () => {
         diskUsedMb: 4096,
         diskTotalMb: 8192,
       }),
-      version: "agentbay-runner/1.2.3",
+      version: "bruno-runner/1.2.3",
       lastSeenAt: "2026-07-05T02:01:00.000Z",
       updatedAt: "2026-07-05T02:00:00.000Z",
     });
@@ -142,7 +142,7 @@ describe("manual runner status summaries", () => {
       latestHeartbeat: {
         status: "online",
         metadata: {
-          version: "agentbay-runner/1.0.0",
+          version: "bruno-runner/1.0.0",
         },
         observedAt: "2026-07-05T08:00:29.999Z",
       },
@@ -156,7 +156,7 @@ describe("manual runner status summaries", () => {
       latestHeartbeat: {
         status: "online",
         metadata: {
-          version: "agentbay-runner/1.0.0",
+          version: "bruno-runner/1.0.0",
         },
         observedAt: "2026-07-05T08:00:29.999Z",
       },
@@ -165,7 +165,7 @@ describe("manual runner status summaries", () => {
     expect(summary).toMatchObject({
       status: "offline",
       capacity: capacity(),
-      version: "agentbay-runner/1.0.0",
+      version: "bruno-runner/1.0.0",
       lastSeenAt: "2026-07-05T08:00:29.999Z",
     });
     expect(assigned).toMatchObject({
@@ -505,7 +505,7 @@ async function seedStaleManualRunner(
   await connection.db.insert(runnerHeartbeats).values({
     runnerId: runner.id,
     status: "online",
-    metadata: { version: "agentbay-runner/1.0.0" },
+    metadata: { version: "bruno-runner/1.0.0" },
     observedAt: staleObservedAt,
     createdAt: staleObservedAt,
   });

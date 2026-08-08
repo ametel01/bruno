@@ -32,7 +32,7 @@ describe("Milestone 15 backup restore acceptance evidence", () => {
   });
 
   it("creates, lists, restores, records timeline events, and excludes raw secrets from backup surfaces", async () => {
-    const storage = new FakeBackupObjectStorage("agentbay-backups");
+    const storage = new FakeBackupObjectStorage("bruno-backups");
     const original = await createAgentForDevelopmentUser(
       {
         name: "Acceptance Backup Agent",
@@ -224,7 +224,7 @@ describe("Milestone 15 backup restore acceptance evidence", () => {
     expect(persistedBackupAndTimelineSurfaces).not.toContain(RAW_LOG_SECRET);
     expect(persistedBackupAndTimelineSurfaces).not.toContain("storageUri");
     expect(persistedBackupAndTimelineSurfaces).not.toContain("s3://");
-    expect(persistedBackupAndTimelineSurfaces).not.toContain("agentbay-backups");
+    expect(persistedBackupAndTimelineSurfaces).not.toContain("bruno-backups");
   });
 });
 

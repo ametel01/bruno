@@ -26,7 +26,7 @@ describe("runner release identity", () => {
     const calls: string[][] = [];
     const docker = fakeDocker(calls, {
       repoDigests: [
-        `ghcr.io/ametel01/agentbay-runner@${OBSERVED_DIGEST}`,
+        `ghcr.io/ametel01/bruno-runner@${OBSERVED_DIGEST}`,
         `mirror.example/runner@${OBSERVED_DIGEST}`,
       ],
       labels: {
@@ -77,7 +77,7 @@ describe("runner release identity", () => {
 
   it("accepts one exact matching expected identity", async () => {
     const docker = fakeDocker([], {
-      repoDigests: [`ghcr.io/ametel01/agentbay-runner@${OBSERVED_DIGEST}`],
+      repoDigests: [`ghcr.io/ametel01/bruno-runner@${OBSERVED_DIGEST}`],
       labels: { [RUNNER_OCI_REVISION_LABEL]: "release-sha" },
     });
 
@@ -124,22 +124,22 @@ describe("runner release identity", () => {
   it("parses only canonical immutable references and bounded release fields", () => {
     expect(
       parseImmutableRunnerImageReference(
-        `ghcr.io/ametel01/agentbay-runner:0123456789abcdef@${OBSERVED_DIGEST}`,
+        `ghcr.io/ametel01/bruno-runner:0123456789abcdef@${OBSERVED_DIGEST}`,
       ),
     ).toEqual({
-      imageReference: `ghcr.io/ametel01/agentbay-runner:0123456789abcdef@${OBSERVED_DIGEST}`,
+      imageReference: `ghcr.io/ametel01/bruno-runner:0123456789abcdef@${OBSERVED_DIGEST}`,
       imageDigest: OBSERVED_DIGEST,
       version: "0123456789abcdef",
     });
     expect(
-      parseImmutableRunnerImageReference(`ghcr.io/ametel01/agentbay-runner@${OBSERVED_DIGEST}`),
+      parseImmutableRunnerImageReference(`ghcr.io/ametel01/bruno-runner@${OBSERVED_DIGEST}`),
     ).toMatchObject({ imageDigest: OBSERVED_DIGEST, version: "b".repeat(64) });
 
     for (const image of [
-      "ghcr.io/ametel01/agentbay-runner:main",
+      "ghcr.io/ametel01/bruno-runner:main",
       `docker.io/Runner/Image@${OBSERVED_DIGEST}`,
-      `ghcr.io/ametel01/agentbay-runner@sha256:${"A".repeat(64)}`,
-      "ghcr.io/ametel01/agentbay-runner@sha256:short",
+      `ghcr.io/ametel01/bruno-runner@sha256:${"A".repeat(64)}`,
+      "ghcr.io/ametel01/bruno-runner@sha256:short",
     ]) {
       expect(parseImmutableRunnerImageReference(image)).toBeNull();
     }

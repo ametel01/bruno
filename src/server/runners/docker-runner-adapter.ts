@@ -25,27 +25,27 @@ import type {
   RunnerLogStreamInput,
 } from "@/src/server/runners/runner-adapter";
 
-export const AGENTBAY_AGENT_ID_LABEL = "agentbay.agent_id";
+export const BRUNO_AGENT_ID_LABEL = "bruno.agent_id";
 export const DEFAULT_DOCKER_RUNNER_IMAGE = "busybox:1.36";
 export const DEFAULT_DOCKER_CPU_LIMIT = "1";
 export const DEFAULT_DOCKER_MEMORY_LIMIT = "512m";
 export const DEFAULT_DOCKER_WORKSPACE_TARGET = "/workspace";
-export const DEFAULT_DOCKER_CONFIG_TARGET = "/etc/agentbay/config";
+export const DEFAULT_DOCKER_CONFIG_TARGET = "/etc/bruno/config";
 
-const DOCKER_RUNNER_IMAGE_ENV = "AGENTBAY_DOCKER_RUNNER_IMAGE";
-const DOCKER_RUNNER_ARGS_ENV = "AGENTBAY_DOCKER_RUNNER_ARGS_JSON";
-const DOCKER_RUNNER_CONFIG_PATH_ENV = "AGENTBAY_DOCKER_CONFIG_PATH";
-const DOCKER_RUNNER_WORKSPACE_ROOT_ENV = "AGENTBAY_DOCKER_WORKSPACE_ROOT";
-const DOCKER_RUNNER_CPU_LIMIT_ENV = "AGENTBAY_DOCKER_CPU_LIMIT";
-const DOCKER_RUNNER_MEMORY_LIMIT_ENV = "AGENTBAY_DOCKER_MEMORY_LIMIT";
+const DOCKER_RUNNER_IMAGE_ENV = "BRUNO_DOCKER_RUNNER_IMAGE";
+const DOCKER_RUNNER_ARGS_ENV = "BRUNO_DOCKER_RUNNER_ARGS_JSON";
+const DOCKER_RUNNER_CONFIG_PATH_ENV = "BRUNO_DOCKER_CONFIG_PATH";
+const DOCKER_RUNNER_WORKSPACE_ROOT_ENV = "BRUNO_DOCKER_WORKSPACE_ROOT";
+const DOCKER_RUNNER_CPU_LIMIT_ENV = "BRUNO_DOCKER_CPU_LIMIT";
+const DOCKER_RUNNER_MEMORY_LIMIT_ENV = "BRUNO_DOCKER_MEMORY_LIMIT";
 const DOCKER_CLI_TIMEOUT_MS = 15_000;
 const DUMMY_DOCKER_RUNNER_ARGS = [
   "sh",
   "-c",
   [
-    'printf "agentbay docker dummy runner started for %s\\n" "$AGENTBAY_AGENT_ID"',
-    'printf "agentbay docker dummy runner stderr ready for %s\\n" "$AGENTBAY_AGENT_ID" >&2',
-    'trap \'printf "agentbay docker dummy runner stopping for %s\\n" "$AGENTBAY_AGENT_ID"; exit 0\' TERM INT',
+    'printf "bruno docker dummy runner started for %s\\n" "$BRUNO_AGENT_ID"',
+    'printf "bruno docker dummy runner stderr ready for %s\\n" "$BRUNO_AGENT_ID" >&2',
+    'trap \'printf "bruno docker dummy runner stopping for %s\\n" "$BRUNO_AGENT_ID"; exit 0\' TERM INT',
     "while true; do sleep 1; done",
   ].join("; "),
 ];
@@ -596,7 +596,7 @@ export class DockerRunnerAdapter
       return { ok: false, reason: "docker_inspect_failed" };
     }
 
-    if (inspect.Config?.Labels?.[AGENTBAY_AGENT_ID_LABEL] !== agentId) {
+    if (inspect.Config?.Labels?.[BRUNO_AGENT_ID_LABEL] !== agentId) {
       return { ok: false, reason: "label_mismatch" };
     }
 
@@ -673,7 +673,7 @@ export function resolveDockerRunnerMounts(
       : {}),
     configTarget: input.configTarget ?? DEFAULT_DOCKER_CONFIG_TARGET,
     workspaceRoot: resolve(
-      /* turbopackIgnore: true */ workspaceRoot || join(tmpdir(), "agentbay-docker-workspaces"),
+      /* turbopackIgnore: true */ workspaceRoot || join(tmpdir(), "bruno-docker-workspaces"),
     ),
     workspaceTarget: input.workspaceTarget ?? DEFAULT_DOCKER_WORKSPACE_TARGET,
   };
@@ -700,7 +700,7 @@ export function buildDockerRunPlan(input: {
     "--name",
     containerName,
     "--label",
-    `${AGENTBAY_AGENT_ID_LABEL}=${input.agentId}`,
+    `${BRUNO_AGENT_ID_LABEL}=${input.agentId}`,
     "--cpus",
     input.resources.cpus,
     "--memory",
@@ -710,9 +710,9 @@ export function buildDockerRunPlan(input: {
     "--workdir",
     input.mounts.workspaceTarget,
     "--env",
-    `AGENTBAY_AGENT_ID=${input.agentId}`,
+    `BRUNO_AGENT_ID=${input.agentId}`,
     "--env",
-    `AGENTBAY_WORKSPACE=${input.mounts.workspaceTarget}`,
+    `BRUNO_WORKSPACE=${input.mounts.workspaceTarget}`,
   ];
 
   if (input.mounts.configPath && configTargetPath) {
@@ -720,7 +720,7 @@ export function buildDockerRunPlan(input: {
       "--mount",
       `type=bind,source=${input.mounts.configPath},target=${configTargetPath},readonly`,
       "--env",
-      `AGENTBAY_CONFIG_PATH=${configTargetPath}`,
+      `BRUNO_CONFIG_PATH=${configTargetPath}`,
     );
   }
 
@@ -816,7 +816,7 @@ function dockerRunnerMetadata(input: {
 }): Record<string, unknown> {
   return {
     labels: {
-      [AGENTBAY_AGENT_ID_LABEL]: input.agentId,
+      [BRUNO_AGENT_ID_LABEL]: input.agentId,
     },
     command: {
       image: input.command.image,
@@ -916,7 +916,7 @@ function shouldAppendDockerLogLine(
 }
 
 function dockerContainerName(agentId: string, suffix: string): string {
-  return `agentbay-${agentId}-${suffix}`.replace(/[^a-zA-Z0-9_.-]/g, "-").slice(0, 120);
+  return `bruno-${agentId}-${suffix}`.replace(/[^a-zA-Z0-9_.-]/g, "-").slice(0, 120);
 }
 
 function resolveDockerTextEnv(

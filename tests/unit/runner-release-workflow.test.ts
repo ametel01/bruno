@@ -73,13 +73,13 @@ describe("runner release workflow contract", () => {
   it("temporarily bypasses the simulated-Droplet canary and deploys the published digest at batch one", () => {
     expect(workflowSource).not.toContain("bun run runner:release:smoke -- --image");
     expect(workflowSource).not.toContain("--provider local_docker");
-    expect(workflowSource).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN: local-docker");
-    expect(workflowSource).not.toContain("AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: local_docker");
+    expect(workflowSource).not.toContain("BRUNO_DIGITALOCEAN_TOKEN: local-docker");
+    expect(workflowSource).not.toContain("BRUNO_DIGITALOCEAN_PROVIDER_MODE: local_docker");
     expect(workflowSource).not.toContain("RUNNER_RELEASE_DIGITALOCEAN_TOKEN");
     expect(workflowSource).not.toContain("billable_canary_authorization");
     expect(workflowSource).not.toContain("authorize-disposable-runner-release-smoke");
-    expect(workflowSource).toContain("AGENTBAY_RUNNER_IMAGE=$" + "{IMMUTABLE_IMAGE}");
-    expect(workflowSource).toContain("AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=1");
+    expect(workflowSource).toContain("BRUNO_RUNNER_IMAGE=$" + "{IMMUTABLE_IMAGE}");
+    expect(workflowSource).toContain("BRUNO_RUNNER_ROLLOUT_BATCH_SIZE=1");
     expect(workflowSource).toContain("/api/internal/runner-release/required");
     expect(workflowSource).toContain("/health");
     expect(workflowSource).not.toMatch(/cloud-init.*GITHUB_STEP_SUMMARY/i);
@@ -125,11 +125,11 @@ describe("runner release workflow contract", () => {
     expect(
       runIgnoreCommand({
         VERCEL_ENV: "production",
-        AGENTBAY_CANARY_VERIFIED_DEPLOY: "true",
+        BRUNO_CANARY_VERIFIED_DEPLOY: "true",
       }),
     ).toBe(1);
     expect(runIgnoreCommand({ VERCEL_ENV: "preview" })).toBe(1);
-    expect(workflowSource.match(/AGENTBAY_CANARY_VERIFIED_DEPLOY=true/g)).toHaveLength(2);
+    expect(workflowSource.match(/BRUNO_CANARY_VERIFIED_DEPLOY=true/g)).toHaveLength(2);
   });
 
   it("routes the documented production command through the protected release workflow", () => {
@@ -138,14 +138,14 @@ describe("runner release workflow contract", () => {
     );
     expect(packageJson.scripts["deploy:prod"]).not.toContain("vercel deploy --prod");
     expect(readme).toContain("Do not run `vercel deploy --prod` directly");
-    expect(readme).toContain("release-workflow-authorized `AGENTBAY_RUNNER_IMAGE` digest");
+    expect(readme).toContain("release-workflow-authorized `BRUNO_RUNNER_IMAGE` digest");
   });
 
   it("allows only artifact-backed immutable rollback and halts rollout", () => {
     expect(workflowSource).toContain("verified-runner-release");
     expect(workflowSource).toContain("run-id: $" + "{{ inputs.rollback_run_id }}");
     expect(workflowSource).toContain("previously verified image");
-    expect(workflowSource).toContain("AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE=0");
+    expect(workflowSource).toContain("BRUNO_RUNNER_ROLLOUT_BATCH_SIZE=0");
     expect(workflowSource).not.toContain("rollback_image: main");
   });
 });

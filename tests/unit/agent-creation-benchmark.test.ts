@@ -57,7 +57,7 @@ describe("agent creation benchmark command", () => {
   it("fails closed before any DigitalOcean benchmark execution", async () => {
     await expect(
       runAgentCreationBenchmark(["--mode", "digitalocean"], {
-        AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION: undefined,
+        BRUNO_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION: undefined,
       }),
     ).rejects.toThrow(/DigitalOcean benchmark mode is fail-closed/);
   });
@@ -105,9 +105,9 @@ describe("agent creation benchmark command", () => {
   it("requires exact local Docker sentinels for local benchmark mode", async () => {
     await expect(
       runAgentCreationBenchmark(["--mode", "local_docker"], {
-        AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "digitalocean",
-        AGENTBAY_DIGITALOCEAN_TOKEN: "local-docker",
-        AGENTBAY_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
+        BRUNO_DIGITALOCEAN_PROVIDER_MODE: "digitalocean",
+        BRUNO_DIGITALOCEAN_TOKEN: "local-docker",
+        BRUNO_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
       }),
     ).rejects.toThrow(/Local Docker benchmark mode requires/);
   });

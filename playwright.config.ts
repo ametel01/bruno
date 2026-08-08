@@ -25,7 +25,7 @@ export default defineConfig({
     ...artifactPolicy,
   },
   webServer: {
-    command: `AGENTBAY_READY_AGENT_CREATION_ENABLED=true bun run dev --hostname 127.0.0.1 --port ${port}`,
+    command: `BRUNO_READY_AGENT_CREATION_ENABLED=true bun run dev --hostname 127.0.0.1 --port ${port}`,
     url: baseURL,
     reuseExistingServer: process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === "1",
     timeout: 120_000,

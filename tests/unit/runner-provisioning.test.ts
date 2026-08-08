@@ -44,11 +44,11 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
-          runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
+          runnerImage: "ghcr.io/ametel01/bruno-runner:sha-123",
           region: "nyc3",
           sizeSlug: "s-2vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay", "agentbay-runner", "cloud-runner"],
+          tags: ["bruno", "bruno-runner", "cloud-runner"],
         }),
         createRegistrationToken: () => generatedRegistrationToken,
         now: sequenceClock("2026-07-06T02:00:00.000Z"),
@@ -87,24 +87,24 @@ describe.sequential("runner provisioning service", () => {
           region: "nyc3",
           sizeSlug: "s-2vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay", "agentbay-runner", "cloud-runner"],
-          firewallName: "agentbay-runners",
+          tags: ["bruno", "bruno-runner", "cloud-runner"],
+          firewallName: "bruno-runners",
           sshKeyIds: ["52830696"],
-          userData: expect.stringContaining("AGENTBAY_RUNNER_REGISTRATION_TOKEN="),
+          userData: expect.stringContaining("BRUNO_RUNNER_REGISTRATION_TOKEN="),
         },
       },
       {
         step: "tag",
         input: {
           providerResourceId: "droplet-1",
-          tags: ["agentbay", "agentbay-runner", "cloud-runner"],
+          tags: ["bruno", "bruno-runner", "cloud-runner"],
         },
       },
       {
         step: "firewall",
         input: {
           providerResourceId: "droplet-1",
-          firewallName: "agentbay-runners-droplet-1",
+          firewallName: "bruno-runners-droplet-1",
           sshSourceAddresses: ["0.0.0.0/0", "::/0"],
         },
       },
@@ -128,65 +128,63 @@ describe.sequential("runner provisioning service", () => {
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
-    ).toContain("AGENTBAY_RUNNER_BEARER_TOKEN=runner-command-token");
+    ).toContain("BRUNO_RUNNER_BEARER_TOKEN=runner-command-token");
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
-    ).toContain("AGENTBAY_RUNNER_IMAGE=ghcr.io/ametel01/agentbay-runner:sha-123");
+    ).toContain("BRUNO_RUNNER_IMAGE=ghcr.io/ametel01/bruno-runner:sha-123");
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
+    ).toContain("BRUNO_RUNNER_ENDPOINT_URL=https://$" + "{BRUNO_PUBLIC_IPV4_DASHED}.sslip.io");
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
+    ).not.toContain("BRUNO_RUNNER_ENDPOINT_URL=http://127.0.0.1:3045");
+    expect(
+      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
+        .userData,
+    ).toContain("bruno_pull_image 'ghcr.io/ametel01/bruno-runner:sha-123'");
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
     ).toContain(
-      "AGENTBAY_RUNNER_ENDPOINT_URL=https://$" + "{AGENTBAY_PUBLIC_IPV4_DASHED}.sslip.io",
+      "bruno_pull_image 'nousresearch/hermes-agent:v2026.7.7.2@sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973'",
     );
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
-    ).not.toContain("AGENTBAY_RUNNER_ENDPOINT_URL=http://127.0.0.1:3045");
+    ).toContain("BRUNO_RUNNER_MAX_AGENTS=1");
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
-    ).toContain("agentbay_pull_image 'ghcr.io/ametel01/agentbay-runner:sha-123'");
+    ).toContain("BRUNO_HERMES_DOCKER_CPUS=1");
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
-    ).toContain(
-      "agentbay_pull_image 'nousresearch/hermes-agent:v2026.7.7.2@sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973'",
-    );
+    ).toContain("BRUNO_HERMES_DOCKER_MEMORY=1536m");
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
-    ).toContain("AGENTBAY_RUNNER_MAX_AGENTS=1");
+    ).toContain("BRUNO_HERMES_DOCKER_PIDS_LIMIT=256");
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
-    ).toContain("AGENTBAY_HERMES_DOCKER_CPUS=1");
-    expect(
-      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
-        .userData,
-    ).toContain("AGENTBAY_HERMES_DOCKER_MEMORY=1536m");
-    expect(
-      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
-        .userData,
-    ).toContain("AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256");
-    expect(
-      (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
-        .userData,
-    ).toContain("AGENTBAY_RUNNER_BOOT_MODEL_CANARY_ENABLED=false");
+    ).toContain("BRUNO_RUNNER_BOOT_MODEL_CANARY_ENABLED=false");
     expect(
       (provider.calls.find((call) => call.step === "create")?.input as { userData?: string })
         .userData,
     ).toContain(
-      "docker run --detach --name 'agentbay-runner' --restart always --network 'agentbay-hermes' --env-file '/etc/agentbay/runner.env' -v '/etc/agentbay/runner.env:/etc/agentbay/runner.env' -v '/var/lib/agentbay/agents:/var/lib/agentbay/agents' -v '/var/lib/agentbay/boot-self-test:/var/lib/agentbay/boot-self-test' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' 'ghcr.io/ametel01/agentbay-runner:sha-123'",
+      "docker run --detach --name 'bruno-runner' --restart always --network 'bruno-hermes' --env-file '/etc/bruno/runner.env' -v '/etc/bruno/runner.env:/etc/bruno/runner.env' -v '/var/lib/bruno/agents:/var/lib/bruno/agents' -v '/var/lib/bruno/boot-self-test:/var/lib/bruno/boot-self-test' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' 'ghcr.io/ametel01/bruno-runner:sha-123'",
     );
     expect(
       result.runner.provisioning.phases.find((event) => event.phase === "pending")?.metadata,
     ).toMatchObject({
       provider: "digitalocean",
-      runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
+      runnerImage: "ghcr.io/ametel01/bruno-runner:sha-123",
       hermesWorkloadImage:
         "nousresearch/hermes-agent:v2026.7.7.2@sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973",
-      hermesPrivateNetwork: "agentbay-hermes",
+      hermesPrivateNetwork: "bruno-hermes",
       runnerMaxAgents: 1,
     });
     expect(
@@ -194,14 +192,14 @@ describe.sequential("runner provisioning service", () => {
     ).toMatchObject({
       provider: "digitalocean",
       registrationToken: "injected",
-      runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
+      runnerImage: "ghcr.io/ametel01/bruno-runner:sha-123",
     });
     expect(
       result.runner.provisioning.phases.find(
         (event) => event.phase === "creating" && event.status === "started",
       )?.metadata,
     ).toMatchObject({
-      runnerImage: "ghcr.io/ametel01/agentbay-runner:sha-123",
+      runnerImage: "ghcr.io/ametel01/bruno-runner:sha-123",
       sshKeyCount: 1,
     });
     expect(
@@ -210,7 +208,7 @@ describe.sequential("runner provisioning service", () => {
       )?.metadata,
     ).toMatchObject({
       firewallApplied: true,
-      firewallName: "agentbay-runners-droplet-1",
+      firewallName: "bruno-runners-droplet-1",
     });
 
     const persistedTokens = await connection.db.select().from(runnerRegistrationTokens);
@@ -275,11 +273,11 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
-          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          runnerImage: "ghcr.io/ametel01/bruno-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay"],
+          tags: ["bruno"],
         }),
         now: sequenceClock("2026-07-06T02:00:00.000Z"),
       },
@@ -336,11 +334,11 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
-          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          runnerImage: "ghcr.io/ametel01/bruno-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay"],
+          tags: ["bruno"],
         }),
         now: sequenceClock("2026-07-06T02:30:00.000Z"),
       },
@@ -362,7 +360,7 @@ describe.sequential("runner provisioning service", () => {
       step: "createSshKey",
       input: {
         name: "bruno managed runner key",
-        publicKey: expect.stringMatching(/^ssh-ed25519 [A-Za-z0-9+/=]+ agentbay-managed-runner$/),
+        publicKey: expect.stringMatching(/^ssh-ed25519 [A-Za-z0-9+/=]+ bruno-managed-runner$/),
       },
     });
     expect(provider.calls[1]).toMatchObject({
@@ -385,11 +383,11 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
-          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          runnerImage: "ghcr.io/ametel01/bruno-runner:main",
           region: "sfo3",
           sizeSlug: "s-2vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay"],
+          tags: ["bruno"],
           hermesDockerCpus: "0.5",
           hermesDockerMemory: "1024m",
           hermesDockerPidsLimit: "128",
@@ -401,9 +399,9 @@ describe.sequential("runner provisioning service", () => {
     const createCall = provider.calls.find((call) => call.step === "create");
 
     expect(result).toMatchObject({ ok: true, duplicate: false });
-    expect(createCall?.input.userData).toContain("AGENTBAY_HERMES_DOCKER_CPUS=0.5");
-    expect(createCall?.input.userData).toContain("AGENTBAY_HERMES_DOCKER_MEMORY=1024m");
-    expect(createCall?.input.userData).toContain("AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=128");
+    expect(createCall?.input.userData).toContain("BRUNO_HERMES_DOCKER_CPUS=0.5");
+    expect(createCall?.input.userData).toContain("BRUNO_HERMES_DOCKER_MEMORY=1024m");
+    expect(createCall?.input.userData).toContain("BRUNO_HERMES_DOCKER_PIDS_LIMIT=128");
   });
 
   it("rejects the low-memory DigitalOcean size before SSH lookup or Droplet creation", async () => {
@@ -417,11 +415,11 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
-          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          runnerImage: "ghcr.io/ametel01/bruno-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-512mb-10gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay", "cloud-runner"],
+          tags: ["bruno", "cloud-runner"],
         }),
         now: sequenceClock("2026-07-06T06:00:00.000Z"),
       },
@@ -432,7 +430,7 @@ describe.sequential("runner provisioning service", () => {
       reason: "validation_failed",
       issues: [
         expect.objectContaining({
-          field: "AGENTBAY_DIGITALOCEAN_SIZE_SLUG",
+          field: "BRUNO_DIGITALOCEAN_SIZE_SLUG",
           message: expect.stringContaining("Swap is not counted as compatible memory"),
         }),
       ],
@@ -472,11 +470,11 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
-          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          runnerImage: "ghcr.io/ametel01/bruno-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay", "cloud-runner"],
+          tags: ["bruno", "cloud-runner"],
         }),
         publicEndpointPollAttempts: 3,
         publicEndpointPollIntervalMs: 0,
@@ -511,11 +509,11 @@ describe.sequential("runner provisioning service", () => {
     const config = {
       token: "dop_v1_super_secret",
       runnerBearerToken: "runner-command-token",
-      runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+      runnerImage: "ghcr.io/ametel01/bruno-runner:main",
       region: "sfo3",
       sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
-      tags: ["agentbay", "cloud-runner"],
+      tags: ["bruno", "cloud-runner"],
     };
 
     const first = await createDigitalOceanRunnerForDevelopmentUser(
@@ -588,11 +586,11 @@ describe.sequential("runner provisioning service", () => {
     const config = {
       token: "dop_v1_super_secret",
       runnerBearerToken: "runner-command-token",
-      runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+      runnerImage: "ghcr.io/ametel01/bruno-runner:main",
       region: "sfo3",
       sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
-      tags: ["agentbay", "cloud-runner"],
+      tags: ["bruno", "cloud-runner"],
     };
 
     const first = await createDigitalOceanRunnerForDevelopmentUser(
@@ -646,7 +644,7 @@ describe.sequential("runner provisioning service", () => {
       status: "provision_failed",
       provisioningStatus: "failed",
       provisioningError:
-        "DigitalOcean Droplet deleted-droplet-1 is no longer available for runner registration. bruno marked the stale runner failed and will create a new runner.",
+        "DigitalOcean Droplet deleted-droplet-1 is no longer available for runner registration. Bruno marked the stale runner failed and will create a new runner.",
     });
   });
 
@@ -663,11 +661,11 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
-          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          runnerImage: "ghcr.io/ametel01/bruno-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay"],
+          tags: ["bruno"],
         }),
         now: sequenceClock("2026-07-06T03:00:00.000Z"),
       },
@@ -716,11 +714,11 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
-          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          runnerImage: "ghcr.io/ametel01/bruno-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay", "agentbay-runner"],
+          tags: ["bruno", "bruno-runner"],
         }),
         now: sequenceClock("2026-07-06T03:30:00.000Z"),
       },
@@ -776,11 +774,11 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
-          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          runnerImage: "ghcr.io/ametel01/bruno-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay", "agentbay-runner"],
+          tags: ["bruno", "bruno-runner"],
         }),
         now: sequenceClock("2026-07-06T03:45:00.000Z"),
       },
@@ -795,7 +793,7 @@ describe.sequential("runner provisioning service", () => {
         provisioning: {
           status: "failed",
           error:
-            "Automatic cleanup could not confirm deletion for DigitalOcean Droplet manual-cleanup-1. In DigitalOcean, delete only that Droplet after confirming it has the bruno runner tags, then create a new runner.",
+            "Automatic cleanup could not confirm deletion for DigitalOcean Droplet manual-cleanup-1. In DigitalOcean, delete only that Droplet after confirming it has the Bruno runner tags, then create a new runner.",
           completedAt: expect.any(String),
         },
       },
@@ -838,11 +836,11 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
-          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          runnerImage: "ghcr.io/ametel01/bruno-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay"],
+          tags: ["bruno"],
         }),
       },
     );
@@ -869,11 +867,11 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
-          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          runnerImage: "ghcr.io/ametel01/bruno-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay"],
+          tags: ["bruno"],
         }),
         now: sequenceClock("2026-07-06T04:00:00.000Z"),
       },
@@ -886,11 +884,11 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
-          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          runnerImage: "ghcr.io/ametel01/bruno-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay"],
+          tags: ["bruno"],
         }),
         now: sequenceClock("2026-07-06T04:05:00.000Z"),
       },
@@ -922,11 +920,11 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
-          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          runnerImage: "ghcr.io/ametel01/bruno-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay"],
+          tags: ["bruno"],
         }),
         now: sequenceClock("2026-07-06T04:00:00.000Z"),
       },
@@ -939,11 +937,11 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
-          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          runnerImage: "ghcr.io/ametel01/bruno-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-512mb-10gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay"],
+          tags: ["bruno"],
         }),
         now: sequenceClock("2026-07-06T04:05:00.000Z"),
       },
@@ -955,7 +953,7 @@ describe.sequential("runner provisioning service", () => {
       reason: "validation_failed",
       issues: [
         expect.objectContaining({
-          field: "AGENTBAY_DIGITALOCEAN_SIZE_SLUG",
+          field: "BRUNO_DIGITALOCEAN_SIZE_SLUG",
           message: expect.stringContaining("Swap is not counted as compatible memory"),
         }),
       ],
@@ -977,11 +975,11 @@ describe.sequential("runner provisioning service", () => {
         readConfig: () => ({
           token: "dop_v1_super_secret",
           runnerBearerToken: "runner-command-token",
-          runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+          runnerImage: "ghcr.io/ametel01/bruno-runner:main",
           region: "sfo3",
           sizeSlug: "s-1vcpu-2gb",
           image: "ubuntu-24-04-x64",
-          tags: ["agentbay"],
+          tags: ["bruno"],
         }),
       },
     );
@@ -1025,8 +1023,8 @@ async function countRows(connection: DatabaseConnection, tableName: string): Pro
 }
 
 function invalidSnapshotConfig(): DigitalOceanProviderConfig {
-  const runnerImage = `ghcr.io/ametel01/agentbay-runner:abc123@sha256:${"a".repeat(64)}`;
-  const defaultAgentImage = `ghcr.io/ametel01/agentbay-default:abc123@sha256:${"b".repeat(64)}`;
+  const runnerImage = `ghcr.io/ametel01/bruno-runner:abc123@sha256:${"a".repeat(64)}`;
+  const defaultAgentImage = `ghcr.io/ametel01/bruno-default:abc123@sha256:${"b".repeat(64)}`;
 
   return {
     token: "dop_v1_super_secret",
@@ -1036,7 +1034,7 @@ function invalidSnapshotConfig(): DigitalOceanProviderConfig {
     region: "sfo3",
     sizeSlug: "s-1vcpu-2gb",
     image: "ubuntu-24-04-x64",
-    tags: ["agentbay"],
+    tags: ["bruno"],
     snapshotMode: {
       mode: "snapshot",
       manifestBytes: "{}",

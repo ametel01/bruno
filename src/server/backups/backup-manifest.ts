@@ -87,7 +87,7 @@ const RAW_SECRET_VALUE_PATTERNS = [
   /^Bearer\s+\S+/i,
   /^sk-[A-Za-z0-9_-]{8,}/,
   /^dop_v1_[A-Za-z0-9_-]{8,}/,
-  /^agb_(run|reg)_[A-Za-z0-9_-]{8,}/,
+  /^bruno_(run|reg)_[A-Za-z0-9_-]{8,}/,
   /^gh[pousr]_[A-Za-z0-9_]{8,}/,
   /^AKIA[A-Z0-9]{12,}/,
   /-----BEGIN (RSA |EC |OPENSSH |)PRIVATE KEY-----/,

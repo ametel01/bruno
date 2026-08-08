@@ -12,7 +12,7 @@ CREATE TABLE "runner_infrastructure_orphans" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "runner_infrastructure_orphans_resource_check" CHECK (length(trim("runner_infrastructure_orphans"."provider_resource_id")) > 0),
-	CONSTRAINT "runner_infrastructure_orphans_operation_check" CHECK ("runner_infrastructure_orphans"."operation_tag" ~ '^agentbay-deploy-[0-9a-f]{32}$'),
+	CONSTRAINT "runner_infrastructure_orphans_operation_check" CHECK ("runner_infrastructure_orphans"."operation_tag" ~ '^bruno-deploy-[0-9a-f]{32}$'),
 	CONSTRAINT "runner_infrastructure_orphans_firewall_check" CHECK ("runner_infrastructure_orphans"."provider_firewall_id" IS NULL OR length(trim("runner_infrastructure_orphans"."provider_firewall_id")) > 0),
 	CONSTRAINT "runner_infrastructure_orphans_expected_fields_check" CHECK (length(trim("runner_infrastructure_orphans"."expected_name")) > 0 AND length(trim("runner_infrastructure_orphans"."expected_region")) > 0 AND length(trim("runner_infrastructure_orphans"."expected_size_slug")) > 0),
 	CONSTRAINT "runner_infrastructure_orphans_observation_count_check" CHECK ("runner_infrastructure_orphans"."observation_count" >= 1),

@@ -12,7 +12,7 @@ import postgres from "postgres";
 
 const createdAgentIds = new Set<string>();
 const createdRunnerIds = new Set<string>();
-const AGENTBAY_AGENT_ID_LABEL = "agentbay.agent_id";
+const BRUNO_AGENT_ID_LABEL = "bruno.agent_id";
 const DOCKER_RUNNER_FIXTURE_IMAGE = "busybox:1.36";
 const DEVELOPMENT_USER_E2E_LOCK_KEY = 125_125;
 
@@ -31,7 +31,7 @@ test.afterEach(async ({ request }) => {
   }
 
   await deleteCreatedRunners();
-  await removeOrphanedStoppedAgentBayDockerContainers();
+  await removeOrphanedStoppedBrunoDockerContainers();
 });
 
 const shellRoutes = [
@@ -217,7 +217,7 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
     localRunnerIds.push(runner.id);
     await insertRunnerHeartbeat(runner.id, {
       status: "online",
-      version: "agentbay-runner/1.2.3",
+      version: "bruno-runner/1.2.3",
       observedAt: "2026-07-05T01:30:30.000Z",
       metrics: {
         maxAgents: 1,
@@ -242,7 +242,7 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
     localRunnerIds.push(onlineRunner.id);
     await insertRunnerHeartbeat(onlineRunner.id, {
       status: "online",
-      version: "agentbay-runner/2.0.0",
+      version: "bruno-runner/2.0.0",
       observedAt: "2026-07-05T01:32:30.000Z",
       metrics: {
         maxAgents: 5,
@@ -254,7 +254,7 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
         diskTotalMb: 8192,
       },
     });
-    const oldRunnerCredential = `agb_run_old_${randomUUID().replaceAll("-", "")}`;
+    const oldRunnerCredential = `bruno_run_old_${randomUUID().replaceAll("-", "")}`;
     await insertRunnerCredential(runner.id, oldRunnerCredential, "2026-07-05T01:33:00.000Z");
     await insertManualRunnerLog(created.id, runner.id, {
       stream: "stderr",
@@ -284,8 +284,8 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
       await expect(runnerPanel).toContainText("37%");
       await expect(runnerPanel).toContainText("512 / 2,048 MB");
       await expect(runnerPanel).toContainText("1,024 / 4,096 MB");
-      await expect(runnerPanel).toContainText("agentbay-runner/1.2.3");
-      await expect(runnerPanel).toContainText("agentbay-runner/2.0.0");
+      await expect(runnerPanel).toContainText("bruno-runner/1.2.3");
+      await expect(runnerPanel).toContainText("bruno-runner/2.0.0");
       await expect(runnerPanel).toContainText("2026-07-05T01:30:30.000Z");
       await expect(runnerPanel).toContainText("2026-07-05T01:32:30.000Z");
       await expect(runnerPanel).toContainText("2026-07-05T01:30:00.000Z");
@@ -321,7 +321,7 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
       await expect(assignedRunnerPanel).toContainText("37%");
       await expect(assignedRunnerPanel).toContainText("512 / 2,048 MB");
       await expect(assignedRunnerPanel).toContainText(new URL(runner.endpointUrl).host);
-      await expect(assignedRunnerPanel).toContainText("agentbay-runner/1.2.3");
+      await expect(assignedRunnerPanel).toContainText("bruno-runner/1.2.3");
       await expect(assignedRunnerPanel).toContainText("2026-07-05T01:30:30.000Z");
       await expect(assignedRunnerPanel).toContainText(
         "Assigned runner is inactive or unreachable.",
@@ -363,8 +363,8 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
       await expect(settingsRunnerPanel).toContainText("42%");
       await expect(settingsRunnerPanel).toContainText("1,024 / 4,096 MB");
       await expect(settingsRunnerPanel).toContainText("2,048 / 8,192 MB");
-      await expect(settingsRunnerPanel).toContainText("agentbay-runner/1.2.3");
-      await expect(settingsRunnerPanel).toContainText("agentbay-runner/2.0.0");
+      await expect(settingsRunnerPanel).toContainText("bruno-runner/1.2.3");
+      await expect(settingsRunnerPanel).toContainText("bruno-runner/2.0.0");
       await expect(settingsRunnerPanel).not.toContainText(runner.id);
       await expect(settingsRunnerPanel).not.toContainText(onlineRunner.id);
       await expect(settingsRunnerPanel).not.toContainText("credentialHash");
@@ -380,7 +380,7 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
           body: JSON.stringify({
             error: {
               code: "database_unavailable",
-              message: "postgres://user:pass@localhost/db agb_reg_should_not_render",
+              message: "postgres://user:pass@localhost/db bruno_reg_should_not_render",
             },
           }),
         });
@@ -392,17 +392,17 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
         "Registration token could not be created. Start the database and run migrations.",
       );
       await expect(settingsRunnerPanel).not.toContainText("postgres://");
-      await expect(settingsRunnerPanel).not.toContainText("agb_reg_should_not_render");
+      await expect(settingsRunnerPanel).not.toContainText("bruno_reg_should_not_render");
       await page.unroute("**/api/runners/registration-tokens", registrationFailureRoute);
 
       await settingsRunnerPanel.getByRole("button", { name: "Create Token" }).click();
       const registrationSecret = settingsRunnerPanel
         .locator(".visible-once-secret", { hasText: "Registration token" })
         .first();
-      await expect(registrationSecret).toContainText("agb_reg_");
+      await expect(registrationSecret).toContainText("bruno_reg_");
       await expect(registrationSecret).toContainText("Expires");
       const registrationToken = await registrationSecret.locator("code").innerText();
-      expect(registrationToken).toMatch(/^agb_reg_/);
+      expect(registrationToken).toMatch(/^bruno_reg_/);
       await registrationSecret.getByRole("button", { name: "Dismiss" }).click();
       await expect(settingsRunnerPanel).not.toContainText(registrationToken);
 
@@ -418,7 +418,7 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
             ok: false,
             error: {
               code: "validation_failed",
-              message: "agb_run_validation_leak should not render",
+              message: "bruno_run_validation_leak should not render",
             },
           }),
         });
@@ -429,7 +429,7 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
       await expect(managedRunnerItem.locator(".form-message").last()).toContainText(
         "Runner credential request was invalid.",
       );
-      await expect(managedRunnerItem).not.toContainText("agb_run_validation_leak");
+      await expect(managedRunnerItem).not.toContainText("bruno_run_validation_leak");
       await page.unroute("**/api/runners/*/credentials/rotate", rotateValidationRoute);
 
       const rotateDelayRoute = async (route: Route) => {
@@ -442,10 +442,10 @@ test("manual runner status, alerts, and remote logs stay visible and safe", asyn
       const runnerCredentialSecret = managedRunnerItem
         .locator(".visible-once-secret", { hasText: "Runner credential" })
         .first();
-      await expect(runnerCredentialSecret).toContainText("agb_run_");
+      await expect(runnerCredentialSecret).toContainText("bruno_run_");
       await expect(runnerCredentialSecret).toContainText("Rotated");
       const rotatedCredential = await runnerCredentialSecret.locator("code").innerText();
-      expect(rotatedCredential).toMatch(/^agb_run_/);
+      expect(rotatedCredential).toMatch(/^bruno_run_/);
       await page.unroute("**/api/runners/*/credentials/rotate", rotateDelayRoute);
       await expectRunnerHeartbeat(request, runner.id, oldRunnerCredential, 401);
       await runnerCredentialSecret.getByRole("button", { name: "Dismiss" }).click();
@@ -520,7 +520,7 @@ test("cloud runner create action and provisioning status stay visible and safe",
     cloudRunnerIds.push(onlineRunner.id);
     await insertRunnerHeartbeat(onlineRunner.id, {
       status: "online",
-      version: "agentbay-runner/3.0.0",
+      version: "bruno-runner/3.0.0",
       observedAt: "2026-07-06T01:09:00.000Z",
     });
 
@@ -538,9 +538,9 @@ test("cloud runner create action and provisioning status stay visible and safe",
       await expect(cloudPanel).toContainText("2026-07-06T01:09:00.000Z");
       await expect(cloudPanel).toContainText("Next step: check the provider configuration");
       await expect(cloudPanel).not.toContainText("token=stored-for-downstream");
-      await expect(cloudPanel).not.toContainText("AGENTBAY_DIGITALOCEAN_TOKEN");
-      await expect(cloudPanel).not.toContainText("agb_reg_");
-      await expect(cloudPanel).not.toContainText("agb_run_");
+      await expect(cloudPanel).not.toContainText("BRUNO_DIGITALOCEAN_TOKEN");
+      await expect(cloudPanel).not.toContainText("bruno_reg_");
+      await expect(cloudPanel).not.toContainText("bruno_run_");
       await expect(cloudPanel).not.toContainText("credentialHash");
 
       await deleteRunnerRows(cloudRunnerIds.splice(0));
@@ -617,8 +617,8 @@ test("cloud runner create action and provisioning status stay visible and safe",
       await expect(cloudPanel).toContainText("pending");
       await expect(cloudPanel).toContainText("provisioning");
       await expect(cloudPanel).not.toContainText("registrationToken");
-      await expect(cloudPanel).not.toContainText("agb_reg_");
-      await expect(cloudPanel).not.toContainText("agb_run_");
+      await expect(cloudPanel).not.toContainText("bruno_reg_");
+      await expect(cloudPanel).not.toContainText("bruno_run_");
 
       await expectPageNotHorizontallyOverflowing(page);
     });
@@ -1018,7 +1018,7 @@ test("/dashboard shows Docker logs captured by observing a running agent", async
     expect(logsResponse.status()).toBe(200);
     const logsBody = (await logsResponse.json()) as { logs: { message: string }[] };
     expect(logsBody.logs.map((log) => log.message)).toContain(
-      `agentbay docker dummy runner started for ${created.id}`,
+      `bruno docker dummy runner started for ${created.id}`,
     );
   }).toPass({ timeout: 5_000 });
 
@@ -1028,13 +1028,13 @@ test("/dashboard shows Docker logs captured by observing a running agent", async
   const processLogsPanel = page.locator(".dashboard-process-log-panel");
   await expect(processLogsPanel).toContainText("Latest process logs");
   const capturedLog = processLogsPanel.locator(".runtime-log-item", {
-    hasText: `agentbay docker dummy runner started for ${created.id}`,
+    hasText: `bruno docker dummy runner started for ${created.id}`,
   });
   await expect(capturedLog.getByRole("link", { name })).toHaveAttribute(
     "href",
     `/agents/${created.id}`,
   );
-  await expect(capturedLog).toContainText(`agentbay docker dummy runner started for ${created.id}`);
+  await expect(capturedLog).toContainText(`bruno docker dummy runner started for ${created.id}`);
   await expect(capturedLog).toContainText("stdout");
   await expect(capturedLog).toContainText("info");
   await expect(capturedLog).not.toContainText("dockerRunnerContainerId");
@@ -1091,9 +1091,9 @@ test("/dashboard Docker runner final acceptance keeps selected containers isolat
 
     const primaryLogs = await expectAgentLogs(request, primary.id);
     const siblingLogs = await expectAgentLogs(request, sibling.id);
-    expect(primaryLogs).toContain(`agentbay docker dummy runner started for ${primary.id}`);
+    expect(primaryLogs).toContain(`bruno docker dummy runner started for ${primary.id}`);
     expect(primaryLogs).not.toContain(sibling.id);
-    expect(siblingLogs).toContain(`agentbay docker dummy runner started for ${sibling.id}`);
+    expect(siblingLogs).toContain(`bruno docker dummy runner started for ${sibling.id}`);
     expect(siblingLogs).not.toContain(primary.id);
 
     await expectAgentAction(request, primary.id, "restart", 202);
@@ -1444,7 +1444,7 @@ test("/agents detail shows backup status and runs backup restore controls safely
     await expect(backupPanel).toContainText("Not restored");
     await expect(backupPanel).toContainText(backupId);
     await expect(backupPanel).not.toContainText("s3://");
-    await expect(backupPanel).not.toContainText("agentbay-backups");
+    await expect(backupPanel).not.toContainText("bruno-backups");
     await expect(backupPanel).not.toContainText("manifestJson");
     await expect(backupPanel).not.toContainText("storageUri");
     await expect(backupPanel).not.toContainText("sk-");
@@ -1458,7 +1458,7 @@ test("/agents detail shows backup status and runs backup restore controls safely
       "href",
       `/agents/${restoredAgentId}`,
     );
-    await expect(backupPanel).not.toContainText("AGENTBAY_BACKUP_STORAGE");
+    await expect(backupPanel).not.toContainText("BRUNO_BACKUP_STORAGE");
     await expect(backupPanel).not.toContainText("token=stored-for-downstream");
   });
 });
@@ -2016,10 +2016,10 @@ test("/agents detail shows scoped runtime logs and stops polling after settled s
   await page.reload();
   await expect(page.getByRole("heading", { name: primaryName })).toBeVisible();
   await expect(primaryRuntimeLogs).toContainText(
-    `agentbay docker dummy runner started for ${primaryAgent.id}`,
+    `bruno docker dummy runner started for ${primaryAgent.id}`,
   );
   await expect(primaryRuntimeLogs).toContainText(
-    `agentbay docker dummy runner stderr ready for ${primaryAgent.id}`,
+    `bruno docker dummy runner stderr ready for ${primaryAgent.id}`,
   );
   await expect(primaryRuntimeLogs).toContainText("stdout");
   await expect(primaryRuntimeLogs).toContainText("stderr");
@@ -2046,7 +2046,7 @@ test("/agents detail shows scoped runtime logs and stops polling after settled s
     timeout: 5_000,
   });
   await expect(primaryRuntimeLogs).toContainText(
-    `agentbay docker dummy runner started for ${primaryAgent.id}`,
+    `bruno docker dummy runner started for ${primaryAgent.id}`,
   );
   await page.waitForTimeout(2_000);
   await expect(primaryLogItems).toHaveCount(stoppedLogCount);
@@ -2590,7 +2590,7 @@ async function countDockerContainersForAgent(agentId: string): Promise<number> {
     "ps",
     "-a",
     "--filter",
-    `label=${AGENTBAY_AGENT_ID_LABEL}=${agentId}`,
+    `label=${BRUNO_AGENT_ID_LABEL}=${agentId}`,
     "--format",
     "{{.ID}}",
   ]);
@@ -2608,7 +2608,7 @@ async function expectDockerContainer(
 ): Promise<void> {
   const inspect = await inspectDockerContainer(containerId);
 
-  expect(inspect.Config?.Labels?.[AGENTBAY_AGENT_ID_LABEL]).toBe(agentId);
+  expect(inspect.Config?.Labels?.[BRUNO_AGENT_ID_LABEL]).toBe(agentId);
   expect(inspect.State?.Status).toBe(expectedStatus);
 }
 
@@ -2633,11 +2633,11 @@ async function removeDockerContainersForAgent(agentId: string): Promise<void> {
     .toEqual([]);
 }
 
-async function removeOrphanedStoppedAgentBayDockerContainers(): Promise<void> {
+async function removeOrphanedStoppedBrunoDockerContainers(): Promise<void> {
   const removableStatuses = ["created", "exited", "dead"] as const;
 
   for (const status of removableStatuses) {
-    await removeDockerContainersByIds(await listOrphanedAgentBayDockerContainerIdsByStatus(status));
+    await removeDockerContainersByIds(await listOrphanedBrunoDockerContainerIdsByStatus(status));
   }
 
   await expect
@@ -2645,9 +2645,7 @@ async function removeOrphanedStoppedAgentBayDockerContainers(): Promise<void> {
       async () =>
         (
           await Promise.all(
-            removableStatuses.map((status) =>
-              listOrphanedAgentBayDockerContainerIdsByStatus(status),
-            ),
+            removableStatuses.map((status) => listOrphanedBrunoDockerContainerIdsByStatus(status)),
           )
         ).flat(),
       { timeout: 10_000 },
@@ -2661,7 +2659,7 @@ async function listDockerContainerIdsForAgent(agentId: string): Promise<string[]
     "-a",
     "--quiet",
     "--filter",
-    `label=${AGENTBAY_AGENT_ID_LABEL}=${agentId}`,
+    `label=${BRUNO_AGENT_ID_LABEL}=${agentId}`,
   ]).catch(() => ({ stdout: "", stderr: "" }));
 
   return result.stdout
@@ -2671,14 +2669,14 @@ async function listDockerContainerIdsForAgent(agentId: string): Promise<string[]
     .filter((line) => line.length > 0);
 }
 
-async function listOrphanedAgentBayDockerContainerIdsByStatus(status: string): Promise<string[]> {
+async function listOrphanedBrunoDockerContainerIdsByStatus(status: string): Promise<string[]> {
   const result = await runDocker([
     "ps",
     "-a",
     "--format",
-    `{{.ID}}\t{{.Label "${AGENTBAY_AGENT_ID_LABEL}"}}`,
+    `{{.ID}}\t{{.Label "${BRUNO_AGENT_ID_LABEL}"}}`,
     "--filter",
-    `label=${AGENTBAY_AGENT_ID_LABEL}`,
+    `label=${BRUNO_AGENT_ID_LABEL}`,
     "--filter",
     `status=${status}`,
   ]).catch(() => ({ stdout: "", stderr: "" }));
@@ -2856,7 +2854,7 @@ async function insertBackupSummaryFixture(agentId: string, agentName: string): P
         ${agentId},
         null,
         'ready',
-        ${`s3://agentbay-backups/agents/${agentId}/backups/${backupId}.json`},
+        ${`s3://bruno-backups/agents/${agentId}/backups/${backupId}.json`},
         ${sql.json(validBackupManifestForE2e(agentId, agentName))},
         ${agent?.user_id ?? ""},
         '2026-07-06T05:10:00.000Z'
@@ -3508,7 +3506,7 @@ async function expectRunnerHeartbeat(
     data: {
       runnerId,
       status: "online",
-      version: "agentbay-runner/e2e",
+      version: "bruno-runner/e2e",
     },
   });
   const body = await response.json();
@@ -3546,8 +3544,7 @@ async function expectPageNotHorizontallyOverflowing(page: Page): Promise<void> {
 }
 
 async function withDatabase<T>(run: (sql: postgres.Sql) => Promise<T>): Promise<T> {
-  const databaseUrl =
-    process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
+  const databaseUrl = process.env.DATABASE_URL ?? "postgres://bruno:bruno@127.0.0.1:54329/bruno";
   const sql = postgres(databaseUrl, {
     connect_timeout: 5,
     idle_timeout: 5,

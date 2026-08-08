@@ -27,17 +27,17 @@ import {
   RUNNER_RELEASE_DEVELOPMENT_MODE,
   RUNNER_RELEASE_IDENTITY_MODE_ENV,
 } from "@/src/runner-service/release-identity";
-import { DEFAULT_AGENTBAY_RUNNER_IMAGE } from "@/src/server/env";
+import { DEFAULT_BRUNO_RUNNER_IMAGE } from "@/src/server/env";
 
 const LEGACY_HOST_BOOTSTRAP_TOKENS = [
   "git" + " clone",
   "bun" + " install",
   "/root/.bun/bin/" + "bun",
-  "https://github.com/ametel01/" + "agentbay.git",
+  "https://github.com/ametel01/" + "bruno.git",
 ];
 const RUNNER_RELEASE_VERSION = "0123456789abcdef";
 const RUNNER_IMAGE_DIGEST = `sha256:${"a".repeat(64)}`;
-const IMMUTABLE_RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:${RUNNER_RELEASE_VERSION}@${RUNNER_IMAGE_DIGEST}`;
+const IMMUTABLE_RUNNER_IMAGE = `ghcr.io/ametel01/bruno-runner:${RUNNER_RELEASE_VERSION}@${RUNNER_IMAGE_DIGEST}`;
 
 describe.sequential("cloud runner bootstrap content", () => {
   let connection: DatabaseConnection;
@@ -53,12 +53,12 @@ describe.sequential("cloud runner bootstrap content", () => {
   });
 
   it("builds cloud-init that installs Docker and starts the runner container from the selected image", () => {
-    const registrationToken = "agb_reg_1234567890123456789012345678901234567890123";
+    const registrationToken = "bruno_reg_1234567890123456789012345678901234567890123";
     const content = buildCloudRunnerBootstrapContent({
-      appBaseUrl: "https://app.agentbay.test",
+      appBaseUrl: "https://app.bruno.test",
       registrationToken,
       commandBearerToken: "runner-command-token",
-      runnerEndpointUrl: "https://runner.agentbay.test",
+      runnerEndpointUrl: "https://runner.bruno.test",
       runnerName: "Cloud Runner 1",
       runnerImage: IMMUTABLE_RUNNER_IMAGE,
     });
@@ -71,25 +71,25 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).not.toContain("  - |\n    set -euo pipefail");
     expect(content.userData).not.toContain("  - |\n    set -euxo pipefail");
     expect(content.userData).toContain(
-      "      sed 's/^    //' > /usr/local/bin/agentbay-bootstrap-event <<'AGENTBAY_BOOTSTRAP_EVENT_SCRIPT'\n" +
+      "      sed 's/^    //' > /usr/local/bin/bruno-bootstrap-event <<'BRUNO_BOOTSTRAP_EVENT_SCRIPT'\n" +
         "          #!/usr/bin/env bash\n" +
         "          set -euo pipefail",
     );
-    expect(content.userData).not.toContain("\n    set -euo pipefail\n\nAGENTBAY_APP_URL=");
+    expect(content.userData).not.toContain("\n    set -euo pipefail\n\nBRUNO_APP_URL=");
     expect(content.userData).toContain("apt-get install -y docker-ce");
     expect(content.userData).toContain("systemctl enable --now docker");
-    expect(content.userData).toContain("AGENTBAY_RUNNER_REGISTRATION_TOKEN=");
+    expect(content.userData).toContain("BRUNO_RUNNER_REGISTRATION_TOKEN=");
     expect(content.userData).toContain(registrationToken);
-    expect(content.userData).toContain("AGENTBAY_RUNNER_ENDPOINT_URL=");
-    expect(content.userData).toContain("sed 's/^    //' > /usr/local/bin/agentbay-bootstrap-event");
+    expect(content.userData).toContain("BRUNO_RUNNER_ENDPOINT_URL=");
+    expect(content.userData).toContain("sed 's/^    //' > /usr/local/bin/bruno-bootstrap-event");
     expect(content.userData).toContain(
-      "sed 's/^    //' > '/etc/agentbay/runner.env' <<AGENTBAY_RUNNER_ENV",
+      "sed 's/^    //' > '/etc/bruno/runner.env' <<BRUNO_RUNNER_ENV",
     );
-    expect(content.userData).toContain("AGENTBAY_APP_URL=https://app.agentbay.test");
-    expect(content.userData).toContain("AGENTBAY_RUNNER_ENDPOINT_URL=https://runner.agentbay.test");
-    expect(content.userData).toContain("AGENTBAY_RUNNER_NAME=Cloud Runner 1");
-    expect(content.userData).toContain("AGENTBAY_RUNNER_BEARER_TOKEN=runner-command-token");
-    expect(content.userData).toContain(`AGENTBAY_RUNNER_IMAGE=${IMMUTABLE_RUNNER_IMAGE}`);
+    expect(content.userData).toContain("BRUNO_APP_URL=https://app.bruno.test");
+    expect(content.userData).toContain("BRUNO_RUNNER_ENDPOINT_URL=https://runner.bruno.test");
+    expect(content.userData).toContain("BRUNO_RUNNER_NAME=Cloud Runner 1");
+    expect(content.userData).toContain("BRUNO_RUNNER_BEARER_TOKEN=runner-command-token");
+    expect(content.userData).toContain(`BRUNO_RUNNER_IMAGE=${IMMUTABLE_RUNNER_IMAGE}`);
     expect(content.userData).toContain(
       `${RUNNER_EXPECTED_RELEASE_VERSION_ENV}=${RUNNER_RELEASE_VERSION}`,
     );
@@ -99,89 +99,87 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain(
       `${RUNNER_EXPECTED_BOOT_CONTRACT_VERSION_ENV}=${RUNNER_BOOT_CONTRACT_VERSION}`,
     );
+    expect(content.userData).toContain(`BRUNO_DOCKER_RUNNER_IMAGE=${DEFAULT_MANUAL_RUNNER_IMAGE}`);
     expect(content.userData).toContain(
-      `AGENTBAY_DOCKER_RUNNER_IMAGE=${DEFAULT_MANUAL_RUNNER_IMAGE}`,
+      `BRUNO_HERMES_WORKLOAD_IMAGE=${DEFAULT_HERMES_WORKLOAD_IMAGE}`,
+    );
+    expect(content.userData).toContain(`BRUNO_HERMES_STATE_ROOT=${DEFAULT_HERMES_STATE_ROOT}`);
+    expect(content.userData).toContain(
+      `BRUNO_HERMES_PRIVATE_NETWORK=${DEFAULT_HERMES_PRIVATE_NETWORK}`,
     );
     expect(content.userData).toContain(
-      `AGENTBAY_HERMES_WORKLOAD_IMAGE=${DEFAULT_HERMES_WORKLOAD_IMAGE}`,
+      `BRUNO_HERMES_READINESS_TIMEOUT_MS=${DEFAULT_HERMES_READINESS_TIMEOUT_MS}`,
     );
-    expect(content.userData).toContain(`AGENTBAY_HERMES_STATE_ROOT=${DEFAULT_HERMES_STATE_ROOT}`);
+    expect(content.userData).toContain(`BRUNO_HERMES_DOCKER_CPUS=${DEFAULT_HERMES_DOCKER_CPUS}`);
     expect(content.userData).toContain(
-      `AGENTBAY_HERMES_PRIVATE_NETWORK=${DEFAULT_HERMES_PRIVATE_NETWORK}`,
-    );
-    expect(content.userData).toContain(
-      `AGENTBAY_HERMES_READINESS_TIMEOUT_MS=${DEFAULT_HERMES_READINESS_TIMEOUT_MS}`,
-    );
-    expect(content.userData).toContain(`AGENTBAY_HERMES_DOCKER_CPUS=${DEFAULT_HERMES_DOCKER_CPUS}`);
-    expect(content.userData).toContain(
-      `AGENTBAY_HERMES_DOCKER_MEMORY=${DEFAULT_HERMES_DOCKER_MEMORY}`,
+      `BRUNO_HERMES_DOCKER_MEMORY=${DEFAULT_HERMES_DOCKER_MEMORY}`,
     );
     expect(content.userData).toContain(
-      `AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=${DEFAULT_HERMES_DOCKER_PIDS_LIMIT}`,
+      `BRUNO_HERMES_DOCKER_PIDS_LIMIT=${DEFAULT_HERMES_DOCKER_PIDS_LIMIT}`,
     );
     expect(content.userData).toContain(
-      `AGENTBAY_RUNNER_MAX_AGENTS=${DEFAULT_HERMES_RUNNER_MAX_AGENTS}`,
+      `BRUNO_RUNNER_MAX_AGENTS=${DEFAULT_HERMES_RUNNER_MAX_AGENTS}`,
     );
-    expect(content.userData).toContain("AGENTBAY_RUNNER_BOOT_MODEL_CANARY_ENABLED=false");
+    expect(content.userData).toContain("BRUNO_RUNNER_BOOT_MODEL_CANARY_ENABLED=false");
     expect(content.userData).toContain(
-      "          AGENTBAY_APP_URL=https://app.agentbay.test\n" +
-        "          AGENTBAY_RUNNER_REGISTRATION_TOKEN=",
+      "          BRUNO_APP_URL=https://app.bruno.test\n" +
+        "          BRUNO_RUNNER_REGISTRATION_TOKEN=",
     );
-    expect(content.userData).toContain("AGENTBAY_RUNNER_ENV_FILE=/etc/agentbay/runner.env");
-    expect(content.userData).toContain("AGENTBAY_RUNNER_HOST=0.0.0.0");
-    expect(content.userData).not.toContain("AGENTBAY_RUNNER_HOST=127.0.0.1");
-    expect(content.userData).not.toContain('AGENTBAY_APP_URL="https://app.agentbay.test"');
-    expect(content.userData).not.toContain(`AGENTBAY_RUNNER_IMAGE="${IMMUTABLE_RUNNER_IMAGE}"`);
-    expect(content.userData).not.toContain(". '/etc/agentbay/runner.env'");
-    expect(content.userData).toContain(`agentbay_pull_image '${IMMUTABLE_RUNNER_IMAGE}'`);
-    expect(content.userData).toContain(`agentbay_pull_image '${DEFAULT_MANUAL_RUNNER_IMAGE}'`);
-    expect(content.userData).toContain(`agentbay_pull_image '${DEFAULT_HERMES_WORKLOAD_IMAGE}'`);
+    expect(content.userData).toContain("BRUNO_RUNNER_ENV_FILE=/etc/bruno/runner.env");
+    expect(content.userData).toContain("BRUNO_RUNNER_HOST=0.0.0.0");
+    expect(content.userData).not.toContain("BRUNO_RUNNER_HOST=127.0.0.1");
+    expect(content.userData).not.toContain('BRUNO_APP_URL="https://app.bruno.test"');
+    expect(content.userData).not.toContain(`BRUNO_RUNNER_IMAGE="${IMMUTABLE_RUNNER_IMAGE}"`);
+    expect(content.userData).not.toContain(". '/etc/bruno/runner.env'");
+    expect(content.userData).toContain(`bruno_pull_image '${IMMUTABLE_RUNNER_IMAGE}'`);
+    expect(content.userData).toContain(`bruno_pull_image '${DEFAULT_MANUAL_RUNNER_IMAGE}'`);
+    expect(content.userData).toContain(`bruno_pull_image '${DEFAULT_HERMES_WORKLOAD_IMAGE}'`);
     expect(content.userData).toContain("for attempt in 1 2 3; do");
     expect(content.userData).toContain('sleep "$((attempt * 2))"');
-    expect(content.userData).toContain("AGENTBAY_BOOTSTRAP_STEP=docker_pull");
-    expect(content.userData).toContain("AGENTBAY_BOOTSTRAP_STEP=agent_image_pull");
-    expect(content.userData).toContain("AGENTBAY_BOOTSTRAP_STEP=hermes_image_pull");
-    expect(content.userData).toContain("AGENTBAY_BOOTSTRAP_STEP=runner_container_start");
-    expect(content.userData).not.toContain("AGENTBAY_BOOTSTRAP_STEP=docker_container_start");
+    expect(content.userData).toContain("BRUNO_BOOTSTRAP_STEP=docker_pull");
+    expect(content.userData).toContain("BRUNO_BOOTSTRAP_STEP=agent_image_pull");
+    expect(content.userData).toContain("BRUNO_BOOTSTRAP_STEP=hermes_image_pull");
+    expect(content.userData).toContain("BRUNO_BOOTSTRAP_STEP=runner_container_start");
+    expect(content.userData).not.toContain("BRUNO_BOOTSTRAP_STEP=docker_container_start");
     expect(content.userData).toContain(
-      '/usr/local/bin/agentbay-bootstrap-event bootstrapping started "Installing cloud runner packages." package_install',
+      '/usr/local/bin/bruno-bootstrap-event bootstrapping started "Installing cloud runner packages." package_install',
     );
     expect(content.userData).toContain(
-      '/usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Cloud runner packages were installed." package_install',
+      '/usr/local/bin/bruno-bootstrap-event bootstrapping completed "Cloud runner packages were installed." package_install',
     );
     expect(content.userData).toContain(
-      '/usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled cloud runner image." docker_pull',
+      '/usr/local/bin/bruno-bootstrap-event bootstrapping completed "Pulled cloud runner image." docker_pull',
     );
     expect(content.userData).toContain(
-      '/usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled default agent container image." agent_image_pull',
+      '/usr/local/bin/bruno-bootstrap-event bootstrapping completed "Pulled default agent container image." agent_image_pull',
     );
     expect(content.userData).toContain(
-      '/usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled Hermes workload image." hermes_image_pull',
+      '/usr/local/bin/bruno-bootstrap-event bootstrapping completed "Pulled Hermes workload image." hermes_image_pull',
     );
     expect(content.userData).toContain(
-      '/usr/local/bin/agentbay-bootstrap-event bootstrapping started "Starting runner container." runner_container_start',
+      '/usr/local/bin/bruno-bootstrap-event bootstrapping started "Starting runner container." runner_container_start',
     );
     expect(content.userData).toContain(
-      '/usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Runner container started." runner_container_start',
+      '/usr/local/bin/bruno-bootstrap-event bootstrapping completed "Runner container started." runner_container_start',
     );
     expect(content.userData).toContain(
-      '/usr/local/bin/agentbay-bootstrap-event waiting_for_runner started "Runner container started; waiting for registration and heartbeat." runner_registration',
+      '/usr/local/bin/bruno-bootstrap-event waiting_for_runner started "Runner container started; waiting for registration and heartbeat." runner_registration',
     );
     expect(content.userData).toContain(`install -m 0710 -d '${DEFAULT_HERMES_STATE_ROOT}'`);
     expect(content.userData).toContain(
       `docker network inspect '${DEFAULT_HERMES_PRIVATE_NETWORK}' >/dev/null 2>&1 || docker network create '${DEFAULT_HERMES_PRIVATE_NETWORK}'`,
     );
-    expect(content.userData).toContain("docker rm --force 'agentbay-runner' || true");
+    expect(content.userData).toContain("docker rm --force 'bruno-runner' || true");
     expect(content.userData).toContain(
-      `docker run --detach --name 'agentbay-runner' --restart always --network 'agentbay-hermes' --env-file '/etc/agentbay/runner.env' -v '/etc/agentbay/runner.env:/etc/agentbay/runner.env' -v '/var/lib/agentbay/agents:/var/lib/agentbay/agents' -v '/var/lib/agentbay/boot-self-test:/var/lib/agentbay/boot-self-test' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' '${IMMUTABLE_RUNNER_IMAGE}'`,
+      `docker run --detach --name 'bruno-runner' --restart always --network 'bruno-hermes' --env-file '/etc/bruno/runner.env' -v '/etc/bruno/runner.env:/etc/bruno/runner.env' -v '/var/lib/bruno/agents:/var/lib/bruno/agents' -v '/var/lib/bruno/boot-self-test:/var/lib/bruno/boot-self-test' -v '/var/run/docker.sock:/var/run/docker.sock' -p '127.0.0.1:3045:3045' '${IMMUTABLE_RUNNER_IMAGE}'`,
     );
     expect(content.userData).toContain("/runner/v1/bootstrap-events");
     for (const token of LEGACY_HOST_BOOTSTRAP_TOKENS) {
       expect(content.userData).not.toContain(token);
     }
     expect(content.safeSummary).toMatchObject({
-      appBaseUrl: "https://app.agentbay.test",
-      runnerEndpointUrl: "https://runner.agentbay.test",
+      appBaseUrl: "https://app.bruno.test",
+      runnerEndpointUrl: "https://runner.bruno.test",
       runnerName: "Cloud Runner 1",
       runnerImage: IMMUTABLE_RUNNER_IMAGE,
       runnerRelease: {
@@ -205,18 +203,18 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(JSON.stringify(content.safeSummary)).not.toContain(registrationToken);
     expect(JSON.stringify(content.safeSummary)).not.toContain("runner-command-token");
     expect(content.userData).not.toContain("dop_v1_super_secret");
-    expect(content.userData).not.toContain("agb_run_1234567890123456789012345678901234567890123");
+    expect(content.userData).not.toContain("bruno_run_1234567890123456789012345678901234567890123");
   });
 
   it("defaults the selected runner image in safe bootstrap content", () => {
     const content = buildCloudRunnerBootstrapContent({
-      appBaseUrl: "https://app.agentbay.test",
-      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
-      runnerEndpointUrl: "https://runner.agentbay.test",
+      appBaseUrl: "https://app.bruno.test",
+      registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
+      runnerEndpointUrl: "https://runner.bruno.test",
       runnerName: "Cloud Runner 1",
     });
 
-    expect(content.safeSummary.runnerImage).toBe(DEFAULT_AGENTBAY_RUNNER_IMAGE);
+    expect(content.safeSummary.runnerImage).toBe(DEFAULT_BRUNO_RUNNER_IMAGE);
     expect(content.safeSummary.hermesWorkloadImage).toBe(DEFAULT_HERMES_WORKLOAD_IMAGE);
     expect(content.safeSummary.hermesStateRoot).toBe(DEFAULT_HERMES_STATE_ROOT);
     expect(content.safeSummary.hermesPrivateNetwork).toBe(DEFAULT_HERMES_PRIVATE_NETWORK);
@@ -228,23 +226,23 @@ describe.sequential("cloud runner bootstrap content", () => {
     });
     expect(content.safeSummary.runnerMaxAgents).toBe(DEFAULT_HERMES_RUNNER_MAX_AGENTS);
     expect(content.safeSummary.runnerRelease).toBeNull();
-    expect(content.userData).toContain(`AGENTBAY_RUNNER_IMAGE=${DEFAULT_AGENTBAY_RUNNER_IMAGE}`);
+    expect(content.userData).toContain(`BRUNO_RUNNER_IMAGE=${DEFAULT_BRUNO_RUNNER_IMAGE}`);
     expect(content.userData).not.toContain(RUNNER_EXPECTED_IMAGE_DIGEST_ENV);
   });
 
   it("builds snapshot first-boot data without package installation or image pulls", () => {
     const content = buildCloudRunnerBootstrapContent({
-      appBaseUrl: "https://app.agentbay.test",
-      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      appBaseUrl: "https://app.bruno.test",
+      registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
       commandBearerToken: "runner-command-token",
-      runnerEndpointUrl: "https://runner.agentbay.test",
+      runnerEndpointUrl: "https://runner.bruno.test",
       runnerImage: IMMUTABLE_RUNNER_IMAGE,
       bootMode: "snapshot",
     });
 
     expect(content.userData).toContain("#cloud-config");
-    expect(content.userData).toContain("AGENTBAY_RUNNER_REGISTRATION_TOKEN=");
-    expect(content.userData).toContain("AGENTBAY_RUNNER_BEARER_TOKEN=runner-command-token");
+    expect(content.userData).toContain("BRUNO_RUNNER_REGISTRATION_TOKEN=");
+    expect(content.userData).toContain("BRUNO_RUNNER_BEARER_TOKEN=runner-command-token");
     expect(content.userData).toContain("snapshot_preloaded_images");
     expect(content.userData).toContain("docker run --detach");
     expect(content.userData).toContain("waiting_for_runner");
@@ -252,16 +250,16 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).not.toContain("packages:");
     expect(content.userData).not.toContain("apt-get install");
     expect(content.userData).not.toContain("docker pull");
-    expect(content.userData).not.toContain("agentbay_pull_image");
+    expect(content.userData).not.toContain("bruno_pull_image");
     expect(content.userData).not.toContain("docker_apt_repository");
   });
 
   it("marks local tagged images with the explicit development identity seam", () => {
     const content = buildCloudRunnerBootstrapContent({
-      appBaseUrl: "https://app.agentbay.test",
-      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
-      runnerEndpointUrl: "https://runner.agentbay.test",
-      runnerImage: "agentbay-runner:local",
+      appBaseUrl: "https://app.bruno.test",
+      registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
+      runnerEndpointUrl: "https://runner.bruno.test",
+      runnerImage: "bruno-runner:local",
       releaseIdentityMode: RUNNER_RELEASE_DEVELOPMENT_MODE,
     });
 
@@ -273,13 +271,13 @@ describe.sequential("cloud runner bootstrap content", () => {
 
   it("uses custom safe Hermes deployment settings without exposing secrets", () => {
     const content = buildCloudRunnerBootstrapContent({
-      appBaseUrl: "https://app.agentbay.test",
-      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
-      runnerEndpointUrl: "https://runner.agentbay.test",
+      appBaseUrl: "https://app.bruno.test",
+      registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
+      runnerEndpointUrl: "https://runner.bruno.test",
       runnerName: "Cloud Runner 1",
-      hermesWorkloadImage: "ghcr.io/ametel01/agentbay-hermes:sha-123",
-      hermesStateRoot: "/var/lib/agentbay/custom-agents",
-      hermesPrivateNetwork: "agentbay-custom-hermes",
+      hermesWorkloadImage: "ghcr.io/ametel01/bruno-hermes:sha-123",
+      hermesStateRoot: "/var/lib/bruno/custom-agents",
+      hermesPrivateNetwork: "bruno-custom-hermes",
       hermesReadinessTimeoutMs: 240_000,
       hermesDockerCpus: "1",
       hermesDockerMemory: "1536m",
@@ -288,28 +286,24 @@ describe.sequential("cloud runner bootstrap content", () => {
     });
 
     expect(content.userData).toContain(
-      "AGENTBAY_HERMES_WORKLOAD_IMAGE=ghcr.io/ametel01/agentbay-hermes:sha-123",
+      "BRUNO_HERMES_WORKLOAD_IMAGE=ghcr.io/ametel01/bruno-hermes:sha-123",
     );
+    expect(content.userData).toContain("BRUNO_HERMES_STATE_ROOT=/var/lib/bruno/custom-agents");
+    expect(content.userData).toContain("BRUNO_HERMES_PRIVATE_NETWORK=bruno-custom-hermes");
+    expect(content.userData).toContain("BRUNO_HERMES_READINESS_TIMEOUT_MS=240000");
+    expect(content.userData).toContain("BRUNO_HERMES_DOCKER_CPUS=1");
+    expect(content.userData).toContain("BRUNO_HERMES_DOCKER_MEMORY=1536m");
+    expect(content.userData).toContain("BRUNO_HERMES_DOCKER_PIDS_LIMIT=256");
+    expect(content.userData).toContain("BRUNO_RUNNER_MAX_AGENTS=1");
+    expect(content.userData).toContain("bruno_pull_image 'ghcr.io/ametel01/bruno-hermes:sha-123'");
+    expect(content.userData).toContain("docker network create 'bruno-custom-hermes'");
     expect(content.userData).toContain(
-      "AGENTBAY_HERMES_STATE_ROOT=/var/lib/agentbay/custom-agents",
-    );
-    expect(content.userData).toContain("AGENTBAY_HERMES_PRIVATE_NETWORK=agentbay-custom-hermes");
-    expect(content.userData).toContain("AGENTBAY_HERMES_READINESS_TIMEOUT_MS=240000");
-    expect(content.userData).toContain("AGENTBAY_HERMES_DOCKER_CPUS=1");
-    expect(content.userData).toContain("AGENTBAY_HERMES_DOCKER_MEMORY=1536m");
-    expect(content.userData).toContain("AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256");
-    expect(content.userData).toContain("AGENTBAY_RUNNER_MAX_AGENTS=1");
-    expect(content.userData).toContain(
-      "agentbay_pull_image 'ghcr.io/ametel01/agentbay-hermes:sha-123'",
-    );
-    expect(content.userData).toContain("docker network create 'agentbay-custom-hermes'");
-    expect(content.userData).toContain(
-      "-v '/var/lib/agentbay/custom-agents:/var/lib/agentbay/custom-agents'",
+      "-v '/var/lib/bruno/custom-agents:/var/lib/bruno/custom-agents'",
     );
     expect(content.safeSummary).toMatchObject({
-      hermesWorkloadImage: "ghcr.io/ametel01/agentbay-hermes:sha-123",
-      hermesStateRoot: "/var/lib/agentbay/custom-agents",
-      hermesPrivateNetwork: "agentbay-custom-hermes",
+      hermesWorkloadImage: "ghcr.io/ametel01/bruno-hermes:sha-123",
+      hermesStateRoot: "/var/lib/bruno/custom-agents",
+      hermesPrivateNetwork: "bruno-custom-hermes",
       hermesReadinessTimeoutMs: 240_000,
       hermesDocker: {
         cpus: "1",
@@ -322,8 +316,8 @@ describe.sequential("cloud runner bootstrap content", () => {
 
   it("rejects Hermes runtime settings Docker cannot represent", () => {
     const base = {
-      appBaseUrl: "https://app.agentbay.test",
-      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      appBaseUrl: "https://app.bruno.test",
+      registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
       runnerName: "Cloud Runner 1",
     };
 
@@ -345,8 +339,8 @@ describe.sequential("cloud runner bootstrap content", () => {
   it("rejects loopback runner endpoint URLs for cloud bootstrap registration", () => {
     expect(() =>
       buildCloudRunnerBootstrapContent({
-        appBaseUrl: "https://app.agentbay.test",
-        registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+        appBaseUrl: "https://app.bruno.test",
+        registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
         runnerEndpointUrl: "http://127.0.0.1:3045",
         runnerName: "Cloud Runner 1",
       }),
@@ -355,8 +349,8 @@ describe.sequential("cloud runner bootstrap content", () => {
 
   it("configures an HTTPS reverse proxy for the public runner hostname", () => {
     const content = buildCloudRunnerBootstrapContent({
-      appBaseUrl: "https://app.agentbay.test",
-      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      appBaseUrl: "https://app.bruno.test",
+      registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
       runnerEndpointUrl: "https://203-0-113-10.sslip.io",
       runnerName: "Cloud Runner 1",
     });
@@ -372,40 +366,40 @@ describe.sequential("cloud runner bootstrap content", () => {
 
   it("keeps metadata endpoint discovery commands inside each YAML block scalar that uses them", () => {
     const content = buildCloudRunnerBootstrapContent({
-      appBaseUrl: "https://app.agentbay.test",
-      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      appBaseUrl: "https://app.bruno.test",
+      registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
       endpointDiscovery: { type: "digitalocean_metadata" },
       runnerName: "Cloud Runner 1",
     });
-    const discoveredIpPlaceholder = ["$", "{AGENTBAY_PUBLIC_IPV4_DASHED}"].join("");
+    const discoveredIpPlaceholder = ["$", "{BRUNO_PUBLIC_IPV4_DASHED}"].join("");
 
     expect(content.userData).toContain(
-      '      AGENTBAY_PUBLIC_IPV4="$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)"\n' +
-        '      AGENTBAY_PUBLIC_IPV4_DASHED="$(printf \'%s\' "$AGENTBAY_PUBLIC_IPV4" | tr . -)"\n' +
-        "      sed 's/^    //' > /etc/caddy/Caddyfile <<AGENTBAY_CADDYFILE",
+      '      BRUNO_PUBLIC_IPV4="$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)"\n' +
+        '      BRUNO_PUBLIC_IPV4_DASHED="$(printf \'%s\' "$BRUNO_PUBLIC_IPV4" | tr . -)"\n' +
+        "      sed 's/^    //' > /etc/caddy/Caddyfile <<BRUNO_CADDYFILE",
     );
     expect(content.userData).toContain(`      https://${discoveredIpPlaceholder}.sslip.io {`);
     expect(content.userData).toContain(
-      '      AGENTBAY_PUBLIC_IPV4="$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)"\n' +
-        '      AGENTBAY_PUBLIC_IPV4_DASHED="$(printf \'%s\' "$AGENTBAY_PUBLIC_IPV4" | tr . -)"\n' +
-        "      sed 's/^    //' > '/etc/agentbay/runner.env' <<AGENTBAY_RUNNER_ENV",
+      '      BRUNO_PUBLIC_IPV4="$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)"\n' +
+        '      BRUNO_PUBLIC_IPV4_DASHED="$(printf \'%s\' "$BRUNO_PUBLIC_IPV4" | tr . -)"\n' +
+        "      sed 's/^    //' > '/etc/bruno/runner.env' <<BRUNO_RUNNER_ENV",
     );
     expect(content.userData).toContain(
-      `          AGENTBAY_RUNNER_ENDPOINT_URL=https://${discoveredIpPlaceholder}.sslip.io`,
+      `          BRUNO_RUNNER_ENDPOINT_URL=https://${discoveredIpPlaceholder}.sslip.io`,
     );
-    expect(content.userData).not.toContain("\nAGENTBAY_PUBLIC_IPV4_DASHED=");
+    expect(content.userData).not.toContain("\nBRUNO_PUBLIC_IPV4_DASHED=");
   });
 
   it("adds bootstrap logging and swap setup when low-memory Droplet swap is enabled", () => {
     const content = buildCloudRunnerBootstrapContent({
-      appBaseUrl: "https://app.agentbay.test",
-      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      appBaseUrl: "https://app.bruno.test",
+      registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
       runnerEndpointUrl: "https://203-0-113-10.sslip.io",
       runnerName: "Cloud Runner 1",
       enableSwap: true,
     });
 
-    expect(content.userData).toContain("/var/log/agentbay-bootstrap.log");
+    expect(content.userData).toContain("/var/log/bruno-bootstrap.log");
     expect(content.userData).toContain("set -euxo pipefail");
     expect(content.userData).toContain("    - bash\n    - -lc\n    - |\n      set -euxo pipefail");
     expect(content.userData).toContain("fallocate -l 1G /swapfile");
@@ -416,8 +410,8 @@ describe.sequential("cloud runner bootstrap content", () => {
 
   it("does not emit under-indented runcmd block content", () => {
     const content = buildCloudRunnerBootstrapContent({
-      appBaseUrl: "https://app.agentbay.test",
-      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      appBaseUrl: "https://app.bruno.test",
+      registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
       endpointDiscovery: { type: "digitalocean_metadata" },
       runnerName: "Cloud Runner 1",
       enableSwap: true,
@@ -443,30 +437,30 @@ describe.sequential("cloud runner bootstrap content", () => {
 
   it("redacts provider tokens, one-time registration tokens, and runner credentials from safe output", () => {
     const unsafeOutput = [
-      "AGENTBAY_DIGITALOCEAN_TOKEN=dop_v1_super_secret",
-      "AGENTBAY_RUNNER_REGISTRATION_TOKEN=agb_reg_1234567890123456789012345678901234567890123",
-      "AGENTBAY_RUNNER_BEARER_TOKEN=runner-command-token",
-      "AGENTBAY_RUNNER_CREDENTIAL=agb_run_1234567890123456789012345678901234567890123",
+      "BRUNO_DIGITALOCEAN_TOKEN=dop_v1_super_secret",
+      "BRUNO_RUNNER_REGISTRATION_TOKEN=bruno_reg_1234567890123456789012345678901234567890123",
+      "BRUNO_RUNNER_BEARER_TOKEN=runner-command-token",
+      "BRUNO_RUNNER_CREDENTIAL=bruno_run_1234567890123456789012345678901234567890123",
     ].join("\n");
 
     const redacted = redactCloudRunnerBootstrapOutput(unsafeOutput);
 
     expect(redacted).toContain(BOOTSTRAP_REDACTION);
     expect(redacted).not.toContain("dop_v1_super_secret");
-    expect(redacted).not.toContain("agb_reg_1234567890123456789012345678901234567890123");
+    expect(redacted).not.toContain("bruno_reg_1234567890123456789012345678901234567890123");
     expect(redacted).not.toContain("runner-command-token");
-    expect(redacted).not.toContain("agb_run_1234567890123456789012345678901234567890123");
+    expect(redacted).not.toContain("bruno_run_1234567890123456789012345678901234567890123");
   });
 
   it("records the bootstrap injected phase without persisting raw registration material", async () => {
     const runner = await seedCloudRunner(connection);
-    const registrationToken = "agb_reg_1234567890123456789012345678901234567890123";
+    const registrationToken = "bruno_reg_1234567890123456789012345678901234567890123";
 
     const content = await buildCloudRunnerBootstrapForRunner({
       runnerId: runner.id,
-      appBaseUrl: "https://app.agentbay.test",
+      appBaseUrl: "https://app.bruno.test",
       registrationToken,
-      runnerEndpointUrl: "https://runner.agentbay.test",
+      runnerEndpointUrl: "https://runner.bruno.test",
       runnerImage: IMMUTABLE_RUNNER_IMAGE,
       createConnection: () => connection,
       now: () => new Date("2026-07-06T02:00:30.000Z"),

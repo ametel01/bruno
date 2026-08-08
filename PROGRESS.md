@@ -204,8 +204,8 @@ cold-deployment plan.
   supported physical profile such as `s-1vcpu-2gb` is configured with the canonical Hermes limits.
 - Full gates passed: `bun run format:check`; `bun run lint`; `bun run typecheck`; `bun run test`
   (170 files, 1,645 tests); `bun run build`; `bun run test:e2e:ci` (26 tests);
-  `AGENTBAY_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-2gb AGENTBAY_HERMES_DOCKER_CPUS=1
-  AGENTBAY_HERMES_DOCKER_MEMORY=1536m AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=256 bun run
+  `BRUNO_DIGITALOCEAN_SIZE_SLUG=s-1vcpu-2gb BRUNO_HERMES_DOCKER_CPUS=1
+  BRUNO_HERMES_DOCKER_MEMORY=1536m BRUNO_HERMES_DOCKER_PIDS_LIMIT=256 bun run
   repro:cloud-runner`; and equivalent `bun run local:agent:smoke`.
 - The local agent smoke stayed inside the synthetic local Docker boundary: `digitalOceanRequests=0`,
   one simulated Droplet, agent created/deleted, cleanup verified, and single-run local p95

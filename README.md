@@ -1,9 +1,9 @@
-# bruno
+# Bruno
 
-bruno is the web control plane for AgentBay: a supervised way to create, configure, run,
-observe, approve, back up, and recover persistent Hermes agents. The Next.js application owns the
-user-facing dashboard and control APIs; PostgreSQL stores durable state; separate runner services
-execute each agent in an isolated Docker container.
+Bruno is a platform for easy deployment and hosting of always-on AI personal assistants. Its web
+control plane lets people create, configure, run, observe, approve, back up, and recover persistent
+Hermes agents. The Next.js application owns the user-facing dashboard and control APIs; PostgreSQL
+stores durable state; separate runner services execute each agent in an isolated Docker container.
 
 The project is under active development. See [milestones](./docs/MILESTONES.md) for the product
 roadmap.
@@ -123,9 +123,9 @@ provisioning.
 Create an ignored `.env.local`:
 
 ```dotenv
-DATABASE_URL=postgres://agentbay:agentbay@127.0.0.1:54329/bruno
+DATABASE_URL=postgres://bruno:bruno@127.0.0.1:54329/bruno
 NEXT_PUBLIC_APP_URL=http://localhost:3000
-AGENTBAY_AUTH_MODE=development
+BRUNO_AUTH_MODE=development
 ```
 
 Then run:
@@ -137,7 +137,7 @@ bun run local:up
 `local:up` starts PostgreSQL, applies migrations, and launches `next dev`. It does not configure a
 cloud provider, so create-agent flows that need automatic provisioning fail closed. The Compose
 database is named `bruno`; if you copy `.env.example`, change its database path from
-`/agentbay` to `/bruno` for this local Compose path.
+`/bruno` to `/bruno` for this local Compose path.
 
 Useful database commands:
 
@@ -160,14 +160,14 @@ commit tokens, encryption keys, runner credentials, Clerk keys, or database cred
 | --- | --- | --- |
 | `DATABASE_URL` | Yes | PostgreSQL connection URL used by the app and Drizzle migrations. |
 | `NEXT_PUBLIC_APP_URL` | Yes | Canonical absolute application URL. |
-| `AGENTBAY_LOG_LEVEL` | No | Minimum structured server-log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, or `silent`; defaults to `info`. |
-| `AGENTBAY_AUTH_MODE` | Hosted deployments | `operator` or `clerk` normally; `development` is allowed on loopback, protected previews, or an explicitly public development deployment. |
-| `AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT` | Public Vercel development only | Must be exactly `true` with development mode to expose a production-target deployment without browser authentication. |
-| `AGENTBAY_OPERATOR_PASSWORD` | Operator deployments | Password for the Basic-auth gate in front of product pages and browser APIs. |
-| `AGENTBAY_OPERATOR_USERNAME` | No | Basic-auth username; defaults to `agentbay`. |
+| `BRUNO_LOG_LEVEL` | No | Minimum structured server-log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, or `silent`; defaults to `info`. |
+| `BRUNO_AUTH_MODE` | Hosted deployments | `operator` or `clerk` normally; `development` is allowed on loopback, protected previews, or an explicitly public development deployment. |
+| `BRUNO_ALLOW_PUBLIC_DEVELOPMENT` | Public Vercel development only | Must be exactly `true` with development mode to expose a production-target deployment without browser authentication. |
+| `BRUNO_OPERATOR_PASSWORD` | Operator deployments | Password for the Basic-auth gate in front of product pages and browser APIs. |
+| `BRUNO_OPERATOR_USERNAME` | No | Basic-auth username; defaults to `bruno`. |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk mode | Clerk publishable key. |
 | `CLERK_SECRET_KEY` | Clerk mode | Clerk server key. |
-| `AGENTBAY_PREVIEW_PROTECTION_VERIFIED` | Development-mode Vercel previews only | Must be exactly `true`, and only after Deployment Protection has been independently verified. |
+| `BRUNO_PREVIEW_PROTECTION_VERIFIED` | Development-mode Vercel previews only | Must be exactly `true`, and only after Deployment Protection has been independently verified. |
 
 See [Authentication modes](./docs/AUTHENTICATION.md) and the
 [Clerk development runbook](./docs/CLERK_DEVELOPMENT.md) before changing hosted authentication.
@@ -176,22 +176,22 @@ See [Authentication modes](./docs/AUTHENTICATION.md) and the
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `AGENTBAY_DIGITALOCEAN_TOKEN` | Automated cloud runners | DigitalOcean API token. If omitted, cloud provisioning is unavailable. |
-| `AGENTBAY_RUNNER_BEARER_TOKEN` | DigitalOcean or manual runner control | Shared server-side command token used between the control plane and runner service. |
-| `AGENTBAY_RUNNER_IMAGE` | Hosted cloud runners | Immutable runner reference in `registry/path:version@sha256:digest` form. Hosted DigitalOcean configuration rejects mutable or tag-only references; `local_docker` may use a tagged development image. |
-| `AGENTBAY_HERMES_WORKLOAD_IMAGE` | No | Exact Hermes workload image used by deployment and runtime reconciliation; defaults to the source-pinned image and digest. Controlled staging requires the attested untagged GHCR amd64 manifest digest. |
-| `AGENTBAY_HERMES_DOCKER_CPUS` | No | Docker CPU limit for each managed Hermes container; defaults to `1` and is validated against the selected runner profile before provider calls. |
-| `AGENTBAY_HERMES_DOCKER_MEMORY` | No | Docker memory limit for each managed Hermes container; defaults to `1536m`. Compatibility counts physical RAM plus the documented runner/OS reserve, never swap. |
-| `AGENTBAY_HERMES_DOCKER_PIDS_LIMIT` | No | Docker PID limit for each managed Hermes container; defaults to `256` and is propagated into runner bootstrap. |
-| `AGENTBAY_RUNNER_MAX_AGENTS` | No | Positive per-runner agent capacity; defaults to `1`. A value above one is accepted only when the exact runner/runtime profile also has approved measured capacity and sufficient CPU, physical memory, and disk evidence; current hosted profiles remain fail-closed to one. |
-| `AGENTBAY_DIGITALOCEAN_REGION` | No | Droplet region; defaults to `sfo3`. |
-| `AGENTBAY_DIGITALOCEAN_SIZE_SLUG` | No | Droplet size; legacy default remains `s-1vcpu-512mb-10gb` until authorized evidence selects a replacement, but hosted provisioning rejects profiles that cannot fit the configured Hermes limit plus runner/OS reserve in physical memory. Use an explicit supported profile such as `s-1vcpu-2gb` for managed Hermes trials. |
-| `AGENTBAY_DIGITALOCEAN_IMAGE` | No | Droplet image; defaults to `ubuntu-24-04-x64`. |
-| `AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS` | No | `auto`, `none`, or a comma-separated key-ID list. Omitted values auto-discover account keys. |
-| `AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS` | No | Comma-separated IPs/CIDRs allowed to reach SSH. SSH ingress is closed when this is omitted. |
-| `AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION` | Hermes BYOK setup | Active encryption-key label, for example `v1`. |
-| `AGENTBAY_AGENT_SECRET_KEYS_JSON` | Hermes BYOK setup | JSON object mapping key versions to 32-byte base64url keys. Keep old keys during rotation so existing secrets remain decryptable. |
-| `AGENTBAY_READY_AGENT_CREATION_ENABLED` | Controlled ready-mode rollout | Must be exactly `true` to offer common one-click creation. Unset, blank, or `false` makes new setup unavailable; any other value fails closed. |
+| `BRUNO_DIGITALOCEAN_TOKEN` | Automated cloud runners | DigitalOcean API token. If omitted, cloud provisioning is unavailable. |
+| `BRUNO_RUNNER_BEARER_TOKEN` | DigitalOcean or manual runner control | Shared server-side command token used between the control plane and runner service. |
+| `BRUNO_RUNNER_IMAGE` | Hosted cloud runners | Immutable runner reference in `registry/path:version@sha256:digest` form. Hosted DigitalOcean configuration rejects mutable or tag-only references; `local_docker` may use a tagged development image. |
+| `BRUNO_HERMES_WORKLOAD_IMAGE` | No | Exact Hermes workload image used by deployment and runtime reconciliation; defaults to the source-pinned image and digest. Controlled staging requires the attested untagged GHCR amd64 manifest digest. |
+| `BRUNO_HERMES_DOCKER_CPUS` | No | Docker CPU limit for each managed Hermes container; defaults to `1` and is validated against the selected runner profile before provider calls. |
+| `BRUNO_HERMES_DOCKER_MEMORY` | No | Docker memory limit for each managed Hermes container; defaults to `1536m`. Compatibility counts physical RAM plus the documented runner/OS reserve, never swap. |
+| `BRUNO_HERMES_DOCKER_PIDS_LIMIT` | No | Docker PID limit for each managed Hermes container; defaults to `256` and is propagated into runner bootstrap. |
+| `BRUNO_RUNNER_MAX_AGENTS` | No | Positive per-runner agent capacity; defaults to `1`. A value above one is accepted only when the exact runner/runtime profile also has approved measured capacity and sufficient CPU, physical memory, and disk evidence; current hosted profiles remain fail-closed to one. |
+| `BRUNO_DIGITALOCEAN_REGION` | No | Droplet region; defaults to `sfo3`. |
+| `BRUNO_DIGITALOCEAN_SIZE_SLUG` | No | Droplet size; legacy default remains `s-1vcpu-512mb-10gb` until authorized evidence selects a replacement, but hosted provisioning rejects profiles that cannot fit the configured Hermes limit plus runner/OS reserve in physical memory. Use an explicit supported profile such as `s-1vcpu-2gb` for managed Hermes trials. |
+| `BRUNO_DIGITALOCEAN_IMAGE` | No | Droplet image; defaults to `ubuntu-24-04-x64`. |
+| `BRUNO_DIGITALOCEAN_SSH_KEY_IDS` | No | `auto`, `none`, or a comma-separated key-ID list. Omitted values auto-discover account keys. |
+| `BRUNO_DIGITALOCEAN_SSH_SOURCE_CIDRS` | No | Comma-separated IPs/CIDRs allowed to reach SSH. SSH ingress is closed when this is omitted. |
+| `BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION` | Hermes BYOK setup | Active encryption-key label, for example `v1`. |
+| `BRUNO_AGENT_SECRET_KEYS_JSON` | Hermes BYOK setup | JSON object mapping key versions to 32-byte base64url keys. Keep old keys during rotation so existing secrets remain decryptable. |
+| `BRUNO_READY_AGENT_CREATION_ENABLED` | Controlled ready-mode rollout | Must be exactly `true` to offer common one-click creation. Unset, blank, or `false` makes new setup unavailable; any other value fails closed. |
 | `CRON_SECRET` | Hosted reconciliation | A 32–256 character bearer-safe secret used by Vercel to authorize both deployment and runtime reconciliation routes. |
 
 The default-disabled staging acceptance controller additionally requires the
@@ -210,11 +210,11 @@ does not install.
 
 All five variables are required together to enable S3-compatible backup and restore:
 
-- `AGENTBAY_BACKUP_STORAGE_ENDPOINT_URL`
-- `AGENTBAY_BACKUP_STORAGE_BUCKET`
-- `AGENTBAY_BACKUP_STORAGE_REGION`
-- `AGENTBAY_BACKUP_STORAGE_ACCESS_KEY_ID`
-- `AGENTBAY_BACKUP_STORAGE_SECRET_ACCESS_KEY`
+- `BRUNO_BACKUP_STORAGE_ENDPOINT_URL`
+- `BRUNO_BACKUP_STORAGE_BUCKET`
+- `BRUNO_BACKUP_STORAGE_REGION`
+- `BRUNO_BACKUP_STORAGE_ACCESS_KEY_ID`
+- `BRUNO_BACKUP_STORAGE_SECRET_ACCESS_KEY`
 
 Leaving all five unset disables object-backed backups without preventing the rest of the app from
 starting.
@@ -235,7 +235,7 @@ billable resources.
    pullable by a fresh Ubuntu Droplet.
 4. If backups are required, create the S3-compatible bucket and a least-privilege credential.
 5. Choose `operator` or `clerk` authentication. For a temporary public development deployment,
-   explicitly choose `development` and set `AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT=true`; this exposes
+   explicitly choose `development` and set `BRUNO_ALLOW_PUBLIC_DEVELOPMENT=true`; this exposes
    all browser pages and app-side APIs.
 6. Before ready-mode rollout, choose ChatGPT or Claude and obtain the matching funded OpenAI
    Platform or Anthropic API key. API usage is billed separately from ChatGPT and Claude consumer
@@ -260,13 +260,13 @@ arguments:
 ```sh
 vercel env add DATABASE_URL production
 vercel env add NEXT_PUBLIC_APP_URL production
-vercel env add AGENTBAY_AUTH_MODE production
-vercel env add AGENTBAY_OPERATOR_PASSWORD production
+vercel env add BRUNO_AUTH_MODE production
+vercel env add BRUNO_OPERATOR_PASSWORD production
 ```
 
-Add `AGENTBAY_OPERATOR_USERNAME` only when you do not want the default `agentbay` username.
-For public development testing, set `AGENTBAY_AUTH_MODE` to `development`, add
-`AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT=true`, and omit the operator password prompt.
+Add `BRUNO_OPERATOR_USERNAME` only when you do not want the default `bruno` username.
+For public development testing, set `BRUNO_AUTH_MODE` to `development`, add
+`BRUNO_ALLOW_PUBLIC_DEVELOPMENT=true`, and omit the operator password prompt.
 
 For Clerk mode, also add:
 
@@ -278,16 +278,16 @@ vercel env add CLERK_SECRET_KEY production
 For DigitalOcean-backed execution, add:
 
 ```sh
-vercel env add AGENTBAY_DIGITALOCEAN_TOKEN production
-vercel env add AGENTBAY_RUNNER_BEARER_TOKEN production
+vercel env add BRUNO_DIGITALOCEAN_TOKEN production
+vercel env add BRUNO_RUNNER_BEARER_TOKEN production
 ```
 
 For Hermes BYOK and Telegram setup, generate one 32-byte base64url key, store it as a versioned
 JSON value, and add both keyring variables:
 
 ```sh
-vercel env add AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION production
-vercel env add AGENTBAY_AGENT_SECRET_KEYS_JSON production
+vercel env add BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION production
+vercel env add BRUNO_AGENT_SECRET_KEYS_JSON production
 vercel env add CRON_SECRET production
 ```
 
@@ -296,7 +296,7 @@ vercel env add CRON_SECRET production
 as a bearer credential, and each invocation claims at most one due row. Keep the value in Vercel;
 do not place it in a URL, log, or committed file.
 
-Leave `AGENTBAY_READY_AGENT_CREATION_ENABLED` unset during initial deployment. Add it with the exact
+Leave `BRUNO_READY_AGENT_CREATION_ENABLED` unset during initial deployment. Add it with the exact
 value `true` only to the controlled environment after the authorized staging acceptance passes.
 
 Add any runner overrides or all five backup-storage variables from the reference above. Use
@@ -338,7 +338,7 @@ approve the protected environments when prompted. See
 contract.
 
 Do not run `vercel deploy --prod` directly when ready agent creation is enabled. Direct deployment
-does not supply the release-workflow-authorized `AGENTBAY_RUNNER_IMAGE` digest and build marker, so
+does not supply the release-workflow-authorized `BRUNO_RUNNER_IMAGE` digest and build marker, so
 the production build fails closed before migrations.
 
 To create a preview first, configure the preview environment and run `vercel deploy`. Preview auth
@@ -403,7 +403,7 @@ agents after runner or Docker restarts, performs bounded recovery, and opens a c
 failures. Stop first persists desired state as stopped and then removes the workload, so a runner
 process or Docker restart must not resurrect it.
 
-To roll back, remove or set `AGENTBAY_READY_AGENT_CREATION_ENABLED=false` in the affected environment
+To roll back, remove or set `BRUNO_READY_AGENT_CREATION_ENABLED=false` in the affected environment
 and redeploy. This disables common new-agent setup. The stopped-create API remains only as a legacy
 operator compatibility path; it is not offered in ordinary onboarding. Existing running agents
 retain their persisted desired state, so stop them explicitly when containment is required.

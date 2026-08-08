@@ -31,18 +31,18 @@ import type {
 
 const DEFAULT_STOP_TIMEOUT_MS = 2_000;
 const RUNNING_PROCESS_STATUSES = ["starting", "running"] as const;
-const CONFIGURED_RUNNER_ARGS_ENV = "AGENTBAY_LOCAL_RUNNER_ARGS_JSON";
-const CONFIGURED_RUNNER_EXECUTABLE_ENV = "AGENTBAY_LOCAL_RUNNER_EXECUTABLE";
+const CONFIGURED_RUNNER_ARGS_ENV = "BRUNO_LOCAL_RUNNER_ARGS_JSON";
+const CONFIGURED_RUNNER_EXECUTABLE_ENV = "BRUNO_LOCAL_RUNNER_EXECUTABLE";
 const DUMMY_RUNNER_SCRIPT = `
-const agentId = process.env.AGENTBAY_AGENT_ID || "unknown";
-console.log("agentbay dummy runner started for " + agentId);
-console.error("agentbay dummy runner stderr ready for " + agentId);
+const agentId = process.env.BRUNO_AGENT_ID || "unknown";
+console.log("bruno dummy runner started for " + agentId);
+console.error("bruno dummy runner stderr ready for " + agentId);
 const interval = setInterval(() => {
-  console.log("agentbay dummy runner heartbeat for " + agentId);
+  console.log("bruno dummy runner heartbeat for " + agentId);
 }, 1000);
 process.on("SIGTERM", () => {
   clearInterval(interval);
-  console.log("agentbay dummy runner stopping for " + agentId);
+  console.log("bruno dummy runner stopping for " + agentId);
   process.exit(0);
 });
 `;
@@ -151,7 +151,7 @@ export class LocalRunnerAdapter implements RunnerAdapter {
         env: {
           ...process.env,
           ...this.command.env,
-          AGENTBAY_AGENT_ID: agentId,
+          BRUNO_AGENT_ID: agentId,
         },
         shell: false,
         stdio: "pipe",

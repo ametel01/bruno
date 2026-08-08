@@ -17,10 +17,10 @@ describe("runner service bootstrap registration", () => {
     const result = await bootstrapRegisteredRunner({
       releaseEvidence: RELEASE_EVIDENCE,
       env: {
-        AGENTBAY_APP_URL: "https://app.agentbay.test",
-        AGENTBAY_RUNNER_REGISTRATION_TOKEN: "agb_reg_1234567890123456789012345678901234567890123",
-        AGENTBAY_RUNNER_ENDPOINT_URL: "https://runner.agentbay.test",
-        AGENTBAY_RUNNER_NAME: "Cloud Runner 1",
+        BRUNO_APP_URL: "https://app.bruno.test",
+        BRUNO_RUNNER_REGISTRATION_TOKEN: "bruno_reg_1234567890123456789012345678901234567890123",
+        BRUNO_RUNNER_ENDPOINT_URL: "https://runner.bruno.test",
+        BRUNO_RUNNER_NAME: "Cloud Runner 1",
       },
       fetch: async (url, init) => {
         calls.push({ url: String(url), init: init ?? {} });
@@ -31,8 +31,8 @@ describe("runner service bootstrap registration", () => {
               ok: true,
               runner: { id: "00000000-0000-4000-8000-000000000153" },
               credential: {
-                token: "agb_run_1234567890123456789012345678901234567890123",
-                prefix: "agb_run_12345678",
+                token: "bruno_run_1234567890123456789012345678901234567890123",
+                prefix: "bruno_run_12345678",
               },
             },
             { status: 201 },
@@ -54,22 +54,22 @@ describe("runner service bootstrap registration", () => {
     });
     expect(calls).toHaveLength(2);
     expect(calls[0]).toMatchObject({
-      url: "https://app.agentbay.test/runner/v1/register",
+      url: "https://app.bruno.test/runner/v1/register",
       init: {
         method: "POST",
       },
     });
     expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
-      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
-      endpointUrl: "https://runner.agentbay.test",
+      registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
+      endpointUrl: "https://runner.bruno.test",
       name: "Cloud Runner 1",
     });
     expect(calls[1]).toMatchObject({
-      url: "https://app.agentbay.test/runner/v1/heartbeat",
+      url: "https://app.bruno.test/runner/v1/heartbeat",
       init: {
         method: "POST",
         headers: {
-          authorization: "Bearer agb_run_1234567890123456789012345678901234567890123",
+          authorization: "Bearer bruno_run_1234567890123456789012345678901234567890123",
           "content-type": "application/json",
         },
       },
@@ -86,18 +86,17 @@ describe("runner service bootstrap registration", () => {
     const result = await bootstrapRegisteredRunner({
       releaseEvidence: RELEASE_EVIDENCE,
       env: {
-        AGENTBAY_APP_URL: "https://app.agentbay.test",
-        AGENTBAY_RUNNER_REGISTRATION_TOKEN: "agb_reg_1234567890123456789012345678901234567890123",
-        AGENTBAY_RUNNER_ENDPOINT_URL: "https://runner.agentbay.test",
-        AGENTBAY_RUNNER_NAME: "Cloud Runner 1",
-        AGENTBAY_RUNNER_ENV_FILE: "/etc/agentbay/runner.env",
-        AGENTBAY_DOCKER_RUNNER_IMAGE: "ghcr.io/ametel01/agentbay-agent:main",
-        AGENTBAY_RUNNER_EXPECTED_RELEASE_VERSION: RELEASE_EVIDENCE.release.version,
-        AGENTBAY_RUNNER_EXPECTED_IMAGE_DIGEST: RELEASE_EVIDENCE.release.imageDigest,
-        AGENTBAY_RUNNER_EXPECTED_BOOT_CONTRACT_VERSION:
-          RELEASE_EVIDENCE.release.bootContractVersion,
-        AGENTBAY_RUNNER_BOOT_MODEL_CANARY_ENABLED: "false",
-        AGENTBAY_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
+        BRUNO_APP_URL: "https://app.bruno.test",
+        BRUNO_RUNNER_REGISTRATION_TOKEN: "bruno_reg_1234567890123456789012345678901234567890123",
+        BRUNO_RUNNER_ENDPOINT_URL: "https://runner.bruno.test",
+        BRUNO_RUNNER_NAME: "Cloud Runner 1",
+        BRUNO_RUNNER_ENV_FILE: "/etc/bruno/runner.env",
+        BRUNO_DOCKER_RUNNER_IMAGE: "ghcr.io/ametel01/bruno-agent:main",
+        BRUNO_RUNNER_EXPECTED_RELEASE_VERSION: RELEASE_EVIDENCE.release.version,
+        BRUNO_RUNNER_EXPECTED_IMAGE_DIGEST: RELEASE_EVIDENCE.release.imageDigest,
+        BRUNO_RUNNER_EXPECTED_BOOT_CONTRACT_VERSION: RELEASE_EVIDENCE.release.bootContractVersion,
+        BRUNO_RUNNER_BOOT_MODEL_CANARY_ENABLED: "false",
+        BRUNO_LOCAL_AGENT_SMOKE_MODE: "synthetic-external-boundaries",
       },
       fetch: async (url) => {
         if (String(url).endsWith("/runner/v1/register")) {
@@ -106,8 +105,8 @@ describe("runner service bootstrap registration", () => {
               ok: true,
               runner: { id: "00000000-0000-4000-8000-000000000153" },
               credential: {
-                token: "agb_run_1234567890123456789012345678901234567890123",
-                prefix: "agb_run_12345678",
+                token: "bruno_run_1234567890123456789012345678901234567890123",
+                prefix: "bruno_run_12345678",
               },
             },
             { status: 201 },
@@ -130,30 +129,28 @@ describe("runner service bootstrap registration", () => {
     });
     expect(writes).toEqual([
       {
-        path: "/etc/agentbay/runner.env",
+        path: "/etc/bruno/runner.env",
         mode: 0o600,
-        content: expect.stringContaining(
-          'AGENTBAY_RUNNER_ID="00000000-0000-4000-8000-000000000153"',
-        ),
+        content: expect.stringContaining('BRUNO_RUNNER_ID="00000000-0000-4000-8000-000000000153"'),
       },
     ]);
     expect(writes[0]?.content).toContain(
-      'AGENTBAY_RUNNER_CREDENTIAL="agb_run_1234567890123456789012345678901234567890123"',
+      'BRUNO_RUNNER_CREDENTIAL="bruno_run_1234567890123456789012345678901234567890123"',
     );
     expect(writes[0]?.content).toContain(
-      'AGENTBAY_DOCKER_RUNNER_IMAGE="ghcr.io/ametel01/agentbay-agent:main"',
+      'BRUNO_DOCKER_RUNNER_IMAGE="ghcr.io/ametel01/bruno-agent:main"',
     );
     expect(writes[0]?.content).toContain(
-      `AGENTBAY_RUNNER_EXPECTED_RELEASE_VERSION="${RELEASE_EVIDENCE.release.version}"`,
+      `BRUNO_RUNNER_EXPECTED_RELEASE_VERSION="${RELEASE_EVIDENCE.release.version}"`,
     );
     expect(writes[0]?.content).toContain(
-      `AGENTBAY_RUNNER_EXPECTED_IMAGE_DIGEST="${RELEASE_EVIDENCE.release.imageDigest}"`,
+      `BRUNO_RUNNER_EXPECTED_IMAGE_DIGEST="${RELEASE_EVIDENCE.release.imageDigest}"`,
     );
     expect(writes[0]?.content).toContain(
-      'AGENTBAY_LOCAL_AGENT_SMOKE_MODE="synthetic-external-boundaries"',
+      'BRUNO_LOCAL_AGENT_SMOKE_MODE="synthetic-external-boundaries"',
     );
-    expect(writes[0]?.content).toContain('AGENTBAY_RUNNER_BOOT_MODEL_CANARY_ENABLED="false"');
-    expect(writes[0]?.content).not.toContain("AGENTBAY_RUNNER_REGISTRATION_TOKEN");
+    expect(writes[0]?.content).toContain('BRUNO_RUNNER_BOOT_MODEL_CANARY_ENABLED="false"');
+    expect(writes[0]?.content).not.toContain("BRUNO_RUNNER_REGISTRATION_TOKEN");
   });
 
   it("uses existing runner credentials when already registered", async () => {
@@ -161,10 +158,10 @@ describe("runner service bootstrap registration", () => {
     const result = await bootstrapRegisteredRunner({
       releaseEvidence: RELEASE_EVIDENCE,
       env: {
-        AGENTBAY_APP_URL: "https://app.agentbay.test/",
-        AGENTBAY_RUNNER_ENDPOINT_URL: "https://runner.agentbay.test",
-        AGENTBAY_RUNNER_ID: "00000000-0000-4000-8000-000000000154",
-        AGENTBAY_RUNNER_CREDENTIAL: "agb_run_existing",
+        BRUNO_APP_URL: "https://app.bruno.test/",
+        BRUNO_RUNNER_ENDPOINT_URL: "https://runner.bruno.test",
+        BRUNO_RUNNER_ID: "00000000-0000-4000-8000-000000000154",
+        BRUNO_RUNNER_CREDENTIAL: "bruno_run_existing",
       },
       fetch: async (url, init) => {
         calls.push({ url: String(url), init: init ?? {} });
@@ -177,11 +174,9 @@ describe("runner service bootstrap registration", () => {
       runnerId: "00000000-0000-4000-8000-000000000154",
       status: "online",
     });
-    expect(calls.map((call) => call.url)).toEqual([
-      "https://app.agentbay.test/runner/v1/heartbeat",
-    ]);
+    expect(calls.map((call) => call.url)).toEqual(["https://app.bruno.test/runner/v1/heartbeat"]);
     expect(calls[0]?.init.headers).toEqual({
-      authorization: "Bearer agb_run_existing",
+      authorization: "Bearer bruno_run_existing",
       "content-type": "application/json",
     });
   });
@@ -189,8 +184,8 @@ describe("runner service bootstrap registration", () => {
   it("fails closed without bootstrap registration or credential environment", async () => {
     const result = await bootstrapRegisteredRunner({
       env: {
-        AGENTBAY_APP_URL: "https://app.agentbay.test",
-        AGENTBAY_RUNNER_ENDPOINT_URL: "https://runner.agentbay.test",
+        BRUNO_APP_URL: "https://app.bruno.test",
+        BRUNO_RUNNER_ENDPOINT_URL: "https://runner.bruno.test",
       },
       fetch: async () => Response.json({ ok: false }, { status: 500 }),
     });
@@ -203,10 +198,10 @@ describe("runner service bootstrap registration", () => {
     const result = await bootstrapRegisteredRunner({
       releaseEvidence: { ...RELEASE_EVIDENCE, expectedMatch: false },
       env: {
-        AGENTBAY_APP_URL: "https://app.agentbay.test",
-        AGENTBAY_RUNNER_ENDPOINT_URL: "https://runner.agentbay.test",
-        AGENTBAY_RUNNER_ID: "00000000-0000-4000-8000-000000000154",
-        AGENTBAY_RUNNER_CREDENTIAL: "agb_run_existing",
+        BRUNO_APP_URL: "https://app.bruno.test",
+        BRUNO_RUNNER_ENDPOINT_URL: "https://runner.bruno.test",
+        BRUNO_RUNNER_ID: "00000000-0000-4000-8000-000000000154",
+        BRUNO_RUNNER_CREDENTIAL: "bruno_run_existing",
       },
       fetch: async (_url, init) => {
         heartbeatBodies.push(JSON.parse(String(init?.body)));

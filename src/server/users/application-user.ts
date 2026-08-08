@@ -103,7 +103,7 @@ export async function lockClerkUserId(
 ): Promise<void> {
   assertClerkUserId(clerkUserId);
   await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtextextended(${`agentbay:clerk-user:${clerkUserId}`}, 0))`,
+    sql`select pg_advisory_xact_lock(hashtextextended(${`bruno:clerk-user:${clerkUserId}`}, 0))`,
   );
 }
 

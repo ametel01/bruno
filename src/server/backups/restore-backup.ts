@@ -87,7 +87,7 @@ const RAW_SECRET_TEXT_PATTERNS = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]+/i,
   /\bsk-[A-Za-z0-9_-]{8,}\b/,
   /\bdop_v1_[A-Za-z0-9_-]{8,}\b/,
-  /\bagb_(?:run|reg)_[A-Za-z0-9_-]{8,}\b/,
+  /\bbruno_(?:run|reg)_[A-Za-z0-9_-]{8,}\b/,
   /\bgh[pousr]_[A-Za-z0-9_]{8,}\b/,
   /\bAKIA[A-Z0-9]{12,}\b/,
   /-----BEGIN (?:RSA |EC |OPENSSH |)PRIVATE KEY-----/,

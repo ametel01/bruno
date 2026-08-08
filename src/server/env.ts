@@ -29,7 +29,7 @@ import {
 } from "@/src/server/runners/runner-resource-profiles";
 import type { RunnerSnapshotExpectedIdentities } from "@/src/server/runners/runner-snapshot-manifest";
 
-export const DEFAULT_AGENTBAY_RUNNER_IMAGE = "ghcr.io/ametel01/agentbay-runner:main";
+export const DEFAULT_BRUNO_RUNNER_IMAGE = "ghcr.io/ametel01/bruno-runner:main";
 
 export type ReadyAgentCreationFlag =
   | {
@@ -128,7 +128,7 @@ export function getServerEnv(input = process.env) {
 export function readReadyAgentCreationFlag(
   input: Record<string, string | undefined> = process.env,
 ): ReadyAgentCreationFlag {
-  const rawValue = input.AGENTBAY_READY_AGENT_CREATION_ENABLED;
+  const rawValue = input.BRUNO_READY_AGENT_CREATION_ENABLED;
 
   if (rawValue === undefined) {
     return { ok: true, enabled: false };
@@ -150,7 +150,7 @@ export function readReadyAgentCreationFlag(
 export function readRunnerRolloutBatchSize(
   input: Record<string, string | undefined> = process.env,
 ): 0 | 1 {
-  const value = input.AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE?.trim();
+  const value = input.BRUNO_RUNNER_ROLLOUT_BATCH_SIZE?.trim();
 
   if (value === undefined || value === "1") {
     return 1;
@@ -161,7 +161,7 @@ export function readRunnerRolloutBatchSize(
   }
 
   throw new EnvValidationError([
-    "AGENTBAY_RUNNER_ROLLOUT_BATCH_SIZE must be 0 (halted) or 1 (gradual) when set.",
+    "BRUNO_RUNNER_ROLLOUT_BATCH_SIZE must be 0 (halted) or 1 (gradual) when set.",
   ]);
 }
 
@@ -184,7 +184,7 @@ export function readCronSecretConfig(
 export function readDeploymentDispatchConfig(
   input: Record<string, string | undefined> = process.env,
 ): DeploymentDispatchConfig {
-  const rawMode = input.AGENTBAY_DEPLOYMENT_DISPATCH_MODE?.trim();
+  const rawMode = input.BRUNO_DEPLOYMENT_DISPATCH_MODE?.trim();
   const mode = rawMode === undefined || rawMode === "" ? "cron" : rawMode;
 
   if (mode === "cron") {
@@ -209,7 +209,7 @@ export function readDeploymentDispatchConfig(
     !isValidDeploymentDispatchSigningKey(nextSigningKey) ||
     currentSigningKey === nextSigningKey ||
     callbackBaseUrl === null ||
-    [input.CRON_SECRET, input.AGENTBAY_RUNNER_BEARER_TOKEN, input.AGENTBAY_OPERATOR_PASSWORD].some(
+    [input.CRON_SECRET, input.BRUNO_RUNNER_BEARER_TOKEN, input.BRUNO_OPERATOR_PASSWORD].some(
       (otherSecret) => otherSecret !== undefined && otherSecret === token,
     )
   ) {
@@ -255,7 +255,7 @@ export function isAuthorizedCronRequest(input: {
 export function readHermesStagingAcceptanceConfig(
   input: Record<string, string | undefined> = process.env,
 ): HermesStagingAcceptanceConfig {
-  const enabled = input.AGENTBAY_HERMES_STAGING_ACCEPTANCE_ENABLED;
+  const enabled = input.BRUNO_HERMES_STAGING_ACCEPTANCE_ENABLED;
 
   if (enabled === undefined || enabled === "false") {
     return { ok: true, enabled: false };
@@ -265,16 +265,16 @@ export function readHermesStagingAcceptanceConfig(
     return { ok: false, reason: "hermes_staging_acceptance_configuration_invalid" };
   }
 
-  const bearerSecret = input.AGENTBAY_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET;
+  const bearerSecret = input.BRUNO_HERMES_STAGING_ACCEPTANCE_BEARER_SECRET;
   const baseUrl = parseHermesStagingAcceptanceBaseUrl(
-    input.AGENTBAY_HERMES_STAGING_ACCEPTANCE_BASE_URL,
+    input.BRUNO_HERMES_STAGING_ACCEPTANCE_BASE_URL,
   );
 
   if (
     bearerSecret === undefined ||
     !isValidDedicatedBearerSecret(bearerSecret) ||
     !baseUrl ||
-    [input.CRON_SECRET, input.AGENTBAY_RUNNER_BEARER_TOKEN, input.AGENTBAY_OPERATOR_PASSWORD].some(
+    [input.CRON_SECRET, input.BRUNO_RUNNER_BEARER_TOKEN, input.BRUNO_OPERATOR_PASSWORD].some(
       (otherSecret) => otherSecret !== undefined && otherSecret === bearerSecret,
     )
   ) {
@@ -366,55 +366,55 @@ function parseHermesStagingAcceptanceBaseUrl(value: string | undefined): string 
 export function readDigitalOceanProviderConfig(
   input: Record<string, string | undefined> = process.env,
 ): DigitalOceanProviderConfig | null {
-  const token = input.AGENTBAY_DIGITALOCEAN_TOKEN?.trim();
+  const token = input.BRUNO_DIGITALOCEAN_TOKEN?.trim();
 
   if (token === undefined) {
     return null;
   }
 
   if (!token) {
-    throw new EnvValidationError(["AGENTBAY_DIGITALOCEAN_TOKEN cannot be blank."]);
+    throw new EnvValidationError(["BRUNO_DIGITALOCEAN_TOKEN cannot be blank."]);
   }
 
-  const runnerBearerToken = input.AGENTBAY_RUNNER_BEARER_TOKEN?.trim();
+  const runnerBearerToken = input.BRUNO_RUNNER_BEARER_TOKEN?.trim();
 
   if (!runnerBearerToken) {
     throw new EnvValidationError([
-      "AGENTBAY_RUNNER_BEARER_TOKEN is required when DigitalOcean provisioning is set.",
+      "BRUNO_RUNNER_BEARER_TOKEN is required when DigitalOcean provisioning is set.",
     ]);
   }
 
-  const sshKeyIds = readDigitalOceanSshKeyIds(input.AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS);
-  const providerMode = readDigitalOceanProviderMode(input.AGENTBAY_DIGITALOCEAN_PROVIDER_MODE);
-  const runnerImage = readRunnerImage(input.AGENTBAY_RUNNER_IMAGE, {
-    envName: "AGENTBAY_RUNNER_IMAGE",
-    defaultValue: DEFAULT_AGENTBAY_RUNNER_IMAGE,
+  const sshKeyIds = readDigitalOceanSshKeyIds(input.BRUNO_DIGITALOCEAN_SSH_KEY_IDS);
+  const providerMode = readDigitalOceanProviderMode(input.BRUNO_DIGITALOCEAN_PROVIDER_MODE);
+  const runnerImage = readRunnerImage(input.BRUNO_RUNNER_IMAGE, {
+    envName: "BRUNO_RUNNER_IMAGE",
+    defaultValue: DEFAULT_BRUNO_RUNNER_IMAGE,
   });
 
   const localRunnerEndpointUrl =
     providerMode === "local_docker"
       ? validateManualRunnerEndpointUrl(
-          readNonEmptyProviderSetting(input.AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL, {
-            envName: "AGENTBAY_LOCAL_CLOUD_RUNNER_ENDPOINT_URL",
+          readNonEmptyProviderSetting(input.BRUNO_LOCAL_CLOUD_RUNNER_ENDPOINT_URL, {
+            envName: "BRUNO_LOCAL_CLOUD_RUNNER_ENDPOINT_URL",
             defaultValue: "http://127.0.0.1:3045",
           }),
         )
       : undefined;
   const localRunnerContainerName =
     providerMode === "local_docker"
-      ? readNonEmptyProviderSetting(input.AGENTBAY_LOCAL_CLOUD_RUNNER_CONTAINER_NAME, {
-          envName: "AGENTBAY_LOCAL_CLOUD_RUNNER_CONTAINER_NAME",
-          defaultValue: "agentbay-local-cloud-runner",
+      ? readNonEmptyProviderSetting(input.BRUNO_LOCAL_CLOUD_RUNNER_CONTAINER_NAME, {
+          envName: "BRUNO_LOCAL_CLOUD_RUNNER_CONTAINER_NAME",
+          defaultValue: "bruno-local-cloud-runner",
         })
       : undefined;
   const localRunnerStartDelayMs =
     providerMode === "local_docker"
-      ? readNonNegativeInteger(input.AGENTBAY_LOCAL_CLOUD_RUNNER_START_DELAY_MS, {
-          envName: "AGENTBAY_LOCAL_CLOUD_RUNNER_START_DELAY_MS",
+      ? readNonNegativeInteger(input.BRUNO_LOCAL_CLOUD_RUNNER_START_DELAY_MS, {
+          envName: "BRUNO_LOCAL_CLOUD_RUNNER_START_DELAY_MS",
           defaultValue: 1_000,
         })
       : undefined;
-  const localAgentSmokeMode = input.AGENTBAY_LOCAL_AGENT_SMOKE_MODE;
+  const localAgentSmokeMode = input.BRUNO_LOCAL_AGENT_SMOKE_MODE;
 
   if (
     localAgentSmokeMode !== undefined &&
@@ -423,7 +423,7 @@ export function readDigitalOceanProviderConfig(
       localAgentSmokeMode !== "synthetic-external-boundaries")
   ) {
     throw new EnvValidationError([
-      "AGENTBAY_LOCAL_AGENT_SMOKE_MODE requires the local_docker provider, the exact local-docker token, and the synthetic-external-boundaries value.",
+      "BRUNO_LOCAL_AGENT_SMOKE_MODE requires the local_docker provider, the exact local-docker token, and the synthetic-external-boundaries value.",
     ]);
   }
 
@@ -433,50 +433,50 @@ export function readDigitalOceanProviderConfig(
     runnerBearerToken,
     runnerImage,
     hermesWorkloadImage: readHermesWorkloadImage(input),
-    hermesStateRoot: readAbsoluteRuntimePath(input.AGENTBAY_HERMES_STATE_ROOT, {
-      envName: "AGENTBAY_HERMES_STATE_ROOT",
+    hermesStateRoot: readAbsoluteRuntimePath(input.BRUNO_HERMES_STATE_ROOT, {
+      envName: "BRUNO_HERMES_STATE_ROOT",
       defaultValue: DEFAULT_HERMES_STATE_ROOT,
     }),
-    hermesPrivateNetwork: readDockerNetworkName(input.AGENTBAY_HERMES_PRIVATE_NETWORK, {
-      envName: "AGENTBAY_HERMES_PRIVATE_NETWORK",
+    hermesPrivateNetwork: readDockerNetworkName(input.BRUNO_HERMES_PRIVATE_NETWORK, {
+      envName: "BRUNO_HERMES_PRIVATE_NETWORK",
       defaultValue: DEFAULT_HERMES_PRIVATE_NETWORK,
     }),
-    hermesReadinessTimeoutMs: readPositiveInteger(input.AGENTBAY_HERMES_READINESS_TIMEOUT_MS, {
-      envName: "AGENTBAY_HERMES_READINESS_TIMEOUT_MS",
+    hermesReadinessTimeoutMs: readPositiveInteger(input.BRUNO_HERMES_READINESS_TIMEOUT_MS, {
+      envName: "BRUNO_HERMES_READINESS_TIMEOUT_MS",
       defaultValue: DEFAULT_HERMES_READINESS_TIMEOUT_MS,
     }),
-    hermesDockerCpus: readDockerCpuLimit(input.AGENTBAY_HERMES_DOCKER_CPUS, {
-      envName: "AGENTBAY_HERMES_DOCKER_CPUS",
+    hermesDockerCpus: readDockerCpuLimit(input.BRUNO_HERMES_DOCKER_CPUS, {
+      envName: "BRUNO_HERMES_DOCKER_CPUS",
       defaultValue: DEFAULT_HERMES_DOCKER_CPUS,
     }),
-    hermesDockerMemory: readDockerMemoryLimit(input.AGENTBAY_HERMES_DOCKER_MEMORY, {
-      envName: "AGENTBAY_HERMES_DOCKER_MEMORY",
+    hermesDockerMemory: readDockerMemoryLimit(input.BRUNO_HERMES_DOCKER_MEMORY, {
+      envName: "BRUNO_HERMES_DOCKER_MEMORY",
       defaultValue: DEFAULT_HERMES_DOCKER_MEMORY,
     }),
-    hermesDockerPidsLimit: readDockerPidsLimit(input.AGENTBAY_HERMES_DOCKER_PIDS_LIMIT, {
-      envName: "AGENTBAY_HERMES_DOCKER_PIDS_LIMIT",
+    hermesDockerPidsLimit: readDockerPidsLimit(input.BRUNO_HERMES_DOCKER_PIDS_LIMIT, {
+      envName: "BRUNO_HERMES_DOCKER_PIDS_LIMIT",
       defaultValue: DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
     }),
-    runnerMaxAgents: readPositiveInteger(input.AGENTBAY_RUNNER_MAX_AGENTS, {
-      envName: "AGENTBAY_RUNNER_MAX_AGENTS",
+    runnerMaxAgents: readPositiveInteger(input.BRUNO_RUNNER_MAX_AGENTS, {
+      envName: "BRUNO_RUNNER_MAX_AGENTS",
       defaultValue: DEFAULT_HERMES_RUNNER_MAX_AGENTS,
     }),
-    region: readDigitalOceanSlug(input.AGENTBAY_DIGITALOCEAN_REGION, {
-      envName: "AGENTBAY_DIGITALOCEAN_REGION",
+    region: readDigitalOceanSlug(input.BRUNO_DIGITALOCEAN_REGION, {
+      envName: "BRUNO_DIGITALOCEAN_REGION",
       defaultValue: "sfo3",
     }),
-    sizeSlug: readDigitalOceanSlug(input.AGENTBAY_DIGITALOCEAN_SIZE_SLUG, {
-      envName: "AGENTBAY_DIGITALOCEAN_SIZE_SLUG",
+    sizeSlug: readDigitalOceanSlug(input.BRUNO_DIGITALOCEAN_SIZE_SLUG, {
+      envName: "BRUNO_DIGITALOCEAN_SIZE_SLUG",
       defaultValue: "s-1vcpu-512mb-10gb",
     }),
-    image: readDigitalOceanSlug(input.AGENTBAY_DIGITALOCEAN_IMAGE, {
-      envName: "AGENTBAY_DIGITALOCEAN_IMAGE",
+    image: readDigitalOceanSlug(input.BRUNO_DIGITALOCEAN_IMAGE, {
+      envName: "BRUNO_DIGITALOCEAN_IMAGE",
       defaultValue: "ubuntu-24-04-x64",
     }),
-    tags: readDigitalOceanTags(input.AGENTBAY_DIGITALOCEAN_TAGS),
+    tags: readDigitalOceanTags(input.BRUNO_DIGITALOCEAN_TAGS),
     sshSourceAddresses: readDigitalOceanSshSourceAddresses(
-      input.AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS,
-      input.AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH,
+      input.BRUNO_DIGITALOCEAN_SSH_SOURCE_CIDRS,
+      input.BRUNO_DIGITALOCEAN_ALLOW_PUBLIC_SSH,
     ),
     ...(sshKeyIds === null ? {} : { sshKeyIds }),
     ...(localRunnerEndpointUrl ? { localRunnerEndpointUrl } : {}),
@@ -496,7 +496,7 @@ export function readDigitalOceanProviderConfig(
 
   if (providerMode === "digitalocean" && !parseImmutableRunnerImageReference(runnerImage)) {
     throw new EnvValidationError([
-      "AGENTBAY_RUNNER_IMAGE must be an immutable registry image reference with a sha256 digest for hosted DigitalOcean provisioning.",
+      "BRUNO_RUNNER_IMAGE must be an immutable registry image reference with a sha256 digest for hosted DigitalOcean provisioning.",
     ]);
   }
 
@@ -521,7 +521,7 @@ function readDigitalOceanSnapshotMode(
     hermesImage: string;
   },
 ): DigitalOceanSnapshotModeConfig {
-  const mode = input.AGENTBAY_DIGITALOCEAN_IMAGE_MODE?.trim() ?? "stock";
+  const mode = input.BRUNO_DIGITALOCEAN_IMAGE_MODE?.trim() ?? "stock";
 
   if (mode === "stock") {
     return { mode: "stock" };
@@ -529,30 +529,30 @@ function readDigitalOceanSnapshotMode(
 
   if (mode !== "snapshot") {
     throw new EnvValidationError([
-      "AGENTBAY_DIGITALOCEAN_IMAGE_MODE must be stock or snapshot when set.",
+      "BRUNO_DIGITALOCEAN_IMAGE_MODE must be stock or snapshot when set.",
     ]);
   }
 
   const manifestBytes = readRequiredSnapshotSetting(
-    input.AGENTBAY_DIGITALOCEAN_SNAPSHOT_MANIFEST,
-    "AGENTBAY_DIGITALOCEAN_SNAPSHOT_MANIFEST",
+    input.BRUNO_DIGITALOCEAN_SNAPSHOT_MANIFEST,
+    "BRUNO_DIGITALOCEAN_SNAPSHOT_MANIFEST",
   );
   const signature = readRequiredSnapshotSetting(
-    input.AGENTBAY_DIGITALOCEAN_SNAPSHOT_SIGNATURE,
-    "AGENTBAY_DIGITALOCEAN_SNAPSHOT_SIGNATURE",
+    input.BRUNO_DIGITALOCEAN_SNAPSHOT_SIGNATURE,
+    "BRUNO_DIGITALOCEAN_SNAPSHOT_SIGNATURE",
   );
   const publicKeyPem = readRequiredSnapshotSetting(
-    input.AGENTBAY_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY,
-    "AGENTBAY_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY",
+    input.BRUNO_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY,
+    "BRUNO_DIGITALOCEAN_SNAPSHOT_PUBLIC_KEY",
   );
   const sourceRevision = readRequiredSnapshotSetting(
-    input.AGENTBAY_RELEASE_SOURCE_REVISION,
-    "AGENTBAY_RELEASE_SOURCE_REVISION",
+    input.BRUNO_RELEASE_SOURCE_REVISION,
+    "BRUNO_RELEASE_SOURCE_REVISION",
   );
 
   if (!/^[a-f0-9]{40}$/.test(sourceRevision)) {
     throw new EnvValidationError([
-      "AGENTBAY_RELEASE_SOURCE_REVISION must be the exact 40-character source commit for snapshot mode.",
+      "BRUNO_RELEASE_SOURCE_REVISION must be the exact 40-character source commit for snapshot mode.",
     ]);
   }
 
@@ -567,8 +567,8 @@ function readDigitalOceanSnapshotMode(
       baseImageSlug: expectedInput.baseImageSlug,
       architecture: "amd64",
       runnerImage: expectedInput.runnerImage,
-      defaultAgentImage: readRunnerImage(input.AGENTBAY_DOCKER_RUNNER_IMAGE, {
-        envName: "AGENTBAY_DOCKER_RUNNER_IMAGE",
+      defaultAgentImage: readRunnerImage(input.BRUNO_DOCKER_RUNNER_IMAGE, {
+        envName: "BRUNO_DOCKER_RUNNER_IMAGE",
         defaultValue: DEFAULT_MANUAL_RUNNER_IMAGE,
       }),
       hermesImage: expectedInput.hermesImage,
@@ -595,8 +595,8 @@ function diskGbForDigitalOceanSizeSlug(sizeSlug: string): number {
 export function readHermesWorkloadImage(
   input: Record<string, string | undefined> = process.env,
 ): string {
-  return readRunnerImage(input.AGENTBAY_HERMES_WORKLOAD_IMAGE, {
-    envName: "AGENTBAY_HERMES_WORKLOAD_IMAGE",
+  return readRunnerImage(input.BRUNO_HERMES_WORKLOAD_IMAGE, {
+    envName: "BRUNO_HERMES_WORKLOAD_IMAGE",
     defaultValue: DEFAULT_HERMES_WORKLOAD_IMAGE,
   });
 }
@@ -613,7 +613,7 @@ function readDigitalOceanProviderMode(value: string | undefined): "digitalocean"
   }
 
   throw new EnvValidationError([
-    "AGENTBAY_DIGITALOCEAN_PROVIDER_MODE must be digitalocean or local_docker when set.",
+    "BRUNO_DIGITALOCEAN_PROVIDER_MODE must be digitalocean or local_docker when set.",
   ]);
 }
 
@@ -745,7 +745,7 @@ function readDigitalOceanSlug(
 
 function readDigitalOceanTags(value: string | undefined): string[] {
   if (value === undefined) {
-    return ["agentbay", "agentbay-runner"];
+    return ["bruno", "bruno-runner"];
   }
 
   const tags = [
@@ -759,7 +759,7 @@ function readDigitalOceanTags(value: string | undefined): string[] {
 
   if (tags.length === 0) {
     throw new EnvValidationError([
-      "AGENTBAY_DIGITALOCEAN_TAGS must include at least one non-empty tag when set.",
+      "BRUNO_DIGITALOCEAN_TAGS must include at least one non-empty tag when set.",
     ]);
   }
 
@@ -767,7 +767,7 @@ function readDigitalOceanTags(value: string | undefined): string[] {
 
   if (invalidTag) {
     throw new EnvValidationError([
-      "AGENTBAY_DIGITALOCEAN_TAGS entries must not contain whitespace, slash, comma, quote, or shell-control characters.",
+      "BRUNO_DIGITALOCEAN_TAGS entries must not contain whitespace, slash, comma, quote, or shell-control characters.",
     ]);
   }
 
@@ -783,7 +783,7 @@ function readDigitalOceanSshKeyIds(value: string | undefined): string[] | null {
 
   if (!normalizedValue) {
     throw new EnvValidationError([
-      "AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS cannot be blank when set. Use auto or omit it to discover account keys.",
+      "BRUNO_DIGITALOCEAN_SSH_KEY_IDS cannot be blank when set. Use auto or omit it to discover account keys.",
     ]);
   }
 
@@ -795,11 +795,11 @@ function readDigitalOceanSshKeyIds(value: string | undefined): string[] | null {
     return [];
   }
 
-  const sshKeyIds = readNonEmptyCsvSetting(normalizedValue, "AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS");
+  const sshKeyIds = readNonEmptyCsvSetting(normalizedValue, "BRUNO_DIGITALOCEAN_SSH_KEY_IDS");
 
   if (sshKeyIds.some((sshKeyId) => !/^[A-Za-z0-9_.:-]{1,255}$/.test(sshKeyId))) {
     throw new EnvValidationError([
-      "AGENTBAY_DIGITALOCEAN_SSH_KEY_IDS entries must not contain whitespace, slash, quote, or shell-control characters.",
+      "BRUNO_DIGITALOCEAN_SSH_KEY_IDS entries must not contain whitespace, slash, quote, or shell-control characters.",
     ]);
   }
 
@@ -816,7 +816,7 @@ function readDigitalOceanSshSourceAddresses(
     return allowPublicSsh ? ["0.0.0.0/0", "::/0"] : [];
   }
 
-  return readNonEmptyCsvSetting(value, "AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS")
+  return readNonEmptyCsvSetting(value, "BRUNO_DIGITALOCEAN_SSH_SOURCE_CIDRS")
     .map((address) => normalizeSshSourceCidr(address))
     .sort();
 }
@@ -837,14 +837,14 @@ function readExplicitPublicSshFlag(value: string | undefined): boolean {
   }
 
   throw new EnvValidationError([
-    "AGENTBAY_DIGITALOCEAN_ALLOW_PUBLIC_SSH must be true, false, 0, or no when set.",
+    "BRUNO_DIGITALOCEAN_ALLOW_PUBLIC_SSH must be true, false, 0, or no when set.",
   ]);
 }
 
 function normalizeSshSourceCidr(value: string): string {
   if (/[\s"'`$;&|<>\\]/.test(value)) {
     throw new EnvValidationError([
-      "AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must be IP addresses or CIDRs without whitespace or shell-control characters.",
+      "BRUNO_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must be IP addresses or CIDRs without whitespace or shell-control characters.",
     ]);
   }
 
@@ -862,7 +862,7 @@ function normalizeSshSourceCidr(value: string): string {
 
   if (parts.length !== 2) {
     throw new EnvValidationError([
-      "AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must be valid IPv4 or IPv6 CIDRs.",
+      "BRUNO_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must be valid IPv4 or IPv6 CIDRs.",
     ]);
   }
 
@@ -871,7 +871,7 @@ function normalizeSshSourceCidr(value: string): string {
 
   if (address === undefined || prefixText === undefined) {
     throw new EnvValidationError([
-      "AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must be valid IPv4 or IPv6 CIDRs.",
+      "BRUNO_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must be valid IPv4 or IPv6 CIDRs.",
     ]);
   }
 
@@ -879,7 +879,7 @@ function normalizeSshSourceCidr(value: string): string {
 
   if (ipVersion === 0 || !/^\d{1,3}$/.test(prefixText)) {
     throw new EnvValidationError([
-      "AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must be valid IPv4 or IPv6 CIDRs.",
+      "BRUNO_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must be valid IPv4 or IPv6 CIDRs.",
     ]);
   }
 
@@ -888,7 +888,7 @@ function normalizeSshSourceCidr(value: string): string {
 
   if (!Number.isInteger(prefix) || prefix < 0 || prefix > maxPrefix) {
     throw new EnvValidationError([
-      "AGENTBAY_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must use a valid IPv4 or IPv6 prefix length.",
+      "BRUNO_DIGITALOCEAN_SSH_SOURCE_CIDRS entries must use a valid IPv4 or IPv6 prefix length.",
     ]);
   }
 

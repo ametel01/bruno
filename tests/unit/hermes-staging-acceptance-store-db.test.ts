@@ -20,7 +20,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const BASE_DATABASE_URL =
-  process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
+  process.env.DATABASE_URL ?? "postgres://bruno:bruno@127.0.0.1:54329/bruno";
 const OWNER_ID = "00000000-0000-4000-8000-000000011001";
 const NOW = new Date("2026-08-03T10:00:00.000Z");
 const DEADLINE = new Date("2026-08-03T11:00:00.000Z");

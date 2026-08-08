@@ -22,7 +22,7 @@ SET
 			'defaultSchedule',
 			'Manual',
 			'defaultSystemPrompt',
-			'You are an AgentBay agent. Follow the operator instructions and keep responses concise.',
+			'You are an Bruno agent. Follow the operator instructions and keep responses concise.',
 			'requiredIntegrations',
 			'[]'::jsonb
 		)

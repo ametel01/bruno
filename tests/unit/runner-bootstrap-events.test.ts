@@ -13,7 +13,7 @@ import {
 } from "@/src/server/runners/runner-bootstrap-events";
 import { hashRunnerSecret } from "@/src/server/runners/runner-auth-secrets";
 
-const REGISTRATION_TOKEN = "agb_reg_1234567890123456789012345678901234567890123";
+const REGISTRATION_TOKEN = "bruno_reg_1234567890123456789012345678901234567890123";
 
 describe.sequential("runner bootstrap event telemetry", () => {
   let connection: DatabaseConnection;
@@ -178,7 +178,7 @@ describe.sequential("runner bootstrap event telemetry", () => {
 
   it("rejects malformed payloads before persistence", () => {
     const result = validateRunnerBootstrapEventPayload({
-      registrationToken: "agb_run_wrong",
+      registrationToken: "bruno_run_wrong",
       phase: "creating",
       status: "done",
       message: "",

@@ -25,20 +25,20 @@ import { findDigitalOceanRunnerResourceProfile } from "@/src/server/runners/runn
 
 const localDockerProviderLogger = createAppLogger("local_docker.provider");
 
-export const LOCAL_DOCKER_DROPLET_CONTAINER_NAME = "agentbay-local-cloud-runner";
+export const LOCAL_DOCKER_DROPLET_CONTAINER_NAME = "bruno-local-cloud-runner";
 const DEFAULT_LOCAL_ENDPOINT_URL = "http://127.0.0.1:3045";
 const DEFAULT_LOCAL_START_DELAY_MS = 1_000;
 const DOCKER_SOCKET = "/var/run/docker.sock";
 const DOCKER_TIMEOUT_MS = 30_000;
 const LOCAL_DROPLET_IMAGE = "ubuntu:24.04";
-export const LOCAL_AGENT_SMOKE_DROPLET_IMAGE = "agentbay-local-droplet:ubuntu-24.04";
-export const LOCAL_AGENT_SMOKE_IMAGE_BUNDLE_PATH = "/tmp/agentbay-local-agent-smoke/images.tar";
+export const LOCAL_AGENT_SMOKE_DROPLET_IMAGE = "bruno-local-droplet:ubuntu-24.04";
+export const LOCAL_AGENT_SMOKE_IMAGE_BUNDLE_PATH = "/tmp/bruno-local-agent-smoke/images.tar";
 const LOCAL_DROPLET_PLATFORM = "linux/amd64";
-const LOCAL_HERMES_WORKLOAD_IMAGE = "agentbay-hermes:local";
-const LOCAL_AGENT_SMOKE_IMAGE_BUNDLE_CONTAINER_PATH = "/opt/agentbay/images.tar";
-const LOCAL_PRODUCTION_RUNNER_CONTAINER_NAME = "agentbay-runner";
+const LOCAL_HERMES_WORKLOAD_IMAGE = "bruno-hermes:local";
+const LOCAL_AGENT_SMOKE_IMAGE_BUNDLE_CONTAINER_PATH = "/opt/bruno/images.tar";
+const LOCAL_PRODUCTION_RUNNER_CONTAINER_NAME = "bruno-runner";
 const LOCAL_SIMULATED_PUBLIC_IPV4 = "127.0.0.1";
-const LOCAL_HOST_BRIDGE_DIR = "/tmp/agentbay-local-cloud";
+const LOCAL_HOST_BRIDGE_DIR = "/tmp/bruno-local-cloud";
 
 type DockerRunner = (
   args: readonly string[],
@@ -301,13 +301,13 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
         "--add-host",
         "host.docker.internal:host-gateway",
         "--env",
-        `AGENTBAY_LOCAL_CLOUD_INIT_SCRIPT_B64=${Buffer.from(script, "utf8").toString("base64")}`,
+        `BRUNO_LOCAL_CLOUD_INIT_SCRIPT_B64=${Buffer.from(script, "utf8").toString("base64")}`,
         "--env",
-        `AGENTBAY_LOCAL_PUBLIC_IPV4=${LOCAL_SIMULATED_PUBLIC_IPV4}`,
+        `BRUNO_LOCAL_PUBLIC_IPV4=${LOCAL_SIMULATED_PUBLIC_IPV4}`,
         "--env",
-        `AGENTBAY_LOCAL_RUNNER_ENDPOINT_URL=${this.#endpointUrl}`,
+        `BRUNO_LOCAL_RUNNER_ENDPOINT_URL=${this.#endpointUrl}`,
         "--env",
-        `AGENTBAY_LOCAL_HOST_BRIDGE_DIR=${LOCAL_HOST_BRIDGE_DIR}`,
+        `BRUNO_LOCAL_HOST_BRIDGE_DIR=${LOCAL_HOST_BRIDGE_DIR}`,
         "--env",
         `DOCKER_DEFAULT_PLATFORM=${LOCAL_DROPLET_PLATFORM}`,
         this.#agentSmokeMode ? LOCAL_AGENT_SMOKE_DROPLET_IMAGE : LOCAL_DROPLET_IMAGE,
@@ -315,9 +315,9 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
         "-lc",
         [
           "set -euo pipefail",
-          'printf "%s" "$AGENTBAY_LOCAL_CLOUD_INIT_SCRIPT_B64" | base64 -d > /tmp/agentbay-local-cloud-init.sh',
-          "chmod 0700 /tmp/agentbay-local-cloud-init.sh",
-          "/tmp/agentbay-local-cloud-init.sh",
+          'printf "%s" "$BRUNO_LOCAL_CLOUD_INIT_SCRIPT_B64" | base64 -d > /tmp/bruno-local-cloud-init.sh',
+          "chmod 0700 /tmp/bruno-local-cloud-init.sh",
+          "/tmp/bruno-local-cloud-init.sh",
           ...(this.#agentSmokeMode ? ["exec tail --follow /dev/null"] : []),
         ].join("; "),
       ]);
@@ -379,24 +379,24 @@ function buildLocalCloudInitScript(
       `echo ${shellQuote(`== local cloud-init runcmd ${index + 1}/${commands.length} ==`)}`,
     ];
 
-    if (command.includes("AGENTBAY_BOOTSTRAP_STEP=runner_container_start")) {
+    if (command.includes("BRUNO_BOOTSTRAP_STEP=runner_container_start")) {
       scripts.push(buildLocalEndpointBridgeScript(options.agentSmokeMode));
     }
 
     if (isLocalSwapSetup(command)) {
       scripts.push(`echo ${shellQuote("Local cloud simulation skips host swap activation.")}`);
       scripts.push(
-        '/usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Swap setup was skipped by the local cloud simulator." swap_setup',
+        '/usr/local/bin/bruno-bootstrap-event bootstrapping completed "Swap setup was skipped by the local cloud simulator." swap_setup',
       );
     } else if (skippedBootstrapStep) {
       scripts.push(
-        `/usr/local/bin/agentbay-bootstrap-event bootstrapping started ${shellQuote(
+        `/usr/local/bin/bruno-bootstrap-event bootstrapping started ${shellQuote(
           localAgentSmokeSkippedBootstrapStartedMessage(skippedBootstrapStep),
         )} ${skippedBootstrapStep}`,
       );
       scripts.push(`echo ${shellQuote("Local agent smoke uses the prepared Droplet image.")}`);
       scripts.push(
-        `/usr/local/bin/agentbay-bootstrap-event bootstrapping completed ${shellQuote(
+        `/usr/local/bin/bruno-bootstrap-event bootstrapping completed ${shellQuote(
           localAgentSmokeSkippedBootstrapCompletedMessage(skippedBootstrapStep),
         )} ${skippedBootstrapStep}`,
       );
@@ -418,44 +418,44 @@ function buildLocalCloudInitScript(
       ? [
           "install -m 0755 -d /var/lib/docker /var/run",
           "rm -f /var/run/docker.sock",
-          "dockerd --host=unix:///var/run/docker.sock --storage-driver=overlay2 > /var/log/agentbay-local-dockerd.log 2>&1 &",
+          "dockerd --host=unix:///var/run/docker.sock --storage-driver=overlay2 > /var/log/bruno-local-dockerd.log 2>&1 &",
           "for attempt in $(seq 1 90); do /usr/bin/docker info >/dev/null 2>&1 && break; sleep 1; done",
           "/usr/bin/docker info >/dev/null",
           `/usr/bin/docker load --input ${LOCAL_AGENT_SMOKE_IMAGE_BUNDLE_CONTAINER_PATH} >/dev/null`,
-          "getent ahostsv4 host.docker.internal | awk 'NR == 1 { print $1 }' > /run/agentbay-host-gateway",
-          "test -s /run/agentbay-host-gateway",
+          "getent ahostsv4 host.docker.internal | awk 'NR == 1 { print $1 }' > /run/bruno-host-gateway",
+          "test -s /run/bruno-host-gateway",
         ]
       : []),
     "install -m 0755 -d /usr/local/bin",
-    "cat > /usr/local/bin/curl <<'AGENTBAY_LOCAL_CURL'",
+    "cat > /usr/local/bin/curl <<'BRUNO_LOCAL_CURL'",
     "#!/usr/bin/env bash",
     'if [[ "$*" == *"169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address"* ]]; then',
-    `  printf "%s\\n" "${"$"}{AGENTBAY_LOCAL_PUBLIC_IPV4:-127.0.0.1}"`,
+    `  printf "%s\\n" "${"$"}{BRUNO_LOCAL_PUBLIC_IPV4:-127.0.0.1}"`,
     "  exit 0",
     "fi",
     'exec /usr/bin/curl "$@"',
-    "AGENTBAY_LOCAL_CURL",
+    "BRUNO_LOCAL_CURL",
     "chmod 0755 /usr/local/bin/curl",
     ...buildLocalDockerShim(options.agentSmokeMode),
-    "cat > /usr/local/bin/systemctl <<'AGENTBAY_LOCAL_SYSTEMCTL'",
+    "cat > /usr/local/bin/systemctl <<'BRUNO_LOCAL_SYSTEMCTL'",
     "#!/usr/bin/env bash",
     'if [[ "$*" == *"enable --now caddy"* ]] && command -v caddy >/dev/null 2>&1; then',
-    "  caddy validate --config /etc/caddy/Caddyfile >/var/log/agentbay-local-caddy-validate.log 2>&1 || true",
+    "  caddy validate --config /etc/caddy/Caddyfile >/var/log/bruno-local-caddy-validate.log 2>&1 || true",
     "fi",
     "exit 0",
-    "AGENTBAY_LOCAL_SYSTEMCTL",
+    "BRUNO_LOCAL_SYSTEMCTL",
     "chmod 0755 /usr/local/bin/systemctl",
     ...(options.agentSmokeMode
       ? [
-          "cat > /usr/local/bin/caddy <<'AGENTBAY_LOCAL_CADDY'",
+          "cat > /usr/local/bin/caddy <<'BRUNO_LOCAL_CADDY'",
           "#!/usr/bin/env bash",
           "exit 0",
-          "AGENTBAY_LOCAL_CADDY",
+          "BRUNO_LOCAL_CADDY",
           "chmod 0755 /usr/local/bin/caddy",
           "install -m 0755 -d /etc/caddy",
         ]
       : []),
-    `export AGENTBAY_LOCAL_RUNNER_ENDPOINT_URL=${shellQuote(options.localRunnerEndpointUrl)}`,
+    `export BRUNO_LOCAL_RUNNER_ENDPOINT_URL=${shellQuote(options.localRunnerEndpointUrl)}`,
     ...commandScripts,
   ].join("\n");
 }
@@ -463,15 +463,15 @@ function buildLocalCloudInitScript(
 function buildLocalDockerShim(agentSmokeMode: boolean): string[] {
   if (agentSmokeMode) {
     return [
-      "cat > /usr/local/bin/docker <<'AGENTBAY_LOCAL_DOCKER'",
+      "cat > /usr/local/bin/docker <<'BRUNO_LOCAL_DOCKER'",
       "#!/usr/bin/env bash",
       "set -euo pipefail",
-      `if [[ "${"$"}{1:-}" == "pull" && ( "${"$"}{2:-}" == "agentbay-runner:local" || "${"$"}{2:-}" == "${LOCAL_HERMES_WORKLOAD_IMAGE}" || "${"$"}{2:-}" == "busybox:1.36" ) ]]; then`,
+      `if [[ "${"$"}{1:-}" == "pull" && ( "${"$"}{2:-}" == "bruno-runner:local" || "${"$"}{2:-}" == "${LOCAL_HERMES_WORKLOAD_IMAGE}" || "${"$"}{2:-}" == "busybox:1.36" ) ]]; then`,
       '  /usr/bin/docker image inspect "$2" >/dev/null',
       "  exit 0",
       "fi",
       `if [[ "${"$"}{1:-}" == "run" ]]; then`,
-      '  host_gateway="$(cat /run/agentbay-host-gateway)"',
+      '  host_gateway="$(cat /run/bruno-host-gateway)"',
       `  translated=("run" "--add-host" "host.docker.internal:${"$"}host_gateway")`,
       "  shift",
       '  for arg in "$@"; do',
@@ -484,40 +484,40 @@ function buildLocalDockerShim(agentSmokeMode: boolean): string[] {
       `  exec /usr/bin/docker "${"$"}{translated[@]}"`,
       "fi",
       'exec /usr/bin/docker "$@"',
-      "AGENTBAY_LOCAL_DOCKER",
+      "BRUNO_LOCAL_DOCKER",
       "chmod 0755 /usr/local/bin/docker",
     ];
   }
 
   return [
-    "cat > /usr/local/bin/docker <<'AGENTBAY_LOCAL_DOCKER'",
+    "cat > /usr/local/bin/docker <<'BRUNO_LOCAL_DOCKER'",
     "#!/usr/bin/env bash",
     "set -euo pipefail",
-    `if [[ "${"$"}{1:-}" == "pull" && "${"$"}{2:-}" == "agentbay-runner:local" ]]; then`,
+    `if [[ "${"$"}{1:-}" == "pull" && "${"$"}{2:-}" == "bruno-runner:local" ]]; then`,
     '  /usr/bin/docker image inspect "$2" >/dev/null',
     "  exit 0",
     "fi",
     `if [[ "${"$"}{1:-}" == "run" ]]; then`,
-    `  bridge_dir="${"$"}{AGENTBAY_LOCAL_HOST_BRIDGE_DIR:-/tmp/agentbay-local-cloud}"`,
+    `  bridge_dir="${"$"}{BRUNO_LOCAL_HOST_BRIDGE_DIR:-/tmp/bruno-local-cloud}"`,
     '  mkdir -p "$bridge_dir"',
     '  bridge_env="$bridge_dir/runner.env"',
-    "  if [[ -f /etc/agentbay/runner.env ]]; then",
-    '    cp /etc/agentbay/runner.env "$bridge_env"',
-    '    sed -i "s#^AGENTBAY_HERMES_STATE_ROOT=.*#AGENTBAY_HERMES_STATE_ROOT=$bridge_dir/var/lib/agentbay/agents#" "$bridge_env"',
-    '    sed -i "s#^AGENTBAY_RUNNER_BOOT_SELF_TEST_ROOT=.*#AGENTBAY_RUNNER_BOOT_SELF_TEST_ROOT=$bridge_dir/var/lib/agentbay/boot-self-test#" "$bridge_env"',
+    "  if [[ -f /etc/bruno/runner.env ]]; then",
+    '    cp /etc/bruno/runner.env "$bridge_env"',
+    '    sed -i "s#^BRUNO_HERMES_STATE_ROOT=.*#BRUNO_HERMES_STATE_ROOT=$bridge_dir/var/lib/bruno/agents#" "$bridge_env"',
+    '    sed -i "s#^BRUNO_RUNNER_BOOT_SELF_TEST_ROOT=.*#BRUNO_RUNNER_BOOT_SELF_TEST_ROOT=$bridge_dir/var/lib/bruno/boot-self-test#" "$bridge_env"',
     "  fi",
     "  translated=()",
     `  translated+=("run" "--add-host" "host.docker.internal:host-gateway")`,
     "  shift",
     '  for arg in "$@"; do',
     '    case "$arg" in',
-    "      /etc/agentbay/runner.env)",
+    "      /etc/bruno/runner.env)",
     '        translated+=("$bridge_env")',
     "        ;;",
-    "      /etc/agentbay/runner.env:/etc/agentbay/runner.env)",
-    '        translated+=("$bridge_env:/etc/agentbay/runner.env")',
+    "      /etc/bruno/runner.env:/etc/bruno/runner.env)",
+    '        translated+=("$bridge_env:/etc/bruno/runner.env")',
     "        ;;",
-    "      /var/lib/agentbay/*:/var/lib/agentbay/*)",
+    "      /var/lib/bruno/*:/var/lib/bruno/*)",
     `        source_path="${"$"}{arg%%:*}"`,
     `        target_path="${"$"}{arg#*:}"`,
     '        translated_source="$bridge_dir$source_path"',
@@ -533,7 +533,7 @@ function buildLocalDockerShim(agentSmokeMode: boolean): string[] {
     `  exec /usr/bin/docker "${"$"}{translated[@]}"`,
     "fi",
     'exec /usr/bin/docker "$@"',
-    "AGENTBAY_LOCAL_DOCKER",
+    "BRUNO_LOCAL_DOCKER",
     "chmod 0755 /usr/local/bin/docker",
   ];
 }
@@ -541,11 +541,11 @@ function buildLocalDockerShim(agentSmokeMode: boolean): string[] {
 function localAgentSmokeSkippedBootstrapStep(
   command: string,
 ): "docker_apt_repository" | "package_install" | null {
-  if (command.includes("AGENTBAY_BOOTSTRAP_STEP=docker_apt_repository")) {
+  if (command.includes("BRUNO_BOOTSTRAP_STEP=docker_apt_repository")) {
     return "docker_apt_repository";
   }
 
-  if (command.includes("AGENTBAY_BOOTSTRAP_STEP=package_install")) {
+  if (command.includes("BRUNO_BOOTSTRAP_STEP=package_install")) {
     return "package_install";
   }
 
@@ -569,26 +569,26 @@ function localAgentSmokeSkippedBootstrapCompletedMessage(
 }
 
 function isLocalSwapSetup(command: string): boolean {
-  return command.includes("AGENTBAY_BOOTSTRAP_STEP=swap_setup");
+  return command.includes("BRUNO_BOOTSTRAP_STEP=swap_setup");
 }
 
 function buildLocalEndpointBridgeScript(agentSmokeMode: boolean): string {
   return [
-    "if [ ! -f /etc/agentbay/runner.env ]; then",
-    '  echo "Local cloud-init parity check failed: /etc/agentbay/runner.env was not created." >&2',
+    "if [ ! -f /etc/bruno/runner.env ]; then",
+    '  echo "Local cloud-init parity check failed: /etc/bruno/runner.env was not created." >&2',
     "  exit 90",
     "fi",
-    "agentbay_generated_endpoint=\"$(sed -n 's/^AGENTBAY_RUNNER_ENDPOINT_URL=//p' /etc/agentbay/runner.env | tail -n 1)\"",
-    'if [ -z "$agentbay_generated_endpoint" ] || [ "$agentbay_generated_endpoint" = "https://.sslip.io" ]; then',
-    `  echo "Local cloud-init parity check failed: invalid generated endpoint: ${"$"}{agentbay_generated_endpoint:-<missing>}" >&2`,
+    "bruno_generated_endpoint=\"$(sed -n 's/^BRUNO_RUNNER_ENDPOINT_URL=//p' /etc/bruno/runner.env | tail -n 1)\"",
+    'if [ -z "$bruno_generated_endpoint" ] || [ "$bruno_generated_endpoint" = "https://.sslip.io" ]; then',
+    `  echo "Local cloud-init parity check failed: invalid generated endpoint: ${"$"}{bruno_generated_endpoint:-<missing>}" >&2`,
     "  exit 91",
     "fi",
-    'echo "Local cloud-init generated production endpoint: $agentbay_generated_endpoint"',
-    `sed -i "s#^AGENTBAY_RUNNER_ENDPOINT_URL=.*#AGENTBAY_RUNNER_ENDPOINT_URL=${"$"}{AGENTBAY_LOCAL_RUNNER_ENDPOINT_URL}#" /etc/agentbay/runner.env`,
+    'echo "Local cloud-init generated production endpoint: $bruno_generated_endpoint"',
+    `sed -i "s#^BRUNO_RUNNER_ENDPOINT_URL=.*#BRUNO_RUNNER_ENDPOINT_URL=${"$"}{BRUNO_LOCAL_RUNNER_ENDPOINT_URL}#" /etc/bruno/runner.env`,
     ...(agentSmokeMode
       ? [
-          `sed -i "s#^AGENTBAY_HERMES_WORKLOAD_IMAGE=.*#AGENTBAY_HERMES_WORKLOAD_IMAGE=${LOCAL_HERMES_WORKLOAD_IMAGE}#" /etc/agentbay/runner.env`,
-          'printf "%s\\n" "AGENTBAY_LOCAL_AGENT_SMOKE_MODE=synthetic-external-boundaries" >> /etc/agentbay/runner.env',
+          `sed -i "s#^BRUNO_HERMES_WORKLOAD_IMAGE=.*#BRUNO_HERMES_WORKLOAD_IMAGE=${LOCAL_HERMES_WORKLOAD_IMAGE}#" /etc/bruno/runner.env`,
+          'printf "%s\\n" "BRUNO_LOCAL_AGENT_SMOKE_MODE=synthetic-external-boundaries" >> /etc/bruno/runner.env',
         ]
       : []),
   ].join("\n");

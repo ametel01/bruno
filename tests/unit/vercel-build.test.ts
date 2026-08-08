@@ -7,10 +7,10 @@ import {
 } from "@/scripts/vercel-build";
 
 const PRODUCTION_RUNNER_ENV = {
-  AGENTBAY_READY_AGENT_CREATION_ENABLED: "true",
-  AGENTBAY_DIGITALOCEAN_TOKEN: "provider-token-present",
-  AGENTBAY_RUNNER_BEARER_TOKEN: "runner-token-present",
-  AGENTBAY_RUNNER_IMAGE: `ghcr.io/ametel01/agentbay-runner:${"a".repeat(40)}@sha256:${"b".repeat(64)}`,
+  BRUNO_READY_AGENT_CREATION_ENABLED: "true",
+  BRUNO_DIGITALOCEAN_TOKEN: "provider-token-present",
+  BRUNO_RUNNER_BEARER_TOKEN: "runner-token-present",
+  BRUNO_RUNNER_IMAGE: `ghcr.io/ametel01/bruno-runner:${"a".repeat(40)}@sha256:${"b".repeat(64)}`,
 };
 
 describe("Vercel build workflow", () => {
@@ -23,11 +23,11 @@ describe("Vercel build workflow", () => {
     await runVercelBuild(
       {
         ...PRODUCTION_RUNNER_ENV,
-        AGENTBAY_AUTH_MODE: "clerk",
+        BRUNO_AUTH_MODE: "clerk",
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "publishable-key-present",
         CLERK_SECRET_KEY: "secret-key-present",
         VERCEL_ENV: "production",
-        DATABASE_URL: "postgres://production.example/agentbay",
+        DATABASE_URL: "postgres://production.example/bruno",
       },
       runCommand,
     );
@@ -41,10 +41,10 @@ describe("Vercel build workflow", () => {
   it("migrates and builds a pre-cutover operator-protected production deployment", () => {
     expect(
       planVercelBuildCommands({
-        AGENTBAY_AUTH_MODE: "operator",
-        AGENTBAY_OPERATOR_PASSWORD: "operator-password-present",
+        BRUNO_AUTH_MODE: "operator",
+        BRUNO_OPERATOR_PASSWORD: "operator-password-present",
         VERCEL_ENV: "production",
-        DATABASE_URL: "postgres://production.example/agentbay",
+        DATABASE_URL: "postgres://production.example/bruno",
       }),
     ).toEqual([
       { command: "bun", args: ["run", "db:migrate"] },
@@ -55,11 +55,11 @@ describe("Vercel build workflow", () => {
   it("migrates and builds an explicitly public development production deployment", () => {
     expect(
       planVercelBuildCommands({
-        AGENTBAY_AUTH_MODE: "development",
-        AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: "true",
+        BRUNO_AUTH_MODE: "development",
+        BRUNO_ALLOW_PUBLIC_DEVELOPMENT: "true",
         NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
         VERCEL_ENV: "production",
-        DATABASE_URL: "postgres://production.example/agentbay",
+        DATABASE_URL: "postgres://production.example/bruno",
       }),
     ).toEqual([
       { command: "bun", args: ["run", "db:migrate"] },
@@ -70,9 +70,9 @@ describe("Vercel build workflow", () => {
   it("fails an operator production build closed when Basic auth is not configured", () => {
     expect(() =>
       planVercelBuildCommands({
-        AGENTBAY_AUTH_MODE: "operator",
+        BRUNO_AUTH_MODE: "operator",
         VERCEL_ENV: "production",
-        DATABASE_URL: "postgres://production.example/agentbay",
+        DATABASE_URL: "postgres://production.example/bruno",
       }),
     ).toThrow("Operator authentication is not configured.");
   });
@@ -80,7 +80,7 @@ describe("Vercel build workflow", () => {
   it("fails closed when a production build has no database URL", () => {
     expect(() =>
       planVercelBuildCommands({
-        AGENTBAY_AUTH_MODE: "clerk",
+        BRUNO_AUTH_MODE: "clerk",
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "publishable-key-present",
         CLERK_SECRET_KEY: "secret-key-present",
         VERCEL_ENV: "production",
@@ -91,16 +91,16 @@ describe("Vercel build workflow", () => {
   it("fails a ready-agent production build before deployment without an immutable runner", () => {
     expect(() =>
       planVercelBuildCommands({
-        AGENTBAY_AUTH_MODE: "development",
-        AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: "true",
-        AGENTBAY_READY_AGENT_CREATION_ENABLED: "true",
-        AGENTBAY_DIGITALOCEAN_TOKEN: "provider-token-present",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-token-present",
+        BRUNO_AUTH_MODE: "development",
+        BRUNO_ALLOW_PUBLIC_DEVELOPMENT: "true",
+        BRUNO_READY_AGENT_CREATION_ENABLED: "true",
+        BRUNO_DIGITALOCEAN_TOKEN: "provider-token-present",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-token-present",
         NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
         VERCEL_ENV: "production",
-        DATABASE_URL: "postgres://production.example/agentbay",
+        DATABASE_URL: "postgres://production.example/bruno",
       }),
-    ).toThrow("AGENTBAY_RUNNER_IMAGE must be an immutable registry image reference");
+    ).toThrow("BRUNO_RUNNER_IMAGE must be an immutable registry image reference");
   });
 
   it.each([
@@ -109,7 +109,7 @@ describe("Vercel build workflow", () => {
   ])("does not migrate an %s Clerk preview build without a preview database", (_label, mode) => {
     expect(
       planVercelBuildCommands({
-        AGENTBAY_AUTH_MODE: mode,
+        BRUNO_AUTH_MODE: mode,
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "publishable-key-present",
         CLERK_SECRET_KEY: "secret-key-present",
         VERCEL_ENV: "preview",
@@ -132,12 +132,12 @@ describe("Vercel build workflow", () => {
 
   it("permits only an explicit attested development preview", () => {
     const previewEnv = {
-      AGENTBAY_AUTH_MODE: "development",
-      AGENTBAY_PREVIEW_PROTECTION_VERIFIED: "true",
-      NEXT_PUBLIC_APP_URL: "https://agentbay-git-feature.example.vercel.app",
+      BRUNO_AUTH_MODE: "development",
+      BRUNO_PREVIEW_PROTECTION_VERIFIED: "true",
+      NEXT_PUBLIC_APP_URL: "https://bruno-git-feature.example.vercel.app",
       VERCEL: "1",
       VERCEL_ENV: "preview",
-      VERCEL_URL: "agentbay-git-feature.example.vercel.app",
+      VERCEL_URL: "bruno-git-feature.example.vercel.app",
     };
 
     expect(planVercelBuildCommands(previewEnv)).toEqual([
@@ -146,7 +146,7 @@ describe("Vercel build workflow", () => {
     expect(() =>
       planVercelBuildCommands({
         ...previewEnv,
-        AGENTBAY_PREVIEW_PROTECTION_VERIFIED: undefined,
+        BRUNO_PREVIEW_PROTECTION_VERIFIED: undefined,
       }),
     ).toThrow("Preview development authentication requires verified deployment protection.");
   });
@@ -157,8 +157,8 @@ describe("Vercel build workflow", () => {
   ])("fails closed before planning an attested preview build with %s hosts", (_label, appUrl, vercelUrl) => {
     expect(() =>
       planVercelBuildCommands({
-        AGENTBAY_AUTH_MODE: "development",
-        AGENTBAY_PREVIEW_PROTECTION_VERIFIED: "true",
+        BRUNO_AUTH_MODE: "development",
+        BRUNO_PREVIEW_PROTECTION_VERIFIED: "true",
         NEXT_PUBLIC_APP_URL: appUrl,
         VERCEL: "1",
         VERCEL_ENV: "preview",
@@ -176,12 +176,12 @@ describe("Vercel build workflow", () => {
   it("fails the real build entrypoint before spawning commands for an unattested preview", async () => {
     const sensitiveValue = "publishable-value-that-must-not-be-echoed";
     const result = await runRealVercelBuild({
-      AGENTBAY_AUTH_MODE: "development",
-      NEXT_PUBLIC_APP_URL: "https://agentbay-git-feature.example.vercel.app",
+      BRUNO_AUTH_MODE: "development",
+      NEXT_PUBLIC_APP_URL: "https://bruno-git-feature.example.vercel.app",
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: sensitiveValue,
       VERCEL: "1",
       VERCEL_ENV: "preview",
-      VERCEL_URL: "agentbay-git-feature.example.vercel.app",
+      VERCEL_URL: "bruno-git-feature.example.vercel.app",
     });
 
     expect(result.exitCode).not.toBe(0);
@@ -196,12 +196,12 @@ describe("Vercel build workflow", () => {
   it("fails the real unset-preview build entrypoint closed when Clerk keys are incomplete", async () => {
     const sensitiveValue = "publishable-value-that-must-not-be-echoed";
     const result = await runRealVercelBuild({
-      AGENTBAY_AUTH_MODE: undefined,
-      NEXT_PUBLIC_APP_URL: "https://agentbay-git-feature.example.vercel.app",
+      BRUNO_AUTH_MODE: undefined,
+      NEXT_PUBLIC_APP_URL: "https://bruno-git-feature.example.vercel.app",
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: sensitiveValue,
       VERCEL: "1",
       VERCEL_ENV: "preview",
-      VERCEL_URL: "agentbay-git-feature.example.vercel.app",
+      VERCEL_URL: "bruno-git-feature.example.vercel.app",
     });
 
     expect(result.exitCode).not.toBe(0);
@@ -224,7 +224,7 @@ async function runRealVercelBuild(
       env: {
         ...process.env,
         ...values,
-        AGENTBAY_PREVIEW_PROTECTION_VERIFIED: undefined,
+        BRUNO_PREVIEW_PROTECTION_VERIFIED: undefined,
         CLERK_SECRET_KEY: undefined,
       },
     });

@@ -222,7 +222,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
         Response.json(
           {
             ok: true,
-            contractVersion: "agentbay.runner.launch.v2",
+            contractVersion: "bruno.runner.launch.v2",
             agentId: created.agent.id,
             action: "start",
             operation: {
@@ -242,7 +242,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
               },
               container: {
                 id: "manual-container-accepted",
-                name: "agentbay-runner",
+                name: "bruno-runner",
                 image: launchSpec.image.ref,
                 state: "running",
                 startedAt: acceptedAt,
@@ -370,7 +370,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
       fetch: async () =>
         Response.json({
           ok: true,
-          contractVersion: "agentbay.runner.status.v2",
+          contractVersion: "bruno.runner.status.v2",
           agentId,
           action: "status",
           snapshot: accepted.snapshot,
@@ -381,7 +381,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
     await expect(adapter.status(agentId)).resolves.toEqual({
       ok: true,
       runner: manualRunner("https://runner.example.com"),
-      contractVersion: "agentbay.runner.status.v2",
+      contractVersion: "bruno.runner.status.v2",
       snapshot: {
         ...accepted.snapshot,
         container: {
@@ -416,7 +416,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
       fetch: async () =>
         Response.json({
           ok: true,
-          contractVersion: "agentbay.runner.status.v3",
+          contractVersion: "bruno.runner.status.v3",
           agentId,
           action: "status",
           snapshot,
@@ -427,7 +427,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
     await expect(adapter.status(agentId)).resolves.toEqual({
       ok: true,
       runner: manualRunner("https://runner.example.com"),
-      contractVersion: "agentbay.runner.status.v3",
+      contractVersion: "bruno.runner.status.v3",
       snapshot: {
         ...snapshot,
         container: { ...snapshot.container, imageIdentity: null },
@@ -458,7 +458,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
       fetch: async () =>
         Response.json({
           ok: true,
-          contractVersion: "agentbay.runner.status.v3",
+          contractVersion: "bruno.runner.status.v3",
           agentId,
           action: "status",
           snapshot,
@@ -469,7 +469,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
     await expect(adapter.status(agentId)).resolves.toEqual({
       ok: true,
       runner: manualRunner("https://runner.example.com"),
-      contractVersion: "agentbay.runner.status.v3",
+      contractVersion: "bruno.runner.status.v3",
       snapshot,
     });
   });
@@ -530,7 +530,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
     });
 
     expect(info).toHaveBeenCalledWith(
-      "[agentbay] manual_runner.request",
+      "[bruno] manual_runner.request",
       expect.objectContaining({
         event: "request_failed",
         action: "start",
@@ -563,7 +563,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
       reason: "runner_request_failed",
     });
     expect(info).toHaveBeenCalledWith(
-      "[agentbay] manual_runner.request",
+      "[bruno] manual_runner.request",
       expect.objectContaining({
         event: "request_error",
         errorName: "Error",
@@ -600,7 +600,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
       readinessReason: "telegram_not_connected",
     });
     expect(info).toHaveBeenCalledWith(
-      "[agentbay] manual_runner.request",
+      "[bruno] manual_runner.request",
       expect.objectContaining({
         event: "request_failed",
         responseErrorCode: "hermes_readiness_failed",
@@ -635,7 +635,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
       reason: "runner_readiness_failed",
     });
     expect(info).toHaveBeenCalledWith(
-      "[agentbay] manual_runner.request",
+      "[bruno] manual_runner.request",
       expect.objectContaining({
         event: "request_failed",
         responseErrorCode: "hermes_readiness_failed",
@@ -717,7 +717,7 @@ describe("ManualRunnerAdapter dashboard HTTP contract", () => {
     const runner = await bootstrapManualRunnerForDevelopmentUser({
       createConnection: () => connection,
       env: {
-        AGENTBAY_MANUAL_RUNNER_ENDPOINT_URL: endpointUrl,
+        BRUNO_MANUAL_RUNNER_ENDPOINT_URL: endpointUrl,
       },
     });
 
@@ -755,13 +755,13 @@ function acceptedLaunchResponse(agentId: string, action: "start" | "restart") {
   const operationId = "11111111-1111-4111-8111-111111111111";
   const target = {
     image: "nousresearch/hermes-agent:test@sha256:abc",
-    launchSpecVersion: "agentbay.hermes.launch.v3",
+    launchSpecVersion: "bruno.hermes.launch.v3",
     configRevision: "cfg-accepted",
   };
 
   return {
     ok: true,
-    contractVersion: "agentbay.runner.launch.v2",
+    contractVersion: "bruno.runner.launch.v2",
     agentId,
     action,
     operation: {
@@ -776,7 +776,7 @@ function acceptedLaunchResponse(agentId: string, action: "start" | "restart") {
       operation: { id: operationId, action, target, acceptedAt },
       container: {
         id: "manual-container-accepted",
-        name: "agentbay-runner",
+        name: "bruno-runner",
         image: target.image,
         state: "running",
         startedAt: acceptedAt,

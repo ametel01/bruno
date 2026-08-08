@@ -323,7 +323,7 @@ export const runners = pgTable(
     ),
     check(
       "runners_provisioning_operation_key_check",
-      sql`${table.provisioningOperationKey} IS NULL OR (${table.kind} = 'digitalocean' AND ${table.provisioningOperationKey} ~ '^agentbay-deploy-[0-9a-f]{32}$')`,
+      sql`${table.provisioningOperationKey} IS NULL OR (${table.kind} = 'digitalocean' AND ${table.provisioningOperationKey} ~ '^bruno-deploy-[0-9a-f]{32}$')`,
     ),
     check(
       "runners_required_runner_image_digest_check",
@@ -787,7 +787,7 @@ export const runnerReplacements = pgTable(
     ),
     check(
       "runner_replacements_operation_key_check",
-      sql`${table.operationKey} ~ '^agentbay-replace-[0-9a-f]{32}$'`,
+      sql`${table.operationKey} ~ '^bruno-replace-[0-9a-f]{32}$'`,
     ),
     check("runner_replacements_generation_check", sql`${table.generation} >= 0`),
     check("runner_replacements_attempt_count_check", sql`${table.attemptCount} >= 0`),
@@ -915,7 +915,7 @@ export const runnerInfrastructureOrphans = pgTable(
     ),
     check(
       "runner_infrastructure_orphans_operation_check",
-      sql`${table.operationTag} ~ '^agentbay-deploy-[0-9a-f]{32}$'`,
+      sql`${table.operationTag} ~ '^bruno-deploy-[0-9a-f]{32}$'`,
     ),
     check(
       "runner_infrastructure_orphans_firewall_check",

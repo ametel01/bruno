@@ -282,8 +282,8 @@ function isSensitiveMetadataKey(value: string): boolean {
 function redactSecretLikeValues(value: string): string {
   return value
     .replace(/dop_v1_[A-Za-z0-9_-]+/g, "[redacted]")
-    .replace(/agb_reg_[A-Za-z0-9_-]+/g, "[redacted]")
-    .replace(/agb_run_[A-Za-z0-9_-]+/g, "[redacted]");
+    .replace(/bruno_reg_[A-Za-z0-9_-]+/g, "[redacted]")
+    .replace(/bruno_run_[A-Za-z0-9_-]+/g, "[redacted]");
 }
 
 function truncate(value: string, maxLength: number): string {

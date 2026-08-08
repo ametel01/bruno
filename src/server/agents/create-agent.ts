@@ -1442,7 +1442,7 @@ function ensureDefaultCloudRunnerProvisioning(
 ): Promise<CreateRunnerProvisioningResult> {
   return createDigitalOceanRunnerForUser(userId, {
     provider: "digitalocean",
-    name: "bruno Cloud Runner",
+    name: "Bruno Cloud Runner",
   });
 }
 
@@ -1582,7 +1582,7 @@ async function takeReadyCreateIdempotencyLock(
   input: { userId: string; idempotencyKey: string },
 ): Promise<void> {
   await tx.execute(sql`
-    select pg_advisory_xact_lock(hashtextextended(${`agentbay:ready-create:${input.userId}:${input.idempotencyKey}`}, 0))
+    select pg_advisory_xact_lock(hashtextextended(${`bruno:ready-create:${input.userId}:${input.idempotencyKey}`}, 0))
   `);
 }
 

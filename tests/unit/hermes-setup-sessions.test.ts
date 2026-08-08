@@ -20,7 +20,7 @@ describe("Hermes setup sessions", () => {
 
   it("terminates an active PTY when its short-lived session expires", async () => {
     vi.useFakeTimers();
-    const stateRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-setup-"));
+    const stateRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-setup-"));
     tempRoots.push(stateRoot);
     const dockerCalls: string[][] = [];
     const processKill = vi.fn();
@@ -65,12 +65,12 @@ describe("Hermes setup sessions", () => {
     expect(dockerCalls).toContainEqual([
       "rm",
       "--force",
-      expect.stringMatching(/^agentbay-hermes-setup-/),
+      expect.stringMatching(/^bruno-hermes-setup-/),
     ]);
   });
 
   it("issues a one-time websocket protocol and streams a real PTY contract", async () => {
-    const stateRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-setup-"));
+    const stateRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-setup-"));
     tempRoots.push(stateRoot);
     const dockerCalls: string[][] = [];
     const spawnCalls: string[][] = [];
@@ -85,8 +85,8 @@ describe("Hermes setup sessions", () => {
     let emitTerminalData: ((data: Uint8Array) => void) | undefined;
     const manager = new HermesSetupSessionManager({
       stateRoot,
-      image: "agentbay-hermes:test",
-      network: "agentbay-hermes-test",
+      image: "bruno-hermes:test",
+      network: "bruno-hermes-test",
       docker: async (args) => {
         dockerCalls.push([...args]);
         return { stdout: "" };
@@ -145,8 +145,8 @@ describe("Hermes setup sessions", () => {
         "--interactive",
         "--tty",
         "--network",
-        "agentbay-hermes-test",
-        "agentbay-hermes:test",
+        "bruno-hermes-test",
+        "bruno-hermes:test",
         "sh",
         "-lc",
         expect.stringContaining("hermes setup"),
@@ -174,12 +174,12 @@ describe("Hermes setup sessions", () => {
     expect(dockerCalls).toContainEqual([
       "rm",
       "--force",
-      expect.stringMatching(/^agentbay-hermes-setup-/),
+      expect.stringMatching(/^bruno-hermes-setup-/),
     ]);
   });
 
   it("rejects concurrent setup and setup while the agent workload is running", async () => {
-    const stateRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-setup-"));
+    const stateRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-setup-"));
     tempRoots.push(stateRoot);
     const manager = new HermesSetupSessionManager({
       stateRoot,
@@ -201,7 +201,7 @@ describe("Hermes setup sessions", () => {
   });
 
   it("exposes authenticated session creation and upgrades without the runner bearer token", async () => {
-    const stateRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-setup-"));
+    const stateRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-setup-"));
     tempRoots.push(stateRoot);
     const setupSessions = new HermesSetupSessionManager({
       stateRoot,
@@ -256,7 +256,7 @@ function createNoopDocker() {
   const container = {
     id: "container-id",
     name: "container-name",
-    image: "agentbay-hermes:test",
+    image: "bruno-hermes:test",
     status: "running",
     startedAt: null,
     finishedAt: null,

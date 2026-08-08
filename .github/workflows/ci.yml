@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  DATABASE_URL: postgres://agentbay:agentbay@127.0.0.1:54329/agentbay
+  DATABASE_URL: postgres://bruno:bruno@127.0.0.1:54329/bruno
   NEXT_PUBLIC_APP_URL: http://localhost:3000
 
 jobs:
@@ -23,13 +23,13 @@ jobs:
       postgres:
         image: postgres:17-alpine
         env:
-          POSTGRES_DB: agentbay
-          POSTGRES_USER: agentbay
-          POSTGRES_PASSWORD: agentbay
+          POSTGRES_DB: bruno
+          POSTGRES_USER: bruno
+          POSTGRES_PASSWORD: bruno
         ports:
           - 54329:5432
         options: >-
-          --health-cmd "pg_isready -U agentbay -d agentbay"
+          --health-cmd "pg_isready -U bruno -d bruno"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10

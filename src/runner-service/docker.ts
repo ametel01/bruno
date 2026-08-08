@@ -4,7 +4,7 @@ import { constants as fsConstants } from "node:fs";
 import { lstat, open, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { basename, relative, resolve, sep } from "node:path";
 import {
-  AGENTBAY_AGENT_ID_LABEL,
+  BRUNO_AGENT_ID_LABEL,
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_READINESS_TIMEOUT_MS,
   DEFAULT_HERMES_DOCKER_CPUS,
@@ -50,22 +50,22 @@ import {
 import type { AgentLaunchSpec } from "@/src/server/agents/agent-launch-spec";
 import { redactSecretText } from "@/src/shared/secret-redaction";
 
-export { AGENTBAY_AGENT_ID_LABEL, DEFAULT_MANUAL_RUNNER_IMAGE, DOCKER_CLI_TIMEOUT_MS };
+export { BRUNO_AGENT_ID_LABEL, DEFAULT_MANUAL_RUNNER_IMAGE, DOCKER_CLI_TIMEOUT_MS };
 
-const DOCKER_RUNNER_IMAGE_ENV = "AGENTBAY_DOCKER_RUNNER_IMAGE";
-const DOCKER_RUNNER_ARGS_ENV = "AGENTBAY_DOCKER_RUNNER_ARGS_JSON";
-const DOCKER_EXECUTABLE_ENV = "AGENTBAY_RUNNER_DOCKER_EXECUTABLE";
-const HERMES_PRIVATE_NETWORK_ENV = "AGENTBAY_HERMES_PRIVATE_NETWORK";
-const HERMES_DOCKER_CPUS_ENV = "AGENTBAY_HERMES_DOCKER_CPUS";
-const HERMES_DOCKER_MEMORY_ENV = "AGENTBAY_HERMES_DOCKER_MEMORY";
-const HERMES_DOCKER_PIDS_LIMIT_ENV = "AGENTBAY_HERMES_DOCKER_PIDS_LIMIT";
-const HERMES_READINESS_PORT_ENV = "AGENTBAY_HERMES_READINESS_PORT";
-const HERMES_STATE_ROOT_ENV = "AGENTBAY_HERMES_STATE_ROOT";
-const AGENTBAY_CONFIG_REVISION_LABEL = "agentbay.config_revision";
-const AGENTBAY_LAUNCH_SPEC_VERSION_LABEL = "agentbay.launch_spec_version";
-const AGENTBAY_OPERATION_ID_LABEL = "agentbay.operation_id";
-const AGENTBAY_OPERATION_ACTION_LABEL = "agentbay.operation_action";
-const AGENTBAY_OPERATION_ACCEPTED_AT_LABEL = "agentbay.operation_accepted_at";
+const DOCKER_RUNNER_IMAGE_ENV = "BRUNO_DOCKER_RUNNER_IMAGE";
+const DOCKER_RUNNER_ARGS_ENV = "BRUNO_DOCKER_RUNNER_ARGS_JSON";
+const DOCKER_EXECUTABLE_ENV = "BRUNO_RUNNER_DOCKER_EXECUTABLE";
+const HERMES_PRIVATE_NETWORK_ENV = "BRUNO_HERMES_PRIVATE_NETWORK";
+const HERMES_DOCKER_CPUS_ENV = "BRUNO_HERMES_DOCKER_CPUS";
+const HERMES_DOCKER_MEMORY_ENV = "BRUNO_HERMES_DOCKER_MEMORY";
+const HERMES_DOCKER_PIDS_LIMIT_ENV = "BRUNO_HERMES_DOCKER_PIDS_LIMIT";
+const HERMES_READINESS_PORT_ENV = "BRUNO_HERMES_READINESS_PORT";
+const HERMES_STATE_ROOT_ENV = "BRUNO_HERMES_STATE_ROOT";
+const BRUNO_CONFIG_REVISION_LABEL = "bruno.config_revision";
+const BRUNO_LAUNCH_SPEC_VERSION_LABEL = "bruno.launch_spec_version";
+const BRUNO_OPERATION_ID_LABEL = "bruno.operation_id";
+const BRUNO_OPERATION_ACTION_LABEL = "bruno.operation_action";
+const BRUNO_OPERATION_ACCEPTED_AT_LABEL = "bruno.operation_accepted_at";
 const HERMES_WORKLOAD_UID = 10000;
 const HERMES_WORKLOAD_GID = 10000;
 const HERMES_DOCKER_CAP_DROP = ["ALL"] as const;
@@ -170,9 +170,9 @@ const DUMMY_DOCKER_RUNNER_ARGS = [
   "sh",
   "-c",
   [
-    'printf "agentbay manual runner started for %s\\n" "$AGENTBAY_AGENT_ID"',
-    'printf "agentbay manual runner stderr ready for %s\\n" "$AGENTBAY_AGENT_ID" >&2',
-    'trap \'printf "agentbay manual runner stopping for %s\\n" "$AGENTBAY_AGENT_ID"; exit 0\' TERM INT',
+    'printf "bruno manual runner started for %s\\n" "$BRUNO_AGENT_ID"',
+    'printf "bruno manual runner stderr ready for %s\\n" "$BRUNO_AGENT_ID" >&2',
+    'trap \'printf "bruno manual runner stopping for %s\\n" "$BRUNO_AGENT_ID"; exit 0\' TERM INT',
     "while true; do sleep 1; done",
   ].join("; "),
 ];
@@ -806,11 +806,11 @@ export class ManualRunnerDocker {
     const revision = await readProjectedRevision(agentId, this.stateRoot);
     const requestedRevision =
       operation?.target.configRevision ??
-      selected.inspect.Config?.Labels?.[AGENTBAY_CONFIG_REVISION_LABEL] ??
+      selected.inspect.Config?.Labels?.[BRUNO_CONFIG_REVISION_LABEL] ??
       null;
     const revisionState = classifyRevisionState({
       requested: requestedRevision,
-      containerLabel: selected.inspect.Config?.Labels?.[AGENTBAY_CONFIG_REVISION_LABEL] ?? null,
+      containerLabel: selected.inspect.Config?.Labels?.[BRUNO_CONFIG_REVISION_LABEL] ?? null,
       marker: revision,
     });
     const base = buildStatusSnapshotBase(
@@ -1373,7 +1373,7 @@ export class ManualRunnerDocker {
       "ps",
       "--all",
       "--filter",
-      `label=${AGENTBAY_AGENT_ID_LABEL}=${agentId}`,
+      `label=${BRUNO_AGENT_ID_LABEL}=${agentId}`,
       "--format",
       "{{json .}}",
     ];
@@ -1419,7 +1419,7 @@ export class ManualRunnerDocker {
     const result = token ? await this.runLaunchDocker(token, args) : await this.runDocker(args);
     const inspect = parseDockerInspect(result.stdout);
 
-    if (inspect.Config?.Labels?.[AGENTBAY_AGENT_ID_LABEL] !== agentId) {
+    if (inspect.Config?.Labels?.[BRUNO_AGENT_ID_LABEL] !== agentId) {
       throw new Error("Docker container label mismatch.");
     }
 
@@ -1439,7 +1439,7 @@ export class ManualRunnerDocker {
     const result = token ? await this.runLaunchDocker(token, args) : await this.runDocker(args);
     const inspect = parseDockerInspect(result.stdout);
 
-    if (inspect.Config?.Labels?.[AGENTBAY_AGENT_ID_LABEL] !== agentId) {
+    if (inspect.Config?.Labels?.[BRUNO_AGENT_ID_LABEL] !== agentId) {
       throw new Error("Docker container label mismatch.");
     }
 
@@ -1491,12 +1491,12 @@ function containerFromInspect(
 
 function readOperationFromInspect(inspect: DockerInspectContainer): RunnerOperation | null {
   const labels = inspect.Config?.Labels ?? {};
-  const id = labels[AGENTBAY_OPERATION_ID_LABEL];
-  const action = labels[AGENTBAY_OPERATION_ACTION_LABEL];
-  const acceptedAt = labels[AGENTBAY_OPERATION_ACCEPTED_AT_LABEL];
+  const id = labels[BRUNO_OPERATION_ID_LABEL];
+  const action = labels[BRUNO_OPERATION_ACTION_LABEL];
+  const acceptedAt = labels[BRUNO_OPERATION_ACCEPTED_AT_LABEL];
   const image = inspect.Config?.Image;
-  const launchSpecVersion = labels[AGENTBAY_LAUNCH_SPEC_VERSION_LABEL];
-  const configRevision = labels[AGENTBAY_CONFIG_REVISION_LABEL];
+  const launchSpecVersion = labels[BRUNO_LAUNCH_SPEC_VERSION_LABEL];
+  const configRevision = labels[BRUNO_CONFIG_REVISION_LABEL];
   const parsedAcceptedAt = acceptedAt ? Date.parse(acceptedAt) : NaN;
 
   if (
@@ -1618,7 +1618,7 @@ function buildStatusSnapshotBase(
     revision: {
       state: revision.revisionState,
       requested: revision.requestedRevision,
-      containerLabel: container.inspect.Config?.Labels?.[AGENTBAY_CONFIG_REVISION_LABEL] ?? null,
+      containerLabel: container.inspect.Config?.Labels?.[BRUNO_CONFIG_REVISION_LABEL] ?? null,
       projectionMarker: revision.projectionMarkerRevision,
       observedAt,
     },
@@ -1710,7 +1710,7 @@ function buildTerminalSnapshot(
       requested: operation?.target.configRevision ?? null,
       containerLabel: containerRemoved
         ? null
-        : (selected.inspect.Config?.Labels?.[AGENTBAY_CONFIG_REVISION_LABEL] ?? null),
+        : (selected.inspect.Config?.Labels?.[BRUNO_CONFIG_REVISION_LABEL] ?? null),
       projectionMarker: null,
       observedAt,
     },
@@ -1746,7 +1746,7 @@ async function readProjectedRevision(
     resolveHermesStateRoot(configuredStateRoot),
     agentId,
     "hermes",
-    "agentbay-config-revision.json",
+    "bruno-config-revision.json",
   );
 
   try {
@@ -1821,7 +1821,7 @@ async function readProjectedApiServerKey(
       value = parsed;
     }
 
-    return /^agb_agent_[A-Za-z0-9_-]{32,247}$/.test(value) ? value : null;
+    return /^bruno_agent_[A-Za-z0-9_-]{32,247}$/.test(value) ? value : null;
   } catch {
     return null;
   }
@@ -1906,10 +1906,9 @@ function hasExactStatusRuntimeEvidence(
   const labels = inspect.Config?.Labels;
   const checks = {
     image: inspect.Config?.Image === operation.target.image,
-    agentLabel: labels?.[AGENTBAY_AGENT_ID_LABEL] === agentId,
-    versionLabel:
-      labels?.[AGENTBAY_LAUNCH_SPEC_VERSION_LABEL] === operation.target.launchSpecVersion,
-    revisionLabel: labels?.[AGENTBAY_CONFIG_REVISION_LABEL] === operation.target.configRevision,
+    agentLabel: labels?.[BRUNO_AGENT_ID_LABEL] === agentId,
+    versionLabel: labels?.[BRUNO_LAUNCH_SPEC_VERSION_LABEL] === operation.target.launchSpecVersion,
+    revisionLabel: labels?.[BRUNO_CONFIG_REVISION_LABEL] === operation.target.configRevision,
     markerAgent: marker.agentId === agentId,
     markerRevision: marker.configRevision === operation.target.configRevision,
     markerImage: marker.image === operation.target.image,
@@ -2159,7 +2158,7 @@ function normalizeTelegramState(value: unknown): RunnerTelegramState {
 }
 
 function isSafePrivateContainerName(value: string): boolean {
-  return /^agentbay-runner-[A-Za-z0-9][A-Za-z0-9_.-]{0,103}$/.test(value);
+  return /^bruno-runner-[A-Za-z0-9][A-Za-z0-9_.-]{0,103}$/.test(value);
 }
 
 function isValidCanaryCompletion(value: unknown): boolean {
@@ -2235,13 +2234,12 @@ async function assertHermesInspectMatchesRuntime(
   }
 
   if (
-    inspect.Config?.Labels?.[AGENTBAY_CONFIG_REVISION_LABEL] !==
-    input.launchSpec.agent.configRevision
+    inspect.Config?.Labels?.[BRUNO_CONFIG_REVISION_LABEL] !== input.launchSpec.agent.configRevision
   ) {
     throw new HermesRevisionEvidenceError();
   }
 
-  if (inspect.Config?.Labels?.[AGENTBAY_LAUNCH_SPEC_VERSION_LABEL] !== input.launchSpec.version) {
+  if (inspect.Config?.Labels?.[BRUNO_LAUNCH_SPEC_VERSION_LABEL] !== input.launchSpec.version) {
     throw new HermesRevisionEvidenceError();
   }
 
@@ -2390,7 +2388,7 @@ function inspectContainsSecretValue(
   launchSpec: AgentLaunchSpec,
 ): boolean {
   const highEntropySecrets =
-    launchSpec.version === "agentbay.hermes.launch.v3"
+    launchSpec.version === "bruno.hermes.launch.v3"
       ? [
           "openrouterApiKey" in launchSpec.secrets
             ? launchSpec.secrets.openrouterApiKey
@@ -2419,7 +2417,7 @@ function inspectContainsSecretValue(
   }
 
   return (
-    launchSpec.version === "agentbay.hermes.launch.v3" &&
+    launchSpec.version === "bruno.hermes.launch.v3" &&
     launchSpec.secrets.telegramAllowedUsers.some((telegramId) =>
       inspectStrings.some((value) => stringExposesTelegramAllowedUser(value, telegramId)),
     )
@@ -2504,17 +2502,17 @@ export function buildHermesDockerRunArgs(input: {
     "--name",
     input.containerName,
     "--label",
-    `${AGENTBAY_AGENT_ID_LABEL}=${input.agentId}`,
+    `${BRUNO_AGENT_ID_LABEL}=${input.agentId}`,
     "--label",
-    `${AGENTBAY_CONFIG_REVISION_LABEL}=${input.launchSpec.agent.configRevision}`,
+    `${BRUNO_CONFIG_REVISION_LABEL}=${input.launchSpec.agent.configRevision}`,
     "--label",
-    `${AGENTBAY_LAUNCH_SPEC_VERSION_LABEL}=${input.launchSpec.version}`,
+    `${BRUNO_LAUNCH_SPEC_VERSION_LABEL}=${input.launchSpec.version}`,
     "--label",
-    `${AGENTBAY_OPERATION_ID_LABEL}=${input.operation.id}`,
+    `${BRUNO_OPERATION_ID_LABEL}=${input.operation.id}`,
     "--label",
-    `${AGENTBAY_OPERATION_ACTION_LABEL}=${input.operation.action}`,
+    `${BRUNO_OPERATION_ACTION_LABEL}=${input.operation.action}`,
     "--label",
-    `${AGENTBAY_OPERATION_ACCEPTED_AT_LABEL}=${input.operation.acceptedAt}`,
+    `${BRUNO_OPERATION_ACCEPTED_AT_LABEL}=${input.operation.acceptedAt}`,
     ...(input.additionalLabels ?? []).flatMap(([name, value]) => ["--label", `${name}=${value}`]),
     "--network",
     input.runtime.network,
@@ -2574,9 +2572,9 @@ function buildLegacyDockerRunArgs(input: {
     "--name",
     input.containerName,
     "--label",
-    `${AGENTBAY_AGENT_ID_LABEL}=${input.agentId}`,
+    `${BRUNO_AGENT_ID_LABEL}=${input.agentId}`,
     "--env",
-    `AGENTBAY_AGENT_ID=${input.agentId}`,
+    `BRUNO_AGENT_ID=${input.agentId}`,
     input.command.image,
     ...input.command.args,
   ];
@@ -3216,7 +3214,7 @@ function normalizeDockerTimestamp(value: string | undefined): string | null {
 }
 
 function dockerContainerName(agentId: string, suffix: string): string {
-  return `agentbay-runner-${agentId}-${suffix}`.replace(/[^a-zA-Z0-9_.-]/g, "-").slice(0, 120);
+  return `bruno-runner-${agentId}-${suffix}`.replace(/[^a-zA-Z0-9_.-]/g, "-").slice(0, 120);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

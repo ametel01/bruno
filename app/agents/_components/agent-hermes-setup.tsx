@@ -236,7 +236,7 @@ function isSetupSessionResponse(value: unknown): value is SetupSessionResponse {
     typeof value.session.websocketUrl === "string" &&
     /^wss?:\/\//.test(value.session.websocketUrl) &&
     typeof value.session.websocketProtocol === "string" &&
-    value.session.websocketProtocol.startsWith("agentbay.hermes.setup.") &&
+    value.session.websocketProtocol.startsWith("bruno.hermes.setup.") &&
     typeof value.session.expiresAt === "string"
   );
 }
@@ -289,7 +289,7 @@ async function safeFailureMessage(response: Response): Promise<string> {
 }
 
 function looksUnsafe(message: string): boolean {
-  return /(sk-|token=|authorization|bearer|agentbay\.hermes\.setup\.)/i.test(message);
+  return /(sk-|token=|authorization|bearer|bruno\.hermes\.setup\.)/i.test(message);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

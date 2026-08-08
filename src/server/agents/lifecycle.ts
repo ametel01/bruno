@@ -2996,7 +2996,7 @@ export async function deleteAgentForUser(
     }
 
     if (!cleanup.ok) {
-      console.warn("[agentbay] agent.delete", {
+      console.warn("[bruno] agent.delete", {
         event: "runner_cleanup_incomplete",
         agentId: normalizedAgentId,
         source: "docker_runner",
@@ -3027,7 +3027,7 @@ export async function deleteAgentForUser(
       }
 
       if (!manualCleanup.ok) {
-        console.warn("[agentbay] agent.delete", {
+        console.warn("[bruno] agent.delete", {
           event: "runner_cleanup_incomplete",
           agentId: normalizedAgentId,
           source: "assigned_runner",
@@ -3626,7 +3626,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function logAgentStart(event: string, metadata: Record<string, unknown>): void {
-  console.info("[agentbay] agent.start", { event, ...metadata });
+  console.info("[bruno] agent.start", { event, ...metadata });
 }
 
 function shouldRequireOnlineRunnerForStart(): boolean {

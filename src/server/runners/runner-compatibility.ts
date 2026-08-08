@@ -59,11 +59,11 @@ type PersistedRunnerCompatibility = {
 export function readRunnerCompatibilityRequirement(
   env: Record<string, string | undefined> = process.env,
 ): RunnerCompatibilityRequirement {
-  if (env.AGENTBAY_DIGITALOCEAN_PROVIDER_MODE?.trim() === "local_docker") {
+  if (env.BRUNO_DIGITALOCEAN_PROVIDER_MODE?.trim() === "local_docker") {
     return { mode: "local_docker", release: null };
   }
 
-  const image = env.AGENTBAY_RUNNER_IMAGE;
+  const image = env.BRUNO_RUNNER_IMAGE;
   const parsed = image ? parseImmutableRunnerImageReference(image) : null;
 
   if (!parsed) {

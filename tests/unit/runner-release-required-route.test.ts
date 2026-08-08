@@ -5,7 +5,7 @@ import { GET } from "@/app/api/internal/runner-release/required/route";
 const SECRET = "abcdefghijklmnopqrstuvwxyzABCDEF012345";
 const SHA = "a".repeat(40);
 const DIGEST = `sha256:${"b".repeat(64)}`;
-const IMAGE = `ghcr.io/ametel01/agentbay-runner:${SHA}@${DIGEST}`;
+const IMAGE = `ghcr.io/ametel01/bruno-runner:${SHA}@${DIGEST}`;
 const URL = "https://bruno.example/api/internal/runner-release/required";
 
 describe("GET /api/internal/runner-release/required", () => {
@@ -48,7 +48,7 @@ describe("GET /api/internal/runner-release/required", () => {
     const request = () => new Request(URL, { headers: { authorization: `Bearer ${SECRET}` } });
     const mutable = await GET(request(), undefined, {
       readCron: () => ({ ok: true, secret: SECRET }),
-      runnerImage: "ghcr.io/ametel01/agentbay-runner:main",
+      runnerImage: "ghcr.io/ametel01/bruno-runner:main",
       readRolloutBatchSize: () => 1,
     });
     expect(mutable.status).toBe(503);

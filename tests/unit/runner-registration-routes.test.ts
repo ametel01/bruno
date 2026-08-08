@@ -49,8 +49,8 @@ describe("POST /api/runners/registration-tokens route", () => {
     mocks.createRunnerRegistrationTokenForUser.mockResolvedValueOnce({
       registrationToken: {
         id: "00000000-0000-4000-8000-000000000101",
-        token: "agb_reg_1234567890123456789012345678901234567890123",
-        prefix: "agb_reg_12345678",
+        token: "bruno_reg_1234567890123456789012345678901234567890123",
+        prefix: "bruno_reg_12345678",
         expiresAt: "2026-07-05T08:15:00.000Z",
       },
     });
@@ -65,8 +65,8 @@ describe("POST /api/runners/registration-tokens route", () => {
     expect(body).toEqual({
       registrationToken: {
         id: "00000000-0000-4000-8000-000000000101",
-        token: "agb_reg_1234567890123456789012345678901234567890123",
-        prefix: "agb_reg_12345678",
+        token: "bruno_reg_1234567890123456789012345678901234567890123",
+        prefix: "bruno_reg_12345678",
         expiresAt: "2026-07-05T08:15:00.000Z",
       },
     });
@@ -133,8 +133,8 @@ describe("POST /runner/v1/register route", () => {
         id: "00000000-0000-4000-8000-000000000201",
       },
       credential: {
-        token: "agb_run_1234567890123456789012345678901234567890123",
-        prefix: "agb_run_12345678",
+        token: "bruno_run_1234567890123456789012345678901234567890123",
+        prefix: "bruno_run_12345678",
       },
     });
     const { POST } = await import("@/app/runner/v1/register/route");
@@ -143,7 +143,7 @@ describe("POST /runner/v1/register route", () => {
       new Request("http://localhost/runner/v1/register", {
         method: "POST",
         body: JSON.stringify({
-          registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+          registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
           endpointUrl: "http://127.0.0.1:8787",
           name: "Registered Runner",
         }),
@@ -161,12 +161,12 @@ describe("POST /runner/v1/register route", () => {
         id: "00000000-0000-4000-8000-000000000201",
       },
       credential: {
-        token: "agb_run_1234567890123456789012345678901234567890123",
-        prefix: "agb_run_12345678",
+        token: "bruno_run_1234567890123456789012345678901234567890123",
+        prefix: "bruno_run_12345678",
       },
     });
     expect(mocks.exchangeRunnerRegistrationTokenForCredential).toHaveBeenCalledWith({
-      registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+      registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
       endpointUrl: "http://127.0.0.1:8787",
       name: "Registered Runner",
     });
@@ -189,8 +189,8 @@ describe("POST /runner/v1/register route", () => {
     );
     expect(JSON.stringify(body)).not.toContain("tokenHash");
     expect(JSON.stringify(body)).not.toContain("credentialHash");
-    expect(JSON.stringify(ingressLogs)).not.toContain("agb_reg_");
-    expect(JSON.stringify(ingressLogs)).not.toContain("agb_run_");
+    expect(JSON.stringify(ingressLogs)).not.toContain("bruno_reg_");
+    expect(JSON.stringify(ingressLogs)).not.toContain("bruno_run_");
     expect(mocks.requireConfiguredApplicationUser).not.toHaveBeenCalled();
   });
 
@@ -199,8 +199,8 @@ describe("POST /runner/v1/register route", () => {
 
     for (const registrationToken of [
       "",
-      "agb_reg_short",
-      "agb_run_1234567890123456789012345678901234567890123",
+      "bruno_reg_short",
+      "bruno_run_1234567890123456789012345678901234567890123",
     ]) {
       const response = await POST(
         new Request("http://localhost/runner/v1/register", {
@@ -245,7 +245,7 @@ describe("POST /runner/v1/register route", () => {
         new Request("http://localhost/runner/v1/register", {
           method: "POST",
           body: JSON.stringify({
-            registrationToken: "agb_reg_1234567890123456789012345678901234567890123",
+            registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
             endpointUrl: "http://127.0.0.1:8787",
           }),
         }),
@@ -261,7 +261,7 @@ describe("POST /runner/v1/register route", () => {
         },
       });
       expect(JSON.stringify(body)).not.toContain(
-        "agb_reg_1234567890123456789012345678901234567890123",
+        "bruno_reg_1234567890123456789012345678901234567890123",
       );
     }
   });

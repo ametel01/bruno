@@ -48,10 +48,10 @@ type BunServerRuntime = {
 declare const Bun: BunServerRuntime;
 
 const DEFAULT_RUNNER_PORT = 3045;
-const RUNNER_HOST_ENV = "AGENTBAY_RUNNER_HOST";
-const RUNNER_PORT_ENV = "AGENTBAY_RUNNER_PORT";
-const RUNNER_HEARTBEAT_INTERVAL_ENV = "AGENTBAY_RUNNER_HEARTBEAT_INTERVAL_MS";
-const RUNNER_MAX_AGENTS_ENV = "AGENTBAY_RUNNER_MAX_AGENTS";
+const RUNNER_HOST_ENV = "BRUNO_RUNNER_HOST";
+const RUNNER_PORT_ENV = "BRUNO_RUNNER_PORT";
+const RUNNER_HEARTBEAT_INTERVAL_ENV = "BRUNO_RUNNER_HEARTBEAT_INTERVAL_MS";
+const RUNNER_MAX_AGENTS_ENV = "BRUNO_RUNNER_MAX_AGENTS";
 
 const heartbeat = readHeartbeatOptions(process.env);
 const localAgentSmokeDocker = createLocalAgentSmokeRunnerDocker(process.env);
@@ -78,9 +78,9 @@ function parsePort(value: string | undefined): number {
 }
 
 function readHeartbeatOptions(env: NodeJS.ProcessEnv) {
-  const appBaseUrl = env.AGENTBAY_APP_URL?.trim();
-  const runnerId = env.AGENTBAY_RUNNER_ID?.trim();
-  const credential = env.AGENTBAY_RUNNER_CREDENTIAL?.trim();
+  const appBaseUrl = env.BRUNO_APP_URL?.trim();
+  const runnerId = env.BRUNO_RUNNER_ID?.trim();
+  const credential = env.BRUNO_RUNNER_CREDENTIAL?.trim();
 
   if (!appBaseUrl || !runnerId || !credential) {
     return undefined;

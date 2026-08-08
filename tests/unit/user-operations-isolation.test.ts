@@ -156,7 +156,7 @@ describe("signed-in user operations isolation", () => {
   });
 
   it("binds backup rows and object keys to the owner before any foreign storage access", async () => {
-    const storage = new FakeBackupObjectStorage("agentbay-backups");
+    const storage = new FakeBackupObjectStorage("bruno-backups");
     const download = vi.spyOn(storage, "download");
     const createResult = await createManualBackupForUser(
       { agentId: AGENT_A_ID, userId: USER_A_ID },

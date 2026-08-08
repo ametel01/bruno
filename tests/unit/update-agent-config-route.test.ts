@@ -283,7 +283,7 @@ describe("PATCH /api/agents/[agentId] route", () => {
     mocks.updateAgentConfigForUser.mockRejectedValueOnce(
       new AgentConfigUpdatePersistenceError({
         code: "23514",
-        detail: "postgres://agentbay:secret@localhost stack trace token",
+        detail: "postgres://bruno:secret@localhost stack trace token",
       }),
     );
     const { PATCH } = await import("@/app/api/agents/[agentId]/route");

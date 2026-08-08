@@ -48,23 +48,23 @@ const OPERATION_ID = "00000000-0000-4000-8000-00000000a741";
 const NOW = new Date("2026-08-03T08:00:00.000Z");
 const CONFIG_REVISION = "cfg-1784000000000";
 const CUSTOM_HERMES_IMAGE =
-  "ghcr.io/ametel01/agentbay-hermes@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  "ghcr.io/ametel01/bruno-hermes@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const RUNNER_IMAGE_DIGEST = `sha256:${"f".repeat(64)}`;
-const RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:sha-current@${RUNNER_IMAGE_DIGEST}`;
-const ORIGINAL_RUNNER_IMAGE = process.env.AGENTBAY_RUNNER_IMAGE;
+const RUNNER_IMAGE = `ghcr.io/ametel01/bruno-runner:sha-current@${RUNNER_IMAGE_DIGEST}`;
+const ORIGINAL_RUNNER_IMAGE = process.env.BRUNO_RUNNER_IMAGE;
 
 describe("agent deployment reconciler", () => {
   let connection: DatabaseConnection;
 
   beforeAll(() => {
-    process.env.AGENTBAY_RUNNER_IMAGE = RUNNER_IMAGE;
+    process.env.BRUNO_RUNNER_IMAGE = RUNNER_IMAGE;
   });
 
   afterAll(() => {
     if (ORIGINAL_RUNNER_IMAGE === undefined) {
-      delete process.env.AGENTBAY_RUNNER_IMAGE;
+      delete process.env.BRUNO_RUNNER_IMAGE;
     } else {
-      process.env.AGENTBAY_RUNNER_IMAGE = ORIGINAL_RUNNER_IMAGE;
+      process.env.BRUNO_RUNNER_IMAGE = ORIGINAL_RUNNER_IMAGE;
     }
   });
 
@@ -196,7 +196,7 @@ describe("agent deployment reconciler", () => {
         kind: "digitalocean",
         requiredRunnerImageDigest: RUNNER_IMAGE_DIGEST,
         provisioningStatus: "waiting_for_runner",
-        provisioningOperationKey: `agentbay-deploy-${DEPLOYMENT_ID.replaceAll("-", "")}`,
+        provisioningOperationKey: `bruno-deploy-${DEPLOYMENT_ID.replaceAll("-", "")}`,
       });
       expect(agent?.runnerId).toBe(provisioned[0]?.id);
     } finally {
@@ -249,7 +249,7 @@ describe("agent deployment reconciler", () => {
       sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
       provisioningStatus: "pending",
-      provisioningOperationKey: `agentbay-deploy-${DEPLOYMENT_ID.replaceAll("-", "")}`,
+      provisioningOperationKey: `bruno-deploy-${DEPLOYMENT_ID.replaceAll("-", "")}`,
       provisioningStartedAt: NOW,
       createdAt: NOW,
       updatedAt: NOW,
@@ -486,7 +486,7 @@ describe("agent deployment reconciler", () => {
         runner: manualRunner(),
         response: {
           ok: true,
-          contractVersion: "agentbay.runner.canary.v1",
+          contractVersion: "bruno.runner.canary.v1",
           agentId: AGENT_ID,
           action: "canary",
           operationId: OPERATION_ID,
@@ -1409,7 +1409,7 @@ describe("agent deployment reconciler", () => {
         triggerDeploymentId: DEPLOYMENT_ID,
         reason: "gateway_deadline",
         state: "failed",
-        operationKey: `agentbay-replace-${suffix.repeat(32)}`,
+        operationKey: `bruno-replace-${suffix.repeat(32)}`,
         nextAttemptAt: null,
         terminalCode: "target_provisioning_failed",
         terminalSummary: "Replacement runner provisioning did not complete.",
@@ -1784,7 +1784,7 @@ async function seedAutomaticRunner(
     sizeSlug: "s-1vcpu-2gb",
     image: "ubuntu-24-04-x64",
     provisioningStatus: input.provisioningStatus,
-    provisioningOperationKey: `agentbay-deploy-${DEPLOYMENT_ID.replaceAll("-", "")}`,
+    provisioningOperationKey: `bruno-deploy-${DEPLOYMENT_ID.replaceAll("-", "")}`,
     provisioningStartedAt: NOW,
     provisioningCompletedAt: input.provisioningStatus === "ready" ? NOW : null,
     ...(input.provisioningStatus === "ready"
@@ -1811,7 +1811,7 @@ function automaticProviderConfig(): DigitalOceanProviderConfig {
     region: "sfo3",
     sizeSlug: "s-1vcpu-2gb",
     image: "ubuntu-24-04-x64",
-    tags: ["agentbay", "agentbay-runner"],
+    tags: ["bruno", "bruno-runner"],
     sshKeyIds: ["fake-key"],
     sshSourceAddresses: ["203.0.113.5/32"],
   };
@@ -1935,7 +1935,7 @@ function readySnapshot(): RunnerAgentStatusSnapshot {
     },
     container: {
       id: "container-001",
-      name: "agentbay-runner",
+      name: "bruno-runner",
       image: sampleManagedLaunchSpec().image.ref,
       state: "running",
       startedAt: NOW.toISOString(),

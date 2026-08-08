@@ -7,7 +7,7 @@ import {
 } from "@/src/auth/auth-mode";
 
 const COMPLETE_CLERK_ENV = {
-  AGENTBAY_AUTH_MODE: "clerk",
+  BRUNO_AUTH_MODE: "clerk",
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "publishable-key-present",
   CLERK_SECRET_KEY: "secret-key-present",
 } as const;
@@ -15,7 +15,7 @@ const COMPLETE_CLERK_ENV = {
 describe("authentication mode policy", () => {
   it.each([
     "http://localhost:3000",
-    "http://agentbay.localhost:3000",
+    "http://bruno.localhost:3000",
     "http://host.docker.internal:3000",
     "http://127.0.0.1:3000",
     "http://127.42.0.8:3000",
@@ -27,7 +27,7 @@ describe("authentication mode policy", () => {
   it("accepts an explicit local development mode without Clerk keys", () => {
     expect(
       resolveAuthMode({
-        AGENTBAY_AUTH_MODE: "development",
+        BRUNO_AUTH_MODE: "development",
         NEXT_PUBLIC_APP_URL: "http://localhost:3000",
       }),
     ).toEqual({ mode: "development" });
@@ -36,8 +36,8 @@ describe("authentication mode policy", () => {
   it("allows an explicitly opted-in public development production deployment", () => {
     expect(
       resolveAuthMode({
-        AGENTBAY_AUTH_MODE: "development",
-        AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: "true",
+        BRUNO_AUTH_MODE: "development",
+        BRUNO_ALLOW_PUBLIC_DEVELOPMENT: "true",
         NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
         VERCEL_ENV: "production",
       }),
@@ -46,8 +46,8 @@ describe("authentication mode policy", () => {
     for (const optIn of [undefined, "", " ", "TRUE", "false"]) {
       expect(
         resolveAuthMode({
-          AGENTBAY_AUTH_MODE: "development",
-          AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT: optIn,
+          BRUNO_AUTH_MODE: "development",
+          BRUNO_ALLOW_PUBLIC_DEVELOPMENT: optIn,
           NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
           VERCEL_ENV: "production",
         }),
@@ -58,8 +58,8 @@ describe("authentication mode policy", () => {
   it("accepts explicit operator mode only with the Basic-auth password", () => {
     expect(
       resolveAuthMode({
-        AGENTBAY_AUTH_MODE: "operator",
-        AGENTBAY_OPERATOR_PASSWORD: "operator-password-present",
+        BRUNO_AUTH_MODE: "operator",
+        BRUNO_OPERATOR_PASSWORD: "operator-password-present",
         NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
         VERCEL_ENV: "production",
       }),
@@ -68,8 +68,8 @@ describe("authentication mode policy", () => {
     for (const password of [undefined, "", " "]) {
       expect(
         resolveAuthMode({
-          AGENTBAY_AUTH_MODE: "operator",
-          AGENTBAY_OPERATOR_PASSWORD: password,
+          BRUNO_AUTH_MODE: "operator",
+          BRUNO_OPERATOR_PASSWORD: password,
           NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
           VERCEL_ENV: "production",
         }),
@@ -87,7 +87,7 @@ describe("authentication mode policy", () => {
   ])("fails closed for invalid mode %j", (mode) => {
     expect(
       resolveAuthMode({
-        AGENTBAY_AUTH_MODE: mode,
+        BRUNO_AUTH_MODE: mode,
         NEXT_PUBLIC_APP_URL: "http://localhost:3000",
       }),
     ).toEqual({ mode: "invalid", code: "invalid_auth_mode" });
@@ -95,13 +95,13 @@ describe("authentication mode policy", () => {
 
   it("requires complete Clerk configuration", () => {
     for (const env of [
-      { AGENTBAY_AUTH_MODE: "clerk" },
+      { BRUNO_AUTH_MODE: "clerk" },
       {
-        AGENTBAY_AUTH_MODE: "clerk",
+        BRUNO_AUTH_MODE: "clerk",
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "publishable-key-present",
       },
       {
-        AGENTBAY_AUTH_MODE: "clerk",
+        BRUNO_AUTH_MODE: "clerk",
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "publishable-key-present",
         CLERK_SECRET_KEY: " ",
       },
@@ -148,18 +148,18 @@ describe("authentication mode policy", () => {
 
   it("permits only an explicit, attested development mode on the current Vercel preview", () => {
     const previewEnv = {
-      AGENTBAY_AUTH_MODE: "development",
-      AGENTBAY_PREVIEW_PROTECTION_VERIFIED: "true",
-      NEXT_PUBLIC_APP_URL: "https://agentbay-git-feature.example.vercel.app",
+      BRUNO_AUTH_MODE: "development",
+      BRUNO_PREVIEW_PROTECTION_VERIFIED: "true",
+      NEXT_PUBLIC_APP_URL: "https://bruno-git-feature.example.vercel.app",
       VERCEL: "1",
       VERCEL_ENV: "preview",
-      VERCEL_URL: "agentbay-git-feature.example.vercel.app",
-      VERCEL_PROJECT_PRODUCTION_URL: "agentbay.example.vercel.app",
+      VERCEL_URL: "bruno-git-feature.example.vercel.app",
+      VERCEL_PROJECT_PRODUCTION_URL: "bruno.example.vercel.app",
     };
 
     expect(resolveAuthMode(previewEnv)).toEqual({ mode: "development" });
 
-    expect(resolveAuthMode({ ...previewEnv, AGENTBAY_AUTH_MODE: undefined })).toEqual({
+    expect(resolveAuthMode({ ...previewEnv, BRUNO_AUTH_MODE: undefined })).toEqual({
       mode: "invalid",
       code: "clerk_auth_not_configured",
     });
@@ -168,7 +168,7 @@ describe("authentication mode policy", () => {
       expect(
         resolveAuthMode({
           ...previewEnv,
-          AGENTBAY_PREVIEW_PROTECTION_VERIFIED: attestation,
+          BRUNO_PREVIEW_PROTECTION_VERIFIED: attestation,
         }),
       ).toEqual({ mode: "invalid", code: "preview_protection_not_verified" });
     }
@@ -177,13 +177,13 @@ describe("authentication mode policy", () => {
   it.each([
     ["missing hosts", undefined, undefined],
     ["malformed hosts", "not a URL", "not a hostname"],
-    ["missing app host", undefined, "agentbay-git-feature.example.vercel.app"],
-    ["missing current preview host", "https://agentbay-git-feature.example.vercel.app", undefined],
+    ["missing app host", undefined, "bruno-git-feature.example.vercel.app"],
+    ["missing current preview host", "https://bruno-git-feature.example.vercel.app", undefined],
   ])("refuses an attested development preview with %s", (_label, appUrl, vercelUrl) => {
     expect(
       resolveAuthMode({
-        AGENTBAY_AUTH_MODE: "development",
-        AGENTBAY_PREVIEW_PROTECTION_VERIFIED: "true",
+        BRUNO_AUTH_MODE: "development",
+        BRUNO_PREVIEW_PROTECTION_VERIFIED: "true",
         NEXT_PUBLIC_APP_URL: appUrl,
         VERCEL: "1",
         VERCEL_ENV: "preview",
@@ -199,13 +199,13 @@ describe("authentication mode policy", () => {
   ])("refuses preview development mode for a %s", (_label, appUrl) => {
     expect(
       resolveAuthMode({
-        AGENTBAY_AUTH_MODE: "development",
-        AGENTBAY_PREVIEW_PROTECTION_VERIFIED: "true",
+        BRUNO_AUTH_MODE: "development",
+        BRUNO_PREVIEW_PROTECTION_VERIFIED: "true",
         NEXT_PUBLIC_APP_URL: appUrl,
         VERCEL: "1",
         VERCEL_ENV: "preview",
-        VERCEL_URL: "agentbay-git-feature.example.vercel.app",
-        VERCEL_PROJECT_PRODUCTION_URL: "agentbay.example.vercel.app",
+        VERCEL_URL: "bruno-git-feature.example.vercel.app",
+        VERCEL_PROJECT_PRODUCTION_URL: "bruno.example.vercel.app",
       }),
     ).toEqual({ mode: "invalid", code: "development_auth_not_allowed" });
   });
@@ -213,8 +213,8 @@ describe("authentication mode policy", () => {
   it("refuses a custom hostname even when VERCEL_URL matches it", () => {
     expect(
       resolveAuthMode({
-        AGENTBAY_AUTH_MODE: "development",
-        AGENTBAY_PREVIEW_PROTECTION_VERIFIED: "true",
+        BRUNO_AUTH_MODE: "development",
+        BRUNO_PREVIEW_PROTECTION_VERIFIED: "true",
         NEXT_PUBLIC_APP_URL: "https://preview.example.com",
         VERCEL: "1",
         VERCEL_ENV: "preview",
@@ -227,12 +227,12 @@ describe("authentication mode policy", () => {
     ["Vercel production", { VERCEL_ENV: "production", NEXT_PUBLIC_APP_URL: "http://localhost" }],
     ["production domain", { NEXT_PUBLIC_APP_URL: "https://getbruno.xyz" }],
     ["production subdomain", { NEXT_PUBLIC_APP_URL: "https://www.getbruno.xyz" }],
-    ["custom hostname", { NEXT_PUBLIC_APP_URL: "https://agentbay.example.com" }],
+    ["custom hostname", { NEXT_PUBLIC_APP_URL: "https://bruno.example.com" }],
     [
       "configured Vercel production hostname",
       {
-        NEXT_PUBLIC_APP_URL: "https://agentbay.example.vercel.app",
-        VERCEL_PROJECT_PRODUCTION_URL: "agentbay.example.vercel.app",
+        NEXT_PUBLIC_APP_URL: "https://bruno.example.vercel.app",
+        VERCEL_PROJECT_PRODUCTION_URL: "bruno.example.vercel.app",
       },
     ],
     ["ambiguous Vercel marker", { NEXT_PUBLIC_APP_URL: "http://localhost", VERCEL: "1" }],
@@ -242,7 +242,7 @@ describe("authentication mode policy", () => {
       { NEXT_PUBLIC_APP_URL: "https://127.0.0.1.attacker.example" },
     ],
   ])("requires Clerk instead of development for %s", (_label, env) => {
-    expect(resolveAuthMode({ AGENTBAY_AUTH_MODE: "development", ...env })).toEqual({
+    expect(resolveAuthMode({ BRUNO_AUTH_MODE: "development", ...env })).toEqual({
       mode: "invalid",
       code: "development_auth_not_allowed",
     });
@@ -251,7 +251,7 @@ describe("authentication mode policy", () => {
   it("does not infer deployment trust from NODE_ENV", () => {
     expect(
       resolveAuthMode({
-        AGENTBAY_AUTH_MODE: "development",
+        BRUNO_AUTH_MODE: "development",
         NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
         NODE_ENV: "development",
       }),
@@ -270,7 +270,7 @@ describe("authentication mode policy", () => {
 
     expect(() =>
       requireValidAuthMode({
-        AGENTBAY_AUTH_MODE: "clerk",
+        BRUNO_AUTH_MODE: "clerk",
         NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: secret,
       }),
@@ -278,7 +278,7 @@ describe("authentication mode policy", () => {
 
     try {
       requireValidAuthMode({
-        AGENTBAY_AUTH_MODE: "clerk",
+        BRUNO_AUTH_MODE: "clerk",
         NEXT_PUBLIC_APP_URL: "https://getbruno.xyz",
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: secret,
       });
@@ -290,15 +290,15 @@ describe("authentication mode policy", () => {
   it("reports every supported explicit auth mode without reflecting configuration values", () => {
     expect(() =>
       requireValidAuthMode({
-        AGENTBAY_AUTH_MODE: "operator",
-        AGENTBAY_OPERATOR_PASSWORD: " ",
+        BRUNO_AUTH_MODE: "operator",
+        BRUNO_OPERATOR_PASSWORD: " ",
       }),
     ).toThrow("Operator authentication is not configured.");
 
     expect(() =>
       requireValidAuthMode({
-        AGENTBAY_AUTH_MODE: "unexpected",
-        AGENTBAY_OPERATOR_PASSWORD: "secret-value-that-must-not-appear",
+        BRUNO_AUTH_MODE: "unexpected",
+        BRUNO_OPERATOR_PASSWORD: "secret-value-that-must-not-appear",
       }),
     ).toThrow("Authentication mode must be development, operator, or clerk.");
   });
@@ -329,6 +329,6 @@ describe("authentication mode policy", () => {
     for (const source of serverConsumerSources) {
       expect(source).toContain("@/src/auth/server-auth-mode");
     }
-    expect(runtimeSources).not.toContain("AGENTBAY_AUTH_TRANSITION_MODE");
+    expect(runtimeSources).not.toContain("BRUNO_AUTH_TRANSITION_MODE");
   });
 });

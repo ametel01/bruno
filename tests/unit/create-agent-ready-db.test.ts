@@ -49,7 +49,7 @@ const TOKEN = "123456:abcdefghijklmnopqrstuvwxyz";
 const SECOND_TOKEN = "654321:abcdefghijklmnopqrstuvwxyz";
 const THIRD_TOKEN = "777777:abcdefghijklmnopqrstuvwxyz";
 const OPENAI_KEY_FIXTURE = ["sk", "fixture", "abcdefghijklmnopqrstuvwxyz1234567890"].join("-");
-const RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:${"a".repeat(40)}@sha256:${"b".repeat(64)}`;
+const RUNNER_IMAGE = `ghcr.io/ametel01/bruno-runner:${"a".repeat(40)}@sha256:${"b".repeat(64)}`;
 const LOCAL_TWO_AGENT_CAPACITY = {
   configuredMaxAgents: 2,
   measuredMaxAgents: 2,
@@ -58,13 +58,13 @@ const LOCAL_TWO_AGENT_CAPACITY = {
   profile: { vcpus: 2, memoryMiB: 4096, diskGiB: 80 },
 } as const;
 const KEYRING_ENV = {
-  AGENTBAY_READY_AGENT_CREATION_ENABLED: "true",
-  AGENTBAY_DIGITALOCEAN_TOKEN: "provider-token-present",
-  AGENTBAY_RUNNER_BEARER_TOKEN: "runner-token-present",
-  AGENTBAY_RUNNER_IMAGE: RUNNER_IMAGE,
-  AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
-  AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
-  AGENTBAY_AGENT_SECRET_KEYS_JSON: JSON.stringify({
+  BRUNO_READY_AGENT_CREATION_ENABLED: "true",
+  BRUNO_DIGITALOCEAN_TOKEN: "provider-token-present",
+  BRUNO_RUNNER_BEARER_TOKEN: "runner-token-present",
+  BRUNO_RUNNER_IMAGE: RUNNER_IMAGE,
+  BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
+  BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
+  BRUNO_AGENT_SECRET_KEYS_JSON: JSON.stringify({
     v1: Buffer.alloc(32, 41).toString("base64url"),
     old: Buffer.alloc(32, 42).toString("base64url"),
   }),
@@ -105,7 +105,7 @@ describe("ready agent creation persistence", () => {
     });
     expect(JSON.stringify(result)).not.toContain(OPENAI_KEY_FIXTURE);
     expect(JSON.stringify(result)).not.toContain(TOKEN);
-    expect(JSON.stringify(result)).not.toContain("agb_agent_");
+    expect(JSON.stringify(result)).not.toContain("bruno_agent_");
 
     const [agent] = await connection.db.select().from(agents);
     const [config] = await connection.db.select().from(agentConfigs);
@@ -175,9 +175,9 @@ describe("ready agent creation persistence", () => {
         createConnection: () => connection,
         env: {
           ...KEYRING_ENV,
-          AGENTBAY_DIGITALOCEAN_TOKEN: undefined,
-          AGENTBAY_RUNNER_BEARER_TOKEN: undefined,
-          AGENTBAY_RUNNER_IMAGE: undefined,
+          BRUNO_DIGITALOCEAN_TOKEN: undefined,
+          BRUNO_RUNNER_BEARER_TOKEN: undefined,
+          BRUNO_RUNNER_IMAGE: undefined,
         },
         now: () => NOW,
         randomBytes: incrementalRandomBytes(),
@@ -201,9 +201,9 @@ describe("ready agent creation persistence", () => {
       createConnection: () => connection,
       env: {
         ...KEYRING_ENV,
-        AGENTBAY_DIGITALOCEAN_TOKEN: undefined,
-        AGENTBAY_RUNNER_BEARER_TOKEN: undefined,
-        AGENTBAY_RUNNER_IMAGE: undefined,
+        BRUNO_DIGITALOCEAN_TOKEN: undefined,
+        BRUNO_RUNNER_BEARER_TOKEN: undefined,
+        BRUNO_RUNNER_IMAGE: undefined,
       },
       now: () => NOW,
       randomBytes: incrementalRandomBytes(),
@@ -782,8 +782,8 @@ describe("ready agent creation persistence", () => {
     const sourceRunnerId = "00000000-0000-4000-8000-000000000512";
     const movingAgentId = "00000000-0000-4000-8000-000000000612";
     const replacementId = "00000000-0000-4000-8000-000000000712";
-    const previousRunnerImage = process.env.AGENTBAY_RUNNER_IMAGE;
-    process.env.AGENTBAY_RUNNER_IMAGE = RUNNER_IMAGE;
+    const previousRunnerImage = process.env.BRUNO_RUNNER_IMAGE;
+    process.env.BRUNO_RUNNER_IMAGE = RUNNER_IMAGE;
     await seedReplacementHandoverRace(connection, {
       sourceRunnerId,
       targetRunnerId,
@@ -872,9 +872,9 @@ describe("ready agent creation persistence", () => {
       releaseCreateLock.resolve();
       await Promise.allSettled(pending);
       if (previousRunnerImage === undefined) {
-        delete process.env.AGENTBAY_RUNNER_IMAGE;
+        delete process.env.BRUNO_RUNNER_IMAGE;
       } else {
-        process.env.AGENTBAY_RUNNER_IMAGE = previousRunnerImage;
+        process.env.BRUNO_RUNNER_IMAGE = previousRunnerImage;
       }
       await createConnection.close();
       await mutationConnection.close();
@@ -1129,7 +1129,7 @@ describe("ready agent creation persistence", () => {
       },
       {
         createConnection: () => connection,
-        env: { ...KEYRING_ENV, AGENTBAY_READY_AGENT_CREATION_ENABLED: "false" },
+        env: { ...KEYRING_ENV, BRUNO_READY_AGENT_CREATION_ENABLED: "false" },
         telegramBotValidator: vi.fn(),
         onReadyDeploymentCommitted,
       },
@@ -1171,7 +1171,7 @@ describe("ready agent creation persistence", () => {
         createConnection: () => connection,
         env: {
           ...KEYRING_ENV,
-          AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "missing",
+          BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION: "missing",
         },
         now: () => NOW,
         randomBytes: incrementalRandomBytes(),
@@ -1373,7 +1373,7 @@ describe("ready agent creation persistence", () => {
       },
       {
         createConnection: () => connection,
-        env: { ...KEYRING_ENV, AGENTBAY_READY_AGENT_CREATION_ENABLED: "false" },
+        env: { ...KEYRING_ENV, BRUNO_READY_AGENT_CREATION_ENABLED: "false" },
         telegramBotValidator: vi.fn(),
       },
     );
@@ -1580,7 +1580,7 @@ async function seedReplacementHandoverRace(
     {
       id: input.sourceRunnerId,
       userId: USER_A_ID,
-      name: `agentbay-deploy-${"1".repeat(32)}`,
+      name: `bruno-deploy-${"1".repeat(32)}`,
       kind: "digitalocean",
       endpointUrl: "https://replacement-source.example.com",
       status: "degraded",
@@ -1591,7 +1591,7 @@ async function seedReplacementHandoverRace(
       sizeSlug: "s-1vcpu-2gb",
       image: RUNNER_IMAGE,
       provisioningStatus: "ready",
-      provisioningOperationKey: `agentbay-deploy-${"1".repeat(32)}`,
+      provisioningOperationKey: `bruno-deploy-${"1".repeat(32)}`,
       requiredRunnerImageDigest: `sha256:${"b".repeat(64)}`,
       observedRunnerImageDigest: `sha256:${"b".repeat(64)}`,
       observedRunnerReleaseVersion: "a".repeat(40),
@@ -1604,7 +1604,7 @@ async function seedReplacementHandoverRace(
     {
       id: input.targetRunnerId,
       userId: USER_A_ID,
-      name: `agentbay-deploy-${"2".repeat(32)}`,
+      name: `bruno-deploy-${"2".repeat(32)}`,
       kind: "digitalocean",
       endpointUrl: "https://replacement-target.example.com",
       status: "online",
@@ -1615,7 +1615,7 @@ async function seedReplacementHandoverRace(
       sizeSlug: "s-1vcpu-2gb",
       image: RUNNER_IMAGE,
       provisioningStatus: "ready",
-      provisioningOperationKey: `agentbay-deploy-${"2".repeat(32)}`,
+      provisioningOperationKey: `bruno-deploy-${"2".repeat(32)}`,
       requiredRunnerImageDigest: `sha256:${"b".repeat(64)}`,
       observedRunnerImageDigest: `sha256:${"b".repeat(64)}`,
       observedRunnerReleaseVersion: "a".repeat(40),
@@ -1695,7 +1695,7 @@ async function seedReplacementHandoverRace(
   await connection.db.insert(runnerCredentials).values({
     runnerId: input.sourceRunnerId,
     credentialHash: "revoked-replacement-source-credential-hash",
-    credentialPrefix: "agb_run_race",
+    credentialPrefix: "bruno_run_race",
     status: "revoked",
     revokedAt: NOW,
     createdAt: new Date(NOW.getTime() - 1_000),
@@ -1707,7 +1707,7 @@ async function seedReplacementHandoverRace(
     targetRunnerId: input.targetRunnerId,
     reason: "stale_heartbeat",
     state: "reassigning",
-    operationKey: `agentbay-replace-${"1".repeat(32)}`,
+    operationKey: `bruno-replace-${"1".repeat(32)}`,
     nextAttemptAt: NOW,
     startedAt: NOW,
     createdAt: NOW,
@@ -1725,7 +1725,7 @@ function replacementRaceProviderConfig(): DigitalOceanProviderConfig {
     region: "sfo3",
     sizeSlug: "s-1vcpu-2gb",
     image: "ubuntu-24-04-x64",
-    tags: ["agentbay", "agentbay-runner"],
+    tags: ["bruno", "bruno-runner"],
     sshKeyIds: ["fake-key"],
     sshSourceAddresses: ["203.0.113.5/32"],
   };

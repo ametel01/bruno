@@ -42,7 +42,7 @@ const SAFE_BOOTSTRAP_FAILURE_STEPS = new Set([
 ]);
 
 const IMMUTABLE_RELEASE_IMAGE_PATTERN =
-  /^ghcr\.io\/ametel01\/agentbay-runner:[a-f0-9]{40}@sha256:[a-f0-9]{64}$/;
+  /^ghcr\.io\/ametel01\/bruno-runner:[a-f0-9]{40}@sha256:[a-f0-9]{64}$/;
 
 export type RunnerReleaseSmokePlan =
   | {
@@ -159,26 +159,24 @@ export function planRunnerReleaseSmoke(
 
   if (
     providerMode === "digitalocean" &&
-    env.AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION?.trim() !==
+    env.BRUNO_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION?.trim() !==
       RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION
   ) {
     capabilities.push({
       name: "digitalocean_authorization",
-      envName: "AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION",
+      envName: "BRUNO_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION",
       state:
-        env.AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION === undefined
-          ? "missing"
-          : "malformed",
+        env.BRUNO_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION === undefined ? "missing" : "malformed",
     });
   }
 
   let providerConfig: DigitalOceanProviderConfig | null = null;
   try {
-    providerConfig = readDigitalOceanProviderConfig({ ...env, AGENTBAY_RUNNER_IMAGE: image });
+    providerConfig = readDigitalOceanProviderConfig({ ...env, BRUNO_RUNNER_IMAGE: image });
   } catch {
     capabilities.push({
       name: "digitalocean_configuration",
-      envName: "AGENTBAY_DIGITALOCEAN_TOKEN",
+      envName: "BRUNO_DIGITALOCEAN_TOKEN",
       state: "malformed",
     });
   }
@@ -186,22 +184,19 @@ export function planRunnerReleaseSmoke(
   if (!providerConfig) {
     capabilities.push({
       name: "digitalocean_configuration",
-      envName: "AGENTBAY_DIGITALOCEAN_TOKEN",
+      envName: "BRUNO_DIGITALOCEAN_TOKEN",
       state: "missing",
     });
   } else if (providerConfig.providerMode !== providerMode) {
     capabilities.push({
       name: "digitalocean_configuration",
-      envName: "AGENTBAY_DIGITALOCEAN_PROVIDER_MODE",
+      envName: "BRUNO_DIGITALOCEAN_PROVIDER_MODE",
       state: "malformed",
     });
-  } else if (
-    providerMode === "local_docker" &&
-    env.AGENTBAY_DIGITALOCEAN_TOKEN !== "local-docker"
-  ) {
+  } else if (providerMode === "local_docker" && env.BRUNO_DIGITALOCEAN_TOKEN !== "local-docker") {
     capabilities.push({
       name: "local_docker_isolation",
-      envName: "AGENTBAY_DIGITALOCEAN_TOKEN",
+      envName: "BRUNO_DIGITALOCEAN_TOKEN",
       state: "malformed",
     });
   }
@@ -235,7 +230,7 @@ export async function smokeRunnerRelease(
     };
   }
 
-  const sessionEnv = { ...env, AGENTBAY_RUNNER_IMAGE: plan.image };
+  const sessionEnv = { ...env, BRUNO_RUNNER_IMAGE: plan.image };
   const session = (dependencies.createSession ?? createRunnerReleaseSmokeSession)(plan, sessionEnv);
   let evidence: RunnerReleaseSmokeEvidence | null = null;
   let runFailed = false;
@@ -294,7 +289,7 @@ function createRunnerReleaseSmokeSession(
     throw new Error("Runner release smoke configuration is unavailable.");
   }
 
-  const operationKey = `agentbay-deploy-${randomUUID().replaceAll("-", "")}`;
+  const operationKey = `bruno-deploy-${randomUUID().replaceAll("-", "")}`;
   const runnerName =
     plan.providerMode === "local_docker"
       ? `bruno release simulation ${plan.release.version.slice(0, 12)}`
@@ -603,7 +598,7 @@ class RunnerReleaseSmokeFailure extends Error {
 
 function logClosedSmokeFailure(event: "cleanup_failed" | "run_failed", error: unknown): void {
   const cause = error instanceof Error ? error.cause : undefined;
-  console.error("[agentbay] runner.release_smoke", {
+  console.error("[bruno] runner.release_smoke", {
     event,
     errorName: error instanceof Error ? error.name : typeof error,
     errorCode: closedErrorCode(error),

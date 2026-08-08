@@ -12,8 +12,8 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import { agentConfigs, agentDeployments, agentSecrets } from "@/src/server/db/schema";
 
 const KEYRING_ENV = {
-  AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
-  AGENTBAY_AGENT_SECRET_KEYS_JSON: JSON.stringify({
+  BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
+  BRUNO_AGENT_SECRET_KEYS_JSON: JSON.stringify({
     v1: Buffer.alloc(32, 31).toString("base64url"),
   }),
 };
@@ -60,7 +60,7 @@ describe("Hermes launch spec builder", () => {
     const result = await buildHermesAgentLaunchSpecForUser(created.agent.userId, created.agent.id, {
       createConnection: () => connection,
       env: KEYRING_ENV,
-      hermesWorkloadImage: "ghcr.io/ametel01/agentbay-hermes:sha-test",
+      hermesWorkloadImage: "ghcr.io/ametel01/bruno-hermes:sha-test",
       requestId: () => "launch-request-0001",
     });
 
@@ -74,14 +74,14 @@ describe("Hermes launch spec builder", () => {
           templateKey: "research_agent",
         },
         image: {
-          ref: "ghcr.io/ametel01/agentbay-hermes:sha-test",
+          ref: "ghcr.io/ametel01/bruno-hermes:sha-test",
         },
         model: {
           provider: "hermes",
           model: "configured-by-hermes",
         },
         secrets: {
-          apiServerKey: expect.stringMatching(/^agb_agent_/),
+          apiServerKey: expect.stringMatching(/^bruno_agent_/),
         },
       },
     });
@@ -161,7 +161,7 @@ describe("Hermes launch spec builder", () => {
     expect(result).toMatchObject({
       ok: true,
       spec: {
-        version: "agentbay.hermes.launch.v3",
+        version: "bruno.hermes.launch.v3",
         requestId: "managed-launch-0001",
         agent: {
           configRevision: newestRevision,
@@ -174,7 +174,7 @@ describe("Hermes launch spec builder", () => {
           openrouterApiKey: "sk-or-v1-managedopenrouterkey1234567890",
           telegramBotToken: "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ12",
           telegramAllowedUsers: ["1", "222222"],
-          apiServerKey: expect.stringMatching(/^agb_agent_/),
+          apiServerKey: expect.stringMatching(/^bruno_agent_/),
         },
       },
     });
@@ -266,7 +266,7 @@ describe("Hermes launch spec builder", () => {
     expect(result).toMatchObject({
       ok: true,
       spec: {
-        version: "agentbay.hermes.launch.v2",
+        version: "bruno.hermes.launch.v2",
         model: { provider: "hermes", model: "configured-by-hermes" },
       },
     });

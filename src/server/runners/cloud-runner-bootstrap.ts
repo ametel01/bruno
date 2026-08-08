@@ -22,7 +22,7 @@ import {
   type RUNNER_RELEASE_DEVELOPMENT_MODE,
   RUNNER_RELEASE_IDENTITY_MODE_ENV,
 } from "@/src/runner-service/release-identity";
-import { DEFAULT_AGENTBAY_RUNNER_IMAGE } from "@/src/server/env";
+import { DEFAULT_BRUNO_RUNNER_IMAGE } from "@/src/server/env";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { DIGITALOCEAN_PROVIDER } from "@/src/server/runners/digitalocean-provider";
 import { markCloudRunnerBootstrapInjected } from "@/src/server/runners/runner-provisioning-events";
@@ -33,12 +33,12 @@ import {
   parseHermesDockerPidsLimit,
 } from "@/src/server/runners/runner-resource-profiles";
 
-export const DEFAULT_CLOUD_RUNNER_ENV_FILE = "/etc/agentbay/runner.env";
+export const DEFAULT_CLOUD_RUNNER_ENV_FILE = "/etc/bruno/runner.env";
 export const DEFAULT_CLOUD_RUNNER_HOST = "127.0.0.1";
 export const DEFAULT_CLOUD_RUNNER_CONTAINER_HOST = "0.0.0.0";
 export const DEFAULT_CLOUD_RUNNER_PORT = 3045;
-export const DEFAULT_CLOUD_RUNNER_CONTAINER_NAME = "agentbay-runner";
-export const DEFAULT_CLOUD_RUNNER_NAME = "bruno Cloud Runner";
+export const DEFAULT_CLOUD_RUNNER_CONTAINER_NAME = "bruno-runner";
+export const DEFAULT_CLOUD_RUNNER_NAME = "Bruno Cloud Runner";
 export const DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET = "/var/run/docker.sock";
 export const BOOTSTRAP_REDACTION = "[redacted]";
 
@@ -146,22 +146,22 @@ export function buildCloudRunnerBootstrapContent(
   const swapCommands = config.bootMode === "stock" && config.enableSwap ? buildSwapCommands() : "";
   const bootstrapEventScript = buildBootstrapEventScript(config);
   const envLines = [
-    `AGENTBAY_APP_URL=${escapeDockerEnvHereDocValue(config.appBaseUrl)}`,
-    `AGENTBAY_RUNNER_REGISTRATION_TOKEN=${escapeDockerEnvHereDocValue(config.registrationToken)}`,
-    `AGENTBAY_RUNNER_ENDPOINT_URL=${endpoint.envValue}`,
-    `AGENTBAY_RUNNER_NAME=${escapeDockerEnvHereDocValue(config.runnerName)}`,
-    `AGENTBAY_RUNNER_IMAGE=${escapeDockerEnvHereDocValue(config.runnerImage)}`,
-    `AGENTBAY_DOCKER_RUNNER_IMAGE=${escapeDockerEnvHereDocValue(config.agentImage)}`,
-    `AGENTBAY_HERMES_WORKLOAD_IMAGE=${escapeDockerEnvHereDocValue(config.hermesWorkloadImage)}`,
-    `AGENTBAY_HERMES_STATE_ROOT=${escapeDockerEnvHereDocValue(config.hermesStateRoot)}`,
-    `AGENTBAY_RUNNER_BOOT_SELF_TEST_ROOT=${DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT}`,
-    `AGENTBAY_HERMES_PRIVATE_NETWORK=${escapeDockerEnvHereDocValue(config.hermesPrivateNetwork)}`,
-    `AGENTBAY_HERMES_READINESS_TIMEOUT_MS=${config.hermesReadinessTimeoutMs}`,
-    `AGENTBAY_HERMES_DOCKER_CPUS=${config.hermesDockerCpus}`,
-    `AGENTBAY_HERMES_DOCKER_MEMORY=${config.hermesDockerMemory}`,
-    `AGENTBAY_HERMES_DOCKER_PIDS_LIMIT=${config.hermesDockerPidsLimit}`,
-    `AGENTBAY_RUNNER_ENV_FILE=${escapeDockerEnvHereDocValue(config.containerEnvFilePath)}`,
-    `AGENTBAY_RUNNER_MAX_AGENTS=${config.runnerMaxAgents}`,
+    `BRUNO_APP_URL=${escapeDockerEnvHereDocValue(config.appBaseUrl)}`,
+    `BRUNO_RUNNER_REGISTRATION_TOKEN=${escapeDockerEnvHereDocValue(config.registrationToken)}`,
+    `BRUNO_RUNNER_ENDPOINT_URL=${endpoint.envValue}`,
+    `BRUNO_RUNNER_NAME=${escapeDockerEnvHereDocValue(config.runnerName)}`,
+    `BRUNO_RUNNER_IMAGE=${escapeDockerEnvHereDocValue(config.runnerImage)}`,
+    `BRUNO_DOCKER_RUNNER_IMAGE=${escapeDockerEnvHereDocValue(config.agentImage)}`,
+    `BRUNO_HERMES_WORKLOAD_IMAGE=${escapeDockerEnvHereDocValue(config.hermesWorkloadImage)}`,
+    `BRUNO_HERMES_STATE_ROOT=${escapeDockerEnvHereDocValue(config.hermesStateRoot)}`,
+    `BRUNO_RUNNER_BOOT_SELF_TEST_ROOT=${DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT}`,
+    `BRUNO_HERMES_PRIVATE_NETWORK=${escapeDockerEnvHereDocValue(config.hermesPrivateNetwork)}`,
+    `BRUNO_HERMES_READINESS_TIMEOUT_MS=${config.hermesReadinessTimeoutMs}`,
+    `BRUNO_HERMES_DOCKER_CPUS=${config.hermesDockerCpus}`,
+    `BRUNO_HERMES_DOCKER_MEMORY=${config.hermesDockerMemory}`,
+    `BRUNO_HERMES_DOCKER_PIDS_LIMIT=${config.hermesDockerPidsLimit}`,
+    `BRUNO_RUNNER_ENV_FILE=${escapeDockerEnvHereDocValue(config.containerEnvFilePath)}`,
+    `BRUNO_RUNNER_MAX_AGENTS=${config.runnerMaxAgents}`,
     `${RUNNER_BOOT_MODEL_CANARY_ENABLED_ENV}=${config.bootModelCanaryEnabled}`,
     ...(config.expectedRelease
       ? [
@@ -174,10 +174,10 @@ export function buildCloudRunnerBootstrapContent(
       ? [`${RUNNER_RELEASE_IDENTITY_MODE_ENV}=${config.releaseIdentityMode}`]
       : []),
     ...(config.commandBearerToken
-      ? [`AGENTBAY_RUNNER_BEARER_TOKEN=${escapeDockerEnvHereDocValue(config.commandBearerToken)}`]
+      ? [`BRUNO_RUNNER_BEARER_TOKEN=${escapeDockerEnvHereDocValue(config.commandBearerToken)}`]
       : []),
-    `AGENTBAY_RUNNER_HOST=${escapeDockerEnvHereDocValue(config.runnerContainerHost)}`,
-    `AGENTBAY_RUNNER_PORT=${config.runnerPort}`,
+    `BRUNO_RUNNER_HOST=${escapeDockerEnvHereDocValue(config.runnerContainerHost)}`,
+    `BRUNO_RUNNER_PORT=${config.runnerPort}`,
   ].join("\n");
   const endpointDiscoveryCommands =
     endpoint.discoveryCommands.length > 0
@@ -188,7 +188,7 @@ export function buildCloudRunnerBootstrapContent(
       ? `package_update: true
 package_upgrade: false
 output:
-  all: '| tee -a /var/log/agentbay-bootstrap.log'
+  all: '| tee -a /var/log/bruno-bootstrap.log'
 packages:
   - bash
   - ca-certificates
@@ -197,7 +197,7 @@ packages:
   - python3
 `
       : `output:
-  all: '| tee -a /var/log/agentbay-bootstrap.log'
+  all: '| tee -a /var/log/bruno-bootstrap.log'
 `;
   const stockInstallCommands =
     config.bootMode === "stock"
@@ -206,32 +206,32 @@ packages:
     - -lc
     - |
       set -euxo pipefail
-      AGENTBAY_BOOTSTRAP_STEP=docker_apt_repository
-      trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
+      BRUNO_BOOTSTRAP_STEP=docker_apt_repository
+      trap 'bruno_bootstrap_exit=$?; bruno_bootstrap_detail="$(tail -n 80 /var/log/bruno-bootstrap.log || true)"; /usr/local/bin/bruno-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${BRUNO_BOOTSTRAP_STEP}." "\${BRUNO_BOOTSTRAP_STEP}" "$bruno_bootstrap_exit" "$bruno_bootstrap_detail"' ERR
       install -m 0755 -d /etc/apt/keyrings
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Configuring Docker apt repository." docker_apt_repository
+      /usr/local/bin/bruno-bootstrap-event bootstrapping started "Configuring Docker apt repository." docker_apt_repository
       curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
       chmod a+r /etc/apt/keyrings/docker.gpg
       sh -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list'
       apt-get update
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Docker apt repository was configured." docker_apt_repository
+      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Docker apt repository was configured." docker_apt_repository
 ${swapCommands}  -
     - bash
     - -lc
     - |
       set -euxo pipefail
-      AGENTBAY_BOOTSTRAP_STEP=package_install
-      trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Installing cloud runner packages." package_install
+      BRUNO_BOOTSTRAP_STEP=package_install
+      trap 'bruno_bootstrap_exit=$?; bruno_bootstrap_detail="$(tail -n 80 /var/log/bruno-bootstrap.log || true)"; /usr/local/bin/bruno-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${BRUNO_BOOTSTRAP_STEP}." "\${BRUNO_BOOTSTRAP_STEP}" "$bruno_bootstrap_exit" "$bruno_bootstrap_detail"' ERR
+      /usr/local/bin/bruno-bootstrap-event bootstrapping started "Installing cloud runner packages." package_install
       apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
       apt-get install -y caddy
       systemctl enable --now docker
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Cloud runner packages were installed." package_install
+      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Cloud runner packages were installed." package_install
 `
       : "";
   const imagePullCommands =
     config.bootMode === "stock"
-      ? `      agentbay_pull_image() {
+      ? `      bruno_pull_image() {
         local image="$1"
         local attempt
         for attempt in 1 2 3; do
@@ -244,19 +244,19 @@ ${swapCommands}  -
         done
         return 1
       }
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling cloud runner image." docker_pull
-      agentbay_pull_image ${shellQuote(config.runnerImage)}
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled cloud runner image." docker_pull
-      AGENTBAY_BOOTSTRAP_STEP=agent_image_pull
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling default agent container image." agent_image_pull
-      agentbay_pull_image ${shellQuote(config.agentImage)}
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled default agent container image." agent_image_pull
-      AGENTBAY_BOOTSTRAP_STEP=hermes_image_pull
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Pulling Hermes workload image." hermes_image_pull
-      agentbay_pull_image ${shellQuote(config.hermesWorkloadImage)}
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Pulled Hermes workload image." hermes_image_pull
+      /usr/local/bin/bruno-bootstrap-event bootstrapping started "Pulling cloud runner image." docker_pull
+      bruno_pull_image ${shellQuote(config.runnerImage)}
+      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Pulled cloud runner image." docker_pull
+      BRUNO_BOOTSTRAP_STEP=agent_image_pull
+      /usr/local/bin/bruno-bootstrap-event bootstrapping started "Pulling default agent container image." agent_image_pull
+      bruno_pull_image ${shellQuote(config.agentImage)}
+      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Pulled default agent container image." agent_image_pull
+      BRUNO_BOOTSTRAP_STEP=hermes_image_pull
+      /usr/local/bin/bruno-bootstrap-event bootstrapping started "Pulling Hermes workload image." hermes_image_pull
+      bruno_pull_image ${shellQuote(config.hermesWorkloadImage)}
+      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Pulled Hermes workload image." hermes_image_pull
 `
-      : `      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Using preloaded snapshot images." snapshot_preloaded_images
+      : `      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Using preloaded snapshot images." snapshot_preloaded_images
 `;
   const userData = `#cloud-config
 ${packageBootstrap}runcmd:
@@ -265,23 +265,23 @@ ${packageBootstrap}runcmd:
     - -lc
     - |
       set -euo pipefail
-      touch /var/log/agentbay-bootstrap.log
-      chmod 0600 /var/log/agentbay-bootstrap.log
-      sed 's/^    //' > /usr/local/bin/agentbay-bootstrap-event <<'AGENTBAY_BOOTSTRAP_EVENT_SCRIPT'
+      touch /var/log/bruno-bootstrap.log
+      chmod 0600 /var/log/bruno-bootstrap.log
+      sed 's/^    //' > /usr/local/bin/bruno-bootstrap-event <<'BRUNO_BOOTSTRAP_EVENT_SCRIPT'
       ${indentYamlBlock(indentHereDoc(bootstrapEventScript))}
-      AGENTBAY_BOOTSTRAP_EVENT_SCRIPT
-      chmod 0700 /usr/local/bin/agentbay-bootstrap-event
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Cloud runner bootstrap started." bootstrap_started
+      BRUNO_BOOTSTRAP_EVENT_SCRIPT
+      chmod 0700 /usr/local/bin/bruno-bootstrap-event
+      /usr/local/bin/bruno-bootstrap-event bootstrapping started "Cloud runner bootstrap started." bootstrap_started
 ${stockInstallCommands}  - install -m 0700 -d ${shellQuote(dirname(config.envFilePath))}
   -
     - bash
     - -lc
     - |
-      ${endpointDiscoveryCommands}sed 's/^    //' > /etc/caddy/Caddyfile <<AGENTBAY_CADDYFILE
+      ${endpointDiscoveryCommands}sed 's/^    //' > /etc/caddy/Caddyfile <<BRUNO_CADDYFILE
       ${endpoint.caddyHost} {
         reverse_proxy ${config.runnerHost}:${config.runnerPort}
       }
-      AGENTBAY_CADDYFILE
+      BRUNO_CADDYFILE
       caddy validate --config /etc/caddy/Caddyfile
       systemctl enable --now caddy
       systemctl reload caddy || systemctl restart caddy
@@ -289,43 +289,43 @@ ${stockInstallCommands}  - install -m 0700 -d ${shellQuote(dirname(config.envFil
     - bash
     - -lc
     - |
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Caddy reverse proxy was configured." caddy_configured
-      ${endpointDiscoveryCommands}sed 's/^    //' > ${shellQuote(config.envFilePath)} <<AGENTBAY_RUNNER_ENV
+      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Caddy reverse proxy was configured." caddy_configured
+      ${endpointDiscoveryCommands}sed 's/^    //' > ${shellQuote(config.envFilePath)} <<BRUNO_RUNNER_ENV
       ${indentYamlBlock(indentHereDoc(envLines))}
-      AGENTBAY_RUNNER_ENV
+      BRUNO_RUNNER_ENV
   - chmod 0600 ${shellQuote(config.envFilePath)}
   -
     - bash
     - -lc
     - |
       set -euxo pipefail
-      AGENTBAY_BOOTSTRAP_STEP=hermes_state_root
-      trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
+      BRUNO_BOOTSTRAP_STEP=hermes_state_root
+      trap 'bruno_bootstrap_exit=$?; bruno_bootstrap_detail="$(tail -n 80 /var/log/bruno-bootstrap.log || true)"; /usr/local/bin/bruno-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${BRUNO_BOOTSTRAP_STEP}." "\${BRUNO_BOOTSTRAP_STEP}" "$bruno_bootstrap_exit" "$bruno_bootstrap_detail"' ERR
       install -m 0710 -d ${shellQuote(config.hermesStateRoot)}
       install -m 0710 -d ${shellQuote(DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT)}
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Hermes state root was prepared." hermes_state_root
+      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Hermes state root was prepared." hermes_state_root
   -
     - bash
     - -lc
     - |
       set -euxo pipefail
-      AGENTBAY_BOOTSTRAP_STEP=hermes_private_network
-      trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true; docker network inspect ${shellQuote(config.hermesPrivateNetwork)} 2>&1 || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
+      BRUNO_BOOTSTRAP_STEP=hermes_private_network
+      trap 'bruno_bootstrap_exit=$?; bruno_bootstrap_detail="$(tail -n 80 /var/log/bruno-bootstrap.log || true; docker network inspect ${shellQuote(config.hermesPrivateNetwork)} 2>&1 || true)"; /usr/local/bin/bruno-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${BRUNO_BOOTSTRAP_STEP}." "\${BRUNO_BOOTSTRAP_STEP}" "$bruno_bootstrap_exit" "$bruno_bootstrap_detail"' ERR
       docker network inspect ${shellQuote(config.hermesPrivateNetwork)} >/dev/null 2>&1 || docker network create ${shellQuote(config.hermesPrivateNetwork)}
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Hermes private network was prepared." hermes_private_network
+      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Hermes private network was prepared." hermes_private_network
   -
     - bash
     - -lc
     - |
       set -euxo pipefail
-      AGENTBAY_BOOTSTRAP_STEP=docker_pull
-      trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true; docker logs --tail 80 ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} 2>&1 || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
-${imagePullCommands}      AGENTBAY_BOOTSTRAP_STEP=runner_container_start
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping started "Starting runner container." runner_container_start
+      BRUNO_BOOTSTRAP_STEP=docker_pull
+      trap 'bruno_bootstrap_exit=$?; bruno_bootstrap_detail="$(tail -n 80 /var/log/bruno-bootstrap.log || true; docker logs --tail 80 ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} 2>&1 || true)"; /usr/local/bin/bruno-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${BRUNO_BOOTSTRAP_STEP}." "\${BRUNO_BOOTSTRAP_STEP}" "$bruno_bootstrap_exit" "$bruno_bootstrap_detail"' ERR
+${imagePullCommands}      BRUNO_BOOTSTRAP_STEP=runner_container_start
+      /usr/local/bin/bruno-bootstrap-event bootstrapping started "Starting runner container." runner_container_start
       docker rm --force ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} || true
       docker run --detach --name ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} --restart always --network ${shellQuote(config.hermesPrivateNetwork)} --env-file ${shellQuote(config.envFilePath)} -v ${shellQuote(`${config.envFilePath}:${config.containerEnvFilePath}`)} -v ${shellQuote(`${config.hermesStateRoot}:${config.hermesStateRoot}`)} -v ${shellQuote(`${DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT}:${DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT}`)} -v ${shellQuote(`${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}:${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}`)} -p ${shellQuote(`${config.runnerHost}:${config.runnerPort}:${config.runnerPort}`)} ${shellQuote(config.runnerImage)}
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Runner container started." runner_container_start
-      /usr/local/bin/agentbay-bootstrap-event waiting_for_runner started "Runner container started; waiting for registration and heartbeat." runner_registration
+      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Runner container started." runner_container_start
+      /usr/local/bin/bruno-bootstrap-event waiting_for_runner started "Runner container started; waiting for registration and heartbeat." runner_registration
 `;
 
   return {
@@ -362,12 +362,12 @@ ${imagePullCommands}      AGENTBAY_BOOTSTRAP_STEP=runner_container_start
 export function redactCloudRunnerBootstrapOutput(value: string): string {
   return value
     .replace(/dop_v1_[A-Za-z0-9_-]+/g, BOOTSTRAP_REDACTION)
-    .replace(/agb_reg_[A-Za-z0-9_-]+/g, BOOTSTRAP_REDACTION)
-    .replace(/agb_run_[A-Za-z0-9_-]+/g, BOOTSTRAP_REDACTION)
-    .replace(/(AGENTBAY_DIGITALOCEAN_TOKEN=)[^\s'"]+/g, `$1${BOOTSTRAP_REDACTION}`)
-    .replace(/(AGENTBAY_RUNNER_REGISTRATION_TOKEN=)[^\n]+/g, `$1${BOOTSTRAP_REDACTION}`)
-    .replace(/(AGENTBAY_RUNNER_BEARER_TOKEN=)[^\n]+/g, `$1${BOOTSTRAP_REDACTION}`)
-    .replace(/(AGENTBAY_RUNNER_CREDENTIAL=)[^\n]+/g, `$1${BOOTSTRAP_REDACTION}`);
+    .replace(/bruno_reg_[A-Za-z0-9_-]+/g, BOOTSTRAP_REDACTION)
+    .replace(/bruno_run_[A-Za-z0-9_-]+/g, BOOTSTRAP_REDACTION)
+    .replace(/(BRUNO_DIGITALOCEAN_TOKEN=)[^\s'"]+/g, `$1${BOOTSTRAP_REDACTION}`)
+    .replace(/(BRUNO_RUNNER_REGISTRATION_TOKEN=)[^\n]+/g, `$1${BOOTSTRAP_REDACTION}`)
+    .replace(/(BRUNO_RUNNER_BEARER_TOKEN=)[^\n]+/g, `$1${BOOTSTRAP_REDACTION}`)
+    .replace(/(BRUNO_RUNNER_CREDENTIAL=)[^\n]+/g, `$1${BOOTSTRAP_REDACTION}`);
 }
 
 function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
@@ -381,9 +381,9 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
     endpointDiscovery: input.endpointDiscovery ?? null,
     enableSwap: input.enableSwap ?? false,
     runnerName: input.runnerName?.trim() || DEFAULT_CLOUD_RUNNER_NAME,
-    runnerImage: input.runnerImage?.trim() || DEFAULT_AGENTBAY_RUNNER_IMAGE,
+    runnerImage: input.runnerImage?.trim() || DEFAULT_BRUNO_RUNNER_IMAGE,
     expectedRelease: parseImmutableRunnerImageReference(
-      input.runnerImage?.trim() || DEFAULT_AGENTBAY_RUNNER_IMAGE,
+      input.runnerImage?.trim() || DEFAULT_BRUNO_RUNNER_IMAGE,
     ),
     releaseIdentityMode: input.releaseIdentityMode ?? null,
     agentImage: DEFAULT_MANUAL_RUNNER_IMAGE,
@@ -505,8 +505,8 @@ function buildSwapCommands(): string {
     - -lc
     - |
       set -euxo pipefail
-      AGENTBAY_BOOTSTRAP_STEP=swap_setup
-      trap 'agentbay_bootstrap_exit=$?; agentbay_bootstrap_detail="$(tail -n 80 /var/log/agentbay-bootstrap.log || true)"; /usr/local/bin/agentbay-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${AGENTBAY_BOOTSTRAP_STEP}." "\${AGENTBAY_BOOTSTRAP_STEP}" "$agentbay_bootstrap_exit" "$agentbay_bootstrap_detail"' ERR
+      BRUNO_BOOTSTRAP_STEP=swap_setup
+      trap 'bruno_bootstrap_exit=$?; bruno_bootstrap_detail="$(tail -n 80 /var/log/bruno-bootstrap.log || true)"; /usr/local/bin/bruno-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${BRUNO_BOOTSTRAP_STEP}." "\${BRUNO_BOOTSTRAP_STEP}" "$bruno_bootstrap_exit" "$bruno_bootstrap_detail"' ERR
       if [ ! -f /swapfile ]; then
         fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024
         chmod 600 /swapfile
@@ -514,7 +514,7 @@ function buildSwapCommands(): string {
       fi
       swapon /swapfile || true
       grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
-      /usr/local/bin/agentbay-bootstrap-event bootstrapping completed "Swap was configured for the low-memory runner." swap_setup
+      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Swap was configured for the low-memory runner." swap_setup
 `;
 }
 
@@ -522,8 +522,8 @@ function buildBootstrapEventScript(config: ReturnType<typeof normalizeBootstrapI
   return `#!/usr/bin/env bash
 set -euo pipefail
 
-AGENTBAY_APP_URL=${shellQuote(config.appBaseUrl)}
-AGENTBAY_REGISTRATION_TOKEN=${shellQuote(config.registrationToken)}
+BRUNO_APP_URL=${shellQuote(config.appBaseUrl)}
+BRUNO_REGISTRATION_TOKEN=${shellQuote(config.registrationToken)}
 
 phase="\${1:-bootstrapping}"
 status="\${2:-started}"
@@ -532,7 +532,7 @@ step="\${4:-unknown}"
 exit_code="\${5:-}"
 detail="\${6:-}"
 
-python3 - "$AGENTBAY_APP_URL" "$AGENTBAY_REGISTRATION_TOKEN" "$phase" "$status" "$message" "$step" "$exit_code" "$detail" <<'AGENTBAY_BOOTSTRAP_EVENT_PY' || true
+python3 - "$BRUNO_APP_URL" "$BRUNO_REGISTRATION_TOKEN" "$phase" "$status" "$message" "$step" "$exit_code" "$detail" <<'BRUNO_BOOTSTRAP_EVENT_PY' || true
 import json
 import sys
 import urllib.request
@@ -567,7 +567,7 @@ try:
         response.read()
 except Exception:
     pass
-AGENTBAY_BOOTSTRAP_EVENT_PY
+BRUNO_BOOTSTRAP_EVENT_PY
 `;
 }
 
@@ -595,11 +595,11 @@ function buildEndpointConfig(config: ReturnType<typeof normalizeBootstrapInput>)
 
     return {
       discoveryCommands: [
-        'AGENTBAY_PUBLIC_IPV4="$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)"',
-        'AGENTBAY_PUBLIC_IPV4_DASHED="$(printf \'%s\' "$AGENTBAY_PUBLIC_IPV4" | tr . -)"',
+        'BRUNO_PUBLIC_IPV4="$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)"',
+        'BRUNO_PUBLIC_IPV4_DASHED="$(printf \'%s\' "$BRUNO_PUBLIC_IPV4" | tr . -)"',
       ],
-      envValue: `https://\${AGENTBAY_PUBLIC_IPV4_DASHED}.${hostnameSuffix}`,
-      caddyHost: `https://\${AGENTBAY_PUBLIC_IPV4_DASHED}.${hostnameSuffix}`,
+      envValue: `https://\${BRUNO_PUBLIC_IPV4_DASHED}.${hostnameSuffix}`,
+      caddyHost: `https://\${BRUNO_PUBLIC_IPV4_DASHED}.${hostnameSuffix}`,
       safeSummary: `https://<public-ip>.${hostnameSuffix}`,
     };
   }

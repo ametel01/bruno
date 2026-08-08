@@ -45,16 +45,16 @@ describe("production logger", () => {
       base: { environment: "test" },
     });
     const cause = new Error(
-      "request used Bearer agb_run_123456 and postgres://admin:password@db.internal/bruno",
+      "request used Bearer bruno_run_123456 and postgres://admin:password@db.internal/bruno",
     );
     const error = new Error("provider token=dop_v1_super_secret failed", { cause });
-    Object.assign(error, { registrationToken: "agb_reg_123456", safeCount: 2 });
+    Object.assign(error, { registrationToken: "bruno_reg_123456", safeCount: 2 });
 
     logger.error(
       "provider_create_failed",
       error,
       {
-        authorization: "Bearer agb_run_123456",
+        authorization: "Bearer bruno_run_123456",
         nested: {
           apiKey: "sk-production-secret",
           cookie: "session=secret",
@@ -81,8 +81,8 @@ describe("production logger", () => {
         cause: { type: "Error" },
       },
     });
-    expect(serialized).not.toContain("agb_run_123456");
-    expect(serialized).not.toContain("agb_reg_123456");
+    expect(serialized).not.toContain("bruno_run_123456");
+    expect(serialized).not.toContain("bruno_reg_123456");
     expect(serialized).not.toContain("dop_v1_super_secret");
     expect(serialized).not.toContain("sk-production-secret");
     expect(serialized).not.toContain("admin:password");

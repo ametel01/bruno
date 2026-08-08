@@ -20,8 +20,8 @@ import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/
 import { agentSecrets } from "@/src/server/db/schema";
 
 const KEYRING_ENV = {
-  AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
-  AGENTBAY_AGENT_SECRET_KEYS_JSON: JSON.stringify({
+  BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
+  BRUNO_AGENT_SECRET_KEYS_JSON: JSON.stringify({
     v1: Buffer.alloc(32, 17).toString("base64url"),
     old: Buffer.alloc(32, 19).toString("base64url"),
   }),
@@ -178,8 +178,8 @@ describe("agent secret storage", () => {
 
     expect(() =>
       parseAgentSecretKeyring({
-        AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "missing",
-        AGENTBAY_AGENT_SECRET_KEYS_JSON: JSON.stringify({
+        BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION: "missing",
+        BRUNO_AGENT_SECRET_KEYS_JSON: JSON.stringify({
           v1: Buffer.alloc(32).toString("base64"),
         }),
       }),
@@ -623,7 +623,7 @@ describe("agent secret storage", () => {
     );
     const oldEnv = {
       ...KEYRING_ENV,
-      AGENTBAY_AGENT_SECRET_ACTIVE_KEY_VERSION: "old",
+      BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION: "old",
     };
 
     await replaceAgentSecretForUser(

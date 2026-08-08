@@ -412,7 +412,7 @@ Cold history: [`STATUS.archive.md`](STATUS.archive.md)
     fences are atomically claimed; the existing deployment lease remains the final execution fence.
   - Lost post-response publish, publish rejection, expired publish lease, and queue delivery loss
     are recoverable through the outbox sweep and existing deployment cron without losing due work.
-  - `AGENTBAY_DEPLOYMENT_DISPATCH_MODE=cron|qstash`, `QSTASH_TOKEN`,
+  - `BRUNO_DEPLOYMENT_DISPATCH_MODE=cron|qstash`, `QSTASH_TOKEN`,
     `QSTASH_CURRENT_SIGNING_KEY`, and `QSTASH_NEXT_SIGNING_KEY` are validated and documented.
     `qstash` fails closed unless complete; `cron` performs no external queue publication and can be
     selected without schema rollback or invalidating active deployments/wakeups.
@@ -530,7 +530,7 @@ Status: FAILED
   `https://upstash.com/docs/qstash/howto/roll-signing-keys`)
   result: FAILED
   evidence: real QStash deliveries use `Upstash-Signature` JWT verification with raw-body hash and
-  claim checks; implementation uses a bespoke body HMAC in `x-agentbay-qstash-signature`.
+  claim checks; implementation uses a bespoke body HMAC in `x-bruno-qstash-signature`.
 - command: source inspection of deployment mutation + wakeup atomicity
   result: FAILED
   evidence: helper APIs can perform deployment mutation and wakeup mutation as separate statements
@@ -543,7 +543,7 @@ Status: FAILED
 
 - file: `src/server/agents/agent-deployment-dispatch.ts:56`
   check: real QStash delivery compatibility
-  exact error: implementation expects `x-agentbay-qstash-signature`, but QStash sends
+  exact error: implementation expects `x-bruno-qstash-signature`, but QStash sends
   `Upstash-Signature`.
   likely owner: builder-agent for #264.
 - file: `src/server/agents/agent-deployment-dispatch.ts:72`
@@ -691,24 +691,24 @@ Status: FAILED
 - command: `bun run local:agent:smoke`
   result: FAILED
   evidence: first serialized default-cron smoke attempt exited 1 with
-  `Error response from daemon: No such container: agentbay-local-cloud-runner` followed by
+  `Error response from daemon: No such container: bruno-local-cloud-runner` followed by
   `Error: docker compose failed with exit 1.` No smoke summary, timing record, zero-provider
   assertion, or QStash absence proof was produced by the run.
 - command: `bun run local:agent:smoke`
   result: FAILED
   evidence: retry failed with the same error:
-  `Error response from daemon: No such container: agentbay-local-cloud-runner`; `Error: docker compose failed with exit 1.`
+  `Error response from daemon: No such container: bruno-local-cloud-runner`; `Error: docker compose failed with exit 1.`
 - command: cleanup checks after failed smoke
   result: PASS
-  evidence: `docker ps -a --filter label=agentbay.agent_id --format ...` returned no rows;
-  `docker ps -a --filter name=agentbay --format ...` only showed old `agentbay-postgres-1`
+  evidence: `docker ps -a --filter label=bruno.agent_id --format ...` returned no rows;
+  `docker ps -a --filter name=bruno --format ...` only showed old `bruno-postgres-1`
   exited from 4 days ago.
 
 ## Failures
 
 - file: `scripts/smoke-local-agent-cycle.ts`
   check: serialized default-cron local full-cycle smoke
-  exact error: `Error response from daemon: No such container: agentbay-local-cloud-runner`;
+  exact error: `Error response from daemon: No such container: bruno-local-cloud-runner`;
   `Error: docker compose failed with exit 1.`
   likely owner: builder-agent for #264 or coordinator/local Docker harness owner.
 
@@ -718,7 +718,7 @@ Status: FAILED
   `digitalOceanRequests:0`, or any completed lifecycle summary because it failed during local
   Docker setup/diagnostics.
 - No dedicated fake-delayed local-smoke command or harness was found in `package.json`,
-  `scripts/smoke-local-agent-cycle.ts`, or repo references to `AGENTBAY_DEPLOYMENT_DISPATCH_MODE`;
+  `scripts/smoke-local-agent-cycle.ts`, or repo references to `BRUNO_DEPLOYMENT_DISPATCH_MODE`;
   fake delayed behavior is covered by the already-passed isolated integrated fake
   producer-consumer check, not by local smoke.
 - Real external QStash publishing remains unexercised by design; no production secrets, real QStash
@@ -727,7 +727,7 @@ Status: FAILED
 ## Next Action
 
 - Builder/coordinator should fix the local smoke harness failure for missing
-  `agentbay-local-cloud-runner`, then rerun `bun run local:agent:smoke` and require a completed
+  `bruno-local-cloud-runner`, then rerun `bun run local:agent:smoke` and require a completed
   summary with `cleanupVerified:true`, `digitalOceanRequests:0`, and a valid creation-latency timing
   record before PR/review.
 - Coordinator should grant #264 a serialized `bun run local:agent:smoke` slot after the cycle-2
@@ -740,14 +740,14 @@ Status: FAILED
   did not import #265 resource-profile scope.
 - behavior changes:
   - `compose.yaml` now maps dashboard container port 3000 to
-    `${AGENTBAY_APP_HOST_PORT:-55300}` and sets `NEXT_PUBLIC_APP_URL` to the matching
-    `http://host.docker.internal:${AGENTBAY_APP_HOST_PORT:-55300}` callback origin.
+    `${BRUNO_APP_HOST_PORT:-55300}` and sets `NEXT_PUBLIC_APP_URL` to the matching
+    `http://host.docker.internal:${BRUNO_APP_HOST_PORT:-55300}` callback origin.
   - `local:cloud:up` and `local:agent:smoke` scripts expose the same default
-    `AGENTBAY_APP_HOST_PORT=${AGENTBAY_APP_HOST_PORT:-55300}` override.
+    `BRUNO_APP_HOST_PORT=${BRUNO_APP_HOST_PORT:-55300}` override.
   - `scripts/smoke-local-agent-cycle.ts` resolves the app host port once, passes it to compose,
     sets `NEXT_PUBLIC_APP_URL` accordingly, and probes
-    `http://127.0.0.1:${AGENTBAY_APP_HOST_PORT}/health` instead of hard-coded port 3000.
-  - Smoke diagnostics no longer attempt nested Docker exec when `agentbay-local-cloud-runner` was
+    `http://127.0.0.1:${BRUNO_APP_HOST_PORT}/health` instead of hard-coded port 3000.
+  - Smoke diagnostics no longer attempt nested Docker exec when `bruno-local-cloud-runner` was
     never created; dashboard logs remain available for startup failures.
 - regressions added:
   - Unit coverage for default/custom/invalid app host port resolution and callback URL construction.
@@ -780,32 +780,32 @@ Status: FAILED
   no diff-check whitespace errors.
 - command: source inspection of configurable local smoke port and diagnostics
   result: PASS
-  evidence: `compose.yaml` maps `${AGENTBAY_APP_HOST_PORT:-55300}:3000` and sets
-  `NEXT_PUBLIC_APP_URL=http://host.docker.internal:${AGENTBAY_APP_HOST_PORT:-55300}`;
-  `package.json` passes `AGENTBAY_APP_HOST_PORT` into `local:cloud:up` and `local:agent:smoke`;
-  `scripts/smoke-local-agent-cycle.ts` resolves `AGENTBAY_APP_HOST_PORT`, uses
+  evidence: `compose.yaml` maps `${BRUNO_APP_HOST_PORT:-55300}:3000` and sets
+  `NEXT_PUBLIC_APP_URL=http://host.docker.internal:${BRUNO_APP_HOST_PORT:-55300}`;
+  `package.json` passes `BRUNO_APP_HOST_PORT` into `local:cloud:up` and `local:agent:smoke`;
+  `scripts/smoke-local-agent-cycle.ts` resolves `BRUNO_APP_HOST_PORT`, uses
   `http://host.docker.internal:<port>` for app URL, probes `http://127.0.0.1:<port>/health`, and
-  skips nested-Docker diagnostics when `agentbay-local-cloud-runner` does not exist.
+  skips nested-Docker diagnostics when `bruno-local-cloud-runner` does not exist.
 - command: `bun scripts/run-unit-tests.ts tests/unit/local-agent-cycle-smoke.test.ts`
   result: PASS
   evidence: isolated DB `bruno_test_43590_2dadf12d3f48`; 1 file / 5 tests passed.
 - command: dedicated port/namespace preflight
   result: PASS
   evidence: Python bind check reported ports `55300`, `55311`, `55321`, `55331`, and `55341` free;
-  `docker ps -a --filter label=agentbay.agent_id` returned no rows; broad `name=agentbay` listed
-  only old exited `agentbay-postgres-1`.
-- command: `AGENTBAY_APP_HOST_PORT=55311 bun run local:agent:smoke`
+  `docker ps -a --filter label=bruno.agent_id` returned no rows; broad `name=bruno` listed
+  only old exited `bruno-postgres-1`.
+- command: `BRUNO_APP_HOST_PORT=55311 bun run local:agent:smoke`
   result: FAILED
   evidence: smoke used app callback origin `http://host.docker.internal:55311` and advanced local
   provisioning through `provider_create_completed`, but failed before ready/cleanup summary. Exact
   terminal errors: `Error response from daemon: container ... is not running`;
-  `Error response from daemon: removal of container agentbay-local-cloud-runner is already in progress`;
+  `Error response from daemon: removal of container bruno-local-cloud-runner is already in progress`;
   `Failed query: select "stage", "error_code", "error_detail" from "agent_deployments" ... <-
   Error: connect ECONNREFUSED 127.0.0.1:55432`.
 - command: cleanup checks after failed cycle-2 smoke
   result: PASS
-  evidence: `docker ps -a --filter label=agentbay.agent_id --format ...` returned no rows; broad
-  `docker ps -a --filter name=agentbay --format ...` only listed old exited `agentbay-postgres-1`;
+  evidence: `docker ps -a --filter label=bruno.agent_id --format ...` returned no rows; broad
+  `docker ps -a --filter name=bruno --format ...` only listed old exited `bruno-postgres-1`;
   bind check reported ports `55311`, `55432`, and `3045` free.
 
 ## Failures
@@ -832,7 +832,7 @@ Status: FAILED
 
 - Builder/coordinator should fix the remaining local smoke stability failure where the simulated
   Droplet/local Compose stack exits or is removed before the deployment reaches ready, then rerun
-  `AGENTBAY_APP_HOST_PORT=<free-port> bun run local:agent:smoke` and require a completed summary
+  `BRUNO_APP_HOST_PORT=<free-port> bun run local:agent:smoke` and require a completed summary
   with valid timing, `cleanupVerified:true`, `digitalOceanRequests:0`, and no real QStash/provider
   effects before PR/review.
 
@@ -875,9 +875,9 @@ Status: FAILED
     `claimed`.
   - full non-smoke gates: `bun run verify` PASS; `PORT=3117 bun run test:e2e:ci` PASS, 26/26.
   - smoke gate: `bun run local:agent:smoke` FAILED twice with missing
-    `agentbay-local-cloud-runner`; no completed timing/cleanup/provider summary was emitted.
-  - cleanup check after failure: no containers with `agentbay.agent_id` label remained; only old
-    exited `agentbay-postgres-1` was listed by the broad `name=agentbay` filter.
+    `bruno-local-cloud-runner`; no completed timing/cleanup/provider summary was emitted.
+  - cleanup check after failure: no containers with `bruno.agent_id` label remained; only old
+    exited `bruno-postgres-1` was listed by the broad `name=bruno` filter.
 - #264 builder cycle-1 fix gates (2026-08-07, `issue_264_builder`): PASS locally.
   - command: `bun run typecheck`
     result: PASS.
@@ -926,7 +926,7 @@ Status: FAILED
     evidence: QStash delivery verification uses a JWT in `Upstash-Signature`; official verification
     requires raw-body verification plus JWT claim checks including issuer, subject URL, expiration,
     not-before, and body hash. The implementation instead defines
-    `SIGNATURE_HEADER = "x-agentbay-qstash-signature"` at
+    `SIGNATURE_HEADER = "x-bruno-qstash-signature"` at
     `src/server/agents/agent-deployment-dispatch.ts:56`, creates a bespoke HMAC at
     `src/server/agents/agent-deployment-dispatch.ts:72-74`, verifies only that HMAC at
     `src/server/agents/agent-deployment-dispatch.ts:109-123`, and reads that custom header in
@@ -952,7 +952,7 @@ Status: FAILED
     evidence: isolated DB `bruno_test_76358_482cde9c1d27`; 6 files / 43 tests passed.
   - failures:
     - `src/server/agents/agent-deployment-dispatch.ts:56`: signature header is
-      `x-agentbay-qstash-signature`; real QStash sends `Upstash-Signature`.
+      `x-bruno-qstash-signature`; real QStash sends `Upstash-Signature`.
     - `src/server/agents/agent-deployment-dispatch.ts:72-123`: signature verification is bespoke
       HMAC over body only; missing official QStash JWT verification and required `iss`, `sub`,
       `exp`, `nbf`, and body-hash checks.
@@ -1056,13 +1056,13 @@ Status: ALL GREEN
     `Receiver.verify` using current/next signing keys, callback URL subject, raw body, region, and
     clock tolerance; `:480-500` publishes with `Client.publishJSON`, `notBefore`, retries,
     deduplication ID, and redaction. `readDeploymentDispatchConfig` defaults to cron unless QStash
-    config is complete; `package.json` local smoke forces `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE=local_docker`.
+    config is complete; `package.json` local smoke forces `BRUNO_DIGITALOCEAN_PROVIDER_MODE=local_docker`.
 - command: ambient secret/effect preflight
   result: PASS
   evidence: environment variable names checked without printing values:
-    `AGENTBAY_DEPLOYMENT_DISPATCH_MODE`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`,
+    `BRUNO_DEPLOYMENT_DISPATCH_MODE`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`,
     `QSTASH_NEXT_SIGNING_KEY`, `DIGITALOCEAN_ACCESS_TOKEN`, and
-    `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE` are all unset in the checker shell.
+    `BRUNO_DIGITALOCEAN_PROVIDER_MODE` are all unset in the checker shell.
 - command:
     `bun scripts/run-unit-tests.ts tests/unit/agent-deployment-wakeup-route.test.ts tests/unit/agent-deployments-db.test.ts tests/unit/agent-deployment-cron-route.test.ts tests/unit/agent-deployment-triggers.test.ts tests/unit/server-env.test.ts tests/unit/agent-deployment-migration-fixtures.test.ts tests/unit/agent-launch-builder.test.ts tests/unit/local-agent-cycle-smoke.test.ts tests/unit/agent-deployment-reconciler.test.ts`
   result: PASS
@@ -1149,11 +1149,11 @@ Status: FAILED
   result: FAILED
   evidence: `runner-provisioning.ts:194-200` constructs provisioning logger bindings with
     `lifecycleId: input.operationKey`; `operationKey` is the provider operation tag
-    `agentbay-deploy-<deployment-id-without-dashes>` from
+    `bruno-deploy-<deployment-id-without-dashes>` from
     `agent-deployment-reconciler.ts:2330-2331`; `createRunnerProvisioningLog` only suppresses logs
     in `NODE_ENV=test` at `runner-provisioning.ts:2692-2695`. `logger.ts:126-128`, `:140-164`,
     `:261-285`, and `:288-300` sanitize sensitive keys/text but do not redact `lifecycleId` or the
-    `agentbay-deploy-...` operation-tag pattern. Non-test logs therefore expose the operation tag,
+    `bruno-deploy-...` operation-tag pattern. Non-test logs therefore expose the operation tag,
     contrary to the #267 contract's explicit "Safe events/logs must not expose operation tags"
     invariant.
 - command:
@@ -1177,10 +1177,10 @@ Status: FAILED
 - command: ambient external-effect preflight
   result: PASS
   evidence: environment variable names checked without printing values:
-    `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE`, `AGENTBAY_DIGITALOCEAN_TOKEN`,
+    `BRUNO_DIGITALOCEAN_PROVIDER_MODE`, `BRUNO_DIGITALOCEAN_TOKEN`,
     `DIGITALOCEAN_ACCESS_TOKEN`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`,
-    `QSTASH_NEXT_SIGNING_KEY`, `AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION`, and
-    `AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION` are all unset.
+    `QSTASH_NEXT_SIGNING_KEY`, `BRUNO_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION`, and
+    `BRUNO_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION` are all unset.
 - command: coordinator serialized smoke evidence for `075d55d`
   result: PASS
   evidence: coordinator reported clean local smoke at `89513ms`, `cleanupVerified:true`,
@@ -1194,8 +1194,8 @@ Status: FAILED
 - file: `src/server/runners/runner-provisioning.ts:194`
   check: safe provider provisioning logs must not expose operation tags
   exact error: logger child binding sets `lifecycleId: input.operationKey`; `input.operationKey` is
-    the provider operation tag `agentbay-deploy-<deployment-id-without-dashes>`, and the app logger
-    does not redact `lifecycleId` or `agentbay-deploy-...` values in non-test logs.
+    the provider operation tag `bruno-deploy-<deployment-id-without-dashes>`, and the app logger
+    does not redact `lifecycleId` or `bruno-deploy-...` values in non-test logs.
   likely owner: builder-agent for #267 / runner provisioning logging.
 
 ## Coverage Gaps
@@ -1210,7 +1210,7 @@ Status: FAILED
 ## Next Action
 
 - Redact or replace the provisioning log `lifecycleId` value so non-test logs cannot expose
-  `agentbay-deploy-...` operation tags, add regression coverage, then rerun focused provider/
+  `bruno-deploy-...` operation tags, add regression coverage, then rerun focused provider/
   reconciler gates and lightweight quality gates. Do not merge #267 until this is fixed.
 
 ## Builder Result — #267 Log Redaction Fix
@@ -1297,7 +1297,7 @@ Status: ALL GREEN
   result: PASS
   evidence: `runner-provisioning.ts:2693-2720` redacts child bindings before `logger.child`, redacts
     metadata before every log call, and redacts `Error` values before `logger.error`;
-    `runner-provisioning.ts:2723-2844` redacts the full `agentbay-deploy|replace-<32hex>` tag plus
+    `runner-provisioning.ts:2723-2844` redacts the full `bruno-deploy|replace-<32hex>` tag plus
     compact and dashed deployment identifiers, recurses through arrays/objects/errors, preserves
     safe scalar values, handles cycles, and leaves final generic app-logger secret redaction intact.
 - command: source inspection of sanitizer over/under-redaction
@@ -1338,10 +1338,10 @@ Status: ALL GREEN
 - command: ambient external-effect preflight
   result: PASS
   evidence: environment variable names checked without printing values:
-    `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE`, `AGENTBAY_DIGITALOCEAN_TOKEN`,
+    `BRUNO_DIGITALOCEAN_PROVIDER_MODE`, `BRUNO_DIGITALOCEAN_TOKEN`,
     `DIGITALOCEAN_ACCESS_TOKEN`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`,
-    `QSTASH_NEXT_SIGNING_KEY`, `AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION`, and
-    `AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION` are all unset.
+    `QSTASH_NEXT_SIGNING_KEY`, `BRUNO_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION`, and
+    `BRUNO_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION` are all unset.
 - command: prior functional/full/E2E/repro/smoke evidence accepted for unchanged behavior
   result: PASS
   evidence: head-only fix is logging/redaction scoped. Prior coordinator/builder evidence on this
@@ -1430,10 +1430,10 @@ Status: RED
 - command: external-effect preflight
   result: PASS
   evidence: variable names checked without printing values:
-    `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE`, `AGENTBAY_DIGITALOCEAN_TOKEN`,
+    `BRUNO_DIGITALOCEAN_PROVIDER_MODE`, `BRUNO_DIGITALOCEAN_TOKEN`,
     `DIGITALOCEAN_ACCESS_TOKEN`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`,
-    `QSTASH_NEXT_SIGNING_KEY`, `AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION`, and
-    `AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION` are unset.
+    `QSTASH_NEXT_SIGNING_KEY`, `BRUNO_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION`, and
+    `BRUNO_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION` are unset.
 
 ## Failures
 
@@ -1605,10 +1605,10 @@ Status: ALL GREEN
 - command: external-effect preflight
   result: PASS
   evidence: variable names checked without printing values:
-    `AGENTBAY_DIGITALOCEAN_PROVIDER_MODE`, `AGENTBAY_DIGITALOCEAN_TOKEN`,
+    `BRUNO_DIGITALOCEAN_PROVIDER_MODE`, `BRUNO_DIGITALOCEAN_TOKEN`,
     `DIGITALOCEAN_ACCESS_TOKEN`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`,
-    `QSTASH_NEXT_SIGNING_KEY`, `AGENTBAY_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION`, and
-    `AGENTBAY_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION` are unset.
+    `QSTASH_NEXT_SIGNING_KEY`, `BRUNO_RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION`, and
+    `BRUNO_AGENT_CREATION_BENCHMARK_DIGITALOCEAN_AUTHORIZATION` are unset.
 
 ## Failures
 
@@ -1681,24 +1681,24 @@ Status: NOT GREEN
   WebServer also emitted `error: script "dev" exited with code 143`. Available artifacts do not
   prove whether the timeout was inside `waitForResponse`, `waitForRequest`, route hold, or elsewhere.
 - command:
-  `PORT=3140 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/bruno} NEXT_PUBLIC_APP_URL=http://localhost:3140 PLAYWRIGHT_BASE_URL=http://localhost:3140 ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts -g "automatic submission follows persisted progress to ready across refresh, reopen, and a second context"`
+  `PORT=3140 DATABASE_URL=${DATABASE_URL:-postgres://bruno:bruno@127.0.0.1:54329/bruno} NEXT_PUBLIC_APP_URL=http://localhost:3140 PLAYWRIGHT_BASE_URL=http://localhost:3140 ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts -g "automatic submission follows persisted progress to ready across refresh, reopen, and a second context"`
   result: PASS
   evidence: moved ignored `.next` cache to
   `/tmp/bruno-e2e-ready-refresh-next-checker-20260807144628`; cold-cache exact scenario passed
   desktop/mobile 2/2 in 14.0s.
 - command:
-  `PORT=3141 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/bruno} NEXT_PUBLIC_APP_URL=http://localhost:3141 PLAYWRIGHT_BASE_URL=http://localhost:3141 ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts -g "automatic submission follows persisted progress to ready across refresh, reopen, and a second context" --repeat-each=5`
+  `PORT=3141 DATABASE_URL=${DATABASE_URL:-postgres://bruno:bruno@127.0.0.1:54329/bruno} NEXT_PUBLIC_APP_URL=http://localhost:3141 PLAYWRIGHT_BASE_URL=http://localhost:3141 ./node_modules/.bin/playwright test tests/e2e/automatic-ready.spec.ts -g "automatic submission follows persisted progress to ready across refresh, reopen, and a second context" --repeat-each=5`
   result: PASS
   evidence: exact scenario passed 10/10 total, 5 desktop and 5 mobile, in 1.0m.
 - command:
-  `PORT=3142 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/bruno} NEXT_PUBLIC_APP_URL=http://localhost:3142 PLAYWRIGHT_BASE_URL=http://localhost:3142 bun run test:e2e:ci`
+  `PORT=3142 DATABASE_URL=${DATABASE_URL:-postgres://bruno:bruno@127.0.0.1:54329/bruno} NEXT_PUBLIC_APP_URL=http://localhost:3142 PLAYWRIGHT_BASE_URL=http://localhost:3142 bun run test:e2e:ci`
   result: FAIL
   evidence: full E2E passed 18/26 before WebServer emitted
   `error: script "dev" exited with code 143`; remaining mobile tests then failed with
   `net::ERR_CONNECTION_REFUSED`/`ECONNREFUSED` against `localhost:3142`. The changed ready-refresh
   scenario passed in both projects before the server exit.
 - command:
-  `PORT=3143 DATABASE_URL=${DATABASE_URL:-postgres://agentbay:agentbay@127.0.0.1:54329/bruno} NEXT_PUBLIC_APP_URL=http://localhost:3143 PLAYWRIGHT_BASE_URL=http://localhost:3143 bun run test:e2e:ci`
+  `PORT=3143 DATABASE_URL=${DATABASE_URL:-postgres://bruno:bruno@127.0.0.1:54329/bruno} NEXT_PUBLIC_APP_URL=http://localhost:3143 PLAYWRIGHT_BASE_URL=http://localhost:3143 bun run test:e2e:ci`
   result: FAIL
   evidence: rerun passed 15/26 before WebServer again emitted
   `error: script "dev" exited with code 143`; one mobile retry test first failed waiting for
@@ -1806,7 +1806,7 @@ Status: ALL GREEN
     `floor((diskGiB-hostDiskReserveGiB)/perHermesDiskGiB)`. Swap and momentary unused percentages do
     not increase capacity. Malformed, missing, zero, or unmeasured inputs fail closed to one.
   - Final selectable capacity is the minimum of the computed maximum, authenticated heartbeat
-    `maxAgents`, configured `AGENTBAY_RUNNER_MAX_AGENTS`, and an explicitly approved measured maximum
+    `maxAgents`, configured `BRUNO_RUNNER_MAX_AGENTS`, and an explicitly approved measured maximum
     for that exact size/runtime profile. Heartbeat claims never raise the profile ceiling.
   - Preserve `DEFAULT_HERMES_RUNNER_MAX_AGENTS = 1`; align runner-service, bootstrap, env, placement,
     local provider, and all omitted-value fallbacks to that shared default. Production accepts an
@@ -1932,7 +1932,7 @@ Status: ALL GREEN
 - commit: pending local commit at handoff time.
 - behavior implemented:
   - selectable runner capacity is the minimum of computed CPU, physical-memory, disk, heartbeat,
-    configured `AGENTBAY_RUNNER_MAX_AGENTS`, and explicit measured profile caps; missing/unmeasured
+    configured `BRUNO_RUNNER_MAX_AGENTS`, and explicit measured profile caps; missing/unmeasured
     evidence fails closed to one and runner-service omitted fallbacks now use the shared default one.
   - runner placement counts durable `desired_status = 'running'` reservations, not transient runtime
     status, and owner-aware transaction locks replace every bare runner-ID capacity lock call.
@@ -2273,7 +2273,7 @@ Status: ALL GREEN
 - implementation audit/fix:
   - deterministic inspection with the first create paused after acquiring the runner-capacity lock
     showed the second create blocked earlier on the global
-    `agentbay:telegram-secret-uniqueness:v1` transaction lock, so it could not reach the reviewer-
+    `bruno:telegram-secret-uniqueness:v1` transaction lock, so it could not reach the reviewer-
     required capacity-lock boundary.
   - ready creation now performs placement and owner-scoped runner-capacity locking/revalidation
     before taking the Telegram uniqueness lock. The Telegram gate remains inside the same atomic

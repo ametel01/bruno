@@ -64,7 +64,7 @@ describe("cloud runner provisioning summaries", () => {
     });
     expect(JSON.stringify(summary)).not.toContain("registrationToken");
     expect(JSON.stringify(summary)).not.toContain("credentialHash");
-    expect(JSON.stringify(summary)).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN");
+    expect(JSON.stringify(summary)).not.toContain("BRUNO_DIGITALOCEAN_TOKEN");
     expect(JSON.stringify(summary)).not.toContain("dop_v1");
   });
 

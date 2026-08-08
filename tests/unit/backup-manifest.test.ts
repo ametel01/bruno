@@ -14,7 +14,7 @@ describe("backup manifest contract", () => {
         ...validManifest().config,
         secretReferences: {
           openai: { kind: "env", ref: "OPENAI_API_KEY" },
-          provider: { kind: "vault", ref: "vault://agentbay/agent-1/provider-token" },
+          provider: { kind: "vault", ref: "vault://bruno/agent-1/provider-token" },
         },
       },
     });

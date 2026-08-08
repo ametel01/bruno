@@ -13,7 +13,7 @@ const digitalOceanProviderLogger = createAppLogger("digitalocean.provider");
 const execFileAsync = promisify(execFile);
 
 export const DIGITALOCEAN_PROVIDER = "digitalocean";
-export const DIGITALOCEAN_MANAGED_RUNNER_TAG = "agentbay-runner";
+export const DIGITALOCEAN_MANAGED_RUNNER_TAG = "bruno-runner";
 export const DIGITALOCEAN_RUNNER_KIND = "digitalocean";
 
 export type DigitalOceanProviderName = typeof DIGITALOCEAN_PROVIDER;
@@ -1237,8 +1237,8 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
       };
     }
 
-    const remoteDirectory = input.remoteDirectory ?? "/run/agentbay-snapshot-builder";
-    const tempKnownHosts = await mkdtemp(join(tmpdir(), "agentbay-snapshot-known-hosts-"));
+    const remoteDirectory = input.remoteDirectory ?? "/run/bruno-snapshot-builder";
+    const tempKnownHosts = await mkdtemp(join(tmpdir(), "bruno-snapshot-known-hosts-"));
 
     try {
       const knownHostsPath = join(tempKnownHosts, "known_hosts");
@@ -1258,7 +1258,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
       const command = [
         "set -euo pipefail",
         `cat ${shellPath(`${remoteDirectory}/boot-result.json`)}`,
-        "printf '\\nAGENTBAY_SNAPSHOT_EVIDENCE_SEPARATOR\\n'",
+        "printf '\\nBRUNO_SNAPSHOT_EVIDENCE_SEPARATOR\\n'",
         `cat ${shellPath(`${remoteDirectory}/sanitation-result.json`)}`,
       ].join("; ");
       const { stdout } = await execFileAsync(
@@ -1284,9 +1284,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
           timeout: 120_000,
         },
       );
-      const [bootResult, sanitationResult] = stdout.split(
-        "\nAGENTBAY_SNAPSHOT_EVIDENCE_SEPARATOR\n",
-      );
+      const [bootResult, sanitationResult] = stdout.split("\nBRUNO_SNAPSHOT_EVIDENCE_SEPARATOR\n");
 
       if (!bootResult?.trim() || !sanitationResult?.trim()) {
         return {
@@ -1534,7 +1532,7 @@ export class FakeDigitalOceanProvider
     const created = {
       id,
       name: input.name,
-      fingerprint: `agentbay-managed-${id}`,
+      fingerprint: `bruno-managed-${id}`,
     };
 
     this.#sshKeys.push(created);
@@ -2032,17 +2030,17 @@ export class FakeDigitalOceanProvider
           forbiddenPathsAbsent: true,
           hostileMarkersAbsent: true,
           removedPaths: [
-            "/etc/agentbay/runner.env",
+            "/etc/bruno/runner.env",
             "/root/.docker/config.json",
             "/var/lib/cloud/instances",
             "/etc/ssh/ssh_host_ed25519_key",
             "/etc/machine-id",
             "/var/log/cloud-init-output.log",
           ],
-          scannedPaths: ["/etc", "/root", "/var/lib/agentbay", "/var/log"],
+          scannedPaths: ["/etc", "/root", "/var/lib/bruno", "/var/log"],
           hostileMarkers: [
-            "AGENTBAY_RUNNER_REGISTRATION_TOKEN",
-            "AGENTBAY_RUNNER_BEARER_TOKEN",
+            "BRUNO_RUNNER_REGISTRATION_TOKEN",
+            "BRUNO_RUNNER_BEARER_TOKEN",
             "dop_v1_",
             "BEGIN OPENSSH PRIVATE KEY",
           ],
@@ -2173,7 +2171,7 @@ function apiDropletToResource(
     providerFirewallId: fallback?.providerFirewallId ?? null,
     providerFirewallName: fallback?.providerFirewallName ?? null,
     publicIpv4: readApiPublicIpv4(droplet),
-    name: droplet.name ?? fallback?.name ?? "agentbay-runner",
+    name: droplet.name ?? fallback?.name ?? "bruno-runner",
     region: readApiSlug(droplet.region) ?? fallback?.region ?? "unknown",
     sizeSlug: droplet.sizeSlug ?? droplet.size_slug ?? fallback?.sizeSlug ?? "unknown",
     image: readApiSlug(droplet.image) ?? fallback?.image ?? "unknown",
@@ -2480,7 +2478,7 @@ function toDropletName(value: string): string {
     .slice(0, 63)
     .replace(/-+$/g, "");
 
-  return normalized || "agentbay-runner";
+  return normalized || "bruno-runner";
 }
 
 function cloneResource(resource: DigitalOceanResource): DigitalOceanResource {

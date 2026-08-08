@@ -58,7 +58,7 @@ describe("runner heartbeat persistence", () => {
         authorizationHeader: `Bearer ${credential.value}`,
         payload: {
           runnerId: runner.id,
-          version: " agentbay-runner/1.0.0 <token=secret> ",
+          version: " bruno-runner/1.0.0 <token=secret> ",
           metrics: {
             cpuPercent: 250,
             memoryUsedMb: 128.4,
@@ -104,7 +104,7 @@ describe("runner heartbeat persistence", () => {
       observedAt: now,
       createdAt: now,
       metadata: {
-        version: "agentbay-runner/1.0.0 tokensecret",
+        version: "bruno-runner/1.0.0 tokensecret",
         metrics: {
           cpuPercent: 100,
           memoryUsedMb: 128.4,
@@ -178,7 +178,7 @@ describe("runner heartbeat persistence", () => {
           authorizationHeader: `Bearer ${credential.value}`,
           payload: {
             runnerId: runner.id,
-            version: "agentbay-runner/baseline",
+            version: "bruno-runner/baseline",
             release: {
               version: "release-sha",
               imageDigest: observedDigest,
@@ -211,7 +211,7 @@ describe("runner heartbeat persistence", () => {
       .where(eq(runners.id, runner.id));
 
     expect(heartbeat?.metadata).toEqual({
-      version: "agentbay-runner/baseline",
+      version: "bruno-runner/baseline",
       releaseEvidence: "present",
       release: {
         version: "release-sha",
@@ -294,10 +294,10 @@ describe("runner heartbeat persistence", () => {
   it.each([
     ["missing bearer", null],
     ["malformed bearer", "Token wrong"],
-    ["unknown bearer", "Bearer agb_run_unknown"],
+    ["unknown bearer", "Bearer bruno_run_unknown"],
   ])("rejects %s credentials with a safe auth failure", async (_label, authorizationHeader) => {
     const runner = await seedRunnerCredential(connection, {
-      credentialValue: "agb_run_valid",
+      credentialValue: "bruno_run_valid",
       runnerStatus: "active",
     });
 
@@ -311,8 +311,8 @@ describe("runner heartbeat persistence", () => {
 
     await expect(countRows(connection, "runner_heartbeats")).resolves.toBe(0);
     expect(result.ok).toBe(false);
-    expect(JSON.stringify(result)).not.toContain("agb_run_valid");
-    expect(JSON.stringify(result)).not.toContain("agb_run_unknown");
+    expect(JSON.stringify(result)).not.toContain("bruno_run_valid");
+    expect(JSON.stringify(result)).not.toContain("bruno_run_unknown");
   });
 
   it.each([
@@ -446,7 +446,7 @@ describe("runner heartbeat persistence", () => {
         payload: {
           runnerId: runner.id,
           status: "online",
-          version: "agentbay-runner/bootstrap",
+          version: "bruno-runner/bootstrap",
           release: HOSTED_COMPATIBILITY_REQUIREMENT.release,
         },
       },

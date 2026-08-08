@@ -8,7 +8,7 @@ import {
 
 const IMAGE_DIGEST = `sha256:${"a".repeat(64)}`;
 const OLD_IMAGE_DIGEST = `sha256:${"b".repeat(64)}`;
-const IMMUTABLE_IMAGE = `ghcr.io/ametel01/agentbay-runner:sha-current@${IMAGE_DIGEST}`;
+const IMMUTABLE_IMAGE = `ghcr.io/ametel01/bruno-runner:sha-current@${IMAGE_DIGEST}`;
 const NOW = new Date("2026-08-04T00:00:00.000Z");
 const RELEASE = {
   version: "sha-current",
@@ -18,13 +18,13 @@ const RELEASE = {
 
 describe("runner release compatibility policy", () => {
   it("derives a hosted requirement only from an immutable image reference", () => {
-    expect(readRunnerCompatibilityRequirement({ AGENTBAY_RUNNER_IMAGE: IMMUTABLE_IMAGE })).toEqual({
+    expect(readRunnerCompatibilityRequirement({ BRUNO_RUNNER_IMAGE: IMMUTABLE_IMAGE })).toEqual({
       mode: "hosted",
       release: RELEASE,
     });
     expect(
       readRunnerCompatibilityRequirement({
-        AGENTBAY_RUNNER_IMAGE: "ghcr.io/ametel01/agentbay-runner:main",
+        BRUNO_RUNNER_IMAGE: "ghcr.io/ametel01/bruno-runner:main",
       }),
     ).toEqual({ mode: "unavailable", release: null });
     expect(requiredRunnerImageDigestForProvider({ runnerImage: IMMUTABLE_IMAGE })).toBe(
@@ -34,7 +34,7 @@ describe("runner release compatibility policy", () => {
 
   it("accepts only an exact hosted release and reports safe mismatch reasons", () => {
     const requirement = readRunnerCompatibilityRequirement({
-      AGENTBAY_RUNNER_IMAGE: IMMUTABLE_IMAGE,
+      BRUNO_RUNNER_IMAGE: IMMUTABLE_IMAGE,
     });
 
     expect(

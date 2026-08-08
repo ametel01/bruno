@@ -1,5 +1,5 @@
-export const NATIVE_AGENT_LAUNCH_SPEC_VERSION = "agentbay.hermes.launch.v2";
-export const MANAGED_AGENT_LAUNCH_SPEC_VERSION = "agentbay.hermes.launch.v3";
+export const NATIVE_AGENT_LAUNCH_SPEC_VERSION = "bruno.hermes.launch.v2";
+export const MANAGED_AGENT_LAUNCH_SPEC_VERSION = "bruno.hermes.launch.v3";
 export const AGENT_LAUNCH_SPEC_VERSION = NATIVE_AGENT_LAUNCH_SPEC_VERSION;
 export const AGENT_LAUNCH_SPEC_MAX_BYTES = 64 * 1024;
 
@@ -1040,7 +1040,7 @@ function readApiServerKey(
 ): string {
   const secret = readBoundedString(value, key, issues, { min: 40, maxBytes: 300 }, "$.secrets");
 
-  if (!/^agb_agent_[A-Za-z0-9_-]{32,}$/.test(secret)) {
+  if (!/^bruno_agent_[A-Za-z0-9_-]{32,}$/.test(secret)) {
     issues.push({ path: "$.secrets.apiServerKey", message: "Agent API server key is invalid." });
   }
 

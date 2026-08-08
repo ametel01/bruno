@@ -49,11 +49,11 @@ type StoredBackupArtifact = {
 };
 
 const STORAGE_ENV_NAMES = [
-  "AGENTBAY_BACKUP_STORAGE_ENDPOINT_URL",
-  "AGENTBAY_BACKUP_STORAGE_BUCKET",
-  "AGENTBAY_BACKUP_STORAGE_REGION",
-  "AGENTBAY_BACKUP_STORAGE_ACCESS_KEY_ID",
-  "AGENTBAY_BACKUP_STORAGE_SECRET_ACCESS_KEY",
+  "BRUNO_BACKUP_STORAGE_ENDPOINT_URL",
+  "BRUNO_BACKUP_STORAGE_BUCKET",
+  "BRUNO_BACKUP_STORAGE_REGION",
+  "BRUNO_BACKUP_STORAGE_ACCESS_KEY_ID",
+  "BRUNO_BACKUP_STORAGE_SECRET_ACCESS_KEY",
 ] as const;
 
 const SAFE_UPLOAD_FAILURE_MESSAGE =
@@ -70,11 +70,11 @@ export function readBackupStorageConfig(
     return null;
   }
 
-  const endpointUrl = readRequiredSetting(input, "AGENTBAY_BACKUP_STORAGE_ENDPOINT_URL");
-  const bucket = readRequiredSetting(input, "AGENTBAY_BACKUP_STORAGE_BUCKET");
-  const region = readRequiredSetting(input, "AGENTBAY_BACKUP_STORAGE_REGION");
-  const accessKeyId = readRequiredSetting(input, "AGENTBAY_BACKUP_STORAGE_ACCESS_KEY_ID");
-  const secretAccessKey = readRequiredSetting(input, "AGENTBAY_BACKUP_STORAGE_SECRET_ACCESS_KEY");
+  const endpointUrl = readRequiredSetting(input, "BRUNO_BACKUP_STORAGE_ENDPOINT_URL");
+  const bucket = readRequiredSetting(input, "BRUNO_BACKUP_STORAGE_BUCKET");
+  const region = readRequiredSetting(input, "BRUNO_BACKUP_STORAGE_REGION");
+  const accessKeyId = readRequiredSetting(input, "BRUNO_BACKUP_STORAGE_ACCESS_KEY_ID");
+  const secretAccessKey = readRequiredSetting(input, "BRUNO_BACKUP_STORAGE_SECRET_ACCESS_KEY");
 
   return {
     endpointUrl: validateBackupStorageEndpoint(endpointUrl),
@@ -102,7 +102,7 @@ export function backupStorageFailure(operation: "upload" | "download"): BackupSt
 export class FakeBackupObjectStorage implements BackupObjectStorage {
   private readonly artifacts = new Map<string, StoredBackupArtifact>();
 
-  constructor(private readonly bucket = "agentbay-test-backups") {}
+  constructor(private readonly bucket = "bruno-test-backups") {}
 
   async upload(input: BackupStorageUploadInput): Promise<BackupStorageUploadResult> {
     const keyResult = validateBackupArtifactKey(input.key);
@@ -317,18 +317,18 @@ function validateBackupStorageEndpoint(value: string): string {
   try {
     parsed = new URL(value);
   } catch {
-    throw new EnvValidationError(["AGENTBAY_BACKUP_STORAGE_ENDPOINT_URL must be a valid URL."]);
+    throw new EnvValidationError(["BRUNO_BACKUP_STORAGE_ENDPOINT_URL must be a valid URL."]);
   }
 
   if (parsed.username || parsed.password || parsed.search || parsed.hash) {
     throw new EnvValidationError([
-      "AGENTBAY_BACKUP_STORAGE_ENDPOINT_URL must not include credentials, query strings, or fragments.",
+      "BRUNO_BACKUP_STORAGE_ENDPOINT_URL must not include credentials, query strings, or fragments.",
     ]);
   }
 
   if (parsed.protocol !== "https:" && !isLoopbackHttp(parsed)) {
     throw new EnvValidationError([
-      "AGENTBAY_BACKUP_STORAGE_ENDPOINT_URL must use HTTPS unless it targets a loopback host for local tests.",
+      "BRUNO_BACKUP_STORAGE_ENDPOINT_URL must use HTTPS unless it targets a loopback host for local tests.",
     ]);
   }
 
@@ -343,7 +343,7 @@ function validateBackupStorageBucket(value: string): string {
     /^\d+\.\d+\.\d+\.\d+$/.test(value)
   ) {
     throw new EnvValidationError([
-      "AGENTBAY_BACKUP_STORAGE_BUCKET must be a valid S3-compatible bucket name.",
+      "BRUNO_BACKUP_STORAGE_BUCKET must be a valid S3-compatible bucket name.",
     ]);
   }
 
@@ -353,7 +353,7 @@ function validateBackupStorageBucket(value: string): string {
 function validateBackupStorageRegion(value: string): string {
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(value)) {
     throw new EnvValidationError([
-      "AGENTBAY_BACKUP_STORAGE_REGION must contain only lowercase letters, numbers, and hyphens.",
+      "BRUNO_BACKUP_STORAGE_REGION must contain only lowercase letters, numbers, and hyphens.",
     ]);
   }
 

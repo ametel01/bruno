@@ -18,7 +18,7 @@ export type AuthModeDecision =
 type AuthEnvironment = Record<string, string | undefined>;
 
 export function resolveAuthMode(env: AuthEnvironment): AuthModeDecision {
-  const configuredMode = env.AGENTBAY_AUTH_MODE;
+  const configuredMode = env.BRUNO_AUTH_MODE;
   const isPreview = env.VERCEL_ENV === "preview";
   const resolvedMode = configuredMode ?? (isPreview ? "clerk" : undefined);
 
@@ -43,7 +43,7 @@ export function resolveAuthMode(env: AuthEnvironment): AuthModeDecision {
   }
 
   if (resolvedMode === "operator") {
-    if (!configuredValue(env.AGENTBAY_OPERATOR_PASSWORD)) {
+    if (!configuredValue(env.BRUNO_OPERATOR_PASSWORD)) {
       return { mode: "invalid", code: "operator_auth_not_configured" };
     }
 
@@ -58,7 +58,7 @@ export function resolveAuthMode(env: AuthEnvironment): AuthModeDecision {
 
   if (
     configuredMode === "development" &&
-    env.AGENTBAY_ALLOW_PUBLIC_DEVELOPMENT === "true" &&
+    env.BRUNO_ALLOW_PUBLIC_DEVELOPMENT === "true" &&
     env.VERCEL_ENV === "production" &&
     appHostname !== null
   ) {
@@ -83,7 +83,7 @@ export function resolveAuthMode(env: AuthEnvironment): AuthModeDecision {
       return { mode: "invalid", code: "development_auth_not_allowed" };
     }
 
-    if (env.AGENTBAY_PREVIEW_PROTECTION_VERIFIED !== "true") {
+    if (env.BRUNO_PREVIEW_PROTECTION_VERIFIED !== "true") {
       return { mode: "invalid", code: "preview_protection_not_verified" };
     }
 

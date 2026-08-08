@@ -7,7 +7,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const BASE_DATABASE_URL =
-  process.env.DATABASE_URL ?? "postgres://agentbay:agentbay@127.0.0.1:54329/bruno";
+  process.env.DATABASE_URL ?? "postgres://bruno:bruno@127.0.0.1:54329/bruno";
 let createdDatabase: string | null = null;
 
 describe("agent runtime reconciliation migration", () => {

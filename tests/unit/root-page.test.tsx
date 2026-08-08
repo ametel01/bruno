@@ -346,7 +346,7 @@ describe("product shell routes", () => {
   it("renders the root product dashboard shell", () => {
     const html = renderToStaticMarkup(createElement(Home));
 
-    expect(html).toContain("bruno");
+    expect(html).toContain("Bruno");
     expect(html).toContain('href="/dashboard"');
     expect(html).toContain("Operational dashboard");
     expect(html).toContain("No agent records");
@@ -630,7 +630,7 @@ describe("product shell routes", () => {
           diskUsedMb: null,
           diskTotalMb: null,
         }),
-        version: "agentbay-runner/1.2.3",
+        version: "bruno-runner/1.2.3",
         lastSeenAt: "2026-07-05T01:01:00.000Z",
         updatedAt: "2026-07-05T01:00:00.000Z",
       },
@@ -649,7 +649,7 @@ describe("product shell routes", () => {
     expect(html).toContain("37%");
     expect(html).toContain("512 / 2,048 MB");
     expect(html).toContain("No runner capacity blocker");
-    expect(html).toContain("agentbay-runner/1.2.3");
+    expect(html).toContain("bruno-runner/1.2.3");
     expect(html).toContain("2026-07-05T01:01:00.000Z");
     expect(html).toContain("2026-07-05T01:00:00.000Z");
     expect(html).not.toContain("https://user:password@runner.example.com");
@@ -742,10 +742,10 @@ describe("product shell routes", () => {
     expect(html).toContain("Runner heartbeat is online and ready for work.");
     expect(html).toContain("2026-07-06T01:04:00.000Z");
     expect(html).not.toContain("registrationToken");
-    expect(html).not.toContain("agb_reg_");
-    expect(html).not.toContain("agb_run_");
+    expect(html).not.toContain("bruno_reg_");
+    expect(html).not.toContain("bruno_run_");
     expect(html).not.toContain("credentialHash");
-    expect(html).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN");
+    expect(html).not.toContain("BRUNO_DIGITALOCEAN_TOKEN");
     expect(html).not.toContain("dop_v1");
   });
 
@@ -791,7 +791,7 @@ describe("product shell routes", () => {
     expect(html).toContain("Sensitive details omitted.");
     expect(html).toContain("Next step: check the provider configuration");
     expect(html).not.toContain("token=stored-for-downstream");
-    expect(html).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN");
+    expect(html).not.toContain("BRUNO_DIGITALOCEAN_TOKEN");
     expect(html).not.toContain("dop_v1");
     expect(html).not.toContain("credentialHash");
   });
@@ -1349,7 +1349,7 @@ describe("product shell routes", () => {
     expect(html).toContain("2026-07-06T05:13:00.000Z");
     expect(html).toContain("00000000-0000-4000-8000-000000000267");
     expect(html).not.toContain("s3://");
-    expect(html).not.toContain("agentbay-backups");
+    expect(html).not.toContain("bruno-backups");
     expect(html).not.toContain("manifestJson");
     expect(html).not.toContain("storageUri");
     expect(html).not.toContain("secretReferences");
@@ -1447,7 +1447,7 @@ describe("product shell routes", () => {
       endpointHost: "runner.example.com",
       status: "offline",
       capacity: capacity({ runningAgents: 1, maxAgents: 1, blocker: "runner_capacity_reached" }),
-      version: "agentbay-runner/1.2.3",
+      version: "bruno-runner/1.2.3",
       lastSeenAt: "2026-07-05T01:31:00.000Z",
       updatedAt: "2026-07-05T01:30:00.000Z",
       assignmentNotice: "This agent is assigned to Remote Runner.",
@@ -1469,7 +1469,7 @@ describe("product shell routes", () => {
     expect(html).toContain("offline");
     expect(html).toContain("1 / 1 agent running");
     expect(html).toContain("Runner capacity reached");
-    expect(html).toContain("agentbay-runner/1.2.3");
+    expect(html).toContain("bruno-runner/1.2.3");
     expect(html).toContain("2026-07-05T01:31:00.000Z");
     expect(html).toContain("2026-07-05T01:30:00.000Z");
     expect(html).toContain("Runner is offline");
@@ -1502,7 +1502,7 @@ describe("product shell routes", () => {
         diskUsedMb: null,
         diskTotalMb: null,
       }),
-      version: "agentbay-runner/3.0.0",
+      version: "bruno-runner/3.0.0",
       lastSeenAt: "2026-07-06T01:31:00.000Z",
       updatedAt: "2026-07-06T01:30:00.000Z",
       assignmentNotice: "This agent is assigned to Provisioned Cloud Runner.",
@@ -1522,14 +1522,14 @@ describe("product shell routes", () => {
     expect(html).toContain("online");
     expect(html).toContain("2 / 5 agents running");
     expect(html).toContain("Not reported");
-    expect(html).toContain("agentbay-runner/3.0.0");
+    expect(html).toContain("bruno-runner/3.0.0");
     expect(html).not.toContain("runnerId");
     expect(html).not.toContain("registrationToken");
-    expect(html).not.toContain("agb_reg_");
-    expect(html).not.toContain("agb_run_");
+    expect(html).not.toContain("bruno_reg_");
+    expect(html).not.toContain("bruno_run_");
     expect(html).not.toContain("credentialHash");
     expect(html).not.toContain("tokenHash");
-    expect(html).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN");
+    expect(html).not.toContain("BRUNO_DIGITALOCEAN_TOKEN");
   });
 
   it("renders persisted pending approvals on the agent detail page without raw payload details", async () => {
@@ -1779,8 +1779,8 @@ describe("product shell routes", () => {
     expect(html).toContain("Create Token");
     expect(html).toContain("Rotate Credential");
     expect(html).toContain("Revoke Credential");
-    expect(html).not.toContain("agb_reg_");
-    expect(html).not.toContain("agb_run_");
+    expect(html).not.toContain("bruno_reg_");
+    expect(html).not.toContain("bruno_run_");
     expect(html).not.toContain("credentialHash");
     expect(html).not.toContain("tokenHash");
     expect(html).not.toContain("runnerId");

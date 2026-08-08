@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export const DEFAULT_LOCAL_HERMES_IMAGE = "agentbay-hermes:local";
+export const DEFAULT_LOCAL_HERMES_IMAGE = "bruno-hermes:local";
 export const HERMES_UPSTREAM_IMAGE = "nousresearch/hermes-agent:v2026.7.7.2";
 export const HERMES_UPSTREAM_INDEX_DIGEST =
   "sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973";
@@ -19,7 +19,7 @@ const SECRET_HISTORY_CANARIES = [
   "OPENROUTER_API_KEY=",
   "TELEGRAM_BOT_TOKEN=",
   "TELEGRAM_ALLOWED_USERS=",
-  "AGENTBAY_AGENT_SECRET_KEYS_JSON",
+  "BRUNO_AGENT_SECRET_KEYS_JSON",
   "sk-or-v1-",
   ".env.local",
 ] as const;
@@ -36,7 +36,7 @@ type RunCommandOptions = {
 };
 
 export async function smokeHermesAgentImage(
-  image = process.env.AGENTBAY_HERMES_IMAGE?.trim() || DEFAULT_LOCAL_HERMES_IMAGE,
+  image = process.env.BRUNO_HERMES_IMAGE?.trim() || DEFAULT_LOCAL_HERMES_IMAGE,
 ) {
   assertSafeImageReference(image);
 
@@ -78,8 +78,8 @@ export async function smokeHermesAgentImage(
       "-lc",
       [
         "set -eu",
-        "printf ok > /opt/data/agentbay-write-test",
-        'test "$(cat /opt/data/agentbay-write-test)" = ok',
+        "printf ok > /opt/data/bruno-write-test",
+        'test "$(cat /opt/data/bruno-write-test)" = ok',
       ].join("; "),
     ]);
     assertExitCode(writeProbe, "Hermes prepared data directory write probe");
@@ -133,12 +133,12 @@ export async function smokeHermesAgentImage(
 
 function assertSafeImageReference(image: string) {
   if (!SAFE_IMAGE_REFERENCE_PATTERN.test(image)) {
-    throw new Error("AGENTBAY_HERMES_IMAGE must be a valid container image reference.");
+    throw new Error("BRUNO_HERMES_IMAGE must be a valid container image reference.");
   }
 }
 
 async function withPreparedDataDir<T>(callback: (dataDir: string) => Promise<T>): Promise<T> {
-  const dataDir = await mkdtemp(join(tmpdir(), "agentbay-hermes-data-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "bruno-hermes-data-"));
 
   try {
     await chmod(dataDir, 0o777);

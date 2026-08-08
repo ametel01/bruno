@@ -50,22 +50,22 @@ describe("E2E capability gates", () => {
     [
       "blank provider token",
       {
-        AGENTBAY_DIGITALOCEAN_TOKEN: " ",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-value-must-not-print",
+        BRUNO_DIGITALOCEAN_TOKEN: " ",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-value-must-not-print",
       },
     ],
     [
       "missing runner token",
       {
-        AGENTBAY_DIGITALOCEAN_TOKEN: "provider-value-must-not-print",
+        BRUNO_DIGITALOCEAN_TOKEN: "provider-value-must-not-print",
       },
     ],
     [
       "invalid optional provider setting",
       {
-        AGENTBAY_DIGITALOCEAN_TOKEN: "provider-value-must-not-print",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "runner-value-must-not-print",
-        AGENTBAY_DIGITALOCEAN_REGION: "invalid region value-must-not-print",
+        BRUNO_DIGITALOCEAN_TOKEN: "provider-value-must-not-print",
+        BRUNO_RUNNER_BEARER_TOKEN: "runner-value-must-not-print",
+        BRUNO_DIGITALOCEAN_REGION: "invalid region value-must-not-print",
       },
     ],
   ])("fails once before Playwright for %s", async (_caseName, env) => {
@@ -92,19 +92,19 @@ describe("E2E capability gates", () => {
     [
       "DigitalOcean",
       {
-        AGENTBAY_DIGITALOCEAN_TOKEN: "synthetic-provider-token",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "synthetic-runner-token",
-        AGENTBAY_RUNNER_IMAGE: `ghcr.io/ametel01/agentbay-runner:sha-test@sha256:${"a".repeat(64)}`,
-        AGENTBAY_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
+        BRUNO_DIGITALOCEAN_TOKEN: "synthetic-provider-token",
+        BRUNO_RUNNER_BEARER_TOKEN: "synthetic-runner-token",
+        BRUNO_RUNNER_IMAGE: `ghcr.io/ametel01/bruno-runner:sha-test@sha256:${"a".repeat(64)}`,
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
       },
     ],
     [
       "local Docker",
       {
-        AGENTBAY_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
-        AGENTBAY_DIGITALOCEAN_TOKEN: "local-docker",
-        AGENTBAY_RUNNER_BEARER_TOKEN: "synthetic-runner-token",
-        AGENTBAY_LOCAL_CLOUD_RUNNER_START_DELAY_MS: "0",
+        BRUNO_DIGITALOCEAN_PROVIDER_MODE: "local_docker",
+        BRUNO_DIGITALOCEAN_TOKEN: "local-docker",
+        BRUNO_RUNNER_BEARER_TOKEN: "synthetic-runner-token",
+        BRUNO_LOCAL_CLOUD_RUNNER_START_DELAY_MS: "0",
       },
     ],
   ])("delegates %s capability to the complete unfiltered Playwright suite", async (_name, env) => {

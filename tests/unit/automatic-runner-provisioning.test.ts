@@ -22,7 +22,7 @@ import {
 
 const USER_ID = "00000000-0000-4000-8000-00000000b701";
 const RUNNER_ID = "00000000-0000-4000-8000-00000000b721";
-const OPERATION_KEY = "agentbay-deploy-0000000000004000800000000000b731";
+const OPERATION_KEY = "bruno-deploy-0000000000004000800000000000b731";
 const NOW = new Date("2026-08-03T09:00:00.000Z");
 
 describe("automatic DigitalOcean runner provisioning", () => {
@@ -144,8 +144,8 @@ describe("automatic DigitalOcean runner provisioning", () => {
           expect.objectContaining({
             providerResourceId: "local-docker-droplet",
             firewallApplied: true,
-            providerFirewallName: "agentbay-runners-local-docker-droplet",
-            tags: expect.arrayContaining([OPERATION_KEY, "agentbay", "agentbay-runner"]),
+            providerFirewallName: "bruno-runners-local-docker-droplet",
+            tags: expect.arrayContaining([OPERATION_KEY, "bruno", "bruno-runner"]),
           }),
         ],
       },
@@ -286,12 +286,12 @@ describe("automatic DigitalOcean runner provisioning", () => {
       region: "sfo3",
       sizeSlug: "s-1vcpu-2gb",
       image: "ubuntu-24-04-x64",
-      tags: ["agentbay", "agentbay-runner", OPERATION_KEY],
+      tags: ["bruno", "bruno-runner", OPERATION_KEY],
     });
     if (!created.ok) throw new Error("Expected fake Droplet creation to succeed.");
     await provider.tagResource({
       providerResourceId: created.value.providerResourceId,
-      tags: ["agentbay", "agentbay-runner", OPERATION_KEY],
+      tags: ["bruno", "bruno-runner", OPERATION_KEY],
     });
     const firewalled = await provider.applyFirewall({
       providerResourceId: created.value.providerResourceId,
@@ -627,8 +627,8 @@ function advance(
 }
 
 function invalidSnapshotAutomaticConfig(): DigitalOceanProviderConfig {
-  const runnerImage = `ghcr.io/ametel01/agentbay-runner:abc123@sha256:${"a".repeat(64)}`;
-  const defaultAgentImage = `ghcr.io/ametel01/agentbay-default:abc123@sha256:${"b".repeat(64)}`;
+  const runnerImage = `ghcr.io/ametel01/bruno-runner:abc123@sha256:${"a".repeat(64)}`;
+  const defaultAgentImage = `ghcr.io/ametel01/bruno-default:abc123@sha256:${"b".repeat(64)}`;
 
   return {
     ...providerConfig(),
@@ -668,11 +668,11 @@ function providerConfig(): DigitalOceanProviderConfig {
     token: "fake-provider-token",
     providerMode: "digitalocean",
     runnerBearerToken: "fake-runner-bearer",
-    runnerImage: "agentbay-runner:test",
+    runnerImage: "bruno-runner:test",
     region: "sfo3",
     sizeSlug: "s-1vcpu-2gb",
     image: "ubuntu-24-04-x64",
-    tags: ["agentbay", "agentbay-runner"],
+    tags: ["bruno", "bruno-runner"],
     sshKeyIds: ["fake-key"],
     sshSourceAddresses: ["203.0.113.5/32"],
   };
@@ -683,7 +683,7 @@ function localDockerProviderConfig(): DigitalOceanProviderConfig {
     ...providerConfig(),
     token: "local-docker",
     providerMode: "local_docker",
-    runnerImage: "agentbay-runner:local",
+    runnerImage: "bruno-runner:local",
     localRunnerEndpointUrl: "http://127.0.0.1:3045",
   };
 }

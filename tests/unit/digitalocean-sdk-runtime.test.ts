@@ -20,7 +20,7 @@ describe("DigitalOcean SDK runtime adapter", () => {
           : Response.json({
               firewall: {
                 id: "firewall/owned",
-                name: "agentbay-runners-owned",
+                name: "bruno-runners-owned",
                 droplet_ids: [7654321],
               },
             });

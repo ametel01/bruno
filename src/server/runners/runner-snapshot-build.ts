@@ -23,8 +23,8 @@ import type {
 } from "@/src/server/runners/digitalocean-provider";
 
 const SNAPSHOT_AUTHORIZATION_SENTINEL = "I_UNDERSTAND_THIS_CREATES_A_BILLABLE_SNAPSHOT_BUILDER";
-const SNAPSHOT_OPERATION_TAG_PREFIX = "agentbay-snapshot-build";
-const SNAPSHOT_BUILDER_NAME_PREFIX = "agentbay-snapshot-builder";
+const SNAPSHOT_OPERATION_TAG_PREFIX = "bruno-snapshot-build";
+const SNAPSHOT_BUILDER_NAME_PREFIX = "bruno-snapshot-builder";
 const SNAPSHOT_MIN_DISK_GB = 25;
 
 export type BuildRunnerSnapshotInput = {
@@ -530,7 +530,7 @@ packages:
 runcmd:
   - |
     set -euo pipefail
-    install -m 0755 -d /etc/apt/keyrings /etc/agentbay-snapshot-builder /run/agentbay-snapshot-builder
+    install -m 0755 -d /etc/apt/keyrings /etc/bruno-snapshot-builder /run/bruno-snapshot-builder
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
     chmod a+r /etc/apt/keyrings/docker.gpg
     . /etc/os-release
@@ -543,11 +543,11 @@ runcmd:
     docker pull ${defaultAgentImageShell}
     docker pull ${hermesImageShell}
     docker image inspect ${runnerImageShell} ${defaultAgentImageShell} ${hermesImageShell} >/dev/null
-    AGENTBAY_BUILDER_RESOURCE_ID="$(curl -fsS http://169.254.169.254/metadata/v1/id)"
-    cat > /run/agentbay-snapshot-builder/boot-result.json <<AGENTBAY_BOOT_RESULT_JSON
+    BRUNO_BUILDER_RESOURCE_ID="$(curl -fsS http://169.254.169.254/metadata/v1/id)"
+    cat > /run/bruno-snapshot-builder/boot-result.json <<BRUNO_BOOT_RESULT_JSON
     {
       "ok": true,
-      "builderResourceId": "$AGENTBAY_BUILDER_RESOURCE_ID",
+      "builderResourceId": "$BRUNO_BUILDER_RESOURCE_ID",
       "runnerImage": ${runnerImageJson},
       "defaultAgentImage": ${defaultAgentImageJson},
       "hermesImage": ${hermesImageJson},
@@ -555,18 +555,18 @@ runcmd:
       "preloadedImages": [${runnerImageJson}, ${defaultAgentImageJson}, ${hermesImageJson}],
       "completedAt": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
     }
-    AGENTBAY_BOOT_RESULT_JSON
+    BRUNO_BOOT_RESULT_JSON
     docker ps -aq | xargs --no-run-if-empty docker rm --force
-    docker network ls --format '{{.Name}}' | grep '^agentbay' | xargs --no-run-if-empty docker network rm
+    docker network ls --format '{{.Name}}' | grep '^bruno' | xargs --no-run-if-empty docker network rm
     rm -rf \
-      /etc/agentbay/runner.env \
+      /etc/bruno/runner.env \
       /root/.docker/config.json \
-      /var/lib/agentbay/agents \
-      /var/lib/agentbay/boot-self-test \
+      /var/lib/bruno/agents \
+      /var/lib/bruno/boot-self-test \
       /var/lib/cloud/instances \
       /etc/ssh/ssh_host_* \
-      /tmp/agentbay-* \
-      /var/tmp/agentbay-* \
+      /tmp/bruno-* \
+      /var/tmp/bruno-* \
       /var/log/cloud-init.log \
       /var/log/cloud-init-output.log
     truncate -s 0 /root/.bash_history || true
@@ -575,7 +575,7 @@ runcmd:
     rm -f /etc/machine-id /var/lib/dbus/machine-id
     touch /etc/machine-id
     FORBIDDEN_PATHS=(
-      /etc/agentbay/runner.env
+      /etc/bruno/runner.env
       /root/.docker/config.json
       /var/lib/cloud/instances
       /etc/ssh/ssh_host_ed25519_key
@@ -589,29 +589,29 @@ runcmd:
       fi
     done
     HOSTILE_MARKERS=(
-      AGENTBAY_RUNNER_REGISTRATION_TOKEN
-      AGENTBAY_RUNNER_BEARER_TOKEN
+      BRUNO_RUNNER_REGISTRATION_TOKEN
+      BRUNO_RUNNER_BEARER_TOKEN
       dop_v1_
       "BEGIN OPENSSH PRIVATE KEY"
     )
     for marker in "\${HOSTILE_MARKERS[@]}"; do
-      if grep -R -I -F -- "$marker" /etc /root /var/lib/agentbay /var/log >/dev/null 2>&1; then
+      if grep -R -I -F -- "$marker" /etc /root /var/lib/bruno /var/log >/dev/null 2>&1; then
         echo "hostile marker remains" >&2
         exit 1
       fi
     done
-    cat > /run/agentbay-snapshot-builder/sanitation-result.json <<AGENTBAY_SANITATION_RESULT_JSON
+    cat > /run/bruno-snapshot-builder/sanitation-result.json <<BRUNO_SANITATION_RESULT_JSON
     {
       "ok": true,
-      "builderResourceId": "$AGENTBAY_BUILDER_RESOURCE_ID",
+      "builderResourceId": "$BRUNO_BUILDER_RESOURCE_ID",
       "forbiddenPathsAbsent": true,
       "hostileMarkersAbsent": true,
-      "removedPaths": ["/etc/agentbay/runner.env", "/root/.docker/config.json", "/var/lib/cloud/instances", "/etc/ssh/ssh_host_ed25519_key", "/etc/machine-id", "/var/log/cloud-init-output.log"],
-      "scannedPaths": ["/etc", "/root", "/var/lib/agentbay", "/var/log"],
-      "hostileMarkers": ["AGENTBAY_RUNNER_REGISTRATION_TOKEN", "AGENTBAY_RUNNER_BEARER_TOKEN", "dop_v1_", "BEGIN OPENSSH PRIVATE KEY"],
+      "removedPaths": ["/etc/bruno/runner.env", "/root/.docker/config.json", "/var/lib/cloud/instances", "/etc/ssh/ssh_host_ed25519_key", "/etc/machine-id", "/var/log/cloud-init-output.log"],
+      "scannedPaths": ["/etc", "/root", "/var/lib/bruno", "/var/log"],
+      "hostileMarkers": ["BRUNO_RUNNER_REGISTRATION_TOKEN", "BRUNO_RUNNER_BEARER_TOKEN", "dop_v1_", "BEGIN OPENSSH PRIVATE KEY"],
       "completedAt": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
     }
-    AGENTBAY_SANITATION_RESULT_JSON
+    BRUNO_SANITATION_RESULT_JSON
 `;
 }
 
@@ -689,17 +689,17 @@ function bootFixtureMatches(
 
 function sanitationPassed(result: SnapshotSanitationResult, builderResourceId: string): boolean {
   const requiredRemovedPaths = [
-    "/etc/agentbay/runner.env",
+    "/etc/bruno/runner.env",
     "/root/.docker/config.json",
     "/var/lib/cloud/instances",
     "/etc/ssh/ssh_host_ed25519_key",
     "/etc/machine-id",
     "/var/log/cloud-init-output.log",
   ];
-  const requiredScannedPaths = ["/etc", "/root", "/var/lib/agentbay", "/var/log"];
+  const requiredScannedPaths = ["/etc", "/root", "/var/lib/bruno", "/var/log"];
   const requiredHostileMarkers = [
-    "AGENTBAY_RUNNER_REGISTRATION_TOKEN",
-    "AGENTBAY_RUNNER_BEARER_TOKEN",
+    "BRUNO_RUNNER_REGISTRATION_TOKEN",
+    "BRUNO_RUNNER_BEARER_TOKEN",
     "dop_v1_",
     "BEGIN OPENSSH PRIVATE KEY",
   ];

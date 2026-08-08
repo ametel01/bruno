@@ -63,7 +63,7 @@ describe("POST /api/agents/[agentId]/backups/[backupId]/restore route", () => {
     });
     expect(JSON.stringify(body)).not.toContain("storageUri");
     expect(JSON.stringify(body)).not.toContain("s3://");
-    expect(JSON.stringify(body)).not.toContain("agentbay-backups");
+    expect(JSON.stringify(body)).not.toContain("bruno-backups");
     expect(JSON.stringify(body)).not.toContain("templateSnapshotJson");
     expect(JSON.stringify(body)).not.toContain("userId");
     expect(mocks.restoreBackupForUser).toHaveBeenCalledWith({
@@ -129,7 +129,7 @@ function backupDto(status: "failed" | "restored") {
     status,
     storageUri:
       status === "restored"
-        ? `s3://agentbay-backups/agents/${AGENT_ID}/backups/${BACKUP_ID}.json`
+        ? `s3://bruno-backups/agents/${AGENT_ID}/backups/${BACKUP_ID}.json`
         : null,
     createdAt: "2026-07-06T04:30:00.000Z",
     restoredAt: status === "restored" ? "2026-07-06T05:00:00.000Z" : null,

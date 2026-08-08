@@ -39,7 +39,7 @@ import { redactSecretText } from "@/src/shared/secret-redaction";
 export const MANUAL_RUNNER_LOG_SOURCE = "manual_runner";
 export const HERMES_GATEWAY_LOG_SOURCE = "hermes_gateway";
 export const MANUAL_RUNNER_BOOTSTRAP_LOG_SOURCE = "manual_runner_bootstrap";
-export const RUNNER_BEARER_TOKEN_ENV = "AGENTBAY_RUNNER_BEARER_TOKEN";
+export const RUNNER_BEARER_TOKEN_ENV = "BRUNO_RUNNER_BEARER_TOKEN";
 export const DEFAULT_MANUAL_RUNNER_TIMEOUT_MS = DOCKER_CLI_TIMEOUT_MS + 5_000;
 
 type ManualRunnerAction = "start" | "stop" | "restart" | "status" | "logs" | "cleanup" | "canary";
@@ -978,7 +978,7 @@ function safeErrorName(error: unknown): string {
 }
 
 function logManualRunnerRequest(event: string, metadata: Record<string, unknown>): void {
-  console.info("[agentbay] manual_runner.request", { event, ...metadata });
+  console.info("[bruno] manual_runner.request", { event, ...metadata });
 }
 
 function isValidManualLogLine(line: ManualRunnerLogLineInput): boolean {

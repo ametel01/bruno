@@ -16,9 +16,9 @@ describe("Hermes agent workload image", () => {
 
     expect(dockerfile).toContain(`FROM ${HERMES_UPSTREAM_IMAGE}@${HERMES_UPSTREAM_INDEX_DIGEST}`);
     expect(dockerfile).toContain(
-      `io.agentbay.hermes.amd64-manifest="${HERMES_AMD64_MANIFEST_DIGEST}"`,
+      `io.bruno.hermes.amd64-manifest="${HERMES_AMD64_MANIFEST_DIGEST}"`,
     );
-    expect(dockerfile).toContain('io.agentbay.hermes.version="v0.18.2"');
+    expect(dockerfile).toContain('io.bruno.hermes.version="v0.18.2"');
     expect(dockerfile).not.toMatch(/^\s*(COPY|ADD)\s/im);
     expect(dockerfile).not.toContain(".env");
     expect(dockerfile).not.toContain("TELEGRAM_BOT_TOKEN");
@@ -34,7 +34,7 @@ describe("Hermes agent workload image", () => {
       scripts: Record<string, string>;
     };
 
-    expect(DEFAULT_LOCAL_HERMES_IMAGE).toBe("agentbay-hermes:local");
+    expect(DEFAULT_LOCAL_HERMES_IMAGE).toBe("bruno-hermes:local");
     expect(HERMES_VERSION_FRAGMENT).toBe("Hermes Agent v0.18.2 (2026.7.7.2)");
     expect(HERMES_RUNTIME_UID_GID).toBe("10000:10000");
     expect(packageJson.scripts["agent:image:smoke"]).toBe(
@@ -56,13 +56,13 @@ describe("Hermes agent workload image", () => {
     expect(workflow).toContain("Publish Hermes workload image");
     expect(workflow).toContain("file: Dockerfile.agent");
     expect(workflow).toContain("ghcr.io");
-    expect(workflow).toContain("ametel01/agentbay-hermes");
+    expect(workflow).toContain("ametel01/bruno-hermes");
     expect(workflow).toContain("sbom: true");
     expect(workflow).toContain("provenance: mode=max");
     expect(workflow).toContain("aquasecurity/trivy-action");
     expect(workflow).toContain("severity: CRITICAL");
     expect(workflow).toContain("Digest verification");
     expect(workflow).not.toContain("Dockerfile.runner");
-    expect(workflow).not.toContain("agentbay-runner");
+    expect(workflow).not.toContain("bruno-runner");
   });
 });

@@ -12,16 +12,16 @@ import {
 } from "@/src/server/backups/backup-storage";
 
 const COMPLETE_ENV = {
-  AGENTBAY_BACKUP_STORAGE_ENDPOINT_URL: " https://nyc3.digitaloceanspaces.com ",
-  AGENTBAY_BACKUP_STORAGE_BUCKET: " agentbay-backups ",
-  AGENTBAY_BACKUP_STORAGE_REGION: " us-east-1 ",
-  AGENTBAY_BACKUP_STORAGE_ACCESS_KEY_ID: " backup-access-key ",
-  AGENTBAY_BACKUP_STORAGE_SECRET_ACCESS_KEY: " backup-secret-key ",
+  BRUNO_BACKUP_STORAGE_ENDPOINT_URL: " https://nyc3.digitaloceanspaces.com ",
+  BRUNO_BACKUP_STORAGE_BUCKET: " bruno-backups ",
+  BRUNO_BACKUP_STORAGE_REGION: " us-east-1 ",
+  BRUNO_BACKUP_STORAGE_ACCESS_KEY_ID: " backup-access-key ",
+  BRUNO_BACKUP_STORAGE_SECRET_ACCESS_KEY: " backup-secret-key ",
 };
 
 describe("backup object storage boundary", () => {
   it("uploads and downloads backup artifacts through the deterministic fake storage", async () => {
-    const storage = new FakeBackupObjectStorage("agentbay-backups");
+    const storage = new FakeBackupObjectStorage("bruno-backups");
     const body = new TextEncoder().encode("backup artifact");
 
     await expect(
@@ -32,7 +32,7 @@ describe("backup object storage boundary", () => {
       }),
     ).resolves.toEqual({
       ok: true,
-      storageUri: "s3://agentbay-backups/agents/agent-1/backup.json",
+      storageUri: "s3://bruno-backups/agents/agent-1/backup.json",
       byteLength: body.byteLength,
     });
 
@@ -40,7 +40,7 @@ describe("backup object storage boundary", () => {
 
     expect(downloaded).toMatchObject({
       ok: true,
-      storageUri: "s3://agentbay-backups/agents/agent-1/backup.json",
+      storageUri: "s3://bruno-backups/agents/agent-1/backup.json",
       contentType: "application/json",
     });
 
@@ -62,7 +62,7 @@ describe("backup object storage boundary", () => {
   });
 
   it("maps missing artifacts and invalid keys to safe backup failures", async () => {
-    const storage = new FakeBackupObjectStorage("agentbay-backups");
+    const storage = new FakeBackupObjectStorage("bruno-backups");
 
     await expect(storage.download({ key: "missing.json" })).resolves.toEqual(
       backupStorageFailure("download"),
@@ -76,7 +76,7 @@ describe("backup object storage boundary", () => {
     expect(readBackupStorageConfig({})).toBeNull();
     expect(readBackupStorageConfig(COMPLETE_ENV)).toEqual({
       endpointUrl: "https://nyc3.digitaloceanspaces.com",
-      bucket: "agentbay-backups",
+      bucket: "bruno-backups",
       region: "us-east-1",
       accessKeyId: "backup-access-key",
       secretAccessKey: "backup-secret-key",
@@ -89,37 +89,37 @@ describe("backup object storage boundary", () => {
   it("rejects partial, blank, malformed, or credential-bearing storage configuration safely", () => {
     expect(() =>
       readBackupStorageConfig({
-        AGENTBAY_BACKUP_STORAGE_ENDPOINT_URL: "https://nyc3.digitaloceanspaces.com",
+        BRUNO_BACKUP_STORAGE_ENDPOINT_URL: "https://nyc3.digitaloceanspaces.com",
       }),
     ).toThrowError(EnvValidationError);
     expect(() =>
       readBackupStorageConfig({
         ...COMPLETE_ENV,
-        AGENTBAY_BACKUP_STORAGE_SECRET_ACCESS_KEY: " ",
+        BRUNO_BACKUP_STORAGE_SECRET_ACCESS_KEY: " ",
       }),
-    ).toThrow("AGENTBAY_BACKUP_STORAGE_SECRET_ACCESS_KEY is required");
+    ).toThrow("BRUNO_BACKUP_STORAGE_SECRET_ACCESS_KEY is required");
     expect(() =>
       readBackupStorageConfig({
         ...COMPLETE_ENV,
-        AGENTBAY_BACKUP_STORAGE_ENDPOINT_URL: "http://spaces.example.com",
+        BRUNO_BACKUP_STORAGE_ENDPOINT_URL: "http://spaces.example.com",
       }),
     ).toThrow("must use HTTPS");
     expect(() =>
       readBackupStorageConfig({
         ...COMPLETE_ENV,
-        AGENTBAY_BACKUP_STORAGE_ENDPOINT_URL: "https://user:secret@spaces.example.com?token=x",
+        BRUNO_BACKUP_STORAGE_ENDPOINT_URL: "https://user:secret@spaces.example.com?token=x",
       }),
     ).toThrow("must not include credentials");
     expect(() =>
       readBackupStorageConfig({
         ...COMPLETE_ENV,
-        AGENTBAY_BACKUP_STORAGE_BUCKET: "Invalid_Bucket",
+        BRUNO_BACKUP_STORAGE_BUCKET: "Invalid_Bucket",
       }),
     ).toThrow("valid S3-compatible bucket name");
     expect(() =>
       readBackupStorageConfig({
         ...COMPLETE_ENV,
-        AGENTBAY_BACKUP_STORAGE_REGION: "us_east_1",
+        BRUNO_BACKUP_STORAGE_REGION: "us_east_1",
       }),
     ).toThrow("lowercase letters, numbers, and hyphens");
   });
@@ -128,7 +128,7 @@ describe("backup object storage boundary", () => {
     expect(
       readBackupStorageConfig({
         ...COMPLETE_ENV,
-        AGENTBAY_BACKUP_STORAGE_ENDPOINT_URL: "http://127.0.0.1:9000",
+        BRUNO_BACKUP_STORAGE_ENDPOINT_URL: "http://127.0.0.1:9000",
       }),
     ).toMatchObject({
       endpointUrl: "http://127.0.0.1:9000",
@@ -162,7 +162,7 @@ describe("backup object storage boundary", () => {
       }),
     ).resolves.toEqual({
       ok: true,
-      storageUri: "s3://agentbay-backups/agents/agent-1/backup.json",
+      storageUri: "s3://bruno-backups/agents/agent-1/backup.json",
       byteLength: 15,
     });
 
@@ -170,7 +170,7 @@ describe("backup object storage boundary", () => {
 
     expect(downloaded).toMatchObject({
       ok: true,
-      storageUri: "s3://agentbay-backups/agents/agent-1/backup.json",
+      storageUri: "s3://bruno-backups/agents/agent-1/backup.json",
       contentType: "application/json",
     });
 
@@ -181,8 +181,8 @@ describe("backup object storage boundary", () => {
     expect(new TextDecoder().decode(downloaded.body)).toBe("stored artifact");
     expect(requests).toHaveLength(2);
     expect(requests.map((request) => [request.method, request.url])).toEqual([
-      ["PUT", "https://nyc3.digitaloceanspaces.com/agentbay-backups/agents/agent-1/backup.json"],
-      ["GET", "https://nyc3.digitaloceanspaces.com/agentbay-backups/agents/agent-1/backup.json"],
+      ["PUT", "https://nyc3.digitaloceanspaces.com/bruno-backups/agents/agent-1/backup.json"],
+      ["GET", "https://nyc3.digitaloceanspaces.com/bruno-backups/agents/agent-1/backup.json"],
     ]);
 
     const serializedRequests = JSON.stringify(
@@ -221,7 +221,7 @@ describe("backup object storage boundary", () => {
 
   it("keeps backup object storage credentials out of shared validation and client components", async () => {
     await expect(readFile("src/env/validation.ts", "utf8")).resolves.not.toContain(
-      "AGENTBAY_BACKUP_STORAGE",
+      "BRUNO_BACKUP_STORAGE",
     );
     await expect(readFile("src/server/backups/backup-storage.ts", "utf8")).resolves.toContain(
       'import "server-only";',
@@ -234,16 +234,16 @@ describe("backup object storage boundary", () => {
         continue;
       }
 
-      expect(source).not.toContain("AGENTBAY_BACKUP_STORAGE");
+      expect(source).not.toContain("BRUNO_BACKUP_STORAGE");
       expect(source).not.toContain("@/src/server/backups/backup-storage");
     }
   });
 
   it("builds safe storage URIs without accepting traversal keys", () => {
-    expect(buildBackupStorageUri("agentbay-backups", "agents/agent-1/backup.json")).toBe(
-      "s3://agentbay-backups/agents/agent-1/backup.json",
+    expect(buildBackupStorageUri("bruno-backups", "agents/agent-1/backup.json")).toBe(
+      "s3://bruno-backups/agents/agent-1/backup.json",
     );
-    expect(() => buildBackupStorageUri("agentbay-backups", "/agents/backup.json")).toThrow(
+    expect(() => buildBackupStorageUri("bruno-backups", "/agents/backup.json")).toThrow(
       "Backup storage key is invalid.",
     );
   });
@@ -251,7 +251,7 @@ describe("backup object storage boundary", () => {
 
 const COMPLETE_ENV_CONFIG = {
   endpointUrl: "https://nyc3.digitaloceanspaces.com",
-  bucket: "agentbay-backups",
+  bucket: "bruno-backups",
   region: "us-east-1",
   accessKeyId: "backup-access-key",
   secretAccessKey: "backup-secret-key",

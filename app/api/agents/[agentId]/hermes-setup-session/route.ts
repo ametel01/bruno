@@ -247,7 +247,7 @@ function parseRunnerResponse(value: unknown): RunnerSetupSessionResponse | null 
     typeof session.websocketPath !== "string" ||
     !session.websocketPath.startsWith("/runner/v1/hermes-setup-sessions/") ||
     typeof session.websocketProtocol !== "string" ||
-    !session.websocketProtocol.startsWith("agentbay.hermes.setup.") ||
+    !session.websocketProtocol.startsWith("bruno.hermes.setup.") ||
     typeof session.expiresAt !== "string" ||
     !Number.isFinite(Date.parse(session.expiresAt))
   ) {

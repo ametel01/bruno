@@ -12,8 +12,8 @@ const COMPLETE_ENV = {
   CLERK_PUBLISHABLE_KEY: "publishable-value-must-not-print",
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "publishable-value-must-not-print",
   CLERK_SECRET_KEY: "secret-value-must-not-print",
-  AGENTBAY_OPERATOR_USERNAME: "operator-user-must-not-print",
-  AGENTBAY_OPERATOR_PASSWORD: "operator-password-must-not-print",
+  BRUNO_OPERATOR_USERNAME: "operator-user-must-not-print",
+  BRUNO_OPERATOR_PASSWORD: "operator-password-must-not-print",
   E2E_CLERK_TEST_USER_A_EMAIL: "user-a+clerk_test@example.invalid",
   E2E_CLERK_TEST_USER_B_EMAIL: "user-b+clerk_test@example.invalid",
 };

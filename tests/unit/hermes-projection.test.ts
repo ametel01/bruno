@@ -34,7 +34,7 @@ describe("Hermes home projection", () => {
     ["openai-api", "OPENAI_API_KEY"],
     ["anthropic", "ANTHROPIC_API_KEY"],
   ] as const)("projects direct %s configuration without other provider keys", async (provider, envKey) => {
-    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-direct-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-direct-"));
     const spec = sampleDirectManagedLaunchSpec(provider);
     const result = await projectHermesHome(spec, { stateRoot: tempRoot });
     const config = await readFile(result.configPath, "utf8");
@@ -47,8 +47,8 @@ describe("Hermes home projection", () => {
     expect(env).not.toContain(provider === "anthropic" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY");
   });
 
-  it("preserves Hermes-owned setup and merges only AgentBay API settings", async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+  it("preserves Hermes-owned setup and merges only Bruno API settings", async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
     const spec = sampleLaunchSpec();
     const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
     const setupConfig = 'model:\n  provider: "openai-codex"\n  model: "gpt-5.4"\n';
@@ -83,7 +83,7 @@ describe("Hermes home projection", () => {
   });
 
   it("is idempotent for the same revision and rejects managed-path symlinks", async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
     const spec = sampleLaunchSpec();
     const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
     await writeFile(
@@ -99,14 +99,14 @@ describe("Hermes home projection", () => {
     );
 
     await rm(first.envPath);
-    await symlink("/tmp/outside-agentbay", first.envPath);
+    await symlink("/tmp/outside-bruno", first.envPath);
     await expect(projectHermesHome(spec, { stateRoot: tempRoot })).rejects.toThrow(
       "safe regular file",
     );
   });
 
   it("projects a complete managed v3 config from a fresh root without setup", async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
     const spec = sampleManagedLaunchSpec();
     const projected = await projectHermesHome(spec, { stateRoot: tempRoot });
     const config = await readFile(projected.configPath, "utf8");
@@ -125,7 +125,7 @@ describe("Hermes home projection", () => {
     expect(soul).toBe(`${spec.prompt.soul}\n`);
     expect(soul).not.toContain(spec.secrets.openrouterApiKey);
     expect(JSON.parse(revision)).toEqual({
-      version: "agentbay.hermes.launch.v3",
+      version: "bruno.hermes.launch.v3",
       agentId: spec.agent.id,
       configRevision: spec.agent.configRevision,
       image: spec.image.ref,
@@ -139,7 +139,7 @@ describe("Hermes home projection", () => {
   });
 
   it("preserves unrelated safe YAML while managed v3 removes aliases and legacy env keys", async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
     const spec = sampleManagedLaunchSpec({
       agent: { ...sampleManagedLaunchSpec().agent, configRevision: "cfg-new-revision" },
     });
@@ -193,12 +193,12 @@ describe("Hermes home projection", () => {
   });
 
   it("rejects unsafe YAML without replacing the old authoritative marker", async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
     const spec = sampleManagedLaunchSpec();
     const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
     await writeFile(join(state.hermesHome, "config.yaml"), "safe: true\n", "utf8");
     await writeFile(
-      join(state.hermesHome, "agentbay-config-revision.json"),
+      join(state.hermesHome, "bruno-config-revision.json"),
       '{"version":"old","agentId":"old","configRevision":"old","image":"old"}\n',
       "utf8",
     );
@@ -207,7 +207,7 @@ describe("Hermes home projection", () => {
     await expect(projectHermesHome(spec, { stateRoot: tempRoot })).rejects.toThrow(
       "Hermes projection is invalid.",
     );
-    expect(await readFile(join(state.hermesHome, "agentbay-config-revision.json"), "utf8")).toBe(
+    expect(await readFile(join(state.hermesHome, "bruno-config-revision.json"), "utf8")).toBe(
       '{"version":"old","agentId":"old","configRevision":"old","image":"old"}\n',
     );
   });
@@ -225,7 +225,7 @@ describe("Hermes home projection", () => {
     ];
 
     for (const config of invalidSecretConfigs) {
-      tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+      tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
       const spec = sampleManagedLaunchSpec();
       const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
 
@@ -237,7 +237,7 @@ describe("Hermes home projection", () => {
       tempRoot = null;
     }
 
-    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
     const spec = sampleManagedLaunchSpec();
     const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
 
@@ -277,7 +277,7 @@ describe("Hermes home projection", () => {
     ];
 
     for (const config of unsafeConfigs) {
-      tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+      tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
       const spec = sampleManagedLaunchSpec();
       const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
 
@@ -291,7 +291,7 @@ describe("Hermes home projection", () => {
   });
 
   it("preserves safe unrelated YAML scalar text containing punctuation", async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
     const spec = sampleManagedLaunchSpec();
     const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
 
@@ -320,7 +320,7 @@ describe("Hermes home projection", () => {
   });
 
   it("normalizes CRLF/export/duplicate managed env and rejects malformed multiline managed env", async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
     const spec = sampleManagedLaunchSpec();
     const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
 
@@ -354,8 +354,8 @@ describe("Hermes home projection", () => {
   });
 
   it("rejects hard-linked final targets and cleans staged temp files without moving the marker", async () => {
-    for (const fileName of ["config.yaml", ".env", "SOUL.md", "agentbay-config-revision.json"]) {
-      tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    for (const fileName of ["config.yaml", ".env", "SOUL.md", "bruno-config-revision.json"]) {
+      tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
       const spec = sampleManagedLaunchSpec();
       const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
       const source = join(state.hermesHome, `${fileName}.source`);
@@ -374,12 +374,12 @@ describe("Hermes home projection", () => {
   });
 
   it("rejects symlinks at every projected target", async () => {
-    for (const fileName of ["config.yaml", ".env", "SOUL.md", "agentbay-config-revision.json"]) {
-      tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    for (const fileName of ["config.yaml", ".env", "SOUL.md", "bruno-config-revision.json"]) {
+      tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
       const spec = sampleManagedLaunchSpec();
       const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
 
-      await symlink("/tmp/outside-agentbay", join(state.hermesHome, fileName));
+      await symlink("/tmp/outside-bruno", join(state.hermesHome, fileName));
       await expect(projectHermesHome(spec, { stateRoot: tempRoot })).rejects.toThrow(
         "Hermes projection is invalid.",
       );
@@ -389,7 +389,7 @@ describe("Hermes home projection", () => {
   });
 
   it("rejects nonregular targets, non-directory state components, and oversized existing files", async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
     const spec = sampleManagedLaunchSpec();
     const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
     const fifoPath = join(state.hermesHome, ".env");
@@ -417,14 +417,14 @@ describe("Hermes home projection", () => {
     }
     await rm(tempRoot, { recursive: true, force: true });
 
-    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
     await writeFile(join(tempRoot, spec.agent.id), "not a directory", "utf8");
     await expect(projectHermesHome(spec, { stateRoot: tempRoot })).rejects.toThrow(
       "Hermes projection is invalid.",
     );
     await rm(tempRoot, { recursive: true, force: true });
 
-    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
     const oversizedState = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
     await writeFile(
       join(oversizedState.hermesHome, "config.yaml"),
@@ -437,7 +437,7 @@ describe("Hermes home projection", () => {
   });
 
   it("sets exact directory and file modes for managed projection outputs", async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
     const spec = sampleManagedLaunchSpec();
     const projected = await projectHermesHome(spec, { stateRoot: tempRoot });
 
@@ -452,7 +452,7 @@ describe("Hermes home projection", () => {
   });
 
   it("uses injected ownership hooks for directories and all staged files", async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
     const chownCalls: Array<{ path: string; uid: number; gid: number }> = [];
     const handleChownCalls: Array<{ uid: number; gid: number }> = [];
 
@@ -484,13 +484,13 @@ describe("Hermes home projection", () => {
   });
 
   it("fails closed on owned temp collisions without removing preexisting temp paths", async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
     const spec = sampleManagedLaunchSpec();
     const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
     const tempSuffix = Buffer.alloc(12, 0xab).toString("hex");
     const collidingTemp = join(state.hermesHome, `.config.yaml.tmp-${tempSuffix}`);
 
-    await symlink("/tmp/outside-agentbay", collidingTemp);
+    await symlink("/tmp/outside-bruno", collidingTemp);
     await expect(
       projectHermesHome(spec, {
         stateRoot: tempRoot,
@@ -543,7 +543,7 @@ describe("Hermes home projection", () => {
         name: "marker-rename",
         fs: {
           rename: async (from, to) => {
-            if (String(to).endsWith("agentbay-config-revision.json")) {
+            if (String(to).endsWith("bruno-config-revision.json")) {
               throw new Error("injected marker rename failure");
             }
             await import("node:fs/promises").then(({ rename }) => rename(from, to));
@@ -553,12 +553,12 @@ describe("Hermes home projection", () => {
     ];
 
     for (const failureCase of failureCases) {
-      tempRoot = await mkdtemp(join(tmpdir(), `agentbay-hermes-${failureCase.name}-`));
+      tempRoot = await mkdtemp(join(tmpdir(), `bruno-hermes-${failureCase.name}-`));
       const spec = sampleManagedLaunchSpec();
       const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
 
       await writeFile(
-        join(state.hermesHome, "agentbay-config-revision.json"),
+        join(state.hermesHome, "bruno-config-revision.json"),
         '{"version":"old","agentId":"old","configRevision":"old","image":"old"}\n',
         "utf8",
       );
@@ -573,7 +573,7 @@ describe("Hermes home projection", () => {
           },
         }),
       ).rejects.toThrow("Hermes projection is invalid.");
-      expect(await readFile(join(state.hermesHome, "agentbay-config-revision.json"), "utf8")).toBe(
+      expect(await readFile(join(state.hermesHome, "bruno-config-revision.json"), "utf8")).toBe(
         '{"version":"old","agentId":"old","configRevision":"old","image":"old"}\n',
       );
       expect((await readdir(state.hermesHome)).filter((entry) => entry.includes(".tmp-"))).toEqual(
@@ -585,7 +585,7 @@ describe("Hermes home projection", () => {
   });
 
   it("repairs projection after marker-last interruption without deleting workspace data", async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "agentbay-hermes-projection-"));
+    tempRoot = await mkdtemp(join(tmpdir(), "bruno-hermes-projection-"));
     const spec = sampleManagedLaunchSpec();
     const state = await prepareHermesState(spec.agent.id, { stateRoot: tempRoot });
     const workspaceSentinel = join(state.workspace, "sentinel.txt");
@@ -593,7 +593,7 @@ describe("Hermes home projection", () => {
 
     await writeFile(workspaceSentinel, "preserved", "utf8");
     await writeFile(
-      join(state.hermesHome, "agentbay-config-revision.json"),
+      join(state.hermesHome, "bruno-config-revision.json"),
       '{"version":"old","agentId":"old","configRevision":"old","image":"old"}\n',
       "utf8",
     );
@@ -602,7 +602,7 @@ describe("Hermes home projection", () => {
         stateRoot: tempRoot,
         fs: {
           rename: async (from, to) => {
-            if (!failedMarker && String(to).endsWith("agentbay-config-revision.json")) {
+            if (!failedMarker && String(to).endsWith("bruno-config-revision.json")) {
               failedMarker = true;
               throw new Error("injected marker interruption");
             }
@@ -611,7 +611,7 @@ describe("Hermes home projection", () => {
         },
       }),
     ).rejects.toThrow("Hermes projection is invalid.");
-    expect(await readFile(join(state.hermesHome, "agentbay-config-revision.json"), "utf8")).toBe(
+    expect(await readFile(join(state.hermesHome, "bruno-config-revision.json"), "utf8")).toBe(
       '{"version":"old","agentId":"old","configRevision":"old","image":"old"}\n',
     );
 

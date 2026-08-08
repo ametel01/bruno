@@ -9,7 +9,7 @@ import type {
 const USER_ID = "00000000-0000-4000-8000-00000000b701";
 const RUNNER_ID = "00000000-0000-4000-8000-00000000b721";
 const DEPLOYMENT_ID_WITHOUT_DASHES = "0000000000004000800000000000b731";
-const OPERATION_KEY = `agentbay-deploy-${DEPLOYMENT_ID_WITHOUT_DASHES}`;
+const OPERATION_KEY = `bruno-deploy-${DEPLOYMENT_ID_WITHOUT_DASHES}`;
 
 describe("runner provisioning logging", () => {
   afterEach(() => {
@@ -173,11 +173,11 @@ function providerConfig(): DigitalOceanProviderConfig {
     token: "fake-provider-token",
     providerMode: "digitalocean",
     runnerBearerToken: "fake-runner-bearer",
-    runnerImage: "agentbay-runner:test",
+    runnerImage: "bruno-runner:test",
     region: "sfo3",
     sizeSlug: "s-1vcpu-2gb",
     image: "ubuntu-24-04-x64",
-    tags: ["agentbay", "agentbay-runner"],
+    tags: ["bruno", "bruno-runner"],
     sshKeyIds: ["fake-key"],
     sshSourceAddresses: ["203.0.113.5/32"],
   };

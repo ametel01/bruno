@@ -84,7 +84,7 @@ describe("DigitalOcean runner resource profiles", () => {
         }),
       ).toMatchObject({
         ok: false,
-        issues: [expect.objectContaining({ field: "AGENTBAY_DIGITALOCEAN_SIZE_SLUG" })],
+        issues: [expect.objectContaining({ field: "BRUNO_DIGITALOCEAN_SIZE_SLUG" })],
       });
     }
   });
@@ -113,7 +113,7 @@ describe("DigitalOcean runner resource profiles", () => {
         ok: false,
         issues: [
           expect.objectContaining({
-            field: "AGENTBAY_DIGITALOCEAN_SIZE_SLUG",
+            field: "BRUNO_DIGITALOCEAN_SIZE_SLUG",
             message: expect.stringContaining("Swap is not counted as compatible memory"),
           }),
         ],
@@ -128,7 +128,7 @@ describe("DigitalOcean runner resource profiles", () => {
       }),
     ).toMatchObject({
       ok: false,
-      issues: [expect.objectContaining({ field: "AGENTBAY_DIGITALOCEAN_SIZE_SLUG" })],
+      issues: [expect.objectContaining({ field: "BRUNO_DIGITALOCEAN_SIZE_SLUG" })],
     });
 
     expect(
@@ -139,7 +139,7 @@ describe("DigitalOcean runner resource profiles", () => {
       }),
     ).toMatchObject({
       ok: false,
-      issues: [expect.objectContaining({ field: "AGENTBAY_HERMES_DOCKER_CPUS" })],
+      issues: [expect.objectContaining({ field: "BRUNO_HERMES_DOCKER_CPUS" })],
     });
 
     expect(
@@ -150,7 +150,7 @@ describe("DigitalOcean runner resource profiles", () => {
       }),
     ).toMatchObject({
       ok: false,
-      issues: [expect.objectContaining({ field: "AGENTBAY_HERMES_DOCKER_MEMORY" })],
+      issues: [expect.objectContaining({ field: "BRUNO_HERMES_DOCKER_MEMORY" })],
     });
 
     expect(
@@ -161,7 +161,7 @@ describe("DigitalOcean runner resource profiles", () => {
     ).toMatchObject({
       ok: false,
       issues: expect.arrayContaining([
-        expect.objectContaining({ field: "AGENTBAY_RUNNER_MAX_AGENTS" }),
+        expect.objectContaining({ field: "BRUNO_RUNNER_MAX_AGENTS" }),
       ]),
     });
   });

@@ -70,7 +70,7 @@ describe("POST /api/runners route", () => {
       provider: "digitalocean",
       name: "Cloud Runner",
     });
-    expect(JSON.stringify(body)).not.toContain("agb_reg_");
+    expect(JSON.stringify(body)).not.toContain("bruno_reg_");
     expect(JSON.stringify(body)).not.toContain("tokenHash");
     expect(JSON.stringify(body)).not.toContain("dop_v1");
   });

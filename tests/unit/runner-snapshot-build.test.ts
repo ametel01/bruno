@@ -7,8 +7,8 @@ import {
   buildSnapshotBuilderBootstrap,
 } from "@/src/server/runners/runner-snapshot-build";
 
-const RUNNER_IMAGE = `ghcr.io/ametel01/agentbay-runner:abc123@sha256:${"a".repeat(64)}`;
-const AGENT_IMAGE = `ghcr.io/ametel01/agentbay-default:abc123@sha256:${"b".repeat(64)}`;
+const RUNNER_IMAGE = `ghcr.io/ametel01/bruno-runner:abc123@sha256:${"a".repeat(64)}`;
+const AGENT_IMAGE = `ghcr.io/ametel01/bruno-default:abc123@sha256:${"b".repeat(64)}`;
 const AUTH = "I_UNDERSTAND_THIS_CREATES_A_BILLABLE_SNAPSHOT_BUILDER";
 
 describe("runner snapshot build orchestration", () => {
@@ -24,12 +24,12 @@ describe("runner snapshot build orchestration", () => {
     );
     expect(userData).toContain("systemctl enable --now docker");
     expect(userData).toContain("systemctl enable --now caddy");
-    expect(userData).toContain("/run/agentbay-snapshot-builder/boot-result.json");
-    expect(userData).toContain("/run/agentbay-snapshot-builder/sanitation-result.json");
+    expect(userData).toContain("/run/bruno-snapshot-builder/boot-result.json");
+    expect(userData).toContain("/run/bruno-snapshot-builder/sanitation-result.json");
     expect(userData).toContain("docker image inspect");
     expect(userData).toContain("docker ps -aq | xargs --no-run-if-empty docker rm --force");
     expect(userData).toContain("grep -R -I -F");
-    expect(userData).toContain("AGENTBAY_RUNNER_REGISTRATION_TOKEN");
+    expect(userData).toContain("BRUNO_RUNNER_REGISTRATION_TOKEN");
     expect(userData).toContain("BEGIN OPENSSH PRIVATE KEY");
   });
 
@@ -280,7 +280,7 @@ describe("runner snapshot build orchestration", () => {
     expect(provider.calls).toEqual(
       expect.arrayContaining([
         { step: "readAction", input: { actionId: "8102" } },
-        { step: "findImage", input: { name: "agentbay-snapshot-builder-111111111111" } },
+        { step: "findImage", input: { name: "bruno-snapshot-builder-111111111111" } },
         { step: "readImage", input: { imageId: "9102" } },
       ]),
     );
@@ -336,9 +336,9 @@ class BadSanitationEvidenceProvider extends FakeDigitalOceanProvider {
           builderResourceId: input.providerResourceId,
           forbiddenPathsAbsent: false,
           hostileMarkersAbsent: true,
-          removedPaths: ["/etc/agentbay/runner.env"],
+          removedPaths: ["/etc/bruno/runner.env"],
           scannedPaths: ["/etc"],
-          hostileMarkers: ["AGENTBAY_RUNNER_REGISTRATION_TOKEN"],
+          hostileMarkers: ["BRUNO_RUNNER_REGISTRATION_TOKEN"],
           completedAt: "2026-08-07T00:00:02.000Z",
         },
       },

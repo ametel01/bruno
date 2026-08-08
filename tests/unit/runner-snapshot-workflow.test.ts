@@ -19,13 +19,13 @@ describe("runner snapshot workflow", () => {
     expect(workflow).toContain("Validate authorization and static inputs before secrets");
     expect(
       workflow.indexOf("Validate authorization and static inputs before secrets"),
-    ).toBeLessThan(workflow.indexOf("AGENTBAY_DIGITALOCEAN_TOKEN"));
+    ).toBeLessThan(workflow.indexOf("BRUNO_DIGITALOCEAN_TOKEN"));
     expect(workflow).toContain("Resolve controller SSH CIDR before provider effects");
     expect(workflow.indexOf("Resolve controller SSH CIDR before provider effects")).toBeLessThan(
-      workflow.indexOf("AGENTBAY_DIGITALOCEAN_TOKEN"),
+      workflow.indexOf("BRUNO_DIGITALOCEAN_TOKEN"),
     );
-    expect(workflow).toContain("AGENTBAY_SNAPSHOT_CONTROLLER_CIDR");
-    expect(workflow).toContain('--controller-cidr "$AGENTBAY_SNAPSHOT_CONTROLLER_CIDR"');
+    expect(workflow).toContain("BRUNO_SNAPSHOT_CONTROLLER_CIDR");
+    expect(workflow).toContain('--controller-cidr "$BRUNO_SNAPSHOT_CONTROLLER_CIDR"');
     expect(workflow).toContain("/32");
     expect(workflow).toContain("/128");
     expect(workflow).not.toContain("0.0.0.0/0");
@@ -62,7 +62,7 @@ describe("runner snapshot workflow", () => {
       ".github/workflows/publish-agent-image.yml",
       ".github/workflows/deploy-production.yml",
     ]) {
-      expect(await readFile(file, "utf8")).not.toContain("AGENTBAY_DIGITALOCEAN_TOKEN");
+      expect(await readFile(file, "utf8")).not.toContain("BRUNO_DIGITALOCEAN_TOKEN");
     }
   });
 
@@ -102,6 +102,6 @@ describe("runner snapshot workflow", () => {
     );
     expect(script).toContain("new AbortController()");
     expect(script).toContain("builderSshKeyId = null");
-    expect(script).not.toContain("process.env.AGENTBAY_DIGITALOCEAN_TOKEN");
+    expect(script).not.toContain("process.env.BRUNO_DIGITALOCEAN_TOKEN");
   });
 });

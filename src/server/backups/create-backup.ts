@@ -76,7 +76,7 @@ export class ManualBackupPersistenceError extends Error {
   }
 }
 
-const MANIFEST_CONTENT_TYPE = "application/vnd.agentbay.backup-manifest+json";
+const MANIFEST_CONTENT_TYPE = "application/vnd.bruno.backup-manifest+json";
 const REDACTED_SECRET = "[redacted]";
 const SECRET_KEY_PATTERN =
   /(api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|refresh[_-]?token|provider[_-]?token|registration[_-]?token|secret|token|password|credential|authorization|bearer)/i;
@@ -84,7 +84,7 @@ const RAW_SECRET_TEXT_PATTERNS = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi,
   /\bsk-[A-Za-z0-9_-]{8,}\b/g,
   /\bdop_v1_[A-Za-z0-9_-]{8,}\b/g,
-  /\bagb_(?:run|reg)_[A-Za-z0-9_-]{8,}\b/g,
+  /\bbruno_(?:run|reg)_[A-Za-z0-9_-]{8,}\b/g,
   /\bgh[pousr]_[A-Za-z0-9_]{8,}\b/g,
   /\bAKIA[A-Z0-9]{12,}\b/g,
   /-----BEGIN (?:RSA |EC |OPENSSH |)PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |)PRIVATE KEY-----/g,

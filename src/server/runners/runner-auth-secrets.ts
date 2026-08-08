@@ -1,8 +1,8 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 export const RUNNER_AUTH_HASH_ALGORITHM = "sha256";
-export const REGISTRATION_TOKEN_PREFIX = "agb_reg";
-export const RUNNER_CREDENTIAL_PREFIX = "agb_run";
+export const REGISTRATION_TOKEN_PREFIX = "bruno_reg";
+export const RUNNER_CREDENTIAL_PREFIX = "bruno_run";
 
 const RANDOM_SECRET_BYTES = 32;
 const STORED_PREFIX_LENGTH = 16;
