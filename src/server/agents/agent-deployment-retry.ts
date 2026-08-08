@@ -13,7 +13,6 @@ import {
   validateDeploymentConfigRevision,
 } from "@/src/server/agents/deployment-state";
 import {
-  CURRENT_ROLLOUT_CONFIGURATION_GENERATION,
   deploymentEnvironmentForRuntime,
   isRolloutConfigurationGeneration,
   initialCohortForAssignedRunner,
@@ -97,7 +96,13 @@ export async function createAgentDeploymentForRunnerReplacement(input: {
     order by created_at desc, id desc
     limit 1
   `);
-  if (!latest || !validateDeploymentConfigRevision(latest.configRevision)) return null;
+  if (
+    !latest ||
+    !validateDeploymentConfigRevision(latest.configRevision) ||
+    !isRolloutConfigurationGeneration(latest.rolloutConfigurationGeneration)
+  ) {
+    return null;
+  }
 
   await input.tx.execute(sql`
     update ${agentDeployments}
@@ -126,11 +131,7 @@ export async function createAgentDeploymentForRunnerReplacement(input: {
       origin: "runner_replacement",
       initialCohort: "unknown",
       deploymentEnvironment: deploymentEnvironmentForRuntime(),
-      rolloutConfigurationGeneration: isRolloutConfigurationGeneration(
-        latest.rolloutConfigurationGeneration,
-      )
-        ? latest.rolloutConfigurationGeneration
-        : CURRENT_ROLLOUT_CONFIGURATION_GENERATION,
+      rolloutConfigurationGeneration: latest.rolloutConfigurationGeneration,
       createdAt: input.now,
       updatedAt: input.now,
     })
@@ -289,8 +290,14 @@ export async function retryAgentDeploymentForUser(input: {
         return { kind: "deployment_not_retryable" as const };
       }
 
-      const [latest] = await tx.execute<{ configRevision: string; stage: string }>(sql`
-        select config_revision as "configRevision", stage
+      const [latest] = await tx.execute<{
+        configRevision: string;
+        rolloutConfigurationGeneration: number | null;
+        stage: string;
+      }>(sql`
+        select config_revision as "configRevision",
+          rollout_configuration_generation as "rolloutConfigurationGeneration",
+          stage
         from ${agentDeployments}
         where agent_id = ${agentId}
           and user_id = ${input.userId}
@@ -298,7 +305,11 @@ export async function retryAgentDeploymentForUser(input: {
         limit 1
       `);
 
-      if (latest?.stage !== "failed" || !validateDeploymentConfigRevision(latest.configRevision)) {
+      if (
+        latest?.stage !== "failed" ||
+        !validateDeploymentConfigRevision(latest.configRevision) ||
+        !isRolloutConfigurationGeneration(latest.rolloutConfigurationGeneration)
+      ) {
         return { kind: "deployment_not_retryable" as const };
       }
 
@@ -325,7 +336,7 @@ export async function retryAgentDeploymentForUser(input: {
           'owner_request',
           ${initialCohortForAssignedRunner(agent.runnerId)},
           ${deploymentEnvironmentForRuntime()},
-          ${CURRENT_ROLLOUT_CONFIGURATION_GENERATION},
+          ${latest.rolloutConfigurationGeneration},
           ${now.toISOString()},
           ${now.toISOString()}
         )

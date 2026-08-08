@@ -31,12 +31,13 @@ its deadline is `pending`. Missing boundaries and invalid event ordering fail vi
 evidence instead of being assigned a zero duration or silently admitted to the SLO cohort.
 
 Each new Agent Deployment also persists immutable origin, initial cohort, deployment environment,
-and rollout-configuration generation evidence. Runner-replacement recovery inherits the triggering
-deployment's generation instead of reading a later default. Only production Owner requests in the
-`cold_deployment` cohort are eligible. Operator trials, non-production deployments, Same-Owner
-Reuse, runner-replacement work, and explicit Owner cancellation before the 60-second boundary are
-excluded. Historical rows without immutable identity remain diagnostic. A missing rollout
-generation and cancellation timestamp before durable acceptance are reported as invalid evidence,
+and rollout-configuration generation evidence. Explicit retries and runner-replacement recovery
+inherit the triggering deployment's generation instead of reading a later default. Only production
+Owner requests in the `cold_deployment` cohort are eligible. Operator trials, non-production
+deployments, Same-Owner Reuse, runner-replacement work, and explicit Owner cancellation before the
+60-second boundary are excluded. Historical rows without immutable identity remain diagnostic. A
+missing rollout generation and cancellation timestamp before durable acceptance are reported as
+invalid evidence,
 not silently excluded. The default query applies the durable eligibility rules before selecting the
 latest observations by `accepted_at` and deployment ID.
 

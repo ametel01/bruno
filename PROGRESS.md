@@ -372,8 +372,8 @@ cold-deployment plan.
 
 - Added migration 0030 for a nullable historical and required-on-new
   `rollout_configuration_generation`. The existing SLO-identity trigger now prevents later
-  mutation, Owner creates and explicit retries pin generation 1, and runner-replacement recovery
-  inherits the triggering deployment's generation.
+  mutation, Owner creates pin generation 1, and explicit retries plus runner-replacement recovery
+  inherit the triggering deployment's generation.
 - Versioned the sanitized Agent Deployment latency report to v4. Per-deployment evidence includes
   the rollout generation; missing configuration, unknown cohort, and Owner cancellation before
   durable acceptance are visible invalid evidence. Eligible and diagnostic rows are ranked

@@ -30,7 +30,9 @@ describe("agent deployment retry persistence", () => {
   });
 
   it("converges separate-connection same-key retries to one new pending operation", async () => {
-    await seedFailedDeployment(connection, AGENT_A_ID, USER_A_ID);
+    await seedFailedDeployment(connection, AGENT_A_ID, USER_A_ID, {
+      rolloutConfigurationGeneration: 7,
+    });
     const first = createDatabaseConnection();
     const second = createDatabaseConnection();
     const onCommitted = vi.fn();
@@ -76,7 +78,7 @@ describe("agent deployment retry persistence", () => {
             idempotencyKey: "Retry-Key-Case",
             attemptCount: 0,
             acceptedAt: expect.any(Date),
-            rolloutConfigurationGeneration: 1,
+            rolloutConfigurationGeneration: 7,
           }),
         ]),
       );
