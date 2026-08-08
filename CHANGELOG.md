@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Bounded deployment recovery now drains at most 25 due items under one shared 40-second cron
+  deadline, preserves PostgreSQL-first progress during QStash outages, aborts stalled hint
+  publication while its delivery generation remains fenced, and reports only the active
+  `cron`/`qstash` mode (or fail-closed `invalid`) through public health evidence.
 - Bounded poison-wakeup handling now exhausts permanent QStash authentication/payload failures
   immediately and retryable publication failures after an atomic configurable attempt limit of 12
   by default. Exhausted generations leave ordinary claims, retain only sanitized operational

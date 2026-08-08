@@ -208,6 +208,61 @@ describe("deployment wakeup exhaustion", () => {
     });
   });
 
+  it("bounds a stalled fake-QStash sweep and leaves its generation fenced", async () => {
+    const payload = await createWakeupPayload(connection);
+    const controller = new AbortController();
+    let publicationStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      publicationStarted = resolve;
+    });
+    const publisher = {
+      publish: vi.fn(
+        () =>
+          new Promise<{ messageId: string }>(() => {
+            publicationStarted?.();
+          }),
+      ),
+    };
+
+    const sweep = sweepDeploymentWakeupOutbox({
+      createConnection: () => connection,
+      readConfig: () => qstashConfig(12),
+      publisher,
+      now: () => NOW,
+      randomUUID: () => "00000000-0000-4000-8000-000000000f99",
+      signal: controller.signal,
+    });
+    await started;
+    controller.abort(new DOMException("Cron deadline exceeded.", "TimeoutError"));
+
+    await expect(sweep).resolves.toEqual({ published: 0 });
+    expect(publisher.publish).toHaveBeenCalledOnce();
+
+    const [wakeup] = await connection.db
+      .select()
+      .from(agentDeploymentWakeups)
+      .where(eq(agentDeploymentWakeups.deploymentId, payload.deploymentId));
+    expect(wakeup).toMatchObject({
+      state: "publishing",
+      publishAttemptCount: 1,
+      publishLeaseOwner: "publish:00000000-0000-4000-8000-000000000f99",
+    });
+
+    const reorderedPublisher = {
+      publish: vi.fn(async () => ({ messageId: "must-not-duplicate" })),
+    };
+    await expect(
+      sweepDeploymentWakeupOutbox({
+        createConnection: () => connection,
+        readConfig: () => qstashConfig(12),
+        publisher: reorderedPublisher,
+        now: () => NOW,
+        randomUUID: () => "00000000-0000-4000-8000-000000000f98",
+      }),
+    ).resolves.toEqual({ published: 0 });
+    expect(reorderedPublisher.publish).not.toHaveBeenCalled();
+  });
+
   it("lists and inspects only sanitized exhaustion evidence", async () => {
     const payload = await createWakeupPayload(connection);
     await exhaustWakeup(connection, payload, 401);

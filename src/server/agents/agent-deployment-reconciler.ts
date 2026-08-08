@@ -123,6 +123,11 @@ export type DeploymentActionContext = {
   remainingMs: () => number;
 };
 
+export type AgentDeploymentReconcileBudget = {
+  deadlineAt: Date;
+  signal: AbortSignal;
+};
+
 export type AgentDeploymentReconcilerDependencies = {
   createConnection?: () => DatabaseConnection;
   now?: () => Date;
@@ -202,8 +207,12 @@ export function computeDeploymentBackoffMs(attemptCount: number): number {
 
 export async function reconcileNextAgentDeployment(
   dependencies: AgentDeploymentReconcilerDependencies = {},
+  budget?: AgentDeploymentReconcileBudget,
 ): Promise<AgentDeploymentReconcileResult> {
-  return publicReconcileResult(await reconcileOne({ kind: "global" }, dependencies));
+  const context = budget
+    ? deploymentActionContextFromBudget(budget, dependencies.now ?? (() => new Date()))
+    : undefined;
+  return publicReconcileResult(await reconcileOne({ kind: "global" }, dependencies, context));
 }
 
 export async function reconcileTargetAgentDeployment(
@@ -311,6 +320,17 @@ function createDeploymentActionContext(now: () => Date): {
   };
 
   return { context, dispose: () => clearTimeout(timeout) };
+}
+
+function deploymentActionContextFromBudget(
+  budget: AgentDeploymentReconcileBudget,
+  now: () => Date,
+): DeploymentActionContext {
+  return {
+    deadlineAt: budget.deadlineAt,
+    signal: budget.signal,
+    remainingMs: () => Math.max(0, budget.deadlineAt.getTime() - now().getTime()),
+  };
 }
 
 async function reconcileOne(

@@ -945,6 +945,34 @@ describe("agent deployment reconciler", () => {
     expect(seen[0]?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it("honors the cron caller's shared 40-second deadline and abort signal", async () => {
+    await seedAutomaticRunner(connection, { status: "online", provisioningStatus: "ready" });
+    await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
+    await seedDeployment(connection, { stage: "configuring_hermes" });
+    const launchSpec = managedLaunchSpec();
+    const controller = new AbortController();
+    const deadlineAt = new Date(NOW.getTime() + 40_000);
+    const seen: Array<{ signal: AbortSignal; timeoutMs: number }> = [];
+    const adapter = fakeRunnerAdapter({
+      start: vi.fn(async () => acceptedStart(launchSpec, OPERATION_ID)),
+    });
+
+    await reconcileNextAgentDeployment(
+      {
+        createConnection: () => connection,
+        now: () => NOW,
+        launchSpec: async () => ({ ok: true, spec: launchSpec }),
+        manualRunnerAdapter: (_runner, options) => {
+          seen.push(options);
+          return adapter as never;
+        },
+      },
+      { deadlineAt, signal: controller.signal },
+    );
+
+    expect(seen).toEqual([{ signal: controller.signal, timeoutMs: 40_000 }]);
+  });
+
   it("drains one pinned runner deployment through ready with one shared deadline", async () => {
     const otherAgentId = "00000000-0000-4000-8000-00000000a712";
     const otherDeploymentId = "00000000-0000-4000-8000-00000000a732";

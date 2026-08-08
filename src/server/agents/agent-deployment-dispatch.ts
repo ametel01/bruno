@@ -65,10 +65,12 @@ export type DeploymentWakeupDispatchDependencies = {
   publisher?: DeploymentWakeupPublisher;
   now?: () => Date;
   randomUUID?: () => string;
+  signal?: AbortSignal;
 };
 
 const MAX_WAKEUP_BODY_BYTES = 4096;
 const PUBLISH_LEASE_MS = 30_000;
+const QSTASH_DELIVERY_RETRY_DELAY_MS = 1_000;
 const SAFE_PUBLISH_REJECTION_CODE = "publish_rejected";
 const SAFE_PUBLISH_AUTHENTICATION_REJECTION_CODE = "publish_authentication_rejected";
 const SAFE_PUBLISH_PAYLOAD_REJECTION_CODE = "publish_payload_rejected";
@@ -317,11 +319,15 @@ export async function publishDeploymentWakeupAfterCommit(
     if (!claimed) return "unavailable";
 
     try {
-      const published = await publisher.publish({
-        payload,
-        dueAt: new Date(payload.dueAt),
-        callbackUrl: deploymentWakeupCallbackUrl(config),
-      });
+      const published = await waitForDeploymentWakeupPublish(
+        () =>
+          publisher.publish({
+            payload,
+            dueAt: new Date(payload.dueAt),
+            callbackUrl: deploymentWakeupCallbackUrl(config),
+          }),
+        dependencies.signal,
+      );
       await connection.db.transaction(async (tx) => {
         await lockDeploymentForWakeupCompletion(tx, claimed);
         await markDeploymentWakeupPublished(tx, {
@@ -333,6 +339,7 @@ export async function publishDeploymentWakeupAfterCommit(
       });
       return "published";
     } catch (error) {
+      if (dependencies.signal?.aborted) return "unavailable";
       const failure = classifyDeploymentWakeupPublishFailure(error);
       await connection.db.transaction(async (tx) => {
         await lockDeploymentForWakeupCompletion(tx, claimed);
@@ -416,15 +423,19 @@ export async function sweepDeploymentWakeupOutbox(
     if (!claimed) return { published: 0 };
 
     try {
-      const published = await publisher.publish({
-        payload: {
-          deploymentId: claimed.deploymentId,
-          generation: claimed.generation,
-          dueAt: claimed.dueAt,
-        },
-        dueAt: new Date(claimed.dueAt),
-        callbackUrl: deploymentWakeupCallbackUrl(config),
-      });
+      const published = await waitForDeploymentWakeupPublish(
+        () =>
+          publisher.publish({
+            payload: {
+              deploymentId: claimed.deploymentId,
+              generation: claimed.generation,
+              dueAt: claimed.dueAt,
+            },
+            dueAt: new Date(claimed.dueAt),
+            callbackUrl: deploymentWakeupCallbackUrl(config),
+          }),
+        dependencies.signal,
+      );
       await connection.db.transaction(async (tx) => {
         await lockDeploymentForWakeupCompletion(tx, claimed);
         await markDeploymentWakeupPublished(tx, {
@@ -436,6 +447,7 @@ export async function sweepDeploymentWakeupOutbox(
       });
       return { published: 1 };
     } catch (error) {
+      if (dependencies.signal?.aborted) return { published: 0 };
       const failure = classifyDeploymentWakeupPublishFailure(error);
       await connection.db.transaction(async (tx) => {
         await lockDeploymentForWakeupCompletion(tx, claimed);
@@ -455,6 +467,30 @@ export async function sweepDeploymentWakeupOutbox(
   } finally {
     if (ownsConnection) await connection.close();
   }
+}
+
+function waitForDeploymentWakeupPublish<T>(
+  publish: () => Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (signal?.aborted) return Promise.reject(signal.reason);
+  const publication = publish();
+  if (!signal) return publication;
+
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    publication.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
 }
 
 export async function claimDeploymentWakeupDelivery(
@@ -698,6 +734,7 @@ export function createQstashDeploymentWakeupPublisher(input: {
         method: "POST",
         notBefore,
         retries: 3,
+        retryDelay: String(QSTASH_DELIVERY_RETRY_DELAY_MS),
         deduplicationId: `${payload.deploymentId}:${payload.generation}`,
         redact: { body: true, header: true },
       });

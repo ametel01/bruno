@@ -124,6 +124,27 @@ stage timing/status, and issue names. They must not retain user identity,
 agent identity, raw credentials, tokens, endpoint URLs, provider resource IDs, provider responses,
 cloud-init output, arbitrary metadata, or serialized environment objects.
 
+## Deployment dispatch recovery
+
+PostgreSQL deployment and wakeup rows remain authoritative in both dispatch modes. The protected
+deployment cron reconciler processes the oldest due work first and stops after at most 25 items or
+one shared 40-second deadline. Its abort signal and remaining timeout propagate to runner/provider
+boundaries. QStash mode reserves one of those 25 item slots for its outbox sweep. The reconciler
+performs PostgreSQL recovery before that sweep, so a QStash outage cannot starve durable recovery or
+create a second Droplet effect. A timed-out publication keeps its leased delivery generation fenced
+until ordinary lease recovery.
+
+QStash publication uses the persisted `due_at` value as `notBefore`, one-second provider retry
+delays, and a `deploymentId:generation` deduplication identity. Duplicate, reordered, early, stale,
+and already claimed deliveries cannot advance deployment state twice. The signed callback drains
+only the claimed deployment and publishes the exact next persisted generation when more delayed
+work is due.
+
+`BRUNO_DEPLOYMENT_DISPATCH_MODE` defaults to `cron`. Selecting `qstash` requires the token, distinct
+current and next signing keys, and a valid public HTTPS application URL; partial configuration
+fails closed. The public `/health` response reports only `deploymentDispatch: "cron"`, `"qstash"`,
+or `"invalid"` and never includes QStash tokens, signing keys, callback URLs, or delivery details.
+
 ## Exhausted deployment wakeups
 
 QStash publication is a bounded hint over PostgreSQL state. Known authentication (`401`, `403`) or

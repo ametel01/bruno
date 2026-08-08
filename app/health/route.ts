@@ -1,17 +1,35 @@
 import { checkDatabaseHealth } from "@/src/server/db/health";
+import { readDeploymentDispatchConfig } from "@/src/server/env";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const health = await checkDatabaseHealth();
+type HealthRouteDependencies = {
+  checkHealth?: typeof checkDatabaseHealth;
+  readDispatchConfig?: typeof readDeploymentDispatchConfig;
+  now?: () => Date;
+};
+
+export async function GET(
+  _request?: Request,
+  _context?: unknown,
+  dependencies: HealthRouteDependencies = {},
+) {
+  const health = await (dependencies.checkHealth ?? checkDatabaseHealth)();
+  const dispatch = (dependencies.readDispatchConfig ?? readDeploymentDispatchConfig)();
+  const ok = health.ok && dispatch.ok;
   const payload = {
-    status: health.ok ? "ok" : "error",
+    status: ok ? "ok" : "error",
     database: health.database,
-    timestamp: new Date().toISOString(),
-    ...(health.message ? { message: health.message } : {}),
+    deploymentDispatch: dispatch.ok ? dispatch.mode : "invalid",
+    timestamp: (dependencies.now?.() ?? new Date()).toISOString(),
+    ...(health.message
+      ? { message: health.message }
+      : dispatch.ok
+        ? {}
+        : { message: "Deployment dispatch configuration is invalid." }),
   };
 
   return Response.json(payload, {
-    status: health.ok ? 200 : 503,
+    status: ok ? 200 : 503,
   });
 }

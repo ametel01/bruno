@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { SignJWT } from "jose";
+import { Client } from "@upstash/qstash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/internal/agent-deployments/wakeup/route";
 import { createAgentDeploymentForUser } from "@/src/server/agents/agent-deployments";
 import {
   deploymentWakeupSafeCodes,
   type DeploymentWakeupPayload,
+  createQstashDeploymentWakeupPublisher,
   publishLatestDeploymentWakeupAfterCommit,
 } from "@/src/server/agents/agent-deployment-dispatch";
 import {
@@ -51,8 +53,38 @@ describe("POST /api/internal/agent-deployments/wakeup", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await resetTables(connection);
     await connection.close();
+  });
+
+  it("schedules fake-QStash delivery and short retries from the persisted due time", async () => {
+    const dueAt = new Date("2099-08-09T00:00:40.999Z");
+    const payload: DeploymentWakeupPayload = {
+      deploymentId: "00000000-0000-4000-8000-000000000e31",
+      generation: 7,
+      dueAt: dueAt.toISOString(),
+    };
+    const publishJson = vi
+      .spyOn(Client.prototype, "publishJSON")
+      .mockResolvedValue({ messageId: "fake-qstash-message" });
+    const publisher = createQstashDeploymentWakeupPublisher({
+      token: "qstash_token_abcdefghijklmnopqrstuvwxyz012345",
+    });
+
+    await expect(publisher.publish({ payload, dueAt, callbackUrl: CALLBACK_URL })).resolves.toEqual(
+      { messageId: "fake-qstash-message" },
+    );
+    expect(publishJson).toHaveBeenCalledWith({
+      url: CALLBACK_URL,
+      body: payload,
+      method: "POST",
+      notBefore: Math.floor(dueAt.getTime() / 1_000),
+      retries: 3,
+      retryDelay: "1000",
+      deduplicationId: `${payload.deploymentId}:${payload.generation}`,
+      redact: { body: true, header: true },
+    });
   });
 
   it("verifies the unmodified body before parsing and rejects unsigned payloads safely", async () => {

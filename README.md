@@ -298,8 +298,9 @@ vercel env add CRON_SECRET production
 
 `vercel.json` schedules both `/api/internal/agent-deployments/reconcile` and
 `/api/internal/agent-runtime/reconcile` every minute. Each request must carry the exact cron secret
-as a bearer credential, and each invocation claims at most one due row. Keep the value in Vercel;
-do not place it in a URL, log, or committed file.
+as a bearer credential. Deployment recovery processes at most 25 due items under one shared
+40-second deadline; runtime convergence continues to claim at most one due row. Keep the value in
+Vercel; do not place it in a URL, log, or committed file.
 
 Leave `BRUNO_READY_AGENT_CREATION_ENABLED` unset during initial deployment. Add it with the exact
 value `true` only to the controlled environment after the authorized staging acceptance passes.
@@ -358,10 +359,11 @@ curl -fsS https://your-domain.example/health
 vercel logs --environment production --level error --since 5m
 ```
 
-The health response should report `status: "ok"` and `database: "reachable"`. Then authenticate,
-open Settings, provision a cloud runner, and wait for registration plus the first heartbeat before
-assigning or starting an agent. Production start requests fail closed when no online runner is
-available.
+The health response should report `status: "ok"`, `database: "reachable"`, and the sanitized active
+`deploymentDispatch` mode (`cron` or `qstash`). An incomplete selected QStash configuration reports
+`deploymentDispatch: "invalid"` and returns `503`. Then authenticate, open Settings, provision a
+cloud runner, and wait for registration plus the first heartbeat before assigning or starting an
+agent. Production start requests fail closed when no online runner is available.
 
 ### 7. Operate and roll back ready-mode creation
 
