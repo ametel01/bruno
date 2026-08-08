@@ -15,30 +15,50 @@ export type DockerInfoRunner = () => Promise<{
   stdout: string;
 }>;
 
+type DockerAvailabilityOptions = {
+  attempts?: number;
+  retryDelayMs?: number;
+  wait?: (delayMs: number) => Promise<void>;
+};
+
+const DEFAULT_DOCKER_INFO_ATTEMPTS = 3;
+const DEFAULT_DOCKER_INFO_RETRY_DELAY_MS = 250;
+
 export async function detectDockerAvailability(
   runDockerInfo: DockerInfoRunner = runDockerInfoCommand,
+  options: DockerAvailabilityOptions = {},
 ): Promise<DockerAvailability> {
-  try {
-    const result = await runDockerInfo();
-    const serverVersion = result.stdout.trim();
+  const attempts = options.attempts ?? DEFAULT_DOCKER_INFO_ATTEMPTS;
+  const retryDelayMs = options.retryDelayMs ?? DEFAULT_DOCKER_INFO_RETRY_DELAY_MS;
+  const wait = options.wait ?? waitForRetry;
+  let lastFailure = "Docker daemon check failed.";
 
-    if (serverVersion.length === 0) {
-      return {
-        available: false,
-        reason: "Docker daemon check returned no server version.",
-      };
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const result = await runDockerInfo();
+      const serverVersion = result.stdout.trim();
+
+      if (serverVersion.length > 0) {
+        return {
+          available: true,
+          serverVersion,
+        };
+      }
+
+      lastFailure = "Docker daemon check returned no server version.";
+    } catch (error) {
+      lastFailure = describeDockerFailure(error);
     }
 
-    return {
-      available: true,
-      serverVersion,
-    };
-  } catch (error) {
-    return {
-      available: false,
-      reason: describeDockerFailure(error),
-    };
+    if (attempt < attempts) {
+      await wait(retryDelayMs);
+    }
   }
+
+  return {
+    available: false,
+    reason: lastFailure,
+  };
 }
 
 export function dockerUnavailableSkipReason(availability: DockerAvailability): string | null {
@@ -68,6 +88,10 @@ function runDockerInfoCommand(): Promise<{ stderr: string; stdout: string }> {
       },
     );
   });
+}
+
+function waitForRetry(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 function describeDockerFailure(error: unknown): string {
