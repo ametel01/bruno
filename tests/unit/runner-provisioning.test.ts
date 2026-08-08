@@ -1044,6 +1044,7 @@ function invalidSnapshotConfig(): DigitalOceanProviderConfig {
         region: "sfo3",
         sizeSlug: "s-1vcpu-2gb",
         sizeDiskGb: 50,
+        baseImageId: "ubuntu-24-04-x64-20260801",
         baseImageSlug: "ubuntu-24-04-x64",
         architecture: "amd64",
         runnerImage,

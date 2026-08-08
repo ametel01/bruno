@@ -118,6 +118,7 @@ export type RunnerSnapshotExpectedIdentities = {
   region: string;
   sizeSlug: string;
   sizeDiskGb: number;
+  baseImageId: string;
   baseImageSlug: string;
   architecture: "amd64";
   runnerImage: string;
@@ -127,6 +128,10 @@ export type RunnerSnapshotExpectedIdentities = {
 };
 
 export type RunnerSnapshotTrustedPublicKeys = Readonly<Record<string, string>>;
+
+export function isRunnerSnapshotSigningKeyId(value: unknown): value is string {
+  return typeof value === "string" && SIGNING_KEY_ID_PATTERN.test(value);
+}
 
 export type RunnerSnapshotManifestSelection =
   | {
@@ -170,7 +175,7 @@ export function createRunnerSnapshotAttestation(input: {
   if (!parsed.ok) {
     throw new Error(`Runner snapshot manifest is invalid: ${parsed.reason}.`);
   }
-  if (!SIGNING_KEY_ID_PATTERN.test(input.signingKeyId)) {
+  if (!isRunnerSnapshotSigningKeyId(input.signingKeyId)) {
     throw new Error("Runner snapshot signing key ID is invalid.");
   }
 
@@ -400,6 +405,7 @@ function checkManifestIdentities(
     manifest.runner.diskSizeGb !== expected.sizeDiskGb ||
     manifest.runner.architecture !== expected.architecture ||
     manifest.snapshot.architecture !== expected.architecture ||
+    manifest.baseImage.id !== expected.baseImageId ||
     manifest.baseImage.slug !== expected.baseImageSlug ||
     manifest.runnerImage.reference !== expected.runnerImage ||
     manifest.runnerImage.digest !== runner?.imageDigest ||
@@ -581,8 +587,7 @@ function isBundleSignature(value: unknown): value is RunnerSnapshotBundle["signa
     !isRecord(value) ||
     hasUnknownKeys(value, ["algorithm", "keyId", "value"]) ||
     value.algorithm !== SNAPSHOT_SIGNATURE_ALGORITHM ||
-    typeof value.keyId !== "string" ||
-    !SIGNING_KEY_ID_PATTERN.test(value.keyId) ||
+    !isRunnerSnapshotSigningKeyId(value.keyId) ||
     typeof value.value !== "string" ||
     !/^[A-Za-z0-9_-]+$/.test(value.value)
   ) {

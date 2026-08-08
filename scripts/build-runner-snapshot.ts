@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { buildRunnerSnapshot } from "@/src/server/runners/runner-snapshot-build";
 import { DigitalOceanApiProvider } from "@/src/server/runners/digitalocean-provider";
+import { isRunnerSnapshotSigningKeyId } from "@/src/server/runners/runner-snapshot-manifest";
 
 const execFileAsync = promisify(execFile);
 const args = parseArgs(process.argv.slice(2));
@@ -107,7 +108,7 @@ function validatePreEffectArgs(input: ReturnType<typeof parseArgs>): void {
   if (!/^[a-f0-9]{40}$/.test(input.sourceRevision)) {
     throw new Error("--source-revision is invalid.");
   }
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.signingKeyId)) {
+  if (!isRunnerSnapshotSigningKeyId(input.signingKeyId)) {
     throw new Error("--signing-key-id is invalid.");
   }
   for (const [key, value] of [

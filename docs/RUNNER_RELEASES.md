@@ -166,6 +166,7 @@ BRUNO_DIGITALOCEAN_IMAGE_MODE=snapshot
 BRUNO_DIGITALOCEAN_SNAPSHOT_BUNDLE=<canonical Snapshot Attestation v2 bundle JSON>
 BRUNO_DIGITALOCEAN_APPROVED_SNAPSHOT_DIGEST=<exact sha256 bundle digest>
 BRUNO_DIGITALOCEAN_SNAPSHOT_TRUST_SET=<JSON object mapping key IDs to Ed25519 public keys>
+BRUNO_DIGITALOCEAN_SNAPSHOT_BASE_IMAGE_ID=<exact provider base image ID>
 BRUNO_DOCKER_RUNNER_IMAGE=<immutable default-agent image reference>
 ```
 

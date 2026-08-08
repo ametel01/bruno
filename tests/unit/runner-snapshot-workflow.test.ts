@@ -32,6 +32,12 @@ describe("runner snapshot workflow", () => {
     expect(workflow).not.toContain("::/0");
     expect(workflow).toContain("if: always()");
     expect(workflow).toContain("Build signed snapshot bundle");
+    expect(workflow).toContain("Verify Snapshot Attestation v2 contracts before provider effects");
+    expect(workflow).toContain("tests/unit/runner-snapshot-manifest.test.ts");
+    expect(workflow).toContain("tests/unit/runner-snapshot-build.test.ts");
+    expect(
+      workflow.indexOf("Verify Snapshot Attestation v2 contracts before provider effects"),
+    ).toBeLessThan(workflow.indexOf("BRUNO_DIGITALOCEAN_TOKEN"));
     expect(workflow).toContain("BRUNO_SNAPSHOT_SIGNING_KEY_ID");
     expect(workflow).toContain('--signing-key-id "$BRUNO_SNAPSHOT_SIGNING_KEY_ID"');
     expect(workflow).toContain("Validate retrieved builder evidence");

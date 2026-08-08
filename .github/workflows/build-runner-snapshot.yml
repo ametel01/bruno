@@ -86,6 +86,14 @@ jobs:
       - name: Install frozen dependencies
         run: bun install --frozen-lockfile --ignore-scripts
 
+      - name: Verify Snapshot Attestation v2 contracts before provider effects
+        run: >-
+          bun --conditions react-server node_modules/.bin/vitest run --no-file-parallelism
+          tests/unit/runner-snapshot-manifest.test.ts
+          tests/unit/runner-snapshot-build.test.ts
+          tests/unit/runner-snapshot-workflow.test.ts
+          tests/unit/server-env.test.ts
+
       - name: Resolve controller SSH CIDR before provider effects
         run: |
           set -euo pipefail

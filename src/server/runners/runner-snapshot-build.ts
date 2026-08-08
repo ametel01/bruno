@@ -3,6 +3,7 @@ import "server-only";
 import { isIP } from "node:net";
 import {
   createRunnerSnapshotAttestation,
+  isRunnerSnapshotSigningKeyId,
   type RunnerSnapshotBundle,
   type RunnerSnapshotManifest,
 } from "./runner-snapshot-manifest";
@@ -665,7 +666,7 @@ function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
       !isSha256SshFingerprint(input.expectedBuilderHostKeySha256)) ||
     input.hermesImage === undefined ||
     !hermesImage.includes("@sha256:") ||
-    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.signingKeyId)
+    !isRunnerSnapshotSigningKeyId(input.signingKeyId)
   ) {
     return { ok: false, reason: "input_invalid" };
   }

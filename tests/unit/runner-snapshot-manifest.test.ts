@@ -93,6 +93,7 @@ describe("runner snapshot manifest", () => {
   it.each([
     ["runner profile", { sizeSlug: "s-2vcpu-4gb" }, "manifest_identity_mismatch"],
     ["runner disk", { sizeDiskGb: 60 }, "manifest_identity_mismatch"],
+    ["base OS ID", { baseImageId: "ubuntu-24-04-x64-20200202" }, "manifest_identity_mismatch"],
     ["base OS", { baseImageSlug: "ubuntu-22-04-x64" }, "manifest_identity_mismatch"],
     [
       "runner image",
@@ -352,6 +353,7 @@ function expected(): RunnerSnapshotExpectedIdentities {
     region: "sfo3",
     sizeSlug: "s-1vcpu-2gb",
     sizeDiskGb: 50,
+    baseImageId: "ubuntu-24-04-x64-20200101",
     baseImageSlug: "ubuntu-24-04-x64",
     architecture: "amd64",
     runnerImage: RUNNER_IMAGE,

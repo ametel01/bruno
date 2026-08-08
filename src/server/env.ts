@@ -28,9 +28,10 @@ import {
   parseHermesDockerPidsLimit,
   validateDigitalOceanRunnerResourceCompatibility,
 } from "@/src/server/runners/runner-resource-profiles";
-import type {
-  RunnerSnapshotExpectedIdentities,
-  RunnerSnapshotTrustedPublicKeys,
+import {
+  isRunnerSnapshotSigningKeyId,
+  type RunnerSnapshotExpectedIdentities,
+  type RunnerSnapshotTrustedPublicKeys,
 } from "@/src/server/runners/runner-snapshot-manifest";
 
 export const DEFAULT_BRUNO_RUNNER_IMAGE = "ghcr.io/ametel01/bruno-runner:main";
@@ -569,9 +570,18 @@ function readDigitalOceanSnapshotMode(
     input.BRUNO_DIGITALOCEAN_SNAPSHOT_TRUST_SET,
     "BRUNO_DIGITALOCEAN_SNAPSHOT_TRUST_SET",
   );
+  const baseImageId = readRequiredSnapshotSetting(
+    input.BRUNO_DIGITALOCEAN_SNAPSHOT_BASE_IMAGE_ID,
+    "BRUNO_DIGITALOCEAN_SNAPSHOT_BASE_IMAGE_ID",
+  );
   if (!/^sha256:[a-f0-9]{64}$/.test(approvedDigest)) {
     throw new EnvValidationError([
       "BRUNO_DIGITALOCEAN_APPROVED_SNAPSHOT_DIGEST must be an exact sha256 digest for snapshot mode.",
+    ]);
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(baseImageId)) {
+    throw new EnvValidationError([
+      "BRUNO_DIGITALOCEAN_SNAPSHOT_BASE_IMAGE_ID must be an exact provider base image ID for snapshot mode.",
     ]);
   }
   const trustedPublicKeys = readSnapshotTrustSet(trustSetBytes);
@@ -585,6 +595,7 @@ function readDigitalOceanSnapshotMode(
       region: expectedInput.region,
       sizeSlug: expectedInput.sizeSlug,
       sizeDiskGb: diskGbForDigitalOceanSizeSlug(expectedInput.sizeSlug),
+      baseImageId,
       baseImageSlug: expectedInput.baseImageSlug,
       architecture: "amd64",
       runnerImage: expectedInput.runnerImage,
@@ -620,7 +631,7 @@ function readSnapshotTrustSet(value: string): RunnerSnapshotTrustedPublicKeys {
     entries.length > 16 ||
     entries.some(
       ([keyId, publicKey]) =>
-        !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(keyId) ||
+        !isRunnerSnapshotSigningKeyId(keyId) ||
         typeof publicKey !== "string" ||
         publicKey.trim().length === 0 ||
         publicKey.length > 8192,

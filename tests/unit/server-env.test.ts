@@ -406,6 +406,7 @@ describe("server-only provider environment validation", () => {
       BRUNO_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
       BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
       BRUNO_DIGITALOCEAN_IMAGE_MODE: "snapshot",
+      BRUNO_DIGITALOCEAN_SNAPSHOT_BASE_IMAGE_ID: "ubuntu-24-04-x64-20260801",
     };
 
     expect(() => readDigitalOceanProviderConfig(base)).toThrow(
@@ -429,6 +430,7 @@ describe("server-only provider environment validation", () => {
         region: "sfo3",
         sizeSlug: "s-1vcpu-2gb",
         sizeDiskGb: 50,
+        baseImageId: "ubuntu-24-04-x64-20260801",
         baseImageSlug: "ubuntu-24-04-x64",
       },
       approvedDigest: `sha256:${"a".repeat(64)}`,
@@ -453,6 +455,16 @@ describe("server-only provider environment validation", () => {
         BRUNO_DIGITALOCEAN_SNAPSHOT_TRUST_SET: "[]",
       }),
     ).toThrow("must be a JSON object of signing key IDs");
+
+    expect(() =>
+      readDigitalOceanProviderConfig({
+        ...base,
+        BRUNO_DIGITALOCEAN_SNAPSHOT_BASE_IMAGE_ID: undefined,
+        BRUNO_DIGITALOCEAN_SNAPSHOT_BUNDLE: "{}",
+        BRUNO_DIGITALOCEAN_APPROVED_SNAPSHOT_DIGEST: `sha256:${"a".repeat(64)}`,
+        BRUNO_DIGITALOCEAN_SNAPSHOT_TRUST_SET: '{"snapshot-current":"public-key"}',
+      }),
+    ).toThrow("BRUNO_DIGITALOCEAN_SNAPSHOT_BASE_IMAGE_ID is required");
   });
 
   it("parses local Docker provider mode for manual cloud-runner smoke tests", () => {
