@@ -1,9 +1,12 @@
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_HERMES_WORKLOAD_IMAGE,
   RUNNER_BOOT_CONTRACT_VERSION,
 } from "@/src/runner-service/constants";
+import { OrasRunnerSnapshotRegistryAdapter } from "@/src/server/runners/oras-runner-snapshot-registry";
 import {
   createRunnerSnapshotAttestation,
   type RunnerSnapshotManifest,
@@ -119,17 +122,18 @@ describe("runner snapshot registry", () => {
       "snapshot-previous": publicKeyPem(previousKey.publicKey),
     };
     const registry = new InMemorySnapshotRegistry();
-    const currentPublished = await publishRunnerSnapshotBundle({
-      repository: OCI_REPOSITORY,
-      bundleBytes: current.bundleBytes,
-      expectedBundleDigest: current.digest,
-      trustedPublicKeys: trustSet,
-      registry,
-    });
     const previousPublished = await publishRunnerSnapshotBundle({
       repository: OCI_REPOSITORY,
       bundleBytes: previous.bundleBytes,
       expectedBundleDigest: previous.digest,
+      trustedPublicKeys: trustSet,
+      registry,
+    });
+    const currentPublished = await publishRunnerSnapshotBundle({
+      repository: OCI_REPOSITORY,
+      bundleBytes: current.bundleBytes,
+      expectedBundleDigest: current.digest,
+      previous: previousPublished,
       trustedPublicKeys: trustSet,
       registry,
     });
@@ -154,6 +158,119 @@ describe("runner snapshot registry", () => {
         registry,
       }),
     ).rejects.toThrow("signing key is not trusted");
+  });
+
+  it("allows bootstrap only for an empty repository and requires a distinct previous candidate later", async () => {
+    const signing = generateKeyPairSync("ed25519");
+    const first = attest(manifest("123456"), "snapshot-current", signing.privateKey);
+    const second = attest(manifest("123457"), "snapshot-current", signing.privateKey);
+    const trustSet = { "snapshot-current": publicKeyPem(signing.publicKey) };
+    const registry = new InMemorySnapshotRegistry();
+    const firstPublished = await publishRunnerSnapshotBundle({
+      repository: OCI_REPOSITORY,
+      bundleBytes: first.bundleBytes,
+      expectedBundleDigest: first.digest,
+      trustedPublicKeys: trustSet,
+      registry,
+    });
+
+    await expect(
+      publishRunnerSnapshotBundle({
+        repository: OCI_REPOSITORY,
+        bundleBytes: second.bundleBytes,
+        expectedBundleDigest: second.digest,
+        trustedPublicKeys: trustSet,
+        registry,
+      }),
+    ).rejects.toThrow("previous snapshot candidate is required");
+    await expect(
+      publishRunnerSnapshotBundle({
+        repository: OCI_REPOSITORY,
+        bundleBytes: first.bundleBytes,
+        expectedBundleDigest: first.digest,
+        previous: firstPublished,
+        trustedPublicKeys: trustSet,
+        registry,
+      }),
+    ).rejects.toThrow("active and previous snapshot candidates must be distinct");
+  });
+
+  it("uses ORAS for tag discovery, publication, and digest-addressed retrieval", async () => {
+    const calls: string[][] = [];
+    const adapter = new OrasRunnerSnapshotRegistryAdapter(async (args, _options) => {
+      calls.push(args);
+      if (args[0] === "repo") {
+        return { stdout: JSON.stringify({ tags: ["bundle-existing"] }) };
+      }
+      if (args[0] === "push") {
+        return { stdout: `sha256:${"d".repeat(64)}\n` };
+      }
+      if (args[0] === "manifest") {
+        return {
+          stdout: JSON.stringify({
+            artifactType: RUNNER_SNAPSHOT_OCI_ARTIFACT_TYPE,
+            layers: [
+              layer("runner-snapshot-bundle.json", "application/json"),
+              layer("runner-snapshot-bundle.sha256", "text/plain"),
+              layer("runner-snapshot-signing-key.pem", "application/x-pem-file"),
+            ],
+          }),
+        };
+      }
+      if (args[0] === "pull") {
+        const outputIndex = args.indexOf("--output");
+        const output = args[outputIndex + 1];
+        if (!output) throw new Error("missing ORAS output directory");
+        await Promise.all([
+          writeFile(join(output, "runner-snapshot-bundle.json"), "bundle"),
+          writeFile(join(output, "runner-snapshot-bundle.sha256"), "digest"),
+          writeFile(join(output, "runner-snapshot-signing-key.pem"), "public-key"),
+        ]);
+        return { stdout: "" };
+      }
+      throw new Error(`unexpected ORAS command ${args[0]}`);
+    });
+    const files = [
+      { name: "runner-snapshot-bundle.json", mediaType: "application/json", contents: "bundle" },
+      { name: "runner-snapshot-bundle.sha256", mediaType: "text/plain", contents: "digest" },
+      {
+        name: "runner-snapshot-signing-key.pem",
+        mediaType: "application/x-pem-file",
+        contents: "public-key",
+      },
+    ];
+
+    await expect(adapter.listTags(OCI_REPOSITORY)).resolves.toEqual(["bundle-existing"]);
+    await expect(
+      adapter.publish({
+        repository: OCI_REPOSITORY,
+        tag: "bundle-candidate",
+        artifactType: RUNNER_SNAPSHOT_OCI_ARTIFACT_TYPE,
+        files,
+      }),
+    ).resolves.toEqual({
+      ociReference: `${OCI_REPOSITORY}@sha256:${"d".repeat(64)}`,
+    });
+    await expect(adapter.retrieve(`${OCI_REPOSITORY}@sha256:${"d".repeat(64)}`)).resolves.toEqual({
+      ociReference: `${OCI_REPOSITORY}@sha256:${"d".repeat(64)}`,
+      artifactType: RUNNER_SNAPSHOT_OCI_ARTIFACT_TYPE,
+      files,
+    });
+    expect(calls).toContainEqual(["repo", "tags", OCI_REPOSITORY, "--format", "json"]);
+    expect(calls.find((args) => args[0] === "push")).toContain(
+      `${OCI_REPOSITORY}:bundle-candidate`,
+    );
+    expect(calls).toContainEqual([
+      "manifest",
+      "fetch",
+      `${OCI_REPOSITORY}@sha256:${"d".repeat(64)}`,
+    ]);
+    expect(calls).toContainEqual([
+      "pull",
+      `${OCI_REPOSITORY}@sha256:${"d".repeat(64)}`,
+      "--output",
+      expect.any(String),
+    ]);
   });
 
   it("rejects non-allowlisted evidence and never publishes private signing material", async () => {
@@ -196,6 +313,12 @@ class InMemorySnapshotRegistry implements RunnerSnapshotRegistryAdapter {
   readonly published: Array<Parameters<RunnerSnapshotRegistryAdapter["publish"]>[0]> = [];
   readonly retrieved: string[] = [];
 
+  async listTags(repository: string): Promise<string[]> {
+    return this.published
+      .filter((publication) => publication.repository === repository)
+      .map((publication) => publication.tag);
+  }
+
   async publish(
     input: Parameters<RunnerSnapshotRegistryAdapter["publish"]>[0],
   ): Promise<{ ociReference: string }> {
@@ -224,6 +347,13 @@ class InMemorySnapshotRegistry implements RunnerSnapshotRegistryAdapter {
     if (!file) throw new Error("OCI artifact file was not found.");
     file.contents = contents;
   }
+}
+
+function layer(name: string, mediaType: string) {
+  return {
+    mediaType,
+    annotations: { "org.opencontainers.image.title": name },
+  };
 }
 
 function attest(manifestValue: RunnerSnapshotManifest, keyId: string, privateKey: KeyObject) {

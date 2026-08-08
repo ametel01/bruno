@@ -181,8 +181,10 @@ Ed25519 public keys used for publication verification. When an earlier candidate
 `BRUNO_SNAPSHOT_PREVIOUS_OCI_REFERENCE` and `BRUNO_SNAPSHOT_PREVIOUS_BUNDLE_DIGEST` to its exact
 digest-addressed GHCR reference and canonical bundle digest. The pair is fail-closed: setting only
 one value stops publication. On the first publication, the new candidate fills both retention roles;
-before the next publication, move that candidate's two identities into the previous-candidate
-variables.
+the workflow permits that bootstrap case only while the dedicated OCI repository has no tags.
+Before the next publication, move that candidate's two identities into the previous-candidate
+variables. Once any bundle tag exists, a missing or identical previous candidate fails before the
+next publication.
 
 After provider cleanup, the workflow publishes three allowlisted OCI layers to
 `ghcr.io/<owner>/bruno-runner-snapshot-bundles`: the canonical bundle JSON, its `sha256:` bundle

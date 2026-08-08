@@ -34,6 +34,7 @@ export type RunnerSnapshotRegistryArtifact = {
 };
 
 export interface RunnerSnapshotRegistryAdapter {
+  listTags(repository: string): Promise<string[]>;
   publish(input: {
     repository: string;
     tag: string;
@@ -57,10 +58,28 @@ export async function publishRunnerSnapshotBundle(input: {
   bundleBytes: string;
   expectedBundleDigest: string;
   trustedPublicKeys: RunnerSnapshotTrustedPublicKeys;
+  previous?: RunnerSnapshotBundleIdentity;
   registry: RunnerSnapshotRegistryAdapter;
 }): Promise<VerifiedRunnerSnapshotBundleIdentity> {
   if (!OCI_REPOSITORY_PATTERN.test(input.repository)) {
     throw new Error("Runner snapshot OCI repository is invalid.");
+  }
+
+  const existingTags = await input.registry.listTags(input.repository);
+
+  if (existingTags.length > 0 && !input.previous) {
+    throw new Error("A previous snapshot candidate is required after bootstrap publication.");
+  }
+  if (input.previous?.bundleDigest === input.expectedBundleDigest) {
+    throw new Error("The active and previous snapshot candidates must be distinct.");
+  }
+  if (input.previous) {
+    await retrieveRunnerSnapshotBundle({
+      ociReference: input.previous.ociReference,
+      expectedBundleDigest: input.previous.bundleDigest,
+      trustedPublicKeys: input.trustedPublicKeys,
+      registry: input.registry,
+    });
   }
 
   const files = validatedArtifactFiles({

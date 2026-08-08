@@ -13,7 +13,34 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
+export type OrasCommandRunner = (
+  args: string[],
+  options: { cwd?: string },
+) => Promise<{ stdout: string }>;
+
 export class OrasRunnerSnapshotRegistryAdapter implements RunnerSnapshotRegistryAdapter {
+  constructor(private readonly runOras: OrasCommandRunner = runOrasCommand) {}
+
+  async listTags(repository: string): Promise<string[]> {
+    const { stdout } = await this.runOras(["repo", "tags", repository, "--format", "json"], {});
+    let raw: unknown;
+
+    try {
+      raw = JSON.parse(stdout);
+    } catch {
+      throw new Error("Runner snapshot OCI tag listing is not valid JSON.");
+    }
+    if (
+      !isRecord(raw) ||
+      !Array.isArray(raw.tags) ||
+      raw.tags.some((tag) => typeof tag !== "string")
+    ) {
+      throw new Error("Runner snapshot OCI tag listing schema is invalid.");
+    }
+
+    return raw.tags;
+  }
+
   async publish(
     input: Parameters<RunnerSnapshotRegistryAdapter["publish"]>[0],
   ): Promise<{ ociReference: string }> {
@@ -22,8 +49,7 @@ export class OrasRunnerSnapshotRegistryAdapter implements RunnerSnapshotRegistry
         await writeFile(join(directory, file.name), file.contents, { mode: 0o600 });
       }
 
-      const { stdout } = await execFileAsync(
-        "oras",
+      const { stdout } = await this.runOras(
         [
           "push",
           "--artifact-type",
@@ -35,7 +61,7 @@ export class OrasRunnerSnapshotRegistryAdapter implements RunnerSnapshotRegistry
           "--format",
           "go-template={{.digest}}",
         ],
-        { cwd: directory, maxBuffer: 1024 * 1024 },
+        { cwd: directory },
       );
       const digest = stdout.trim();
 
@@ -46,12 +72,8 @@ export class OrasRunnerSnapshotRegistryAdapter implements RunnerSnapshotRegistry
   async retrieve(ociReference: string): Promise<RunnerSnapshotRegistryArtifact> {
     return withTempDirectory(async (directory) => {
       const [{ stdout: manifestBytes }] = await Promise.all([
-        execFileAsync("oras", ["manifest", "fetch", ociReference], {
-          maxBuffer: 1024 * 1024,
-        }),
-        execFileAsync("oras", ["pull", ociReference, "--output", directory], {
-          maxBuffer: 1024 * 1024,
-        }),
+        this.runOras(["manifest", "fetch", ociReference], {}),
+        this.runOras(["pull", ociReference, "--output", directory], {}),
       ]);
       const manifest = parseOciManifest(manifestBytes);
       const names = (await readdir(directory)).sort();
@@ -76,6 +98,18 @@ export class OrasRunnerSnapshotRegistryAdapter implements RunnerSnapshotRegistry
       };
     });
   }
+}
+
+async function runOrasCommand(
+  args: string[],
+  options: { cwd?: string },
+): Promise<{ stdout: string }> {
+  const { stdout } = await execFileAsync("oras", args, {
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+  });
+  return { stdout };
 }
 
 async function withTempDirectory<T>(action: (directory: string) => Promise<T>): Promise<T> {

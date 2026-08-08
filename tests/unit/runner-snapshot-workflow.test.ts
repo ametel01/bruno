@@ -72,6 +72,7 @@ describe("runner snapshot workflow", () => {
       ".github/workflows/ci.yml",
       ".github/workflows/publish-agent-image.yml",
       ".github/workflows/deploy-production.yml",
+      ".github/workflows/react-doctor.yml",
     ]) {
       expect(await readFile(file, "utf8")).not.toContain("BRUNO_DIGITALOCEAN_TOKEN");
     }
@@ -133,6 +134,7 @@ describe("runner snapshot workflow", () => {
       ".github/workflows/ci.yml",
       ".github/workflows/publish-agent-image.yml",
       ".github/workflows/deploy-production.yml",
+      ".github/workflows/react-doctor.yml",
     ]) {
       const workflow = await readFile(file, "utf8");
       expect(workflow).not.toContain("actions: write");

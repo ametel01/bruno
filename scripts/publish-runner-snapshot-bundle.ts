@@ -25,19 +25,21 @@ if (Boolean(previousOciReference) !== Boolean(previousBundleDigest)) {
 const registry = new OrasRunnerSnapshotRegistryAdapter();
 const bundleBytes = await readFile(args.bundlePath, "utf8");
 const expectedBundleDigest = (await readFile(args.digestPath, "utf8")).trim();
+const previous =
+  previousOciReference && previousBundleDigest
+    ? { ociReference: previousOciReference, bundleDigest: previousBundleDigest }
+    : undefined;
 const active = await publishRunnerSnapshotBundle({
   repository: args.repository,
   bundleBytes,
   expectedBundleDigest,
+  ...(previous ? { previous } : {}),
   trustedPublicKeys,
   registry,
 });
 const retained = await verifyRetainedRunnerSnapshotBundles({
   active,
-  previous:
-    previousOciReference && previousBundleDigest
-      ? { ociReference: previousOciReference, bundleDigest: previousBundleDigest }
-      : active,
+  previous: previous ?? active,
   trustedPublicKeys,
   registry,
 });
