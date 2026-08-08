@@ -322,13 +322,16 @@ describe("server-only provider environment validation", () => {
       }),
     ).toThrow("BRUNO_RUNNER_IMAGE must be an immutable registry image reference");
 
-    expect(() =>
+    expect(
       readDigitalOceanProviderConfig({
         BRUNO_DIGITALOCEAN_TOKEN: "dop_v1_test_token",
         BRUNO_RUNNER_BEARER_TOKEN: "runner-command-token",
         BRUNO_RUNNER_IMAGE: HOSTED_RUNNER_IMAGE,
       }),
-    ).toThrow("Swap is not counted as compatible memory");
+    ).toMatchObject({
+      runnerMaxAgents: DEFAULT_HERMES_RUNNER_MAX_AGENTS,
+      sizeSlug: "s-1vcpu-2gb",
+    });
 
     expect(
       readDigitalOceanProviderConfig({

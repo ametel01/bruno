@@ -8,11 +8,11 @@ import {
   validateRequiredEnv,
 } from "@/src/env/validation";
 import {
-  DEFAULT_HERMES_PRIVATE_NETWORK,
-  DEFAULT_HERMES_READINESS_TIMEOUT_MS,
   DEFAULT_HERMES_DOCKER_CPUS,
   DEFAULT_HERMES_DOCKER_MEMORY,
   DEFAULT_HERMES_DOCKER_PIDS_LIMIT,
+  DEFAULT_HERMES_PRIVATE_NETWORK,
+  DEFAULT_HERMES_READINESS_TIMEOUT_MS,
   DEFAULT_HERMES_RUNNER_MAX_AGENTS,
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
@@ -22,6 +22,7 @@ import { parseImmutableRunnerImageReference } from "@/src/runner-service/release
 import {
   findDigitalOceanRunnerResourceProfile,
   MAX_HERMES_DOCKER_PIDS_LIMIT,
+  PROVISIONAL_DIGITALOCEAN_RUNNER_SIZE_SLUG,
   parseHermesDockerCpus,
   parseHermesDockerMemoryMiB,
   parseHermesDockerPidsLimit,
@@ -487,7 +488,7 @@ export function readDigitalOceanProviderConfig(
     }),
     sizeSlug: readDigitalOceanSlug(input.BRUNO_DIGITALOCEAN_SIZE_SLUG, {
       envName: "BRUNO_DIGITALOCEAN_SIZE_SLUG",
-      defaultValue: "s-1vcpu-512mb-10gb",
+      defaultValue: PROVISIONAL_DIGITALOCEAN_RUNNER_SIZE_SLUG,
     }),
     image: readDigitalOceanSlug(input.BRUNO_DIGITALOCEAN_IMAGE, {
       envName: "BRUNO_DIGITALOCEAN_IMAGE",

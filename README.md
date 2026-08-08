@@ -185,7 +185,7 @@ See [Authentication modes](./docs/AUTHENTICATION.md) and the
 | `BRUNO_HERMES_DOCKER_PIDS_LIMIT` | No | Docker PID limit for each managed Hermes container; defaults to `256` and is propagated into runner bootstrap. |
 | `BRUNO_RUNNER_MAX_AGENTS` | No | Positive per-runner agent capacity; defaults to `1`. A value above one is accepted only when the exact runner/runtime profile also has approved measured capacity and sufficient CPU, physical memory, and disk evidence; current hosted profiles remain fail-closed to one. |
 | `BRUNO_DIGITALOCEAN_REGION` | No | Droplet region; defaults to `sfo3`. |
-| `BRUNO_DIGITALOCEAN_SIZE_SLUG` | No | Droplet size; legacy default remains `s-1vcpu-512mb-10gb` until authorized evidence selects a replacement, but hosted provisioning rejects profiles that cannot fit the configured Hermes limit plus runner/OS reserve in physical memory. Use an explicit supported profile such as `s-1vcpu-2gb` for managed Hermes trials. |
+| `BRUNO_DIGITALOCEAN_SIZE_SLUG` | No | Droplet size; defaults to the provisional `s-1vcpu-2gb` managed-runner profile. Hosted provisioning rejects unsupported profiles and combinations that cannot fit the configured Hermes CPU and memory limits plus the runner/OS reserve in physical resources. Explicit supported overrides remain available for separately authorized resizing. |
 | `BRUNO_DIGITALOCEAN_IMAGE` | No | Droplet image; defaults to `ubuntu-24-04-x64`. |
 | `BRUNO_DIGITALOCEAN_SSH_KEY_IDS` | No | `auto`, `none`, or a comma-separated key-ID list. Omitted values auto-discover account keys. |
 | `BRUNO_DIGITALOCEAN_SSH_SOURCE_CIDRS` | No | Comma-separated IPs/CIDRs allowed to reach SSH. SSH ingress is closed when this is omitted. |

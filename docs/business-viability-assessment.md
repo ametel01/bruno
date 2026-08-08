@@ -141,21 +141,22 @@ GiB, and $12 for 2 GiB. Weekly backups add 20% of Droplet cost.
 Sources: [DigitalOcean Droplet pricing](https://www.digitalocean.com/pricing/droplets) and
 [Stripe pricing](https://stripe.com/pricing).
 
-The current repository defaults to the $4 512 MiB Droplet, but live provider-backed acceptance on
-that tier remains a required proof point. If reliable operation requires a dedicated 2 GiB runner,
-$30 is too thin for a support-heavy service. Bruno would need a higher price, safe runner
-sharing, or a more constrained service.
+The repository now defaults provisionally to the $12 2 GiB Droplet because the 512 MiB and 1 GiB
+profiles cannot satisfy the configured Hermes memory limit plus the runner/OS reserve in physical
+RAM. Regional availability and live one-agent observation remain separately authorized proof
+points. At this profile, $30 is too thin for a support-heavy service. Bruno would need a higher
+price, safe runner sharing, or a more constrained service.
 
 ### Revenue milestones
 
-Assuming the $4 runner with weekly backup:
+Assuming the provisional $12 runner with weekly backup:
 
 | Paying customers | MRR | ARR | Monthly contribution before shared costs and support |
 | ---: | ---: | ---: | ---: |
-| 10 | $300 | $3,600 | $240 |
-| 25 | $750 | $9,000 | $601 |
-| 100 | $3,000 | $36,000 | $2,403 |
-| 500 | $15,000 | $180,000 | $12,015 |
+| 10 | $300 | $3,600 | $144 |
+| 25 | $750 | $9,000 | $361 |
+| 100 | $3,000 | $36,000 | $1,443 |
+| 500 | $15,000 | $180,000 | $7,215 |
 
 These are customer-count scenarios, not acquisition forecasts. There is not yet enough evidence to
 forecast growth responsibly.
