@@ -7,6 +7,10 @@ import {
   buildRunnerSnapshot,
   buildSnapshotBuilderBootstrap,
 } from "@/src/server/runners/runner-snapshot-build";
+import {
+  SNAPSHOT_BUILDER_EVIDENCE_COMMENT_MARKER,
+  type SnapshotBuilderEvidencePublisher,
+} from "@/src/server/runners/snapshot-builder-evidence-channel";
 
 const RUNNER_IMAGE = `ghcr.io/ametel01/bruno-runner:abc123@sha256:${"a".repeat(64)}`;
 const AGENT_IMAGE = `ghcr.io/ametel01/bruno-default:abc123@sha256:${"b".repeat(64)}`;
@@ -68,6 +72,71 @@ describe("runner snapshot build orchestration", () => {
 
     expect(userData).toContain("'\"'\"'; touch /tmp/pwned; '\"'\"''");
     expect(userData).not.toContain(`docker pull '${maliciousImage}'`);
+  });
+
+  it("publishes progress and sanitized completion through the outbound evidence channel", () => {
+    const publisher = evidencePublisher("github-token-'quoted");
+    const userData = buildSnapshotBuilderBootstrap({
+      runnerImage: RUNNER_IMAGE,
+      runnerVersion: "abc123",
+      runnerDigest: `sha256:${"a".repeat(64)}`,
+      defaultAgentImage: AGENT_IMAGE,
+      hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
+      evidencePublisher: publisher,
+    });
+    const cloudConfig = parse(userData) as { runcmd: string[] };
+    const command = String(cloudConfig.runcmd[0] ?? "");
+
+    expect(command).toContain(SNAPSHOT_BUILDER_EVIDENCE_COMMENT_MARKER);
+    expect(command).toContain("github-token-'\"'\"'quoted");
+    expect(command).toContain("bootstrap_started");
+    expect(command).toContain("docker_installed");
+    expect(command).toContain("images_preloaded");
+    expect(command).toContain("fixture_complete");
+    expect(command).toContain('/run/bruno-snapshot-builder/publish-evidence.py "complete"');
+    expect(command.indexOf("rm -rf /var/lib/cloud /root/.ssh/authorized_keys")).toBeLessThan(
+      command.indexOf('/run/bruno-snapshot-builder/publish-evidence.py "complete"'),
+    );
+    expect(command.indexOf("os.remove(path)")).toBeLessThan(command.indexOf("last_error = None"));
+    expect(command.indexOf("os.remove(path)")).toBeLessThan(
+      command.indexOf('sanitation_result["completedAt"]'),
+    );
+    expect(command).toContain(
+      'if stage == "complete":\n    payload["nonce"] = os.environ["BRUNO_SNAPSHOT_EVIDENCE_NONCE"]',
+    );
+    expect(command).toContain('grep -R -I -F -- "$BRUNO_SNAPSHOT_EVIDENCE_TOKEN"');
+    expect(command).toContain("unset BRUNO_SNAPSHOT_EVIDENCE_TOKEN");
+    expect(command).toContain("After=cloud-final.service network-online.target");
+    expect(command).toContain("systemctl start --no-block bruno-snapshot-finalize.service");
+    expect(command.indexOf("source /run/bruno-snapshot-builder/evidence.env")).toBeLessThan(
+      command.indexOf("rm -rf /var/lib/cloud /root/.ssh/authorized_keys"),
+    );
+    expect(command.indexOf("rm -rf /var/lib/cloud /root/.ssh/authorized_keys")).toBeLessThan(
+      command.indexOf('/run/bruno-snapshot-builder/publish-evidence.py "complete"'),
+    );
+  });
+
+  it("uses the protected outbound evidence reader instead of inbound SSH when configured", async () => {
+    const provider = new FakeDigitalOceanProvider();
+    const input = baseInput(provider);
+    const readBuilderEvidence = async (evidenceInput: { providerResourceId: string }) => {
+      const providerEvidence = await provider.readSnapshotBuilderEvidence(evidenceInput);
+      provider.calls.pop();
+      return providerEvidence;
+    };
+
+    const result = await buildRunnerSnapshot({
+      ...input,
+      builderEvidencePublisher: evidencePublisher("github-token-test-value"),
+      readBuilderEvidence,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(provider.calls.map((call) => call.step)).not.toContain("readBuilderEvidence");
+    const create = provider.calls.find((call) => call.step === "create");
+    expect(create).toMatchObject({ step: "create" });
+    expect(JSON.stringify(create)).toContain(SNAPSHOT_BUILDER_EVIDENCE_COMMENT_MARKER);
+    expect(JSON.stringify(result)).not.toContain("github-token-test-value");
   });
 
   it("builds a signed manifest only after boot, sanitation, power-off, snapshot, and availability", async () => {
@@ -168,6 +237,18 @@ describe("runner snapshot build orchestration", () => {
       },
     });
     expect(provider.calls).toEqual([]);
+  });
+
+  it("fails before provider effects when callback publication and reading are not paired", async () => {
+    const provider = new FakeDigitalOceanProvider();
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      builderEvidencePublisher: evidencePublisher("github-token-test-value"),
+    });
+
+    expect(result).toMatchObject({ ok: false, reason: "input_invalid" });
+    expect(provider.calls).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain("github-token-test-value");
   });
 
   it("fails before provider effects on world-open, non-exact, invalid, or injected controller CIDRs", async () => {
@@ -371,7 +452,7 @@ describe("runner snapshot build orchestration", () => {
         absenceVerified: true,
       },
     });
-    expect(provider.calls.filter((call) => call.step === "deleteDroplet")).toHaveLength(2);
+    expect(provider.calls.filter((call) => call.step === "deleteDroplet")).toHaveLength(3);
   });
 
   it("fails closed when the expected builder host key does not match the pinned identity", async () => {
@@ -738,6 +819,14 @@ class EventuallyConsistentDropletDeletionProvider extends FakeDigitalOceanProvid
         message: "DigitalOcean has not made the completed deletion observable yet.",
       };
     }
+    if (this.#deleteAttempts === 2) {
+      return {
+        ok: false as const,
+        reason: "ownership_ambiguous" as const,
+        retryable: false,
+        message: "The exact-ID delete is complete while tag discovery still lags.",
+      };
+    }
     return deleted;
   }
 }
@@ -985,5 +1074,17 @@ function baseInput(provider: FakeDigitalOceanProvider) {
     provider,
     context: { signal: new AbortController().signal },
     now: () => new Date("2026-08-07T00:00:03.000Z"),
+  };
+}
+
+function evidencePublisher(token: string): SnapshotBuilderEvidencePublisher {
+  return {
+    token,
+    repository: "ametel01/bruno",
+    issueNumber: 294,
+    runId: "123456",
+    nonce: "11111111-1111-4111-8111-111111111111",
+    authenticationSecret: "d".repeat(64),
+    apiUrl: "https://api.github.com",
   };
 }

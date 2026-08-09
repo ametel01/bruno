@@ -33,14 +33,19 @@ import {
   type RunnerSnapshotBundle,
   type RunnerSnapshotManifest,
 } from "./runner-snapshot-manifest";
+import {
+  SNAPSHOT_BUILDER_EVIDENCE_COMMENT_MARKER,
+  SNAPSHOT_BUILDER_EVIDENCE_CONTRACT_VERSION,
+  type SnapshotBuilderEvidencePublisher,
+} from "./snapshot-builder-evidence-channel";
 
 const SNAPSHOT_AUTHORIZATION_SENTINEL = "I_UNDERSTAND_THIS_CREATES_A_BILLABLE_SNAPSHOT_BUILDER";
 const SNAPSHOT_OPERATION_TAG_PREFIX = "bruno-snapshot-build";
 const SNAPSHOT_BUILDER_NAME_PREFIX = "bruno-snapshot-builder";
 const SNAPSHOT_MIN_DISK_GB = 25;
 const SNAPSHOT_BUILDER_EVIDENCE_POLL_ATTEMPTS = 63;
-const SNAPSHOT_BUILDER_EVIDENCE_DEADLINE_MS = 20 * 60 * 1_000;
-const SNAPSHOT_BUILDER_EVIDENCE_POLL_INTERVAL_MS = 20_000;
+const SNAPSHOT_BUILDER_EVIDENCE_DEADLINE_MS = 35 * 60 * 1_000;
+const SNAPSHOT_BUILDER_EVIDENCE_POLL_INTERVAL_MS = 35_000;
 const SNAPSHOT_CLEANUP_DEADLINE_MS = 2 * 60 * 1_000;
 const SNAPSHOT_CLEANUP_POLL_ATTEMPTS = 24;
 const SNAPSHOT_CLEANUP_POLL_INTERVAL_MS = 5_000;
@@ -60,6 +65,11 @@ export type BuildRunnerSnapshotInput = {
   builderSshKeyId?: string;
   builderSshPrivateKeyPath?: string;
   expectedBuilderHostKeySha256?: string;
+  builderEvidencePublisher?: SnapshotBuilderEvidencePublisher;
+  readBuilderEvidence?: (
+    input: DigitalOceanReadSnapshotBuilderEvidenceInput,
+    context?: DigitalOceanProviderRequestContext,
+  ) => Promise<DigitalOceanProviderResult<DigitalOceanSnapshotBuilderEvidence>>;
   privateKeyPem: string;
   signingKeyId: string;
   provider: DigitalOceanProvider;
@@ -256,6 +266,9 @@ async function buildRunnerSnapshotCandidate(
           runnerDigest: validated.runnerDigest,
           defaultAgentImage: validated.defaultAgentImage,
           hermesImage: validated.hermesImage,
+          ...(input.builderEvidencePublisher
+            ? { evidencePublisher: input.builderEvidencePublisher }
+            : {}),
         }),
       },
       input.context,
@@ -286,7 +299,9 @@ async function buildRunnerSnapshotCandidate(
     builder = firewalled.value;
 
     const evidence = await pollSnapshotBuilderEvidence({
-      readEvidence: input.provider.readSnapshotBuilderEvidence.bind(input.provider),
+      readEvidence:
+        input.readBuilderEvidence ??
+        input.provider.readSnapshotBuilderEvidence.bind(input.provider),
       evidenceInput: {
         providerResourceId: builder.providerResourceId,
         ...(input.builderSshPrivateKeyPath
@@ -320,7 +335,13 @@ async function buildRunnerSnapshotCandidate(
       };
     }
 
-    if (!sanitationPassed(sanitationResult, builder.providerResourceId)) {
+    if (
+      !sanitationPassed(
+        sanitationResult,
+        builder.providerResourceId,
+        input.builderEvidencePublisher !== undefined,
+      )
+    ) {
       return { ok: false, reason: "sanitation_failed", bootResult, sanitationResult, cleanup };
     }
 
@@ -731,17 +752,19 @@ async function retryOwnedSetDeletion(input: {
   intervalMs: number;
 }): Promise<DigitalOceanOwnedSetResult<DigitalOceanOwnedSetDeleteResult>> {
   let result = await input.operation();
+  let deleteOutcomeUnknown = !result.ok && result.reason === "delete_outcome_unknown";
 
   for (
     let attempt = 1;
     !result.ok &&
-    result.retryable &&
+    (result.retryable || (deleteOutcomeUnknown && result.reason === "ownership_ambiguous")) &&
     attempt < SNAPSHOT_CLEANUP_POLL_ATTEMPTS &&
     !input.context.signal.aborted;
     attempt += 1
   ) {
     if (input.intervalMs > 0) await sleep(input.intervalMs, input.context.signal);
     result = await input.operation();
+    deleteOutcomeUnknown ||= !result.ok && result.reason === "delete_outcome_unknown";
   }
 
   return result;
@@ -876,6 +899,7 @@ export function buildSnapshotBuilderBootstrap(input: {
   runnerDigest: string;
   defaultAgentImage: string;
   hermesImage: string;
+  evidencePublisher?: SnapshotBuilderEvidencePublisher;
 }): string {
   const runnerImageShell = shellSingleQuote(input.runnerImage);
   const defaultAgentImageShell = shellSingleQuote(input.defaultAgentImage);
@@ -895,6 +919,61 @@ export function buildSnapshotBuilderBootstrap(input: {
       'if (result.status !== "ready") process.exit(1);',
     ].join(" "),
   );
+  const evidencePublisherSetup = buildEvidencePublisherSetup(input.evidencePublisher);
+  const sanitationRemovedPaths = [
+    "/etc/bruno/runner.env",
+    "/root/.docker/config.json",
+    "/var/lib/cloud",
+    "/root/.ssh/authorized_keys",
+    "/root/.ssh/authorized_keys2",
+    "/etc/ssh/ssh_host_ed25519_key",
+    "/etc/machine-id",
+    "/var/log/cloud-init-output.log",
+    "/usr/local/sbin/bruno-finalize-snapshot-sanitation",
+    ...(input.evidencePublisher
+      ? [
+          "/run/bruno-snapshot-builder/evidence.env",
+          "/etc/systemd/system/bruno-snapshot-finalize.service",
+          "/run/bruno-snapshot-builder/publish-evidence.py",
+        ]
+      : []),
+  ];
+  const sanitationHostileMarkers = [
+    "BRUNO_RUNNER_REGISTRATION_TOKEN",
+    "BRUNO_RUNNER_BEARER_TOKEN",
+    "dop_v1_",
+    "BEGIN OPENSSH PRIVATE KEY",
+    ...(input.evidencePublisher
+      ? [
+          "BRUNO_SNAPSHOT_EVIDENCE_TOKEN_VALUE",
+          "BRUNO_SNAPSHOT_EVIDENCE_AUTHENTICATION_SECRET_VALUE",
+        ]
+      : []),
+  ];
+  const sanitationInitialOk = input.evidencePublisher ? "False" : "True";
+  const sanitationInitialCompletedAt = input.evidencePublisher
+    ? "None"
+    : 'datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")';
+  const evidencePublisherCompletion = input.evidencePublisher
+    ? `    /run/bruno-snapshot-builder/publish-evidence.py "complete"
+    unset BRUNO_SNAPSHOT_EVIDENCE_TOKEN`
+    : "    :";
+  const scheduleSanitationFinalizer = input.evidencePublisher
+    ? `    declare -p BRUNO_SNAPSHOT_EVIDENCE_TOKEN BRUNO_SNAPSHOT_EVIDENCE_REPOSITORY BRUNO_SNAPSHOT_EVIDENCE_ISSUE_NUMBER BRUNO_SNAPSHOT_EVIDENCE_RUN_ID BRUNO_SNAPSHOT_EVIDENCE_NONCE BRUNO_SNAPSHOT_EVIDENCE_AUTHENTICATION_SECRET BRUNO_SNAPSHOT_EVIDENCE_API_URL > /run/bruno-snapshot-builder/evidence.env
+    chmod 0600 /run/bruno-snapshot-builder/evidence.env
+    cat > /etc/systemd/system/bruno-snapshot-finalize.service <<'BRUNO_SNAPSHOT_FINALIZE_UNIT'
+    [Unit]
+    Description=Finalize sanitized Bruno runner snapshot evidence
+    After=cloud-final.service network-online.target
+    Wants=network-online.target
+
+    [Service]
+    Type=oneshot
+    ExecStart=/usr/local/sbin/bruno-finalize-snapshot-sanitation
+    BRUNO_SNAPSHOT_FINALIZE_UNIT
+    systemctl daemon-reload
+    systemctl start --no-block bruno-snapshot-finalize.service`
+    : "";
 
   return `#cloud-config
 package_update: true
@@ -908,6 +987,11 @@ runcmd:
   - |
     set -euo pipefail
     install -m 0755 -d /etc/apt/keyrings /etc/bruno-snapshot-builder /run/bruno-snapshot-builder
+    BRUNO_BUILDER_RESOURCE_ID="$(curl -fsS http://169.254.169.254/metadata/v1/id)"
+    export BRUNO_BUILDER_RESOURCE_ID
+    printf '%s\\n' "$BRUNO_BUILDER_RESOURCE_ID" > /run/bruno-snapshot-builder/builder-resource-id
+${evidencePublisherSetup}
+    publish_builder_evidence "bootstrap_started"
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
     chmod a+r /etc/apt/keyrings/docker.gpg
     . /etc/os-release
@@ -916,10 +1000,12 @@ runcmd:
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin caddy
     systemctl enable --now docker
     systemctl enable --now caddy
+    publish_builder_evidence "docker_installed"
     docker pull ${runnerImageShell}
     docker pull ${defaultAgentImageShell}
     docker pull ${hermesImageShell}
     docker image inspect ${runnerImageShell} ${defaultAgentImageShell} ${hermesImageShell} >/dev/null
+    publish_builder_evidence "images_preloaded"
     install -m 0700 -d /var/lib/bruno/boot-self-test
     docker rm --force bruno-snapshot-runner-fixture >/dev/null 2>&1 || true
     set +e
@@ -940,9 +1026,6 @@ runcmd:
     BRUNO_RUNNER_FIXTURE_EXIT_CODE=$?
     set -e
     export BRUNO_RUNNER_FIXTURE_EXIT_CODE
-    BRUNO_BUILDER_RESOURCE_ID="$(curl -fsS http://169.254.169.254/metadata/v1/id)"
-    export BRUNO_BUILDER_RESOURCE_ID
-    printf '%s\\n' "$BRUNO_BUILDER_RESOURCE_ID" > /run/bruno-snapshot-builder/builder-resource-id
     python3 - <<'BRUNO_BOOT_RESULT_PY'
     import datetime
     import json
@@ -995,6 +1078,7 @@ runcmd:
         json.dump(result, output, separators=(",", ":"), sort_keys=True)
         output.write("\\n")
     BRUNO_BOOT_RESULT_PY
+    publish_builder_evidence "fixture_complete"
     docker ps -aq | xargs --no-run-if-empty docker rm --force
     docker network ls --format '{{.Name}}' | grep '^bruno' | xargs --no-run-if-empty docker network rm
     rm -rf \
@@ -1042,11 +1126,23 @@ runcmd:
     cat > /usr/local/sbin/bruno-finalize-snapshot-sanitation <<'BRUNO_SANITATION_FINALIZER'
     #!/usr/bin/env bash
     set -euo pipefail
+    if [ -f /run/bruno-snapshot-builder/evidence.env ]; then
+      source /run/bruno-snapshot-builder/evidence.env
+    fi
+    rm -f /run/bruno-snapshot-builder/evidence.env /etc/systemd/system/bruno-snapshot-finalize.service /usr/local/sbin/bruno-finalize-snapshot-sanitation
     rm -rf /var/lib/cloud /root/.ssh/authorized_keys /root/.ssh/authorized_keys2
     test ! -e /var/lib/cloud
     test ! -e /root/.ssh/authorized_keys
     test ! -e /root/.ssh/authorized_keys2
     test ! -s /etc/machine-id
+    if [ -n "\${BRUNO_SNAPSHOT_EVIDENCE_TOKEN:-}" ] && grep -R -I -F -- "$BRUNO_SNAPSHOT_EVIDENCE_TOKEN" /etc /root /var/lib/bruno /var/log >/dev/null 2>&1; then
+      echo "snapshot evidence credential remains" >&2
+      exit 1
+    fi
+    if [ -n "\${BRUNO_SNAPSHOT_EVIDENCE_AUTHENTICATION_SECRET:-}" ] && grep -R -I -F -- "$BRUNO_SNAPSHOT_EVIDENCE_AUTHENTICATION_SECRET" /etc /root /var/lib/bruno /var/log >/dev/null 2>&1; then
+      echo "snapshot evidence authentication secret remains" >&2
+      exit 1
+    fi
     for marker in BRUNO_RUNNER_REGISTRATION_TOKEN BRUNO_RUNNER_BEARER_TOKEN dop_v1_ "BEGIN OPENSSH PRIVATE KEY"; do
       if grep -R -I -F -- "$marker" /etc /root /var/lib/bruno /var/log >/dev/null 2>&1; then
         echo "hostile marker remains" >&2
@@ -1054,7 +1150,7 @@ runcmd:
       fi
     done
     BRUNO_BUILDER_RESOURCE_ID="$(cat /run/bruno-snapshot-builder/builder-resource-id)"
-    rm -f /run/bruno-snapshot-builder/builder-resource-id /usr/local/sbin/bruno-finalize-snapshot-sanitation
+    rm -f /run/bruno-snapshot-builder/builder-resource-id
     export BRUNO_BUILDER_RESOURCE_ID
     python3 - <<'BRUNO_SANITATION_RESULT_PY'
     import datetime
@@ -1062,22 +1158,188 @@ runcmd:
     import os
 
     result = {
-        "ok": True,
+        "ok": ${sanitationInitialOk},
         "builderResourceId": os.environ["BRUNO_BUILDER_RESOURCE_ID"],
         "forbiddenPathsAbsent": True,
         "hostileMarkersAbsent": True,
-        "removedPaths": ["/etc/bruno/runner.env", "/root/.docker/config.json", "/var/lib/cloud", "/root/.ssh/authorized_keys", "/root/.ssh/authorized_keys2", "/etc/ssh/ssh_host_ed25519_key", "/etc/machine-id", "/var/log/cloud-init-output.log", "/usr/local/sbin/bruno-finalize-snapshot-sanitation"],
+        "removedPaths": ${JSON.stringify(sanitationRemovedPaths)},
         "scannedPaths": ["/etc", "/root", "/var/lib/bruno", "/var/log"],
-        "hostileMarkers": ["BRUNO_RUNNER_REGISTRATION_TOKEN", "BRUNO_RUNNER_BEARER_TOKEN", "dop_v1_", "BEGIN OPENSSH PRIVATE KEY"],
-        "completedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "hostileMarkers": ${JSON.stringify(sanitationHostileMarkers)},
+        "completedAt": ${sanitationInitialCompletedAt},
     }
     with open("/run/bruno-snapshot-builder/sanitation-result.json", "w", encoding="utf-8") as output:
         json.dump(result, output, separators=(",", ":"), sort_keys=True)
         output.write("\\n")
     BRUNO_SANITATION_RESULT_PY
+${evidencePublisherCompletion}
     BRUNO_SANITATION_FINALIZER
     chmod 0700 /usr/local/sbin/bruno-finalize-snapshot-sanitation
+${scheduleSanitationFinalizer}
 `;
+}
+
+function buildEvidencePublisherSetup(
+  publisher: SnapshotBuilderEvidencePublisher | undefined,
+): string {
+  if (!publisher) {
+    return `    publish_builder_evidence() {
+      :
+    }`;
+  }
+
+  const token = shellSingleQuote(publisher.token);
+  const repository = shellSingleQuote(publisher.repository);
+  const issueNumber = shellSingleQuote(String(publisher.issueNumber));
+  const runId = shellSingleQuote(publisher.runId);
+  const nonce = shellSingleQuote(publisher.nonce);
+  const authenticationSecret = shellSingleQuote(publisher.authenticationSecret);
+  const apiUrl = shellSingleQuote(publisher.apiUrl);
+  const marker = JSON.stringify(SNAPSHOT_BUILDER_EVIDENCE_COMMENT_MARKER);
+  const contractVersion = JSON.stringify(SNAPSHOT_BUILDER_EVIDENCE_CONTRACT_VERSION);
+
+  return `    export BRUNO_SNAPSHOT_EVIDENCE_TOKEN=${token}
+    export BRUNO_SNAPSHOT_EVIDENCE_REPOSITORY=${repository}
+    export BRUNO_SNAPSHOT_EVIDENCE_ISSUE_NUMBER=${issueNumber}
+    export BRUNO_SNAPSHOT_EVIDENCE_RUN_ID=${runId}
+    export BRUNO_SNAPSHOT_EVIDENCE_NONCE=${nonce}
+    export BRUNO_SNAPSHOT_EVIDENCE_AUTHENTICATION_SECRET=${authenticationSecret}
+    export BRUNO_SNAPSHOT_EVIDENCE_API_URL=${apiUrl}
+    cat > /run/bruno-snapshot-builder/publish-evidence.py <<'BRUNO_EVIDENCE_PUBLISHER_PY'
+    #!/usr/bin/env python3
+    import datetime
+    import hashlib
+    import hmac
+    import json
+    import os
+    import sys
+    import time
+    import urllib.error
+    import urllib.request
+
+    stage = sys.argv[1]
+    if stage not in {"bootstrap_started", "docker_installed", "images_preloaded", "fixture_complete", "complete"}:
+        raise ValueError("invalid snapshot builder evidence stage")
+    runtime_directory = "/run/bruno-snapshot-builder"
+    publisher_path = f"{runtime_directory}/publish-evidence.py"
+    state_path = f"{runtime_directory}/evidence-comment-id"
+    payload = {
+        "contractVersion": ${contractVersion},
+        "repository": os.environ["BRUNO_SNAPSHOT_EVIDENCE_REPOSITORY"],
+        "issueNumber": int(os.environ["BRUNO_SNAPSHOT_EVIDENCE_ISSUE_NUMBER"]),
+        "runId": os.environ["BRUNO_SNAPSHOT_EVIDENCE_RUN_ID"],
+        "stage": stage,
+        "builderResourceId": os.environ["BRUNO_BUILDER_RESOURCE_ID"],
+    }
+    if stage in {"fixture_complete", "complete"}:
+        with open(f"{runtime_directory}/boot-result.json", encoding="utf-8") as source:
+            payload["bootResult"] = json.load(source)
+    if stage == "complete":
+        payload["nonce"] = os.environ["BRUNO_SNAPSHOT_EVIDENCE_NONCE"]
+    comment_id = None
+    try:
+        with open(state_path, encoding="utf-8") as source:
+            comment_id = int(source.read().strip())
+    except (OSError, TypeError, ValueError):
+        pass
+    repository = os.environ["BRUNO_SNAPSHOT_EVIDENCE_REPOSITORY"]
+    issue_number = os.environ["BRUNO_SNAPSHOT_EVIDENCE_ISSUE_NUMBER"]
+    api_url = os.environ["BRUNO_SNAPSHOT_EVIDENCE_API_URL"]
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {os.environ['BRUNO_SNAPSHOT_EVIDENCE_TOKEN']}",
+        "Content-Type": "application/json",
+        "User-Agent": "bruno-snapshot-builder-evidence",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    def discover_comment_id():
+        request = urllib.request.Request(
+            f"{api_url}/repos/{repository}/issues/{issue_number}/comments?per_page=100&sort=created&direction=desc",
+            headers=headers,
+            method="GET",
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            comments = json.load(response)
+        matches = []
+        for comment in comments:
+            comment_body = comment.get("body", "")
+            if not comment_body.startswith(${marker} + "\\n"):
+                continue
+            try:
+                existing = json.loads(comment_body.split("\\n", 1)[1])
+            except (IndexError, json.JSONDecodeError, TypeError, ValueError):
+                continue
+            if (
+                existing.get("contractVersion") == ${contractVersion}
+                and existing.get("repository") == repository
+                and str(existing.get("issueNumber")) == issue_number
+                and existing.get("runId") == os.environ["BRUNO_SNAPSHOT_EVIDENCE_RUN_ID"]
+                and existing.get("builderResourceId") == os.environ["BRUNO_BUILDER_RESOURCE_ID"]
+                and comment.get("user", {}).get("login") == "github-actions[bot]"
+            ):
+                matches.append(int(comment["id"]))
+        if len(matches) > 1:
+            raise RuntimeError("duplicate snapshot builder evidence comments")
+        return matches[0] if matches else None
+    if stage == "complete":
+        for path in (publisher_path, state_path):
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+        with open(f"{runtime_directory}/sanitation-result.json", encoding="utf-8") as source:
+            sanitation_result = json.load(source)
+        sanitation_result["ok"] = True
+        sanitation_result["completedAt"] = datetime.datetime.now(
+            datetime.timezone.utc
+        ).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        with open(f"{runtime_directory}/sanitation-result.json", "w", encoding="utf-8") as output:
+            json.dump(sanitation_result, output, separators=(",", ":"), sort_keys=True)
+            output.write("\\n")
+        payload["sanitationResult"] = sanitation_result
+        payload["authenticationTag"] = hmac.new(
+            bytes.fromhex(os.environ["BRUNO_SNAPSHOT_EVIDENCE_AUTHENTICATION_SECRET"]),
+            json.dumps(
+                payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+            ).encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+    body = ${marker} + "\\n" + json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    last_error = None
+    for delay in (0, 2, 4, 8, 16):
+        if delay:
+            time.sleep(delay)
+        try:
+            if comment_id is None:
+                comment_id = discover_comment_id()
+            if comment_id is None:
+                url = f"{api_url}/repos/{repository}/issues/{issue_number}/comments"
+                method = "POST"
+            else:
+                url = f"{api_url}/repos/{repository}/issues/comments/{comment_id}"
+                method = "PATCH"
+            request = urllib.request.Request(
+                url,
+                data=json.dumps({"body": body}, separators=(",", ":")).encode("utf-8"),
+                headers=headers,
+                method=method,
+            )
+            with urllib.request.urlopen(request, timeout=15) as response:
+                result = json.load(response)
+            comment_id = int(result["id"])
+            if stage != "complete":
+                with open(state_path, "w", encoding="utf-8") as output:
+                    output.write(str(comment_id))
+            sys.exit(0)
+        except (OSError, TypeError, ValueError, urllib.error.HTTPError) as error:
+            last_error = error
+            if isinstance(error, urllib.error.HTTPError) and error.code == 404:
+                comment_id = None
+    raise RuntimeError("snapshot builder evidence publication failed") from last_error
+    BRUNO_EVIDENCE_PUBLISHER_PY
+    chmod 0700 /run/bruno-snapshot-builder/publish-evidence.py
+    publish_builder_evidence() {
+      /run/bruno-snapshot-builder/publish-evidence.py "$1"
+    }`;
 }
 
 function shellSingleQuote(value: string): string {
@@ -1120,7 +1382,10 @@ function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
       !isSha256SshFingerprint(input.expectedBuilderHostKeySha256)) ||
     input.hermesImage === undefined ||
     hermesImage !== DEFAULT_HERMES_WORKLOAD_IMAGE ||
-    !isRunnerSnapshotSigningKeyId(input.signingKeyId)
+    !isRunnerSnapshotSigningKeyId(input.signingKeyId) ||
+    (input.builderEvidencePublisher === undefined) !== (input.readBuilderEvidence === undefined) ||
+    (input.builderEvidencePublisher !== undefined &&
+      !evidencePublisherMatchesBuild(input.builderEvidencePublisher, input.operationId))
   ) {
     return { ok: false, reason: "input_invalid" };
   }
@@ -1134,6 +1399,33 @@ function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
     hermesImage,
     runnerDiskGiB: runnerProfile.diskGiB,
   };
+}
+
+function evidencePublisherMatchesBuild(
+  publisher: SnapshotBuilderEvidencePublisher,
+  operationId: string,
+): boolean {
+  try {
+    const apiUrl = new URL(publisher.apiUrl);
+    return (
+      publisher.token.trim().length > 0 &&
+      /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(publisher.repository) &&
+      Number.isSafeInteger(publisher.issueNumber) &&
+      publisher.issueNumber > 0 &&
+      publisher.runId === operationId &&
+      /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(
+        publisher.nonce,
+      ) &&
+      /^[a-f0-9]{64}$/.test(publisher.authenticationSecret) &&
+      apiUrl.protocol === "https:" &&
+      !apiUrl.username &&
+      !apiUrl.password &&
+      !apiUrl.search &&
+      !apiUrl.hash
+    );
+  } catch {
+    return false;
+  }
 }
 
 function bootFixtureMatches(
@@ -1168,7 +1460,11 @@ function bootFixtureMatches(
   );
 }
 
-function sanitationPassed(result: SnapshotSanitationResult, builderResourceId: string): boolean {
+function sanitationPassed(
+  result: SnapshotSanitationResult,
+  builderResourceId: string,
+  outboundEvidenceEnabled: boolean,
+): boolean {
   const requiredRemovedPaths = [
     "/etc/bruno/runner.env",
     "/root/.docker/config.json",
@@ -1178,6 +1474,14 @@ function sanitationPassed(result: SnapshotSanitationResult, builderResourceId: s
     "/etc/ssh/ssh_host_ed25519_key",
     "/etc/machine-id",
     "/var/log/cloud-init-output.log",
+    ...(outboundEvidenceEnabled
+      ? [
+          "/run/bruno-snapshot-builder/evidence.env",
+          "/etc/systemd/system/bruno-snapshot-finalize.service",
+          "/usr/local/sbin/bruno-finalize-snapshot-sanitation",
+          "/run/bruno-snapshot-builder/publish-evidence.py",
+        ]
+      : []),
   ];
   const requiredScannedPaths = ["/etc", "/root", "/var/lib/bruno", "/var/log"];
   const requiredHostileMarkers = [
@@ -1185,6 +1489,12 @@ function sanitationPassed(result: SnapshotSanitationResult, builderResourceId: s
     "BRUNO_RUNNER_BEARER_TOKEN",
     "dop_v1_",
     "BEGIN OPENSSH PRIVATE KEY",
+    ...(outboundEvidenceEnabled
+      ? [
+          "BRUNO_SNAPSHOT_EVIDENCE_TOKEN_VALUE",
+          "BRUNO_SNAPSHOT_EVIDENCE_AUTHENTICATION_SECRET_VALUE",
+        ]
+      : []),
   ];
 
   return (

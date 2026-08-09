@@ -146,8 +146,9 @@ forbidden.
 Snapshot mode is not a warm pool. The workflow creates a short-lived builder Droplet only after
 approval, runs the immutable runner image's Docker, Hermes fixture, detailed-health, synthetic model
 canary, Telegram-configuration, and fixture-cleanup checks, and requires every component to pass.
-After cloud-init completes, the evidence retrieval session removes cloud-init state and the temporary
-authorized SSH key, verifies the machine identity is empty, and only then allows snapshot creation.
+After cloud-init completes, a one-shot finalizer removes cloud-init state, the temporary authorized
+SSH key, its own callback credential and files, verifies the machine identity is empty, and only then
+publishes completion evidence and allows snapshot creation.
 Publication fails closed unless the firewall, Droplet, and provider SSH key are authoritatively absent;
 the sanitized cleanup result is retained for 30 days with GitHub build provenance alongside the signed
 bundle. The workflow then powers the builder off, creates one snapshot, emits an allowlisted signed
@@ -155,15 +156,26 @@ Snapshot Attestation v2 bundle, and deletes temporary builder resources. It must
 not create user runners, ready capacity, spare Droplets, cross-user capacity, schedules, release
 triggers, or production deployments.
 
-The builder SSH trust chain is intentionally narrow. The workflow resolves the GitHub runner
-controller's public egress identity before any DigitalOcean step and the builder firewall accepts SSH
-only from that exact `/32` IPv4 or `/128` IPv6 CIDR. The build command creates one provider SSH key,
-tracks ownership immediately, and deletes it from both orchestrator and controller cleanup paths. To
-retrieve builder evidence, the provider pins the observed ephemeral SSH host key into a temporary
-`known_hosts` file, optionally compares a supplied `SHA256:` fingerprint, uses
-`StrictHostKeyChecking=yes`, then removes the temporary known-hosts file and private key material.
-The same authenticated session waits for cloud-init completion and removes its own authorized key
-before power-off. `accept-new` and world-open SSH ingress are forbidden.
+The protected workflow retrieves builder evidence through a short-lived outbound GitHub callback; it
+does not depend on inbound connectivity to a standard GitHub-hosted runner. The build job grants its
+job-scoped `GITHUB_TOKEN` only `contents: read` and `issues: write`, and the builder updates one issue
+comment with sanitized progress stages. The controller accepts completion only from
+`github-actions[bot]` when the repository, issue, workflow run, completion-only random nonce, and exact
+DigitalOcean builder ID all match. Progress updates do not disclose the nonce, and duplicate completion
+comments fail closed. Completion also carries an HMAC bound to a separate controller-generated,
+one-run secret that is never published, so another issue-writing workflow cannot replace the evidence
+after learning its public fields. The post-cloud-init finalizer removes
+the callback environment file, systemd unit, uploader, cloud-init state, authorized keys, and machine
+identity before the completed comment is sent. The comment contains only boot and sanitation contract
+evidence; it contains no callback token, DigitalOcean credential, SSH private key, endpoint, or Owner
+data.
+
+The workflow still creates and immediately tracks one provider SSH key as a cleanup and sanitation
+proof target. Its firewall accepts SSH only from the controller's observed `/32` IPv4 or `/128` IPv6
+CIDR, never a world-open range, and every terminal path must prove that the provider SSH key,
+firewall, and builder are absent. The provider's pinned-host-key SSH evidence reader remains a local
+and compatibility fallback, but the protected build uses the outbound callback reader. `accept-new`
+and world-open SSH ingress are forbidden.
 
 Production snapshot consumption is configured with:
 

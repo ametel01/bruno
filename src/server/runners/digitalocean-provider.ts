@@ -201,6 +201,7 @@ export type DigitalOceanReadSnapshotBuilderEvidenceInput = {
 export type DigitalOceanSnapshotBuilderEvidence = {
   bootResult: unknown;
   sanitationResult: unknown;
+  sourceUrl?: string;
 };
 
 export type DigitalOceanActionInput = {
@@ -2215,6 +2216,14 @@ export class FakeDigitalOceanProvider
             "/etc/ssh/ssh_host_ed25519_key",
             "/etc/machine-id",
             "/var/log/cloud-init-output.log",
+            ...(userData.includes("bruno.runner.snapshot-builder-evidence.v1")
+              ? [
+                  "/run/bruno-snapshot-builder/evidence.env",
+                  "/etc/systemd/system/bruno-snapshot-finalize.service",
+                  "/usr/local/sbin/bruno-finalize-snapshot-sanitation",
+                  "/run/bruno-snapshot-builder/publish-evidence.py",
+                ]
+              : []),
           ],
           scannedPaths: ["/etc", "/root", "/var/lib/bruno", "/var/log"],
           hostileMarkers: [
@@ -2222,6 +2231,12 @@ export class FakeDigitalOceanProvider
             "BRUNO_RUNNER_BEARER_TOKEN",
             "dop_v1_",
             "BEGIN OPENSSH PRIVATE KEY",
+            ...(userData.includes("bruno.runner.snapshot-builder-evidence.v1")
+              ? [
+                  "BRUNO_SNAPSHOT_EVIDENCE_TOKEN_VALUE",
+                  "BRUNO_SNAPSHOT_EVIDENCE_AUTHENTICATION_SECRET_VALUE",
+                ]
+              : []),
           ],
           completedAt: "2026-08-07T00:00:02.000Z",
         },
