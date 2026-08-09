@@ -33,7 +33,11 @@ describe("runner snapshot build orchestration", () => {
     expect(userData).toContain("createRunnerBootReadinessController");
     expect(userData).toContain("BRUNO_RUNNER_EXPECTED_RELEASE_VERSION");
     expect(userData).toContain("BRUNO_RUNNER_EXPECTED_IMAGE_DIGEST");
-    expect(userData).toContain('fixture["status"] != "ready"');
+    expect(userData).toContain("BRUNO_RUNNER_FIXTURE_EXIT_CODE=$?");
+    expect(userData).toContain('"fixtureStatus": fixture["status"]');
+    expect(userData).toContain('"failureReason": fixture["failureReason"]');
+    expect(userData).toContain("except (json.JSONDecodeError, OSError, TypeError, ValueError)");
+    expect(userData).toContain('"failureReason": "snapshot_invalid"');
     expect(userData).toContain('"components": fixture["components"]');
     expect(userData).toContain("docker ps -aq | xargs --no-run-if-empty docker rm --force");
     expect(userData).toContain("grep -R -I -F");
@@ -261,6 +265,40 @@ describe("runner snapshot build orchestration", () => {
     ]);
   });
 
+  it("returns sanitized builder evidence when the full boot fixture fails", async () => {
+    const provider = new FailedBootEvidenceProvider();
+    const result = await buildRunnerSnapshot(baseInput(provider));
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "boot_fixture_failed",
+      bootResult: {
+        ok: false,
+        fixtureStatus: "failed",
+        failureReason: "fixture_launch_failed",
+      },
+      sanitationResult: {
+        ok: true,
+        forbiddenPathsAbsent: true,
+        hostileMarkersAbsent: true,
+      },
+      cleanup: { absenceVerified: true },
+    });
+  });
+
+  it("retains failed boot evidence when terminal cleanup also fails closed", async () => {
+    const provider = new FailedBootAmbiguousCleanupProvider();
+    const result = await buildRunnerSnapshot(baseInput(provider));
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "cleanup_failed",
+      bootResult: { ok: false, failureReason: "fixture_launch_failed" },
+      sanitationResult: { ok: true },
+      cleanup: { ambiguousOwnership: true, absenceVerified: false },
+    });
+  });
+
   it("waits for a newly created builder to publish boot evidence", async () => {
     const provider = new DelayedBuilderEvidenceProvider(2);
     const result = await buildRunnerSnapshot({
@@ -292,7 +330,18 @@ describe("runner snapshot build orchestration", () => {
     });
   });
 
-  it("bounds builder evidence reads below the resilience retry ceiling", async () => {
+  it("keeps polling through slow fresh-builder bootstrap without exceeding resilience limits", async () => {
+    const provider = new DelayedBuilderEvidenceProvider(60);
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      builderEvidencePollIntervalMs: 0,
+    });
+
+    expect(result).toMatchObject({ ok: true, cleanup: { absenceVerified: true } });
+    expect(provider.calls.filter((call) => call.step === "readBuilderEvidence")).toHaveLength(61);
+  });
+
+  it("caps fresh-builder evidence observations below the resilience ceiling", async () => {
     const provider = new DelayedBuilderEvidenceProvider(100);
     const result = await buildRunnerSnapshot({
       ...baseInput(provider),
@@ -304,7 +353,25 @@ describe("runner snapshot build orchestration", () => {
       reason: "boot_fixture_failed",
       cleanup: { absenceVerified: true },
     });
-    expect(provider.calls.filter((call) => call.step === "readBuilderEvidence")).toHaveLength(60);
+    expect(provider.calls.filter((call) => call.step === "readBuilderEvidence")).toHaveLength(63);
+  });
+
+  it("retries a retryable Droplet deletion outcome until absence is confirmed", async () => {
+    const provider = new EventuallyConsistentDropletDeletionProvider();
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      cleanupPollIntervalMs: 0,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      cleanup: {
+        deletedDropletId: "do-fake-1",
+        ambiguousOwnership: false,
+        absenceVerified: true,
+      },
+    });
+    expect(provider.calls.filter((call) => call.step === "deleteDroplet")).toHaveLength(2);
   });
 
   it("fails closed when the expected builder host key does not match the pinned identity", async () => {
@@ -571,6 +638,42 @@ class BadSanitationEvidenceProvider extends FakeDigitalOceanProvider {
   }
 }
 
+class FailedBootEvidenceProvider extends FakeDigitalOceanProvider {
+  override async readSnapshotBuilderEvidence(
+    input: Parameters<FakeDigitalOceanProvider["readSnapshotBuilderEvidence"]>[0],
+    context?: { signal: AbortSignal },
+  ) {
+    const result = await super.readSnapshotBuilderEvidence(input, context);
+    if (!result.ok) return result;
+    return {
+      ok: true as const,
+      value: {
+        ...result.value,
+        bootResult: {
+          ...(result.value.bootResult as Record<string, unknown>),
+          ok: false,
+          fixtureStatus: "failed",
+          failureReason: "fixture_launch_failed",
+        },
+      },
+    };
+  }
+}
+
+class FailedBootAmbiguousCleanupProvider extends FailedBootEvidenceProvider {
+  override async observeOwnedSet(
+    input: Parameters<FakeDigitalOceanProvider["observeOwnedSet"]>[0],
+  ) {
+    this.calls.push({ step: "observeOwnedSet", input });
+    return {
+      ok: false as const,
+      reason: "ownership_ambiguous" as const,
+      retryable: false,
+      message: "ambiguous owner",
+    };
+  }
+}
+
 class DelayedBuilderEvidenceProvider extends FakeDigitalOceanProvider {
   #remainingUnavailableAttempts: number;
 
@@ -615,6 +718,27 @@ class AbortingBuilderEvidenceProvider extends FakeDigitalOceanProvider {
       reason: "builder_evidence_not_ready" as const,
       message: "Snapshot builder evidence polling was aborted.",
     };
+  }
+}
+
+class EventuallyConsistentDropletDeletionProvider extends FakeDigitalOceanProvider {
+  #deleteAttempts = 0;
+
+  override async deleteDroplet(
+    input: Parameters<FakeDigitalOceanProvider["deleteDroplet"]>[0],
+    context?: { signal: AbortSignal },
+  ) {
+    const deleted = await super.deleteDroplet(input, context);
+    this.#deleteAttempts += 1;
+    if (this.#deleteAttempts === 1) {
+      return {
+        ok: false as const,
+        reason: "delete_outcome_unknown" as const,
+        retryable: true,
+        message: "DigitalOcean has not made the completed deletion observable yet.",
+      };
+    }
+    return deleted;
   }
 }
 

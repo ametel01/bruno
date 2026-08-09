@@ -5,11 +5,11 @@ import { isIP } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { DigitalOceanApiProvider } from "@/src/server/runners/digitalocean-provider";
 import {
   buildRunnerSnapshot,
   type SnapshotCleanupEvidence,
 } from "@/src/server/runners/runner-snapshot-build";
-import { DigitalOceanApiProvider } from "@/src/server/runners/digitalocean-provider";
 import { isRunnerSnapshotSigningKeyId } from "@/src/server/runners/runner-snapshot-manifest";
 
 const execFileAsync = promisify(execFile);
@@ -75,18 +75,23 @@ try {
     builderSshKeyId = null;
   }
 
+  if (result.bootResult) {
+    await writeFile(args.bootResultOut, `${JSON.stringify(result.bootResult, null, 2)}\n`, {
+      mode: 0o600,
+    });
+  }
+  if (result.sanitationResult) {
+    await writeFile(
+      args.sanitationResultOut,
+      `${JSON.stringify(result.sanitationResult, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+  }
+
   if (!result.ok) {
     throw new Error(`Snapshot build failed closed: ${result.reason}.`);
   }
 
-  await writeFile(args.bootResultOut, `${JSON.stringify(result.bootResult, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  await writeFile(
-    args.sanitationResultOut,
-    `${JSON.stringify(result.sanitationResult, null, 2)}\n`,
-    { mode: 0o600 },
-  );
   await writeFile(args.bundleOut, result.bundleBytes, { mode: 0o600 });
   await writeFile(args.digestOut, `${result.digest}\n`, { mode: 0o600 });
   process.stdout.write("Runner snapshot v2 bundle written with allowlisted evidence only.\n");

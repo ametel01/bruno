@@ -146,6 +146,18 @@ describe("runner snapshot workflow", () => {
     expect(workflow).toContain("runner-snapshot-oci-publication.json");
     expect(workflow).toContain("Retain terminal cleanup evidence");
     expect(workflow).toContain("name: runner-snapshot-cleanup-");
+    expect(workflow).toContain("Retain sanitized builder diagnostics");
+    expect(workflow).toContain("name: runner-snapshot-builder-diagnostics-");
+    expect(workflow).toContain("snapshot-artifacts/boot-result.json");
+    expect(workflow).toContain("snapshot-artifacts/sanitation-result.json");
+    const cleanupEvidenceStep = workflow.slice(
+      workflow.indexOf("- name: Retain terminal cleanup evidence"),
+      workflow.indexOf("- name: Retain sanitized builder diagnostics"),
+    );
+    expect(cleanupEvidenceStep).toContain("path: snapshot-artifacts/cleanup-result.json");
+    expect(cleanupEvidenceStep).toContain("if-no-files-found: error");
+    expect(cleanupEvidenceStep).not.toContain("boot-result.json");
+    expect(cleanupEvidenceStep).not.toContain("sanitation-result.json");
     expect(workflow).toContain("retention-days: 30");
     expect(workflow).not.toContain("delete-package-version");
     expect(workflow).not.toContain("oras manifest delete");
@@ -191,6 +203,12 @@ describe("runner snapshot workflow", () => {
     expect(script).toContain("sanitationResultOut");
     expect(script).toContain("cleanupResultOut");
     expect(script).toContain('requiredArg(parsed, "cleanup-result-out")');
+    expect(script.indexOf("if (result.bootResult)")).toBeLessThan(
+      script.indexOf("if (!result.ok)"),
+    );
+    expect(script.indexOf("if (result.sanitationResult)")).toBeLessThan(
+      script.indexOf("if (!result.ok)"),
+    );
     expect(script).not.toContain("bootResultPath");
     expect(script).not.toContain("sanitationResultPath");
     expect(script).not.toContain('requiredArg(parsed, "boot-result")');

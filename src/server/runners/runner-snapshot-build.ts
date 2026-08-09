@@ -2,12 +2,6 @@ import "server-only";
 
 import { isIP } from "node:net";
 import {
-  createRunnerSnapshotAttestation,
-  isRunnerSnapshotSigningKeyId,
-  type RunnerSnapshotBundle,
-  type RunnerSnapshotManifest,
-} from "./runner-snapshot-manifest";
-import {
   DEFAULT_HERMES_WORKLOAD_IMAGE,
   DEFAULT_HERMES_WORKLOAD_IMAGE_AMD64_MANIFEST_DIGEST,
   DEFAULT_HERMES_WORKLOAD_IMAGE_INDEX_DIGEST,
@@ -15,26 +9,41 @@ import {
   RUNNER_BOOT_CONTRACT_VERSION,
 } from "@/src/runner-service/constants";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
-import { findDigitalOceanRunnerResourceProfile } from "@/src/server/runners/runner-resource-profiles";
+import type {
+  RunnerBootFailureReason,
+  RunnerBootSnapshotStatus,
+} from "@/src/runner-service/runner-contracts";
 import type {
   DigitalOceanAction,
+  DigitalOceanOwnedSetDeleteResult,
   DigitalOceanOwnedSetExpectation,
   DigitalOceanOwnedSetProvider,
+  DigitalOceanOwnedSetResult,
   DigitalOceanProvider,
-  DigitalOceanProviderResult,
   DigitalOceanProviderRequestContext,
+  DigitalOceanProviderResult,
   DigitalOceanReadSnapshotBuilderEvidenceInput,
   DigitalOceanResource,
   DigitalOceanSnapshotBuilderEvidence,
 } from "@/src/server/runners/digitalocean-provider";
+import { findDigitalOceanRunnerResourceProfile } from "@/src/server/runners/runner-resource-profiles";
+import {
+  createRunnerSnapshotAttestation,
+  isRunnerSnapshotSigningKeyId,
+  type RunnerSnapshotBundle,
+  type RunnerSnapshotManifest,
+} from "./runner-snapshot-manifest";
 
 const SNAPSHOT_AUTHORIZATION_SENTINEL = "I_UNDERSTAND_THIS_CREATES_A_BILLABLE_SNAPSHOT_BUILDER";
 const SNAPSHOT_OPERATION_TAG_PREFIX = "bruno-snapshot-build";
 const SNAPSHOT_BUILDER_NAME_PREFIX = "bruno-snapshot-builder";
 const SNAPSHOT_MIN_DISK_GB = 25;
-const SNAPSHOT_BUILDER_EVIDENCE_POLL_ATTEMPTS = 60;
+const SNAPSHOT_BUILDER_EVIDENCE_POLL_ATTEMPTS = 63;
 const SNAPSHOT_BUILDER_EVIDENCE_DEADLINE_MS = 20 * 60 * 1_000;
+const SNAPSHOT_BUILDER_EVIDENCE_POLL_INTERVAL_MS = 20_000;
 const SNAPSHOT_CLEANUP_DEADLINE_MS = 2 * 60 * 1_000;
+const SNAPSHOT_CLEANUP_POLL_ATTEMPTS = 24;
+const SNAPSHOT_CLEANUP_POLL_INTERVAL_MS = 5_000;
 
 export type BuildRunnerSnapshotInput = {
   costAuthorization: string;
@@ -59,6 +68,7 @@ export type BuildRunnerSnapshotInput = {
   actionPollAttempts?: number;
   actionPollIntervalMs?: number;
   builderEvidencePollIntervalMs?: number;
+  cleanupPollIntervalMs?: number;
 };
 
 export type SnapshotBootFixtureResult = {
@@ -70,6 +80,9 @@ export type SnapshotBootFixtureResult = {
   bootContractVersion: string;
   preloadedImages?: string[];
   components?: Record<string, string>;
+  fixtureStatus?: RunnerBootSnapshotStatus;
+  failureReason?: RunnerBootFailureReason;
+  fixtureExitCode?: number;
   completedAt: string;
 };
 
@@ -98,6 +111,8 @@ export type BuildRunnerSnapshotResult =
   | {
       ok: false;
       reason: BuildRunnerSnapshotFailureReason;
+      bootResult?: SnapshotBootFixtureResult;
+      sanitationResult?: SnapshotSanitationResult;
       cleanup: SnapshotCleanupEvidence;
     };
 
@@ -166,7 +181,13 @@ export async function buildRunnerSnapshot(
     clearTimeout(cleanupTimeout);
   }
 
-  return { ok: false, reason: "cleanup_failed", cleanup: result.cleanup };
+  return {
+    ok: false,
+    reason: "cleanup_failed",
+    ...(!result.ok && result.bootResult ? { bootResult: result.bootResult } : {}),
+    ...(!result.ok && result.sanitationResult ? { sanitationResult: result.sanitationResult } : {}),
+    cleanup: result.cleanup,
+  };
 }
 
 async function buildRunnerSnapshotCandidate(
@@ -290,11 +311,17 @@ async function buildRunnerSnapshotCandidate(
     const sanitationResult = evidence.value.sanitationResult as SnapshotSanitationResult;
 
     if (!bootFixtureMatches(bootResult, input, builder.providerResourceId)) {
-      return { ok: false, reason: "boot_fixture_failed", cleanup };
+      return {
+        ok: false,
+        reason: "boot_fixture_failed",
+        bootResult,
+        sanitationResult,
+        cleanup,
+      };
     }
 
     if (!sanitationPassed(sanitationResult, builder.providerResourceId)) {
-      return { ok: false, reason: "sanitation_failed", cleanup };
+      return { ok: false, reason: "sanitation_failed", bootResult, sanitationResult, cleanup };
     }
 
     const powerOffAction = await input.provider.powerOffResource(
@@ -470,6 +497,7 @@ async function buildRunnerSnapshotCandidate(
             operationTag,
             cleanup,
             context: cleanupContext,
+            intervalMs: input.cleanupPollIntervalMs ?? SNAPSHOT_CLEANUP_POLL_INTERVAL_MS,
           });
         } catch {
           cleanup.ambiguousOwnership = true;
@@ -635,6 +663,7 @@ async function cleanupOwnedBuilder(input: {
   operationTag: string;
   cleanup: SnapshotCleanupEvidence;
   context: DigitalOceanProviderRequestContext;
+  intervalMs: number;
 }): Promise<void> {
   const ownedSetProvider = asOwnedSetProvider(input.provider);
   const firewallId = input.builder.providerFirewallId;
@@ -663,7 +692,11 @@ async function cleanupOwnedBuilder(input: {
     return;
   }
 
-  const firewall = await ownedSetProvider.deleteFirewall(expectation, input.context);
+  const firewall = await retryOwnedSetDeletion({
+    operation: () => ownedSetProvider.deleteFirewall(expectation, input.context),
+    context: input.context,
+    intervalMs: input.intervalMs,
+  });
   input.cleanup.steps.push("delete_firewall");
   if (!firewall.ok) {
     input.cleanup.ambiguousOwnership = true;
@@ -671,7 +704,11 @@ async function cleanupOwnedBuilder(input: {
   }
   input.cleanup.deletedFirewallId = firewallId;
 
-  const droplet = await ownedSetProvider.deleteDroplet(expectation, input.context);
+  const droplet = await retryOwnedSetDeletion({
+    operation: () => ownedSetProvider.deleteDroplet(expectation, input.context),
+    context: input.context,
+    intervalMs: input.intervalMs,
+  });
   input.cleanup.steps.push("delete_builder");
   if (!droplet.ok) {
     input.cleanup.ambiguousOwnership = true;
@@ -686,6 +723,28 @@ async function cleanupOwnedBuilder(input: {
   } else {
     input.cleanup.ambiguousOwnership = true;
   }
+}
+
+async function retryOwnedSetDeletion(input: {
+  operation: () => Promise<DigitalOceanOwnedSetResult<DigitalOceanOwnedSetDeleteResult>>;
+  context: DigitalOceanProviderRequestContext;
+  intervalMs: number;
+}): Promise<DigitalOceanOwnedSetResult<DigitalOceanOwnedSetDeleteResult>> {
+  let result = await input.operation();
+
+  for (
+    let attempt = 1;
+    !result.ok &&
+    result.retryable &&
+    attempt < SNAPSHOT_CLEANUP_POLL_ATTEMPTS &&
+    !input.context.signal.aborted;
+    attempt += 1
+  ) {
+    if (input.intervalMs > 0) await sleep(input.intervalMs, input.context.signal);
+    result = await input.operation();
+  }
+
+  return result;
 }
 
 async function pollDigitalOceanAction(input: {
@@ -725,7 +784,7 @@ async function pollSnapshotBuilderEvidence(input: {
   context: DigitalOceanProviderRequestContext;
   intervalMs?: number;
 }): Promise<DigitalOceanProviderResult<DigitalOceanSnapshotBuilderEvidence>> {
-  const intervalMs = input.intervalMs ?? 5_000;
+  const intervalMs = input.intervalMs ?? SNAPSHOT_BUILDER_EVIDENCE_POLL_INTERVAL_MS;
   const deadlineAt = Date.now() + SNAPSHOT_BUILDER_EVIDENCE_DEADLINE_MS;
   let lastEvidence: DigitalOceanProviderResult<DigitalOceanSnapshotBuilderEvidence> = {
     ok: false,
@@ -863,6 +922,7 @@ runcmd:
     docker image inspect ${runnerImageShell} ${defaultAgentImageShell} ${hermesImageShell} >/dev/null
     install -m 0700 -d /var/lib/bruno/boot-self-test
     docker rm --force bruno-snapshot-runner-fixture >/dev/null 2>&1 || true
+    set +e
     docker run --rm \
       --name bruno-snapshot-runner-fixture \
       --platform linux/amd64 \
@@ -877,6 +937,9 @@ runcmd:
       ${runnerImageShell} \
       --conditions react-server -e ${runnerFixtureSource} \
       > /run/bruno-snapshot-builder/runner-boot-self-test.json
+    BRUNO_RUNNER_FIXTURE_EXIT_CODE=$?
+    set -e
+    export BRUNO_RUNNER_FIXTURE_EXIT_CODE
     BRUNO_BUILDER_RESOURCE_ID="$(curl -fsS http://169.254.169.254/metadata/v1/id)"
     export BRUNO_BUILDER_RESOURCE_ID
     printf '%s\\n' "$BRUNO_BUILDER_RESOURCE_ID" > /run/bruno-snapshot-builder/builder-resource-id
@@ -885,8 +948,24 @@ runcmd:
     import json
     import os
 
-    with open("/run/bruno-snapshot-builder/runner-boot-self-test.json", encoding="utf-8") as source:
-        fixture = json.load(source)
+    try:
+        with open("/run/bruno-snapshot-builder/runner-boot-self-test.json", encoding="utf-8") as source:
+            fixture = json.load(source)
+        if not isinstance(fixture, dict) or not isinstance(fixture.get("components"), dict):
+            raise TypeError("invalid runner boot fixture evidence")
+    except (json.JSONDecodeError, OSError, TypeError, ValueError):
+        fixture = {
+            "status": "failed",
+            "components": {
+                "docker": "failed",
+                "hermesFixture": "pending",
+                "detailedHealth": "pending",
+                "modelCanary": "pending",
+                "telegramConfig": "pending",
+                "cleanup": "pending",
+            },
+            "failureReason": "snapshot_invalid",
+        }
     required_components = {
         "docker",
         "hermesFixture",
@@ -895,12 +974,11 @@ runcmd:
         "telegramConfig",
         "cleanup",
     }
-    if fixture["status"] != "ready" or any(
+    fixture_passed = fixture["status"] == "ready" and not any(
         fixture["components"].get(component) != "passed" for component in required_components
-    ):
-        raise SystemExit("runner boot fixture did not pass")
+    ) and int(os.environ["BRUNO_RUNNER_FIXTURE_EXIT_CODE"]) == 0
     result = {
-        "ok": True,
+        "ok": fixture_passed,
         "builderResourceId": os.environ["BRUNO_BUILDER_RESOURCE_ID"],
         "runnerImage": ${runnerImageJson},
         "defaultAgentImage": ${defaultAgentImageJson},
@@ -908,6 +986,9 @@ runcmd:
         "bootContractVersion": "${RUNNER_BOOT_CONTRACT_VERSION}",
         "preloadedImages": [${runnerImageJson}, ${defaultAgentImageJson}, ${hermesImageJson}],
         "components": fixture["components"],
+        "fixtureStatus": fixture["status"],
+        "failureReason": fixture["failureReason"],
+        "fixtureExitCode": int(os.environ["BRUNO_RUNNER_FIXTURE_EXIT_CODE"]),
         "completedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
     }
     with open("/run/bruno-snapshot-builder/boot-result.json", "w", encoding="utf-8") as output:
