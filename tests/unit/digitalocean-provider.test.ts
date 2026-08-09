@@ -272,7 +272,82 @@ describe("DigitalOcean API provider", () => {
     expect(source).toContain("expectedHostKeySha256");
     expect(source).toContain("StrictHostKeyChecking=yes");
     expect(source).toContain("UserKnownHostsFile=");
+    expect(source).toContain("cloud-init status --wait");
+    expect(source).toContain("/root/.ssh/authorized_keys");
+    expect(source).toContain("/var/lib/cloud");
     expect(source).not.toContain("StrictHostKeyChecking=accept-new");
+  });
+
+  it("verifies snapshot image absence with a post-delete provider read", async () => {
+    let imagePresent = true;
+    const client = {
+      v2: {
+        images: {
+          byImage_id: () => ({
+            get: async () => {
+              if (!imagePresent) {
+                throw Object.assign(new Error("not found"), { statusCode: 404 });
+              }
+              return { image: { id: 9102, name: "snapshot", status: "available" } };
+            },
+            delete: async () => {
+              imagePresent = false;
+            },
+          }),
+        },
+      },
+    } as unknown as DigitalOceanSdkClient;
+    const provider = new DigitalOceanApiProvider({ token: "unused", client });
+
+    await expect(provider.verifyImageAbsent({ imageId: "9102" })).resolves.toMatchObject({
+      ok: false,
+      reason: "cleanup_failed",
+    });
+    await expect(provider.deleteImage({ imageId: "9102" })).resolves.toEqual({
+      ok: true,
+      value: { deleted: true },
+    });
+    await expect(provider.verifyImageAbsent({ imageId: "9102" })).resolves.toEqual({
+      ok: true,
+      value: { absent: true },
+    });
+  });
+
+  it("verifies an SSH key is absent by its exact provider ID", async () => {
+    let keyPresent = true;
+    const client = {
+      v2: {
+        account: {
+          keys: {
+            bySsh_key_id: () => ({
+              get: async () => {
+                if (!keyPresent) {
+                  throw Object.assign(new Error("not found"), { statusCode: 404 });
+                }
+                return { ssh_key: { id: 52830700, name: "builder" } };
+              },
+              delete: async () => {
+                keyPresent = false;
+              },
+            }),
+          },
+        },
+      },
+    } as unknown as DigitalOceanSdkClient;
+    const provider = new DigitalOceanApiProvider({ token: "unused", client });
+
+    await expect(provider.verifySshKeyAbsent({ id: "52830700" })).resolves.toMatchObject({
+      ok: false,
+      reason: "cleanup_failed",
+    });
+    await expect(provider.deleteSshKey({ id: "52830700" })).resolves.toEqual({
+      ok: true,
+      value: { deleted: true },
+    });
+    await expect(provider.verifySshKeyAbsent({ id: "52830700" })).resolves.toEqual({
+      ok: true,
+      value: { absent: true },
+    });
   });
 
   it("joins complete firewall inventory onto authoritative managed Droplets", async () => {

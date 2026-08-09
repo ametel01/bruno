@@ -1,5 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
 import { FakeDigitalOceanProvider } from "@/src/server/runners/digitalocean-provider";
 import {
@@ -15,6 +16,8 @@ describe("runner snapshot build orchestration", () => {
   it("installs Docker and Caddy before preloading images and emits boot/sanitation evidence", () => {
     const userData = buildSnapshotBuilderBootstrap({
       runnerImage: RUNNER_IMAGE,
+      runnerVersion: "abc123",
+      runnerDigest: `sha256:${"a".repeat(64)}`,
       defaultAgentImage: AGENT_IMAGE,
       hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
     });
@@ -27,16 +30,34 @@ describe("runner snapshot build orchestration", () => {
     expect(userData).toContain("/run/bruno-snapshot-builder/boot-result.json");
     expect(userData).toContain("/run/bruno-snapshot-builder/sanitation-result.json");
     expect(userData).toContain("docker image inspect");
+    expect(userData).toContain("createRunnerBootReadinessController");
+    expect(userData).toContain("BRUNO_RUNNER_EXPECTED_RELEASE_VERSION");
+    expect(userData).toContain("BRUNO_RUNNER_EXPECTED_IMAGE_DIGEST");
+    expect(userData).toContain('fixture["status"] != "ready"');
+    expect(userData).toContain('"components": fixture["components"]');
     expect(userData).toContain("docker ps -aq | xargs --no-run-if-empty docker rm --force");
     expect(userData).toContain("grep -R -I -F");
     expect(userData).toContain("BRUNO_RUNNER_REGISTRATION_TOKEN");
     expect(userData).toContain("BEGIN OPENSSH PRIVATE KEY");
+    expect(userData).toContain('"/var/lib/cloud"');
+    expect(userData).toContain('"/root/.ssh/authorized_keys"');
+    const cloudConfig = parse(userData) as { runcmd: string[] };
+    const command = String(cloudConfig.runcmd[0] ?? "");
+    expect(cloudConfig).toMatchObject({ runcmd: [expect.any(String)] });
+    expect(command.indexOf("rm -rf /var/lib/cloud /root/.ssh/authorized_keys")).toBeLessThan(
+      command.indexOf('with open("/run/bruno-snapshot-builder/sanitation-result.json"'),
+    );
+    expect(command.indexOf("test ! -e /var/lib/cloud")).toBeLessThan(
+      command.indexOf('with open("/run/bruno-snapshot-builder/sanitation-result.json"'),
+    );
   });
 
   it("shell-quotes image references in the builder bootstrap", () => {
     const maliciousImage = `ghcr.io/owner/runner@sha256:${"a".repeat(64)}'; touch /tmp/pwned; '`;
     const userData = buildSnapshotBuilderBootstrap({
       runnerImage: maliciousImage,
+      runnerVersion: "abc123",
+      runnerDigest: `sha256:${"a".repeat(64)}`,
       defaultAgentImage: AGENT_IMAGE,
       hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
     });
@@ -131,9 +152,11 @@ describe("runner snapshot build orchestration", () => {
       reason: "authorization_missing",
       cleanup: {
         deletedSnapshotId: null,
+        snapshotAbsenceVerified: true,
         deletedDropletId: null,
         deletedFirewallId: null,
         deletedSshKeyId: null,
+        sshKeyAbsenceVerified: true,
         sshKeyDeletionFailed: false,
         ambiguousOwnership: false,
         absenceVerified: false,
@@ -178,6 +201,7 @@ describe("runner snapshot build orchestration", () => {
       ok: true,
       cleanup: {
         deletedSshKeyId: "ssh-key-123",
+        sshKeyAbsenceVerified: true,
         sshKeyDeletionFailed: false,
       },
     });
@@ -194,10 +218,12 @@ describe("runner snapshot build orchestration", () => {
     });
 
     expect(result).toMatchObject({
-      ok: true,
+      ok: false,
+      reason: "cleanup_failed",
       cleanup: {
         deletedSshKeyId: null,
         sshKeyDeletionFailed: true,
+        deletedSnapshotId: "9102",
       },
     });
     expect(provider.calls).toEqual(
@@ -233,6 +259,52 @@ describe("runner snapshot build orchestration", () => {
       "observeOwnedSet",
       "observeOwnedSet",
     ]);
+  });
+
+  it("waits for a newly created builder to publish boot evidence", async () => {
+    const provider = new DelayedBuilderEvidenceProvider(2);
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      builderEvidencePollIntervalMs: 0,
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(provider.calls.filter((call) => call.step === "readBuilderEvidence")).toHaveLength(3);
+  });
+
+  it("cleans up the builder with an independent context after evidence polling is aborted", async () => {
+    const controller = new AbortController();
+    const provider = new AbortingBuilderEvidenceProvider(controller);
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      context: { signal: controller.signal },
+      builderEvidencePollIntervalMs: 0,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "boot_fixture_failed",
+      cleanup: {
+        deletedDropletId: "do-fake-1",
+        deletedFirewallId: "do-fake-firewall-1",
+        absenceVerified: true,
+      },
+    });
+  });
+
+  it("bounds builder evidence reads below the resilience retry ceiling", async () => {
+    const provider = new DelayedBuilderEvidenceProvider(100);
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      builderEvidencePollIntervalMs: 0,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "boot_fixture_failed",
+      cleanup: { absenceVerified: true },
+    });
+    expect(provider.calls.filter((call) => call.step === "readBuilderEvidence")).toHaveLength(60);
   });
 
   it("fails closed when the expected builder host key does not match the pinned identity", async () => {
@@ -287,6 +359,108 @@ describe("runner snapshot build orchestration", () => {
     expect(provider.calls.map((call) => call.step)).toContain("readAction");
   });
 
+  it("reconciles an image that appears after the initial snapshot-action timeout", async () => {
+    const provider = new LateSnapshotImageProvider();
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      actionPollAttempts: 1,
+      actionPollIntervalMs: 0,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "snapshot_failed",
+      cleanup: {
+        deletedSnapshotId: "late-snapshot-9102",
+        snapshotAbsenceVerified: true,
+        absenceVerified: true,
+      },
+    });
+    expect(provider.calls.map((call) => call.step)).toContain("observeSnapshotImage");
+  });
+
+  it("reconciles a late image after the snapshot request outcome is unknown", async () => {
+    const provider = new OutcomeUnknownLateImageProvider();
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      actionPollIntervalMs: 0,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "snapshot_failed",
+      cleanup: {
+        deletedSnapshotId: "eventual-snapshot-9102",
+        snapshotAbsenceVerified: true,
+      },
+    });
+  });
+
+  it("never treats a prior run's same-revision snapshot as the current attempt", async () => {
+    const provider = new PriorRevisionSnapshotProvider();
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      actionPollIntervalMs: 0,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "cleanup_failed",
+      cleanup: {
+        snapshotAbsenceVerified: false,
+        absenceVerified: true,
+      },
+    });
+    expect(provider.calls).toContainEqual({
+      step: "snapshot",
+      input: {
+        providerResourceId: "do-fake-1",
+        name: "bruno-snapshot-builder-111111111111-123456",
+      },
+    });
+    expect(provider.calls).not.toContainEqual({
+      step: "deleteImage",
+      input: { imageId: "prior-snapshot-9102" },
+    });
+    expect(provider.builderWasAbsentAtFirstImageObservation).toBe(true);
+  });
+
+  it("waits for a completed snapshot action's image to become visible before deleting it", async () => {
+    const provider = new CompletedEventuallyVisibleImageProvider();
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      actionPollIntervalMs: 0,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "snapshot_unavailable",
+      cleanup: {
+        deletedSnapshotId: "eventual-snapshot-9102",
+        snapshotAbsenceVerified: true,
+      },
+    });
+  });
+
+  it("converts unexpected post-effect exceptions into retained cleanup evidence", async () => {
+    const provider = new FakeDigitalOceanProvider();
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      privateKeyPem: "not a private key",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "cleanup_failed",
+      cleanup: {
+        deletedSnapshotId: "9102",
+        snapshotAbsenceVerified: true,
+        deletedDropletId: "do-fake-1",
+        absenceVerified: true,
+      },
+    });
+  });
+
   it("does not use the snapshot action ID as the manifest image ID", async () => {
     const provider = new FakeDigitalOceanProvider();
     const result = await buildRunnerSnapshot(baseInput(provider));
@@ -298,7 +472,7 @@ describe("runner snapshot build orchestration", () => {
     expect(provider.calls).toEqual(
       expect.arrayContaining([
         { step: "readAction", input: { actionId: "8102" } },
-        { step: "findImage", input: { name: "bruno-snapshot-builder-111111111111" } },
+        { step: "findImage", input: { name: "bruno-snapshot-builder-111111111111-123456" } },
         { step: "readImage", input: { imageId: "9102" } },
       ]),
     );
@@ -313,7 +487,8 @@ describe("runner snapshot build orchestration", () => {
       ok: false,
       reason: "snapshot_unavailable",
       cleanup: {
-        deletedSnapshotId: null,
+        deletedSnapshotId: "9102",
+        snapshotAbsenceVerified: true,
         deletedDropletId: "do-fake-1",
       },
     });
@@ -326,15 +501,47 @@ describe("runner snapshot build orchestration", () => {
     const result = await buildRunnerSnapshot(baseInput(provider));
 
     expect(result).toMatchObject({
-      ok: true,
+      ok: false,
+      reason: "cleanup_failed",
       cleanup: {
         deletedDropletId: null,
         deletedFirewallId: null,
         ambiguousOwnership: true,
         absenceVerified: false,
+        deletedSnapshotId: "9102",
       },
     });
     expect(provider.calls.map((call) => call.step)).not.toContain("deleteDroplet");
+    expect(provider.calls.map((call) => call.step)).toContain("verifyImageAbsent");
+  });
+
+  it("replaces a build failure with cleanup_failed when builder absence is ambiguous", async () => {
+    const provider = new AmbiguousFailureProvider();
+    const result = await buildRunnerSnapshot(baseInput(provider));
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "cleanup_failed",
+      cleanup: {
+        absenceVerified: false,
+        ambiguousOwnership: true,
+        snapshotAbsenceVerified: true,
+      },
+    });
+  });
+
+  it("does not claim failed snapshot deletion until provider absence is observed", async () => {
+    const provider = new UnverifiedImageDeletionProvider();
+    const result = await buildRunnerSnapshot(baseInput(provider));
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "cleanup_failed",
+      cleanup: {
+        deletedSnapshotId: null,
+        snapshotAbsenceVerified: false,
+      },
+    });
   });
 });
 
@@ -364,6 +571,53 @@ class BadSanitationEvidenceProvider extends FakeDigitalOceanProvider {
   }
 }
 
+class DelayedBuilderEvidenceProvider extends FakeDigitalOceanProvider {
+  #remainingUnavailableAttempts: number;
+
+  constructor(unavailableAttempts: number) {
+    super();
+    this.#remainingUnavailableAttempts = unavailableAttempts;
+  }
+
+  override async readSnapshotBuilderEvidence(
+    input: Parameters<FakeDigitalOceanProvider["readSnapshotBuilderEvidence"]>[0],
+    context?: { signal: AbortSignal },
+  ) {
+    if (this.#remainingUnavailableAttempts > 0) {
+      this.#remainingUnavailableAttempts -= 1;
+      this.calls.push({ step: "readBuilderEvidence", input });
+      return {
+        ok: false as const,
+        reason: "builder_evidence_not_ready" as const,
+        message: "Snapshot builder evidence is not ready yet.",
+      };
+    }
+
+    return super.readSnapshotBuilderEvidence(input, context);
+  }
+}
+
+class AbortingBuilderEvidenceProvider extends FakeDigitalOceanProvider {
+  readonly #controller: AbortController;
+
+  constructor(controller: AbortController) {
+    super();
+    this.#controller = controller;
+  }
+
+  override async readSnapshotBuilderEvidence(
+    input: Parameters<FakeDigitalOceanProvider["readSnapshotBuilderEvidence"]>[0],
+  ) {
+    this.calls.push({ step: "readBuilderEvidence", input });
+    this.#controller.abort();
+    return {
+      ok: false as const,
+      reason: "builder_evidence_not_ready" as const,
+      message: "Snapshot builder evidence polling was aborted.",
+    };
+  }
+}
+
 class ActionErroredProvider extends FakeDigitalOceanProvider {
   override async readAction(input: { actionId: string }, context?: { signal: AbortSignal }) {
     await super.readAction(input, context);
@@ -374,6 +628,159 @@ class ActionErroredProvider extends FakeDigitalOceanProvider {
         status: input.actionId.endsWith("02") ? ("errored" as const) : ("completed" as const),
         type: input.actionId.endsWith("02") ? "snapshot" : "power_off",
         resourceId: "do-fake-1",
+      },
+    };
+  }
+}
+
+class LateSnapshotImageProvider extends FakeDigitalOceanProvider {
+  #snapshotActionReads = 0;
+
+  override async snapshotResource(
+    input: Parameters<FakeDigitalOceanProvider["snapshotResource"]>[0],
+  ) {
+    this.calls.push({ step: "snapshot", input });
+    return {
+      ok: true as const,
+      value: {
+        id: "late-snapshot-action",
+        status: "in-progress" as const,
+        type: "snapshot",
+        resourceId: input.providerResourceId,
+      },
+    };
+  }
+
+  override async readAction(input: { actionId: string }) {
+    if (input.actionId !== "late-snapshot-action") return await super.readAction(input);
+    this.calls.push({ step: "readAction", input });
+    this.#snapshotActionReads += 1;
+    return {
+      ok: true as const,
+      value: {
+        id: input.actionId,
+        status: this.#snapshotActionReads > 1 ? ("completed" as const) : ("in-progress" as const),
+        type: "snapshot",
+        resourceId: "do-fake-1",
+      },
+    };
+  }
+
+  override async observeSnapshotImageByName(
+    input: Parameters<FakeDigitalOceanProvider["observeSnapshotImageByName"]>[0],
+  ) {
+    this.calls.push({ step: "observeSnapshotImage", input });
+    return {
+      ok: true as const,
+      value: {
+        state: "present" as const,
+        image: {
+          id: "late-snapshot-9102",
+          name: input.name,
+          regions: ["sfo3"],
+          minDiskSizeGb: 25,
+          architecture: "amd64" as const,
+          status: "available" as const,
+        },
+      },
+    };
+  }
+}
+
+abstract class EventuallyVisibleImageProvider extends FakeDigitalOceanProvider {
+  #observations = 0;
+
+  override async observeSnapshotImageByName(
+    input: Parameters<FakeDigitalOceanProvider["observeSnapshotImageByName"]>[0],
+  ) {
+    this.calls.push({ step: "observeSnapshotImage", input });
+    this.#observations += 1;
+    if (this.#observations === 1) {
+      return { ok: true as const, value: { state: "absent" as const } };
+    }
+    return {
+      ok: true as const,
+      value: {
+        state: "present" as const,
+        image: {
+          id: "eventual-snapshot-9102",
+          name: input.name,
+          regions: ["sfo3"],
+          minDiskSizeGb: 25,
+          architecture: "amd64" as const,
+          status: "available" as const,
+        },
+      },
+    };
+  }
+}
+
+class OutcomeUnknownLateImageProvider extends EventuallyVisibleImageProvider {
+  override async snapshotResource(
+    input: Parameters<FakeDigitalOceanProvider["snapshotResource"]>[0],
+  ) {
+    this.calls.push({ step: "snapshot", input });
+    return {
+      ok: false as const,
+      reason: "action_outcome_unknown" as const,
+      message: "snapshot request outcome unknown",
+    };
+  }
+}
+
+class PriorRevisionSnapshotProvider extends FakeDigitalOceanProvider {
+  builderWasAbsentAtFirstImageObservation = false;
+
+  override async snapshotResource(
+    input: Parameters<FakeDigitalOceanProvider["snapshotResource"]>[0],
+  ) {
+    this.calls.push({ step: "snapshot", input });
+    return {
+      ok: false as const,
+      reason: "action_outcome_unknown" as const,
+      message: "snapshot request outcome unknown",
+    };
+  }
+
+  override async observeSnapshotImageByName(
+    input: Parameters<FakeDigitalOceanProvider["observeSnapshotImageByName"]>[0],
+  ) {
+    if (!this.calls.some((call) => call.step === "observeSnapshotImage")) {
+      this.builderWasAbsentAtFirstImageObservation =
+        this.resources.get("do-fake-1")?.deletedAt !== null && this.firewalls.size === 0;
+    }
+    this.calls.push({ step: "observeSnapshotImage", input });
+    return input.name === "bruno-snapshot-builder-111111111111"
+      ? {
+          ok: true as const,
+          value: {
+            state: "present" as const,
+            image: {
+              id: "prior-snapshot-9102",
+              name: input.name,
+              regions: ["sfo3"],
+              minDiskSizeGb: 25,
+              architecture: "amd64" as const,
+              status: "available" as const,
+            },
+          },
+        }
+      : { ok: true as const, value: { state: "absent" as const } };
+  }
+}
+
+class CompletedEventuallyVisibleImageProvider extends EventuallyVisibleImageProvider {
+  override async snapshotResource(
+    input: Parameters<FakeDigitalOceanProvider["snapshotResource"]>[0],
+  ) {
+    this.calls.push({ step: "snapshot", input });
+    return {
+      ok: true as const,
+      value: {
+        id: "eventual-snapshot-action",
+        status: "completed" as const,
+        type: "snapshot",
+        resourceId: input.providerResourceId,
       },
     };
   }
@@ -403,6 +810,33 @@ class AmbiguousOwnedSetProvider extends FakeDigitalOceanProvider {
       reason: "ownership_ambiguous" as const,
       retryable: false,
       message: "ambiguous owner",
+    };
+  }
+}
+
+class AmbiguousFailureProvider extends BadSanitationEvidenceProvider {
+  override async observeOwnedSet(
+    input: Parameters<FakeDigitalOceanProvider["observeOwnedSet"]>[0],
+  ) {
+    this.calls.push({ step: "observeOwnedSet", input });
+    return {
+      ok: false as const,
+      reason: "ownership_ambiguous" as const,
+      retryable: false,
+      message: "ambiguous owner",
+    };
+  }
+}
+
+class UnverifiedImageDeletionProvider extends AmbiguousOwnedSetProvider {
+  override async verifyImageAbsent(
+    input: Parameters<FakeDigitalOceanProvider["verifyImageAbsent"]>[0],
+  ) {
+    this.calls.push({ step: "verifyImageAbsent", input });
+    return {
+      ok: false as const,
+      reason: "cleanup_failed" as const,
+      message: "image absence is unknown",
     };
   }
 }

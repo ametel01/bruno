@@ -21,14 +21,20 @@ import type {
   DigitalOceanOwnedSetExpectation,
   DigitalOceanOwnedSetProvider,
   DigitalOceanProvider,
+  DigitalOceanProviderResult,
   DigitalOceanProviderRequestContext,
+  DigitalOceanReadSnapshotBuilderEvidenceInput,
   DigitalOceanResource,
+  DigitalOceanSnapshotBuilderEvidence,
 } from "@/src/server/runners/digitalocean-provider";
 
 const SNAPSHOT_AUTHORIZATION_SENTINEL = "I_UNDERSTAND_THIS_CREATES_A_BILLABLE_SNAPSHOT_BUILDER";
 const SNAPSHOT_OPERATION_TAG_PREFIX = "bruno-snapshot-build";
 const SNAPSHOT_BUILDER_NAME_PREFIX = "bruno-snapshot-builder";
 const SNAPSHOT_MIN_DISK_GB = 25;
+const SNAPSHOT_BUILDER_EVIDENCE_POLL_ATTEMPTS = 60;
+const SNAPSHOT_BUILDER_EVIDENCE_DEADLINE_MS = 20 * 60 * 1_000;
+const SNAPSHOT_CLEANUP_DEADLINE_MS = 2 * 60 * 1_000;
 
 export type BuildRunnerSnapshotInput = {
   costAuthorization: string;
@@ -52,6 +58,7 @@ export type BuildRunnerSnapshotInput = {
   now?: () => Date;
   actionPollAttempts?: number;
   actionPollIntervalMs?: number;
+  builderEvidencePollIntervalMs?: number;
 };
 
 export type SnapshotBootFixtureResult = {
@@ -62,6 +69,7 @@ export type SnapshotBootFixtureResult = {
   hermesImage: string;
   bootContractVersion: string;
   preloadedImages?: string[];
+  components?: Record<string, string>;
   completedAt: string;
 };
 
@@ -102,13 +110,16 @@ export type BuildRunnerSnapshotFailureReason =
   | "sanitation_failed"
   | "power_off_failed"
   | "snapshot_failed"
-  | "snapshot_unavailable";
+  | "snapshot_unavailable"
+  | "cleanup_failed";
 
 export type SnapshotCleanupEvidence = {
   deletedSnapshotId: string | null;
+  snapshotAbsenceVerified: boolean;
   deletedDropletId: string | null;
   deletedFirewallId: string | null;
   deletedSshKeyId: string | null;
+  sshKeyAbsenceVerified: boolean;
   sshKeyDeletionFailed: boolean;
   ambiguousOwnership: boolean;
   absenceVerified: boolean;
@@ -118,11 +129,56 @@ export type SnapshotCleanupEvidence = {
 export async function buildRunnerSnapshot(
   input: BuildRunnerSnapshotInput,
 ): Promise<BuildRunnerSnapshotResult> {
+  const result = await buildRunnerSnapshotCandidate(input);
+  if (input.builderSshKeyId && !result.cleanup.sshKeyAbsenceVerified) {
+    const cleanupController = new AbortController();
+    const cleanupTimeout = setTimeout(
+      () => cleanupController.abort(),
+      SNAPSHOT_CLEANUP_DEADLINE_MS,
+    );
+    try {
+      await deleteSshKeyAndVerifyAbsence({
+        provider: input.provider,
+        sshKeyId: input.builderSshKeyId,
+        cleanup: result.cleanup,
+        context: { signal: cleanupController.signal },
+      });
+    } finally {
+      clearTimeout(cleanupTimeout);
+    }
+  }
+
+  if (terminalCleanupPassed(result.cleanup, input.builderSshKeyId)) return result;
+
+  const cleanupController = new AbortController();
+  const cleanupTimeout = setTimeout(() => cleanupController.abort(), SNAPSHOT_CLEANUP_DEADLINE_MS);
+  try {
+    if (result.ok) {
+      result.cleanup.snapshotAbsenceVerified = false;
+      await deleteImageAndVerifyAbsence({
+        provider: input.provider,
+        imageId: result.manifest.snapshot.id,
+        cleanup: result.cleanup,
+        context: { signal: cleanupController.signal },
+      });
+    }
+  } finally {
+    clearTimeout(cleanupTimeout);
+  }
+
+  return { ok: false, reason: "cleanup_failed", cleanup: result.cleanup };
+}
+
+async function buildRunnerSnapshotCandidate(
+  input: BuildRunnerSnapshotInput,
+): Promise<BuildRunnerSnapshotResult> {
   const cleanup: SnapshotCleanupEvidence = {
     deletedSnapshotId: null,
+    snapshotAbsenceVerified: true,
     deletedDropletId: null,
     deletedFirewallId: null,
     deletedSshKeyId: null,
+    sshKeyAbsenceVerified: !input.builderSshKeyId,
     sshKeyDeletionFailed: false,
     ambiguousOwnership: false,
     absenceVerified: false,
@@ -131,6 +187,7 @@ export async function buildRunnerSnapshot(
   const now = input.now ?? (() => new Date());
   let builder: DigitalOceanResource | null = null;
   let snapshotId: string | null = null;
+  let snapshotAction: DigitalOceanAction | null = null;
 
   const validated = validateSnapshotBuildInput(input);
   if (!validated.ok) {
@@ -143,8 +200,11 @@ export async function buildRunnerSnapshot(
     !input.provider.readAction ||
     !input.provider.readImageAvailability ||
     !input.provider.findSnapshotImageByName ||
+    !input.provider.observeSnapshotImageByName ||
     !input.provider.readSnapshotBuilderEvidence ||
-    !input.provider.deleteImage
+    !input.provider.deleteImage ||
+    !input.provider.verifyImageAbsent ||
+    (input.builderSshKeyId && (!input.provider.deleteSshKey || !input.provider.verifySshKeyAbsent))
   ) {
     return { ok: false, reason: "provider_contract_missing", cleanup };
   }
@@ -155,9 +215,10 @@ export async function buildRunnerSnapshot(
     return { ok: false, reason: "provider_contract_missing", cleanup };
   }
 
+  const operationTag = `${SNAPSHOT_OPERATION_TAG_PREFIX}-${input.operationId}`;
+  const snapshotName = `${SNAPSHOT_BUILDER_NAME_PREFIX}-${input.sourceRevision.slice(0, 12)}-${input.operationId}`;
+
   try {
-    const operationTag = `${SNAPSHOT_OPERATION_TAG_PREFIX}-${input.operationId}`;
-    const snapshotName = `${SNAPSHOT_BUILDER_NAME_PREFIX}-${input.sourceRevision.slice(0, 12)}`;
     const firewallName = `${snapshotName}-firewall`;
     const created = await input.provider.createRunner(
       {
@@ -170,6 +231,8 @@ export async function buildRunnerSnapshot(
         ...(input.builderSshKeyId ? { sshKeyIds: [input.builderSshKeyId] } : {}),
         userData: buildSnapshotBuilderBootstrap({
           runnerImage: input.runnerImage,
+          runnerVersion: validated.runnerVersion,
+          runnerDigest: validated.runnerDigest,
           defaultAgentImage: validated.defaultAgentImage,
           hermesImage: validated.hermesImage,
         }),
@@ -201,8 +264,9 @@ export async function buildRunnerSnapshot(
 
     builder = firewalled.value;
 
-    const evidence = await input.provider.readSnapshotBuilderEvidence(
-      {
+    const evidence = await pollSnapshotBuilderEvidence({
+      readEvidence: input.provider.readSnapshotBuilderEvidence.bind(input.provider),
+      evidenceInput: {
         providerResourceId: builder.providerResourceId,
         ...(input.builderSshPrivateKeyPath
           ? { privateKeyPath: input.builderSshPrivateKeyPath }
@@ -211,8 +275,11 @@ export async function buildRunnerSnapshot(
           ? { expectedHostKeySha256: input.expectedBuilderHostKeySha256 }
           : {}),
       },
-      input.context,
-    );
+      context: input.context,
+      ...(input.builderEvidencePollIntervalMs === undefined
+        ? {}
+        : { intervalMs: input.builderEvidencePollIntervalMs }),
+    });
     cleanup.steps.push("read_builder_evidence");
 
     if (!evidence.ok) {
@@ -255,19 +322,21 @@ export async function buildRunnerSnapshot(
       return { ok: false, reason: "power_off_failed", cleanup };
     }
 
-    const snapshotAction = await input.provider.snapshotResource(
+    cleanup.snapshotAbsenceVerified = false;
+    const createdSnapshotAction = await input.provider.snapshotResource(
       { providerResourceId: builder.providerResourceId, name: snapshotName },
       input.context,
     );
     cleanup.steps.push("snapshot");
 
-    if (!snapshotAction.ok) {
+    if (!createdSnapshotAction.ok) {
       return { ok: false, reason: "snapshot_failed", cleanup };
     }
+    snapshotAction = createdSnapshotAction.value;
 
     const snapshot = await pollDigitalOceanAction({
       provider: input.provider,
-      action: snapshotAction.value,
+      action: snapshotAction,
       context: input.context,
       ...(input.actionPollAttempts === undefined ? {} : { attempts: input.actionPollAttempts }),
       ...(input.actionPollIntervalMs === undefined
@@ -356,6 +425,7 @@ export async function buildRunnerSnapshot(
       privateKeyPem: input.privateKeyPem,
     });
 
+    cleanup.snapshotAbsenceVerified = true;
     snapshotId = null;
 
     return {
@@ -368,42 +438,194 @@ export async function buildRunnerSnapshot(
       sanitationResult,
       cleanup,
     };
+  } catch {
+    return { ok: false, reason: "cleanup_failed", cleanup };
   } finally {
     cleanup.steps.push("revoke_ephemeral_registration_token");
     cleanup.steps.push("revoke_ephemeral_registry_credential");
-    if (input.builderSshKeyId && input.provider.deleteSshKey) {
-      const deleted = await input.provider.deleteSshKey(
-        { id: input.builderSshKeyId },
-        input.context,
-      );
-      if (deleted.ok) {
-        cleanup.deletedSshKeyId = input.builderSshKeyId;
-      } else {
-        cleanup.sshKeyDeletionFailed = true;
-      }
-      cleanup.steps.push("delete_ephemeral_ssh_key");
-    } else if (input.builderSshKeyId) {
+    const builderSshKeyId = input.builderSshKeyId;
+    if (builderSshKeyId && input.provider.deleteSshKey) {
+      await runWithSnapshotCleanupContext(async (cleanupContext) => {
+        await deleteSshKeyAndVerifyAbsence({
+          provider: input.provider,
+          sshKeyId: builderSshKeyId,
+          cleanup,
+          context: cleanupContext,
+        });
+      });
+    } else if (builderSshKeyId) {
       cleanup.sshKeyDeletionFailed = true;
       cleanup.steps.push("delete_ephemeral_ssh_key");
     } else {
       cleanup.steps.push("delete_ephemeral_ssh_key");
     }
 
-    if (snapshotId && input.provider.deleteImage) {
-      const deleted = await input.provider.deleteImage({ imageId: snapshotId }, input.context);
-      cleanup.steps.push("delete_partial_snapshot");
-      if (deleted.ok) cleanup.deletedSnapshotId = snapshotId;
-    }
-
-    if (builder) {
-      await cleanupOwnedBuilder({
-        provider: input.provider,
-        builder,
-        operationTag: `${SNAPSHOT_OPERATION_TAG_PREFIX}-${input.operationId}`,
-        cleanup,
-        context: input.context,
+    const builderToCleanup = builder;
+    if (builderToCleanup) {
+      await runWithSnapshotCleanupContext(async (cleanupContext) => {
+        try {
+          await cleanupOwnedBuilder({
+            provider: input.provider,
+            builder: builderToCleanup,
+            operationTag,
+            cleanup,
+            context: cleanupContext,
+          });
+        } catch {
+          cleanup.ambiguousOwnership = true;
+          cleanup.steps.push("owned_builder_cleanup_failed");
+        }
       });
     }
+
+    await runWithSnapshotCleanupContext(async (cleanupContext) => {
+      if (snapshotId) {
+        cleanup.snapshotAbsenceVerified = false;
+        await deleteImageAndVerifyAbsence({
+          provider: input.provider,
+          imageId: snapshotId,
+          cleanup,
+          context: cleanupContext,
+        });
+      } else if (!cleanup.snapshotAbsenceVerified) {
+        await reconcilePartialSnapshot({
+          provider: input.provider,
+          snapshotAction,
+          snapshotName,
+          cleanup,
+          context: cleanupContext,
+          intervalMs: input.actionPollIntervalMs ?? 5_000,
+        });
+      }
+    });
+  }
+}
+
+async function runWithSnapshotCleanupContext(
+  operation: (context: DigitalOceanProviderRequestContext) => Promise<void>,
+): Promise<void> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SNAPSHOT_CLEANUP_DEADLINE_MS);
+  try {
+    await operation({ signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function terminalCleanupPassed(
+  cleanup: SnapshotCleanupEvidence,
+  builderSshKeyId: string | undefined,
+): boolean {
+  const builderWasAttempted = cleanup.steps.includes("create_builder");
+  return (
+    (!builderWasAttempted || (cleanup.absenceVerified && !cleanup.ambiguousOwnership)) &&
+    cleanup.snapshotAbsenceVerified &&
+    !cleanup.sshKeyDeletionFailed &&
+    (!builderSshKeyId ||
+      (cleanup.deletedSshKeyId === builderSshKeyId && cleanup.sshKeyAbsenceVerified))
+  );
+}
+
+async function deleteSshKeyAndVerifyAbsence(input: {
+  provider: DigitalOceanProvider;
+  sshKeyId: string;
+  cleanup: SnapshotCleanupEvidence;
+  context: DigitalOceanProviderRequestContext;
+}): Promise<void> {
+  input.cleanup.steps.push("delete_ephemeral_ssh_key");
+  try {
+    const deleted = await input.provider.deleteSshKey?.({ id: input.sshKeyId }, input.context);
+    if (!deleted?.ok) {
+      input.cleanup.sshKeyDeletionFailed = true;
+      return;
+    }
+
+    const observed = await input.provider.verifySshKeyAbsent?.(
+      { id: input.sshKeyId },
+      input.context,
+    );
+    input.cleanup.steps.push("verify_ephemeral_ssh_key_absence");
+    if (observed?.ok) {
+      input.cleanup.deletedSshKeyId = input.sshKeyId;
+      input.cleanup.sshKeyAbsenceVerified = true;
+      return;
+    }
+  } catch {
+    input.cleanup.steps.push("ephemeral_ssh_key_cleanup_failed");
+  }
+
+  input.cleanup.sshKeyDeletionFailed = true;
+}
+
+async function deleteImageAndVerifyAbsence(input: {
+  provider: DigitalOceanProvider;
+  imageId: string;
+  cleanup: SnapshotCleanupEvidence;
+  context: DigitalOceanProviderRequestContext;
+}): Promise<void> {
+  input.cleanup.steps.push("delete_partial_snapshot");
+  try {
+    const deleted = await input.provider.deleteImage?.({ imageId: input.imageId }, input.context);
+    if (!deleted?.ok) return;
+
+    const verified = await input.provider.verifyImageAbsent?.(
+      { imageId: input.imageId },
+      input.context,
+    );
+    input.cleanup.steps.push("verify_partial_snapshot_absence");
+    if (!verified?.ok) return;
+
+    input.cleanup.deletedSnapshotId = input.imageId;
+    input.cleanup.snapshotAbsenceVerified = true;
+  } catch {
+    input.cleanup.steps.push("partial_snapshot_deletion_failed");
+  }
+}
+
+async function reconcilePartialSnapshot(input: {
+  provider: DigitalOceanProvider;
+  snapshotAction: DigitalOceanAction | null;
+  snapshotName: string;
+  cleanup: SnapshotCleanupEvidence;
+  context: DigitalOceanProviderRequestContext;
+  intervalMs: number;
+}): Promise<void> {
+  let action = input.snapshotAction;
+  input.cleanup.steps.push("reconcile_partial_snapshot_action");
+
+  try {
+    for (let attempt = 0; attempt < 24 && !input.context.signal.aborted; attempt += 1) {
+      if (action && action.status === "in-progress" && input.provider.readAction) {
+        const read = await input.provider.readAction({ actionId: action.id }, input.context);
+        if (read.ok) action = read.value;
+      }
+
+      const observed = await input.provider.observeSnapshotImageByName?.(
+        { name: input.snapshotName },
+        input.context,
+      );
+      input.cleanup.steps.push("observe_partial_snapshot");
+      if (observed?.ok && observed.value.state === "present") {
+        await deleteImageAndVerifyAbsence({
+          provider: input.provider,
+          imageId: observed.value.image.id,
+          cleanup: input.cleanup,
+          context: input.context,
+        });
+        return;
+      }
+      if (observed?.ok && observed.value.state === "absent" && action?.status === "errored") {
+        input.cleanup.snapshotAbsenceVerified = true;
+        return;
+      }
+
+      if (attempt < 23 && input.intervalMs > 0) {
+        await sleep(input.intervalMs, input.context.signal);
+      }
+    }
+  } catch {
+    input.cleanup.steps.push("partial_snapshot_reconciliation_failed");
   }
 }
 
@@ -474,23 +696,93 @@ async function pollDigitalOceanAction(input: {
   intervalMs?: number;
 }): Promise<{ ok: true; action: DigitalOceanAction } | { ok: false }> {
   const attempts = input.attempts ?? 30;
-  const intervalMs = input.intervalMs ?? 5_000;
+  const intervalMs = input.intervalMs ?? 20_000;
   let action = input.action;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    if (action.status === "errored" || input.context.signal.aborted) return { ok: false };
+    if (action.status === "errored") return { ok: true, action };
+    if (input.context.signal.aborted) return { ok: false };
     if (!input.provider.readAction) return { ok: false };
     const read = await input.provider.readAction({ actionId: action.id }, input.context);
     if (!read.ok) return { ok: false };
     action = read.value;
     if (action.status === "completed") return { ok: true, action };
-    if (action.status === "errored") return { ok: false };
+    if (action.status === "errored") return { ok: true, action };
     if (attempt < attempts - 1 && intervalMs > 0) {
       await sleep(intervalMs, input.context.signal);
     }
   }
 
   return { ok: false };
+}
+
+async function pollSnapshotBuilderEvidence(input: {
+  readEvidence: (
+    input: DigitalOceanReadSnapshotBuilderEvidenceInput,
+    context?: DigitalOceanProviderRequestContext,
+  ) => Promise<DigitalOceanProviderResult<DigitalOceanSnapshotBuilderEvidence>>;
+  evidenceInput: DigitalOceanReadSnapshotBuilderEvidenceInput;
+  context: DigitalOceanProviderRequestContext;
+  intervalMs?: number;
+}): Promise<DigitalOceanProviderResult<DigitalOceanSnapshotBuilderEvidence>> {
+  const intervalMs = input.intervalMs ?? 5_000;
+  const deadlineAt = Date.now() + SNAPSHOT_BUILDER_EVIDENCE_DEADLINE_MS;
+  let lastEvidence: DigitalOceanProviderResult<DigitalOceanSnapshotBuilderEvidence> = {
+    ok: false,
+    reason: "builder_evidence_not_ready",
+    message: "Snapshot builder evidence polling did not start.",
+  };
+
+  for (let attempt = 0; attempt < SNAPSHOT_BUILDER_EVIDENCE_POLL_ATTEMPTS; attempt += 1) {
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0 || input.context.signal.aborted) return lastEvidence;
+
+    const evidence = await readSnapshotBuilderEvidenceBeforeDeadline({
+      readEvidence: input.readEvidence,
+      evidenceInput: input.evidenceInput,
+      context: input.context,
+      timeoutMs: remainingMs,
+    });
+    lastEvidence = evidence;
+    if (evidence.ok || evidence.reason !== "builder_evidence_not_ready") return evidence;
+    if (input.context.signal.aborted || attempt === SNAPSHOT_BUILDER_EVIDENCE_POLL_ATTEMPTS - 1) {
+      return evidence;
+    }
+
+    const remainingAfterReadMs = deadlineAt - Date.now();
+    if (remainingAfterReadMs <= 0) return evidence;
+    if (intervalMs > 0) {
+      try {
+        await sleep(Math.min(intervalMs, remainingAfterReadMs), input.context.signal);
+      } catch {
+        return evidence;
+      }
+    }
+  }
+
+  return lastEvidence;
+}
+
+async function readSnapshotBuilderEvidenceBeforeDeadline(input: {
+  readEvidence: (
+    input: DigitalOceanReadSnapshotBuilderEvidenceInput,
+    context?: DigitalOceanProviderRequestContext,
+  ) => Promise<DigitalOceanProviderResult<DigitalOceanSnapshotBuilderEvidence>>;
+  evidenceInput: DigitalOceanReadSnapshotBuilderEvidenceInput;
+  context: DigitalOceanProviderRequestContext;
+  timeoutMs: number;
+}): Promise<DigitalOceanProviderResult<DigitalOceanSnapshotBuilderEvidence>> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const timeout = setTimeout(abort, input.timeoutMs);
+  input.context.signal.addEventListener("abort", abort, { once: true });
+
+  try {
+    return await input.readEvidence(input.evidenceInput, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+    input.context.signal.removeEventListener("abort", abort);
+  }
 }
 
 function asOwnedSetProvider(provider: DigitalOceanProvider): DigitalOceanOwnedSetProvider | null {
@@ -521,6 +813,8 @@ async function sleep(ms: number, signal: AbortSignal): Promise<void> {
 
 export function buildSnapshotBuilderBootstrap(input: {
   runnerImage: string;
+  runnerVersion: string;
+  runnerDigest: string;
   defaultAgentImage: string;
   hermesImage: string;
 }): string {
@@ -530,6 +824,18 @@ export function buildSnapshotBuilderBootstrap(input: {
   const runnerImageJson = JSON.stringify(input.runnerImage);
   const defaultAgentImageJson = JSON.stringify(input.defaultAgentImage);
   const hermesImageJson = JSON.stringify(input.hermesImage);
+  const runnerVersionShell = shellSingleQuote(input.runnerVersion);
+  const runnerDigestShell = shellSingleQuote(input.runnerDigest);
+  const runnerFixtureSource = shellSingleQuote(
+    [
+      'import { createRunnerBootReadinessController } from "./src/runner-service/boot-self-test.ts";',
+      "const controller = createRunnerBootReadinessController();",
+      "await controller.start();",
+      "const result = await controller.read();",
+      "process.stdout.write(JSON.stringify(result));",
+      'if (result.status !== "ready") process.exit(1);',
+    ].join(" "),
+  );
 
   return `#cloud-config
 package_update: true
@@ -555,19 +861,59 @@ runcmd:
     docker pull ${defaultAgentImageShell}
     docker pull ${hermesImageShell}
     docker image inspect ${runnerImageShell} ${defaultAgentImageShell} ${hermesImageShell} >/dev/null
+    install -m 0700 -d /var/lib/bruno/boot-self-test
+    docker rm --force bruno-snapshot-runner-fixture >/dev/null 2>&1 || true
+    docker run --rm \
+      --name bruno-snapshot-runner-fixture \
+      --platform linux/amd64 \
+      --env BRUNO_RUNNER_CONTAINER_ID=bruno-snapshot-runner-fixture \
+      --env BRUNO_RUNNER_EXPECTED_RELEASE_VERSION=${runnerVersionShell} \
+      --env BRUNO_RUNNER_EXPECTED_IMAGE_DIGEST=${runnerDigestShell} \
+      --env BRUNO_RUNNER_EXPECTED_BOOT_CONTRACT_VERSION=${RUNNER_BOOT_CONTRACT_VERSION} \
+      --env BRUNO_RUNNER_BOOT_MODEL_CANARY_ENABLED=true \
+      --volume /var/run/docker.sock:/var/run/docker.sock \
+      --volume /var/lib/bruno/boot-self-test:/var/lib/bruno/boot-self-test \
+      --entrypoint bun \
+      ${runnerImageShell} \
+      --conditions react-server -e ${runnerFixtureSource} \
+      > /run/bruno-snapshot-builder/runner-boot-self-test.json
     BRUNO_BUILDER_RESOURCE_ID="$(curl -fsS http://169.254.169.254/metadata/v1/id)"
-    cat > /run/bruno-snapshot-builder/boot-result.json <<BRUNO_BOOT_RESULT_JSON
-    {
-      "ok": true,
-      "builderResourceId": "$BRUNO_BUILDER_RESOURCE_ID",
-      "runnerImage": ${runnerImageJson},
-      "defaultAgentImage": ${defaultAgentImageJson},
-      "hermesImage": ${hermesImageJson},
-      "bootContractVersion": "${RUNNER_BOOT_CONTRACT_VERSION}",
-      "preloadedImages": [${runnerImageJson}, ${defaultAgentImageJson}, ${hermesImageJson}],
-      "completedAt": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+    export BRUNO_BUILDER_RESOURCE_ID
+    printf '%s\\n' "$BRUNO_BUILDER_RESOURCE_ID" > /run/bruno-snapshot-builder/builder-resource-id
+    python3 - <<'BRUNO_BOOT_RESULT_PY'
+    import datetime
+    import json
+    import os
+
+    with open("/run/bruno-snapshot-builder/runner-boot-self-test.json", encoding="utf-8") as source:
+        fixture = json.load(source)
+    required_components = {
+        "docker",
+        "hermesFixture",
+        "detailedHealth",
+        "modelCanary",
+        "telegramConfig",
+        "cleanup",
     }
-    BRUNO_BOOT_RESULT_JSON
+    if fixture["status"] != "ready" or any(
+        fixture["components"].get(component) != "passed" for component in required_components
+    ):
+        raise SystemExit("runner boot fixture did not pass")
+    result = {
+        "ok": True,
+        "builderResourceId": os.environ["BRUNO_BUILDER_RESOURCE_ID"],
+        "runnerImage": ${runnerImageJson},
+        "defaultAgentImage": ${defaultAgentImageJson},
+        "hermesImage": ${hermesImageJson},
+        "bootContractVersion": "${RUNNER_BOOT_CONTRACT_VERSION}",
+        "preloadedImages": [${runnerImageJson}, ${defaultAgentImageJson}, ${hermesImageJson}],
+        "components": fixture["components"],
+        "completedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+    with open("/run/bruno-snapshot-builder/boot-result.json", "w", encoding="utf-8") as output:
+        json.dump(result, output, separators=(",", ":"), sort_keys=True)
+        output.write("\\n")
+    BRUNO_BOOT_RESULT_PY
     docker ps -aq | xargs --no-run-if-empty docker rm --force
     docker network ls --format '{{.Name}}' | grep '^bruno' | xargs --no-run-if-empty docker network rm
     rm -rf \
@@ -612,18 +958,44 @@ runcmd:
         exit 1
       fi
     done
-    cat > /run/bruno-snapshot-builder/sanitation-result.json <<BRUNO_SANITATION_RESULT_JSON
-    {
-      "ok": true,
-      "builderResourceId": "$BRUNO_BUILDER_RESOURCE_ID",
-      "forbiddenPathsAbsent": true,
-      "hostileMarkersAbsent": true,
-      "removedPaths": ["/etc/bruno/runner.env", "/root/.docker/config.json", "/var/lib/cloud/instances", "/etc/ssh/ssh_host_ed25519_key", "/etc/machine-id", "/var/log/cloud-init-output.log"],
-      "scannedPaths": ["/etc", "/root", "/var/lib/bruno", "/var/log"],
-      "hostileMarkers": ["BRUNO_RUNNER_REGISTRATION_TOKEN", "BRUNO_RUNNER_BEARER_TOKEN", "dop_v1_", "BEGIN OPENSSH PRIVATE KEY"],
-      "completedAt": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+    cat > /usr/local/sbin/bruno-finalize-snapshot-sanitation <<'BRUNO_SANITATION_FINALIZER'
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -rf /var/lib/cloud /root/.ssh/authorized_keys /root/.ssh/authorized_keys2
+    test ! -e /var/lib/cloud
+    test ! -e /root/.ssh/authorized_keys
+    test ! -e /root/.ssh/authorized_keys2
+    test ! -s /etc/machine-id
+    for marker in BRUNO_RUNNER_REGISTRATION_TOKEN BRUNO_RUNNER_BEARER_TOKEN dop_v1_ "BEGIN OPENSSH PRIVATE KEY"; do
+      if grep -R -I -F -- "$marker" /etc /root /var/lib/bruno /var/log >/dev/null 2>&1; then
+        echo "hostile marker remains" >&2
+        exit 1
+      fi
+    done
+    BRUNO_BUILDER_RESOURCE_ID="$(cat /run/bruno-snapshot-builder/builder-resource-id)"
+    rm -f /run/bruno-snapshot-builder/builder-resource-id /usr/local/sbin/bruno-finalize-snapshot-sanitation
+    export BRUNO_BUILDER_RESOURCE_ID
+    python3 - <<'BRUNO_SANITATION_RESULT_PY'
+    import datetime
+    import json
+    import os
+
+    result = {
+        "ok": True,
+        "builderResourceId": os.environ["BRUNO_BUILDER_RESOURCE_ID"],
+        "forbiddenPathsAbsent": True,
+        "hostileMarkersAbsent": True,
+        "removedPaths": ["/etc/bruno/runner.env", "/root/.docker/config.json", "/var/lib/cloud", "/root/.ssh/authorized_keys", "/root/.ssh/authorized_keys2", "/etc/ssh/ssh_host_ed25519_key", "/etc/machine-id", "/var/log/cloud-init-output.log", "/usr/local/sbin/bruno-finalize-snapshot-sanitation"],
+        "scannedPaths": ["/etc", "/root", "/var/lib/bruno", "/var/log"],
+        "hostileMarkers": ["BRUNO_RUNNER_REGISTRATION_TOKEN", "BRUNO_RUNNER_BEARER_TOKEN", "dop_v1_", "BEGIN OPENSSH PRIVATE KEY"],
+        "completedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
     }
-    BRUNO_SANITATION_RESULT_JSON
+    with open("/run/bruno-snapshot-builder/sanitation-result.json", "w", encoding="utf-8") as output:
+        json.dump(result, output, separators=(",", ":"), sort_keys=True)
+        output.write("\\n")
+    BRUNO_SANITATION_RESULT_PY
+    BRUNO_SANITATION_FINALIZER
+    chmod 0700 /usr/local/sbin/bruno-finalize-snapshot-sanitation
 `;
 }
 
@@ -635,6 +1007,7 @@ function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
   | {
       ok: true;
       runnerDigest: string;
+      runnerVersion: string;
       defaultAgentImage: string;
       defaultAgentDigest: string;
       hermesImage: string;
@@ -665,7 +1038,7 @@ function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
     (input.expectedBuilderHostKeySha256 !== undefined &&
       !isSha256SshFingerprint(input.expectedBuilderHostKeySha256)) ||
     input.hermesImage === undefined ||
-    !hermesImage.includes("@sha256:") ||
+    hermesImage !== DEFAULT_HERMES_WORKLOAD_IMAGE ||
     !isRunnerSnapshotSigningKeyId(input.signingKeyId)
   ) {
     return { ok: false, reason: "input_invalid" };
@@ -674,6 +1047,7 @@ function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
   return {
     ok: true,
     runnerDigest: runner.imageDigest,
+    runnerVersion: runner.version,
     defaultAgentImage,
     defaultAgentDigest: defaultAgent.imageDigest,
     hermesImage,
@@ -691,6 +1065,14 @@ function bootFixtureMatches(
     input.defaultAgentImage ?? DEFAULT_MANUAL_RUNNER_IMAGE,
     input.hermesImage ?? DEFAULT_HERMES_WORKLOAD_IMAGE,
   ].sort();
+  const requiredComponents = [
+    "docker",
+    "hermesFixture",
+    "detailedHealth",
+    "modelCanary",
+    "telegramConfig",
+    "cleanup",
+  ];
 
   return (
     boot.ok &&
@@ -699,6 +1081,7 @@ function bootFixtureMatches(
     boot.defaultAgentImage === (input.defaultAgentImage ?? DEFAULT_MANUAL_RUNNER_IMAGE) &&
     boot.hermesImage === (input.hermesImage ?? DEFAULT_HERMES_WORKLOAD_IMAGE) &&
     boot.bootContractVersion === RUNNER_BOOT_CONTRACT_VERSION &&
+    requiredComponents.every((component) => boot.components?.[component] === "passed") &&
     Array.isArray(boot.preloadedImages) &&
     [...boot.preloadedImages].sort().join("\n") === expectedPreloads.join("\n")
   );
@@ -708,7 +1091,9 @@ function sanitationPassed(result: SnapshotSanitationResult, builderResourceId: s
   const requiredRemovedPaths = [
     "/etc/bruno/runner.env",
     "/root/.docker/config.json",
-    "/var/lib/cloud/instances",
+    "/var/lib/cloud",
+    "/root/.ssh/authorized_keys",
+    "/root/.ssh/authorized_keys2",
     "/etc/ssh/ssh_host_ed25519_key",
     "/etc/machine-id",
     "/var/log/cloud-init-output.log",

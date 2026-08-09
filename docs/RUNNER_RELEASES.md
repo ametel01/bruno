@@ -144,9 +144,14 @@ unless required reviewers are enforced on that environment; an unprotected manua
 forbidden.
 
 Snapshot mode is not a warm pool. The workflow creates a short-lived builder Droplet only after
-approval, validates the full boot contract, sanitizes instance state, powers the builder off, creates
-one snapshot, emits an allowlisted signed Snapshot Attestation v2 bundle, and deletes temporary
-builder resources. It must
+approval, runs the immutable runner image's Docker, Hermes fixture, detailed-health, synthetic model
+canary, Telegram-configuration, and fixture-cleanup checks, and requires every component to pass.
+After cloud-init completes, the evidence retrieval session removes cloud-init state and the temporary
+authorized SSH key, verifies the machine identity is empty, and only then allows snapshot creation.
+Publication fails closed unless the firewall, Droplet, and provider SSH key are authoritatively absent;
+the sanitized cleanup result is retained for 30 days with GitHub build provenance alongside the signed
+bundle. The workflow then powers the builder off, creates one snapshot, emits an allowlisted signed
+Snapshot Attestation v2 bundle, and deletes temporary builder resources. It must
 not create user runners, ready capacity, spare Droplets, cross-user capacity, schedules, release
 triggers, or production deployments.
 
@@ -157,7 +162,8 @@ tracks ownership immediately, and deletes it from both orchestrator and controll
 retrieve builder evidence, the provider pins the observed ephemeral SSH host key into a temporary
 `known_hosts` file, optionally compares a supplied `SHA256:` fingerprint, uses
 `StrictHostKeyChecking=yes`, then removes the temporary known-hosts file and private key material.
-`accept-new` and world-open SSH ingress are forbidden.
+The same authenticated session waits for cloud-init completion and removes its own authorized key
+before power-off. `accept-new` and world-open SSH ingress are forbidden.
 
 Production snapshot consumption is configured with:
 

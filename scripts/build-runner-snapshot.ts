@@ -1,10 +1,14 @@
 import { execFile } from "node:child_process";
+import { createPrivateKey } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { buildRunnerSnapshot } from "@/src/server/runners/runner-snapshot-build";
+import {
+  buildRunnerSnapshot,
+  type SnapshotCleanupEvidence,
+} from "@/src/server/runners/runner-snapshot-build";
 import { DigitalOceanApiProvider } from "@/src/server/runners/digitalocean-provider";
 import { isRunnerSnapshotSigningKeyId } from "@/src/server/runners/runner-snapshot-manifest";
 
@@ -15,10 +19,12 @@ const timeout = setTimeout(() => controller.abort(), 55 * 60 * 1000);
 const tempDir = await mkdtemp(join(tmpdir(), "bruno-runner-snapshot-"));
 let provider: DigitalOceanApiProvider | null = null;
 let builderSshKeyId: string | null = null;
+let cleanupResult: SnapshotCleanupEvidence | null = null;
 
 try {
   validatePreEffectArgs(args);
   const privateKeyPem = await readRequiredFile(args.signingKeyPath, "signing key");
+  validateSigningKey(privateKeyPem);
   const token = readRequiredEnv("BRUNO_DIGITALOCEAN_TOKEN");
   provider = new DigitalOceanApiProvider({ token });
   const builderSshPrivateKeyPath = join(tempDir, "builder_ssh_key");
@@ -64,7 +70,8 @@ try {
     provider,
     context: { signal: controller.signal },
   });
-  if (result.cleanup.deletedSshKeyId === builderSshKeyId) {
+  cleanupResult = result.cleanup;
+  if (result.cleanup.deletedSshKeyId === builderSshKeyId && result.cleanup.sshKeyAbsenceVerified) {
     builderSshKeyId = null;
   }
 
@@ -89,13 +96,33 @@ try {
     const cleanupController = new AbortController();
     const cleanupTimeout = setTimeout(() => cleanupController.abort(), 30_000);
     try {
-      await provider.deleteSshKey({ id: builderSshKeyId }, { signal: cleanupController.signal });
+      const deleted = await provider.deleteSshKey(
+        { id: builderSshKeyId },
+        { signal: cleanupController.signal },
+      );
+      const observed = deleted.ok
+        ? await provider.verifySshKeyAbsent(
+            { id: builderSshKeyId },
+            { signal: cleanupController.signal },
+          )
+        : deleted;
+      if (cleanupResult && observed.ok) {
+        cleanupResult.deletedSshKeyId = builderSshKeyId;
+        cleanupResult.sshKeyAbsenceVerified = true;
+        cleanupResult.sshKeyDeletionFailed = false;
+        cleanupResult.steps.push("fallback_verify_ephemeral_ssh_key_absence");
+      }
     } catch {
       // The provider cleanup result is intentionally not logged: key ID and provider errors are
       // reconciliation-sensitive evidence. The orchestrator also records deletion failures.
     } finally {
       clearTimeout(cleanupTimeout);
     }
+  }
+  if (cleanupResult) {
+    await writeFile(args.cleanupResultOut, `${JSON.stringify(cleanupResult, null, 2)}\n`, {
+      mode: 0o600,
+    });
   }
   await rm(tempDir, { recursive: true, force: true });
 }
@@ -163,6 +190,7 @@ function parseArgs(values: string[]) {
     signingKeyId: requiredArg(parsed, "signing-key-id"),
     bootResultOut: requiredArg(parsed, "boot-result-out"),
     sanitationResultOut: requiredArg(parsed, "sanitation-result-out"),
+    cleanupResultOut: requiredArg(parsed, "cleanup-result-out"),
     bundleOut: requiredArg(parsed, "bundle-out"),
     digestOut: requiredArg(parsed, "digest-out"),
   };
@@ -178,6 +206,17 @@ function readRequiredEnv(key: string): string {
   const value = process.env[key]?.trim();
   if (!value) throw new Error(`${key} is required.`);
   return value;
+}
+
+function validateSigningKey(privateKeyPem: string): void {
+  try {
+    const key = createPrivateKey(privateKeyPem);
+    if (key.type !== "private" || key.asymmetricKeyType !== "ed25519") {
+      throw new Error("wrong key type");
+    }
+  } catch {
+    throw new Error("signing key must be a valid Ed25519 private key.");
+  }
 }
 
 async function readRequiredFile(path: string, label: string): Promise<string> {

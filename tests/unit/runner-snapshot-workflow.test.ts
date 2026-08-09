@@ -3,6 +3,21 @@ import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
 describe("runner snapshot workflow", () => {
+  it("reserves enough job time for every bounded cleanup phase and evidence upload", async () => {
+    const workflow = await readFile(".github/workflows/build-runner-snapshot.yml", "utf8");
+    const script = await readFile("scripts/build-runner-snapshot.ts", "utf8");
+    const buildJobTimeoutMinutes = Number(
+      workflow.match(/name: Build protected runner snapshot[\s\S]*?timeout-minutes: (\d+)/)?.[1],
+    );
+    const mainWorkDeadlineMinutes = Number(
+      script.match(/setTimeout\(\(\) => controller\.abort\(\), (\d+) \* 60 \* 1000\)/)?.[1],
+    );
+
+    expect(buildJobTimeoutMinutes).toBe(75);
+    expect(mainWorkDeadlineMinutes).toBe(55);
+    expect(buildJobTimeoutMinutes - mainWorkDeadlineMinutes).toBeGreaterThanOrEqual(20);
+  });
+
   it("is protected, manually dispatched only, and keeps provider secrets out of ordinary CI", async () => {
     const workflow = await readFile(".github/workflows/build-runner-snapshot.yml", "utf8");
     const parsed = parse(workflow) as Record<string, unknown>;
@@ -52,9 +67,14 @@ describe("runner snapshot workflow", () => {
     expect(
       workflow.indexOf("--sanitation-result-out snapshot-artifacts/sanitation-result.json"),
     ).toBeLessThan(workflow.indexOf("Validate retrieved builder evidence"));
+    expect(
+      workflow.indexOf("--cleanup-result-out snapshot-artifacts/cleanup-result.json"),
+    ).toBeLessThan(workflow.indexOf("Validate retrieved builder evidence"));
     expect(workflow).toContain("preloadedImages");
+    expect(workflow).toContain("hermesFixture");
     expect(workflow).toContain("removedPaths");
     expect(workflow).toContain("hostileMarkers");
+    expect(workflow).toContain("cleanup-result.json");
     expect(workflow).not.toContain("--boot-result snapshot-artifacts/boot-result.json");
     expect(workflow).not.toContain("--sanitation-result snapshot-artifacts/sanitation-result.json");
     expect(workflow).not.toContain("bun run runner:release:smoke -- --image");
@@ -124,7 +144,9 @@ describe("runner snapshot workflow", () => {
     expect(workflow).toContain("BRUNO_SNAPSHOT_PREVIOUS_BUNDLE_DIGEST");
     expect(workflow).toContain("runner-snapshot-signing-key.pem");
     expect(workflow).toContain("runner-snapshot-oci-publication.json");
-    expect(workflow).toContain("retention-days: 90");
+    expect(workflow).toContain("Retain terminal cleanup evidence");
+    expect(workflow).toContain("name: runner-snapshot-cleanup-");
+    expect(workflow).toContain("retention-days: 30");
     expect(workflow).not.toContain("delete-package-version");
     expect(workflow).not.toContain("oras manifest delete");
   });
@@ -148,11 +170,15 @@ describe("runner snapshot workflow", () => {
     const script = await readFile("scripts/build-runner-snapshot.ts", "utf8");
 
     expect(script).toContain("ssh-keygen");
+    expect(script.indexOf("validateSigningKey(privateKeyPem)")).toBeLessThan(
+      script.indexOf("provider.createSshKey"),
+    );
     expect(script).toContain("provider.createSshKey");
     expect(script.indexOf("builderSshKeyId = builderSshKey.value.id")).toBeLessThan(
       script.indexOf("const result = await buildRunnerSnapshot"),
     );
-    expect(script).toContain("provider.deleteSshKey({ id: builderSshKeyId }");
+    expect(script).toContain("await provider.deleteSshKey(");
+    expect(script).toContain("await provider.verifySshKeyAbsent(");
     expect(script).toContain("builderSshKeyId");
     expect(script).toContain("builderSshPrivateKeyPath");
     expect(script).toContain("controllerCidr");
@@ -163,6 +189,8 @@ describe("runner snapshot workflow", () => {
     expect(script).toContain("isExplicitControllerCidr");
     expect(script).toContain("bootResultOut");
     expect(script).toContain("sanitationResultOut");
+    expect(script).toContain("cleanupResultOut");
+    expect(script).toContain('requiredArg(parsed, "cleanup-result-out")');
     expect(script).not.toContain("bootResultPath");
     expect(script).not.toContain("sanitationResultPath");
     expect(script).not.toContain('requiredArg(parsed, "boot-result")');
@@ -179,7 +207,7 @@ describe("runner snapshot workflow", () => {
       script.indexOf("const result = await buildRunnerSnapshot"),
     );
     expect(script.indexOf("} finally {")).toBeLessThan(
-      script.indexOf("provider.deleteSshKey({ id: builderSshKeyId }"),
+      script.indexOf("await provider.deleteSshKey("),
     );
     expect(script).toContain("new AbortController()");
     expect(script).toContain("builderSshKeyId = null");

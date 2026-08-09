@@ -73,6 +73,7 @@ export type DigitalOceanProviderErrorReason =
   | "firewall_failed"
   | "cleanup_failed"
   | "resource_not_found"
+  | "builder_evidence_not_ready"
   | "ssh_key_lookup_failed"
   | "ssh_key_create_failed"
   | "image_lookup_failed"
@@ -96,6 +97,10 @@ export type DigitalOceanImageAvailability = {
   architecture: "amd64" | "unknown";
   status: "available" | "pending" | "deleted" | "unknown";
 };
+
+export type DigitalOceanSnapshotImageObservation =
+  | { state: "absent" }
+  | { state: "present"; image: DigitalOceanImageAvailability };
 
 export type DigitalOceanOwnedSetExpectation = {
   operationTag: string;
@@ -253,6 +258,10 @@ export interface DigitalOceanProvider {
     input: DigitalOceanDeleteSshKeyInput,
     context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<{ deleted: true }>>;
+  verifySshKeyAbsent?(
+    input: DigitalOceanDeleteSshKeyInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<{ absent: true }>>;
   createRunner(
     input: DigitalOceanRunnerSpec,
     context?: DigitalOceanProviderRequestContext,
@@ -297,6 +306,10 @@ export interface DigitalOceanProvider {
     input: DigitalOceanFindImageByNameInput,
     context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanImageAvailability>>;
+  observeSnapshotImageByName?(
+    input: DigitalOceanFindImageByNameInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanSnapshotImageObservation>>;
   readSnapshotBuilderEvidence?(
     input: DigitalOceanReadSnapshotBuilderEvidenceInput,
     context?: DigitalOceanProviderRequestContext,
@@ -305,6 +318,10 @@ export interface DigitalOceanProvider {
     input: DigitalOceanDeleteImageInput,
     context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<{ deleted: true }>>;
+  verifyImageAbsent?(
+    input: DigitalOceanDeleteImageInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<{ absent: true }>>;
 }
 
 type FakeProviderStep = "create" | "tag" | "firewall" | "cleanup" | "deleteSshKey";
@@ -381,6 +398,9 @@ export type DigitalOceanSdkClient = {
           context?: DigitalOceanProviderRequestContext,
         ): Promise<DigitalOceanSshKeyCreateResponse | undefined>;
         bySsh_key_id?(id: string): {
+          get?(
+            context?: DigitalOceanProviderRequestContext,
+          ): Promise<DigitalOceanSshKeyCreateResponse | undefined>;
           delete(context?: DigitalOceanProviderRequestContext): Promise<void>;
         };
       };
@@ -649,6 +669,30 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
     const response = await runSdkStep("cleanup_failed", () => keyResource.delete(context), context);
 
     return response.ok ? { ok: true, value: { deleted: true } } : response;
+  }
+
+  async verifySshKeyAbsent(
+    input: DigitalOceanDeleteSshKeyInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<{ absent: true }>> {
+    const keyResource = this.#client.v2.account.keys.bySsh_key_id?.(input.id);
+    if (!keyResource?.get) {
+      return {
+        ok: false,
+        reason: "cleanup_failed",
+        message: "DigitalOcean SSH key absence verification was unavailable.",
+      };
+    }
+
+    const readKey = keyResource.get.bind(keyResource);
+    const observed = await observeSdkResource(() => readKey(context), context);
+    return observed.state === "absent"
+      ? { ok: true, value: { absent: true } }
+      : {
+          ok: false,
+          reason: "cleanup_failed",
+          message: "DigitalOcean SSH key absence could not be authoritatively verified.",
+        };
   }
 
   async createRunner(
@@ -1219,6 +1263,55 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
         };
   }
 
+  async observeSnapshotImageByName(
+    input: DigitalOceanFindImageByNameInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanSnapshotImageObservation>> {
+    const imagesClient = this.#client.v2.images;
+    const listImages = imagesClient?.get;
+    if (!listImages || !input.name.trim()) {
+      return {
+        ok: false,
+        reason: "cleanup_failed",
+        message: "DigitalOcean snapshot image observation was unavailable.",
+      };
+    }
+
+    const response = await runSdkStep(
+      "cleanup_failed",
+      () => listImages({ privateImages: true, perPage: 200 }, context),
+      context,
+    );
+    if (!response.ok) return response;
+
+    const rawImages = response.value?.images ?? [];
+    if (
+      response.value?.links?.pages?.next ||
+      (response.value?.meta?.total ?? 0) > rawImages.length
+    ) {
+      return {
+        ok: false,
+        reason: "cleanup_failed",
+        message: "DigitalOcean snapshot image observation was not exhaustive.",
+      };
+    }
+
+    const images = rawImages.flatMap((image) => {
+      const availability = apiImageToImageAvailability(image);
+      return availability?.name === input.name ? [availability] : [];
+    });
+    if (images.length > 1) {
+      return {
+        ok: false,
+        reason: "cleanup_failed",
+        message: "DigitalOcean snapshot image ownership was ambiguous.",
+      };
+    }
+    return images[0]
+      ? { ok: true, value: { state: "present", image: images[0] } }
+      : { ok: true, value: { state: "absent" } };
+  }
+
   async readSnapshotBuilderEvidence(
     input: DigitalOceanReadSnapshotBuilderEvidenceInput,
     context?: DigitalOceanProviderRequestContext,
@@ -1229,11 +1322,18 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
     );
 
     if (!resource.ok) return resource;
-    if (!resource.value.publicIpv4 || !input.privateKeyPath) {
+    if (!input.privateKeyPath) {
       return {
         ok: false,
         reason: "resource_not_found",
         message: "Snapshot builder evidence retrieval prerequisites were unavailable.",
+      };
+    }
+    if (!resource.value.publicIpv4) {
+      return {
+        ok: false,
+        reason: "builder_evidence_not_ready",
+        message: "Snapshot builder public network identity is not ready yet.",
       };
     }
 
@@ -1257,6 +1357,8 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
 
       const command = [
         "set -euo pipefail",
+        "cloud-init status --wait >/dev/null",
+        "/usr/local/sbin/bruno-finalize-snapshot-sanitation",
         `cat ${shellPath(`${remoteDirectory}/boot-result.json`)}`,
         "printf '\\nBRUNO_SNAPSHOT_EVIDENCE_SEPARATOR\\n'",
         `cat ${shellPath(`${remoteDirectory}/sanitation-result.json`)}`,
@@ -1289,8 +1391,8 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
       if (!bootResult?.trim() || !sanitationResult?.trim()) {
         return {
           ok: false,
-          reason: "resource_not_found",
-          message: "Snapshot builder evidence was incomplete.",
+          reason: "builder_evidence_not_ready",
+          message: "Snapshot builder evidence is not complete yet.",
         };
       }
 
@@ -1304,8 +1406,8 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
     } catch {
       return {
         ok: false,
-        reason: "resource_not_found",
-        message: "Snapshot builder evidence could not be retrieved.",
+        reason: "builder_evidence_not_ready",
+        message: "Snapshot builder evidence is not ready yet.",
       };
     } finally {
       await rm(tempKnownHosts, { recursive: true, force: true });
@@ -1335,6 +1437,35 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
     );
 
     return response.ok ? { ok: true, value: { deleted: true } } : response;
+  }
+
+  async verifyImageAbsent(
+    input: DigitalOceanDeleteImageInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<{ absent: true }>> {
+    const imageId = Number(input.imageId);
+    const imagesClient = this.#client.v2.images;
+
+    if (!Number.isSafeInteger(imageId) || !imagesClient) {
+      return {
+        ok: false,
+        reason: "cleanup_failed",
+        message: "DigitalOcean image absence verification was unavailable.",
+      };
+    }
+
+    const observed = await observeSdkResource(
+      () => imagesClient.byImage_id(imageId).get(context),
+      context,
+    );
+
+    return observed.state === "absent"
+      ? { ok: true, value: { absent: true } }
+      : {
+          ok: false,
+          reason: "cleanup_failed",
+          message: "DigitalOcean image absence could not be authoritatively verified.",
+        };
   }
 
   async #runDropletAction(
@@ -1433,8 +1564,8 @@ async function pinSnapshotBuilderHostKey(input: {
     if (!line || !fingerprint) {
       return {
         ok: false,
-        reason: "resource_not_found",
-        message: "Snapshot builder host key was unavailable.",
+        reason: "builder_evidence_not_ready",
+        message: "Snapshot builder host key is not ready yet.",
       };
     }
 
@@ -1452,8 +1583,8 @@ async function pinSnapshotBuilderHostKey(input: {
   } catch {
     return {
       ok: false,
-      reason: "resource_not_found",
-      message: "Snapshot builder host key could not be pinned.",
+      reason: "builder_evidence_not_ready",
+      message: "Snapshot builder host key is not ready yet.",
     };
   }
 }
@@ -1466,6 +1597,7 @@ export class FakeDigitalOceanProvider
   readonly calls: Array<
     | { step: "createSshKey"; input: DigitalOceanCreateSshKeyInput }
     | { step: "deleteSshKey"; input: DigitalOceanDeleteSshKeyInput }
+    | { step: "verifySshKeyAbsent"; input: DigitalOceanDeleteSshKeyInput }
     | { step: "create"; input: DigitalOceanRunnerSpec }
     | { step: "tag"; input: DigitalOceanTagInput }
     | { step: "firewall"; input: DigitalOceanFirewallInput }
@@ -1479,8 +1611,10 @@ export class FakeDigitalOceanProvider
     | { step: "readAction"; input: { actionId: string } }
     | { step: "readBuilderEvidence"; input: DigitalOceanReadSnapshotBuilderEvidenceInput }
     | { step: "findImage"; input: DigitalOceanFindImageByNameInput }
+    | { step: "observeSnapshotImage"; input: DigitalOceanFindImageByNameInput }
     | { step: "readImage"; input: DigitalOceanReadImageInput }
     | { step: "deleteImage"; input: DigitalOceanDeleteImageInput }
+    | { step: "verifyImageAbsent"; input: DigitalOceanDeleteImageInput }
   > = [];
 
   #counter = 0;
@@ -1560,6 +1694,22 @@ export class FakeDigitalOceanProvider
     }
 
     return { ok: true, value: { deleted: true } };
+  }
+
+  async verifySshKeyAbsent(
+    input: DigitalOceanDeleteSshKeyInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<{ absent: true }>> {
+    const aborted = abortedProviderResult<{ absent: true }>("cleanup_failed", context);
+    if (aborted) return aborted;
+    this.calls.push({ step: "verifySshKeyAbsent", input });
+    return this.#sshKeys.some((key) => key.id === input.id)
+      ? {
+          ok: false,
+          reason: "cleanup_failed",
+          message: "DigitalOcean SSH key remains present.",
+        }
+      : { ok: true, value: { absent: true } };
   }
 
   async createRunner(
@@ -1973,6 +2123,25 @@ export class FakeDigitalOceanProvider
         };
   }
 
+  async observeSnapshotImageByName(
+    input: DigitalOceanFindImageByNameInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanSnapshotImageObservation>> {
+    const aborted = abortedProviderResult<DigitalOceanSnapshotImageObservation>(
+      "cleanup_failed",
+      context,
+    );
+    if (aborted) return aborted;
+    this.calls.push({ step: "observeSnapshotImage", input });
+    const image = this.#snapshotImagesByName.get(input.name);
+    return image
+      ? {
+          ok: true,
+          value: { state: "present", image: { ...image, regions: [...image.regions] } },
+        }
+      : { ok: true, value: { state: "absent" } };
+  }
+
   async readSnapshotBuilderEvidence(
     input: DigitalOceanReadSnapshotBuilderEvidenceInput,
     context?: DigitalOceanProviderRequestContext,
@@ -2019,6 +2188,14 @@ export class FakeDigitalOceanProvider
           defaultAgentImage: defaultAgentImageMatch?.[1] ?? "",
           hermesImage: hermesImageMatch?.[1] ?? "",
           bootContractVersion: "bruno.runner.boot.v1",
+          components: {
+            docker: "passed",
+            hermesFixture: "passed",
+            detailedHealth: "passed",
+            modelCanary: "passed",
+            telegramConfig: "passed",
+            cleanup: "passed",
+          },
           preloadedImages:
             preloadMatches[0]?.[1]?.split(",").map((value) => value.trim().replace(/^"|"$/g, "")) ??
             [],
@@ -2032,7 +2209,9 @@ export class FakeDigitalOceanProvider
           removedPaths: [
             "/etc/bruno/runner.env",
             "/root/.docker/config.json",
-            "/var/lib/cloud/instances",
+            "/var/lib/cloud",
+            "/root/.ssh/authorized_keys",
+            "/root/.ssh/authorized_keys2",
             "/etc/ssh/ssh_host_ed25519_key",
             "/etc/machine-id",
             "/var/log/cloud-init-output.log",
@@ -2057,7 +2236,29 @@ export class FakeDigitalOceanProvider
     const aborted = abortedProviderResult<{ deleted: true }>("cleanup_failed", context);
     if (aborted) return aborted;
     this.calls.push({ step: "deleteImage", input });
+    for (const [name, image] of this.#snapshotImagesByName) {
+      if (image.id === input.imageId) this.#snapshotImagesByName.delete(name);
+    }
     return { ok: true, value: { deleted: true } };
+  }
+
+  async verifyImageAbsent(
+    input: DigitalOceanDeleteImageInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<{ absent: true }>> {
+    const aborted = abortedProviderResult<{ absent: true }>("cleanup_failed", context);
+    if (aborted) return aborted;
+    this.calls.push({ step: "verifyImageAbsent", input });
+    const present = [...this.#snapshotImagesByName.values()].some(
+      (image) => image.id === input.imageId,
+    );
+    return present
+      ? {
+          ok: false,
+          reason: "cleanup_failed",
+          message: "DigitalOcean image remains present.",
+        }
+      : { ok: true, value: { absent: true } };
   }
 
   #failure<T>(

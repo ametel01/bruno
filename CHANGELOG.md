@@ -193,6 +193,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Protected snapshot builders now wait within a strict bounded deadline for SSH and full-fixture
+  evidence, run the immutable runner boot self-test instead of treating image pulls as fixture proof,
+  remove complete cloud-init and temporary SSH authorization state, and fail publication closed unless
+  authoritative Droplet, firewall, and provider-key cleanup evidence is retained and attested.
 - Non-hosted Playwright commands now pin development authentication, preventing operator or Clerk
   settings in `.env.local` from replacing the expected credential-free application shell.
 - Ready agent creation now reuses an eligible runner or fails before persistence unless automatic DigitalOcean provisioning is fully configured; when no runner is available, the bounded post-response reconciler immediately advances through runner initialization and starts one provisioning attempt instead of leaving the deployment pending. Production builds also reject ready-agent configuration without an immutable runner image.

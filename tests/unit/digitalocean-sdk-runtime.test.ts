@@ -42,4 +42,29 @@ describe("DigitalOcean SDK runtime adapter", () => {
     ]);
     expect(JSON.stringify(requests)).not.toContain("dop_v1_not_logged");
   });
+
+  it("reads an exact encoded SSH key and preserves a provider 404 for absence proof", async () => {
+    const requests: Array<{ method: string; url: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+        requests.push({ method, url });
+        return new Response(JSON.stringify({ id: "not_found" }), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+
+    const client = createDigitalOceanSdkClient("dop_v1_not_logged", "https://provider.test/v2");
+    const key = client.v2.account.keys.bySsh_key_id?.("builder/key");
+    if (!key?.get) throw new Error("Expected exact SSH-key GET method.");
+
+    await expect(key.get()).rejects.toMatchObject({ statusCode: 404 });
+    expect(requests).toEqual([
+      { method: "GET", url: "https://provider.test/v2/account/keys/builder%2Fkey" },
+    ]);
+  });
 });

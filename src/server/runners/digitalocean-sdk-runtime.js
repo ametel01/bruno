@@ -95,6 +95,11 @@ export function createDigitalOceanSdkClient(token, apiBaseUrl) {
           post: (body, context) =>
             sendJson(adapter, client.v2.account.keys.toPostRequestInformation(body), context),
           bySsh_key_id: (id) => ({
+            get: (context) =>
+              sendRestJson(token, baseUrl, `/v2/account/keys/${encodeURIComponent(String(id))}`, {
+                method: "GET",
+                context,
+              }),
             delete: (context) =>
               sendRestNoContent(
                 token,

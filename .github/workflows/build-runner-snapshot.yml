@@ -53,7 +53,7 @@ jobs:
   build:
     name: Build protected runner snapshot
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     environment: snapshot-build
     permissions:
       contents: read
@@ -143,6 +143,7 @@ jobs:
             --controller-cidr "$BRUNO_SNAPSHOT_CONTROLLER_CIDR" \
             --boot-result-out snapshot-artifacts/boot-result.json \
             --sanitation-result-out snapshot-artifacts/sanitation-result.json \
+            --cleanup-result-out snapshot-artifacts/cleanup-result.json \
             --signing-key snapshot-artifacts/signing-key.pem \
             --signing-key-id "$BRUNO_SNAPSHOT_SIGNING_KEY_ID" \
             --bundle-out snapshot-artifacts/runner-snapshot-bundle.json \
@@ -157,9 +158,11 @@ jobs:
           set -euo pipefail
           test -s snapshot-artifacts/boot-result.json
           test -s snapshot-artifacts/sanitation-result.json
+          test -s snapshot-artifacts/cleanup-result.json
           bun -e '
             const boot = await Bun.file("snapshot-artifacts/boot-result.json").json();
             const sanitation = await Bun.file("snapshot-artifacts/sanitation-result.json").json();
+            const cleanup = await Bun.file("snapshot-artifacts/cleanup-result.json").json();
             const required = [process.env.RUNNER_IMAGE, process.env.DEFAULT_AGENT_IMAGE, process.env.HERMES_IMAGE].sort();
             if (
               boot?.ok !== true ||
@@ -167,6 +170,7 @@ jobs:
               boot.defaultAgentImage !== process.env.DEFAULT_AGENT_IMAGE ||
               boot.hermesImage !== process.env.HERMES_IMAGE ||
               boot.bootContractVersion !== "bruno.runner.boot.v1" ||
+              !["docker", "hermesFixture", "detailedHealth", "modelCanary", "telegramConfig", "cleanup"].every((component) => boot.components?.[component] === "passed") ||
               JSON.stringify([...(boot.preloadedImages ?? [])].sort()) !== JSON.stringify(required)
             ) {
               throw new Error("builder boot evidence mismatch");
@@ -174,7 +178,7 @@ jobs:
             const removed = new Set(sanitation?.removedPaths ?? []);
             const scanned = new Set(sanitation?.scannedPaths ?? []);
             const markers = new Set(sanitation?.hostileMarkers ?? []);
-            for (const value of ["/etc/bruno/runner.env", "/root/.docker/config.json", "/var/lib/cloud/instances", "/etc/ssh/ssh_host_ed25519_key", "/etc/machine-id", "/var/log/cloud-init-output.log"]) {
+            for (const value of ["/etc/bruno/runner.env", "/root/.docker/config.json", "/var/lib/cloud", "/root/.ssh/authorized_keys", "/root/.ssh/authorized_keys2", "/etc/ssh/ssh_host_ed25519_key", "/etc/machine-id", "/var/log/cloud-init-output.log"]) {
               if (!removed.has(value)) throw new Error("missing sanitation removal evidence");
             }
             for (const value of ["/etc", "/root", "/var/lib/bruno", "/var/log"]) {
@@ -186,6 +190,18 @@ jobs:
             if (sanitation?.ok !== true || sanitation.forbiddenPathsAbsent !== true || sanitation.hostileMarkersAbsent !== true) {
               throw new Error("builder sanitation evidence mismatch");
             }
+            if (
+              cleanup?.absenceVerified !== true ||
+              cleanup?.snapshotAbsenceVerified !== true ||
+              cleanup?.sshKeyAbsenceVerified !== true ||
+              cleanup?.ambiguousOwnership !== false ||
+              cleanup?.sshKeyDeletionFailed !== false ||
+              typeof cleanup?.deletedDropletId !== "string" ||
+              typeof cleanup?.deletedFirewallId !== "string" ||
+              typeof cleanup?.deletedSshKeyId !== "string"
+            ) {
+              throw new Error("builder cleanup evidence mismatch");
+            }
           '
 
       - name: Cleanup temporary credentials and builder state
@@ -195,6 +211,15 @@ jobs:
           rm -f snapshot-artifacts/signing-key.pem
           echo "Cleanup step ran. Provider cleanup is also enforced by the snapshot build script."
 
+      - name: Retain terminal cleanup evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-snapshot-cleanup-${{ github.run_id }}
+          path: snapshot-artifacts/cleanup-result.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Upload signed snapshot publication input
         uses: actions/upload-artifact@v4
         with:
@@ -202,6 +227,7 @@ jobs:
           path: |
             snapshot-artifacts/runner-snapshot-bundle.json
             snapshot-artifacts/runner-snapshot-bundle.sha256
+            snapshot-artifacts/cleanup-result.json
           if-no-files-found: error
           retention-days: 1
 
@@ -271,6 +297,7 @@ jobs:
             snapshot-artifacts/runner-snapshot-bundle.sha256
             snapshot-artifacts/runner-snapshot-signing-key.pem
             snapshot-artifacts/runner-snapshot-oci-publication.json
+            snapshot-artifacts/cleanup-result.json
 
       - name: Upload allowlisted bundle artifacts
         uses: actions/upload-artifact@v4
@@ -281,5 +308,6 @@ jobs:
             snapshot-artifacts/runner-snapshot-bundle.sha256
             snapshot-artifacts/runner-snapshot-signing-key.pem
             snapshot-artifacts/runner-snapshot-oci-publication.json
+            snapshot-artifacts/cleanup-result.json
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 30
