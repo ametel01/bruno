@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { parse, stringify } from "yaml";
+import { HERMES_WORKLOAD_GID, HERMES_WORKLOAD_UID } from "@/src/runner-service/constants";
 import {
   createHermesReadinessWaiter,
   ManualRunnerDocker,
@@ -127,7 +128,7 @@ export function createLocalAgentSmokeRunnerDocker(
       project: async (spec) => {
         await ensureLocalAgentSmokeFakeModel(hermesImage, runtime.network);
         const projection = await projectHermesHome(spec, {
-          ownership: { uid: 10_000, gid: 10_000 },
+          ownership: { uid: HERMES_WORKLOAD_UID, gid: HERMES_WORKLOAD_GID },
           ...(env.BRUNO_HERMES_STATE_ROOT ? { stateRoot: env.BRUNO_HERMES_STATE_ROOT } : {}),
         });
         await applyLocalAgentSmokeProjection(projection, mode.fakeModelBaseUrl);

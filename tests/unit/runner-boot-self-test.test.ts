@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildRunnerBootLaunchSpec,
   createDockerRunnerBootSelfTestExecutor,
   createRunnerBootReadinessController,
+  projectRunnerBootFixtureHermesHome,
   RunnerBootSelfTestError,
   type RunnerBootFixture,
   type RunnerBootSelfTestExecutor,
@@ -18,6 +20,36 @@ afterEach(async () => {
 });
 
 describe("runner boot self-test", () => {
+  it("projects the synthetic fixture for the Hermes workload identity", async () => {
+    const root = await temporaryRoot();
+    const directoryOwnership: Array<{ path: string; uid: number; gid: number }> = [];
+    const fileOwnership: Array<{ uid: number; gid: number }> = [];
+    const agentId = "00000000-0000-4000-8000-000000000123";
+
+    const projection = await projectRunnerBootFixtureHermesHome({
+      fakeModelContainer: "bruno-boot-abcdef012345-model",
+      spec: buildRunnerBootLaunchSpec({ agentId, configRevision: "boot-test" }),
+      stateRoot: root,
+      fs: {
+        chown: async (path, uid, gid) => {
+          directoryOwnership.push({ path, uid, gid });
+        },
+        handleChown: async (_handle, uid, gid) => {
+          fileOwnership.push({ uid, gid });
+        },
+      },
+    });
+
+    expect(directoryOwnership).toEqual(
+      [projection.agentRoot, projection.hermesHome, projection.workspace].map((path) => ({
+        path,
+        uid: 10_000,
+        gid: 10_000,
+      })),
+    );
+    expect(fileOwnership).toEqual(Array.from({ length: 4 }, () => ({ uid: 10_000, gid: 10_000 })));
+  });
+
   it("persists ready only after every capability and cleanup passes", async () => {
     const { controller, calls, snapshotPath } = await createHarness();
 

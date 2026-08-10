@@ -13,6 +13,8 @@ import {
   DEFAULT_HERMES_STATE_ROOT,
   DEFAULT_MANUAL_RUNNER_IMAGE,
   DOCKER_CLI_TIMEOUT_MS,
+  HERMES_WORKLOAD_GID,
+  HERMES_WORKLOAD_UID,
 } from "@/src/runner-service/constants";
 import {
   type HermesProjectionOptions,
@@ -66,8 +68,6 @@ const BRUNO_LAUNCH_SPEC_VERSION_LABEL = "bruno.launch_spec_version";
 const BRUNO_OPERATION_ID_LABEL = "bruno.operation_id";
 const BRUNO_OPERATION_ACTION_LABEL = "bruno.operation_action";
 const BRUNO_OPERATION_ACCEPTED_AT_LABEL = "bruno.operation_accepted_at";
-const HERMES_WORKLOAD_UID = 10000;
-const HERMES_WORKLOAD_GID = 10000;
 const HERMES_DOCKER_CAP_DROP = ["ALL"] as const;
 const HERMES_DOCKER_CAP_ADD = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"] as const;
 const HERMES_DOCKER_SECURITY_OPT = ["no-new-privileges"] as const;

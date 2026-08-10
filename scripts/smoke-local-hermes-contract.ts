@@ -10,6 +10,8 @@ import { DEFAULT_LOCAL_HERMES_IMAGE } from "@/scripts/smoke-hermes-agent-image";
 import {
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_WORKLOAD_IMAGE,
+  HERMES_WORKLOAD_GID,
+  HERMES_WORKLOAD_UID,
 } from "@/src/runner-service/constants";
 import {
   createHermesReadinessWaiter,
@@ -201,6 +203,7 @@ export async function smokeLocalHermesContract(): Promise<LocalHermesContractSmo
         projection: {
           project: async (launchSpec) => {
             const projected = await projectHermesHome(launchSpec, {
+              ownership: { uid: HERMES_WORKLOAD_UID, gid: HERMES_WORKLOAD_GID },
               stateRoot,
             });
             await applyLocalSmokeOverrides({

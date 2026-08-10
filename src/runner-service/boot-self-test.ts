@@ -8,6 +8,8 @@ import {
   DEFAULT_HERMES_WORKLOAD_IMAGE,
   DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT,
   DOCKER_CLI_TIMEOUT_MS,
+  HERMES_WORKLOAD_GID,
+  HERMES_WORKLOAD_UID,
   RUNNER_BOOT_MODEL_CANARY_ENABLED_ENV,
 } from "@/src/runner-service/constants";
 import {
@@ -16,6 +18,7 @@ import {
   ManualRunnerDocker,
 } from "@/src/runner-service/docker";
 import {
+  type HermesProjectionFilesystem,
   type HermesProjectionResult,
   projectHermesHome,
 } from "@/src/runner-service/hermes-projection";
@@ -474,13 +477,12 @@ async function launchDockerFixture(input: {
     probe: { requestContainerHealth },
     projection: {
       options: { stateRoot },
-      project: async (spec) => {
-        const projection = await projectHermesHome(spec, {
+      project: async (spec) =>
+        await projectRunnerBootFixtureHermesHome({
+          fakeModelContainer,
+          spec,
           stateRoot,
-        });
-        await configurePrivateSyntheticTelegram(projection, fakeModelContainer);
-        return projection;
-      },
+        }),
     },
   });
   const spec = buildRunnerBootLaunchSpec({ agentId, configRevision });
@@ -499,6 +501,21 @@ async function launchDockerFixture(input: {
     root: fixtureRoot,
     runner,
   };
+}
+
+export async function projectRunnerBootFixtureHermesHome(input: {
+  fakeModelContainer: string;
+  spec: AgentLaunchSpec;
+  stateRoot: string;
+  fs?: Partial<HermesProjectionFilesystem>;
+}): Promise<HermesProjectionResult> {
+  const projection = await projectHermesHome(input.spec, {
+    stateRoot: input.stateRoot,
+    ownership: { uid: HERMES_WORKLOAD_UID, gid: HERMES_WORKLOAD_GID },
+    ...(input.fs ? { fs: input.fs } : {}),
+  });
+  await configurePrivateSyntheticTelegram(projection, input.fakeModelContainer);
+  return projection;
 }
 
 async function configurePrivateSyntheticTelegram(
