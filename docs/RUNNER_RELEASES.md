@@ -145,8 +145,11 @@ one managed runner per invocation. Set the batch size to `0` to halt automatic f
 
 For artifact publication without any Vercel deployment, dispatch the workflow with
 `action=verified-release` or run `bun run runner:release:publish-verified`. That path publishes and
-verifies the runner image and signed OCI release bundle, while the staging and production jobs stay
-skipped. Use `action=release` only when the separate production deployment is authorized.
+verifies the runner image already retained by the signed Approved Snapshot, scans that exact image,
+and publishes the signed OCI release bundle while the candidate-build, staging, and production jobs
+stay skipped. `action=release` instead builds a new candidate and fails closed unless its immutable
+identity matches the selected Approved Snapshot; use it only when the separate production
+deployment is authorized.
 
 For emergency rollback, dispatch the same workflow with `action=rollback`, the immutable image, and
 the prior successful workflow run ID. The job downloads that run's `verified-runner-release`

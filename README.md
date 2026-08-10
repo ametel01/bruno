@@ -340,9 +340,11 @@ deployment, run:
 bun run runner:release:publish-verified
 ```
 
-The `verified-release` action builds and scans the immutable runner image, exercises the
-credential-free full fixture, verifies cleanup, and publishes the signed digest-addressed OCI
-bundle. It does not run the Vercel staging or production jobs.
+The `verified-release` action retrieves the immutable runner image from the signed Approved
+Snapshot, verifies that exact identity, scans it, exercises the credential-free full fixture,
+verifies cleanup, and publishes the signed digest-addressed OCI bundle. It does not build a new
+runner candidate or run the Vercel staging or production jobs. The production `release` action
+still builds a new candidate and requires it to match the selected Approved Snapshot exactly.
 
 Run this only from a clean `main` branch after pushing the intended release commit. It dispatches the
 protected `Deploy production application` workflow, which publishes an immutable runner image,

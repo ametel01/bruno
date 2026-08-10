@@ -39,7 +39,7 @@ env:
 
 jobs:
   publish:
-    if: inputs.action == 'release' || inputs.action == 'verified-release'
+    if: inputs.action == 'release'
     name: Build, publish, scan, and verify digest
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -175,7 +175,10 @@ jobs:
           echo "Staged the exact release control plane without assigning production domains." >> "${GITHUB_STEP_SUMMARY}"
 
   canary:
-    if: inputs.action == 'release' || inputs.action == 'verified-release'
+    if: >-
+      always() &&
+      (inputs.action == 'release' || inputs.action == 'verified-release') &&
+      (inputs.action != 'release' || needs.publish.result == 'success')
     name: Build and publish credential-free Verified Release
     needs: publish
     runs-on: ubuntu-latest
@@ -225,6 +228,7 @@ jobs:
           password: ${{ github.token }}
 
       - name: Retrieve the exact Approved Snapshot without provider access
+        id: approved-snapshot
         run: |
           set -euo pipefail
           [[ "${BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE}" =~ ^ghcr\.io/.+@sha256:[a-f0-9]{64}$ ]]
@@ -235,8 +239,13 @@ jobs:
           oras pull "${BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE}" --output approved-snapshot
           test "$(find approved-snapshot -maxdepth 1 -type f | wc -l | tr -d ' ')" = "3"
           test "$(tr -d '\n' < approved-snapshot/runner-snapshot-bundle.sha256)" = "${BRUNO_RELEASE_APPROVED_SNAPSHOT_BUNDLE_DIGEST}"
+          RELEASE_RUNNER_IMAGE="${{ needs.publish.outputs.immutable-image }}"
+          if [[ "${{ inputs.action }}" = "verified-release" ]]; then
+            RELEASE_RUNNER_IMAGE="$(jq -r '.manifest.runnerImage.reference // empty' approved-snapshot/runner-snapshot-bundle.json)"
+          fi
+          [[ "${RELEASE_RUNNER_IMAGE}" =~ ^ghcr\.io/ametel01/bruno-runner:[a-f0-9]{40}@sha256:[a-f0-9]{64}$ ]]
           bun run runner:release:snapshot:verify -- \
-            --runner-image "${{ needs.publish.outputs.immutable-image }}" \
+            --runner-image "${RELEASE_RUNNER_IMAGE}" \
             --snapshot-bundle approved-snapshot/runner-snapshot-bundle.json \
             --snapshot-bundle-digest "${BRUNO_RELEASE_APPROVED_SNAPSHOT_BUNDLE_DIGEST}" \
             --output approved-snapshot/verified-images.json
@@ -244,14 +253,37 @@ jobs:
           HERMES_IMAGE="$(jq -r '.hermesImage // empty' approved-snapshot/verified-images.json)"
           test -n "${DEFAULT_AGENT_IMAGE}"
           test -n "${HERMES_IMAGE}"
+          echo "runner-image=${RELEASE_RUNNER_IMAGE}" >> "${GITHUB_OUTPUT}"
+          echo "BRUNO_RUNNER_IMAGE=${RELEASE_RUNNER_IMAGE}" >> "${GITHUB_ENV}"
           echo "BRUNO_DOCKER_RUNNER_IMAGE=${DEFAULT_AGENT_IMAGE}" >> "${GITHUB_ENV}"
           echo "BRUNO_HERMES_WORKLOAD_IMAGE=${HERMES_IMAGE}" >> "${GITHUB_ENV}"
+
+      - name: Scan the retained Approved Snapshot runner
+        if: inputs.action == 'verified-release'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.approved-snapshot.outputs.runner-image }}
+          scanners: vuln
+          format: sarif
+          output: trivy-runner-image.sarif
+          severity: CRITICAL
+          ignore-unfixed: true
+          limit-severities-for-sarif: true
+          exit-code: "1"
+
+      - name: Upload retained runner scan report
+        if: always() && inputs.action == 'verified-release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-approved-runner-image-${{ github.sha }}
+          path: trivy-runner-image.sarif
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Exercise the exact full fixture and verify cleanup
         env:
           DATABASE_URL: ${{ secrets.RUNNER_RELEASE_DATABASE_URL }}
           BRUNO_RUNNER_BEARER_TOKEN: ${{ secrets.RUNNER_RELEASE_BEARER_TOKEN }}
-          IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
         run: |
           set -euo pipefail
           bun run build
@@ -272,7 +304,7 @@ jobs:
           done
           test "${CONTROL_PLANE_READY}" = "true"
           mkdir -p runner-release-evidence
-          bun run runner:release:smoke -- --image "${IMMUTABLE_IMAGE}" --provider local_docker \
+          bun run runner:release:smoke -- --image "${BRUNO_RUNNER_IMAGE}" --provider local_docker \
             > runner-release-evidence/runner-release-smoke.json
           jq -e '.ok == true and .code == "passed" and .cleanupVerified == true' \
             runner-release-evidence/runner-release-smoke.json >/dev/null
@@ -282,11 +314,10 @@ jobs:
       - name: Build signed Verified Release joined to the Approved Snapshot
         env:
           BRUNO_RELEASE_SIGNING_KEY_PEM: ${{ secrets.BRUNO_RELEASE_SIGNING_KEY_PEM }}
-          IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
         run: |
           set -euo pipefail
           bun run runner:release:bundle -- \
-            --runner-image "${IMMUTABLE_IMAGE}" \
+            --runner-image "${BRUNO_RUNNER_IMAGE}" \
             --snapshot-oci-reference "${BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE}" \
             --snapshot-bundle-digest "${BRUNO_RELEASE_APPROVED_SNAPSHOT_BUNDLE_DIGEST}" \
             --snapshot-bundle approved-snapshot/runner-snapshot-bundle.json \
@@ -297,7 +328,7 @@ jobs:
             --cleanup-verified-at "${VERIFIED_AT}" \
             --bundle-out runner-release-evidence/runner-release-bundle.json \
             --digest-out runner-release-evidence/runner-release-bundle.sha256
-          echo "${IMMUTABLE_IMAGE}" > runner-release-evidence/immutable-image.txt
+          echo "${BRUNO_RUNNER_IMAGE}" > runner-release-evidence/immutable-image.txt
 
       - name: Publish and re-verify digest-addressed Verified Release
         run: |
