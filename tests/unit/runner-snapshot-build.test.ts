@@ -17,6 +17,25 @@ const AGENT_IMAGE = `ghcr.io/ametel01/bruno-default:abc123@sha256:${"b".repeat(6
 const AUTH = "I_UNDERSTAND_THIS_CREATES_A_BILLABLE_SNAPSHOT_BUILDER";
 
 describe("runner snapshot build orchestration", () => {
+  it("invokes the cloud-init bootstrap explicitly with Bash", () => {
+    const userData = buildSnapshotBuilderBootstrap({
+      runnerImage: RUNNER_IMAGE,
+      runnerVersion: "abc123",
+      runnerDigest: `sha256:${"a".repeat(64)}`,
+      defaultAgentImage: AGENT_IMAGE,
+      hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
+    });
+
+    const cloudConfig = parse(userData) as { runcmd: unknown[] };
+
+    expect(cloudConfig.runcmd[0]).toEqual([
+      "/usr/bin/env",
+      "bash",
+      "-c",
+      expect.stringMatching(/^set -euo pipefail/),
+    ]);
+  });
+
   it("installs Docker and Caddy before preloading images and emits boot/sanitation evidence", () => {
     const userData = buildSnapshotBuilderBootstrap({
       runnerImage: RUNNER_IMAGE,
@@ -49,9 +68,9 @@ describe("runner snapshot build orchestration", () => {
     expect(userData).toContain("BEGIN OPENSSH PRIVATE KEY");
     expect(userData).toContain('"/var/lib/cloud"');
     expect(userData).toContain('"/root/.ssh/authorized_keys"');
-    const cloudConfig = parse(userData) as { runcmd: string[] };
-    const command = String(cloudConfig.runcmd[0] ?? "");
-    expect(cloudConfig).toMatchObject({ runcmd: [expect.any(String)] });
+    const cloudConfig = parse(userData) as { runcmd: string[][] };
+    const command = String(cloudConfig.runcmd[0]?.[3] ?? "");
+    expect(cloudConfig.runcmd[0]).toEqual(["/usr/bin/env", "bash", "-c", expect.any(String)]);
     expect(command.indexOf("rm -rf /var/lib/cloud /root/.ssh/authorized_keys")).toBeLessThan(
       command.indexOf('with open("/run/bruno-snapshot-builder/sanitation-result.json"'),
     );
@@ -84,8 +103,8 @@ describe("runner snapshot build orchestration", () => {
       hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
       evidencePublisher: publisher,
     });
-    const cloudConfig = parse(userData) as { runcmd: string[] };
-    const command = String(cloudConfig.runcmd[0] ?? "");
+    const cloudConfig = parse(userData) as { runcmd: string[][] };
+    const command = String(cloudConfig.runcmd[0]?.[3] ?? "");
 
     expect(command).toContain(SNAPSHOT_BUILDER_EVIDENCE_COMMENT_MARKER);
     expect(command).toContain("github-token-'\"'\"'quoted");

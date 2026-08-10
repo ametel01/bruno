@@ -144,8 +144,10 @@ unless required reviewers are enforced on that environment; an unprotected manua
 forbidden.
 
 Snapshot mode is not a warm pool. The workflow creates a short-lived builder Droplet only after
-approval, runs the immutable runner image's Docker, Hermes fixture, detailed-health, synthetic model
-canary, Telegram-configuration, and fixture-cleanup checks, and requires every component to pass.
+approval. Cloud-init invokes the generated bootstrap through an explicit Bash argument vector rather
+than the distribution `/bin/sh`, then runs the immutable runner image's Docker, Hermes fixture,
+detailed-health, synthetic model canary, Telegram-configuration, and fixture-cleanup checks, and
+requires every component to pass.
 After cloud-init completes, a one-shot finalizer removes cloud-init state, the temporary authorized
 SSH key, its own callback credential and files, verifies the machine identity is empty, and only then
 publishes completion evidence and allows snapshot creation.

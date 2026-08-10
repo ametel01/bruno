@@ -975,16 +975,7 @@ export function buildSnapshotBuilderBootstrap(input: {
     systemctl start --no-block bruno-snapshot-finalize.service`
     : "";
 
-  return `#cloud-config
-package_update: true
-package_upgrade: false
-packages:
-  - bash
-  - ca-certificates
-  - curl
-  - gnupg
-runcmd:
-  - |
+  const bootstrapCommand = dedentSnapshotBootstrapCommand(`
     set -euo pipefail
     install -m 0755 -d /etc/apt/keyrings /etc/bruno-snapshot-builder /run/bruno-snapshot-builder
     BRUNO_BUILDER_RESOURCE_ID="$(curl -fsS http://169.254.169.254/metadata/v1/id)"
@@ -1175,7 +1166,50 @@ ${evidencePublisherCompletion}
     BRUNO_SANITATION_FINALIZER
     chmod 0700 /usr/local/sbin/bruno-finalize-snapshot-sanitation
 ${scheduleSanitationFinalizer}
+`);
+  const indentedBootstrapCommand = bootstrapCommand
+    .split("\n")
+    .map((line) => `      ${line}`)
+    .join("\n");
+
+  return `#cloud-config
+package_update: true
+package_upgrade: false
+packages:
+  - bash
+  - ca-certificates
+  - curl
+  - gnupg
+runcmd:
+  - - /usr/bin/env
+    - bash
+    - -c
+    - |
+${indentedBootstrapCommand}
 `;
+}
+
+function dedentSnapshotBootstrapCommand(command: string): string {
+  const lines = command.split("\n");
+
+  if (lines[0] === "") {
+    lines.shift();
+  }
+  if (lines.at(-1) === "") {
+    lines.pop();
+  }
+
+  return lines
+    .map((line) => {
+      if (line === "") {
+        return line;
+      }
+      if (!line.startsWith("    ")) {
+        throw new Error("Snapshot bootstrap command must use four-space template indentation.");
+      }
+      return line.slice(4);
+    })
+    .join("\n");
 }
 
 function buildEvidencePublisherSetup(
