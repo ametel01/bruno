@@ -12,6 +12,22 @@ export const SNAPSHOT_BUILDER_EVIDENCE_CONTRACT_VERSION =
   "bruno.runner.snapshot-builder-evidence.v1";
 export const SNAPSHOT_BUILDER_EVIDENCE_COMMENT_MARKER =
   "<!-- bruno.runner.snapshot-builder-evidence.v1 -->";
+export const SNAPSHOT_BUILDER_DIAGNOSTICS_CONTRACT_VERSION =
+  "bruno.runner.snapshot-builder-diagnostics.v1";
+
+export type SnapshotBuilderProgressStage =
+  | "bootstrap_started"
+  | "docker_installed"
+  | "images_preloaded"
+  | "fixture_complete"
+  | "complete";
+
+export type SnapshotBuilderEvidenceDiagnostics = {
+  schemaVersion: typeof SNAPSHOT_BUILDER_DIAGNOSTICS_CONTRACT_VERSION;
+  status: "progress_observed" | "no_progress_observed" | "unavailable";
+  lastStage: SnapshotBuilderProgressStage | null;
+  sourceUrl?: string;
+};
 
 export type SnapshotBuilderEvidencePublisher = {
   token: string;
@@ -60,6 +76,10 @@ export function createSnapshotBuilderEvidenceChannel(input: EvidenceChannelInput
     input: DigitalOceanReadSnapshotBuilderEvidenceInput,
     context?: DigitalOceanProviderRequestContext,
   ) => Promise<DigitalOceanProviderResult<DigitalOceanSnapshotBuilderEvidence>>;
+  readDiagnostics: (
+    input: DigitalOceanReadSnapshotBuilderEvidenceInput,
+    context?: DigitalOceanProviderRequestContext,
+  ) => Promise<SnapshotBuilderEvidenceDiagnostics>;
 } {
   const publisher = validatePublisher({
     token: input.token,
@@ -71,52 +91,76 @@ export function createSnapshotBuilderEvidenceChannel(input: EvidenceChannelInput
     apiUrl: input.apiUrl ?? "https://api.github.com",
   });
   const fetchImpl = input.fetch ?? fetch;
+  const fetchComments = async (
+    context: DigitalOceanProviderRequestContext,
+  ): Promise<unknown[] | null> => {
+    if (context.signal.aborted) return null;
+
+    try {
+      const response = await fetchImpl(
+        `${publisher.apiUrl}/repos/${publisher.repository}/issues/${publisher.issueNumber}/comments?per_page=100&sort=created&direction=desc`,
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${publisher.token}`,
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          signal: context.signal,
+        },
+      );
+      if (!response.ok) return null;
+      const comments: unknown = await response.json();
+      return Array.isArray(comments) ? comments : null;
+    } catch {
+      return null;
+    }
+  };
 
   return {
     publisher,
     read: async (evidenceInput, context = { signal: new AbortController().signal }) => {
       if (context.signal.aborted) return evidenceNotReady();
 
-      try {
-        const response = await fetchImpl(
-          `${publisher.apiUrl}/repos/${publisher.repository}/issues/${publisher.issueNumber}/comments?per_page=100&sort=created&direction=desc`,
-          {
-            method: "GET",
-            headers: {
-              Accept: "application/vnd.github+json",
-              Authorization: `Bearer ${publisher.token}`,
-              "X-GitHub-Api-Version": "2022-11-28",
-            },
-            signal: context.signal,
-          },
-        );
-        if (!response.ok) return evidenceNotReady();
-        const comments: unknown = await response.json();
-        if (!Array.isArray(comments)) return evidenceNotReady();
+      const comments = await fetchComments(context);
+      if (!comments) return evidenceNotReady();
+      const matches = comments.flatMap((comment) => {
+        const parsed = parseCompletedComment(comment, publisher, evidenceInput.providerResourceId);
+        return parsed ? [parsed] : [];
+      });
+      if (matches.length !== 1) return evidenceNotReady();
+      const match = matches[0];
+      if (!match) return evidenceNotReady();
 
-        const matches = comments.flatMap((comment) => {
-          const parsed = parseCompletedComment(
-            comment,
-            publisher,
-            evidenceInput.providerResourceId,
-          );
-          return parsed ? [parsed] : [];
-        });
-        if (matches.length !== 1) return evidenceNotReady();
-        const match = matches[0];
-        if (!match) return evidenceNotReady();
-
-        return {
-          ok: true,
-          value: {
-            bootResult: match.payload.bootResult,
-            sanitationResult: match.payload.sanitationResult,
-            sourceUrl: match.sourceUrl,
-          },
-        };
-      } catch {
-        return evidenceNotReady();
-      }
+      return {
+        ok: true,
+        value: {
+          bootResult: match.payload.bootResult,
+          sanitationResult: match.payload.sanitationResult,
+          sourceUrl: match.sourceUrl,
+        },
+      };
+    },
+    readDiagnostics: async (evidenceInput, context = { signal: new AbortController().signal }) => {
+      const comments = await fetchComments(context);
+      if (!comments) return unavailableDiagnostics();
+      const progress = comments
+        .map((comment) =>
+          parseProgressComment(comment, publisher, evidenceInput.providerResourceId),
+        )
+        .find((value) => value !== null);
+      return progress
+        ? {
+            schemaVersion: SNAPSHOT_BUILDER_DIAGNOSTICS_CONTRACT_VERSION,
+            status: "progress_observed",
+            lastStage: progress.stage,
+            sourceUrl: progress.sourceUrl,
+          }
+        : {
+            schemaVersion: SNAPSHOT_BUILDER_DIAGNOSTICS_CONTRACT_VERSION,
+            status: "no_progress_observed",
+            lastStage: null,
+          };
     },
   };
 }
@@ -204,6 +248,47 @@ function parseCompletedComment(
   };
 }
 
+function parseProgressComment(
+  value: unknown,
+  expected: SnapshotBuilderEvidencePublisher,
+  providerResourceId: string,
+): { stage: SnapshotBuilderProgressStage; sourceUrl: string } | null {
+  const comment = value as GitHubIssueComment;
+  if (
+    !comment ||
+    typeof comment !== "object" ||
+    comment.user?.login !== "github-actions[bot]" ||
+    typeof comment.body !== "string" ||
+    typeof comment.html_url !== "string"
+  ) {
+    return null;
+  }
+  const prefix = `${SNAPSHOT_BUILDER_EVIDENCE_COMMENT_MARKER}\n`;
+  if (!comment.body.startsWith(prefix)) return null;
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(comment.body.slice(prefix.length));
+  } catch {
+    return null;
+  }
+  if (
+    !isRecord(payload) ||
+    payload.contractVersion !== SNAPSHOT_BUILDER_EVIDENCE_CONTRACT_VERSION ||
+    payload.repository !== expected.repository ||
+    payload.issueNumber !== expected.issueNumber ||
+    payload.runId !== expected.runId ||
+    payload.builderResourceId !== providerResourceId ||
+    !isProgressStage(payload.stage)
+  ) {
+    return null;
+  }
+  const expectedUrlPrefix = `https://github.com/${expected.repository}/issues/${expected.issueNumber}#issuecomment-`;
+  return comment.html_url.startsWith(expectedUrlPrefix)
+    ? { stage: payload.stage, sourceUrl: comment.html_url }
+    : null;
+}
+
 function authenticationTagMatches(
   payload: Record<string, unknown>,
   authenticationSecret: string,
@@ -242,5 +327,23 @@ function evidenceNotReady(): DigitalOceanProviderResult<DigitalOceanSnapshotBuil
     ok: false,
     reason: "builder_evidence_not_ready",
     message: "Snapshot builder evidence is not ready yet.",
+  };
+}
+
+function isProgressStage(value: unknown): value is SnapshotBuilderProgressStage {
+  return (
+    value === "bootstrap_started" ||
+    value === "docker_installed" ||
+    value === "images_preloaded" ||
+    value === "fixture_complete" ||
+    value === "complete"
+  );
+}
+
+function unavailableDiagnostics(): SnapshotBuilderEvidenceDiagnostics {
+  return {
+    schemaVersion: SNAPSHOT_BUILDER_DIAGNOSTICS_CONTRACT_VERSION,
+    status: "unavailable",
+    lastStage: null,
   };
 }

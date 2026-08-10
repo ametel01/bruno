@@ -132,6 +132,58 @@ describe("snapshot builder GitHub evidence channel", () => {
     ).resolves.toMatchObject({ ok: false, reason: "builder_evidence_not_ready" });
     expect(called).toBe(false);
   });
+
+  it("returns only the latest allowlisted progress stage as failure diagnostics", async () => {
+    const channel = createSnapshotBuilderEvidenceChannel({
+      token: "github-token-test-value",
+      repository: "ametel01/bruno",
+      issueNumber: 294,
+      runId: "31339201376",
+      nonce: "11111111-1111-4111-8111-111111111111",
+      authenticationSecret: AUTHENTICATION_SECRET,
+      fetch: async () =>
+        Response.json([
+          comment(progressPayload("images_preloaded"), "github-actions[bot]", 12),
+          comment(progressPayload("docker_installed"), "github-actions[bot]", 11),
+          comment(progressPayload("fixture_complete"), "ametel01", 10),
+        ]),
+    });
+
+    await expect(
+      channel.readDiagnostics(
+        { providerResourceId: "7654321" },
+        { signal: new AbortController().signal },
+      ),
+    ).resolves.toEqual({
+      schemaVersion: "bruno.runner.snapshot-builder-diagnostics.v1",
+      status: "progress_observed",
+      lastStage: "images_preloaded",
+      sourceUrl: "https://github.com/ametel01/bruno/issues/294#issuecomment-12",
+    });
+  });
+
+  it("reports when no builder progress callback was observed", async () => {
+    const channel = createSnapshotBuilderEvidenceChannel({
+      token: "github-token-test-value",
+      repository: "ametel01/bruno",
+      issueNumber: 294,
+      runId: "31339201376",
+      nonce: "11111111-1111-4111-8111-111111111111",
+      authenticationSecret: AUTHENTICATION_SECRET,
+      fetch: async () => Response.json([]),
+    });
+
+    await expect(
+      channel.readDiagnostics(
+        { providerResourceId: "7654321" },
+        { signal: new AbortController().signal },
+      ),
+    ).resolves.toEqual({
+      schemaVersion: "bruno.runner.snapshot-builder-diagnostics.v1",
+      status: "no_progress_observed",
+      lastStage: null,
+    });
+  });
 });
 
 function completedPayload() {
@@ -166,9 +218,9 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function progressPayload() {
+function progressPayload(stage = "images_preloaded") {
   const { nonce: _nonce, authenticationTag: _authenticationTag, ...payload } = completedPayload();
-  return { ...payload, stage: "images_preloaded" };
+  return { ...payload, stage };
 }
 
 function comment(payload: unknown, login: string, id: number) {

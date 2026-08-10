@@ -144,8 +144,9 @@ unless required reviewers are enforced on that environment; an unprotected manua
 forbidden.
 
 Snapshot mode is not a warm pool. The workflow creates a short-lived builder Droplet only after
-approval. Cloud-init invokes the generated bootstrap through an explicit Bash argument vector rather
-than the distribution `/bin/sh`, then runs the immutable runner image's Docker, Hermes fixture,
+approval. The generated user-data is a directly executable Bash script, so bootstrap does not depend
+on cloud-config `runcmd` serialization or the distribution `/bin/sh`. It publishes the
+`bootstrap_started` progress stage before package installation, then runs the immutable runner image's Docker, Hermes fixture,
 detailed-health, synthetic model canary, Telegram-configuration, and fixture-cleanup checks, and
 requires every component to pass.
 After cloud-init completes, a one-shot finalizer removes cloud-init state, the temporary authorized
@@ -171,6 +172,14 @@ the callback environment file, systemd unit, uploader, cloud-init state, authori
 identity before the completed comment is sent. The comment contains only boot and sanitation contract
 evidence; it contains no callback token, DigitalOcean credential, SSH private key, endpoint, or Owner
 data.
+
+If completed evidence does not arrive within the builder deadline, the build reports
+`builder_evidence_timeout` instead of classifying the absence as a boot-fixture assertion. It retains
+one separate diagnostics artifact containing only the diagnostics contract version, whether an
+allowlisted progress callback was observed, the last allowlisted progress stage, and that comment's
+GitHub URL when present. `no_progress_observed` means the builder never published even
+`bootstrap_started`; `unavailable` means the controller could not authoritatively read the callback
+channel. This artifact is diagnostic only and cannot authorize snapshot creation.
 
 The workflow still creates and immediately tracks one provider SSH key as a cleanup and sanitation
 proof target. Its firewall accepts SSH only from the controller's observed `/32` IPv4 or `/128` IPv6

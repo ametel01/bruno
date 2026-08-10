@@ -1,6 +1,6 @@
+import { spawnSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { parse } from "yaml";
 import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
 import { FakeDigitalOceanProvider } from "@/src/server/runners/digitalocean-provider";
 import {
@@ -17,7 +17,7 @@ const AGENT_IMAGE = `ghcr.io/ametel01/bruno-default:abc123@sha256:${"b".repeat(6
 const AUTH = "I_UNDERSTAND_THIS_CREATES_A_BILLABLE_SNAPSHOT_BUILDER";
 
 describe("runner snapshot build orchestration", () => {
-  it("invokes the cloud-init bootstrap explicitly with Bash", () => {
+  it("emits directly executable Bash user-data", () => {
     const userData = buildSnapshotBuilderBootstrap({
       runnerImage: RUNNER_IMAGE,
       runnerVersion: "abc123",
@@ -26,14 +26,12 @@ describe("runner snapshot build orchestration", () => {
       hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
     });
 
-    const cloudConfig = parse(userData) as { runcmd: unknown[] };
+    const syntax = spawnSync("bash", ["-n"], { input: userData, encoding: "utf8" });
 
-    expect(cloudConfig.runcmd[0]).toEqual([
-      "/usr/bin/env",
-      "bash",
-      "-c",
-      expect.stringMatching(/^set -euo pipefail/),
-    ]);
+    expect(userData).toMatch(/^#!\/usr\/bin\/env bash\nset -euo pipefail\n/);
+    expect(userData).not.toContain("#cloud-config");
+    expect(userData).not.toContain("runcmd:");
+    expect(syntax).toMatchObject({ status: 0, stderr: "" });
   });
 
   it("installs Docker and Caddy before preloading images and emits boot/sanitation evidence", () => {
@@ -50,6 +48,9 @@ describe("runner snapshot build orchestration", () => {
     );
     expect(userData).toContain("systemctl enable --now docker");
     expect(userData).toContain("systemctl enable --now caddy");
+    expect(userData.indexOf('publish_builder_evidence "bootstrap_started"')).toBeLessThan(
+      userData.indexOf("apt-get update"),
+    );
     expect(userData).toContain("/run/bruno-snapshot-builder/boot-result.json");
     expect(userData).toContain("/run/bruno-snapshot-builder/sanitation-result.json");
     expect(userData).toContain("docker image inspect");
@@ -68,9 +69,7 @@ describe("runner snapshot build orchestration", () => {
     expect(userData).toContain("BEGIN OPENSSH PRIVATE KEY");
     expect(userData).toContain('"/var/lib/cloud"');
     expect(userData).toContain('"/root/.ssh/authorized_keys"');
-    const cloudConfig = parse(userData) as { runcmd: string[][] };
-    const command = String(cloudConfig.runcmd[0]?.[3] ?? "");
-    expect(cloudConfig.runcmd[0]).toEqual(["/usr/bin/env", "bash", "-c", expect.any(String)]);
+    const command = userData;
     expect(command.indexOf("rm -rf /var/lib/cloud /root/.ssh/authorized_keys")).toBeLessThan(
       command.indexOf('with open("/run/bruno-snapshot-builder/sanitation-result.json"'),
     );
@@ -103,9 +102,23 @@ describe("runner snapshot build orchestration", () => {
       hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
       evidencePublisher: publisher,
     });
-    const cloudConfig = parse(userData) as { runcmd: string[][] };
-    const command = String(cloudConfig.runcmd[0]?.[3] ?? "");
+    const command = userData;
+    const shellSyntax = spawnSync("bash", ["-n"], {
+      input: command,
+      encoding: "utf8",
+    });
+    const publisherSource = command.match(
+      /<<'BRUNO_EVIDENCE_PUBLISHER_PY'\n([\s\S]*?)\nBRUNO_EVIDENCE_PUBLISHER_PY/,
+    )?.[1];
+    const publisherSyntax = spawnSync(
+      "python3",
+      ["-c", 'import sys; compile(sys.stdin.read(), "publish-evidence.py", "exec")'],
+      { input: publisherSource, encoding: "utf8" },
+    );
 
+    expect(shellSyntax).toMatchObject({ status: 0, stderr: "" });
+    expect(publisherSource).toBeTruthy();
+    expect(publisherSyntax).toMatchObject({ status: 0, stderr: "" });
     expect(command).toContain(SNAPSHOT_BUILDER_EVIDENCE_COMMENT_MARKER);
     expect(command).toContain("github-token-'\"'\"'quoted");
     expect(command).toContain("bootstrap_started");
@@ -450,10 +463,41 @@ describe("runner snapshot build orchestration", () => {
 
     expect(result).toMatchObject({
       ok: false,
-      reason: "boot_fixture_failed",
+      reason: "builder_evidence_timeout",
+      diagnostics: {
+        schemaVersion: "bruno.runner.snapshot-builder-diagnostics.v1",
+        status: "unavailable",
+        lastStage: null,
+      },
       cleanup: { absenceVerified: true },
     });
     expect(provider.calls.filter((call) => call.step === "readBuilderEvidence")).toHaveLength(63);
+  });
+
+  it("retains only allowlisted progress diagnostics after evidence polling times out", async () => {
+    const provider = new DelayedBuilderEvidenceProvider(100);
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      builderEvidencePollIntervalMs: 0,
+      readBuilderDiagnostics: async () => ({
+        schemaVersion: "bruno.runner.snapshot-builder-diagnostics.v1",
+        status: "progress_observed",
+        lastStage: "docker_installed",
+        sourceUrl: "https://github.com/ametel01/bruno/issues/294#issuecomment-12",
+      }),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "builder_evidence_timeout",
+      diagnostics: {
+        status: "progress_observed",
+        lastStage: "docker_installed",
+      },
+      cleanup: { absenceVerified: true },
+    });
+    expect(JSON.stringify(result)).not.toContain("github-token-test-value");
+    expect(JSON.stringify(result)).not.toContain('"authenticationSecret"');
   });
 
   it("retries a retryable Droplet deletion outcome until absence is confirmed", async () => {

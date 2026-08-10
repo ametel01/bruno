@@ -82,6 +82,7 @@ try {
     builderSshPrivateKeyPath,
     builderEvidencePublisher: evidenceChannel.publisher,
     readBuilderEvidence: evidenceChannel.read,
+    readBuilderDiagnostics: evidenceChannel.readDiagnostics,
     privateKeyPem,
     signingKeyId: args.signingKeyId,
     provider,
@@ -101,6 +102,13 @@ try {
     await writeFile(
       args.sanitationResultOut,
       `${JSON.stringify(result.sanitationResult, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+  }
+  if (!result.ok && result.diagnostics) {
+    await writeFile(
+      args.failureDiagnosticsOut,
+      `${JSON.stringify(result.diagnostics, null, 2)}\n`,
       { mode: 0o600 },
     );
   }
@@ -212,6 +220,7 @@ function parseArgs(values: string[]) {
     signingKeyId: requiredArg(parsed, "signing-key-id"),
     bootResultOut: requiredArg(parsed, "boot-result-out"),
     sanitationResultOut: requiredArg(parsed, "sanitation-result-out"),
+    failureDiagnosticsOut: requiredArg(parsed, "failure-diagnostics-out"),
     cleanupResultOut: requiredArg(parsed, "cleanup-result-out"),
     bundleOut: requiredArg(parsed, "bundle-out"),
     digestOut: requiredArg(parsed, "digest-out"),

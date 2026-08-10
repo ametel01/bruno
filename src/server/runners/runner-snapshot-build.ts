@@ -34,8 +34,10 @@ import {
   type RunnerSnapshotManifest,
 } from "./runner-snapshot-manifest";
 import {
+  SNAPSHOT_BUILDER_DIAGNOSTICS_CONTRACT_VERSION,
   SNAPSHOT_BUILDER_EVIDENCE_COMMENT_MARKER,
   SNAPSHOT_BUILDER_EVIDENCE_CONTRACT_VERSION,
+  type SnapshotBuilderEvidenceDiagnostics,
   type SnapshotBuilderEvidencePublisher,
 } from "./snapshot-builder-evidence-channel";
 
@@ -70,6 +72,10 @@ export type BuildRunnerSnapshotInput = {
     input: DigitalOceanReadSnapshotBuilderEvidenceInput,
     context?: DigitalOceanProviderRequestContext,
   ) => Promise<DigitalOceanProviderResult<DigitalOceanSnapshotBuilderEvidence>>;
+  readBuilderDiagnostics?: (
+    input: DigitalOceanReadSnapshotBuilderEvidenceInput,
+    context?: DigitalOceanProviderRequestContext,
+  ) => Promise<SnapshotBuilderEvidenceDiagnostics>;
   privateKeyPem: string;
   signingKeyId: string;
   provider: DigitalOceanProvider;
@@ -123,6 +129,7 @@ export type BuildRunnerSnapshotResult =
       reason: BuildRunnerSnapshotFailureReason;
       bootResult?: SnapshotBootFixtureResult;
       sanitationResult?: SnapshotSanitationResult;
+      diagnostics?: SnapshotBuilderEvidenceDiagnostics;
       cleanup: SnapshotCleanupEvidence;
     };
 
@@ -131,6 +138,7 @@ export type BuildRunnerSnapshotFailureReason =
   | "input_invalid"
   | "provider_contract_missing"
   | "builder_create_failed"
+  | "builder_evidence_timeout"
   | "boot_fixture_failed"
   | "sanitation_failed"
   | "power_off_failed"
@@ -196,6 +204,7 @@ export async function buildRunnerSnapshot(
     reason: "cleanup_failed",
     ...(!result.ok && result.bootResult ? { bootResult: result.bootResult } : {}),
     ...(!result.ok && result.sanitationResult ? { sanitationResult: result.sanitationResult } : {}),
+    ...(!result.ok && result.diagnostics ? { diagnostics: result.diagnostics } : {}),
     cleanup: result.cleanup,
   };
 }
@@ -319,7 +328,23 @@ async function buildRunnerSnapshotCandidate(
     cleanup.steps.push("read_builder_evidence");
 
     if (!evidence.ok) {
-      return { ok: false, reason: "boot_fixture_failed", cleanup };
+      if (evidence.reason !== "builder_evidence_not_ready" || input.context.signal.aborted) {
+        return { ok: false, reason: "boot_fixture_failed", cleanup };
+      }
+      const diagnostics = await readFailureDiagnostics({
+        readDiagnostics: input.readBuilderDiagnostics,
+        evidenceInput: {
+          providerResourceId: builder.providerResourceId,
+          ...(input.builderSshPrivateKeyPath
+            ? { privateKeyPath: input.builderSshPrivateKeyPath }
+            : {}),
+          ...(input.expectedBuilderHostKeySha256
+            ? { expectedHostKeySha256: input.expectedBuilderHostKeySha256 }
+            : {}),
+        },
+        context: input.context,
+      });
+      return { ok: false, reason: "builder_evidence_timeout", diagnostics, cleanup };
     }
 
     const bootResult = evidence.value.bootResult as SnapshotBootFixtureResult;
@@ -548,6 +573,28 @@ async function buildRunnerSnapshotCandidate(
       }
     });
   }
+}
+
+async function readFailureDiagnostics(input: {
+  readDiagnostics: BuildRunnerSnapshotInput["readBuilderDiagnostics"];
+  evidenceInput: DigitalOceanReadSnapshotBuilderEvidenceInput;
+  context: DigitalOceanProviderRequestContext;
+}): Promise<SnapshotBuilderEvidenceDiagnostics> {
+  if (!input.readDiagnostics) return unavailableBuilderDiagnostics();
+
+  try {
+    return await input.readDiagnostics(input.evidenceInput, input.context);
+  } catch {
+    return unavailableBuilderDiagnostics();
+  }
+}
+
+function unavailableBuilderDiagnostics(): SnapshotBuilderEvidenceDiagnostics {
+  return {
+    schemaVersion: SNAPSHOT_BUILDER_DIAGNOSTICS_CONTRACT_VERSION,
+    status: "unavailable",
+    lastStage: null,
+  };
 }
 
 async function runWithSnapshotCleanupContext(
@@ -978,11 +1025,20 @@ export function buildSnapshotBuilderBootstrap(input: {
   const bootstrapCommand = dedentSnapshotBootstrapCommand(`
     set -euo pipefail
     install -m 0755 -d /etc/apt/keyrings /etc/bruno-snapshot-builder /run/bruno-snapshot-builder
-    BRUNO_BUILDER_RESOURCE_ID="$(curl -fsS http://169.254.169.254/metadata/v1/id)"
+    BRUNO_BUILDER_RESOURCE_ID="$(
+      python3 - <<'BRUNO_BUILDER_METADATA_PY'
+    import urllib.request
+
+    with urllib.request.urlopen("http://169.254.169.254/metadata/v1/id", timeout=15) as response:
+        print(response.read().decode("utf-8").strip())
+    BRUNO_BUILDER_METADATA_PY
+    )"
     export BRUNO_BUILDER_RESOURCE_ID
     printf '%s\\n' "$BRUNO_BUILDER_RESOURCE_ID" > /run/bruno-snapshot-builder/builder-resource-id
 ${evidencePublisherSetup}
     publish_builder_evidence "bootstrap_started"
+    apt-get update
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
     chmod a+r /etc/apt/keyrings/docker.gpg
     . /etc/os-release
@@ -1167,26 +1223,8 @@ ${evidencePublisherCompletion}
     chmod 0700 /usr/local/sbin/bruno-finalize-snapshot-sanitation
 ${scheduleSanitationFinalizer}
 `);
-  const indentedBootstrapCommand = bootstrapCommand
-    .split("\n")
-    .map((line) => `      ${line}`)
-    .join("\n");
 
-  return `#cloud-config
-package_update: true
-package_upgrade: false
-packages:
-  - bash
-  - ca-certificates
-  - curl
-  - gnupg
-runcmd:
-  - - /usr/bin/env
-    - bash
-    - -c
-    - |
-${indentedBootstrapCommand}
-`;
+  return `#!/usr/bin/env bash\n${bootstrapCommand}\n`;
 }
 
 function dedentSnapshotBootstrapCommand(command: string): string {

@@ -193,6 +193,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Protected snapshot builders now execute direct Bash user-data, publish their first progress stage
+  before package installation, distinguish evidence timeouts from failed fixture assertions, and
+  retain only allowlisted callback-stage diagnostics when completion never arrives.
 - Protected snapshot builders now wait within a strict bounded deadline for SSH and full-fixture
   evidence, run the immutable runner boot self-test instead of treating image pulls as fixture proof,
   remove complete cloud-init and temporary SSH authorization state, and fail publication closed unless

@@ -147,6 +147,7 @@ jobs:
             --controller-cidr "$BRUNO_SNAPSHOT_CONTROLLER_CIDR" \
             --boot-result-out snapshot-artifacts/boot-result.json \
             --sanitation-result-out snapshot-artifacts/sanitation-result.json \
+            --failure-diagnostics-out snapshot-artifacts/failure-diagnostics.json \
             --cleanup-result-out snapshot-artifacts/cleanup-result.json \
             --signing-key snapshot-artifacts/signing-key.pem \
             --signing-key-id "$BRUNO_SNAPSHOT_SIGNING_KEY_ID" \
@@ -232,6 +233,7 @@ jobs:
           path: |
             snapshot-artifacts/boot-result.json
             snapshot-artifacts/sanitation-result.json
+            snapshot-artifacts/failure-diagnostics.json
           if-no-files-found: warn
           retention-days: 30
 

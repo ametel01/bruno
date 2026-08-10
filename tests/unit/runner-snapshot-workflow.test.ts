@@ -155,6 +155,10 @@ describe("runner snapshot workflow", () => {
     expect(workflow).toContain("name: runner-snapshot-builder-diagnostics-");
     expect(workflow).toContain("snapshot-artifacts/boot-result.json");
     expect(workflow).toContain("snapshot-artifacts/sanitation-result.json");
+    expect(workflow).toContain(
+      "--failure-diagnostics-out snapshot-artifacts/failure-diagnostics.json",
+    );
+    expect(workflow).toContain("snapshot-artifacts/failure-diagnostics.json");
     const cleanupEvidenceStep = workflow.slice(
       workflow.indexOf("- name: Retain terminal cleanup evidence"),
       workflow.indexOf("- name: Retain sanitized builder diagnostics"),
@@ -204,6 +208,7 @@ describe("runner snapshot workflow", () => {
     expect(script).toContain('readRequiredEnv("BRUNO_SNAPSHOT_EVIDENCE_ISSUE_NUMBER")');
     expect(script).toContain("builderEvidencePublisher: evidenceChannel.publisher");
     expect(script).toContain("readBuilderEvidence: evidenceChannel.read");
+    expect(script).toContain("readBuilderDiagnostics: evidenceChannel.readDiagnostics");
     expect(script).toContain("controllerCidr");
     expect(script).toContain("signingKeyId");
     expect(script).toContain('requiredArg(parsed, "signing-key-id")');
@@ -212,6 +217,8 @@ describe("runner snapshot workflow", () => {
     expect(script).toContain("isExplicitControllerCidr");
     expect(script).toContain("bootResultOut");
     expect(script).toContain("sanitationResultOut");
+    expect(script).toContain("failureDiagnosticsOut");
+    expect(script).toContain('requiredArg(parsed, "failure-diagnostics-out")');
     expect(script).toContain("cleanupResultOut");
     expect(script).toContain('requiredArg(parsed, "cleanup-result-out")');
     expect(script.indexOf("if (result.bootResult)")).toBeLessThan(
