@@ -122,7 +122,7 @@ describe("runner snapshot workflow", () => {
       attestations: "write",
       "id-token": "write",
     });
-    expect(workflow).toContain("oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6");
+    expect(workflow).toContain("oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d");
     expect(workflow).toContain("version: 1.3.3");
     expect(workflow).toContain("docker/login-action@v3");
     expect(workflow).toContain("registry: ghcr.io");
