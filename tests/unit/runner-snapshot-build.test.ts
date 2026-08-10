@@ -329,6 +329,59 @@ cleanup_snapshot_builder_networks`,
     expect(JSON.stringify(result)).not.toContain("expiresAt");
   });
 
+  it("accepts a snapshot whose minimum disk matches the selected runner profile", async () => {
+    const provider = new ProfileSizedSnapshotProvider(50);
+
+    const result = await buildRunnerSnapshot(baseInput(provider));
+
+    expect(result).toMatchObject({
+      ok: true,
+      manifest: {
+        runner: { diskSizeGb: 50 },
+        snapshot: { minDiskSizeGb: 50 },
+      },
+    });
+  });
+
+  it("waits for a pending snapshot image to become available in the selected region", async () => {
+    const provider = new PendingSnapshotImageProvider();
+
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      imageAvailabilityPollAttempts: 2,
+      imageAvailabilityPollIntervalMs: 0,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      manifest: {
+        snapshot: {
+          status: "available",
+          regions: ["sfo3"],
+          minDiskSizeGb: 50,
+        },
+      },
+    });
+    expect(provider.imageReads).toBe(2);
+  });
+
+  it("rejects a snapshot whose minimum disk exceeds the selected runner profile", async () => {
+    const provider = new ProfileSizedSnapshotProvider(51);
+
+    const result = await buildRunnerSnapshot(baseInput(provider));
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "snapshot_unavailable",
+      bootResult: { ok: true },
+      sanitationResult: { ok: true },
+      cleanup: {
+        deletedSnapshotId: "9102",
+        snapshotAbsenceVerified: true,
+      },
+    });
+  });
+
   it("fails before provider effects without the cost authorization sentinel", async () => {
     const provider = new FakeDigitalOceanProvider();
     const result = await buildRunnerSnapshot({
@@ -1091,6 +1144,43 @@ class ActionErroredProvider extends FakeDigitalOceanProvider {
   }
 }
 
+class ProfileSizedSnapshotProvider extends FakeDigitalOceanProvider {
+  constructor(private readonly minDiskSizeGb: number) {
+    super();
+  }
+
+  override async readImageAvailability(
+    input: Parameters<FakeDigitalOceanProvider["readImageAvailability"]>[0],
+    context?: Parameters<FakeDigitalOceanProvider["readImageAvailability"]>[1],
+  ) {
+    const result = await super.readImageAvailability(input, context);
+    return result.ok
+      ? { ok: true as const, value: { ...result.value, minDiskSizeGb: this.minDiskSizeGb } }
+      : result;
+  }
+}
+
+class PendingSnapshotImageProvider extends ProfileSizedSnapshotProvider {
+  imageReads = 0;
+
+  constructor() {
+    super(50);
+  }
+
+  override async readImageAvailability(
+    input: Parameters<FakeDigitalOceanProvider["readImageAvailability"]>[0],
+    context?: Parameters<FakeDigitalOceanProvider["readImageAvailability"]>[1],
+  ) {
+    const result = await super.readImageAvailability(input, context);
+    this.imageReads += 1;
+    if (!result.ok || this.imageReads > 1) return result;
+    return {
+      ok: true as const,
+      value: { ...result.value, status: "pending" as const, regions: [] },
+    };
+  }
+}
+
 class LateSnapshotImageProvider extends FakeDigitalOceanProvider {
   #snapshotActionReads = 0;
 
@@ -1319,6 +1409,7 @@ function baseInput(provider: FakeDigitalOceanProvider) {
     provider,
     context: { signal: new AbortController().signal },
     now: () => new Date("2026-08-07T00:00:03.000Z"),
+    imageAvailabilityPollIntervalMs: 0,
   };
 }
 

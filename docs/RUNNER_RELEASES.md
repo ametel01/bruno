@@ -171,6 +171,14 @@ Snapshot Attestation v2 bundle, and deletes temporary builder resources. It must
 not create user runners, ready capacity, spare Droplets, cross-user capacity, schedules, release
 triggers, or production deployments.
 
+After the snapshot action completes, the builder polls the image lookup and availability contract for
+up to two minutes. Publication requires the image ID and name to remain stable, the selected region to
+be available, and the snapshot minimum disk size to fit the selected runner profile. Pending or
+not-yet-region-visible images are retried; deleted, mismatched, or oversized images fail closed. Any
+failure after valid boot and sanitation evidence preserves those two allowlisted results in the
+sanitized builder-diagnostics artifact so operators can distinguish snapshot-provider failures from
+fixture failures.
+
 The protected workflow retrieves builder evidence directly through its short-lived,
 firewall-restricted SSH connection. It pins the builder host key, keeps the connection alive while
 `cloud-init status --wait` completes, runs sanitation, and reads the two allowlisted evidence files

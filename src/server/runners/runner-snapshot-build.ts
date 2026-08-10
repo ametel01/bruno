@@ -15,6 +15,7 @@ import type {
 } from "@/src/runner-service/runner-contracts";
 import type {
   DigitalOceanAction,
+  DigitalOceanImageAvailability,
   DigitalOceanOwnedSetDeleteResult,
   DigitalOceanOwnedSetExpectation,
   DigitalOceanOwnedSetProvider,
@@ -44,13 +45,14 @@ import {
 const SNAPSHOT_AUTHORIZATION_SENTINEL = "I_UNDERSTAND_THIS_CREATES_A_BILLABLE_SNAPSHOT_BUILDER";
 const SNAPSHOT_OPERATION_TAG_PREFIX = "bruno-snapshot-build";
 const SNAPSHOT_BUILDER_NAME_PREFIX = "bruno-snapshot-builder";
-const SNAPSHOT_MIN_DISK_GB = 25;
 const SNAPSHOT_BUILDER_EVIDENCE_POLL_ATTEMPTS = 63;
 const SNAPSHOT_BUILDER_EVIDENCE_DEADLINE_MS = 35 * 60 * 1_000;
 const SNAPSHOT_BUILDER_EVIDENCE_POLL_INTERVAL_MS = 35_000;
 const SNAPSHOT_CLEANUP_DEADLINE_MS = 2 * 60 * 1_000;
 const SNAPSHOT_CLEANUP_POLL_ATTEMPTS = 24;
 const SNAPSHOT_CLEANUP_POLL_INTERVAL_MS = 5_000;
+const SNAPSHOT_IMAGE_AVAILABILITY_POLL_ATTEMPTS = 24;
+const SNAPSHOT_IMAGE_AVAILABILITY_POLL_INTERVAL_MS = 5_000;
 
 export type BuildRunnerSnapshotInput = {
   costAuthorization: string;
@@ -85,6 +87,8 @@ export type BuildRunnerSnapshotInput = {
   actionPollIntervalMs?: number;
   builderEvidencePollIntervalMs?: number;
   cleanupPollIntervalMs?: number;
+  imageAvailabilityPollAttempts?: number;
+  imageAvailabilityPollIntervalMs?: number;
 };
 
 export type SnapshotBootFixtureResult = {
@@ -249,6 +253,8 @@ async function buildRunnerSnapshotCandidate(
   let builder: DigitalOceanResource | null = null;
   let snapshotId: string | null = null;
   let snapshotAction: DigitalOceanAction | null = null;
+  let retainedBootResult: SnapshotBootFixtureResult | undefined;
+  let retainedSanitationResult: SnapshotSanitationResult | undefined;
 
   const validated = validateSnapshotBuildInput(input);
   if (!validated.ok) {
@@ -370,6 +376,8 @@ async function buildRunnerSnapshotCandidate(
 
     const bootResult = evidence.value.bootResult as SnapshotBootFixtureResult;
     const sanitationResult = evidence.value.sanitationResult as SnapshotSanitationResult;
+    retainedBootResult = bootResult;
+    retainedSanitationResult = sanitationResult;
 
     if (!bootFixtureMatches(bootResult, input, builder.providerResourceId)) {
       return {
@@ -398,7 +406,7 @@ async function buildRunnerSnapshotCandidate(
     cleanup.steps.push("power_off");
 
     if (!powerOffAction.ok) {
-      return { ok: false, reason: "power_off_failed", cleanup };
+      return { ok: false, reason: "power_off_failed", bootResult, sanitationResult, cleanup };
     }
 
     const poweredOff = await pollDigitalOceanAction({
@@ -413,7 +421,7 @@ async function buildRunnerSnapshotCandidate(
     cleanup.steps.push("poll_power_off");
 
     if (!poweredOff.ok || poweredOff.action.status !== "completed") {
-      return { ok: false, reason: "power_off_failed", cleanup };
+      return { ok: false, reason: "power_off_failed", bootResult, sanitationResult, cleanup };
     }
 
     cleanup.snapshotAbsenceVerified = false;
@@ -424,7 +432,7 @@ async function buildRunnerSnapshotCandidate(
     cleanup.steps.push("snapshot");
 
     if (!createdSnapshotAction.ok) {
-      return { ok: false, reason: "snapshot_failed", cleanup };
+      return { ok: false, reason: "snapshot_failed", bootResult, sanitationResult, cleanup };
     }
     snapshotAction = createdSnapshotAction.value;
 
@@ -440,35 +448,35 @@ async function buildRunnerSnapshotCandidate(
     cleanup.steps.push("poll_snapshot");
 
     if (!snapshot.ok || snapshot.action.status !== "completed") {
-      return { ok: false, reason: "snapshot_failed", cleanup };
+      return { ok: false, reason: "snapshot_failed", bootResult, sanitationResult, cleanup };
     }
 
-    const foundImage = await input.provider.findSnapshotImageByName(
-      { name: snapshotName },
-      input.context,
-    );
+    const availability = await pollSnapshotImageAvailability({
+      provider: input.provider,
+      snapshotName,
+      snapshotActionId: snapshot.action.id,
+      expectedRegion: input.region,
+      maxDiskSizeGb: validated.runnerDiskGiB,
+      context: input.context,
+      ...(input.imageAvailabilityPollAttempts === undefined
+        ? {}
+        : { attempts: input.imageAvailabilityPollAttempts }),
+      ...(input.imageAvailabilityPollIntervalMs === undefined
+        ? {}
+        : { intervalMs: input.imageAvailabilityPollIntervalMs }),
+    });
     cleanup.steps.push("find_snapshot_image");
+    if (availability.imageReadAttempted) cleanup.steps.push("read_snapshot");
+    snapshotId = availability.snapshotId;
 
-    if (!foundImage.ok || foundImage.value.id === snapshot.action.id) {
-      return { ok: false, reason: "snapshot_unavailable", cleanup };
-    }
-
-    snapshotId = foundImage.value.id;
-    const availability = await input.provider.readImageAvailability(
-      { imageId: snapshotId },
-      input.context,
-    );
-    cleanup.steps.push("read_snapshot");
-
-    if (
-      !availability.ok ||
-      availability.value.status !== "available" ||
-      availability.value.id !== foundImage.value.id ||
-      availability.value.name !== snapshotName ||
-      !availability.value.regions.includes(input.region) ||
-      availability.value.minDiskSizeGb > SNAPSHOT_MIN_DISK_GB
-    ) {
-      return { ok: false, reason: "snapshot_unavailable", cleanup };
+    if (!availability.ok) {
+      return {
+        ok: false,
+        reason: "snapshot_unavailable",
+        bootResult,
+        sanitationResult,
+        cleanup,
+      };
     }
 
     const availableAt = now().toISOString();
@@ -482,11 +490,11 @@ async function buildRunnerSnapshotCandidate(
       },
       snapshot: {
         provider: "digitalocean",
-        id: snapshotId,
+        id: availability.snapshotId,
         name: snapshotName,
         status: "available",
-        regions: availability.value.regions,
-        minDiskSizeGb: availability.value.minDiskSizeGb,
+        regions: availability.image.regions,
+        minDiskSizeGb: availability.image.minDiskSizeGb,
         architecture: "amd64",
       },
       baseImage: { id: input.baseImageId, slug: input.baseImageSlug },
@@ -533,7 +541,13 @@ async function buildRunnerSnapshotCandidate(
       cleanup,
     };
   } catch {
-    return { ok: false, reason: "cleanup_failed", cleanup };
+    return {
+      ok: false,
+      reason: "cleanup_failed",
+      ...(retainedBootResult ? { bootResult: retainedBootResult } : {}),
+      ...(retainedSanitationResult ? { sanitationResult: retainedSanitationResult } : {}),
+      cleanup,
+    };
   } finally {
     cleanup.steps.push("revoke_ephemeral_registration_token");
     cleanup.steps.push("revoke_ephemeral_registry_credential");
@@ -875,6 +889,80 @@ async function pollDigitalOceanAction(input: {
   }
 
   return { ok: false };
+}
+
+async function pollSnapshotImageAvailability(input: {
+  provider: DigitalOceanProvider;
+  snapshotName: string;
+  snapshotActionId: string;
+  expectedRegion: string;
+  maxDiskSizeGb: number;
+  context: DigitalOceanProviderRequestContext;
+  attempts?: number;
+  intervalMs?: number;
+}): Promise<
+  | {
+      ok: true;
+      snapshotId: string;
+      image: DigitalOceanImageAvailability;
+      imageReadAttempted: true;
+    }
+  | { ok: false; snapshotId: string | null; imageReadAttempted: boolean }
+> {
+  const attempts = input.attempts ?? SNAPSHOT_IMAGE_AVAILABILITY_POLL_ATTEMPTS;
+  const intervalMs = input.intervalMs ?? SNAPSHOT_IMAGE_AVAILABILITY_POLL_INTERVAL_MS;
+  let snapshotId: string | null = null;
+  let imageReadAttempted = false;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (input.context.signal.aborted) {
+      return { ok: false, snapshotId, imageReadAttempted };
+    }
+
+    const found = await input.provider.findSnapshotImageByName?.(
+      { name: input.snapshotName },
+      input.context,
+    );
+    if (found?.ok) {
+      if (found.value.id === input.snapshotActionId) {
+        return { ok: false, snapshotId, imageReadAttempted };
+      }
+      if (snapshotId !== null && found.value.id !== snapshotId) {
+        return { ok: false, snapshotId, imageReadAttempted };
+      }
+      snapshotId = found.value.id;
+
+      imageReadAttempted = true;
+      const availability = await input.provider.readImageAvailability?.(
+        { imageId: snapshotId },
+        input.context,
+      );
+      if (availability?.ok) {
+        const image = availability.value;
+        if (
+          image.id !== snapshotId ||
+          image.name !== input.snapshotName ||
+          image.minDiskSizeGb > input.maxDiskSizeGb ||
+          image.status === "deleted"
+        ) {
+          return { ok: false, snapshotId, imageReadAttempted };
+        }
+        if (image.status === "available" && image.regions.includes(input.expectedRegion)) {
+          return { ok: true, snapshotId, image, imageReadAttempted };
+        }
+      }
+    }
+
+    if (attempt < attempts - 1 && intervalMs > 0) {
+      try {
+        await sleep(intervalMs, input.context.signal);
+      } catch {
+        return { ok: false, snapshotId, imageReadAttempted };
+      }
+    }
+  }
+
+  return { ok: false, snapshotId, imageReadAttempted };
 }
 
 async function pollSnapshotBuilderEvidence(input: {
