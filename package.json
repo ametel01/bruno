@@ -30,6 +30,7 @@
     "runner:bootstrap": "bun src/runner-service/bootstrap.ts",
     "runner:release:smoke": "bun --conditions react-server scripts/smoke-runner-release.ts",
     "runner:release:bundle": "bun --conditions react-server scripts/create-runner-release-bundle.ts",
+    "runner:release:publish-verified": "gh workflow run deploy-production.yml --repo ametel01/bruno --ref main --raw-field action=verified-release",
     "runner:release:registry": "bun --conditions react-server scripts/publish-runner-release-bundle.ts",
     "runner:release:snapshot:verify": "bun --conditions react-server scripts/verify-runner-release-snapshot.ts",
     "runner:service": "bun src/runner-service/index.ts",

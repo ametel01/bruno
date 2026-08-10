@@ -30,12 +30,27 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).toContain("\n  canary:");
     expect(workflowSource).toContain("environment: runner-release-canary");
     expect(workflowSource).toContain("environment: production");
-    expect(workflowSource).toContain("needs:\n      - publish\n      - stage-control-plane");
+    expect(workflowSource).toContain(
+      "canary:\n    if: inputs.action == 'release' || inputs.action == 'verified-release'",
+    );
+    expect(workflowSource).toContain("needs: publish");
     expect(workflowSource).toContain(
       "needs:\n      - publish\n      - stage-control-plane\n      - canary",
     );
     expect(workflowSource).toContain(
       "concurrency:\n  group: production-application-deploy\n  cancel-in-progress: false",
+    );
+  });
+
+  it("can publish a Verified Release without staging or promoting production", () => {
+    expect(workflowSource).toContain("- verified-release");
+    expect(workflowSource).toContain(
+      "publish:\n    if: inputs.action == 'release' || inputs.action == 'verified-release'",
+    );
+    expect(workflowSource).toContain("stage-control-plane:\n    if: inputs.action == 'release'");
+    expect(workflowSource).toContain("deploy:\n    if: inputs.action == 'release'");
+    expect(packageJson.scripts["runner:release:publish-verified"]).toBe(
+      "gh workflow run deploy-production.yml --repo ametel01/bruno --ref main --raw-field action=verified-release",
     );
   });
 

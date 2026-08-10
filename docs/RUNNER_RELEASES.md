@@ -143,6 +143,11 @@ verification succeed, then verifies `/health` plus the authenticated
 `/api/internal/runner-release/required` contract. Infrastructure reconciliation processes at most
 one managed runner per invocation. Set the batch size to `0` to halt automatic fleet work.
 
+For artifact publication without any Vercel deployment, dispatch the workflow with
+`action=verified-release` or run `bun run runner:release:publish-verified`. That path publishes and
+verifies the runner image and signed OCI release bundle, while the staging and production jobs stay
+skipped. Use `action=release` only when the separate production deployment is authorized.
+
 For emergency rollback, dispatch the same workflow with `action=rollback`, the immutable image, and
 the prior successful workflow run ID. The job downloads that run's `verified-runner-release`
 artifact and refuses any image that does not match it exactly. Rollback deploys with batch size `0`,
