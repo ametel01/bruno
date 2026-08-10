@@ -11,7 +11,7 @@ import {
   type SnapshotCleanupEvidence,
 } from "@/src/server/runners/runner-snapshot-build";
 import { isRunnerSnapshotSigningKeyId } from "@/src/server/runners/runner-snapshot-manifest";
-import { createSnapshotBuilderEvidenceChannel } from "@/src/server/runners/snapshot-builder-evidence-channel";
+import { SNAPSHOT_BUILDER_DIAGNOSTICS_CONTRACT_VERSION } from "@/src/server/runners/snapshot-builder-evidence-channel";
 
 const execFileAsync = promisify(execFile);
 const args = parseArgs(process.argv.slice(2));
@@ -27,24 +27,10 @@ try {
   const privateKeyPem = await readRequiredFile(args.signingKeyPath, "signing key");
   validateSigningKey(privateKeyPem);
   const token = readRequiredEnv("BRUNO_DIGITALOCEAN_TOKEN");
-  const evidenceToken = readRequiredEnv("BRUNO_SNAPSHOT_EVIDENCE_GITHUB_TOKEN");
-  const evidenceRepository = readRequiredEnv("GITHUB_REPOSITORY");
-  const evidenceIssueNumber = readEvidenceIssueNumber(
-    readRequiredEnv("BRUNO_SNAPSHOT_EVIDENCE_ISSUE_NUMBER"),
-  );
-  if (evidenceRepository !== "ametel01/bruno") {
-    throw new Error("GITHUB_REPOSITORY must identify ametel01/bruno.");
-  }
   const digitalOceanProvider = new DigitalOceanApiProvider({ token });
   provider = digitalOceanProvider;
-  const evidenceChannel = createSnapshotBuilderEvidenceChannel({
-    token: evidenceToken,
-    repository: evidenceRepository,
-    issueNumber: evidenceIssueNumber,
-    runId: args.runId,
-    readLocalDiagnostics:
-      digitalOceanProvider.readSnapshotBuilderDiagnostics.bind(digitalOceanProvider),
-  });
+  const readLocalDiagnostics =
+    digitalOceanProvider.readSnapshotBuilderDiagnostics.bind(digitalOceanProvider);
   const builderSshPrivateKeyPath = join(tempDir, "builder_ssh_key");
 
   await execFileAsync(
@@ -83,9 +69,21 @@ try {
     controllerSshSourceCidr: args.controllerCidr,
     builderSshKeyId,
     builderSshPrivateKeyPath,
-    builderEvidencePublisher: evidenceChannel.publisher,
-    readBuilderEvidence: evidenceChannel.read,
-    readBuilderDiagnostics: evidenceChannel.readDiagnostics,
+    readBuilderDiagnostics: async (input, context) => {
+      const diagnostics = await readLocalDiagnostics(input, context);
+      return {
+        schemaVersion: SNAPSHOT_BUILDER_DIAGNOSTICS_CONTRACT_VERSION,
+        status: "unavailable",
+        lastStage: null,
+        localStatus: diagnostics.ok
+          ? diagnostics.value.localStage
+            ? "progress_observed"
+            : "no_progress_observed"
+          : "unavailable",
+        localStage: diagnostics.ok ? diagnostics.value.localStage : null,
+        cloudInitStatus: diagnostics.ok ? diagnostics.value.cloudInitStatus : "unknown",
+      };
+    },
     privateKeyPem,
     signingKeyId: args.signingKeyId,
     provider,
@@ -240,17 +238,6 @@ function readRequiredEnv(key: string): string {
   const value = process.env[key]?.trim();
   if (!value) throw new Error(`${key} is required.`);
   return value;
-}
-
-function readEvidenceIssueNumber(value: string): number {
-  if (!/^[1-9][0-9]{0,8}$/.test(value)) {
-    throw new Error("BRUNO_SNAPSHOT_EVIDENCE_ISSUE_NUMBER is invalid.");
-  }
-  const issueNumber = Number(value);
-  if (!Number.isSafeInteger(issueNumber)) {
-    throw new Error("BRUNO_SNAPSHOT_EVIDENCE_ISSUE_NUMBER is invalid.");
-  }
-  return issueNumber;
 }
 
 function validateSigningKey(privateKeyPem: string): void {

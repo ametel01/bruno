@@ -193,6 +193,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Protected snapshot builders now treat an empty Bruno Docker-network set as successful cleanup and
+  retrieve authoritative completion evidence through a controller-owned pinned-SSH session that
+  waits for cloud-init, runs sanitation, and reads the result before closing. The protected job no
+  longer grants issue-write permission or places a GitHub callback token in builder user-data.
 - Protected snapshot builders now retain an allowlisted local stage before metadata and network
   access, continue through transient progress-callback failures while keeping authenticated
   completion mandatory, attach normalized pinned-SSH/cloud-init diagnostics to evidence timeouts,

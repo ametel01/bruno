@@ -37,6 +37,39 @@ describe("runner snapshot build orchestration", () => {
     expect(syntax).toMatchObject({ status: 0, stderr: "" });
   });
 
+  it("treats an empty Bruno Docker-network set as successful cleanup", () => {
+    const userData = buildSnapshotBuilderBootstrap({
+      runnerImage: RUNNER_IMAGE,
+      runnerVersion: "abc123",
+      runnerDigest: `sha256:${"a".repeat(64)}`,
+      defaultAgentImage: AGENT_IMAGE,
+      hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
+    });
+    const cleanupFunction = userData.match(
+      /cleanup_snapshot_builder_networks\(\) \{\n([\s\S]*?)\n\}/,
+    )?.[0];
+    const execution = spawnSync(
+      "bash",
+      [
+        "-c",
+        `set -euo pipefail
+docker() {
+  if [ "$1" = "network" ] && [ "$2" = "ls" ]; then
+    printf '%s\\n' bridge host none
+    return 0
+  fi
+  return 99
+}
+${cleanupFunction ?? "exit 98"}
+cleanup_snapshot_builder_networks`,
+      ],
+      { encoding: "utf8" },
+    );
+
+    expect(cleanupFunction).toBeTruthy();
+    expect(execution).toMatchObject({ status: 0, stderr: "" });
+  });
+
   it("installs Docker and Caddy before preloading images and emits boot/sanitation evidence", () => {
     const userData = buildSnapshotBuilderBootstrap({
       runnerImage: RUNNER_IMAGE,

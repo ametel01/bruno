@@ -266,6 +266,10 @@ describe("DigitalOcean API provider", () => {
 
   it("pins snapshot-builder SSH host identity with strict known-host checking", async () => {
     const source = await readFile("src/server/runners/digitalocean-provider.ts", "utf8");
+    const evidenceReader = source.slice(
+      source.indexOf("  async readSnapshotBuilderEvidence("),
+      source.indexOf("  async readSnapshotBuilderDiagnostics("),
+    );
 
     expect(source).toContain("ssh-keyscan");
     expect(source).toContain("known_hosts");
@@ -276,6 +280,9 @@ describe("DigitalOcean API provider", () => {
     expect(source).toContain("/root/.ssh/authorized_keys");
     expect(source).toContain("/var/lib/cloud");
     expect(source).not.toContain("StrictHostKeyChecking=accept-new");
+    expect(evidenceReader).toContain("ServerAliveInterval=30");
+    expect(evidenceReader).toContain("ServerAliveCountMax=4");
+    expect(evidenceReader).toContain("timeout: 35 * 60 * 1_000");
   });
 
   it("verifies snapshot image absence with a post-delete provider read", async () => {

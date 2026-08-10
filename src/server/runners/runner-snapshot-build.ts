@@ -1048,6 +1048,13 @@ export function buildSnapshotBuilderBootstrap(input: {
           ;;
       esac
     }
+    cleanup_snapshot_builder_networks() {
+      local -a networks=()
+      mapfile -t networks < <(docker network ls --format '{{.Name}}' | awk '/^bruno/')
+      if [ "\${#networks[@]}" -gt 0 ]; then
+        docker network rm "\${networks[@]}"
+      fi
+    }
     record_snapshot_builder_stage "user_data_started"
     BRUNO_BUILDER_RESOURCE_ID="$(
       python3 - <<'BRUNO_BUILDER_METADATA_PY'
@@ -1152,7 +1159,7 @@ ${evidencePublisherSetup}
     BRUNO_BOOT_RESULT_PY
     publish_builder_evidence "fixture_complete"
     docker ps -aq | xargs --no-run-if-empty docker rm --force
-    docker network ls --format '{{.Name}}' | grep '^bruno' | xargs --no-run-if-empty docker network rm
+    cleanup_snapshot_builder_networks
     rm -rf \
       /etc/bruno/runner.env \
       /root/.docker/config.json \

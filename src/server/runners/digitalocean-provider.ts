@@ -1399,6 +1399,10 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
           "-o",
           "StrictHostKeyChecking=yes",
           "-o",
+          "ServerAliveInterval=30",
+          "-o",
+          "ServerAliveCountMax=4",
+          "-o",
           `UserKnownHostsFile=${knownHostsPath}`,
           `root@${resource.value.publicIpv4}`,
           command,
@@ -1407,7 +1411,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
           encoding: "utf8",
           maxBuffer: 128 * 1024,
           signal: context?.signal,
-          timeout: 120_000,
+          timeout: 35 * 60 * 1_000,
         },
       );
       const [bootResult, sanitationResult] = stdout.split("\nBRUNO_SNAPSHOT_EVIDENCE_SEPARATOR\n");

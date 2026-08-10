@@ -33,7 +33,7 @@ describe("runner snapshot workflow", () => {
     expect(workflow).toContain("attestations: write");
     expect(workflow).toContain("id-token: write");
     expect(workflow).not.toContain("actions: write");
-    expect(workflow).toContain("issues: write");
+    expect(workflow).not.toContain("issues: write");
     expect(workflow).toContain("Validate authorization and static inputs before secrets");
     expect(
       workflow.indexOf("Validate authorization and static inputs before secrets"),
@@ -58,8 +58,8 @@ describe("runner snapshot workflow", () => {
       workflow.indexOf("Verify Snapshot Attestation v2 contracts before provider effects"),
     ).toBeLessThan(workflow.indexOf("BRUNO_DIGITALOCEAN_TOKEN"));
     expect(workflow).toContain("BRUNO_SNAPSHOT_SIGNING_KEY_ID");
-    expect(workflow).toContain("BRUNO_SNAPSHOT_EVIDENCE_GITHUB_TOKEN: $" + "{{ github.token }}");
-    expect(workflow).toContain('BRUNO_SNAPSHOT_EVIDENCE_ISSUE_NUMBER: "294"');
+    expect(workflow).not.toContain("BRUNO_SNAPSHOT_EVIDENCE_GITHUB_TOKEN");
+    expect(workflow).not.toContain("BRUNO_SNAPSHOT_EVIDENCE_ISSUE_NUMBER");
     expect(workflow).toContain('--signing-key-id "$BRUNO_SNAPSHOT_SIGNING_KEY_ID"');
     expect(workflow).toContain("Validate retrieved builder evidence");
     expect(workflow.indexOf("Build signed snapshot bundle")).toBeLessThan(
@@ -112,7 +112,7 @@ describe("runner snapshot workflow", () => {
       scripts: Record<string, string>;
     };
 
-    expect(parsed.jobs.build?.permissions).toEqual({ contents: "read", issues: "write" });
+    expect(parsed.jobs.build?.permissions).toEqual({ contents: "read" });
     expect(parsed.jobs.publish?.needs).toBe("build");
     expect(parsed.jobs.publish?.permissions).toEqual({
       contents: "read",
@@ -188,7 +188,7 @@ describe("runner snapshot workflow", () => {
     }
   });
 
-  it("build script retrieves builder evidence through the protected outbound channel", async () => {
+  it("build script retrieves builder evidence through controller-pulled pinned SSH", async () => {
     const script = await readFile("scripts/build-runner-snapshot.ts", "utf8");
 
     expect(script).toContain("ssh-keygen");
@@ -203,14 +203,13 @@ describe("runner snapshot workflow", () => {
     expect(script).toContain("await provider.verifySshKeyAbsent(");
     expect(script).toContain("builderSshKeyId");
     expect(script).toContain("builderSshPrivateKeyPath");
-    expect(script).toContain("createSnapshotBuilderEvidenceChannel");
-    expect(script).toContain('readRequiredEnv("BRUNO_SNAPSHOT_EVIDENCE_GITHUB_TOKEN")');
-    expect(script).toContain('readRequiredEnv("GITHUB_REPOSITORY")');
-    expect(script).toContain('readRequiredEnv("BRUNO_SNAPSHOT_EVIDENCE_ISSUE_NUMBER")');
-    expect(script).toContain("builderEvidencePublisher: evidenceChannel.publisher");
-    expect(script).toContain("readBuilderEvidence: evidenceChannel.read");
-    expect(script).toContain("readBuilderDiagnostics: evidenceChannel.readDiagnostics");
-    expect(script).toContain("readLocalDiagnostics:");
+    expect(script).not.toContain("createSnapshotBuilderEvidenceChannel");
+    expect(script).not.toContain("BRUNO_SNAPSHOT_EVIDENCE_GITHUB_TOKEN");
+    expect(script).not.toContain("GITHUB_REPOSITORY");
+    expect(script).not.toContain("BRUNO_SNAPSHOT_EVIDENCE_ISSUE_NUMBER");
+    expect(script).not.toContain("builderEvidencePublisher:");
+    expect(script).not.toContain("readBuilderEvidence:");
+    expect(script).toContain("readBuilderDiagnostics:");
     expect(script).toContain("readSnapshotBuilderDiagnostics.bind(digitalOceanProvider)");
     expect(script).toContain("controllerCidr");
     expect(script).toContain("signingKeyId");
