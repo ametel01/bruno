@@ -2328,6 +2328,7 @@ export class FakeDigitalOceanProvider
             telegramConfig: "passed",
             cleanup: "passed",
           },
+          modelCanaryAttempts: ["passed"],
           preloadedImages:
             preloadMatches[0]?.[1]?.split(",").map((value) => value.trim().replace(/^"|"$/g, "")) ??
             [],

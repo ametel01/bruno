@@ -62,6 +62,8 @@ describe("runner snapshot workflow", () => {
     expect(workflow).not.toContain("BRUNO_SNAPSHOT_EVIDENCE_ISSUE_NUMBER");
     expect(workflow).toContain('--signing-key-id "$BRUNO_SNAPSHOT_SIGNING_KEY_ID"');
     expect(workflow).toContain("Validate retrieved builder evidence");
+    expect(workflow).toContain("modelCanaryAttempts");
+    expect(workflow).toContain("canary_timeout");
     expect(workflow.indexOf("Build signed snapshot bundle")).toBeLessThan(
       workflow.indexOf("Validate retrieved builder evidence"),
     );

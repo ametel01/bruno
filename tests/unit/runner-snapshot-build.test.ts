@@ -78,6 +78,27 @@ cleanup_snapshot_builder_networks`,
       defaultAgentImage: AGENT_IMAGE,
       hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
     });
+    const runnerFixtureSource = userData
+      .match(
+        /--conditions react-server -e '(.+)'\s+> \/run\/bruno-snapshot-builder\/runner-boot-self-test\.json/,
+      )?.[1]
+      ?.replaceAll("'\"'\"'", "'");
+    const bootResultSource = userData.match(
+      /<<'BRUNO_BOOT_RESULT_PY'\n([\s\S]*?)\nBRUNO_BOOT_RESULT_PY/,
+    )?.[1];
+    const runnerFixtureSyntax = spawnSync(
+      "bun",
+      [
+        "-e",
+        'const source = await Bun.stdin.text(); new Bun.Transpiler({ loader: "ts" }).transformSync(source);',
+      ],
+      { input: runnerFixtureSource, encoding: "utf8" },
+    );
+    const bootResultSyntax = spawnSync(
+      "python3",
+      ["-c", 'import sys; compile(sys.stdin.read(), "boot-result.py", "exec")'],
+      { input: bootResultSource, encoding: "utf8" },
+    );
 
     expect(userData.indexOf("apt-get install -y docker-ce")).toBeLessThan(
       userData.indexOf(`docker pull '${RUNNER_IMAGE}'`),
@@ -91,11 +112,29 @@ cleanup_snapshot_builder_networks`,
     expect(userData).toContain("/run/bruno-snapshot-builder/sanitation-result.json");
     expect(userData).toContain("docker image inspect");
     expect(userData).toContain("createRunnerBootReadinessController");
+    expect(userData).toContain("createDockerRunnerBootSelfTestExecutor");
+    expect(userData).toContain("RunnerCanaryNotReadyError");
+    expect(userData).toContain("canaryAttempts: 6");
+    expect(userData).toContain("canaryRetryDelayMs: 5000");
+    expect(userData).toContain("modelCanaryAttempts");
+    for (const outcome of [
+      "passed",
+      "canary_unauthorized",
+      "canary_unreachable",
+      "canary_timeout",
+      "canary_invalid_response",
+      "canary_model_failed",
+      "canary_not_ready",
+      "canary_exception",
+    ]) {
+      expect(userData).toContain(outcome);
+    }
     expect(userData).toContain("BRUNO_RUNNER_EXPECTED_RELEASE_VERSION");
     expect(userData).toContain("BRUNO_RUNNER_EXPECTED_IMAGE_DIGEST");
     expect(userData).toContain("BRUNO_RUNNER_FIXTURE_EXIT_CODE=$?");
     expect(userData).toContain('"fixtureStatus": fixture["status"]');
     expect(userData).toContain('"failureReason": fixture["failureReason"]');
+    expect(userData).toContain('"modelCanaryAttempts": canary_attempts');
     expect(userData).toContain("except (json.JSONDecodeError, OSError, TypeError, ValueError)");
     expect(userData).toContain('"failureReason": "snapshot_invalid"');
     expect(userData).toContain('"components": fixture["components"]');
@@ -105,6 +144,10 @@ cleanup_snapshot_builder_networks`,
     expect(userData).toContain("BEGIN OPENSSH PRIVATE KEY");
     expect(userData).toContain('"/var/lib/cloud"');
     expect(userData).toContain('"/root/.ssh/authorized_keys"');
+    expect(runnerFixtureSource).toBeTruthy();
+    expect(runnerFixtureSyntax).toMatchObject({ status: 0, stderr: "" });
+    expect(bootResultSource).toBeTruthy();
+    expect(bootResultSyntax).toMatchObject({ status: 0, stderr: "" });
     const command = userData;
     expect(command.indexOf("rm -rf /var/lib/cloud /root/.ssh/authorized_keys")).toBeLessThan(
       command.indexOf('with open("/run/bruno-snapshot-builder/sanitation-result.json"'),
@@ -458,6 +501,38 @@ cleanup_snapshot_builder_networks`,
       },
       cleanup: { absenceVerified: true },
     });
+  });
+
+  it("requires bounded allowlisted model-canary attempts ending in passed", async () => {
+    for (const modelCanaryAttempts of [
+      undefined,
+      [],
+      ["canary_timeout"],
+      ["private-provider-response", "passed"],
+      [
+        "canary_timeout",
+        "canary_timeout",
+        "canary_timeout",
+        "canary_timeout",
+        "canary_timeout",
+        "canary_timeout",
+        "passed",
+      ],
+    ]) {
+      const result = await buildRunnerSnapshot(
+        baseInput(new CanaryAttemptEvidenceProvider(modelCanaryAttempts)),
+      );
+
+      expect(result).toMatchObject({ ok: false, reason: "boot_fixture_failed" });
+    }
+
+    const recovered = await buildRunnerSnapshot(
+      baseInput(
+        new CanaryAttemptEvidenceProvider(["canary_timeout", "canary_model_failed", "passed"]),
+      ),
+    );
+
+    expect(recovered).toMatchObject({ ok: true });
   });
 
   it("retains failed boot evidence when terminal cleanup also fails closed", async () => {
@@ -862,9 +937,30 @@ class FailedBootEvidenceProvider extends FakeDigitalOceanProvider {
           ok: false,
           fixtureStatus: "failed",
           failureReason: "fixture_launch_failed",
+          modelCanaryAttempts: [],
         },
       },
     };
+  }
+}
+
+class CanaryAttemptEvidenceProvider extends FakeDigitalOceanProvider {
+  constructor(private readonly modelCanaryAttempts: unknown) {
+    super();
+  }
+
+  override async readSnapshotBuilderEvidence(
+    input: Parameters<FakeDigitalOceanProvider["readSnapshotBuilderEvidence"]>[0],
+    context?: { signal: AbortSignal },
+  ) {
+    const result = await super.readSnapshotBuilderEvidence(input, context);
+    if (!result.ok) return result;
+    const bootResult = { ...(result.value.bootResult as Record<string, unknown>) };
+    delete bootResult.modelCanaryAttempts;
+    if (this.modelCanaryAttempts !== undefined) {
+      bootResult.modelCanaryAttempts = this.modelCanaryAttempts;
+    }
+    return { ok: true as const, value: { ...result.value, bootResult } };
   }
 }
 

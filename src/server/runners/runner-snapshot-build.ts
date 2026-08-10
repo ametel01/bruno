@@ -98,9 +98,30 @@ export type SnapshotBootFixtureResult = {
   components?: Record<string, string>;
   fixtureStatus?: RunnerBootSnapshotStatus;
   failureReason?: RunnerBootFailureReason;
+  modelCanaryAttempts: SnapshotBootCanaryAttemptOutcome[];
   fixtureExitCode?: number;
   completedAt: string;
 };
+
+export const SNAPSHOT_BOOT_CANARY_ATTEMPT_OUTCOMES = [
+  "passed",
+  "canary_unauthorized",
+  "canary_unreachable",
+  "canary_timeout",
+  "canary_invalid_response",
+  "canary_model_failed",
+  "canary_not_ready",
+  "canary_exception",
+] as const;
+
+export type SnapshotBootCanaryAttemptOutcome =
+  (typeof SNAPSHOT_BOOT_CANARY_ATTEMPT_OUTCOMES)[number];
+
+const SNAPSHOT_BOOT_CANARY_ATTEMPT_OUTCOME_SET = new Set<string>(
+  SNAPSHOT_BOOT_CANARY_ATTEMPT_OUTCOMES,
+);
+const SNAPSHOT_BOOT_CANARY_MAX_ATTEMPTS = 6;
+const SNAPSHOT_BOOT_CANARY_RETRY_DELAY_MS = 5_000;
 
 export type SnapshotSanitationResult = {
   ok: boolean;
@@ -969,11 +990,23 @@ export function buildSnapshotBuilderBootstrap(input: {
   const runnerDigestShell = shellSingleQuote(input.runnerDigest);
   const runnerFixtureSource = shellSingleQuote(
     [
-      'import { createRunnerBootReadinessController } from "./src/runner-service/boot-self-test.ts";',
-      "const controller = createRunnerBootReadinessController();",
+      'import { createDockerRunnerBootSelfTestExecutor, createRunnerBootReadinessController, RunnerBootSelfTestError } from "./src/runner-service/boot-self-test.ts";',
+      'import { RunnerCanaryNotReadyError } from "./src/runner-service/docker.ts";',
+      `const safeCanaryOutcomes = new Set(${JSON.stringify(SNAPSHOT_BOOT_CANARY_ATTEMPT_OUTCOMES)});`,
+      "const modelCanaryAttempts = [];",
+      "const baseExecutor = createDockerRunnerBootSelfTestExecutor();",
+      "const executor = { ...baseExecutor, async runCanary(fixture) {",
+      "let response;",
+      'try { response = await fixture.runner.canary(fixture.agentId, { operationId: fixture.operationId, configRevision: fixture.configRevision, model: "openai/gpt-4.1-mini" }); }',
+      'catch (error) { modelCanaryAttempts.push(error instanceof RunnerCanaryNotReadyError ? "canary_not_ready" : "canary_exception"); throw error; }',
+      "const outcome = response.observation.reason ?? response.observation.state;",
+      'modelCanaryAttempts.push(safeCanaryOutcomes.has(outcome) ? outcome : "canary_invalid_response");',
+      'if (response.observation.state !== "passed") throw new RunnerBootSelfTestError("canary_failed");',
+      "} };",
+      `const controller = createRunnerBootReadinessController({ executor, canaryAttempts: ${SNAPSHOT_BOOT_CANARY_MAX_ATTEMPTS}, canaryRetryDelayMs: ${SNAPSHOT_BOOT_CANARY_RETRY_DELAY_MS} });`,
       "await controller.start();",
       "const result = await controller.read();",
-      "process.stdout.write(JSON.stringify(result));",
+      "process.stdout.write(JSON.stringify({ ...result, modelCanaryAttempts }));",
       'if (result.status !== "ready") process.exit(1);',
     ].join(" "),
   );
@@ -1136,9 +1169,25 @@ ${evidencePublisherSetup}
         "telegramConfig",
         "cleanup",
     }
+    allowed_canary_attempts = {
+        "passed",
+        "canary_unauthorized",
+        "canary_unreachable",
+        "canary_timeout",
+        "canary_invalid_response",
+        "canary_model_failed",
+        "canary_not_ready",
+        "canary_exception",
+    }
+    raw_canary_attempts = fixture.get("modelCanaryAttempts", [])
+    canary_attempts = raw_canary_attempts if (
+        isinstance(raw_canary_attempts, list)
+        and len(raw_canary_attempts) <= ${SNAPSHOT_BOOT_CANARY_MAX_ATTEMPTS}
+        and all(isinstance(attempt, str) and attempt in allowed_canary_attempts for attempt in raw_canary_attempts)
+    ) else []
     fixture_passed = fixture["status"] == "ready" and not any(
         fixture["components"].get(component) != "passed" for component in required_components
-    ) and int(os.environ["BRUNO_RUNNER_FIXTURE_EXIT_CODE"]) == 0
+    ) and len(canary_attempts) > 0 and canary_attempts[-1] == "passed" and int(os.environ["BRUNO_RUNNER_FIXTURE_EXIT_CODE"]) == 0
     result = {
         "ok": fixture_passed,
         "builderResourceId": os.environ["BRUNO_BUILDER_RESOURCE_ID"],
@@ -1150,6 +1199,7 @@ ${evidencePublisherSetup}
         "components": fixture["components"],
         "fixtureStatus": fixture["status"],
         "failureReason": fixture["failureReason"],
+        "modelCanaryAttempts": canary_attempts,
         "fixtureExitCode": int(os.environ["BRUNO_RUNNER_FIXTURE_EXIT_CODE"]),
         "completedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
     }
@@ -1562,9 +1612,23 @@ function bootFixtureMatches(
     boot.defaultAgentImage === (input.defaultAgentImage ?? DEFAULT_MANUAL_RUNNER_IMAGE) &&
     boot.hermesImage === (input.hermesImage ?? DEFAULT_HERMES_WORKLOAD_IMAGE) &&
     boot.bootContractVersion === RUNNER_BOOT_CONTRACT_VERSION &&
+    snapshotBootCanaryAttemptsPassed(boot.modelCanaryAttempts) &&
     requiredComponents.every((component) => boot.components?.[component] === "passed") &&
     Array.isArray(boot.preloadedImages) &&
     [...boot.preloadedImages].sort().join("\n") === expectedPreloads.join("\n")
+  );
+}
+
+function snapshotBootCanaryAttemptsPassed(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= SNAPSHOT_BOOT_CANARY_MAX_ATTEMPTS &&
+    value.every(
+      (outcome) =>
+        typeof outcome === "string" && SNAPSHOT_BOOT_CANARY_ATTEMPT_OUTCOME_SET.has(outcome),
+    ) &&
+    value.at(-1) === "passed"
   );
 }
 

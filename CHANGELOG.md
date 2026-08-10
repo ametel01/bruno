@@ -193,6 +193,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Protected snapshot builds now retry the isolated model canary up to six times within the existing
+  full-fixture deadline and retain only bounded allowlisted per-attempt outcomes. Successful evidence
+  must end in `passed`; missing, hostile, oversized, and non-passing diagnostics fail closed without
+  retaining provider responses, credentials, or exception text.
 - Protected snapshot builders now treat an empty Bruno Docker-network set as successful cleanup and
   retrieve authoritative completion evidence through a controller-owned pinned-SSH session that
   waits for cloud-init, runs sanitation, and reads the result before closing. The protected job no

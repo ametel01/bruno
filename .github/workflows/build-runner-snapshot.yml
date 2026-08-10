@@ -166,12 +166,16 @@ jobs:
             const sanitation = await Bun.file("snapshot-artifacts/sanitation-result.json").json();
             const cleanup = await Bun.file("snapshot-artifacts/cleanup-result.json").json();
             const required = [process.env.RUNNER_IMAGE, process.env.DEFAULT_AGENT_IMAGE, process.env.HERMES_IMAGE].sort();
+            const canaryOutcomes = new Set(["passed", "canary_unauthorized", "canary_unreachable", "canary_timeout", "canary_invalid_response", "canary_model_failed", "canary_not_ready", "canary_exception"]);
+            const canaryAttempts = boot?.modelCanaryAttempts;
+            const canaryEvidencePassed = Array.isArray(canaryAttempts) && canaryAttempts.length > 0 && canaryAttempts.length <= 6 && canaryAttempts.every((outcome) => typeof outcome === "string" && canaryOutcomes.has(outcome)) && canaryAttempts.at(-1) === "passed";
             if (
               boot?.ok !== true ||
               boot.runnerImage !== process.env.RUNNER_IMAGE ||
               boot.defaultAgentImage !== process.env.DEFAULT_AGENT_IMAGE ||
               boot.hermesImage !== process.env.HERMES_IMAGE ||
               boot.bootContractVersion !== "bruno.runner.boot.v1" ||
+              !canaryEvidencePassed ||
               !["docker", "hermesFixture", "detailedHealth", "modelCanary", "telegramConfig", "cleanup"].every((component) => boot.components?.[component] === "passed") ||
               JSON.stringify([...(boot.preloadedImages ?? [])].sort()) !== JSON.stringify(required)
             ) {

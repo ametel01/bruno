@@ -155,6 +155,15 @@ controller invokes a one-shot finalizer over the already-established SSH session
 removes cloud-init state and the temporary authorized SSH key, verifies the machine identity is
 empty, and only then returns boot and sanitation evidence over that same connection for snapshot
 creation.
+
+The protected snapshot fixture attempts the synthetic model canary at most six times, five seconds
+apart, within the existing 180-second full-fixture deadline. Its boot evidence retains only one
+allowlisted outcome per attempt: `passed`, `canary_unauthorized`, `canary_unreachable`,
+`canary_timeout`, `canary_invalid_response`, `canary_model_failed`, `canary_not_ready`, or
+`canary_exception`. It never retains response bodies, model output, URLs, headers, keys, or exception
+text. Snapshot creation requires between one and six outcomes with `passed` last; missing, malformed,
+oversized, or non-passing evidence fails closed.
+
 Publication fails closed unless the firewall, Droplet, and provider SSH key are authoritatively absent;
 the sanitized cleanup result is retained for 30 days with GitHub build provenance alongside the signed
 bundle. The workflow then powers the builder off, creates one snapshot, emits an allowlisted signed
