@@ -333,6 +333,17 @@ DigitalOcean credentials and may create and delete billable resources.
 bun run deploy:prod
 ```
 
+To publish and verify the signed release artifacts without staging or promoting a Vercel
+deployment, run:
+
+```sh
+bun run runner:release:publish-verified
+```
+
+The `verified-release` action builds and scans the immutable runner image, exercises the
+credential-free full fixture, verifies cleanup, and publishes the signed digest-addressed OCI
+bundle. It does not run the Vercel staging or production jobs.
+
 Run this only from a clean `main` branch after pushing the intended release commit. It dispatches the
 protected `Deploy production application` workflow, which publishes an immutable runner image,
 scans it, stages the full application without production traffic, and runs the credential-free full
@@ -447,6 +458,7 @@ enable ready mode by treating mock or local evidence as live acceptance.
 | `bun run agent:image:smoke` | Verify the selected Hermes image contract locally. |
 | `bun run agent:hermes:contract-smoke` | Exercise the pinned Hermes runner/readiness/restart contract locally. |
 | `bun run runner:snapshot:build` | Protected manual runner-snapshot build entrypoint; requires explicit authorization and provider credentials. |
+| `bun run runner:release:publish-verified` | Publish the credential-free Verified Release without staging or promoting production. |
 | `bun run verify:hermes:staging` | Run the capability-gated, interactive-human-attested live Hermes/Telegram acceptance and durable cleanup workflow. |
 | `bun run deploy:prod` | Dispatch the protected full-application production deployment workflow. |
 
