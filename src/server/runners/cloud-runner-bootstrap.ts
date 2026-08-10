@@ -1,6 +1,14 @@
 import "server-only";
 
 import {
+  RUNNER_APPROVED_SNAPSHOT_DIGEST_ENV,
+  RUNNER_APPROVED_SNAPSHOT_OCI_ENV,
+  RUNNER_BOOT_VALIDATION_MODE_ENV,
+  RUNNER_RELEASE_APPROVED_DIGEST_ENV,
+  RUNNER_RELEASE_BUNDLE_ENV,
+  RUNNER_RELEASE_TRUST_SET_ENV,
+} from "@/src/runner-service/boot-validation";
+import {
   DEFAULT_HERMES_PRIVATE_NETWORK,
   DEFAULT_HERMES_READINESS_TIMEOUT_MS,
   DEFAULT_HERMES_DOCKER_CPUS,
@@ -68,6 +76,16 @@ export type CloudRunnerBootstrapInput = {
   runnerPort?: number;
   releaseIdentityMode?: typeof RUNNER_RELEASE_DEVELOPMENT_MODE;
   bootMode?: "stock" | "snapshot";
+  bootValidation?:
+    | { mode: "full" }
+    | {
+        mode: "release_attested";
+        bundleBytes: string;
+        approvedReleaseDigest: string;
+        releaseTrustSetBytes: string;
+        snapshotOciReference: string;
+        snapshotBundleDigest: string;
+      };
 };
 
 export type CloudRunnerBootstrapContent = {
@@ -88,6 +106,11 @@ export type CloudRunnerBootstrapContent = {
     };
     runnerMaxAgents: number;
     bootModelCanaryEnabled: boolean;
+    bootValidation: {
+      mode: "full" | "release_attested";
+      releaseBundleDigest: string | null;
+      snapshotBundleDigest: string | null;
+    };
     runnerRelease: {
       version: string;
       imageDigest: string;
@@ -163,6 +186,16 @@ export function buildCloudRunnerBootstrapContent(
     `BRUNO_RUNNER_ENV_FILE=${escapeDockerEnvHereDocValue(config.containerEnvFilePath)}`,
     `BRUNO_RUNNER_MAX_AGENTS=${config.runnerMaxAgents}`,
     `${RUNNER_BOOT_MODEL_CANARY_ENABLED_ENV}=${config.bootModelCanaryEnabled}`,
+    `${RUNNER_BOOT_VALIDATION_MODE_ENV}=${config.bootValidation.mode}`,
+    ...(config.bootValidation.mode === "release_attested"
+      ? [
+          `${RUNNER_RELEASE_BUNDLE_ENV}=${escapeDockerEnvHereDocValue(config.bootValidation.bundleBytes)}`,
+          `${RUNNER_RELEASE_APPROVED_DIGEST_ENV}=${config.bootValidation.approvedReleaseDigest}`,
+          `${RUNNER_RELEASE_TRUST_SET_ENV}=${escapeDockerEnvHereDocValue(config.bootValidation.releaseTrustSetBytes)}`,
+          `${RUNNER_APPROVED_SNAPSHOT_OCI_ENV}=${config.bootValidation.snapshotOciReference}`,
+          `${RUNNER_APPROVED_SNAPSHOT_DIGEST_ENV}=${config.bootValidation.snapshotBundleDigest}`,
+        ]
+      : []),
     ...(config.expectedRelease
       ? [
           `${RUNNER_EXPECTED_RELEASE_VERSION_ENV}=${escapeDockerEnvHereDocValue(config.expectedRelease.version)}`,
@@ -346,6 +379,17 @@ ${imagePullCommands}      BRUNO_BOOTSTRAP_STEP=runner_container_start
       },
       runnerMaxAgents: config.runnerMaxAgents,
       bootModelCanaryEnabled: config.bootModelCanaryEnabled,
+      bootValidation: {
+        mode: config.bootValidation.mode,
+        releaseBundleDigest:
+          config.bootValidation.mode === "release_attested"
+            ? config.bootValidation.approvedReleaseDigest
+            : null,
+        snapshotBundleDigest:
+          config.bootValidation.mode === "release_attested"
+            ? config.bootValidation.snapshotBundleDigest
+            : null,
+      },
       runnerRelease: config.expectedRelease
         ? {
             version: config.expectedRelease.version,
@@ -371,6 +415,22 @@ export function redactCloudRunnerBootstrapOutput(value: string): string {
 }
 
 function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
+  const bootMode = input.bootMode ?? "stock";
+  const bootValidation = input.bootValidation ?? { mode: "full" as const };
+  if (bootMode === "stock" && bootValidation.mode !== "full") {
+    throw new Error("Stock runner bootstrap must use full boot validation.");
+  }
+  if (
+    bootValidation.mode === "release_attested" &&
+    (!bootValidation.bundleBytes.trim() ||
+      !/^sha256:[a-f0-9]{64}$/.test(bootValidation.approvedReleaseDigest) ||
+      !bootValidation.releaseTrustSetBytes.trim() ||
+      !/^ghcr\.io\/.+@sha256:[a-f0-9]{64}$/.test(bootValidation.snapshotOciReference) ||
+      !/^sha256:[a-f0-9]{64}$/.test(bootValidation.snapshotBundleDigest))
+  ) {
+    throw new Error("Release-attested runner bootstrap evidence is invalid.");
+  }
+
   return {
     appBaseUrl: normalizeUrl(input.appBaseUrl, "appBaseUrl"),
     registrationToken: requireNonEmpty(input.registrationToken, "registrationToken"),
@@ -425,7 +485,8 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
     runnerHost: input.runnerHost?.trim() || DEFAULT_CLOUD_RUNNER_HOST,
     runnerContainerHost: DEFAULT_CLOUD_RUNNER_CONTAINER_HOST,
     runnerPort: input.runnerPort ?? DEFAULT_CLOUD_RUNNER_PORT,
-    bootMode: input.bootMode ?? "stock",
+    bootMode,
+    bootValidation,
   };
 }
 

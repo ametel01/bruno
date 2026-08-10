@@ -3,6 +3,10 @@ import {
   type ConfiguredApplicationUserResolution,
   requireConfiguredApplicationUser,
 } from "@/src/server/users/configured-application-user";
+import {
+  createAgentDeploymentApiAttemptRecorder,
+  type AgentDeploymentApiAttemptRecorder,
+} from "@/src/server/agents/agent-deployment-api-acceptance";
 
 type StartAgentRouteContext = {
   params: Promise<{
@@ -12,6 +16,7 @@ type StartAgentRouteContext = {
 
 type StartAgentRouteDependencies = {
   requireApplicationUser?: typeof requireConfiguredApplicationUser;
+  apiAttemptRecorder?: AgentDeploymentApiAttemptRecorder;
 };
 
 export const dynamic = "force-dynamic";
@@ -43,8 +48,29 @@ export async function POST(
     return authenticationResponse(applicationUser);
   }
 
+  const recorder = productionApiAttemptRecorder(dependencies.apiAttemptRecorder);
+  let attemptId: string | null = null;
+  if (recorder) {
+    try {
+      attemptId = await recorder.begin("start");
+    } catch {
+      return apiEvidenceUnavailableResponse();
+    }
+  }
+
   try {
     const result = await startAgentForUser(applicationUser.userId, decodedAgentId);
+
+    if (recorder && attemptId) {
+      await recorder
+        .finish({
+          attemptId,
+          kind: "start",
+          phase: result.ok ? "accepted" : "rejected",
+          ...(!result.ok ? { safeCode: result.reason } : {}),
+        })
+        .catch(() => undefined);
+    }
 
     if (result.ok) {
       return Response.json(result, {
@@ -155,6 +181,16 @@ export async function POST(
       },
     );
   } catch (error) {
+    if (recorder && attemptId) {
+      await recorder
+        .finish({
+          attemptId,
+          kind: "start",
+          phase: "outcome_unknown",
+          safeCode: "request_failed",
+        })
+        .catch(() => undefined);
+    }
     if (error instanceof AgentLifecyclePersistenceError) {
       return Response.json(
         {
@@ -171,6 +207,25 @@ export async function POST(
 
     throw error;
   }
+}
+
+function productionApiAttemptRecorder(
+  injected: AgentDeploymentApiAttemptRecorder | undefined,
+): AgentDeploymentApiAttemptRecorder | null {
+  if (injected) return injected;
+  return process.env.VERCEL_ENV === "production" ? createAgentDeploymentApiAttemptRecorder() : null;
+}
+
+function apiEvidenceUnavailableResponse() {
+  return Response.json(
+    {
+      error: {
+        code: "deployment_api_evidence_unavailable",
+        message: "Deployment request evidence is temporarily unavailable.",
+      },
+    },
+    { status: 503, headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 function authenticationResponse(

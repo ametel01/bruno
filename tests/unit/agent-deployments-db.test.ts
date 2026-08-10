@@ -1,12 +1,14 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  quarantineAgentDeploymentForSafety,
   claimNextAgentDeployment,
   createAgentDeploymentForUser,
   releaseAgentDeploymentLease,
   renewAgentDeploymentLease,
   transitionAgentDeploymentStage,
 } from "@/src/server/agents/agent-deployments";
+import { captureAgentDeploymentChoicesFromEnvironment } from "@/src/server/agents/agent-deployment-choices";
 import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentDeploymentWakeups, agentDeployments, agents, users } from "@/src/server/db/schema";
@@ -527,6 +529,49 @@ describe("agent deployment persistence and leases", () => {
 
     await expect(connection.db.select().from(agentDeployments)).resolves.toEqual([]);
     await expect(connection.db.select().from(agentDeploymentWakeups)).resolves.toEqual([]);
+  });
+
+  it("retains accepted choices through explicit safety quarantine without rewriting evidence", async () => {
+    const choices = {
+      ...captureAgentDeploymentChoicesFromEnvironment({}, 1),
+      dispatchMode: "qstash" as const,
+    };
+    const created = await createDeploymentInTransaction(connection, {
+      userId: USER_A_ID,
+      agentId: AGENT_A_ID,
+      configRevision: "cfg-pinned-choices",
+      idempotencyKey: "pinned-choices",
+      deploymentChoices: choices,
+      now: NOW,
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    await expect(
+      connection.db.transaction((tx) =>
+        quarantineAgentDeploymentForSafety({
+          db: tx,
+          userId: USER_A_ID,
+          deploymentId: created.deployment.id,
+          reason: "artifact identity mismatch",
+          now: new Date(NOW.getTime() + 1_000),
+        }),
+      ),
+    ).resolves.toBe(true);
+
+    const [row] = await connection.db
+      .select()
+      .from(agentDeployments)
+      .where(eq(agentDeployments.id, created.deployment.id));
+    expect(row).toMatchObject({
+      stage: "failed",
+      errorCode: "safety_quarantined",
+      safetyQuarantineReason: "artifact identity mismatch",
+      deploymentChoices: choices,
+    });
+    await expect(
+      connection.client`update agent_deployments set deployment_choices = jsonb_set(deployment_choices, '{dispatchMode}', '"cron"'::jsonb) where id = ${created.deployment.id}`,
+    ).rejects.toThrow("immutable");
   });
 
   async function insertDeployment(idempotencyKey: string) {

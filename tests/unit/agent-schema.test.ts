@@ -391,6 +391,9 @@ describe("Milestone 1 agent persistence schema", () => {
       "deploymentEnvironment",
       "ownerCancelledAt",
       "rolloutConfigurationGeneration",
+      "deploymentChoices",
+      "safetyQuarantinedAt",
+      "safetyQuarantineReason",
       "canaryState",
       "canaryAttemptedAt",
       "canaryCompletedAt",
@@ -417,6 +420,9 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(columns.runnerOperationId.notNull).toBe(false);
     expect(columns.runnerAcceptedAt.notNull).toBe(false);
     expect(columns.acceptedAt.notNull).toBe(false);
+    expect(columns.deploymentChoices.notNull).toBe(true);
+    expect(columns.safetyQuarantinedAt.notNull).toBe(false);
+    expect(columns.safetyQuarantineReason.notNull).toBe(false);
     expect(columns.canaryState.notNull).toBe(true);
     expect(columns.canaryState.default).toBe("not_started");
     expect(columns.canaryAttemptedAt.notNull).toBe(false);

@@ -68,7 +68,7 @@ describe("runner boot self-test", () => {
     expect(snapshot).toMatchObject({
       status: "ready",
       failureReason: null,
-      components: {
+      observedChecks: {
         docker: "passed",
         hermesFixture: "passed",
         detailedHealth: "passed",
@@ -94,7 +94,7 @@ describe("runner boot self-test", () => {
     expect(snapshot).toMatchObject({
       status: "failed",
       failureReason: "detailed_health_failed",
-      components: { detailedHealth: "failed", cleanup: "passed" },
+      observedChecks: { detailedHealth: "failed", cleanup: "passed" },
     });
     expect(calls).toContain("cleanup");
     expect(JSON.stringify(snapshot)).not.toContain(secret);
@@ -117,7 +117,7 @@ describe("runner boot self-test", () => {
     await expect(controller.read()).resolves.toMatchObject({
       status: "ready",
       failureReason: null,
-      components: { modelCanary: "passed", cleanup: "passed" },
+      observedChecks: { modelCanary: "passed", cleanup: "passed" },
     });
     expect(canaryAttempts).toBe(2);
   });
@@ -132,7 +132,7 @@ describe("runner boot self-test", () => {
     await expect(controller.read()).resolves.toMatchObject({
       status: "ready",
       failureReason: null,
-      components: {
+      observedChecks: {
         docker: "passed",
         hermesFixture: "passed",
         detailedHealth: "passed",
@@ -142,6 +142,52 @@ describe("runner boot self-test", () => {
       },
     });
     expect(calls).not.toContain("canary");
+  });
+
+  it("observes current services and exact preloaded images without launching a duplicate fixture", async () => {
+    const releaseDigest = `sha256:${"b".repeat(64)}`;
+    const snapshotDigest = `sha256:${"c".repeat(64)}`;
+    const { controller, calls } = await createHarness({}, 1_000, 1_000, {
+      env: { BRUNO_RUNNER_BOOT_VALIDATION_MODE: "release_attested" },
+      resolveBootValidation: () => ({
+        mode: "release_attested" as const,
+        releaseBundleDigest: releaseDigest,
+        snapshotBundleDigest: snapshotDigest,
+        snapshotImageId: "1102",
+        runnerImage: `ghcr.io/ametel01/bruno-runner:release@sha256:${"a".repeat(64)}`,
+        defaultAgentImage: `ghcr.io/ametel01/bruno-agent:release@sha256:${"d".repeat(64)}`,
+        hermesImage: `ghcr.io/nousresearch/hermes:release@sha256:${"e".repeat(64)}`,
+        attestedChecks: {
+          fullFixture: "verified" as const,
+          detailedHealth: "verified" as const,
+          modelCanary: "verified" as const,
+          telegramConfig: "verified" as const,
+          cleanup: "verified" as const,
+        },
+      }),
+    });
+
+    await controller.start();
+
+    expect(calls).toEqual(["recover", "docker", "services", "images", "cleanup", "recover"]);
+    await expect(controller.read()).resolves.toMatchObject({
+      validationMode: "release_attested",
+      status: "ready",
+      observedChecks: {
+        docker: "passed",
+        requiredServices: "passed",
+        injectedBundleDigests: "passed",
+        preloadedImages: "passed",
+        hermesFixture: "not_applicable",
+        cleanup: "passed",
+      },
+      attestedChecks: { fullFixture: "verified", cleanup: "verified" },
+      evidence: {
+        releaseBundleDigest: releaseDigest,
+        snapshotBundleDigest: snapshotDigest,
+        snapshotImageId: "1102",
+      },
+    });
   });
 
   it("enforces the total deadline even when a fixture operation ignores abort", async () => {
@@ -155,7 +201,7 @@ describe("runner boot self-test", () => {
     await expect(controller.read()).resolves.toMatchObject({
       status: "failed",
       failureReason: "deadline_exceeded",
-      components: { hermesFixture: "failed", cleanup: "passed" },
+      observedChecks: { hermesFixture: "failed", cleanup: "passed" },
     });
     expect(calls).toContain("cleanup");
   });
@@ -172,7 +218,7 @@ describe("runner boot self-test", () => {
     await expect(controller.read()).resolves.toMatchObject({
       status: "failed",
       failureReason: "cleanup_failed",
-      components: { cleanup: "failed" },
+      observedChecks: { cleanup: "failed" },
     });
   });
 
@@ -188,7 +234,7 @@ describe("runner boot self-test", () => {
     await expect(controller.read()).resolves.toMatchObject({
       status: "failed",
       failureReason: "cleanup_failed",
-      components: { cleanup: "failed" },
+      observedChecks: { cleanup: "failed" },
     });
   });
 
@@ -204,7 +250,11 @@ describe("runner boot self-test", () => {
     await expect(controller.read()).resolves.toMatchObject({
       status: "failed",
       failureReason: "telegram_config_failed",
-      components: { hermesFixture: "failed", telegramConfig: "failed", cleanup: "passed" },
+      observedChecks: {
+        hermesFixture: "failed",
+        telegramConfig: "failed",
+        cleanup: "passed",
+      },
     });
   });
 
@@ -263,7 +313,10 @@ async function createHarness(
   overrides: Partial<RunnerBootSelfTestExecutor> = {},
   timeoutMs = 1_000,
   cleanupTimeoutMs = 1_000,
-  controllerOptions: { modelCanaryEnabled?: boolean } = {},
+  controllerOptions: Pick<
+    NonNullable<Parameters<typeof createRunnerBootReadinessController>[0]>,
+    "env" | "modelCanaryEnabled" | "resolveBootValidation"
+  > = {},
 ) {
   const root = await temporaryRoot();
   const snapshotPath = join(root, "boot.json");
@@ -283,6 +336,20 @@ async function createHarness(
     },
     async verifyDockerAndRelease() {
       calls.push("docker");
+      return {
+        release: {
+          version: "development",
+          imageDigest: `sha256:${"a".repeat(64)}`,
+          bootContractVersion: "bruno.runner.boot.v2",
+        },
+        expectedMatch: null,
+      };
+    },
+    async verifyRequiredServices() {
+      calls.push("services");
+    },
+    async verifyPreloadedImages() {
+      calls.push("images");
     },
     async launchFixture() {
       calls.push("launch");

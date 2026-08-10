@@ -3,6 +3,7 @@ import "server-only";
 import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
+import { parseAgentDeploymentChoices } from "@/src/server/agents/agent-deployment-choices";
 import { replaceDeploymentWakeupInTransaction } from "@/src/server/agents/agent-deployment-dispatch";
 import {
   type AgentDeploymentDto,
@@ -86,9 +87,11 @@ export async function createAgentDeploymentForRunnerReplacement(input: {
 
   const [latest] = await input.tx.execute<{
     configRevision: string;
+    deploymentChoices: unknown;
     rolloutConfigurationGeneration: number | null;
   }>(sql`
     select config_revision as "configRevision",
+      deployment_choices as "deploymentChoices",
       rollout_configuration_generation as "rolloutConfigurationGeneration"
     from ${agentDeployments}
     where user_id = ${input.userId}
@@ -96,10 +99,13 @@ export async function createAgentDeploymentForRunnerReplacement(input: {
     order by created_at desc, id desc
     limit 1
   `);
+  const deploymentChoices = latest ? parseAgentDeploymentChoices(latest.deploymentChoices) : null;
   if (
     !latest ||
     !validateDeploymentConfigRevision(latest.configRevision) ||
-    !isRolloutConfigurationGeneration(latest.rolloutConfigurationGeneration)
+    !isRolloutConfigurationGeneration(latest.rolloutConfigurationGeneration) ||
+    !deploymentChoices ||
+    deploymentChoices.rolloutConfigurationGeneration !== latest.rolloutConfigurationGeneration
   ) {
     return null;
   }
@@ -132,6 +138,7 @@ export async function createAgentDeploymentForRunnerReplacement(input: {
       initialCohort: "unknown",
       deploymentEnvironment: deploymentEnvironmentForRuntime(),
       rolloutConfigurationGeneration: latest.rolloutConfigurationGeneration,
+      deploymentChoices,
       createdAt: input.now,
       updatedAt: input.now,
     })
@@ -292,10 +299,12 @@ export async function retryAgentDeploymentForUser(input: {
 
       const [latest] = await tx.execute<{
         configRevision: string;
+        deploymentChoices: unknown;
         rolloutConfigurationGeneration: number | null;
         stage: string;
       }>(sql`
         select config_revision as "configRevision",
+          deployment_choices as "deploymentChoices",
           rollout_configuration_generation as "rolloutConfigurationGeneration",
           stage
         from ${agentDeployments}
@@ -305,10 +314,15 @@ export async function retryAgentDeploymentForUser(input: {
         limit 1
       `);
 
+      const deploymentChoices = latest
+        ? parseAgentDeploymentChoices(latest.deploymentChoices)
+        : null;
       if (
         latest?.stage !== "failed" ||
         !validateDeploymentConfigRevision(latest.configRevision) ||
-        !isRolloutConfigurationGeneration(latest.rolloutConfigurationGeneration)
+        !isRolloutConfigurationGeneration(latest.rolloutConfigurationGeneration) ||
+        !deploymentChoices ||
+        deploymentChoices.rolloutConfigurationGeneration !== latest.rolloutConfigurationGeneration
       ) {
         return { kind: "deployment_not_retryable" as const };
       }
@@ -324,6 +338,7 @@ export async function retryAgentDeploymentForUser(input: {
           initial_cohort,
           deployment_environment,
           rollout_configuration_generation,
+          deployment_choices,
           created_at,
           updated_at
         )
@@ -337,6 +352,7 @@ export async function retryAgentDeploymentForUser(input: {
           ${initialCohortForAssignedRunner(agent.runnerId)},
           ${deploymentEnvironmentForRuntime()},
           ${latest.rolloutConfigurationGeneration},
+          ${JSON.stringify(deploymentChoices)}::jsonb,
           ${now.toISOString()},
           ${now.toISOString()}
         )

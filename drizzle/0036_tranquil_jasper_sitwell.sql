@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "agent_deployment_api_attempt_events_one_terminal_idx" ON "agent_deployment_api_attempt_events" USING btree ("attempt_id") WHERE "agent_deployment_api_attempt_events"."phase" <> 'started';

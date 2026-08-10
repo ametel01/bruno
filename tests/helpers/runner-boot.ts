@@ -10,15 +10,27 @@ export function readyRunnerBootSnapshot(
   return {
     ok: true,
     contractVersion: RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION,
+    validationMode: "full",
     status: "ready",
-    components: {
+    observedChecks: {
       docker: "passed",
+      requiredServices: "not_applicable",
+      injectedBundleDigests: "not_applicable",
+      preloadedImages: "not_applicable",
       hermesFixture: "passed",
       detailedHealth: "passed",
       modelCanary: "passed",
       telegramConfig: "passed",
       cleanup: "passed",
     },
+    attestedChecks: {
+      fullFixture: "not_applicable",
+      detailedHealth: "not_applicable",
+      modelCanary: "not_applicable",
+      telegramConfig: "not_applicable",
+      cleanup: "not_applicable",
+    },
+    evidence: null,
     failureReason: null,
     startedAt: "2026-08-04T00:00:00.000Z",
     completedAt: "2026-08-04T00:00:01.000Z",

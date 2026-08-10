@@ -1,0 +1,4 @@
+ALTER TABLE "provider_trial_runs" ADD COLUMN "active_slot_checkpoint" jsonb;--> statement-breakpoint
+ALTER TABLE "provider_trial_runs" ADD COLUMN "lease_owner" text;--> statement-breakpoint
+ALTER TABLE "provider_trial_runs" ADD COLUMN "lease_expires_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "provider_trial_runs" ADD CONSTRAINT "provider_trial_runs_lease_pair_check" CHECK (("provider_trial_runs"."lease_owner" IS NULL AND "provider_trial_runs"."lease_expires_at" IS NULL) OR ("provider_trial_runs"."lease_owner" IS NOT NULL AND "provider_trial_runs"."lease_expires_at" IS NOT NULL));

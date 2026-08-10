@@ -1,9 +1,16 @@
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
+  RUNNER_APPROVED_SNAPSHOT_DIGEST_ENV,
+  RUNNER_BOOT_VALIDATION_MODE_ENV,
+  RUNNER_RELEASE_APPROVED_DIGEST_ENV,
+  RUNNER_RELEASE_BUNDLE_ENV,
+} from "@/src/runner-service/boot-validation";
+import {
   parseRunnerReleaseIdentity,
   type RunnerReleaseIdentity,
 } from "@/src/runner-service/release-identity";
+import { parseRunnerReleaseBundle } from "@/src/runner-service/release-attestation";
 import {
   parseRunnerBootSnapshot,
   type RunnerBootSnapshot,
@@ -145,6 +152,7 @@ export type ConfirmCloudRunnerReadinessResult =
         | "endpoint_rejected"
         | "network_error"
         | "persistence_error"
+        | "boot_evidence_incompatible"
         | "release_incompatible"
         | "response_invalid"
         | "runner_not_ready"
@@ -185,6 +193,16 @@ export type ProbeRunnerEndpointReadinessResult =
         | "response_invalid"
         | "token_not_configured";
     };
+
+export type RunnerBootValidationRequirement =
+  | { mode: "full" }
+  | {
+      mode: "release_attested";
+      releaseBundleDigest: string;
+      snapshotBundleDigest: string;
+      snapshotImageId: string;
+    }
+  | { mode: "unavailable" };
 
 export class RunnerHeartbeatPersistenceError extends Error {
   constructor(cause?: unknown) {
@@ -323,6 +341,7 @@ export async function confirmCloudRunnerReadiness(
   runnerId: string,
   dependencies: {
     allowInsecureLoopback?: boolean;
+    bootValidationRequirement?: RunnerBootValidationRequirement;
     compatibilityRequirement?: RunnerCompatibilityRequirement;
     createConnection?: () => DatabaseConnection;
     fetch?: typeof fetch;
@@ -414,6 +433,15 @@ export async function confirmCloudRunnerReadiness(
     }
 
     if (
+      !runnerBootSnapshotMatchesRequirement(
+        probe.snapshot,
+        dependencies.bootValidationRequirement ?? readRunnerBootValidationRequirement(),
+      )
+    ) {
+      return { outcome: "pending", reason: "boot_evidence_incompatible" };
+    }
+
+    if (
       !isPersistedRunnerCompatible(
         runner,
         dependencies.compatibilityRequirement ?? readRunnerCompatibilityRequirement(),
@@ -441,6 +469,51 @@ export async function confirmCloudRunnerReadiness(
       await connection.close();
     }
   }
+}
+
+export function runnerBootSnapshotMatchesRequirement(
+  snapshot: RunnerBootSnapshot,
+  requirement: RunnerBootValidationRequirement,
+): boolean {
+  if (snapshot.status !== "ready" || requirement.mode === "unavailable") return false;
+  if (requirement.mode === "full") {
+    return snapshot.validationMode === "full" && snapshot.evidence === null;
+  }
+  return (
+    snapshot.validationMode === "release_attested" &&
+    snapshot.evidence?.releaseBundleDigest === requirement.releaseBundleDigest &&
+    snapshot.evidence.snapshotBundleDigest === requirement.snapshotBundleDigest &&
+    snapshot.evidence.snapshotImageId === requirement.snapshotImageId
+  );
+}
+
+export function readRunnerBootValidationRequirement(
+  env: Record<string, string | undefined> = process.env,
+): RunnerBootValidationRequirement {
+  const mode = env[RUNNER_BOOT_VALIDATION_MODE_ENV]?.trim() || "full";
+  if (mode === "full") return { mode };
+  if (mode !== "release_attested") return { mode: "unavailable" };
+
+  const bundleBytes = env[RUNNER_RELEASE_BUNDLE_ENV]?.trim();
+  const releaseBundleDigest = env[RUNNER_RELEASE_APPROVED_DIGEST_ENV]?.trim();
+  const snapshotBundleDigest = env[RUNNER_APPROVED_SNAPSHOT_DIGEST_ENV]?.trim();
+  if (!bundleBytes || !releaseBundleDigest || !snapshotBundleDigest) {
+    return { mode: "unavailable" };
+  }
+  const release = parseRunnerReleaseBundle(bundleBytes);
+  if (
+    !release.ok ||
+    release.digest !== releaseBundleDigest ||
+    release.bundle.manifest.snapshot.bundleDigest !== snapshotBundleDigest
+  ) {
+    return { mode: "unavailable" };
+  }
+  return {
+    mode,
+    releaseBundleDigest,
+    snapshotBundleDigest,
+    snapshotImageId: release.bundle.manifest.snapshot.imageId,
+  };
 }
 
 export async function probeRunnerEndpointReadiness(input: {

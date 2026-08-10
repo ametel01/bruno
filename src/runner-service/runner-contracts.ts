@@ -4,7 +4,7 @@ export const RUNNER_LAUNCH_CONTRACT_VERSION = "bruno.runner.launch.v2" as const;
 export const LEGACY_RUNNER_STATUS_CONTRACT_VERSION = "bruno.runner.status.v2" as const;
 export const RUNNER_STATUS_CONTRACT_VERSION = "bruno.runner.status.v3" as const;
 export const RUNNER_CANARY_CONTRACT_VERSION = "bruno.runner.canary.v1" as const;
-export const RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION = "bruno.runner.boot-snapshot.v1" as const;
+export const RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION = "bruno.runner.boot-snapshot.v2" as const;
 export const MAX_RUNNER_RESTART_COUNT = 2_147_483_647;
 export const MAX_RUNNER_IMAGE_IDENTITY_DIGESTS = 16;
 export const MAX_RUNNER_IMAGE_REFERENCE_LENGTH = 512;
@@ -228,12 +228,43 @@ export const RUNNER_BOOT_COMPONENTS = [
 ] as const;
 
 export type RunnerBootComponent = (typeof RUNNER_BOOT_COMPONENTS)[number];
-export type RunnerBootComponentState = "pending" | "passed" | "failed" | "skipped";
+export const RUNNER_BOOT_OBSERVED_CHECKS = [
+  "docker",
+  "requiredServices",
+  "injectedBundleDigests",
+  "preloadedImages",
+  "hermesFixture",
+  "detailedHealth",
+  "modelCanary",
+  "telegramConfig",
+  "cleanup",
+] as const;
+export const RUNNER_BOOT_ATTESTED_CHECKS = [
+  "fullFixture",
+  "detailedHealth",
+  "modelCanary",
+  "telegramConfig",
+  "cleanup",
+] as const;
+
+export type RunnerBootObservedCheck = (typeof RUNNER_BOOT_OBSERVED_CHECKS)[number];
+export type RunnerBootAttestedCheck = (typeof RUNNER_BOOT_ATTESTED_CHECKS)[number];
+export type RunnerBootObservedCheckState =
+  | "pending"
+  | "passed"
+  | "failed"
+  | "skipped"
+  | "not_applicable";
+export type RunnerBootAttestedCheckState = "verified" | "not_applicable";
+export type RunnerBootValidationMode = "full" | "release_attested";
 export type RunnerBootSnapshotStatus = "testing" | "ready" | "failed";
 export type RunnerBootFailureReason =
   | null
   | "docker_unavailable"
   | "release_mismatch"
+  | "release_validation_failed"
+  | "required_services_unavailable"
+  | "preloaded_images_mismatch"
   | "fixture_launch_failed"
   | "detailed_health_failed"
   | "canary_failed"
@@ -245,8 +276,15 @@ export type RunnerBootFailureReason =
 export type RunnerBootSnapshot = {
   ok: true;
   contractVersion: typeof RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION;
+  validationMode: RunnerBootValidationMode;
   status: RunnerBootSnapshotStatus;
-  components: Record<RunnerBootComponent, RunnerBootComponentState>;
+  observedChecks: Record<RunnerBootObservedCheck, RunnerBootObservedCheckState>;
+  attestedChecks: Record<RunnerBootAttestedCheck, RunnerBootAttestedCheckState>;
+  evidence: {
+    releaseBundleDigest: string;
+    snapshotBundleDigest: string;
+    snapshotImageId: string;
+  } | null;
   failureReason: RunnerBootFailureReason;
   startedAt: string;
   completedAt: string | null;
@@ -256,15 +294,19 @@ export function parseRunnerBootSnapshot(value: unknown): RunnerBootSnapshot | nu
   if (
     !isExactRecord(value, [
       "completedAt",
-      "components",
+      "attestedChecks",
       "contractVersion",
+      "evidence",
       "failureReason",
+      "observedChecks",
       "ok",
       "startedAt",
       "status",
+      "validationMode",
     ]) ||
     value.ok !== true ||
     value.contractVersion !== RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION ||
+    !["full", "release_attested"].includes(value.validationMode as never) ||
     !["testing", "ready", "failed"].includes(value.status as never) ||
     !isRunnerIsoTimestamp(value.startedAt) ||
     !isNullableIsoTimestamp(value.completedAt) ||
@@ -272,6 +314,9 @@ export function parseRunnerBootSnapshot(value: unknown): RunnerBootSnapshot | nu
       null,
       "docker_unavailable",
       "release_mismatch",
+      "release_validation_failed",
+      "required_services_unavailable",
+      "preloaded_images_mismatch",
       "fixture_launch_failed",
       "detailed_health_failed",
       "canary_failed",
@@ -280,22 +325,44 @@ export function parseRunnerBootSnapshot(value: unknown): RunnerBootSnapshot | nu
       "deadline_exceeded",
       "snapshot_invalid",
     ].includes(value.failureReason as never) ||
-    !isExactRecord(value.components, RUNNER_BOOT_COMPONENTS)
+    !isExactRecord(value.observedChecks, RUNNER_BOOT_OBSERVED_CHECKS) ||
+    !isExactRecord(value.attestedChecks, RUNNER_BOOT_ATTESTED_CHECKS)
   ) {
     return null;
   }
 
-  const components = value.components as Record<string, unknown>;
-  const states = RUNNER_BOOT_COMPONENTS.map((component) => components[component]);
+  const observedChecks = value.observedChecks as Record<string, unknown>;
+  const observedStates = RUNNER_BOOT_OBSERVED_CHECKS.map((check) => observedChecks[check]);
+  const attestedChecks = value.attestedChecks as Record<string, unknown>;
+  const attestedStates = RUNNER_BOOT_ATTESTED_CHECKS.map((check) => attestedChecks[check]);
   if (
-    !states.every((state) => ["pending", "passed", "failed", "skipped"].includes(state as never))
+    !observedStates.every((state) =>
+      ["pending", "passed", "failed", "skipped", "not_applicable"].includes(state as never),
+    ) ||
+    !attestedStates.every((state) => ["verified", "not_applicable"].includes(state as never))
   ) {
     return null;
   }
   if (
-    RUNNER_BOOT_COMPONENTS.some(
-      (component) => components[component] === "skipped" && component !== "modelCanary",
+    RUNNER_BOOT_OBSERVED_CHECKS.some(
+      (check) => observedChecks[check] === "skipped" && check !== "modelCanary",
     )
+  ) {
+    return null;
+  }
+
+  const evidence = parseRunnerBootEvidence(value.evidence);
+  if (value.evidence !== null && evidence === null) return null;
+
+  const mode = value.validationMode as RunnerBootValidationMode;
+  if (
+    (mode === "full" &&
+      (evidence !== null || attestedStates.some((state) => state !== "not_applicable"))) ||
+    (mode === "release_attested" &&
+      ["hermesFixture", "detailedHealth", "modelCanary", "telegramConfig"].some(
+        (check) =>
+          observedChecks[check] !== "not_applicable" && observedChecks[check] !== "pending",
+      ))
   ) {
     return null;
   }
@@ -306,15 +373,73 @@ export function parseRunnerBootSnapshot(value: unknown): RunnerBootSnapshot | nu
     (isReady &&
       (value.failureReason !== null ||
         value.completedAt === null ||
-        !states.every((state) => state === "passed" || state === "skipped"))) ||
+        !isReadyRunnerBootCheckSet(mode, observedChecks, attestedChecks, evidence))) ||
     (isTesting && (value.failureReason !== null || value.completedAt !== null)) ||
     (value.status === "failed" &&
-      (value.failureReason === null || value.completedAt === null || !states.includes("failed")))
+      (value.failureReason === null ||
+        value.completedAt === null ||
+        !observedStates.includes("failed")))
   ) {
     return null;
   }
 
-  return value as RunnerBootSnapshot;
+  return { ...(value as RunnerBootSnapshot), evidence };
+}
+
+function isReadyRunnerBootCheckSet(
+  mode: RunnerBootValidationMode,
+  observed: Record<string, unknown>,
+  attested: Record<string, unknown>,
+  evidence: RunnerBootSnapshot["evidence"],
+): boolean {
+  if (mode === "full") {
+    return (
+      observed.docker === "passed" &&
+      observed.requiredServices === "not_applicable" &&
+      observed.injectedBundleDigests === "not_applicable" &&
+      observed.preloadedImages === "not_applicable" &&
+      observed.hermesFixture === "passed" &&
+      observed.detailedHealth === "passed" &&
+      ["passed", "skipped"].includes(observed.modelCanary as never) &&
+      observed.telegramConfig === "passed" &&
+      observed.cleanup === "passed" &&
+      evidence === null
+    );
+  }
+
+  return (
+    observed.docker === "passed" &&
+    observed.requiredServices === "passed" &&
+    observed.injectedBundleDigests === "passed" &&
+    observed.preloadedImages === "passed" &&
+    observed.hermesFixture === "not_applicable" &&
+    observed.detailedHealth === "not_applicable" &&
+    observed.modelCanary === "not_applicable" &&
+    observed.telegramConfig === "not_applicable" &&
+    observed.cleanup === "passed" &&
+    RUNNER_BOOT_ATTESTED_CHECKS.every((check) => attested[check] === "verified") &&
+    evidence !== null
+  );
+}
+
+function parseRunnerBootEvidence(value: unknown): RunnerBootSnapshot["evidence"] {
+  if (value === null) return null;
+  if (
+    !isExactRecord(value, ["releaseBundleDigest", "snapshotBundleDigest", "snapshotImageId"]) ||
+    typeof value.releaseBundleDigest !== "string" ||
+    !/^sha256:[a-f0-9]{64}$/.test(value.releaseBundleDigest) ||
+    typeof value.snapshotBundleDigest !== "string" ||
+    !/^sha256:[a-f0-9]{64}$/.test(value.snapshotBundleDigest) ||
+    typeof value.snapshotImageId !== "string" ||
+    !/^[1-9][0-9]{0,18}$/.test(value.snapshotImageId)
+  ) {
+    return null;
+  }
+  return {
+    releaseBundleDigest: value.releaseBundleDigest,
+    snapshotBundleDigest: value.snapshotBundleDigest,
+    snapshotImageId: value.snapshotImageId,
+  };
 }
 
 export type RunnerStopResponsePayload = {

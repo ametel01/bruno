@@ -14,6 +14,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { AgentDeploymentChoices } from "@/src/server/agents/agent-deployment-choices";
 import type { AgentTemplateSnapshot } from "@/src/server/agents/templates";
 import type { BackupManifest, BackupStatus } from "@/src/server/backups/backup-manifest";
 
@@ -575,6 +576,14 @@ export const agentDeployments = pgTable(
     deploymentEnvironment: text("deployment_environment").default("non_production"),
     ownerCancelledAt: timestamp("owner_cancelled_at", { withTimezone: true }),
     rolloutConfigurationGeneration: integer("rollout_configuration_generation").default(1),
+    deploymentChoices: jsonb("deployment_choices")
+      .$type<AgentDeploymentChoices>()
+      .notNull()
+      .default(
+        sql`'{"schemaVersion":"bruno.agent-deployment.choices.v1","dispatchMode":"cron","rolloutConfigurationGeneration":1,"provider":{"mode":"unavailable","region":"unknown","sizeSlug":"unknown","image":"unknown","tags":[],"runnerImage":"unknown","hermesWorkloadImage":null,"hermesStateRoot":null,"hermesPrivateNetwork":null,"hermesReadinessTimeoutMs":null,"hermesDockerCpus":null,"hermesDockerMemory":null,"hermesDockerPidsLimit":null,"runnerMaxAgents":null,"snapshotMode":{"mode":"stock"}},"validation":{"mode":"full","releaseBundleDigest":null,"snapshotBundleDigest":null}}'::jsonb`,
+      ),
+    safetyQuarantinedAt: timestamp("safety_quarantined_at", { withTimezone: true }),
+    safetyQuarantineReason: text("safety_quarantine_reason"),
     canaryState: text("canary_state").notNull().default("not_started"),
     canaryAttemptedAt: timestamp("canary_attempted_at", { withTimezone: true }),
     canaryCompletedAt: timestamp("canary_completed_at", { withTimezone: true }),
@@ -642,6 +651,14 @@ export const agentDeployments = pgTable(
     check(
       "agent_deployments_rollout_configuration_generation_check",
       sql`${table.rolloutConfigurationGeneration} IS NULL OR ${table.rolloutConfigurationGeneration} >= 1`,
+    ),
+    check(
+      "agent_deployments_choices_schema_check",
+      sql`${table.deploymentChoices} ->> 'schemaVersion' = 'bruno.agent-deployment.choices.v1'`,
+    ),
+    check(
+      "agent_deployments_safety_quarantine_pair_check",
+      sql`(${table.safetyQuarantinedAt} IS NULL AND ${table.safetyQuarantineReason} IS NULL) OR (${table.safetyQuarantinedAt} IS NOT NULL AND length(trim(${table.safetyQuarantineReason})) BETWEEN 1 AND 200)`,
     ),
     check(
       "agent_deployments_stage_runner_operation_check",
@@ -820,6 +837,170 @@ export const providerTrialSlots = pgTable(
     check(
       "provider_trial_slots_precommit_code_match_check",
       sql`${table.terminalOutcome} <> 'pre_commit_failure' OR ${table.terminalSafeCode} = ${table.requestSafeCode}`,
+    ),
+  ],
+);
+
+export const providerTrialSlotCleanupEvents = pgTable(
+  "provider_trial_slot_cleanup_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slotId: uuid("slot_id")
+      .notNull()
+      .references(() => providerTrialSlots.id, { onDelete: "restrict" }),
+    cleanupAttemptNumber: integer("cleanup_attempt_number").notNull(),
+    costCents: integer("cost_cents").notNull(),
+    activeProviderResources: integer("active_provider_resources").notNull(),
+    ok: boolean("ok").notNull(),
+    authoritative: boolean("authoritative").notNull(),
+    remainingResourceCount: integer("remaining_resource_count").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("provider_trial_slot_cleanup_events_attempt_idx").on(
+      table.slotId,
+      table.cleanupAttemptNumber,
+    ),
+    index("provider_trial_slot_cleanup_events_created_idx").on(table.createdAt, table.slotId),
+    check(
+      "provider_trial_slot_cleanup_events_attempt_check",
+      sql`${table.cleanupAttemptNumber} >= 1`,
+    ),
+    check("provider_trial_slot_cleanup_events_cost_check", sql`${table.costCents} >= 0`),
+    check(
+      "provider_trial_slot_cleanup_events_resource_count_check",
+      sql`${table.activeProviderResources} >= 0 AND ${table.remainingResourceCount} >= 0`,
+    ),
+  ],
+);
+
+export const providerTrialRuns = pgTable(
+  "provider_trial_runs",
+  {
+    cohortId: uuid("cohort_id")
+      .primaryKey()
+      .references(() => providerTrialCohorts.id, { onDelete: "restrict" }),
+    state: text("state").notNull().default("running"),
+    configuration: jsonb("configuration").notNull(),
+    nextSlotNumber: integer("next_slot_number").notNull().default(1),
+    spentCents: integer("spent_cents").notNull().default(0),
+    authorizationGeneration: integer("authorization_generation").notNull(),
+    authorizationIdHash: text("authorization_id_hash").notNull(),
+    authorizedAt: timestamp("authorized_at", { withTimezone: true }).notNull().defaultNow(),
+    pausedAt: timestamp("paused_at", { withTimezone: true }),
+    pauseReason: text("pause_reason"),
+    activeSlotCheckpoint: jsonb("active_slot_checkpoint"),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    cleanupEvidence: jsonb("cleanup_evidence"),
+    signedReportBytes: text("signed_report_bytes"),
+    signedReportDigest: text("signed_report_digest"),
+    signedReportKeyId: text("signed_report_key_id"),
+    signedReportSignature: text("signed_report_signature"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "provider_trial_runs_state_check",
+      sql`${table.state} IN ('running', 'paused', 'ready_to_finalize', 'complete')`,
+    ),
+    check("provider_trial_runs_next_slot_check", sql`${table.nextSlotNumber} BETWEEN 1 AND 31`),
+    check("provider_trial_runs_spend_check", sql`${table.spentCents} >= 0`),
+    check(
+      "provider_trial_runs_authorization_generation_check",
+      sql`${table.authorizationGeneration} >= 1`,
+    ),
+    check(
+      "provider_trial_runs_pause_pair_check",
+      sql`(${table.state} = 'paused' AND ${table.pausedAt} IS NOT NULL AND ${table.pauseReason} IS NOT NULL) OR (${table.state} <> 'paused' AND ${table.pausedAt} IS NULL AND ${table.pauseReason} IS NULL)`,
+    ),
+    check(
+      "provider_trial_runs_lease_pair_check",
+      sql`(${table.leaseOwner} IS NULL AND ${table.leaseExpiresAt} IS NULL) OR (${table.leaseOwner} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL)`,
+    ),
+    check(
+      "provider_trial_runs_signed_report_shape_check",
+      sql`(${table.state} = 'complete' AND ${table.signedReportBytes} IS NOT NULL AND ${table.signedReportDigest} IS NOT NULL AND ${table.signedReportKeyId} IS NOT NULL AND ${table.signedReportSignature} IS NOT NULL AND ${table.cleanupEvidence} IS NOT NULL) OR (${table.state} <> 'complete' AND ${table.signedReportBytes} IS NULL AND ${table.signedReportDigest} IS NULL AND ${table.signedReportKeyId} IS NULL AND ${table.signedReportSignature} IS NULL)`,
+    ),
+  ],
+);
+
+export const coldDeploymentSloEvaluations = pgTable(
+  "cold_deployment_slo_evaluations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    generatedAt: timestamp("generated_at", { withTimezone: true }).notNull(),
+    reportBytes: text("report_bytes").notNull(),
+    reportDigest: text("report_digest").notNull(),
+    signingKeyId: text("signing_key_id").notNull(),
+    signature: text("signature").notNull(),
+    eligibleCount: integer("eligible_count").notNull(),
+    readyWithin60: integer("ready_within_60").notNull(),
+    pendingCount: integer("pending_count").notNull(),
+    proven: boolean("proven").notNull(),
+    incidentOpened: boolean("incident_opened").notNull().default(false),
+    rolloutConfigurationGenerations: jsonb("rollout_configuration_generations")
+      .$type<number[]>()
+      .notNull(),
+    previousReportDigest: text("previous_report_digest"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("cold_deployment_slo_evaluations_digest_idx").on(table.reportDigest),
+    check(
+      "cold_deployment_slo_evaluations_digest_check",
+      sql`${table.reportDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "cold_deployment_slo_evaluations_previous_digest_check",
+      sql`${table.previousReportDigest} IS NULL OR ${table.previousReportDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "cold_deployment_slo_evaluations_count_check",
+      sql`${table.eligibleCount} BETWEEN 0 AND 100 AND ${table.readyWithin60} BETWEEN 0 AND ${table.eligibleCount} AND ${table.pendingCount} BETWEEN 0 AND ${table.eligibleCount}`,
+    ),
+    check(
+      "cold_deployment_slo_evaluations_proven_check",
+      sql`${table.proven} = (${table.eligibleCount} = 100 AND ${table.pendingCount} = 0 AND ${table.readyWithin60} >= 95)`,
+    ),
+    check(
+      "cold_deployment_slo_evaluations_incident_check",
+      sql`NOT ${table.incidentOpened} OR NOT ${table.proven}`,
+    ),
+  ],
+);
+
+export const agentDeploymentApiAttemptEvents = pgTable(
+  "agent_deployment_api_attempt_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    attemptId: uuid("attempt_id").notNull(),
+    requestKind: text("request_kind").notNull(),
+    phase: text("phase").notNull(),
+    safeCode: text("safe_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("agent_deployment_api_attempt_events_attempt_phase_idx").on(
+      table.attemptId,
+      table.phase,
+    ),
+    uniqueIndex("agent_deployment_api_attempt_events_one_terminal_idx")
+      .on(table.attemptId)
+      .where(sql`${table.phase} <> 'started'`),
+    index("agent_deployment_api_attempt_events_created_idx").on(table.createdAt, table.attemptId),
+    check(
+      "agent_deployment_api_attempt_events_kind_check",
+      sql`${table.requestKind} IN ('create_ready', 'start')`,
+    ),
+    check(
+      "agent_deployment_api_attempt_events_phase_check",
+      sql`${table.phase} IN ('started', 'accepted', 'rejected', 'outcome_unknown')`,
+    ),
+    check(
+      "agent_deployment_api_attempt_events_shape_check",
+      sql`(${table.phase} IN ('started', 'accepted') AND ${table.safeCode} IS NULL) OR (${table.phase} IN ('rejected', 'outcome_unknown') AND ${table.safeCode} ~ '^[a-z0-9_.:-]{1,64}$')`,
     ),
   ],
 );

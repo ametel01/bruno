@@ -20,10 +20,15 @@ import {
   requireConfiguredApplicationUser,
 } from "@/src/server/users/configured-application-user";
 import { scheduleAgentDeploymentReconcileAfterResponse } from "@/src/server/agents/agent-deployment-triggers";
+import {
+  createAgentDeploymentApiAttemptRecorder,
+  type AgentDeploymentApiAttemptRecorder,
+} from "@/src/server/agents/agent-deployment-api-acceptance";
 
 type CreateAgentRouteDependencies = {
   requireApplicationUser?: typeof requireConfiguredApplicationUser;
   scheduleDeploymentReconcile?: typeof scheduleAgentDeploymentReconcileAfterResponse;
+  apiAttemptRecorder?: AgentDeploymentApiAttemptRecorder;
 };
 
 type CreateAgentRouteContext = {
@@ -59,6 +64,16 @@ export async function POST(
     return authenticationResponse(applicationUser);
   }
 
+  const recorder = productionApiAttemptRecorder(dependencies.apiAttemptRecorder);
+  let attemptId: string | null = null;
+  if (recorder && "launchMode" in validation.value) {
+    try {
+      attemptId = await recorder.begin("create_ready");
+    } catch {
+      return apiEvidenceUnavailableResponse();
+    }
+  }
+
   try {
     const body =
       "launchMode" in validation.value
@@ -69,10 +84,25 @@ export async function POST(
           })
         : await createAgentForUser(applicationUser.userId, validation.value);
 
+    if (recorder && attemptId && "deployment" in body) {
+      await recorder
+        .finish({ attemptId, kind: "create_ready", phase: "accepted" })
+        .catch(() => undefined);
+    }
     return Response.json(body, {
       status: "deployment" in body ? 202 : 201,
     });
   } catch (error) {
+    if (recorder && attemptId) {
+      await recorder
+        .finish({
+          attemptId,
+          kind: "create_ready",
+          phase: "outcome_unknown",
+          safeCode: "request_failed",
+        })
+        .catch(() => undefined);
+    }
     if (error instanceof ReadyAgentValidationError) {
       return validationResponse(error.issues);
     }
@@ -169,6 +199,25 @@ export async function POST(
 
     throw error;
   }
+}
+
+function productionApiAttemptRecorder(
+  injected: AgentDeploymentApiAttemptRecorder | undefined,
+): AgentDeploymentApiAttemptRecorder | null {
+  if (injected) return injected;
+  return process.env.VERCEL_ENV === "production" ? createAgentDeploymentApiAttemptRecorder() : null;
+}
+
+function apiEvidenceUnavailableResponse() {
+  return Response.json(
+    {
+      error: {
+        code: "deployment_api_evidence_unavailable",
+        message: "Deployment request evidence is temporarily unavailable.",
+      },
+    },
+    { status: 503, headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 function authenticationResponse(

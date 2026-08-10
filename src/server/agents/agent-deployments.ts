@@ -4,6 +4,11 @@ import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import {
+  captureAgentDeploymentChoicesFromEnvironment,
+  parseAgentDeploymentChoices,
+  type AgentDeploymentChoices,
+} from "@/src/server/agents/agent-deployment-choices";
+import {
   assertTransactionHandle,
   replaceDeploymentWakeupInTransaction,
 } from "@/src/server/agents/agent-deployment-dispatch";
@@ -76,6 +81,38 @@ export type CreateAgentDeploymentResult =
         | "invalid_idempotency_key";
     };
 
+export async function quarantineAgentDeploymentForSafety(input: {
+  db: AgentDeploymentTransaction;
+  userId: string;
+  deploymentId: string;
+  reason: string;
+  now?: Date;
+}): Promise<boolean> {
+  assertTransactionHandle(input.db);
+  const reason = input.reason.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9 _.:/-]{0,199}$/.test(reason)) return false;
+  const now = input.now ?? new Date();
+  const [quarantined] = await input.db.execute<{ id: string }>(sql`
+    update ${agentDeployments}
+    set safety_quarantined_at = ${now.toISOString()},
+        safety_quarantine_reason = ${reason},
+        stage = 'failed',
+        error_code = 'safety_quarantined',
+        error_detail = 'Deployment was explicitly quarantined for safety.',
+        next_attempt_at = null,
+        lease_owner = null,
+        lease_expires_at = null,
+        failed_at = ${now.toISOString()},
+        updated_at = ${now.toISOString()}
+    where id = ${input.deploymentId}
+      and user_id = ${input.userId}
+      and stage not in ('ready', 'failed')
+      and safety_quarantined_at is null
+    returning id
+  `);
+  return Boolean(quarantined);
+}
+
 export type LatestAgentDeploymentResult =
   | {
       ok: true;
@@ -140,6 +177,7 @@ export async function createAgentDeploymentForUser(input: {
   configRevision: string;
   idempotencyKey: string;
   deploymentEnvironment?: AgentDeploymentEnvironment;
+  deploymentChoices?: AgentDeploymentChoices;
   now?: Date;
 }): Promise<CreateAgentDeploymentResult> {
   assertTransactionHandle(input.db);
@@ -162,6 +200,24 @@ export async function createAgentDeploymentForUser(input: {
 
   const now = input.now ?? new Date();
   const nowIso = toTimestampParameter(now);
+  const deploymentChoices =
+    parseAgentDeploymentChoices(
+      input.deploymentChoices ??
+        captureAgentDeploymentChoicesFromEnvironment(
+          process.env,
+          CURRENT_ROLLOUT_CONFIGURATION_GENERATION,
+        ),
+    ) ?? null;
+  if (!deploymentChoices) {
+    throw new AgentDeploymentPersistenceError(new Error("Agent Deployment choices are invalid."));
+  }
+  if (
+    deploymentChoices.rolloutConfigurationGeneration !== CURRENT_ROLLOUT_CONFIGURATION_GENERATION
+  ) {
+    throw new AgentDeploymentPersistenceError(
+      new Error("Agent Deployment choices use the wrong Rollout Configuration generation."),
+    );
+  }
 
   try {
     const ownedAgent = await input.db.execute<{ id: string; runnerId: string | null }>(sql`
@@ -215,6 +271,7 @@ export async function createAgentDeploymentForUser(input: {
         initial_cohort,
         deployment_environment,
         rollout_configuration_generation,
+        deployment_choices,
         created_at,
         updated_at
       )
@@ -228,6 +285,7 @@ export async function createAgentDeploymentForUser(input: {
         ${initialCohortForAssignedRunner(ownedAgent[0].runnerId)},
         ${input.deploymentEnvironment ?? deploymentEnvironmentForRuntime()},
         ${CURRENT_ROLLOUT_CONFIGURATION_GENERATION},
+        ${JSON.stringify(deploymentChoices)}::jsonb,
         ${nowIso},
         ${nowIso}
       )

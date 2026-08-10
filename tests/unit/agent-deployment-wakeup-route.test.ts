@@ -5,6 +5,7 @@ import { Client } from "@upstash/qstash";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/internal/agent-deployments/wakeup/route";
 import { createAgentDeploymentForUser } from "@/src/server/agents/agent-deployments";
+import { captureAgentDeploymentChoicesFromEnvironment } from "@/src/server/agents/agent-deployment-choices";
 import {
   deploymentWakeupSafeCodes,
   type DeploymentWakeupPayload,
@@ -370,6 +371,10 @@ describe("POST /api/internal/agent-deployments/wakeup", () => {
         agentId: AGENT_ID,
         configRevision: "cfg-wakeup",
         idempotencyKey: `wakeup-${dueAt.getTime()}`,
+        deploymentChoices: {
+          ...captureAgentDeploymentChoicesFromEnvironment(process.env, 1),
+          dispatchMode: "qstash",
+        },
         now: dueAt,
       }),
     );

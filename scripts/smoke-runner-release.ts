@@ -451,7 +451,7 @@ async function waitForReleaseEvidence(
       if (
         readiness.ok &&
         RUNNER_BOOT_COMPONENTS.every(
-          (component) => readiness.snapshot.components[component] === "passed",
+          (component) => readiness.snapshot.observedChecks[component] === "passed",
         )
       ) {
         return {
@@ -614,7 +614,12 @@ function closedErrorCode(error: unknown): string | null {
 }
 
 async function main(): Promise<void> {
-  const result = await smokeRunnerRelease(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const env =
+    argv[2] === "--provider" && argv[3] === "local_docker"
+      ? { ...process.env, BRUNO_DIGITALOCEAN_TOKEN: "local-docker" }
+      : process.env;
+  const result = await smokeRunnerRelease(argv, env);
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (!result.ok) process.exitCode = 1;
 }

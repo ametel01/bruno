@@ -227,15 +227,29 @@ function localBootSnapshot(
   status: RunnerBootSnapshot["status"],
   startedAt: string,
   completedAt: string | null,
-  componentStatus: RunnerBootSnapshot["components"][keyof RunnerBootSnapshot["components"]],
+  componentStatus: "pending" | "passed" | "failed",
 ): RunnerBootSnapshot {
   return {
     ok: true,
     contractVersion: RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION,
+    validationMode: "full",
     status,
-    components: Object.fromEntries(
-      RUNNER_BOOT_COMPONENTS.map((component) => [component, componentStatus]),
-    ) as RunnerBootSnapshot["components"],
+    observedChecks: {
+      requiredServices: "not_applicable",
+      injectedBundleDigests: "not_applicable",
+      preloadedImages: "not_applicable",
+      ...Object.fromEntries(
+        RUNNER_BOOT_COMPONENTS.map((component) => [component, componentStatus]),
+      ),
+    } as RunnerBootSnapshot["observedChecks"],
+    attestedChecks: {
+      fullFixture: "not_applicable",
+      detailedHealth: "not_applicable",
+      modelCanary: "not_applicable",
+      telegramConfig: "not_applicable",
+      cleanup: "not_applicable",
+    },
+    evidence: null,
     failureReason: status === "failed" ? "docker_unavailable" : null,
     startedAt,
     completedAt,

@@ -20,6 +20,11 @@ import {
 } from "@/src/runner-service/constants";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
 import {
+  parseRunnerReleaseBundle,
+  verifyRunnerReleaseBundle,
+  type RunnerReleaseTrustedPublicKeys,
+} from "@/src/runner-service/release-attestation";
+import {
   findDigitalOceanRunnerResourceProfile,
   MAX_HERMES_DOCKER_PIDS_LIMIT,
   PROVISIONAL_DIGITALOCEAN_RUNNER_SIZE_SLUG,
@@ -32,6 +37,7 @@ import {
   isRunnerSnapshotSigningKeyId,
   type RunnerSnapshotExpectedIdentities,
   type RunnerSnapshotTrustedPublicKeys,
+  verifyRunnerSnapshotBundle,
 } from "@/src/server/runners/runner-snapshot-manifest";
 
 export const DEFAULT_BRUNO_RUNNER_IMAGE = "ghcr.io/ametel01/bruno-runner:main";
@@ -71,6 +77,18 @@ export type DigitalOceanProviderConfig = {
   localRunnerStartDelayMs?: number;
   localAgentSmokeMode?: boolean;
   snapshotMode?: DigitalOceanSnapshotModeConfig;
+  bootValidation?: DigitalOceanReleaseAttestedBootConfig;
+};
+
+export type DigitalOceanReleaseAttestedBootConfig = {
+  mode: "release_attested";
+  bundleBytes: string;
+  approvedReleaseDigest: string;
+  releaseTrustSetBytes: string;
+  trustedPublicKeys: RunnerReleaseTrustedPublicKeys;
+  snapshotOciReference: string;
+  snapshotBundleDigest: string;
+  snapshotImageId: string;
 };
 
 export type DigitalOceanSnapshotModeConfig =
@@ -518,6 +536,8 @@ export function readDigitalOceanProviderConfig(
     hermesImage: config.hermesWorkloadImage ?? DEFAULT_HERMES_WORKLOAD_IMAGE,
   });
   config.snapshotMode = snapshotMode;
+  const bootValidation = readDigitalOceanRunnerBootValidation(input, config, snapshotMode);
+  if (bootValidation) config.bootValidation = bootValidation;
 
   if (providerMode === "digitalocean" && !parseImmutableRunnerImageReference(runnerImage)) {
     throw new EnvValidationError([
@@ -534,6 +554,128 @@ export function readDigitalOceanProviderConfig(
   }
 
   return config;
+}
+
+function readDigitalOceanRunnerBootValidation(
+  input: Record<string, string | undefined>,
+  config: DigitalOceanProviderConfig,
+  snapshotMode: DigitalOceanSnapshotModeConfig,
+): DigitalOceanReleaseAttestedBootConfig | undefined {
+  const mode = input.BRUNO_RUNNER_BOOT_VALIDATION_MODE?.trim() || "full";
+  if (mode === "full") return undefined;
+  if (mode !== "release_attested") {
+    throw new EnvValidationError([
+      "BRUNO_RUNNER_BOOT_VALIDATION_MODE must be full or release_attested when set.",
+    ]);
+  }
+  if (snapshotMode.mode !== "snapshot") {
+    throw new EnvValidationError([
+      "BRUNO_RUNNER_BOOT_VALIDATION_MODE=release_attested requires an Approved Snapshot.",
+    ]);
+  }
+
+  const bundleBytes = readRequiredSnapshotSetting(
+    input.BRUNO_RUNNER_RELEASE_BUNDLE,
+    "BRUNO_RUNNER_RELEASE_BUNDLE",
+  );
+  const approvedReleaseDigest = readRequiredSnapshotSetting(
+    input.BRUNO_RUNNER_APPROVED_RELEASE_DIGEST,
+    "BRUNO_RUNNER_APPROVED_RELEASE_DIGEST",
+  );
+  const releaseTrustSetBytes = readRequiredSnapshotSetting(
+    input.BRUNO_RUNNER_RELEASE_TRUST_SET,
+    "BRUNO_RUNNER_RELEASE_TRUST_SET",
+  );
+  const snapshotOciReference = readRequiredSnapshotSetting(
+    input.BRUNO_RUNNER_APPROVED_SNAPSHOT_OCI,
+    "BRUNO_RUNNER_APPROVED_SNAPSHOT_OCI",
+  );
+  if (
+    !/^sha256:[a-f0-9]{64}$/.test(approvedReleaseDigest) ||
+    !/^ghcr\.io\/.+@sha256:[a-f0-9]{64}$/.test(snapshotOciReference)
+  ) {
+    throw new EnvValidationError([
+      "Release-attested boot validation requires exact release and Snapshot OCI digests.",
+    ]);
+  }
+
+  const snapshot = verifyRunnerSnapshotBundle({
+    bundleBytes: snapshotMode.bundleBytes,
+    approvedDigest: snapshotMode.approvedDigest,
+    trustedPublicKeys: snapshotMode.trustedPublicKeys,
+    expected: snapshotMode.expected,
+  });
+  const parsedRelease = parseRunnerReleaseBundle(bundleBytes);
+  const trustedPublicKeys = readReleaseTrustSet(releaseTrustSetBytes);
+  if (!snapshot.ok || !parsedRelease.ok) {
+    throw new EnvValidationError([
+      "Release-attested boot validation requires valid Approved Snapshot and Verified Release bundles.",
+    ]);
+  }
+  const release = verifyRunnerReleaseBundle({
+    bundleBytes,
+    approvedDigest: approvedReleaseDigest,
+    trustedPublicKeys,
+    expected: {
+      sourceRevision: parsedRelease.bundle.manifest.controlPlane.source.revision,
+      runnerImage: config.runnerImage,
+      defaultAgentImage: snapshotMode.expected.defaultAgentImage,
+      hermesImage: snapshotMode.expected.hermesImage,
+      snapshotOciReference,
+      snapshotBundleDigest: snapshot.digest,
+    },
+  });
+  if (!release.ok) {
+    throw new EnvValidationError([
+      `Release-attested boot validation evidence failed closed: ${release.reason}.`,
+    ]);
+  }
+
+  return {
+    mode,
+    bundleBytes,
+    approvedReleaseDigest,
+    releaseTrustSetBytes,
+    trustedPublicKeys,
+    snapshotOciReference,
+    snapshotBundleDigest: snapshot.digest,
+    snapshotImageId: snapshot.manifest.snapshot.id,
+  };
+}
+
+function readReleaseTrustSet(value: string): RunnerReleaseTrustedPublicKeys {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(value);
+  } catch {
+    throw new EnvValidationError([
+      "BRUNO_RUNNER_RELEASE_TRUST_SET must be a JSON object of signing key IDs to Ed25519 public keys.",
+    ]);
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new EnvValidationError([
+      "BRUNO_RUNNER_RELEASE_TRUST_SET must be a JSON object of signing key IDs to Ed25519 public keys.",
+    ]);
+  }
+  const entries = Object.entries(raw);
+  if (
+    entries.length === 0 ||
+    entries.length > 16 ||
+    entries.some(
+      ([keyId, publicKey]) =>
+        !isRunnerSnapshotSigningKeyId(keyId) ||
+        typeof publicKey !== "string" ||
+        publicKey.trim().length === 0 ||
+        publicKey.length > 8192,
+    )
+  ) {
+    throw new EnvValidationError([
+      "BRUNO_RUNNER_RELEASE_TRUST_SET must contain 1 to 16 valid signing key IDs mapped to public keys.",
+    ]);
+  }
+  return Object.fromEntries(
+    entries.map(([keyId, publicKey]) => [keyId, (publicKey as string).trim()]),
+  );
 }
 
 function readDigitalOceanSnapshotMode(

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import postgres from "postgres";
 import { afterEach, describe, expect, it } from "vitest";
@@ -77,6 +77,9 @@ describe("agent deployment migration fixtures", () => {
         "deployment_environment",
         "owner_cancelled_at",
         "rollout_configuration_generation",
+        "deployment_choices",
+        "safety_quarantined_at",
+        "safety_quarantine_reason",
       ]);
       await expect(readColumnNames(sql, "agent_deployment_wakeups")).resolves.toEqual([
         "id",
@@ -117,6 +120,17 @@ describe("agent deployment migration fixtures", () => {
         "terminal_outcome",
         "terminal_safe_code",
         "terminal_recorded_at",
+        "created_at",
+      ]);
+      await expect(readColumnNames(sql, "provider_trial_slot_cleanup_events")).resolves.toEqual([
+        "id",
+        "slot_id",
+        "cleanup_attempt_number",
+        "cost_cents",
+        "active_provider_resources",
+        "ok",
+        "authoritative",
+        "remaining_resource_count",
         "created_at",
       ]);
       await expect(readAgentsDesiredDefault(sql)).resolves.toEqual({
@@ -171,11 +185,32 @@ describe("agent deployment migration fixtures", () => {
         readTriggerDefinition(sql, "agent_deployments_slo_identity_immutable_trigger"),
       ).resolves.toContain("BEFORE UPDATE");
       await expect(
+        readTriggerDefinition(sql, "agent_deployments_immutable_choices_update"),
+      ).resolves.toContain("BEFORE UPDATE");
+      await expect(
+        readTriggerDefinition(sql, "cold_deployment_slo_evaluations_immutable_update"),
+      ).resolves.toContain("BEFORE UPDATE");
+      await expect(
+        readTriggerDefinition(sql, "cold_deployment_slo_evaluations_immutable_delete"),
+      ).resolves.toContain("BEFORE DELETE");
+      await expect(
         readTriggerDefinition(sql, "provider_trial_cohorts_preserve_identity_trigger"),
       ).resolves.toContain("BEFORE INSERT OR DELETE OR UPDATE");
       await expect(
         readTriggerDefinition(sql, "provider_trial_slots_preserve_evidence_trigger"),
       ).resolves.toContain("BEFORE INSERT OR DELETE OR UPDATE");
+      await expect(
+        readTriggerDefinition(sql, "provider_trial_slot_cleanup_events_immutable_update"),
+      ).resolves.toContain("BEFORE UPDATE");
+      await expect(
+        readTriggerDefinition(sql, "provider_trial_slot_cleanup_events_immutable_delete"),
+      ).resolves.toContain("BEFORE DELETE");
+      await expect(
+        readTriggerDefinition(sql, "provider_trial_runs_preserve_configuration_trigger"),
+      ).resolves.toContain("BEFORE UPDATE OF configuration");
+      await expect(
+        readTriggerDefinition(sql, "provider_trial_runs_immutable_delete"),
+      ).resolves.toContain("BEFORE DELETE");
       await expect(readConstraintDefinition(sql, "agents_id_user_id_unique")).resolves.toContain(
         "UNIQUE (id, user_id)",
       );

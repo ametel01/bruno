@@ -22,16 +22,18 @@ const readmePath = new URL("../../README.md", import.meta.url);
 const readme = readFileSync(readmePath, "utf8");
 
 describe("runner release workflow contract", () => {
-  it("is valid YAML with publish, staging, deploy, and rollback boundaries while the canary is disabled", () => {
+  it("is valid YAML with publish, staging, Verified Release, deploy, and rollback boundaries", () => {
     const workflow = parse(workflowSource) as Record<string, unknown>;
     expect(workflow).toBeTypeOf("object");
     expect(workflow.name).toBe("Deploy production application");
     expect(workflowSource).toContain("workflow_dispatch:");
-    expect(workflowSource).not.toContain("\n  canary:");
-    expect(workflowSource).not.toContain("environment: runner-release-canary");
+    expect(workflowSource).toContain("\n  canary:");
+    expect(workflowSource).toContain("environment: runner-release-canary");
     expect(workflowSource).toContain("environment: production");
     expect(workflowSource).toContain("needs:\n      - publish\n      - stage-control-plane");
-    expect(workflowSource).not.toContain("      - canary");
+    expect(workflowSource).toContain(
+      "needs:\n      - publish\n      - stage-control-plane\n      - canary",
+    );
     expect(workflowSource).toContain(
       "concurrency:\n  group: production-application-deploy\n  cancel-in-progress: false",
     );
@@ -70,11 +72,14 @@ describe("runner release workflow contract", () => {
     expect(agentWorkflowSource).toContain("path: trivy-agent-image.sarif");
   });
 
-  it("temporarily bypasses the simulated-Droplet canary and deploys the published digest at batch one", () => {
-    expect(workflowSource).not.toContain("bun run runner:release:smoke -- --image");
-    expect(workflowSource).not.toContain("--provider local_docker");
-    expect(workflowSource).not.toContain("BRUNO_DIGITALOCEAN_TOKEN: local-docker");
-    expect(workflowSource).not.toContain("BRUNO_DIGITALOCEAN_PROVIDER_MODE: local_docker");
+  it("gates promotion on a zero-cloud full fixture and deploys the exact tested digest at batch one", () => {
+    expect(workflowSource).toContain("bun run runner:release:smoke -- --image");
+    expect(workflowSource).toContain("--provider local_docker");
+    expect(workflowSource).not.toContain("BRUNO_DIGITALOCEAN_TOKEN");
+    expect(workflowSource).toContain("BRUNO_DIGITALOCEAN_PROVIDER_MODE: local_docker");
+    expect(workflowSource).toContain(
+      "BRUNO_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: http://127.0.0.1:3045",
+    );
     expect(workflowSource).not.toContain("RUNNER_RELEASE_DIGITALOCEAN_TOKEN");
     expect(workflowSource).not.toContain("billable_canary_authorization");
     expect(workflowSource).not.toContain("authorize-disposable-runner-release-smoke");
@@ -85,12 +90,12 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).not.toMatch(/cloud-init.*GITHUB_STEP_SUMMARY/i);
   });
 
-  it("stages an operator-protected production candidate and promotes that exact deployment", () => {
+  it("stages a compatible candidate and promotes it only after release verification", () => {
     expect(workflowSource).toContain("stage-control-plane:");
     expect(workflowSource).toContain("outputs:\n      deployment-url:");
     expect(workflowSource).toContain("deploy --prod --skip-domain --yes");
-    expect(workflowSource).not.toContain("NEXT_PUBLIC_APP_URL: http://host.docker.internal:3000");
-    expect(workflowSource).not.toContain("bun run start --hostname 0.0.0.0");
+    expect(workflowSource).toContain("NEXT_PUBLIC_APP_URL: http://host.docker.internal:3000");
+    expect(workflowSource).toContain("bun run start --hostname 0.0.0.0");
     expect(workflowSource).toContain(
       "CANDIDATE_DEPLOYMENT_URL: $" + "{{ needs.stage-control-plane.outputs.deployment-url }}",
     );
@@ -102,6 +107,38 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).not.toContain("BRUNO_AUTH_MODE=clerk");
   });
 
+  it("publishes a signed digest-addressed Verified Release joined to the Approved Snapshot", () => {
+    expect(workflowSource).toContain("BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE");
+    expect(workflowSource).toContain("BRUNO_RELEASE_APPROVED_SNAPSHOT_BUNDLE_DIGEST");
+    expect(workflowSource).toContain("BRUNO_RELEASE_SIGNING_KEY_ID");
+    expect(workflowSource).toContain("BRUNO_RELEASE_SIGNING_KEY_PEM");
+    expect(workflowSource).toContain("bun run runner:release:bundle");
+    expect(workflowSource).toContain("bun run runner:release:registry");
+    expect(workflowSource).toContain("bruno-runner-release-bundles");
+    expect(workflowSource).toContain("verified-runner-release");
+    expect(workflowSource).toContain("runner-release-oci-publication.json");
+    expect(workflowSource).toContain("oras pull");
+    expect(workflowSource).toContain("oras manifest fetch");
+    const snapshotVerification = workflowSource.indexOf("bun run runner:release:snapshot:verify");
+    const imageExtraction = workflowSource.indexOf(
+      "DEFAULT_AGENT_IMAGE=\"$(jq -r '.defaultAgentImage",
+    );
+    const fixtureExecution = workflowSource.indexOf("bun run runner:release:smoke -- --image");
+    expect(snapshotVerification).toBeGreaterThan(-1);
+    expect(imageExtraction).toBeGreaterThan(snapshotVerification);
+    expect(fixtureExecution).toBeGreaterThan(imageExtraction);
+    expect(workflowSource).not.toContain(".manifest.defaultAgentImage.reference");
+  });
+
+  it("never exposes a DigitalOcean credential to the release workflow", () => {
+    expect(workflowSource).not.toContain("RUNNER_RELEASE_DIGITALOCEAN_TOKEN");
+    expect(workflowSource).not.toContain("secrets.BRUNO_DIGITALOCEAN_TOKEN");
+    expect(workflowSource).not.toContain("secrets.DIGITALOCEAN_TOKEN");
+    expect(workflowSource).not.toContain("authorize-disposable-runner-release-smoke");
+    expect(workflowSource).toContain("no DigitalOcean resource was requested");
+    expect(workflowSource).not.toMatch(/booted (?:the )?provider snapshot/i);
+  });
+
   it("targets the linked Vercel project with explicitly authorized CLI token authentication", () => {
     expect(workflowSource).toContain("VERCEL_ORG_ID: $" + "{{ secrets.VERCEL_ORG_ID }}");
     expect(workflowSource).toContain("VERCEL_PROJECT_ID: $" + "{{ secrets.VERCEL_PROJECT_ID }}");
@@ -111,7 +148,7 @@ describe("runner release workflow contract", () => {
   });
 
   it("keeps dependency lifecycle code outside production secret scopes", () => {
-    expect(workflowSource.match(/bun install --frozen-lockfile --ignore-scripts/g)).toHaveLength(2);
+    expect(workflowSource.match(/bun install --frozen-lockfile --ignore-scripts/g)).toHaveLength(3);
     expect(workflowSource).not.toMatch(/^ {6}[A-Z_]+: \$\{\{ secrets\./m);
   });
 
@@ -140,7 +177,7 @@ describe("runner release workflow contract", () => {
     );
     expect(packageJson.scripts["deploy:prod"]).not.toContain("vercel deploy --prod");
     expect(readme).toContain("Do not run `vercel deploy --prod` directly");
-    expect(readme).toContain("release-workflow-authorized `BRUNO_RUNNER_IMAGE` digest");
+    expect(readme).toContain("Verified Release `BRUNO_RUNNER_IMAGE` digest");
   });
 
   it("allows only artifact-backed immutable rollback and halts rollout", () => {

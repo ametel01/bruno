@@ -562,7 +562,7 @@ describe("runner heartbeat persistence", () => {
         metadata: expect.objectContaining({
           provider: "digitalocean",
           step: "boot_validation",
-          bootContractVersion: "bruno.runner.boot-snapshot.v1",
+          bootContractVersion: "bruno.runner.boot-snapshot.v2",
           bootStatus: "ready",
         }),
         createdAt: new Date("2026-08-04T00:00:00.000Z"),
@@ -574,9 +574,11 @@ describe("runner heartbeat persistence", () => {
         metadata: {
           provider: "digitalocean",
           step: "boot_validation",
-          bootContractVersion: "bruno.runner.boot-snapshot.v1",
+          bootContractVersion: "bruno.runner.boot-snapshot.v2",
           bootStatus: "ready",
-          bootComponents: readyRunnerBootSnapshot().components,
+          bootObservedChecks: readyRunnerBootSnapshot().observedChecks,
+          bootAttestedChecks: readyRunnerBootSnapshot().attestedChecks,
+          bootEvidence: null,
         },
         createdAt: new Date("2026-08-04T00:00:01.000Z"),
       }),
@@ -622,9 +624,11 @@ describe("runner heartbeat persistence", () => {
           step: "authenticated_readiness",
           heartbeatStatus: "online",
           readinessProbe: "authenticated_endpoint",
-          bootContractVersion: "bruno.runner.boot-snapshot.v1",
+          bootContractVersion: "bruno.runner.boot-snapshot.v2",
           bootStatus: "ready",
-          bootComponents: readyRunnerBootSnapshot().components,
+          bootObservedChecks: readyRunnerBootSnapshot().observedChecks,
+          bootAttestedChecks: readyRunnerBootSnapshot().attestedChecks,
+          bootEvidence: null,
         },
         createdAt: readinessProbeCompletedAt,
       }),
@@ -699,8 +703,8 @@ describe("runner heartbeat persistence", () => {
 
   it("accepts production readiness when only the boot model canary is skipped", async () => {
     const snapshot = readyRunnerBootSnapshot({
-      components: {
-        ...readyRunnerBootSnapshot().components,
+      observedChecks: {
+        ...readyRunnerBootSnapshot().observedChecks,
         modelCanary: "skipped",
       },
     });
@@ -727,8 +731,8 @@ describe("runner heartbeat persistence", () => {
   it("preserves an authenticated failed boot snapshot returned with 503", async () => {
     const snapshot = readyRunnerBootSnapshot({
       status: "failed",
-      components: {
-        ...readyRunnerBootSnapshot().components,
+      observedChecks: {
+        ...readyRunnerBootSnapshot().observedChecks,
         hermesFixture: "failed",
       },
       failureReason: "fixture_launch_failed",
@@ -764,8 +768,8 @@ describe("runner heartbeat persistence", () => {
     });
     const snapshot = readyRunnerBootSnapshot({
       status: "failed",
-      components: {
-        ...readyRunnerBootSnapshot().components,
+      observedChecks: {
+        ...readyRunnerBootSnapshot().observedChecks,
         hermesFixture: "failed",
       },
       failureReason: "fixture_launch_failed",
@@ -811,7 +815,9 @@ describe("runner heartbeat persistence", () => {
         readinessProbe: "authenticated_endpoint",
         bootContractVersion: snapshot.contractVersion,
         bootStatus: "failed",
-        bootComponents: snapshot.components,
+        bootObservedChecks: snapshot.observedChecks,
+        bootAttestedChecks: snapshot.attestedChecks,
+        bootEvidence: snapshot.evidence,
         bootFailureReason: "fixture_launch_failed",
       },
     });

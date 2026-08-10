@@ -11,6 +11,7 @@ import {
   reconcileTargetRunnerDeployment,
 } from "@/src/server/agents/agent-deployment-reconciler";
 import { scheduleRunnerReconciliationsAfterResponse } from "@/src/server/agents/agent-runtime-triggers";
+import { captureAgentDeploymentChoices } from "@/src/server/agents/agent-deployment-choices";
 import { retryAgentDeploymentForUser } from "@/src/server/agents/agent-deployment-retry";
 import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
@@ -1010,6 +1011,7 @@ describe("agent deployment reconciler", () => {
       stage: "provisioning_runner",
       configRevision: "cfg-second-due",
       idempotencyKey: "ready-key-second-due",
+      deploymentChoices: automaticDeploymentChoices(),
       createdAt: new Date(NOW.getTime() + 1),
       updatedAt: NOW,
     });
@@ -1605,6 +1607,7 @@ describe("agent deployment reconciler", () => {
         stage: "pending",
         configRevision: "cfg-concurrent-2",
         idempotencyKey: "ready-key-002",
+        deploymentChoices: automaticDeploymentChoices(),
         createdAt: new Date(NOW.getTime() + 1),
         updatedAt: NOW,
       });
@@ -1910,8 +1913,17 @@ async function seedDeployment(
     canaryAttemptedAt: input.canaryAttemptedAt ?? null,
     canaryCompletedAt: input.canaryCompletedAt ?? null,
     attemptCount: input.attemptCount ?? 0,
+    deploymentChoices: automaticDeploymentChoices(),
     createdAt: NOW,
     updatedAt: NOW,
+  });
+}
+
+function automaticDeploymentChoices() {
+  return captureAgentDeploymentChoices({
+    config: automaticProviderConfig(),
+    dispatchMode: "cron",
+    rolloutConfigurationGeneration: 1,
   });
 }
 

@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A protected scheduled latest-100 Cold-Deployment evaluator now retains canonical Ed25519-signed
+  point-in-time evidence, remains unproven below 100 eligible observations, reports active Rollout
+  Configuration generations and separate append-only API-acceptance availability, preserves prior
+  proof, and durably records the transition to an internal incident when a later failure-inclusive
+  result falls below 95 ready within 60 seconds.
+- A resumable sequential Provider Trial driver now consumes the original 30-slot ledger with stable
+  idempotency identities across interruption, fenced leases and phase checkpoints, reconciled
+  outcome-unknown timeouts, pre-authorized spend and resource limits, renewed authorization after
+  safety pauses, immutable configuration, post-commit deployment-choice and benchmark-identity
+  verification, an independently reserved cleanup deadline, append-only per-slot cleanup attempts,
+  and a signed sanitized final report that rejects unfinished or scope-mismatched evidence. It does
+  not grant or imply authorization for a live provider run.
+- Agent Deployments now pin their exact dispatch, provider, runner profile, image, Snapshot,
+  Verified Release, validation mode, and Rollout Configuration generation at acceptance. Retry,
+  reconciliation, and replacement recover from those immutable choices, while incompatible rows
+  fail closed and explicit safety quarantine remains separately auditable.
+- Release-attested runner admission now proves current Docker, required services, injected bundle
+  digests, and exact preloaded images while representing historical full-fixture checks separately
+  as attested evidence. Stock mode retains full validation, and authenticated heartbeat admission
+  requires exact Approved Snapshot and Verified Release compatibility.
+- Production releases now require the credential-free full simulated-Droplet fixture, join its
+  exact runner/control-plane contract and cleanup evidence to the selected Snapshot Attestation v2
+  bundle, sign the result with an identified Ed25519 key, and publish and re-verify active and
+  previous Verified Release bundles by immutable GHCR OCI digest without exposing DigitalOcean
+  credentials or claiming a provider-snapshot boot.
 - Protected snapshot builds now publish each sanitized signed Snapshot Attestation v2 bundle to
   GHCR as an OCI artifact, return only its immutable OCI manifest reference plus exact bundle
   digest, re-pull and verify both identities, retain the signing public key with the bundle, and

@@ -87,13 +87,17 @@ describe("local full agent-cycle smoke", () => {
 
     expect(await readiness.read()).toMatchObject({
       status: "ready",
-      components: {
+      validationMode: "full",
+      observedChecks: {
         docker: "passed",
         hermesFixture: "passed",
         detailedHealth: "passed",
         modelCanary: "passed",
         telegramConfig: "passed",
         cleanup: "passed",
+        requiredServices: "not_applicable",
+        injectedBundleDigests: "not_applicable",
+        preloadedImages: "not_applicable",
       },
     });
   });

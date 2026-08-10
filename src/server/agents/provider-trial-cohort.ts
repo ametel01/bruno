@@ -173,6 +173,37 @@ export async function beginProviderTrialSlot(
   });
 }
 
+export async function beginOrResumeProviderTrialSlot(
+  connection: DatabaseConnection,
+  input: { cohortId: string; slotNumber: number },
+): Promise<ProviderTrialSlotAttempt> {
+  assertUuid(input.cohortId, "cohortId");
+  assertSlotNumber(input.slotNumber);
+  const [started] = await connection.db
+    .select({
+      cohortId: providerTrialSlots.cohortId,
+      slotId: providerTrialSlots.id,
+      slotNumber: providerTrialSlots.slotNumber,
+      requestAttemptId: providerTrialSlots.requestAttemptId,
+      requestStartedAt: providerTrialSlots.requestStartedAt,
+    })
+    .from(providerTrialSlots)
+    .where(
+      sql`${providerTrialSlots.cohortId} = ${input.cohortId} AND ${providerTrialSlots.slotNumber} = ${input.slotNumber} AND ${providerTrialSlots.requestAttemptId} IS NOT NULL`,
+    )
+    .limit(1);
+  if (started?.requestAttemptId && started.requestStartedAt) {
+    return {
+      cohortId: started.cohortId,
+      slotId: started.slotId,
+      slotNumber: started.slotNumber,
+      requestAttemptId: started.requestAttemptId,
+      requestStartedAt: toIso(started.requestStartedAt),
+    };
+  }
+  return await beginProviderTrialSlot(connection, input);
+}
+
 export async function recordProviderTrialRequestOutcome(
   connection: DatabaseConnection,
   input:
@@ -553,6 +584,17 @@ function assertValidReport(value: unknown): asserts value is ProviderTrialCohort
     !hasConsistentSummaries(value as ProviderTrialCohortReport)
   ) {
     throw new Error("report_invalid");
+  }
+}
+
+export function isValidProviderTrialCohortReport(
+  value: unknown,
+): value is ProviderTrialCohortReport {
+  try {
+    assertValidReport(value);
+    return true;
+  } catch {
+    return false;
   }
 }
 

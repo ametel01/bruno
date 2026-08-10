@@ -40,6 +40,29 @@ The server report boundary supports
 canonical SHA-256 digesting and Ed25519 signing with an identified key, and verification rejects
 tampered or internally inconsistent summaries.
 
+The resumable driver in `src/server/agents/provider-trial-driver.ts` advances at most one original
+slot per call. A fenced lease prevents concurrent resumes, and a durable phase checkpoint preserves
+the original request-attempt identity, execution result, spend, terminal evidence, and cleanup
+boundary across interruption. A request deadline never relabels an unresolved operation as a
+pre-commit failure: the run pauses without cleanup or slot advancement and requires renewed
+authorization plus reconciliation through the same deployment idempotency key. The provider
+boundary receives its reserved per-slot spend, quota, region/profile, pinned-choice digest, and
+sanitized dedicated benchmark-identity hashes. A committed deployment is rechecked against all
+three durable commitments before observation, and the run row and configuration cannot be reset or
+deleted after initialization. Cleanup has a separately reserved deadline, including when timeout evidence is too
+early to classify. Any unsafe result or non-empty authoritative cleanup pauses the ledger. Every
+cleanup attempt is retained in an append-only per-slot ledger as Boolean
+authority, resource-count, and spend evidence, so a failed cleanup followed by a successful resume
+cannot erase the earlier failure. Finalization is available only after all 30 slots are terminal and an
+authoritative absence check succeeds; its canonical signed report combines the immutable cohort
+result, scope-matched pinned configuration, allowlisted stage outcomes, and the complete sanitized
+per-slot cleanup history without retaining
+the raw authorization, credentials, tokens, Owner identity, or provider responses.
+
+The driver API is repository machinery, not provider authority. A DigitalOcean run still requires
+the separate authorization described by issue #299: exact region and profile, 30 slots, maximum
+spend, dedicated benchmark Owner and Telegram bot, cleanup policy, and retained-artifact policy.
+
 Version 4 of the benchmark uses the immutable database-clock
 `agent_deployments.accepted_at` boundary. New Agent Deployments capture this timestamp inside the
 request transaction after the earlier persistence work, so transaction commit latency remains in
@@ -96,6 +119,42 @@ Same-Owner Reuse is reported as a separate cohort and never borrows historical r
 provisioning stages. Unknown or ambiguous correlation is invalid evidence. Cold-path SLO decisions
 must read the `slo` counts for the `cold_deployment` cohort; faster reuse samples and
 successful-only latency percentiles cannot improve the binary gate.
+
+## Rolling production SLO evidence
+
+Production schedules `GET /api/internal/cold-deployment-slo/evaluate` once per minute through the
+same `CRON_SECRET` authorization boundary as the other protected reconcilers. The endpoint requires
+`BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_ID` and
+`BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_PEM`; incomplete signing configuration fails closed. Its
+response publishes only the canonical report digest, eligible and ready-within-60 counts, pending
+count, the latest-100 API-acceptance summary, current proof state, and whether this evaluation
+opened a regression incident.
+
+Each invocation queries the latest 100 production Owner-request Cold Deployments using the
+immutable accepted boundary, cohort, origin, cancellation, and Rollout Configuration generation
+fields. Operator trials, Same-Owner Reuse, runner-replacement work, non-production rows, and an
+explicit Owner cancellation before 60 seconds remain excluded. Provider failures, internal
+failures, retries, timeouts, pending observations at the boundary, and slow successes remain in the
+failure-inclusive sample. Fewer than 100 observations is unproven; proof requires all 100 decided
+and at least 95 ready within 60 seconds.
+
+The `cold_deployment_slo_evaluations` ledger is append-only. It stores canonical sanitized report
+bytes, SHA-256 digest, Ed25519 signature and key ID, active Rollout Configuration generations, the
+previous report digest, and the proof/incident transition. Database triggers reject update and
+delete, so a regression removes current proven status without rewriting earlier signed evidence.
+Production ready-create and Start routes also append a sanitized `started` event and one
+`accepted`, `rejected`, or `outcome_unknown` event to
+`agent_deployment_api_attempt_events`. The signed evaluation reports accepted, rejected, unknown,
+pending, and availability counts for the latest 100 attempts separately from readiness; it stores
+no Owner, Agent, Telegram, token, credential, request body, or endpoint identity. Those events are
+append-only, so pre-commit failures cannot disappear merely because no Agent Deployment row exists.
+Detailed deployment and stage records remain in their existing durable stores; retention policy
+must keep immutable boundaries, cohorts, choices, and terminal outcomes indefinitely and detailed
+stages for at least 90 days.
+
+This evaluator provides the production-proof mechanism but cannot manufacture production traffic.
+The objective remains operationally incomplete until a separately authorized rollout exists and
+100 real eligible observations contain at least 95 ready-within-60 outcomes.
 
 Default mode is read-only and does not create, mutate, clean up, or contact provider resources.
 Local Docker mode requires the exact zero-cloud sentinels used by `local:agent:smoke`:

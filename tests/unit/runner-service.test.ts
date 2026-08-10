@@ -67,7 +67,7 @@ describe("manual runner service HTTP contract", () => {
   it("returns a deterministic no-store 503 for a failed boot snapshot", async () => {
     const snapshot = readyRunnerBootSnapshot({
       status: "failed",
-      components: { ...readyRunnerBootSnapshot().components, cleanup: "failed" },
+      observedChecks: { ...readyRunnerBootSnapshot().observedChecks, cleanup: "failed" },
       failureReason: "cleanup_failed",
     });
     const service = createRunnerService({

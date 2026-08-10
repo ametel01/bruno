@@ -5,23 +5,19 @@ deploys the full Next.js application and coordinates that deployment with its re
 image. The workflow never publishes or promotes a mutable `:main` tag. A release builds the exact
 selected commit once, pushes only its Git-SHA runner tag, verifies and scans the resulting digest,
 and stages the full application against production configuration without assigning any production
-domain. The production job promotes that exact staged deployment, then verifies `/health` and the
-authenticated required-release contract without rebuilding or substituting another commit or
-image.
-
-> **Temporary development mode:** The simulated-Droplet canary is disabled in the deployment
-> workflow to shorten iteration time. Image provenance, vulnerability scanning, staging, protected
-> production approval, and post-deploy health/digest verification still run. Releases created while
-> this bypass is active do not produce a `verified-runner-release` artifact and cannot be selected as
-> verified rollback sources. Re-enable the canary before treating this workflow as a hardened
-> production release gate.
+domain. A protected credential-free canary pulls the exact selected Snapshot Attestation v2 OCI
+artifact, runs the full simulated-Droplet fixture against its immutable runner, default-agent,
+Hermes, and boot-contract identities, and proves exact cleanup. It then signs a canonical Verified
+Release bundle, publishes it to GHCR, and re-verifies it by immutable OCI manifest digest. Only that
+successful dependency allows the production job to promote the exact staged deployment and verify
+`/health` plus the authenticated required-release contract.
 
 The linked Git repository does not deploy `main` directly to production. `vercel.json` skips an
 automatic production build unless the release workflow supplies its non-secret
 `BRUNO_CANARY_VERIFIED_DEPLOY=true` build marker. Preview builds remain enabled. The release and
 rollback jobs are the only repository-owned paths that supply that marker, preventing a push from
-bypassing the publish, scan, and staging path. The marker name is retained temporarily for
-compatibility; it does not imply that the disabled canary ran.
+bypassing image publication, scanning, staging, full-fixture verification, signed bundle
+publication, and protected promotion.
 
 Production builds also fail before migrations or compilation when automatic Agent Deployments are
 enabled without a DigitalOcean token, runner command bearer token, and immutable
@@ -45,19 +41,27 @@ the real Hermes gateway reports ready, the deployment records the canary as skip
 Telegram verification. Local release and contract smoke paths retain model-path coverage.
 
 Release workflow runs share one non-cancelling concurrency group. Automated tests and release runs
-create zero DigitalOcean Droplets. The release workflow does not configure a DigitalOcean provider
-or map the DigitalOcean release secret into any job. Another release run cannot enter the workflow
-until the current run has completed.
+create zero DigitalOcean Droplets. The canary selects only the `local_docker` simulation with the
+literal non-secret `local-docker` token and never maps a DigitalOcean credential into any job.
+Another release run cannot enter the workflow until the current run has published or failed and
+verified cleanup.
 
 ## Protected environments
 
-The currently disabled `runner-release-canary` environment retains these scoped values for when the
-gate is restored; they are not required by release runs while the bypass is active:
+Configure `runner-release-canary` with required reviewers and these scoped values:
 
 | Kind | Name | Purpose |
 | --- | --- | --- |
 | Secret | `RUNNER_RELEASE_DATABASE_URL` | Database used by the staged control plane for the simulated runner registration record. |
 | Secret | `RUNNER_RELEASE_BEARER_TOKEN` | Dedicated command bearer shared only with simulated release runners. |
+| Secret | `BRUNO_RELEASE_SIGNING_KEY_PEM` | Ed25519 private key used only while creating the canonical release bundle. |
+| Variable | `BRUNO_RELEASE_SIGNING_KEY_ID` | Identifier carried by the release signature. |
+| Variable | `BRUNO_RELEASE_TRUST_SET` | JSON map of current and retained release key IDs to Ed25519 public keys. |
+| Variable | `BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE` | Exact digest-addressed Snapshot Attestation v2 OCI reference selected for the release. |
+| Variable | `BRUNO_RELEASE_APPROVED_SNAPSHOT_BUNDLE_DIGEST` | Canonical digest of the selected snapshot bundle. |
+| Variable | `BRUNO_SNAPSHOT_TRUST_SET` | JSON map used to verify the selected snapshot signing key. |
+| Variable | `BRUNO_RELEASE_PREVIOUS_OCI_REFERENCE` | Retained previous Verified Release OCI reference after the first publication. |
+| Variable | `BRUNO_RELEASE_PREVIOUS_BUNDLE_DIGEST` | Canonical digest paired with the retained previous release. |
 
 Configure `production` with required reviewers and the existing Vercel project credentials:
 
@@ -76,10 +80,9 @@ dispatch is not a substitute for the required review.
 The simulation injects `BRUNO_DIGITALOCEAN_SSH_KEY_IDS=disabled`; it neither creates an account
 SSH key nor opens SSH ingress.
 
-## Temporarily disabled canary contract
+## Credential-free canary contract
 
-The reusable smoke command remains available for local or explicitly requested verification, but
-the deployment workflow does not currently run it:
+The workflow runs the same reusable smoke command available for local verification:
 
 ```sh
 bun run runner:release:smoke -- --image \
@@ -95,19 +98,34 @@ ready heartbeat, and all boot components. Those boot components exercise an isol
 start, status/readiness probe, model canary, stop, and cleanup without Telegram, a paid model
 request, or a DigitalOcean API call.
 
-When invoked, cleanup runs in a `finally` path. It removes the simulated Droplet and runner
-containers, confirms
+Cleanup runs in a `finally` path. It removes the simulated Droplet and runner containers, confirms
 the tagged local-provider set is absent, revokes runner credentials, and tombstones the runner
 record. A failed cleanup fails the job and blocks promotion. Failure output contains only capability
 names and closed error codes; it does not include tokens, database URLs, or cloud-init output.
 
-When enabled, this gate proves the runner image, generated bootstrap commands, local
-candidate-control-plane
+This gate proves the runner image, generated bootstrap commands, local candidate-control-plane
 registration flow, release identity, readiness contract, and cleanup on an Ubuntu/Docker host. It
 does not prove Vercel deployment-protection behavior, DigitalOcean API availability, regional
 capacity, public-IP assignment, cloud firewall behavior, or external network routing. A real
 provider acceptance is therefore a separate, explicitly approved operation for provider/bootstrap
 changes, never an automatic release retry.
+
+The canary retrieves the Approved Snapshot only as a signed OCI artifact. It does not receive a
+DigitalOcean credential, inspect live provider state, or claim to boot that provider snapshot. The
+Verified Release joins snapshot and release evidence only when the snapshot signature, approved
+bundle digest, runner image, default-agent image, Hermes image, and boot contract all match exactly.
+The workflow verifies that signature, digest, trust set, and exact runner-image join before it reads
+or executes either workload image reference from the Snapshot bundle.
+The bundle retains the current-machine full-fixture checks separately from the historical Snapshot
+Attestation identity.
+
+The workflow publishes three allowlisted OCI layers to
+`ghcr.io/<owner>/bruno-runner-release-bundles`: the canonical bundle JSON, its `sha256:` digest, and
+the identified Ed25519 public key. It pulls the result by OCI manifest digest and verifies the exact
+file allowlist, canonical bytes, digest, signature, signing key, and active/previous retention pair.
+The `verified-runner-release` GitHub artifact is a 90-day operational convenience; the durable
+release identity is the OCI reference plus canonical bundle digest recorded in
+`runner-release-oci-publication.json`.
 
 ## Promotion and rollback
 
@@ -119,21 +137,45 @@ BRUNO_RUNNER_IMAGE=<tested immutable Git-SHA-plus-digest reference>
 BRUNO_RUNNER_ROLLOUT_BATCH_SIZE=1
 ```
 
-The staged deployment URL is never assigned a production domain during staging. While the canary is
-temporarily disabled, the production job promotes that URL immediately after publish, scan, and
-staging succeed, then verifies `/health` plus the authenticated
+The staged deployment URL is never assigned a production domain during staging. The production job
+promotes it only after image publication, scanning, the full fixture, cleanup, and signed OCI bundle
+verification succeed, then verifies `/health` plus the authenticated
 `/api/internal/runner-release/required` contract. Infrastructure reconciliation processes at most
 one managed runner per invocation. Set the batch size to `0` to halt automatic fleet work.
 
 For emergency rollback, dispatch the same workflow with `action=rollback`, the immutable image, and
 the prior successful workflow run ID. The job downloads that run's `verified-runner-release`
 artifact and refuses any image that does not match it exactly. Rollback deploys with batch size `0`,
-verifies the required digest, and leaves rollout halted for operator review. Runs created while the
-canary bypass is active do not contain this artifact and therefore are not valid rollback sources.
+verifies the required digest, and leaves rollout halted for operator review. The artifact retains
+the signed bundle and its immutable OCI publication identity so the rollback source remains
+independently verifiable.
 
 Do not switch the release workflow to `digitalocean` or add a cloud token to its environment.
-Credential-free runs are expected to exit with `capability_unavailable` and
-`sideEffectsAttempted: false`.
+Provider-backed release acceptance is a separate action requiring exact authorization.
+
+## Release-attested admission and pinned recovery
+
+Stock runners always use `BRUNO_RUNNER_BOOT_VALIDATION_MODE=full` and execute the current-machine
+fixture. Protected Rollout Configuration may select `release_attested` only when it also supplies
+the exact canonical Verified Release bundle and approved digest, overlapping release trust set,
+digest-addressed Approved Snapshot OCI reference, and approved Snapshot bundle digest. Server
+configuration verifies the complete Snapshot and release join before any provider effect.
+
+On a release-attested runner, boot observes current Docker access, required services, the injected
+bundle identities, and each exact digest-qualified preloaded image. Historical full-fixture,
+detailed-health, model-canary, Telegram-configuration, and cleanup evidence remains under
+`attestedChecks`; it cannot be reported as a current-machine observation. Admission additionally
+requires authenticated registration, heartbeat, readiness, exact runner release identity, and the
+same release/snapshot evidence expected by the control plane. The release-attested path does not
+start a duplicate synthetic Hermes fixture on an Owner cold deployment.
+
+At Agent Deployment acceptance, Bruno persists the exact dispatch mode, provider mode and region,
+runner size and images, Snapshot bundle and trust inputs, Verified Release bundle and trust inputs,
+validation mode, and Rollout Configuration generation. Retry, reconciler crash recovery, and runner
+replacement combine those immutable non-secret choices with the credentials currently authorized
+for the provider. A rollback changes defaults only for new deployments; existing deployments keep
+their pinned interpretation. If a pinned choice becomes unsafe, the explicit safety-quarantine
+operation terminalizes that deployment without rewriting its evidence.
 
 ## Protected runner snapshot builds
 

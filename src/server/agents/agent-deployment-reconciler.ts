@@ -4,6 +4,11 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import type { RunnerAgentStatusSnapshot } from "@/src/runner-service/runner-contracts";
 import { replaceDeploymentWakeupInTransaction } from "@/src/server/agents/agent-deployment-dispatch";
+import {
+  applyAgentDeploymentChoices,
+  parseAgentDeploymentChoices,
+  type AgentDeploymentChoices,
+} from "@/src/server/agents/agent-deployment-choices";
 import { buildHermesAgentLaunchSpecForUser } from "@/src/server/agents/agent-launch-builder";
 import { logAgentDeploymentTerminalCompletion } from "@/src/server/agents/agent-deployment-latency";
 import { initializeAgentRuntimeAfterDeploymentReady } from "@/src/server/agents/agent-runtime-store";
@@ -177,6 +182,7 @@ type ClaimedDeploymentWork = {
   canaryState: CanaryState;
   canaryAttemptedAt: Date | null;
   agentRunnerId: string | null;
+  deploymentChoices: AgentDeploymentChoices;
 };
 
 type DeploymentTerminalErrorCode =
@@ -1366,6 +1372,7 @@ async function claimOneDeploymentForReconcile(
         on ${agents.id} = ${agentDeployments.agentId}
        and ${agents.userId} = ${agentDeployments.userId}
       where ${agentDeployments.stage} not in ('ready', 'failed')
+        and ${agentDeployments.safetyQuarantinedAt} is null
         and ${agents.deletedAt} is null
         and ${agents.desiredStatus} = 'running'
         and (${agentDeployments.nextAttemptAt} is null or ${agentDeployments.nextAttemptAt} <= ${nowIso})
@@ -1402,6 +1409,7 @@ async function claimOneDeploymentForReconcile(
       ${agentDeployments.runnerAcceptedAt} as "runnerAcceptedAt",
       ${agentDeployments.canaryState} as "canaryState",
       ${agentDeployments.canaryAttemptedAt} as "canaryAttemptedAt",
+      ${agentDeployments.deploymentChoices} as "deploymentChoices",
       ${agents.runnerId} as "agentRunnerId"
   `);
 
@@ -1455,9 +1463,16 @@ async function initializeProvisioningRunner(
 ): Promise<
   { ok: true; state: "created" | "waiting" } | { ok: false; code: DeploymentTerminalErrorCode }
 > {
-  const config = dependencies.readDigitalOceanConfig
+  const currentConfig = dependencies.readDigitalOceanConfig
     ? dependencies.readDigitalOceanConfig()
     : readDigitalOceanProviderConfig();
+  const choices = parseAgentDeploymentChoices(work.deploymentChoices);
+  let config: DigitalOceanProviderConfig | null = null;
+  try {
+    config = currentConfig && choices ? applyAgentDeploymentChoices(currentConfig, choices) : null;
+  } catch {
+    config = null;
+  }
 
   if (!config) {
     return { ok: false, code: "runner_provisioning_unavailable" };
@@ -2520,9 +2535,16 @@ async function defaultProvisioner(
   context: DeploymentActionContext,
   dependencies: AgentDeploymentReconcilerDependencies,
 ): Promise<ProvisionerResult> {
-  const config = dependencies.readDigitalOceanConfig
+  const currentConfig = dependencies.readDigitalOceanConfig
     ? dependencies.readDigitalOceanConfig()
     : readDigitalOceanProviderConfig();
+  const choices = parseAgentDeploymentChoices(work.deploymentChoices);
+  let config: DigitalOceanProviderConfig | null = null;
+  try {
+    config = currentConfig && choices ? applyAgentDeploymentChoices(currentConfig, choices) : null;
+  } catch {
+    config = null;
+  }
 
   if (!config || !work.agentRunnerId) {
     return { ok: false, terminalCode: "runner_provisioning_unavailable" };
@@ -2561,6 +2583,7 @@ async function deploymentProvisioningAuthorityStillHeld(
       and ${agentDeployments.configRevision} = ${work.configRevision}
       and ${agentDeployments.leaseOwner} = ${work.leaseOwner}
       and ${agentDeployments.leaseExpiresAt} > ${now.toISOString()}
+      and ${agentDeployments.safetyQuarantinedAt} is null
       and ${agents.id} = ${work.agentId}
       and ${agents.userId} = ${work.userId}
       and ${agents.deletedAt} is null

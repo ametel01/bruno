@@ -155,6 +155,7 @@ export type AgentDeploymentLatencyRun = {
   outcome: AgentDeploymentLatencyRunOutcome;
   evidenceStatus: "valid" | "invalid";
   acceptedAt: string | null;
+  ownerCancelledAt: string | null;
   createdAt: string;
   terminalAt: string | null;
   totalDurationMs: number | null;
@@ -484,6 +485,7 @@ function toLatencyRun(
     outcome: terminal.outcome,
     evidenceStatus,
     acceptedAt,
+    ownerCancelledAt,
     createdAt: createdAt ?? "invalid",
     terminalAt: terminal.at,
     totalDurationMs,

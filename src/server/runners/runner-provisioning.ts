@@ -25,6 +25,7 @@ import type { DigitalOceanProviderConfig } from "@/src/server/env";
 import { getServerEnv, readDigitalOceanProviderConfig } from "@/src/server/env";
 import {
   buildCloudRunnerBootstrapForRunner,
+  type CloudRunnerBootstrapInput,
   type CloudRunnerBootstrapContent,
   redactCloudRunnerBootstrapOutput,
 } from "@/src/server/runners/cloud-runner-bootstrap";
@@ -455,6 +456,7 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
           ? { releaseIdentityMode: RUNNER_RELEASE_DEVELOPMENT_MODE }
           : {}),
         bootMode: input.config.snapshotMode?.mode === "snapshot" ? "snapshot" : "stock",
+        bootValidation: runnerBootstrapValidation(input.config),
         sizeSlug: input.config.sizeSlug,
         now: input.now,
         log,
@@ -1313,6 +1315,7 @@ export async function createDigitalOceanRunnerForUser(
         ? { releaseIdentityMode: RUNNER_RELEASE_DEVELOPMENT_MODE }
         : {}),
       bootMode: config.snapshotMode?.mode === "snapshot" ? "snapshot" : "stock",
+      bootValidation: runnerBootstrapValidation(config),
       sizeSlug: initialized.runner.sizeSlug,
       now,
       log,
@@ -1995,6 +1998,7 @@ async function buildProvisioningBootstrap(input: {
   runnerMaxAgents?: number;
   releaseIdentityMode?: typeof RUNNER_RELEASE_DEVELOPMENT_MODE;
   bootMode?: "stock" | "snapshot";
+  bootValidation?: CloudRunnerBootstrapInput["bootValidation"];
   sizeSlug: string;
   now: () => Date;
   log: ProvisioningLog;
@@ -2035,6 +2039,7 @@ async function buildProvisioningBootstrap(input: {
       ...(input.runnerMaxAgents === undefined ? {} : { runnerMaxAgents: input.runnerMaxAgents }),
       ...(input.releaseIdentityMode ? { releaseIdentityMode: input.releaseIdentityMode } : {}),
       ...(input.bootMode ? { bootMode: input.bootMode } : {}),
+      ...(input.bootValidation ? { bootValidation: input.bootValidation } : {}),
       bootModelCanaryEnabled: input.releaseIdentityMode === RUNNER_RELEASE_DEVELOPMENT_MODE,
       endpointDiscovery: { type: "digitalocean_metadata" },
       enableSwap: isDigitalOceanLowMemorySwapResilienceProfile(input.sizeSlug),
@@ -2049,6 +2054,21 @@ async function buildProvisioningBootstrap(input: {
 
     throw error;
   }
+}
+
+function runnerBootstrapValidation(
+  config: DigitalOceanProviderConfig,
+): NonNullable<CloudRunnerBootstrapInput["bootValidation"]> {
+  return config.bootValidation
+    ? {
+        mode: "release_attested",
+        bundleBytes: config.bootValidation.bundleBytes,
+        approvedReleaseDigest: config.bootValidation.approvedReleaseDigest,
+        releaseTrustSetBytes: config.bootValidation.releaseTrustSetBytes,
+        snapshotOciReference: config.bootValidation.snapshotOciReference,
+        snapshotBundleDigest: config.bootValidation.snapshotBundleDigest,
+      }
+    : { mode: "full" };
 }
 
 async function resolveDigitalOceanPublicEndpoint(

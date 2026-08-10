@@ -6,7 +6,7 @@
   "scripts": {
     "build": "next build",
     "db:generate": "drizzle-kit generate",
-    "db:health": "DATABASE_URL=${DATABASE_URL:-postgres://bruno:bruno@127.0.0.1:54329/bruno} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} bun scripts/db-health.ts",
+    "db:health": "DATABASE_URL=${DATABASE_URL:-postgres://bruno:bruno@127.0.0.1:54329/bruno} NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000} bun --conditions react-server scripts/db-health.ts",
     "db:migrate": "DATABASE_URL=${DATABASE_URL:-postgres://bruno:bruno@127.0.0.1:54329/bruno} drizzle-kit migrate",
     "deploy:prod": "gh workflow run deploy-production.yml --repo ametel01/bruno --ref main --raw-field action=release",
     "dev": "next dev",
@@ -29,6 +29,9 @@
     "lint": "biome lint app src scripts tests *.ts *.json",
     "runner:bootstrap": "bun src/runner-service/bootstrap.ts",
     "runner:release:smoke": "bun --conditions react-server scripts/smoke-runner-release.ts",
+    "runner:release:bundle": "bun --conditions react-server scripts/create-runner-release-bundle.ts",
+    "runner:release:registry": "bun --conditions react-server scripts/publish-runner-release-bundle.ts",
+    "runner:release:snapshot:verify": "bun --conditions react-server scripts/verify-runner-release-snapshot.ts",
     "runner:service": "bun src/runner-service/index.ts",
     "start": "next start",
     "test": "bun scripts/run-unit-tests.ts",

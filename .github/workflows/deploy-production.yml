@@ -173,22 +173,34 @@ jobs:
           echo "deployment-url=${CANDIDATE_DEPLOYMENT_URL}" >> "${GITHUB_OUTPUT}"
           echo "Staged the exact release control plane without assigning production domains." >> "${GITHUB_STEP_SUMMARY}"
 
-  deploy:
+  canary:
     if: inputs.action == 'release'
-    name: Deploy staged release to production
+    name: Build and publish credential-free Verified Release
     needs:
       - publish
       - stage-control-plane
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-    environment: production
+    timeout-minutes: 30
+    environment: runner-release-canary
     env:
-      PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
-      IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
-      CANDIDATE_DEPLOYMENT_URL: ${{ needs.stage-control-plane.outputs.deployment-url }}
+      NEXT_PUBLIC_APP_URL: http://host.docker.internal:3000
+      BRUNO_AUTH_MODE: development
+      BRUNO_ALLOW_PUBLIC_DEVELOPMENT: "true"
+      BRUNO_DIGITALOCEAN_PROVIDER_MODE: local_docker
+      BRUNO_DIGITALOCEAN_SSH_KEY_IDS: disabled
+      BRUNO_DIGITALOCEAN_SIZE_SLUG: s-1vcpu-2gb
+      BRUNO_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: http://127.0.0.1:3045
+      BRUNO_RUNNER_IMAGE: ${{ needs.publish.outputs.immutable-image }}
+      BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE: ${{ vars.BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE }}
+      BRUNO_RELEASE_APPROVED_SNAPSHOT_BUNDLE_DIGEST: ${{ vars.BRUNO_RELEASE_APPROVED_SNAPSHOT_BUNDLE_DIGEST }}
+      BRUNO_SNAPSHOT_TRUST_SET: ${{ vars.BRUNO_SNAPSHOT_TRUST_SET }}
+      BRUNO_RELEASE_SIGNING_KEY_ID: ${{ vars.BRUNO_RELEASE_SIGNING_KEY_ID }}
+      BRUNO_RELEASE_TRUST_SET: ${{ vars.BRUNO_RELEASE_TRUST_SET }}
+      BRUNO_RELEASE_PREVIOUS_OCI_REFERENCE: ${{ vars.BRUNO_RELEASE_PREVIOUS_OCI_REFERENCE }}
+      BRUNO_RELEASE_PREVIOUS_BUNDLE_DIGEST: ${{ vars.BRUNO_RELEASE_PREVIOUS_BUNDLE_DIGEST }}
 
     steps:
-      - name: Check out exact staged commit
+      - name: Check out exact release commit
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -198,7 +210,161 @@ jobs:
         with:
           bun-version-file: .bun-version
 
-      - name: Promote the exact staged deployment
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Set up ORAS
+        uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
+        with:
+          version: 1.3.3
+
+      - name: Log in to GHCR for immutable evidence
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Retrieve the exact Approved Snapshot without provider access
+        run: |
+          set -euo pipefail
+          [[ "${BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE}" =~ ^ghcr\.io/.+@sha256:[a-f0-9]{64}$ ]]
+          [[ "${BRUNO_RELEASE_APPROVED_SNAPSHOT_BUNDLE_DIGEST}" =~ ^sha256:[a-f0-9]{64}$ ]]
+          SNAPSHOT_MANIFEST="$(oras manifest fetch "${BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE}")"
+          test "$(jq -r '.artifactType // empty' <<< "${SNAPSHOT_MANIFEST}")" = "application/vnd.bruno.runner.snapshot.bundle.v2"
+          mkdir -p approved-snapshot
+          oras pull "${BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE}" --output approved-snapshot
+          test "$(find approved-snapshot -maxdepth 1 -type f | wc -l | tr -d ' ')" = "3"
+          test "$(tr -d '\n' < approved-snapshot/runner-snapshot-bundle.sha256)" = "${BRUNO_RELEASE_APPROVED_SNAPSHOT_BUNDLE_DIGEST}"
+          bun run runner:release:snapshot:verify -- \
+            --runner-image "${{ needs.publish.outputs.immutable-image }}" \
+            --snapshot-bundle approved-snapshot/runner-snapshot-bundle.json \
+            --snapshot-bundle-digest "${BRUNO_RELEASE_APPROVED_SNAPSHOT_BUNDLE_DIGEST}" \
+            --output approved-snapshot/verified-images.json
+          DEFAULT_AGENT_IMAGE="$(jq -r '.defaultAgentImage // empty' approved-snapshot/verified-images.json)"
+          HERMES_IMAGE="$(jq -r '.hermesImage // empty' approved-snapshot/verified-images.json)"
+          test -n "${DEFAULT_AGENT_IMAGE}"
+          test -n "${HERMES_IMAGE}"
+          echo "BRUNO_DOCKER_RUNNER_IMAGE=${DEFAULT_AGENT_IMAGE}" >> "${GITHUB_ENV}"
+          echo "BRUNO_HERMES_WORKLOAD_IMAGE=${HERMES_IMAGE}" >> "${GITHUB_ENV}"
+
+      - name: Exercise the exact full fixture and verify cleanup
+        env:
+          DATABASE_URL: ${{ secrets.RUNNER_RELEASE_DATABASE_URL }}
+          BRUNO_RUNNER_BEARER_TOKEN: ${{ secrets.RUNNER_RELEASE_BEARER_TOKEN }}
+          IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
+        run: |
+          set -euo pipefail
+          bun run build
+          bun run start --hostname 0.0.0.0 > "${RUNNER_TEMP}/runner-release-control-plane.log" 2>&1 &
+          CONTROL_PLANE_PID=$!
+          cleanup_control_plane() {
+            kill "${CONTROL_PLANE_PID}" >/dev/null 2>&1 || true
+            wait "${CONTROL_PLANE_PID}" >/dev/null 2>&1 || true
+          }
+          trap cleanup_control_plane EXIT
+          CONTROL_PLANE_READY=false
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/health >/dev/null; then
+              CONTROL_PLANE_READY=true
+              break
+            fi
+            sleep 1
+          done
+          test "${CONTROL_PLANE_READY}" = "true"
+          mkdir -p runner-release-evidence
+          bun run runner:release:smoke -- --image "${IMMUTABLE_IMAGE}" --provider local_docker \
+            > runner-release-evidence/runner-release-smoke.json
+          jq -e '.ok == true and .code == "passed" and .cleanupVerified == true' \
+            runner-release-evidence/runner-release-smoke.json >/dev/null
+          VERIFIED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          echo "VERIFIED_AT=${VERIFIED_AT}" >> "${GITHUB_ENV}"
+
+      - name: Build signed Verified Release joined to the Approved Snapshot
+        env:
+          BRUNO_RELEASE_SIGNING_KEY_PEM: ${{ secrets.BRUNO_RELEASE_SIGNING_KEY_PEM }}
+          IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
+        run: |
+          set -euo pipefail
+          bun run runner:release:bundle -- \
+            --runner-image "${IMMUTABLE_IMAGE}" \
+            --snapshot-oci-reference "${BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE}" \
+            --snapshot-bundle-digest "${BRUNO_RELEASE_APPROVED_SNAPSHOT_BUNDLE_DIGEST}" \
+            --snapshot-bundle approved-snapshot/runner-snapshot-bundle.json \
+            --smoke-result runner-release-evidence/runner-release-smoke.json \
+            --run-id "${GITHUB_RUN_ID}" \
+            --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --full-fixture-passed-at "${VERIFIED_AT}" \
+            --cleanup-verified-at "${VERIFIED_AT}" \
+            --bundle-out runner-release-evidence/runner-release-bundle.json \
+            --digest-out runner-release-evidence/runner-release-bundle.sha256
+          echo "${IMMUTABLE_IMAGE}" > runner-release-evidence/immutable-image.txt
+
+      - name: Publish and re-verify digest-addressed Verified Release
+        run: |
+          set -euo pipefail
+          bun run runner:release:registry -- publish \
+            --repository "ghcr.io/${{ github.repository_owner }}/bruno-runner-release-bundles" \
+            --bundle runner-release-evidence/runner-release-bundle.json \
+            --digest runner-release-evidence/runner-release-bundle.sha256 \
+            --public-key-out runner-release-evidence/runner-release-signing-key.pem \
+            --publication-out runner-release-evidence/runner-release-oci-publication.json
+          echo "Published a signed Verified Release after the full local fixture and exact cleanup; no DigitalOcean resource was requested and the workflow does not claim to boot the provider snapshot." >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Attest allowlisted Verified Release artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            runner-release-evidence/runner-release-bundle.json
+            runner-release-evidence/runner-release-bundle.sha256
+            runner-release-evidence/runner-release-signing-key.pem
+            runner-release-evidence/runner-release-oci-publication.json
+
+      - name: Upload Verified Release convenience artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-runner-release
+          path: |
+            runner-release-evidence/immutable-image.txt
+            runner-release-evidence/runner-release-bundle.json
+            runner-release-evidence/runner-release-bundle.sha256
+            runner-release-evidence/runner-release-signing-key.pem
+            runner-release-evidence/runner-release-oci-publication.json
+            runner-release-evidence/runner-release-smoke.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Record safe failure summary
+        if: failure()
+        run: echo "Verified Release failed; promotion is blocked and no DigitalOcean resource was requested." >> "${GITHUB_STEP_SUMMARY}"
+
+  deploy:
+    if: inputs.action == 'release'
+    name: Deploy Verified Release to production
+    needs:
+      - publish
+      - stage-control-plane
+      - canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    env:
+      PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+      IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
+      CANDIDATE_DEPLOYMENT_URL: ${{ needs.stage-control-plane.outputs.deployment-url }}
+
+    steps:
+      - name: Check out exact verified commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Promote the exact Verified Release deployment
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -227,7 +393,7 @@ jobs:
             sleep 5
           done
           test "${VERIFIED}" = "true"
-          echo "Production requires the published immutable runner with batch size 1; the simulated-Droplet canary is temporarily disabled." >> "${GITHUB_STEP_SUMMARY}"
+          echo "Production requires the full-fixture Verified Release runner with batch size 1." >> "${GITHUB_STEP_SUMMARY}"
 
   rollback:
     if: inputs.action == 'rollback'

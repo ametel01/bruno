@@ -62,6 +62,7 @@ export type DeploymentWakeupPublisher = {
 export type DeploymentWakeupDispatchDependencies = {
   createConnection?: () => DatabaseConnection;
   readConfig?: () => DeploymentDispatchConfig;
+  readPinnedQstashConfig?: () => DeploymentDispatchConfig;
   publisher?: DeploymentWakeupPublisher;
   now?: () => Date;
   randomUUID?: () => string;
@@ -295,18 +296,22 @@ export async function publishDeploymentWakeupAfterCommit(
   payload: DeploymentWakeupPayload,
   dependencies: DeploymentWakeupDispatchDependencies = {},
 ): Promise<"published" | "cron_mode" | "unavailable"> {
-  const config = (dependencies.readConfig ?? readDeploymentDispatchConfig)();
-  if (!config.ok) return "unavailable";
-  if (config.mode === "cron") return "cron_mode";
-
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now?.() ?? new Date();
   const leaseOwner = `publish:${dependencies.randomUUID?.() ?? randomUUID()}`;
-  const publisher =
-    dependencies.publisher ?? createQstashDeploymentWakeupPublisher({ token: config.token });
 
   try {
+    const dispatchMode = await readPinnedDeploymentDispatchMode(
+      connection.db,
+      payload.deploymentId,
+    );
+    if (dispatchMode === "cron") return "cron_mode";
+    if (dispatchMode !== "qstash") return "unavailable";
+    const config = resolvePinnedQstashConfig(dependencies);
+    if (!config) return "unavailable";
+    const publisher =
+      dependencies.publisher ?? createQstashDeploymentWakeupPublisher({ token: config.token });
     const claimed = await connection.db.transaction((tx) =>
       claimDeploymentWakeupForPublish(tx, {
         payload,
@@ -400,10 +405,8 @@ export async function publishLatestDeploymentWakeupAfterCommit(
 export async function sweepDeploymentWakeupOutbox(
   dependencies: DeploymentWakeupDispatchDependencies = {},
 ): Promise<{ published: number }> {
-  const config = (dependencies.readConfig ?? readDeploymentDispatchConfig)();
-  if (!config.ok || config.mode === "cron") {
-    return { published: 0 };
-  }
+  const config = resolvePinnedQstashConfig(dependencies);
+  if (!config) return { published: 0 };
 
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
@@ -467,6 +470,20 @@ export async function sweepDeploymentWakeupOutbox(
   } finally {
     if (ownsConnection) await connection.close();
   }
+}
+
+function resolvePinnedQstashConfig(
+  dependencies: DeploymentWakeupDispatchDependencies,
+): Extract<DeploymentDispatchConfig, { ok: true; mode: "qstash" }> | null {
+  const selected = (dependencies.readConfig ?? readDeploymentDispatchConfig)();
+  if (selected.ok && selected.mode === "qstash") return selected;
+  const pinned = dependencies.readPinnedQstashConfig
+    ? dependencies.readPinnedQstashConfig()
+    : readDeploymentDispatchConfig({
+        ...process.env,
+        BRUNO_DEPLOYMENT_DISPATCH_MODE: "qstash",
+      });
+  return pinned.ok && pinned.mode === "qstash" ? pinned : null;
 }
 
 function waitForDeploymentWakeupPublish<T>(
@@ -820,6 +837,11 @@ async function claimNextDeploymentWakeupForPublish(
           publish_lease_expires_at = null,
           updated_at = ${nowIso}
       where ${agentDeploymentWakeups.publishAttemptCount} >= ${input.maxPublishAttempts}
+        and exists (
+          select 1 from ${agentDeployments}
+          where ${agentDeployments.id} = ${agentDeploymentWakeups.deploymentId}
+            and ${agentDeployments.deploymentChoices} ->> 'dispatchMode' = 'qstash'
+        )
         and (
           ${agentDeploymentWakeups.state} in ('pending', 'failed')
           or (
@@ -839,6 +861,11 @@ async function claimNextDeploymentWakeupForPublish(
           )
         )
         and ${agentDeploymentWakeups.publishAttemptCount} < ${input.maxPublishAttempts}
+        and exists (
+          select 1 from ${agentDeployments}
+          where ${agentDeployments.id} = ${agentDeploymentWakeups.deploymentId}
+            and ${agentDeployments.deploymentChoices} ->> 'dispatchMode' = 'qstash'
+        )
       order by ${agentDeploymentWakeups.dueAt}, ${agentDeploymentWakeups.updatedAt}, ${agentDeploymentWakeups.id}
       for update skip locked
       limit 1
@@ -866,6 +893,19 @@ async function claimNextDeploymentWakeupForPublish(
         dueAt: toIso(claimed.dueAt),
       }
     : null;
+}
+
+async function readPinnedDeploymentDispatchMode(
+  db: DeploymentDispatchDatabase,
+  deploymentId: string,
+): Promise<"cron" | "qstash" | null> {
+  const [row] = await db.execute<{ dispatchMode: string | null }>(sql`
+    select ${agentDeployments.deploymentChoices} ->> 'dispatchMode' as "dispatchMode"
+    from ${agentDeployments}
+    where ${agentDeployments.id} = ${deploymentId}
+    limit 1
+  `);
+  return row?.dispatchMode === "cron" || row?.dispatchMode === "qstash" ? row.dispatchMode : null;
 }
 
 async function markDeploymentWakeupPublished(

@@ -4,6 +4,7 @@ import {
   createAgentDeploymentForRunnerReplacement,
   retryAgentDeploymentForUser,
 } from "@/src/server/agents/agent-deployment-retry";
+import { captureAgentDeploymentChoicesFromEnvironment } from "@/src/server/agents/agent-deployment-choices";
 import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentDeployments, agentEvents, agents, users } from "@/src/server/db/schema";
@@ -236,6 +237,10 @@ async function seedFailedDeployment(
     configRevision: "cfg-retry-1",
     idempotencyKey: options.key ?? "Failed-Key-001",
     rolloutConfigurationGeneration: options.rolloutConfigurationGeneration ?? 1,
+    deploymentChoices: captureAgentDeploymentChoicesFromEnvironment(
+      {},
+      options.rolloutConfigurationGeneration ?? 1,
+    ),
     errorCode: "runner_start_failed",
     failedAt: new Date(NOW.getTime() - 1_000),
     createdAt: new Date(NOW.getTime() - 2_000),

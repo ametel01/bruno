@@ -335,16 +335,17 @@ bun run deploy:prod
 
 Run this only from a clean `main` branch after pushing the intended release commit. It dispatches the
 protected `Deploy production application` workflow, which publishes an immutable runner image,
-scans it, stages the full application without production traffic, promotes that exact deployment,
-and verifies the production health and required-release contract. The slow zero-Droplet runner
-canary is temporarily disabled for faster development iteration; releases made while it is disabled
-do not produce new rollback-verification artifacts. Follow the returned GitHub Actions URL and
-approve the protected environments when prompted. See
+scans it, stages the full application without production traffic, and runs the credential-free full
+runner fixture against the exact approved Snapshot Attestation v2 identities. The workflow signs
+and publishes that Verified Release by immutable GHCR OCI digest before it promotes the exact staged
+deployment and verifies the production health and required-release contract. The canary creates no
+DigitalOcean resource. Follow the returned GitHub Actions URL and approve the protected environments
+when prompted. See
 [Production application deployments](./docs/RUNNER_RELEASES.md) for the release and rollback
 contract.
 
 Do not run `vercel deploy --prod` directly when ready agent creation is enabled. Direct deployment
-does not supply the release-workflow-authorized `BRUNO_RUNNER_IMAGE` digest and build marker, so
+does not supply the Verified Release `BRUNO_RUNNER_IMAGE` digest and build marker, so
 the production build fails closed before migrations.
 
 To create a preview first, configure the preview environment and run `vercel deploy`. Preview auth

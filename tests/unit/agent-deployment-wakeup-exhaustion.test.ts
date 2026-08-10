@@ -1,16 +1,17 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createAgentDeploymentForUser } from "@/src/server/agents/agent-deployments";
+import { captureAgentDeploymentChoicesFromEnvironment } from "@/src/server/agents/agent-deployment-choices";
 import {
   claimDeploymentWakeupDelivery,
+  type DeploymentWakeupPayload,
   inspectExhaustedDeploymentWakeup,
   listExhaustedDeploymentWakeups,
-  type DeploymentWakeupPayload,
   publishLatestDeploymentWakeupAfterCommit,
   replaceDeploymentWakeupInTransaction,
   replayExhaustedDeploymentWakeupInTransaction,
   sweepDeploymentWakeupOutbox,
 } from "@/src/server/agents/agent-deployment-dispatch";
+import { createAgentDeploymentForUser } from "@/src/server/agents/agent-deployments";
 import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentDeployments, agentDeploymentWakeups, agents, users } from "@/src/server/db/schema";
@@ -170,6 +171,42 @@ describe("deployment wakeup exhaustion", () => {
       publishAttemptCount: 1,
       safeErrorCode: "publish_authentication_rejected",
     });
+  });
+
+  it("continues an active QStash deployment after defaults roll back to cron", async () => {
+    const payload = await createWakeupPayload(connection);
+    const publisher = { publish: vi.fn(async () => ({ messageId: "must-not-publish" })) };
+
+    await expect(
+      publishLatestDeploymentWakeupAfterCommit(payload.deploymentId, {
+        createConnection: () => connection,
+        readConfig: () => ({ ok: true, mode: "cron" }),
+        readPinnedQstashConfig: () => qstashConfig(12),
+        publisher,
+        now: () => NOW,
+      }),
+    ).resolves.toBe("published");
+    expect(publisher.publish).toHaveBeenCalledOnce();
+    const [deployment] = await connection.db
+      .select({ choices: agentDeployments.deploymentChoices })
+      .from(agentDeployments);
+    expect(deployment?.choices).toMatchObject({ dispatchMode: "qstash" });
+  });
+
+  it("sweeps pinned QStash work after defaults roll back to cron", async () => {
+    await createWakeupPayload(connection);
+    const publisher = { publish: vi.fn(async () => ({ messageId: "pinned-qstash-sweep" })) };
+
+    await expect(
+      sweepDeploymentWakeupOutbox({
+        createConnection: () => connection,
+        readConfig: () => ({ ok: true, mode: "cron" }),
+        readPinnedQstashConfig: () => qstashConfig(12),
+        publisher,
+        now: () => NOW,
+      }),
+    ).resolves.toEqual({ published: 1 });
+    expect(publisher.publish).toHaveBeenCalledOnce();
   });
 
   it("exhausts a bound-consuming expired publication lease without another provider effect", async () => {
@@ -450,6 +487,10 @@ async function createWakeupPayload(
       agentId: AGENT_ID,
       configRevision: "cfg-poison-wakeup",
       idempotencyKey: "poison-wakeup",
+      deploymentChoices: {
+        ...captureAgentDeploymentChoicesFromEnvironment(process.env, 1),
+        dispatchMode: "qstash",
+      },
       now: NOW,
     }),
   );

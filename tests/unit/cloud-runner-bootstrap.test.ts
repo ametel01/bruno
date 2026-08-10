@@ -254,6 +254,57 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).not.toContain("docker_apt_repository");
   });
 
+  it("injects exact release-attested evidence only for snapshot boot", () => {
+    const releaseDigest = `sha256:${"b".repeat(64)}`;
+    const snapshotDigest = `sha256:${"c".repeat(64)}`;
+    const snapshotOci = `ghcr.io/ametel01/bruno-runner-snapshot-bundles@sha256:${"d".repeat(64)}`;
+    const content = buildCloudRunnerBootstrapContent({
+      appBaseUrl: "https://app.bruno.test",
+      registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
+      runnerEndpointUrl: "https://runner.bruno.test",
+      runnerImage: IMMUTABLE_RUNNER_IMAGE,
+      bootMode: "snapshot",
+      bootValidation: {
+        mode: "release_attested",
+        bundleBytes: '{"signed":"release"}',
+        approvedReleaseDigest: releaseDigest,
+        releaseTrustSetBytes: '{"release-current":"public-key"}',
+        snapshotOciReference: snapshotOci,
+        snapshotBundleDigest: snapshotDigest,
+      },
+    });
+
+    expect(content.userData).toContain("BRUNO_RUNNER_BOOT_VALIDATION_MODE=release_attested");
+    expect(content.userData).toContain(`BRUNO_RUNNER_APPROVED_RELEASE_DIGEST=${releaseDigest}`);
+    expect(content.userData).toContain(`BRUNO_RUNNER_APPROVED_SNAPSHOT_OCI=${snapshotOci}`);
+    expect(content.userData).toContain(
+      `BRUNO_RUNNER_APPROVED_SNAPSHOT_BUNDLE_DIGEST=${snapshotDigest}`,
+    );
+    expect(content.safeSummary.bootValidation).toEqual({
+      mode: "release_attested",
+      releaseBundleDigest: releaseDigest,
+      snapshotBundleDigest: snapshotDigest,
+    });
+    expect(JSON.stringify(content.safeSummary)).not.toContain("public-key");
+
+    expect(() =>
+      buildCloudRunnerBootstrapContent({
+        appBaseUrl: "https://app.bruno.test",
+        registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
+        runnerEndpointUrl: "https://runner.bruno.test",
+        bootMode: "stock",
+        bootValidation: {
+          mode: "release_attested",
+          bundleBytes: "{}",
+          approvedReleaseDigest: releaseDigest,
+          releaseTrustSetBytes: "{}",
+          snapshotOciReference: snapshotOci,
+          snapshotBundleDigest: snapshotDigest,
+        },
+      }),
+    ).toThrow("Stock runner bootstrap must use full boot validation");
+  });
+
   it("marks local tagged images with the explicit development identity seam", () => {
     const content = buildCloudRunnerBootstrapContent({
       appBaseUrl: "https://app.bruno.test",
