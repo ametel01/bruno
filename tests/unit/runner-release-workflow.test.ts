@@ -31,7 +31,10 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).toContain("environment: runner-release-canary");
     expect(workflowSource).toContain("environment: production");
     expect(workflowSource).toContain(
-      "canary:\n    if: inputs.action == 'release' || inputs.action == 'verified-release'",
+      "(inputs.action == 'release' || inputs.action == 'verified-release') &&",
+    );
+    expect(workflowSource).toContain(
+      "(inputs.action != 'release' || needs.publish.result == 'success')",
     );
     expect(workflowSource).toContain("needs: publish");
     expect(workflowSource).toContain(
@@ -44,13 +47,28 @@ describe("runner release workflow contract", () => {
 
   it("can publish a Verified Release without staging or promoting production", () => {
     expect(workflowSource).toContain("- verified-release");
-    expect(workflowSource).toContain(
-      "publish:\n    if: inputs.action == 'release' || inputs.action == 'verified-release'",
-    );
+    expect(workflowSource).toContain("publish:\n    if: inputs.action == 'release'");
     expect(workflowSource).toContain("stage-control-plane:\n    if: inputs.action == 'release'");
     expect(workflowSource).toContain("deploy:\n    if: inputs.action == 'release'");
     expect(packageJson.scripts["runner:release:publish-verified"]).toBe(
       "gh workflow run deploy-production.yml --repo ametel01/bruno --ref main --raw-field action=verified-release",
+    );
+    expect(workflowSource).toContain(
+      'RELEASE_RUNNER_IMAGE="$' + '{{ needs.publish.outputs.immutable-image }}"',
+    );
+    expect(workflowSource).toContain(
+      'if [[ "$' + '{{ inputs.action }}" = "verified-release" ]]; then',
+    );
+    expect(workflowSource).toContain(
+      "RELEASE_RUNNER_IMAGE=\"$(jq -r '.manifest.runnerImage.reference // empty' approved-snapshot/runner-snapshot-bundle.json)\"",
+    );
+    expect(workflowSource).toContain('--runner-image "$' + '{RELEASE_RUNNER_IMAGE}"');
+    expect(workflowSource).toContain(
+      'echo "BRUNO_RUNNER_IMAGE=$' + '{RELEASE_RUNNER_IMAGE}" >> "$' + '{GITHUB_ENV}"',
+    );
+    expect(workflowSource).toContain("Scan the retained Approved Snapshot runner");
+    expect(workflowSource).toContain(
+      "image-ref: $" + "{{ steps.approved-snapshot.outputs.runner-image }}",
     );
   });
 
@@ -83,6 +101,7 @@ describe("runner release workflow contract", () => {
     }
     expect(workflowSource).toContain("name: trivy-runner-image-$" + "{{ github.sha }}");
     expect(workflowSource).toContain("path: trivy-runner-image.sarif");
+    expect(workflowSource).toContain("name: trivy-approved-runner-image-$" + "{{ github.sha }}");
     expect(agentWorkflowSource).toContain("name: trivy-agent-image-$" + "{{ github.sha }}");
     expect(agentWorkflowSource).toContain("path: trivy-agent-image.sarif");
   });

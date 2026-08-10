@@ -33,7 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exact runner/control-plane contract and cleanup evidence to the selected Snapshot Attestation v2
   bundle, sign the result with an identified Ed25519 key, and publish and re-verify active and
   previous Verified Release bundles by immutable GHCR OCI digest without exposing DigitalOcean
-  credentials or claiming a provider-snapshot boot.
+  credentials or claiming a provider-snapshot boot. Publication-only runs consume and scan the
+  runner already retained by the signed Approved Snapshot instead of creating an unrelated new
+  candidate; production releases still require the newly built runner to match that snapshot.
 - Protected snapshot builds now publish each sanitized signed Snapshot Attestation v2 bundle to
   GHCR as an OCI artifact, return only its immutable OCI manifest reference plus exact bundle
   digest, re-pull and verify both identities, retain the signing public key with the bundle, and
