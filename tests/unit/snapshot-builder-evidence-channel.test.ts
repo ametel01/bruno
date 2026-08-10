@@ -159,6 +159,9 @@ describe("snapshot builder GitHub evidence channel", () => {
       status: "progress_observed",
       lastStage: "images_preloaded",
       sourceUrl: "https://github.com/ametel01/bruno/issues/294#issuecomment-12",
+      localStatus: "unavailable",
+      localStage: null,
+      cloudInitStatus: "unknown",
     });
   });
 
@@ -182,6 +185,72 @@ describe("snapshot builder GitHub evidence channel", () => {
       schemaVersion: "bruno.runner.snapshot-builder-diagnostics.v1",
       status: "no_progress_observed",
       lastStage: null,
+      localStatus: "unavailable",
+      localStage: null,
+      cloudInitStatus: "unknown",
+    });
+  });
+
+  it("combines callback evidence with allowlisted local builder diagnostics", async () => {
+    const channel = createSnapshotBuilderEvidenceChannel({
+      token: "github-token-test-value",
+      repository: "ametel01/bruno",
+      issueNumber: 294,
+      runId: "31339201376",
+      nonce: "11111111-1111-4111-8111-111111111111",
+      authenticationSecret: AUTHENTICATION_SECRET,
+      fetch: async () => Response.json([]),
+      readLocalDiagnostics: async () => ({
+        ok: true as const,
+        value: {
+          localStage: "bootstrap_started" as const,
+          cloudInitStatus: "running" as const,
+        },
+      }),
+    });
+
+    await expect(
+      channel.readDiagnostics(
+        { providerResourceId: "7654321", privateKeyPath: "/tmp/builder-key" },
+        { signal: new AbortController().signal },
+      ),
+    ).resolves.toEqual({
+      schemaVersion: "bruno.runner.snapshot-builder-diagnostics.v1",
+      status: "no_progress_observed",
+      lastStage: null,
+      localStatus: "progress_observed",
+      localStage: "bootstrap_started",
+      cloudInitStatus: "running",
+    });
+  });
+
+  it("rejects non-allowlisted local diagnostic output", async () => {
+    const channel = createSnapshotBuilderEvidenceChannel({
+      token: "github-token-test-value",
+      repository: "ametel01/bruno",
+      issueNumber: 294,
+      runId: "31339201376",
+      nonce: "11111111-1111-4111-8111-111111111111",
+      authenticationSecret: AUTHENTICATION_SECRET,
+      fetch: async () => Response.json([]),
+      readLocalDiagnostics: async () => ({
+        ok: true as const,
+        value: {
+          localStage: "../../etc/shadow" as never,
+          cloudInitStatus: "done" as const,
+        },
+      }),
+    });
+
+    await expect(
+      channel.readDiagnostics(
+        { providerResourceId: "7654321", privateKeyPath: "/tmp/builder-key" },
+        { signal: new AbortController().signal },
+      ),
+    ).resolves.toMatchObject({
+      localStatus: "unavailable",
+      localStage: null,
+      cloudInitStatus: "unknown",
     });
   });
 });

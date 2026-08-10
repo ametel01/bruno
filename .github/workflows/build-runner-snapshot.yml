@@ -183,7 +183,7 @@ jobs:
             const removed = new Set(sanitation?.removedPaths ?? []);
             const scanned = new Set(sanitation?.scannedPaths ?? []);
             const markers = new Set(sanitation?.hostileMarkers ?? []);
-            for (const value of ["/etc/bruno/runner.env", "/root/.docker/config.json", "/var/lib/cloud", "/root/.ssh/authorized_keys", "/root/.ssh/authorized_keys2", "/etc/ssh/ssh_host_ed25519_key", "/etc/machine-id", "/var/log/cloud-init-output.log", "/run/bruno-snapshot-builder/evidence.env", "/etc/systemd/system/bruno-snapshot-finalize.service", "/usr/local/sbin/bruno-finalize-snapshot-sanitation", "/run/bruno-snapshot-builder/publish-evidence.py"]) {
+            for (const value of ["/etc/bruno/runner.env", "/root/.docker/config.json", "/var/lib/cloud", "/root/.ssh/authorized_keys", "/root/.ssh/authorized_keys2", "/etc/ssh/ssh_host_ed25519_key", "/etc/machine-id", "/var/log/cloud-init-output.log", "/run/bruno-snapshot-builder/bootstrap-stage", "/run/bruno-snapshot-builder/evidence.env", "/etc/systemd/system/bruno-snapshot-finalize.service", "/usr/local/sbin/bruno-finalize-snapshot-sanitation", "/run/bruno-snapshot-builder/publish-evidence.py"]) {
               if (!removed.has(value)) throw new Error("missing sanitation removal evidence");
             }
             for (const value of ["/etc", "/root", "/var/lib/bruno", "/var/log"]) {

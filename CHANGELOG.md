@@ -193,6 +193,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Protected snapshot builders now retain an allowlisted local stage before metadata and network
+  access, continue through transient progress-callback failures while keeping authenticated
+  completion mandatory, attach normalized pinned-SSH/cloud-init diagnostics to evidence timeouts,
+  and treat exact ephemeral-key deletion `404` responses as authoritative absence so cleanup cannot
+  mask the original build failure.
 - Protected snapshot builders now execute direct Bash user-data, publish their first progress stage
   before package installation, distinguish evidence timeouts from failed fixture assertions, and
   retain only allowlisted callback-stage diagnostics when completion never arrives.

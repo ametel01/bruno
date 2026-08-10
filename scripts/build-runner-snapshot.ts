@@ -35,13 +35,16 @@ try {
   if (evidenceRepository !== "ametel01/bruno") {
     throw new Error("GITHUB_REPOSITORY must identify ametel01/bruno.");
   }
+  const digitalOceanProvider = new DigitalOceanApiProvider({ token });
+  provider = digitalOceanProvider;
   const evidenceChannel = createSnapshotBuilderEvidenceChannel({
     token: evidenceToken,
     repository: evidenceRepository,
     issueNumber: evidenceIssueNumber,
     runId: args.runId,
+    readLocalDiagnostics:
+      digitalOceanProvider.readSnapshotBuilderDiagnostics.bind(digitalOceanProvider),
   });
-  provider = new DigitalOceanApiProvider({ token });
   const builderSshPrivateKeyPath = join(tempDir, "builder_ssh_key");
 
   await execFileAsync(

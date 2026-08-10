@@ -204,6 +204,27 @@ export type DigitalOceanSnapshotBuilderEvidence = {
   sourceUrl?: string;
 };
 
+export type DigitalOceanSnapshotBuilderLocalStage =
+  | "user_data_started"
+  | "metadata_resolved"
+  | "bootstrap_started"
+  | "docker_installed"
+  | "images_preloaded"
+  | "fixture_complete"
+  | "complete";
+
+export type DigitalOceanSnapshotBuilderCloudInitStatus =
+  | "running"
+  | "done"
+  | "error"
+  | "disabled"
+  | "unknown";
+
+export type DigitalOceanSnapshotBuilderDiagnostics = {
+  localStage: DigitalOceanSnapshotBuilderLocalStage | null;
+  cloudInitStatus: DigitalOceanSnapshotBuilderCloudInitStatus;
+};
+
 export type DigitalOceanActionInput = {
   providerResourceId: string;
 };
@@ -258,7 +279,7 @@ export interface DigitalOceanProvider {
   deleteSshKey?(
     input: DigitalOceanDeleteSshKeyInput,
     context?: DigitalOceanProviderRequestContext,
-  ): Promise<DigitalOceanProviderResult<{ deleted: true }>>;
+  ): Promise<DigitalOceanProviderResult<{ deleted: true; alreadyAbsent?: true }>>;
   verifySshKeyAbsent?(
     input: DigitalOceanDeleteSshKeyInput,
     context?: DigitalOceanProviderRequestContext,
@@ -315,6 +336,10 @@ export interface DigitalOceanProvider {
     input: DigitalOceanReadSnapshotBuilderEvidenceInput,
     context?: DigitalOceanProviderRequestContext,
   ): Promise<DigitalOceanProviderResult<DigitalOceanSnapshotBuilderEvidence>>;
+  readSnapshotBuilderDiagnostics?(
+    input: DigitalOceanReadSnapshotBuilderEvidenceInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanSnapshotBuilderDiagnostics>>;
   deleteImage?(
     input: DigitalOceanDeleteImageInput,
     context?: DigitalOceanProviderRequestContext,
@@ -656,7 +681,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
   async deleteSshKey(
     input: DigitalOceanDeleteSshKeyInput,
     context?: DigitalOceanProviderRequestContext,
-  ): Promise<DigitalOceanProviderResult<{ deleted: true }>> {
+  ): Promise<DigitalOceanProviderResult<{ deleted: true; alreadyAbsent?: true }>> {
     const keyResource = this.#client.v2.account.keys.bySsh_key_id?.(input.id);
 
     if (!keyResource) {
@@ -667,9 +692,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
       };
     }
 
-    const response = await runSdkStep("cleanup_failed", () => keyResource.delete(context), context);
-
-    return response.ok ? { ok: true, value: { deleted: true } } : response;
+    return await runSdkIdempotentDelete(() => keyResource.delete(context), context);
   }
 
   async verifySshKeyAbsent(
@@ -1409,6 +1432,110 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
         ok: false,
         reason: "builder_evidence_not_ready",
         message: "Snapshot builder evidence is not ready yet.",
+      };
+    } finally {
+      await rm(tempKnownHosts, { recursive: true, force: true });
+    }
+  }
+
+  async readSnapshotBuilderDiagnostics(
+    input: DigitalOceanReadSnapshotBuilderEvidenceInput,
+    context?: DigitalOceanProviderRequestContext,
+  ): Promise<DigitalOceanProviderResult<DigitalOceanSnapshotBuilderDiagnostics>> {
+    const resource = await this.readResource(
+      { providerResourceId: input.providerResourceId },
+      context,
+    );
+
+    if (!resource.ok) return resource;
+    if (!input.privateKeyPath) {
+      return {
+        ok: false,
+        reason: "resource_not_found",
+        message: "Snapshot builder diagnostics retrieval prerequisites were unavailable.",
+      };
+    }
+    if (!resource.value.publicIpv4) {
+      return {
+        ok: false,
+        reason: "builder_evidence_not_ready",
+        message: "Snapshot builder public network identity is not ready yet.",
+      };
+    }
+
+    const remoteDirectory = input.remoteDirectory ?? "/run/bruno-snapshot-builder";
+    const tempKnownHosts = await mkdtemp(join(tmpdir(), "bruno-snapshot-known-hosts-"));
+
+    try {
+      const knownHostsPath = join(tempKnownHosts, "known_hosts");
+      const pinnedHostKey = await pinSnapshotBuilderHostKey({
+        host: resource.value.publicIpv4,
+        knownHostsPath,
+        ...(input.expectedHostKeySha256 === undefined
+          ? {}
+          : { expectedHostKeySha256: input.expectedHostKeySha256 }),
+        ...(context === undefined ? {} : { context }),
+      });
+      if (!pinnedHostKey.ok) return pinnedHostKey;
+
+      const stagePath = shellPath(`${remoteDirectory}/bootstrap-stage`);
+      const command = [
+        "set -euo pipefail",
+        "stage=''",
+        `if IFS= read -r candidate < ${stagePath}; then`,
+        '  case "$candidate" in',
+        '    user_data_started|metadata_resolved|bootstrap_started|docker_installed|images_preloaded|fixture_complete|complete) stage="$candidate" ;;',
+        "    *) stage='invalid' ;;",
+        "  esac",
+        "fi",
+        "cloud_init_status='unknown'",
+        "if command -v cloud-init >/dev/null 2>&1; then",
+        '  cloud_init_output="$(cloud-init status 2>/dev/null || true)"',
+        '  case "$cloud_init_output" in',
+        '    "status: running"*) cloud_init_status="running" ;;',
+        '    "status: done"*) cloud_init_status="done" ;;',
+        '    "status: error"*) cloud_init_status="error" ;;',
+        '    "status: disabled"*) cloud_init_status="disabled" ;;',
+        "  esac",
+        "fi",
+        `printf '%s\\n%s\\n' "$stage" "$cloud_init_status"`,
+      ].join("\n");
+      const { stdout } = await execFileAsync(
+        "ssh",
+        [
+          "-i",
+          input.privateKeyPath,
+          "-o",
+          "BatchMode=yes",
+          "-o",
+          "IdentitiesOnly=yes",
+          "-o",
+          "StrictHostKeyChecking=yes",
+          "-o",
+          `UserKnownHostsFile=${knownHostsPath}`,
+          `root@${resource.value.publicIpv4}`,
+          command,
+        ],
+        {
+          encoding: "utf8",
+          maxBuffer: 4 * 1024,
+          signal: context?.signal,
+          timeout: 30_000,
+        },
+      );
+      const diagnostics = parseSnapshotBuilderDiagnosticsOutput(stdout);
+      return diagnostics
+        ? { ok: true, value: diagnostics }
+        : {
+            ok: false,
+            reason: "builder_evidence_not_ready",
+            message: "Snapshot builder diagnostics were not allowlisted.",
+          };
+    } catch {
+      return {
+        ok: false,
+        reason: "builder_evidence_not_ready",
+        message: "Snapshot builder diagnostics are not ready yet.",
       };
     } finally {
       await rm(tempKnownHosts, { recursive: true, force: true });
@@ -2216,6 +2343,7 @@ export class FakeDigitalOceanProvider
             "/etc/ssh/ssh_host_ed25519_key",
             "/etc/machine-id",
             "/var/log/cloud-init-output.log",
+            "/run/bruno-snapshot-builder/bootstrap-stage",
             ...(userData.includes("bruno.runner.snapshot-builder-evidence.v1")
               ? [
                   "/run/bruno-snapshot-builder/evidence.env",
@@ -2418,6 +2546,37 @@ async function observeSdkResource<T>(
   }
 }
 
+function parseSnapshotBuilderDiagnosticsOutput(
+  value: string,
+): DigitalOceanSnapshotBuilderDiagnostics | null {
+  const lines = value.replace(/\n$/, "").split("\n");
+  if (lines.length !== 2) return null;
+  const [stage, cloudInitStatus] = lines;
+  const localStage = stage === "" ? null : stage;
+  if (
+    !(
+      localStage === null ||
+      localStage === "user_data_started" ||
+      localStage === "metadata_resolved" ||
+      localStage === "bootstrap_started" ||
+      localStage === "docker_installed" ||
+      localStage === "images_preloaded" ||
+      localStage === "fixture_complete" ||
+      localStage === "complete"
+    ) ||
+    !(
+      cloudInitStatus === "running" ||
+      cloudInitStatus === "done" ||
+      cloudInitStatus === "error" ||
+      cloudInitStatus === "disabled" ||
+      cloudInitStatus === "unknown"
+    )
+  ) {
+    return null;
+  }
+  return { localStage, cloudInitStatus };
+}
+
 function apiDropletMatchesOwnedSet(
   droplet: DigitalOceanApiDroplet | null | undefined,
   input: DigitalOceanOwnedSetExpectation,
@@ -2546,6 +2705,47 @@ async function runSdkStep<T>(
     return {
       ok: false,
       reason: context?.signal.aborted ? abortedReason : reason,
+      message: `DigitalOcean API request failed${readSdkStatusSuffix(error)}.`,
+    };
+  }
+}
+
+async function runSdkIdempotentDelete(
+  execute: () => Promise<unknown>,
+  context?: DigitalOceanProviderRequestContext,
+): Promise<DigitalOceanProviderResult<{ deleted: true; alreadyAbsent?: true }>> {
+  if (context?.signal.aborted) {
+    return {
+      ok: false,
+      reason: "cleanup_failed",
+      message: "DigitalOcean API request was cancelled before completion.",
+    };
+  }
+
+  try {
+    await execute();
+    return { ok: true, value: { deleted: true } };
+  } catch (error) {
+    if (context?.signal.aborted) {
+      return {
+        ok: false,
+        reason: "cleanup_failed",
+        message: "DigitalOcean API request was cancelled before completion.",
+      };
+    }
+    if (readSdkStatus(error) === 404) {
+      return { ok: true, value: { deleted: true, alreadyAbsent: true } };
+    }
+    if (process.env.NODE_ENV !== "test") {
+      digitalOceanProviderLogger.error("api_request_failed", error, {
+        reason: "cleanup_failed",
+        providerStatus: readSdkStatus(error),
+        aborted: Boolean(context?.signal.aborted),
+      });
+    }
+    return {
+      ok: false,
+      reason: "cleanup_failed",
       message: `DigitalOcean API request failed${readSdkStatusSuffix(error)}.`,
     };
   }

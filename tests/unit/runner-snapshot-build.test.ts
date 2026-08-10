@@ -31,6 +31,9 @@ describe("runner snapshot build orchestration", () => {
     expect(userData).toMatch(/^#!\/usr\/bin\/env bash\nset -euo pipefail\n/);
     expect(userData).not.toContain("#cloud-config");
     expect(userData).not.toContain("runcmd:");
+    expect(userData.indexOf("user_data_started")).toBeLessThan(
+      userData.indexOf("http://169.254.169.254/metadata/v1/id"),
+    );
     expect(syntax).toMatchObject({ status: 0, stderr: "" });
   });
 
@@ -126,6 +129,11 @@ describe("runner snapshot build orchestration", () => {
     expect(command).toContain("images_preloaded");
     expect(command).toContain("fixture_complete");
     expect(command).toContain('/run/bruno-snapshot-builder/publish-evidence.py "complete"');
+    expect(command).toContain('/run/bruno-snapshot-builder/publish-evidence.py "$1" || true');
+    expect(command).not.toContain(
+      '/run/bruno-snapshot-builder/publish-evidence.py "complete" || true',
+    );
+    expect(command).toContain("/run/bruno-snapshot-builder/bootstrap-stage");
     expect(command.indexOf("rm -rf /var/lib/cloud /root/.ssh/authorized_keys")).toBeLessThan(
       command.indexOf('/run/bruno-snapshot-builder/publish-evidence.py "complete"'),
     );
@@ -348,6 +356,26 @@ describe("runner snapshot build orchestration", () => {
     );
   });
 
+  it("preserves the build failure when the exact ephemeral SSH key was already absent", async () => {
+    const provider = new AlreadyAbsentSshKeyAfterEvidenceTimeoutProvider();
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      builderSshKeyId: "ssh-key-123",
+      builderEvidencePollIntervalMs: 0,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "builder_evidence_timeout",
+      cleanup: {
+        deletedSshKeyId: "ssh-key-123",
+        sshKeyAbsenceVerified: true,
+        sshKeyDeletionFailed: false,
+      },
+    });
+    expect(provider.calls.map((call) => call.step)).not.toContain("verifySshKeyAbsent");
+  });
+
   it("deletes the builder when retrieved sanitation evidence fails after creation", async () => {
     const provider = new BadSanitationEvidenceProvider();
     const result = await buildRunnerSnapshot({
@@ -484,6 +512,9 @@ describe("runner snapshot build orchestration", () => {
         status: "progress_observed",
         lastStage: "docker_installed",
         sourceUrl: "https://github.com/ametel01/bruno/issues/294#issuecomment-12",
+        localStatus: "progress_observed",
+        localStage: "bootstrap_started",
+        cloudInitStatus: "running",
       }),
     });
 
@@ -841,6 +872,28 @@ class DelayedBuilderEvidenceProvider extends FakeDigitalOceanProvider {
     }
 
     return super.readSnapshotBuilderEvidence(input, context);
+  }
+}
+
+class AlreadyAbsentSshKeyAfterEvidenceTimeoutProvider extends DelayedBuilderEvidenceProvider {
+  constructor() {
+    super(100);
+  }
+
+  override async deleteSshKey(input: Parameters<FakeDigitalOceanProvider["deleteSshKey"]>[0]) {
+    this.calls.push({ step: "deleteSshKey", input });
+    return { ok: true as const, value: { deleted: true as const, alreadyAbsent: true as const } };
+  }
+
+  override async verifySshKeyAbsent(
+    input: Parameters<FakeDigitalOceanProvider["verifySshKeyAbsent"]>[0],
+  ) {
+    this.calls.push({ step: "verifySshKeyAbsent", input });
+    return {
+      ok: false as const,
+      reason: "cleanup_failed" as const,
+      message: "provider observation remained unavailable",
+    };
   }
 }
 

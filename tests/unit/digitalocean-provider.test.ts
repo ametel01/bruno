@@ -350,6 +350,65 @@ describe("DigitalOcean API provider", () => {
     });
   });
 
+  it("treats an exact SSH key DELETE 404 as authoritative absence", async () => {
+    const client = {
+      v2: {
+        account: {
+          keys: {
+            bySsh_key_id: () => ({
+              delete: async () => {
+                throw Object.assign(new Error("not found"), { statusCode: 404 });
+              },
+            }),
+          },
+        },
+      },
+    } as unknown as DigitalOceanSdkClient;
+    const provider = new DigitalOceanApiProvider({ token: "unused", client });
+
+    await expect(provider.deleteSshKey({ id: "52830700" })).resolves.toEqual({
+      ok: true,
+      value: { deleted: true, alreadyAbsent: true },
+    });
+  });
+
+  it("does not treat non-404 SSH key deletion failures as absence", async () => {
+    const client = {
+      v2: {
+        account: {
+          keys: {
+            bySsh_key_id: () => ({
+              delete: async () => {
+                throw Object.assign(new Error("forbidden"), { statusCode: 403 });
+              },
+            }),
+          },
+        },
+      },
+    } as unknown as DigitalOceanSdkClient;
+    const provider = new DigitalOceanApiProvider({ token: "unused", client });
+
+    await expect(provider.deleteSshKey({ id: "52830700" })).resolves.toMatchObject({
+      ok: false,
+      reason: "cleanup_failed",
+    });
+  });
+
+  it("limits SSH timeout diagnostics to allowlisted stage and cloud-init status", async () => {
+    const source = await readFile("src/server/runners/digitalocean-provider.ts", "utf8");
+    const start = source.indexOf("  async readSnapshotBuilderDiagnostics(");
+    const end = source.indexOf("  async deleteImage(", start);
+    const diagnosticsSource = source.slice(start, end);
+
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(diagnosticsSource).toContain("bootstrap-stage");
+    expect(diagnosticsSource).toContain("cloud-init status");
+    expect(diagnosticsSource).toContain("StrictHostKeyChecking=yes");
+    expect(diagnosticsSource).not.toContain("cloud-init-output.log");
+    expect(diagnosticsSource).not.toContain("user-data");
+  });
+
   it("joins complete firewall inventory onto authoritative managed Droplets", async () => {
     const provider = new DigitalOceanApiProvider({
       token: "dop_v1_super_secret",

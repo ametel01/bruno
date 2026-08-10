@@ -594,6 +594,9 @@ function unavailableBuilderDiagnostics(): SnapshotBuilderEvidenceDiagnostics {
     schemaVersion: SNAPSHOT_BUILDER_DIAGNOSTICS_CONTRACT_VERSION,
     status: "unavailable",
     lastStage: null,
+    localStatus: "unavailable",
+    localStage: null,
+    cloudInitStatus: "unknown",
   };
 }
 
@@ -634,6 +637,14 @@ async function deleteSshKeyAndVerifyAbsence(input: {
     const deleted = await input.provider.deleteSshKey?.({ id: input.sshKeyId }, input.context);
     if (!deleted?.ok) {
       input.cleanup.sshKeyDeletionFailed = true;
+      return;
+    }
+
+    if (deleted.value.alreadyAbsent) {
+      input.cleanup.deletedSshKeyId = input.sshKeyId;
+      input.cleanup.sshKeyAbsenceVerified = true;
+      input.cleanup.sshKeyDeletionFailed = false;
+      input.cleanup.steps.push("confirm_ephemeral_ssh_key_already_absent");
       return;
     }
 
@@ -976,6 +987,7 @@ export function buildSnapshotBuilderBootstrap(input: {
     "/etc/ssh/ssh_host_ed25519_key",
     "/etc/machine-id",
     "/var/log/cloud-init-output.log",
+    "/run/bruno-snapshot-builder/bootstrap-stage",
     "/usr/local/sbin/bruno-finalize-snapshot-sanitation",
     ...(input.evidencePublisher
       ? [
@@ -1025,6 +1037,18 @@ export function buildSnapshotBuilderBootstrap(input: {
   const bootstrapCommand = dedentSnapshotBootstrapCommand(`
     set -euo pipefail
     install -m 0755 -d /etc/apt/keyrings /etc/bruno-snapshot-builder /run/bruno-snapshot-builder
+    BRUNO_SNAPSHOT_BUILDER_STAGE_PATH=/run/bruno-snapshot-builder/bootstrap-stage
+    record_snapshot_builder_stage() {
+      case "$1" in
+        user_data_started|metadata_resolved|bootstrap_started|docker_installed|images_preloaded|fixture_complete|complete)
+          printf '%s\\n' "$1" > "$BRUNO_SNAPSHOT_BUILDER_STAGE_PATH"
+          ;;
+        *)
+          return 1
+          ;;
+      esac
+    }
+    record_snapshot_builder_stage "user_data_started"
     BRUNO_BUILDER_RESOURCE_ID="$(
       python3 - <<'BRUNO_BUILDER_METADATA_PY'
     import urllib.request
@@ -1035,6 +1059,7 @@ export function buildSnapshotBuilderBootstrap(input: {
     )"
     export BRUNO_BUILDER_RESOURCE_ID
     printf '%s\\n' "$BRUNO_BUILDER_RESOURCE_ID" > /run/bruno-snapshot-builder/builder-resource-id
+    record_snapshot_builder_stage "metadata_resolved"
 ${evidencePublisherSetup}
     publish_builder_evidence "bootstrap_started"
     apt-get update
@@ -1176,7 +1201,7 @@ ${evidencePublisherSetup}
     if [ -f /run/bruno-snapshot-builder/evidence.env ]; then
       source /run/bruno-snapshot-builder/evidence.env
     fi
-    rm -f /run/bruno-snapshot-builder/evidence.env /etc/systemd/system/bruno-snapshot-finalize.service /usr/local/sbin/bruno-finalize-snapshot-sanitation
+    rm -f /run/bruno-snapshot-builder/evidence.env /run/bruno-snapshot-builder/bootstrap-stage /etc/systemd/system/bruno-snapshot-finalize.service /usr/local/sbin/bruno-finalize-snapshot-sanitation
     rm -rf /var/lib/cloud /root/.ssh/authorized_keys /root/.ssh/authorized_keys2
     test ! -e /var/lib/cloud
     test ! -e /root/.ssh/authorized_keys
@@ -1255,7 +1280,7 @@ function buildEvidencePublisherSetup(
 ): string {
   if (!publisher) {
     return `    publish_builder_evidence() {
-      :
+      record_snapshot_builder_stage "$1"
     }`;
   }
 
@@ -1294,6 +1319,9 @@ function buildEvidencePublisherSetup(
     runtime_directory = "/run/bruno-snapshot-builder"
     publisher_path = f"{runtime_directory}/publish-evidence.py"
     state_path = f"{runtime_directory}/evidence-comment-id"
+    stage_path = f"{runtime_directory}/bootstrap-stage"
+    with open(stage_path, "w", encoding="utf-8") as output:
+        output.write(stage + "\\n")
     payload = {
         "contractVersion": ${contractVersion},
         "repository": os.environ["BRUNO_SNAPSHOT_EVIDENCE_REPOSITORY"],
@@ -1353,7 +1381,7 @@ function buildEvidencePublisherSetup(
             raise RuntimeError("duplicate snapshot builder evidence comments")
         return matches[0] if matches else None
     if stage == "complete":
-        for path in (publisher_path, state_path):
+        for path in (publisher_path, state_path, stage_path):
             try:
                 os.remove(path)
             except FileNotFoundError:
@@ -1410,7 +1438,8 @@ function buildEvidencePublisherSetup(
     BRUNO_EVIDENCE_PUBLISHER_PY
     chmod 0700 /run/bruno-snapshot-builder/publish-evidence.py
     publish_builder_evidence() {
-      /run/bruno-snapshot-builder/publish-evidence.py "$1"
+      record_snapshot_builder_stage "$1"
+      /run/bruno-snapshot-builder/publish-evidence.py "$1" || true
     }`;
 }
 
@@ -1546,6 +1575,7 @@ function sanitationPassed(
     "/etc/ssh/ssh_host_ed25519_key",
     "/etc/machine-id",
     "/var/log/cloud-init-output.log",
+    "/run/bruno-snapshot-builder/bootstrap-stage",
     ...(outboundEvidenceEnabled
       ? [
           "/run/bruno-snapshot-builder/evidence.env",

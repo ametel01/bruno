@@ -5,6 +5,7 @@ import type {
   DigitalOceanProviderRequestContext,
   DigitalOceanProviderResult,
   DigitalOceanReadSnapshotBuilderEvidenceInput,
+  DigitalOceanSnapshotBuilderDiagnostics,
   DigitalOceanSnapshotBuilderEvidence,
 } from "./digitalocean-provider";
 
@@ -27,6 +28,9 @@ export type SnapshotBuilderEvidenceDiagnostics = {
   status: "progress_observed" | "no_progress_observed" | "unavailable";
   lastStage: SnapshotBuilderProgressStage | null;
   sourceUrl?: string;
+  localStatus: "progress_observed" | "no_progress_observed" | "unavailable";
+  localStage: DigitalOceanSnapshotBuilderDiagnostics["localStage"];
+  cloudInitStatus: DigitalOceanSnapshotBuilderDiagnostics["cloudInitStatus"];
 };
 
 export type SnapshotBuilderEvidencePublisher = {
@@ -48,6 +52,10 @@ type EvidenceChannelInput = {
   authenticationSecret?: string;
   apiUrl?: string;
   fetch?: typeof fetch;
+  readLocalDiagnostics?: (
+    input: DigitalOceanReadSnapshotBuilderEvidenceInput,
+    context?: DigitalOceanProviderRequestContext,
+  ) => Promise<DigitalOceanProviderResult<DigitalOceanSnapshotBuilderDiagnostics>>;
 };
 
 type GitHubIssueComment = {
@@ -142,27 +150,69 @@ export function createSnapshotBuilderEvidenceChannel(input: EvidenceChannelInput
       };
     },
     readDiagnostics: async (evidenceInput, context = { signal: new AbortController().signal }) => {
-      const comments = await fetchComments(context);
-      if (!comments) return unavailableDiagnostics();
+      const [comments, localDiagnostics] = await Promise.all([
+        fetchComments(context),
+        readLocalDiagnostics(input.readLocalDiagnostics, evidenceInput, context),
+      ]);
       const progress = comments
-        .map((comment) =>
+        ?.map((comment) =>
           parseProgressComment(comment, publisher, evidenceInput.providerResourceId),
         )
         .find((value) => value !== null);
-      return progress
-        ? {
-            schemaVersion: SNAPSHOT_BUILDER_DIAGNOSTICS_CONTRACT_VERSION,
-            status: "progress_observed",
-            lastStage: progress.stage,
-            sourceUrl: progress.sourceUrl,
-          }
-        : {
-            schemaVersion: SNAPSHOT_BUILDER_DIAGNOSTICS_CONTRACT_VERSION,
-            status: "no_progress_observed",
-            lastStage: null,
-          };
+      const callbackDiagnostics = !comments
+        ? { status: "unavailable" as const, lastStage: null }
+        : progress
+          ? {
+              status: "progress_observed" as const,
+              lastStage: progress.stage,
+              sourceUrl: progress.sourceUrl,
+            }
+          : { status: "no_progress_observed" as const, lastStage: null };
+      return {
+        schemaVersion: SNAPSHOT_BUILDER_DIAGNOSTICS_CONTRACT_VERSION,
+        ...callbackDiagnostics,
+        localStatus: localDiagnostics
+          ? localDiagnostics.localStage
+            ? "progress_observed"
+            : "no_progress_observed"
+          : "unavailable",
+        localStage: localDiagnostics?.localStage ?? null,
+        cloudInitStatus: localDiagnostics?.cloudInitStatus ?? "unknown",
+      };
     },
   };
+}
+
+async function readLocalDiagnostics(
+  read: EvidenceChannelInput["readLocalDiagnostics"],
+  input: DigitalOceanReadSnapshotBuilderEvidenceInput,
+  context: DigitalOceanProviderRequestContext,
+): Promise<DigitalOceanSnapshotBuilderDiagnostics | null> {
+  if (!read) return null;
+  try {
+    const result = await read(input, context);
+    return result.ok && isAllowlistedLocalDiagnostics(result.value) ? result.value : null;
+  } catch {
+    return null;
+  }
+}
+
+function isAllowlistedLocalDiagnostics(value: DigitalOceanSnapshotBuilderDiagnostics): boolean {
+  return (
+    (value.localStage === null ||
+      value.localStage === "user_data_started" ||
+      value.localStage === "metadata_resolved" ||
+      value.localStage === "bootstrap_started" ||
+      value.localStage === "docker_installed" ||
+      value.localStage === "images_preloaded" ||
+      value.localStage === "fixture_complete" ||
+      value.localStage === "complete") &&
+    (value.cloudInitStatus === "running" ||
+      value.cloudInitStatus === "done" ||
+      value.cloudInitStatus === "error" ||
+      value.cloudInitStatus === "disabled" ||
+      value.cloudInitStatus === "unknown")
+  );
 }
 
 function validatePublisher(
@@ -338,12 +388,4 @@ function isProgressStage(value: unknown): value is SnapshotBuilderProgressStage 
     value === "fixture_complete" ||
     value === "complete"
   );
-}
-
-function unavailableDiagnostics(): SnapshotBuilderEvidenceDiagnostics {
-  return {
-    schemaVersion: SNAPSHOT_BUILDER_DIAGNOSTICS_CONTRACT_VERSION,
-    status: "unavailable",
-    lastStage: null,
-  };
 }

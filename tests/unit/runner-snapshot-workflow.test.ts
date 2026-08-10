@@ -159,6 +159,7 @@ describe("runner snapshot workflow", () => {
       "--failure-diagnostics-out snapshot-artifacts/failure-diagnostics.json",
     );
     expect(workflow).toContain("snapshot-artifacts/failure-diagnostics.json");
+    expect(workflow).toContain("/run/bruno-snapshot-builder/bootstrap-stage");
     const cleanupEvidenceStep = workflow.slice(
       workflow.indexOf("- name: Retain terminal cleanup evidence"),
       workflow.indexOf("- name: Retain sanitized builder diagnostics"),
@@ -209,6 +210,8 @@ describe("runner snapshot workflow", () => {
     expect(script).toContain("builderEvidencePublisher: evidenceChannel.publisher");
     expect(script).toContain("readBuilderEvidence: evidenceChannel.read");
     expect(script).toContain("readBuilderDiagnostics: evidenceChannel.readDiagnostics");
+    expect(script).toContain("readLocalDiagnostics:");
+    expect(script).toContain("readSnapshotBuilderDiagnostics.bind(digitalOceanProvider)");
     expect(script).toContain("controllerCidr");
     expect(script).toContain("signingKeyId");
     expect(script).toContain('requiredArg(parsed, "signing-key-id")');
