@@ -305,7 +305,7 @@ jobs:
           test "${CONTROL_PLANE_READY}" = "true"
           mkdir -p runner-release-evidence
           bun run runner:release:smoke -- --image "${BRUNO_RUNNER_IMAGE}" --provider local_docker \
-            > runner-release-evidence/runner-release-smoke.json
+            --output runner-release-evidence/runner-release-smoke.json
           jq -e '.ok == true and .code == "passed" and .cleanupVerified == true' \
             runner-release-evidence/runner-release-smoke.json >/dev/null
           VERIFIED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"

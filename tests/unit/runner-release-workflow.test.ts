@@ -109,6 +109,8 @@ describe("runner release workflow contract", () => {
   it("gates promotion on a zero-cloud full fixture and deploys the exact tested digest at batch one", () => {
     expect(workflowSource).toContain("bun run runner:release:smoke -- --image");
     expect(workflowSource).toContain("--provider local_docker");
+    expect(workflowSource).toContain("--output runner-release-evidence/runner-release-smoke.json");
+    expect(workflowSource).not.toContain("> runner-release-evidence/runner-release-smoke.json");
     expect(workflowSource).not.toContain("BRUNO_DIGITALOCEAN_TOKEN");
     expect(workflowSource).toContain("BRUNO_DIGITALOCEAN_PROVIDER_MODE: local_docker");
     expect(workflowSource).toContain(

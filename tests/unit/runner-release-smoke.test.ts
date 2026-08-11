@@ -1,4 +1,7 @@
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   planRunnerReleaseSmoke,
@@ -46,6 +49,39 @@ const smokeSource = readFileSync(
 );
 
 describe("runner release smoke", () => {
+  it("writes CLI evidence directly to an isolated output file", () => {
+    const directory = mkdtempSync(join(tmpdir(), "bruno-runner-release-smoke-"));
+    const outputPath = join(directory, "evidence.json");
+
+    try {
+      const command = spawnSync(
+        "bun",
+        [
+          "--conditions",
+          "react-server",
+          new URL("../../scripts/smoke-runner-release.ts", import.meta.url).pathname,
+          "--image",
+          "mutable-image",
+          "--provider",
+          "local_docker",
+          "--output",
+          outputPath,
+        ],
+        { encoding: "utf8" },
+      );
+
+      expect(command.status).toBe(1);
+      expect(command.stdout).toBe("");
+      expect(JSON.parse(readFileSync(outputPath, "utf8"))).toMatchObject({
+        ok: false,
+        code: "capability_unavailable",
+        sideEffectsAttempted: false,
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("reports only allowlisted bootstrap failure steps", () => {
     expect(
       runnerReleaseBootstrapFailureCode({ step: "docker_pull", detail: "private output" }),
