@@ -35,6 +35,10 @@ describe("runner snapshot workflow", () => {
     expect(workflow).not.toContain("actions: write");
     expect(workflow).not.toContain("issues: write");
     expect(workflow).toContain("Validate authorization and static inputs before secrets");
+    expect(workflow).toContain("Check out protected workflow implementation");
+    expect(workflow).toContain("ref: $" + "{{ github.sha }}");
+    expect(workflow).not.toContain("ref: $" + "{{ inputs.source_revision }}");
+    expect(workflow).toContain('--source-revision "$' + '{{ inputs.source_revision }}"');
     expect(
       workflow.indexOf("Validate authorization and static inputs before secrets"),
     ).toBeLessThan(workflow.indexOf("BRUNO_DIGITALOCEAN_TOKEN"));
