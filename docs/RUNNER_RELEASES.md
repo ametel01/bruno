@@ -77,6 +77,13 @@ If the repository's GitHub plan cannot enforce required environment reviewers, d
 release. Upgrade the plan or add an equivalently protected approval boundary first; a plain manual
 dispatch is not a substitute for the required review.
 
+Superseded provider snapshots are retired separately through the protected `Retire superseded
+runner snapshot` workflow. The workflow requires the exact snapshot ID, its signed snapshot name,
+region, and destructive-action sentinel before exposing the `snapshot-build` credential. It reads
+and matches that complete identity, deletes only that image, performs an authoritative post-delete
+read, and retains an allowlisted absence artifact. Snapshot publication must succeed before this
+retirement workflow is dispatched; a failed retirement never retries the billable builder.
+
 The simulation injects `BRUNO_DIGITALOCEAN_SSH_KEY_IDS=disabled`; it neither creates an account
 SSH key nor opens SSH ingress.
 

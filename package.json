@@ -22,6 +22,7 @@
     "agent:image:smoke": "bun scripts/smoke-hermes-agent-image.ts",
     "runner:snapshot:build": "bun --conditions react-server scripts/build-runner-snapshot.ts",
     "runner:snapshot:registry": "bun --conditions react-server scripts/publish-runner-snapshot-bundle.ts",
+    "runner:snapshot:retire": "bun --conditions react-server scripts/retire-runner-snapshot.ts",
     "repro:cloud-runner": "bun --conditions react-server scripts/repro-cloud-runner-bootstrap.ts",
     "runners:reconcile-provider": "bun --conditions react-server scripts/reconcile-cloud-runners.ts",
     "format": "biome format --write app src scripts tests app/globals.css *.ts *.json",
