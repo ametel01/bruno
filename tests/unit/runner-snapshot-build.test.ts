@@ -1,5 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
 import { FakeDigitalOceanProvider } from "@/src/server/runners/digitalocean-provider";
@@ -132,12 +135,15 @@ cleanup_snapshot_builder_networks`,
     expect(userData).toContain("BRUNO_RUNNER_EXPECTED_RELEASE_VERSION");
     expect(userData).toContain("BRUNO_RUNNER_EXPECTED_IMAGE_DIGEST");
     expect(userData).toContain("BRUNO_RUNNER_FIXTURE_EXIT_CODE=$?");
-    expect(userData).toContain('"fixtureStatus": fixture["status"]');
-    expect(userData).toContain('"failureReason": fixture["failureReason"]');
+    expect(userData).toContain('"fixtureStatus": fixture.get("status")');
+    expect(userData).toContain('"failureReason": fixture.get("failureReason")');
     expect(userData).toContain('"modelCanaryAttempts": canary_attempts');
     expect(userData).toContain("except (json.JSONDecodeError, OSError, TypeError, ValueError)");
     expect(userData).toContain('"failureReason": "snapshot_invalid"');
-    expect(userData).toContain('"components": fixture["components"]');
+    expect(userData).toContain('fixture.get("contractVersion") == "bruno.runner.boot-snapshot.v2"');
+    expect(userData).toContain('fixture.get("observedChecks") == expected_observed_checks');
+    expect(userData).toContain('fixture.get("attestedChecks") == expected_attested_checks');
+    expect(userData).toContain('component: fixture["observedChecks"].get(component)');
     expect(userData).toContain("docker ps -aq | xargs --no-run-if-empty docker rm --force");
     expect(userData).toContain("grep -R -I -F");
     expect(userData).toContain("BRUNO_RUNNER_REGISTRATION_TOKEN");
@@ -155,6 +161,87 @@ cleanup_snapshot_builder_networks`,
     expect(command.indexOf("test ! -e /var/lib/cloud")).toBeLessThan(
       command.indexOf('with open("/run/bruno-snapshot-builder/sanitation-result.json"'),
     );
+  });
+
+  it("translates the current boot-snapshot v2 fixture into snapshot-build evidence", () => {
+    const userData = buildSnapshotBuilderBootstrap({
+      runnerImage: RUNNER_IMAGE,
+      runnerVersion: "abc123",
+      runnerDigest: `sha256:${"a".repeat(64)}`,
+      defaultAgentImage: AGENT_IMAGE,
+      hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
+    });
+    const bootResultSource = userData.match(
+      /<<'BRUNO_BOOT_RESULT_PY'\n([\s\S]*?)\nBRUNO_BOOT_RESULT_PY/,
+    )?.[1];
+    const directory = mkdtempSync(join(tmpdir(), "bruno-snapshot-boot-contract-"));
+    const fixturePath = join(directory, "fixture.json");
+    const resultPath = join(directory, "result.json");
+
+    try {
+      writeFileSync(
+        fixturePath,
+        JSON.stringify({
+          ok: true,
+          contractVersion: "bruno.runner.boot-snapshot.v2",
+          validationMode: "full",
+          status: "ready",
+          observedChecks: {
+            docker: "passed",
+            requiredServices: "not_applicable",
+            injectedBundleDigests: "not_applicable",
+            preloadedImages: "not_applicable",
+            hermesFixture: "passed",
+            detailedHealth: "passed",
+            modelCanary: "passed",
+            telegramConfig: "passed",
+            cleanup: "passed",
+          },
+          attestedChecks: {
+            fullFixture: "not_applicable",
+            detailedHealth: "not_applicable",
+            modelCanary: "not_applicable",
+            telegramConfig: "not_applicable",
+            cleanup: "not_applicable",
+          },
+          evidence: null,
+          failureReason: null,
+          startedAt: "2026-08-11T00:00:00.000Z",
+          completedAt: "2026-08-11T00:00:01.000Z",
+          modelCanaryAttempts: ["canary_not_ready", "passed"],
+        }),
+      );
+      const executableSource = bootResultSource
+        ?.replace("/run/bruno-snapshot-builder/runner-boot-self-test.json", fixturePath)
+        .replace("/run/bruno-snapshot-builder/boot-result.json", resultPath);
+      const execution = spawnSync("python3", ["-c", executableSource ?? "raise SystemExit(99)"], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          BRUNO_BUILDER_RESOURCE_ID: "do-builder-1",
+          BRUNO_RUNNER_FIXTURE_EXIT_CODE: "0",
+        },
+      });
+
+      expect(execution).toMatchObject({ status: 0, stderr: "" });
+      expect(JSON.parse(readFileSync(resultPath, "utf8"))).toMatchObject({
+        ok: true,
+        builderResourceId: "do-builder-1",
+        fixtureStatus: "ready",
+        failureReason: null,
+        modelCanaryAttempts: ["canary_not_ready", "passed"],
+        components: {
+          docker: "passed",
+          hermesFixture: "passed",
+          detailedHealth: "passed",
+          modelCanary: "passed",
+          telegramConfig: "passed",
+          cleanup: "passed",
+        },
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("shell-quotes image references in the builder bootstrap", () => {

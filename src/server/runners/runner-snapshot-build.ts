@@ -9,9 +9,10 @@ import {
   RUNNER_BOOT_CONTRACT_VERSION,
 } from "@/src/runner-service/constants";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
-import type {
-  RunnerBootFailureReason,
-  RunnerBootSnapshotStatus,
+import {
+  RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION,
+  type RunnerBootFailureReason,
+  type RunnerBootSnapshotStatus,
 } from "@/src/runner-service/runner-contracts";
 import type {
   DigitalOceanAction,
@@ -1234,13 +1235,23 @@ ${evidencePublisherSetup}
     try:
         with open("/run/bruno-snapshot-builder/runner-boot-self-test.json", encoding="utf-8") as source:
             fixture = json.load(source)
-        if not isinstance(fixture, dict) or not isinstance(fixture.get("components"), dict):
+        if (
+            not isinstance(fixture, dict)
+            or not isinstance(fixture.get("observedChecks"), dict)
+            or not isinstance(fixture.get("attestedChecks"), dict)
+        ):
             raise TypeError("invalid runner boot fixture evidence")
     except (json.JSONDecodeError, OSError, TypeError, ValueError):
         fixture = {
+            "ok": True,
+            "contractVersion": "${RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION}",
+            "validationMode": "full",
             "status": "failed",
-            "components": {
+            "observedChecks": {
                 "docker": "failed",
+                "requiredServices": "pending",
+                "injectedBundleDigests": "pending",
+                "preloadedImages": "pending",
                 "hermesFixture": "pending",
                 "detailedHealth": "pending",
                 "modelCanary": "pending",
@@ -1248,14 +1259,26 @@ ${evidencePublisherSetup}
                 "cleanup": "pending",
             },
             "failureReason": "snapshot_invalid",
+            "attestedChecks": {},
+            "evidence": None,
         }
-    required_components = {
-        "docker",
-        "hermesFixture",
-        "detailedHealth",
-        "modelCanary",
-        "telegramConfig",
-        "cleanup",
+    expected_observed_checks = {
+        "docker": "passed",
+        "requiredServices": "not_applicable",
+        "injectedBundleDigests": "not_applicable",
+        "preloadedImages": "not_applicable",
+        "hermesFixture": "passed",
+        "detailedHealth": "passed",
+        "modelCanary": "passed",
+        "telegramConfig": "passed",
+        "cleanup": "passed",
+    }
+    expected_attested_checks = {
+        "fullFixture": "not_applicable",
+        "detailedHealth": "not_applicable",
+        "modelCanary": "not_applicable",
+        "telegramConfig": "not_applicable",
+        "cleanup": "not_applicable",
     }
     allowed_canary_attempts = {
         "passed",
@@ -1273,9 +1296,19 @@ ${evidencePublisherSetup}
         and len(raw_canary_attempts) <= ${SNAPSHOT_BOOT_CANARY_MAX_ATTEMPTS}
         and all(isinstance(attempt, str) and attempt in allowed_canary_attempts for attempt in raw_canary_attempts)
     ) else []
-    fixture_passed = fixture["status"] == "ready" and not any(
-        fixture["components"].get(component) != "passed" for component in required_components
-    ) and len(canary_attempts) > 0 and canary_attempts[-1] == "passed" and int(os.environ["BRUNO_RUNNER_FIXTURE_EXIT_CODE"]) == 0
+    fixture_passed = (
+        fixture.get("ok") is True
+        and fixture.get("contractVersion") == "${RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION}"
+        and fixture.get("validationMode") == "full"
+        and fixture.get("status") == "ready"
+        and fixture.get("failureReason") is None
+        and fixture.get("evidence") is None
+        and fixture.get("observedChecks") == expected_observed_checks
+        and fixture.get("attestedChecks") == expected_attested_checks
+        and len(canary_attempts) > 0
+        and canary_attempts[-1] == "passed"
+        and int(os.environ["BRUNO_RUNNER_FIXTURE_EXIT_CODE"]) == 0
+    )
     result = {
         "ok": fixture_passed,
         "builderResourceId": os.environ["BRUNO_BUILDER_RESOURCE_ID"],
@@ -1284,9 +1317,12 @@ ${evidencePublisherSetup}
         "hermesImage": ${hermesImageJson},
         "bootContractVersion": "${RUNNER_BOOT_CONTRACT_VERSION}",
         "preloadedImages": [${runnerImageJson}, ${defaultAgentImageJson}, ${hermesImageJson}],
-        "components": fixture["components"],
-        "fixtureStatus": fixture["status"],
-        "failureReason": fixture["failureReason"],
+        "components": {
+            component: fixture["observedChecks"].get(component)
+            for component in ("docker", "hermesFixture", "detailedHealth", "modelCanary", "telegramConfig", "cleanup")
+        },
+        "fixtureStatus": fixture.get("status"),
+        "failureReason": fixture.get("failureReason"),
         "modelCanaryAttempts": canary_attempts,
         "fixtureExitCode": int(os.environ["BRUNO_RUNNER_FIXTURE_EXIT_CODE"]),
         "completedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),

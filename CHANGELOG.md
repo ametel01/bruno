@@ -223,6 +223,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Protected snapshot builders now consume the runner's current Boot Snapshot v2
+  `observedChecks`/`attestedChecks` schema, validate the complete full-fixture state, and translate
+  it into signed snapshot-build evidence instead of rejecting a successful fixture as legacy
+  `components` data. The protected builder implementation is pinned to the workflow run SHA while
+  the separately authorized source revision remains the signed snapshot provenance.
 - Protected snapshot builds now retry the isolated model canary up to six times within the existing
   full-fixture deadline and retain only bounded allowlisted per-attempt outcomes. Successful evidence
   must end in `passed`; missing, hostile, oversized, and non-passing diagnostics fail closed without
