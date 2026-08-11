@@ -7,6 +7,11 @@ import {
   parseAgentDeploymentChoices,
 } from "@/src/server/agents/agent-deployment-choices";
 import {
+  buildAgentDeploymentLatencyReportForDatabase,
+  type AgentDeploymentLatencyStageSummary,
+  summarizeAgentDeploymentLatencyStages,
+} from "@/src/server/agents/agent-deployment-latency";
+import {
   beginOrResumeProviderTrialSlot,
   buildProviderTrialCohortReport,
   isValidProviderTrialCohortReport,
@@ -75,19 +80,19 @@ type CommittedExecution = {
   outcome: "committed";
   deploymentId: string;
   costCents: number;
-  activeProviderResources?: number;
+  activeProviderResources: number;
 };
 type PreCommitExecution = {
   outcome: "pre_commit_failure";
   safeCode: ProviderTrialSafeCode;
   costCents: number;
-  activeProviderResources?: number;
+  activeProviderResources: number;
 };
 type SafetyExecution = {
   outcome: "safety_pause";
   safeCode: "safety_failure";
   costCents: number;
-  activeProviderResources?: number;
+  activeProviderResources: number;
 };
 type ProviderTrialExecution = CommittedExecution | PreCommitExecution | SafetyExecution;
 type ProviderTrialCheckpoint = {
@@ -184,6 +189,7 @@ function isValidProviderTrialDriverReport(value: Record<string, unknown>): boole
         "generatedAt",
         "schemaVersion",
         "slotCleanup",
+        "stageDistributions",
         "stages",
       ]
         .sort()
@@ -200,6 +206,7 @@ function isValidProviderTrialDriverReport(value: Record<string, unknown>): boole
     value.cleanup.authoritative !== true ||
     value.cleanup.remainingResourceCount !== 0 ||
     !isValidSlotCleanupEvidence(value.slotCleanup) ||
+    !isValidStageDistributions(value.stageDistributions, value.cohort.readiness.committed) ||
     !isRecord(value.stages) ||
     Object.keys(value.stages)
       .sort((left, right) => Number(left) - Number(right))
@@ -226,6 +233,78 @@ function isValidProviderTrialDriverReport(value: Record<string, unknown>): boole
   } catch {
     return false;
   }
+}
+
+function isValidStageDistributions(
+  value: unknown,
+  committedDeployments: number,
+): value is AgentDeploymentLatencyStageSummary[] {
+  if (!Array.isArray(value) || value.length > 100) return false;
+  let previousKey = "";
+  for (const stage of value) {
+    if (
+      !isRecord(stage) ||
+      Object.keys(stage).sort().join("\0") !==
+        [
+          "duplicateEvidenceCount",
+          "invalidCount",
+          "maxMs",
+          "missingCount",
+          "name",
+          "p50Ms",
+          "p95Ms",
+          "sampleCount",
+          "source",
+        ]
+          .sort()
+          .join("\0") ||
+      typeof stage.name !== "string" ||
+      !/^[a-z0-9][a-z0-9:_-]{0,159}$/.test(stage.name) ||
+      !["agent_event", "runner_provisioning_event"].includes(String(stage.source)) ||
+      ![
+        stage.sampleCount,
+        stage.missingCount,
+        stage.invalidCount,
+        stage.duplicateEvidenceCount,
+      ].every(
+        (count) =>
+          Number.isSafeInteger(count) &&
+          Number(count) >= 0 &&
+          Number(count) <= committedDeployments,
+      ) ||
+      !validStageDurations(stage.sampleCount, stage.p50Ms, stage.p95Ms, stage.maxMs)
+    ) {
+      return false;
+    }
+    if (
+      Number(stage.missingCount) > Number(stage.invalidCount) ||
+      Number(stage.duplicateEvidenceCount) > Number(stage.invalidCount) ||
+      (stage.source === "agent_event" && !stage.name.startsWith("agent:")) ||
+      (stage.source === "runner_provisioning_event" &&
+        !stage.name.startsWith("runner:") &&
+        !stage.name.startsWith("bootstrap:"))
+    ) {
+      return false;
+    }
+    const key = `${stage.name}\0${stage.source}`;
+    if (key <= previousKey) return false;
+    previousKey = key;
+  }
+  return true;
+}
+
+function validStageDurations(
+  sampleCount: unknown,
+  p50Ms: unknown,
+  p95Ms: unknown,
+  maxMs: unknown,
+): boolean {
+  const values = [p50Ms, p95Ms, maxMs];
+  if (sampleCount === 0) return values.every((value) => value === null);
+  if (!values.every((value) => Number.isSafeInteger(value) && Number(value) >= 0)) {
+    return false;
+  }
+  return Number(p50Ms) <= Number(p95Ms) && Number(p95Ms) <= Number(maxMs);
 }
 
 function isValidSlotCleanupEvidence(value: unknown): value is SlotCleanupEvidence[] {
@@ -320,8 +399,6 @@ export async function resumeProviderTrialDriver(
   const leaseOwner = `provider-trial:${dependencies.leaseOwner?.() ?? randomUUID()}`;
   const run = await acquireRunLease(connection, input, startedAt, leaseOwner);
   const configuration = parseConfiguration(run.configuration);
-  const executionDeadlineAt = new Date(startedAt.getTime() + configuration.perSlotTimeoutMs);
-
   if (run.state === "complete") {
     return {
       state: "complete",
@@ -342,6 +419,9 @@ export async function resumeProviderTrialDriver(
     cohortId: input.cohortId,
     slotNumber: run.nextSlotNumber,
   });
+  const executionDeadlineAt = new Date(
+    new Date(attempt.requestStartedAt).getTime() + configuration.perSlotTimeoutMs,
+  );
   const context = executionContext(attempt, configuration, executionDeadlineAt);
   let checkpoint = parseCheckpoint(run.activeSlotCheckpoint, attempt);
 
@@ -358,13 +438,16 @@ export async function resumeProviderTrialDriver(
     }
     let execution: ProviderTrialExecution | { outcome: "request_outcome_unknown" };
     try {
+      const requestOperationDeadlineAt = recoveringUnknown
+        ? new Date(startedAt.getTime() + configuration.cleanupTimeoutMs)
+        : executionDeadlineAt;
       execution = recoveringUnknown
         ? dependencies.reconcileRequest
           ? await runBeforeDeadline(
               (signal, timeoutMs) =>
                 dependencies.reconcileRequest?.(attempt, { ...context, signal, timeoutMs }) ??
                 Promise.resolve({ outcome: "request_outcome_unknown" as const }),
-              executionDeadlineAt,
+              requestOperationDeadlineAt,
             )
           : { outcome: "request_outcome_unknown" }
         : await runBeforeDeadline(
@@ -389,7 +472,7 @@ export async function resumeProviderTrialDriver(
   }
 
   const execution = parseExecution(checkpoint.execution);
-  const activeResources = execution.activeProviderResources ?? 0;
+  const activeResources = execution.activeProviderResources;
   let unsafe =
     execution.outcome === "safety_pause" ||
     execution.costCents > configuration.maxSlotCostCents ||
@@ -724,6 +807,23 @@ async function finalizeRun(
   const cohortReport = await buildProviderTrialCohortReport(connection, run.cohortId, {
     generatedAt: now,
   });
+  const deploymentIds = cohortReport.slots.flatMap((slot) =>
+    slot.deploymentId ? [slot.deploymentId] : [],
+  );
+  const stageRuns = await Promise.all(
+    deploymentIds.map(async (deploymentId) => {
+      const latency = await buildAgentDeploymentLatencyReportForDatabase(connection, {
+        deploymentId,
+        limit: 1,
+        generatedAt: now,
+      });
+      const exactRun = latency.runs[0];
+      if (latency.runs.length !== 1 || exactRun?.deploymentId !== deploymentId) {
+        throw new Error("Provider Trial stage evidence is missing its exact Agent Deployment.");
+      }
+      return exactRun;
+    }),
+  );
   const slotCleanup = await buildSlotCleanupEvidence(connection, run.cohortId);
   const report = {
     schemaVersion: PROVIDER_TRIAL_DRIVER_REPORT_SCHEMA_VERSION,
@@ -733,6 +833,7 @@ async function finalizeRun(
     stages: Object.fromEntries(
       cohortReport.slots.map((slot) => [String(slot.slotNumber), slot.terminalOutcome]),
     ),
+    stageDistributions: summarizeAgentDeploymentLatencyStages(stageRuns),
     slotCleanup,
     cleanup: {
       ok: cleanup.ok,
@@ -971,9 +1072,9 @@ function parseExecution(value: ProviderTrialCheckpoint["execution"]): ProviderTr
     !Number.isSafeInteger("costCents" in value ? value.costCents : Number.NaN) ||
     !("costCents" in value) ||
     value.costCents < 0 ||
-    ("activeProviderResources" in value &&
-      value.activeProviderResources !== undefined &&
-      (!Number.isSafeInteger(value.activeProviderResources) || value.activeProviderResources < 0))
+    !("activeProviderResources" in value) ||
+    !Number.isSafeInteger(value.activeProviderResources) ||
+    value.activeProviderResources < 0
   ) {
     throw new Error("Provider Trial execution checkpoint is invalid.");
   }
@@ -998,27 +1099,21 @@ function normalizeExecution(
         outcome: "committed",
         deploymentId: parsed.deploymentId,
         costCents: parsed.costCents,
-        ...(parsed.activeProviderResources !== undefined
-          ? { activeProviderResources: parsed.activeProviderResources }
-          : {}),
+        activeProviderResources: parsed.activeProviderResources,
       };
     }
-    const resources =
-      parsed.activeProviderResources !== undefined
-        ? { activeProviderResources: parsed.activeProviderResources }
-        : {};
     return parsed.outcome === "safety_pause"
       ? {
           outcome: "safety_pause",
           safeCode: "safety_failure",
           costCents: parsed.costCents,
-          ...resources,
+          activeProviderResources: parsed.activeProviderResources,
         }
       : {
           outcome: "pre_commit_failure",
           safeCode: parsed.safeCode,
           costCents: parsed.costCents,
-          ...resources,
+          activeProviderResources: parsed.activeProviderResources,
         };
   } catch {
     return { outcome: "request_outcome_unknown" };

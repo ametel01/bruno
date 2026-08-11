@@ -45,19 +45,24 @@ slot per call. A fenced lease prevents concurrent resumes, and a durable phase c
 the original request-attempt identity, execution result, spend, terminal evidence, and cleanup
 boundary across interruption. A request deadline never relabels an unresolved operation as a
 pre-commit failure: the run pauses without cleanup or slot advancement and requires renewed
-authorization plus reconciliation through the same deployment idempotency key. The provider
+authorization plus reconciliation through the same deployment idempotency key. Resume derives the
+request deadline from the slot's original durable `request_started_at`; reconciliation has its own
+bounded recovery window and cannot grant the provider request a fresh slot timeout. The provider
 boundary receives its reserved per-slot spend, quota, region/profile, pinned-choice digest, and
-sanitized dedicated benchmark-identity hashes. A committed deployment is rechecked against all
-three durable commitments before observation, and the run row and configuration cannot be reset or
-deleted after initialization. Cleanup has a separately reserved deadline, including when timeout evidence is too
-early to classify. Any unsafe result or non-empty authoritative cleanup pauses the ledger. Every
+sanitized dedicated benchmark-identity hashes. Every provider result must include its current
+resource count; missing evidence fails closed as an unresolved request instead of being interpreted
+as zero resources. A committed deployment is rechecked against all three durable commitments before
+observation, and the run row and configuration cannot be reset or deleted after initialization.
+Cleanup has a separately reserved deadline, including when timeout evidence is too early to
+classify. Any unsafe result or non-empty authoritative cleanup pauses the ledger. Every
 cleanup attempt is retained in an append-only per-slot ledger as Boolean
 authority, resource-count, and spend evidence, so a failed cleanup followed by a successful resume
 cannot erase the earlier failure. Finalization is available only after all 30 slots are terminal and an
 authoritative absence check succeeds; its canonical signed report combines the immutable cohort
-result, scope-matched pinned configuration, allowlisted stage outcomes, and the complete sanitized
-per-slot cleanup history without retaining
-the raw authorization, credentials, tokens, Owner identity, or provider responses.
+result, scope-matched pinned configuration, allowlisted stage outcomes, p50/p95/maximum stage
+distributions queried only from the exact deployments linked to the ledger, and the complete
+sanitized per-slot cleanup history without retaining the raw authorization, credentials, tokens,
+Owner identity, Telegram identity, raw stage events, or provider responses.
 
 The driver API is repository machinery, not provider authority. A DigitalOcean run still requires
 the separate authorization described by issue #299: exact region and profile, 30 slots, maximum

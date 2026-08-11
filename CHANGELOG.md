@@ -17,10 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A resumable sequential Provider Trial driver now consumes the original 30-slot ledger with stable
   idempotency identities across interruption, fenced leases and phase checkpoints, reconciled
   outcome-unknown timeouts, pre-authorized spend and resource limits, renewed authorization after
-  safety pauses, immutable configuration, post-commit deployment-choice and benchmark-identity
+  safety pauses, per-slot deadlines preserved across resume, immutable configuration,
+  post-commit deployment-choice and benchmark-identity
   verification, an independently reserved cleanup deadline, append-only per-slot cleanup attempts,
-  and a signed sanitized final report that rejects unfinished or scope-mismatched evidence. It does
-  not grant or imply authorization for a live provider run.
+  mandatory provider-resource counts, and a signed sanitized final report with exact-ledger stage
+  distributions that rejects unfinished, malformed, or scope-mismatched evidence. It does not grant
+  or imply authorization for a live provider run.
 - Agent Deployments now pin their exact dispatch, provider, runner profile, image, Snapshot,
   Verified Release, validation mode, and Rollout Configuration generation at acceptance. Retry,
   reconciliation, and replacement recover from those immutable choices, while incompatible rows

@@ -15,6 +15,7 @@ import { getAgentTemplateSnapshot } from "@/src/server/agents/templates";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   agentDeployments,
+  agentEvents,
   agentSecrets,
   agents,
   providerTrialRuns,
@@ -22,6 +23,11 @@ import {
   providerTrialSlots,
   users,
 } from "@/src/server/db/schema";
+import {
+  LOCAL_DOCKER_DROPLET_CONTAINER_NAME,
+  LocalDockerDigitalOceanProvider,
+} from "@/src/server/runners/local-docker-digitalocean-provider";
+import { LOCAL_DOCKER_DIGITALOCEAN_RESOURCE_ID } from "@/src/server/runners/local-docker-provider-constants";
 
 const USER_ID = "00000000-0000-4000-8000-000000003001";
 const AGENT_ID = "00000000-0000-4000-8000-000000003002";
@@ -88,14 +94,22 @@ describe("resumable Provider Trial driver", () => {
         {
           async executeSlot(attempt) {
             seenSlots.push(attempt.slotNumber);
-            return { outcome: "pre_commit_failure", safeCode: "request_rejected", costCents: 1 };
+            return {
+              outcome: "pre_commit_failure",
+              safeCode: "request_rejected",
+              costCents: 1,
+              activeProviderResources: 0,
+            };
           },
           async cleanup() {
             return { ok: true, authoritative: true, remainingResourceIds: [] };
           },
         },
       );
-      expect(result.state).toBe(slot === 30 ? "ready_to_finalize" : "running");
+      expect(result).toMatchObject({
+        state: slot === 30 ? "ready_to_finalize" : "running",
+        nextSlotNumber: slot + 1,
+      });
     }
 
     const finalized = await resumeProviderTrialDriver(
@@ -123,6 +137,7 @@ describe("resumable Provider Trial driver", () => {
     expect(run?.signedReportDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
     const report = JSON.parse(run?.signedReportBytes ?? "{}") as Record<string, unknown>;
     expect(report.slotCleanup).toHaveLength(30);
+    expect(report.stageDistributions).toEqual([]);
     expect(
       verifyProviderTrialDriverReport({
         canonicalBytes: run?.signedReportBytes ?? "",
@@ -191,6 +206,194 @@ describe("resumable Provider Trial driver", () => {
     ).toBe(false);
   });
 
+  it("signs sanitized stage distributions from the exact deployment linked to the ledger", async () => {
+    const cohort = await createCohort(connection, "provider-trial-driver-stages");
+    const keys = generateKeyPairSync("ed25519");
+    const acceptedAt = new Date("2026-08-08T10:00:00.000Z");
+    await seedOwner(connection);
+    await initializeProviderTrialDriver(connection, {
+      cohortId: cohort.id,
+      authorization: { id: "auth-local-001", generation: 1 },
+      configuration: configuration(),
+    });
+    for (let slot = 1; slot <= 30; slot += 1) {
+      const result = await resumeProviderTrialDriver(
+        connection,
+        { cohortId: cohort.id, authorization: { id: "auth-local-001", generation: 1 } },
+        {
+          async executeSlot(attempt) {
+            if (slot !== 1) {
+              return {
+                outcome: "pre_commit_failure",
+                safeCode: "request_rejected",
+                costCents: 0,
+                activeProviderResources: 0,
+              };
+            }
+            await seedDeployment(
+              connection,
+              attempt.requestAttemptId,
+              DEPLOYMENT_CHOICES,
+              acceptedAt,
+            );
+            await connection.db
+              .update(agentDeployments)
+              .set({
+                stage: "ready",
+                runnerOperationId: "00000000-0000-4000-8000-000000003099",
+                runnerAcceptedAt: new Date(acceptedAt.getTime() + 1_000),
+                canaryState: "skipped",
+                completedAt: new Date(acceptedAt.getTime() + 50_000),
+              })
+              .where(eq(agentDeployments.id, DEPLOYMENT_ID));
+            await connection.db.insert(agentEvents).values([
+              {
+                agentId: AGENT_ID,
+                actorUserId: USER_ID,
+                type: "agent.deployment_stage_changed",
+                message: "Provider trial entered provisioning.",
+                metadata: {
+                  deploymentId: DEPLOYMENT_ID,
+                  fromStage: "pending",
+                  toStage: "provisioning",
+                },
+                createdAt: new Date(acceptedAt.getTime() + 5_000),
+              },
+              {
+                agentId: AGENT_ID,
+                actorUserId: USER_ID,
+                type: "agent.deployment_stage_changed",
+                message: "Provider trial became ready.",
+                metadata: {
+                  deploymentId: DEPLOYMENT_ID,
+                  fromStage: "provisioning",
+                  toStage: "ready",
+                },
+                createdAt: new Date(acceptedAt.getTime() + 20_000),
+              },
+            ]);
+            return {
+              outcome: "committed",
+              deploymentId: DEPLOYMENT_ID,
+              costCents: 0,
+              activeProviderResources: 1,
+            };
+          },
+          async cleanup() {
+            return { ok: true, authoritative: true, remainingResourceIds: [] };
+          },
+        },
+      );
+      expect(result).toMatchObject({
+        state: slot === 30 ? "ready_to_finalize" : "running",
+        nextSlotNumber: slot + 1,
+      });
+    }
+
+    await resumeProviderTrialDriver(
+      connection,
+      { cohortId: cohort.id, authorization: { id: "auth-local-001", generation: 1 } },
+      {
+        async executeSlot() {
+          throw new Error("No replacement slot may be executed.");
+        },
+        async cleanup() {
+          return { ok: true, authoritative: true, remainingResourceIds: [] };
+        },
+        signing: {
+          keyId: "provider-trial-local",
+          privateKeyPem: keys.privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+        },
+      },
+    );
+
+    const [run] = await connection.db.select().from(providerTrialRuns);
+    const report = JSON.parse(run?.signedReportBytes ?? "{}") as {
+      stageDistributions?: Array<Record<string, unknown>>;
+    };
+    expect(report.stageDistributions).toEqual(
+      expect.arrayContaining([
+        {
+          name: "agent:pending",
+          source: "agent_event",
+          sampleCount: 1,
+          missingCount: 0,
+          invalidCount: 0,
+          duplicateEvidenceCount: 0,
+          p50Ms: 5_000,
+          p95Ms: 5_000,
+          maxMs: 5_000,
+        },
+        {
+          name: "agent:provisioning",
+          source: "agent_event",
+          sampleCount: 1,
+          missingCount: 0,
+          invalidCount: 0,
+          duplicateEvidenceCount: 0,
+          p50Ms: 15_000,
+          p95Ms: 15_000,
+          maxMs: 15_000,
+        },
+      ]),
+    );
+    expect(JSON.stringify(report)).not.toContain(USER_ID);
+    expect(JSON.stringify(report)).not.toContain(TELEGRAM_UNIQUENESS_FINGERPRINT);
+    expect(
+      verifyProviderTrialDriverReport({
+        canonicalBytes: run?.signedReportBytes ?? "",
+        digest: run?.signedReportDigest ?? "",
+        keyId: run?.signedReportKeyId ?? "",
+        signature: run?.signedReportSignature ?? "",
+        trustedPublicKeys: {
+          "provider-trial-local": keys.publicKey.export({ format: "pem", type: "spki" }).toString(),
+        },
+      }),
+    ).toBe(true);
+
+    const tampered = JSON.parse(run?.signedReportBytes ?? "{}") as {
+      stageDistributions: Array<Record<string, unknown>>;
+    };
+    const firstDistribution = tampered.stageDistributions[0];
+    if (!firstDistribution) throw new Error("Expected signed Provider Trial stage evidence.");
+    firstDistribution.sampleCount = 0;
+    const tamperedBytes = canonicalJson(tampered);
+    expect(
+      verifyProviderTrialDriverReport({
+        canonicalBytes: tamperedBytes,
+        digest: `sha256:${createHash("sha256").update(tamperedBytes).digest("hex")}`,
+        keyId: "provider-trial-local",
+        signature: sign(null, Buffer.from(tamperedBytes), keys.privateKey).toString("base64url"),
+        trustedPublicKeys: {
+          "provider-trial-local": keys.publicKey.export({ format: "pem", type: "spki" }).toString(),
+        },
+      }),
+    ).toBe(false);
+
+    const inconsistentCounters = JSON.parse(run?.signedReportBytes ?? "{}") as {
+      stageDistributions: Array<Record<string, unknown>>;
+    };
+    const inconsistentDistribution = inconsistentCounters.stageDistributions[0];
+    if (!inconsistentDistribution) {
+      throw new Error("Expected signed Provider Trial stage evidence.");
+    }
+    inconsistentDistribution.missingCount = 1;
+    const inconsistentBytes = canonicalJson(inconsistentCounters);
+    expect(
+      verifyProviderTrialDriverReport({
+        canonicalBytes: inconsistentBytes,
+        digest: `sha256:${createHash("sha256").update(inconsistentBytes).digest("hex")}`,
+        keyId: "provider-trial-local",
+        signature: sign(null, Buffer.from(inconsistentBytes), keys.privateKey).toString(
+          "base64url",
+        ),
+        trustedPublicKeys: {
+          "provider-trial-local": keys.publicKey.export({ format: "pem", type: "spki" }).toString(),
+        },
+      }),
+    ).toBe(false);
+  });
+
   it("pauses immediately on a safety violation and requires renewed authorization to resume", async () => {
     const cohort = await createCohort(connection, "provider-trial-driver-002");
     await initializeProviderTrialDriver(connection, {
@@ -205,7 +408,12 @@ describe("resumable Provider Trial driver", () => {
         { cohortId: cohort.id, authorization: { id: "auth-local-001", generation: 1 } },
         {
           async executeSlot() {
-            return { outcome: "safety_pause", safeCode: "safety_failure", costCents: 2 };
+            return {
+              outcome: "safety_pause",
+              safeCode: "safety_failure",
+              costCents: 2,
+              activeProviderResources: 0,
+            };
           },
           async cleanup() {
             return { ok: true, authoritative: true, remainingResourceIds: [] };
@@ -235,7 +443,12 @@ describe("resumable Provider Trial driver", () => {
         { cohortId: cohort.id, authorization: { id: "auth-local-002", generation: 2 } },
         {
           async executeSlot() {
-            return { outcome: "pre_commit_failure", safeCode: "request_rejected", costCents: 1 };
+            return {
+              outcome: "pre_commit_failure",
+              safeCode: "request_rejected",
+              costCents: 1,
+              activeProviderResources: 0,
+            };
           },
           async cleanup() {
             return { ok: true, authoritative: true, remainingResourceIds: [] };
@@ -308,7 +521,12 @@ describe("resumable Provider Trial driver", () => {
           async reconcileRequest(attempt, context) {
             expect(attempt.requestAttemptId).toBe(interruptedAttemptId);
             expect(context.idempotencyKey).toBe(`provider-trial:${interruptedAttemptId}`);
-            return { outcome: "pre_commit_failure", safeCode: "request_rejected", costCents: 1 };
+            return {
+              outcome: "pre_commit_failure",
+              safeCode: "request_rejected",
+              costCents: 1,
+              activeProviderResources: 0,
+            };
           },
           async cleanup() {
             return { ok: true, authoritative: true, remainingResourceIds: [] };
@@ -377,7 +595,12 @@ describe("resumable Provider Trial driver", () => {
               ...DEPLOYMENT_CHOICES,
               dispatchMode: "qstash",
             });
-            return { outcome: "committed", deploymentId: DEPLOYMENT_ID, costCents: 1 };
+            return {
+              outcome: "committed",
+              deploymentId: DEPLOYMENT_ID,
+              costCents: 1,
+              activeProviderResources: 1,
+            };
           },
           async observeCommittedSlot() {
             throw new Error("Mismatched durable choices must not reach observation.");
@@ -417,7 +640,12 @@ describe("resumable Provider Trial driver", () => {
         async executeSlot() {
           releaseExecution?.();
           await executionGate;
-          return { outcome: "pre_commit_failure", safeCode: "request_rejected", costCents: 1 };
+          return {
+            outcome: "pre_commit_failure",
+            safeCode: "request_rejected",
+            costCents: 1,
+            activeProviderResources: 0,
+          };
         },
         async cleanup() {
           return { ok: true, authoritative: true, remainingResourceIds: [] };
@@ -455,6 +683,7 @@ describe("resumable Provider Trial driver", () => {
       outcome: "pre_commit_failure" as const,
       safeCode: "request_rejected" as const,
       costCents: 1,
+      activeProviderResources: 0,
     }));
 
     await expect(
@@ -537,6 +766,7 @@ describe("resumable Provider Trial driver", () => {
       authoritative: true,
       remainingResourceIds: [] as string[],
     }));
+    let originalSlotDeadlineAt: string | undefined;
 
     await expect(
       resumeProviderTrialDriver(
@@ -544,12 +774,18 @@ describe("resumable Provider Trial driver", () => {
         { cohortId: cohort.id, authorization: { id: "auth-local-001", generation: 1 } },
         {
           executeSlot(attempt, context) {
+            originalSlotDeadlineAt = context.deadlineAt;
             return new Promise((resolve) => {
               context.signal.addEventListener(
                 "abort",
                 () => {
                   void seedDeployment(connection, attempt.requestAttemptId).then(() => {
-                    resolve({ outcome: "committed", deploymentId: DEPLOYMENT_ID, costCents: 1 });
+                    resolve({
+                      outcome: "committed",
+                      deploymentId: DEPLOYMENT_ID,
+                      costCents: 1,
+                      activeProviderResources: 1,
+                    });
                     lateCommitFinished?.();
                   });
                 },
@@ -574,7 +810,13 @@ describe("resumable Provider Trial driver", () => {
           },
           async reconcileRequest(attempt, context) {
             expect(context.idempotencyKey).toBe(`provider-trial:${attempt.requestAttemptId}`);
-            return { outcome: "committed", deploymentId: DEPLOYMENT_ID, costCents: 1 };
+            expect(context.deadlineAt).toBe(originalSlotDeadlineAt);
+            return {
+              outcome: "committed",
+              deploymentId: DEPLOYMENT_ID,
+              costCents: 1,
+              activeProviderResources: 1,
+            };
           },
           async observeCommittedSlot() {
             return "timed_out";
@@ -611,7 +853,12 @@ describe("resumable Provider Trial driver", () => {
               DEPLOYMENT_CHOICES,
               new Date(),
             );
-            return { outcome: "committed", deploymentId: DEPLOYMENT_ID, costCents: 1 };
+            return {
+              outcome: "committed",
+              deploymentId: DEPLOYMENT_ID,
+              costCents: 1,
+              activeProviderResources: 1,
+            };
           },
           async observeCommittedSlot() {
             return "timed_out";
@@ -662,13 +909,123 @@ describe("resumable Provider Trial driver", () => {
               ),
             },
           });
-          return { outcome: "pre_commit_failure", safeCode: "request_rejected", costCents: 2 };
+          return {
+            outcome: "pre_commit_failure",
+            safeCode: "request_rejected",
+            costCents: 2,
+            activeProviderResources: 0,
+          };
         },
         async cleanup() {
           return { ok: true, authoritative: true, remainingResourceIds: [] };
         },
       },
     );
+  });
+
+  it("drives and authoritatively cleans the local DigitalOcean-compatible provider", async () => {
+    const cohort = await createCohort(connection, "provider-trial-driver-local-provider");
+    const docker = vi.fn(async () => ({ stdout: "", stderr: "" }));
+    const provider = new LocalDockerDigitalOceanProvider({ docker });
+    const providerTag = "bruno-provider-trial-local";
+    await initializeProviderTrialDriver(connection, {
+      cohortId: cohort.id,
+      authorization: { id: "auth-local-001", generation: 1 },
+      configuration: configuration(),
+    });
+
+    await expect(
+      resumeProviderTrialDriver(
+        connection,
+        { cohortId: cohort.id, authorization: { id: "auth-local-001", generation: 1 } },
+        {
+          async executeSlot(_attempt, context) {
+            const created = await provider.createRunner(
+              {
+                name: "bruno-provider-trial-local-01",
+                region: context.authorizationScope.region,
+                sizeSlug: context.authorizationScope.runnerSizeSlug,
+                image: "ubuntu-24-04-x64",
+                tags: [providerTag],
+              },
+              { signal: context.signal },
+            );
+            if (!created.ok) {
+              return {
+                outcome: "safety_pause",
+                safeCode: "safety_failure",
+                costCents: 0,
+                activeProviderResources: 0,
+              };
+            }
+            return {
+              outcome: "pre_commit_failure",
+              safeCode: "request_failed",
+              costCents: 0,
+              activeProviderResources: 1,
+            };
+          },
+          async cleanup(context) {
+            const cleaned = await provider.cleanupResource(
+              { providerResourceId: LOCAL_DOCKER_DIGITALOCEAN_RESOURCE_ID },
+              { signal: context.signal },
+            );
+            const discovery = await provider.discoverResourcesByTag(
+              { tag: providerTag },
+              { signal: context.signal },
+            );
+            if (!cleaned.ok || !discovery.ok) {
+              return { ok: false, authoritative: false, remainingResourceIds: [] };
+            }
+            return {
+              ok: true,
+              authoritative: discovery.value.authoritative,
+              remainingResourceIds: discovery.value.resources.map(
+                (resource) => resource.providerResourceId,
+              ),
+            };
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ state: "running", nextSlotNumber: 2, spentCents: 0 });
+
+    const discovery = await provider.discoverResourcesByTag({ tag: providerTag });
+    expect(discovery).toEqual({
+      ok: true,
+      value: { authoritative: true, resources: [] },
+    });
+    expect(docker).toHaveBeenCalledWith(
+      ["rm", "--force", LOCAL_DOCKER_DROPLET_CONTAINER_NAME],
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("fails closed when provider resource-count evidence is omitted", async () => {
+    const cohort = await createCohort(connection, "provider-trial-driver-resource-evidence");
+    await initializeProviderTrialDriver(connection, {
+      cohortId: cohort.id,
+      authorization: { id: "auth-local-001", generation: 1 },
+      configuration: configuration(),
+    });
+    const cleanup = vi.fn();
+
+    await expect(
+      resumeProviderTrialDriver(
+        connection,
+        { cohortId: cohort.id, authorization: { id: "auth-local-001", generation: 1 } },
+        {
+          async executeSlot() {
+            return {
+              outcome: "pre_commit_failure",
+              safeCode: "request_rejected",
+              costCents: 1,
+            } as never;
+          },
+          cleanup,
+        },
+      ),
+    ).resolves.toMatchObject({ state: "paused", nextSlotNumber: 1, spentCents: 0 });
+    expect(cleanup).not.toHaveBeenCalled();
   });
 });
 
@@ -721,6 +1078,7 @@ async function seedDeployment(
     rolloutConfigurationGeneration: 1,
     deploymentChoices,
     stage: "pending",
+    createdAt: acceptedAt,
     acceptedAt,
   });
 }

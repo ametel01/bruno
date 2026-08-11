@@ -303,7 +303,7 @@ export function buildAgentDeploymentLatencyReport(
     },
     cohorts,
     runs,
-    stageSummaries: summarizeStages(runs),
+    stageSummaries: summarizeAgentDeploymentLatencyStages(runs),
   };
 }
 
@@ -789,7 +789,7 @@ function summarizeCohort(
     slo: summarizeSlo(cohortRuns),
     readyLatency: summarizeDurations(readyDurations),
     failedTerminalLatency: summarizeDurations(failedDurations),
-    stageSummaries: summarizeStages(cohortRuns),
+    stageSummaries: summarizeAgentDeploymentLatencyStages(cohortRuns),
   };
 }
 
@@ -825,7 +825,7 @@ function summarizeSlo(
   };
 }
 
-function summarizeStages(
+export function summarizeAgentDeploymentLatencyStages(
   runs: readonly AgentDeploymentLatencyRun[],
 ): AgentDeploymentLatencyStageSummary[] {
   const byName = new Map<string, AgentDeploymentLatencyStageTiming[]>();
