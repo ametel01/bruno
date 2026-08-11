@@ -117,6 +117,14 @@ capacity, public-IP assignment, cloud firewall behavior, or external network rou
 provider acceptance is therefore a separate, explicitly approved operation for provider/bootstrap
 changes, never an automatic release retry.
 
+Before the bounded full fixture starts, the workflow pulls and inspects the exact digest-qualified
+runner, default-agent, and Hermes images selected by the Approved Snapshot. This keeps cold registry
+transfer time outside the readiness deadline without changing the images or relaxing that deadline.
+The fixture also verifies that a nested container can reach the candidate control plane through the
+Linux host-gateway mapping. Each attempt retains its sanitized smoke result for 90 days; failed
+results contain only the closed failure code and cleanup verdict, never credentials or raw
+bootstrap output.
+
 The canary retrieves the Approved Snapshot only as a signed OCI artifact. It does not receive a
 DigitalOcean credential, inspect live provider state, or claim to boot that provider snapshot. The
 Verified Release joins snapshot and release evidence only when the snapshot signature, approved

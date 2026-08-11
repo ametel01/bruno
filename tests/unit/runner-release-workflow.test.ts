@@ -5,6 +5,8 @@ import { parse } from "yaml";
 
 const workflowPath = new URL("../../.github/workflows/deploy-production.yml", import.meta.url);
 const workflowSource = readFileSync(workflowPath, "utf8");
+const releaseSmokePath = new URL("../../scripts/smoke-runner-release.ts", import.meta.url);
+const releaseSmokeSource = readFileSync(releaseSmokePath, "utf8");
 const agentWorkflowPath = new URL(
   "../../.github/workflows/publish-agent-image.yml",
   import.meta.url,
@@ -124,6 +126,26 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).toContain("/api/internal/runner-release/required");
     expect(workflowSource).toContain("/health");
     expect(workflowSource).not.toMatch(/cloud-init.*GITHUB_STEP_SUMMARY/i);
+  });
+
+  it("warms every exact full-fixture image before the bounded release smoke", () => {
+    const preloadStep = workflowSource.indexOf("Preload exact full-fixture images");
+    const fixtureExecution = workflowSource.indexOf("bun run runner:release:smoke -- --image");
+
+    expect(preloadStep).toBeGreaterThan(-1);
+    expect(fixtureExecution).toBeGreaterThan(preloadStep);
+    expect(workflowSource).toContain('docker pull "$' + '{BRUNO_RUNNER_IMAGE}"');
+    expect(workflowSource).toContain('docker pull "$' + '{BRUNO_DOCKER_RUNNER_IMAGE}"');
+    expect(workflowSource).toContain('docker pull "$' + '{BRUNO_HERMES_WORKLOAD_IMAGE}"');
+    expect(workflowSource).toContain(
+      'docker run --rm --add-host host.docker.internal:host-gateway "$' +
+        '{BRUNO_DOCKER_RUNNER_IMAGE}"',
+    );
+    expect(workflowSource).toContain(
+      "name: runner-release-smoke-$" + "{{ github.sha }}-$" + "{{ github.run_attempt }}",
+    );
+    expect(workflowSource).toContain("path: runner-release-evidence/runner-release-smoke.json");
+    expect(releaseSmokeSource).toContain("RUNNER_RELEASE_SMOKE_TIMEOUT_MS = 12 * 60 * 1000");
   });
 
   it("stages a compatible candidate and promotes it only after release verification", () => {

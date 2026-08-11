@@ -32,6 +32,7 @@ export const RUNNER_RELEASE_DIGITALOCEAN_AUTHORIZATION =
 export const RUNNER_RELEASE_SMOKE_TIMEOUT_MS = 12 * 60 * 1000;
 
 const SAFE_BOOTSTRAP_FAILURE_STEPS = new Set([
+  "bootstrap_started",
   "agent_image_pull",
   "docker_apt_repository",
   "docker_container_start",
@@ -39,6 +40,10 @@ const SAFE_BOOTSTRAP_FAILURE_STEPS = new Set([
   "hermes_image_pull",
   "hermes_private_network",
   "hermes_state_root",
+  "package_install",
+  "runner_container_start",
+  "runner_registration",
+  "snapshot_preloaded_images",
   "swap_setup",
 ]);
 
@@ -84,6 +89,7 @@ export type RunnerReleaseSmokeResult =
       code: "capability_unavailable" | "usage_invalid" | "smoke_failed" | "cleanup_failed";
       sideEffectsAttempted: boolean;
       cleanupVerified: boolean;
+      failureCode?: string | null;
       capabilities?: RunnerReleaseSmokePlan extends infer _Plan
         ? Array<{ name: string; envName: string; state: "missing" | "malformed" }>
         : never;
@@ -235,12 +241,14 @@ export async function smokeRunnerRelease(
   const session = (dependencies.createSession ?? createRunnerReleaseSmokeSession)(plan, sessionEnv);
   let evidence: RunnerReleaseSmokeEvidence | null = null;
   let runFailed = false;
+  let runFailureCode: string | null = null;
   let cleanupFailed = false;
 
   try {
     evidence = await session.run();
   } catch (error) {
     runFailed = true;
+    runFailureCode = closedErrorCode(error);
     logClosedSmokeFailure("run_failed", error);
   } finally {
     try {
@@ -267,6 +275,7 @@ export async function smokeRunnerRelease(
       code: "smoke_failed",
       sideEffectsAttempted: true,
       cleanupVerified: true,
+      failureCode: runFailureCode,
     };
   }
 
@@ -469,7 +478,13 @@ async function waitForReleaseEvidence(
     await delay(5_000);
   }
 
-  throw new Error("Release smoke runner did not become ready before the bounded deadline.");
+  const [latestEvent] = await connection.db
+    .select({ metadata: runnerProvisioningEvents.metadata })
+    .from(runnerProvisioningEvents)
+    .where(eq(runnerProvisioningEvents.runnerId, input.runnerId))
+    .orderBy(desc(runnerProvisioningEvents.createdAt))
+    .limit(1);
+  throw new RunnerReleaseSmokeFailure(runnerReleaseBootstrapFailureCode(latestEvent?.metadata));
 }
 
 async function cleanupReleaseRunner(

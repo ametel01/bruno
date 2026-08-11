@@ -280,6 +280,24 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      - name: Preload exact full-fixture images
+        run: |
+          set -euo pipefail
+          for image in \
+            "${BRUNO_RUNNER_IMAGE}" \
+            "${BRUNO_DOCKER_RUNNER_IMAGE}" \
+            "${BRUNO_HERMES_WORKLOAD_IMAGE}"
+          do
+            [[ "${image}" =~ @sha256:[a-f0-9]{64}$ ]]
+          done
+          docker pull "${BRUNO_RUNNER_IMAGE}"
+          docker pull "${BRUNO_DOCKER_RUNNER_IMAGE}"
+          docker pull "${BRUNO_HERMES_WORKLOAD_IMAGE}"
+          docker image inspect \
+            "${BRUNO_RUNNER_IMAGE}" \
+            "${BRUNO_DOCKER_RUNNER_IMAGE}" \
+            "${BRUNO_HERMES_WORKLOAD_IMAGE}" >/dev/null
+
       - name: Exercise the exact full fixture and verify cleanup
         env:
           DATABASE_URL: ${{ secrets.RUNNER_RELEASE_DATABASE_URL }}
@@ -303,6 +321,8 @@ jobs:
             sleep 1
           done
           test "${CONTROL_PLANE_READY}" = "true"
+          docker run --rm --add-host host.docker.internal:host-gateway "${BRUNO_DOCKER_RUNNER_IMAGE}" \
+            wget --quiet --output-document=/dev/null http://host.docker.internal:3000/health
           mkdir -p runner-release-evidence
           bun run runner:release:smoke -- --image "${BRUNO_RUNNER_IMAGE}" --provider local_docker \
             --output runner-release-evidence/runner-release-smoke.json
@@ -310,6 +330,15 @@ jobs:
             runner-release-evidence/runner-release-smoke.json >/dev/null
           VERIFIED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
           echo "VERIFIED_AT=${VERIFIED_AT}" >> "${GITHUB_ENV}"
+
+      - name: Upload full-fixture smoke evidence
+        if: always() && hashFiles('runner-release-evidence/runner-release-smoke.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-release-smoke-${{ github.sha }}-${{ github.run_attempt }}
+          path: runner-release-evidence/runner-release-smoke.json
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Build signed Verified Release joined to the Approved Snapshot
         env:

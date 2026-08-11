@@ -86,6 +86,9 @@ describe("runner release smoke", () => {
     expect(
       runnerReleaseBootstrapFailureCode({ step: "docker_pull", detail: "private output" }),
     ).toBe("bootstrap_docker_pull");
+    expect(runnerReleaseBootstrapFailureCode({ step: "hermes_image_pull" })).toBe(
+      "bootstrap_hermes_image_pull",
+    );
     expect(runnerReleaseBootstrapFailureCode({ step: "untrusted_step" })).toBe(
       "runner_provisioning_failed",
     );
@@ -196,6 +199,7 @@ describe("runner release smoke", () => {
       code: "smoke_failed",
       sideEffectsAttempted: true,
       cleanupVerified: true,
+      failureCode: null,
     });
     expect(JSON.stringify(result)).not.toMatch(/cloud-init|credential/i);
     expect(JSON.stringify(error.mock.calls)).not.toMatch(/cloud-init|credential/i);
@@ -208,6 +212,28 @@ describe("runner release smoke", () => {
     });
     expect(calls).toEqual(["run", "cleanup", "verifyCleanup"]);
     error.mockRestore();
+  });
+
+  it("retains only a closed bootstrap failure code after verified cleanup", async () => {
+    const result = await smokeRunnerRelease(DIGITALOCEAN_ARGS, VALID_ENV, {
+      createSession: () =>
+        session([], {
+          run: async () => {
+            throw Object.assign(new Error("private image pull output"), {
+              code: "bootstrap_hermes_image_pull",
+            });
+          },
+        }),
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      code: "smoke_failed",
+      sideEffectsAttempted: true,
+      cleanupVerified: true,
+      failureCode: "bootstrap_hermes_image_pull",
+    });
+    expect(JSON.stringify(result)).not.toContain("private image pull output");
   });
 
   it("blocks promotion when cleanup cannot be verified", async () => {
