@@ -128,6 +128,27 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).not.toMatch(/cloud-init.*GITHUB_STEP_SUMMARY/i);
   });
 
+  it("migrates an isolated ephemeral database for every credential-free release", () => {
+    const canaryJob = workflowSource.slice(
+      workflowSource.indexOf("  canary:"),
+      workflowSource.indexOf("  deploy:"),
+    );
+    const migration = canaryJob.indexOf("bun run db:migrate");
+    const controlPlane = canaryJob.indexOf("bun run start --hostname 0.0.0.0");
+
+    expect(canaryJob).toContain("services:\n      postgres:");
+    expect(canaryJob).toContain("POSTGRES_DB: bruno_runner_release");
+    expect(canaryJob).toContain(
+      "DATABASE_URL: postgres://bruno:bruno@127.0.0.1:54329/bruno_runner_release",
+    );
+    expect(canaryJob).not.toContain("RUNNER_RELEASE_DATABASE_URL");
+    expect(migration).toBeGreaterThan(-1);
+    expect(controlPlane).toBeGreaterThan(migration);
+    expect(canaryJob).toContain('select(.component == "runner.ingress")');
+    expect(canaryJob).toContain("runner-release-evidence/runner-release-control-plane-events.json");
+    expect(canaryJob).not.toContain("path: $" + "{RUNNER_TEMP}/runner-release-control-plane.log");
+  });
+
   it("warms every exact full-fixture image before the bounded release smoke", () => {
     const preloadStep = workflowSource.indexOf("Preload exact full-fixture images");
     const fixtureExecution = workflowSource.indexOf("bun run runner:release:smoke -- --image");
@@ -149,7 +170,7 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).toContain(
       "name: runner-release-smoke-$" + "{{ github.sha }}-$" + "{{ github.run_attempt }}",
     );
-    expect(workflowSource).toContain("path: runner-release-evidence/runner-release-smoke.json");
+    expect(workflowSource).toContain("runner-release-evidence/runner-release-smoke.json");
     expect(releaseSmokeSource).toContain("RUNNER_RELEASE_SMOKE_TIMEOUT_MS = 12 * 60 * 1000");
   });
 

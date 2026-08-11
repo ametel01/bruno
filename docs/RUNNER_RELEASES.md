@@ -52,7 +52,6 @@ Configure `runner-release-canary` with required reviewers and these scoped value
 
 | Kind | Name | Purpose |
 | --- | --- | --- |
-| Secret | `RUNNER_RELEASE_DATABASE_URL` | Database used by the staged control plane for the simulated runner registration record. |
 | Secret | `RUNNER_RELEASE_BEARER_TOKEN` | Dedicated command bearer shared only with simulated release runners. |
 | Secret | `BRUNO_RELEASE_SIGNING_KEY_PEM` | Ed25519 private key used only while creating the canonical release bundle. |
 | Variable | `BRUNO_RELEASE_SIGNING_KEY_ID` | Identifier carried by the release signature. |
@@ -62,6 +61,11 @@ Configure `runner-release-canary` with required reviewers and these scoped value
 | Variable | `BRUNO_SNAPSHOT_TRUST_SET` | JSON map used to verify the selected snapshot signing key. |
 | Variable | `BRUNO_RELEASE_PREVIOUS_OCI_REFERENCE` | Retained previous Verified Release OCI reference after the first publication. |
 | Variable | `BRUNO_RELEASE_PREVIOUS_BUNDLE_DIGEST` | Canonical digest paired with the retained previous release. |
+
+The canary provisions a job-scoped PostgreSQL service from a digest-pinned image and applies every
+repository migration before starting the control plane. The service is destroyed with the GitHub
+runner, so the credential-free fixture cannot drift behind the checked-out schema or retain trial
+records between releases.
 
 Configure `production` with required reviewers and the existing Vercel project credentials:
 
@@ -124,7 +128,8 @@ The fixture also creates the Hermes bridge before provisioning and verifies that
 can reach the candidate control plane through that bridge's concrete Linux gateway. The local
 provider applies the same gateway to the runner callback while preserving Docker Desktop's native
 host routing. Each attempt retains its sanitized smoke result for 90 days; failed results contain
-only the closed failure code and cleanup verdict, never credentials or raw bootstrap output.
+only the closed failure code, cleanup verdict, and an allowlisted runner-ingress event summary,
+never credentials, runner IDs, database details, or raw bootstrap and control-plane output.
 
 The canary retrieves the Approved Snapshot only as a signed OCI artifact. It does not receive a
 DigitalOcean credential, inspect live provider state, or claim to boot that provider snapshot. The

@@ -184,7 +184,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: runner-release-canary
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        env:
+          POSTGRES_DB: bruno_runner_release
+          POSTGRES_USER: bruno
+          POSTGRES_PASSWORD: bruno
+        ports:
+          - 54329:5432
+        options: >-
+          --health-cmd "pg_isready -U bruno -d bruno_runner_release"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
+      DATABASE_URL: postgres://bruno:bruno@127.0.0.1:54329/bruno_runner_release
       NEXT_PUBLIC_APP_URL: http://host.docker.internal:3000
       BRUNO_AUTH_MODE: development
       BRUNO_ALLOW_PUBLIC_DEVELOPMENT: "true"
@@ -215,6 +230,9 @@ jobs:
 
       - name: Install frozen dependencies
         run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Migrate isolated release database
+        run: bun run db:migrate
 
       - name: Set up ORAS
         uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
@@ -301,7 +319,6 @@ jobs:
 
       - name: Exercise the exact full fixture and verify cleanup
         env:
-          DATABASE_URL: ${{ secrets.RUNNER_RELEASE_DATABASE_URL }}
           BRUNO_RUNNER_BEARER_TOKEN: ${{ secrets.RUNNER_RELEASE_BEARER_TOKEN }}
         run: |
           set -euo pipefail
@@ -338,12 +355,31 @@ jobs:
           VERIFIED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
           echo "VERIFIED_AT=${VERIFIED_AT}" >> "${GITHUB_ENV}"
 
+      - name: Retain sanitized control-plane ingress evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p runner-release-evidence
+          if [[ -f "${RUNNER_TEMP}/runner-release-control-plane.log" ]]; then
+            jq --raw-input --slurp '
+              split("\n")
+              | map(try fromjson catch empty)
+              | map(select(.component == "runner.ingress"))
+              | map({time, component, event, endpoint, reason, issueCount, issueFields, errorName, errorCode})
+            ' "${RUNNER_TEMP}/runner-release-control-plane.log" \
+              > runner-release-evidence/runner-release-control-plane-events.json
+          else
+            printf '[]\n' > runner-release-evidence/runner-release-control-plane-events.json
+          fi
+
       - name: Upload full-fixture smoke evidence
-        if: always() && hashFiles('runner-release-evidence/runner-release-smoke.json') != ''
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: runner-release-smoke-${{ github.sha }}-${{ github.run_attempt }}
-          path: runner-release-evidence/runner-release-smoke.json
+          path: |
+            runner-release-evidence/runner-release-smoke.json
+            runner-release-evidence/runner-release-control-plane-events.json
           if-no-files-found: error
           retention-days: 90
 
