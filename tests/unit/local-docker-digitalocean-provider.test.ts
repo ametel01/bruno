@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { buildCloudRunnerBootstrapContent } from "@/src/server/runners/cloud-runner-bootstrap";
-import { LocalDockerDigitalOceanProvider } from "@/src/server/runners/local-docker-digitalocean-provider";
+import {
+  LocalDockerDigitalOceanProvider,
+  localDockerRunnerBootstrapFailureCode,
+} from "@/src/server/runners/local-docker-digitalocean-provider";
 
 describe("local Docker DigitalOcean provider", () => {
   it("runs generated cloud runner bootstrap user-data inside a local Ubuntu droplet simulator", async () => {
@@ -192,6 +195,32 @@ describe("local Docker DigitalOcean provider", () => {
     expect(bootstrapScript).not.toContain("fallocate -l 1G /swapfile");
     expect(bootstrapScript).not.toContain("mkswap /swapfile");
     expect(bootstrapScript).not.toContain("swapon /swapfile");
+    expect(bootstrapScript).toContain("Docker Desktop");
+    expect(bootstrapScript).toContain(
+      "network inspect --format '{{(index .IPAM.Config 0).Gateway}}'",
+    );
+    expect(bootstrapScript).toContain(
+      'translated+=("run" "--add-host" "host.docker.internal:$host_gateway")',
+    );
+  });
+
+  it("classifies only closed runner bootstrap diagnostics", () => {
+    expect(
+      localDockerRunnerBootstrapFailureCode(
+        "exited",
+        "bruno runner bootstrap failed: registration_failed",
+      ),
+    ).toBe("runner_registration_failed");
+    expect(
+      localDockerRunnerBootstrapFailureCode(
+        "restarting",
+        "error: ConnectionRefused while fetching the callback",
+      ),
+    ).toBe("runner_callback_unreachable");
+    expect(localDockerRunnerBootstrapFailureCode("running", "private untrusted output")).toBe(
+      "runner_running_without_registration",
+    );
+    expect(localDockerRunnerBootstrapFailureCode("unknown", "private untrusted output")).toBeNull();
   });
 
   it("removes the droplet simulator and production-named runner during cleanup", async () => {

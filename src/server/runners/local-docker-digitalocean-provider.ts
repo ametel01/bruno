@@ -40,6 +40,34 @@ const LOCAL_PRODUCTION_RUNNER_CONTAINER_NAME = "bruno-runner";
 const LOCAL_SIMULATED_PUBLIC_IPV4 = "127.0.0.1";
 const LOCAL_HOST_BRIDGE_DIR = "/tmp/bruno-local-cloud";
 
+const RUNNER_BOOTSTRAP_FAILURE_REASONS = new Set([
+  "not_configured",
+  "registration_failed",
+  "registration_response_invalid",
+  "release_identity_unavailable",
+  "heartbeat_failed",
+]);
+
+export function localDockerRunnerBootstrapFailureCode(state: string, logs: string): string | null {
+  const bootstrapFailure = /bruno runner bootstrap failed: ([a-z_]+)/.exec(logs)?.[1];
+  if (bootstrapFailure && RUNNER_BOOTSTRAP_FAILURE_REASONS.has(bootstrapFailure)) {
+    return `runner_${bootstrapFailure}`;
+  }
+
+  if (/\b(?:ENOTFOUND|EAI_AGAIN|getaddrinfo)\b/i.test(logs)) {
+    return "runner_callback_dns";
+  }
+  if (/\b(?:ConnectionRefused|ECONNREFUSED|Failed to connect|Unable to connect)\b/i.test(logs)) {
+    return "runner_callback_unreachable";
+  }
+
+  if (state === "running") return "runner_running_without_registration";
+  if (state === "restarting" || state === "exited" || state === "dead") {
+    return `runner_container_${state}`;
+  }
+  return null;
+}
+
 type DockerRunner = (
   args: readonly string[],
   context?: DigitalOceanProviderRequestContext,
@@ -243,6 +271,40 @@ export class LocalDockerDigitalOceanProvider implements DigitalOceanProvider {
     resource.providerFirewallName = null;
 
     return { ok: true, value: cloneResource(resource) };
+  }
+
+  async diagnoseRunnerBootstrapFailure(): Promise<string | null> {
+    let state: string;
+    try {
+      const inspected = await this.#docker([
+        "inspect",
+        "--format",
+        "{{.State.Status}}",
+        LOCAL_PRODUCTION_RUNNER_CONTAINER_NAME,
+      ]);
+      state = inspected.stdout.trim();
+    } catch {
+      return null;
+    }
+
+    let logs = "";
+    try {
+      const captured = await this.#docker([
+        "logs",
+        "--tail",
+        "80",
+        LOCAL_PRODUCTION_RUNNER_CONTAINER_NAME,
+      ]);
+      logs = `${captured.stdout}\n${captured.stderr}`;
+    } catch {
+      // Container state alone still provides a closed diagnostic.
+    }
+
+    const failureCode = localDockerRunnerBootstrapFailureCode(state, logs);
+    if (failureCode && process.env.NODE_ENV !== "test") {
+      localDockerProviderLogger.info("runner_bootstrap_diagnosed", { failureCode });
+    }
+    return failureCode;
   }
 
   #scheduleRunnerStart(input: DigitalOceanRunnerSpec): void {
@@ -506,8 +568,25 @@ function buildLocalDockerShim(agentSmokeMode: boolean): string[] {
     '    sed -i "s#^BRUNO_HERMES_STATE_ROOT=.*#BRUNO_HERMES_STATE_ROOT=$bridge_dir/var/lib/bruno/agents#" "$bridge_env"',
     '    sed -i "s#^BRUNO_RUNNER_BOOT_SELF_TEST_ROOT=.*#BRUNO_RUNNER_BOOT_SELF_TEST_ROOT=$bridge_dir/var/lib/bruno/boot-self-test#" "$bridge_env"',
     "  fi",
+    `  host_gateway="${"$"}(getent ahostsv4 host.docker.internal | awk 'NR == 1 { print ${"$"}1 }')"`,
+    '  network_name=""',
+    '  previous_arg=""',
+    '  for arg in "$@"; do',
+    '    if [[ "$previous_arg" == "--network" ]]; then',
+    '      network_name="$arg"',
+    "      break",
+    "    fi",
+    '    previous_arg="$arg"',
+    "  done",
+    `  if [[ -n "${"$"}network_name" ]] && ! /usr/bin/docker info --format '{{.OperatingSystem}}' | grep -qi 'Docker Desktop'; then`,
+    `    network_gateway="${"$"}(/usr/bin/docker network inspect --format '{{(index .IPAM.Config 0).Gateway}}' "${"$"}network_name")"`,
+    `    if [[ -n "${"$"}network_gateway" ]]; then`,
+    '      host_gateway="$network_gateway"',
+    "    fi",
+    "  fi",
+    '  test -n "$host_gateway"',
     "  translated=()",
-    `  translated+=("run" "--add-host" "host.docker.internal:host-gateway")`,
+    `  translated+=("run" "--add-host" "host.docker.internal:${"$"}host_gateway")`,
     "  shift",
     '  for arg in "$@"; do',
     '    case "$arg" in',

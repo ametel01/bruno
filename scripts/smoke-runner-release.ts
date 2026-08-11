@@ -20,6 +20,7 @@ import {
   type DigitalOceanOwnedSetProvider,
   type DigitalOceanProvider,
 } from "@/src/server/runners/digitalocean-provider";
+import { LocalDockerDigitalOceanProvider } from "@/src/server/runners/local-docker-digitalocean-provider";
 import { probeRunnerEndpointReadiness } from "@/src/server/runners/runner-heartbeat";
 import {
   createConfiguredDigitalOceanProvider,
@@ -97,6 +98,7 @@ export type RunnerReleaseSmokeResult =
 
 export type RunnerReleaseSmokeSession = {
   run(): Promise<RunnerReleaseSmokeEvidence>;
+  diagnoseFailure?(): Promise<string | null>;
   cleanup(): Promise<void>;
   verifyCleanup(): Promise<boolean>;
 };
@@ -249,6 +251,13 @@ export async function smokeRunnerRelease(
   } catch (error) {
     runFailed = true;
     runFailureCode = closedErrorCode(error);
+    if (session.diagnoseFailure) {
+      try {
+        runFailureCode = (await session.diagnoseFailure()) ?? runFailureCode;
+      } catch {
+        // Retain the original closed code when diagnostics are unavailable.
+      }
+    }
     logClosedSmokeFailure("run_failed", error);
   } finally {
     try {
@@ -344,6 +353,12 @@ function createRunnerReleaseSmokeSession(
         plan,
         config: releaseConfig,
       });
+    },
+
+    async diagnoseFailure() {
+      return provider instanceof LocalDockerDigitalOceanProvider
+        ? await provider.diagnoseRunnerBootstrapFailure()
+        : null;
     },
 
     async cleanup() {

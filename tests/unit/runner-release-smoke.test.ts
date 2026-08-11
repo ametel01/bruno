@@ -219,10 +219,9 @@ describe("runner release smoke", () => {
       createSession: () =>
         session([], {
           run: async () => {
-            throw Object.assign(new Error("private image pull output"), {
-              code: "bootstrap_hermes_image_pull",
-            });
+            throw new Error("private callback output");
           },
+          diagnoseFailure: async () => "runner_callback_unreachable",
         }),
     });
 
@@ -231,9 +230,9 @@ describe("runner release smoke", () => {
       code: "smoke_failed",
       sideEffectsAttempted: true,
       cleanupVerified: true,
-      failureCode: "bootstrap_hermes_image_pull",
+      failureCode: "runner_callback_unreachable",
     });
-    expect(JSON.stringify(result)).not.toContain("private image pull output");
+    expect(JSON.stringify(result)).not.toContain("private callback output");
   });
 
   it("blocks promotion when cleanup cannot be verified", async () => {

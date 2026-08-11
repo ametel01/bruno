@@ -191,6 +191,7 @@ jobs:
       BRUNO_DIGITALOCEAN_PROVIDER_MODE: local_docker
       BRUNO_DIGITALOCEAN_SSH_KEY_IDS: disabled
       BRUNO_DIGITALOCEAN_SIZE_SLUG: s-1vcpu-2gb
+      BRUNO_HERMES_PRIVATE_NETWORK: bruno-hermes
       BRUNO_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: http://127.0.0.1:3045
       BRUNO_RUNNER_IMAGE: ${{ needs.publish.outputs.immutable-image }}
       BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE: ${{ vars.BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE }}
@@ -310,6 +311,7 @@ jobs:
           cleanup_control_plane() {
             kill "${CONTROL_PLANE_PID}" >/dev/null 2>&1 || true
             wait "${CONTROL_PLANE_PID}" >/dev/null 2>&1 || true
+            docker network rm "${BRUNO_HERMES_PRIVATE_NETWORK}" >/dev/null 2>&1 || true
           }
           trap cleanup_control_plane EXIT
           CONTROL_PLANE_READY=false
@@ -321,7 +323,12 @@ jobs:
             sleep 1
           done
           test "${CONTROL_PLANE_READY}" = "true"
-          docker run --rm --add-host host.docker.internal:host-gateway "${BRUNO_DOCKER_RUNNER_IMAGE}" \
+          docker network inspect "${BRUNO_HERMES_PRIVATE_NETWORK}" >/dev/null 2>&1 || \
+            docker network create "${BRUNO_HERMES_PRIVATE_NETWORK}" >/dev/null
+          FIXTURE_HOST_GATEWAY="$(docker network inspect \
+            --format '{{(index .IPAM.Config 0).Gateway}}' "${BRUNO_HERMES_PRIVATE_NETWORK}")"
+          test -n "${FIXTURE_HOST_GATEWAY}"
+          docker run --rm --network "${BRUNO_HERMES_PRIVATE_NETWORK}" --add-host "host.docker.internal:${FIXTURE_HOST_GATEWAY}" "${BRUNO_DOCKER_RUNNER_IMAGE}" \
             wget --quiet --output-document=/dev/null http://host.docker.internal:3000/health
           mkdir -p runner-release-evidence
           bun run runner:release:smoke -- --image "${BRUNO_RUNNER_IMAGE}" --provider local_docker \

@@ -138,7 +138,12 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).toContain('docker pull "$' + '{BRUNO_DOCKER_RUNNER_IMAGE}"');
     expect(workflowSource).toContain('docker pull "$' + '{BRUNO_HERMES_WORKLOAD_IMAGE}"');
     expect(workflowSource).toContain(
-      'docker run --rm --add-host host.docker.internal:host-gateway "$' +
+      'docker network inspect "$' + '{BRUNO_HERMES_PRIVATE_NETWORK}"',
+    );
+    expect(workflowSource).toContain(
+      'docker run --rm --network "$' +
+        '{BRUNO_HERMES_PRIVATE_NETWORK}" --add-host "host.docker.internal:$' +
+        '{FIXTURE_HOST_GATEWAY}" "$' +
         '{BRUNO_DOCKER_RUNNER_IMAGE}"',
     );
     expect(workflowSource).toContain(
