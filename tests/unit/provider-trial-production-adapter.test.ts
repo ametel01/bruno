@@ -1,0 +1,134 @@
+import { describe, expect, it } from "vitest";
+import { createProviderTrialProductionDriverDependencies } from "@/src/server/agents/provider-trial-production-adapter";
+
+const ATTEMPT = {
+  cohortId: "00000000-0000-4000-8000-000000002991",
+  slotId: "00000000-0000-4000-8000-000000002992",
+  slotNumber: 1,
+  requestAttemptId: "00000000-0000-4000-8000-000000002993",
+  requestStartedAt: "2026-08-11T12:00:00.000Z",
+};
+
+describe("DigitalOcean Provider Trial production adapter", () => {
+  it("commits through the existing driver port with operator-trial identity and reserved cost", async () => {
+    const dependencies = createProviderTrialProductionDriverDependencies({
+      ownerUserId: "00000000-0000-4000-8000-000000002994",
+      fixture: {
+        assistant: "chatgpt",
+        modelApiKey: `sk-${"a".repeat(24)}`,
+        telegramBotToken: `123456:${"b".repeat(20)}`,
+        telegramUserId: "123456",
+      },
+      async createReadyDeployment(input) {
+        if (
+          input.identity.origin !== "operator_trial" ||
+          input.identity.environment !== "non_production" ||
+          input.idempotencyKey !== "provider-trial:00000000-0000-4000-8000-000000002993"
+        ) {
+          return { state: "rejected" };
+        }
+        return {
+          state: "committed",
+          deploymentId: "00000000-0000-4000-8000-000000002995",
+          activeProviderResources: 1,
+        };
+      },
+    });
+    const result = await dependencies.executeSlot(ATTEMPT, {
+      idempotencyKey: "provider-trial:00000000-0000-4000-8000-000000002993",
+      signal: new AbortController().signal,
+      deadlineAt: "2026-08-11T12:15:00.000Z",
+      timeoutMs: 900_000,
+      maxCostCents: 16,
+      maxProviderResources: 1,
+      authorizationScope: {
+        cohortId: ATTEMPT.cohortId,
+        region: "sfo3",
+        runnerSizeSlug: "s-1vcpu-2gb",
+        deploymentChoicesDigest: `sha256:${"c".repeat(64)}`,
+        benchmarkOwnerIdentityHash: `sha256:${"d".repeat(64)}`,
+        benchmarkTelegramIdentityHash: `sha256:${"e".repeat(64)}`,
+      },
+    });
+
+    expect(result).toEqual({
+      outcome: "committed",
+      deploymentId: "00000000-0000-4000-8000-000000002995",
+      costCents: 16,
+      activeProviderResources: 1,
+    });
+  });
+
+  it("reconciles the original request, observes its terminal deployment, and cleans the exact cohort", async () => {
+    const dependencies = createProviderTrialProductionDriverDependencies({
+      ownerUserId: "00000000-0000-4000-8000-000000002994",
+      fixture: {
+        assistant: "chatgpt",
+        modelApiKey: `sk-${"a".repeat(24)}`,
+        telegramBotToken: `123456:${"b".repeat(20)}`,
+        telegramUserId: "123456",
+      },
+      async createReadyDeployment() {
+        return { state: "rejected" };
+      },
+      async findDeployment(input) {
+        return input.idempotencyKey.endsWith(ATTEMPT.requestAttemptId)
+          ? {
+              state: "found",
+              deploymentId: "00000000-0000-4000-8000-000000002995",
+              activeProviderResources: 1,
+            }
+          : { state: "conflict" };
+      },
+      async observeDeployment(input) {
+        return input.deploymentId === "00000000-0000-4000-8000-000000002995"
+          ? { state: "ready" }
+          : { state: "conflict" };
+      },
+      async cleanupCohort(input) {
+        return input.cohortId === ATTEMPT.cohortId
+          ? { ok: true, authoritative: true, remainingResourceIds: [] }
+          : { ok: false, authoritative: true, remainingResourceIds: ["cohort-mismatch"] };
+      },
+      now: () => new Date("2026-08-11T12:00:01.000Z"),
+    });
+    const context = {
+      idempotencyKey: "provider-trial:00000000-0000-4000-8000-000000002993",
+      signal: new AbortController().signal,
+      deadlineAt: "2026-08-11T12:15:00.000Z",
+      timeoutMs: 900_000,
+      maxCostCents: 16,
+      maxProviderResources: 1,
+      authorizationScope: {
+        cohortId: ATTEMPT.cohortId,
+        region: "sfo3",
+        runnerSizeSlug: "s-1vcpu-2gb",
+        deploymentChoicesDigest: `sha256:${"c".repeat(64)}`,
+        benchmarkOwnerIdentityHash: `sha256:${"d".repeat(64)}`,
+        benchmarkTelegramIdentityHash: `sha256:${"e".repeat(64)}`,
+      },
+    } as const;
+
+    await expect(dependencies.reconcileRequest?.(ATTEMPT, context)).resolves.toEqual({
+      outcome: "committed",
+      deploymentId: "00000000-0000-4000-8000-000000002995",
+      costCents: 16,
+      activeProviderResources: 1,
+    });
+    await expect(
+      dependencies.observeCommittedSlot?.(ATTEMPT, {
+        signal: context.signal,
+        deadlineAt: context.deadlineAt,
+        timeoutMs: context.timeoutMs,
+      }),
+    ).resolves.toBe("observe_deployment");
+    await expect(
+      dependencies.cleanup?.({
+        cohortId: ATTEMPT.cohortId,
+        signal: context.signal,
+        deadlineAt: "2026-08-11T12:20:00.000Z",
+        timeoutMs: 300_000,
+      }),
+    ).resolves.toEqual({ ok: true, authoritative: true, remainingResourceIds: [] });
+  });
+});

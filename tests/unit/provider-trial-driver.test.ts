@@ -136,6 +136,17 @@ describe("resumable Provider Trial driver", () => {
     expect(run).toMatchObject({ state: "complete", nextSlotNumber: 31, spentCents: 30 });
     expect(run?.signedReportDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
     const report = JSON.parse(run?.signedReportBytes ?? "{}") as Record<string, unknown>;
+    expect(report.authorization).toEqual({
+      generation: 1,
+      idHash: createHash("sha256").update("auth-local-001").digest("hex"),
+    });
+    expect(report.configuration).toMatchObject({
+      digitalOceanAccountIdentityHash: `sha256:${"a".repeat(64)}`,
+      telegramBotIdentityHash: `sha256:${"b".repeat(64)}`,
+      telegramChatIdentityHash: `sha256:${"c".repeat(64)}`,
+      telegramUserIdentityHash: `sha256:${"e".repeat(64)}`,
+      prerequisiteGateEvidenceDigest: `sha256:${"f".repeat(64)}`,
+    });
     expect(report.slotCleanup).toHaveLength(30);
     expect(report.stageDistributions).toEqual([]);
     expect(
@@ -1107,6 +1118,11 @@ function configuration(
     benchmarkTelegramIdentityHash: providerTrialBenchmarkTelegramIdentityHash(
       TELEGRAM_UNIQUENESS_FINGERPRINT,
     ),
+    digitalOceanAccountIdentityHash: `sha256:${"a".repeat(64)}`,
+    telegramBotIdentityHash: `sha256:${"b".repeat(64)}`,
+    telegramChatIdentityHash: `sha256:${"c".repeat(64)}`,
+    telegramUserIdentityHash: `sha256:${"e".repeat(64)}`,
+    prerequisiteGateEvidenceDigest: `sha256:${"f".repeat(64)}`,
     evidenceRetentionDays: 90,
     ...overrides,
   };

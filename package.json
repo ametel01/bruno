@@ -19,6 +19,7 @@
     "local:up": "docker compose up -d postgres && bun run db:migrate && BRUNO_AUTH_MODE=development bun run dev",
     "agent:hermes:contract-smoke": "bun --conditions react-server scripts/smoke-local-hermes-contract.ts",
     "agent:deployment:benchmark": "bun --conditions react-server scripts/benchmark-agent-deployment.ts",
+    "agent:provider-trial": "bun --conditions react-server scripts/run-provider-trial.ts",
     "agent:image:smoke": "bun scripts/smoke-hermes-agent-image.ts",
     "runner:snapshot:build": "bun --conditions react-server scripts/build-runner-snapshot.ts",
     "runner:snapshot:registry": "bun --conditions react-server scripts/publish-runner-snapshot-bundle.ts",

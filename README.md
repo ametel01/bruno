@@ -206,6 +206,9 @@ DigitalOcean budget and live-effect sentinels, and isolated Telegram plus direct
 OpenAI-or-Anthropic credentials. Disabling the acceptance flag prevents forward work while cron
 continues durable cleanup for an existing run.
 
+The issue #299 DigitalOcean Provider Trial has a separate fail-closed operator command and
+credential wizard. See [Run the authorized issue #299 Provider Trial](./docs/E2E_VALIDATION.md#run-the-authorized-issue-299-provider-trial).
+
 Additional validated tuning variables are documented inline in `.env.example` and
 `src/server/env.ts`. Production runner bootstrap pulls the configured runner and Hermes images;
 ensure those images are available to the Droplet without relying on credentials that bootstrap

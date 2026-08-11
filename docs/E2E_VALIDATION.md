@@ -68,6 +68,79 @@ The driver API is repository machinery, not provider authority. A DigitalOcean r
 the separate authorization described by issue #299: exact region and profile, 30 slots, maximum
 spend, dedicated benchmark Owner and Telegram bot, cleanup policy, and retained-artifact policy.
 
+### Run the authorized issue #299 Provider Trial
+
+The operator command is intentionally split into three gates. Its default `preflight` command is
+zero-effect. `initialize` creates only the dedicated non-Clerk Bruno Owner, immutable cohort, slots,
+and driver row in PostgreSQL. `run` is the sole live command and consumes the original 30 slots
+sequentially until the run completes or pauses.
+
+Create the ignored credential file with the ephemeral wizard:
+
+```bash
+./.vercel/provider-trial-credentials-wizard.sh
+```
+
+The wizard stores credentials in `.env.provider-trial.local`, generates an ignored Ed25519 keypair,
+and checks the release-attested runtime configuration already held in `.env.local`. It does not
+write Provider Trial secrets to GitHub. After the protected Verified Release is bound to the current
+commit, run the prerequisite gates and then the zero-effect preflight:
+
+```bash
+bun --env-file=.env.local --env-file=.env.provider-trial.local \
+  --conditions react-server scripts/run-provider-trial.ts verify-gates
+bun --env-file=.env.local --env-file=.env.provider-trial.local \
+  --conditions react-server scripts/run-provider-trial.ts preflight
+```
+
+`verify-gates` runs the repository verification, desktop/mobile browser gate, cloud bootstrap
+reproduction, and full local Agent lifecycle smoke. It writes a signed, sanitized gate manifest
+bound to the current Git revision, exact Verified Release digest, authorization generation, and
+hashed DigitalOcean account, Telegram bot, Telegram chat, and Telegram user identities. Credential
+fingerprints prevent a different DigitalOcean, model, or Telegram credential from being substituted
+after the gates. Those identity hashes and the gate-evidence digest are also bound into the canonical
+signed cohort report. `preflight`, `initialize`, and `run` reject a dirty working tree or a missing,
+tampered, stale-revision, wrong-release, or credential-mismatched manifest.
+
+Only after preflight succeeds, create the database-only ledger and start the authorized live run:
+
+```bash
+bun --env-file=.env.local --env-file=.env.provider-trial.local \
+  --conditions react-server scripts/run-provider-trial.ts initialize
+bun --env-file=.env.local --env-file=.env.provider-trial.local \
+  --conditions react-server scripts/run-provider-trial.ts run
+```
+
+The issue #299 scope is compiled into the command: `sfo3`, `s-1vcpu-2gb`, 30 slots, at most one
+billable Droplet at a time, 16 cents reserved per slot, and 500 cents total. The Bruno benchmark
+Owner is an isolated application principal, not the DigitalOcean account owner. Cleanup can act
+only on the exact runner, Droplet, and firewall tuple linked to the cohort. Missing or ambiguous
+ownership evidence pauses the ledger. Successful cleanup deletes every trial workload, active
+secret, firewall, Droplet, runner credential, and runner record; no trial provider resource or
+credential is intentionally retained.
+
+The database retains the sanitized signed report and append-only cleanup ledger. Detailed evidence
+has a 90-day minimum retention commitment; the signed canonical report is retained without a
+scheduled deletion. The signing public key is retained beside the ignored private key so an exported
+report can be verified independently. A paused run needs fresh authorization before reconciliation;
+never create a replacement slot or manually relink a deployment.
+
+After `run` stops, revoke the short-lived DigitalOcean PAT and dedicated model key, then regenerate
+or revoke the benchmark Telegram token in BotFather. Do this even when the performance gate failed.
+Once the run is complete, or paused with authoritative provider-cleanup evidence, finish with:
+
+```bash
+bun --env-file=.env.local --env-file=.env.provider-trial.local \
+  --conditions react-server scripts/run-provider-trial.ts verify-credential-cleanup
+```
+
+The final command proves all three remote credentials are rejected, signs a sanitized companion
+record bound to the cohort-report digest when one exists, and deletes `.env.provider-trial.local`
+plus the signing private key. Keep only the signed gate/cohort/credential-cleanup evidence and public
+verification key. A truthful signed `.pending` record is retained if local deletion or final evidence
+publication cannot finish. Until credential cleanup succeeds, `run` deliberately returns a non-zero
+credential-cleanup-required status regardless of whether the 30-slot performance gate passed.
+
 Version 4 of the benchmark uses the immutable database-clock
 `agent_deployments.accepted_at` boundary. New Agent Deployments capture this timestamp inside the
 request transaction after the earlier persistence work, so transaction commit latency remains in

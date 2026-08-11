@@ -18,6 +18,7 @@ import {
 import {
   DEVELOPMENT_USER_METADATA_KEY,
   HERMES_STAGING_OWNER_METADATA_KEY,
+  PROVIDER_TRIAL_BENCHMARK_OWNER_METADATA_KEY,
 } from "@/src/server/users/development-user";
 
 export { HERMES_STAGING_OWNER_METADATA_KEY };
@@ -114,6 +115,15 @@ async function validateExistingOwnerPointer(
     .limit(1);
 
   if (developmentPointer?.value === owner.id) {
+    return { ok: false, reason: "staging_owner_shared_with_development" };
+  }
+
+  const [providerTrialPointer] = await db
+    .select({ value: appMetadata.value })
+    .from(appMetadata)
+    .where(eq(appMetadata.key, PROVIDER_TRIAL_BENCHMARK_OWNER_METADATA_KEY))
+    .limit(1);
+  if (providerTrialPointer?.value === owner.id) {
     return { ok: false, reason: "staging_owner_shared_with_development" };
   }
 

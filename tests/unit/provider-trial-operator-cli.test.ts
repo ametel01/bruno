@@ -1,0 +1,85 @@
+import { spawnSync } from "node:child_process";
+import { describe, expect, it } from "vitest";
+
+const COMMAND = [
+  "--conditions",
+  "react-server",
+  "scripts/run-provider-trial.ts",
+  "preflight",
+] as const;
+
+describe("Provider Trial operator CLI", () => {
+  it("fails closed with zero effects and names every missing configuration field", () => {
+    const result = spawnSync("bun", COMMAND, {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH,
+        NODE_ENV: "test",
+      },
+    });
+
+    expect(result.status).toBe(1);
+    expect(JSON.parse(result.stdout)).toEqual({
+      command: "preflight",
+      effects: 0,
+      ok: false,
+      issues: [
+        "authorization_id",
+        "authorization_generation",
+        "cohort_key",
+        "live_confirmation",
+        "digitalocean_token",
+        "deployment_choices",
+        "model_fixture",
+        "signing_key",
+        "prerequisite_gates",
+        "credential_cleanup",
+        "telegram_fixture",
+      ],
+    });
+    expect(result.stdout).not.toContain("undefined");
+  });
+
+  it("rejects a fully populated environment that differs from the approved scope", () => {
+    const result = spawnSync("bun", COMMAND, {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH,
+        NODE_ENV: "test",
+        BRUNO_PROVIDER_TRIAL_AUTHORIZATION_ID: "different-authorization",
+        BRUNO_PROVIDER_TRIAL_AUTHORIZATION_GENERATION: "2",
+        BRUNO_PROVIDER_TRIAL_COHORT_KEY: "issue-299-provider-trial-20260811-g1",
+        BRUNO_PROVIDER_TRIAL_LIVE_SIDE_EFFECT_CONFIRMATION:
+          "authorize-issue-299-live-provider-trial",
+        BRUNO_DIGITALOCEAN_TOKEN: "do-not-print-this-provider-token-value",
+        BRUNO_DIGITALOCEAN_PROVIDER_MODE: "digitalocean",
+        BRUNO_DIGITALOCEAN_REGION: "nyc3",
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-2vcpu-4gb",
+        BRUNO_RUNNER_IMAGE: `ghcr.io/ametel01/bruno-runner@sha256:${"1".repeat(64)}`,
+        BRUNO_RUNNER_BEARER_TOKEN: "do-not-print-this-runner-bearer-value",
+        BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION: "v1",
+        BRUNO_AGENT_SECRET_KEYS_JSON: '{"v1":"do-not-print-this-keyring-value"}',
+        BRUNO_PROVIDER_TRIAL_ASSISTANT: "chatgpt",
+        BRUNO_PROVIDER_TRIAL_MODEL_API_KEY: "do-not-print-this-model-key-value",
+        BRUNO_PROVIDER_TRIAL_SIGNING_KEY_ID: "issue-299",
+        BRUNO_PROVIDER_TRIAL_SIGNING_PRIVATE_KEY_PATH: "/tmp/issue-299.pem",
+        BRUNO_PROVIDER_TRIAL_GATE_EVIDENCE_PATH: "/tmp/issue-299-gates.json",
+        BRUNO_PROVIDER_TRIAL_CREDENTIAL_FILE_PATH: "/tmp/issue-299.env",
+        BRUNO_PROVIDER_TRIAL_TELEGRAM_BOT_TOKEN: "do-not-print-this-telegram-token-value",
+        BRUNO_PROVIDER_TRIAL_TELEGRAM_USER_ID: "123456",
+        BRUNO_PROVIDER_TRIAL_TELEGRAM_CHAT_ID: "123456",
+      },
+    });
+
+    expect(result.status).toBe(1);
+    expect(JSON.parse(result.stdout)).toEqual({
+      command: "preflight",
+      effects: 0,
+      ok: false,
+      issues: ["approved_scope"],
+    });
+    expect(result.stdout).not.toContain("do-not-print-this");
+  });
+});

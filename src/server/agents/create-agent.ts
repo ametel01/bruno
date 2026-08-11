@@ -5,6 +5,12 @@ import {
   createAgentDeploymentForUser,
   getAgentDeploymentByIdempotencyKeyForUser,
 } from "@/src/server/agents/agent-deployments";
+import { captureAgentDeploymentChoicesFromEnvironment } from "@/src/server/agents/agent-deployment-choices";
+import {
+  CURRENT_ROLLOUT_CONFIGURATION_GENERATION,
+  type AgentDeploymentEnvironment,
+  type AgentDeploymentOrigin,
+} from "@/src/server/agents/deployment-slo-identity";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import {
   AgentSecretKeyringError,
@@ -214,6 +220,10 @@ export type CreateAgentDependencies = {
   telegramClient?: TelegramClientDependencies;
   telegramBotValidator?: TelegramBotValidator;
   onReadyDeploymentCommitted?: (deploymentId: string) => void;
+  readyDeploymentIdentity?: {
+    origin: AgentDeploymentOrigin;
+    environment: AgentDeploymentEnvironment;
+  };
   readyCreateTestHooks?: {
     beforeCapacityLock?: (input: { runnerId: string; userId: string }) => Promise<void> | void;
     afterCapacityLock?: (input: { runnerId: string; userId: string }) => Promise<void> | void;
@@ -1141,6 +1151,16 @@ async function createReadyAgentForUser(
         agentId,
         configRevision,
         idempotencyKey: input.idempotencyKey,
+        ...(dependencies.readyDeploymentIdentity
+          ? {
+              origin: dependencies.readyDeploymentIdentity.origin,
+              deploymentEnvironment: dependencies.readyDeploymentIdentity.environment,
+            }
+          : {}),
+        deploymentChoices: captureAgentDeploymentChoicesFromEnvironment(
+          dependencies.env ?? process.env,
+          CURRENT_ROLLOUT_CONFIGURATION_GENERATION,
+        ),
         now,
       });
 

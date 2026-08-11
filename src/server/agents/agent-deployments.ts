@@ -31,6 +31,7 @@ import {
 import {
   CURRENT_ROLLOUT_CONFIGURATION_GENERATION,
   type AgentDeploymentEnvironment,
+  type AgentDeploymentOrigin,
   deploymentEnvironmentForRuntime,
   initialCohortForAssignedRunner,
 } from "@/src/server/agents/deployment-slo-identity";
@@ -183,6 +184,7 @@ export async function createAgentDeploymentForUser(input: {
   agentId: string;
   configRevision: string;
   idempotencyKey: string;
+  origin?: AgentDeploymentOrigin;
   deploymentEnvironment?: AgentDeploymentEnvironment;
   deploymentChoices?: AgentDeploymentChoices;
   now?: Date;
@@ -288,7 +290,7 @@ export async function createAgentDeploymentForUser(input: {
         ${input.configRevision},
         ${normalizedKey.value},
         clock_timestamp(),
-        'owner_request',
+        ${input.origin ?? "owner_request"},
         ${initialCohortForAssignedRunner(ownedAgent[0].runnerId)},
         ${input.deploymentEnvironment ?? deploymentEnvironmentForRuntime()},
         ${CURRENT_ROLLOUT_CONFIGURATION_GENERATION},

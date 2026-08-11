@@ -32,9 +32,10 @@ import {
   providerTrialSlots,
 } from "@/src/server/db/schema";
 
-export const PROVIDER_TRIAL_DRIVER_REPORT_SCHEMA_VERSION = "bruno.provider-trial-driver.v1";
+export const PROVIDER_TRIAL_DRIVER_REPORT_SCHEMA_VERSION = "bruno.provider-trial-driver.v2";
 const PROVIDER_TRIAL_CHECKPOINT_SCHEMA_VERSION = "bruno.provider-trial-checkpoint.v1";
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/;
+const SHA256_HEX = /^[a-f0-9]{64}$/;
 const SAFE_SLUG = /^[a-z0-9][a-z0-9-]{0,127}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_CODES = new Set<ProviderTrialSafeCode>([
@@ -60,6 +61,11 @@ export type ProviderTrialDriverConfiguration = {
   authorizedRunnerSizeSlug: string;
   benchmarkOwnerIdentityHash: string;
   benchmarkTelegramIdentityHash: string;
+  digitalOceanAccountIdentityHash: string;
+  telegramBotIdentityHash: string;
+  telegramChatIdentityHash: string;
+  telegramUserIdentityHash: string;
+  prerequisiteGateEvidenceDigest: string;
   evidenceRetentionDays: number;
 };
 
@@ -186,6 +192,7 @@ function isValidProviderTrialDriverReport(value: Record<string, unknown>): boole
         "cleanup",
         "cohort",
         "configuration",
+        "authorization",
         "generatedAt",
         "schemaVersion",
         "slotCleanup",
@@ -199,6 +206,12 @@ function isValidProviderTrialDriverReport(value: Record<string, unknown>): boole
     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value.generatedAt) ||
     !isValidProviderTrialCohortReport(value.cohort) ||
     value.cohort.generatedAt !== value.generatedAt ||
+    !isRecord(value.authorization) ||
+    Object.keys(value.authorization).sort().join("\0") !==
+      ["generation", "idHash"].sort().join("\0") ||
+    !Number.isSafeInteger(value.authorization.generation) ||
+    Number(value.authorization.generation) < 1 ||
+    !SHA256_HEX.test(String(value.authorization.idHash)) ||
     !isRecord(value.cleanup) ||
     Object.keys(value.cleanup).sort().join("\0") !==
       ["authoritative", "ok", "remainingResourceCount"].sort().join("\0") ||
@@ -828,6 +841,10 @@ async function finalizeRun(
   const report = {
     schemaVersion: PROVIDER_TRIAL_DRIVER_REPORT_SCHEMA_VERSION,
     generatedAt: now.toISOString(),
+    authorization: {
+      idHash: run.authorizationIdHash,
+      generation: run.authorizationGeneration,
+    },
     configuration,
     cohort: cohortReport,
     stages: Object.fromEntries(
@@ -1139,6 +1156,11 @@ function assertConfiguration(value: ProviderTrialDriverConfiguration): void {
     !SHA256_DIGEST.test(value.deploymentChoicesDigest) ||
     !SHA256_DIGEST.test(value.benchmarkOwnerIdentityHash) ||
     !SHA256_DIGEST.test(value.benchmarkTelegramIdentityHash) ||
+    !SHA256_DIGEST.test(value.digitalOceanAccountIdentityHash) ||
+    !SHA256_DIGEST.test(value.telegramBotIdentityHash) ||
+    !SHA256_DIGEST.test(value.telegramChatIdentityHash) ||
+    !SHA256_DIGEST.test(value.telegramUserIdentityHash) ||
+    !SHA256_DIGEST.test(value.prerequisiteGateEvidenceDigest) ||
     !SAFE_SLUG.test(value.authorizedRegion) ||
     !SAFE_SLUG.test(value.authorizedRunnerSizeSlug) ||
     !Number.isInteger(value.evidenceRetentionDays) ||
@@ -1159,6 +1181,11 @@ function parseConfiguration(value: unknown): ProviderTrialDriverConfiguration {
       "authorizedRunnerSizeSlug",
       "benchmarkOwnerIdentityHash",
       "benchmarkTelegramIdentityHash",
+      "digitalOceanAccountIdentityHash",
+      "telegramBotIdentityHash",
+      "telegramChatIdentityHash",
+      "telegramUserIdentityHash",
+      "prerequisiteGateEvidenceDigest",
       "cleanupTimeoutMs",
       "deploymentChoicesDigest",
       "evidenceRetentionDays",
