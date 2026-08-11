@@ -120,6 +120,56 @@ describe("agent deployment reconciler", () => {
     expect(JSON.stringify(events)).not.toMatch(/lease|operation|endpoint|secret|ready-key/i);
   });
 
+  it("places pending recovery work against its accepted release after defaults roll back", async () => {
+    await seedRunner(connection);
+    await seedAgent(connection, { runnerId: null });
+    await seedDeployment(connection, { stage: "pending" });
+    vi.stubEnv(
+      "BRUNO_RUNNER_IMAGE",
+      `ghcr.io/ametel01/bruno-runner:rollback@sha256:${"d".repeat(64)}`,
+    );
+
+    await expect(
+      reconcileNextAgentDeployment({
+        createConnection: () => connection,
+        now: () => NOW,
+      }),
+    ).resolves.toEqual({ processed: 1, outcome: "advanced" });
+
+    const [agent] = await connection.db.select().from(agents).where(eq(agents.id, AGENT_ID));
+    expect(agent?.runnerId).toBe(RUNNER_ID);
+  });
+
+  it("normalizes legacy v1 choices before crash recovery placement", async () => {
+    const legacy = automaticDeploymentChoices() as unknown as {
+      provider: Record<string, unknown>;
+    };
+    for (const key of [
+      "runnerBootContractVersion",
+      "sshKeyIds",
+      "sshSourceAddresses",
+      "localRunnerEndpointUrl",
+      "localRunnerContainerName",
+      "localRunnerStartDelayMs",
+      "localAgentSmokeMode",
+    ]) {
+      delete legacy.provider[key];
+    }
+    await seedRunner(connection);
+    await seedAgent(connection, { runnerId: null });
+    await seedDeployment(connection, {
+      stage: "pending",
+      deploymentChoices: legacy as never,
+    });
+
+    await expect(
+      reconcileNextAgentDeployment({ createConnection: () => connection, now: () => NOW }),
+    ).resolves.toEqual({ processed: 1, outcome: "advanced" });
+
+    const [agent] = await connection.db.select().from(agents).where(eq(agents.id, AGENT_ID));
+    expect(agent?.runnerId).toBe(RUNNER_ID);
+  });
+
   it.each([
     ["offline", { status: "offline", maxAgents: 1, runningAgents: 0 }],
     ["full", { status: "online", maxAgents: 1, runningAgents: 1 }],
@@ -326,6 +376,45 @@ describe("agent deployment reconciler", () => {
       stage: "starting_gateway",
       runnerOperationId: OPERATION_ID,
       canaryState: "not_started",
+    });
+  });
+
+  it("launches Hermes from accepted deployment choices after the default rolls back", async () => {
+    const pinnedHermesImage =
+      "ghcr.io/ametel01/bruno-hermes:pinned@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const rolledBackHermesImage =
+      "ghcr.io/ametel01/bruno-hermes:rollback@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+    await seedRunner(connection);
+    await seedAgent(connection, { runnerId: RUNNER_ID });
+    await seedDeployment(connection, {
+      stage: "configuring_hermes",
+      deploymentChoices: captureAgentDeploymentChoices({
+        config: { ...automaticProviderConfig(), hermesWorkloadImage: pinnedHermesImage },
+        dispatchMode: "cron",
+        rolloutConfigurationGeneration: 1,
+      }),
+    });
+    const launchSpec = sampleManagedLaunchSpec({
+      agent: { ...sampleManagedLaunchSpec().agent, id: AGENT_ID, configRevision: CONFIG_REVISION },
+      image: { ref: pinnedHermesImage },
+    });
+    const launchSpecBuilder = vi.fn(async () => ({ ok: true as const, spec: launchSpec }));
+    const adapter = fakeRunnerAdapter({
+      start: vi.fn(async () => acceptedStart(launchSpec, OPERATION_ID)),
+    });
+
+    await expect(
+      reconcileNextAgentDeployment({
+        createConnection: () => connection,
+        now: () => NOW,
+        readHermesWorkloadImage: () => rolledBackHermesImage,
+        launchSpec: launchSpecBuilder,
+        manualRunnerAdapter: () => adapter as never,
+      }),
+    ).resolves.toEqual({ processed: 1, outcome: "advanced" });
+
+    expect(launchSpecBuilder).toHaveBeenCalledWith(USER_ID, AGENT_ID, {
+      hermesWorkloadImage: pinnedHermesImage,
     });
   });
 
@@ -1898,6 +1987,7 @@ async function seedDeployment(
     canaryAttemptedAt?: Date;
     canaryCompletedAt?: Date;
     attemptCount?: number;
+    deploymentChoices?: ReturnType<typeof captureAgentDeploymentChoices>;
   },
 ) {
   await connection.db.insert(agentDeployments).values({
@@ -1913,7 +2003,7 @@ async function seedDeployment(
     canaryAttemptedAt: input.canaryAttemptedAt ?? null,
     canaryCompletedAt: input.canaryCompletedAt ?? null,
     attemptCount: input.attemptCount ?? 0,
-    deploymentChoices: automaticDeploymentChoices(),
+    deploymentChoices: input.deploymentChoices ?? automaticDeploymentChoices(),
     createdAt: NOW,
     updatedAt: NOW,
   });

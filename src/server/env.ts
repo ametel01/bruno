@@ -58,6 +58,7 @@ export type DigitalOceanProviderConfig = {
   providerMode?: "digitalocean" | "local_docker";
   runnerBearerToken: string;
   runnerImage: string;
+  runnerBootContractVersion?: string;
   hermesWorkloadImage?: string;
   hermesStateRoot?: string;
   hermesPrivateNetwork?: string;
@@ -79,6 +80,11 @@ export type DigitalOceanProviderConfig = {
   snapshotMode?: DigitalOceanSnapshotModeConfig;
   bootValidation?: DigitalOceanReleaseAttestedBootConfig;
 };
+
+export type DigitalOceanProviderCredentials = Pick<
+  DigitalOceanProviderConfig,
+  "token" | "runnerBearerToken"
+>;
 
 export type DigitalOceanReleaseAttestedBootConfig = {
   mode: "release_attested";
@@ -409,23 +415,11 @@ function parseHermesStagingAcceptanceBaseUrl(value: string | undefined): string 
 export function readDigitalOceanProviderConfig(
   input: Record<string, string | undefined> = process.env,
 ): DigitalOceanProviderConfig | null {
-  const token = input.BRUNO_DIGITALOCEAN_TOKEN?.trim();
+  const credentials = readDigitalOceanProviderCredentials(input);
 
-  if (token === undefined) {
-    return null;
-  }
+  if (!credentials) return null;
 
-  if (!token) {
-    throw new EnvValidationError(["BRUNO_DIGITALOCEAN_TOKEN cannot be blank."]);
-  }
-
-  const runnerBearerToken = input.BRUNO_RUNNER_BEARER_TOKEN?.trim();
-
-  if (!runnerBearerToken) {
-    throw new EnvValidationError([
-      "BRUNO_RUNNER_BEARER_TOKEN is required when DigitalOcean provisioning is set.",
-    ]);
-  }
+  const { token, runnerBearerToken } = credentials;
 
   const sshKeyIds = readDigitalOceanSshKeyIds(input.BRUNO_DIGITALOCEAN_SSH_KEY_IDS);
   const providerMode = readDigitalOceanProviderMode(input.BRUNO_DIGITALOCEAN_PROVIDER_MODE);
@@ -554,6 +548,26 @@ export function readDigitalOceanProviderConfig(
   }
 
   return config;
+}
+
+export function readDigitalOceanProviderCredentials(
+  input: Record<string, string | undefined> = process.env,
+): DigitalOceanProviderCredentials | null {
+  const token = input.BRUNO_DIGITALOCEAN_TOKEN?.trim();
+
+  if (token === undefined) return null;
+  if (!token) {
+    throw new EnvValidationError(["BRUNO_DIGITALOCEAN_TOKEN cannot be blank."]);
+  }
+
+  const runnerBearerToken = input.BRUNO_RUNNER_BEARER_TOKEN?.trim();
+  if (!runnerBearerToken) {
+    throw new EnvValidationError([
+      "BRUNO_RUNNER_BEARER_TOKEN is required when DigitalOcean provisioning is set.",
+    ]);
+  }
+
+  return { token, runnerBearerToken };
 }
 
 function readDigitalOceanRunnerBootValidation(

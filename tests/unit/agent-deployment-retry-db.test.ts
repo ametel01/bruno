@@ -188,6 +188,8 @@ describe("agent deployment retry persistence", () => {
 
     expect(result).toMatchObject({ created: true });
     const rows = await connection.db.select().from(agentDeployments);
+    const failed = rows.find((row) => row.id === FAILED_DEPLOYMENT_ID);
+    const retried = rows.find((row) => row.id !== FAILED_DEPLOYMENT_ID);
     expect(rows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -196,6 +198,7 @@ describe("agent deployment retry persistence", () => {
         }),
       ]),
     );
+    expect(retried?.deploymentChoices).toEqual(failed?.deploymentChoices);
   });
 });
 

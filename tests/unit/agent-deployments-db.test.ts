@@ -569,6 +569,11 @@ describe("agent deployment persistence and leases", () => {
       safetyQuarantineReason: "artifact identity mismatch",
       deploymentChoices: choices,
     });
+    const [wakeup] = await connection.db
+      .select({ state: agentDeploymentWakeups.state })
+      .from(agentDeploymentWakeups)
+      .where(eq(agentDeploymentWakeups.deploymentId, created.deployment.id));
+    expect(wakeup).toEqual({ state: "terminal" });
     await expect(
       connection.client`update agent_deployments set deployment_choices = jsonb_set(deployment_choices, '{dispatchMode}', '"cron"'::jsonb) where id = ${created.deployment.id}`,
     ).rejects.toThrow("immutable");

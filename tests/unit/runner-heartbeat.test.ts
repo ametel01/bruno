@@ -1,7 +1,10 @@
 import { eq, inArray, sql } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
+import { captureAgentDeploymentChoices } from "@/src/server/agents/agent-deployment-choices";
 import {
+  agentDeployments,
+  agents,
   runnerCredentials,
   runnerHeartbeats,
   runnerProvisioningEvents,
@@ -39,6 +42,7 @@ describe("runner heartbeat persistence", () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await resetRunnerHeartbeatTables(connection);
     await connection.close();
   });
@@ -228,6 +232,200 @@ describe("runner heartbeat persistence", () => {
       compatibilityState: "compatible",
       compatibilityVerifiedAt: new Date("2026-07-05T08:00:00.000Z"),
     });
+  });
+
+  it("does not reinterpret an admitted runner after the release default changes", async () => {
+    const credential = createRunnerCredential({
+      randomBytes: (size) => Buffer.alloc(size, 15),
+    });
+    const runner = await seedRunnerCredential(connection, {
+      credentialValue: credential.value,
+      runnerStatus: "online",
+      kind: "digitalocean",
+      provisioningStatus: "ready",
+      compatible: true,
+    });
+    vi.stubEnv(
+      "BRUNO_RUNNER_IMAGE",
+      `ghcr.io/ametel01/bruno-runner:rollback@sha256:${"d".repeat(64)}`,
+    );
+    vi.stubEnv("BRUNO_DIGITALOCEAN_PROVIDER_MODE", "digitalocean");
+
+    await expect(
+      recordRunnerHeartbeat(
+        {
+          authorizationHeader: `Bearer ${credential.value}`,
+          payload: {
+            runnerId: runner.id,
+            status: "online",
+            release: HOSTED_COMPATIBILITY_REQUIREMENT.release,
+          },
+        },
+        {
+          createConnection: () => connection,
+          now: () => new Date("2026-08-07T00:00:00.000Z"),
+        },
+      ),
+    ).resolves.toMatchObject({ ok: true });
+
+    const [persisted] = await connection.db
+      .select({
+        requiredRunnerImageDigest: runners.requiredRunnerImageDigest,
+        compatibilityState: runners.compatibilityState,
+      })
+      .from(runners)
+      .where(eq(runners.id, runner.id));
+    expect(persisted).toEqual({
+      requiredRunnerImageDigest: RUNNER_IMAGE_DIGEST,
+      compatibilityState: "compatible",
+    });
+  });
+
+  it("does not let an outdated runner adopt its mismatched boot contract on a later heartbeat", async () => {
+    const credential = createRunnerCredential({
+      randomBytes: (size) => Buffer.alloc(size, 16),
+    });
+    const runner = await seedRunnerCredential(connection, {
+      credentialValue: credential.value,
+      runnerStatus: "online",
+      kind: "digitalocean",
+      provisioningStatus: "ready",
+      compatible: true,
+    });
+    const mismatchedRelease = {
+      ...HOSTED_COMPATIBILITY_REQUIREMENT.release,
+      bootContractVersion: "bruno.runner.boot.unaccepted",
+    };
+    const compatibilityStates: string[] = [];
+
+    for (const observedAt of ["2026-08-07T01:00:00.000Z", "2026-08-07T01:01:00.000Z"]) {
+      await expect(
+        recordRunnerHeartbeat(
+          {
+            authorizationHeader: `Bearer ${credential.value}`,
+            payload: { runnerId: runner.id, status: "online", release: mismatchedRelease },
+          },
+          { createConnection: () => connection, now: () => new Date(observedAt) },
+        ),
+      ).resolves.toMatchObject({ ok: true });
+      const [persisted] = await connection.db
+        .select({ compatibilityState: runners.compatibilityState })
+        .from(runners)
+        .where(eq(runners.id, runner.id));
+      compatibilityStates.push(persisted?.compatibilityState ?? "missing");
+    }
+
+    expect(compatibilityStates).not.toContain("compatible");
+  });
+
+  it("admits a recovering runner against its deployment choices after defaults roll back", async () => {
+    const runner = await seedRunner(connection, {
+      endpointUrl: "https://pinned-cloud-runner.example.com",
+      status: "online",
+      kind: "digitalocean",
+      provisioningStatus: "waiting_for_runner",
+      compatible: true,
+    });
+    const [agent] = await connection.db
+      .insert(agents)
+      .values({
+        userId: runner.userId,
+        runnerId: runner.id,
+        name: "Pinned admission agent",
+        templateKey: "research_agent",
+        status: "starting",
+        desiredStatus: "running",
+      })
+      .returning({ id: agents.id });
+    if (!agent) throw new Error("Pinned admission agent insert returned no row.");
+    await connection.db.insert(agentDeployments).values({
+      agentId: agent.id,
+      userId: runner.userId,
+      stage: "provisioning_runner",
+      configRevision: "cfg-pinned-admission",
+      idempotencyKey: "pinned-admission",
+      deploymentChoices: captureAgentDeploymentChoices({
+        config: {
+          token: "old-provider-secret",
+          providerMode: "digitalocean",
+          runnerBearerToken: "old-runner-secret",
+          runnerImage: `ghcr.io/ametel01/bruno-runner:sha-current@${RUNNER_IMAGE_DIGEST}`,
+          region: "sfo3",
+          sizeSlug: "s-1vcpu-2gb",
+          image: "ubuntu-24-04-x64",
+          tags: ["bruno", "bruno-runner"],
+        },
+        dispatchMode: "cron",
+        rolloutConfigurationGeneration: 1,
+      }),
+    });
+    vi.stubEnv(
+      "BRUNO_RUNNER_IMAGE",
+      `ghcr.io/ametel01/bruno-runner:rollback@sha256:${"d".repeat(64)}`,
+    );
+    vi.stubEnv("BRUNO_DIGITALOCEAN_PROVIDER_MODE", "digitalocean");
+
+    await expect(
+      confirmCloudRunnerReadiness(runner.id, {
+        createConnection: () => connection,
+        fetch: async () => Response.json(readyRunnerBootSnapshot()),
+        runnerBearerToken: "current-runner-secret",
+      }),
+    ).resolves.toEqual({ outcome: "ready", transitioned: true });
+  });
+
+  it("fails closed when a recovering runner is associated with invalid recorded choices", async () => {
+    const runner = await seedRunner(connection, {
+      endpointUrl: "https://invalid-choice-runner.example.com",
+      status: "online",
+      kind: "digitalocean",
+      provisioningStatus: "waiting_for_runner",
+      compatible: true,
+    });
+    const [agent] = await connection.db
+      .insert(agents)
+      .values({
+        userId: runner.userId,
+        runnerId: runner.id,
+        name: "Invalid choice recovery agent",
+        templateKey: "research_agent",
+        status: "starting",
+        desiredStatus: "running",
+      })
+      .returning({ id: agents.id });
+    if (!agent) throw new Error("Invalid choice recovery agent insert returned no row.");
+    const choices = captureAgentDeploymentChoices({
+      config: {
+        token: "accepted-provider-secret",
+        providerMode: "digitalocean",
+        runnerBearerToken: "accepted-runner-secret",
+        runnerImage: `ghcr.io/ametel01/bruno-runner:sha-current@${RUNNER_IMAGE_DIGEST}`,
+        region: "sfo3",
+        sizeSlug: "s-1vcpu-2gb",
+        image: "ubuntu-24-04-x64",
+        tags: ["bruno", "bruno-runner"],
+      },
+      dispatchMode: "cron",
+      rolloutConfigurationGeneration: 1,
+    });
+    await connection.db.insert(agentDeployments).values({
+      agentId: agent.id,
+      userId: runner.userId,
+      stage: "provisioning_runner",
+      configRevision: "cfg-invalid-choice-admission",
+      idempotencyKey: "invalid-choice-admission",
+      deploymentChoices: { ...choices, unexpectedMutableDefault: true } as never,
+    });
+    const fetch = vi.fn();
+
+    await expect(
+      confirmCloudRunnerReadiness(runner.id, {
+        createConnection: () => connection,
+        fetch,
+        runnerBearerToken: "current-runner-secret",
+      }),
+    ).resolves.toEqual({ outcome: "pending", reason: "boot_evidence_incompatible" });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("persists a managed runner mismatch as outdated in the heartbeat transaction", async () => {
@@ -996,15 +1194,17 @@ async function seedRunnerCredential(
     endpointUrl?: string;
     provisioningStatus?: string;
     provisioningStartedAt?: Date;
+    compatible?: boolean;
     credentialOverrides?: Partial<typeof runnerCredentials.$inferInsert>;
   },
-): Promise<{ id: string }> {
+): Promise<{ id: string; userId: string }> {
   const runner = await seedRunner(connection, {
     endpointUrl: input.endpointUrl ?? "https://runner.example.com",
     status: input.runnerStatus,
     ...(input.kind ? { kind: input.kind } : {}),
     ...(input.provisioningStatus ? { provisioningStatus: input.provisioningStatus } : {}),
     ...(input.provisioningStartedAt ? { provisioningStartedAt: input.provisioningStartedAt } : {}),
+    ...(input.compatible ? { compatible: true } : {}),
   });
 
   await connection.db.insert(runnerCredentials).values({
@@ -1028,7 +1228,7 @@ async function seedRunner(
     provisioningStatus?: string;
     provisioningStartedAt?: Date;
   },
-): Promise<{ id: string }> {
+): Promise<{ id: string; userId: string }> {
   const [user] = await connection.db.insert(users).values({}).returning({ id: users.id });
 
   if (!user) {
@@ -1067,7 +1267,7 @@ async function seedRunner(
       createdAt: new Date("2026-07-05T07:00:00.000Z"),
       updatedAt: new Date("2026-07-05T07:00:00.000Z"),
     })
-    .returning({ id: runners.id });
+    .returning({ id: runners.id, userId: runners.userId });
 
   if (!runner) {
     throw new Error("Test runner insert returned no rows.");

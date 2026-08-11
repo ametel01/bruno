@@ -444,6 +444,9 @@ export async function advanceAutomaticDigitalOceanRunnerProvisioning(input: {
         registrationToken: generatedToken.value,
         commandBearerToken: input.config.runnerBearerToken,
         runnerImage: input.config.runnerImage,
+        ...(input.config.runnerBootContractVersion
+          ? { expectedBootContractVersion: input.config.runnerBootContractVersion }
+          : {}),
         hermesWorkloadImage: hermes.hermesWorkloadImage,
         hermesStateRoot: hermes.hermesStateRoot,
         hermesPrivateNetwork: hermes.hermesPrivateNetwork,
@@ -1123,6 +1126,7 @@ export async function createDigitalOceanRunnerForUser(
       sizeSlug: config.sizeSlug,
       image: selectedImage.image,
       runnerImage: config.runnerImage,
+      expectedBootContractVersion: config.runnerBootContractVersion,
       hermesWorkloadImage: hermesConfig.hermesWorkloadImage,
       hermesStateRoot: hermesConfig.hermesStateRoot,
       hermesPrivateNetwork: hermesConfig.hermesPrivateNetwork,
@@ -1303,6 +1307,9 @@ export async function createDigitalOceanRunnerForUser(
       registrationToken: initialized.registrationToken,
       commandBearerToken: config.runnerBearerToken,
       runnerImage: config.runnerImage,
+      ...(config.runnerBootContractVersion
+        ? { expectedBootContractVersion: config.runnerBootContractVersion }
+        : {}),
       hermesWorkloadImage: hermesConfig.hermesWorkloadImage,
       hermesStateRoot: hermesConfig.hermesStateRoot,
       hermesPrivateNetwork: hermesConfig.hermesPrivateNetwork,
@@ -1988,6 +1995,7 @@ async function buildProvisioningBootstrap(input: {
   registrationToken: string;
   commandBearerToken: string;
   runnerImage: string;
+  expectedBootContractVersion?: string;
   hermesWorkloadImage?: string;
   hermesStateRoot?: string;
   hermesPrivateNetwork?: string;
@@ -2023,6 +2031,9 @@ async function buildProvisioningBootstrap(input: {
       registrationToken: input.registrationToken,
       commandBearerToken: input.commandBearerToken,
       runnerImage: input.runnerImage,
+      ...(input.expectedBootContractVersion
+        ? { expectedBootContractVersion: input.expectedBootContractVersion }
+        : {}),
       ...(input.hermesWorkloadImage ? { hermesWorkloadImage: input.hermesWorkloadImage } : {}),
       ...(input.hermesStateRoot ? { hermesStateRoot: input.hermesStateRoot } : {}),
       ...(input.hermesPrivateNetwork ? { hermesPrivateNetwork: input.hermesPrivateNetwork } : {}),

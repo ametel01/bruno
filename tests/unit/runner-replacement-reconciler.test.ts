@@ -4,6 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import postgres from "postgres";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
+import { captureAgentDeploymentChoices } from "@/src/server/agents/agent-deployment-choices";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   agentDeploymentReplacementBudgets,
@@ -138,6 +139,75 @@ describe("runner replacement target reconciliation", () => {
     });
     expect(await sourceSnapshot(connection)).toEqual(sourceBefore);
     expect(provider.calls.filter((call) => call.step === "create")).toHaveLength(1);
+  });
+
+  it("recovers a deployment with its accepted runner choices after defaults roll back", async () => {
+    const replacementId = await createReplacement(connection);
+    const provider = new FakeDigitalOceanProvider({ now: () => NOW, idPrefix: "pinned" });
+    const rolledBackDigest = `sha256:${"7".repeat(64)}`;
+    const rolledBackConfig: DigitalOceanProviderConfig = {
+      ...providerConfig(),
+      runnerImage: `ghcr.io/ametel01/bruno-runner:rollback@${rolledBackDigest}`,
+      sizeSlug: "s-2vcpu-4gb",
+      image: "ubuntu-22-04-x64",
+      tags: ["rolled-back-default"],
+    };
+
+    await expect(
+      reconcile(connection, provider, replacementId, { readConfig: () => rolledBackConfig }),
+    ).resolves.toMatchObject({ outcome: "advanced", state: "provisioning_target" });
+    await expect(
+      reconcile(connection, provider, replacementId, { readConfig: () => rolledBackConfig }),
+    ).resolves.toMatchObject({ outcome: "advanced", state: "validating_target" });
+
+    const [replacement] = await connection.db
+      .select({ targetRunnerId: runnerReplacements.targetRunnerId })
+      .from(runnerReplacements)
+      .where(eq(runnerReplacements.id, replacementId));
+    const [target] = await connection.db
+      .select()
+      .from(runners)
+      .where(eq(runners.id, replacement?.targetRunnerId ?? SOURCE_ID));
+    expect(target).toMatchObject({
+      sizeSlug: "s-1vcpu-2gb",
+      image: "ubuntu-24-04-x64",
+      requiredRunnerImageDigest: IMAGE_DIGEST,
+    });
+    expect(provider.calls.find((call) => call.step === "create")?.input).toMatchObject({
+      sizeSlug: "s-1vcpu-2gb",
+      image: "ubuntu-24-04-x64",
+      tags: expect.arrayContaining(["bruno", "bruno-runner"]),
+    });
+  });
+
+  it("recovers pinned replacement choices when unrelated current defaults are malformed", async () => {
+    const replacementId = await createReplacement(connection);
+    const provider = new FakeDigitalOceanProvider({ now: () => NOW, idPrefix: "pinned-env" });
+    const originalToken = process.env.BRUNO_DIGITALOCEAN_TOKEN;
+    const originalBearer = process.env.BRUNO_RUNNER_BEARER_TOKEN;
+    const originalSize = process.env.BRUNO_DIGITALOCEAN_SIZE_SLUG;
+    process.env.BRUNO_DIGITALOCEAN_TOKEN = "current-provider-secret";
+    process.env.BRUNO_RUNNER_BEARER_TOKEN = "current-runner-secret";
+    process.env.BRUNO_DIGITALOCEAN_SIZE_SLUG = "invalid mutable size";
+
+    try {
+      await expect(
+        reconcileNextRunnerReplacement({
+          replacementId,
+          leaseOwner: LEASE_A,
+          dependencies: {
+            createConnection: () => connection,
+            now: () => NOW,
+            provider,
+            retryMs: 0,
+          },
+        }),
+      ).resolves.toMatchObject({ outcome: "advanced", state: "provisioning_target" });
+    } finally {
+      restoreEnvironment("BRUNO_DIGITALOCEAN_TOKEN", originalToken);
+      restoreEnvironment("BRUNO_RUNNER_BEARER_TOKEN", originalBearer);
+      restoreEnvironment("BRUNO_DIGITALOCEAN_SIZE_SLUG", originalSize);
+    }
   });
 
   it("rejects a persisted infrastructure replacement while its source is still provisioning", async () => {
@@ -618,6 +688,11 @@ async function seedFixture(connection: DatabaseConnection): Promise<void> {
     canaryCompletedAt: NOW,
     startedAt: NOW,
     completedAt: NOW,
+    deploymentChoices: captureAgentDeploymentChoices({
+      config: providerConfig(),
+      dispatchMode: "cron",
+      rolloutConfigurationGeneration: 1,
+    }),
     createdAt: NOW,
     updatedAt: NOW,
   });
@@ -650,6 +725,11 @@ async function seedSecondAgent(connection: DatabaseConnection): Promise<void> {
     canaryCompletedAt: NOW,
     startedAt: NOW,
     completedAt: NOW,
+    deploymentChoices: captureAgentDeploymentChoices({
+      config: providerConfig(),
+      dispatchMode: "cron",
+      rolloutConfigurationGeneration: 1,
+    }),
     createdAt: NOW,
     updatedAt: NOW,
   });

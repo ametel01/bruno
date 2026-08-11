@@ -7,6 +7,12 @@ import {
   createAgentDeploymentForRunnerReplacement,
   retryAgentDeploymentForUser,
 } from "@/src/server/agents/agent-deployment-retry";
+import {
+  applyAgentDeploymentChoices,
+  parseAgentDeploymentChoices,
+  recoverAgentDeploymentProviderConfig,
+  runnerBootValidationRequirementForProviderConfig,
+} from "@/src/server/agents/agent-deployment-choices";
 import { scheduleAgentDeploymentReconcileAfterResponse } from "@/src/server/agents/agent-deployment-triggers";
 import { scheduleAgentRuntimeReconcileAfterResponse } from "@/src/server/agents/agent-runtime-triggers";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
@@ -23,7 +29,12 @@ import {
   runnerReplacements,
   runners,
 } from "@/src/server/db/schema";
-import { type DigitalOceanProviderConfig, readDigitalOceanProviderConfig } from "@/src/server/env";
+import {
+  type DigitalOceanProviderConfig,
+  type DigitalOceanProviderCredentials,
+  readDigitalOceanProviderConfig,
+  readDigitalOceanProviderCredentials,
+} from "@/src/server/env";
 import {
   DIGITALOCEAN_PROVIDER,
   type DigitalOceanOwnedSetProvider,
@@ -125,7 +136,15 @@ export async function reconcileNextRunnerReplacement(input: {
 
     let config: DigitalOceanProviderConfig | null;
     try {
-      config = dependencies.readConfig?.() ?? readDigitalOceanProviderConfig();
+      const injectedConfig = dependencies.readConfig?.();
+      if (claim.triggerDeploymentId) {
+        const credentials = injectedConfig ?? readDigitalOceanProviderCredentials();
+        config = credentials
+          ? await applyTriggerDeploymentChoices(connection, claim, credentials)
+          : null;
+      } else {
+        config = injectedConfig ?? readDigitalOceanProviderConfig();
+      }
     } catch {
       return await failClaim(connection, claim, claimedAt, "target_provisioning_failed");
     }
@@ -211,6 +230,35 @@ export async function reconcileNextRunnerReplacement(input: {
   } finally {
     if (ownsConnection) await connection.close();
   }
+}
+
+async function applyTriggerDeploymentChoices(
+  connection: DatabaseConnection,
+  claim: ClaimedRunnerReplacement,
+  current: DigitalOceanProviderConfig | DigitalOceanProviderCredentials,
+): Promise<DigitalOceanProviderConfig> {
+  if (!claim.triggerDeploymentId) {
+    if ("region" in current) return current;
+    throw new Error("Runner replacement provider choices are unavailable.");
+  }
+
+  const [deployment] = await connection.db
+    .select({
+      choices: agentDeployments.deploymentChoices,
+      safetyQuarantinedAt: agentDeployments.safetyQuarantinedAt,
+    })
+    .from(agentDeployments)
+    .where(eq(agentDeployments.id, claim.triggerDeploymentId))
+    .limit(1);
+  const choices = parseAgentDeploymentChoices(deployment?.choices);
+
+  if (!deployment || deployment.safetyQuarantinedAt !== null || !choices) {
+    throw new Error("Runner replacement has no compatible triggering deployment choices.");
+  }
+
+  return "region" in current
+    ? applyAgentDeploymentChoices(current, choices)
+    : recoverAgentDeploymentProviderConfig(current, choices);
 }
 
 async function initializeTarget(
@@ -376,6 +424,7 @@ async function reconcileValidatingTarget(input: {
     now: () => input.now,
     runnerBearerToken: input.config.runnerBearerToken,
     allowInsecureLoopback: input.config.providerMode === "local_docker",
+    bootValidationRequirement: runnerBootValidationRequirementForProviderConfig(input.config),
     compatibilityRequirement: compatibilityRequirement(input.config),
   });
 
@@ -763,7 +812,7 @@ function runnerReplacementCompatibilityRequirement(config: DigitalOceanProviderC
         release: {
           version: release.version,
           imageDigest: release.imageDigest,
-          bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+          bootContractVersion: config.runnerBootContractVersion ?? RUNNER_BOOT_CONTRACT_VERSION,
         },
       } as const)
     : ({ mode: "unavailable", release: null } as const);
@@ -1463,7 +1512,7 @@ function compatibilityRequirement(
         release: {
           version: parsed.version,
           imageDigest: parsed.imageDigest,
-          bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+          bootContractVersion: config.runnerBootContractVersion ?? RUNNER_BOOT_CONTRACT_VERSION,
         },
       }
     : { mode: "unavailable", release: null };

@@ -4,9 +4,12 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import type { RunnerAgentStatusSnapshot } from "@/src/runner-service/runner-contracts";
 import { replaceDeploymentWakeupInTransaction } from "@/src/server/agents/agent-deployment-dispatch";
+import { quarantineAgentDeploymentForSafety } from "@/src/server/agents/agent-deployments";
 import {
   applyAgentDeploymentChoices,
   parseAgentDeploymentChoices,
+  recoverAgentDeploymentProviderConfig,
+  runnerCompatibilityRequirementForAgentDeploymentChoices,
   type AgentDeploymentChoices,
 } from "@/src/server/agents/agent-deployment-choices";
 import { buildHermesAgentLaunchSpecForUser } from "@/src/server/agents/agent-launch-builder";
@@ -32,7 +35,7 @@ import {
 } from "@/src/server/db/schema";
 import {
   type DigitalOceanProviderConfig,
-  readDigitalOceanProviderConfig,
+  readDigitalOceanProviderCredentials,
   readHermesWorkloadImage,
 } from "@/src/server/env";
 import { recordAgentEventsInTransaction } from "@/src/server/events/agent-events";
@@ -344,7 +347,6 @@ async function reconcileOne(
   dependencies: AgentDeploymentReconcilerDependencies,
   sharedContext?: DeploymentActionContext,
 ): Promise<InternalAgentDeploymentReconcileResult> {
-  const hermesWorkloadImage = (dependencies.readHermesWorkloadImage ?? readHermesWorkloadImage)();
   const connection = dependencies.createConnection?.() ?? createDatabaseConnection();
   const ownsConnection = !dependencies.createConnection;
   const now = dependencies.now ?? (() => new Date());
@@ -374,6 +376,10 @@ async function reconcileOne(
       );
       return { processed: 0, outcome: "idle", deploymentId: null };
     }
+
+    const hermesWorkloadImage =
+      claimed.deploymentChoices.provider.hermesWorkloadImage ??
+      (dependencies.readHermesWorkloadImage ?? readHermesWorkloadImage)();
 
     const lifecycleMetadata = {
       lifecycle: "agent_deployment",
@@ -482,6 +488,9 @@ async function reconcilePending(
   dependencies: AgentDeploymentReconcilerDependencies,
   now: () => Date,
 ): Promise<AgentDeploymentReconcileOutcome> {
+  const compatibilityRequirement = runnerCompatibilityRequirementForAgentDeploymentChoices(
+    work.deploymentChoices,
+  );
   let transitioned:
     | { kind: "advanced" }
     | { kind: "fail"; code: DeploymentTerminalErrorCode }
@@ -508,7 +517,7 @@ async function reconcilePending(
           tx,
           work.userId,
           { excludeAgentId: work.agentId, runnerId: owned.agent.runnerId },
-          { now: now() },
+          { now: now(), compatibilityRequirement },
         );
 
         if (!assigned.ok) {
@@ -534,7 +543,7 @@ async function reconcilePending(
         tx,
         work.userId,
         { runnerId: null },
-        { now: now() },
+        { now: now(), compatibilityRequirement },
       );
 
       if (placement.ok) {
@@ -549,7 +558,7 @@ async function reconcilePending(
           tx,
           work.userId,
           { runnerId: placement.runner.id },
-          { now: now() },
+          { now: now(), compatibilityRequirement },
         );
 
         if (confirmed.ok) {
@@ -621,6 +630,9 @@ async function reconcileProvisioningRunner(
   now: () => Date,
   context: DeploymentActionContext,
 ): Promise<AgentDeploymentReconcileOutcome> {
+  const compatibilityRequirement = runnerCompatibilityRequirementForAgentDeploymentChoices(
+    work.deploymentChoices,
+  );
   const placementState = await connection.db.transaction(async (tx) => {
     const [runner] = await tx
       .select({
@@ -653,7 +665,7 @@ async function reconcileProvisioningRunner(
       tx,
       work.userId,
       { excludeAgentId: work.agentId, runnerId: runner.id },
-      { now: now() },
+      { now: now(), compatibilityRequirement },
     );
 
     if (placement.ok) {
@@ -1413,7 +1425,18 @@ async function claimOneDeploymentForReconcile(
       ${agents.runnerId} as "agentRunnerId"
   `);
 
-  return row ?? null;
+  if (!row) return null;
+  const deploymentChoices = parseAgentDeploymentChoices(row.deploymentChoices);
+  if (deploymentChoices) return { ...row, deploymentChoices };
+
+  await quarantineAgentDeploymentForSafety({
+    db: tx,
+    userId: row.userId,
+    deploymentId: row.id,
+    reason: "Invalid recorded deployment choices",
+    now: input.now,
+  });
+  return null;
 }
 
 async function lockOwnedAgentForDeployment(
@@ -1463,16 +1486,7 @@ async function initializeProvisioningRunner(
 ): Promise<
   { ok: true; state: "created" | "waiting" } | { ok: false; code: DeploymentTerminalErrorCode }
 > {
-  const currentConfig = dependencies.readDigitalOceanConfig
-    ? dependencies.readDigitalOceanConfig()
-    : readDigitalOceanProviderConfig();
-  const choices = parseAgentDeploymentChoices(work.deploymentChoices);
-  let config: DigitalOceanProviderConfig | null = null;
-  try {
-    config = currentConfig && choices ? applyAgentDeploymentChoices(currentConfig, choices) : null;
-  } catch {
-    config = null;
-  }
+  const config = recoverDeploymentProviderConfig(work, dependencies);
 
   if (!config) {
     return { ok: false, code: "runner_provisioning_unavailable" };
@@ -2535,16 +2549,7 @@ async function defaultProvisioner(
   context: DeploymentActionContext,
   dependencies: AgentDeploymentReconcilerDependencies,
 ): Promise<ProvisionerResult> {
-  const currentConfig = dependencies.readDigitalOceanConfig
-    ? dependencies.readDigitalOceanConfig()
-    : readDigitalOceanProviderConfig();
-  const choices = parseAgentDeploymentChoices(work.deploymentChoices);
-  let config: DigitalOceanProviderConfig | null = null;
-  try {
-    config = currentConfig && choices ? applyAgentDeploymentChoices(currentConfig, choices) : null;
-  } catch {
-    config = null;
-  }
+  const config = recoverDeploymentProviderConfig(work, dependencies);
 
   if (!config || !work.agentRunnerId) {
     return { ok: false, terminalCode: "runner_provisioning_unavailable" };
@@ -2567,6 +2572,23 @@ async function defaultProvisioner(
     now: () => currentNow,
     canContinue: () => deploymentProvisioningAuthorityStillHeld(connection, work, currentNow),
   });
+}
+
+function recoverDeploymentProviderConfig(
+  work: ClaimedDeploymentWork,
+  dependencies: AgentDeploymentReconcilerDependencies,
+): DigitalOceanProviderConfig | null {
+  const choices = parseAgentDeploymentChoices(work.deploymentChoices);
+  if (!choices) return null;
+
+  try {
+    const injectedConfig = dependencies.readDigitalOceanConfig?.();
+    if (injectedConfig) return applyAgentDeploymentChoices(injectedConfig, choices);
+    const credentials = readDigitalOceanProviderCredentials();
+    return credentials ? recoverAgentDeploymentProviderConfig(credentials, choices) : null;
+  } catch {
+    return null;
+  }
 }
 
 async function deploymentProvisioningAuthorityStillHeld(

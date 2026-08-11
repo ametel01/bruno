@@ -3,6 +3,7 @@ import {
   applyAgentDeploymentChoices,
   captureAgentDeploymentChoices,
   parseAgentDeploymentChoices,
+  runnerCompatibilityRequirementForAgentDeploymentChoices,
 } from "@/src/server/agents/agent-deployment-choices";
 import type { DigitalOceanProviderConfig } from "@/src/server/env";
 
@@ -14,12 +15,18 @@ describe("pinned Agent Deployment choices", () => {
       dispatchMode: "qstash",
       rolloutConfigurationGeneration: 7,
     });
-    const current = providerConfig({ token: "new-secret", sizeSlug: "s-2vcpu-2gb" });
+    const current = {
+      ...providerConfig({ token: "new-secret", sizeSlug: "s-2vcpu-2gb" }),
+      sshKeyIds: ["current-key"],
+      sshSourceAddresses: ["198.51.100.0/24"],
+    };
 
     expect(applyAgentDeploymentChoices(current, choices)).toMatchObject({
       token: "new-secret",
       runnerBearerToken: "new-runner-secret",
       sizeSlug: "s-1vcpu-2gb",
+      sshKeyIds: ["accepted-key"],
+      sshSourceAddresses: ["203.0.113.0/24"],
       runnerImage: accepted.runnerImage,
       snapshotMode: accepted.snapshotMode,
       bootValidation: accepted.bootValidation,
@@ -39,6 +46,33 @@ describe("pinned Agent Deployment choices", () => {
     expect(JSON.stringify(choices)).not.toContain("new-secret");
   });
 
+  it("pins local lifecycle settings without retaining provider credentials", () => {
+    const accepted = localProviderConfig({
+      endpointUrl: "http://host.docker.internal:3045",
+      containerName: "accepted-runner",
+    });
+    const choices = captureAgentDeploymentChoices({
+      config: accepted,
+      dispatchMode: "cron",
+      rolloutConfigurationGeneration: 4,
+    });
+    const current = localProviderConfig({
+      endpointUrl: "http://host.docker.internal:4045",
+      containerName: "current-runner",
+    });
+
+    expect(applyAgentDeploymentChoices(current, choices)).toMatchObject({
+      token: "current-local-secret",
+      runnerBearerToken: "current-runner-secret",
+      localRunnerEndpointUrl: "http://host.docker.internal:3045",
+      localRunnerContainerName: "accepted-runner",
+      localRunnerStartDelayMs: 250,
+      localAgentSmokeMode: true,
+    });
+    expect(JSON.stringify(choices)).not.toContain("accepted-local-secret");
+    expect(JSON.stringify(choices)).not.toContain("current-local-secret");
+  });
+
   it("rejects unknown or partially rewritten recorded choices", () => {
     const choices = captureAgentDeploymentChoices({
       config: providerConfig({ token: "secret", sizeSlug: "s-1vcpu-2gb" }),
@@ -53,6 +87,74 @@ describe("pinned Agent Deployment choices", () => {
         validation: { ...choices.validation, mode: "full" },
       }),
     ).toBeNull();
+  });
+
+  it("pins boot compatibility and disables mutable SSH-key discovery when no keys were accepted", () => {
+    const accepted = providerConfig({ token: "accepted-secret", sizeSlug: "s-1vcpu-2gb" });
+    delete accepted.sshKeyIds;
+    delete accepted.sshSourceAddresses;
+    const choices = captureAgentDeploymentChoices({
+      config: accepted,
+      dispatchMode: "cron",
+      rolloutConfigurationGeneration: 2,
+    });
+
+    expect(choices.provider).toMatchObject({
+      runnerBootContractVersion: "bruno.runner.boot.v1",
+      sshKeyIds: [],
+      sshSourceAddresses: [],
+    });
+    expect(runnerCompatibilityRequirementForAgentDeploymentChoices(choices)).toMatchObject({
+      mode: "hosted",
+      release: { bootContractVersion: "bruno.runner.boot.v1" },
+    });
+    expect(
+      applyAgentDeploymentChoices({ ...accepted, sshKeyIds: ["mutable-account-key"] }, choices),
+    ).toMatchObject({ sshKeyIds: [], sshSourceAddresses: [] });
+  });
+
+  it("gives legacy v1 records deterministic recovery semantics", () => {
+    const complete = captureAgentDeploymentChoices({
+      config: providerConfig({ token: "accepted-secret", sizeSlug: "s-1vcpu-2gb" }),
+      dispatchMode: "cron",
+      rolloutConfigurationGeneration: 2,
+    });
+    const legacy = structuredClone(complete) as unknown as {
+      provider: Record<string, unknown>;
+    };
+    for (const key of [
+      "runnerBootContractVersion",
+      "sshKeyIds",
+      "sshSourceAddresses",
+      "localRunnerEndpointUrl",
+      "localRunnerContainerName",
+      "localRunnerStartDelayMs",
+      "localAgentSmokeMode",
+    ]) {
+      delete legacy.provider[key];
+    }
+
+    const parsed = parseAgentDeploymentChoices(legacy);
+    if (!parsed) throw new Error("Legacy deployment choices did not parse.");
+    expect(parsed?.provider).toMatchObject({
+      runnerBootContractVersion: "bruno.runner.boot.v1",
+      sshKeyIds: [],
+      sshSourceAddresses: [],
+      localRunnerEndpointUrl: null,
+      localRunnerContainerName: null,
+      localRunnerStartDelayMs: null,
+      localAgentSmokeMode: false,
+    });
+    expect(
+      applyAgentDeploymentChoices(
+        {
+          ...providerConfig({ token: "current-secret", sizeSlug: "s-2vcpu-2gb" }),
+          sshKeyIds: ["mutable-current-key"],
+          sshSourceAddresses: ["198.51.100.0/24"],
+        },
+        parsed,
+      ),
+    ).toMatchObject({ sshKeyIds: [], sshSourceAddresses: [] });
   });
 });
 
@@ -69,6 +171,8 @@ function providerConfig(input: { token: string; sizeSlug: string }): DigitalOcea
     sizeSlug: input.sizeSlug,
     image: "1102",
     tags: ["bruno", "bruno-runner"],
+    sshKeyIds: ["accepted-key"],
+    sshSourceAddresses: ["203.0.113.0/24"],
     snapshotMode: {
       mode: "snapshot",
       bundleBytes: '{"snapshot":"bundle"}',
@@ -96,5 +200,30 @@ function providerConfig(input: { token: string; sizeSlug: string }): DigitalOcea
       snapshotBundleDigest: snapshotDigest,
       snapshotImageId: "1102",
     },
+  };
+}
+
+function localProviderConfig(input: {
+  endpointUrl: string;
+  containerName: string;
+}): DigitalOceanProviderConfig {
+  return {
+    token:
+      input.containerName === "accepted-runner" ? "accepted-local-secret" : "current-local-secret",
+    providerMode: "local_docker",
+    runnerBearerToken:
+      input.containerName === "accepted-runner"
+        ? "accepted-runner-secret"
+        : "current-runner-secret",
+    runnerImage: "bruno-runner:local",
+    region: "local",
+    sizeSlug: "s-1vcpu-2gb",
+    image: "local-image",
+    tags: ["bruno-local"],
+    sshSourceAddresses: [],
+    localRunnerEndpointUrl: input.endpointUrl,
+    localRunnerContainerName: input.containerName,
+    localRunnerStartDelayMs: 250,
+    localAgentSmokeMode: true,
   };
 }

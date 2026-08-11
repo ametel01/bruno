@@ -207,6 +207,23 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).not.toContain("bruno_run_1234567890123456789012345678901234567890123");
   });
 
+  it("uses the pinned boot contract when recovering an older accepted release", () => {
+    const content = buildCloudRunnerBootstrapContent({
+      appBaseUrl: "https://app.bruno.test",
+      registrationToken: "bruno_reg_1234567890123456789012345678901234567890123",
+      runnerEndpointUrl: "https://runner.bruno.test",
+      runnerImage: IMMUTABLE_RUNNER_IMAGE,
+      expectedBootContractVersion: "bruno.runner.boot.accepted-v0",
+    });
+
+    expect(content.userData).toContain(
+      `${RUNNER_EXPECTED_BOOT_CONTRACT_VERSION_ENV}=bruno.runner.boot.accepted-v0`,
+    );
+    expect(content.safeSummary.runnerRelease?.bootContractVersion).toBe(
+      "bruno.runner.boot.accepted-v0",
+    );
+  });
+
   it("defaults the selected runner image in safe bootstrap content", () => {
     const content = buildCloudRunnerBootstrapContent({
       appBaseUrl: "https://app.bruno.test",

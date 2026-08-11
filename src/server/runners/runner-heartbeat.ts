@@ -10,6 +10,12 @@ import {
   parseRunnerReleaseIdentity,
   type RunnerReleaseIdentity,
 } from "@/src/runner-service/release-identity";
+import {
+  parseAgentDeploymentChoices,
+  runnerBootValidationRequirementForAgentDeploymentChoices,
+  runnerCompatibilityRequirementForAgentDeploymentChoices,
+  type AgentDeploymentChoices,
+} from "@/src/server/agents/agent-deployment-choices";
 import { parseRunnerReleaseBundle } from "@/src/runner-service/release-attestation";
 import {
   parseRunnerBootSnapshot,
@@ -17,7 +23,14 @@ import {
 } from "@/src/runner-service/runner-contracts";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import type * as schema from "@/src/server/db/schema";
-import { runnerCredentials, runnerHeartbeats, runners } from "@/src/server/db/schema";
+import {
+  agentDeployments,
+  agents,
+  runnerCredentials,
+  runnerHeartbeats,
+  runnerReplacements,
+  runners,
+} from "@/src/server/db/schema";
 import {
   DIGITALOCEAN_PROVIDER,
   DIGITALOCEAN_RUNNER_KIND,
@@ -113,6 +126,8 @@ export type RunnerHeartbeatReconciliationResult = {
 export type RunnerHeartbeatTransaction = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>["transaction"]>[0]
 >[0];
+
+type RunnerHeartbeatDatabase = PostgresJsDatabase<typeof schema> | RunnerHeartbeatTransaction;
 
 export type LatestRunnerHeartbeat = {
   status: string;
@@ -251,7 +266,12 @@ export async function recordRunnerHeartbeat(
           runnerId: runners.id,
           runnerKind: runners.kind,
           runnerProvider: runners.provider,
+          runnerProvisioningStatus: runners.provisioningStatus,
           requiredRunnerImageDigest: runners.requiredRunnerImageDigest,
+          observedRunnerImageDigest: runners.observedRunnerImageDigest,
+          observedRunnerReleaseVersion: runners.observedRunnerReleaseVersion,
+          observedRunnerBootContractVersion: runners.observedRunnerBootContractVersion,
+          compatibilityState: runners.compatibilityState,
         })
         .from(runnerCredentials)
         .innerJoin(runners, eq(runners.id, runnerCredentials.runnerId))
@@ -269,12 +289,19 @@ export async function recordRunnerHeartbeat(
         return { ok: false, reason: "wrong_runner" } as const;
       }
 
+      const pinnedChoices = await readPinnedAgentDeploymentChoicesForRunner(
+        tx,
+        payload.value.runnerId,
+      );
       const compatibility = assessRunnerCompatibility({
         kind: row.runnerKind,
         provider: row.runnerProvider,
         requiredImageDigest: row.requiredRunnerImageDigest,
         observedRelease: payload.value.metadata.release ?? null,
-        requirement: dependencies.compatibilityRequirement ?? readRunnerCompatibilityRequirement(),
+        requirement:
+          admittedRunnerCompatibilityRequirement(row) ??
+          dependencies.compatibilityRequirement ??
+          compatibilityRequirementForDeploymentAssociation(pinnedChoices),
         now,
       });
 
@@ -337,6 +364,35 @@ export async function recordRunnerHeartbeat(
   }
 }
 
+function admittedRunnerCompatibilityRequirement(input: {
+  runnerProvisioningStatus: string | null;
+  requiredRunnerImageDigest: string | null;
+  observedRunnerImageDigest: string | null;
+  observedRunnerReleaseVersion: string | null;
+  observedRunnerBootContractVersion: string | null;
+  compatibilityState: string;
+}): RunnerCompatibilityRequirement | null {
+  if (
+    input.runnerProvisioningStatus !== "ready" ||
+    input.compatibilityState !== "compatible" ||
+    input.requiredRunnerImageDigest === null ||
+    input.observedRunnerImageDigest !== input.requiredRunnerImageDigest ||
+    input.observedRunnerReleaseVersion === null ||
+    input.observedRunnerBootContractVersion === null
+  ) {
+    return null;
+  }
+
+  return {
+    mode: "hosted",
+    release: {
+      version: input.observedRunnerReleaseVersion,
+      imageDigest: input.requiredRunnerImageDigest,
+      bootContractVersion: input.observedRunnerBootContractVersion,
+    },
+  };
+}
+
 export async function confirmCloudRunnerReadiness(
   runnerId: string,
   dependencies: {
@@ -384,6 +440,12 @@ export async function confirmCloudRunnerReadiness(
       runner.provisioningStatus !== "waiting_for_runner"
     ) {
       return { outcome: "not_applicable", reason: "runner_not_eligible" };
+    }
+
+    const pinnedChoices = await readPinnedAgentDeploymentChoicesForRunner(connection.db, runnerId);
+
+    if (pinnedChoices.kind === "associated" && pinnedChoices.choices === null) {
+      return { outcome: "pending", reason: "boot_evidence_incompatible" };
     }
 
     const runnerBearerToken =
@@ -435,7 +497,8 @@ export async function confirmCloudRunnerReadiness(
     if (
       !runnerBootSnapshotMatchesRequirement(
         probe.snapshot,
-        dependencies.bootValidationRequirement ?? readRunnerBootValidationRequirement(),
+        dependencies.bootValidationRequirement ??
+          bootValidationRequirementForDeploymentAssociation(pinnedChoices),
       )
     ) {
       return { outcome: "pending", reason: "boot_evidence_incompatible" };
@@ -444,7 +507,8 @@ export async function confirmCloudRunnerReadiness(
     if (
       !isPersistedRunnerCompatible(
         runner,
-        dependencies.compatibilityRequirement ?? readRunnerCompatibilityRequirement(),
+        dependencies.compatibilityRequirement ??
+          compatibilityRequirementForDeploymentAssociation(pinnedChoices),
       )
     ) {
       return { outcome: "pending", reason: "release_incompatible" };
@@ -469,6 +533,79 @@ export async function confirmCloudRunnerReadiness(
       await connection.close();
     }
   }
+}
+
+async function readPinnedAgentDeploymentChoicesForRunner(
+  db: RunnerHeartbeatDatabase,
+  runnerId: string,
+): Promise<DeploymentChoiceAssociation> {
+  const [row] = await db.execute<{
+    deploymentChoices: unknown;
+    safetyQuarantinedAt: Date | string | null;
+    stage: string;
+  }>(sql`
+    select ${agentDeployments.deploymentChoices} as "deploymentChoices"
+      , ${agentDeployments.safetyQuarantinedAt} as "safetyQuarantinedAt"
+      , ${agentDeployments.stage} as "stage"
+    from ${agentDeployments}
+    where (
+        exists (
+          select 1 from ${agents}
+          where ${agents.id} = ${agentDeployments.agentId}
+            and ${agents.userId} = ${agentDeployments.userId}
+            and ${agents.runnerId} = ${runnerId}
+            and ${agents.deletedAt} is null
+        )
+        or exists (
+          select 1 from ${runnerReplacements}
+          where ${runnerReplacements.targetRunnerId} = ${runnerId}
+            and ${runnerReplacements.triggerDeploymentId} = ${agentDeployments.id}
+            and ${runnerReplacements.state} not in ('complete', 'failed')
+        )
+        or exists (
+          select 1 from ${runners}
+          where ${runners.id} = ${runnerId}
+            and ${runners.provisioningOperationKey} =
+              'bruno-deploy-' || replace(${agentDeployments.id}::text, '-', '')
+        )
+      )
+    order by
+      case when ${agentDeployments.stage} in ('ready', 'failed') then 1 else 0 end,
+      ${agentDeployments.createdAt} desc,
+      ${agentDeployments.id} desc
+    limit 1
+  `);
+
+  if (!row) return { kind: "none" };
+  return {
+    kind: "associated",
+    choices:
+      row.safetyQuarantinedAt === null && row.stage !== "failed"
+        ? parseAgentDeploymentChoices(row.deploymentChoices)
+        : null,
+  };
+}
+
+type DeploymentChoiceAssociation =
+  | { kind: "none" }
+  | { kind: "associated"; choices: AgentDeploymentChoices | null };
+
+function compatibilityRequirementForDeploymentAssociation(
+  association: DeploymentChoiceAssociation,
+): RunnerCompatibilityRequirement {
+  if (association.kind === "none") return readRunnerCompatibilityRequirement();
+  return association.choices
+    ? runnerCompatibilityRequirementForAgentDeploymentChoices(association.choices)
+    : { mode: "unavailable", release: null };
+}
+
+function bootValidationRequirementForDeploymentAssociation(
+  association: DeploymentChoiceAssociation,
+): RunnerBootValidationRequirement {
+  if (association.kind === "none") return readRunnerBootValidationRequirement();
+  const choices = association.choices;
+  if (!choices || choices.provider.mode === "unavailable") return { mode: "unavailable" };
+  return runnerBootValidationRequirementForAgentDeploymentChoices(choices);
 }
 
 export function runnerBootSnapshotMatchesRequirement(

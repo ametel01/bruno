@@ -62,6 +62,7 @@ export type CloudRunnerBootstrapInput = {
   enableSwap?: boolean;
   runnerName?: string;
   runnerImage?: string;
+  expectedBootContractVersion?: string;
   hermesWorkloadImage?: string;
   hermesStateRoot?: string;
   hermesPrivateNetwork?: string;
@@ -201,7 +202,7 @@ export function buildCloudRunnerBootstrapContent(
       ? [
           `${RUNNER_EXPECTED_RELEASE_VERSION_ENV}=${escapeDockerEnvHereDocValue(config.expectedRelease.version)}`,
           `${RUNNER_EXPECTED_IMAGE_DIGEST_ENV}=${config.expectedRelease.imageDigest}`,
-          `${RUNNER_EXPECTED_BOOT_CONTRACT_VERSION_ENV}=${RUNNER_BOOT_CONTRACT_VERSION}`,
+          `${RUNNER_EXPECTED_BOOT_CONTRACT_VERSION_ENV}=${escapeDockerEnvHereDocValue(config.expectedBootContractVersion)}`,
         ]
       : []),
     ...(config.releaseIdentityMode
@@ -395,7 +396,7 @@ ${imagePullCommands}      BRUNO_BOOTSTRAP_STEP=runner_container_start
         ? {
             version: config.expectedRelease.version,
             imageDigest: config.expectedRelease.imageDigest,
-            bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
+            bootContractVersion: config.expectedBootContractVersion,
           }
         : null,
       envFilePath: config.envFilePath,
@@ -446,6 +447,10 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
     runnerImage: input.runnerImage?.trim() || DEFAULT_BRUNO_RUNNER_IMAGE,
     expectedRelease: parseImmutableRunnerImageReference(
       input.runnerImage?.trim() || DEFAULT_BRUNO_RUNNER_IMAGE,
+    ),
+    expectedBootContractVersion: requireNonEmpty(
+      input.expectedBootContractVersion ?? RUNNER_BOOT_CONTRACT_VERSION,
+      "expectedBootContractVersion",
     ),
     releaseIdentityMode: input.releaseIdentityMode ?? null,
     agentImage: normalizeContainerImage(

@@ -110,6 +110,13 @@ export async function quarantineAgentDeploymentForSafety(input: {
       and safety_quarantined_at is null
     returning id
   `);
+  if (quarantined) {
+    await replaceDeploymentWakeupInTransaction(input.db, {
+      deploymentId: quarantined.id,
+      dueAt: null,
+      now,
+    });
+  }
   return Boolean(quarantined);
 }
 
