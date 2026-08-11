@@ -2059,16 +2059,20 @@ async function buildProvisioningBootstrap(input: {
 function runnerBootstrapValidation(
   config: DigitalOceanProviderConfig,
 ): NonNullable<CloudRunnerBootstrapInput["bootValidation"]> {
-  return config.bootValidation
-    ? {
-        mode: "release_attested",
-        bundleBytes: config.bootValidation.bundleBytes,
-        approvedReleaseDigest: config.bootValidation.approvedReleaseDigest,
-        releaseTrustSetBytes: config.bootValidation.releaseTrustSetBytes,
-        snapshotOciReference: config.bootValidation.snapshotOciReference,
-        snapshotBundleDigest: config.bootValidation.snapshotBundleDigest,
-      }
-    : { mode: "full" };
+  if (!config.bootValidation) return { mode: "full" };
+  if (config.snapshotMode?.mode !== "snapshot") {
+    throw new Error("Release-attested runner bootstrap requires recorded Snapshot choices.");
+  }
+
+  return {
+    mode: "release_attested",
+    bundleBytes: config.bootValidation.bundleBytes,
+    approvedReleaseDigest: config.bootValidation.approvedReleaseDigest,
+    releaseTrustSetBytes: config.bootValidation.releaseTrustSetBytes,
+    snapshotOciReference: config.bootValidation.snapshotOciReference,
+    snapshotBundleDigest: config.bootValidation.snapshotBundleDigest,
+    defaultAgentImage: config.snapshotMode.expected.defaultAgentImage,
+  };
 }
 
 async function resolveDigitalOceanPublicEndpoint(

@@ -38,6 +38,7 @@ const LEGACY_HOST_BOOTSTRAP_TOKENS = [
 const RUNNER_RELEASE_VERSION = "0123456789abcdef";
 const RUNNER_IMAGE_DIGEST = `sha256:${"a".repeat(64)}`;
 const IMMUTABLE_RUNNER_IMAGE = `ghcr.io/ametel01/bruno-runner:${RUNNER_RELEASE_VERSION}@${RUNNER_IMAGE_DIGEST}`;
+const IMMUTABLE_DEFAULT_AGENT_IMAGE = `ghcr.io/ametel01/bruno-default:0123456789abcdef@sha256:${"e".repeat(64)}`;
 
 describe.sequential("cloud runner bootstrap content", () => {
   let connection: DatabaseConnection;
@@ -271,10 +272,14 @@ describe.sequential("cloud runner bootstrap content", () => {
         releaseTrustSetBytes: '{"release-current":"public-key"}',
         snapshotOciReference: snapshotOci,
         snapshotBundleDigest: snapshotDigest,
+        defaultAgentImage: IMMUTABLE_DEFAULT_AGENT_IMAGE,
       },
     });
 
     expect(content.userData).toContain("BRUNO_RUNNER_BOOT_VALIDATION_MODE=release_attested");
+    expect(content.userData).toContain(
+      `BRUNO_DOCKER_RUNNER_IMAGE=${IMMUTABLE_DEFAULT_AGENT_IMAGE}`,
+    );
     expect(content.userData).toContain(`BRUNO_RUNNER_APPROVED_RELEASE_DIGEST=${releaseDigest}`);
     expect(content.userData).toContain(`BRUNO_RUNNER_APPROVED_SNAPSHOT_OCI=${snapshotOci}`);
     expect(content.userData).toContain(
@@ -300,6 +305,7 @@ describe.sequential("cloud runner bootstrap content", () => {
           releaseTrustSetBytes: "{}",
           snapshotOciReference: snapshotOci,
           snapshotBundleDigest: snapshotDigest,
+          defaultAgentImage: IMMUTABLE_DEFAULT_AGENT_IMAGE,
         },
       }),
     ).toThrow("Stock runner bootstrap must use full boot validation");

@@ -85,6 +85,7 @@ export type CloudRunnerBootstrapInput = {
         releaseTrustSetBytes: string;
         snapshotOciReference: string;
         snapshotBundleDigest: string;
+        defaultAgentImage: string;
       };
 };
 
@@ -426,7 +427,8 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
       !/^sha256:[a-f0-9]{64}$/.test(bootValidation.approvedReleaseDigest) ||
       !bootValidation.releaseTrustSetBytes.trim() ||
       !/^ghcr\.io\/.+@sha256:[a-f0-9]{64}$/.test(bootValidation.snapshotOciReference) ||
-      !/^sha256:[a-f0-9]{64}$/.test(bootValidation.snapshotBundleDigest))
+      !/^sha256:[a-f0-9]{64}$/.test(bootValidation.snapshotBundleDigest) ||
+      !bootValidation.defaultAgentImage.trim())
   ) {
     throw new Error("Release-attested runner bootstrap evidence is invalid.");
   }
@@ -446,7 +448,12 @@ function normalizeBootstrapInput(input: CloudRunnerBootstrapInput) {
       input.runnerImage?.trim() || DEFAULT_BRUNO_RUNNER_IMAGE,
     ),
     releaseIdentityMode: input.releaseIdentityMode ?? null,
-    agentImage: DEFAULT_MANUAL_RUNNER_IMAGE,
+    agentImage: normalizeContainerImage(
+      bootValidation.mode === "release_attested"
+        ? bootValidation.defaultAgentImage
+        : DEFAULT_MANUAL_RUNNER_IMAGE,
+      "defaultAgentImage",
+    ),
     hermesWorkloadImage: normalizeContainerImage(
       input.hermesWorkloadImage?.trim() || DEFAULT_HERMES_WORKLOAD_IMAGE,
       "hermesWorkloadImage",
