@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { and, desc, eq } from "drizzle-orm";
 import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
@@ -615,12 +616,23 @@ function closedErrorCode(error: unknown): string | null {
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
+  const outputIndex = argv.indexOf("--output");
+  const outputPath = outputIndex === -1 ? null : argv[outputIndex + 1]?.trim();
+  const smokeArgs = outputIndex === -1 ? argv : argv.slice(0, outputIndex);
+  if (outputIndex !== -1 && (outputIndex !== 4 || !outputPath || argv.length !== 6)) {
+    throw new Error("--output must follow the provider argument and name one evidence file.");
+  }
   const env =
-    argv[2] === "--provider" && argv[3] === "local_docker"
+    smokeArgs[2] === "--provider" && smokeArgs[3] === "local_docker"
       ? { ...process.env, BRUNO_DIGITALOCEAN_TOKEN: "local-docker" }
       : process.env;
-  const result = await smokeRunnerRelease(argv, env);
-  process.stdout.write(`${JSON.stringify(result)}\n`);
+  const result = await smokeRunnerRelease(smokeArgs, env);
+  const serialized = `${JSON.stringify(result)}\n`;
+  if (outputPath) {
+    await writeFile(outputPath, serialized, { mode: 0o600 });
+  } else {
+    process.stdout.write(serialized);
+  }
   if (!result.ok) process.exitCode = 1;
 }
 
