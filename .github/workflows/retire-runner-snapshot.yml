@@ -1,0 +1,81 @@
+name: Retire superseded runner snapshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      snapshot_id:
+        description: Exact superseded DigitalOcean snapshot ID
+        required: true
+        type: string
+      expected_snapshot_name:
+        description: Exact signed snapshot name paired with the snapshot ID
+        required: true
+        type: string
+      region:
+        description: Exact region retained by the signed snapshot
+        required: true
+        type: string
+      cost_authorization:
+        description: Exact destructive-action sentinel
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  retire:
+    name: Retire exact superseded snapshot and verify absence
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: snapshot-build
+
+    steps:
+      - name: Validate the authorized target before secrets
+        env:
+          SNAPSHOT_ID: ${{ inputs.snapshot_id }}
+          EXPECTED_SNAPSHOT_NAME: ${{ inputs.expected_snapshot_name }}
+          SNAPSHOT_REGION: ${{ inputs.region }}
+          RETIRE_AUTHORIZATION: ${{ inputs.cost_authorization }}
+        run: |
+          set -euo pipefail
+          test "${RETIRE_AUTHORIZATION}" = "I_UNDERSTAND_THIS_DELETES_THE_SUPERSEDED_SNAPSHOT"
+          [[ "${SNAPSHOT_ID}" =~ ^[1-9][0-9]{0,18}$ ]]
+          [[ "${EXPECTED_SNAPSHOT_NAME}" =~ ^bruno-snapshot-builder-[a-f0-9]{12}-[1-9][0-9]{0,19}$ ]]
+          [[ "${SNAPSHOT_REGION}" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,127}$ ]]
+
+      - name: Check out exact trusted retirement code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Delete only the exact authorized snapshot
+        env:
+          BRUNO_DIGITALOCEAN_TOKEN: ${{ secrets.BRUNO_DIGITALOCEAN_TOKEN }}
+          SNAPSHOT_ID: ${{ inputs.snapshot_id }}
+          EXPECTED_SNAPSHOT_NAME: ${{ inputs.expected_snapshot_name }}
+          SNAPSHOT_REGION: ${{ inputs.region }}
+        run: |
+          set -euo pipefail
+          mkdir -p runner-snapshot-retirement
+          bun run runner:snapshot:retire -- \
+            --snapshot-id "${SNAPSHOT_ID}" \
+            --expected-name "${EXPECTED_SNAPSHOT_NAME}" \
+            --expected-region "${SNAPSHOT_REGION}" \
+            --output runner-snapshot-retirement/retirement.json
+
+      - name: Retain allowlisted retirement evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-snapshot-retirement-${{ github.run_id }}
+          path: runner-snapshot-retirement/retirement.json
+          if-no-files-found: error
+          retention-days: 90

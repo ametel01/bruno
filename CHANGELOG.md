@@ -40,7 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GHCR as an OCI artifact, return only its immutable OCI manifest reference plus exact bundle
   digest, re-pull and verify both identities, retain the signing public key with the bundle, and
   verify active and previous approval candidates without granting ordinary CI or release workflows
-  provider-dispatch authority.
+  provider-dispatch authority. A separate protected retirement workflow matches an explicitly
+  authorized superseded snapshot by exact provider ID, signed name, and region, deletes only that
+  image after replacement publication, and retains authoritative absence evidence without rerunning
+  the billable builder.
 - Snapshot Attestation v2 now binds exact immutable runner, default-agent, Hermes, boot-contract,
   base OS, architecture, region, disk, and provider-availability identities in a canonical signed
   bundle. Production selects one exact revocable digest, verifies the bundle through an overlapping
