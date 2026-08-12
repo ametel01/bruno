@@ -1159,6 +1159,87 @@ describe("DigitalOcean API provider", () => {
     expect(deleteCalls).toEqual([]);
   });
 
+  it("deletes the exact stored firewall after its owned Droplet is already absent", async () => {
+    let firewallPresent = true;
+    let firewallName = "unexpected-firewall";
+    const deleteCalls: string[] = [];
+    const notFound = () => Object.assign(new Error("not found"), { statusCode: 404 });
+    const provider = new DigitalOceanApiProvider({
+      token: "unused",
+      client: {
+        v2: {
+          droplets: {
+            post: async () => ({ droplet: null }),
+            get: async () => ({ droplets: [] }),
+            byDroplet_id: () => ({
+              get: async () => {
+                throw notFound();
+              },
+              delete: async () => {
+                deleteCalls.push("droplet");
+              },
+            }),
+          },
+          account: {
+            keys: {
+              get: async () => ({ sshKeys: [] }),
+              post: async () => ({ sshKey: null }),
+            },
+          },
+          firewalls: {
+            post: async () => ({ firewall: null }),
+            byFirewall_id: () => ({
+              get: async () => {
+                if (!firewallPresent) throw notFound();
+                return {
+                  firewall: {
+                    id: "owned-firewall",
+                    name: firewallName,
+                    droplet_ids: [],
+                  },
+                };
+              },
+              delete: async () => {
+                deleteCalls.push("firewall");
+                firewallPresent = false;
+              },
+            }),
+          },
+          tags: { byTag_id: () => ({ resources: { post: async () => {} } }) },
+        },
+      },
+    });
+    const ownedSet = {
+      operationTag: "operation-unique-tag",
+      providerResourceId: "7654321",
+      providerFirewallId: "owned-firewall",
+      expectedName: "bruno-staging-operation",
+      expectedRegion: "sfo3",
+      expectedSizeSlug: "s-1vcpu-512mb-10gb",
+      expectedFirewallName: "bruno-runners-7654321",
+    };
+
+    await expect(provider.deleteFirewall(ownedSet)).resolves.toMatchObject({
+      ok: false,
+      reason: "ownership_ambiguous",
+    });
+    expect(deleteCalls).toEqual([]);
+    firewallName = ownedSet.expectedFirewallName;
+    await expect(provider.observeOwnedSet(ownedSet)).resolves.toEqual({
+      ok: true,
+      value: { state: "owned", droplet: "absent", firewall: "present" },
+    });
+    await expect(provider.deleteFirewall(ownedSet)).resolves.toEqual({
+      ok: true,
+      value: { state: "absent" },
+    });
+    await expect(provider.observeOwnedSet(ownedSet)).resolves.toEqual({
+      ok: true,
+      value: { state: "absent", droplet: "absent", firewall: "absent" },
+    });
+    expect(deleteCalls).toEqual(["firewall"]);
+  });
+
   it("reports an unknown delete outcome as retryable when absence cannot be verified", async () => {
     let firewallReads = 0;
     const provider = new DigitalOceanApiProvider({

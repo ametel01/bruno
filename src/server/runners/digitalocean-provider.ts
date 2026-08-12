@@ -1062,8 +1062,7 @@ export class DigitalOceanApiProvider implements DigitalOceanProvider, DigitalOce
       !taggedDropletsMatchOwnedSet(taggedDroplets, input, droplet.state) ||
       (droplet.state === "present" && !apiDropletMatchesOwnedSet(apiDroplet, input)) ||
       (firewall.state === "present" &&
-        !apiFirewallMatchesOwnedSet(apiFirewall, input, dropletId)) ||
-      (droplet.state === "absent" && firewall.state === "present")
+        !apiFirewallMatchesOwnedSet(apiFirewall, input, dropletId, droplet.state))
     ) {
       return ambiguousOwnedSet();
     }
@@ -2600,6 +2599,7 @@ function apiFirewallMatchesOwnedSet(
   firewall: DigitalOceanApiFirewall | null | undefined,
   input: DigitalOceanOwnedSetExpectation,
   dropletId: number,
+  dropletState: "present" | "absent",
 ): boolean {
   const attachedDropletIds = firewall?.dropletIds ?? firewall?.droplet_ids;
 
@@ -2607,8 +2607,9 @@ function apiFirewallMatchesOwnedSet(
     firewall?.id?.trim() === input.providerFirewallId &&
     firewall.name === input.expectedFirewallName &&
     Array.isArray(attachedDropletIds) &&
-    attachedDropletIds.length === 1 &&
-    attachedDropletIds[0] === dropletId
+    (dropletState === "absent"
+      ? attachedDropletIds.length === 0
+      : attachedDropletIds.length === 1 && attachedDropletIds[0] === dropletId)
   );
 }
 

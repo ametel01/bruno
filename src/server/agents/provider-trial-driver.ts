@@ -708,6 +708,7 @@ export async function reconcileProviderTrialCleanup(
   state: "running" | "paused" | "ready_to_finalize";
   nextSlotNumber: number;
   spentCents: number;
+  pauseReason?: "cleanup_failed" | "gate_impossible" | "safety_pause";
 }> {
   assertAuthorization(input.authorization);
   const startedAt = dependencies.now?.() ?? new Date();
@@ -746,7 +747,7 @@ export async function reconcileProviderTrialCleanup(
     if (!cleanupPause) {
       throw new Error("Provider Trial cleanup reconciliation did not produce a safety pause.");
     }
-    return { state: "paused", ...cleanupPause };
+    return { state: "paused", ...cleanupPause, pauseReason: "cleanup_failed" };
   }
 
   const nextSlotNumber = leased.run.nextSlotNumber + 1;
@@ -784,6 +785,7 @@ export async function reconcileProviderTrialCleanup(
     state,
     nextSlotNumber,
     spentCents: leased.run.spentCents + execution.costCents,
+    ...(pauseReason ? { pauseReason } : {}),
   };
 }
 

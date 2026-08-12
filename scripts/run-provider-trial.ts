@@ -200,16 +200,18 @@ async function reconcileCleanup(
     { cohortId: cohort.id, authorization: config.authorization },
     { cleanup: dependencies.cleanup },
   );
+  const ok = result.pauseReason !== "cleanup_failed";
   write({
     command: "reconcile-cleanup",
     effects: "authorized_cleanup_only",
-    ok: true,
+    ok,
     cohortId: cohort.id,
     state: result.state,
     nextSlotNumber: result.nextSlotNumber,
     spentCents: result.spentCents,
+    ...(result.pauseReason ? { pauseReason: result.pauseReason } : {}),
   });
-  return 0;
+  return ok ? 0 : 1;
 }
 
 async function initialize(

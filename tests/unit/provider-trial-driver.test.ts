@@ -967,6 +967,23 @@ describe("resumable Provider Trial driver", () => {
       ),
     ).resolves.toMatchObject({ state: "paused", nextSlotNumber: 1, spentCents: 0 });
 
+    await expect(
+      reconcileProviderTrialCleanup(
+        connection,
+        { cohortId: cohort.id, authorization: { id: "auth-local-001", generation: 1 } },
+        {
+          async cleanup() {
+            return { ok: false, authoritative: false, remainingResourceIds: ["slot:1"] };
+          },
+        },
+      ),
+    ).resolves.toMatchObject({
+      state: "paused",
+      nextSlotNumber: 1,
+      spentCents: 0,
+      pauseReason: "cleanup_failed",
+    });
+
     const cleanup = vi.fn(async () => ({
       ok: true,
       authoritative: true,
@@ -995,7 +1012,8 @@ describe("resumable Provider Trial driver", () => {
       .orderBy(providerTrialSlotCleanupEvents.cleanupAttemptNumber);
     expect(cleanupEvents).toMatchObject([
       { cleanupAttemptNumber: 1, ok: false, authoritative: false, remainingResourceCount: 1 },
-      { cleanupAttemptNumber: 2, ok: true, authoritative: true, remainingResourceCount: 0 },
+      { cleanupAttemptNumber: 2, ok: false, authoritative: false, remainingResourceCount: 1 },
+      { cleanupAttemptNumber: 3, ok: true, authoritative: true, remainingResourceCount: 0 },
     ]);
   });
 
