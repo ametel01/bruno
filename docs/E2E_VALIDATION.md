@@ -122,8 +122,17 @@ credential is intentionally retained.
 The database retains the sanitized signed report and append-only cleanup ledger. Detailed evidence
 has a 90-day minimum retention commitment; the signed canonical report is retained without a
 scheduled deletion. The signing public key is retained beside the ignored private key so an exported
-report can be verified independently. A paused run needs fresh authorization before reconciliation;
-never create a replacement slot or manually relink a deployment.
+report can be verified independently. A paused run needs fresh authorization before any provider
+request can be reconciled or resumed. A `cleanup_failed` pause is the exception: retry its already
+authorized teardown with the cleanup-only command below. It accepts only the exact active
+authorization and signed prerequisite evidence, cannot issue a provider request, appends another
+cleanup attempt, and stops as `gate_impossible` when the remaining original slots cannot satisfy
+the cohort gate. Never create a replacement slot or manually relink a deployment.
+
+```bash
+bun --env-file=.env.local --env-file=.env.provider-trial.local \
+  --conditions react-server scripts/run-provider-trial.ts reconcile-cleanup
+```
 
 After `run` stops, revoke the short-lived DigitalOcean PAT and dedicated model key, then regenerate
 or revoke the benchmark Telegram token in BotFather. Do this even when the performance gate failed.

@@ -225,6 +225,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Provider Trial cleanup can now retry a terminal slot's failed teardown under the exact active
+  authorization without granting another provider request, append the authoritative retry, and
+  stop an already-failed cohort before it spends the remaining trial budget.
 - Protected snapshot builders now consume the runner's current Boot Snapshot v2
   `observedChecks`/`attestedChecks` schema, validate the complete full-fixture state, and translate
   it into signed snapshot-build evidence instead of rejecting a successful fixture as legacy
