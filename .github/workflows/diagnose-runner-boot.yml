@@ -48,20 +48,21 @@ jobs:
           mkdir -p runner-boot-diagnostic
           install -m 0700 -d "${DIAGNOSTIC_ROOT}"
           cat > "${DIAGNOSTIC_ROOT}/docker" <<'SH'
-          #!/usr/bin/env bash
-          set -uo pipefail
+          #!/bin/sh
+          set -u
           STDERR_FILE="$(mktemp "${DIAGNOSTIC_ROOT}/docker-stderr.XXXXXX")"
           STDOUT_FILE="$(mktemp "${DIAGNOSTIC_ROOT}/docker-stdout.XXXXXX")"
           /usr/bin/docker "$@" >"${STDOUT_FILE}" 2>"${STDERR_FILE}"
           STATUS=$?
-          if [[ "${1:-}" = "image" && "${2:-}" = "inspect" && "${4:-}" = '{{json .Id}}' ]]; then
+          if [ "${1:-}" = "image" ] && [ "${2:-}" = "inspect" ] && \
+            [ "${4:-}" = '{{json .Id}}' ]; then
             {
               printf 'image-id-inspect exit=%s stdout=' "${STATUS}"
               head -c 256 "${STDOUT_FILE}"
               printf '\n'
             } >> "${DIAGNOSTIC_ROOT}/docker-image-id-inspects.log"
           fi
-          if [[ "${STATUS}" -ne 0 ]]; then
+          if [ "${STATUS}" -ne 0 ]; then
             {
               printf 'command=%s subcommand=%s exit=%s\n' "${1:-unknown}" "${2:-unknown}" "${STATUS}"
               head -c 4096 "${STDERR_FILE}"
