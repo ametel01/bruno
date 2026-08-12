@@ -156,9 +156,14 @@ describe("E2E capability gates", () => {
 
     expect(childEnv).toEqual({
       PATH: "/test-bin",
+      BRUNO_AUTH_MODE: "development",
       BRUNO_DIGITALOCEAN_TOKEN: "",
       BRUNO_PROVIDER_TRIAL_MODEL_API_KEY: "",
       BRUNO_PROVIDER_TRIAL_TELEGRAM_BOT_TOKEN: "",
+      NEXT_PUBLIC_APP_URL: "http://localhost:3100",
+      PLAYWRIGHT_BASE_URL: "http://localhost:3100",
+      PLAYWRIGHT_REUSE_EXISTING_SERVER: "",
+      PORT: "3100",
     });
   });
 });
