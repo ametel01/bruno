@@ -1,11 +1,7 @@
 import "server-only";
 
 import { createHash, sign, verify } from "node:crypto";
-import {
-  DEFAULT_HERMES_WORKLOAD_IMAGE_AMD64_MANIFEST_DIGEST,
-  DEFAULT_HERMES_WORKLOAD_IMAGE_INDEX_DIGEST,
-  RUNNER_BOOT_CONTRACT_VERSION,
-} from "@/src/runner-service/constants";
+import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
 import type {
   DigitalOceanImageAvailability,
@@ -124,6 +120,7 @@ export type RunnerSnapshotExpectedIdentities = {
   runnerImage: string;
   defaultAgentImage: string;
   hermesImage: string;
+  hermesAmd64ManifestDigest: string;
   bootContractVersion?: string;
 };
 
@@ -392,6 +389,7 @@ function checkManifestIdentities(
 ): RunnerSnapshotIdentityCheck {
   const runner = parseImmutableRunnerImageReference(expected.runnerImage);
   const agent = parseImmutableRunnerImageReference(expected.defaultAgentImage);
+  const hermes = parseImmutableRunnerImageReference(expected.hermesImage);
 
   if (!manifest.snapshot.regions.includes(expected.region)) {
     return { ok: false, reason: "manifest_region_unavailable" };
@@ -412,9 +410,8 @@ function checkManifestIdentities(
     manifest.defaultAgentImage.reference !== expected.defaultAgentImage ||
     manifest.defaultAgentImage.digest !== agent?.imageDigest ||
     manifest.hermesImage.reference !== expected.hermesImage ||
-    manifest.hermesImage.indexDigest !== DEFAULT_HERMES_WORKLOAD_IMAGE_INDEX_DIGEST ||
-    manifest.hermesImage.amd64ManifestDigest !==
-      DEFAULT_HERMES_WORKLOAD_IMAGE_AMD64_MANIFEST_DIGEST ||
+    manifest.hermesImage.indexDigest !== hermes?.imageDigest ||
+    manifest.hermesImage.amd64ManifestDigest !== expected.hermesAmd64ManifestDigest ||
     manifest.bootContractVersion !== (expected.bootContractVersion ?? RUNNER_BOOT_CONTRACT_VERSION)
   ) {
     return { ok: false, reason: "manifest_identity_mismatch" };
@@ -540,13 +537,18 @@ function isDigestImage(value: unknown): value is RunnerSnapshotManifest["runnerI
 }
 
 function isHermesImage(value: unknown): value is RunnerSnapshotManifest["hermesImage"] {
+  const parsed =
+    isRecord(value) && typeof value.reference === "string"
+      ? parseImmutableRunnerImageReference(value.reference)
+      : null;
   return (
     isRecord(value) &&
     !hasUnknownKeys(value, ["reference", "indexDigest", "amd64ManifestDigest"]) &&
     typeof value.reference === "string" &&
-    value.reference.includes("@sha256:") &&
+    parsed !== null &&
     typeof value.indexDigest === "string" &&
     SHA256_DIGEST_PATTERN.test(value.indexDigest) &&
+    value.indexDigest === parsed.imageDigest &&
     typeof value.amd64ManifestDigest === "string" &&
     SHA256_DIGEST_PATTERN.test(value.amd64ManifestDigest)
   );

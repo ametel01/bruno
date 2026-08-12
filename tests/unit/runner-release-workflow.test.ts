@@ -158,6 +158,8 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).toContain('docker pull "$' + '{BRUNO_RUNNER_IMAGE}"');
     expect(workflowSource).toContain('docker pull "$' + '{BRUNO_DOCKER_RUNNER_IMAGE}"');
     expect(workflowSource).toContain('docker pull "$' + '{BRUNO_HERMES_WORKLOAD_IMAGE}"');
+    expect(workflowSource).toContain("hermesAmd64ManifestDigest");
+    expect(workflowSource).toContain("BRUNO_HERMES_WORKLOAD_AMD64_MANIFEST_DIGEST");
     expect(workflowSource).toContain(
       'docker network inspect "$' + '{BRUNO_HERMES_PRIVATE_NETWORK}"',
     );

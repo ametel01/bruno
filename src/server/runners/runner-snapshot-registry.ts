@@ -313,6 +313,7 @@ function expectedIdentities(manifest: RunnerSnapshotManifest): RunnerSnapshotExp
     runnerImage: manifest.runnerImage.reference,
     defaultAgentImage: manifest.defaultAgentImage.reference,
     hermesImage: manifest.hermesImage.reference,
+    hermesAmd64ManifestDigest: manifest.hermesImage.amd64ManifestDigest,
     bootContractVersion: manifest.bootContractVersion,
   };
 }

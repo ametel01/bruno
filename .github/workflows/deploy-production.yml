@@ -270,12 +270,15 @@ jobs:
             --output approved-snapshot/verified-images.json
           DEFAULT_AGENT_IMAGE="$(jq -r '.defaultAgentImage // empty' approved-snapshot/verified-images.json)"
           HERMES_IMAGE="$(jq -r '.hermesImage // empty' approved-snapshot/verified-images.json)"
+          HERMES_AMD64_MANIFEST_DIGEST="$(jq -r '.hermesAmd64ManifestDigest // empty' approved-snapshot/verified-images.json)"
           test -n "${DEFAULT_AGENT_IMAGE}"
           test -n "${HERMES_IMAGE}"
+          [[ "${HERMES_AMD64_MANIFEST_DIGEST}" =~ ^sha256:[a-f0-9]{64}$ ]]
           echo "runner-image=${RELEASE_RUNNER_IMAGE}" >> "${GITHUB_OUTPUT}"
           echo "BRUNO_RUNNER_IMAGE=${RELEASE_RUNNER_IMAGE}" >> "${GITHUB_ENV}"
           echo "BRUNO_DOCKER_RUNNER_IMAGE=${DEFAULT_AGENT_IMAGE}" >> "${GITHUB_ENV}"
           echo "BRUNO_HERMES_WORKLOAD_IMAGE=${HERMES_IMAGE}" >> "${GITHUB_ENV}"
+          echo "BRUNO_HERMES_WORKLOAD_AMD64_MANIFEST_DIGEST=${HERMES_AMD64_MANIFEST_DIGEST}" >> "${GITHUB_ENV}"
 
       - name: Scan the retained Approved Snapshot runner
         if: inputs.action == 'verified-release'

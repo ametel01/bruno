@@ -2,6 +2,7 @@ import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_HERMES_WORKLOAD_IMAGE,
+  DEFAULT_HERMES_WORKLOAD_IMAGE_AMD64_MANIFEST_DIGEST,
   RUNNER_BOOT_CONTRACT_VERSION,
 } from "@/src/runner-service/constants";
 import { FakeDigitalOceanProvider } from "@/src/server/runners/digitalocean-provider";
@@ -18,6 +19,9 @@ const AGENT_DIGEST = `sha256:${"b".repeat(64)}`;
 const RUNNER_IMAGE = `ghcr.io/ametel01/bruno-runner:abc123@${RUNNER_DIGEST}`;
 const AGENT_IMAGE = `ghcr.io/ametel01/bruno-default:abc123@${AGENT_DIGEST}`;
 const SOURCE_REVISION = "1".repeat(40);
+const OPTIMIZED_HERMES_INDEX_DIGEST = `sha256:${"c".repeat(64)}`;
+const OPTIMIZED_HERMES_AMD64_DIGEST = `sha256:${"d".repeat(64)}`;
+const OPTIMIZED_HERMES_IMAGE = `ghcr.io/ametel01/bruno-hermes:optimized-test@${OPTIMIZED_HERMES_INDEX_DIGEST}`;
 
 describe("runner snapshot manifest", () => {
   it("verifies an approved v2 bundle through its identified trusted key without time expiry", () => {
@@ -42,6 +46,32 @@ describe("runner snapshot manifest", () => {
         createdAt: "2020-01-01T00:00:00.000Z",
       },
     });
+  });
+
+  it("verifies a signed allowlisted optimized Hermes image identity", () => {
+    const signing = generateKeyPairSync("ed25519");
+    const optimizedManifest: RunnerSnapshotManifest = {
+      ...manifest(),
+      hermesImage: {
+        reference: OPTIMIZED_HERMES_IMAGE,
+        indexDigest: OPTIMIZED_HERMES_INDEX_DIGEST,
+        amd64ManifestDigest: OPTIMIZED_HERMES_AMD64_DIGEST,
+      },
+    };
+    const attestation = attest(optimizedManifest, "snapshot-current", signing.privateKey);
+
+    expect(
+      verifyRunnerSnapshotBundle({
+        bundleBytes: attestation.bundleBytes,
+        approvedDigest: attestation.digest,
+        trustedPublicKeys: { "snapshot-current": publicKeyPem(signing.publicKey) },
+        expected: {
+          ...expected(),
+          hermesImage: OPTIMIZED_HERMES_IMAGE,
+          hermesAmd64ManifestDigest: OPTIMIZED_HERMES_AMD64_DIGEST,
+        },
+      }),
+    ).toMatchObject({ ok: true });
   });
 
   it("rejects manifest v1 and unknown evidence fields before approval", () => {
@@ -359,6 +389,7 @@ function expected(): RunnerSnapshotExpectedIdentities {
     runnerImage: RUNNER_IMAGE,
     defaultAgentImage: AGENT_IMAGE,
     hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
+    hermesAmd64ManifestDigest: DEFAULT_HERMES_WORKLOAD_IMAGE_AMD64_MANIFEST_DIGEST,
   };
 }
 

@@ -5,6 +5,10 @@ import { isIP } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import {
+  readLinuxAmd64ManifestDigest,
+  validateHermesImageIdentity,
+} from "@/src/runner-service/hermes-image-identity";
 import { DigitalOceanApiProvider } from "@/src/server/runners/digitalocean-provider";
 import {
   buildRunnerSnapshot,
@@ -24,6 +28,7 @@ let cleanupResult: SnapshotCleanupEvidence | null = null;
 
 try {
   validatePreEffectArgs(args);
+  await verifyHermesPlatformIdentity(args);
   const privateKeyPem = await readRequiredFile(args.signingKeyPath, "signing key");
   validateSigningKey(privateKeyPem);
   const token = readRequiredEnv("BRUNO_DIGITALOCEAN_TOKEN");
@@ -66,6 +71,7 @@ try {
     runnerImage: args.runnerImage,
     defaultAgentImage: args.defaultAgentImage,
     hermesImage: args.hermesImage,
+    hermesAmd64ManifestDigest: args.hermesAmd64ManifestDigest,
     controllerSshSourceCidr: args.controllerCidr,
     builderSshKeyId,
     builderSshPrivateKeyPath,
@@ -188,8 +194,26 @@ function validatePreEffectArgs(input: ReturnType<typeof parseArgs>): void {
   ] as const) {
     if (!/@sha256:[a-f0-9]{64}$/.test(value)) throw new Error(`--${key} is invalid.`);
   }
+  if (!/^sha256:[a-f0-9]{64}$/.test(input.hermesAmd64ManifestDigest)) {
+    throw new Error("--hermes-amd64-manifest-digest is invalid.");
+  }
+  if (!validateHermesImageIdentity(input.hermesImage, input.hermesAmd64ManifestDigest)) {
+    throw new Error("--hermes-image identity is not allowlisted.");
+  }
   if (!isExplicitControllerCidr(input.controllerCidr)) {
     throw new Error("--controller-cidr must be an explicit controller /32 IPv4 or /128 IPv6 CIDR.");
+  }
+}
+
+async function verifyHermesPlatformIdentity(input: ReturnType<typeof parseArgs>): Promise<void> {
+  const inspected = await execFileAsync(
+    "docker",
+    ["buildx", "imagetools", "inspect", "--raw", input.hermesImage],
+    { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, signal: controller.signal },
+  );
+  const observed = readLinuxAmd64ManifestDigest(inspected.stdout);
+  if (observed !== input.hermesAmd64ManifestDigest) {
+    throw new Error("--hermes-amd64-manifest-digest does not belong to --hermes-image.");
   }
 }
 
@@ -216,6 +240,7 @@ function parseArgs(values: string[]) {
     runnerImage: requiredArg(parsed, "runner-image"),
     defaultAgentImage: requiredArg(parsed, "default-agent-image"),
     hermesImage: requiredArg(parsed, "hermes-image"),
+    hermesAmd64ManifestDigest: requiredArg(parsed, "hermes-amd64-manifest-digest"),
     controllerCidr: requiredArg(parsed, "controller-cidr"),
     signingKeyPath: requiredArg(parsed, "signing-key"),
     signingKeyId: requiredArg(parsed, "signing-key-id"),

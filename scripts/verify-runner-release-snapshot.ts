@@ -22,6 +22,7 @@ await writeFile(
     signingKeyId: verified.signingKeyId,
     defaultAgentImage: verified.manifest.defaultAgentImage.reference,
     hermesImage: verified.manifest.hermesImage.reference,
+    hermesAmd64ManifestDigest: verified.manifest.hermesImage.amd64ManifestDigest,
   })}\n`,
   { mode: 0o600 },
 );

@@ -17,6 +17,9 @@ import {
 
 const RUNNER_IMAGE = `ghcr.io/ametel01/bruno-runner:abc123@sha256:${"a".repeat(64)}`;
 const AGENT_IMAGE = `ghcr.io/ametel01/bruno-default:abc123@sha256:${"b".repeat(64)}`;
+const OPTIMIZED_HERMES_INDEX_DIGEST = `sha256:${"c".repeat(64)}`;
+const OPTIMIZED_HERMES_AMD64_DIGEST = `sha256:${"d".repeat(64)}`;
+const OPTIMIZED_HERMES_IMAGE = `ghcr.io/ametel01/bruno-hermes:optimized-test@${OPTIMIZED_HERMES_INDEX_DIGEST}`;
 const AUTH = "I_UNDERSTAND_THIS_CREATES_A_BILLABLE_SNAPSHOT_BUILDER";
 
 describe("runner snapshot build orchestration", () => {
@@ -144,7 +147,14 @@ cleanup_snapshot_builder_networks`,
     expect(userData).toContain('fixture.get("observedChecks") == expected_observed_checks');
     expect(userData).toContain('fixture.get("attestedChecks") == expected_attested_checks');
     expect(userData).toContain('component: fixture["observedChecks"].get(component)');
-    expect(userData).toContain("docker ps -aq | xargs --no-run-if-empty docker rm --force");
+    expect(userData).toContain(
+      "docker ps -aq | xargs --no-run-if-empty docker rm --force --volumes",
+    );
+    expect(userData).toContain("docker volume prune --force");
+    expect(userData).toContain("docker builder prune --all --force");
+    expect(userData).toContain("apt-get clean");
+    expect(userData).toContain("rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*");
+    expect(userData).toContain("fstrim --all || true");
     expect(userData).toContain("grep -R -I -F");
     expect(userData).toContain("BRUNO_RUNNER_REGISTRATION_TOKEN");
     expect(userData).toContain("BEGIN OPENSSH PRIVATE KEY");
@@ -300,6 +310,12 @@ cleanup_snapshot_builder_networks`,
     expect(command.indexOf("rm -rf /var/lib/cloud /root/.ssh/authorized_keys")).toBeLessThan(
       command.indexOf('/run/bruno-snapshot-builder/publish-evidence.py "complete"'),
     );
+    expect(command.indexOf("rm -rf /var/lib/cloud /root/.ssh/authorized_keys")).toBeLessThan(
+      command.lastIndexOf("fstrim --all || true"),
+    );
+    expect(command.lastIndexOf("fstrim --all || true")).toBeLessThan(
+      command.indexOf('/run/bruno-snapshot-builder/publish-evidence.py "complete"'),
+    );
     expect(command.indexOf("os.remove(path)")).toBeLessThan(command.indexOf("last_error = None"));
     expect(command.indexOf("os.remove(path)")).toBeLessThan(
       command.indexOf('sanitation_result["completedAt"]'),
@@ -414,6 +430,42 @@ cleanup_snapshot_builder_networks`,
     expect(JSON.stringify(result)).not.toContain("dop_v1_super_secret");
     expect(JSON.stringify(result)).not.toContain("BEGIN PRIVATE KEY");
     expect(JSON.stringify(result)).not.toContain("expiresAt");
+  });
+
+  it("attests an allowlisted optimized Hermes index and amd64 manifest", async () => {
+    const provider = new FakeDigitalOceanProvider();
+    const result = await buildRunnerSnapshot({
+      ...baseInput(provider),
+      hermesImage: OPTIMIZED_HERMES_IMAGE,
+      hermesAmd64ManifestDigest: OPTIMIZED_HERMES_AMD64_DIGEST,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      manifest: {
+        hermesImage: {
+          reference: OPTIMIZED_HERMES_IMAGE,
+          indexDigest: OPTIMIZED_HERMES_INDEX_DIGEST,
+          amd64ManifestDigest: OPTIMIZED_HERMES_AMD64_DIGEST,
+        },
+      },
+    });
+  });
+
+  it("rejects an optimized Hermes image without exact platform identity or outside Bruno GHCR", async () => {
+    for (const input of [
+      { hermesImage: OPTIMIZED_HERMES_IMAGE },
+      {
+        hermesImage: `ghcr.io/example/bruno-hermes:optimized@${OPTIMIZED_HERMES_INDEX_DIGEST}`,
+        hermesAmd64ManifestDigest: OPTIMIZED_HERMES_AMD64_DIGEST,
+      },
+    ]) {
+      const provider = new FakeDigitalOceanProvider();
+      const result = await buildRunnerSnapshot({ ...baseInput(provider), ...input });
+
+      expect(result).toMatchObject({ ok: false, reason: "input_invalid" });
+      expect(provider.calls).toEqual([]);
+    }
   });
 
   it("accepts a snapshot whose minimum disk matches the selected runner profile", async () => {

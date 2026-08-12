@@ -1,0 +1,124 @@
+# syntax=docker/dockerfile:1.12@sha256:93bfd3b68c109427185cd78b4779fc82b484b0b7618e36d0f104d4d801e66d25
+
+# Bruno's optimized image is intentionally separate from Dockerfile.agent. The
+# legacy image remains the deployment default while this image is validated and
+# rolled out by immutable digest.
+
+ARG DEBIAN_IMAGE=debian:13.4@sha256:e2d08da6f42ef4b09b165d55528a12727aeed8240dc9edf888e3ec07e10ef9da
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.6-python3.13-trixie@sha256:b3c543b6c4f23a5f2df22866bd7857e5d304b67a564f4feab6ac22044dde719b
+ARG PYTHON_IMAGE=python:3.13-slim-trixie@sha256:ffb752e139c0a19692a43af8d8523b274222dd68eebad5d583b45c2201c6e30a
+ARG NODE_IMAGE=node:26-bookworm-slim@sha256:9e6f9357d371591e32ab6f2d8a26d63bdd0d17c29eee3f4f3e7e454d9634bf73
+
+# Debian 13's SQLite predates the WAL-reset fix required by Hermes. Build only
+# the shared runtime library, then copy it into the final image.
+FROM ${DEBIAN_IMAGE} AS sqlite-build
+ARG SQLITE_AUTOCONF_VERSION=3530400
+ARG SQLITE_SHA256=0e9483900e92cd5de8fd48d16bf9200145a61f7fd5be542a5ac81d8a9516eb9c
+RUN apt-get -o Acquire::Retries=3 update && \
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
+      build-essential ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 120 \
+      -o /tmp/sqlite.tar.gz \
+      "https://sqlite.org/2026/sqlite-autoconf-${SQLITE_AUTOCONF_VERSION}.tar.gz" && \
+    printf '%s  %s\n' "${SQLITE_SHA256}" /tmp/sqlite.tar.gz | sha256sum -c - && \
+    tar -xzf /tmp/sqlite.tar.gz -C /tmp && \
+    cd "/tmp/sqlite-autoconf-${SQLITE_AUTOCONF_VERSION}" && \
+    CFLAGS="-O2 -DSQLITE_ENABLE_FTS3 -DSQLITE_ENABLE_FTS3_PARENTHESIS -DSQLITE_ENABLE_FTS4 -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_RTREE -DSQLITE_ENABLE_GEOPOLY -DSQLITE_ENABLE_COLUMN_METADATA -DSQLITE_ENABLE_UNLOCK_NOTIFY -DSQLITE_ENABLE_DBSTAT_VTAB -DSQLITE_ENABLE_DBPAGE_VTAB -DSQLITE_ENABLE_MATH_FUNCTIONS -DSQLITE_ENABLE_PREUPDATE_HOOK -DSQLITE_ENABLE_SESSION -DSQLITE_SECURE_DELETE -DSQLITE_THREADSAFE=1 -DSQLITE_MAX_VARIABLE_NUMBER=250000" \
+      ./configure --prefix=/opt/sqlite-fixed --disable-static && \
+    make -j"$(nproc)" && \
+    make install
+
+FROM ${UV_IMAGE} AS hermes-build
+ARG HERMES_RELEASE=v2026.8.3
+ARG HERMES_ARCHIVE_SHA256=47e0874a68d428882c0c3aeb7769a7ef330275485926745a9ea48050b00a6453
+ARG HERMES_SOURCE_URL=https://github.com/NousResearch/hermes-agent/archive/refs/tags/v2026.8.3.zip
+
+RUN apt-get -o Acquire::Retries=3 update && \
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
+      ca-certificates curl unzip && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt
+RUN curl -fsSL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 300 \
+      -o /tmp/hermes.zip "${HERMES_SOURCE_URL}" && \
+    printf '%s  %s\n' "${HERMES_ARCHIVE_SHA256}" /tmp/hermes.zip | sha256sum -c - && \
+    unzip -q /tmp/hermes.zip -d /tmp/hermes-source && \
+    mv "/tmp/hermes-source/hermes-agent-${HERMES_RELEASE#v}" /opt/hermes && \
+    rm -rf /tmp/hermes.zip /tmp/hermes-source
+
+WORKDIR /opt/hermes
+# Bruno needs the core OpenAI/OpenRouter path, direct Anthropic, and messaging
+# gateways. Browser automation, Matrix, Bedrock, Azure, Hindsight, OTLP, and
+# developer extras remain excluded from this workload-specific image.
+RUN uv sync --frozen --no-managed-python --python /usr/local/bin/python3.13 --no-install-project \
+      --extra anthropic \
+      --extra messaging && \
+    uv pip install --python .venv/bin/python --no-cache-dir --no-deps --editable . && \
+    find .venv -type d -name __pycache__ -prune -exec rm -rf '{}' + && \
+    find .venv -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete && \
+    rm -rf \
+      .github .plans apps assets contributors datagen-config-examples docs \
+      mcp-research-data nix tests tests-js ui-tui web website
+
+FROM ${NODE_IMAGE} AS node-source
+
+FROM ${PYTHON_IMAGE}
+ARG HERMES_RELEASE=v2026.8.3
+ARG HERMES_VERSION=0.20.0
+ARG HERMES_GIT_SHA=3c27eb6234bf91b8ceee9e9071591b31e9b148cb
+
+LABEL org.opencontainers.image.title="Bruno Hermes optimized workload"
+LABEL org.opencontainers.image.description="Workload-specific Hermes gateway image without browsers, local media transcoding, frontend build dependencies, or compilers."
+LABEL org.opencontainers.image.source="https://github.com/ametel01/bruno"
+LABEL org.opencontainers.image.base.name="https://github.com/NousResearch/hermes-agent/archive/refs/tags/v2026.8.3.zip"
+LABEL org.opencontainers.image.version="${HERMES_RELEASE}"
+LABEL io.bruno.hermes.version="v${HERMES_VERSION}"
+LABEL io.bruno.hermes.release="${HERMES_RELEASE}"
+LABEL io.bruno.hermes.source-revision="${HERMES_GIT_SHA}"
+LABEL io.bruno.hermes.flavor="optimized-gateway"
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    HERMES_HOME=/opt/data \
+    HERMES_WRITE_SAFE_ROOT=/opt/data \
+    HERMES_BUNDLED_SKILLS=/opt/hermes/skills \
+    HERMES_OPTIONAL_SKILLS=/opt/hermes/optional-skills \
+    HERMES_OPTIONAL_MCPS=/opt/hermes/optional-mcps \
+    HERMES_DISABLE_LAZY_INSTALLS=1 \
+    PATH=/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Keep only runtime utilities used by the Bruno-managed agent. Build tools,
+# Docker CLI, Chromium/Playwright, and distro npm are deliberately absent.
+RUN apt-get -o Acquire::Retries=3 update && \
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
+      ca-certificates curl git gosu iputils-ping libatomic1 \
+      openssh-client procps ripgrep tini && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=sqlite-build /opt/sqlite-fixed/lib/libsqlite3.so.3.53.4 /usr/local/lib/
+RUN ln -sf libsqlite3.so.3.53.4 /usr/local/lib/libsqlite3.so.0 && \
+    ln -sf libsqlite3.so.3.53.4 /usr/local/lib/libsqlite3.so && \
+    printf '/usr/local/lib\n' > /etc/ld.so.conf.d/000-sqlite-fixed.conf && \
+    ldconfig
+
+COPY --from=node-source /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-source /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+
+COPY --from=hermes-build --chown=root:root /opt/hermes /opt/hermes
+COPY --chmod=0755 docker/hermes-optimized/entrypoint.sh /usr/local/bin/hermes-entrypoint
+
+RUN groupadd --gid 10000 hermes && \
+    useradd --uid 10000 --gid 10000 --home-dir /opt/data --no-create-home hermes && \
+    install -d -o hermes -g hermes -m 0700 /opt/data && \
+    install -d -o hermes -g hermes -m 0755 /workspace /opt/hermes/bin && \
+    printf 'docker-optimized\n' > /opt/hermes/.install_method && \
+    ln -s /opt/hermes/.venv/bin/hermes /opt/hermes/bin/hermes && \
+    python -c "import sqlite3, sys; sys.exit(sqlite3.sqlite_version) if sqlite3.sqlite_version_info < (3, 51, 3) else None" && \
+    /opt/hermes/.venv/bin/hermes --version
+
+WORKDIR /workspace
+VOLUME ["/opt/data"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/hermes-entrypoint"]

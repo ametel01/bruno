@@ -5,7 +5,12 @@ on:
     branches:
       - main
     paths:
+      - .dockerignore
       - Dockerfile.agent
+      - Dockerfile.agent.optimized
+      - docker/hermes-optimized/**
+      - scripts/smoke-hermes-agent-image.ts
+      - scripts/smoke-hermes-agent-optimized-image.ts
       - .github/workflows/publish-agent-image.yml
 
 permissions:
@@ -18,6 +23,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ametel01/bruno-hermes
   LOCAL_IMAGE: bruno-hermes:ci
+  LOCAL_OPTIMIZED_IMAGE: bruno-hermes-optimized:ci
   UPSTREAM_IMAGE: nousresearch/hermes-agent:v2026.7.7.2
   UPSTREAM_INDEX_DIGEST: sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973
 
@@ -59,6 +65,22 @@ jobs:
           BRUNO_HERMES_IMAGE: ${{ env.LOCAL_IMAGE }}
         run: bun scripts/smoke-hermes-agent-image.ts
 
+      - name: Build local optimized workload image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.agent.optimized
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.LOCAL_OPTIMIZED_IMAGE }}
+          cache-from: type=gha,scope=hermes-optimized-amd64
+          cache-to: type=gha,mode=max,scope=hermes-optimized-amd64
+
+      - name: Smoke local optimized workload image
+        env:
+          BRUNO_HERMES_IMAGE: ${{ env.LOCAL_OPTIMIZED_IMAGE }}
+        run: bun scripts/smoke-hermes-agent-optimized-image.ts
+
       - name: Scan critical fixable vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -77,6 +99,27 @@ jobs:
         with:
           name: trivy-agent-image-${{ github.sha }}
           path: trivy-agent-image.sarif
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Scan optimized image for critical fixable vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.LOCAL_OPTIMIZED_IMAGE }}
+          scanners: vuln
+          format: sarif
+          output: trivy-agent-optimized-image.sarif
+          severity: CRITICAL
+          ignore-unfixed: true
+          limit-severities-for-sarif: true
+          exit-code: "1"
+
+      - name: Upload optimized scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-agent-optimized-image-${{ github.sha }}
+          path: trivy-agent-optimized-image.sarif
           if-no-files-found: error
           retention-days: 90
 
@@ -110,3 +153,76 @@ jobs:
           IMAGE="${REGISTRY}/${IMAGE_NAME}@${{ steps.push.outputs.digest }}"
           docker buildx imagetools inspect "${IMAGE}"
           echo "published_digest=${{ steps.push.outputs.digest }}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Build and push optimized workload image
+        id: push-optimized
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.agent.optimized
+          platforms: linux/amd64
+          push: true
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha,scope=hermes-optimized-amd64
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:optimized-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:optimized-hermes-v2026.8.3
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Optimized digest verification
+        run: |
+          set -euo pipefail
+          IMAGE="${REGISTRY}/${IMAGE_NAME}@${{ steps.push-optimized.outputs.digest }}"
+          docker buildx imagetools inspect "${IMAGE}"
+          OPTIMIZED_AMD64_MANIFEST_DIGEST="$(
+            IMAGE="${IMAGE}" bun -e '
+              const result = Bun.spawnSync([
+                "docker", "buildx", "imagetools", "inspect", "--raw", process.env.IMAGE,
+              ]);
+              if (result.exitCode !== 0) throw new Error("optimized manifest inspection failed");
+              const index = JSON.parse(new TextDecoder().decode(result.stdout));
+              const matches = (index.manifests ?? []).filter(
+                (entry) => entry?.platform?.os === "linux" && entry.platform.architecture === "amd64",
+              );
+              if (matches.length !== 1 || !/^sha256:[a-f0-9]{64}$/.test(matches[0]?.digest ?? "")) {
+                throw new Error("optimized amd64 manifest identity is ambiguous");
+              }
+              console.log(matches[0].digest);
+            '
+          )"
+          echo "optimized_published_digest=${{ steps.push-optimized.outputs.digest }}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "optimized_amd64_manifest_digest=${OPTIMIZED_AMD64_MANIFEST_DIGEST}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Smoke published optimized digest
+        env:
+          OPTIMIZED_DIGEST: ${{ steps.push-optimized.outputs.digest }}
+        run: |
+          set -euo pipefail
+          BRUNO_HERMES_IMAGE="${REGISTRY}/${IMAGE_NAME}@${OPTIMIZED_DIGEST}"
+          export BRUNO_HERMES_IMAGE
+          docker pull --platform linux/amd64 "${BRUNO_HERMES_IMAGE}"
+          bun scripts/smoke-hermes-agent-optimized-image.ts
+
+      - name: Scan published optimized digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push-optimized.outputs.digest }}
+          scanners: vuln
+          format: sarif
+          output: trivy-agent-optimized-published-image.sarif
+          severity: CRITICAL
+          ignore-unfixed: true
+          limit-severities-for-sarif: true
+          exit-code: "1"
+
+      - name: Upload published optimized scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-agent-optimized-published-image-${{ github.sha }}
+          path: trivy-agent-optimized-published-image.sarif
+          if-no-files-found: error
+          retention-days: 90

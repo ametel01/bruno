@@ -1050,6 +1050,7 @@ function invalidSnapshotConfig(): DigitalOceanProviderConfig {
         runnerImage,
         defaultAgentImage,
         hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
+        hermesAmd64ManifestDigest: `sha256:${"d".repeat(64)}`,
       },
     },
   };

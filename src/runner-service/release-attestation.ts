@@ -1,9 +1,5 @@
 import { createHash, sign, verify } from "node:crypto";
-import {
-  DEFAULT_HERMES_WORKLOAD_IMAGE_AMD64_MANIFEST_DIGEST,
-  DEFAULT_HERMES_WORKLOAD_IMAGE_INDEX_DIGEST,
-  RUNNER_BOOT_CONTRACT_VERSION,
-} from "@/src/runner-service/constants";
+import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
 import {
   RUNNER_BOOT_COMPONENTS,
@@ -251,9 +247,12 @@ function parseRunnerReleaseManifest(raw: unknown): RunnerReleaseManifest | null 
       defaultAgentImage.digest ||
     !isExactRecord(hermesImage, ["amd64ManifestDigest", "indexDigest", "reference"]) ||
     typeof hermesImage.reference !== "string" ||
-    hermesImage.indexDigest !== DEFAULT_HERMES_WORKLOAD_IMAGE_INDEX_DIGEST ||
-    hermesImage.amd64ManifestDigest !== DEFAULT_HERMES_WORKLOAD_IMAGE_AMD64_MANIFEST_DIGEST ||
-    !hermesImage.reference.endsWith(`@${hermesImage.indexDigest}`) ||
+    typeof hermesImage.indexDigest !== "string" ||
+    !SHA256_DIGEST.test(hermesImage.indexDigest) ||
+    typeof hermesImage.amd64ManifestDigest !== "string" ||
+    !SHA256_DIGEST.test(hermesImage.amd64ManifestDigest) ||
+    parseImmutableRunnerImageReference(hermesImage.reference)?.imageDigest !==
+      hermesImage.indexDigest ||
     !isExactRecord(snapshot, [
       "bundleDigest",
       "imageId",

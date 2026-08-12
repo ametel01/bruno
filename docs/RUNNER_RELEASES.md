@@ -214,6 +214,13 @@ cost-authorization sentinel before any DigitalOcean token is exposed to a step. 
 unless required reviewers are enforced on that environment; an unprotected manual dispatch is
 forbidden.
 
+The dispatch identifies Hermes with two immutable values: `hermes_image` is the exact OCI index
+reference ending in `@sha256:...`, and `hermes_amd64_manifest_digest` is the single linux/amd64
+manifest nested under that index. The published workload-image workflow prints both values in its
+summary after smoking and scanning the exact pushed digest. The legacy default retains its pinned
+upstream identity; optimized candidates are accepted only from `ghcr.io/ametel01/bruno-hermes` and
+remain opt-in until their signed snapshot and Verified Release pass.
+
 Snapshot mode is not a warm pool. The workflow creates a short-lived builder Droplet only after
 approval. The generated user-data is a directly executable Bash script, so bootstrap does not depend
 on cloud-config `runcmd` serialization or the distribution `/bin/sh`. Before metadata or network

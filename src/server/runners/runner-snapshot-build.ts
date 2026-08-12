@@ -3,11 +3,10 @@ import "server-only";
 import { isIP } from "node:net";
 import {
   DEFAULT_HERMES_WORKLOAD_IMAGE,
-  DEFAULT_HERMES_WORKLOAD_IMAGE_AMD64_MANIFEST_DIGEST,
-  DEFAULT_HERMES_WORKLOAD_IMAGE_INDEX_DIGEST,
   DEFAULT_MANUAL_RUNNER_IMAGE,
   RUNNER_BOOT_CONTRACT_VERSION,
 } from "@/src/runner-service/constants";
+import { validateHermesImageIdentity } from "@/src/runner-service/hermes-image-identity";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
 import {
   RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION,
@@ -66,6 +65,7 @@ export type BuildRunnerSnapshotInput = {
   runnerImage: string;
   defaultAgentImage?: string;
   hermesImage?: string;
+  hermesAmd64ManifestDigest?: string;
   controllerSshSourceCidr: string;
   builderSshKeyId?: string;
   builderSshPrivateKeyPath?: string;
@@ -509,8 +509,8 @@ async function buildRunnerSnapshotCandidate(
       },
       hermesImage: {
         reference: validated.hermesImage,
-        indexDigest: DEFAULT_HERMES_WORKLOAD_IMAGE_INDEX_DIGEST,
-        amd64ManifestDigest: DEFAULT_HERMES_WORKLOAD_IMAGE_AMD64_MANIFEST_DIGEST,
+        indexDigest: validated.hermesIndexDigest,
+        amd64ManifestDigest: validated.hermesAmd64ManifestDigest,
       },
       bootContractVersion: RUNNER_BOOT_CONTRACT_VERSION,
       source: { repository: "ametel01/bruno", revision: input.sourceRevision },
@@ -1136,9 +1136,12 @@ export function buildSnapshotBuilderBootstrap(input: {
     ? "None"
     : 'datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")';
   const evidencePublisherCompletion = input.evidencePublisher
-    ? `    /run/bruno-snapshot-builder/publish-evidence.py "complete"
+    ? `    sync
+    fstrim --all || true
+    /run/bruno-snapshot-builder/publish-evidence.py "complete"
     unset BRUNO_SNAPSHOT_EVIDENCE_TOKEN`
-    : "    :";
+    : `    sync
+    fstrim --all || true`;
   const scheduleSanitationFinalizer = input.evidencePublisher
     ? `    declare -p BRUNO_SNAPSHOT_EVIDENCE_TOKEN BRUNO_SNAPSHOT_EVIDENCE_REPOSITORY BRUNO_SNAPSHOT_EVIDENCE_ISSUE_NUMBER BRUNO_SNAPSHOT_EVIDENCE_RUN_ID BRUNO_SNAPSHOT_EVIDENCE_NONCE BRUNO_SNAPSHOT_EVIDENCE_AUTHENTICATION_SECRET BRUNO_SNAPSHOT_EVIDENCE_API_URL > /run/bruno-snapshot-builder/evidence.env
     chmod 0600 /run/bruno-snapshot-builder/evidence.env
@@ -1332,8 +1335,12 @@ ${evidencePublisherSetup}
         output.write("\\n")
     BRUNO_BOOT_RESULT_PY
     publish_builder_evidence "fixture_complete"
-    docker ps -aq | xargs --no-run-if-empty docker rm --force
+    docker ps -aq | xargs --no-run-if-empty docker rm --force --volumes
     cleanup_snapshot_builder_networks
+    docker volume prune --force
+    docker builder prune --all --force
+    apt-get clean
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
     rm -rf \
       /etc/bruno/runner.env \
       /root/.docker/config.json \
@@ -1636,6 +1643,8 @@ function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
       defaultAgentImage: string;
       defaultAgentDigest: string;
       hermesImage: string;
+      hermesIndexDigest: string;
+      hermesAmd64ManifestDigest: string;
       runnerDiskGiB: number;
     }
   | { ok: false; reason: "authorization_missing" | "input_invalid" } {
@@ -1647,6 +1656,7 @@ function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
   const defaultAgentImage = input.defaultAgentImage ?? DEFAULT_MANUAL_RUNNER_IMAGE;
   const defaultAgent = parseImmutableRunnerImageReference(defaultAgentImage);
   const hermesImage = input.hermesImage ?? DEFAULT_HERMES_WORKLOAD_IMAGE;
+  const hermes = validateHermesImageIdentity(hermesImage, input.hermesAmd64ManifestDigest);
   const runnerProfile = findDigitalOceanRunnerResourceProfile(input.sizeSlug);
 
   if (
@@ -1663,7 +1673,7 @@ function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
     (input.expectedBuilderHostKeySha256 !== undefined &&
       !isSha256SshFingerprint(input.expectedBuilderHostKeySha256)) ||
     input.hermesImage === undefined ||
-    hermesImage !== DEFAULT_HERMES_WORKLOAD_IMAGE ||
+    !hermes ||
     !isRunnerSnapshotSigningKeyId(input.signingKeyId) ||
     (input.builderEvidencePublisher === undefined) !== (input.readBuilderEvidence === undefined) ||
     (input.builderEvidencePublisher !== undefined &&
@@ -1679,6 +1689,8 @@ function validateSnapshotBuildInput(input: BuildRunnerSnapshotInput):
     defaultAgentImage,
     defaultAgentDigest: defaultAgent.imageDigest,
     hermesImage,
+    hermesIndexDigest: hermes.indexDigest,
+    hermesAmd64ManifestDigest: hermes.amd64ManifestDigest,
     runnerDiskGiB: runnerProfile.diskGiB,
   };
 }

@@ -188,6 +188,7 @@ function providerConfig(input: { token: string; sizeSlug: string }): DigitalOcea
         runnerImage: `ghcr.io/ametel01/bruno-runner:release@sha256:${"a".repeat(64)}`,
         defaultAgentImage: `ghcr.io/ametel01/bruno-agent:release@sha256:${"c".repeat(64)}`,
         hermesImage: `ghcr.io/nousresearch/hermes:release@sha256:${"b".repeat(64)}`,
+        hermesAmd64ManifestDigest: `sha256:${"d".repeat(64)}`,
       },
     },
     bootValidation: {

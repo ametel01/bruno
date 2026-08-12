@@ -86,4 +86,58 @@ describe("Hermes agent workload image", () => {
     expect(workflow).not.toContain("Dockerfile.runner");
     expect(workflow).not.toContain("bruno-runner");
   });
+
+  it("keeps the legacy image stable while publishing a size-bounded optimized candidate", async () => {
+    const optimizedDockerfile = await readFile(
+      join(process.cwd(), "Dockerfile.agent.optimized"),
+      "utf8",
+    );
+    const optimizedSmoke = await readFile(
+      join(process.cwd(), "scripts/smoke-hermes-agent-optimized-image.ts"),
+      "utf8",
+    );
+    const sharedSmoke = await readFile(
+      join(process.cwd(), "scripts/smoke-hermes-agent-image.ts"),
+      "utf8",
+    );
+    const workflow = await readFile(
+      join(process.cwd(), ".github/workflows/publish-agent-image.yml"),
+      "utf8",
+    );
+    const packageJson = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+
+    expect(DEFAULT_LOCAL_HERMES_IMAGE).toBe("bruno-hermes:local");
+    expect(optimizedDockerfile).toContain(
+      "https://github.com/NousResearch/hermes-agent/archive/refs/tags/v2026.8.3.zip",
+    );
+    expect(optimizedDockerfile).toContain(
+      "47e0874a68d428882c0c3aeb7769a7ef330275485926745a9ea48050b00a6453",
+    );
+    expect(optimizedDockerfile).toMatch(/--extra anthropic\s+\\\s+--extra messaging/);
+    expect(optimizedDockerfile).not.toContain("playwright");
+    expect(optimizedDockerfile).not.toContain("docker-cli");
+    expect(optimizedDockerfile).not.toContain("ffmpeg");
+    expect(optimizedSmoke).toContain("OPTIMIZED_HERMES_IMAGE_CONTRACT");
+    expect(sharedSmoke).toContain("assertImageSizeBudget");
+    expect(sharedSmoke).not.toContain('platformManifestDigest: "custom-linux-amd64"');
+    expect(sharedSmoke).toContain('"image", "inspect", "--format", "{{.Size}}"');
+    expect(packageJson.scripts["agent:image:optimized:smoke"]).toBe(
+      "bun scripts/smoke-hermes-agent-optimized-image.ts",
+    );
+    expect(workflow).toContain("file: Dockerfile.agent.optimized");
+    expect(workflow).toContain("optimized-$" + "{{ github.sha }}");
+    expect(workflow).toContain("Smoke local optimized workload image");
+    expect(workflow).toContain("Smoke published optimized digest");
+    expect(workflow).toMatch(
+      /BRUNO_HERMES_IMAGE="\$\{REGISTRY\}\/\$\{IMAGE_NAME\}@\$\{OPTIMIZED_DIGEST\}"/,
+    );
+    expect(workflow.indexOf("Optimized digest verification")).toBeLessThan(
+      workflow.indexOf("Smoke published optimized digest"),
+    );
+    expect(workflow).toContain("Scan published optimized digest");
+    expect(workflow).toContain("optimized_amd64_manifest_digest=");
+    expect(workflow).toContain("- .dockerignore");
+  });
 });

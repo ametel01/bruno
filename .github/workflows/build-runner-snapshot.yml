@@ -41,6 +41,10 @@ on:
         description: Immutable Hermes image reference with sha256 digest
         required: true
         type: string
+      hermes_amd64_manifest_digest:
+        description: Exact linux/amd64 manifest digest nested under the Hermes image index
+        required: true
+        type: string
 
 concurrency:
   group: runner-snapshot-build
@@ -62,6 +66,8 @@ jobs:
       - name: Validate authorization and static inputs before secrets
         env:
           BRUNO_SNAPSHOT_SIGNING_KEY_ID: ${{ vars.BRUNO_SNAPSHOT_SIGNING_KEY_ID }}
+          HERMES_IMAGE: ${{ inputs.hermes_image }}
+          HERMES_AMD64_MANIFEST_DIGEST: ${{ inputs.hermes_amd64_manifest_digest }}
         run: |
           set -euo pipefail
           test "${{ inputs.cost_authorization }}" = "I_UNDERSTAND_THIS_CREATES_A_BILLABLE_SNAPSHOT_BUILDER"
@@ -70,7 +76,11 @@ jobs:
           [[ "${{ inputs.size_slug }}" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,127}$ ]]
           [[ "${{ inputs.runner_image }}" =~ @sha256:[a-f0-9]{64}$ ]]
           [[ "${{ inputs.default_agent_image }}" =~ @sha256:[a-f0-9]{64}$ ]]
-          [[ "${{ inputs.hermes_image }}" =~ @sha256:[a-f0-9]{64}$ ]]
+          [[ "${HERMES_IMAGE}" =~ @sha256:[a-f0-9]{64}$ ]]
+          [[ "${HERMES_AMD64_MANIFEST_DIGEST}" =~ ^sha256:[a-f0-9]{64}$ ]]
+          if [[ "${HERMES_IMAGE}" != "nousresearch/hermes-agent:v2026.7.7.2@sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973" && ! "${HERMES_IMAGE}" =~ ^ghcr\.io/ametel01/bruno-hermes(:[A-Za-z0-9_][A-Za-z0-9._-]{0,79})?@sha256:[a-f0-9]{64}$ ]]; then
+            exit 1
+          fi
           [[ "$BRUNO_SNAPSHOT_SIGNING_KEY_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$ ]]
 
       - name: Check out protected workflow implementation
@@ -96,11 +106,27 @@ jobs:
           tests/unit/runner-snapshot-workflow.test.ts
           tests/unit/server-env.test.ts
 
+      - name: Verify exact Hermes platform identity before provider effects
+        env:
+          HERMES_IMAGE: ${{ inputs.hermes_image }}
+          HERMES_AMD64_MANIFEST_DIGEST: ${{ inputs.hermes_amd64_manifest_digest }}
+        run: |
+          set -euo pipefail
+          INDEX_JSON="$(docker buildx imagetools inspect --raw "${HERMES_IMAGE}")"
+          OBSERVED_DIGEST="$(
+            INDEX_JSON="${INDEX_JSON}" bun --conditions react-server -e '
+              import { readLinuxAmd64ManifestDigest } from "./src/runner-service/hermes-image-identity.ts";
+              console.log(readLinuxAmd64ManifestDigest(process.env.INDEX_JSON ?? ""));
+            '
+          )"
+          test "${OBSERVED_DIGEST}" = "${HERMES_AMD64_MANIFEST_DIGEST}"
+
       - name: Resolve controller SSH CIDR before provider effects
         run: |
           set -euo pipefail
           CONTROLLER_IP="$(curl -fsS --max-time 10 https://api64.ipify.org)"
           CONTROLLER_CIDR="$(
+            # shellcheck disable=SC2016
             CONTROLLER_IP="$CONTROLLER_IP" bun -e '
               import { isIP } from "node:net";
               const ip = process.env.CONTROLLER_IP?.trim() ?? "";
@@ -141,6 +167,7 @@ jobs:
             --runner-image "${{ inputs.runner_image }}" \
             --default-agent-image "${{ inputs.default_agent_image }}" \
             --hermes-image "${{ inputs.hermes_image }}" \
+            --hermes-amd64-manifest-digest "${{ inputs.hermes_amd64_manifest_digest }}" \
             --controller-cidr "$BRUNO_SNAPSHOT_CONTROLLER_CIDR" \
             --boot-result-out snapshot-artifacts/boot-result.json \
             --sanitation-result-out snapshot-artifacts/sanitation-result.json \

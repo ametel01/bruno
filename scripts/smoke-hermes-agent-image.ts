@@ -12,6 +12,39 @@ export const HERMES_AMD64_MANIFEST_DIGEST =
   "sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a";
 export const HERMES_VERSION_FRAGMENT = "Hermes Agent v0.18.2 (2026.7.7.2)";
 export const HERMES_RUNTIME_UID_GID = "10000:10000";
+export const DEFAULT_LOCAL_OPTIMIZED_HERMES_IMAGE = "bruno-hermes-optimized:local";
+export const OPTIMIZED_HERMES_SOURCE =
+  "https://github.com/NousResearch/hermes-agent/archive/refs/tags/v2026.8.3.zip";
+export const OPTIMIZED_HERMES_SOURCE_SHA256 =
+  "sha256:47e0874a68d428882c0c3aeb7769a7ef330275485926745a9ea48050b00a6453";
+export const OPTIMIZED_HERMES_VERSION_FRAGMENT = "Hermes Agent v0.20.0 (2026.8.3)";
+export const OPTIMIZED_HERMES_MAX_UNPACKED_BYTES = 1_000_000_000;
+
+export type HermesImageContract = {
+  source: string;
+  sourceDigest: string;
+  platformManifestDigest: string | null;
+  version: string;
+  runtimeUser: string;
+  maxUnpackedBytes?: number;
+};
+
+export const LEGACY_HERMES_IMAGE_CONTRACT: HermesImageContract = {
+  source: HERMES_UPSTREAM_IMAGE,
+  sourceDigest: HERMES_UPSTREAM_INDEX_DIGEST,
+  platformManifestDigest: HERMES_AMD64_MANIFEST_DIGEST,
+  version: HERMES_VERSION_FRAGMENT,
+  runtimeUser: HERMES_RUNTIME_UID_GID,
+};
+
+export const OPTIMIZED_HERMES_IMAGE_CONTRACT: HermesImageContract = {
+  source: OPTIMIZED_HERMES_SOURCE,
+  sourceDigest: OPTIMIZED_HERMES_SOURCE_SHA256,
+  platformManifestDigest: null,
+  version: OPTIMIZED_HERMES_VERSION_FRAGMENT,
+  runtimeUser: HERMES_RUNTIME_UID_GID,
+  maxUnpackedBytes: OPTIMIZED_HERMES_MAX_UNPACKED_BYTES,
+};
 
 const SAFE_IMAGE_REFERENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,254}$/;
 const HERMES_DATA_DIR_PREFIX = join(tmpdir(), "bruno-hermes-data-");
@@ -39,6 +72,7 @@ type RunCommandOptions = {
 
 export async function smokeHermesAgentImage(
   image = process.env.BRUNO_HERMES_IMAGE?.trim() || DEFAULT_LOCAL_HERMES_IMAGE,
+  contract: HermesImageContract = LEGACY_HERMES_IMAGE_CONTRACT,
 ) {
   assertSafeImageReference(image);
 
@@ -60,7 +94,7 @@ export async function smokeHermesAgentImage(
     ].join("; "),
   ]);
   assertExitCode(versionProbe, "Hermes version and ownership probe");
-  assertContains(versionProbe.stdout, HERMES_VERSION_FRAGMENT, "Hermes version probe");
+  assertContains(versionProbe.stdout, contract.version, "Hermes version probe");
   assertContains(versionProbe.stdout, "hermes:x:10000:10000", "Hermes passwd probe");
   assertContains(versionProbe.stdout, "10000:10000 700 /opt/data", "Hermes data ownership probe");
 
@@ -71,7 +105,7 @@ export async function smokeHermesAgentImage(
       "--platform",
       "linux/amd64",
       "--user",
-      HERMES_RUNTIME_UID_GID,
+      contract.runtimeUser,
       "--entrypoint",
       "/bin/sh",
       "-v",
@@ -122,15 +156,41 @@ export async function smokeHermesAgentImage(
     }
   }
 
+  const unpackedBytes =
+    contract.maxUnpackedBytes === undefined
+      ? null
+      : await assertImageSizeBudget(image, contract.maxUnpackedBytes);
+
   return {
     image,
-    upstreamImage: HERMES_UPSTREAM_IMAGE,
-    upstreamIndexDigest: HERMES_UPSTREAM_INDEX_DIGEST,
-    amd64ManifestDigest: HERMES_AMD64_MANIFEST_DIGEST,
-    version: HERMES_VERSION_FRAGMENT,
-    runtimeUser: HERMES_RUNTIME_UID_GID,
+    upstreamImage: contract.source,
+    upstreamIndexDigest: contract.sourceDigest,
+    amd64ManifestDigest: contract.platformManifestDigest,
+    version: contract.version,
+    runtimeUser: contract.runtimeUser,
     gatewayStarted: true,
+    unpackedBytes,
   };
+}
+
+export async function assertImageSizeBudget(image: string, maxBytes: number) {
+  assertSafeImageReference(image);
+  const sizeProbe = await runDocker(["image", "inspect", "--format", "{{.Size}}", image]);
+  assertExitCode(sizeProbe, "Hermes image size probe");
+
+  const rawSize = sizeProbe.stdout.trim();
+  if (!/^\d+$/.test(rawSize)) {
+    throw new Error(`Docker returned an invalid image size: ${rawSize}`);
+  }
+
+  const unpackedBytes = Number.parseInt(rawSize, 10);
+  if (!Number.isSafeInteger(unpackedBytes) || unpackedBytes > maxBytes) {
+    throw new Error(
+      `Hermes image exceeds unpacked size budget: ${unpackedBytes} bytes > ${maxBytes} bytes.`,
+    );
+  }
+
+  return unpackedBytes;
 }
 
 function assertSafeImageReference(image: string) {

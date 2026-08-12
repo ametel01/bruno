@@ -10,6 +10,9 @@
 !src/server/
 !src/server/agents/
 !src/server/agents/agent-id.ts
+!docker/
+!docker/hermes-optimized/
+!docker/hermes-optimized/entrypoint.sh
 
 # Secrets, credentials, and local service state must never enter Docker context.
 .env

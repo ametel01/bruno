@@ -21,6 +21,7 @@
     "agent:deployment:benchmark": "bun --conditions react-server scripts/benchmark-agent-deployment.ts",
     "agent:provider-trial": "bun --conditions react-server scripts/run-provider-trial.ts",
     "agent:image:smoke": "bun scripts/smoke-hermes-agent-image.ts",
+    "agent:image:optimized:smoke": "bun scripts/smoke-hermes-agent-optimized-image.ts",
     "runner:snapshot:build": "bun --conditions react-server scripts/build-runner-snapshot.ts",
     "runner:snapshot:registry": "bun --conditions react-server scripts/publish-runner-snapshot-bundle.ts",
     "runner:snapshot:retire": "bun --conditions react-server scripts/retire-runner-snapshot.ts",

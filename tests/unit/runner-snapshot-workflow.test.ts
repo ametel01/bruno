@@ -20,6 +20,7 @@ describe("runner snapshot workflow", () => {
 
   it("is protected, manually dispatched only, and keeps provider secrets out of ordinary CI", async () => {
     const workflow = await readFile(".github/workflows/build-runner-snapshot.yml", "utf8");
+    const script = await readFile("scripts/build-runner-snapshot.ts", "utf8");
     const parsed = parse(workflow) as Record<string, unknown>;
 
     expect(parsed.on).toEqual({
@@ -65,6 +66,20 @@ describe("runner snapshot workflow", () => {
     expect(workflow).not.toContain("BRUNO_SNAPSHOT_EVIDENCE_GITHUB_TOKEN");
     expect(workflow).not.toContain("BRUNO_SNAPSHOT_EVIDENCE_ISSUE_NUMBER");
     expect(workflow).toContain('--signing-key-id "$BRUNO_SNAPSHOT_SIGNING_KEY_ID"');
+    expect(workflow).toContain("hermes_amd64_manifest_digest:");
+    expect(workflow).toContain("Verify exact Hermes platform identity before provider effects");
+    expect(workflow).toContain("readLinuxAmd64ManifestDigest");
+    expect(
+      workflow.indexOf("Verify exact Hermes platform identity before provider effects"),
+    ).toBeLessThan(workflow.indexOf("BRUNO_DIGITALOCEAN_TOKEN"));
+    expect(script).toContain("validateHermesImageIdentity");
+    expect(script).toContain("readLinuxAmd64ManifestDigest");
+    expect(script.indexOf("await verifyHermesPlatformIdentity(args)")).toBeLessThan(
+      script.indexOf('readRequiredEnv("BRUNO_DIGITALOCEAN_TOKEN")'),
+    );
+    expect(workflow).toContain(
+      '--hermes-amd64-manifest-digest "$' + '{{ inputs.hermes_amd64_manifest_digest }}"',
+    );
     expect(workflow).toContain("Validate retrieved builder evidence");
     expect(workflow).toContain("modelCanaryAttempts");
     expect(workflow).toContain("canary_timeout");

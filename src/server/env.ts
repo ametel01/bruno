@@ -18,6 +18,7 @@ import {
   DEFAULT_HERMES_WORKLOAD_IMAGE,
   DEFAULT_MANUAL_RUNNER_IMAGE,
 } from "@/src/runner-service/constants";
+import { validateHermesImageIdentity } from "@/src/runner-service/hermes-image-identity";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
 import {
   parseRunnerReleaseBundle,
@@ -741,6 +742,15 @@ function readDigitalOceanSnapshotMode(
     ]);
   }
   const trustedPublicKeys = readSnapshotTrustSet(trustSetBytes);
+  const hermesIdentity = validateHermesImageIdentity(
+    expectedInput.hermesImage,
+    input.BRUNO_HERMES_WORKLOAD_AMD64_MANIFEST_DIGEST?.trim(),
+  );
+  if (!hermesIdentity) {
+    throw new EnvValidationError([
+      "BRUNO_HERMES_WORKLOAD_AMD64_MANIFEST_DIGEST must identify the exact allowlisted linux/amd64 Hermes manifest for snapshot mode.",
+    ]);
+  }
 
   return {
     mode: "snapshot",
@@ -760,6 +770,7 @@ function readDigitalOceanSnapshotMode(
         defaultValue: DEFAULT_MANUAL_RUNNER_IMAGE,
       }),
       hermesImage: expectedInput.hermesImage,
+      hermesAmd64ManifestDigest: hermesIdentity.amd64ManifestDigest,
     },
   };
 }

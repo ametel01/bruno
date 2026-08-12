@@ -26,6 +26,9 @@ const SNAPSHOT_DIGEST = `sha256:${"c".repeat(64)}`;
 const RUNNER_IMAGE = `ghcr.io/ametel01/bruno-runner:${SOURCE_REVISION}@${RUNNER_DIGEST}`;
 const AGENT_IMAGE = `ghcr.io/ametel01/bruno-default:release@${AGENT_DIGEST}`;
 const SNAPSHOT_OCI = `ghcr.io/ametel01/bruno-runner-snapshot-bundles@sha256:${"d".repeat(64)}`;
+const OPTIMIZED_HERMES_INDEX_DIGEST = `sha256:${"e".repeat(64)}`;
+const OPTIMIZED_HERMES_AMD64_DIGEST = `sha256:${"f".repeat(64)}`;
+const OPTIMIZED_HERMES_IMAGE = `ghcr.io/ametel01/bruno-hermes:optimized-test@${OPTIMIZED_HERMES_INDEX_DIGEST}`;
 
 describe("runner Verified Release bundle", () => {
   it("verifies exact immutable release and snapshot identities without time expiry", () => {
@@ -71,6 +74,34 @@ describe("runner Verified Release bundle", () => {
         approvedDigest: historicalBundle.digest,
         trustedPublicKeys: { "release-current": publicKey },
         expected: expected(),
+      }),
+    ).toMatchObject({ ok: true });
+  });
+
+  it("verifies an optimized Hermes image carried by the signed snapshot release", () => {
+    const keys = generateKeyPairSync("ed25519");
+    const optimizedManifest: RunnerReleaseManifest = {
+      ...manifest(),
+      hermesImage: {
+        reference: OPTIMIZED_HERMES_IMAGE,
+        indexDigest: OPTIMIZED_HERMES_INDEX_DIGEST,
+        amd64ManifestDigest: OPTIMIZED_HERMES_AMD64_DIGEST,
+      },
+    };
+    const signed = createRunnerReleaseBundle({
+      manifest: optimizedManifest,
+      signingKeyId: "release-current",
+      privateKeyPem: keys.privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+    });
+
+    expect(
+      verifyRunnerReleaseBundle({
+        bundleBytes: signed.bundleBytes,
+        approvedDigest: signed.digest,
+        trustedPublicKeys: {
+          "release-current": keys.publicKey.export({ format: "pem", type: "spki" }).toString(),
+        },
+        expected: { ...expected(), hermesImage: OPTIMIZED_HERMES_IMAGE },
       }),
     ).toMatchObject({ ok: true });
   });
