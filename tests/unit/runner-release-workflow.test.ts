@@ -215,6 +215,16 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).not.toContain(".manifest.defaultAgentImage.reference");
   });
 
+  it("retries transient Verified Release transparency-log attestation failures", () => {
+    expect(workflowSource.match(/actions\/attest-build-provenance@v2/g)).toHaveLength(3);
+    expect(workflowSource).toContain("id: attest_release_attempt_1");
+    expect(workflowSource).toContain("id: attest_release_attempt_2");
+    expect(workflowSource).toContain("id: attest_release_attempt_3");
+    expect(workflowSource).toContain("continue-on-error: true");
+    expect(workflowSource).toContain("if: steps.attest_release_attempt_1.outcome == 'failure'");
+    expect(workflowSource).toContain("if: steps.attest_release_attempt_2.outcome == 'failure'");
+  });
+
   it("never exposes a DigitalOcean credential to the release workflow", () => {
     expect(workflowSource).not.toContain("RUNNER_RELEASE_DIGITALOCEAN_TOKEN");
     expect(workflowSource).not.toContain("secrets.BRUNO_DIGITALOCEAN_TOKEN");

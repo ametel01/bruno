@@ -414,7 +414,32 @@ jobs:
             --publication-out runner-release-evidence/runner-release-oci-publication.json
           echo "Published a signed Verified Release after the full local fixture and exact cleanup; no DigitalOcean resource was requested and the workflow does not claim to boot the provider snapshot." >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Attest allowlisted Verified Release artifacts
+      - name: Attest allowlisted Verified Release artifacts (attempt 1 of 3)
+        id: attest_release_attempt_1
+        continue-on-error: true
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            runner-release-evidence/runner-release-bundle.json
+            runner-release-evidence/runner-release-bundle.sha256
+            runner-release-evidence/runner-release-signing-key.pem
+            runner-release-evidence/runner-release-oci-publication.json
+
+      - name: Attest allowlisted Verified Release artifacts (attempt 2 of 3)
+        id: attest_release_attempt_2
+        if: steps.attest_release_attempt_1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            runner-release-evidence/runner-release-bundle.json
+            runner-release-evidence/runner-release-bundle.sha256
+            runner-release-evidence/runner-release-signing-key.pem
+            runner-release-evidence/runner-release-oci-publication.json
+
+      - name: Attest allowlisted Verified Release artifacts (attempt 3 of 3)
+        id: attest_release_attempt_3
+        if: steps.attest_release_attempt_2.outcome == 'failure'
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
