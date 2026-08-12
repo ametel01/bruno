@@ -1,0 +1,139 @@
+name: Diagnose immutable runner boot fixture
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_image:
+        description: Exact digest-qualified ametel01/bruno-runner image
+        required: true
+        type: string
+      hermes_image:
+        description: Exact digest-qualified ametel01/bruno-hermes image
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Exercise isolated full boot fixture
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUNNER_IMAGE: ${{ inputs.runner_image }}
+      HERMES_IMAGE: ${{ inputs.hermes_image }}
+      DIAGNOSTIC_ROOT: /tmp/bruno-runner-boot-diagnostic
+      RUNNER_CONTAINER: bruno-runner-boot-diagnostic
+      FIXTURE_NETWORK: bruno-hermes
+      RUNNER_TOKEN: bruno_runner_boot_diagnostic_token
+
+    steps:
+      - name: Validate immutable image inputs
+        run: |
+          set -euo pipefail
+          [[ "${RUNNER_IMAGE}" =~ ^ghcr\.io/ametel01/bruno-runner:[a-f0-9]{40}@sha256:[a-f0-9]{64}$ ]]
+          [[ "${HERMES_IMAGE}" =~ ^ghcr\.io/ametel01/bruno-hermes@sha256:[a-f0-9]{64}$ ]]
+
+      - name: Preload exact images
+        run: |
+          set -euo pipefail
+          docker pull "${RUNNER_IMAGE}"
+          docker pull "${HERMES_IMAGE}"
+          docker image inspect "${RUNNER_IMAGE}" "${HERMES_IMAGE}" >/dev/null
+
+      - name: Exercise full boot fixture with bounded diagnostics
+        run: |
+          set -euo pipefail
+          mkdir -p runner-boot-diagnostic
+          install -m 0700 -d "${DIAGNOSTIC_ROOT}"
+          docker events \
+            --filter type=container \
+            --filter type=network \
+            --format '{{json .}}' > runner-boot-diagnostic/docker-events.jsonl &
+          EVENT_PID=$!
+          cleanup() {
+            kill "${EVENT_PID}" >/dev/null 2>&1 || true
+            wait "${EVENT_PID}" >/dev/null 2>&1 || true
+            docker rm --force "${RUNNER_CONTAINER}" >/dev/null 2>&1 || true
+            docker ps --all --quiet --filter label=bruno.boot.fixture=v1 | \
+              xargs --no-run-if-empty docker rm --force >/dev/null 2>&1 || true
+            docker network ls --quiet --filter label=bruno.boot.fixture=v1 | \
+              xargs --no-run-if-empty docker network rm >/dev/null 2>&1 || true
+            docker network rm "${FIXTURE_NETWORK}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker network create "${FIXTURE_NETWORK}" >/dev/null
+          RUNNER_DIGEST="${RUNNER_IMAGE##*@}"
+          RUNNER_VERSION="${RUNNER_IMAGE#*:}"
+          RUNNER_VERSION="${RUNNER_VERSION%%@*}"
+          docker run --detach \
+            --name "${RUNNER_CONTAINER}" \
+            --network "${FIXTURE_NETWORK}" \
+            --publish 127.0.0.1:3045:3045 \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            --volume "${DIAGNOSTIC_ROOT}:${DIAGNOSTIC_ROOT}" \
+            --env BRUNO_RUNNER_HOST=0.0.0.0 \
+            --env BRUNO_RUNNER_BEARER_TOKEN="${RUNNER_TOKEN}" \
+            --env BRUNO_RUNNER_BOOT_SNAPSHOT_PATH="${DIAGNOSTIC_ROOT}/boot-readiness.json" \
+            --env BRUNO_RUNNER_BOOT_SELF_TEST_ROOT="${DIAGNOSTIC_ROOT}/boot-self-test" \
+            --env BRUNO_HERMES_STATE_ROOT="${DIAGNOSTIC_ROOT}/agents" \
+            --env BRUNO_HERMES_PRIVATE_NETWORK="${FIXTURE_NETWORK}" \
+            --env BRUNO_HERMES_WORKLOAD_IMAGE="${HERMES_IMAGE}" \
+            --env BRUNO_RUNNER_EXPECTED_RELEASE_VERSION="${RUNNER_VERSION}" \
+            --env BRUNO_RUNNER_EXPECTED_IMAGE_DIGEST="${RUNNER_DIGEST}" \
+            --env BRUNO_RUNNER_EXPECTED_BOOT_CONTRACT_VERSION=bruno.runner.boot.v1 \
+            "${RUNNER_IMAGE}" bun run runner:service >/dev/null
+
+          TERMINAL=false
+          for attempt in $(seq 1 200); do
+            if docker exec "${RUNNER_CONTAINER}" \
+              test -f "${DIAGNOSTIC_ROOT}/boot-readiness.json"
+            then
+              docker exec "${RUNNER_CONTAINER}" \
+                cat "${DIAGNOSTIC_ROOT}/boot-readiness.json" \
+                > runner-boot-diagnostic/boot-readiness.json
+              status="$(jq -r '.status // empty' runner-boot-diagnostic/boot-readiness.json)"
+              if [[ "${status}" = "ready" || "${status}" = "failed" ]]; then
+                TERMINAL=true
+                break
+              fi
+            fi
+            sleep 1
+          done
+
+          docker logs "${RUNNER_CONTAINER}" \
+            > runner-boot-diagnostic/runner.log 2>&1 || true
+          docker ps --all \
+            --filter label=bruno.boot.fixture=v1 \
+            --format '{{json .}}' \
+            > runner-boot-diagnostic/fixture-containers.jsonl
+          docker network ls \
+            --filter label=bruno.boot.fixture=v1 \
+            --format '{{json .}}' \
+            > runner-boot-diagnostic/fixture-networks.jsonl
+
+          test "${TERMINAL}" = "true"
+          jq -e '
+            .status == "ready" and
+            .failureReason == null and
+            ([.observedChecks[]] | all(. == "passed" or . == "not_applicable"))
+          ' runner-boot-diagnostic/boot-readiness.json >/dev/null
+
+      - name: Verify authoritative local cleanup
+        if: always()
+        run: |
+          set -euo pipefail
+          test -z "$(docker ps --all --quiet --filter name=^/${RUNNER_CONTAINER}$)"
+          test -z "$(docker ps --all --quiet --filter label=bruno.boot.fixture=v1)"
+          test -z "$(docker network ls --quiet --filter label=bruno.boot.fixture=v1)"
+
+      - name: Upload bounded diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-boot-diagnostic-${{ github.run_attempt }}
+          path: runner-boot-diagnostic
+          if-no-files-found: error
+          retention-days: 30
