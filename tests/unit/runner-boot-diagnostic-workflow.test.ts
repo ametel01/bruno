@@ -25,6 +25,9 @@ describe("runner boot diagnostic workflow", () => {
     expect(workflow).toContain("nested-image-run.status");
     expect(workflow).toContain("timeout 15s docker exec");
     expect(workflow).toContain("--label bruno.boot.fixture=v1");
+    expect(workflow).toContain("createDockerRunnerBootSelfTestExecutor");
+    expect(workflow).toContain("replay-fixture.log");
+    expect(workflow).toContain("await executor.cleanup(fixture, signal)");
     expect(workflow).toContain("if: always()\n        run: |");
     expect(workflow).toContain("--filter label=bruno.boot.fixture=v1");
     expect(workflow).toContain('test -z "$(docker ps --all --quiet');

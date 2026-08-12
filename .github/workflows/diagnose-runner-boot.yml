@@ -138,6 +138,65 @@ jobs:
           fi
           set -e
 
+          if ! jq -e '.status == "ready"' runner-boot-diagnostic/boot-readiness.json >/dev/null
+          then
+            cat > runner-boot-diagnostic/replay-fixture.ts <<'BUN'
+          import { execFile } from "node:child_process";
+          import { promisify } from "node:util";
+          import { createDockerRunnerBootSelfTestExecutor } from "/app/src/runner-service/boot-self-test.ts";
+
+          const execute = promisify(execFile);
+          const docker = async (executable, args, options = {}) => {
+            const sourceIndex = args.indexOf("-c");
+            const safeArgs = sourceIndex < 0 ? args : [...args.slice(0, sourceIndex + 1), "<source>"];
+            try {
+              const result = await execute(executable, args, {
+                encoding: "utf8",
+                maxBuffer: 64 * 1024,
+                signal: options.signal,
+                timeout: options.timeoutMs,
+              });
+              console.error(JSON.stringify({ args: safeArgs, exitCode: 0 }));
+              return result;
+            } catch (error) {
+              console.error(JSON.stringify({
+                args: safeArgs,
+                exitCode: typeof error?.code === "number" ? error.code : null,
+                stderr: typeof error?.stderr === "string" ? error.stderr.slice(0, 4096) : null,
+              }));
+              throw error;
+            }
+          };
+
+          const executor = createDockerRunnerBootSelfTestExecutor({
+            docker,
+            hermesImage: process.env.HERMES_IMAGE,
+            root: `${process.env.DIAGNOSTIC_ROOT}/replay`,
+          });
+          const signal = new AbortController().signal;
+          let fixture = null;
+          try {
+            fixture = await executor.launchFixture(signal);
+            console.error(JSON.stringify({ fixture: "launched" }));
+          } catch (error) {
+            console.error(JSON.stringify({
+              error: error instanceof Error ? error.name : "unknown",
+              message: error instanceof Error ? error.message.slice(0, 4096) : null,
+            }));
+          } finally {
+            await executor.cleanup(fixture, signal);
+          }
+          BUN
+            docker cp runner-boot-diagnostic/replay-fixture.ts \
+              "${RUNNER_CONTAINER}:/tmp/replay-fixture.ts"
+            timeout 120s docker exec \
+              --env DIAGNOSTIC_ROOT="${DIAGNOSTIC_ROOT}" \
+              --env HERMES_IMAGE="${HERMES_IMAGE}" \
+              "${RUNNER_CONTAINER}" \
+              bun /tmp/replay-fixture.ts \
+              > runner-boot-diagnostic/replay-fixture.log 2>&1 || true
+          fi
+
           test "${TERMINAL}" = "true"
           jq -e '
             .status == "ready" and
