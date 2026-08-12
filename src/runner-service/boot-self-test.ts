@@ -56,6 +56,7 @@ export const DEFAULT_RUNNER_BOOT_CANARY_ATTEMPTS = 3;
 export const DEFAULT_RUNNER_BOOT_CANARY_RETRY_DELAY_MS = 2_000;
 export const DEFAULT_RUNNER_BOOT_FIXTURE_CREATE_ATTEMPTS = 6;
 export const DEFAULT_RUNNER_BOOT_FIXTURE_CREATE_RETRY_DELAY_MS = 500;
+export const DEFAULT_RUNNER_BOOT_FIXTURE_IMAGE_LOOKUP_TIMEOUT_MS = 15_000;
 
 const FIXTURE_LABEL = "bruno.boot_fixture";
 const FIXTURE_LABEL_VALUE = "v1";
@@ -507,7 +508,12 @@ function configuredValidationMode(
 }
 
 export function createDockerRunnerBootSelfTestExecutor(
-  options: { docker?: DockerExecutableRunner; root?: string; hermesImage?: string } = {},
+  options: {
+    docker?: DockerExecutableRunner;
+    root?: string;
+    hermesImage?: string;
+    imageLookupTimeoutMs?: number;
+  } = {},
 ): RunnerBootSelfTestExecutor {
   const docker = options.docker ?? executeDocker;
   const root =
@@ -515,6 +521,7 @@ export function createDockerRunnerBootSelfTestExecutor(
     process.env[RUNNER_BOOT_SELF_TEST_ROOT_ENV]?.trim() ??
     DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT;
   const hermesImage = options.hermesImage?.trim() || DEFAULT_HERMES_WORKLOAD_IMAGE;
+  const imageLookupTimeoutMs = resolveImageLookupTimeoutMs(options.imageLookupTimeoutMs);
 
   return {
     recover: (signal) => recoverFixtures({ docker, root, signal }),
@@ -561,7 +568,8 @@ export function createDockerRunnerBootSelfTestExecutor(
         throw new RunnerBootSelfTestError("preloaded_images_mismatch");
       }
     },
-    launchFixture: (signal) => launchDockerFixture({ docker, root, hermesImage, signal }),
+    launchFixture: (signal) =>
+      launchDockerFixture({ docker, root, hermesImage, imageLookupTimeoutMs, signal }),
     async probeDetailedHealth(fixture, signal) {
       const deadline = Date.now() + 90_000;
       while (Date.now() < deadline && !signal.aborted) {
@@ -590,6 +598,7 @@ async function launchDockerFixture(input: {
   docker: DockerExecutableRunner;
   root: string;
   hermesImage: string;
+  imageLookupTimeoutMs: number;
   signal: AbortSignal;
 }): Promise<RunnerBootFixture> {
   const id = randomUUID();
@@ -625,6 +634,7 @@ async function launchDockerFixture(input: {
     input.docker,
     fixturePlan.fakeModelImage,
     input.signal,
+    input.imageLookupTimeoutMs,
   );
   await createSyntheticModelContainer({
     docker: input.docker,
@@ -723,8 +733,11 @@ async function resolveLocalDockerImageId(
   docker: DockerExecutableRunner,
   imageReference: string,
   signal: AbortSignal,
+  timeoutMs: number,
 ): Promise<string> {
-  for (let attempt = 1; attempt <= DEFAULT_RUNNER_BOOT_FIXTURE_CREATE_ATTEMPTS; attempt += 1) {
+  const deadlineAt = Date.now() + timeoutMs;
+
+  while (true) {
     try {
       const result = await docker(
         "docker",
@@ -740,12 +753,22 @@ async function resolveLocalDockerImageId(
       // The Docker socket can accept version probes before its image store is queryable.
     }
 
-    if (attempt < DEFAULT_RUNNER_BOOT_FIXTURE_CREATE_ATTEMPTS) {
-      await delay(DEFAULT_RUNNER_BOOT_FIXTURE_CREATE_RETRY_DELAY_MS, signal);
-    }
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) break;
+    await delay(Math.min(DEFAULT_RUNNER_BOOT_FIXTURE_CREATE_RETRY_DELAY_MS, remainingMs), signal);
   }
 
   throw new RunnerBootSelfTestError("fixture_launch_failed");
+}
+
+function resolveImageLookupTimeoutMs(value: number | undefined): number {
+  const resolved = value ?? DEFAULT_RUNNER_BOOT_FIXTURE_IMAGE_LOOKUP_TIMEOUT_MS;
+
+  if (!Number.isSafeInteger(resolved) || resolved < 1 || resolved > 30_000) {
+    throw new Error("Runner boot fixture image lookup timeout must be between 1 and 30000 ms.");
+  }
+
+  return resolved;
 }
 
 export async function projectRunnerBootFixtureHermesHome(input: {

@@ -85,6 +85,7 @@ describe("runner boot self-test", () => {
     const calls: string[][] = [];
     const executor = createDockerRunnerBootSelfTestExecutor({
       root,
+      imageLookupTimeoutMs: 1,
       docker: async (_executable, args) => {
         calls.push([...args]);
         if (args[0] === "network") return { stdout: "fixture-network\n", stderr: "" };
