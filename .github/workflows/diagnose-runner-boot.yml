@@ -114,6 +114,30 @@ jobs:
             --format '{{json .}}' \
             > runner-boot-diagnostic/fixture-networks.jsonl
 
+          set +e
+          docker exec "${RUNNER_CONTAINER}" docker image inspect \
+            --format '{"imageId":{{json .Id}},"repoDigests":{{json .RepoDigests}}}' \
+            "${HERMES_IMAGE}" \
+            > runner-boot-diagnostic/nested-image-inspect.json \
+            2> runner-boot-diagnostic/nested-image-inspect.stderr
+          INSPECT_STATUS=$?
+          printf '%s\n' "${INSPECT_STATUS}" \
+            > runner-boot-diagnostic/nested-image-inspect.status
+          NESTED_IMAGE_ID="$(jq -r '.imageId // empty' \
+            runner-boot-diagnostic/nested-image-inspect.json 2>/dev/null)"
+          if [[ "${NESTED_IMAGE_ID}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            timeout 15s docker exec "${RUNNER_CONTAINER}" docker run --rm \
+              --pull never \
+              --platform linux/amd64 \
+              --label bruno.boot.fixture=v1 \
+              --entrypoint python \
+              "${NESTED_IMAGE_ID}" \
+              -c 'print("nested-local-image-ok")' \
+              > runner-boot-diagnostic/nested-image-run.log 2>&1
+            printf '%s\n' "$?" > runner-boot-diagnostic/nested-image-run.status
+          fi
+          set -e
+
           test "${TERMINAL}" = "true"
           jq -e '
             .status == "ready" and
