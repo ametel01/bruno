@@ -5,6 +5,10 @@ import { parse } from "yaml";
 
 const workflowPath = new URL("../../.github/workflows/deploy-production.yml", import.meta.url);
 const workflowSource = readFileSync(workflowPath, "utf8");
+const ciWorkflowPath = new URL("../../.github/workflows/ci.yml", import.meta.url);
+const ciWorkflowSource = readFileSync(ciWorkflowPath, "utf8");
+const bunVersionPath = new URL("../../.bun-version", import.meta.url);
+const bunVersion = readFileSync(bunVersionPath, "utf8").trim();
 const releaseSmokePath = new URL("../../scripts/smoke-runner-release.ts", import.meta.url);
 const releaseSmokeSource = readFileSync(releaseSmokePath, "utf8");
 const agentWorkflowPath = new URL(
@@ -24,6 +28,13 @@ const readmePath = new URL("../../README.md", import.meta.url);
 const readme = readFileSync(readmePath, "utf8");
 
 describe("runner release workflow contract", () => {
+  it("pins the Bun toolchain used by CI and protected release jobs", () => {
+    expect(bunVersion).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(ciWorkflowSource).toContain("bun-version-file: .bun-version");
+    expect(workflowSource).toContain("bun-version-file: .bun-version");
+    expect(ciWorkflowSource).not.toContain("bun-version: latest");
+  });
+
   it("is valid YAML with publish, staging, Verified Release, deploy, and rollback boundaries", () => {
     const workflow = parse(workflowSource) as Record<string, unknown>;
     expect(workflow).toBeTypeOf("object");
@@ -121,6 +132,8 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).toContain("name: trivy-runner-image-$" + "{{ github.sha }}");
     expect(workflowSource).toContain("path: trivy-runner-image.sarif");
     expect(workflowSource).toContain("name: trivy-approved-runner-image-$" + "{{ github.sha }}");
+    expect(workflowSource).toContain("id: scan_approved_runner");
+    expect(workflowSource).toContain("steps.scan_approved_runner.outcome != 'skipped'");
     expect(agentWorkflowSource).toContain("name: trivy-agent-image-$" + "{{ github.sha }}");
     expect(agentWorkflowSource).toContain("path: trivy-agent-image.sarif");
   });
