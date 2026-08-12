@@ -6,9 +6,9 @@ import {
   resolveLocalAgentCycleSizeSlug,
 } from "@/scripts/smoke-local-agent-cycle";
 import {
+  createLocalAgentSmokeBootReadiness,
   LOCAL_AGENT_SMOKE_MODE_ENV,
   LOCAL_AGENT_SMOKE_MODE_VALUE,
-  createLocalAgentSmokeBootReadiness,
   resolveLocalAgentSmokeMode,
 } from "@/src/runner-service/local-agent-smoke";
 
@@ -117,6 +117,12 @@ describe("local full agent-cycle smoke", () => {
     );
     expect(packageJson.scripts["local:agent:smoke"]).toContain(
       "BRUNO_DIGITALOCEAN_TOKEN=local-docker",
+    );
+    expect(packageJson.scripts["local:agent:smoke"]).toContain(
+      "BRUNO_DIGITALOCEAN_IMAGE_MODE=stock",
+    );
+    expect(packageJson.scripts["local:agent:smoke"]).toContain(
+      "BRUNO_RUNNER_BOOT_VALIDATION_MODE=full",
     );
     expect(source).toContain("createAgentForUser");
     expect(source).toContain("reconcileTargetAgentDeployment");

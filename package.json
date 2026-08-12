@@ -14,7 +14,7 @@
     "local:cloud:down": "sh -lc 'docker rm --force bruno-local-cloud-runner bruno-runner >/dev/null 2>&1 || true; ids=$(docker ps -aq --filter label=bruno.agent_id); if [ -n \"$ids\" ]; then docker rm --force $ids >/dev/null 2>&1 || true; fi; docker compose --profile local-cloud down --remove-orphans'",
     "local:cloud:smoke": "bun --conditions react-server scripts/smoke-local-cloud.ts",
     "local:cloud:up": "BRUNO_POSTGRES_HOST_PORT=${BRUNO_POSTGRES_HOST_PORT:-55432} BRUNO_APP_HOST_PORT=${BRUNO_APP_HOST_PORT:-55300} docker compose --profile local-cloud up --build dashboard",
-    "local:agent:smoke": "BRUNO_APP_HOST_PORT=${BRUNO_APP_HOST_PORT:-55300} BRUNO_DIGITALOCEAN_PROVIDER_MODE=local_docker BRUNO_DIGITALOCEAN_TOKEN=local-docker BRUNO_LOCAL_AGENT_SMOKE_MODE=synthetic-external-boundaries bun --conditions react-server scripts/smoke-local-agent-cycle.ts",
+    "local:agent:smoke": "BRUNO_APP_HOST_PORT=${BRUNO_APP_HOST_PORT:-55300} BRUNO_DIGITALOCEAN_PROVIDER_MODE=local_docker BRUNO_DIGITALOCEAN_TOKEN=local-docker BRUNO_DIGITALOCEAN_IMAGE_MODE=stock BRUNO_RUNNER_BOOT_VALIDATION_MODE=full BRUNO_LOCAL_AGENT_SMOKE_MODE=synthetic-external-boundaries bun --conditions react-server scripts/smoke-local-agent-cycle.ts",
     "local:down": "docker compose down --remove-orphans",
     "local:up": "docker compose up -d postgres && bun run db:migrate && BRUNO_AUTH_MODE=development bun run dev",
     "agent:hermes:contract-smoke": "bun --conditions react-server scripts/smoke-local-hermes-contract.ts",

@@ -5,6 +5,7 @@ import postgres from "postgres";
 
 const DEFAULT_DATABASE_URL = "postgres://bruno:bruno@127.0.0.1:54329/bruno";
 const DEFAULT_APP_URL = "http://localhost:3000";
+const DEFAULT_TEST_DOCKER_RUNNER_IMAGE = "busybox:1.36";
 const DATABASE_URL_ERROR = "Unit tests require a loopback PostgreSQL DATABASE_URL.";
 
 export type UnitTestCommand = {
@@ -98,6 +99,11 @@ export async function runUnitTests(
     ((command, commandEnv) => runInheritedCommand(command, commandEnv, cwd));
   const commandEnv = {
     ...env,
+    // Bun loads .env.local before this harness starts. Pin test-safe defaults so a
+    // live snapshot/release configuration cannot change default-path test behavior.
+    BRUNO_DIGITALOCEAN_IMAGE_MODE: "stock",
+    BRUNO_DOCKER_RUNNER_IMAGE: DEFAULT_TEST_DOCKER_RUNNER_IMAGE,
+    BRUNO_RUNNER_BOOT_VALIDATION_MODE: "full",
     DATABASE_URL: plan.databaseUrl,
     NEXT_PUBLIC_APP_URL: DEFAULT_APP_URL,
   };

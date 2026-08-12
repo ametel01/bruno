@@ -37,11 +37,21 @@ describe("isolated unit-test database runner", () => {
 
   it("creates, migrates, tests, and drops one isolated database", async () => {
     const events: string[] = [];
-    const commands: Array<{ appUrl: string; command: UnitTestCommand; databaseUrl: string }> = [];
+    const commands: Array<{
+      appUrl: string;
+      bootValidationMode: string;
+      command: UnitTestCommand;
+      databaseUrl: string;
+      digitalOceanImageMode: string;
+      dockerRunnerImage: string;
+    }> = [];
 
     const result = await runUnitTests(
       {
         DATABASE_URL: BASE_DATABASE_URL,
+        BRUNO_DIGITALOCEAN_IMAGE_MODE: "snapshot",
+        BRUNO_DOCKER_RUNNER_IMAGE: "registry.example/agent@sha256:release",
+        BRUNO_RUNNER_BOOT_VALIDATION_MODE: "release_attested",
         NEXT_PUBLIC_APP_URL: "https://development-tunnel.example",
       },
       {
@@ -57,8 +67,11 @@ describe("isolated unit-test database runner", () => {
         runCommand: async (command, env) => {
           commands.push({
             appUrl: env.NEXT_PUBLIC_APP_URL ?? "",
+            bootValidationMode: env.BRUNO_RUNNER_BOOT_VALIDATION_MODE ?? "",
             command,
             databaseUrl: env.DATABASE_URL ?? "",
+            digitalOceanImageMode: env.BRUNO_DIGITALOCEAN_IMAGE_MODE ?? "",
+            dockerRunnerImage: env.BRUNO_DOCKER_RUNNER_IMAGE ?? "",
           });
           return 0;
         },
@@ -72,16 +85,22 @@ describe("isolated unit-test database runner", () => {
     expect(commands).toEqual([
       {
         appUrl: "http://localhost:3000",
+        bootValidationMode: "full",
         command: { command: "bun", args: ["run", "db:migrate"] },
         databaseUrl: isolatedUrl,
+        digitalOceanImageMode: "stock",
+        dockerRunnerImage: "busybox:1.36",
       },
       {
         appUrl: "http://localhost:3000",
+        bootValidationMode: "full",
         command: {
           command: "/repo/node_modules/.bin/vitest",
           args: ["run", "--no-file-parallelism", "tests/unit/example.test.ts"],
         },
         databaseUrl: isolatedUrl,
+        digitalOceanImageMode: "stock",
+        dockerRunnerImage: "busybox:1.36",
       },
     ]);
     expect(events).toEqual([
