@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  buildPreparedDataDirOwnershipRestoreArgs,
   DEFAULT_LOCAL_HERMES_IMAGE,
   HERMES_AMD64_MANIFEST_DIGEST,
   HERMES_RUNTIME_UID_GID,
@@ -63,6 +64,33 @@ describe("Hermes agent workload image", () => {
     );
   });
 
+  it("restores bind-mount ownership through the tested image before host cleanup", () => {
+    const dataDir = join(tmpdir(), "bruno-hermes-data-owned-by-container");
+
+    expect(
+      buildPreparedDataDirOwnershipRestoreArgs("bruno-hermes:ci", dataDir, 1001, 1002),
+    ).toEqual([
+      "run",
+      "--rm",
+      "--platform",
+      "linux/amd64",
+      "--user",
+      "0:0",
+      "--entrypoint",
+      "/bin/chown",
+      "-v",
+      `${dataDir}:/opt/data`,
+      "bruno-hermes:ci",
+      "-R",
+      "--no-dereference",
+      "1001:1002",
+      "/opt/data",
+    ]);
+    expect(() =>
+      buildPreparedDataDirOwnershipRestoreArgs("bruno-hermes:ci", tmpdir(), 1001, 1002),
+    ).toThrow("unmanaged Hermes data directory");
+  });
+
   it("publishes the workload image through a separate scanned GHCR workflow", async () => {
     const workflow = await readFile(
       join(process.cwd(), ".github/workflows/publish-agent-image.yml"),
@@ -77,6 +105,18 @@ describe("Hermes agent workload image", () => {
     expect(workflow).toContain("provenance: mode=max");
     expect(workflow).toContain("aquasecurity/trivy-action");
     expect(workflow).toContain("severity: CRITICAL");
+    expect(workflow).toContain("id: scan_legacy");
+    expect(workflow).toContain("id: scan_optimized");
+    expect(workflow).toContain("id: scan_optimized_published");
+    expect(workflow).toContain(
+      "if: $" + "{{ always() && steps.scan_legacy.outcome != 'skipped' }}",
+    );
+    expect(workflow).toContain(
+      "if: $" + "{{ always() && steps.scan_optimized.outcome != 'skipped' }}",
+    );
+    expect(workflow).toContain(
+      "if: $" + "{{ always() && steps.scan_optimized_published.outcome != 'skipped' }}",
+    );
     expect(workflow).toContain("Digest verification");
     expect(workflow).toContain("oven-sh/setup-bun@v2");
     expect(workflow).toContain("bun-version-file: .bun-version");

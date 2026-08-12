@@ -98,7 +98,7 @@ export async function smokeHermesAgentImage(
   assertContains(versionProbe.stdout, "hermes:x:10000:10000", "Hermes passwd probe");
   assertContains(versionProbe.stdout, "10000:10000 700 /opt/data", "Hermes data ownership probe");
 
-  await withPreparedDataDir(async (dataDir) => {
+  await withPreparedDataDir(image, async (dataDir) => {
     const writeProbe = await runDocker([
       "run",
       "--rm",
@@ -121,7 +121,7 @@ export async function smokeHermesAgentImage(
     assertExitCode(writeProbe, "Hermes prepared data directory write probe");
   });
 
-  const gatewayProbe = await withPreparedDataDir((dataDir) =>
+  const gatewayProbe = await withPreparedDataDir(image, (dataDir) =>
     runDocker(
       [
         "run",
@@ -199,26 +199,77 @@ function assertSafeImageReference(image: string) {
   }
 }
 
-async function withPreparedDataDir<T>(callback: (dataDir: string) => Promise<T>): Promise<T> {
+async function withPreparedDataDir<T>(
+  image: string,
+  callback: (dataDir: string) => Promise<T>,
+): Promise<T> {
   const dataDir = await mkdtemp(HERMES_DATA_DIR_PREFIX);
 
   try {
     await chmod(dataDir, 0o777);
     return await callback(dataDir);
   } finally {
+    await restorePreparedDataDirOwnership(image, dataDir);
     await removePreparedDataDir(dataDir);
   }
 }
 
 export async function removePreparedDataDir(dataDir: string) {
+  assertManagedDataDir(dataDir);
+
+  const cleanup = await runCommand("/bin/rm", ["-rf", "--", dataDir]);
+  assertExitCode(cleanup, "Hermes prepared data directory cleanup");
+}
+
+export function buildPreparedDataDirOwnershipRestoreArgs(
+  image: string,
+  dataDir: string,
+  uid: number,
+  gid: number,
+) {
+  assertSafeImageReference(image);
+  assertManagedDataDir(dataDir);
+
+  if (!Number.isSafeInteger(uid) || uid < 0 || !Number.isSafeInteger(gid) || gid < 0) {
+    throw new Error("Hermes data directory cleanup requires valid host UID and GID values.");
+  }
+
+  return [
+    "run",
+    "--rm",
+    "--platform",
+    "linux/amd64",
+    "--user",
+    "0:0",
+    "--entrypoint",
+    "/bin/chown",
+    "-v",
+    `${dataDir}:/opt/data`,
+    image,
+    "-R",
+    "--no-dereference",
+    `${uid}:${gid}`,
+    "/opt/data",
+  ];
+}
+
+async function restorePreparedDataDirOwnership(image: string, dataDir: string) {
+  if (typeof process.getuid !== "function" || typeof process.getgid !== "function") {
+    throw new Error("Hermes image smoke requires a POSIX host UID and GID for safe cleanup.");
+  }
+
+  const restore = await runDocker(
+    buildPreparedDataDirOwnershipRestoreArgs(image, dataDir, process.getuid(), process.getgid()),
+  );
+  assertExitCode(restore, "Hermes prepared data directory ownership restore");
+}
+
+function assertManagedDataDir(dataDir: string) {
   const suffix = dataDir.slice(HERMES_DATA_DIR_PREFIX.length);
 
   if (!dataDir.startsWith(HERMES_DATA_DIR_PREFIX) || !HERMES_DATA_DIR_SUFFIX_PATTERN.test(suffix)) {
     throw new Error(`Refusing to remove unmanaged Hermes data directory: ${dataDir}`);
   }
-
-  const cleanup = await runCommand("/bin/rm", ["-rf", "--", dataDir]);
-  assertExitCode(cleanup, "Hermes prepared data directory cleanup");
 }
 
 function assertExitCode(result: CommandResult, label: string) {
