@@ -51,6 +51,7 @@ export const RUNNER_BOOT_SELF_TEST_ROOT_ENV = "BRUNO_RUNNER_BOOT_SELF_TEST_ROOT"
 export const DEFAULT_RUNNER_BOOT_SNAPSHOT_PATH = "/var/lib/bruno/boot-readiness.json";
 export const DEFAULT_RUNNER_BOOT_SELF_TEST_TIMEOUT_MS = 180_000;
 export const DEFAULT_RUNNER_BOOT_CLEANUP_TIMEOUT_MS = 30_000;
+export const DEFAULT_RUNNER_BOOT_FIXTURE_LAUNCH_TIMEOUT_MS = 90_000;
 export const DEFAULT_RUNNER_BOOT_CANARY_ATTEMPTS = 3;
 export const DEFAULT_RUNNER_BOOT_CANARY_RETRY_DELAY_MS = 2_000;
 
@@ -654,6 +655,7 @@ async function launchDockerFixture(input: {
     additionalContainerLabels: { [FIXTURE_LABEL]: FIXTURE_LABEL_VALUE },
     docker: input.docker,
     hermes: { network },
+    launchAcceptanceTimeoutMs: DEFAULT_RUNNER_BOOT_FIXTURE_LAUNCH_TIMEOUT_MS,
     probe: { requestContainerHealth },
     projection: {
       options: { stateRoot },

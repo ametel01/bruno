@@ -804,6 +804,46 @@ describe("manual runner service HTTP contract", () => {
     }
   });
 
+  it("allows a longer bounded launch budget for the boot fixture only", async () => {
+    vi.useFakeTimers();
+    let settled = false;
+
+    try {
+      const service = createReadyRunnerService({
+        authToken: "test-token",
+        docker: new ManualRunnerDocker({
+          docker: createMockDocker(),
+          launchAcceptanceTimeoutMs: 90_000,
+          projection: {
+            project: async () => await new Promise(() => undefined),
+          },
+        }),
+      });
+      const responsePromise = service
+        .fetch(
+          authorizedJsonRequest(
+            `/runner/v1/agents/${AGENT_ID}/start`,
+            sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } }),
+          ),
+        )
+        .finally(() => {
+          settled = true;
+        });
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      const response = await responsePromise;
+      expect(response.status).toBe(504);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "launch_acceptance_timeout" },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps different agents independent while one launch is blocked", async () => {
     let releaseFirst!: () => void;
     let markFirstStarted!: () => void;

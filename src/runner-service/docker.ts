@@ -193,6 +193,7 @@ export type ManualRunnerDockerOptions = {
   docker?: DockerExecutableRunner;
   dockerExecutable?: string;
   hermes?: Partial<HermesDockerRuntimeOptions>;
+  launchAcceptanceTimeoutMs?: number;
   nameSuffix?: () => string;
   now?: () => Date;
   probe?: {
@@ -403,6 +404,7 @@ export class ManualRunnerDocker {
   private readonly docker: DockerExecutableRunner;
   private readonly dockerExecutable: string;
   private readonly hermes: HermesDockerRuntimeOptions;
+  private readonly launchAcceptanceTimeoutMs: number;
   private readonly nameSuffix: () => string;
   private readonly now: () => Date;
   private readonly project: (
@@ -427,6 +429,9 @@ export class ManualRunnerDocker {
     this.dockerExecutable =
       options.dockerExecutable ?? process.env[DOCKER_EXECUTABLE_ENV]?.trim() ?? "docker";
     this.hermes = resolveHermesDockerRuntimeOptions(options.hermes);
+    this.launchAcceptanceTimeoutMs = resolveLaunchAcceptanceTimeoutMs(
+      options.launchAcceptanceTimeoutMs,
+    );
     this.nameSuffix = options.nameSuffix ?? (() => randomUUID().replaceAll("-", "").slice(0, 12));
     this.now = options.now ?? (() => new Date());
     this.stateRoot = resolveHermesStateRoot(options.projection?.options?.stateRoot);
@@ -643,7 +648,7 @@ export class ManualRunnerDocker {
       action,
       controller: new AbortController(),
       createdContainerId: null,
-      deadlineAt: Date.now() + DOCKER_CLI_TIMEOUT_MS,
+      deadlineAt: Date.now() + this.launchAcceptanceTimeoutMs,
       operationId: randomUUID(),
       target: runnerTargetFromLaunchSpec(launchSpec),
       terminalReason: null,
@@ -2603,6 +2608,14 @@ function resolveHermesDockerRuntimeOptions(
       overrides?.readinessPort ?? 8642,
     ),
   };
+}
+
+function resolveLaunchAcceptanceTimeoutMs(value: number | undefined): number {
+  if (value === undefined) return DOCKER_CLI_TIMEOUT_MS;
+  if (!Number.isSafeInteger(value) || value < 1 || value > 180_000) {
+    throw new Error("Runner launch acceptance timeout must be between 1 and 180000 milliseconds.");
+  }
+  return value;
 }
 
 export function createHermesReadinessWaiter(

@@ -7,6 +7,7 @@ import {
   buildRunnerBootLaunchSpec,
   createDockerRunnerBootSelfTestExecutor,
   createRunnerBootReadinessController,
+  DEFAULT_RUNNER_BOOT_FIXTURE_LAUNCH_TIMEOUT_MS,
   projectRunnerBootFixtureHermesHome,
   RunnerBootSelfTestError,
   type RunnerBootFixture,
@@ -21,6 +22,10 @@ afterEach(async () => {
 });
 
 describe("runner boot self-test", () => {
+  it("reserves a larger bounded launch window for the nested boot fixture", () => {
+    expect(DEFAULT_RUNNER_BOOT_FIXTURE_LAUNCH_TIMEOUT_MS).toBe(90_000);
+  });
+
   it("binds every fixture container to the supplied immutable Hermes image", async () => {
     const root = await temporaryRoot();
     const hermesImage = `ghcr.io/ametel01/bruno-hermes:optimized@sha256:${"f".repeat(64)}`;

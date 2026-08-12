@@ -109,6 +109,10 @@ ready heartbeat, and all boot components. Those boot components exercise an isol
 start, status/readiness probe, model canary, stop, and cleanup without Telegram, a paid model
 request, or a DigitalOcean API call.
 
+The nested boot fixture has a 90-second launch-acceptance window inside the existing 180-second
+total boot deadline. Ordinary runner start and restart requests retain their 30-second acceptance
+budget. This isolates slower nested-Docker hosts without changing the production API deadline.
+
 Cleanup runs in a `finally` path. It removes the simulated Droplet and runner containers, confirms
 the tagged local-provider set is absent, revokes runner credentials, and tombstones the runner
 record. A failed cleanup fails the job and blocks promotion. Failure output contains only capability
