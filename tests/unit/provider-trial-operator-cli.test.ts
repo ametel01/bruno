@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
+import { PROVIDER_TRIAL_AUTHORIZATION } from "@/src/server/agents/provider-trial-operator-config";
 
 const COMMAND = [
   "--conditions",
@@ -9,6 +10,13 @@ const COMMAND = [
 ] as const;
 
 describe("Provider Trial operator CLI", () => {
+  it("pins the renewed issue #299 authorization generation", () => {
+    expect(PROVIDER_TRIAL_AUTHORIZATION).toEqual({
+      id: "issue-299-20260812-g2",
+      generation: 2,
+    });
+  });
+
   it("fails closed with zero effects and names every missing configuration field", () => {
     const result = spawnSync("bun", COMMAND, {
       cwd: process.cwd(),

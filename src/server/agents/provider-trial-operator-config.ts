@@ -16,8 +16,8 @@ import {
 import { CURRENT_ROLLOUT_CONFIGURATION_GENERATION } from "@/src/server/agents/deployment-slo-identity";
 
 export const PROVIDER_TRIAL_AUTHORIZATION = {
-  id: "issue-299-20260811-g1",
-  generation: 1,
+  id: "issue-299-20260812-g2",
+  generation: 2,
 } as const;
 
 export const PROVIDER_TRIAL_APPROVED_SCOPE = {
