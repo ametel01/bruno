@@ -64,6 +64,7 @@ function attestedEnvironment(): {
     privateKeyPem: snapshotKeys.privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
   });
   const release = buildRunnerReleaseBundleArtifact({
+    controlPlaneSourceRevision: SOURCE_REVISION,
     runnerImage: RUNNER_IMAGE,
     snapshotBundleBytes: snapshot.bundleBytes,
     approvedSnapshotDigest: snapshot.digest,

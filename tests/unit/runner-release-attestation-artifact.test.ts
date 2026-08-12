@@ -6,8 +6,8 @@ import {
   DEFAULT_HERMES_WORKLOAD_IMAGE_INDEX_DIGEST,
   RUNNER_BOOT_CONTRACT_VERSION,
 } from "@/src/runner-service/constants";
-import { RUNNER_BOOT_COMPONENTS } from "@/src/runner-service/runner-contracts";
 import { verifyRunnerReleaseBundle } from "@/src/runner-service/release-attestation";
+import { RUNNER_BOOT_COMPONENTS } from "@/src/runner-service/runner-contracts";
 import { buildRunnerReleaseBundleArtifact } from "@/src/server/runners/runner-release-attestation-artifact";
 import {
   createRunnerSnapshotAttestation,
@@ -15,6 +15,7 @@ import {
 } from "@/src/server/runners/runner-snapshot-manifest";
 
 const SOURCE_REVISION = "1".repeat(40);
+const CONTROL_PLANE_SOURCE_REVISION = "2".repeat(40);
 const RUNNER_DIGEST = `sha256:${"a".repeat(64)}`;
 const AGENT_DIGEST = `sha256:${"b".repeat(64)}`;
 const RUNNER_IMAGE = `ghcr.io/ametel01/bruno-runner:${SOURCE_REVISION}@${RUNNER_DIGEST}`;
@@ -33,6 +34,7 @@ describe("Verified Release artifact builder", () => {
       "release-current": releaseKeys.publicKey.export({ format: "pem", type: "spki" }).toString(),
     };
     const artifact = buildRunnerReleaseBundleArtifact({
+      controlPlaneSourceRevision: CONTROL_PLANE_SOURCE_REVISION,
       runnerImage: RUNNER_IMAGE,
       snapshotOciReference: SNAPSHOT_OCI,
       snapshotBundleBytes: snapshot.bundleBytes,
@@ -56,7 +58,7 @@ describe("Verified Release artifact builder", () => {
         approvedDigest: artifact.digest,
         trustedPublicKeys: releaseTrust,
         expected: {
-          sourceRevision: SOURCE_REVISION,
+          sourceRevision: CONTROL_PLANE_SOURCE_REVISION,
           runnerImage: RUNNER_IMAGE,
           defaultAgentImage: AGENT_IMAGE,
           hermesImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
@@ -79,6 +81,7 @@ describe("Verified Release artifact builder", () => {
     const keys = generateKeyPairSync("ed25519");
     const snapshot = attestSnapshot(keys.privateKey);
     const base = {
+      controlPlaneSourceRevision: CONTROL_PLANE_SOURCE_REVISION,
       runnerImage: RUNNER_IMAGE,
       snapshotOciReference: SNAPSHOT_OCI,
       snapshotBundleBytes: snapshot.bundleBytes,
@@ -108,6 +111,12 @@ describe("Verified Release artifact builder", () => {
         smokeResult: { ...passingSmoke(), cleanupVerified: false },
       }),
     ).toThrow("full fixture and cleanup evidence");
+    expect(() =>
+      buildRunnerReleaseBundleArtifact({
+        ...base,
+        controlPlaneSourceRevision: "not-a-revision",
+      }),
+    ).toThrow("exact control-plane source revision");
   });
 });
 

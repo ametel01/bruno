@@ -4,6 +4,7 @@ import type { RunnerSnapshotTrustedPublicKeys } from "@/src/server/runners/runne
 
 const args = parseArgs(process.argv.slice(2));
 const artifact = buildRunnerReleaseBundleArtifact({
+  controlPlaneSourceRevision: args.controlPlaneSourceRevision,
   runnerImage: args.runnerImage,
   snapshotOciReference: args.snapshotOciReference,
   snapshotBundleBytes: await readRequiredFile(args.snapshotBundle, "snapshot bundle"),
@@ -36,6 +37,7 @@ function parseArgs(values: string[]) {
     parsed.set(key.slice(2), value);
   }
   return {
+    controlPlaneSourceRevision: requiredArg(parsed, "control-plane-source-revision"),
     runnerImage: requiredArg(parsed, "runner-image"),
     snapshotOciReference: requiredArg(parsed, "snapshot-oci-reference"),
     snapshotBundleDigest: requiredArg(parsed, "snapshot-bundle-digest"),

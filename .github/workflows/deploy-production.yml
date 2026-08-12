@@ -389,6 +389,7 @@ jobs:
         run: |
           set -euo pipefail
           bun run runner:release:bundle -- \
+            --control-plane-source-revision "${GITHUB_SHA}" \
             --runner-image "${BRUNO_RUNNER_IMAGE}" \
             --snapshot-oci-reference "${BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE}" \
             --snapshot-bundle-digest "${BRUNO_RELEASE_APPROVED_SNAPSHOT_BUNDLE_DIGEST}" \

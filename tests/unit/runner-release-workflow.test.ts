@@ -197,6 +197,7 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).toContain("BRUNO_RELEASE_SIGNING_KEY_ID");
     expect(workflowSource).toContain("BRUNO_RELEASE_SIGNING_KEY_PEM");
     expect(workflowSource).toContain("bun run runner:release:bundle");
+    expect(workflowSource).toMatch(/--control-plane-source-revision "\$\{GITHUB_SHA\}"/);
     expect(workflowSource).toContain("bun run runner:release:registry");
     expect(workflowSource).toContain("bruno-runner-release-bundles");
     expect(workflowSource).toContain("verified-runner-release");

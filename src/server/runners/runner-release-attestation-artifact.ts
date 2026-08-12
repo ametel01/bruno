@@ -1,15 +1,15 @@
 import "server-only";
 
 import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
+import {
+  createRunnerReleaseBundle,
+  RUNNER_RELEASE_MANIFEST_SCHEMA_VERSION,
+} from "@/src/runner-service/release-attestation";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
 import {
   RUNNER_BOOT_COMPONENTS,
   RUNNER_BOOT_SNAPSHOT_CONTRACT_VERSION,
 } from "@/src/runner-service/runner-contracts";
-import {
-  createRunnerReleaseBundle,
-  RUNNER_RELEASE_MANIFEST_SCHEMA_VERSION,
-} from "@/src/runner-service/release-attestation";
 import {
   parseRunnerSnapshotBundle,
   type RunnerSnapshotManifest,
@@ -36,6 +36,7 @@ type ReleaseSmokeResult = {
 };
 
 export function buildRunnerReleaseBundleArtifact(input: {
+  controlPlaneSourceRevision: string;
   runnerImage: string;
   snapshotOciReference: string;
   snapshotBundleBytes: string;
@@ -50,6 +51,9 @@ export function buildRunnerReleaseBundleArtifact(input: {
   cleanupVerifiedAt: string;
   now?: Date;
 }) {
+  if (!SOURCE_REVISION.test(input.controlPlaneSourceRevision)) {
+    throw new Error("Verified Release requires an exact control-plane source revision.");
+  }
   const runner = parseImmutableRunnerImageReference(input.runnerImage);
   if (!runner || !SOURCE_REVISION.test(runner.version)) {
     throw new Error("Verified Release requires an immutable Git-SHA runner image.");
@@ -93,7 +97,7 @@ export function buildRunnerReleaseBundleArtifact(input: {
     manifest: {
       schemaVersion: RUNNER_RELEASE_MANIFEST_SCHEMA_VERSION,
       controlPlane: {
-        source: { repository: "ametel01/bruno", revision: runner.version },
+        source: { repository: "ametel01/bruno", revision: input.controlPlaneSourceRevision },
         contracts: {
           launch: "bruno.runner.launch.v2",
           status: "bruno.runner.status.v3",
