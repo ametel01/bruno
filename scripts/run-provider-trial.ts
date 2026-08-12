@@ -9,6 +9,7 @@ import { createProviderTrialCohort } from "@/src/server/agents/provider-trial-co
 import {
   initializeProviderTrialDriver,
   providerTrialBenchmarkOwnerIdentityHash,
+  reconcileProviderTrialCleanup,
   resumeProviderTrialDriver,
   verifyProviderTrialDriverReport,
 } from "@/src/server/agents/provider-trial-driver";
@@ -30,7 +31,13 @@ import {
   providerTrialRuns,
 } from "@/src/server/db/schema";
 
-type Command = "preflight" | "verify-gates" | "initialize" | "run" | "verify-credential-cleanup";
+type Command =
+  | "preflight"
+  | "verify-gates"
+  | "initialize"
+  | "run"
+  | "reconcile-cleanup"
+  | "verify-credential-cleanup";
 type OperatorConfig = NonNullable<ReturnType<typeof parseProviderTrialOperatorConfiguration>>;
 type SigningKey = { keyId: string; privateKeyPem: string };
 type AuthorizedIdentityEvidence = {
@@ -61,9 +68,14 @@ function write(value: unknown): void {
 async function main(): Promise<number> {
   const command = (process.argv[2] ?? "preflight") as Command;
   if (
-    !["preflight", "verify-gates", "initialize", "run", "verify-credential-cleanup"].includes(
-      command,
-    )
+    ![
+      "preflight",
+      "verify-gates",
+      "initialize",
+      "run",
+      "reconcile-cleanup",
+      "verify-credential-cleanup",
+    ].includes(command)
   ) {
     write({ command, effects: 0, ok: false, issues: ["unsupported_command"] });
     return 1;
@@ -89,14 +101,19 @@ async function main(): Promise<number> {
     return 1;
   }
   const sourceRevision = await readSourceRevision();
-  if (config.releaseSourceRevision !== sourceRevision) {
+  const cleanupOnly = command === "reconcile-cleanup" || command === "verify-credential-cleanup";
+  if (!cleanupOnly && config.releaseSourceRevision !== sourceRevision) {
     write({ command, effects: 0, ok: false, issues: ["immutable_release_revision"] });
     return 1;
   }
   if (command === "verify-gates") {
     return await verifyPrerequisiteGates(config, signing, sourceRevision);
   }
-  const gateEvidence = await readGateEvidence(config, signing, sourceRevision);
+  const gateEvidence = await readGateEvidence(
+    config,
+    signing,
+    cleanupOnly ? config.releaseSourceRevision : sourceRevision,
+  );
   if (!gateEvidence) {
     write({ command, effects: 0, ok: false, issues: ["prerequisite_gates"] });
     return 1;
@@ -137,10 +154,62 @@ async function main(): Promise<number> {
         gateEvidence,
       );
     }
+    if (command === "reconcile-cleanup") {
+      return await reconcileCleanup(connection, config, gateEvidence);
+    }
     return await run(connection, config, signing, gateEvidence);
   } finally {
     await connection.close();
   }
+}
+
+async function reconcileCleanup(
+  connection: DatabaseConnection,
+  config: OperatorConfig,
+  gateEvidence: VerifiedGateEvidence,
+): Promise<number> {
+  const ownerUserId = await connection.db.transaction(readProviderTrialBenchmarkOwner);
+  const [cohort] = await connection.db
+    .select({ id: providerTrialCohorts.id })
+    .from(providerTrialCohorts)
+    .where(eq(providerTrialCohorts.cohortKey, config.cohortKey))
+    .limit(1);
+  if (!ownerUserId || !cohort) throw new Error("trial_not_initialized");
+  const [authorizationEvidence] = await connection.db
+    .select()
+    .from(providerTrialAuthorizationEvents)
+    .where(eq(providerTrialAuthorizationEvents.cohortId, cohort.id))
+    .orderBy(desc(providerTrialAuthorizationEvents.generation))
+    .limit(1);
+  if (
+    !authorizationEvidence ||
+    authorizationEvidence.generation !== config.authorization.generation ||
+    authorizationEvidence.prerequisiteGateEvidenceDigest !== gateEvidence.digest ||
+    authorizationEvidence.deploymentChoicesDigest !== config.deploymentChoicesDigest
+  ) {
+    throw new Error("cleanup_authorization_evidence_mismatch");
+  }
+  const dependencies = createProviderTrialProductionDriverDependencies({
+    ownerUserId,
+    fixture: config.fixture,
+    env: process.env,
+  });
+  if (!dependencies.cleanup) throw new Error("cleanup_dependency_missing");
+  const result = await reconcileProviderTrialCleanup(
+    connection,
+    { cohortId: cohort.id, authorization: config.authorization },
+    { cleanup: dependencies.cleanup },
+  );
+  write({
+    command: "reconcile-cleanup",
+    effects: "authorized_cleanup_only",
+    ok: true,
+    cohortId: cohort.id,
+    state: result.state,
+    nextSlotNumber: result.nextSlotNumber,
+    spentCents: result.spentCents,
+  });
+  return 0;
 }
 
 async function initialize(
@@ -525,9 +594,12 @@ async function readAuthoritativeProviderCleanup(
     return null;
   }
   if (run.state === "paused") {
-    return ["budget_exhausted", "observation_incomplete", "safety_pause"].includes(
-      run.pauseReason ?? "",
-    )
+    return [
+      "budget_exhausted",
+      "gate_impossible",
+      "observation_incomplete",
+      "safety_pause",
+    ].includes(run.pauseReason ?? "")
       ? { reportDigest: null, runState: "paused" }
       : null;
   }
@@ -695,8 +767,9 @@ async function verifyCredentialCleanup(
   }
 
   const manifest = {
-    schemaVersion: "bruno.provider-trial-credential-cleanup.v1",
-    sourceRevision,
+    schemaVersion: "bruno.provider-trial-credential-cleanup.v2",
+    authorizedReleaseSourceRevision: config.releaseSourceRevision,
+    cleanupOperatorSourceRevision: sourceRevision,
     gateEvidenceDigest: gateEvidence.digest,
     cohortReportDigest: providerCleanup.reportDigest,
     trialState: providerCleanup.runState,

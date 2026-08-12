@@ -154,6 +154,11 @@ export type ProviderTrialDriverDependencies = {
   leaseOwner?: () => string;
 };
 
+type ProviderTrialCleanupDependencies = Pick<
+  ProviderTrialDriverDependencies,
+  "cleanup" | "leaseOwner" | "now"
+>;
+
 export function verifyProviderTrialDriverReport(input: {
   canonicalBytes: string;
   digest: string;
@@ -695,6 +700,93 @@ export async function resumeProviderTrialDriver(
   };
 }
 
+export async function reconcileProviderTrialCleanup(
+  connection: DatabaseConnection,
+  input: { cohortId: string; authorization: Authorization },
+  dependencies: ProviderTrialCleanupDependencies,
+): Promise<{
+  state: "running" | "paused" | "ready_to_finalize";
+  nextSlotNumber: number;
+  spentCents: number;
+}> {
+  assertAuthorization(input.authorization);
+  const startedAt = dependencies.now?.() ?? new Date();
+  const leaseOwner = `provider-trial-cleanup:${dependencies.leaseOwner?.() ?? randomUUID()}`;
+  const leased = await acquireCleanupLease(connection, input, startedAt, leaseOwner);
+  const configuration = parseConfiguration(leased.run.configuration);
+  const checkpoint = parseCheckpoint(leased.run.activeSlotCheckpoint, leased.attempt);
+  if (!checkpoint) throw new Error("Provider Trial cleanup checkpoint is missing.");
+  const execution = parseExecution(checkpoint.execution);
+  let unsafe =
+    execution.outcome === "safety_pause" ||
+    execution.costCents > configuration.maxSlotCostCents ||
+    leased.run.spentCents + execution.costCents > configuration.maxSpendCents ||
+    execution.activeProviderResources > configuration.maxProviderResources;
+  if (execution.outcome === "committed") {
+    unsafe ||= !(await committedBenchmarkIdentityMatches(
+      connection,
+      execution.deploymentId,
+      configuration,
+    ));
+  }
+
+  const cleanupDeadlineAt = new Date(Date.now() + configuration.cleanupTimeoutMs);
+  const cleanup = await performCleanup(dependencies, leased.run.cohortId, cleanupDeadlineAt);
+  const cleanupPause = await recordSlotCleanupEvent(connection, {
+    cohortId: leased.run.cohortId,
+    leaseOwner,
+    slotId: leased.attempt.slotId,
+    costCents: execution.costCents,
+    activeProviderResources: execution.activeProviderResources,
+    cleanup,
+    pauseReason: null,
+    createdAt: dependencies.now?.() ?? new Date(),
+  });
+  if (!cleanup.ok || !cleanup.authoritative || cleanup.remainingResourceIds.length > 0) {
+    if (!cleanupPause) {
+      throw new Error("Provider Trial cleanup reconciliation did not produce a safety pause.");
+    }
+    return { state: "paused", ...cleanupPause };
+  }
+
+  const nextSlotNumber = leased.run.nextSlotNumber + 1;
+  const gateImpossible = await isProviderTrialGateImpossible(connection, leased.run.cohortId);
+  const pauseReason = unsafe ? "safety_pause" : gateImpossible ? "gate_impossible" : null;
+  const state = pauseReason
+    ? "paused"
+    : nextSlotNumber > PROVIDER_TRIAL_SLOT_COUNT
+      ? "ready_to_finalize"
+      : "running";
+  const now = dependencies.now?.() ?? new Date();
+  const [advanced] = await connection.db
+    .update(providerTrialRuns)
+    .set({
+      state,
+      nextSlotNumber,
+      spentCents: leased.run.spentCents + execution.costCents,
+      activeSlotCheckpoint: null,
+      cleanupEvidence: cleanup,
+      pausedAt: pauseReason ? now : null,
+      pauseReason,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(providerTrialRuns.cohortId, leased.run.cohortId),
+        eq(providerTrialRuns.leaseOwner, leaseOwner),
+      ),
+    )
+    .returning();
+  if (!advanced) throw new Error("Provider Trial cleanup reconciliation lost its lease.");
+  return {
+    state,
+    nextSlotNumber,
+    spentCents: leased.run.spentCents + execution.costCents,
+  };
+}
+
 async function recordSlotCleanupEvent(
   connection: DatabaseConnection,
   input: {
@@ -921,6 +1013,82 @@ async function acquireRunLease(
   });
 }
 
+async function acquireCleanupLease(
+  connection: DatabaseConnection,
+  input: { cohortId: string; authorization: Authorization },
+  now: Date,
+  leaseOwner: string,
+): Promise<{
+  run: typeof providerTrialRuns.$inferSelect;
+  attempt: ProviderTrialSlotAttempt;
+}> {
+  return await connection.db.transaction(async (tx) => {
+    const [run] = await tx
+      .select()
+      .from(providerTrialRuns)
+      .where(eq(providerTrialRuns.cohortId, input.cohortId))
+      .for("update")
+      .limit(1);
+    if (!run) throw new Error("Provider Trial driver was not initialized.");
+    if (run.state !== "paused" || run.pauseReason !== "cleanup_failed") {
+      throw new Error("Provider Trial is not paused for cleanup reconciliation.");
+    }
+    if (run.leaseOwner && run.leaseExpiresAt && run.leaseExpiresAt.getTime() > now.getTime()) {
+      throw new Error("Provider Trial run already has an active lease.");
+    }
+    if (
+      input.authorization.generation !== run.authorizationGeneration ||
+      authorizationHash(input.authorization.id) !== run.authorizationIdHash
+    ) {
+      throw new Error("Provider Trial cleanup authorization does not match the active run.");
+    }
+    const [slot] = await tx
+      .select()
+      .from(providerTrialSlots)
+      .where(
+        and(
+          eq(providerTrialSlots.cohortId, input.cohortId),
+          eq(providerTrialSlots.slotNumber, run.nextSlotNumber),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (
+      !slot?.requestAttemptId ||
+      !slot.requestStartedAt ||
+      !slot.requestOutcome ||
+      !slot.terminalOutcome
+    ) {
+      throw new Error("Provider Trial cleanup slot is not terminal.");
+    }
+    const attempt = {
+      cohortId: slot.cohortId,
+      slotId: slot.id,
+      slotNumber: slot.slotNumber,
+      requestAttemptId: slot.requestAttemptId,
+      requestStartedAt: slot.requestStartedAt.toISOString(),
+    };
+    if (!parseCheckpoint(run.activeSlotCheckpoint, attempt)) {
+      throw new Error("Provider Trial cleanup checkpoint is missing.");
+    }
+    const configuration = parseConfiguration(run.configuration);
+    const [leased] = await tx
+      .update(providerTrialRuns)
+      .set({
+        state: "running",
+        pausedAt: null,
+        pauseReason: null,
+        leaseOwner,
+        leaseExpiresAt: new Date(now.getTime() + configuration.cleanupTimeoutMs + LEASE_GRACE_MS),
+        updatedAt: now,
+      })
+      .where(eq(providerTrialRuns.cohortId, input.cohortId))
+      .returning();
+    if (!leased) throw new Error("Provider Trial cleanup lease acquisition failed.");
+    return { run: leased, attempt };
+  });
+}
+
 async function finalizeRun(
   connection: DatabaseConnection,
   run: typeof providerTrialRuns.$inferSelect,
@@ -1114,6 +1282,24 @@ async function readSlotState(connection: DatabaseConnection, attempt: ProviderTr
   return slot;
 }
 
+async function isProviderTrialGateImpossible(
+  connection: DatabaseConnection,
+  cohortId: string,
+): Promise<boolean> {
+  const slots = await connection.db
+    .select({
+      requestOutcome: providerTrialSlots.requestOutcome,
+      terminalOutcome: providerTrialSlots.terminalOutcome,
+    })
+    .from(providerTrialSlots)
+    .where(eq(providerTrialSlots.cohortId, cohortId));
+  const completed = slots.filter((slot) => slot.terminalOutcome !== null).length;
+  const remaining = PROVIDER_TRIAL_SLOT_COUNT - completed;
+  const committed = slots.filter((slot) => slot.requestOutcome === "committed").length;
+  const readyWithin60 = slots.filter((slot) => slot.terminalOutcome === "ready_within_60").length;
+  return committed + remaining < 29 || readyWithin60 + remaining < 29;
+}
+
 function assertRecordedRequestMatches(
   slot: Awaited<ReturnType<typeof readSlotState>>,
   execution: ProviderTrialExecution,
@@ -1132,7 +1318,7 @@ function assertRecordedRequestMatches(
 }
 
 async function performCleanup(
-  dependencies: ProviderTrialDriverDependencies,
+  dependencies: Pick<ProviderTrialDriverDependencies, "cleanup">,
   cohortId: string,
   deadlineAt: Date,
 ): Promise<CleanupEvidence> {

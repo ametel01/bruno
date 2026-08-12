@@ -8,6 +8,7 @@ import {
   providerTrialBenchmarkOwnerIdentityHash,
   providerTrialBenchmarkTelegramIdentityHash,
   providerTrialDeploymentChoicesDigest,
+  reconcileProviderTrialCleanup,
   resumeProviderTrialDriver,
   verifyProviderTrialDriverReport,
 } from "@/src/server/agents/provider-trial-driver";
@@ -936,6 +937,129 @@ describe("resumable Provider Trial driver", () => {
         remainingResourceCount: 0,
       },
     ]);
+  });
+
+  it("reconciles a failed cleanup without authorizing another provider request", async () => {
+    const cohort = await createCohort(connection, "provider-trial-driver-cleanup-reconcile");
+    await initializeProviderTrialDriver(connection, {
+      cohortId: cohort.id,
+      authorization: { id: "auth-local-001", generation: 1 },
+      configuration: configuration(),
+    });
+
+    await expect(
+      resumeProviderTrialDriver(
+        connection,
+        { cohortId: cohort.id, authorization: { id: "auth-local-001", generation: 1 } },
+        {
+          async executeSlot() {
+            return {
+              outcome: "pre_commit_failure",
+              safeCode: "request_rejected",
+              costCents: 1,
+              activeProviderResources: 0,
+            };
+          },
+          async cleanup() {
+            return { ok: false, authoritative: false, remainingResourceIds: ["slot:1"] };
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ state: "paused", nextSlotNumber: 1, spentCents: 0 });
+
+    const cleanup = vi.fn(async () => ({
+      ok: true,
+      authoritative: true,
+      remainingResourceIds: [] as string[],
+    }));
+    await expect(
+      reconcileProviderTrialCleanup(
+        connection,
+        { cohortId: cohort.id, authorization: { id: "auth-local-001", generation: 1 } },
+        { cleanup },
+      ),
+    ).resolves.toMatchObject({ state: "running", nextSlotNumber: 2, spentCents: 1 });
+    expect(cleanup).toHaveBeenCalledOnce();
+
+    const [run] = await connection.db.select().from(providerTrialRuns);
+    expect(run).toMatchObject({
+      state: "running",
+      nextSlotNumber: 2,
+      spentCents: 1,
+      activeSlotCheckpoint: null,
+      cleanupEvidence: { ok: true, authoritative: true, remainingResourceIds: [] },
+    });
+    const cleanupEvents = await connection.db
+      .select()
+      .from(providerTrialSlotCleanupEvents)
+      .orderBy(providerTrialSlotCleanupEvents.cleanupAttemptNumber);
+    expect(cleanupEvents).toMatchObject([
+      { cleanupAttemptNumber: 1, ok: false, authoritative: false, remainingResourceCount: 1 },
+      { cleanupAttemptNumber: 2, ok: true, authoritative: true, remainingResourceCount: 0 },
+    ]);
+  });
+
+  it("stops cleanup recovery when the original cohort gate is mathematically impossible", async () => {
+    const cohort = await createCohort(connection, "provider-trial-driver-gate-impossible");
+    await initializeProviderTrialDriver(connection, {
+      cohortId: cohort.id,
+      authorization: { id: "auth-local-001", generation: 1 },
+      configuration: configuration(),
+    });
+    const executeSlot = vi.fn(async () => ({
+      outcome: "pre_commit_failure" as const,
+      safeCode: "request_rejected" as const,
+      costCents: 1,
+      activeProviderResources: 0,
+    }));
+
+    await expect(
+      resumeProviderTrialDriver(
+        connection,
+        { cohortId: cohort.id, authorization: { id: "auth-local-001", generation: 1 } },
+        {
+          executeSlot,
+          async cleanup() {
+            return { ok: true, authoritative: true, remainingResourceIds: [] };
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ state: "running", nextSlotNumber: 2, spentCents: 1 });
+    await expect(
+      resumeProviderTrialDriver(
+        connection,
+        { cohortId: cohort.id, authorization: { id: "auth-local-001", generation: 1 } },
+        {
+          executeSlot,
+          async cleanup() {
+            return { ok: false, authoritative: false, remainingResourceIds: ["slot:2"] };
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ state: "paused", nextSlotNumber: 2, spentCents: 1 });
+
+    await expect(
+      reconcileProviderTrialCleanup(
+        connection,
+        { cohortId: cohort.id, authorization: { id: "auth-local-001", generation: 1 } },
+        {
+          async cleanup() {
+            return { ok: true, authoritative: true, remainingResourceIds: [] };
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ state: "paused", nextSlotNumber: 3, spentCents: 2 });
+    expect(executeSlot).toHaveBeenCalledTimes(2);
+
+    const [run] = await connection.db.select().from(providerTrialRuns);
+    expect(run).toMatchObject({
+      state: "paused",
+      nextSlotNumber: 3,
+      spentCents: 2,
+      pauseReason: "gate_impossible",
+      activeSlotCheckpoint: null,
+      cleanupEvidence: { ok: true, authoritative: true, remainingResourceIds: [] },
+    });
   });
 
   it("does not classify a timed-out request until the stable idempotency key is reconciled", async () => {

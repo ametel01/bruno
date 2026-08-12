@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { PROVIDER_TRIAL_AUTHORIZATION } from "@/src/server/agents/provider-trial-operator-config";
 
@@ -15,6 +16,15 @@ describe("Provider Trial operator CLI", () => {
       id: "issue-299-20260812-g2",
       generation: 2,
     });
+  });
+
+  it("provides a cleanup-only recovery command without renewing deployment authorization", () => {
+    const source = readFileSync("scripts/run-provider-trial.ts", "utf8");
+
+    expect(source).toContain('command === "reconcile-cleanup"');
+    expect(source).toContain("reconcileProviderTrialCleanup(");
+    expect(source).toContain('effects: "authorized_cleanup_only"');
+    expect(source).toContain('"gate_impossible"');
   });
 
   it("fails closed with zero effects and names every missing configuration field", () => {
