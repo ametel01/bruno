@@ -47,6 +47,24 @@ jobs:
           set -euo pipefail
           mkdir -p runner-boot-diagnostic
           install -m 0700 -d "${DIAGNOSTIC_ROOT}"
+          cat > "${DIAGNOSTIC_ROOT}/docker-wrapper" <<'SH'
+          #!/usr/bin/env bash
+          set -uo pipefail
+          STDERR_FILE="$(mktemp "${DIAGNOSTIC_ROOT}/docker-stderr.XXXXXX")"
+          /usr/bin/docker "$@" 2>"${STDERR_FILE}"
+          STATUS=$?
+          if [[ "${STATUS}" -ne 0 ]]; then
+            {
+              printf 'command=%s subcommand=%s exit=%s\n' "${1:-unknown}" "${2:-unknown}" "${STATUS}"
+              head -c 4096 "${STDERR_FILE}"
+              printf '\n'
+            } >> "${DIAGNOSTIC_ROOT}/docker-failures.log"
+          fi
+          cat "${STDERR_FILE}" >&2
+          rm --force "${STDERR_FILE}"
+          exit "${STATUS}"
+          SH
+          chmod 0700 "${DIAGNOSTIC_ROOT}/docker-wrapper"
           docker events \
             --filter type=container \
             --filter type=network \
@@ -74,8 +92,10 @@ jobs:
             --publish 127.0.0.1:3045:3045 \
             --volume /var/run/docker.sock:/var/run/docker.sock \
             --volume "${DIAGNOSTIC_ROOT}:${DIAGNOSTIC_ROOT}" \
+            --env DIAGNOSTIC_ROOT="${DIAGNOSTIC_ROOT}" \
             --env BRUNO_RUNNER_HOST=0.0.0.0 \
             --env BRUNO_RUNNER_BEARER_TOKEN="${RUNNER_TOKEN}" \
+            --env BRUNO_RUNNER_DOCKER_EXECUTABLE="${DIAGNOSTIC_ROOT}/docker-wrapper" \
             --env BRUNO_RUNNER_BOOT_SNAPSHOT_PATH="${DIAGNOSTIC_ROOT}/boot-readiness.json" \
             --env BRUNO_RUNNER_BOOT_SELF_TEST_ROOT="${DIAGNOSTIC_ROOT}/boot-self-test" \
             --env BRUNO_HERMES_STATE_ROOT="${DIAGNOSTIC_ROOT}/agents" \
@@ -105,6 +125,13 @@ jobs:
 
           docker logs "${RUNNER_CONTAINER}" \
             > runner-boot-diagnostic/runner.log 2>&1 || true
+          if docker exec "${RUNNER_CONTAINER}" \
+            test -f "${DIAGNOSTIC_ROOT}/docker-failures.log"
+          then
+            docker exec "${RUNNER_CONTAINER}" \
+              cat "${DIAGNOSTIC_ROOT}/docker-failures.log" \
+              > runner-boot-diagnostic/docker-failures.log
+          fi
           docker ps --all \
             --filter label=bruno.boot.fixture=v1 \
             --format '{{json .}}' \

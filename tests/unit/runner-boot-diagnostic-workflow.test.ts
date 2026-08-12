@@ -21,6 +21,10 @@ describe("runner boot diagnostic workflow", () => {
     expect(workflow).toContain("docker events");
     expect(workflow).toContain("boot-readiness.json");
     expect(workflow).toContain("runner.log");
+    expect(workflow).toContain("docker-failures.log");
+    expect(workflow).toContain("BRUNO_RUNNER_DOCKER_EXECUTABLE");
+    expect(workflow).toContain("head -c 4096");
+    expect(workflow).not.toContain("printf 'command=%s subcommand=%s args=");
     expect(workflow).toContain("nested-image-inspect.json");
     expect(workflow).toContain("nested-image-run.status");
     expect(workflow).toContain("timeout 15s docker exec");
