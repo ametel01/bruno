@@ -13,8 +13,8 @@ const COMMAND = [
 describe("Provider Trial operator CLI", () => {
   it("pins the renewed issue #299 authorization generation", () => {
     expect(PROVIDER_TRIAL_AUTHORIZATION).toEqual({
-      id: "issue-299-20260812-g2",
-      generation: 2,
+      id: "issue-299-20260813-g3",
+      generation: 3,
     });
   });
 
@@ -67,8 +67,8 @@ describe("Provider Trial operator CLI", () => {
         PATH: process.env.PATH,
         NODE_ENV: "test",
         BRUNO_PROVIDER_TRIAL_AUTHORIZATION_ID: "different-authorization",
-        BRUNO_PROVIDER_TRIAL_AUTHORIZATION_GENERATION: "2",
-        BRUNO_PROVIDER_TRIAL_COHORT_KEY: "issue-299-provider-trial-20260811-g1",
+        BRUNO_PROVIDER_TRIAL_AUTHORIZATION_GENERATION: "3",
+        BRUNO_PROVIDER_TRIAL_COHORT_KEY: "issue-299-provider-trial-20260813-g3",
         BRUNO_PROVIDER_TRIAL_LIVE_SIDE_EFFECT_CONFIRMATION:
           "authorize-issue-299-live-provider-trial",
         BRUNO_DIGITALOCEAN_TOKEN: "do-not-print-this-provider-token-value",

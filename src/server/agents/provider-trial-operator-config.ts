@@ -16,8 +16,8 @@ import {
 } from "@/src/server/agents/provider-trial-driver";
 
 export const PROVIDER_TRIAL_AUTHORIZATION = {
-  id: "issue-299-20260812-g2",
-  generation: 2,
+  id: "issue-299-20260813-g3",
+  generation: 3,
 } as const;
 
 export const PROVIDER_TRIAL_APPROVED_SCOPE = {
