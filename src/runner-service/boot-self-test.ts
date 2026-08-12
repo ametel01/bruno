@@ -724,24 +724,28 @@ async function resolveLocalDockerImageId(
   imageReference: string,
   signal: AbortSignal,
 ): Promise<string> {
-  const result = await docker(
-    "docker",
-    ["image", "inspect", "--format", "{{json .Id}}", imageReference],
-    { signal, timeoutMs: DOCKER_CLI_TIMEOUT_MS },
-  );
-  let imageId: unknown;
+  for (let attempt = 1; attempt <= DEFAULT_RUNNER_BOOT_FIXTURE_CREATE_ATTEMPTS; attempt += 1) {
+    try {
+      const result = await docker(
+        "docker",
+        ["image", "inspect", "--format", "{{json .Id}}", imageReference],
+        { signal, timeoutMs: DOCKER_CLI_TIMEOUT_MS },
+      );
+      const imageId: unknown = JSON.parse(result.stdout.trim());
 
-  try {
-    imageId = JSON.parse(result.stdout.trim());
-  } catch {
-    throw new RunnerBootSelfTestError("fixture_launch_failed");
+      if (typeof imageId === "string" && /^sha256:[0-9a-f]{64}$/.test(imageId)) {
+        return imageId;
+      }
+    } catch {
+      // The Docker socket can accept version probes before its image store is queryable.
+    }
+
+    if (attempt < DEFAULT_RUNNER_BOOT_FIXTURE_CREATE_ATTEMPTS) {
+      await delay(DEFAULT_RUNNER_BOOT_FIXTURE_CREATE_RETRY_DELAY_MS, signal);
+    }
   }
 
-  if (typeof imageId !== "string" || !/^sha256:[0-9a-f]{64}$/.test(imageId)) {
-    throw new RunnerBootSelfTestError("fixture_launch_failed");
-  }
-
-  return imageId;
+  throw new RunnerBootSelfTestError("fixture_launch_failed");
 }
 
 export async function projectRunnerBootFixtureHermesHome(input: {

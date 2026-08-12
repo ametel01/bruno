@@ -33,13 +33,18 @@ describe("runner boot self-test", () => {
     const calls: string[][] = [];
     let syntheticLaunchAttempts = 0;
     let reconciliationReads = 0;
+    let imageInspectAttempts = 0;
     const executor = createDockerRunnerBootSelfTestExecutor({
       root,
       hermesImage,
       docker: async (_executable, args) => {
         calls.push([...args]);
         if (args[0] === "network") return { stdout: "fixture-network\n", stderr: "" };
-        if (args[0] === "image") return { stdout: JSON.stringify(localImageId), stderr: "" };
+        if (args[0] === "image") {
+          imageInspectAttempts += 1;
+          if (imageInspectAttempts === 1) throw new Error("image store is still stabilizing");
+          return { stdout: JSON.stringify(localImageId), stderr: "" };
+        }
         if (args[0] === "ps") {
           reconciliationReads += 1;
           return { stdout: reconciliationReads === 1 ? "abcdef012345\n" : "", stderr: "" };
@@ -61,6 +66,7 @@ describe("runner boot self-test", () => {
     );
     expect(calls).toContainEqual(["image", "inspect", "--format", "{{json .Id}}", hermesImage]);
     expect(calls).toContainEqual(["rm", "--force", "abcdef012345"]);
+    expect(imageInspectAttempts).toBe(2);
     expect(syntheticLaunchAttempts).toBe(6);
     expect(
       buildRunnerBootFixturePlan({
