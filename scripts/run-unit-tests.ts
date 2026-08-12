@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import postgres from "postgres";
+import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
 
 const DEFAULT_DATABASE_URL = "postgres://bruno:bruno@127.0.0.1:54329/bruno";
 const DEFAULT_APP_URL = "http://localhost:3000";
@@ -103,6 +104,7 @@ export async function runUnitTests(
     // live snapshot/release configuration cannot change default-path test behavior.
     BRUNO_DIGITALOCEAN_IMAGE_MODE: "stock",
     BRUNO_DOCKER_RUNNER_IMAGE: DEFAULT_TEST_DOCKER_RUNNER_IMAGE,
+    BRUNO_HERMES_WORKLOAD_IMAGE: DEFAULT_HERMES_WORKLOAD_IMAGE,
     BRUNO_RUNNER_BOOT_VALIDATION_MODE: "full",
     DATABASE_URL: plan.databaseUrl,
     NEXT_PUBLIC_APP_URL: DEFAULT_APP_URL,

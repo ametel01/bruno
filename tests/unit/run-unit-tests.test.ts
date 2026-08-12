@@ -6,6 +6,7 @@ import {
   type UnitTestCommand,
   type UnitTestDatabasePlan,
 } from "@/scripts/run-unit-tests";
+import { DEFAULT_HERMES_WORKLOAD_IMAGE } from "@/src/runner-service/constants";
 
 const BASE_DATABASE_URL = "postgres://bruno:bruno@127.0.0.1:54329/bruno";
 
@@ -44,6 +45,7 @@ describe("isolated unit-test database runner", () => {
       databaseUrl: string;
       digitalOceanImageMode: string;
       dockerRunnerImage: string;
+      hermesWorkloadImage: string;
     }> = [];
 
     const result = await runUnitTests(
@@ -51,6 +53,7 @@ describe("isolated unit-test database runner", () => {
         DATABASE_URL: BASE_DATABASE_URL,
         BRUNO_DIGITALOCEAN_IMAGE_MODE: "snapshot",
         BRUNO_DOCKER_RUNNER_IMAGE: "registry.example/agent@sha256:release",
+        BRUNO_HERMES_WORKLOAD_IMAGE: "registry.example/hermes@sha256:release",
         BRUNO_RUNNER_BOOT_VALIDATION_MODE: "release_attested",
         NEXT_PUBLIC_APP_URL: "https://development-tunnel.example",
       },
@@ -72,6 +75,7 @@ describe("isolated unit-test database runner", () => {
             databaseUrl: env.DATABASE_URL ?? "",
             digitalOceanImageMode: env.BRUNO_DIGITALOCEAN_IMAGE_MODE ?? "",
             dockerRunnerImage: env.BRUNO_DOCKER_RUNNER_IMAGE ?? "",
+            hermesWorkloadImage: env.BRUNO_HERMES_WORKLOAD_IMAGE ?? "",
           });
           return 0;
         },
@@ -90,6 +94,7 @@ describe("isolated unit-test database runner", () => {
         databaseUrl: isolatedUrl,
         digitalOceanImageMode: "stock",
         dockerRunnerImage: "busybox:1.36",
+        hermesWorkloadImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
       },
       {
         appUrl: "http://localhost:3000",
@@ -101,6 +106,7 @@ describe("isolated unit-test database runner", () => {
         databaseUrl: isolatedUrl,
         digitalOceanImageMode: "stock",
         dockerRunnerImage: "busybox:1.36",
+        hermesWorkloadImage: DEFAULT_HERMES_WORKLOAD_IMAGE,
       },
     ]);
     expect(events).toEqual([
