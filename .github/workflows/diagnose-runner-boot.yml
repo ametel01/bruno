@@ -47,7 +47,7 @@ jobs:
           set -euo pipefail
           mkdir -p runner-boot-diagnostic
           install -m 0700 -d "${DIAGNOSTIC_ROOT}"
-          cat > "${DIAGNOSTIC_ROOT}/docker-wrapper" <<'SH'
+          cat > "${DIAGNOSTIC_ROOT}/docker" <<'SH'
           #!/usr/bin/env bash
           set -uo pipefail
           STDERR_FILE="$(mktemp "${DIAGNOSTIC_ROOT}/docker-stderr.XXXXXX")"
@@ -73,7 +73,7 @@ jobs:
           rm --force "${STDOUT_FILE}" "${STDERR_FILE}"
           exit "${STATUS}"
           SH
-          chmod 0700 "${DIAGNOSTIC_ROOT}/docker-wrapper"
+          chmod 0700 "${DIAGNOSTIC_ROOT}/docker"
           docker events \
             --filter type=container \
             --filter type=network \
@@ -102,9 +102,10 @@ jobs:
             --volume /var/run/docker.sock:/var/run/docker.sock \
             --volume "${DIAGNOSTIC_ROOT}:${DIAGNOSTIC_ROOT}" \
             --env DIAGNOSTIC_ROOT="${DIAGNOSTIC_ROOT}" \
+            --env PATH="${DIAGNOSTIC_ROOT}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
             --env BRUNO_RUNNER_HOST=0.0.0.0 \
             --env BRUNO_RUNNER_BEARER_TOKEN="${RUNNER_TOKEN}" \
-            --env BRUNO_RUNNER_DOCKER_EXECUTABLE="${DIAGNOSTIC_ROOT}/docker-wrapper" \
+            --env BRUNO_RUNNER_DOCKER_EXECUTABLE="${DIAGNOSTIC_ROOT}/docker" \
             --env BRUNO_RUNNER_BOOT_SNAPSHOT_PATH="${DIAGNOSTIC_ROOT}/boot-readiness.json" \
             --env BRUNO_RUNNER_BOOT_SELF_TEST_ROOT="${DIAGNOSTIC_ROOT}/boot-self-test" \
             --env BRUNO_HERMES_STATE_ROOT="${DIAGNOSTIC_ROOT}/agents" \
