@@ -18,6 +18,7 @@ import {
   agentEvents,
   agentSecrets,
   agents,
+  providerTrialAuthorizationEvents,
   providerTrialRuns,
   providerTrialSlotCleanupEvents,
   providerTrialSlots,
@@ -140,6 +141,14 @@ describe("resumable Provider Trial driver", () => {
       generation: 1,
       idHash: createHash("sha256").update("auth-local-001").digest("hex"),
     });
+    expect(report.authorizationEvidence).toMatchObject([
+      {
+        generation: 1,
+        authorizationIdHash: createHash("sha256").update("auth-local-001").digest("hex"),
+        prerequisiteGateEvidenceDigest: `sha256:${"f".repeat(64)}`,
+        deploymentChoicesDigest: providerTrialDeploymentChoicesDigest(DEPLOYMENT_CHOICES),
+      },
+    ]);
     expect(report.configuration).toMatchObject({
       digitalOceanAccountIdentityHash: `sha256:${"a".repeat(64)}`,
       telegramBotIdentityHash: `sha256:${"b".repeat(64)}`,
@@ -451,7 +460,11 @@ describe("resumable Provider Trial driver", () => {
     await expect(
       resumeProviderTrialDriver(
         connection,
-        { cohortId: cohort.id, authorization: { id: "auth-local-002", generation: 2 } },
+        {
+          cohortId: cohort.id,
+          authorization: { id: "auth-local-002", generation: 2 },
+          authorizationEvidence: unchangedRenewalEvidence(),
+        },
         {
           async executeSlot() {
             return {
@@ -467,6 +480,157 @@ describe("resumable Provider Trial driver", () => {
         },
       ),
     ).resolves.toMatchObject({ state: "running", nextSlotNumber: 3 });
+  });
+
+  it("binds a renewed authorization to its new gates and deployment choices", async () => {
+    const cohort = await createCohort(connection, "provider-trial-driver-renewed-binding");
+    const keys = generateKeyPairSync("ed25519");
+    await initializeProviderTrialDriver(connection, {
+      cohortId: cohort.id,
+      authorization: { id: "auth-local-001", generation: 1 },
+      configuration: configuration(),
+    });
+    await resumeProviderTrialDriver(
+      connection,
+      { cohortId: cohort.id, authorization: { id: "auth-local-001", generation: 1 } },
+      {
+        async executeSlot() {
+          return {
+            outcome: "safety_pause",
+            safeCode: "safety_failure",
+            costCents: 0,
+            activeProviderResources: 0,
+          };
+        },
+        async cleanup() {
+          return { ok: true, authoritative: true, remainingResourceIds: [] };
+        },
+      },
+    );
+
+    const renewedGateDigest = `sha256:${"8".repeat(64)}`;
+    const renewedChoicesDigest = `sha256:${"9".repeat(64)}`;
+    await expect(
+      resumeProviderTrialDriver(
+        connection,
+        {
+          cohortId: cohort.id,
+          authorization: { id: "auth-local-002", generation: 2 },
+          authorizationEvidence: {
+            prerequisiteGateEvidenceDigest: renewedGateDigest,
+            deploymentChoicesDigest: renewedChoicesDigest,
+          },
+        },
+        {
+          async executeSlot(_attempt, context) {
+            expect(context.authorizationScope.deploymentChoicesDigest).toBe(renewedChoicesDigest);
+            return {
+              outcome: "pre_commit_failure",
+              safeCode: "request_rejected",
+              costCents: 0,
+              activeProviderResources: 0,
+            };
+          },
+          async cleanup() {
+            return { ok: true, authoritative: true, remainingResourceIds: [] };
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ state: "running", nextSlotNumber: 3 });
+
+    const evidence = await connection.db
+      .select()
+      .from(providerTrialAuthorizationEvents)
+      .orderBy(providerTrialAuthorizationEvents.generation);
+    expect(evidence).toMatchObject([
+      {
+        generation: 1,
+        prerequisiteGateEvidenceDigest: `sha256:${"f".repeat(64)}`,
+        deploymentChoicesDigest: providerTrialDeploymentChoicesDigest(DEPLOYMENT_CHOICES),
+      },
+      {
+        generation: 2,
+        prerequisiteGateEvidenceDigest: renewedGateDigest,
+        deploymentChoicesDigest: renewedChoicesDigest,
+        renewedFromPauseReason: "safety_pause",
+        renewedFromPausedAt: expect.any(Date),
+      },
+    ]);
+
+    for (let slot = 3; slot <= 30; slot += 1) {
+      await resumeProviderTrialDriver(
+        connection,
+        {
+          cohortId: cohort.id,
+          authorization: { id: "auth-local-002", generation: 2 },
+          authorizationEvidence: {
+            prerequisiteGateEvidenceDigest: renewedGateDigest,
+            deploymentChoicesDigest: renewedChoicesDigest,
+          },
+        },
+        {
+          async executeSlot() {
+            return {
+              outcome: "pre_commit_failure",
+              safeCode: "request_rejected",
+              costCents: 0,
+              activeProviderResources: 0,
+            };
+          },
+          async cleanup() {
+            return { ok: true, authoritative: true, remainingResourceIds: [] };
+          },
+        },
+      );
+    }
+    await resumeProviderTrialDriver(
+      connection,
+      {
+        cohortId: cohort.id,
+        authorization: { id: "auth-local-002", generation: 2 },
+        authorizationEvidence: {
+          prerequisiteGateEvidenceDigest: renewedGateDigest,
+          deploymentChoicesDigest: renewedChoicesDigest,
+        },
+      },
+      {
+        async executeSlot() {
+          throw new Error("All original slots have been consumed.");
+        },
+        async cleanup() {
+          return { ok: true, authoritative: true, remainingResourceIds: [] };
+        },
+        signing: {
+          keyId: "provider-trial-local",
+          privateKeyPem: keys.privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+        },
+      },
+    );
+    const [completed] = await connection.db
+      .select()
+      .from(providerTrialRuns)
+      .where(eq(providerTrialRuns.cohortId, cohort.id));
+    const report = JSON.parse(completed?.signedReportBytes ?? "{}") as Record<string, unknown>;
+    expect(report.configuration).toMatchObject({
+      prerequisiteGateEvidenceDigest: renewedGateDigest,
+      deploymentChoicesDigest: renewedChoicesDigest,
+    });
+    expect(report.authorizationEvidence).toHaveLength(2);
+    expect((report.authorizationEvidence as Array<Record<string, unknown>>)[1]).toMatchObject({
+      renewedFromPauseReason: "safety_pause",
+      renewedFromPausedAt: expect.stringMatching(/Z$/),
+    });
+    expect(
+      verifyProviderTrialDriverReport({
+        canonicalBytes: completed?.signedReportBytes ?? "",
+        digest: completed?.signedReportDigest ?? "",
+        keyId: completed?.signedReportKeyId ?? "",
+        signature: completed?.signedReportSignature ?? "",
+        trustedPublicKeys: {
+          "provider-trial-local": keys.publicKey.export({ format: "pem", type: "spki" }).toString(),
+        },
+      }),
+    ).toBe(true);
   });
 
   it("rejects mutation of the durable provider authorization configuration", async () => {
@@ -486,6 +650,12 @@ describe("resumable Provider Trial driver", () => {
     ).rejects.toThrow();
     await expect(
       connection.db.delete(providerTrialRuns).where(eq(providerTrialRuns.cohortId, cohort.id)),
+    ).rejects.toThrow();
+    await expect(
+      connection.db
+        .update(providerTrialAuthorizationEvents)
+        .set({ prerequisiteGateEvidenceDigest: `sha256:${"0".repeat(64)}` })
+        .where(eq(providerTrialAuthorizationEvents.cohortId, cohort.id)),
     ).rejects.toThrow();
     await expect(
       initializeProviderTrialDriver(connection, {
@@ -524,7 +694,11 @@ describe("resumable Provider Trial driver", () => {
     await expect(
       resumeProviderTrialDriver(
         connection,
-        { cohortId: cohort.id, authorization: { id: "auth-local-002", generation: 2 } },
+        {
+          cohortId: cohort.id,
+          authorization: { id: "auth-local-002", generation: 2 },
+          authorizationEvidence: unchangedRenewalEvidence(),
+        },
         {
           async executeSlot() {
             throw new Error("Reconciliation must preserve the original provider request.");
@@ -726,7 +900,11 @@ describe("resumable Provider Trial driver", () => {
     await expect(
       resumeProviderTrialDriver(
         connection,
-        { cohortId: cohort.id, authorization: { id: "auth-local-002", generation: 2 } },
+        {
+          cohortId: cohort.id,
+          authorization: { id: "auth-local-002", generation: 2 },
+          authorizationEvidence: unchangedRenewalEvidence(),
+        },
         {
           executeSlot,
           async cleanup() {
@@ -814,7 +992,11 @@ describe("resumable Provider Trial driver", () => {
     await expect(
       resumeProviderTrialDriver(
         connection,
-        { cohortId: cohort.id, authorization: { id: "auth-local-002", generation: 2 } },
+        {
+          cohortId: cohort.id,
+          authorization: { id: "auth-local-002", generation: 2 },
+          authorizationEvidence: unchangedRenewalEvidence(),
+        },
         {
           async executeSlot() {
             throw new Error("A timed-out request must be reconciled, not replayed blindly.");
@@ -1125,6 +1307,13 @@ function configuration(
     prerequisiteGateEvidenceDigest: `sha256:${"f".repeat(64)}`,
     evidenceRetentionDays: 90,
     ...overrides,
+  };
+}
+
+function unchangedRenewalEvidence() {
+  return {
+    prerequisiteGateEvidenceDigest: `sha256:${"f".repeat(64)}`,
+    deploymentChoicesDigest: providerTrialDeploymentChoicesDigest(DEPLOYMENT_CHOICES),
   };
 }
 

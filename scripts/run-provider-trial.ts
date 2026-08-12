@@ -3,7 +3,8 @@ import { createHash, createPrivateKey, createPublicKey, sign, verify } from "nod
 import { lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
+import { CURRENT_ROLLOUT_CONFIGURATION_GENERATION } from "@/src/server/agents/deployment-slo-identity";
 import { createProviderTrialCohort } from "@/src/server/agents/provider-trial-cohort";
 import {
   initializeProviderTrialDriver,
@@ -13,17 +14,21 @@ import {
 } from "@/src/server/agents/provider-trial-driver";
 import {
   listProviderTrialPreflightIssues,
-  parseProviderTrialOperatorConfiguration,
+  matchesProviderTrialGateEvidence,
   PROVIDER_TRIAL_APPROVED_SCOPE,
+  parseProviderTrialOperatorConfiguration,
 } from "@/src/server/agents/provider-trial-operator-config";
 import {
   readProviderTrialBenchmarkOwner,
   resolveProviderTrialBenchmarkOwner,
 } from "@/src/server/agents/provider-trial-owner";
 import { createProviderTrialProductionDriverDependencies } from "@/src/server/agents/provider-trial-production-adapter";
-import { CURRENT_ROLLOUT_CONFIGURATION_GENERATION } from "@/src/server/agents/deployment-slo-identity";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
-import { providerTrialCohorts, providerTrialRuns } from "@/src/server/db/schema";
+import {
+  providerTrialAuthorizationEvents,
+  providerTrialCohorts,
+  providerTrialRuns,
+} from "@/src/server/db/schema";
 
 type Command = "preflight" | "verify-gates" | "initialize" | "run" | "verify-credential-cleanup";
 type OperatorConfig = NonNullable<ReturnType<typeof parseProviderTrialOperatorConfiguration>>;
@@ -168,6 +173,8 @@ async function initialize(
     .select({
       cohortId: providerTrialRuns.cohortId,
       configuration: providerTrialRuns.configuration,
+      state: providerTrialRuns.state,
+      authorizationGeneration: providerTrialRuns.authorizationGeneration,
     })
     .from(providerTrialRuns)
     .where(eq(providerTrialRuns.cohortId, cohort.id))
@@ -196,7 +203,13 @@ async function initialize(
         evidenceRetentionDays: PROVIDER_TRIAL_APPROVED_SCOPE.evidenceRetentionDays,
       },
     });
-  } else if (!matchesGateEvidenceConfiguration(existing.configuration, gateEvidence)) {
+  } else if (
+    !matchesProviderTrialGateEvidence(
+      existing.configuration,
+      gateEvidence,
+      gateEvidenceModeBeforeLease(existing, config.authorization.generation),
+    )
+  ) {
     throw new Error("cohort_gate_evidence_mismatch");
   }
   write({
@@ -223,11 +236,22 @@ async function run(
     .limit(1);
   if (!ownerUserId || !cohort) throw new Error("trial_not_initialized");
   const [trialRun] = await connection.db
-    .select({ configuration: providerTrialRuns.configuration })
+    .select({
+      configuration: providerTrialRuns.configuration,
+      state: providerTrialRuns.state,
+      authorizationGeneration: providerTrialRuns.authorizationGeneration,
+    })
     .from(providerTrialRuns)
     .where(eq(providerTrialRuns.cohortId, cohort.id))
     .limit(1);
-  if (!trialRun || !matchesGateEvidenceConfiguration(trialRun.configuration, gateEvidence)) {
+  if (
+    !trialRun ||
+    !matchesProviderTrialGateEvidence(
+      trialRun.configuration,
+      gateEvidence,
+      gateEvidenceModeBeforeLease(trialRun, config.authorization.generation),
+    )
+  ) {
     throw new Error("cohort_gate_evidence_mismatch");
   }
 
@@ -243,7 +267,14 @@ async function run(
   do {
     result = await resumeProviderTrialDriver(
       connection,
-      { cohortId: cohort.id, authorization: config.authorization },
+      {
+        cohortId: cohort.id,
+        authorization: config.authorization,
+        authorizationEvidence: {
+          prerequisiteGateEvidenceDigest: gateEvidence.digest,
+          deploymentChoicesDigest: config.deploymentChoicesDigest,
+        },
+      },
       dependencies,
     );
   } while (result.state === "running" || result.state === "ready_to_finalize");
@@ -604,11 +635,27 @@ async function verifyCredentialCleanup(
     return 1;
   }
   const [run] = await connection.db
-    .select({ configuration: providerTrialRuns.configuration })
+    .select({
+      configuration: providerTrialRuns.configuration,
+      authorizationGeneration: providerTrialRuns.authorizationGeneration,
+    })
     .from(providerTrialRuns)
     .where(eq(providerTrialRuns.cohortId, cohort.id))
     .limit(1);
-  if (!run || !matchesGateEvidenceConfiguration(run.configuration, gateEvidence)) {
+  const [latestAuthorizationEvidence] = await connection.db
+    .select()
+    .from(providerTrialAuthorizationEvents)
+    .where(eq(providerTrialAuthorizationEvents.cohortId, cohort.id))
+    .orderBy(desc(providerTrialAuthorizationEvents.generation))
+    .limit(1);
+  if (
+    !run ||
+    run.authorizationGeneration !== config.authorization.generation ||
+    !latestAuthorizationEvidence ||
+    latestAuthorizationEvidence.generation !== config.authorization.generation ||
+    latestAuthorizationEvidence.prerequisiteGateEvidenceDigest !== gateEvidence.digest ||
+    latestAuthorizationEvidence.deploymentChoicesDigest !== config.deploymentChoicesDigest
+  ) {
     return 1;
   }
 
@@ -816,19 +863,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function matchesGateEvidenceConfiguration(
-  value: unknown,
-  gateEvidence: VerifiedGateEvidence,
-): boolean {
-  if (!isRecord(value) || value.prerequisiteGateEvidenceDigest !== gateEvidence.digest) {
-    return false;
-  }
-  return (
-    value.digitalOceanAccountIdentityHash === gateEvidence.identities.digitalOceanAccount &&
-    value.telegramBotIdentityHash === gateEvidence.identities.telegramBot &&
-    value.telegramChatIdentityHash === gateEvidence.identities.telegramChat &&
-    value.telegramUserIdentityHash === gateEvidence.identities.telegramUser
-  );
+function gateEvidenceModeBeforeLease(
+  run: { state: string; authorizationGeneration: number },
+  incomingGeneration: number,
+): "exact" | "renewed_authorization" {
+  return run.state === "paused" && incomingGeneration > run.authorizationGeneration
+    ? "renewed_authorization"
+    : "exact";
 }
 
 try {

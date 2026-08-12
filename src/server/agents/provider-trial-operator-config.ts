@@ -2,18 +2,18 @@ import "server-only";
 
 import { parseRunnerReleaseBundle } from "@/src/runner-service/release-attestation";
 import { captureAgentDeploymentChoicesFromEnvironment } from "@/src/server/agents/agent-deployment-choices";
+import { fingerprintTelegramBotTokenForUniqueness } from "@/src/server/agents/agent-secrets";
 import {
+  type AssistantChoice,
   getAssistantProfile,
   isAssistantChoice,
-  type AssistantChoice,
   validateAssistantApiKey,
 } from "@/src/server/agents/assistant-profiles";
-import { fingerprintTelegramBotTokenForUniqueness } from "@/src/server/agents/agent-secrets";
+import { CURRENT_ROLLOUT_CONFIGURATION_GENERATION } from "@/src/server/agents/deployment-slo-identity";
 import {
   providerTrialBenchmarkTelegramIdentityHash,
   providerTrialDeploymentChoicesDigest,
 } from "@/src/server/agents/provider-trial-driver";
-import { CURRENT_ROLLOUT_CONFIGURATION_GENERATION } from "@/src/server/agents/deployment-slo-identity";
 
 export const PROVIDER_TRIAL_AUTHORIZATION = {
   id: "issue-299-20260812-g2",
@@ -91,6 +91,35 @@ export type ProviderTrialOperatorConfiguration = {
   gateEvidencePath: string;
   credentialFilePath: string;
 };
+
+type ProviderTrialGateEvidenceBinding = {
+  digest: string;
+  identities: {
+    digitalOceanAccount: string;
+    telegramBot: string;
+    telegramChat: string;
+    telegramUser: string;
+  };
+};
+
+export function matchesProviderTrialGateEvidence(
+  value: unknown,
+  gateEvidence: ProviderTrialGateEvidenceBinding,
+  mode: "exact" | "renewed_authorization",
+): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const configuration = value as Record<string, unknown>;
+  const identitiesMatch =
+    configuration.digitalOceanAccountIdentityHash === gateEvidence.identities.digitalOceanAccount &&
+    configuration.telegramBotIdentityHash === gateEvidence.identities.telegramBot &&
+    configuration.telegramChatIdentityHash === gateEvidence.identities.telegramChat &&
+    configuration.telegramUserIdentityHash === gateEvidence.identities.telegramUser;
+  if (!identitiesMatch) return false;
+  return (
+    configuration.prerequisiteGateEvidenceDigest === gateEvidence.digest ||
+    mode === "renewed_authorization"
+  );
+}
 
 export function listProviderTrialPreflightIssues(
   env: Readonly<Record<string, string | undefined>>,

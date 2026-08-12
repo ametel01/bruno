@@ -1,0 +1,3 @@
+ALTER TABLE "provider_trial_authorization_events" ADD COLUMN "renewed_from_paused_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "provider_trial_authorization_events" ADD COLUMN "renewed_from_pause_reason" text;--> statement-breakpoint
+ALTER TABLE "provider_trial_authorization_events" ADD CONSTRAINT "provider_trial_authorization_events_pause_pair_check" CHECK (("provider_trial_authorization_events"."renewed_from_paused_at" IS NULL AND "provider_trial_authorization_events"."renewed_from_pause_reason" IS NULL) OR ("provider_trial_authorization_events"."renewed_from_paused_at" IS NOT NULL AND "provider_trial_authorization_events"."renewed_from_pause_reason" IS NOT NULL));

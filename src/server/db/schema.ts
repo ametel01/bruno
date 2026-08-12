@@ -926,6 +926,46 @@ export const providerTrialRuns = pgTable(
   ],
 );
 
+export const providerTrialAuthorizationEvents = pgTable(
+  "provider_trial_authorization_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cohortId: uuid("cohort_id")
+      .notNull()
+      .references(() => providerTrialRuns.cohortId, { onDelete: "restrict" }),
+    generation: integer("generation").notNull(),
+    authorizationIdHash: text("authorization_id_hash").notNull(),
+    prerequisiteGateEvidenceDigest: text("prerequisite_gate_evidence_digest").notNull(),
+    deploymentChoicesDigest: text("deployment_choices_digest").notNull(),
+    renewedFromPausedAt: timestamp("renewed_from_paused_at", { withTimezone: true }),
+    renewedFromPauseReason: text("renewed_from_pause_reason"),
+    authorizedAt: timestamp("authorized_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("provider_trial_authorization_events_generation_idx").on(
+      table.cohortId,
+      table.generation,
+    ),
+    check("provider_trial_authorization_events_generation_check", sql`${table.generation} >= 1`),
+    check(
+      "provider_trial_authorization_events_id_hash_check",
+      sql`${table.authorizationIdHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check(
+      "provider_trial_authorization_events_gate_digest_check",
+      sql`${table.prerequisiteGateEvidenceDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "provider_trial_authorization_events_choices_digest_check",
+      sql`${table.deploymentChoicesDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+    ),
+    check(
+      "provider_trial_authorization_events_pause_pair_check",
+      sql`(${table.renewedFromPausedAt} IS NULL AND ${table.renewedFromPauseReason} IS NULL) OR (${table.renewedFromPausedAt} IS NOT NULL AND ${table.renewedFromPauseReason} IS NOT NULL)`,
+    ),
+  ],
+);
+
 export const coldDeploymentSloEvaluations = pgTable(
   "cold_deployment_slo_evaluations",
   {

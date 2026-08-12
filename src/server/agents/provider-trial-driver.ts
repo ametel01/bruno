@@ -7,8 +7,8 @@ import {
   parseAgentDeploymentChoices,
 } from "@/src/server/agents/agent-deployment-choices";
 import {
-  buildAgentDeploymentLatencyReportForDatabase,
   type AgentDeploymentLatencyStageSummary,
+  buildAgentDeploymentLatencyReportForDatabase,
   summarizeAgentDeploymentLatencyStages,
 } from "@/src/server/agents/agent-deployment-latency";
 import {
@@ -26,13 +26,14 @@ import type { DatabaseConnection } from "@/src/server/db/client";
 import {
   agentDeployments,
   agentSecrets,
+  providerTrialAuthorizationEvents,
   providerTrialCohorts,
   providerTrialRuns,
   providerTrialSlotCleanupEvents,
   providerTrialSlots,
 } from "@/src/server/db/schema";
 
-export const PROVIDER_TRIAL_DRIVER_REPORT_SCHEMA_VERSION = "bruno.provider-trial-driver.v2";
+export const PROVIDER_TRIAL_DRIVER_REPORT_SCHEMA_VERSION = "bruno.provider-trial-driver.v3";
 const PROVIDER_TRIAL_CHECKPOINT_SCHEMA_VERSION = "bruno.provider-trial-checkpoint.v1";
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/;
 const SHA256_HEX = /^[a-f0-9]{64}$/;
@@ -70,6 +71,10 @@ export type ProviderTrialDriverConfiguration = {
 };
 
 type Authorization = { id: string; generation: number };
+type AuthorizationEvidence = {
+  prerequisiteGateEvidenceDigest: string;
+  deploymentChoicesDigest: string;
+};
 type CleanupEvidence = { ok: boolean; authoritative: boolean; remainingResourceIds: string[] };
 type SlotCleanupEvidence = {
   slotNumber: number;
@@ -193,6 +198,7 @@ function isValidProviderTrialDriverReport(value: Record<string, unknown>): boole
         "cohort",
         "configuration",
         "authorization",
+        "authorizationEvidence",
         "generatedAt",
         "schemaVersion",
         "slotCleanup",
@@ -212,6 +218,7 @@ function isValidProviderTrialDriverReport(value: Record<string, unknown>): boole
     !Number.isSafeInteger(value.authorization.generation) ||
     Number(value.authorization.generation) < 1 ||
     !SHA256_HEX.test(String(value.authorization.idHash)) ||
+    !isValidAuthorizationEvidence(value.authorizationEvidence, value.authorization) ||
     !isRecord(value.cleanup) ||
     Object.keys(value.cleanup).sort().join("\0") !==
       ["authoritative", "ok", "remainingResourceCount"].sort().join("\0") ||
@@ -239,13 +246,65 @@ function isValidProviderTrialDriverReport(value: Record<string, unknown>): boole
   }
   try {
     const configuration = parseConfiguration(value.configuration);
+    const latestAuthorizationEvidence = Array.isArray(value.authorizationEvidence)
+      ? value.authorizationEvidence.at(-1)
+      : null;
     return (
       configuration.authorizedRegion === value.cohort.cohort.region &&
-      configuration.authorizedRunnerSizeSlug === value.cohort.cohort.runnerSizeSlug
+      configuration.authorizedRunnerSizeSlug === value.cohort.cohort.runnerSizeSlug &&
+      isRecord(latestAuthorizationEvidence) &&
+      latestAuthorizationEvidence.prerequisiteGateEvidenceDigest ===
+        configuration.prerequisiteGateEvidenceDigest &&
+      latestAuthorizationEvidence.deploymentChoicesDigest === configuration.deploymentChoicesDigest
     );
   } catch {
     return false;
   }
+}
+
+function isValidAuthorizationEvidence(value: unknown, authorization: Record<string, unknown>) {
+  if (!Array.isArray(value) || value.length < 1) return false;
+  let previousGeneration = 0;
+  for (const event of value) {
+    if (
+      !isRecord(event) ||
+      Object.keys(event).sort().join("\0") !==
+        [
+          "authorizationIdHash",
+          "authorizedAt",
+          "deploymentChoicesDigest",
+          "generation",
+          "prerequisiteGateEvidenceDigest",
+          "renewedFromPauseReason",
+          "renewedFromPausedAt",
+        ]
+          .sort()
+          .join("\0") ||
+      !Number.isSafeInteger(event.generation) ||
+      Number(event.generation) <= previousGeneration ||
+      !SHA256_HEX.test(String(event.authorizationIdHash)) ||
+      !SHA256_DIGEST.test(String(event.prerequisiteGateEvidenceDigest)) ||
+      !SHA256_DIGEST.test(String(event.deploymentChoicesDigest)) ||
+      !(
+        (event.renewedFromPausedAt === null && event.renewedFromPauseReason === null) ||
+        (typeof event.renewedFromPausedAt === "string" &&
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(event.renewedFromPausedAt) &&
+          typeof event.renewedFromPauseReason === "string" &&
+          event.renewedFromPauseReason.length > 0)
+      ) ||
+      typeof event.authorizedAt !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(event.authorizedAt)
+    ) {
+      return false;
+    }
+    previousGeneration = Number(event.generation);
+  }
+  const latest = value.at(-1);
+  return (
+    isRecord(latest) &&
+    latest.generation === authorization.generation &&
+    latest.authorizationIdHash === authorization.idHash
+  );
 }
 
 function isValidStageDistributions(
@@ -389,17 +448,31 @@ export async function initializeProviderTrialDriver(
   ) {
     throw new Error("Provider Trial authorization scope does not match the immutable cohort.");
   }
-  await connection.db.insert(providerTrialRuns).values({
-    cohortId: input.cohortId,
-    configuration: input.configuration,
-    authorizationGeneration: input.authorization.generation,
-    authorizationIdHash: authorizationHash(input.authorization.id),
+  await connection.db.transaction(async (tx) => {
+    const authorizationIdHash = authorizationHash(input.authorization.id);
+    await tx.insert(providerTrialRuns).values({
+      cohortId: input.cohortId,
+      configuration: input.configuration,
+      authorizationGeneration: input.authorization.generation,
+      authorizationIdHash,
+    });
+    await tx.insert(providerTrialAuthorizationEvents).values({
+      cohortId: input.cohortId,
+      generation: input.authorization.generation,
+      authorizationIdHash,
+      prerequisiteGateEvidenceDigest: input.configuration.prerequisiteGateEvidenceDigest,
+      deploymentChoicesDigest: input.configuration.deploymentChoicesDigest,
+    });
   });
 }
 
 export async function resumeProviderTrialDriver(
   connection: DatabaseConnection,
-  input: { cohortId: string; authorization: Authorization },
+  input: {
+    cohortId: string;
+    authorization: Authorization;
+    authorizationEvidence?: AuthorizationEvidence;
+  },
   dependencies: ProviderTrialDriverDependencies,
 ): Promise<{
   state: "running" | "paused" | "ready_to_finalize" | "complete";
@@ -408,10 +481,16 @@ export async function resumeProviderTrialDriver(
   signedReportDigest?: string;
 }> {
   assertAuthorization(input.authorization);
+  if (input.authorizationEvidence) assertAuthorizationEvidence(input.authorizationEvidence);
   const startedAt = dependencies.now?.() ?? new Date();
   const leaseOwner = `provider-trial:${dependencies.leaseOwner?.() ?? randomUUID()}`;
-  const run = await acquireRunLease(connection, input, startedAt, leaseOwner);
-  const configuration = parseConfiguration(run.configuration);
+  const leased = await acquireRunLease(connection, input, startedAt, leaseOwner);
+  const run = leased.run;
+  const configuration = {
+    ...parseConfiguration(run.configuration),
+    prerequisiteGateEvidenceDigest: leased.authorizationEvidence.prerequisiteGateEvidenceDigest,
+    deploymentChoicesDigest: leased.authorizationEvidence.deploymentChoicesDigest,
+  };
   if (run.state === "complete") {
     return {
       state: "complete",
@@ -743,7 +822,11 @@ async function buildSlotCleanupEvidence(
 
 async function acquireRunLease(
   connection: DatabaseConnection,
-  input: { cohortId: string; authorization: Authorization },
+  input: {
+    cohortId: string;
+    authorization: Authorization;
+    authorizationEvidence?: AuthorizationEvidence;
+  },
   now: Date,
   leaseOwner: string,
 ) {
@@ -756,7 +839,14 @@ async function acquireRunLease(
       .limit(1);
     if (!run) throw new Error("Provider Trial driver was not initialized.");
     const configuration = parseConfiguration(run.configuration);
-    if (run.state === "complete") return run;
+    const [currentEvidence] = await tx
+      .select()
+      .from(providerTrialAuthorizationEvents)
+      .where(eq(providerTrialAuthorizationEvents.cohortId, input.cohortId))
+      .orderBy(desc(providerTrialAuthorizationEvents.generation))
+      .limit(1);
+    if (!currentEvidence) throw new Error("Provider Trial authorization evidence is missing.");
+    if (run.state === "complete") return { run, authorizationEvidence: currentEvidence };
     if (run.leaseOwner && run.leaseExpiresAt && run.leaseExpiresAt.getTime() > now.getTime()) {
       throw new Error("Provider Trial run already has an active lease.");
     }
@@ -766,11 +856,43 @@ async function acquireRunLease(
       if (input.authorization.generation <= run.authorizationGeneration) {
         throw new Error("Provider Trial safety pause requires renewed authorization.");
       }
+      if (!input.authorizationEvidence) {
+        throw new Error("Provider Trial renewed authorization evidence is required.");
+      }
     } else if (
       input.authorization.generation !== run.authorizationGeneration ||
       incomingHash !== run.authorizationIdHash
     ) {
       throw new Error("Provider Trial authorization does not match the active run.");
+    }
+    if (
+      !renewing &&
+      input.authorizationEvidence &&
+      (input.authorizationEvidence.prerequisiteGateEvidenceDigest !==
+        currentEvidence.prerequisiteGateEvidenceDigest ||
+        input.authorizationEvidence.deploymentChoicesDigest !==
+          currentEvidence.deploymentChoicesDigest)
+    ) {
+      throw new Error("Provider Trial authorization evidence does not match the active run.");
+    }
+    const activeEvidence = renewing
+      ? {
+          prerequisiteGateEvidenceDigest:
+            input.authorizationEvidence?.prerequisiteGateEvidenceDigest ?? "",
+          deploymentChoicesDigest: input.authorizationEvidence?.deploymentChoicesDigest ?? "",
+        }
+      : currentEvidence;
+    if (renewing) {
+      await tx.insert(providerTrialAuthorizationEvents).values({
+        cohortId: input.cohortId,
+        generation: input.authorization.generation,
+        authorizationIdHash: incomingHash,
+        prerequisiteGateEvidenceDigest: activeEvidence.prerequisiteGateEvidenceDigest,
+        deploymentChoicesDigest: activeEvidence.deploymentChoicesDigest,
+        renewedFromPausedAt: run.pausedAt,
+        renewedFromPauseReason: run.pauseReason,
+        authorizedAt: now,
+      });
     }
     const [leased] = await tx
       .update(providerTrialRuns)
@@ -795,7 +917,7 @@ async function acquireRunLease(
       .where(eq(providerTrialRuns.cohortId, input.cohortId))
       .returning();
     if (!leased) throw new Error("Provider Trial lease acquisition failed.");
-    return leased;
+    return { run: leased, authorizationEvidence: activeEvidence };
   });
 }
 
@@ -838,6 +960,20 @@ async function finalizeRun(
     }),
   );
   const slotCleanup = await buildSlotCleanupEvidence(connection, run.cohortId);
+  const authorizationEvidence = await connection.db
+    .select({
+      generation: providerTrialAuthorizationEvents.generation,
+      authorizationIdHash: providerTrialAuthorizationEvents.authorizationIdHash,
+      prerequisiteGateEvidenceDigest:
+        providerTrialAuthorizationEvents.prerequisiteGateEvidenceDigest,
+      deploymentChoicesDigest: providerTrialAuthorizationEvents.deploymentChoicesDigest,
+      renewedFromPausedAt: providerTrialAuthorizationEvents.renewedFromPausedAt,
+      renewedFromPauseReason: providerTrialAuthorizationEvents.renewedFromPauseReason,
+      authorizedAt: providerTrialAuthorizationEvents.authorizedAt,
+    })
+    .from(providerTrialAuthorizationEvents)
+    .where(eq(providerTrialAuthorizationEvents.cohortId, run.cohortId))
+    .orderBy(providerTrialAuthorizationEvents.generation);
   const report = {
     schemaVersion: PROVIDER_TRIAL_DRIVER_REPORT_SCHEMA_VERSION,
     generatedAt: now.toISOString(),
@@ -845,6 +981,11 @@ async function finalizeRun(
       idHash: run.authorizationIdHash,
       generation: run.authorizationGeneration,
     },
+    authorizationEvidence: authorizationEvidence.map((event) => ({
+      ...event,
+      authorizedAt: event.authorizedAt.toISOString(),
+      renewedFromPausedAt: event.renewedFromPausedAt?.toISOString() ?? null,
+    })),
     configuration,
     cohort: cohortReport,
     stages: Object.fromEntries(
@@ -1210,6 +1351,15 @@ function assertAuthorization(value: Authorization): void {
     value.generation < 1
   ) {
     throw new Error("Provider Trial authorization is invalid.");
+  }
+}
+
+function assertAuthorizationEvidence(value: AuthorizationEvidence): void {
+  if (
+    !SHA256_DIGEST.test(value.prerequisiteGateEvidenceDigest) ||
+    !SHA256_DIGEST.test(value.deploymentChoicesDigest)
+  ) {
+    throw new Error("Provider Trial authorization evidence is invalid.");
   }
 }
 
