@@ -132,6 +132,11 @@ runner, default-agent, and Hermes images selected by the Approved Snapshot. This
 transfer time outside the readiness deadline without changing the images or relaxing that deadline.
 Both synthetic-model and Hermes fixture launches use Docker's `never` pull policy, so the gate fails
 closed on a missing preload instead of contacting a registry from inside the runner.
+Each launch first resolves the approved digest-qualified reference to the daemon's canonical local
+content ID and executes that ID. The managed container retains the approved reference in a dedicated
+label; launch and status evidence require the label, local ID, container image ID, and current local
+reference lookup to remain an exact match. This avoids hidden multi-architecture registry resolution
+while preserving the immutable reference in externally reported evidence.
 The fixture also creates the Hermes bridge before provisioning and verifies that a nested container
 can reach the candidate control plane through that bridge's concrete Linux gateway. The local
 provider applies the same gateway to the runner callback while preserving Docker Desktop's native

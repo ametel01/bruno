@@ -68,6 +68,7 @@ const BRUNO_LAUNCH_SPEC_VERSION_LABEL = "bruno.launch_spec_version";
 const BRUNO_OPERATION_ID_LABEL = "bruno.operation_id";
 const BRUNO_OPERATION_ACTION_LABEL = "bruno.operation_action";
 const BRUNO_OPERATION_ACCEPTED_AT_LABEL = "bruno.operation_accepted_at";
+const BRUNO_IMAGE_REFERENCE_LABEL = "bruno.image_reference";
 const HERMES_DOCKER_CAP_DROP = ["ALL"] as const;
 const HERMES_DOCKER_CAP_ADD = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"] as const;
 const HERMES_DOCKER_SECURITY_OPT = ["no-new-privileges"] as const;
@@ -78,6 +79,7 @@ const CANARY_TIMEOUT_MS = 15_000;
 const MAX_PROBE_RESPONSE_BYTES = 64 * 1024;
 const MAX_DOCKER_IMAGE_IDENTITY_BYTES = 16 * 1024;
 const DOCKER_IMAGE_IDENTITY_FORMAT = '{"imageId":{{json .Id}},"repoDigests":{{json .RepoDigests}}}';
+const DOCKER_LOCAL_IMAGE_ID_FORMAT = "{{json .Id}}";
 const HERMES_CONTAINER_HEALTH_PROBE_SOURCE = `
 import json
 import sys
@@ -695,11 +697,13 @@ export class ManualRunnerDocker {
       this.project(launchSpec, { signal: token.controller.signal }),
     );
     this.throwIfLaunchTerminated(token);
+    const runtimeImageId = await this.resolveLaunchImageId(launchSpec.image.ref, token);
+    this.throwIfLaunchTerminated(token);
 
     const details = await this.listSelectedContainerDetails(agentId, token);
     this.throwIfLaunchTerminated(token);
     const winner = await this.runLaunchStep(token, () =>
-      this.findExactRunningWinner(details, launchSpec, projection),
+      this.findExactRunningWinner(details, launchSpec, projection, runtimeImageId),
     );
     let disposition: RunnerLaunchDisposition = "created";
     let selected: InspectedRunnerContainer | null = null;
@@ -732,6 +736,7 @@ export class ManualRunnerDocker {
             target: token.target,
             acceptedAt: token.acceptedAt,
           },
+          runtimeImageId,
         }),
       );
       const containerId = runResult.stdout.trim();
@@ -746,7 +751,7 @@ export class ManualRunnerDocker {
         const container = await this.inspectSelectedContainer(
           containerId,
           agentId,
-          { launchSpec, projection, runtime: this.hermes },
+          { launchSpec, projection, runtime: this.hermes, runtimeImageId },
           token,
         );
         selected = {
@@ -808,6 +813,9 @@ export class ManualRunnerDocker {
     const selected = chooseStatusContainer(details);
     const imageIdentity = await this.observeImageIdentity(selected.inspect);
     const operation = readOperationFromInspect(selected.inspect);
+    const referencedImageId = operation
+      ? await this.observeLocalImageId(operation.target.image)
+      : null;
     const revision = await readProjectedRevision(agentId, this.stateRoot);
     const requestedRevision =
       operation?.target.configRevision ??
@@ -839,7 +847,15 @@ export class ManualRunnerDocker {
     }
 
     if (
-      !hasExactStatusRuntimeEvidence(selected.inspect, agentId, operation, this.hermes, revision)
+      !hasExactStatusRuntimeEvidence(
+        selected.inspect,
+        agentId,
+        operation,
+        this.hermes,
+        revision,
+        imageIdentity,
+        referencedImageId,
+      )
     ) {
       return { ...base, phase: "failed", readinessReason: "revision_mismatch" };
     }
@@ -1071,6 +1087,19 @@ export class ManualRunnerDocker {
     }
   }
 
+  private async observeLocalImageId(imageReference: string): Promise<string | null> {
+    try {
+      const result = await this.runDocker(
+        ["image", "inspect", "--format", DOCKER_LOCAL_IMAGE_ID_FORMAT, imageReference],
+        { timeoutMs: STATUS_PROBE_TIMEOUT_MS },
+      );
+
+      return parseDockerLocalImageId(result.stdout);
+    } catch {
+      return null;
+    }
+  }
+
   private async callCanaryTransport(input: {
     apiServerKey: string;
     containerName: string;
@@ -1169,6 +1198,7 @@ export class ManualRunnerDocker {
     details: readonly InspectedRunnerContainer[],
     launchSpec: AgentLaunchSpec,
     projection: HermesProjectionResult,
+    runtimeImageId: string,
   ): Promise<InspectedRunnerContainer | null> {
     const exact = (
       await Promise.all(
@@ -1182,6 +1212,7 @@ export class ManualRunnerDocker {
               launchSpec,
               projection,
               runtime: this.hermes,
+              runtimeImageId,
             });
 
             return readOperationFromInspect(detail.inspect) ? detail : null;
@@ -1417,6 +1448,7 @@ export class ManualRunnerDocker {
       launchSpec: AgentLaunchSpec;
       projection: HermesProjectionResult;
       runtime: HermesDockerRuntimeOptions;
+      runtimeImageId: string;
     } | null = null,
     token?: LaunchToken,
   ): Promise<RunnerContainer> {
@@ -1449,6 +1481,23 @@ export class ManualRunnerDocker {
     }
 
     return inspect;
+  }
+
+  private async resolveLaunchImageId(imageReference: string, token: LaunchToken): Promise<string> {
+    const result = await this.runLaunchDocker(token, [
+      "image",
+      "inspect",
+      "--format",
+      DOCKER_LOCAL_IMAGE_ID_FORMAT,
+      imageReference,
+    ]);
+    const imageId = parseDockerLocalImageId(result.stdout);
+
+    if (!imageId) {
+      throw new HermesRevisionEvidenceError();
+    }
+
+    return imageId;
   }
 
   private runDocker(
@@ -1487,7 +1536,7 @@ function containerFromInspect(
   return {
     id: inspect.Id || fallbackId,
     name: inspect.Name?.replace(/^\//, "") || "",
-    image: inspect.Config?.Image || "",
+    image: inspect.Config?.Labels?.[BRUNO_IMAGE_REFERENCE_LABEL] ?? inspect.Config?.Image ?? "",
     status: inspect.State?.Status || "unknown",
     startedAt: normalizeDockerTimestamp(inspect.State?.StartedAt),
     finishedAt: normalizeDockerTimestamp(inspect.State?.FinishedAt),
@@ -1499,7 +1548,7 @@ function readOperationFromInspect(inspect: DockerInspectContainer): RunnerOperat
   const id = labels[BRUNO_OPERATION_ID_LABEL];
   const action = labels[BRUNO_OPERATION_ACTION_LABEL];
   const acceptedAt = labels[BRUNO_OPERATION_ACCEPTED_AT_LABEL];
-  const image = inspect.Config?.Image;
+  const image = labels[BRUNO_IMAGE_REFERENCE_LABEL];
   const launchSpecVersion = labels[BRUNO_LAUNCH_SPEC_VERSION_LABEL];
   const configRevision = labels[BRUNO_CONFIG_REVISION_LABEL];
   const parsedAcceptedAt = acceptedAt ? Date.parse(acceptedAt) : NaN;
@@ -1904,13 +1953,19 @@ function hasExactStatusRuntimeEvidence(
     stateRoot: string | null;
     version: string | null;
   },
+  imageIdentity: RunnerImageIdentity | null,
+  referencedImageId: string | null,
 ): boolean {
   const stateRoots = [
     ...new Set([marker.configuredStateRoot, marker.stateRoot].filter(Boolean)),
   ] as string[];
   const labels = inspect.Config?.Labels;
+  const runtimeImageId = normalizeDockerImageId(inspect.Image);
   const checks = {
-    image: inspect.Config?.Image === operation.target.image,
+    imageReference: labels?.[BRUNO_IMAGE_REFERENCE_LABEL] === operation.target.image,
+    configuredImage: normalizeDockerImageId(inspect.Config?.Image) === runtimeImageId,
+    referencedImage: referencedImageId === runtimeImageId,
+    imageIdentity: imageIdentity?.imageId === runtimeImageId,
     agentLabel: labels?.[BRUNO_AGENT_ID_LABEL] === agentId,
     versionLabel: labels?.[BRUNO_LAUNCH_SPEC_VERSION_LABEL] === operation.target.launchSpecVersion,
     revisionLabel: labels?.[BRUNO_CONFIG_REVISION_LABEL] === operation.target.configRevision,
@@ -2010,6 +2065,18 @@ function parseDockerImageIdentity(
 
 function normalizeDockerImageId(value: unknown): string | null {
   return typeof value === "string" && /^sha256:[0-9a-f]{64}$/.test(value) ? value : null;
+}
+
+function parseDockerLocalImageId(stdout: string): string | null {
+  if (Buffer.byteLength(stdout, "utf8") > MAX_DOCKER_IMAGE_IDENTITY_BYTES) {
+    return null;
+  }
+
+  try {
+    return normalizeDockerImageId(JSON.parse(stdout.trim()));
+  } catch {
+    return null;
+  }
 }
 
 function isDockerRepoDigest(value: unknown): value is string {
@@ -2232,9 +2299,14 @@ async function assertHermesInspectMatchesRuntime(
     launchSpec: AgentLaunchSpec;
     projection: HermesProjectionResult;
     runtime: HermesDockerRuntimeOptions;
+    runtimeImageId: string;
   },
 ): Promise<void> {
-  if (inspect.Config?.Image !== input.launchSpec.image.ref) {
+  if (
+    inspect.Config?.Image !== input.runtimeImageId ||
+    inspect.Image !== input.runtimeImageId ||
+    inspect.Config?.Labels?.[BRUNO_IMAGE_REFERENCE_LABEL] !== input.launchSpec.image.ref
+  ) {
     throw new HermesRevisionEvidenceError();
   }
 
@@ -2498,6 +2570,7 @@ export function buildHermesDockerRunArgs(input: {
   operation: RunnerOperation;
   projection: HermesProjectionResult;
   runtime: HermesDockerRuntimeOptions;
+  runtimeImageId: string;
 }): string[] {
   return [
     "run",
@@ -2520,6 +2593,8 @@ export function buildHermesDockerRunArgs(input: {
     `${BRUNO_OPERATION_ACTION_LABEL}=${input.operation.action}`,
     "--label",
     `${BRUNO_OPERATION_ACCEPTED_AT_LABEL}=${input.operation.acceptedAt}`,
+    "--label",
+    `${BRUNO_IMAGE_REFERENCE_LABEL}=${input.launchSpec.image.ref}`,
     ...(input.additionalLabels ?? []).flatMap(([name, value]) => ["--label", `${name}=${value}`]),
     "--network",
     input.runtime.network,
@@ -2547,7 +2622,7 @@ export function buildHermesDockerRunArgs(input: {
     "SETGID",
     "--cap-add",
     "SETUID",
-    input.launchSpec.image.ref,
+    input.runtimeImageId,
     "gateway",
     "run",
   ];

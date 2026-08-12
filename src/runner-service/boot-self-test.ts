@@ -619,6 +619,11 @@ async function launchDockerFixture(input: {
       timeoutMs: DOCKER_CLI_TIMEOUT_MS,
     },
   );
+  const fakeModelImageId = await resolveLocalDockerImageId(
+    input.docker,
+    fixturePlan.fakeModelImage,
+    input.signal,
+  );
   await input.docker(
     "docker",
     [
@@ -636,7 +641,7 @@ async function launchDockerFixture(input: {
       `${FIXTURE_LABEL}=${FIXTURE_LABEL_VALUE}`,
       "--entrypoint",
       "python",
-      fixturePlan.fakeModelImage,
+      fakeModelImageId,
       "-c",
       FAKE_MODEL_SERVER_SOURCE,
     ],
@@ -684,6 +689,31 @@ async function launchDockerFixture(input: {
     root: fixtureRoot,
     runner,
   };
+}
+
+async function resolveLocalDockerImageId(
+  docker: DockerExecutableRunner,
+  imageReference: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const result = await docker(
+    "docker",
+    ["image", "inspect", "--format", "{{json .Id}}", imageReference],
+    { signal, timeoutMs: DOCKER_CLI_TIMEOUT_MS },
+  );
+  let imageId: unknown;
+
+  try {
+    imageId = JSON.parse(result.stdout.trim());
+  } catch {
+    throw new RunnerBootSelfTestError("fixture_launch_failed");
+  }
+
+  if (typeof imageId !== "string" || !/^sha256:[0-9a-f]{64}$/.test(imageId)) {
+    throw new RunnerBootSelfTestError("fixture_launch_failed");
+  }
+
+  return imageId;
 }
 
 export async function projectRunnerBootFixtureHermesHome(input: {

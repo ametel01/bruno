@@ -340,11 +340,19 @@ describe("manual runner service HTTP contract", () => {
         expect.stringMatching(/^type=bind,source=.+\/hermes,target=\/opt\/data$/),
         "--mount",
         expect.stringMatching(/^type=bind,source=.+\/workspace,target=\/workspace$/),
-        sampleLaunchSpec().image.ref,
+        MOCK_IMAGE_ID,
         "gateway",
         "run",
       ]),
     );
+    expect(calls).toContainEqual([
+      "image",
+      "inspect",
+      "--format",
+      "{{json .Id}}",
+      sampleLaunchSpec().image.ref,
+    ]);
+    expect(managedRun).toContain(`bruno.image_reference=${sampleLaunchSpec().image.ref}`);
     expect(calls).not.toContainEqual(expect.arrayContaining(["-p"]));
     expect(calls).not.toContainEqual(expect.arrayContaining(["--publish"]));
     expect(JSON.stringify(calls)).not.toContain(sampleLaunchSpec().secrets.apiServerKey);
@@ -377,6 +385,35 @@ describe("manual runner service HTTP contract", () => {
       ok: false,
       error: { code: "docker_command_failed" },
     });
+  });
+
+  it.each([
+    "missing",
+    "malformed",
+  ])("fails closed before container creation when the local image ID is %s", async (imageIdCase) => {
+    const calls: string[][] = [];
+    const service = createReadyRunnerService({
+      authToken: "test-token",
+      docker: new ManualRunnerDocker({
+        command: testCommand(),
+        docker: createMockDocker({
+          calls,
+          localImageIdStdout: () =>
+            imageIdCase === "missing" ? "null" : JSON.stringify("sha256:not-a-content-id"),
+        }),
+        nameSuffix: () => "unit001",
+        projection: { project: createHermesProjectionForTest },
+      }),
+    });
+    const response = await service.fetch(
+      authorizedJsonRequest(
+        `/runner/v1/agents/${AGENT_ID}/start`,
+        sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } }),
+      ),
+    );
+
+    expect(response.status).toBe(502);
+    expect(calls.filter((args) => args[0] === "run")).toEqual([]);
   });
 
   it("fails closed when inspect reports extra Hermes Docker capabilities", async () => {
@@ -1039,7 +1076,7 @@ describe("manual runner service HTTP contract", () => {
       JSON.stringify({ imageId: MOCK_IMAGE_ID, repoDigests: [MOCK_REPO_DIGEST], rawInspect: {} }),
     ],
     ["oversized projection", "x".repeat(16 * 1024 + 1)],
-  ])("fails image identity evidence closed for %s without changing runtime readiness", async (_case, imageInspectStdout) => {
+  ])("fails runtime readiness closed for invalid %s evidence", async (_case, imageInspectStdout) => {
     await withHermesStateRootForTest(async () => {
       const docker = new ManualRunnerDocker({
         docker: createMockDocker({ imageInspectStdout: () => imageInspectStdout }),
@@ -1056,10 +1093,43 @@ describe("manual runner service HTTP contract", () => {
       const status = await docker.status(AGENT_ID);
 
       expect(status.snapshot).toMatchObject({
-        phase: "ready",
+        phase: "failed",
+        readinessReason: "revision_mismatch",
         container: { imageIdentity: null },
       });
       expect(JSON.stringify(status)).not.toContain("rawInspect");
+    });
+  });
+
+  it("fails runtime readiness closed when the immutable image-reference label changes", async () => {
+    await withHermesStateRootForTest(async () => {
+      let tamperImageReference = false;
+      const docker = new ManualRunnerDocker({
+        docker: createMockDocker({
+          inspectLabels: () =>
+            tamperImageReference
+              ? {
+                  "bruno.image_reference": `nousresearch/hermes-agent@sha256:${"d".repeat(64)}`,
+                }
+              : {},
+        }),
+        nameSuffix: () => "unit001",
+        projection: {
+          project: (spec) =>
+            createHermesProjectionForTest(spec, { apiServerKey: spec.secrets.apiServerKey }),
+        },
+        probe: { requestHealth: async () => ({ ok: true, body: pinnedHermesHealth() }) },
+      });
+      const spec = sampleLaunchSpec({ agent: { ...sampleLaunchSpec().agent, id: AGENT_ID } });
+      await docker.start(AGENT_ID, spec);
+      tamperImageReference = true;
+
+      const status = await docker.status(AGENT_ID);
+
+      expect(status.snapshot).toMatchObject({
+        phase: "failed",
+        readinessReason: "revision_mismatch",
+      });
     });
   });
 
@@ -2157,7 +2227,9 @@ function createMockDocker(
     execProbeBody?: unknown;
     inspectEnv?: string[];
     inspectHostConfig?: Partial<ReturnType<typeof readRunHostConfig>>;
+    inspectLabels?: () => Record<string, string>;
     imageInspectStdout?: () => string;
+    localImageIdStdout?: () => string;
     inspectRestartCount?: () => unknown;
     inspectRestartPolicy?: () => { MaximumRetryCount?: unknown; Name?: unknown } | null | undefined;
     injectDockerSocket?: boolean;
@@ -2202,6 +2274,13 @@ function createMockDocker(
     }
 
     if (args[0] === "image" && args[1] === "inspect") {
+      if (args[3] === "{{json .Id}}") {
+        return {
+          stdout: input.localImageIdStdout?.() ?? JSON.stringify(MOCK_IMAGE_ID),
+          stderr: "",
+        };
+      }
+
       return {
         stdout:
           input.imageInspectStdout?.() ??
@@ -2250,6 +2329,7 @@ function createMockDocker(
             Labels: {
               [BRUNO_AGENT_ID_LABEL]: container.agentId,
               ...(container.labels ?? {}),
+              ...(input.inspectLabels?.() ?? {}),
             },
           },
           HostConfig: {

@@ -29,6 +29,7 @@ describe("runner boot self-test", () => {
   it("binds every fixture container to the supplied immutable Hermes image", async () => {
     const root = await temporaryRoot();
     const hermesImage = `ghcr.io/ametel01/bruno-hermes:optimized@sha256:${"f".repeat(64)}`;
+    const localImageId = `sha256:${"a".repeat(64)}`;
     const calls: string[][] = [];
     const executor = createDockerRunnerBootSelfTestExecutor({
       root,
@@ -36,6 +37,7 @@ describe("runner boot self-test", () => {
       docker: async (_executable, args) => {
         calls.push([...args]);
         if (args[0] === "network") return { stdout: "fixture-network\n", stderr: "" };
+        if (args[0] === "image") return { stdout: JSON.stringify(localImageId), stderr: "" };
         throw new Error("stop after observing the synthetic model launch");
       },
     });
@@ -44,8 +46,9 @@ describe("runner boot self-test", () => {
       "stop after observing the synthetic model launch",
     );
     expect(calls).toContainEqual(
-      expect.arrayContaining(["--pull", "never", "--entrypoint", "python", hermesImage, "-c"]),
+      expect.arrayContaining(["--pull", "never", "--entrypoint", "python", localImageId, "-c"]),
     );
+    expect(calls).toContainEqual(["image", "inspect", "--format", "{{json .Id}}", hermesImage]);
     expect(
       buildRunnerBootFixturePlan({
         agentId: "00000000-0000-4000-8000-000000000123",
@@ -56,6 +59,25 @@ describe("runner boot self-test", () => {
       fakeModelImage: hermesImage,
       launchSpec: { image: { ref: hermesImage } },
     });
+  });
+
+  it("fails closed before fixture creation when the preloaded image has no local content ID", async () => {
+    const root = await temporaryRoot();
+    const calls: string[][] = [];
+    const executor = createDockerRunnerBootSelfTestExecutor({
+      root,
+      docker: async (_executable, args) => {
+        calls.push([...args]);
+        if (args[0] === "network") return { stdout: "fixture-network\n", stderr: "" };
+        if (args[0] === "image") return { stdout: "null", stderr: "" };
+        throw new Error("fixture container creation must not begin");
+      },
+    });
+
+    await expect(executor.launchFixture(new AbortController().signal)).rejects.toMatchObject({
+      reason: "fixture_launch_failed",
+    });
+    expect(calls.filter((args) => args[0] === "run")).toEqual([]);
   });
 
   it("projects the synthetic fixture for the Hermes workload identity", async () => {
