@@ -54,6 +54,8 @@ export const DEFAULT_RUNNER_BOOT_CLEANUP_TIMEOUT_MS = 30_000;
 export const DEFAULT_RUNNER_BOOT_FIXTURE_LAUNCH_TIMEOUT_MS = 90_000;
 export const DEFAULT_RUNNER_BOOT_CANARY_ATTEMPTS = 3;
 export const DEFAULT_RUNNER_BOOT_CANARY_RETRY_DELAY_MS = 2_000;
+export const DEFAULT_RUNNER_BOOT_FIXTURE_CREATE_ATTEMPTS = 2;
+export const DEFAULT_RUNNER_BOOT_FIXTURE_CREATE_RETRY_DELAY_MS = 250;
 
 const FIXTURE_LABEL = "bruno.boot_fixture";
 const FIXTURE_LABEL_VALUE = "v1";
@@ -624,29 +626,13 @@ async function launchDockerFixture(input: {
     fixturePlan.fakeModelImage,
     input.signal,
   );
-  await input.docker(
-    "docker",
-    [
-      "run",
-      "--detach",
-      "--pull",
-      "never",
-      "--platform",
-      "linux/amd64",
-      "--name",
-      fakeModelContainer,
-      "--network",
-      network,
-      "--label",
-      `${FIXTURE_LABEL}=${FIXTURE_LABEL_VALUE}`,
-      "--entrypoint",
-      "python",
-      fakeModelImageId,
-      "-c",
-      FAKE_MODEL_SERVER_SOURCE,
-    ],
-    { signal: input.signal, timeoutMs: DOCKER_CLI_TIMEOUT_MS },
-  );
+  await createSyntheticModelContainer({
+    docker: input.docker,
+    imageId: fakeModelImageId,
+    name: fakeModelContainer,
+    network,
+    signal: input.signal,
+  });
 
   const requestContainerHealth: HermesContainerHealthTransport = async (probe) => {
     const result = await requestContainerJson(
@@ -689,6 +675,48 @@ async function launchDockerFixture(input: {
     root: fixtureRoot,
     runner,
   };
+}
+
+async function createSyntheticModelContainer(input: {
+  docker: DockerExecutableRunner;
+  imageId: string;
+  name: string;
+  network: string;
+  signal: AbortSignal;
+}): Promise<void> {
+  const args = [
+    "run",
+    "--detach",
+    "--pull",
+    "never",
+    "--platform",
+    "linux/amd64",
+    "--name",
+    input.name,
+    "--network",
+    input.network,
+    "--label",
+    `${FIXTURE_LABEL}=${FIXTURE_LABEL_VALUE}`,
+    "--entrypoint",
+    "python",
+    input.imageId,
+    "-c",
+    FAKE_MODEL_SERVER_SOURCE,
+  ];
+
+  for (let attempt = 1; attempt <= DEFAULT_RUNNER_BOOT_FIXTURE_CREATE_ATTEMPTS; attempt += 1) {
+    try {
+      await input.docker("docker", args, {
+        signal: input.signal,
+        timeoutMs: DOCKER_CLI_TIMEOUT_MS,
+      });
+      return;
+    } catch (error) {
+      if (attempt === DEFAULT_RUNNER_BOOT_FIXTURE_CREATE_ATTEMPTS) throw error;
+      await removeExactFixtureContainer(input.docker, input.name, input.signal);
+      await delay(DEFAULT_RUNNER_BOOT_FIXTURE_CREATE_RETRY_DELAY_MS, input.signal);
+    }
+  }
 }
 
 async function resolveLocalDockerImageId(
@@ -829,27 +857,7 @@ async function removeExactFixtureResources(
         }),
       ),
   );
-  const fixtureContainers = await docker(
-    "docker",
-    [
-      "ps",
-      "--all",
-      "--quiet",
-      "--filter",
-      `name=^/${fixture.fakeModelContainer}$`,
-      "--filter",
-      `label=${FIXTURE_LABEL}=${FIXTURE_LABEL_VALUE}`,
-    ],
-    { signal, timeoutMs: DOCKER_CLI_TIMEOUT_MS },
-  );
-  await Promise.all(
-    safeDockerIds(fixtureContainers.stdout).map((id) =>
-      docker("docker", ["rm", "--force", id], {
-        signal,
-        timeoutMs: DOCKER_CLI_TIMEOUT_MS,
-      }),
-    ),
-  );
+  await removeExactFixtureContainer(docker, fixture.fakeModelContainer, signal);
   const fixtureNetworks = await docker(
     "docker",
     [
@@ -871,6 +879,41 @@ async function removeExactFixtureResources(
       }),
     ),
   );
+}
+
+async function removeExactFixtureContainer(
+  docker: DockerExecutableRunner,
+  containerName: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const inspectExact = () =>
+    docker(
+      "docker",
+      [
+        "ps",
+        "--all",
+        "--quiet",
+        "--filter",
+        `name=^/${containerName}$`,
+        "--filter",
+        `label=${FIXTURE_LABEL}=${FIXTURE_LABEL_VALUE}`,
+      ],
+      { signal, timeoutMs: DOCKER_CLI_TIMEOUT_MS },
+    );
+  const fixtureContainers = await inspectExact();
+  await Promise.all(
+    safeDockerIds(fixtureContainers.stdout).map((id) =>
+      docker("docker", ["rm", "--force", id], {
+        signal,
+        timeoutMs: DOCKER_CLI_TIMEOUT_MS,
+      }),
+    ),
+  );
+  const remaining = await inspectExact();
+
+  if (safeDockerIds(remaining.stdout).length > 0) {
+    throw new RunnerBootSelfTestError("cleanup_failed");
+  }
 }
 
 function safeDockerIds(stdout: string): string[] {

@@ -31,6 +31,8 @@ describe("runner boot self-test", () => {
     const hermesImage = `ghcr.io/ametel01/bruno-hermes:optimized@sha256:${"f".repeat(64)}`;
     const localImageId = `sha256:${"a".repeat(64)}`;
     const calls: string[][] = [];
+    let syntheticLaunchAttempts = 0;
+    let reconciliationReads = 0;
     const executor = createDockerRunnerBootSelfTestExecutor({
       root,
       hermesImage,
@@ -38,6 +40,15 @@ describe("runner boot self-test", () => {
         calls.push([...args]);
         if (args[0] === "network") return { stdout: "fixture-network\n", stderr: "" };
         if (args[0] === "image") return { stdout: JSON.stringify(localImageId), stderr: "" };
+        if (args[0] === "ps") {
+          reconciliationReads += 1;
+          return { stdout: reconciliationReads === 1 ? "abcdef012345\n" : "", stderr: "" };
+        }
+        if (args[0] === "rm") return { stdout: "", stderr: "" };
+        if (args[0] === "run" && args.includes("--entrypoint")) {
+          syntheticLaunchAttempts += 1;
+          if (syntheticLaunchAttempts === 1) throw new Error("ambiguous Docker create failure");
+        }
         throw new Error("stop after observing the synthetic model launch");
       },
     });
@@ -49,6 +60,8 @@ describe("runner boot self-test", () => {
       expect.arrayContaining(["--pull", "never", "--entrypoint", "python", localImageId, "-c"]),
     );
     expect(calls).toContainEqual(["image", "inspect", "--format", "{{json .Id}}", hermesImage]);
+    expect(calls).toContainEqual(["rm", "--force", "abcdef012345"]);
+    expect(syntheticLaunchAttempts).toBe(2);
     expect(
       buildRunnerBootFixturePlan({
         agentId: "00000000-0000-4000-8000-000000000123",
@@ -343,11 +356,16 @@ describe("runner boot self-test", () => {
       }),
     );
     const calls: string[][] = [];
+    let removedOwnedContainer = false;
     const executor = createDockerRunnerBootSelfTestExecutor({
       root,
       docker: async (_executable, args) => {
         calls.push([...args]);
-        return { stdout: args[0] === "ps" ? "a".repeat(64) : "", stderr: "" };
+        if (args[0] === "rm") removedOwnedContainer = true;
+        return {
+          stdout: args[0] === "ps" && !removedOwnedContainer ? "a".repeat(64) : "",
+          stderr: "",
+        };
       },
     });
 
