@@ -22,6 +22,8 @@ describe("Hermes agent workload image", () => {
       `io.bruno.hermes.amd64-manifest="${HERMES_AMD64_MANIFEST_DIGEST}"`,
     );
     expect(dockerfile).toContain('io.bruno.hermes.version="v0.18.2"');
+    expect(dockerfile).toContain("apt-get -o Acquire::Retries=3 upgrade -y");
+    expect(dockerfile).toContain("npm@12.0.2");
     expect(dockerfile).not.toMatch(/^\s*(COPY|ADD)\s/im);
     expect(dockerfile).not.toContain(".env");
     expect(dockerfile).not.toContain("TELEGRAM_BOT_TOKEN");
@@ -155,6 +157,8 @@ describe("Hermes agent workload image", () => {
     expect(optimizedDockerfile).toContain(
       "47e0874a68d428882c0c3aeb7769a7ef330275485926745a9ea48050b00a6453",
     );
+    expect(optimizedDockerfile).toContain("apt-get -o Acquire::Retries=3 upgrade -y");
+    expect(optimizedDockerfile).toContain("npm@12.0.2");
     expect(optimizedDockerfile).toMatch(/--extra anthropic\s+\\\s+--extra messaging/);
     expect(optimizedDockerfile).not.toContain("playwright");
     expect(optimizedDockerfile).not.toContain("docker-cli");

@@ -1,5 +1,18 @@
 FROM nousresearch/hermes-agent:v2026.7.7.2@sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973
 
+# The pinned upstream release predates current Debian and node-tar security
+# fixes. Apply only published distro updates and pin the first npm release that
+# bundles fixed node-tar 7.5.19; the resulting image is still released solely by
+# immutable digest after the workflow's vulnerability gate.
+USER root
+RUN apt-get -o Acquire::Retries=3 update && \
+    apt-get -o Acquire::Retries=3 upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/* && \
+    npm install --global --no-audit --no-fund npm@12.0.2 && \
+    npm cache clean --force && \
+    test "$(npm --version)" = "12.0.2" && \
+    test "$(node -p "require('/usr/local/lib/node_modules/npm/node_modules/tar/package.json').version")" = "7.5.19"
+
 LABEL org.opencontainers.image.title="Bruno Hermes workload"
 LABEL org.opencontainers.image.description="Pinned Hermes Agent workload image for one Bruno-managed agent."
 LABEL org.opencontainers.image.source="https://github.com/ametel01/bruno"

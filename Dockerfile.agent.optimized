@@ -62,6 +62,10 @@ RUN uv sync --frozen --no-managed-python --python /usr/local/bin/python3.13 --no
       mcp-research-data nix tests tests-js ui-tui web website
 
 FROM ${NODE_IMAGE} AS node-source
+RUN npm install --global --no-audit --no-fund npm@12.0.2 && \
+    npm cache clean --force && \
+    test "$(npm --version)" = "12.0.2" && \
+    test "$(node -p "require('/usr/local/lib/node_modules/npm/node_modules/tar/package.json').version")" = "7.5.19"
 
 FROM ${PYTHON_IMAGE}
 ARG HERMES_RELEASE=v2026.8.3
@@ -91,6 +95,7 @@ ENV PYTHONUNBUFFERED=1 \
 # Keep only runtime utilities used by the Bruno-managed agent. Build tools,
 # Docker CLI, Chromium/Playwright, and distro npm are deliberately absent.
 RUN apt-get -o Acquire::Retries=3 update && \
+    apt-get -o Acquire::Retries=3 upgrade -y --no-install-recommends && \
     apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
       ca-certificates curl git gosu iputils-ping libatomic1 \
       openssh-client procps ripgrep tini && \
