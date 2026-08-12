@@ -74,6 +74,23 @@ describe("runner release workflow contract", () => {
     );
   });
 
+  it("can publish and scan a runner candidate without staging or promoting production", () => {
+    expect(workflowSource).toContain("- runner-image");
+    expect(workflowSource).toContain(
+      "if: inputs.action == 'release' || inputs.action == 'runner-image'",
+    );
+    expect(workflowSource).toContain("id: scan_runner");
+    expect(workflowSource).toContain(
+      "if: $" + "{{ always() && steps.scan_runner.outcome != 'skipped' }}",
+    );
+    expect(workflowSource).toContain("stage-control-plane:\n    if: inputs.action == 'release'");
+    expect(workflowSource).toContain("deploy:\n    if: inputs.action == 'release'");
+    expect(packageJson.scripts["runner:image:publish"]).toBe(
+      "gh workflow run deploy-production.yml --repo ametel01/bruno --ref main --raw-field action=runner-image",
+    );
+    expect(readme).toContain("`bun run runner:image:publish`");
+  });
+
   it("builds once, pushes only the Git-SHA tag, verifies the digest, and scans it", () => {
     expect(workflowSource.match(/docker\/build-push-action@v6/g)).toHaveLength(1);
     expect(workflowSource).toContain(

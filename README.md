@@ -344,6 +344,13 @@ deployment, run:
 bun run runner:release:publish-verified
 ```
 
+To publish and scan only the current commit's immutable runner candidate for a protected snapshot
+build, without staging a control plane or promoting production, run:
+
+```sh
+bun run runner:image:publish
+```
+
 The `verified-release` action retrieves the immutable runner image from the signed Approved
 Snapshot, verifies that exact identity, scans it, exercises the credential-free full fixture,
 verifies cleanup, and publishes the signed digest-addressed OCI bundle. It does not build a new
@@ -465,6 +472,7 @@ enable ready mode by treating mock or local evidence as live acceptance.
 | `bun run agent:hermes:contract-smoke` | Exercise the pinned Hermes runner/readiness/restart contract locally. |
 | `bun run runner:snapshot:build` | Protected manual runner-snapshot build entrypoint; requires explicit authorization and provider credentials. |
 | `bun run runner:snapshot:retire` | Protected exact-ID snapshot retirement entrypoint; requires the dedicated workflow and authoritative absence verification. |
+| `bun run runner:image:publish` | Publish and scan the current commit's immutable runner candidate without a Vercel deployment. |
 | `bun run runner:release:publish-verified` | Publish the credential-free Verified Release without staging or promoting production. |
 | `bun run verify:hermes:staging` | Run the capability-gated, interactive-human-attested live Hermes/Telegram acceptance and durable cleanup workflow. |
 | `bun run deploy:prod` | Dispatch the protected full-application production deployment workflow. |

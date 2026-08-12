@@ -10,6 +10,7 @@ on:
         type: choice
         options:
           - release
+          - runner-image
           - verified-release
           - rollback
       rollback_image:
@@ -39,7 +40,7 @@ env:
 
 jobs:
   publish:
-    if: inputs.action == 'release'
+    if: inputs.action == 'release' || inputs.action == 'runner-image'
     name: Build, publish, scan, and verify digest
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -98,6 +99,7 @@ jobs:
           echo "Published an immutable Git-SHA runner candidate." >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Scan critical fixable vulnerabilities
+        id: scan_runner
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ steps.reference.outputs.image }}
@@ -110,7 +112,7 @@ jobs:
           exit-code: "1"
 
       - name: Upload scan report
-        if: always()
+        if: ${{ always() && steps.scan_runner.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
         with:
           name: trivy-runner-image-${{ github.sha }}

@@ -31,6 +31,7 @@
     "format:check": "biome ci --linter-enabled=false --assist-enabled=false app src scripts tests app/globals.css *.ts *.json",
     "lint": "biome lint app src scripts tests *.ts *.json",
     "runner:bootstrap": "bun src/runner-service/bootstrap.ts",
+    "runner:image:publish": "gh workflow run deploy-production.yml --repo ametel01/bruno --ref main --raw-field action=runner-image",
     "runner:release:smoke": "bun --conditions react-server scripts/smoke-runner-release.ts",
     "runner:release:bundle": "bun --conditions react-server scripts/create-runner-release-bundle.ts",
     "runner:release:publish-verified": "gh workflow run deploy-production.yml --repo ametel01/bruno --ref main --raw-field action=verified-release",

@@ -172,6 +172,12 @@ stay skipped. `action=release` instead builds a new candidate and fails closed u
 identity matches the selected Approved Snapshot; use it only when the separate production
 deployment is authorized.
 
+Before a protected snapshot build, dispatch `action=runner-image` or run
+`bun run runner:image:publish`. This path builds, publishes, verifies, and scans only the current
+commit's immutable runner candidate. The Vercel staging, Verified Release, production, and rollback
+jobs remain skipped; use the resulting Git-SHA-plus-digest reference as the snapshot's exact runner
+identity.
+
 For emergency rollback, dispatch the same workflow with `action=rollback`, the immutable image, and
 the prior successful workflow run ID. The job downloads that run's `verified-runner-release`
 artifact and refuses any image that does not match it exactly. Rollback deploys with batch size `0`,
