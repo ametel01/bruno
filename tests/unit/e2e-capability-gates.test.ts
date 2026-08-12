@@ -121,9 +121,44 @@ describe("E2E capability gates", () => {
     ).resolves.toBe(0);
 
     expect(runCommand).toHaveBeenCalledOnce();
-    expect(runCommand).toHaveBeenCalledWith({
-      command: "/repo/node_modules/.bin/playwright",
-      args: ["test"],
+    expect(runCommand).toHaveBeenCalledWith(
+      {
+        command: "/repo/node_modules/.bin/playwright",
+        args: ["test"],
+      },
+      env,
+    );
+  });
+
+  it("keeps the credential-free Playwright child isolated from live trial credentials", async () => {
+    let childEnv: Record<string, string | undefined> | undefined;
+
+    await expect(
+      runE2E(
+        "ci",
+        {
+          PATH: "/test-bin",
+          BRUNO_DIGITALOCEAN_TOKEN: "provider-value-must-not-print",
+          BRUNO_PROVIDER_TRIAL_AUTHORIZATION_ID: "issue-299-value-must-not-print",
+          BRUNO_PROVIDER_TRIAL_MODEL_API_KEY: "model-value-must-not-print",
+          BRUNO_PROVIDER_TRIAL_TELEGRAM_BOT_TOKEN: "telegram-value-must-not-print",
+        },
+        {
+          cwd: "/repo",
+          platform: "linux",
+          runCommand: async (_command, commandEnv) => {
+            childEnv = commandEnv;
+            return 0;
+          },
+        },
+      ),
+    ).resolves.toBe(0);
+
+    expect(childEnv).toEqual({
+      PATH: "/test-bin",
+      BRUNO_DIGITALOCEAN_TOKEN: "",
+      BRUNO_PROVIDER_TRIAL_MODEL_API_KEY: "",
+      BRUNO_PROVIDER_TRIAL_TELEGRAM_BOT_TOKEN: "",
     });
   });
 });

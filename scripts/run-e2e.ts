@@ -24,7 +24,7 @@ export type E2ECommand = {
 type ProviderConfigReader = (
   env: Record<string, string | undefined>,
 ) => ReturnType<typeof readDigitalOceanProviderConfig>;
-type RunCommand = (command: E2ECommand) => Promise<number>;
+type RunCommand = (command: E2ECommand, env: Record<string, string | undefined>) => Promise<number>;
 type WriteError = (message: string) => void;
 
 type E2EPlan =
@@ -83,13 +83,33 @@ export async function runE2E(
     return 1;
   }
 
-  return (options.runCommand ?? runInheritedCommand)(plan.command);
+  const commandEnv = buildE2ECommandEnvironment(mode, env);
+  return (options.runCommand ?? runInheritedCommand)(plan.command, commandEnv);
 }
 
-function runInheritedCommand(input: E2ECommand): Promise<number> {
+function buildE2ECommandEnvironment(
+  mode: E2EMode,
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  const commandEnv = { ...env };
+  if (mode === "full") return commandEnv;
+
+  for (const name of Object.keys(commandEnv)) {
+    if (name.startsWith("BRUNO_PROVIDER_TRIAL_")) delete commandEnv[name];
+  }
+  commandEnv.BRUNO_DIGITALOCEAN_TOKEN = "";
+  commandEnv.BRUNO_PROVIDER_TRIAL_MODEL_API_KEY = "";
+  commandEnv.BRUNO_PROVIDER_TRIAL_TELEGRAM_BOT_TOKEN = "";
+  return commandEnv;
+}
+
+function runInheritedCommand(
+  input: E2ECommand,
+  env: Record<string, string | undefined>,
+): Promise<number> {
   return new Promise((resolve, reject) => {
     const child = spawn(input.command, input.args, {
-      env: process.env,
+      env: env as NodeJS.ProcessEnv,
       stdio: "inherit",
     });
 
