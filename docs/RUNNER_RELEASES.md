@@ -137,10 +137,6 @@ content ID and executes that ID. The managed container retains the approved refe
 label; launch and status evidence require the label, local ID, container image ID, and current local
 reference lookup to remain an exact match. This avoids hidden multi-architecture registry resolution
 while preserving the immutable reference in externally reported evidence.
-The first local image lookup uses a bounded 15-second stabilization window after an error; the
-synthetic-container create uses a separate 2.5-second bound. Before each create retry, the runner
-reconciles the exact fixture name and ownership label, removes any ambiguous create result, and
-verifies that no matching container remains.
 The fixture also creates the Hermes bridge before provisioning and verifies that a nested container
 can reach the candidate control plane through that bridge's concrete Linux gateway. The local
 provider applies the same gateway to the runner callback while preserving Docker Desktop's native
