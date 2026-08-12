@@ -61,6 +61,12 @@ export function localDockerRunnerBootstrapFailureCode(state: string, logs: strin
     return "runner_callback_unreachable";
   }
 
+  if (
+    state === "running" &&
+    /bruno runner bootstrap completed for runner [0-9a-f-]{36}\./.test(logs)
+  ) {
+    return "runner_running_after_registration";
+  }
   if (state === "running") return "runner_running_without_registration";
   if (state === "restarting" || state === "exited" || state === "dead") {
     return `runner_container_${state}`;

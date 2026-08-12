@@ -128,7 +128,12 @@ describe("runner release workflow contract", () => {
   it("gates promotion on a zero-cloud full fixture and deploys the exact tested digest at batch one", () => {
     expect(workflowSource).toContain("bun run runner:release:smoke -- --image");
     expect(workflowSource).toContain("--provider local_docker");
-    expect(workflowSource).toContain("--output runner-release-evidence/runner-release-smoke.json");
+    expect(workflowSource).toContain(
+      '--output "runner-release-evidence/runner-release-smoke-attempt-$' + '{smoke_attempt}.json"',
+    );
+    expect(workflowSource).toContain(
+      'cp "$' + '{smoke_result}" runner-release-evidence/runner-release-smoke.json',
+    );
     expect(workflowSource).not.toContain("> runner-release-evidence/runner-release-smoke.json");
     expect(workflowSource).not.toContain("BRUNO_DIGITALOCEAN_TOKEN");
     expect(workflowSource).toContain("BRUNO_DIGITALOCEAN_PROVIDER_MODE: local_docker");
@@ -189,6 +194,10 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).toContain(
       "name: runner-release-smoke-$" + "{{ github.sha }}-$" + "{{ github.run_attempt }}",
     );
+    expect(workflowSource).toContain("for smoke_attempt in 1 2 3; do");
+    expect(workflowSource).toContain('test "$' + '{SMOKE_PASSED}" = "true"');
+    expect(workflowSource).toContain("runner-release-evidence/runner-release-smoke-attempt-*.json");
+    expect(workflowSource).toContain(".sideEffectsAttempted == true and .cleanupVerified == true");
     expect(workflowSource).toContain("runner-release-evidence/runner-release-smoke.json");
     expect(releaseSmokeSource).toContain("RUNNER_RELEASE_SMOKE_TIMEOUT_MS = 12 * 60 * 1000");
   });

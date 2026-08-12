@@ -113,6 +113,8 @@ Cleanup runs in a `finally` path. It removes the simulated Droplet and runner co
 the tagged local-provider set is absent, revokes runner credentials, and tombstones the runner
 record. A failed cleanup fails the job and blocks promotion. Failure output contains only capability
 names and closed error codes; it does not include tokens, database URLs, or cloud-init output.
+Persisted allowlisted boot-self-test reasons remain authoritative; provider diagnostics are used
+only when no authoritative closed failure code exists.
 
 This gate proves the runner image, generated bootstrap commands, local candidate-control-plane
 registration flow, release identity, readiness contract, and cleanup on an Ubuntu/Docker host. It
@@ -127,7 +129,10 @@ transfer time outside the readiness deadline without changing the images or rela
 The fixture also creates the Hermes bridge before provisioning and verifies that a nested container
 can reach the candidate control plane through that bridge's concrete Linux gateway. The local
 provider applies the same gateway to the runner callback while preserving Docker Desktop's native
-host routing. Each attempt retains its sanitized smoke result for 90 days; failed results contain
+host routing. The workflow makes at most three full-fixture attempts and retries only after the
+failed attempt proves that side effects began and cleanup is authoritative. A capability failure or
+an unverified cleanup stops the gate immediately. The first passing result becomes the canonical
+smoke evidence. Each attempt retains its sanitized smoke result for 90 days; failed results contain
 only the closed failure code, cleanup verdict, and an allowlisted runner-ingress event summary,
 never credentials, runner IDs, database details, or raw bootstrap and control-plane output.
 

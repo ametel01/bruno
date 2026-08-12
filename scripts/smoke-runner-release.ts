@@ -4,7 +4,10 @@ import { pathToFileURL } from "node:url";
 import { and, desc, eq } from "drizzle-orm";
 import { RUNNER_BOOT_CONTRACT_VERSION } from "@/src/runner-service/constants";
 import { parseImmutableRunnerImageReference } from "@/src/runner-service/release-identity";
-import { RUNNER_BOOT_COMPONENTS } from "@/src/runner-service/runner-contracts";
+import {
+  RUNNER_BOOT_COMPONENTS,
+  type RunnerBootFailureReason,
+} from "@/src/runner-service/runner-contracts";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import {
   runnerCredentials,
@@ -46,6 +49,21 @@ const SAFE_BOOTSTRAP_FAILURE_STEPS = new Set([
   "runner_registration",
   "snapshot_preloaded_images",
   "swap_setup",
+]);
+
+const SAFE_BOOT_FAILURE_REASONS: ReadonlySet<Exclude<RunnerBootFailureReason, null>> = new Set([
+  "docker_unavailable",
+  "release_mismatch",
+  "release_validation_failed",
+  "required_services_unavailable",
+  "preloaded_images_mismatch",
+  "fixture_launch_failed",
+  "detailed_health_failed",
+  "canary_failed",
+  "telegram_config_failed",
+  "cleanup_failed",
+  "deadline_exceeded",
+  "snapshot_invalid",
 ]);
 
 const IMMUTABLE_RELEASE_IMAGE_PATTERN =
@@ -115,7 +133,16 @@ export function runnerReleaseBootstrapFailureCode(metadata: unknown): string {
     return "runner_provisioning_failed";
   }
 
-  const step = (metadata as Record<string, unknown>).step;
+  const record = metadata as Record<string, unknown>;
+  const bootFailureReason = record.bootFailureReason;
+  if (
+    typeof bootFailureReason === "string" &&
+    SAFE_BOOT_FAILURE_REASONS.has(bootFailureReason as Exclude<RunnerBootFailureReason, null>)
+  ) {
+    return `boot_${bootFailureReason}`;
+  }
+
+  const step = record.step;
   return typeof step === "string" && SAFE_BOOTSTRAP_FAILURE_STEPS.has(step)
     ? `bootstrap_${step}`
     : "runner_provisioning_failed";
@@ -251,7 +278,7 @@ export async function smokeRunnerRelease(
   } catch (error) {
     runFailed = true;
     runFailureCode = closedErrorCode(error);
-    if (session.diagnoseFailure) {
+    if (runFailureCode === null && session.diagnoseFailure) {
       try {
         runFailureCode = (await session.diagnoseFailure()) ?? runFailureCode;
       } catch {

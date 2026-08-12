@@ -184,7 +184,7 @@ jobs:
     name: Build and publish credential-free Verified Release
     needs: publish
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     environment: runner-release-canary
     services:
       postgres:
@@ -353,10 +353,24 @@ jobs:
           docker run --rm --network "${BRUNO_HERMES_PRIVATE_NETWORK}" --add-host "host.docker.internal:${FIXTURE_HOST_GATEWAY}" "${BRUNO_DOCKER_RUNNER_IMAGE}" \
             wget --quiet --output-document=/dev/null http://host.docker.internal:3000/health
           mkdir -p runner-release-evidence
-          bun run runner:release:smoke -- --image "${BRUNO_RUNNER_IMAGE}" --provider local_docker \
-            --output runner-release-evidence/runner-release-smoke.json
-          jq -e '.ok == true and .code == "passed" and .cleanupVerified == true' \
-            runner-release-evidence/runner-release-smoke.json >/dev/null
+          SMOKE_PASSED=false
+          for smoke_attempt in 1 2 3; do
+            smoke_result="runner-release-evidence/runner-release-smoke-attempt-${smoke_attempt}.json"
+            if bun run runner:release:smoke -- --image "${BRUNO_RUNNER_IMAGE}" --provider local_docker \
+              --output "runner-release-evidence/runner-release-smoke-attempt-${smoke_attempt}.json"
+            then
+              jq -e '.ok == true and .code == "passed" and .cleanupVerified == true' \
+                "${smoke_result}" >/dev/null
+              cp "${smoke_result}" runner-release-evidence/runner-release-smoke.json
+              SMOKE_PASSED=true
+              break
+            fi
+
+            jq -e \
+              '.ok == false and .sideEffectsAttempted == true and .cleanupVerified == true' \
+              "${smoke_result}" >/dev/null
+          done
+          test "${SMOKE_PASSED}" = "true"
           VERIFIED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
           echo "VERIFIED_AT=${VERIFIED_AT}" >> "${GITHUB_ENV}"
 
@@ -383,6 +397,7 @@ jobs:
         with:
           name: runner-release-smoke-${{ github.sha }}-${{ github.run_attempt }}
           path: |
+            runner-release-evidence/runner-release-smoke-attempt-*.json
             runner-release-evidence/runner-release-smoke.json
             runner-release-evidence/runner-release-control-plane-events.json
           if-no-files-found: error

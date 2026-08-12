@@ -92,6 +92,18 @@ describe("runner release smoke", () => {
     expect(runnerReleaseBootstrapFailureCode({ step: "untrusted_step" })).toBe(
       "runner_provisioning_failed",
     );
+    expect(
+      runnerReleaseBootstrapFailureCode({
+        step: "authenticated_readiness",
+        bootFailureReason: "detailed_health_failed",
+      }),
+    ).toBe("boot_detailed_health_failed");
+    expect(
+      runnerReleaseBootstrapFailureCode({
+        step: "authenticated_readiness",
+        bootFailureReason: "private_failure",
+      }),
+    ).toBe("runner_provisioning_failed");
     expect(runnerReleaseBootstrapFailureCode("docker_pull")).toBe("runner_provisioning_failed");
   });
 
@@ -233,6 +245,30 @@ describe("runner release smoke", () => {
       failureCode: "runner_callback_unreachable",
     });
     expect(JSON.stringify(result)).not.toContain("private callback output");
+  });
+
+  it("keeps an authoritative run failure instead of replacing it with provider diagnostics", async () => {
+    const authoritativeFailure = Object.assign(new Error("private boot output"), {
+      code: "boot_detailed_health_failed",
+    });
+    const diagnoseFailure = vi.fn(async () => "runner_running_without_registration");
+    const result = await smokeRunnerRelease(DIGITALOCEAN_ARGS, VALID_ENV, {
+      createSession: () =>
+        session([], {
+          run: async () => {
+            throw authoritativeFailure;
+          },
+          diagnoseFailure,
+        }),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: "smoke_failed",
+      cleanupVerified: true,
+      failureCode: "boot_detailed_health_failed",
+    });
+    expect(diagnoseFailure).not.toHaveBeenCalled();
   });
 
   it("blocks promotion when cleanup cannot be verified", async () => {

@@ -220,6 +220,12 @@ describe("local Docker DigitalOcean provider", () => {
     expect(localDockerRunnerBootstrapFailureCode("running", "private untrusted output")).toBe(
       "runner_running_without_registration",
     );
+    expect(
+      localDockerRunnerBootstrapFailureCode(
+        "running",
+        "bruno runner bootstrap completed for runner 67f08213-e51e-49a9-9cde-b047814a78a7.",
+      ),
+    ).toBe("runner_running_after_registration");
     expect(localDockerRunnerBootstrapFailureCode("unknown", "private untrusted output")).toBeNull();
   });
 
