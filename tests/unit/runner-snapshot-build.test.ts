@@ -173,6 +173,23 @@ cleanup_snapshot_builder_networks`,
     );
   });
 
+  it("runs the full boot fixture against the exact preloaded Hermes image", () => {
+    const userData = buildSnapshotBuilderBootstrap({
+      runnerImage: RUNNER_IMAGE,
+      runnerVersion: "abc123",
+      runnerDigest: `sha256:${"a".repeat(64)}`,
+      defaultAgentImage: AGENT_IMAGE,
+      hermesImage: OPTIMIZED_HERMES_IMAGE,
+    });
+
+    expect(userData).toContain(
+      `createDockerRunnerBootSelfTestExecutor({ hermesImage: ${JSON.stringify(OPTIMIZED_HERMES_IMAGE)} })`,
+    );
+    expect(userData).not.toContain(
+      "const baseExecutor = createDockerRunnerBootSelfTestExecutor();",
+    );
+  });
+
   it("translates the current boot-snapshot v2 fixture into snapshot-build evidence", () => {
     const userData = buildSnapshotBuilderBootstrap({
       runnerImage: RUNNER_IMAGE,

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildRunnerBootFixturePlan,
   buildRunnerBootLaunchSpec,
   createDockerRunnerBootSelfTestExecutor,
   createRunnerBootReadinessController,
@@ -20,6 +21,38 @@ afterEach(async () => {
 });
 
 describe("runner boot self-test", () => {
+  it("binds every fixture container to the supplied immutable Hermes image", async () => {
+    const root = await temporaryRoot();
+    const hermesImage = `ghcr.io/ametel01/bruno-hermes:optimized@sha256:${"f".repeat(64)}`;
+    const calls: string[][] = [];
+    const executor = createDockerRunnerBootSelfTestExecutor({
+      root,
+      hermesImage,
+      docker: async (_executable, args) => {
+        calls.push([...args]);
+        if (args[0] === "network") return { stdout: "fixture-network\n", stderr: "" };
+        throw new Error("stop after observing the synthetic model launch");
+      },
+    });
+
+    await expect(executor.launchFixture(new AbortController().signal)).rejects.toThrow(
+      "stop after observing the synthetic model launch",
+    );
+    expect(calls).toContainEqual(
+      expect.arrayContaining(["--entrypoint", "python", hermesImage, "-c"]),
+    );
+    expect(
+      buildRunnerBootFixturePlan({
+        agentId: "00000000-0000-4000-8000-000000000123",
+        configRevision: "boot-test",
+        hermesImage,
+      }),
+    ).toMatchObject({
+      fakeModelImage: hermesImage,
+      launchSpec: { image: { ref: hermesImage } },
+    });
+  });
+
   it("projects the synthetic fixture for the Hermes workload identity", async () => {
     const root = await temporaryRoot();
     const directoryOwnership: Array<{ path: string; uid: number; gid: number }> = [];

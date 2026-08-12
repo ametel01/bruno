@@ -504,13 +504,14 @@ function configuredValidationMode(
 }
 
 export function createDockerRunnerBootSelfTestExecutor(
-  options: { docker?: DockerExecutableRunner; root?: string } = {},
+  options: { docker?: DockerExecutableRunner; root?: string; hermesImage?: string } = {},
 ): RunnerBootSelfTestExecutor {
   const docker = options.docker ?? executeDocker;
   const root =
     options.root ??
     process.env[RUNNER_BOOT_SELF_TEST_ROOT_ENV]?.trim() ??
     DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT;
+  const hermesImage = options.hermesImage?.trim() || DEFAULT_HERMES_WORKLOAD_IMAGE;
 
   return {
     recover: (signal) => recoverFixtures({ docker, root, signal }),
@@ -557,7 +558,7 @@ export function createDockerRunnerBootSelfTestExecutor(
         throw new RunnerBootSelfTestError("preloaded_images_mismatch");
       }
     },
-    launchFixture: (signal) => launchDockerFixture({ docker, root, signal }),
+    launchFixture: (signal) => launchDockerFixture({ docker, root, hermesImage, signal }),
     async probeDetailedHealth(fixture, signal) {
       const deadline = Date.now() + 90_000;
       while (Date.now() < deadline && !signal.aborted) {
@@ -585,6 +586,7 @@ export function createDockerRunnerBootSelfTestExecutor(
 async function launchDockerFixture(input: {
   docker: DockerExecutableRunner;
   root: string;
+  hermesImage: string;
   signal: AbortSignal;
 }): Promise<RunnerBootFixture> {
   const id = randomUUID();
@@ -595,6 +597,11 @@ async function launchDockerFixture(input: {
   const fixtureRoot = join(input.root, "fixtures", id);
   const stateRoot = join(fixtureRoot, "state");
   const configRevision = `boot-${id}`;
+  const fixturePlan = buildRunnerBootFixturePlan({
+    agentId,
+    configRevision,
+    hermesImage: input.hermesImage,
+  });
   await mkdir(fixtureRoot, { recursive: true, mode: 0o700 });
   await mkdir(stateRoot, { recursive: true, mode: 0o700 });
   await writeFile(
@@ -626,7 +633,7 @@ async function launchDockerFixture(input: {
       `${FIXTURE_LABEL}=${FIXTURE_LABEL_VALUE}`,
       "--entrypoint",
       "python",
-      DEFAULT_HERMES_WORKLOAD_IMAGE,
+      fixturePlan.fakeModelImage,
       "-c",
       FAKE_MODEL_SERVER_SOURCE,
     ],
@@ -658,8 +665,7 @@ async function launchDockerFixture(input: {
         }),
     },
   });
-  const spec = buildRunnerBootLaunchSpec({ agentId, configRevision });
-  const launched = await runner.start(agentId, spec);
+  const launched = await runner.start(agentId, fixturePlan.launchSpec);
 
   if (!("operation" in launched)) {
     throw new RunnerBootSelfTestError("fixture_launch_failed");
@@ -840,6 +846,7 @@ function safeDockerIds(stdout: string): string[] {
 export function buildRunnerBootLaunchSpec(input: {
   agentId: string;
   configRevision: string;
+  hermesImage?: string;
 }): AgentLaunchSpec {
   return {
     version: MANAGED_AGENT_LAUNCH_SPEC_VERSION,
@@ -851,7 +858,7 @@ export function buildRunnerBootLaunchSpec(input: {
       templateVersion: "1.0.0",
       configRevision: input.configRevision,
     },
-    image: { ref: DEFAULT_HERMES_WORKLOAD_IMAGE },
+    image: { ref: input.hermesImage?.trim() || DEFAULT_HERMES_WORKLOAD_IMAGE },
     model: { provider: "openai-api", model: FAKE_MODEL_ALIAS },
     platforms: {
       required: ["api_server", "telegram"],
@@ -882,6 +889,17 @@ export function buildRunnerBootLaunchSpec(input: {
       telegramAllowedUsers: ["1"],
       apiServerKey: `bruno_agent_${randomUUID().replaceAll("-", "")}${randomUUID().replaceAll("-", "")}`,
     },
+  };
+}
+
+export function buildRunnerBootFixturePlan(input: {
+  agentId: string;
+  configRevision: string;
+  hermesImage: string;
+}): { fakeModelImage: string; launchSpec: AgentLaunchSpec } {
+  return {
+    fakeModelImage: input.hermesImage,
+    launchSpec: buildRunnerBootLaunchSpec(input),
   };
 }
 

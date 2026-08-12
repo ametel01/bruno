@@ -1083,7 +1083,7 @@ export function buildSnapshotBuilderBootstrap(input: {
       'import { RunnerCanaryNotReadyError } from "./src/runner-service/docker.ts";',
       `const safeCanaryOutcomes = new Set(${JSON.stringify(SNAPSHOT_BOOT_CANARY_ATTEMPT_OUTCOMES)});`,
       "const modelCanaryAttempts = [];",
-      "const baseExecutor = createDockerRunnerBootSelfTestExecutor();",
+      `const baseExecutor = createDockerRunnerBootSelfTestExecutor({ hermesImage: ${hermesImageJson} });`,
       "const executor = { ...baseExecutor, async runCanary(fixture) {",
       "let response;",
       'try { response = await fixture.runner.canary(fixture.agentId, { operationId: fixture.operationId, configRevision: fixture.configRevision, model: "openai/gpt-4.1-mini" }); }',
