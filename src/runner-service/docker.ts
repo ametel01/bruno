@@ -2502,6 +2502,8 @@ export function buildHermesDockerRunArgs(input: {
   return [
     "run",
     "--detach",
+    "--pull",
+    "never",
     "--restart",
     "unless-stopped",
     "--name",

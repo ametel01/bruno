@@ -44,7 +44,7 @@ describe("runner boot self-test", () => {
       "stop after observing the synthetic model launch",
     );
     expect(calls).toContainEqual(
-      expect.arrayContaining(["--entrypoint", "python", hermesImage, "-c"]),
+      expect.arrayContaining(["--pull", "never", "--entrypoint", "python", hermesImage, "-c"]),
     );
     expect(
       buildRunnerBootFixturePlan({

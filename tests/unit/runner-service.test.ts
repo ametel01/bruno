@@ -325,6 +325,9 @@ describe("manual runner service HTTP contract", () => {
     ]);
     expect(calls).toContainEqual(expect.arrayContaining(["run", "--detach"]));
     const managedRun = calls.find((args) => args[0] === "run");
+    expect(
+      managedRun?.slice(managedRun.indexOf("--pull"), managedRun.indexOf("--pull") + 2),
+    ).toEqual(["--pull", "never"]);
     expect(managedRun?.filter((argument) => argument === "--restart")).toHaveLength(1);
     expect(
       managedRun?.slice(managedRun.indexOf("--restart"), managedRun.indexOf("--restart") + 2),

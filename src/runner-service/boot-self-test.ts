@@ -624,6 +624,8 @@ async function launchDockerFixture(input: {
     [
       "run",
       "--detach",
+      "--pull",
+      "never",
       "--platform",
       "linux/amd64",
       "--name",

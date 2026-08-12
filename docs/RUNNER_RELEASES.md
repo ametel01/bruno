@@ -130,6 +130,8 @@ changes, never an automatic release retry.
 Before the bounded full fixture starts, the workflow pulls and inspects the exact digest-qualified
 runner, default-agent, and Hermes images selected by the Approved Snapshot. This keeps cold registry
 transfer time outside the readiness deadline without changing the images or relaxing that deadline.
+Both synthetic-model and Hermes fixture launches use Docker's `never` pull policy, so the gate fails
+closed on a missing preload instead of contacting a registry from inside the runner.
 The fixture also creates the Hermes bridge before provisioning and verifies that a nested container
 can reach the candidate control plane through that bridge's concrete Linux gateway. The local
 provider applies the same gateway to the runner callback while preserving Docker Desktop's native
