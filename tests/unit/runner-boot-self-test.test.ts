@@ -61,7 +61,7 @@ describe("runner boot self-test", () => {
     );
     expect(calls).toContainEqual(["image", "inspect", "--format", "{{json .Id}}", hermesImage]);
     expect(calls).toContainEqual(["rm", "--force", "abcdef012345"]);
-    expect(syntheticLaunchAttempts).toBe(2);
+    expect(syntheticLaunchAttempts).toBe(6);
     expect(
       buildRunnerBootFixturePlan({
         agentId: "00000000-0000-4000-8000-000000000123",
