@@ -51,8 +51,16 @@ jobs:
           #!/usr/bin/env bash
           set -uo pipefail
           STDERR_FILE="$(mktemp "${DIAGNOSTIC_ROOT}/docker-stderr.XXXXXX")"
-          /usr/bin/docker "$@" 2>"${STDERR_FILE}"
+          STDOUT_FILE="$(mktemp "${DIAGNOSTIC_ROOT}/docker-stdout.XXXXXX")"
+          /usr/bin/docker "$@" >"${STDOUT_FILE}" 2>"${STDERR_FILE}"
           STATUS=$?
+          if [[ "${1:-}" = "image" && "${2:-}" = "inspect" && "${4:-}" = '{{json .Id}}' ]]; then
+            {
+              printf 'image-id-inspect exit=%s stdout=' "${STATUS}"
+              head -c 256 "${STDOUT_FILE}"
+              printf '\n'
+            } >> "${DIAGNOSTIC_ROOT}/docker-image-id-inspects.log"
+          fi
           if [[ "${STATUS}" -ne 0 ]]; then
             {
               printf 'command=%s subcommand=%s exit=%s\n' "${1:-unknown}" "${2:-unknown}" "${STATUS}"
@@ -60,8 +68,9 @@ jobs:
               printf '\n'
             } >> "${DIAGNOSTIC_ROOT}/docker-failures.log"
           fi
+          cat "${STDOUT_FILE}"
           cat "${STDERR_FILE}" >&2
-          rm --force "${STDERR_FILE}"
+          rm --force "${STDOUT_FILE}" "${STDERR_FILE}"
           exit "${STATUS}"
           SH
           chmod 0700 "${DIAGNOSTIC_ROOT}/docker-wrapper"
@@ -131,6 +140,13 @@ jobs:
             docker exec "${RUNNER_CONTAINER}" \
               cat "${DIAGNOSTIC_ROOT}/docker-failures.log" \
               > runner-boot-diagnostic/docker-failures.log
+          fi
+          if docker exec "${RUNNER_CONTAINER}" \
+            test -f "${DIAGNOSTIC_ROOT}/docker-image-id-inspects.log"
+          then
+            docker exec "${RUNNER_CONTAINER}" \
+              cat "${DIAGNOSTIC_ROOT}/docker-image-id-inspects.log" \
+              > runner-boot-diagnostic/docker-image-id-inspects.log
           fi
           docker ps --all \
             --filter label=bruno.boot.fixture=v1 \
