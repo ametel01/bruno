@@ -114,6 +114,7 @@ describe("Hermes home projection", () => {
     const soul = await readFile(projected.soulPath, "utf8");
     const revision = await readFile(projected.revisionPath, "utf8");
 
+    expect(config).toContain("_config_version: 12");
     expect(config).toContain("provider: openrouter");
     expect(config).toContain("default: openai/gpt-4.1-mini");
     expect(config).toContain("api_server:");

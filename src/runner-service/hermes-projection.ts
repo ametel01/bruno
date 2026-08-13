@@ -83,6 +83,7 @@ const MAX_CONFIG_YAML_BYTES = 256 * 1024;
 const MAX_ENV_BYTES = 256 * 1024;
 const MAX_COLLECTION_ENTRIES = 4_096;
 const MAX_NESTING_DEPTH = 64;
+const MANAGED_HERMES_CONFIG_VERSION = 12;
 const DANGEROUS_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const SECRET_KEY_PATTERN =
   /(^|_|\b)(token|password|credential|authorization|private[_-]?key|api[_-]?key|secret)(_|$|\b)/i;
@@ -254,6 +255,7 @@ function renderManagedHermesConfig(existing: string, spec: ManagedAgentLaunchSpe
 
   removeManagedLegacySecretPaths(config);
   rejectSecretBearingYaml(config);
+  setPath(config, ["_config_version"], MANAGED_HERMES_CONFIG_VERSION);
   setPath(config, ["model", "provider"], spec.model.provider);
   setPath(config, ["model", "default"], spec.model.model);
   deletePath(config, ["model", "api_key"]);
