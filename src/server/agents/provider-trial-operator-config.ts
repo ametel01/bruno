@@ -16,15 +16,15 @@ import {
 } from "@/src/server/agents/provider-trial-driver";
 
 export const PROVIDER_TRIAL_AUTHORIZATION = {
-  id: "issue-299-20260814-g8",
-  generation: 8,
+  id: "issue-299-20260814-g9",
+  generation: 9,
 } as const;
 
 export const PROVIDER_TRIAL_ARTIFACT_PATHS = {
   credential: ".env.provider-trial.local",
-  gateEvidence: ".vercel/provider-trial-evidence/issue-299-g8-prerequisite-gates.json",
-  signingPrivateKey: ".vercel/provider-trial-evidence/issue-299-g8-ed25519-private.pem",
-  signingPublicKey: ".vercel/provider-trial-evidence/issue-299-g8-ed25519-public.pem",
+  gateEvidence: ".vercel/provider-trial-evidence/issue-299-g9-prerequisite-gates.json",
+  signingPrivateKey: ".vercel/provider-trial-evidence/issue-299-g9-ed25519-private.pem",
+  signingPublicKey: ".vercel/provider-trial-evidence/issue-299-g9-ed25519-public.pem",
 } as const;
 
 export const PROVIDER_TRIAL_APPROVED_SCOPE = {

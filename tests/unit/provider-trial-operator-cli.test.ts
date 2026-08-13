@@ -59,19 +59,19 @@ describe("Provider Trial operator CLI", () => {
     ).toBe(false);
   });
 
-  it("pins the renewed issue #299 authorization generation", () => {
+  it("pins the fresh issue #299 authorization generation", () => {
     expect(PROVIDER_TRIAL_AUTHORIZATION).toEqual({
-      id: "issue-299-20260814-g8",
-      generation: 8,
+      id: "issue-299-20260814-g9",
+      generation: 9,
     });
   });
 
   it("uses generation-scoped evidence paths without replacing retained verification keys", () => {
     expect(PROVIDER_TRIAL_ARTIFACT_PATHS).toEqual({
       credential: ".env.provider-trial.local",
-      gateEvidence: ".vercel/provider-trial-evidence/issue-299-g8-prerequisite-gates.json",
-      signingPrivateKey: ".vercel/provider-trial-evidence/issue-299-g8-ed25519-private.pem",
-      signingPublicKey: ".vercel/provider-trial-evidence/issue-299-g8-ed25519-public.pem",
+      gateEvidence: ".vercel/provider-trial-evidence/issue-299-g9-prerequisite-gates.json",
+      signingPrivateKey: ".vercel/provider-trial-evidence/issue-299-g9-ed25519-private.pem",
+      signingPublicKey: ".vercel/provider-trial-evidence/issue-299-g9-ed25519-public.pem",
     });
   });
 
