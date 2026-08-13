@@ -11,6 +11,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Database-backed suites create, migrate, close, and force-drop isolated databases in hooks.
+    // Keep that bounded lifecycle aligned with the existing 30-second migration timeout.
+    hookTimeout: 30_000,
     include: ["tests/unit/**/*.test.{ts,tsx}"],
   },
 });
