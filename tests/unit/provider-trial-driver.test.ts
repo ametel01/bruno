@@ -5,6 +5,7 @@ import type { AgentDeploymentChoices } from "@/src/server/agents/agent-deploymen
 import { createProviderTrialCohort } from "@/src/server/agents/provider-trial-cohort";
 import {
   initializeProviderTrialDriver,
+  pauseProviderTrialBeforeNextSlot,
   providerTrialBenchmarkOwnerIdentityHash,
   providerTrialBenchmarkTelegramIdentityHash,
   providerTrialDeploymentChoicesDigest,
@@ -413,6 +414,33 @@ describe("resumable Provider Trial driver", () => {
         },
       }),
     ).toBe(false);
+  });
+
+  it("safety-pauses between slots without consuming the next original slot", async () => {
+    const cohort = await createCohort(connection, "provider-trial-driver-pre-slot-pause");
+    await initializeProviderTrialDriver(connection, {
+      cohortId: cohort.id,
+      authorization: { id: "auth-local-001", generation: 1 },
+      configuration: configuration(),
+    });
+
+    await expect(
+      pauseProviderTrialBeforeNextSlot(connection, {
+        cohortId: cohort.id,
+        authorization: { id: "auth-local-001", generation: 1 },
+      }),
+    ).resolves.toMatchObject({
+      state: "paused",
+      nextSlotNumber: 1,
+      spentCents: 0,
+      pauseReason: "safety_pause",
+    });
+
+    const [slot] = await connection.db
+      .select({ requestAttemptId: providerTrialSlots.requestAttemptId })
+      .from(providerTrialSlots)
+      .where(eq(providerTrialSlots.slotNumber, 1));
+    expect(slot?.requestAttemptId).toBeNull();
   });
 
   it("pauses immediately on a safety violation and requires renewed authorization to resume", async () => {

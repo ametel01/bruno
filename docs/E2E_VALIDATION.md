@@ -143,6 +143,16 @@ bun --env-file=.env.local --env-file=.env.provider-trial.local \
   --conditions react-server scripts/run-provider-trial.ts reconcile-cleanup
 ```
 
+If the exact authorized snapshot becomes unavailable between original slots, move the clean,
+between-slot ledger to a zero-slot safety pause before preparing a replacement snapshot and renewed
+authorization. The command refuses to pause while the snapshot is available or while a slot is
+active:
+
+```bash
+bun --env-file=.env.local --env-file=.env.provider-trial.local \
+  --conditions react-server scripts/run-provider-trial.ts pause-unavailable-snapshot
+```
+
 After `run` stops, revoke the short-lived DigitalOcean PAT and dedicated model key, then regenerate
 or revoke the benchmark Telegram token in BotFather. Do this even when the performance gate failed.
 Once the run is complete, or paused with authoritative provider-cleanup evidence, finish with:

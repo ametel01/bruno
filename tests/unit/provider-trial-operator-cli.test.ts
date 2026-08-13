@@ -61,6 +61,7 @@ describe("Provider Trial operator CLI", () => {
     const source = readFileSync("scripts/run-provider-trial.ts", "utf8");
 
     expect(source).toContain('command === "reconcile-cleanup"');
+    expect(source).toContain('command === "pause-unavailable-snapshot"');
     expect(source).toContain("reconcileProviderTrialCleanup(");
     expect(source).toContain('effects: "authorized_cleanup_only"');
     expect(source).toContain('"gate_impossible"');

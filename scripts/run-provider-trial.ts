@@ -9,6 +9,7 @@ import { CURRENT_ROLLOUT_CONFIGURATION_GENERATION } from "@/src/server/agents/de
 import { createProviderTrialCohort } from "@/src/server/agents/provider-trial-cohort";
 import {
   initializeProviderTrialDriver,
+  pauseProviderTrialBeforeNextSlot,
   providerTrialBenchmarkOwnerIdentityHash,
   reconcileProviderTrialCleanup,
   resumeProviderTrialDriver,
@@ -40,6 +41,7 @@ type Command =
   | "initialize"
   | "run"
   | "reconcile-cleanup"
+  | "pause-unavailable-snapshot"
   | "verify-credential-cleanup";
 type OperatorConfig = NonNullable<ReturnType<typeof parseProviderTrialOperatorConfiguration>>;
 type SigningKey = { keyId: string; privateKeyPem: string };
@@ -79,6 +81,7 @@ async function main(): Promise<number> {
       "initialize",
       "run",
       "reconcile-cleanup",
+      "pause-unavailable-snapshot",
       "verify-credential-cleanup",
     ].includes(command)
   ) {
@@ -106,7 +109,10 @@ async function main(): Promise<number> {
     return 1;
   }
   const sourceRevision = await readSourceRevision();
-  const cleanupOnly = command === "reconcile-cleanup" || command === "verify-credential-cleanup";
+  const cleanupOnly =
+    command === "reconcile-cleanup" ||
+    command === "pause-unavailable-snapshot" ||
+    command === "verify-credential-cleanup";
   if (!cleanupOnly && config.releaseSourceRevision !== sourceRevision) {
     write({ command, effects: 0, ok: false, issues: ["immutable_release_revision"] });
     return 1;
@@ -124,7 +130,7 @@ async function main(): Promise<number> {
     write({ command, effects: 0, ok: false, issues: ["prerequisite_gates"] });
     return 1;
   }
-  if (!cleanupOnly && !(await observeAuthorizedSnapshot(config))) {
+  if (!cleanupOnly && command !== "run" && !(await observeAuthorizedSnapshot(config))) {
     write({ command, effects: 0, ok: false, issues: ["provider_snapshot"] });
     return 1;
   }
@@ -167,10 +173,61 @@ async function main(): Promise<number> {
     if (command === "reconcile-cleanup") {
       return await reconcileCleanup(connection, config, gateEvidence);
     }
+    if (command === "pause-unavailable-snapshot") {
+      return await pauseUnavailableSnapshot(connection, config, gateEvidence);
+    }
     return await run(connection, config, signing, gateEvidence);
   } finally {
     await connection.close();
   }
+}
+
+async function pauseUnavailableSnapshot(
+  connection: DatabaseConnection,
+  config: OperatorConfig,
+  gateEvidence: VerifiedGateEvidence,
+): Promise<number> {
+  const [cohort] = await connection.db
+    .select({ id: providerTrialCohorts.id })
+    .from(providerTrialCohorts)
+    .where(eq(providerTrialCohorts.cohortKey, config.cohortKey))
+    .limit(1);
+  if (!cohort) throw new Error("trial_not_initialized");
+  const [authorizationEvidence] = await connection.db
+    .select()
+    .from(providerTrialAuthorizationEvents)
+    .where(eq(providerTrialAuthorizationEvents.cohortId, cohort.id))
+    .orderBy(desc(providerTrialAuthorizationEvents.generation))
+    .limit(1);
+  if (
+    !authorizationEvidence ||
+    authorizationEvidence.generation !== config.authorization.generation ||
+    authorizationEvidence.prerequisiteGateEvidenceDigest !== gateEvidence.digest ||
+    authorizationEvidence.deploymentChoicesDigest !== config.deploymentChoicesDigest
+  ) {
+    throw new Error("pause_authorization_evidence_mismatch");
+  }
+  if (await observeAuthorizedSnapshot(config)) {
+    write({
+      command: "pause-unavailable-snapshot",
+      effects: 0,
+      ok: false,
+      issues: ["provider_snapshot_available"],
+    });
+    return 1;
+  }
+  const result = await pauseProviderTrialBeforeNextSlot(connection, {
+    cohortId: cohort.id,
+    authorization: config.authorization,
+  });
+  write({
+    command: "pause-unavailable-snapshot",
+    effects: "database_only_safety_pause",
+    ok: true,
+    cohortId: cohort.id,
+    ...result,
+  });
+  return 0;
 }
 
 async function reconcileCleanup(
@@ -205,11 +262,17 @@ async function reconcileCleanup(
     env: process.env,
   });
   if (!dependencies.cleanup) throw new Error("cleanup_dependency_missing");
-  const result = await reconcileProviderTrialCleanup(
+  let result = await reconcileProviderTrialCleanup(
     connection,
     { cohortId: cohort.id, authorization: config.authorization },
     { cleanup: dependencies.cleanup },
   );
+  if (result.state === "running" && !(await observeAuthorizedSnapshot(config))) {
+    result = await pauseProviderTrialBeforeNextSlot(connection, {
+      cohortId: cohort.id,
+      authorization: config.authorization,
+    });
+  }
   const ok = result.pauseReason !== "cleanup_failed";
   write({
     command: "reconcile-cleanup",
@@ -348,7 +411,17 @@ async function run(
   let result: Awaited<ReturnType<typeof resumeProviderTrialDriver>>;
   do {
     if (!(await observeAuthorizedSnapshot(config))) {
-      write({ command: "run", effects: 0, ok: false, issues: ["provider_snapshot"] });
+      const paused = await pauseProviderTrialBeforeNextSlot(connection, {
+        cohortId: cohort.id,
+        authorization: config.authorization,
+      });
+      write({
+        command: "run",
+        effects: "database_only_safety_pause",
+        ok: false,
+        issues: ["provider_snapshot"],
+        ...paused,
+      });
       return 1;
     }
     result = await resumeProviderTrialDriver(

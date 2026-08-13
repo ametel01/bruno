@@ -793,6 +793,70 @@ export async function reconcileProviderTrialCleanup(
   };
 }
 
+export async function pauseProviderTrialBeforeNextSlot(
+  connection: DatabaseConnection,
+  input: { cohortId: string; authorization: Authorization },
+  now = new Date(),
+): Promise<{
+  state: "paused";
+  nextSlotNumber: number;
+  spentCents: number;
+  pauseReason: "safety_pause";
+}> {
+  assertAuthorization(input.authorization);
+  return await connection.db.transaction(async (tx) => {
+    const [run] = await tx
+      .select()
+      .from(providerTrialRuns)
+      .where(eq(providerTrialRuns.cohortId, input.cohortId))
+      .for("update")
+      .limit(1);
+    if (run?.state !== "running" || run.activeSlotCheckpoint !== null) {
+      throw new Error("Provider Trial is not between slots.");
+    }
+    if (run.leaseOwner !== null || run.leaseExpiresAt !== null) {
+      throw new Error("Provider Trial run already has an active lease.");
+    }
+    if (
+      run.authorizationGeneration !== input.authorization.generation ||
+      run.authorizationIdHash !== authorizationHash(input.authorization.id)
+    ) {
+      throw new Error("Provider Trial authorization does not match the active run.");
+    }
+    const [nextSlot] = await tx
+      .select({ requestAttemptId: providerTrialSlots.requestAttemptId })
+      .from(providerTrialSlots)
+      .where(
+        and(
+          eq(providerTrialSlots.cohortId, input.cohortId),
+          eq(providerTrialSlots.slotNumber, run.nextSlotNumber),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!nextSlot || nextSlot.requestAttemptId !== null) {
+      throw new Error("Provider Trial next slot has already started.");
+    }
+    const [paused] = await tx
+      .update(providerTrialRuns)
+      .set({
+        state: "paused",
+        pausedAt: now,
+        pauseReason: "safety_pause",
+        updatedAt: now,
+      })
+      .where(eq(providerTrialRuns.cohortId, input.cohortId))
+      .returning();
+    if (!paused) throw new Error("Provider Trial safety pause failed.");
+    return {
+      state: "paused",
+      nextSlotNumber: paused.nextSlotNumber,
+      spentCents: paused.spentCents,
+      pauseReason: "safety_pause",
+    };
+  });
+}
+
 async function recordSlotCleanupEvent(
   connection: DatabaseConnection,
   input: {
