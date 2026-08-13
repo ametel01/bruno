@@ -220,8 +220,8 @@ export function parseProviderTrialOperatorConfiguration(
       choices.provider.mode !== "digitalocean" ||
       choices.provider.region !== PROVIDER_TRIAL_APPROVED_SCOPE.region ||
       choices.provider.sizeSlug !== PROVIDER_TRIAL_APPROVED_SCOPE.runnerSizeSlug ||
-      !/^[1-9][0-9]{0,19}$/.test(choices.provider.image) ||
-      choices.validation.mode !== "release_attested"
+      choices.validation.mode !== "release_attested" ||
+      !/^[1-9][0-9]{0,19}$/.test(choices.validation.snapshotImageId)
     ) {
       return null;
     }
@@ -240,7 +240,7 @@ export function parseProviderTrialOperatorConfiguration(
       deploymentChoicesDigest: providerTrialDeploymentChoicesDigest(choices),
       releaseBundleDigest: release.digest,
       releaseSourceRevision: release.bundle.manifest.controlPlane.source.revision,
-      providerSnapshotImageId: choices.provider.image,
+      providerSnapshotImageId: choices.validation.snapshotImageId,
       benchmarkTelegramIdentityHash: providerTrialBenchmarkTelegramIdentityHash(
         fingerprintTelegramBotTokenForUniqueness(telegramBotToken),
       ),
