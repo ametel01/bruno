@@ -339,7 +339,7 @@ function createDefaultCleanupCohort(options: ProviderTrialProductionAdapterOptio
         }
 
         if (resource.runnerId !== null) {
-          const expectation = toOwnedSetExpectation(resource);
+          const expectation = toProviderTrialOwnedSetExpectation(resource);
           if (!expectation || !provider) {
             return unsafeCleanup(`slot:${resource.slotNumber}:provider`);
           }
@@ -431,11 +431,12 @@ async function readCohortResources(
     .orderBy(providerTrialSlots.slotNumber);
 }
 
-function toOwnedSetExpectation(resource: CohortResource): DigitalOceanOwnedSetExpectation | null {
+export function toProviderTrialOwnedSetExpectation(
+  resource: CohortResource,
+): DigitalOceanOwnedSetExpectation | null {
   if (
     resource.runnerKind !== "digitalocean" ||
     resource.runnerProvider !== "digitalocean" ||
-    !resource.runnerName ||
     !resource.runnerRegion ||
     !resource.runnerSizeSlug ||
     !resource.operationTag ||
@@ -448,7 +449,7 @@ function toOwnedSetExpectation(resource: CohortResource): DigitalOceanOwnedSetEx
     operationTag: resource.operationTag,
     providerResourceId: resource.providerResourceId,
     providerFirewallId: resource.providerFirewallId,
-    expectedName: resource.runnerName,
+    expectedName: resource.operationTag,
     expectedRegion: resource.runnerRegion,
     expectedSizeSlug: resource.runnerSizeSlug,
     expectedFirewallName: digitalOceanRunnerFirewallName(resource.providerResourceId),

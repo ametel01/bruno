@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createProviderTrialProductionDriverDependencies } from "@/src/server/agents/provider-trial-production-adapter";
+import {
+  createProviderTrialProductionDriverDependencies,
+  toProviderTrialOwnedSetExpectation,
+} from "@/src/server/agents/provider-trial-production-adapter";
 
 const ATTEMPT = {
   cohortId: "00000000-0000-4000-8000-000000002991",
@@ -10,6 +13,35 @@ const ATTEMPT = {
 };
 
 describe("DigitalOcean Provider Trial production adapter", () => {
+  it("binds cleanup ownership to the provider operation name instead of the runner label", () => {
+    expect(
+      toProviderTrialOwnedSetExpectation({
+        slotNumber: 1,
+        origin: "operator_trial",
+        userId: "00000000-0000-4000-8000-000000002994",
+        agentId: "00000000-0000-4000-8000-000000002995",
+        agentDeletedAt: null,
+        runnerId: "00000000-0000-4000-8000-000000002996",
+        runnerName: "Bruno Deployment Runner",
+        runnerKind: "digitalocean",
+        runnerProvider: "digitalocean",
+        runnerRegion: "sfo3",
+        runnerSizeSlug: "s-1vcpu-2gb",
+        operationTag: "bruno-deploy-05d73ff0d570484087452896791ab651",
+        providerResourceId: "592041488",
+        providerFirewallId: "2a18501d-ad3c-45b3-989e-8203bd165797",
+      }),
+    ).toEqual({
+      operationTag: "bruno-deploy-05d73ff0d570484087452896791ab651",
+      providerResourceId: "592041488",
+      providerFirewallId: "2a18501d-ad3c-45b3-989e-8203bd165797",
+      expectedName: "bruno-deploy-05d73ff0d570484087452896791ab651",
+      expectedRegion: "sfo3",
+      expectedSizeSlug: "s-1vcpu-2gb",
+      expectedFirewallName: "bruno-runners-592041488",
+    });
+  });
+
   it("commits through the existing driver port with operator-trial identity and reserved cost", async () => {
     const dependencies = createProviderTrialProductionDriverDependencies({
       ownerUserId: "00000000-0000-4000-8000-000000002994",
