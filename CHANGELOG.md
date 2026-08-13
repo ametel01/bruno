@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Cold-Deployment and Provider Trial readiness objective is now five minutes (300 seconds).
   New signed reports carry the explicit objective, while existing 60-second cohorts and evaluation
   rows retain their original boundary rather than being silently reclassified.
+- Provider Trial authorization generations now use distinct prerequisite-evidence and signing-key
+  paths, preserving each completed cohort's public verification key when a fresh trial is prepared.
 
 ### Added
 

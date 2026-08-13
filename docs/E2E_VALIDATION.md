@@ -122,13 +122,15 @@ credential is intentionally retained.
 
 The database retains the sanitized signed report and append-only cleanup ledger. Detailed evidence
 has a 90-day minimum retention commitment; the signed canonical report is retained without a
-scheduled deletion. The signing public key is retained beside the ignored private key so an exported
-report can be verified independently. A paused run needs fresh authorization before any provider
-request can be reconciled or resumed. A `cleanup_failed` pause is the exception: retry its already
-authorized teardown with the cleanup-only command below. It accepts only the exact active
-authorization and signed prerequisite evidence, cannot issue a provider request, appends another
-cleanup attempt, and stops as `gate_impossible` when the remaining original slots cannot satisfy
-the cohort gate. Never create a replacement slot or manually relink a deployment.
+scheduled deletion. Each authorization generation uses generation-scoped gate-evidence and Ed25519
+key paths, so creating a fresh trial cannot overwrite an earlier cohort's retained public
+verification key. The private key is removed during credential cleanup while its public key remains
+available to verify exported evidence independently. A paused run needs fresh authorization before
+any provider request can be reconciled or resumed. A `cleanup_failed` pause is the exception: retry
+its already authorized teardown with the cleanup-only command below. It accepts only the exact
+active authorization and signed prerequisite evidence, cannot issue a provider request, appends
+another cleanup attempt, and stops as `gate_impossible` when the remaining original slots cannot
+satisfy the cohort gate. Never create a replacement slot or manually relink a deployment.
 
 ```bash
 bun --env-file=.env.local --env-file=.env.provider-trial.local \

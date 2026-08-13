@@ -17,6 +17,7 @@ import {
 import {
   listProviderTrialPreflightIssues,
   matchesProviderTrialGateEvidence,
+  PROVIDER_TRIAL_ARTIFACT_PATHS,
   PROVIDER_TRIAL_APPROVED_SCOPE,
   parseProviderTrialOperatorConfiguration,
 } from "@/src/server/agents/provider-trial-operator-config";
@@ -880,9 +881,9 @@ async function readSourceRevision(): Promise<string> {
 async function hasSafeArtifactPaths(config: OperatorConfig): Promise<boolean> {
   const evidenceDirectory = resolve(process.cwd(), ".vercel/provider-trial-evidence");
   const expected = {
-    credential: resolve(process.cwd(), ".env.provider-trial.local"),
-    gate: resolve(evidenceDirectory, "issue-299-prerequisite-gates.json"),
-    privateKey: resolve(evidenceDirectory, "issue-299-ed25519-private.pem"),
+    credential: resolve(process.cwd(), PROVIDER_TRIAL_ARTIFACT_PATHS.credential),
+    gate: resolve(process.cwd(), PROVIDER_TRIAL_ARTIFACT_PATHS.gateEvidence),
+    privateKey: resolve(process.cwd(), PROVIDER_TRIAL_ARTIFACT_PATHS.signingPrivateKey),
   };
   if (
     resolve(config.credentialFilePath) !== expected.credential ||

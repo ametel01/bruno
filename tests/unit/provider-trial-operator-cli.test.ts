@@ -1,7 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { PROVIDER_TRIAL_AUTHORIZATION } from "@/src/server/agents/provider-trial-operator-config";
+import {
+  PROVIDER_TRIAL_ARTIFACT_PATHS,
+  PROVIDER_TRIAL_AUTHORIZATION,
+} from "@/src/server/agents/provider-trial-operator-config";
 
 const COMMAND = [
   "--conditions",
@@ -13,8 +16,17 @@ const COMMAND = [
 describe("Provider Trial operator CLI", () => {
   it("pins the renewed issue #299 authorization generation", () => {
     expect(PROVIDER_TRIAL_AUTHORIZATION).toEqual({
-      id: "issue-299-20260813-g6",
-      generation: 6,
+      id: "issue-299-20260813-g7",
+      generation: 7,
+    });
+  });
+
+  it("uses generation-scoped evidence paths without replacing retained verification keys", () => {
+    expect(PROVIDER_TRIAL_ARTIFACT_PATHS).toEqual({
+      credential: ".env.provider-trial.local",
+      gateEvidence: ".vercel/provider-trial-evidence/issue-299-g7-prerequisite-gates.json",
+      signingPrivateKey: ".vercel/provider-trial-evidence/issue-299-g7-ed25519-private.pem",
+      signingPublicKey: ".vercel/provider-trial-evidence/issue-299-g7-ed25519-public.pem",
     });
   });
 
