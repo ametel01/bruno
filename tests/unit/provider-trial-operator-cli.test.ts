@@ -16,11 +16,11 @@ const COMMAND = [
 
 describe("Provider Trial operator CLI", () => {
   it("requires the exact authorized snapshot to be available in the authorized region", () => {
-    const expected = { imageId: "240932740", region: "sfo3" };
+    const expected = { imageId: "241009503", region: "sfo3" };
     expect(
       isProviderTrialSnapshotAvailable(
         200,
-        { id: 240932740, status: "available", regions: ["sfo3"] },
+        { id: 241009503, status: "available", regions: ["sfo3"] },
         expected,
       ),
     ).toBe(true);
@@ -28,14 +28,14 @@ describe("Provider Trial operator CLI", () => {
     expect(
       isProviderTrialSnapshotAvailable(
         200,
-        { id: 240932741, status: "available", regions: ["sfo3"] },
+        { id: 241009504, status: "available", regions: ["sfo3"] },
         expected,
       ),
     ).toBe(false);
     expect(
       isProviderTrialSnapshotAvailable(
         200,
-        { id: 240932740, status: "available", regions: ["nyc3"] },
+        { id: 241009503, status: "available", regions: ["nyc3"] },
         expected,
       ),
     ).toBe(false);
@@ -43,17 +43,17 @@ describe("Provider Trial operator CLI", () => {
 
   it("pins the renewed issue #299 authorization generation", () => {
     expect(PROVIDER_TRIAL_AUTHORIZATION).toEqual({
-      id: "issue-299-20260813-g7",
-      generation: 7,
+      id: "issue-299-20260814-g8",
+      generation: 8,
     });
   });
 
   it("uses generation-scoped evidence paths without replacing retained verification keys", () => {
     expect(PROVIDER_TRIAL_ARTIFACT_PATHS).toEqual({
       credential: ".env.provider-trial.local",
-      gateEvidence: ".vercel/provider-trial-evidence/issue-299-g7-prerequisite-gates.json",
-      signingPrivateKey: ".vercel/provider-trial-evidence/issue-299-g7-ed25519-private.pem",
-      signingPublicKey: ".vercel/provider-trial-evidence/issue-299-g7-ed25519-public.pem",
+      gateEvidence: ".vercel/provider-trial-evidence/issue-299-g8-prerequisite-gates.json",
+      signingPrivateKey: ".vercel/provider-trial-evidence/issue-299-g8-ed25519-private.pem",
+      signingPublicKey: ".vercel/provider-trial-evidence/issue-299-g8-ed25519-public.pem",
     });
   });
 
