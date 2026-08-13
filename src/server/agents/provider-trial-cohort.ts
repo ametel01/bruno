@@ -2,12 +2,16 @@ import "server-only";
 
 import { createHash, randomUUID, sign, verify } from "node:crypto";
 import { asc, eq, sql } from "drizzle-orm";
+import {
+  COLD_DEPLOYMENT_SLO_OBJECTIVE_MS,
+  COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS,
+} from "@/src/server/agents/cold-deployment-slo-objective";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import { agentDeployments, providerTrialCohorts, providerTrialSlots } from "@/src/server/db/schema";
 
 export const PROVIDER_TRIAL_SLOT_COUNT = 30;
-export const PROVIDER_TRIAL_REPORT_SCHEMA_VERSION = "bruno.provider-trial-cohort.v1";
-export const PROVIDER_TRIAL_READY_WITHIN_MS = 60_000;
+export const PROVIDER_TRIAL_REPORT_SCHEMA_VERSION = "bruno.provider-trial-cohort.v2";
+export const PROVIDER_TRIAL_READY_WITHIN_MS = COLD_DEPLOYMENT_SLO_OBJECTIVE_MS;
 
 const SAFE_KEY_PATTERN = /^[a-z0-9][a-z0-9._:-]{7,127}$/;
 const SAFE_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,127}$/;
@@ -30,6 +34,8 @@ export type ProviderTrialTerminalOutcome =
   | "pre_commit_failure"
   | "ready_within_60"
   | "ready_after_60"
+  | "ready_within_objective"
+  | "ready_after_objective"
   | "deployment_failed"
   | "timed_out"
   | "safety_failure";
@@ -50,6 +56,7 @@ export type ProviderTrialCohortReport = {
     region: string;
     runnerSizeSlug: string;
     rolloutConfigurationGeneration: number;
+    readinessObjectiveSeconds: number;
     slotCount: typeof PROVIDER_TRIAL_SLOT_COUNT;
     startedAt: string | null;
   };
@@ -63,7 +70,8 @@ export type ProviderTrialCohortReport = {
   readiness: {
     totalSlots: typeof PROVIDER_TRIAL_SLOT_COUNT;
     committed: number;
-    readyWithin60: number;
+    objectiveSeconds: number;
+    readyWithinObjective: number;
     allSlotMisses: number;
     pending: number;
     committedPassRate: number;
@@ -103,7 +111,13 @@ export async function createProviderTrialCohort(
   assertSafeCohortInput(input);
 
   return await connection.db.transaction(async (tx) => {
-    const [cohort] = await tx.insert(providerTrialCohorts).values(input).returning();
+    const [cohort] = await tx
+      .insert(providerTrialCohorts)
+      .values({
+        ...input,
+        readinessObjectiveSeconds: COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS,
+      })
+      .returning();
 
     if (!cohort) {
       throw new Error("Provider Trial Cohort insert returned no row.");
@@ -266,6 +280,7 @@ export async function recordProviderTrialTerminalOutcome(
       errorCode: string | null;
       failedAt: Date | string | null;
       observedAt: Date | string;
+      readinessObjectiveSeconds: number;
       stage: string;
     }>(sql`
       select
@@ -274,8 +289,10 @@ export async function recordProviderTrialTerminalOutcome(
         d.error_code as "errorCode",
         d.failed_at as "failedAt",
         clock_timestamp() as "observedAt",
+        c.readiness_objective_seconds as "readinessObjectiveSeconds",
         d.stage::text as stage
       from ${providerTrialSlots} s
+      inner join ${providerTrialCohorts} c on c.id = s.cohort_id
       inner join ${agentDeployments} d on d.id = s.deployment_id
       where s.id = ${input.slotId}
         and s.cohort_id = ${input.cohortId}
@@ -356,7 +373,7 @@ export async function buildProviderTrialCohortReport(
     terminalOutcome: asTerminalOutcome(row.terminalOutcome),
     terminalSafeCode: asSafeCode(row.terminalSafeCode),
   }));
-  const summaries = summarizeProviderTrialSlots(slots);
+  const summaries = summarizeProviderTrialSlots(slots, cohort.readinessObjectiveSeconds);
 
   return {
     schemaVersion: PROVIDER_TRIAL_REPORT_SCHEMA_VERSION,
@@ -366,6 +383,7 @@ export async function buildProviderTrialCohortReport(
       region: cohort.region,
       runnerSizeSlug: cohort.runnerSizeSlug,
       rolloutConfigurationGeneration: cohort.rolloutConfigurationGeneration,
+      readinessObjectiveSeconds: cohort.readinessObjectiveSeconds,
       slotCount: PROVIDER_TRIAL_SLOT_COUNT,
       startedAt: cohort.startedAt?.toISOString() ?? null,
     },
@@ -439,6 +457,7 @@ function deriveTerminalOutcome(
     errorCode: string | null;
     failedAt: Date | string | null;
     observedAt: Date | string;
+    readinessObjectiveSeconds: number;
     stage: string;
   },
 ): {
@@ -461,9 +480,9 @@ function deriveTerminalOutcome(
     }
     return {
       outcome:
-        completedAt - acceptedAt <= PROVIDER_TRIAL_READY_WITHIN_MS
-          ? "ready_within_60"
-          : "ready_after_60",
+        completedAt - acceptedAt <= evidence.readinessObjectiveSeconds * 1_000
+          ? "ready_within_objective"
+          : "ready_after_objective",
       safeCode: null,
     };
   }
@@ -474,8 +493,10 @@ function deriveTerminalOutcome(
 
   if (requested === "timed_out") {
     const observedAt = new Date(evidence.observedAt).getTime();
-    if (observedAt - acceptedAt < PROVIDER_TRIAL_READY_WITHIN_MS) {
-      throw new Error("Provider Trial deployment cannot time out before the 60-second boundary.");
+    if (observedAt - acceptedAt < evidence.readinessObjectiveSeconds * 1_000) {
+      throw new Error(
+        "Provider Trial deployment cannot time out before its readiness objective boundary.",
+      );
     }
     return { outcome: requested, safeCode: "ready_timeout" };
   }
@@ -561,6 +582,8 @@ function asTerminalOutcome(value: string | null): ProviderTrialTerminalOutcome |
     value === "pre_commit_failure" ||
     value === "ready_within_60" ||
     value === "ready_after_60" ||
+    value === "ready_within_objective" ||
+    value === "ready_after_objective" ||
     value === "deployment_failed" ||
     value === "timed_out" ||
     value === "safety_failure"
@@ -599,7 +622,10 @@ export function isValidProviderTrialCohortReport(
 }
 
 function hasConsistentSummaries(report: ProviderTrialCohortReport): boolean {
-  const expected = summarizeProviderTrialSlots(report.slots);
+  const expected = summarizeProviderTrialSlots(
+    report.slots,
+    report.cohort.readinessObjectiveSeconds,
+  );
   return (
     canonicalJson({
       apiAcceptance: report.apiAcceptance,
@@ -610,14 +636,19 @@ function hasConsistentSummaries(report: ProviderTrialCohortReport): boolean {
 
 function summarizeProviderTrialSlots(
   slots: ProviderTrialCohortReport["slots"],
+  objectiveSeconds: number,
 ): Pick<ProviderTrialCohortReport, "apiAcceptance" | "readiness"> {
   const committed = slots.filter((slot) => slot.requestOutcome === "committed").length;
   const preCommitFailures = slots.filter(
     (slot) => slot.requestOutcome === "pre_commit_failure",
   ).length;
-  const readyWithin60 = slots.filter((slot) => slot.terminalOutcome === "ready_within_60").length;
+  const readyWithinObjective = slots.filter((slot) =>
+    isReadyWithinObjectiveOutcome(slot.terminalOutcome, objectiveSeconds),
+  ).length;
   const allSlotMisses = slots.filter(
-    (slot) => slot.terminalOutcome !== null && slot.terminalOutcome !== "ready_within_60",
+    (slot) =>
+      slot.terminalOutcome !== null &&
+      !isReadyWithinObjectiveOutcome(slot.terminalOutcome, objectiveSeconds),
   ).length;
   const pending = slots.filter((slot) => slot.terminalOutcome === null).length;
 
@@ -632,17 +663,28 @@ function summarizeProviderTrialSlots(
     readiness: {
       totalSlots: PROVIDER_TRIAL_SLOT_COUNT,
       committed,
-      readyWithin60,
+      objectiveSeconds,
+      readyWithinObjective,
       allSlotMisses,
       pending,
-      committedPassRate: committed === 0 ? 0 : readyWithin60 / committed,
+      committedPassRate: committed === 0 ? 0 : readyWithinObjective / committed,
       passesGate:
         pending === 0 &&
         committed >= 29 &&
-        readyWithin60 >= 29 &&
-        readyWithin60 / committed >= 0.95,
+        readyWithinObjective >= 29 &&
+        readyWithinObjective / committed >= 0.95,
     },
   };
+}
+
+function isReadyWithinObjectiveOutcome(
+  outcome: ProviderTrialTerminalOutcome | null,
+  objectiveSeconds: number,
+): boolean {
+  return (
+    outcome === "ready_within_objective" ||
+    (objectiveSeconds === 60 && outcome === "ready_within_60")
+  );
 }
 
 function isValidCohort(value: unknown): boolean {
@@ -657,6 +699,8 @@ function isValidCohort(value: unknown): boolean {
     SAFE_SLUG_PATTERN.test(value.runnerSizeSlug) &&
     Number.isInteger(value.rolloutConfigurationGeneration) &&
     Number(value.rolloutConfigurationGeneration) >= 1 &&
+    (value.readinessObjectiveSeconds === 60 ||
+      value.readinessObjectiveSeconds === COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS) &&
     value.slotCount === PROVIDER_TRIAL_SLOT_COUNT &&
     (value.startedAt === null || isIso(value.startedAt))
   );
@@ -679,7 +723,9 @@ function isValidReadiness(value: unknown): boolean {
     isRecord(value) &&
     hasOnlyKeys(value, READINESS_KEYS) &&
     value.totalSlots === PROVIDER_TRIAL_SLOT_COUNT &&
-    areCounts([value.committed, value.readyWithin60, value.allSlotMisses, value.pending]) &&
+    (value.objectiveSeconds === 60 ||
+      value.objectiveSeconds === COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS) &&
+    areCounts([value.committed, value.readyWithinObjective, value.allSlotMisses, value.pending]) &&
     typeof value.committedPassRate === "number" &&
     value.committedPassRate >= 0 &&
     value.committedPassRate <= 1 &&
@@ -736,7 +782,12 @@ function isValidReportSlot(value: unknown, expectedNumber: number): boolean {
 
   if (value.requestSafeCode !== null || typeof value.deploymentId !== "string") return false;
   if (value.terminalOutcome === null) return value.terminalSafeCode === null;
-  if (value.terminalOutcome === "ready_within_60" || value.terminalOutcome === "ready_after_60") {
+  if (
+    value.terminalOutcome === "ready_within_60" ||
+    value.terminalOutcome === "ready_after_60" ||
+    value.terminalOutcome === "ready_within_objective" ||
+    value.terminalOutcome === "ready_after_objective"
+  ) {
     return value.terminalSafeCode === null;
   }
   return (
@@ -809,6 +860,7 @@ const COHORT_KEYS = [
   "region",
   "runnerSizeSlug",
   "rolloutConfigurationGeneration",
+  "readinessObjectiveSeconds",
   "slotCount",
   "startedAt",
 ] as const;
@@ -822,7 +874,8 @@ const API_KEYS = [
 const READINESS_KEYS = [
   "totalSlots",
   "committed",
-  "readyWithin60",
+  "objectiveSeconds",
+  "readyWithinObjective",
   "allSlotMisses",
   "pending",
   "committedPassRate",

@@ -27,12 +27,13 @@ one `committed` outcome linked to its exact operator-trial Agent Deployment, or 
 constraints prevent slot insertion, deletion, renumbering, request-outcome replacement, deployment
 relinking, and terminal-outcome replacement.
 
-The versioned `bruno.provider-trial-cohort.v1` report selects slots only by the supplied cohort ID
+The versioned `bruno.provider-trial-cohort.v2` report selects slots only by the supplied cohort ID
 and orders them by their original number. `apiAcceptance` counts committed requests, pre-commit
 failures, pending slots, and availability across all 30 slots. `readiness` separately counts
-ready-within-60 outcomes, all-slot misses, pending outcomes, and the committed-deployment pass rate.
+the explicit `objectiveSeconds: 300`, ready-within-objective outcomes, all-slot misses, pending
+outcomes, and the committed-deployment pass rate.
 The gate remains false until every slot has a terminal outcome, at least 29 requests committed, at
-least 29 of all 30 slots reached ready within 60 seconds, and at least 95 percent of committed
+least 29 of all 30 slots reached ready within 300 seconds, and at least 95 percent of committed
 deployments did so. Reports expose only cohort configuration, numbered outcomes, a closed vocabulary
 of mapped safe codes, and exact deployment IDs; request-attempt IDs, raw deployment errors, Owner
 identity, Telegram data, credentials, tokens, endpoints, and arbitrary provider metadata are omitted.
@@ -150,7 +151,7 @@ verification key. A truthful signed `.pending` record is retained if local delet
 publication cannot finish. Until credential cleanup succeeds, `run` deliberately returns a non-zero
 credential-cleanup-required status regardless of whether the 30-slot performance gate passed.
 
-Version 4 of the benchmark uses the immutable database-clock
+Version 5 of the benchmark uses the immutable database-clock
 `agent_deployments.accepted_at` boundary. New Agent Deployments capture this timestamp inside the
 request transaction after the earlier persistence work, so transaction commit latency remains in
 the measurement. `created_at` remains audit and ordering metadata, and `runner_accepted_at` keeps
@@ -160,8 +161,8 @@ the column is added, its database-clock default covers future inserts that omit 
 rejects an explicit null and later mutation, so missing-boundary regressions fail at persistence
 instead of being mislabeled as historical data.
 
-The binary Cold-Deployment gate is failure-inclusive. A Ready Deployment at or before 60 seconds
-is `ready_within_60`; every deployment that does not meet that objective is `slo_miss`. The separate
+The binary Cold-Deployment gate is failure-inclusive. A Ready Deployment at or before 300 seconds
+is `ready_within_objective`; every deployment that does not meet that objective is `slo_miss`. The separate
 allowlisted `sloMissCause` distinguishes `slow_ready`, `terminal_failure`, and
 `not_ready_at_boundary` evidence without renaming the domain outcome. A deployment observed before
 its deadline is `pending`. Missing boundaries and invalid event ordering fail visibly as diagnostic
@@ -172,7 +173,7 @@ and rollout-configuration generation evidence. Explicit retries and runner-repla
 inherit the triggering deployment's generation instead of reading a later default. Only production
 Owner requests in the `cold_deployment` cohort are eligible. Operator trials, non-production
 deployments, Same-Owner Reuse, runner-replacement work, and explicit Owner cancellation before the
-60-second boundary are excluded. Historical rows without immutable identity remain diagnostic. A
+300-second boundary are excluded. Historical rows without immutable identity remain diagnostic. A
 missing rollout generation and cancellation timestamp before durable acceptance are reported as
 invalid evidence,
 not silently excluded. The default query applies the durable eligibility rules before selecting the
@@ -180,9 +181,10 @@ latest observations by `accepted_at` and deployment ID.
 
 The JSON report is versioned and deterministic. It contains:
 
-- `slo.sampleSize`, `requiredSampleSize`, `requiredReadyWithin60`, `eligible`, `readyWithin60`,
+- `slo.objectiveSeconds`, `sampleSize`, `requiredSampleSize`,
+  `requiredReadyWithinObjective`, `eligible`, `readyWithinObjective`,
   `misses`, `pending`, `passRate`, and `passesGate` for the `cold_deployment` cohort; `passesGate`
-  remains false until all 100 observations are decided and at least 95 are ready within 60 seconds;
+  remains false until all 100 observations are decided and at least 95 are ready within 300 seconds;
 - `summary.total`, `ready`, `failed`, `incomplete`, and diagnostic `successRate`;
 - ready and failed terminal latency `p50Ms`, `p95Ms`, and `maxMs`;
 - `cohorts.cold_deployment`, `cohorts.same_owner_reuse`, and `cohorts.unknown` with
@@ -213,17 +215,17 @@ Production schedules `GET /api/internal/cold-deployment-slo/evaluate` once per m
 same `CRON_SECRET` authorization boundary as the other protected reconcilers. The endpoint requires
 `BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_ID` and
 `BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_PEM`; incomplete signing configuration fails closed. Its
-response publishes only the canonical report digest, eligible and ready-within-60 counts, pending
-count, the latest-100 API-acceptance summary, current proof state, and whether this evaluation
-opened a regression incident.
+response publishes only the canonical report digest, objective seconds, eligible and
+ready-within-objective counts, pending count, the latest-100 API-acceptance summary, current proof
+state, and whether this evaluation opened a regression incident.
 
 Each invocation queries the latest 100 production Owner-request Cold Deployments using the
 immutable accepted boundary, cohort, origin, cancellation, and Rollout Configuration generation
 fields. Operator trials, Same-Owner Reuse, runner-replacement work, non-production rows, and an
-explicit Owner cancellation before 60 seconds remain excluded. Provider failures, internal
+explicit Owner cancellation before 300 seconds remain excluded. Provider failures, internal
 failures, retries, timeouts, pending observations at the boundary, and slow successes remain in the
 failure-inclusive sample. Fewer than 100 observations is unproven; proof requires all 100 decided
-and at least 95 ready within 60 seconds.
+and at least 95 ready within 300 seconds.
 
 The `cold_deployment_slo_evaluations` ledger is append-only. It stores canonical sanitized report
 bytes, SHA-256 digest, Ed25519 signature and key ID, active Rollout Configuration generations, the
@@ -241,7 +243,7 @@ stages for at least 90 days.
 
 This evaluator provides the production-proof mechanism but cannot manufacture production traffic.
 The objective remains operationally incomplete until a separately authorized rollout exists and
-100 real eligible observations contain at least 95 ready-within-60 outcomes.
+100 real eligible observations contain at least 95 ready-within-objective outcomes.
 
 Default mode is read-only and does not create, mutate, clean up, or contact provider resources.
 Local Docker mode requires the exact zero-cloud sentinels used by `local:agent:smoke`:
@@ -256,14 +258,14 @@ bun run agent:deployment:benchmark -- --mode local_docker
 DigitalOcean-driving benchmark mode is fail-closed. It requires an explicit positive trial count,
 the `--authorize-provider-costs` flag, explicit `--candidate-size-slugs` values, and
 `BRUNO_AGENT_DEPLOYMENT_BENCHMARK_DIGITALOCEAN_AUTHORIZATION=authorize-digitalocean-agent-deployment-benchmark`.
-Ordinary CI must not run that mode. Provider-backed ready-within-60 acceptance is owned by the
+Ordinary CI must not run that mode. Provider-backed ready-within-objective acceptance is owned by the
 final SLO proof step after operator authorization; this read-only benchmark records evidence but
 does not claim live provider acceptance by itself.
 
 The local full-cycle smoke emits a sanitized `local_agent_cycle_deployment_latency` report after the
 deployment reaches durable ready and before its database volume is removed. The smoke fails unless
 the report contains `acceptedAt`, uses `accepted_at` as its duration boundary, and produces a
-non-diagnostic SLO result. The report exposes the sanitized ready-within-60 result. Reports and
+non-diagnostic SLO result. The report exposes the sanitized ready-within-objective result. Reports and
 terminal completion logs project allowlisted fields only: deployment ID, runner ID when present,
 accepted timestamp, duration boundary, outcome, SLO classification/status, total duration, bounded
 stage timing/status, and issue names. They must not retain user identity,

@@ -43,7 +43,7 @@ describe("continuous production Cold-Deployment SLO evidence", () => {
       report: regressed,
       signing,
     });
-    expect(second).toMatchObject({ proven: false, incidentOpened: true, readyWithin60: 94 });
+    expect(second).toMatchObject({ proven: false, incidentOpened: true, readyWithinObjective: 94 });
 
     const rows = await connection.db.select().from(coldDeploymentSloEvaluations);
     expect(rows).toHaveLength(2);
@@ -98,7 +98,7 @@ describe("continuous production Cold-Deployment SLO evidence", () => {
     });
     await expect(
       recordColdDeploymentSloEvaluation(connection, {
-        report: { ...report, slo: { ...report.slo, readyWithin60: 100 } },
+        report: { ...report, slo: { ...report.slo, readyWithinObjective: 100 } },
         signing,
       }),
     ).rejects.toThrow("disagrees with its immutable runs");
@@ -109,7 +109,7 @@ describe("continuous production Cold-Deployment SLO evidence", () => {
     const artifact = JSON.parse(row.reportBytes) as Record<string, unknown>;
     const embeddedReport = artifact.report as Record<string, unknown>;
     const embeddedSlo = embeddedReport.slo as Record<string, unknown>;
-    embeddedSlo.readyWithin60 = 100;
+    embeddedSlo.readyWithinObjective = 100;
     const inconsistentBytes = canonicalJson(artifact);
     const digest = `sha256:${createHash("sha256").update(inconsistentBytes).digest("hex")}`;
     const signature = sign(null, Buffer.from(inconsistentBytes), signing.privateKeyPem).toString(
@@ -129,11 +129,11 @@ describe("continuous production Cold-Deployment SLO evidence", () => {
 
 function deployments(
   total: number,
-  readyWithin60: number,
+  readyWithinObjective: number,
 ): AgentDeploymentLatencyDeploymentEvidence[] {
   return Array.from({ length: total }, (_, index) => {
     const acceptedAt = new Date(Date.UTC(2026, 7, 10, 0, index, 0));
-    const passes = index < readyWithin60;
+    const passes = index < readyWithinObjective;
     return {
       id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
       runnerId: null,

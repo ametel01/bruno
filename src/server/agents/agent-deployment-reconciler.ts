@@ -17,6 +17,7 @@ import { logAgentDeploymentTerminalCompletion } from "@/src/server/agents/agent-
 import { initializeAgentRuntimeAfterDeploymentReady } from "@/src/server/agents/agent-runtime-store";
 import { scheduleAgentRuntimeReconcileAfterResponse } from "@/src/server/agents/agent-runtime-triggers";
 import { getAssistantProfileForManagedModel } from "@/src/server/agents/assistant-profiles";
+import { COLD_DEPLOYMENT_SLO_OBJECTIVE_MS } from "@/src/server/agents/cold-deployment-slo-objective";
 import {
   type AgentDeploymentStage,
   normalizeDeploymentErrorDetail,
@@ -69,7 +70,7 @@ const agentDeploymentLogger = createAppLogger("agent.deployment");
 export const DEPLOYMENT_RECONCILE_LEASE_MS = 90_000;
 export const DEPLOYMENT_RECONCILE_ACTION_DEADLINE_MS = 45_000;
 export const DEPLOYMENT_DRAIN_MAX_ITERATIONS = 8;
-export const GATEWAY_START_DEADLINE_MS = 30_000;
+export const GATEWAY_START_DEADLINE_MS = COLD_DEPLOYMENT_SLO_OBJECTIVE_MS;
 
 const MAX_REPLACEMENTS_PER_DEPLOYMENT = 2;
 const REPLACEMENT_WINDOW_MS = 24 * 60 * 60 * 1_000;

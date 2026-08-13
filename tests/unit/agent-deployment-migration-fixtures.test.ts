@@ -106,6 +106,7 @@ describe("agent deployment migration fixtures", () => {
         "rollout_configuration_generation",
         "started_at",
         "created_at",
+        "readiness_objective_seconds",
       ]);
       await expect(readColumnNames(sql, "provider_trial_slots")).resolves.toEqual([
         "id",
@@ -415,6 +416,59 @@ describe("agent deployment migration fixtures", () => {
       await sql.end();
     }
   });
+
+  it("preserves legacy 60-second evidence while defaulting new cohorts to 300 seconds", async () => {
+    const database = await createDisposableDatabase("objective_upgrade");
+    const databaseUrl = databaseUrlFor(database);
+    const sql = postgres(databaseUrl, { max: 1 });
+
+    try {
+      await applyMigrationsThrough0039(sql);
+      await sql`
+        insert into cold_deployment_slo_evaluations (
+          generated_at, report_bytes, report_digest, signing_key_id, signature,
+          eligible_count, ready_within_60, pending_count, proven,
+          rollout_configuration_generations
+        ) values (
+          '2026-08-12T00:00:00Z', '{}', ${`sha256:${"a".repeat(64)}`},
+          'legacy-key', 'legacy-signature', 0, 0, 0, false, '[]'::jsonb
+        )
+      `;
+      const [legacyCohort] = await sql<{ id: string }[]>`
+        insert into provider_trial_cohorts (
+          cohort_key, region, runner_size_slug, rollout_configuration_generation
+        ) values ('legacy-objective-cohort', 'sfo3', 's-1vcpu-2gb', 1)
+        returning id
+      `;
+      if (!legacyCohort) throw new Error("Legacy objective cohort was not inserted.");
+
+      await runDbMigrate(databaseUrl);
+
+      await expect(
+        sql`select objective_seconds, ready_within_objective
+          from cold_deployment_slo_evaluations`,
+      ).resolves.toEqual([{ objective_seconds: 60, ready_within_objective: 0 }]);
+      await expect(
+        sql`select readiness_objective_seconds from provider_trial_cohorts
+          where id = ${legacyCohort.id}`,
+      ).resolves.toEqual([{ readiness_objective_seconds: 60 }]);
+      await expect(sql`
+        insert into provider_trial_cohorts (
+          cohort_key, region, runner_size_slug, rollout_configuration_generation
+        ) values ('current-objective-cohort', 'sfo3', 's-1vcpu-2gb', 1)
+        returning readiness_objective_seconds
+      `).resolves.toEqual([{ readiness_objective_seconds: 300 }]);
+      await expect(sql`
+        update provider_trial_cohorts
+        set readiness_objective_seconds = 300
+        where id = ${legacyCohort.id}
+      `).rejects.toMatchObject({
+        constraint_name: "provider_trial_cohorts_identity_immutable_check",
+      });
+    } finally {
+      await sql.end();
+    }
+  });
 });
 
 async function createDisposableDatabase(label: string): Promise<string> {
@@ -480,6 +534,10 @@ async function applyMigrationsThrough0017(sql: postgres.Sql): Promise<void> {
 
 async function applyMigrationsThrough0026(sql: postgres.Sql): Promise<void> {
   await applyMigrationsThrough(sql, 26);
+}
+
+async function applyMigrationsThrough0039(sql: postgres.Sql): Promise<void> {
+  await applyMigrationsThrough(sql, 39);
 }
 
 async function applyMigrationsThrough(sql: postgres.Sql, lastIndex: number): Promise<void> {

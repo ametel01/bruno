@@ -219,7 +219,7 @@ describe("Provider Trial Cohort ledger", () => {
         ...attempt,
         outcome: "observe_deployment",
       }),
-    ).resolves.toMatchObject({ terminalOutcome: "ready_within_60" });
+    ).resolves.toMatchObject({ terminalOutcome: "ready_within_objective" });
   });
 
   it("rejects links to non-trial or wrong-generation deployments", async () => {
@@ -361,7 +361,7 @@ describe("Provider Trial Cohort ledger", () => {
       id: DEPLOYMENT_ID,
       requestAttemptId: slowAttempt.requestAttemptId,
       stage: "ready",
-      completedAt: new Date("2026-08-08T10:01:00.001Z"),
+      completedAt: new Date("2026-08-08T10:05:00.001Z"),
     });
     await recordProviderTrialRequestOutcome(connection, {
       ...slowAttempt,
@@ -388,7 +388,7 @@ describe("Provider Trial Cohort ledger", () => {
         ...slowAttempt,
         outcome: "timed_out",
       }),
-    ).resolves.toMatchObject({ terminalOutcome: "ready_after_60" });
+    ).resolves.toMatchObject({ terminalOutcome: "ready_after_objective" });
     await expect(
       recordProviderTrialTerminalOutcome(connection, {
         ...failedAttempt,
@@ -397,7 +397,7 @@ describe("Provider Trial Cohort ledger", () => {
     ).resolves.toMatchObject({ terminalOutcome: "deployment_failed" });
   });
 
-  it("reports API acceptance separately from failure-inclusive ready-within-60 results", async () => {
+  it("reports API acceptance separately from failure-inclusive ready-within-objective results", async () => {
     const cohort = await createCohort(connection);
 
     const failedAttempt = await beginProviderTrialSlot(connection, {
@@ -459,7 +459,8 @@ describe("Provider Trial Cohort ledger", () => {
     expect(report.readiness).toMatchObject({
       totalSlots: 30,
       committed: 2,
-      readyWithin60: 1,
+      objectiveSeconds: 300,
+      readyWithinObjective: 1,
       allSlotMisses: 1,
       pending: 28,
       committedPassRate: 0.5,
@@ -507,7 +508,8 @@ describe("Provider Trial Cohort ledger", () => {
           readiness: {
             totalSlots: 30,
             committed: 0,
-            readyWithin60: 0,
+            objectiveSeconds: 300,
+            readyWithinObjective: 0,
             allSlotMisses: 1,
             pending: 29,
             committedPassRate: 0,

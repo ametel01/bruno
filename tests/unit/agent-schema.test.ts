@@ -472,6 +472,7 @@ describe("Milestone 1 agent persistence schema", () => {
     const cohortColumns = getTableColumns(providerTrialCohorts);
     const slotColumns = getTableColumns(providerTrialSlots);
     const migration = await readFile("drizzle/0031_neat_screwball.sql", "utf8");
+    const objectiveMigration = await readFile("drizzle/0040_smooth_ezekiel.sql", "utf8");
 
     expect(Object.keys(cohortColumns)).toEqual([
       "id",
@@ -479,6 +480,7 @@ describe("Milestone 1 agent persistence schema", () => {
       "region",
       "runnerSizeSlug",
       "rolloutConfigurationGeneration",
+      "readinessObjectiveSeconds",
       "startedAt",
       "createdAt",
     ]);
@@ -505,6 +507,11 @@ describe("Milestone 1 agent persistence schema", () => {
     expect(migration).toContain("provider_trial_slots_deployment_identity_check");
     expect(migration).toContain('CREATE UNIQUE INDEX "provider_trial_slots_deployment_idx"');
     expect(migration).not.toMatch(/DROP TABLE|DROP COLUMN|ALTER COLUMN|(?:^|\n)UPDATE /);
+    expect(objectiveMigration).toContain('ADD COLUMN "readiness_objective_seconds"');
+    expect(objectiveMigration).toContain(
+      "NEW.readiness_objective_seconds IS DISTINCT FROM OLD.readiness_objective_seconds",
+    );
+    expect(objectiveMigration).not.toMatch(/(?:^|\n)UPDATE /);
   });
 
   it("defines durable manual runner identity rows with soft-delete support", () => {

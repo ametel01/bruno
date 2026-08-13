@@ -43,8 +43,9 @@ export async function GET(
         ok: true,
         evaluation: {
           reportDigest: evaluation.reportDigest,
+          objectiveSeconds: evaluation.objectiveSeconds,
           eligibleCount: evaluation.eligibleCount,
-          readyWithin60: evaluation.readyWithin60,
+          readyWithinObjective: evaluation.readyWithinObjective,
           pendingCount: evaluation.pendingCount,
           proven: evaluation.proven,
           incidentOpened: evaluation.incidentOpened,

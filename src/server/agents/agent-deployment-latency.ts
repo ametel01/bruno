@@ -6,19 +6,22 @@ import type {
   AgentDeploymentOrigin,
 } from "@/src/server/agents/deployment-slo-identity";
 import { isRolloutConfigurationGeneration } from "@/src/server/agents/deployment-slo-identity";
+import {
+  COLD_DEPLOYMENT_SLO_OBJECTIVE_MS,
+  COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS,
+  COLD_DEPLOYMENT_SLO_READY_REQUIRED,
+  COLD_DEPLOYMENT_SLO_SAMPLE_SIZE,
+} from "@/src/server/agents/cold-deployment-slo-objective";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import { createAppLogger } from "@/src/server/logging/logger";
 
-export const AGENT_DEPLOYMENT_LATENCY_REPORT_VERSION = 4;
+export const AGENT_DEPLOYMENT_LATENCY_REPORT_VERSION = 5;
 
 const DEFAULT_REPORT_LIMIT = 100;
 const MAX_REPORT_LIMIT = 1_000;
 const NEAREST_RANK_P95 = 95;
 const NEAREST_RANK_P50 = 50;
 const MAX_LOG_STAGE_COUNT = 20;
-const READY_WITHIN_MS = 60_000;
-const COLD_DEPLOYMENT_SAMPLE_SIZE = 100;
-const COLD_DEPLOYMENT_READY_REQUIRED = 95;
 const REQUIRED_RUNNER_STAGE_NAMES = [
   "runner:creating",
   "runner:tagging",
@@ -114,7 +117,7 @@ export type AgentDeploymentLatencyStageTiming = {
 
 export type AgentDeploymentLatencyRunOutcome = "ready" | "failed" | "incomplete";
 export type AgentDeploymentLatencySloClassification =
-  | "ready_within_60"
+  | "ready_within_objective"
   | "slo_miss"
   | "pending"
   | "missing_boundary"
@@ -122,11 +125,12 @@ export type AgentDeploymentLatencySloClassification =
   | "invalid_event_ordering";
 
 export type AgentDeploymentLatencySloSummary = {
+  objectiveSeconds: typeof COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS;
   sampleSize: number;
-  requiredSampleSize: 100;
-  requiredReadyWithin60: 95;
+  requiredSampleSize: typeof COLD_DEPLOYMENT_SLO_SAMPLE_SIZE;
+  requiredReadyWithinObjective: typeof COLD_DEPLOYMENT_SLO_READY_REQUIRED;
   eligible: number;
-  readyWithin60: number;
+  readyWithinObjective: number;
   misses: number;
   pending: number;
   passRate: number;
@@ -541,11 +545,11 @@ function classifySlo(input: {
     return { classification: "slo_miss", status: "miss", missCause: "terminal_failure" };
   }
   if (input.terminal.outcome === "ready" && input.terminal.at) {
-    return durationMs(input.acceptedAt, input.terminal.at) <= READY_WITHIN_MS
-      ? { classification: "ready_within_60", status: "pass", missCause: null }
+    return durationMs(input.acceptedAt, input.terminal.at) <= COLD_DEPLOYMENT_SLO_OBJECTIVE_MS
+      ? { classification: "ready_within_objective", status: "pass", missCause: null }
       : { classification: "slo_miss", status: "miss", missCause: "slow_ready" };
   }
-  return durationMs(input.acceptedAt, input.generatedAt) >= READY_WITHIN_MS
+  return durationMs(input.acceptedAt, input.generatedAt) >= COLD_DEPLOYMENT_SLO_OBJECTIVE_MS
     ? { classification: "slo_miss", status: "miss", missCause: "not_ready_at_boundary" }
     : { classification: "pending", status: "pending", missCause: null };
 }
@@ -572,7 +576,7 @@ function classifyEligibility(input: {
   if (input.cancellationOrderInvalid) return "contradictory_cancellation_evidence";
   if (
     input.ownerCancelledAt &&
-    durationMs(input.acceptedAt, input.ownerCancelledAt) < READY_WITHIN_MS
+    durationMs(input.acceptedAt, input.ownerCancelledAt) < COLD_DEPLOYMENT_SLO_OBJECTIVE_MS
   ) {
     return "owner_cancelled_before_boundary";
   }
@@ -803,25 +807,26 @@ function summarizeSlo(
         compareIso(right.acceptedAt, left.acceptedAt) ||
         right.deploymentId.localeCompare(left.deploymentId),
     )
-    .slice(0, COLD_DEPLOYMENT_SAMPLE_SIZE);
-  const readyWithin60 = eligibleRuns.filter((run) => run.sloStatus === "pass").length;
+    .slice(0, COLD_DEPLOYMENT_SLO_SAMPLE_SIZE);
+  const readyWithinObjective = eligibleRuns.filter((run) => run.sloStatus === "pass").length;
   const misses = eligibleRuns.filter((run) => run.sloStatus === "miss").length;
   const pending = eligibleRuns.filter((run) => run.sloStatus === "pending").length;
-  const decided = readyWithin60 + misses;
+  const decided = readyWithinObjective + misses;
 
   return {
+    objectiveSeconds: COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS,
     sampleSize: eligibleRuns.length,
-    requiredSampleSize: COLD_DEPLOYMENT_SAMPLE_SIZE,
-    requiredReadyWithin60: COLD_DEPLOYMENT_READY_REQUIRED,
+    requiredSampleSize: COLD_DEPLOYMENT_SLO_SAMPLE_SIZE,
+    requiredReadyWithinObjective: COLD_DEPLOYMENT_SLO_READY_REQUIRED,
     eligible: eligibleRuns.length,
-    readyWithin60,
+    readyWithinObjective,
     misses,
     pending,
-    passRate: decided === 0 ? 0 : readyWithin60 / decided,
+    passRate: decided === 0 ? 0 : readyWithinObjective / decided,
     passesGate:
-      eligibleRuns.length === COLD_DEPLOYMENT_SAMPLE_SIZE &&
+      eligibleRuns.length === COLD_DEPLOYMENT_SLO_SAMPLE_SIZE &&
       pending === 0 &&
-      readyWithin60 >= COLD_DEPLOYMENT_READY_REQUIRED,
+      readyWithinObjective >= COLD_DEPLOYMENT_SLO_READY_REQUIRED,
   };
 }
 
@@ -942,7 +947,7 @@ async function readDeploymentEvidence(
     and d.accepted_at is not null
     and (
       d.owner_cancelled_at is null
-      or d.owner_cancelled_at >= d.accepted_at + interval '60 seconds'
+      or d.owner_cancelled_at >= d.accepted_at + ${COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS} * interval '1 second'
     )
   `;
   const invalidIdentityFilter = sql`

@@ -30,8 +30,9 @@ verified, and whose readiness is durably recorded.
 _Avoid_: Runner ready, gateway ready, boot ready
 
 **Cold-Deployment SLO**:
-At least 95 percent of eligible Cold Deployments must become Ready Deployments within 60 seconds of
-the request transaction committing. A terminal failure or timeout misses the objective.
+At least 95 percent of eligible Cold Deployments must become Ready Deployments within five minutes
+(300 seconds) of the request transaction committing. A terminal failure or timeout misses the
+objective.
 _Avoid_: Successful-run p95, API response time
 
 **Eligible Cold Deployment**:
@@ -41,8 +42,9 @@ service and provider failures are not.
 _Avoid_: Benchmark trial, successful deployment
 
 **SLO Miss**:
-An Eligible Cold Deployment that has not become a Ready Deployment within 60 seconds. An SLO Miss
-does not itself stop the deployment from continuing toward readiness or ordinary terminal failure.
+An Eligible Cold Deployment that has not become a Ready Deployment within five minutes (300
+seconds). An SLO Miss does not itself stop the deployment from continuing toward readiness or
+ordinary terminal failure.
 _Avoid_: Deployment failure, timeout
 
 **Provider Trial Cohort**:

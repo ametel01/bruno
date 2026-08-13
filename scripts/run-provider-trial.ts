@@ -4,6 +4,7 @@ import { lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promi
 import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import { desc, eq } from "drizzle-orm";
+import { COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS } from "@/src/server/agents/cold-deployment-slo-objective";
 import { CURRENT_ROLLOUT_CONFIGURATION_GENERATION } from "@/src/server/agents/deployment-slo-identity";
 import { createProviderTrialCohort } from "@/src/server/agents/provider-trial-cohort";
 import {
@@ -256,6 +257,7 @@ async function initialize(
       authorization: config.authorization,
       configuration: {
         providerMode: "digitalocean",
+        readinessObjectiveSeconds: COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS,
         perSlotTimeoutMs: PROVIDER_TRIAL_APPROVED_SCOPE.perSlotTimeoutMs,
         cleanupTimeoutMs: PROVIDER_TRIAL_APPROVED_SCOPE.cleanupTimeoutMs,
         maxSpendCents: PROVIDER_TRIAL_APPROVED_SCOPE.maxSpendCents,
@@ -558,8 +560,9 @@ async function readCompletedCohortGate(
       typeof cohort.apiAcceptance.committed === "number" &&
       cohort.apiAcceptance.committed >= 29 &&
       isRecord(cohort.readiness) &&
-      typeof cohort.readiness.readyWithin60 === "number" &&
-      cohort.readiness.readyWithin60 >= 29 &&
+      cohort.readiness.objectiveSeconds === COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS &&
+      typeof cohort.readiness.readyWithinObjective === "number" &&
+      cohort.readiness.readyWithinObjective >= 29 &&
       cohort.readiness.passesGate === true
     );
   } catch {

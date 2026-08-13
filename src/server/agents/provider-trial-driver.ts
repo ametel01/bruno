@@ -33,7 +33,7 @@ import {
   providerTrialSlots,
 } from "@/src/server/db/schema";
 
-export const PROVIDER_TRIAL_DRIVER_REPORT_SCHEMA_VERSION = "bruno.provider-trial-driver.v3";
+export const PROVIDER_TRIAL_DRIVER_REPORT_SCHEMA_VERSION = "bruno.provider-trial-driver.v4";
 const PROVIDER_TRIAL_CHECKPOINT_SCHEMA_VERSION = "bruno.provider-trial-checkpoint.v1";
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/;
 const SHA256_HEX = /^[a-f0-9]{64}$/;
@@ -52,6 +52,7 @@ const LEASE_GRACE_MS = 30_000;
 
 export type ProviderTrialDriverConfiguration = {
   providerMode: "digitalocean" | "local_docker";
+  readinessObjectiveSeconds: number;
   perSlotTimeoutMs: number;
   cleanupTimeoutMs: number;
   maxSpendCents: number;
@@ -257,6 +258,7 @@ function isValidProviderTrialDriverReport(value: Record<string, unknown>): boole
     return (
       configuration.authorizedRegion === value.cohort.cohort.region &&
       configuration.authorizedRunnerSizeSlug === value.cohort.cohort.runnerSizeSlug &&
+      configuration.readinessObjectiveSeconds === value.cohort.cohort.readinessObjectiveSeconds &&
       isRecord(latestAuthorizationEvidence) &&
       latestAuthorizationEvidence.prerequisiteGateEvidenceDigest ===
         configuration.prerequisiteGateEvidenceDigest &&
@@ -442,6 +444,7 @@ export async function initializeProviderTrialDriver(
     .select({
       region: providerTrialCohorts.region,
       runnerSizeSlug: providerTrialCohorts.runnerSizeSlug,
+      readinessObjectiveSeconds: providerTrialCohorts.readinessObjectiveSeconds,
     })
     .from(providerTrialCohorts)
     .where(eq(providerTrialCohorts.id, input.cohortId))
@@ -449,7 +452,8 @@ export async function initializeProviderTrialDriver(
   if (
     !cohort ||
     cohort.region !== input.configuration.authorizedRegion ||
-    cohort.runnerSizeSlug !== input.configuration.authorizedRunnerSizeSlug
+    cohort.runnerSizeSlug !== input.configuration.authorizedRunnerSizeSlug ||
+    cohort.readinessObjectiveSeconds !== input.configuration.readinessObjectiveSeconds
   ) {
     throw new Error("Provider Trial authorization scope does not match the immutable cohort.");
   }
@@ -1298,8 +1302,12 @@ async function isProviderTrialGateImpossible(
   const completed = slots.filter((slot) => slot.terminalOutcome !== null).length;
   const remaining = PROVIDER_TRIAL_SLOT_COUNT - completed;
   const committed = slots.filter((slot) => slot.requestOutcome === "committed").length;
-  const readyWithin60 = slots.filter((slot) => slot.terminalOutcome === "ready_within_60").length;
-  return committed + remaining < 29 || readyWithin60 + remaining < 29;
+  const readyWithinObjective = slots.filter(
+    (slot) =>
+      slot.terminalOutcome === "ready_within_objective" ||
+      slot.terminalOutcome === "ready_within_60",
+  ).length;
+  return committed + remaining < 29 || readyWithinObjective + remaining < 29;
 }
 
 function assertRecordedRequestMatches(
@@ -1469,6 +1477,8 @@ function normalizeExecution(
 function assertConfiguration(value: ProviderTrialDriverConfiguration): void {
   if (
     !["digitalocean", "local_docker"].includes(value.providerMode) ||
+    !Number.isInteger(value.readinessObjectiveSeconds) ||
+    ![60, 300].includes(value.readinessObjectiveSeconds) ||
     !Number.isInteger(value.perSlotTimeoutMs) ||
     value.perSlotTimeoutMs < 1_000 ||
     value.perSlotTimeoutMs > 900_000 ||
@@ -1501,34 +1511,38 @@ function assertConfiguration(value: ProviderTrialDriverConfiguration): void {
 
 function parseConfiguration(value: unknown): ProviderTrialDriverConfiguration {
   if (!isRecord(value)) throw new Error("Provider Trial driver configuration is invalid.");
-  const configuration = value as ProviderTrialDriverConfiguration;
-  assertConfiguration(configuration);
+  const requiredKeys = [
+    "authorizedRegion",
+    "authorizedRunnerSizeSlug",
+    "benchmarkOwnerIdentityHash",
+    "benchmarkTelegramIdentityHash",
+    "digitalOceanAccountIdentityHash",
+    "telegramBotIdentityHash",
+    "telegramChatIdentityHash",
+    "telegramUserIdentityHash",
+    "prerequisiteGateEvidenceDigest",
+    "cleanupTimeoutMs",
+    "deploymentChoicesDigest",
+    "evidenceRetentionDays",
+    "maxProviderResources",
+    "maxSlotCostCents",
+    "maxSpendCents",
+    "perSlotTimeoutMs",
+    "providerMode",
+  ].sort();
+  const keys = Object.keys(value).sort();
+  const legacy = keys.join("\0") === requiredKeys.join("\0");
   if (
-    Object.keys(value).sort().join("\0") !==
-    [
-      "authorizedRegion",
-      "authorizedRunnerSizeSlug",
-      "benchmarkOwnerIdentityHash",
-      "benchmarkTelegramIdentityHash",
-      "digitalOceanAccountIdentityHash",
-      "telegramBotIdentityHash",
-      "telegramChatIdentityHash",
-      "telegramUserIdentityHash",
-      "prerequisiteGateEvidenceDigest",
-      "cleanupTimeoutMs",
-      "deploymentChoicesDigest",
-      "evidenceRetentionDays",
-      "maxProviderResources",
-      "maxSlotCostCents",
-      "maxSpendCents",
-      "perSlotTimeoutMs",
-      "providerMode",
-    ]
-      .sort()
-      .join("\0")
+    !legacy &&
+    keys.join("\0") !== [...requiredKeys, "readinessObjectiveSeconds"].sort().join("\0")
   ) {
     throw new Error("Provider Trial driver configuration is invalid.");
   }
+  const configuration: ProviderTrialDriverConfiguration = {
+    ...(value as Omit<ProviderTrialDriverConfiguration, "readinessObjectiveSeconds">),
+    readinessObjectiveSeconds: legacy ? 60 : Number(value.readinessObjectiveSeconds),
+  };
+  assertConfiguration(configuration);
   return configuration;
 }
 

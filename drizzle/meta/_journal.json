@@ -281,6 +281,13 @@
       "when": 1786510429455,
       "tag": "0039_regular_human_fly",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786607238110,
+      "tag": "0040_smooth_ezekiel",
+      "breakpoints": true
     }
   ]
 }

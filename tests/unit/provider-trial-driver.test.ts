@@ -171,7 +171,7 @@ describe("resumable Provider Trial driver", () => {
       }),
     ).toBe(true);
     const inconsistent = JSON.parse(run?.signedReportBytes ?? "{}") as Record<string, unknown>;
-    (inconsistent.stages as Record<string, unknown>)["1"] = "ready_within_60";
+    (inconsistent.stages as Record<string, unknown>)["1"] = "ready_within_objective";
     const inconsistentBytes = canonicalJson(inconsistent);
     expect(
       verifyProviderTrialDriverReport({
@@ -1482,6 +1482,7 @@ function configuration(
 ) {
   return {
     providerMode: "local_docker" as const,
+    readinessObjectiveSeconds: 300,
     perSlotTimeoutMs: 60_000,
     cleanupTimeoutMs: 30_000,
     maxSpendCents: 300,

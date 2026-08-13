@@ -10,19 +10,29 @@ import {
   type AgentDeploymentLatencyReport,
   buildAgentDeploymentLatencyReportForDatabase,
 } from "@/src/server/agents/agent-deployment-latency";
+import {
+  COLD_DEPLOYMENT_SLO_OBJECTIVE_MS,
+  COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS,
+  COLD_DEPLOYMENT_SLO_READY_REQUIRED,
+  COLD_DEPLOYMENT_SLO_SAMPLE_SIZE,
+} from "@/src/server/agents/cold-deployment-slo-objective";
 import type { DatabaseConnection } from "@/src/server/db/client";
 import { coldDeploymentSloEvaluations } from "@/src/server/db/schema";
 
 export const COLD_DEPLOYMENT_SLO_EVALUATION_SCHEMA_VERSION =
-  "bruno.cold-deployment-slo-evaluation.v1" as const;
+  "bruno.cold-deployment-slo-evaluation.v2" as const;
 
 export type ColdDeploymentSloEvaluationArtifact = {
   schemaVersion: typeof COLD_DEPLOYMENT_SLO_EVALUATION_SCHEMA_VERSION;
   generatedAt: string;
-  criteria: { sampleSize: 100; readyWithin60: 95; boundaryMs: 60_000 };
+  criteria: {
+    sampleSize: typeof COLD_DEPLOYMENT_SLO_SAMPLE_SIZE;
+    requiredReadyWithinObjective: typeof COLD_DEPLOYMENT_SLO_READY_REQUIRED;
+    objectiveSeconds: typeof COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS;
+  };
   outcome: {
     eligibleCount: number;
-    readyWithin60: number;
+    readyWithinObjective: number;
     misses: number;
     pending: number;
     proven: boolean;
@@ -36,8 +46,9 @@ export type ColdDeploymentSloEvaluation = {
   reportDigest: string;
   signature: string;
   signingKeyId: string;
+  objectiveSeconds: typeof COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS;
   eligibleCount: number;
-  readyWithin60: number;
+  readyWithinObjective: number;
   pendingCount: number;
   proven: boolean;
   incidentOpened: boolean;
@@ -101,8 +112,9 @@ export async function recordColdDeploymentSloEvaluation(
         reportDigest,
         signingKeyId: input.signing.keyId,
         signature,
+        objectiveSeconds: artifact.criteria.objectiveSeconds,
         eligibleCount: artifact.outcome.eligibleCount,
-        readyWithin60: artifact.outcome.readyWithin60,
+        readyWithinObjective: artifact.outcome.readyWithinObjective,
         pendingCount: artifact.outcome.pending,
         proven: artifact.outcome.proven,
         incidentOpened,
@@ -115,8 +127,9 @@ export async function recordColdDeploymentSloEvaluation(
       reportDigest: inserted.reportDigest,
       signature: inserted.signature,
       signingKeyId: inserted.signingKeyId,
+      objectiveSeconds: COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS,
       eligibleCount: inserted.eligibleCount,
-      readyWithin60: inserted.readyWithin60,
+      readyWithinObjective: inserted.readyWithinObjective,
       pendingCount: inserted.pendingCount,
       proven: inserted.proven,
       incidentOpened: inserted.incidentOpened,
@@ -160,7 +173,12 @@ function buildArtifact(
   report: AgentDeploymentLatencyReport,
   apiAcceptance: AgentDeploymentApiAcceptanceSummary,
 ): ColdDeploymentSloEvaluationArtifact {
-  if (report.version !== 4 || report.slo.sampleSize > 100 || !Array.isArray(report.runs)) {
+  if (
+    report.version !== 5 ||
+    report.slo.objectiveSeconds !== COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS ||
+    report.slo.sampleSize > COLD_DEPLOYMENT_SLO_SAMPLE_SIZE ||
+    !Array.isArray(report.runs)
+  ) {
     throw new Error("Cold-Deployment SLO report is incompatible.");
   }
   const derivedRuns = report.runs.map((run) => ({
@@ -181,21 +199,26 @@ function buildArtifact(
         String(right.run.acceptedAt).localeCompare(String(left.run.acceptedAt)) ||
         right.run.deploymentId.localeCompare(left.run.deploymentId),
     )
-    .slice(0, 100);
-  const readyWithin60 = selectedRuns.filter(({ derived }) => derived.status === "pass").length;
+    .slice(0, COLD_DEPLOYMENT_SLO_SAMPLE_SIZE);
+  const readyWithinObjective = selectedRuns.filter(
+    ({ derived }) => derived.status === "pass",
+  ).length;
   const misses = selectedRuns.filter(({ derived }) => derived.status === "miss").length;
   const pending = selectedRuns.filter(({ derived }) => derived.status === "pending").length;
   const outcome = {
     eligibleCount: selectedRuns.length,
-    readyWithin60,
+    readyWithinObjective,
     misses,
     pending,
-    proven: selectedRuns.length === 100 && pending === 0 && readyWithin60 >= 95,
+    proven:
+      selectedRuns.length === COLD_DEPLOYMENT_SLO_SAMPLE_SIZE &&
+      pending === 0 &&
+      readyWithinObjective >= COLD_DEPLOYMENT_SLO_READY_REQUIRED,
   };
   if (
     report.slo.eligible !== outcome.eligibleCount ||
     report.slo.sampleSize !== outcome.eligibleCount ||
-    report.slo.readyWithin60 !== outcome.readyWithin60 ||
+    report.slo.readyWithinObjective !== outcome.readyWithinObjective ||
     report.slo.misses !== outcome.misses ||
     report.slo.pending !== outcome.pending ||
     report.slo.passesGate !== outcome.proven
@@ -213,7 +236,11 @@ function buildArtifact(
   return {
     schemaVersion: COLD_DEPLOYMENT_SLO_EVALUATION_SCHEMA_VERSION,
     generatedAt: report.generatedAt,
-    criteria: { sampleSize: 100, readyWithin60: 95, boundaryMs: 60_000 },
+    criteria: {
+      sampleSize: COLD_DEPLOYMENT_SLO_SAMPLE_SIZE,
+      requiredReadyWithinObjective: COLD_DEPLOYMENT_SLO_READY_REQUIRED,
+      objectiveSeconds: COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS,
+    },
     outcome,
     rolloutConfigurationGenerations: generations,
     apiAcceptance,
@@ -246,10 +273,10 @@ function deriveImmutableRunSlo(
   }
   const status =
     run.outcome === "ready"
-      ? terminalAt !== null && terminalAt - acceptedAt <= 60_000
+      ? terminalAt !== null && terminalAt - acceptedAt <= COLD_DEPLOYMENT_SLO_OBJECTIVE_MS
         ? "pass"
         : "miss"
-      : run.outcome === "failed" || generatedAt - acceptedAt >= 60_000
+      : run.outcome === "failed" || generatedAt - acceptedAt >= COLD_DEPLOYMENT_SLO_OBJECTIVE_MS
         ? "miss"
         : "pending";
   const eligible =
@@ -258,7 +285,7 @@ function deriveImmutableRunSlo(
     run.cohort === "cold_deployment" &&
     Number.isInteger(run.rolloutConfigurationGeneration) &&
     Number(run.rolloutConfigurationGeneration) >= 1 &&
-    !(cancelledAt !== null && cancelledAt - acceptedAt < 60_000);
+    !(cancelledAt !== null && cancelledAt - acceptedAt < COLD_DEPLOYMENT_SLO_OBJECTIVE_MS);
   return {
     eligible,
     status,

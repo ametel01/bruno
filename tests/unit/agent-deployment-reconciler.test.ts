@@ -1376,7 +1376,7 @@ describe("agent deployment reconciler", () => {
     }
   });
 
-  it("waits at 29,999 ms and starts one replacement at the exact 30,000 ms boundary", async () => {
+  it("waits through 299,999 ms and starts one replacement at the 300,000 ms boundary", async () => {
     await seedAutomaticRunner(connection, { status: "online", provisioningStatus: "ready" });
     await seedAgent(connection, { runnerId: RUNNER_ID, status: "starting" });
     await seedDeployment(connection, {
@@ -1384,7 +1384,7 @@ describe("agent deployment reconciler", () => {
       runnerOperationId: OPERATION_ID,
       runnerAcceptedAt: NOW,
     });
-    let current = new Date(NOW.getTime() + 29_999);
+    let current = new Date(NOW.getTime() + 299_999);
     const adapter = fakeRunnerAdapter({
       status: vi.fn(async () => ({
         ok: true,
@@ -1412,13 +1412,13 @@ describe("agent deployment reconciler", () => {
       .where(eq(agentDeployments.id, DEPLOYMENT_ID));
     expect(waiting?.stage).toBe("starting_gateway");
     expect(waiting?.nextAttemptAt?.toISOString()).toBe(
-      new Date(NOW.getTime() + 30_000).toISOString(),
+      new Date(NOW.getTime() + 300_000).toISOString(),
     );
     expect(adapter.status).toHaveBeenCalledOnce();
     expect(adapter.start).not.toHaveBeenCalled();
     expect(await connection.db.select().from(runnerReplacements)).toHaveLength(0);
 
-    current = new Date(NOW.getTime() + 30_000);
+    current = new Date(NOW.getTime() + 300_000);
     await expect(reconcileNextAgentDeployment(dependencies)).resolves.toEqual({
       processed: 1,
       outcome: "recovering",
@@ -1544,7 +1544,7 @@ describe("agent deployment reconciler", () => {
     await expect(
       reconcileNextAgentDeployment({
         createConnection: () => connection,
-        now: () => new Date(NOW.getTime() + 30_000),
+        now: () => new Date(NOW.getTime() + 300_000),
         manualRunnerAdapter: () => adapter as never,
         triggerReplacement,
       }),

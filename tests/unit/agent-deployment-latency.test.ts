@@ -14,17 +14,17 @@ import {
 } from "@/src/server/db/schema";
 
 describe("Agent Deployment latency report", () => {
-  it("uses durable acceptance for the failure-inclusive ready-within-60 gate", () => {
+  it("uses durable acceptance for the failure-inclusive ready-within-objective gate", () => {
     const report = buildAgentDeploymentLatencyReport({
-      generatedAt: "2026-08-07T00:02:00.000Z",
+      generatedAt: "2026-08-07T00:10:00.000Z",
       deployments: [
-        latencyDeployment("ready-within-60", {
+        latencyDeployment("ready-within-objective", {
           acceptedAt: "2026-08-07T00:00:10.000Z",
-          completedAt: "2026-08-07T00:01:10.000Z",
+          completedAt: "2026-08-07T00:05:10.000Z",
         }),
         latencyDeployment("slow-ready", {
           acceptedAt: "2026-08-07T00:00:10.000Z",
-          completedAt: "2026-08-07T00:01:10.001Z",
+          completedAt: "2026-08-07T00:05:10.001Z",
         }),
         latencyDeployment("terminal-failure", {
           acceptedAt: "2026-08-07T00:00:20.000Z",
@@ -34,7 +34,7 @@ describe("Agent Deployment latency report", () => {
           acceptedAt: "2026-08-07T00:00:30.000Z",
         }),
         latencyDeployment("pending", {
-          acceptedAt: "2026-08-07T00:01:30.001Z",
+          acceptedAt: "2026-08-07T00:06:00.001Z",
         }),
         latencyDeployment("legacy-boundary", {
           acceptedAt: null,
@@ -51,7 +51,7 @@ describe("Agent Deployment latency report", () => {
       ],
     });
 
-    expect(report.version).toBe(4);
+    expect(report.version).toBe(5);
     expect(report.boundary).toEqual({
       sloStart: "agent_deployments.accepted_at",
       legacyDiagnosticStart: "agent_deployments.created_at",
@@ -59,11 +59,12 @@ describe("Agent Deployment latency report", () => {
       failed: "agent_deployments.failed_at",
     });
     expect(report.slo).toEqual({
+      objectiveSeconds: 300,
       sampleSize: 5,
       requiredSampleSize: 100,
-      requiredReadyWithin60: 95,
+      requiredReadyWithinObjective: 95,
       eligible: 5,
-      readyWithin60: 1,
+      readyWithinObjective: 1,
       misses: 3,
       pending: 1,
       passRate: 1 / 4,
@@ -75,7 +76,7 @@ describe("Agent Deployment latency report", () => {
       ["missing-boundary", "missing_boundary"],
       ["not-ready-at-boundary", "slo_miss"],
       ["pending", "pending"],
-      ["ready-within-60", "ready_within_60"],
+      ["ready-within-objective", "ready_within_objective"],
       ["slow-ready", "slo_miss"],
       ["terminal-failure", "slo_miss"],
     ]);
@@ -85,10 +86,10 @@ describe("Agent Deployment latency report", () => {
     expect(report.runs.find((run) => run.deploymentId === "not-ready-at-boundary")).toMatchObject({
       sloMissCause: "not_ready_at_boundary",
     });
-    expect(report.runs.find((run) => run.deploymentId === "ready-within-60")).toMatchObject({
+    expect(report.runs.find((run) => run.deploymentId === "ready-within-objective")).toMatchObject({
       acceptedAt: "2026-08-07T00:00:10.000Z",
       rolloutConfigurationGeneration: 1,
-      totalDurationMs: 60_000,
+      totalDurationMs: 300_000,
       durationBoundary: "accepted_at",
       sloStatus: "pass",
     });
@@ -112,7 +113,7 @@ describe("Agent Deployment latency report", () => {
 
     expect(report.slo).toMatchObject({
       sampleSize: 95,
-      readyWithin60: 95,
+      readyWithinObjective: 95,
       misses: 0,
       passesGate: false,
     });
@@ -121,11 +122,11 @@ describe("Agent Deployment latency report", () => {
   it("uses only the latest 100 Eligible Cold Deployments", () => {
     const deployments = Array.from({ length: 105 }, (_, index) => {
       const acceptedAt = new Date(Date.UTC(2026, 7, 7, 0, 0, index)).toISOString();
-      const readyWithin60 = index < 99;
+      const readyWithinObjective = index < 99;
       return latencyDeployment(`deployment-${String(index).padStart(3, "0")}`, {
         acceptedAt,
         completedAt: new Date(
-          new Date(acceptedAt).getTime() + (readyWithin60 ? 30_000 : 61_000),
+          new Date(acceptedAt).getTime() + (readyWithinObjective ? 30_000 : 301_000),
         ).toISOString(),
       });
     });
@@ -136,7 +137,7 @@ describe("Agent Deployment latency report", () => {
 
     expect(report.slo).toMatchObject({
       sampleSize: 100,
-      readyWithin60: 94,
+      readyWithinObjective: 94,
       misses: 6,
       passesGate: false,
     });
@@ -167,13 +168,13 @@ describe("Agent Deployment latency report", () => {
         }),
         latencyDeployment("cancelled", {
           acceptedAt: "2026-08-07T00:00:00.000Z",
-          ownerCancelledAt: "2026-08-07T00:00:59.999Z",
-          failedAt: "2026-08-07T00:00:59.999Z",
+          ownerCancelledAt: "2026-08-07T00:04:59.999Z",
+          failedAt: "2026-08-07T00:04:59.999Z",
         }),
       ],
     });
 
-    expect(report.slo).toMatchObject({ sampleSize: 1, eligible: 1, readyWithin60: 1 });
+    expect(report.slo).toMatchObject({ sampleSize: 1, eligible: 1, readyWithinObjective: 1 });
     expect(
       Object.fromEntries(report.runs.map((run) => [run.deploymentId, run.eligibilityReason])),
     ).toMatchObject({

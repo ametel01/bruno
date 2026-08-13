@@ -744,6 +744,7 @@ export const providerTrialCohorts = pgTable(
     region: text("region").notNull(),
     runnerSizeSlug: text("runner_size_slug").notNull(),
     rolloutConfigurationGeneration: integer("rollout_configuration_generation").notNull(),
+    readinessObjectiveSeconds: integer("readiness_objective_seconds").notNull().default(300),
     startedAt: timestamp("started_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -764,6 +765,10 @@ export const providerTrialCohorts = pgTable(
     check(
       "provider_trial_cohorts_rollout_generation_check",
       sql`${table.rolloutConfigurationGeneration} >= 1`,
+    ),
+    check(
+      "provider_trial_cohorts_readiness_objective_check",
+      sql`${table.readinessObjectiveSeconds} IN (60, 300)`,
     ),
   ],
 );
@@ -820,7 +825,7 @@ export const providerTrialSlots = pgTable(
     ),
     check(
       "provider_trial_slots_terminal_outcome_check",
-      sql`${table.terminalOutcome} IS NULL OR ${table.terminalOutcome} IN ('pre_commit_failure', 'ready_within_60', 'ready_after_60', 'deployment_failed', 'timed_out', 'safety_failure')`,
+      sql`${table.terminalOutcome} IS NULL OR ${table.terminalOutcome} IN ('pre_commit_failure', 'ready_within_60', 'ready_after_60', 'ready_within_objective', 'ready_after_objective', 'deployment_failed', 'timed_out', 'safety_failure')`,
     ),
     check(
       "provider_trial_slots_terminal_safe_code_check",
@@ -828,7 +833,7 @@ export const providerTrialSlots = pgTable(
     ),
     check(
       "provider_trial_slots_terminal_outcome_shape_check",
-      sql`(${table.terminalOutcome} IS NULL AND ${table.terminalRecordedAt} IS NULL AND ${table.terminalSafeCode} IS NULL) OR (${table.terminalOutcome} = 'pre_commit_failure' AND ${table.terminalRecordedAt} IS NOT NULL AND ${table.terminalSafeCode} IS NOT NULL AND ${table.requestOutcome} = 'pre_commit_failure') OR (${table.terminalOutcome} IN ('ready_within_60', 'ready_after_60') AND ${table.terminalRecordedAt} IS NOT NULL AND ${table.terminalSafeCode} IS NULL AND ${table.requestOutcome} = 'committed') OR (${table.terminalOutcome} IN ('deployment_failed', 'timed_out', 'safety_failure') AND ${table.terminalRecordedAt} IS NOT NULL AND ${table.terminalSafeCode} IS NOT NULL AND ${table.requestOutcome} = 'committed')`,
+      sql`(${table.terminalOutcome} IS NULL AND ${table.terminalRecordedAt} IS NULL AND ${table.terminalSafeCode} IS NULL) OR (${table.terminalOutcome} = 'pre_commit_failure' AND ${table.terminalRecordedAt} IS NOT NULL AND ${table.terminalSafeCode} IS NOT NULL AND ${table.requestOutcome} = 'pre_commit_failure') OR (${table.terminalOutcome} IN ('ready_within_60', 'ready_after_60', 'ready_within_objective', 'ready_after_objective') AND ${table.terminalRecordedAt} IS NOT NULL AND ${table.terminalSafeCode} IS NULL AND ${table.requestOutcome} = 'committed') OR (${table.terminalOutcome} IN ('deployment_failed', 'timed_out', 'safety_failure') AND ${table.terminalRecordedAt} IS NOT NULL AND ${table.terminalSafeCode} IS NOT NULL AND ${table.requestOutcome} = 'committed')`,
     ),
     check(
       "provider_trial_slots_terminal_after_request_check",
@@ -975,8 +980,9 @@ export const coldDeploymentSloEvaluations = pgTable(
     reportDigest: text("report_digest").notNull(),
     signingKeyId: text("signing_key_id").notNull(),
     signature: text("signature").notNull(),
+    objectiveSeconds: integer("objective_seconds").notNull(),
     eligibleCount: integer("eligible_count").notNull(),
-    readyWithin60: integer("ready_within_60").notNull(),
+    readyWithinObjective: integer("ready_within_objective").notNull(),
     pendingCount: integer("pending_count").notNull(),
     proven: boolean("proven").notNull(),
     incidentOpened: boolean("incident_opened").notNull().default(false),
@@ -998,11 +1004,11 @@ export const coldDeploymentSloEvaluations = pgTable(
     ),
     check(
       "cold_deployment_slo_evaluations_count_check",
-      sql`${table.eligibleCount} BETWEEN 0 AND 100 AND ${table.readyWithin60} BETWEEN 0 AND ${table.eligibleCount} AND ${table.pendingCount} BETWEEN 0 AND ${table.eligibleCount}`,
+      sql`${table.objectiveSeconds} IN (60, 300) AND ${table.eligibleCount} BETWEEN 0 AND 100 AND ${table.readyWithinObjective} BETWEEN 0 AND ${table.eligibleCount} AND ${table.pendingCount} BETWEEN 0 AND ${table.eligibleCount}`,
     ),
     check(
       "cold_deployment_slo_evaluations_proven_check",
-      sql`${table.proven} = (${table.eligibleCount} = 100 AND ${table.pendingCount} = 0 AND ${table.readyWithin60} >= 95)`,
+      sql`${table.proven} = (${table.eligibleCount} = 100 AND ${table.pendingCount} = 0 AND ${table.readyWithinObjective} >= 95)`,
     ),
     check(
       "cold_deployment_slo_evaluations_incident_check",

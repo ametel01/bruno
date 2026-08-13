@@ -7,13 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The Cold-Deployment and Provider Trial readiness objective is now five minutes (300 seconds).
+  New signed reports carry the explicit objective, while existing 60-second cohorts and evaluation
+  rows retain their original boundary rather than being silently reclassified.
+
 ### Added
 
 - A protected scheduled latest-100 Cold-Deployment evaluator now retains canonical Ed25519-signed
   point-in-time evidence, remains unproven below 100 eligible observations, reports active Rollout
   Configuration generations and separate append-only API-acceptance availability, preserves prior
   proof, and durably records the transition to an internal incident when a later failure-inclusive
-  result falls below 95 ready within 60 seconds.
+  result falls below 95 ready within 300 seconds.
 - A resumable sequential Provider Trial driver now consumes the original 30-slot ledger with stable
   idempotency identities across interruption, fenced leases and phase checkpoints, reconciled
   outcome-unknown timeouts, pre-authorized spend and resource limits, renewed authorization after
@@ -63,7 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An immutable 30-slot Provider Trial Cohort ledger that pre-creates numbered attempts, retains one
   pre-commit or exact deployment-linked request outcome and one terminal outcome per slot, prevents
   membership replacement after start, reports API acceptance separately from failure-inclusive
-  ready-within-60 results, and supports deterministic sanitized Ed25519-signed evidence by exact
+  ready-within-objective results, and supports deterministic sanitized Ed25519-signed evidence by exact
   cohort ID.
 - Immutable database-clock Agent Deployment acceptance boundaries, origin, initial cohort,
   environment, Owner-cancellation evidence, and rollout-configuration generation with a versioned
