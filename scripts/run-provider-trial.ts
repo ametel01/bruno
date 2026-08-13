@@ -16,6 +16,10 @@ import {
   verifyProviderTrialDriverReport,
 } from "@/src/server/agents/provider-trial-driver";
 import {
+  fetchProviderTrialJson,
+  type ProviderTrialJsonResponse,
+} from "@/src/server/agents/provider-trial-http";
+import {
   isProviderTrialCallbackProbeResponse,
   isProviderTrialSnapshotAvailable,
   isSafeProviderTrialCallbackBaseUrl,
@@ -58,6 +62,15 @@ type AuthorizedIdentityEvidence = {
   telegramUser: string;
   modelProvider: "chatgpt" | "claude";
 };
+type AuthorizedIdentityIssue =
+  | "digitalocean_account"
+  | "digitalocean_snapshot"
+  | "model_credential"
+  | "telegram_bot"
+  | "telegram_chat";
+type AuthorizedIdentityObservation =
+  | { ok: true; evidence: AuthorizedIdentityEvidence }
+  | { ok: false; issue: AuthorizedIdentityIssue };
 type VerifiedGateEvidence = { digest: string; identities: AuthorizedIdentityEvidence };
 
 const execFileAsync = promisify(execFile);
@@ -511,16 +524,18 @@ async function verifyPrerequisiteGates(
     write({ command: "verify-gates", effects: "local_validation", ok: false, gate: "source" });
     return 1;
   }
-  const identities = await observeAuthorizedIdentities(config);
-  if (!identities) {
+  const identityObservation = await observeAuthorizedIdentities(config);
+  if (!identityObservation.ok) {
     write({
       command: "verify-gates",
       effects: "read_only_identity_checks",
       ok: false,
       gate: "authorized_identities",
+      issue: identityObservation.issue,
     });
     return 1;
   }
+  const identities = identityObservation.evidence;
   const manifest = {
     schemaVersion: GATE_EVIDENCE_SCHEMA_VERSION,
     sourceRevision,
@@ -745,49 +760,81 @@ async function readAuthoritativeProviderCleanup(
 
 async function observeAuthorizedIdentities(
   config: OperatorConfig,
-): Promise<AuthorizedIdentityEvidence | null> {
-  try {
-    const [digitalOcean, snapshot, telegramBot, telegramChat, model] = await Promise.all([
-      fetchJson("https://api.digitalocean.com/v2/account", {
+): Promise<AuthorizedIdentityObservation> {
+  const requests = {
+    digitalocean_account: fetchProviderTrialJson("https://api.digitalocean.com/v2/account", {
+      authorization: `Bearer ${process.env.BRUNO_DIGITALOCEAN_TOKEN}`,
+    }),
+    digitalocean_snapshot: fetchProviderTrialJson(
+      `https://api.digitalocean.com/v2/images/${config.providerSnapshotImageId}`,
+      {
         authorization: `Bearer ${process.env.BRUNO_DIGITALOCEAN_TOKEN}`,
-      }),
-      fetchJson(`https://api.digitalocean.com/v2/images/${config.providerSnapshotImageId}`, {
-        authorization: `Bearer ${process.env.BRUNO_DIGITALOCEAN_TOKEN}`,
-      }),
-      fetchJson(`https://api.telegram.org/bot${config.fixture.telegramBotToken}/getMe`, {}),
-      fetchJson(
-        `https://api.telegram.org/bot${config.fixture.telegramBotToken}/getChat?chat_id=${encodeURIComponent(config.fixture.telegramChatId)}`,
-        {},
-      ),
+      },
+    ),
+    telegram_bot: fetchProviderTrialJson(
+      `https://api.telegram.org/bot${config.fixture.telegramBotToken}/getMe`,
+      {},
+    ),
+    telegram_chat: fetchProviderTrialJson(
+      `https://api.telegram.org/bot${config.fixture.telegramBotToken}/getChat?chat_id=${encodeURIComponent(config.fixture.telegramChatId)}`,
+      {},
+    ),
+    model_credential:
       config.fixture.assistant === "chatgpt"
-        ? fetchJson("https://api.openai.com/v1/models", {
+        ? fetchProviderTrialJson("https://api.openai.com/v1/models", {
             authorization: `Bearer ${config.fixture.modelApiKey}`,
           })
-        : fetchJson("https://api.anthropic.com/v1/models", {
+        : fetchProviderTrialJson("https://api.anthropic.com/v1/models", {
             "anthropic-version": "2023-06-01",
             "x-api-key": config.fixture.modelApiKey,
           }),
-    ]);
-    const account = isRecord(digitalOcean.body) ? digitalOcean.body.account : null;
-    const image = isRecord(snapshot.body) ? snapshot.body.image : null;
-    const botResult = isRecord(telegramBot.body) ? telegramBot.body.result : null;
-    const chatResult = isRecord(telegramChat.body) ? telegramChat.body.result : null;
-    if (
-      digitalOcean.status !== 200 ||
-      !isRecord(account) ||
-      typeof account.uuid !== "string" ||
-      !isAvailableAuthorizedSnapshot(snapshot.status, image, config) ||
-      telegramBot.status !== 200 ||
-      !isRecord(botResult) ||
-      typeof botResult.id !== "number" ||
-      telegramChat.status !== 200 ||
-      !isRecord(chatResult) ||
-      String(chatResult.id) !== config.fixture.telegramChatId ||
-      model.status !== 200
-    ) {
-      return null;
-    }
-    return {
+  } satisfies Record<AuthorizedIdentityIssue, Promise<ProviderTrialJsonResponse>>;
+  const entries = Object.entries(requests) as [
+    AuthorizedIdentityIssue,
+    Promise<ProviderTrialJsonResponse>,
+  ][];
+  const settled = await Promise.allSettled(entries.map(([, request]) => request));
+  const responses = Object.fromEntries(
+    entries.flatMap(([issue], index) => {
+      const response = settled[index];
+      return response?.status === "fulfilled" ? [[issue, response.value]] : [];
+    }),
+  ) as Partial<Record<AuthorizedIdentityIssue, ProviderTrialJsonResponse>>;
+  const rejectedIssue = entries.find(
+    ([, _request], index) => settled[index]?.status === "rejected",
+  )?.[0];
+  if (rejectedIssue) {
+    return { ok: false, issue: rejectedIssue };
+  }
+  const digitalOcean = responses.digitalocean_account;
+  const snapshot = responses.digitalocean_snapshot;
+  const telegramBot = responses.telegram_bot;
+  const telegramChat = responses.telegram_chat;
+  const model = responses.model_credential;
+  const account = isRecord(digitalOcean?.body) ? digitalOcean.body.account : null;
+  if (digitalOcean?.status !== 200 || !isRecord(account) || typeof account.uuid !== "string") {
+    return { ok: false, issue: "digitalocean_account" };
+  }
+  const image = isRecord(snapshot?.body) ? snapshot.body.image : null;
+  if (!isAvailableAuthorizedSnapshot(snapshot?.status ?? 0, image, config)) {
+    return { ok: false, issue: "digitalocean_snapshot" };
+  }
+  const botResult = isRecord(telegramBot?.body) ? telegramBot.body.result : null;
+  if (telegramBot?.status !== 200 || !isRecord(botResult) || typeof botResult.id !== "number") {
+    return { ok: false, issue: "telegram_bot" };
+  }
+  const chatResult = isRecord(telegramChat?.body) ? telegramChat.body.result : null;
+  if (
+    telegramChat?.status !== 200 ||
+    !isRecord(chatResult) ||
+    String(chatResult.id) !== config.fixture.telegramChatId
+  ) {
+    return { ok: false, issue: "telegram_chat" };
+  }
+  if (model?.status !== 200) return { ok: false, issue: "model_credential" };
+  return {
+    ok: true,
+    evidence: {
       digitalOceanAccount: digest(`digitalocean:${account.uuid}`),
       digitalOceanCredential: digest(
         `digitalocean-credential:${process.env.BRUNO_DIGITALOCEAN_TOKEN}`,
@@ -799,15 +846,13 @@ async function observeAuthorizedIdentities(
       telegramCredential: digest(`telegram-credential:${config.fixture.telegramBotToken}`),
       telegramUser: digest(`telegram-user:${config.fixture.telegramUserId}`),
       modelProvider: config.fixture.assistant,
-    };
-  } catch {
-    return null;
-  }
+    },
+  };
 }
 
 async function observeAuthorizedSnapshot(config: OperatorConfig): Promise<boolean> {
   try {
-    const response = await fetchJson(
+    const response = await fetchProviderTrialJson(
       `https://api.digitalocean.com/v2/images/${config.providerSnapshotImageId}`,
       { authorization: `Bearer ${process.env.BRUNO_DIGITALOCEAN_TOKEN}` },
     );
@@ -827,20 +872,6 @@ function isAvailableAuthorizedSnapshot(
     imageId: config.providerSnapshotImageId,
     region: PROVIDER_TRIAL_APPROVED_SCOPE.region,
   });
-}
-
-async function fetchJson(
-  url: string,
-  headers: Record<string, string>,
-): Promise<{ status: number; body: unknown }> {
-  const response = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
-  let body: unknown = null;
-  try {
-    body = await response.json();
-  } catch {
-    // Status remains authoritative when a provider returns a non-JSON error body.
-  }
-  return { status: response.status, body };
 }
 
 async function verifyCredentialCleanup(
