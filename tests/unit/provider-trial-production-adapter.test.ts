@@ -62,6 +62,30 @@ describe("DigitalOcean Provider Trial production adapter", () => {
     ).toBeNull();
   });
 
+  it("re-verifies provider absence for a previously cleaned runner", () => {
+    expect(
+      toProviderTrialAbsenceDiscoveryTag({
+        slotNumber: 1,
+        origin: "operator_trial",
+        userId: "00000000-0000-4000-8000-000000002994",
+        agentId: "00000000-0000-4000-8000-000000002995",
+        agentDeletedAt: new Date("2026-08-11T12:01:00.000Z"),
+        deploymentErrorCode: "runner_provisioning_unavailable",
+        runnerId: "00000000-0000-4000-8000-000000002996",
+        runnerName: "Bruno Deployment Runner",
+        runnerKind: "digitalocean",
+        runnerProvider: "digitalocean",
+        runnerRegion: "sfo3",
+        runnerSizeSlug: "s-1vcpu-2gb",
+        runnerProvisioningStatus: "deleted",
+        provisioningCleanupRequired: false,
+        operationTag: "bruno-deploy-05d73ff0d570484087452896791ab651",
+        providerResourceId: null,
+        providerFirewallId: null,
+      }),
+    ).toBe("bruno-deploy-05d73ff0d570484087452896791ab651");
+  });
+
   it("binds cleanup ownership to the provider operation name instead of the runner label", () => {
     expect(
       toProviderTrialOwnedSetExpectation({

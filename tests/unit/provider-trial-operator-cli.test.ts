@@ -2,7 +2,9 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  isProviderTrialCallbackProbeResponse,
   isProviderTrialSnapshotAvailable,
+  isSafeProviderTrialCallbackBaseUrl,
   PROVIDER_TRIAL_ARTIFACT_PATHS,
   PROVIDER_TRIAL_AUTHORIZATION,
 } from "@/src/server/agents/provider-trial-operator-config";
@@ -15,6 +17,22 @@ const COMMAND = [
 ] as const;
 
 describe("Provider Trial operator CLI", () => {
+  it("requires a public HTTPS callback base URL", () => {
+    expect(isSafeProviderTrialCallbackBaseUrl("https://bruno.example/")).toBe(true);
+    expect(isSafeProviderTrialCallbackBaseUrl("http://localhost:3000")).toBe(false);
+    expect(isSafeProviderTrialCallbackBaseUrl("https://127.0.0.1/")).toBe(false);
+    expect(isSafeProviderTrialCallbackBaseUrl("https://bruno.example/callback")).toBe(false);
+  });
+
+  it("accepts only the public runner registration validation response", () => {
+    const expected = { ok: false, error: { code: "validation_failed" } };
+    expect(isProviderTrialCallbackProbeResponse(400, expected)).toBe(true);
+    expect(isProviderTrialCallbackProbeResponse(302, expected)).toBe(false);
+    expect(isProviderTrialCallbackProbeResponse(400, { ok: false, error: { code: "login" } })).toBe(
+      false,
+    );
+  });
+
   it("requires the exact authorized snapshot to be available in the authorized region", () => {
     const expected = { imageId: "241009503", region: "sfo3" };
     expect(
@@ -111,6 +129,7 @@ describe("Provider Trial operator CLI", () => {
         BRUNO_PROVIDER_TRIAL_COHORT_KEY: "issue-299-provider-trial-20260813-g3",
         BRUNO_PROVIDER_TRIAL_LIVE_SIDE_EFFECT_CONFIRMATION:
           "authorize-issue-299-live-provider-trial",
+        NEXT_PUBLIC_APP_URL: "https://bruno.example/",
         BRUNO_DIGITALOCEAN_TOKEN: "do-not-print-this-provider-token-value",
         BRUNO_DIGITALOCEAN_PROVIDER_MODE: "digitalocean",
         BRUNO_DIGITALOCEAN_REGION: "nyc3",

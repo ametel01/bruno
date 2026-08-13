@@ -16,11 +16,13 @@ import {
   verifyProviderTrialDriverReport,
 } from "@/src/server/agents/provider-trial-driver";
 import {
-  listProviderTrialPreflightIssues,
+  isProviderTrialCallbackProbeResponse,
   isProviderTrialSnapshotAvailable,
+  isSafeProviderTrialCallbackBaseUrl,
+  listProviderTrialPreflightIssues,
   matchesProviderTrialGateEvidence,
-  PROVIDER_TRIAL_ARTIFACT_PATHS,
   PROVIDER_TRIAL_APPROVED_SCOPE,
+  PROVIDER_TRIAL_ARTIFACT_PATHS,
   parseProviderTrialOperatorConfiguration,
 } from "@/src/server/agents/provider-trial-operator-config";
 import {
@@ -72,6 +74,22 @@ function write(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
+async function observeProviderTrialCallback(baseUrl: string | undefined): Promise<boolean> {
+  if (!baseUrl) return false;
+  try {
+    const response = await fetch(new URL("/runner/v1/register", baseUrl), {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(10_000),
+    });
+    return isProviderTrialCallbackProbeResponse(response.status, await response.json());
+  } catch {
+    return false;
+  }
+}
+
 async function main(): Promise<number> {
   const command = (process.argv[2] ?? "preflight") as Command;
   if (
@@ -113,6 +131,14 @@ async function main(): Promise<number> {
     command === "reconcile-cleanup" ||
     command === "pause-unavailable-snapshot" ||
     command === "verify-credential-cleanup";
+  if (!cleanupOnly && !isSafeProviderTrialCallbackBaseUrl(process.env.NEXT_PUBLIC_APP_URL)) {
+    write({ command, effects: 0, ok: false, issues: ["callback_base_url"] });
+    return 1;
+  }
+  if (!cleanupOnly && !(await observeProviderTrialCallback(process.env.NEXT_PUBLIC_APP_URL))) {
+    write({ command, effects: 0, ok: false, issues: ["callback_unreachable"] });
+    return 1;
+  }
   if (!cleanupOnly && config.releaseSourceRevision !== sourceRevision) {
     write({ command, effects: 0, ok: false, issues: ["immutable_release_revision"] });
     return 1;

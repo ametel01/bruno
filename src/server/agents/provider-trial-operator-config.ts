@@ -78,6 +78,7 @@ const REQUIRED_GROUPS = [
 export type ProviderTrialPreflightIssue =
   | (typeof REQUIRED_GROUPS)[number][0]
   | "approved_scope"
+  | "callback_base_url"
   | "invalid_configuration";
 
 export type ProviderTrialOperatorConfiguration = {
@@ -99,6 +100,41 @@ export type ProviderTrialOperatorConfiguration = {
   gateEvidencePath: string;
   credentialFilePath: string;
 };
+
+export function isSafeProviderTrialCallbackBaseUrl(value: string | undefined): boolean {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    return (
+      url.protocol === "https:" &&
+      url.username === "" &&
+      url.password === "" &&
+      url.pathname === "/" &&
+      url.search === "" &&
+      url.hash === "" &&
+      hostname !== "localhost" &&
+      hostname !== "0.0.0.0" &&
+      hostname !== "127.0.0.1" &&
+      hostname !== "::1" &&
+      !hostname.endsWith(".localhost") &&
+      !hostname.endsWith(".local")
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function isProviderTrialCallbackProbeResponse(status: number, value: unknown): boolean {
+  if (status !== 400 || typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const response = value as Record<string, unknown>;
+  if (response.ok !== false || typeof response.error !== "object" || response.error === null) {
+    return false;
+  }
+  return (response.error as Record<string, unknown>).code === "validation_failed";
+}
 
 type ProviderTrialGateEvidenceBinding = {
   digest: string;

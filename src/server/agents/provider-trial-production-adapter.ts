@@ -1,9 +1,9 @@
 import "server-only";
 
 import { and, eq, isNull, sql } from "drizzle-orm";
-import type { AssistantChoice } from "@/src/server/agents/assistant-profiles";
 import { reconcileTargetAgentDeployment } from "@/src/server/agents/agent-deployment-reconciler";
 import { getAgentDeploymentByIdempotencyKeyForUser } from "@/src/server/agents/agent-deployments";
+import type { AssistantChoice } from "@/src/server/agents/assistant-profiles";
 import { createAgentForUser } from "@/src/server/agents/create-agent";
 import { deleteAgentForUser } from "@/src/server/agents/lifecycle";
 import { providerTrialDeploymentIdempotencyKey } from "@/src/server/agents/provider-trial-cohort";
@@ -490,12 +490,19 @@ export function toProviderTrialOwnedSetExpectation(
 }
 
 export function toProviderTrialAbsenceDiscoveryTag(resource: CohortResource): string | null {
+  const previouslyCleaned =
+    resource.agentDeletedAt !== null &&
+    resource.deploymentErrorCode === "runner_provisioning_unavailable" &&
+    resource.runnerProvisioningStatus === "deleted" &&
+    resource.provisioningCleanupRequired === false;
+  const terminalPreProviderFailure =
+    resource.deploymentErrorCode === "runner_provisioning_unavailable" &&
+    resource.runnerProvisioningStatus === "failed" &&
+    resource.provisioningCleanupRequired === false;
   if (
-    resource.deploymentErrorCode !== "runner_provisioning_unavailable" ||
     resource.runnerKind !== "digitalocean" ||
     resource.runnerProvider !== "digitalocean" ||
-    resource.runnerProvisioningStatus !== "failed" ||
-    resource.provisioningCleanupRequired !== false ||
+    (!previouslyCleaned && !terminalPreProviderFailure) ||
     !resource.runnerRegion ||
     !resource.runnerSizeSlug ||
     !resource.operationTag ||
