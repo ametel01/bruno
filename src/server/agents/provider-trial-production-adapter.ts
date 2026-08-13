@@ -16,12 +16,14 @@ import {
   agents,
   providerTrialSlots,
   runnerCredentials,
+  runnerProvisioningEvents,
   runners,
 } from "@/src/server/db/schema";
 import { readDigitalOceanProviderConfig } from "@/src/server/env";
 import type {
   DigitalOceanOwnedSetExpectation,
   DigitalOceanOwnedSetProvider,
+  DigitalOceanProvider,
 } from "@/src/server/runners/digitalocean-provider";
 import {
   createConfiguredDigitalOceanProvider,
@@ -340,8 +342,25 @@ function createDefaultCleanupCohort(options: ProviderTrialProductionAdapterOptio
 
         if (resource.runnerId !== null) {
           const expectation = toProviderTrialOwnedSetExpectation(resource);
-          if (!expectation || !provider) {
+          if (!provider) {
             return unsafeCleanup(`slot:${resource.slotNumber}:provider`);
+          }
+          if (!expectation) {
+            const operationTag = toProviderTrialAbsenceDiscoveryTag(resource);
+            if (!operationTag) return unsafeCleanup(`slot:${resource.slotNumber}:provider`);
+            const discovered = await provider.discoverResourcesByTag(
+              { tag: operationTag },
+              { signal: input.signal },
+            );
+            if (
+              !discovered.ok ||
+              !discovered.value.authoritative ||
+              discovered.value.resources.length !== 0
+            ) {
+              return unsafeCleanup(`slot:${resource.slotNumber}:provider`);
+            }
+            await revokeAndDeleteRunner(connection, input.ownerUserId, resource.runnerId);
+            continue;
           }
           const before = await provider.observeOwnedSet(expectation, { signal: input.signal });
           if (!before.ok) return unsafeCleanup(`slot:${resource.slotNumber}:provider`);
@@ -391,12 +410,15 @@ type CohortResource = {
   userId: string;
   agentId: string;
   agentDeletedAt: Date | null;
+  deploymentErrorCode: string | null;
   runnerId: string | null;
   runnerName: string | null;
   runnerKind: string | null;
   runnerProvider: string | null;
   runnerRegion: string | null;
   runnerSizeSlug: string | null;
+  runnerProvisioningStatus: string | null;
+  provisioningCleanupRequired: boolean | null;
   operationTag: string | null;
   providerResourceId: string | null;
   providerFirewallId: string | null;
@@ -413,12 +435,23 @@ async function readCohortResources(
       userId: agentDeployments.userId,
       agentId: agents.id,
       agentDeletedAt: agents.deletedAt,
+      deploymentErrorCode: agentDeployments.errorCode,
       runnerId: runners.id,
       runnerName: runners.name,
       runnerKind: runners.kind,
       runnerProvider: runners.provider,
       runnerRegion: runners.region,
       runnerSizeSlug: runners.sizeSlug,
+      runnerProvisioningStatus: runners.provisioningStatus,
+      provisioningCleanupRequired: sql<boolean | null>`(
+        select (${runnerProvisioningEvents.metadata}->>'cleanupRequired')::boolean
+        from ${runnerProvisioningEvents}
+        where ${runnerProvisioningEvents.runnerId} = ${runners.id}
+          and ${runnerProvisioningEvents.phase} = 'failed'
+          and ${runnerProvisioningEvents.status} = 'failed'
+        order by ${runnerProvisioningEvents.createdAt} desc
+        limit 1
+      )`,
       operationTag: runners.provisioningOperationKey,
       providerResourceId: runners.providerResourceId,
       providerFirewallId: runners.providerFirewallId,
@@ -456,18 +489,37 @@ export function toProviderTrialOwnedSetExpectation(
   };
 }
 
+export function toProviderTrialAbsenceDiscoveryTag(resource: CohortResource): string | null {
+  if (
+    resource.deploymentErrorCode !== "runner_provisioning_unavailable" ||
+    resource.runnerKind !== "digitalocean" ||
+    resource.runnerProvider !== "digitalocean" ||
+    resource.runnerProvisioningStatus !== "failed" ||
+    resource.provisioningCleanupRequired !== false ||
+    !resource.runnerRegion ||
+    !resource.runnerSizeSlug ||
+    !resource.operationTag ||
+    resource.providerResourceId !== null ||
+    resource.providerFirewallId !== null
+  ) {
+    return null;
+  }
+  return resource.operationTag;
+}
+
 function resolveOwnedSetProvider(
   env: Record<string, string | undefined>,
-): DigitalOceanOwnedSetProvider | null {
+): (DigitalOceanProvider & DigitalOceanOwnedSetProvider) | null {
   const config = readDigitalOceanProviderConfig(env);
   if (config?.providerMode !== "digitalocean") return null;
-  const provider = createConfiguredDigitalOceanProvider(
-    config,
-  ) as Partial<DigitalOceanOwnedSetProvider>;
+  const provider = createConfiguredDigitalOceanProvider(config) as Partial<
+    DigitalOceanProvider & DigitalOceanOwnedSetProvider
+  >;
   return typeof provider.observeOwnedSet === "function" &&
     typeof provider.deleteFirewall === "function" &&
-    typeof provider.deleteDroplet === "function"
-    ? (provider as DigitalOceanOwnedSetProvider)
+    typeof provider.deleteDroplet === "function" &&
+    typeof provider.discoverResourcesByTag === "function"
+    ? (provider as DigitalOceanProvider & DigitalOceanOwnedSetProvider)
     : null;
 }
 

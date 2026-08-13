@@ -99,9 +99,12 @@ reproduction, and full local Agent lifecycle smoke. It writes a signed, sanitize
 bound to the current Git revision, exact Verified Release digest, authorization generation, and
 hashed DigitalOcean account, Telegram bot, Telegram chat, and Telegram user identities. Credential
 fingerprints prevent a different DigitalOcean, model, or Telegram credential from being substituted
-after the gates. Those identity hashes and the gate-evidence digest are also bound into the canonical
-signed cohort report. `preflight`, `initialize`, and `run` reject a dirty working tree or a missing,
-tampered, stale-revision, wrong-release, or credential-mismatched manifest.
+after the gates. The gate manifest also binds the exact provider snapshot, and `preflight`,
+`initialize`, and `run` independently re-read that image before allowing a slot to start; a deleted,
+unavailable, wrong-region, or different-account snapshot therefore fails with zero slot effects.
+Those identity hashes and the gate-evidence digest are also bound into the canonical signed cohort
+report. The active commands reject a dirty working tree or a missing, tampered, stale-revision,
+wrong-release, or credential-mismatched manifest.
 
 Only after preflight succeeds, create the database-only ledger and start the authorized live run:
 
@@ -118,7 +121,10 @@ Owner is an isolated application principal, not the DigitalOcean account owner. 
 only on the exact runner, Droplet, and firewall tuple linked to the cohort. Missing or ambiguous
 ownership evidence pauses the ledger. Successful cleanup deletes every trial workload, active
 secret, firewall, Droplet, runner credential, and runner record; no trial provider resource or
-credential is intentionally retained.
+credential is intentionally retained. A provisioning attempt that terminates before DigitalOcean
+returns any resource identity can be cleaned only when its durable terminal evidence says provider
+cleanup was unnecessary and an authoritative lookup finds zero Droplets for its unique operation
+tag; all other missing-ID cases remain fail-closed.
 
 The database retains the sanitized signed report and append-only cleanup ledger. Detailed evidence
 has a 90-day minimum retention commitment; the signed canonical report is retained without a

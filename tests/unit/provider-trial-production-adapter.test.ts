@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createProviderTrialProductionDriverDependencies,
+  toProviderTrialAbsenceDiscoveryTag,
   toProviderTrialOwnedSetExpectation,
 } from "@/src/server/agents/provider-trial-production-adapter";
 
@@ -13,6 +14,54 @@ const ATTEMPT = {
 };
 
 describe("DigitalOcean Provider Trial production adapter", () => {
+  it("permits authoritative tag discovery for a terminal pre-provider failure", () => {
+    expect(
+      toProviderTrialAbsenceDiscoveryTag({
+        slotNumber: 1,
+        origin: "operator_trial",
+        userId: "00000000-0000-4000-8000-000000002994",
+        agentId: "00000000-0000-4000-8000-000000002995",
+        agentDeletedAt: null,
+        deploymentErrorCode: "runner_provisioning_unavailable",
+        runnerId: "00000000-0000-4000-8000-000000002996",
+        runnerName: "Bruno Deployment Runner",
+        runnerKind: "digitalocean",
+        runnerProvider: "digitalocean",
+        runnerRegion: "sfo3",
+        runnerSizeSlug: "s-1vcpu-2gb",
+        runnerProvisioningStatus: "failed",
+        provisioningCleanupRequired: false,
+        operationTag: "bruno-deploy-05d73ff0d570484087452896791ab651",
+        providerResourceId: null,
+        providerFirewallId: null,
+      }),
+    ).toBe("bruno-deploy-05d73ff0d570484087452896791ab651");
+  });
+
+  it("rejects absence discovery when provider cleanup might be required", () => {
+    expect(
+      toProviderTrialAbsenceDiscoveryTag({
+        slotNumber: 1,
+        origin: "operator_trial",
+        userId: "00000000-0000-4000-8000-000000002994",
+        agentId: "00000000-0000-4000-8000-000000002995",
+        agentDeletedAt: null,
+        deploymentErrorCode: "runner_provisioning_unavailable",
+        runnerId: "00000000-0000-4000-8000-000000002996",
+        runnerName: "Bruno Deployment Runner",
+        runnerKind: "digitalocean",
+        runnerProvider: "digitalocean",
+        runnerRegion: "sfo3",
+        runnerSizeSlug: "s-1vcpu-2gb",
+        runnerProvisioningStatus: "failed",
+        provisioningCleanupRequired: true,
+        operationTag: "bruno-deploy-05d73ff0d570484087452896791ab651",
+        providerResourceId: null,
+        providerFirewallId: null,
+      }),
+    ).toBeNull();
+  });
+
   it("binds cleanup ownership to the provider operation name instead of the runner label", () => {
     expect(
       toProviderTrialOwnedSetExpectation({
@@ -21,12 +70,15 @@ describe("DigitalOcean Provider Trial production adapter", () => {
         userId: "00000000-0000-4000-8000-000000002994",
         agentId: "00000000-0000-4000-8000-000000002995",
         agentDeletedAt: null,
+        deploymentErrorCode: null,
         runnerId: "00000000-0000-4000-8000-000000002996",
         runnerName: "Bruno Deployment Runner",
         runnerKind: "digitalocean",
         runnerProvider: "digitalocean",
         runnerRegion: "sfo3",
         runnerSizeSlug: "s-1vcpu-2gb",
+        runnerProvisioningStatus: "ready",
+        provisioningCleanupRequired: null,
         operationTag: "bruno-deploy-05d73ff0d570484087452896791ab651",
         providerResourceId: "592041488",
         providerFirewallId: "2a18501d-ad3c-45b3-989e-8203bd165797",

@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  isProviderTrialSnapshotAvailable,
   PROVIDER_TRIAL_ARTIFACT_PATHS,
   PROVIDER_TRIAL_AUTHORIZATION,
 } from "@/src/server/agents/provider-trial-operator-config";
@@ -14,6 +15,32 @@ const COMMAND = [
 ] as const;
 
 describe("Provider Trial operator CLI", () => {
+  it("requires the exact authorized snapshot to be available in the authorized region", () => {
+    const expected = { imageId: "240932740", region: "sfo3" };
+    expect(
+      isProviderTrialSnapshotAvailable(
+        200,
+        { id: 240932740, status: "available", regions: ["sfo3"] },
+        expected,
+      ),
+    ).toBe(true);
+    expect(isProviderTrialSnapshotAvailable(404, null, expected)).toBe(false);
+    expect(
+      isProviderTrialSnapshotAvailable(
+        200,
+        { id: 240932741, status: "available", regions: ["sfo3"] },
+        expected,
+      ),
+    ).toBe(false);
+    expect(
+      isProviderTrialSnapshotAvailable(
+        200,
+        { id: 240932740, status: "available", regions: ["nyc3"] },
+        expected,
+      ),
+    ).toBe(false);
+  });
+
   it("pins the renewed issue #299 authorization generation", () => {
     expect(PROVIDER_TRIAL_AUTHORIZATION).toEqual({
       id: "issue-299-20260813-g7",

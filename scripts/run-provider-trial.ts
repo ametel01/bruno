@@ -16,6 +16,7 @@ import {
 } from "@/src/server/agents/provider-trial-driver";
 import {
   listProviderTrialPreflightIssues,
+  isProviderTrialSnapshotAvailable,
   matchesProviderTrialGateEvidence,
   PROVIDER_TRIAL_ARTIFACT_PATHS,
   PROVIDER_TRIAL_APPROVED_SCOPE,
@@ -45,6 +46,7 @@ type SigningKey = { keyId: string; privateKeyPem: string };
 type AuthorizedIdentityEvidence = {
   digitalOceanAccount: string;
   digitalOceanCredential: string;
+  digitalOceanSnapshot: string;
   modelCredential: string;
   telegramBot: string;
   telegramChat: string;
@@ -55,7 +57,8 @@ type AuthorizedIdentityEvidence = {
 type VerifiedGateEvidence = { digest: string; identities: AuthorizedIdentityEvidence };
 
 const execFileAsync = promisify(execFile);
-const GATE_EVIDENCE_SCHEMA_VERSION = "bruno.provider-trial-prerequisite-gates.v1";
+const GATE_EVIDENCE_SCHEMA_VERSION = "bruno.provider-trial-prerequisite-gates.v2";
+const LEGACY_GATE_EVIDENCE_SCHEMA_VERSION = "bruno.provider-trial-prerequisite-gates.v1";
 const GATE_COMMANDS = [
   ["repository", ["run", "verify"]],
   ["browser", ["run", "test:e2e:ci"]],
@@ -115,9 +118,14 @@ async function main(): Promise<number> {
     config,
     signing,
     cleanupOnly ? config.releaseSourceRevision : sourceRevision,
+    cleanupOnly ? "cleanup" : "active",
   );
   if (!gateEvidence) {
     write({ command, effects: 0, ok: false, issues: ["prerequisite_gates"] });
+    return 1;
+  }
+  if (!cleanupOnly && !(await observeAuthorizedSnapshot(config))) {
+    write({ command, effects: 0, ok: false, issues: ["provider_snapshot"] });
     return 1;
   }
   if (command === "preflight") {
@@ -339,6 +347,10 @@ async function run(
   };
   let result: Awaited<ReturnType<typeof resumeProviderTrialDriver>>;
   do {
+    if (!(await observeAuthorizedSnapshot(config))) {
+      write({ command: "run", effects: 0, ok: false, issues: ["provider_snapshot"] });
+      return 1;
+    }
     result = await resumeProviderTrialDriver(
       connection,
       {
@@ -453,6 +465,7 @@ async function readGateEvidence(
   config: OperatorConfig,
   signingKey: SigningKey,
   sourceRevision: string,
+  mode: "active" | "cleanup",
 ): Promise<VerifiedGateEvidence | null> {
   try {
     const evidenceBytes = await readFile(config.gateEvidencePath, "utf8");
@@ -464,8 +477,10 @@ async function readGateEvidence(
     const gates = manifest.gates;
     const authorization = manifest.authorization;
     const identities = manifest.identities;
+    const legacyCleanupEvidence =
+      mode === "cleanup" && manifest.schemaVersion === LEGACY_GATE_EVIDENCE_SCHEMA_VERSION;
     if (
-      manifest.schemaVersion !== GATE_EVIDENCE_SCHEMA_VERSION ||
+      (manifest.schemaVersion !== GATE_EVIDENCE_SCHEMA_VERSION && !legacyCleanupEvidence) ||
       manifest.sourceRevision !== sourceRevision ||
       manifest.releaseBundleDigest !== config.releaseBundleDigest ||
       typeof manifest.completedAt !== "string" ||
@@ -476,6 +491,9 @@ async function readGateEvidence(
       !isSha256(identities.digitalOceanAccount) ||
       identities.digitalOceanCredential !==
         digest(`digitalocean-credential:${process.env.BRUNO_DIGITALOCEAN_TOKEN}`) ||
+      (!legacyCleanupEvidence &&
+        identities.digitalOceanSnapshot !==
+          digest(`digitalocean-snapshot:${config.providerSnapshotImageId}`)) ||
       identities.modelCredential !== digest(`model-credential:${config.fixture.modelApiKey}`) ||
       !isSha256(identities.telegramBot) ||
       !isSha256(identities.telegramChat) ||
@@ -509,6 +527,9 @@ async function readGateEvidence(
           identities: {
             digitalOceanAccount: String(identities.digitalOceanAccount),
             digitalOceanCredential: String(identities.digitalOceanCredential),
+            digitalOceanSnapshot: legacyCleanupEvidence
+              ? digest(`digitalocean-snapshot:${config.providerSnapshotImageId}`)
+              : String(identities.digitalOceanSnapshot),
             modelCredential: String(identities.modelCredential),
             telegramBot: String(identities.telegramBot),
             telegramChat: String(identities.telegramChat),
@@ -627,8 +648,11 @@ async function observeAuthorizedIdentities(
   config: OperatorConfig,
 ): Promise<AuthorizedIdentityEvidence | null> {
   try {
-    const [digitalOcean, telegramBot, telegramChat, model] = await Promise.all([
+    const [digitalOcean, snapshot, telegramBot, telegramChat, model] = await Promise.all([
       fetchJson("https://api.digitalocean.com/v2/account", {
+        authorization: `Bearer ${process.env.BRUNO_DIGITALOCEAN_TOKEN}`,
+      }),
+      fetchJson(`https://api.digitalocean.com/v2/images/${config.providerSnapshotImageId}`, {
         authorization: `Bearer ${process.env.BRUNO_DIGITALOCEAN_TOKEN}`,
       }),
       fetchJson(`https://api.telegram.org/bot${config.fixture.telegramBotToken}/getMe`, {}),
@@ -646,12 +670,14 @@ async function observeAuthorizedIdentities(
           }),
     ]);
     const account = isRecord(digitalOcean.body) ? digitalOcean.body.account : null;
+    const image = isRecord(snapshot.body) ? snapshot.body.image : null;
     const botResult = isRecord(telegramBot.body) ? telegramBot.body.result : null;
     const chatResult = isRecord(telegramChat.body) ? telegramChat.body.result : null;
     if (
       digitalOcean.status !== 200 ||
       !isRecord(account) ||
       typeof account.uuid !== "string" ||
+      !isAvailableAuthorizedSnapshot(snapshot.status, image, config) ||
       telegramBot.status !== 200 ||
       !isRecord(botResult) ||
       typeof botResult.id !== "number" ||
@@ -667,6 +693,7 @@ async function observeAuthorizedIdentities(
       digitalOceanCredential: digest(
         `digitalocean-credential:${process.env.BRUNO_DIGITALOCEAN_TOKEN}`,
       ),
+      digitalOceanSnapshot: digest(`digitalocean-snapshot:${config.providerSnapshotImageId}`),
       modelCredential: digest(`model-credential:${config.fixture.modelApiKey}`),
       telegramBot: digest(`telegram-bot:${botResult.id}`),
       telegramChat: digest(`telegram-chat:${chatResult.id}`),
@@ -677,6 +704,30 @@ async function observeAuthorizedIdentities(
   } catch {
     return null;
   }
+}
+
+async function observeAuthorizedSnapshot(config: OperatorConfig): Promise<boolean> {
+  try {
+    const response = await fetchJson(
+      `https://api.digitalocean.com/v2/images/${config.providerSnapshotImageId}`,
+      { authorization: `Bearer ${process.env.BRUNO_DIGITALOCEAN_TOKEN}` },
+    );
+    const image = isRecord(response.body) ? response.body.image : null;
+    return isAvailableAuthorizedSnapshot(response.status, image, config);
+  } catch {
+    return false;
+  }
+}
+
+function isAvailableAuthorizedSnapshot(
+  status: number,
+  value: unknown,
+  config: Pick<OperatorConfig, "providerSnapshotImageId">,
+): boolean {
+  return isProviderTrialSnapshotAvailable(status, value, {
+    imageId: config.providerSnapshotImageId,
+    region: PROVIDER_TRIAL_APPROVED_SCOPE.region,
+  });
 }
 
 async function fetchJson(

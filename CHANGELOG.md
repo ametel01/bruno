@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rows retain their original boundary rather than being silently reclassified.
 - Provider Trial authorization generations now use distinct prerequisite-evidence and signing-key
   paths, preserving each completed cohort's public verification key when a fresh trial is prepared.
+- Provider Trial gates now prove the exact snapshot is still available to the authorized
+  DigitalOcean account and region before every active command. Cleanup now reconciles terminal
+  pre-provider failures from durable no-cleanup evidence plus authoritative zero-resource tag
+  discovery instead of requiring Droplet and firewall IDs that were never created.
 
 ### Added
 

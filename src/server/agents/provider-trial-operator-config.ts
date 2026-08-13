@@ -93,6 +93,7 @@ export type ProviderTrialOperatorConfiguration = {
   deploymentChoicesDigest: string;
   releaseBundleDigest: string;
   releaseSourceRevision: string;
+  providerSnapshotImageId: string;
   benchmarkTelegramIdentityHash: string;
   signing: { keyId: string; privateKeyPath: string };
   gateEvidencePath: string;
@@ -125,6 +126,23 @@ export function matchesProviderTrialGateEvidence(
   return (
     configuration.prerequisiteGateEvidenceDigest === gateEvidence.digest ||
     mode === "renewed_authorization"
+  );
+}
+
+export function isProviderTrialSnapshotAvailable(
+  status: number,
+  value: unknown,
+  expected: { imageId: string; region: string },
+): boolean {
+  if (status !== 200 || typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const image = value as Record<string, unknown>;
+  return (
+    String(image.id) === expected.imageId &&
+    image.status === "available" &&
+    Array.isArray(image.regions) &&
+    image.regions.includes(expected.region)
   );
 }
 
@@ -202,6 +220,7 @@ export function parseProviderTrialOperatorConfiguration(
       choices.provider.mode !== "digitalocean" ||
       choices.provider.region !== PROVIDER_TRIAL_APPROVED_SCOPE.region ||
       choices.provider.sizeSlug !== PROVIDER_TRIAL_APPROVED_SCOPE.runnerSizeSlug ||
+      !/^[1-9][0-9]{0,19}$/.test(choices.provider.image) ||
       choices.validation.mode !== "release_attested"
     ) {
       return null;
@@ -221,6 +240,7 @@ export function parseProviderTrialOperatorConfiguration(
       deploymentChoicesDigest: providerTrialDeploymentChoicesDigest(choices),
       releaseBundleDigest: release.digest,
       releaseSourceRevision: release.bundle.manifest.controlPlane.source.revision,
+      providerSnapshotImageId: choices.provider.image,
       benchmarkTelegramIdentityHash: providerTrialBenchmarkTelegramIdentityHash(
         fingerprintTelegramBotTokenForUniqueness(telegramBotToken),
       ),
