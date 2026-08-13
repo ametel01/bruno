@@ -13,8 +13,8 @@ const COMMAND = [
 describe("Provider Trial operator CLI", () => {
   it("pins the renewed issue #299 authorization generation", () => {
     expect(PROVIDER_TRIAL_AUTHORIZATION).toEqual({
-      id: "issue-299-20260813-g3",
-      generation: 3,
+      id: "issue-299-20260813-g4",
+      generation: 4,
     });
   });
 
