@@ -1017,6 +1017,58 @@ describe("resumable Provider Trial driver", () => {
     ]);
   });
 
+  it("retains committed identity evidence after cleanup revokes the benchmark secret", async () => {
+    const cohort = await createCohort(connection, "provider-trial-driver-revoked-identity");
+    await seedOwner(connection);
+    await initializeProviderTrialDriver(connection, {
+      cohortId: cohort.id,
+      authorization: { id: "auth-local-001", generation: 1 },
+      configuration: configuration(),
+    });
+
+    await expect(
+      resumeProviderTrialDriver(
+        connection,
+        { cohortId: cohort.id, authorization: { id: "auth-local-001", generation: 1 } },
+        {
+          async executeSlot(attempt) {
+            await seedDeployment(connection, attempt.requestAttemptId);
+            return {
+              outcome: "committed",
+              deploymentId: DEPLOYMENT_ID,
+              costCents: 1,
+              activeProviderResources: 1,
+            };
+          },
+          async observeCommittedSlot() {
+            return "timed_out";
+          },
+          async cleanup() {
+            return { ok: false, authoritative: false, remainingResourceIds: ["slot:1"] };
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ state: "paused", nextSlotNumber: 1, spentCents: 0 });
+
+    const revokedAt = new Date("2026-08-11T12:20:00.000Z");
+    await connection.db
+      .update(agentSecrets)
+      .set({ status: "revoked", revokedAt, updatedAt: revokedAt })
+      .where(eq(agentSecrets.agentId, AGENT_ID));
+
+    await expect(
+      reconcileProviderTrialCleanup(
+        connection,
+        { cohortId: cohort.id, authorization: { id: "auth-local-001", generation: 1 } },
+        {
+          async cleanup() {
+            return { ok: true, authoritative: true, remainingResourceIds: [] };
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ state: "running", nextSlotNumber: 2, spentCents: 1 });
+  });
+
   it("stops cleanup recovery when the original cohort gate is mathematically impossible", async () => {
     const cohort = await createCohort(connection, "provider-trial-driver-gate-impossible");
     await initializeProviderTrialDriver(connection, {

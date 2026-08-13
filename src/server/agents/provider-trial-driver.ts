@@ -1572,7 +1572,7 @@ async function committedBenchmarkIdentityMatches(
   deploymentId: string,
   configuration: ProviderTrialDriverConfiguration,
 ): Promise<boolean> {
-  const [identity] = await connection.db
+  const identities = await connection.db
     .select({
       userId: agentDeployments.userId,
       telegramUniquenessFingerprint: agentSecrets.uniquenessFingerprint,
@@ -1584,24 +1584,24 @@ async function committedBenchmarkIdentityMatches(
       and(
         eq(agentSecrets.agentId, agentDeployments.agentId),
         eq(agentSecrets.kind, "telegram_bot_token"),
-        eq(agentSecrets.status, "active"),
       ),
     )
-    .where(eq(agentDeployments.id, deploymentId))
-    .limit(1);
-  if (!identity?.telegramUniquenessFingerprint || !identity.deploymentChoices) return false;
-  try {
-    return (
-      providerTrialBenchmarkOwnerIdentityHash(identity.userId) ===
-        configuration.benchmarkOwnerIdentityHash &&
-      providerTrialBenchmarkTelegramIdentityHash(identity.telegramUniquenessFingerprint) ===
-        configuration.benchmarkTelegramIdentityHash &&
-      providerTrialDeploymentChoicesDigest(identity.deploymentChoices) ===
-        configuration.deploymentChoicesDigest
-    );
-  } catch {
-    return false;
-  }
+    .where(eq(agentDeployments.id, deploymentId));
+  return identities.some((identity) => {
+    if (!identity.telegramUniquenessFingerprint || !identity.deploymentChoices) return false;
+    try {
+      return (
+        providerTrialBenchmarkOwnerIdentityHash(identity.userId) ===
+          configuration.benchmarkOwnerIdentityHash &&
+        providerTrialBenchmarkTelegramIdentityHash(identity.telegramUniquenessFingerprint) ===
+          configuration.benchmarkTelegramIdentityHash &&
+        providerTrialDeploymentChoicesDigest(identity.deploymentChoices) ===
+          configuration.deploymentChoicesDigest
+      );
+    } catch {
+      return false;
+    }
+  });
 }
 
 export function providerTrialDeploymentChoicesDigest(choices: AgentDeploymentChoices): string {
