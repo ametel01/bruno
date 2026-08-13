@@ -3,9 +3,14 @@ import { createHash, createPrivateKey, createPublicKey, sign, verify } from "nod
 import { lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS } from "@/src/server/agents/cold-deployment-slo-objective";
 import { CURRENT_ROLLOUT_CONFIGURATION_GENERATION } from "@/src/server/agents/deployment-slo-identity";
+import {
+  cleanupProviderTrialCallbackAttribution,
+  isProviderTrialRegistrationTokenStatus,
+  observeProviderTrialCallbackDatabaseBinding,
+} from "@/src/server/agents/provider-trial-callback-binding";
 import { createProviderTrialCohort } from "@/src/server/agents/provider-trial-cohort";
 import {
   initializeProviderTrialDriver,
@@ -39,7 +44,11 @@ import {
   providerTrialAuthorizationEvents,
   providerTrialCohorts,
   providerTrialRuns,
+  runnerCredentials,
+  runnerRegistrationTokens,
+  runners,
 } from "@/src/server/db/schema";
+import { createRunnerRegistrationTokenForUser } from "@/src/server/runners/runner-registration";
 
 type Command =
   | "preflight"
@@ -74,8 +83,11 @@ type AuthorizedIdentityObservation =
 type VerifiedGateEvidence = { digest: string; identities: AuthorizedIdentityEvidence };
 
 const execFileAsync = promisify(execFile);
-const GATE_EVIDENCE_SCHEMA_VERSION = "bruno.provider-trial-prerequisite-gates.v2";
-const LEGACY_GATE_EVIDENCE_SCHEMA_VERSION = "bruno.provider-trial-prerequisite-gates.v1";
+const GATE_EVIDENCE_SCHEMA_VERSION = "bruno.provider-trial-prerequisite-gates.v3";
+const LEGACY_GATE_EVIDENCE_SCHEMA_VERSIONS = new Set([
+  "bruno.provider-trial-prerequisite-gates.v1",
+  "bruno.provider-trial-prerequisite-gates.v2",
+]);
 const GATE_COMMANDS = [
   ["repository", ["run", "verify"]],
   ["browser", ["run", "test:e2e:ci"]],
@@ -100,6 +112,127 @@ async function observeProviderTrialCallback(baseUrl: string | undefined): Promis
     return isProviderTrialCallbackProbeResponse(response.status, await response.json());
   } catch {
     return false;
+  }
+}
+
+async function observeProviderTrialCallbackBinding(baseUrl: string): Promise<boolean> {
+  const connection = createDatabaseConnection();
+  try {
+    const owner = await connection.db.transaction(resolveProviderTrialBenchmarkOwner);
+    return await observeProviderTrialCallbackDatabaseBinding(baseUrl, {
+      createProof: async () => {
+        const created = await createRunnerRegistrationTokenForUser(owner.userId, {
+          createConnection: () => connection,
+        });
+        const token = created.registrationToken;
+        return {
+          tokenId: token.id,
+          registrationToken: token.token,
+          endpointUrl: `https://${token.id}.provider-trial.invalid`,
+        };
+      },
+      isLocalRunner: async (runnerId, proof) => {
+        const [token] = await connection.db
+          .select({ runnerId: runnerRegistrationTokens.runnerId })
+          .from(runnerRegistrationTokens)
+          .innerJoin(runners, eq(runners.id, runnerRegistrationTokens.runnerId))
+          .where(
+            and(
+              eq(runnerRegistrationTokens.id, proof.tokenId),
+              eq(runnerRegistrationTokens.userId, owner.userId),
+              eq(runnerRegistrationTokens.status, "used"),
+              eq(runnerRegistrationTokens.runnerId, runnerId),
+              eq(runners.id, runnerId),
+              eq(runners.userId, owner.userId),
+              eq(runners.kind, "manual_vps"),
+              eq(runners.endpointUrl, proof.endpointUrl),
+              isNull(runners.deletedAt),
+            ),
+          )
+          .limit(1);
+        return token?.runnerId === runnerId;
+      },
+      cleanupProof: async (proof, observedRunnerId) => {
+        await connection.db.transaction(async (tx) => {
+          const [token] = await tx
+            .select({
+              runnerId: runnerRegistrationTokens.runnerId,
+              status: runnerRegistrationTokens.status,
+            })
+            .from(runnerRegistrationTokens)
+            .where(
+              and(
+                eq(runnerRegistrationTokens.id, proof.tokenId),
+                eq(runnerRegistrationTokens.userId, owner.userId),
+              ),
+            )
+            .for("update")
+            .limit(1);
+          if (!token) throw new Error("Provider Trial callback proof token disappeared.");
+          if (!isProviderTrialRegistrationTokenStatus(token.status)) {
+            throw new Error("Provider Trial callback proof token has an invalid status.");
+          }
+          const tokenStatus = token.status;
+
+          const now = new Date();
+          await cleanupProviderTrialCallbackAttribution({
+            proof,
+            observedRunnerId,
+            token: { runnerId: token.runnerId, status: tokenStatus },
+            findAttributableRunner: async (runnerId) => {
+              const [observedRunner] = await tx
+                .select({ id: runners.id })
+                .from(runners)
+                .where(
+                  and(
+                    eq(runners.id, runnerId),
+                    eq(runners.userId, owner.userId),
+                    eq(runners.kind, "manual_vps"),
+                    eq(runners.endpointUrl, proof.endpointUrl),
+                    isNull(runners.deletedAt),
+                  ),
+                )
+                .limit(1);
+              return Boolean(observedRunner);
+            },
+            revokeAndDeleteRunner: async (runnerId) => {
+              await tx
+                .update(runnerCredentials)
+                .set({ status: "revoked", revokedAt: now, updatedAt: now })
+                .where(
+                  and(
+                    eq(runnerCredentials.runnerId, runnerId),
+                    eq(runnerCredentials.status, "active"),
+                  ),
+                );
+              const [deleted] = await tx
+                .update(runners)
+                .set({ status: "deleted", deletedAt: now, updatedAt: now })
+                .where(
+                  and(
+                    eq(runners.id, runnerId),
+                    eq(runners.userId, owner.userId),
+                    eq(runners.kind, "manual_vps"),
+                    eq(runners.endpointUrl, proof.endpointUrl),
+                    isNull(runners.deletedAt),
+                  ),
+                )
+                .returning({ id: runners.id });
+              if (!deleted)
+                throw new Error("Provider Trial callback proof runner was not deleted.");
+            },
+            revokePendingToken: async () => {
+              await tx
+                .update(runnerRegistrationTokens)
+                .set({ status: "revoked", revokedAt: now, updatedAt: now })
+                .where(eq(runnerRegistrationTokens.id, proof.tokenId));
+            },
+          });
+        });
+      },
+    });
+  } finally {
+    await connection.close();
   }
 }
 
@@ -167,6 +300,14 @@ async function main(): Promise<number> {
   );
   if (!gateEvidence) {
     write({ command, effects: 0, ok: false, issues: ["prerequisite_gates"] });
+    return 1;
+  }
+  if (
+    !cleanupOnly &&
+    process.env.NEXT_PUBLIC_APP_URL &&
+    !(await observeProviderTrialCallbackBinding(process.env.NEXT_PUBLIC_APP_URL))
+  ) {
+    write({ command, effects: "database_binding_probe", ok: false, issues: ["callback_database"] });
     return 1;
   }
   if (!cleanupOnly && command !== "run" && !(await observeAuthorizedSnapshot(config))) {
@@ -513,6 +654,8 @@ async function verifyPrerequisiteGates(
   signingKey: SigningKey,
   sourceRevision: string,
 ): Promise<number> {
+  const callbackBaseUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (!callbackBaseUrl) throw new Error("Provider Trial callback is unavailable.");
   for (const [name, args] of GATE_COMMANDS) {
     const exitCode = await runCommand("bun", [...args]);
     if (exitCode !== 0) {
@@ -522,6 +665,15 @@ async function verifyPrerequisiteGates(
   }
   if ((await readSourceRevision()) !== sourceRevision) {
     write({ command: "verify-gates", effects: "local_validation", ok: false, gate: "source" });
+    return 1;
+  }
+  if (!(await observeProviderTrialCallbackBinding(callbackBaseUrl))) {
+    write({
+      command: "verify-gates",
+      effects: "database_binding_probe",
+      ok: false,
+      gate: "callbackDatabaseBinding",
+    });
     return 1;
   }
   const identityObservation = await observeAuthorizedIdentities(config);
@@ -540,6 +692,7 @@ async function verifyPrerequisiteGates(
     schemaVersion: GATE_EVIDENCE_SCHEMA_VERSION,
     sourceRevision,
     releaseBundleDigest: config.releaseBundleDigest,
+    callbackBaseUrlHash: digest(new URL(callbackBaseUrl).origin),
     completedAt: new Date().toISOString(),
     authorization: {
       idHash: digest(config.authorization.id),
@@ -547,6 +700,7 @@ async function verifyPrerequisiteGates(
     },
     identities,
     gates: {
+      callbackDatabaseBinding: "passed",
       repository: "passed",
       browser: "passed",
       cloudReproduction: "passed",
@@ -592,11 +746,21 @@ async function readGateEvidence(
     const authorization = manifest.authorization;
     const identities = manifest.identities;
     const legacyCleanupEvidence =
-      mode === "cleanup" && manifest.schemaVersion === LEGACY_GATE_EVIDENCE_SCHEMA_VERSION;
+      mode === "cleanup" &&
+      typeof manifest.schemaVersion === "string" &&
+      LEGACY_GATE_EVIDENCE_SCHEMA_VERSIONS.has(manifest.schemaVersion);
+    const legacySnapshotEvidence =
+      legacyCleanupEvidence &&
+      manifest.schemaVersion === "bruno.provider-trial-prerequisite-gates.v1";
     if (
       (manifest.schemaVersion !== GATE_EVIDENCE_SCHEMA_VERSION && !legacyCleanupEvidence) ||
       manifest.sourceRevision !== sourceRevision ||
       manifest.releaseBundleDigest !== config.releaseBundleDigest ||
+      (!legacyCleanupEvidence &&
+        (typeof manifest.callbackBaseUrlHash !== "string" ||
+          (mode === "active" &&
+            manifest.callbackBaseUrlHash !==
+              digest(new URL(process.env.NEXT_PUBLIC_APP_URL ?? "").origin)))) ||
       typeof manifest.completedAt !== "string" ||
       !isRecord(authorization) ||
       authorization.idHash !== digest(config.authorization.id) ||
@@ -605,7 +769,7 @@ async function readGateEvidence(
       !isSha256(identities.digitalOceanAccount) ||
       identities.digitalOceanCredential !==
         digest(`digitalocean-credential:${process.env.BRUNO_DIGITALOCEAN_TOKEN}`) ||
-      (!legacyCleanupEvidence &&
+      (!legacySnapshotEvidence &&
         identities.digitalOceanSnapshot !==
           digest(`digitalocean-snapshot:${config.providerSnapshotImageId}`)) ||
       identities.modelCredential !== digest(`model-credential:${config.fixture.modelApiKey}`) ||
@@ -617,6 +781,7 @@ async function readGateEvidence(
       identities.modelProvider !== config.fixture.assistant ||
       !isRecord(gates) ||
       [
+        ...(legacyCleanupEvidence ? [] : [gates.callbackDatabaseBinding]),
         gates.repository,
         gates.browser,
         gates.cloudReproduction,
@@ -641,7 +806,7 @@ async function readGateEvidence(
           identities: {
             digitalOceanAccount: String(identities.digitalOceanAccount),
             digitalOceanCredential: String(identities.digitalOceanCredential),
-            digitalOceanSnapshot: legacyCleanupEvidence
+            digitalOceanSnapshot: legacySnapshotEvidence
               ? digest(`digitalocean-snapshot:${config.providerSnapshotImageId}`)
               : String(identities.digitalOceanSnapshot),
             modelCredential: String(identities.modelCredential),
