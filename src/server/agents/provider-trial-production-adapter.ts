@@ -397,7 +397,11 @@ function createDefaultCleanupCohort(options: ProviderTrialProductionAdapterOptio
   };
 }
 
-const PROVIDER_TRIAL_CLEANUP_OBSERVATION_ATTEMPTS = 15;
+// DigitalOcean may accept deletion before list/get observations converge. Keep each
+// provider-resource phase bounded below the five-minute cohort cleanup deadline,
+// while allowing substantially more than the short eventual-consistency window
+// observed by the live trial.
+const PROVIDER_TRIAL_CLEANUP_OBSERVATION_ATTEMPTS = 120;
 const PROVIDER_TRIAL_CLEANUP_OBSERVATION_DELAY_MS = 1_000;
 
 export async function cleanupProviderTrialOwnedSet(input: {
