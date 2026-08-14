@@ -44,6 +44,8 @@ describe("protected production rollout workflow", () => {
     const workflow = await readFile(".github/workflows/rollout-production.yml", "utf8");
 
     expect(workflow).toContain("/api/internal/production-rollout/status");
+    expect(workflow).toContain("vercel@${" + 'VERCEL_CLI_VERSION}" curl');
+    expect(workflow).toContain('--deployment "${' + 'CANDIDATE_URL}"');
     expect(workflow).toContain("pinnedChoicesValid");
     expect(workflow).toContain("provider-trial-report-digest");
     expect(workflow).toContain("temporaryProviderResources");

@@ -285,8 +285,11 @@ jobs:
             STATUS_FILE="rollout-evidence/steps/${BRUNO_ROLLOUT_CONFIGURATION_GENERATION}-${ROLLOUT_STEP}.json"
             VERIFIED=false
             for _attempt in $(seq 1 18); do
-              if curl --config "${STATUS_CURL_CONFIG}" --fail --silent --show-error \
-                "${CANDIDATE_URL}/api/internal/production-rollout/status" > "${STATUS_FILE}"; then
+              if bunx "vercel@${VERCEL_CLI_VERSION}" curl \
+                /api/internal/production-rollout/status \
+                --deployment "${CANDIDATE_URL}" --yes -- \
+                --config "${STATUS_CURL_CONFIG}" --fail --silent --show-error \
+                > "${STATUS_FILE}"; then
                 if test "$(jq -r '.status.current.generation' "${STATUS_FILE}")" = "${BRUNO_ROLLOUT_CONFIGURATION_GENERATION}" \
                   && test "$(jq -r '.status.current.credentialConfigurationValid' "${STATUS_FILE}")" = "true" \
                   && test "$(jq -r '.status.activeDeployments.pinnedChoicesValid' "${STATUS_FILE}")" = "true"; then
