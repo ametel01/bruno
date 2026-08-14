@@ -36,6 +36,7 @@ describe("operator access path decisions", () => {
     "/runner/v1/bootstrap-events",
     "/api/internal/runner-release/required",
     "/api/internal/agent-deployments/reconcile",
+    "/api/internal/production-rollout/status",
     "/robots.txt",
     "/images/logo.svg",
   ])("leaves independently authenticated path %s outside the operator gate", (pathname) => {
@@ -256,6 +257,20 @@ describe("operator access proxy responses", () => {
           message: "Operator access is not configured.",
         },
       });
+    });
+  });
+
+  it("passes the independently authenticated rollout status route through the operator gate", async () => {
+    await withOperatorEnv({ BRUNO_OPERATOR_PASSWORD: "test-password", VERCEL: "1" }, async () => {
+      const response = await proxy(
+        new NextRequest("http://localhost/api/internal/production-rollout/status", {
+          headers: { "x-bruno-rollout-authorization": "Bearer rollout-secret" },
+        }),
+        {} as NextFetchEvent,
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("x-middleware-next")).toBe("1");
     });
   });
 

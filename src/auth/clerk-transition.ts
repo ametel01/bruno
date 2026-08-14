@@ -13,6 +13,7 @@ const INTERNAL_SERVICE_AUTH_PATHS = new Set([
   "/api/internal/agent-runtime/reconcile",
   "/api/internal/hermes-staging/acceptance",
   "/api/internal/hermes-staging/reconcile",
+  "/api/internal/production-rollout/status",
   "/api/internal/runner-infrastructure/reconcile",
   "/api/internal/runner-release/required",
   "/api/internal/runner-replacements/reconcile",
