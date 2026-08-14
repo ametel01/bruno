@@ -5,8 +5,8 @@ import {
   isProviderTrialCallbackProbeResponse,
   isProviderTrialSnapshotAvailable,
   isSafeProviderTrialCallbackBaseUrl,
-  PROVIDER_TRIAL_ARTIFACT_PATHS,
-  PROVIDER_TRIAL_AUTHORIZATION,
+  parseProviderTrialAuthorization,
+  providerTrialArtifactPaths,
 } from "@/src/server/agents/provider-trial-operator-config";
 
 const COMMAND = [
@@ -59,19 +59,33 @@ describe("Provider Trial operator CLI", () => {
     ).toBe(false);
   });
 
-  it("pins the fresh issue #299 authorization generation", () => {
-    expect(PROVIDER_TRIAL_AUTHORIZATION).toEqual({
-      id: "issue-299-20260814-g12",
-      generation: 12,
-    });
+  it("binds an issue #299 authorization ID to its supplied generation", () => {
+    expect(
+      parseProviderTrialAuthorization({
+        BRUNO_PROVIDER_TRIAL_AUTHORIZATION_ID: "issue-299-20260814-g13",
+        BRUNO_PROVIDER_TRIAL_AUTHORIZATION_GENERATION: "13",
+      }),
+    ).toEqual({ id: "issue-299-20260814-g13", generation: 13 });
+    expect(
+      parseProviderTrialAuthorization({
+        BRUNO_PROVIDER_TRIAL_AUTHORIZATION_ID: "issue-299-20260814-g13",
+        BRUNO_PROVIDER_TRIAL_AUTHORIZATION_GENERATION: "12",
+      }),
+    ).toBeNull();
+    expect(
+      parseProviderTrialAuthorization({
+        BRUNO_PROVIDER_TRIAL_AUTHORIZATION_ID: "unscoped-g13",
+        BRUNO_PROVIDER_TRIAL_AUTHORIZATION_GENERATION: "13",
+      }),
+    ).toBeNull();
   });
 
   it("uses generation-scoped evidence paths without replacing retained verification keys", () => {
-    expect(PROVIDER_TRIAL_ARTIFACT_PATHS).toEqual({
+    expect(providerTrialArtifactPaths(13)).toEqual({
       credential: ".env.provider-trial.local",
-      gateEvidence: ".vercel/provider-trial-evidence/issue-299-g12-prerequisite-gates.json",
-      signingPrivateKey: ".vercel/provider-trial-evidence/issue-299-g12-ed25519-private.pem",
-      signingPublicKey: ".vercel/provider-trial-evidence/issue-299-g12-ed25519-public.pem",
+      gateEvidence: ".vercel/provider-trial-evidence/issue-299-g13-prerequisite-gates.json",
+      signingPrivateKey: ".vercel/provider-trial-evidence/issue-299-g13-ed25519-private.pem",
+      signingPublicKey: ".vercel/provider-trial-evidence/issue-299-g13-ed25519-public.pem",
     });
   });
 

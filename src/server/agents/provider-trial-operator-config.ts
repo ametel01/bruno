@@ -15,17 +15,32 @@ import {
   providerTrialDeploymentChoicesDigest,
 } from "@/src/server/agents/provider-trial-driver";
 
-export const PROVIDER_TRIAL_AUTHORIZATION = {
-  id: "issue-299-20260814-g12",
-  generation: 12,
-} as const;
+export type ProviderTrialAuthorization = { id: string; generation: number };
 
-export const PROVIDER_TRIAL_ARTIFACT_PATHS = {
-  credential: ".env.provider-trial.local",
-  gateEvidence: ".vercel/provider-trial-evidence/issue-299-g12-prerequisite-gates.json",
-  signingPrivateKey: ".vercel/provider-trial-evidence/issue-299-g12-ed25519-private.pem",
-  signingPublicKey: ".vercel/provider-trial-evidence/issue-299-g12-ed25519-public.pem",
-} as const;
+export function parseProviderTrialAuthorization(
+  env: Readonly<Record<string, string | undefined>>,
+): ProviderTrialAuthorization | null {
+  const id = env.BRUNO_PROVIDER_TRIAL_AUTHORIZATION_ID;
+  const generationText = env.BRUNO_PROVIDER_TRIAL_AUTHORIZATION_GENERATION;
+  if (!id || !generationText || !/^[1-9][0-9]*$/.test(generationText)) return null;
+  const generation = Number(generationText);
+  if (!Number.isSafeInteger(generation)) return null;
+  const match = /^issue-299-[0-9]{8}-g([1-9][0-9]*)$/.exec(id);
+  if (!match || Number(match[1]) !== generation) return null;
+  return { id, generation };
+}
+
+export function providerTrialArtifactPaths(generation: number) {
+  if (!Number.isSafeInteger(generation) || generation < 1) {
+    throw new Error("Provider Trial authorization generation is invalid.");
+  }
+  return {
+    credential: ".env.provider-trial.local",
+    gateEvidence: `.vercel/provider-trial-evidence/issue-299-g${generation}-prerequisite-gates.json`,
+    signingPrivateKey: `.vercel/provider-trial-evidence/issue-299-g${generation}-ed25519-private.pem`,
+    signingPublicKey: `.vercel/provider-trial-evidence/issue-299-g${generation}-ed25519-public.pem`,
+  } as const;
+}
 
 export const PROVIDER_TRIAL_APPROVED_SCOPE = {
   region: "sfo3",
@@ -82,7 +97,7 @@ export type ProviderTrialPreflightIssue =
   | "invalid_configuration";
 
 export type ProviderTrialOperatorConfiguration = {
-  authorization: typeof PROVIDER_TRIAL_AUTHORIZATION;
+  authorization: ProviderTrialAuthorization;
   cohortKey: string;
   fixture: {
     assistant: AssistantChoice;
@@ -191,14 +206,10 @@ export function listProviderTrialPreflightIssues(
   if (missing.length > 0) return missing;
 
   if (
-    !(
-      env.BRUNO_PROVIDER_TRIAL_AUTHORIZATION_ID === PROVIDER_TRIAL_AUTHORIZATION.id &&
-      env.BRUNO_PROVIDER_TRIAL_AUTHORIZATION_GENERATION ===
-        String(PROVIDER_TRIAL_AUTHORIZATION.generation) &&
-      env.BRUNO_DIGITALOCEAN_PROVIDER_MODE === "digitalocean" &&
-      env.BRUNO_DIGITALOCEAN_REGION === PROVIDER_TRIAL_APPROVED_SCOPE.region &&
-      env.BRUNO_DIGITALOCEAN_SIZE_SLUG === PROVIDER_TRIAL_APPROVED_SCOPE.runnerSizeSlug
-    )
+    !parseProviderTrialAuthorization(env) ||
+    env.BRUNO_DIGITALOCEAN_PROVIDER_MODE !== "digitalocean" ||
+    env.BRUNO_DIGITALOCEAN_REGION !== PROVIDER_TRIAL_APPROVED_SCOPE.region ||
+    env.BRUNO_DIGITALOCEAN_SIZE_SLUG !== PROVIDER_TRIAL_APPROVED_SCOPE.runnerSizeSlug
   ) {
     return ["approved_scope"];
   }
@@ -209,6 +220,7 @@ export function listProviderTrialPreflightIssues(
 export function parseProviderTrialOperatorConfiguration(
   env: Readonly<Record<string, string | undefined>>,
 ): ProviderTrialOperatorConfiguration | null {
+  const authorization = parseProviderTrialAuthorization(env);
   const cohortKey = env.BRUNO_PROVIDER_TRIAL_COHORT_KEY;
   const assistant = env.BRUNO_PROVIDER_TRIAL_ASSISTANT;
   const modelApiKey = env.BRUNO_PROVIDER_TRIAL_MODEL_API_KEY;
@@ -220,9 +232,7 @@ export function parseProviderTrialOperatorConfiguration(
   const gateEvidencePath = env.BRUNO_PROVIDER_TRIAL_GATE_EVIDENCE_PATH;
   const credentialFilePath = env.BRUNO_PROVIDER_TRIAL_CREDENTIAL_FILE_PATH;
   if (
-    env.BRUNO_PROVIDER_TRIAL_AUTHORIZATION_ID !== PROVIDER_TRIAL_AUTHORIZATION.id ||
-    env.BRUNO_PROVIDER_TRIAL_AUTHORIZATION_GENERATION !==
-      String(PROVIDER_TRIAL_AUTHORIZATION.generation) ||
+    !authorization ||
     env.BRUNO_PROVIDER_TRIAL_LIVE_SIDE_EFFECT_CONFIRMATION !== PROVIDER_TRIAL_LIVE_CONFIRMATION ||
     !cohortKey ||
     !/^[a-z0-9][a-z0-9._:-]{7,127}$/.test(cohortKey) ||
@@ -264,7 +274,7 @@ export function parseProviderTrialOperatorConfiguration(
     const release = parseRunnerReleaseBundle(env.BRUNO_RUNNER_RELEASE_BUNDLE ?? "");
     if (!release.ok || release.digest !== choices.validation.releaseBundleDigest) return null;
     return {
-      authorization: PROVIDER_TRIAL_AUTHORIZATION,
+      authorization,
       cohortKey,
       fixture: {
         assistant,

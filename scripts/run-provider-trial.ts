@@ -31,7 +31,7 @@ import {
   listProviderTrialPreflightIssues,
   matchesProviderTrialGateEvidence,
   PROVIDER_TRIAL_APPROVED_SCOPE,
-  PROVIDER_TRIAL_ARTIFACT_PATHS,
+  providerTrialArtifactPaths,
   parseProviderTrialOperatorConfiguration,
 } from "@/src/server/agents/provider-trial-operator-config";
 import {
@@ -1226,10 +1226,11 @@ async function readSourceRevision(): Promise<string> {
 
 async function hasSafeArtifactPaths(config: OperatorConfig): Promise<boolean> {
   const evidenceDirectory = resolve(process.cwd(), ".vercel/provider-trial-evidence");
+  const artifactPaths = providerTrialArtifactPaths(config.authorization.generation);
   const expected = {
-    credential: resolve(process.cwd(), PROVIDER_TRIAL_ARTIFACT_PATHS.credential),
-    gate: resolve(process.cwd(), PROVIDER_TRIAL_ARTIFACT_PATHS.gateEvidence),
-    privateKey: resolve(process.cwd(), PROVIDER_TRIAL_ARTIFACT_PATHS.signingPrivateKey),
+    credential: resolve(process.cwd(), artifactPaths.credential),
+    gate: resolve(process.cwd(), artifactPaths.gateEvidence),
+    privateKey: resolve(process.cwd(), artifactPaths.signingPrivateKey),
   };
   if (
     resolve(config.credentialFilePath) !== expected.credential ||
