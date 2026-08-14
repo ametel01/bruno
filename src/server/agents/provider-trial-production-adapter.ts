@@ -366,37 +366,10 @@ function createDefaultCleanupCohort(options: ProviderTrialProductionAdapterOptio
             await revokeAndDeleteRunner(connection, input.ownerUserId, resource.runnerId);
             continue;
           }
-          const before = await provider.observeOwnedSet(expectation, { signal: input.signal });
-          if (!before.ok) return unsafeCleanup(`slot:${resource.slotNumber}:provider`);
-          if (before.value.firewall === "present") {
-            const deleted = await provider.deleteFirewall(expectation, { signal: input.signal });
-            if (!deleted.ok) return unsafeCleanup(`slot:${resource.slotNumber}:firewall`);
-          }
-          const firewallAbsent = await waitForProviderTrialOwnedSetState({
+          const absent = await cleanupProviderTrialOwnedSet({
             provider,
             expectation,
             signal: input.signal,
-            matches: (value) => value.firewall === "absent",
-            wait,
-          });
-          if (!firewallAbsent) {
-            return unsafeCleanup(`slot:${resource.slotNumber}:firewall`);
-          }
-          const beforeDroplet = await provider.observeOwnedSet(expectation, {
-            signal: input.signal,
-          });
-          if (!beforeDroplet.ok || beforeDroplet.value.firewall !== "absent") {
-            return unsafeCleanup(`slot:${resource.slotNumber}:provider`);
-          }
-          if (beforeDroplet.value.droplet === "present") {
-            const deleted = await provider.deleteDroplet(expectation, { signal: input.signal });
-            if (!deleted.ok) return unsafeCleanup(`slot:${resource.slotNumber}:droplet`);
-          }
-          const absent = await waitForProviderTrialOwnedSetState({
-            provider,
-            expectation,
-            signal: input.signal,
-            matches: (value) => value.state === "absent",
             wait,
           });
           if (!absent) {
@@ -426,6 +399,41 @@ function createDefaultCleanupCohort(options: ProviderTrialProductionAdapterOptio
 
 const PROVIDER_TRIAL_CLEANUP_OBSERVATION_ATTEMPTS = 15;
 const PROVIDER_TRIAL_CLEANUP_OBSERVATION_DELAY_MS = 1_000;
+
+export async function cleanupProviderTrialOwnedSet(input: {
+  provider: Pick<
+    DigitalOceanOwnedSetProvider,
+    "observeOwnedSet" | "deleteFirewall" | "deleteDroplet"
+  >;
+  expectation: DigitalOceanOwnedSetExpectation;
+  signal: AbortSignal;
+  wait?: (milliseconds: number) => Promise<void>;
+}): Promise<boolean> {
+  const before = await input.provider.observeOwnedSet(input.expectation, {
+    signal: input.signal,
+  });
+  if (!before.ok) return false;
+  if (before.value.firewall === "present") {
+    await input.provider.deleteFirewall(input.expectation, { signal: input.signal });
+  }
+  const firewallAbsent = await waitForProviderTrialOwnedSetState({
+    ...input,
+    matches: (value) => value.firewall === "absent",
+  });
+  if (!firewallAbsent) return false;
+
+  const beforeDroplet = await input.provider.observeOwnedSet(input.expectation, {
+    signal: input.signal,
+  });
+  if (!beforeDroplet.ok || beforeDroplet.value.firewall !== "absent") return false;
+  if (beforeDroplet.value.droplet === "present") {
+    await input.provider.deleteDroplet(input.expectation, { signal: input.signal });
+  }
+  return waitForProviderTrialOwnedSetState({
+    ...input,
+    matches: (value) => value.state === "absent",
+  });
+}
 
 export async function waitForProviderTrialOwnedSetState(input: {
   provider: Pick<DigitalOceanOwnedSetProvider, "observeOwnedSet">;

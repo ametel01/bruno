@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  cleanupProviderTrialOwnedSet,
   createProviderTrialProductionDriverDependencies,
   waitForProviderTrialOwnedSetState,
   toProviderTrialAbsenceDiscoveryTag,
@@ -16,6 +17,82 @@ const ATTEMPT = {
 };
 
 describe("DigitalOcean Provider Trial production adapter", () => {
+  it("observes accepted deletions to convergence when immediate confirmation is unavailable", async () => {
+    const events: string[] = [];
+    let state: "owned" | "firewall_absent" | "absent" = "owned";
+    const provider = {
+      async observeOwnedSet() {
+        events.push(`observe:${state}`);
+        return {
+          ok: true as const,
+          value:
+            state === "owned"
+              ? {
+                  state: "owned" as const,
+                  droplet: "present" as const,
+                  firewall: "present" as const,
+                }
+              : state === "firewall_absent"
+                ? {
+                    state: "owned" as const,
+                    droplet: "present" as const,
+                    firewall: "absent" as const,
+                  }
+                : {
+                    state: "absent" as const,
+                    droplet: "absent" as const,
+                    firewall: "absent" as const,
+                  },
+        };
+      },
+      async deleteFirewall() {
+        events.push("delete:firewall");
+        state = "firewall_absent";
+        return {
+          ok: false as const,
+          reason: "delete_outcome_unknown" as const,
+          retryable: true,
+          message: "Deletion was accepted but immediate absence was not yet observable.",
+        };
+      },
+      async deleteDroplet() {
+        events.push("delete:droplet");
+        state = "absent";
+        return {
+          ok: false as const,
+          reason: "delete_outcome_unknown" as const,
+          retryable: true,
+          message: "Deletion was accepted but immediate absence was not yet observable.",
+        };
+      },
+    } as Pick<DigitalOceanOwnedSetProvider, "observeOwnedSet" | "deleteFirewall" | "deleteDroplet">;
+
+    await expect(
+      cleanupProviderTrialOwnedSet({
+        provider,
+        expectation: {
+          operationTag: "bruno-deploy-05d73ff0d570484087452896791ab651",
+          providerResourceId: "592041488",
+          providerFirewallId: "2a18501d-ad3c-45b3-989e-8203bd165797",
+          expectedName: "bruno-deploy-05d73ff0d570484087452896791ab651",
+          expectedRegion: "sfo3",
+          expectedSizeSlug: "s-1vcpu-2gb",
+          expectedFirewallName: "bruno-runners-592041488",
+        },
+        signal: new AbortController().signal,
+        wait: async () => undefined,
+      }),
+    ).resolves.toBe(true);
+    expect(events).toEqual([
+      "observe:owned",
+      "delete:firewall",
+      "observe:firewall_absent",
+      "observe:firewall_absent",
+      "delete:droplet",
+      "observe:absent",
+    ]);
+  });
+
   it("polls bounded provider convergence after a successful deletion", async () => {
     let observations = 0;
     const waits: number[] = [];
