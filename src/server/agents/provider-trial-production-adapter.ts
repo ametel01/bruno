@@ -22,6 +22,7 @@ import {
 import { readDigitalOceanProviderConfig } from "@/src/server/env";
 import type {
   DigitalOceanOwnedSetExpectation,
+  DigitalOceanOwnedSetObservation,
   DigitalOceanOwnedSetProvider,
   DigitalOceanProvider,
 } from "@/src/server/runners/digitalocean-provider";
@@ -316,6 +317,9 @@ function createDefaultCleanupCohort(options: ProviderTrialProductionAdapterOptio
     ? { createConnection: options.createConnection }
     : {};
   const env = options.env ?? process.env;
+  const wait =
+    options.wait ??
+    ((milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
 
   return async (input) => {
     const connection = createConnection();
@@ -368,18 +372,34 @@ function createDefaultCleanupCohort(options: ProviderTrialProductionAdapterOptio
             const deleted = await provider.deleteFirewall(expectation, { signal: input.signal });
             if (!deleted.ok) return unsafeCleanup(`slot:${resource.slotNumber}:firewall`);
           }
-          const afterFirewall = await provider.observeOwnedSet(expectation, {
+          const firewallAbsent = await waitForProviderTrialOwnedSetState({
+            provider,
+            expectation,
             signal: input.signal,
+            matches: (value) => value.firewall === "absent",
+            wait,
           });
-          if (!afterFirewall.ok || afterFirewall.value.firewall !== "absent") {
+          if (!firewallAbsent) {
             return unsafeCleanup(`slot:${resource.slotNumber}:firewall`);
           }
-          if (afterFirewall.value.droplet === "present") {
+          const beforeDroplet = await provider.observeOwnedSet(expectation, {
+            signal: input.signal,
+          });
+          if (!beforeDroplet.ok || beforeDroplet.value.firewall !== "absent") {
+            return unsafeCleanup(`slot:${resource.slotNumber}:provider`);
+          }
+          if (beforeDroplet.value.droplet === "present") {
             const deleted = await provider.deleteDroplet(expectation, { signal: input.signal });
             if (!deleted.ok) return unsafeCleanup(`slot:${resource.slotNumber}:droplet`);
           }
-          const absent = await provider.observeOwnedSet(expectation, { signal: input.signal });
-          if (!absent.ok || absent.value.state !== "absent") {
+          const absent = await waitForProviderTrialOwnedSetState({
+            provider,
+            expectation,
+            signal: input.signal,
+            matches: (value) => value.state === "absent",
+            wait,
+          });
+          if (!absent) {
             return unsafeCleanup(`slot:${resource.slotNumber}:provider`);
           }
           await revokeAndDeleteRunner(connection, input.ownerUserId, resource.runnerId);
@@ -402,6 +422,33 @@ function createDefaultCleanupCohort(options: ProviderTrialProductionAdapterOptio
       await connection.close();
     }
   };
+}
+
+const PROVIDER_TRIAL_CLEANUP_OBSERVATION_ATTEMPTS = 15;
+const PROVIDER_TRIAL_CLEANUP_OBSERVATION_DELAY_MS = 1_000;
+
+export async function waitForProviderTrialOwnedSetState(input: {
+  provider: Pick<DigitalOceanOwnedSetProvider, "observeOwnedSet">;
+  expectation: DigitalOceanOwnedSetExpectation;
+  signal: AbortSignal;
+  matches: (value: DigitalOceanOwnedSetObservation) => boolean;
+  attempts?: number;
+  wait?: (milliseconds: number) => Promise<void>;
+}): Promise<boolean> {
+  const attempts = input.attempts ?? PROVIDER_TRIAL_CLEANUP_OBSERVATION_ATTEMPTS;
+  const wait =
+    input.wait ??
+    ((milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (input.signal.aborted) return false;
+    const observed = await input.provider.observeOwnedSet(input.expectation, {
+      signal: input.signal,
+    });
+    if (!observed.ok) return false;
+    if (input.matches(observed.value)) return true;
+    if (attempt < attempts) await wait(PROVIDER_TRIAL_CLEANUP_OBSERVATION_DELAY_MS);
+  }
+  return false;
 }
 
 type CohortResource = {

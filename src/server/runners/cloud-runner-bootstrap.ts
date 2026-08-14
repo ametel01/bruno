@@ -291,7 +291,15 @@ ${swapCommands}  -
       bruno_pull_image ${shellQuote(config.hermesWorkloadImage)}
       /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Pulled Hermes workload image." hermes_image_pull
 `
-      : `      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Using preloaded snapshot images." snapshot_preloaded_images
+      : `      /usr/local/bin/bruno-bootstrap-event bootstrapping started "Confirming snapshot-preloaded stage." package_install
+      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Snapshot-preloaded stage was confirmed." package_install
+      /usr/local/bin/bruno-bootstrap-event bootstrapping started "Confirming snapshot-preloaded stage." docker_pull
+      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Snapshot-preloaded stage was confirmed." docker_pull
+      /usr/local/bin/bruno-bootstrap-event bootstrapping started "Confirming snapshot-preloaded stage." agent_image_pull
+      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Snapshot-preloaded stage was confirmed." agent_image_pull
+      /usr/local/bin/bruno-bootstrap-event bootstrapping started "Confirming snapshot-preloaded stage." hermes_image_pull
+      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Snapshot-preloaded stage was confirmed." hermes_image_pull
+      /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Using preloaded snapshot images." snapshot_preloaded_images
 `;
   const userData = `#cloud-config
 ${packageBootstrap}runcmd:
@@ -357,10 +365,10 @@ ${stockInstallCommands}  - install -m 0700 -d ${shellQuote(dirname(config.envFil
       trap 'bruno_bootstrap_exit=$?; bruno_bootstrap_detail="$(tail -n 80 /var/log/bruno-bootstrap.log || true; docker logs --tail 80 ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} 2>&1 || true)"; /usr/local/bin/bruno-bootstrap-event bootstrapping failed "Cloud runner bootstrap failed during \${BRUNO_BOOTSTRAP_STEP}." "\${BRUNO_BOOTSTRAP_STEP}" "$bruno_bootstrap_exit" "$bruno_bootstrap_detail"' ERR
 ${imagePullCommands}      BRUNO_BOOTSTRAP_STEP=runner_container_start
       /usr/local/bin/bruno-bootstrap-event bootstrapping started "Starting runner container." runner_container_start
+      /usr/local/bin/bruno-bootstrap-event waiting_for_runner started "Runner registration is pending." runner_registration
       docker rm --force ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} || true
       docker run --detach --name ${shellQuote(DEFAULT_CLOUD_RUNNER_CONTAINER_NAME)} --restart always --network ${shellQuote(config.hermesPrivateNetwork)} --env-file ${shellQuote(config.envFilePath)} -v ${shellQuote(`${config.envFilePath}:${config.containerEnvFilePath}`)} -v ${shellQuote(`${config.hermesStateRoot}:${config.hermesStateRoot}`)} -v ${shellQuote(`${DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT}:${DEFAULT_RUNNER_BOOT_SELF_TEST_ROOT}`)} -v ${shellQuote(`${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}:${DEFAULT_CLOUD_RUNNER_DOCKER_SOCKET}`)} -p ${shellQuote(`${config.runnerHost}:${config.runnerPort}:${config.runnerPort}`)} ${shellQuote(config.runnerImage)}
       /usr/local/bin/bruno-bootstrap-event bootstrapping completed "Runner container started." runner_container_start
-      /usr/local/bin/bruno-bootstrap-event waiting_for_runner started "Runner container started; waiting for registration and heartbeat." runner_registration
 `;
 
   return {

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   createProviderTrialProductionDriverDependencies,
+  waitForProviderTrialOwnedSetState,
   toProviderTrialAbsenceDiscoveryTag,
   toProviderTrialOwnedSetExpectation,
 } from "@/src/server/agents/provider-trial-production-adapter";
+import type { DigitalOceanOwnedSetProvider } from "@/src/server/runners/digitalocean-provider";
 
 const ATTEMPT = {
   cohortId: "00000000-0000-4000-8000-000000002991",
@@ -14,6 +16,90 @@ const ATTEMPT = {
 };
 
 describe("DigitalOcean Provider Trial production adapter", () => {
+  it("polls bounded provider convergence after a successful deletion", async () => {
+    let observations = 0;
+    const waits: number[] = [];
+    const provider = {
+      async observeOwnedSet() {
+        observations += 1;
+        return {
+          ok: true as const,
+          value:
+            observations < 3
+              ? {
+                  state: "owned" as const,
+                  droplet: "present" as const,
+                  firewall: "absent" as const,
+                }
+              : {
+                  state: "absent" as const,
+                  droplet: "absent" as const,
+                  firewall: "absent" as const,
+                },
+        };
+      },
+    } as Pick<DigitalOceanOwnedSetProvider, "observeOwnedSet">;
+
+    await expect(
+      waitForProviderTrialOwnedSetState({
+        provider,
+        expectation: {
+          operationTag: "bruno-deploy-05d73ff0d570484087452896791ab651",
+          providerResourceId: "592041488",
+          providerFirewallId: "2a18501d-ad3c-45b3-989e-8203bd165797",
+          expectedName: "bruno-deploy-05d73ff0d570484087452896791ab651",
+          expectedRegion: "sfo3",
+          expectedSizeSlug: "s-1vcpu-2gb",
+          expectedFirewallName: "bruno-runners-592041488",
+        },
+        signal: new AbortController().signal,
+        matches: (value) => value.state === "absent",
+        wait: async (milliseconds) => {
+          waits.push(milliseconds);
+        },
+      }),
+    ).resolves.toBe(true);
+    expect(observations).toBe(3);
+    expect(waits).toEqual([1_000, 1_000]);
+  });
+
+  it("fails closed when provider convergence remains unproven", async () => {
+    let observations = 0;
+    const provider = {
+      async observeOwnedSet() {
+        observations += 1;
+        return {
+          ok: true as const,
+          value: {
+            state: "owned" as const,
+            droplet: "present" as const,
+            firewall: "absent" as const,
+          },
+        };
+      },
+    } as Pick<DigitalOceanOwnedSetProvider, "observeOwnedSet">;
+
+    await expect(
+      waitForProviderTrialOwnedSetState({
+        provider,
+        expectation: {
+          operationTag: "bruno-deploy-05d73ff0d570484087452896791ab651",
+          providerResourceId: "592041488",
+          providerFirewallId: "2a18501d-ad3c-45b3-989e-8203bd165797",
+          expectedName: "bruno-deploy-05d73ff0d570484087452896791ab651",
+          expectedRegion: "sfo3",
+          expectedSizeSlug: "s-1vcpu-2gb",
+          expectedFirewallName: "bruno-runners-592041488",
+        },
+        signal: new AbortController().signal,
+        matches: (value) => value.state === "absent",
+        attempts: 3,
+        wait: async () => undefined,
+      }),
+    ).resolves.toBe(false);
+    expect(observations).toBe(3);
+  });
+
   it("permits authoritative tag discovery for a terminal pre-provider failure", () => {
     expect(
       toProviderTrialAbsenceDiscoveryTag({

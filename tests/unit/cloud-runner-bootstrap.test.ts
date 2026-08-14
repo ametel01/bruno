@@ -164,7 +164,7 @@ describe.sequential("cloud runner bootstrap content", () => {
       '/usr/local/bin/bruno-bootstrap-event bootstrapping completed "Runner container started." runner_container_start',
     );
     expect(content.userData).toContain(
-      '/usr/local/bin/bruno-bootstrap-event waiting_for_runner started "Runner container started; waiting for registration and heartbeat." runner_registration',
+      '/usr/local/bin/bruno-bootstrap-event waiting_for_runner started "Runner registration is pending." runner_registration',
     );
     expect(content.userData).toContain(`install -m 0710 -d '${DEFAULT_HERMES_STATE_ROOT}'`);
     expect(content.userData).toContain(
@@ -262,8 +262,24 @@ describe.sequential("cloud runner bootstrap content", () => {
     expect(content.userData).toContain("BRUNO_RUNNER_REGISTRATION_TOKEN=");
     expect(content.userData).toContain("BRUNO_RUNNER_BEARER_TOKEN=runner-command-token");
     expect(content.userData).toContain("snapshot_preloaded_images");
+    for (const step of [
+      "package_install",
+      "docker_pull",
+      "agent_image_pull",
+      "hermes_image_pull",
+    ]) {
+      expect(content.userData).toContain(
+        `bootstrapping started "Confirming snapshot-preloaded stage." ${step}`,
+      );
+      expect(content.userData).toContain(
+        `bootstrapping completed "Snapshot-preloaded stage was confirmed." ${step}`,
+      );
+    }
     expect(content.userData).toContain("docker run --detach");
     expect(content.userData).toContain("waiting_for_runner");
+    expect(
+      content.userData.indexOf('waiting_for_runner started "Runner registration is pending.'),
+    ).toBeLessThan(content.userData.indexOf("docker run --detach"));
     expect(content.userData).not.toContain("package_update:");
     expect(content.userData).not.toContain("packages:");
     expect(content.userData).not.toContain("apt-get install");
