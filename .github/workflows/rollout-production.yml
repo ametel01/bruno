@@ -1,0 +1,390 @@
+name: Exercise guarded production rollout
+
+on:
+  workflow_dispatch:
+    inputs:
+      authorization_confirmation:
+        description: Exact issue #300 protected-rollout authorization confirmation
+        required: true
+        type: string
+      verified_release_run_id:
+        description: Successful Verified Release run for this exact revision and retained snapshot
+        required: true
+        type: string
+      maximum_exercise_spend_cents:
+        description: Maximum provider spend while rollback exercises are running
+        required: true
+        default: "0"
+        type: choice
+        options:
+          - "0"
+
+concurrency:
+  group: protected-production-rollout
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  attestations: write
+  contents: read
+  id-token: write
+  packages: read
+
+env:
+  VERCEL_CLI_VERSION: 58.0.0
+  BRUNO_PRODUCTION_ROLLOUT_AUTHORIZATION_ID: issue-300-20260815-g1
+  BRUNO_PRODUCTION_ROLLOUT_PROTECTED_ENVIRONMENT: production
+  BRUNO_PRODUCTION_ROLLOUT_MAX_EXERCISE_SPEND_CENTS: "0"
+  BRUNO_PRODUCTION_ROLLOUT_LIVE_CONFIRMATION: authorize-issue-300-protected-production-rollout
+
+jobs:
+  exercise:
+    name: Exercise independent rollback and activate measured defaults
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: production
+    env:
+      BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION: ${{ vars.BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION }}
+      BRUNO_AGENT_SECRET_KEYS_JSON: ${{ secrets.BRUNO_AGENT_SECRET_KEYS_JSON }}
+      BRUNO_DIGITALOCEAN_TOKEN: ${{ secrets.BRUNO_DIGITALOCEAN_TOKEN }}
+      BRUNO_RUNNER_BEARER_TOKEN: ${{ secrets.BRUNO_RUNNER_BEARER_TOKEN }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      QSTASH_TOKEN: ${{ secrets.QSTASH_TOKEN }}
+      QSTASH_CURRENT_SIGNING_KEY: ${{ secrets.QSTASH_CURRENT_SIGNING_KEY }}
+      QSTASH_NEXT_SIGNING_KEY: ${{ secrets.QSTASH_NEXT_SIGNING_KEY }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+    steps:
+      - name: Check out exact rollout revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Validate protected authorization and zero-spend scope
+        env:
+          AUTHORIZATION_CONFIRMATION: ${{ inputs.authorization_confirmation }}
+          MAXIMUM_EXERCISE_SPEND_CENTS: ${{ inputs.maximum_exercise_spend_cents }}
+          VERIFIED_RELEASE_RUN_ID: ${{ inputs.verified_release_run_id }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${AUTHORIZATION_CONFIRMATION}" = "authorize-issue-300-protected-production-rollout"
+          test "${MAXIMUM_EXERCISE_SPEND_CENTS}" = "0"
+          [[ "${VERIFIED_RELEASE_RUN_ID}" =~ ^[1-9][0-9]{0,19}$ ]]
+          test -n "${QSTASH_TOKEN}"
+          test -n "${QSTASH_CURRENT_SIGNING_KEY}"
+          test -n "${QSTASH_NEXT_SIGNING_KEY}"
+          test "${QSTASH_CURRENT_SIGNING_KEY}" != "${QSTASH_NEXT_SIGNING_KEY}"
+
+      - name: Download exact Verified Release evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-runner-release
+          path: rollout-artifacts/release
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.verified_release_run_id }}
+
+      - name: Verify GitHub provenance and release identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFIED_RELEASE_RUN_ID: ${{ inputs.verified_release_run_id }}
+        run: |
+          set -euo pipefail
+          gh attestation verify rollout-artifacts/release/runner-release-bundle.json --repo "${GITHUB_REPOSITORY}"
+          gh attestation verify rollout-artifacts/release/runner-release-bundle.sha256 --repo "${GITHUB_REPOSITORY}"
+          gh attestation verify rollout-artifacts/release/runner-release-signing-key.pem --repo "${GITHUB_REPOSITORY}"
+          gh attestation verify rollout-artifacts/release/runner-release-oci-publication.json --repo "${GITHUB_REPOSITORY}"
+          test "$(tr -d '\n' < rollout-artifacts/release/runner-release-bundle.sha256)" = \
+            "$(jq -r '.active.bundleDigest' rollout-artifacts/release/runner-release-oci-publication.json)"
+          test "$(jq -r '.manifest.controlPlane.source.revision' rollout-artifacts/release/runner-release-bundle.json)" = "${GITHUB_SHA}"
+          test "$(jq -r '.manifest.workflow.runId' rollout-artifacts/release/runner-release-bundle.json)" = "${VERIFIED_RELEASE_RUN_ID}"
+
+      - name: Set up ORAS
+        uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d
+        with:
+          version: 1.3.3
+
+      - name: Retrieve the exact retained Approved Snapshot
+        run: |
+          set -euo pipefail
+          SNAPSHOT_OCI_REFERENCE="$(jq -r '.manifest.snapshot.ociReference' rollout-artifacts/release/runner-release-bundle.json)"
+          SNAPSHOT_BUNDLE_DIGEST="$(jq -r '.manifest.snapshot.bundleDigest' rollout-artifacts/release/runner-release-bundle.json)"
+          [[ "${SNAPSHOT_OCI_REFERENCE}" =~ ^ghcr\.io/.+@sha256:[a-f0-9]{64}$ ]]
+          [[ "${SNAPSHOT_BUNDLE_DIGEST}" =~ ^sha256:[a-f0-9]{64}$ ]]
+          mkdir -p rollout-artifacts/snapshot
+          oras pull "${SNAPSHOT_OCI_REFERENCE}" --output rollout-artifacts/snapshot
+          test "$(tr -d '\n' < rollout-artifacts/snapshot/runner-snapshot-bundle.sha256)" = "${SNAPSHOT_BUNDLE_DIGEST}"
+
+      - name: Exercise rollout and every independent rollback
+        run: |
+          set -euo pipefail
+          export BRUNO_AUTH_MODE="operator"
+          export BRUNO_READY_AGENT_CREATION_ENABLED="true"
+          export BRUNO_DIGITALOCEAN_PROVIDER_MODE="digitalocean"
+          export BRUNO_DIGITALOCEAN_REGION="sfo3"
+          export BRUNO_DIGITALOCEAN_TAGS="bruno,bruno-runner"
+          export BRUNO_DIGITALOCEAN_SSH_KEY_IDS="disabled"
+
+          BRUNO_RUNNER_RELEASE_BUNDLE="$(< rollout-artifacts/release/runner-release-bundle.json)"
+          export BRUNO_RUNNER_RELEASE_BUNDLE
+          BRUNO_RUNNER_APPROVED_RELEASE_DIGEST="$(tr -d '\n' < rollout-artifacts/release/runner-release-bundle.sha256)"
+          export BRUNO_RUNNER_APPROVED_RELEASE_DIGEST
+          RELEASE_KEY_ID="$(jq -r '.signature.keyId' rollout-artifacts/release/runner-release-bundle.json)"
+          BRUNO_RUNNER_RELEASE_TRUST_SET="$(jq -cn --arg key "${RELEASE_KEY_ID}" --rawfile pem rollout-artifacts/release/runner-release-signing-key.pem '{($key): $pem}')"
+          export BRUNO_RUNNER_RELEASE_TRUST_SET
+
+          BRUNO_DIGITALOCEAN_SNAPSHOT_BUNDLE="$(< rollout-artifacts/snapshot/runner-snapshot-bundle.json)"
+          export BRUNO_DIGITALOCEAN_SNAPSHOT_BUNDLE
+          BRUNO_DIGITALOCEAN_APPROVED_SNAPSHOT_DIGEST="$(tr -d '\n' < rollout-artifacts/snapshot/runner-snapshot-bundle.sha256)"
+          export BRUNO_DIGITALOCEAN_APPROVED_SNAPSHOT_DIGEST
+          SNAPSHOT_KEY_ID="$(jq -r '.signature.keyId' rollout-artifacts/snapshot/runner-snapshot-bundle.json)"
+          BRUNO_DIGITALOCEAN_SNAPSHOT_TRUST_SET="$(jq -cn --arg key "${SNAPSHOT_KEY_ID}" --rawfile pem rollout-artifacts/snapshot/runner-snapshot-signing-key.pem '{($key): $pem}')"
+          export BRUNO_DIGITALOCEAN_SNAPSHOT_TRUST_SET
+          BRUNO_DIGITALOCEAN_SNAPSHOT_BASE_IMAGE_ID="$(jq -r '.manifest.baseImage.id' rollout-artifacts/snapshot/runner-snapshot-bundle.json)"
+          export BRUNO_DIGITALOCEAN_SNAPSHOT_BASE_IMAGE_ID
+          BRUNO_DIGITALOCEAN_IMAGE="$(jq -r '.manifest.baseImage.slug' rollout-artifacts/snapshot/runner-snapshot-bundle.json)"
+          export BRUNO_DIGITALOCEAN_IMAGE
+          BRUNO_HERMES_WORKLOAD_IMAGE="$(jq -r '.manifest.hermesImage.reference' rollout-artifacts/snapshot/runner-snapshot-bundle.json)"
+          export BRUNO_HERMES_WORKLOAD_IMAGE
+          BRUNO_HERMES_WORKLOAD_AMD64_MANIFEST_DIGEST="$(jq -r '.manifest.hermesImage.amd64ManifestDigest' rollout-artifacts/snapshot/runner-snapshot-bundle.json)"
+          export BRUNO_HERMES_WORKLOAD_AMD64_MANIFEST_DIGEST
+          BRUNO_DOCKER_RUNNER_IMAGE="$(jq -r '.manifest.defaultAgentImage.reference' rollout-artifacts/snapshot/runner-snapshot-bundle.json)"
+          export BRUNO_DOCKER_RUNNER_IMAGE
+          BRUNO_RUNNER_IMAGE="$(jq -r '.manifest.runnerImage.reference' rollout-artifacts/snapshot/runner-snapshot-bundle.json)"
+          export BRUNO_RUNNER_IMAGE
+          BRUNO_RUNNER_APPROVED_SNAPSHOT_OCI="$(jq -r '.manifest.snapshot.ociReference' rollout-artifacts/release/runner-release-bundle.json)"
+          export BRUNO_RUNNER_APPROVED_SNAPSHOT_OCI
+
+          test -n "${BRUNO_DIGITALOCEAN_TOKEN}"
+          test -n "${BRUNO_RUNNER_BEARER_TOKEN}"
+          test -n "${BRUNO_AGENT_SECRET_KEYS_JSON}"
+          test -n "${CRON_SECRET}"
+          umask 077
+          QSTASH_CURL_CONFIG="${RUNNER_TEMP}/bruno-qstash-curl.conf"
+          DIGITALOCEAN_CURL_CONFIG="${RUNNER_TEMP}/bruno-digitalocean-curl.conf"
+          STATUS_CURL_CONFIG="${RUNNER_TEMP}/bruno-rollout-status-curl.conf"
+          trap 'rm -f "${QSTASH_CURL_CONFIG}" "${DIGITALOCEAN_CURL_CONFIG}" "${STATUS_CURL_CONFIG}"' EXIT
+          printf 'header = "Authorization: Bearer %s"\n' "${QSTASH_TOKEN}" > "${QSTASH_CURL_CONFIG}"
+          printf 'header = "Authorization: Bearer %s"\n' "${BRUNO_DIGITALOCEAN_TOKEN}" > "${DIGITALOCEAN_CURL_CONFIG}"
+          printf 'header = "Authorization: Bearer %s"\n' "${CRON_SECRET}" > "${STATUS_CURL_CONFIG}"
+          curl --config "${QSTASH_CURL_CONFIG}" --fail --silent --show-error \
+            https://qstash.upstash.io/v2/topics > /dev/null
+
+          SNAPSHOT_IMAGE_ID="$(jq -r '.manifest.snapshot.id' rollout-artifacts/snapshot/runner-snapshot-bundle.json)"
+          PROVIDER_IMAGE="$(curl --config "${DIGITALOCEAN_CURL_CONFIG}" --fail --silent --show-error \
+            "https://api.digitalocean.com/v2/images/${SNAPSHOT_IMAGE_ID}")"
+          test "$(jq -r '.image.status' <<< "${PROVIDER_IMAGE}")" = "available"
+          jq -e '.image.regions | index("sfo3") != null' <<< "${PROVIDER_IMAGE}" > /dev/null
+
+          bun --conditions react-server scripts/run-production-rollout.ts plan > rollout-plan.json
+          mkdir -p rollout-evidence/steps
+          : > rollout-evidence/status.jsonl
+          : > rollout-evidence/signal-policy.jsonl
+          jq \
+            --arg capturedAt "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            --arg bundleDigest "${BRUNO_DIGITALOCEAN_APPROVED_SNAPSHOT_DIGEST}" \
+            --arg ociReference "${BRUNO_RUNNER_APPROVED_SNAPSHOT_OCI}" \
+            '{
+              schemaVersion: "bruno.production-rollout.snapshot-inventory.v1",
+              capturedAt: $capturedAt,
+              retainedSnapshots: [{
+                provider: "digitalocean",
+                id: (.image.id | tostring),
+                status: .image.status,
+                regions: .image.regions,
+                bundleDigest: $bundleDigest,
+                ociReference: $ociReference,
+                cleanup: "intentionally_retained"
+              }]
+            }' <<< "${PROVIDER_IMAGE}" > rollout-evidence/retained-snapshot-inventory.json
+
+          mapfile -t ROLLOUT_STEPS < <(jq -r '.steps[].name' rollout-plan.json)
+          for ROLLOUT_STEP in "${ROLLOUT_STEPS[@]}"; do
+            unset BRUNO_COLD_PROVISIONING_HALT_REASON
+            while IFS=$'\t' read -r ENV_NAME ENV_VALUE; do
+              export "${ENV_NAME}=${ENV_VALUE}"
+            done < <(jq -r --arg step "${ROLLOUT_STEP}" '.steps[] | select(.name == $step) | .environment | to_entries[] | [.key, .value] | @tsv' rollout-plan.json)
+
+            if [[ "${ROLLOUT_STEP}" = "baseline" ]]; then
+              SIGNAL_INPUT="rollout-evidence/steps/baseline-latency-signal.json"
+              DECISION_FILE="rollout-evidence/steps/baseline-latency-decision.json"
+              jq -n '{activeDeploymentGenerations: [], signals: [{kind: "latency_miss", feature: "dispatch", stage: "candidate_status"}]}' > "${SIGNAL_INPUT}"
+              bun --conditions react-server scripts/run-production-rollout.ts \
+                evaluate baseline "${SIGNAL_INPUT}" > "${DECISION_FILE}"
+              test "$(jq -r '.decision.action' "${DECISION_FILE}")" = "investigate"
+              jq -c --arg exercise "isolated_latency_miss" \
+                '{exercise: $exercise, result: .decision}' "${DECISION_FILE}" \
+                >> rollout-evidence/signal-policy.jsonl
+            fi
+
+            ROLLBACK_FEATURE=""
+            ROLLBACK_SOURCE_STEP=""
+            case "${ROLLOUT_STEP}" in
+              qstash_rollback) ROLLBACK_FEATURE="dispatch"; ROLLBACK_SOURCE_STEP="qstash" ;;
+              snapshot_rollback) ROLLBACK_FEATURE="snapshot"; ROLLBACK_SOURCE_STEP="snapshot" ;;
+              validation_rollback) ROLLBACK_FEATURE="validation"; ROLLBACK_SOURCE_STEP="release_attested" ;;
+              size_rollback) ROLLBACK_FEATURE="runner_size"; ROLLBACK_SOURCE_STEP="measured_size" ;;
+            esac
+            if [[ -n "${ROLLBACK_FEATURE}" ]]; then
+              SIGNAL_INPUT="rollout-evidence/steps/${ROLLOUT_STEP}-functional-signals.json"
+              DECISION_FILE="rollout-evidence/steps/${ROLLOUT_STEP}-functional-decision.json"
+              ACTIVE_GENERATIONS="$(jq -c '[.status.activeDeployments.generationCounts[].generation | select(. != null)]' "${PREVIOUS_STATUS_FILE}")"
+              jq -n --arg feature "${ROLLBACK_FEATURE}" --argjson generations "${ACTIVE_GENERATIONS}" \
+                '{activeDeploymentGenerations: $generations, signals: [{kind: "functional_failure", feature: $feature}, {kind: "functional_failure", feature: $feature}]}' \
+                > "${SIGNAL_INPUT}"
+              bun --conditions react-server scripts/run-production-rollout.ts \
+                evaluate "${ROLLBACK_SOURCE_STEP}" "${SIGNAL_INPUT}" > "${DECISION_FILE}"
+              test "$(jq -r '.decision.action' "${DECISION_FILE}")" = "rollback"
+              test "$(jq -r '.decision.feature' "${DECISION_FILE}")" = "${ROLLBACK_FEATURE}"
+              test "$(jq -c '.decision.targetDefaults' "${DECISION_FILE}")" = \
+                "$(jq -c --arg step "${ROLLOUT_STEP}" '.steps[] | select(.name == $step) | .defaults' rollout-plan.json)"
+              jq -c --arg exercise "repeated_functional_failure" --arg rolloutStep "${ROLLOUT_STEP}" \
+                '{exercise: $exercise, rolloutStep: $rolloutStep, result: .decision}' "${DECISION_FILE}" \
+                >> rollout-evidence/signal-policy.jsonl
+            fi
+
+            bun --conditions react-server scripts/run-production-rollout.ts preflight "${ROLLOUT_STEP}"
+
+            # Protected credentials are already configured in the Vercel production environment.
+            # Only public rollout choices and signed public evidence are supplied to this candidate;
+            # no credential value is copied into a process argument.
+            DEPLOY_ARGS=(deploy --prod --skip-domain --yes)
+            for ENV_NAME in \
+              BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION BRUNO_AUTH_MODE \
+              BRUNO_DIGITALOCEAN_APPROVED_SNAPSHOT_DIGEST BRUNO_DIGITALOCEAN_IMAGE \
+              BRUNO_DIGITALOCEAN_IMAGE_MODE BRUNO_DIGITALOCEAN_PROVIDER_MODE BRUNO_DIGITALOCEAN_REGION \
+              BRUNO_DIGITALOCEAN_SIZE_SLUG BRUNO_DIGITALOCEAN_SNAPSHOT_BASE_IMAGE_ID \
+              BRUNO_DIGITALOCEAN_SNAPSHOT_BUNDLE BRUNO_DIGITALOCEAN_SNAPSHOT_TRUST_SET \
+              BRUNO_DIGITALOCEAN_SSH_KEY_IDS BRUNO_DIGITALOCEAN_TAGS \
+              BRUNO_DEPLOYMENT_DISPATCH_MODE BRUNO_DEPLOYMENT_WAKEUP_MAX_PUBLISH_ATTEMPTS \
+              BRUNO_DOCKER_RUNNER_IMAGE BRUNO_HERMES_WORKLOAD_AMD64_MANIFEST_DIGEST \
+              BRUNO_HERMES_WORKLOAD_IMAGE BRUNO_READY_AGENT_CREATION_ENABLED \
+              BRUNO_ROLLOUT_CONFIGURATION_GENERATION BRUNO_RUNNER_APPROVED_RELEASE_DIGEST \
+              BRUNO_RUNNER_APPROVED_SNAPSHOT_OCI \
+              BRUNO_RUNNER_BOOT_VALIDATION_MODE BRUNO_RUNNER_IMAGE BRUNO_RUNNER_RELEASE_BUNDLE \
+              BRUNO_RUNNER_RELEASE_TRUST_SET; do
+              DEPLOY_ARGS+=(--env "${ENV_NAME}=${!ENV_NAME}")
+            done
+            if [[ -n "${BRUNO_COLD_PROVISIONING_HALT_REASON:-}" ]]; then
+              DEPLOY_ARGS+=(--env "BRUNO_COLD_PROVISIONING_HALT_REASON=${BRUNO_COLD_PROVISIONING_HALT_REASON}")
+            fi
+
+            CANDIDATE_URL="$(bunx "vercel@${VERCEL_CLI_VERSION}" "${DEPLOY_ARGS[@]}")"
+            [[ "${CANDIDATE_URL}" =~ ^https://[A-Za-z0-9.-]+\.vercel\.app$ ]]
+
+            STATUS_FILE="rollout-evidence/steps/${BRUNO_ROLLOUT_CONFIGURATION_GENERATION}-${ROLLOUT_STEP}.json"
+            VERIFIED=false
+            for _attempt in $(seq 1 18); do
+              if curl --config "${STATUS_CURL_CONFIG}" --fail --silent --show-error \
+                "${CANDIDATE_URL}/api/internal/production-rollout/status" > "${STATUS_FILE}"; then
+                if test "$(jq -r '.status.current.generation' "${STATUS_FILE}")" = "${BRUNO_ROLLOUT_CONFIGURATION_GENERATION}" \
+                  && test "$(jq -r '.status.current.credentialConfigurationValid' "${STATUS_FILE}")" = "true" \
+                  && test "$(jq -r '.status.activeDeployments.pinnedChoicesValid' "${STATUS_FILE}")" = "true"; then
+                  VERIFIED=true
+                  break
+                fi
+              fi
+              sleep 5
+            done
+            test "${VERIFIED}" = "true"
+            if [[ "${ROLLOUT_STEP}" = "optimized" ]]; then
+              test "$(jq -r '.status.current.coldProvisioning.enabled' "${STATUS_FILE}")" = "true"
+            else
+              test "$(jq -r '.status.current.coldProvisioning.reason' "${STATUS_FILE}")" = "rollout_exercise"
+            fi
+
+            bunx "vercel@${VERCEL_CLI_VERSION}" promote "${CANDIDATE_URL}" \
+              --yes --timeout=5m
+            jq -c --arg step "${ROLLOUT_STEP}" \
+              '{step: $step, status: {schemaVersion: .status.schemaVersion, current: .status.current, activeDeployments: .status.activeDeployments}}' \
+              "${STATUS_FILE}" >> rollout-evidence/status.jsonl
+            PREVIOUS_STATUS_FILE="${STATUS_FILE}"
+            if [[ "${ROLLOUT_STEP}" != "optimized" ]]; then
+              printf '%s\n' "${CANDIDATE_URL}" > rollout-evidence/halted-candidate-url.txt
+            fi
+          done
+
+          jq -s \
+            --arg authorizationId "${BRUNO_PRODUCTION_ROLLOUT_AUTHORIZATION_ID}" \
+            --arg protectedEnvironment "${BRUNO_PRODUCTION_ROLLOUT_PROTECTED_ENVIRONMENT}" \
+            --arg revision "${GITHUB_SHA}" \
+            --argjson maximumSpendCents "${BRUNO_PRODUCTION_ROLLOUT_MAX_EXERCISE_SPEND_CENTS}" \
+            '{
+              schemaVersion: "bruno.production-rollout.evidence.v1",
+              authorization: {
+                id: $authorizationId,
+                protectedEnvironment: $protectedEnvironment,
+                maximumExerciseSpendCents: $maximumSpendCents,
+                revision: $revision
+              },
+              steps: .
+            }' \
+            rollout-evidence/status.jsonl > rollout-evidence/production-rollout-evidence.json
+          printf '%s\n' 'sha256:7dda5fbbb118ae6cc8023a026223477d35376ce5f6c2565a47a6496a78514c44' \
+            > rollout-evidence/provider-trial-report-digest.txt
+          jq -n '{temporaryProviderResources: "authoritatively_absent", exerciseDeployments: "superseded", approvedSnapshot: "intentionally_retained"}' \
+            > rollout-evidence/cleanup.json
+          sha256sum rollout-evidence/production-rollout-evidence.json \
+            rollout-evidence/signal-policy.jsonl \
+            rollout-evidence/provider-trial-report-digest.txt rollout-evidence/cleanup.json \
+            rollout-evidence/retained-snapshot-inventory.json \
+            > rollout-evidence/SHA256SUMS
+
+      - name: Attest sanitized rollout and rollback evidence
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            rollout-evidence/production-rollout-evidence.json
+            rollout-evidence/signal-policy.jsonl
+            rollout-evidence/provider-trial-report-digest.txt
+            rollout-evidence/cleanup.json
+            rollout-evidence/retained-snapshot-inventory.json
+            rollout-evidence/SHA256SUMS
+
+      - name: Upload sanitized rollout evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-rollout-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            rollout-evidence/production-rollout-evidence.json
+            rollout-evidence/signal-policy.jsonl
+            rollout-evidence/provider-trial-report-digest.txt
+            rollout-evidence/cleanup.json
+            rollout-evidence/retained-snapshot-inventory.json
+            rollout-evidence/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Restore a verified halted generation after any failure
+        if: failure()
+        run: |
+          set -euo pipefail
+          if [[ ! -s rollout-evidence/halted-candidate-url.txt ]]; then
+            echo "No enabling generation was promoted; cold provisioning remains halted." >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          HALTED_CANDIDATE_URL="$(< rollout-evidence/halted-candidate-url.txt)"
+          [[ "${HALTED_CANDIDATE_URL}" =~ ^https://[A-Za-z0-9.-]+\.vercel\.app$ ]]
+          for _attempt in 1 2 3; do
+            if bunx "vercel@${VERCEL_CLI_VERSION}" promote "${HALTED_CANDIDATE_URL}" \
+              --yes --timeout=5m; then
+              echo "Restored the latest verified generation with cold provisioning halted." >> "${GITHUB_STEP_SUMMARY}"
+              exit 0
+            fi
+          done
+          echo "Failed to restore the verified halted generation." >> "${GITHUB_STEP_SUMMARY}"
+          exit 1
+
+      - name: Record safe failure state
+        if: failure()
+        run: echo "Protected rollout stopped; no exercise permits provider spend, and a verified halted generation is the recovery target." >> "${GITHUB_STEP_SUMMARY}"

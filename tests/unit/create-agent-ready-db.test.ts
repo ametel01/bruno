@@ -167,6 +167,28 @@ describe("ready agent creation persistence", () => {
     expect(JSON.stringify(event?.metadata)).not.toContain("ready-key-001");
   });
 
+  it("halts new cold provisioning before validation, persistence, or a provider effect", async () => {
+    const telegramBotValidator = vi.fn(telegramValidator());
+
+    await expect(
+      createAgentForUser(USER_A_ID, readyInput("ready-key-rollout-halted"), {
+        createConnection: () => connection,
+        env: {
+          ...KEYRING_ENV,
+          BRUNO_COLD_PROVISIONING_HALT_REASON: "cleanup_violation",
+        },
+        telegramBotValidator,
+      }),
+    ).rejects.toMatchObject({
+      reason: "cold_provisioning_halted",
+    });
+
+    expect(telegramBotValidator).not.toHaveBeenCalled();
+    expect(await connection.db.select().from(agents)).toHaveLength(0);
+    expect(await connection.db.select().from(agentDeployments)).toHaveLength(0);
+    expect(await connection.db.select().from(agentSecrets)).toHaveLength(0);
+  });
+
   it("rejects creation before persistence when no runner can be provisioned safely", async () => {
     const validator = telegramValidator();
 

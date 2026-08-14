@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A protected production rollout now advances versioned defaults through QStash, an Approved
+  Snapshot, release-attested readiness, and the measured runner size while new cold provisioning is
+  halted. It exercises dispatch, snapshot, validation, and compatible stock/full runner-size
+  rollback paths independently, verifies that active deployments retain pinned choices, exposes
+  only authenticated sanitized generation evidence, fails closed for safety violations, and
+  retains provenance-attested rollout and cleanup artifacts for 90 days.
 - A protected scheduled latest-100 Cold-Deployment evaluator now retains canonical Ed25519-signed
   point-in-time evidence, remains unproven below 100 eligible observations, reports active Rollout
   Configuration generations and separate append-only API-acceptance availability, preserves prior

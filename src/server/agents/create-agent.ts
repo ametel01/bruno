@@ -7,9 +7,10 @@ import {
 } from "@/src/server/agents/agent-deployments";
 import { captureAgentDeploymentChoicesFromEnvironment } from "@/src/server/agents/agent-deployment-choices";
 import {
-  CURRENT_ROLLOUT_CONFIGURATION_GENERATION,
   type AgentDeploymentEnvironment,
   type AgentDeploymentOrigin,
+  readColdProvisioningPolicy,
+  readRolloutConfigurationGeneration,
 } from "@/src/server/agents/deployment-slo-identity";
 import { isValidAgentId } from "@/src/server/agents/agent-id";
 import {
@@ -310,9 +311,9 @@ export class AgentRunnerVerificationError extends Error {
 }
 
 export class ReadyAgentCreationDisabledError extends Error {
-  readonly reason: "disabled" | "invalid_configuration";
+  readonly reason: "disabled" | "invalid_configuration" | "cold_provisioning_halted";
 
-  constructor(reason: "disabled" | "invalid_configuration") {
+  constructor(reason: ReadyAgentCreationDisabledError["reason"]) {
     super("Ready agent creation is not enabled.");
     this.name = "ReadyAgentCreationDisabledError";
     this.reason = reason;
@@ -895,6 +896,16 @@ async function createReadyAgentForUser(
     throw new ReadyAgentCreationDisabledError("disabled");
   }
 
+  const coldProvisioning = readColdProvisioningPolicy(dependencies.env);
+  if (!coldProvisioning.ok) {
+    throw new ReadyAgentCreationDisabledError("invalid_configuration");
+  }
+  if (!coldProvisioning.enabled) {
+    throw new ReadyAgentCreationDisabledError("cold_provisioning_halted");
+  }
+
+  const rolloutConfigurationGeneration = readRolloutConfigurationGeneration(dependencies.env);
+
   const now = dependencies.now?.() ?? new Date();
   const placementPrecheck = await connection.db.transaction((tx) =>
     selectRunnerPlacementForUserInTransaction(
@@ -1159,8 +1170,9 @@ async function createReadyAgentForUser(
           : {}),
         deploymentChoices: captureAgentDeploymentChoicesFromEnvironment(
           dependencies.env ?? process.env,
-          CURRENT_ROLLOUT_CONFIGURATION_GENERATION,
+          rolloutConfigurationGeneration,
         ),
+        rolloutConfigurationGeneration,
         now,
       });
 

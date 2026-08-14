@@ -303,6 +303,11 @@ describe("POST /api/agents route", () => {
         code: "ready_agent_creation_invalid_config",
       },
       {
+        error: new ReadyAgentCreationDisabledError("cold_provisioning_halted"),
+        status: 503,
+        code: "cold_provisioning_halted",
+      },
+      {
         error: new TelegramValidationUnavailableError("telegram_validation_timeout"),
         status: 503,
         code: "telegram_validation_unavailable",

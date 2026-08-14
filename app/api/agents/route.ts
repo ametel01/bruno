@@ -108,14 +108,18 @@ export async function POST(
     }
 
     if (error instanceof ReadyAgentCreationDisabledError) {
+      const coldProvisioningHalted = error.reason === "cold_provisioning_halted";
       return Response.json(
         {
           error: {
-            code:
-              error.reason === "invalid_configuration"
+            code: coldProvisioningHalted
+              ? "cold_provisioning_halted"
+              : error.reason === "invalid_configuration"
                 ? "ready_agent_creation_invalid_config"
                 : "ready_agent_creation_disabled",
-            message: "Automatic ready agent creation is not enabled.",
+            message: coldProvisioningHalted
+              ? "New cold provisioning is temporarily halted for operator review."
+              : "Automatic ready agent creation is not enabled.",
           },
         },
         { status: 503 },

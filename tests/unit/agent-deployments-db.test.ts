@@ -187,6 +187,54 @@ describe("agent deployment persistence and leases", () => {
     });
   });
 
+  it("pins a protected rollout generation and choices without reinterpreting active rows", async () => {
+    const acceptedChoices = captureAgentDeploymentChoicesFromEnvironment(
+      {
+        BRUNO_DEPLOYMENT_DISPATCH_MODE: "cron",
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-2vcpu-2gb",
+      },
+      10,
+    );
+    const accepted = await createDeploymentInTransaction(connection, {
+      userId: USER_A_ID,
+      agentId: AGENT_A_ID,
+      configRevision: "cfg-rollout-generation-10",
+      idempotencyKey: "rollout-generation-10",
+      deploymentEnvironment: "production",
+      deploymentChoices: acceptedChoices,
+      rolloutConfigurationGeneration: 10,
+      now: NOW,
+    });
+    expect(accepted).toMatchObject({ ok: true, inserted: true });
+
+    const [stored] = await connection.db
+      .select({
+        rolloutConfigurationGeneration: agentDeployments.rolloutConfigurationGeneration,
+        deploymentChoices: agentDeployments.deploymentChoices,
+      })
+      .from(agentDeployments);
+    expect(stored).toEqual({
+      rolloutConfigurationGeneration: 10,
+      deploymentChoices: acceptedChoices,
+    });
+
+    const rolledBackDefaults = captureAgentDeploymentChoicesFromEnvironment(
+      {
+        BRUNO_DEPLOYMENT_DISPATCH_MODE: "cron",
+        BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
+      },
+      11,
+    );
+    expect(rolledBackDefaults).not.toEqual(acceptedChoices);
+    const [stillPinned] = await connection.db
+      .select({
+        rolloutConfigurationGeneration: agentDeployments.rolloutConfigurationGeneration,
+        deploymentChoices: agentDeployments.deploymentChoices,
+      })
+      .from(agentDeployments);
+    expect(stillPinned).toEqual(stored);
+  });
+
   it("allows different users to reuse keys but rejects different active keys for one agent", async () => {
     const reusedByA = await createDeploymentInTransaction(connection, {
       userId: USER_A_ID,

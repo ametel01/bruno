@@ -169,6 +169,82 @@ verification key. A truthful signed `.pending` record is retained if local delet
 publication cannot finish. Until credential cleanup succeeds, `run` deliberately returns a non-zero
 credential-cleanup-required status regardless of whether the 30-slot performance gate passed.
 
+### Exercise the guarded production rollout
+
+Use the protected `rollout-production.yml` workflow only after issue #299's signed cohort report is
+retained and the exact revision has both a live Approved Snapshot and a successful Verified Release.
+The snapshot build has its own authorization and provider budget. The rollout exercises authorize
+zero provider spend, retain the Approved Snapshot intentionally, and supersede only Vercel
+configuration deployments.
+
+Configure these dedicated secrets on the protected `production` GitHub environment:
+
+- `BRUNO_AGENT_SECRET_KEYS_JSON`
+- `BRUNO_DIGITALOCEAN_TOKEN`
+- `BRUNO_RUNNER_BEARER_TOKEN`
+- `QSTASH_TOKEN`
+- `QSTASH_CURRENT_SIGNING_KEY`
+- `QSTASH_NEXT_SIGNING_KEY`
+
+Set the non-secret `BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION` environment variable and keep the
+existing `CRON_SECRET`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, and `VERCEL_TOKEN` secrets.
+Configure matching `BRUNO_AGENT_SECRET_KEYS_JSON`, `BRUNO_DIGITALOCEAN_TOKEN`,
+`BRUNO_RUNNER_BEARER_TOKEN`, `CRON_SECRET`, `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, and
+`QSTASH_NEXT_SIGNING_KEY` secrets directly in the Vercel production environment. The workflow uses
+the GitHub copies for protected operator checks and lets staged deployments inherit the Vercel
+copies; credential values are never forwarded in Vercel command arguments.
+The QStash token must not equal the cron, runner, or operator credential, and the current and next
+signing keys must differ. GitHub supplies every credential only after the protected environment
+review, and the workflow neither prints nor retains their values.
+
+Before dispatch, inspect the zero-effect plan:
+
+```bash
+bun run agent:production-rollout plan
+```
+
+Dispatch the protected run with the successful Verified Release workflow run ID for the exact main
+revision:
+
+```bash
+gh workflow run rollout-production.yml --ref main \
+  --raw-field authorization_confirmation=authorize-issue-300-protected-production-rollout \
+  --raw-field verified_release_run_id=123456789 \
+  --raw-field maximum_exercise_spend_cents=0
+```
+
+The required environment review is the separate live authorization. After approval, the workflow
+verifies the GitHub attestation, exact source revision, release and snapshot digests, live snapshot
+availability in `sfo3`, and QStash authentication. It then applies these generations in order:
+
+1. Cron, stock, full validation, and the compatible rollback size.
+2. QStash, followed by QStash-to-cron rollback and restoration.
+3. The Approved Snapshot with full validation, followed by Snapshot-to-stock rollback and
+   restoration.
+4. Release-attested validation, followed by release-attested-to-full rollback and restoration.
+5. The measured `s-1vcpu-2gb` size, followed by compatible `s-2vcpu-2gb` stock/full rollback.
+6. The final QStash, Approved Snapshot, release-attested, measured-size generation with cold
+   provisioning enabled.
+
+Every exercise generation carries `BRUNO_COLD_PROVISIONING_HALT_REASON=rollout_exercise`, so no new
+request can reach Telegram validation, persistence, or a provider effect. Each staged deployment
+must report its exact generation and `pinnedChoicesValid: true` from the bearer-protected
+`GET /api/internal/production-rollout/status` endpoint before promotion. A failed staged deployment
+is never promoted, leaving the most recent promoted exercise generation halted. Ownership,
+authentication, artifact-identity, duplicate-billable-effect, and cleanup violations use the same
+halt boundary. The workflow feeds controlled repeated functional failures into the same policy gate
+that selects each live rollback candidate, and it proves that an isolated latency miss produces an
+investigation decision without changing configuration. If a later evidence attestation or upload
+fails after the enabling generation is promoted, the failure handler promotes the most recent
+verified halted generation again.
+
+The successful run uploads and provenance-attests only the authorization identifier and scope,
+allowlisted status fields, signal-policy outcomes, provider trial report digest, cleanup
+classification, retained snapshot ID/status/regions and signed artifact identity, and checksums. It
+retains no credentials, raw provider responses, Owner or Agent identity, deployment IDs, or
+endpoints. Keep the artifact for at least 90 days and link its run and digests in issue #300 before
+closing the issue.
+
 Version 5 of the benchmark uses the immutable database-clock
 `agent_deployments.accepted_at` boundary. New Agent Deployments capture this timestamp inside the
 request transaction after the earlier persistence work, so transaction commit latency remains in

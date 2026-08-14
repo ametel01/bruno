@@ -29,11 +29,11 @@ import {
   validateDeploymentLeaseOwner,
 } from "@/src/server/agents/deployment-state";
 import {
-  CURRENT_ROLLOUT_CONFIGURATION_GENERATION,
   type AgentDeploymentEnvironment,
   type AgentDeploymentOrigin,
   deploymentEnvironmentForRuntime,
   initialCohortForAssignedRunner,
+  readRolloutConfigurationGeneration,
 } from "@/src/server/agents/deployment-slo-identity";
 import { createDatabaseConnection, type DatabaseConnection } from "@/src/server/db/client";
 import { agentDeployments, agents } from "@/src/server/db/schema";
@@ -187,6 +187,7 @@ export async function createAgentDeploymentForUser(input: {
   origin?: AgentDeploymentOrigin;
   deploymentEnvironment?: AgentDeploymentEnvironment;
   deploymentChoices?: AgentDeploymentChoices;
+  rolloutConfigurationGeneration?: number;
   now?: Date;
 }): Promise<CreateAgentDeploymentResult> {
   assertTransactionHandle(input.db);
@@ -209,20 +210,17 @@ export async function createAgentDeploymentForUser(input: {
 
   const now = input.now ?? new Date();
   const nowIso = toTimestampParameter(now);
+  const rolloutConfigurationGeneration =
+    input.rolloutConfigurationGeneration ?? readRolloutConfigurationGeneration();
   const deploymentChoices =
     parseAgentDeploymentChoices(
       input.deploymentChoices ??
-        captureAgentDeploymentChoicesFromEnvironment(
-          process.env,
-          CURRENT_ROLLOUT_CONFIGURATION_GENERATION,
-        ),
+        captureAgentDeploymentChoicesFromEnvironment(process.env, rolloutConfigurationGeneration),
     ) ?? null;
   if (!deploymentChoices) {
     throw new AgentDeploymentPersistenceError(new Error("Agent Deployment choices are invalid."));
   }
-  if (
-    deploymentChoices.rolloutConfigurationGeneration !== CURRENT_ROLLOUT_CONFIGURATION_GENERATION
-  ) {
+  if (deploymentChoices.rolloutConfigurationGeneration !== rolloutConfigurationGeneration) {
     throw new AgentDeploymentPersistenceError(
       new Error("Agent Deployment choices use the wrong Rollout Configuration generation."),
     );
@@ -293,7 +291,7 @@ export async function createAgentDeploymentForUser(input: {
         ${input.origin ?? "owner_request"},
         ${initialCohortForAssignedRunner(ownedAgent[0].runnerId)},
         ${input.deploymentEnvironment ?? deploymentEnvironmentForRuntime()},
-        ${CURRENT_ROLLOUT_CONFIGURATION_GENERATION},
+        ${rolloutConfigurationGeneration},
         ${JSON.stringify(deploymentChoices)}::jsonb,
         ${nowIso},
         ${nowIso}
