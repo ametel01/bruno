@@ -176,7 +176,7 @@ jobs:
           trap 'rm -f "${QSTASH_CURL_CONFIG}" "${DIGITALOCEAN_CURL_CONFIG}" "${STATUS_CURL_CONFIG}"' EXIT
           printf 'header = "Authorization: Bearer %s"\n' "${QSTASH_TOKEN}" > "${QSTASH_CURL_CONFIG}"
           printf 'header = "Authorization: Bearer %s"\n' "${BRUNO_DIGITALOCEAN_TOKEN}" > "${DIGITALOCEAN_CURL_CONFIG}"
-          printf 'header = "Authorization: Bearer %s"\n' "${CRON_SECRET}" > "${STATUS_CURL_CONFIG}"
+          printf 'header = "X-Bruno-Rollout-Authorization: Bearer %s"\n' "${CRON_SECRET}" > "${STATUS_CURL_CONFIG}"
           curl --config "${QSTASH_CURL_CONFIG}" --fail --silent --show-error \
             https://qstash.upstash.io/v2/topics > /dev/null
 

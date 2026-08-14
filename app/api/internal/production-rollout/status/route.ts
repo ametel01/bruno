@@ -21,9 +21,11 @@ export async function GET(
 ) {
   const cron = (dependencies.readCron ?? readCronSecretConfig)();
   if (!cron.ok) return errorResponse(503, "production_rollout_configuration_invalid");
+  const authorizationHeader =
+    request.headers.get("x-bruno-rollout-authorization") ?? request.headers.get("authorization");
   if (
     !(dependencies.authorize ?? isAuthorizedCronRequest)({
-      authorizationHeader: request.headers.get("authorization"),
+      authorizationHeader,
       secret: cron.secret,
     })
   ) {

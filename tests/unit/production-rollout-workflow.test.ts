@@ -46,6 +46,7 @@ describe("protected production rollout workflow", () => {
     expect(workflow).toContain("/api/internal/production-rollout/status");
     expect(workflow).toContain("vercel@${" + 'VERCEL_CLI_VERSION}" curl');
     expect(workflow).toContain('--deployment "${' + 'CANDIDATE_URL}"');
+    expect(workflow).toContain("X-Bruno-Rollout-Authorization: Bearer %s");
     expect(workflow).toContain("pinnedChoicesValid");
     expect(workflow).toContain("provider-trial-report-digest");
     expect(workflow).toContain("temporaryProviderResources");

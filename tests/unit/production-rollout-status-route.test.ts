@@ -18,6 +18,26 @@ describe("GET /api/internal/production-rollout/status", () => {
     expect(unauthorized.status).toBe(401);
   });
 
+  it("accepts a rollout-specific authorization header", async () => {
+    const authorize = vi.fn().mockReturnValue(false);
+    const response = await GET(
+      new Request(URL, {
+        headers: { "x-bruno-rollout-authorization": `Bearer ${SECRET}` },
+      }),
+      undefined,
+      {
+        readCron: () => ({ ok: true, secret: SECRET }),
+        authorize,
+      },
+    );
+
+    expect(response.status).toBe(401);
+    expect(authorize).toHaveBeenCalledWith({
+      authorizationHeader: `Bearer ${SECRET}`,
+      secret: SECRET,
+    });
+  });
+
   it("returns only sanitized configuration-generation and pinning evidence", async () => {
     const readStatus = vi.fn().mockResolvedValue({
       schemaVersion: "bruno.production-rollout.status.v1",
