@@ -34,6 +34,7 @@ describe("operator access path decisions", () => {
     "/runner/v1/register",
     "/runner/v1/heartbeat",
     "/runner/v1/bootstrap-events",
+    "/api/internal/cold-deployment-slo/evaluate",
     "/api/internal/runner-release/required",
     "/api/internal/agent-deployments/reconcile",
     "/api/internal/production-rollout/status",

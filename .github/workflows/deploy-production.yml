@@ -522,7 +522,7 @@ jobs:
           bunx vercel@${VERCEL_CLI_VERSION} promote "${CANDIDATE_DEPLOYMENT_URL}"
           --yes --timeout=5m --token="${VERCEL_TOKEN}"
 
-      - name: Verify production health and required release
+      - name: Verify production health, required release, and SLO evaluator
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
@@ -533,8 +533,20 @@ jobs:
               REQUIRED="$(curl --fail --silent --show-error \
                 -H "Authorization: Bearer ${CRON_SECRET}" \
                 "${PRODUCTION_URL}/api/internal/runner-release/required" || true)"
+              SLO_EVALUATION="$(curl --fail --silent --show-error \
+                -H "Authorization: Bearer ${CRON_SECRET}" \
+                "${PRODUCTION_URL}/api/internal/cold-deployment-slo/evaluate" || true)"
               if [[ "$(jq -r '.requiredRelease.imageReference // empty' <<< "${REQUIRED}")" = "${IMMUTABLE_IMAGE}" ]] \
-                && [[ "$(jq -r '.rollout.batchSize // empty' <<< "${REQUIRED}")" = "1" ]]; then
+                && [[ "$(jq -r '.rollout.batchSize // empty' <<< "${REQUIRED}")" = "1" ]] \
+                && jq -e \
+                  '.ok == true
+                    and .evaluation.objectiveSeconds == 300
+                    and (.evaluation.eligibleCount | type) == "number"
+                    and (.evaluation.readyWithinObjective | type) == "number"
+                    and (.evaluation.pendingCount | type) == "number"
+                    and (.evaluation.proven | type) == "boolean"
+                    and (.evaluation.incidentOpened | type) == "boolean"' \
+                  <<< "${SLO_EVALUATION}" >/dev/null; then
                 VERIFIED=true
                 break
               fi
@@ -542,7 +554,7 @@ jobs:
             sleep 5
           done
           test "${VERIFIED}" = "true"
-          echo "Production requires the full-fixture Verified Release runner with batch size 1." >> "${GITHUB_STEP_SUMMARY}"
+          echo "Production requires the full-fixture Verified Release runner with batch size 1 and a live signed Cold-Deployment SLO evaluation." >> "${GITHUB_STEP_SUMMARY}"
 
   rollback:
     if: inputs.action == 'rollback'

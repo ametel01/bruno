@@ -159,6 +159,9 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).toContain("BRUNO_RUNNER_IMAGE=$" + "{IMMUTABLE_IMAGE}");
     expect(workflowSource).toContain("BRUNO_RUNNER_ROLLOUT_BATCH_SIZE=1");
     expect(workflowSource).toContain("/api/internal/runner-release/required");
+    expect(workflowSource).toContain("/api/internal/cold-deployment-slo/evaluate");
+    expect(workflowSource).toContain(".evaluation.objectiveSeconds == 300");
+    expect(workflowSource).toContain("a live signed Cold-Deployment SLO evaluation");
     expect(workflowSource).toContain("/health");
     expect(workflowSource).not.toMatch(/cloud-init.*GITHUB_STEP_SUMMARY/i);
   });

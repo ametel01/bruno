@@ -1,5 +1,9 @@
+import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { GET } from "@/app/api/internal/cold-deployment-slo/evaluate/route";
+import {
+  GET,
+  readColdDeploymentSloSigningConfiguration,
+} from "@/app/api/internal/cold-deployment-slo/evaluate/route";
 
 const URL = "https://bruno.example.test/api/internal/cold-deployment-slo/evaluate";
 const SECRET = "cron-secret-abcdefghijklmnopqrstuvwxyz012345";
@@ -81,5 +85,38 @@ describe("GET /api/internal/cold-deployment-slo/evaluate", () => {
       authorize: () => true,
     });
     expect(response.status).toBe(400);
+  });
+
+  it("requires the active Ed25519 private key to match the retained trust set", () => {
+    const active = generateKeyPairSync("ed25519");
+    const other = generateKeyPairSync("ed25519");
+    const privateKeyPem = active.privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+    const publicKeyPem = active.publicKey.export({ format: "pem", type: "spki" }).toString();
+    const otherPublicKeyPem = other.publicKey.export({ format: "pem", type: "spki" }).toString();
+
+    expect(
+      readColdDeploymentSloSigningConfiguration({
+        BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_ID: "cold-slo-current",
+        BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_PEM: privateKeyPem,
+        BRUNO_COLD_DEPLOYMENT_SLO_TRUST_SET: JSON.stringify({
+          "cold-slo-current": publicKeyPem,
+        }),
+      }),
+    ).toEqual({ keyId: "cold-slo-current", privateKeyPem: privateKeyPem.trim() });
+    expect(
+      readColdDeploymentSloSigningConfiguration({
+        BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_ID: "cold-slo-current",
+        BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_PEM: privateKeyPem,
+        BRUNO_COLD_DEPLOYMENT_SLO_TRUST_SET: JSON.stringify({
+          "cold-slo-current": otherPublicKeyPem,
+        }),
+      }),
+    ).toBeNull();
+    expect(
+      readColdDeploymentSloSigningConfiguration({
+        BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_ID: "cold-slo-current",
+        BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_PEM: privateKeyPem,
+      }),
+    ).toBeNull();
   });
 });

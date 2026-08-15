@@ -190,6 +190,7 @@ describe("Clerk session proxy", () => {
     "/runner/v1/register",
     "/runner/v1/heartbeat",
     "/runner/v1/bootstrap-events",
+    "/api/internal/cold-deployment-slo/evaluate",
     "/api/internal/runner-release/required",
     "/api/internal/agent-runtime/reconcile",
   ])("bypasses Clerk entirely for infrastructure or machine route %s", async (pathname) => {
