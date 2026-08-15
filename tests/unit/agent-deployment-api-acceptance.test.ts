@@ -101,4 +101,33 @@ describe("production Agent Deployment API-acceptance ledger", () => {
       }),
     ).rejects.toThrow();
   });
+
+  it("does not project terminals that occur after the report timestamp", async () => {
+    const startedAt = new Date("2026-08-11T00:00:00.000Z");
+    await connection.db.insert(agentDeploymentApiAttemptEvents).values({
+      attemptId: ATTEMPTS[0],
+      requestKind: "create_ready",
+      phase: "started",
+      createdAt: startedAt,
+    });
+    await connection.db.insert(agentDeploymentApiAttemptEvents).values({
+      attemptId: ATTEMPTS[0],
+      requestKind: "create_ready",
+      phase: "accepted",
+      createdAt: new Date("2026-08-11T00:00:10.000Z"),
+    });
+
+    await expect(
+      buildAgentDeploymentApiAcceptanceSummary(connection, {
+        generatedAt: new Date("2026-08-11T00:00:05.000Z"),
+      }),
+    ).resolves.toEqual({
+      sampleSize: 1,
+      accepted: 0,
+      rejected: 0,
+      outcomeUnknown: 0,
+      pending: 1,
+      availability: 0,
+    });
+  });
 });

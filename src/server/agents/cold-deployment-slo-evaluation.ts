@@ -181,6 +181,13 @@ function buildArtifact(
   ) {
     throw new Error("Cold-Deployment SLO report is incompatible.");
   }
+  const generatedAt = timestampMs(report.generatedAt);
+  if (generatedAt === null) {
+    throw new Error("Cold-Deployment SLO report timestamp is invalid.");
+  }
+  if (report.runs.some((run) => hasEvidenceAfter(run, generatedAt))) {
+    throw new Error("Cold-Deployment SLO report contains evidence after its point-in-time.");
+  }
   const derivedRuns = report.runs.map((run) => ({
     run,
     derived: deriveImmutableRunSlo(run, report.generatedAt),
@@ -246,6 +253,21 @@ function buildArtifact(
     apiAcceptance,
     report,
   };
+}
+
+function hasEvidenceAfter(run: AgentDeploymentLatencyReport["runs"][number], generatedAt: number) {
+  return (
+    [run.createdAt, run.acceptedAt, run.ownerCancelledAt, run.terminalAt].some((value) => {
+      const timestamp = timestampMs(value);
+      return timestamp !== null && timestamp > generatedAt;
+    }) ||
+    run.stages.some((stage) =>
+      [stage.startedAt, stage.completedAt].some((value) => {
+        const timestamp = timestampMs(value);
+        return timestamp !== null && timestamp > generatedAt;
+      }),
+    )
+  );
 }
 
 function deriveImmutableRunSlo(

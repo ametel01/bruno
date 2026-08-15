@@ -457,19 +457,20 @@ describe("deployment wakeup exhaustion", () => {
       ),
     ).resolves.toEqual({ ok: false, reason: "deployment_terminal" });
 
-    await connection.db
-      .update(agentDeployments)
-      .set({ stage: "pending", errorCode: null, failedAt: null, updatedAt: NOW })
-      .where(eq(agentDeployments.id, payload.deploymentId));
+    const supersededPayload = await createWakeupPayload(connection, "poison-wakeup-superseded");
+    await exhaustWakeup(connection, supersededPayload, 401);
+    const [supersededEvidence] = await listExhaustedDeploymentWakeups(connection.db);
+    if (!supersededEvidence) throw new Error("Expected superseded wakeup evidence.");
+
     await connection.db.insert(agentDeploymentWakeups).values({
-      deploymentId: payload.deploymentId,
-      generation: payload.generation + 1,
+      deploymentId: supersededPayload.deploymentId,
+      generation: supersededPayload.generation + 1,
       dueAt: NOW,
     });
     await expect(
       connection.db.transaction((tx) =>
         replayExhaustedDeploymentWakeupInTransaction(tx, {
-          wakeupId: evidence.wakeupId,
+          wakeupId: supersededEvidence.wakeupId,
           now: NOW,
         }),
       ),
@@ -479,6 +480,7 @@ describe("deployment wakeup exhaustion", () => {
 
 async function createWakeupPayload(
   connection: DatabaseConnection,
+  idempotencyKey = "poison-wakeup",
 ): Promise<DeploymentWakeupPayload> {
   const created = await connection.db.transaction((tx) =>
     createAgentDeploymentForUser({
@@ -486,7 +488,7 @@ async function createWakeupPayload(
       userId: USER_ID,
       agentId: AGENT_ID,
       configRevision: "cfg-poison-wakeup",
-      idempotencyKey: "poison-wakeup",
+      idempotencyKey,
       deploymentChoices: {
         ...captureAgentDeploymentChoicesFromEnvironment(process.env, 1),
         dispatchMode: "qstash",

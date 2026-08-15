@@ -68,6 +68,7 @@ export async function buildAgentDeploymentApiAcceptanceSummary(
         latest_attempts.attempt_id,
         max(${agentDeploymentApiAttemptEvents.phase}) filter (
           where ${agentDeploymentApiAttemptEvents.phase} <> 'started'
+            and ${agentDeploymentApiAttemptEvents.createdAt} <= ${input.generatedAt.toISOString()}
         ) as phase
       from latest_attempts
       left join ${agentDeploymentApiAttemptEvents}

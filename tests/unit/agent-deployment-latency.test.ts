@@ -917,6 +917,50 @@ describe("Agent Deployment latency report", () => {
     }
   });
 
+  it("evaluates database evidence at the requested point in time", async () => {
+    const connection = createDatabaseConnection();
+    try {
+      await resetLatencyFixtureTables(connection);
+      const [user] = await connection.db.insert(users).values({}).returning({ id: users.id });
+      if (!user) throw new Error("Expected user fixture.");
+      const [agent] = await connection.db
+        .insert(agents)
+        .values({ userId: user.id, name: "Point-in-time cohort", templateKey: "research_agent" })
+        .returning({ id: agents.id });
+      if (!agent) throw new Error("Expected agent fixture.");
+
+      const acceptedAt = new Date("2026-08-07T00:00:00.000Z");
+      const [deployment] = await connection.db
+        .insert(agentDeployments)
+        .values({
+          ...databaseLatencyDeployment(agent.id, user.id, "future-terminal", 0, {
+            origin: "owner_request",
+            deploymentEnvironment: "production",
+          }),
+          acceptedAt,
+          ownerCancelledAt: new Date("2026-08-07T00:00:40.000Z"),
+          failedAt: new Date("2026-08-07T00:01:00.000Z"),
+          updatedAt: new Date("2026-08-07T00:01:00.000Z"),
+        })
+        .returning({ id: agentDeployments.id });
+      if (!deployment) throw new Error("Expected deployment fixture.");
+
+      const report = await buildAgentDeploymentLatencyReportForDatabase(connection, {
+        generatedAt: new Date("2026-08-07T00:00:30.000Z"),
+      });
+
+      expect(report.runs[0]).toMatchObject({
+        deploymentId: deployment.id,
+        outcome: "incomplete",
+        sloStatus: "pending",
+      });
+      expect(report.slo).toMatchObject({ sampleSize: 1, pending: 1, misses: 0 });
+    } finally {
+      await resetLatencyFixtureTables(connection);
+      await connection.close();
+    }
+  });
+
   it("does not attribute same-owner historical runner events when an operation key is authoritative", async () => {
     const connection = createDatabaseConnection();
     try {

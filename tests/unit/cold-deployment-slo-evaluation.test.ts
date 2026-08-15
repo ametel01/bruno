@@ -125,6 +125,27 @@ describe("continuous production Cold-Deployment SLO evidence", () => {
       }),
     ).toBe(false);
   });
+
+  it("rejects evidence that contains a terminal outcome after its point-in-time", async () => {
+    const keys = generateKeyPairSync("ed25519");
+    const report = buildAgentDeploymentLatencyReport({
+      deployments: deployments(1, 1).map((deployment) => ({
+        ...deployment,
+        completedAt: new Date("2026-08-11T02:00:00.000Z"),
+      })),
+      generatedAt: new Date("2026-08-11T01:00:00.000Z"),
+    });
+
+    await expect(
+      recordColdDeploymentSloEvaluation(connection, {
+        report,
+        signing: {
+          keyId: "cold-slo-current",
+          privateKeyPem: keys.privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+        },
+      }),
+    ).rejects.toThrow("after its point-in-time");
+  });
 });
 
 function deployments(

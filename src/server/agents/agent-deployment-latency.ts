@@ -320,11 +320,17 @@ export async function buildAgentDeploymentLatencyReportForDatabase(
   } = {},
 ): Promise<AgentDeploymentLatencyReport> {
   const limit = Math.min(Math.max(options.limit ?? DEFAULT_REPORT_LIMIT, 1), MAX_REPORT_LIMIT);
-  const deployments = await readDeploymentEvidence(connection, options.deploymentId, limit);
+  const generatedAt = options.generatedAt ?? new Date();
+  const deployments = await readDeploymentEvidence(
+    connection,
+    options.deploymentId,
+    limit,
+    generatedAt,
+  );
 
   return buildAgentDeploymentLatencyReport({
     deployments,
-    ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
+    generatedAt,
   });
 }
 
@@ -938,35 +944,49 @@ async function readDeploymentEvidence(
   connection: DatabaseConnection,
   deploymentId: string | undefined,
   limit: number,
+  generatedAt: Date,
 ): Promise<AgentDeploymentLatencyDeploymentEvidence[]> {
+  const snapshotAt = generatedAt.toISOString();
   const eligibleFilter = sql`
     d.origin = 'owner_request'
     and d.initial_cohort = 'cold_deployment'
     and d.deployment_environment = 'production'
     and d.rollout_configuration_generation is not null
     and d.accepted_at is not null
+    and d.accepted_at <= ${snapshotAt}
     and (
       d.owner_cancelled_at is null
+      or d.owner_cancelled_at > ${snapshotAt}
       or d.owner_cancelled_at >= d.accepted_at + ${COLD_DEPLOYMENT_SLO_OBJECTIVE_SECONDS} * interval '1 second'
     )
   `;
   const invalidIdentityFilter = sql`
-    d.origin = 'owner_request'
-    and d.deployment_environment = 'production'
-    and d.accepted_at is not null
-    and (
-      d.initial_cohort = 'unknown'
+    (
+      d.accepted_at is null
       or (
-        d.initial_cohort = 'cold_deployment'
+        d.origin = 'owner_request'
+        and d.deployment_environment = 'production'
+        and d.accepted_at <= ${snapshotAt}
         and (
-          d.rollout_configuration_generation is null
-          or d.owner_cancelled_at < d.accepted_at
+          d.initial_cohort = 'unknown'
+          or (
+            d.initial_cohort = 'cold_deployment'
+            and (
+              d.rollout_configuration_generation is null
+              or d.owner_cancelled_at < d.accepted_at
+            )
+          )
         )
       )
     )
+    and d.created_at <= ${snapshotAt}
   `;
   const deploymentFilter = deploymentId
-    ? sql`d.id = ${deploymentId}::uuid`
+    ? sql`
+        d.id = ${deploymentId}::uuid
+        and d.created_at <= ${snapshotAt}
+        and (d.accepted_at is null or d.accepted_at <= ${snapshotAt})
+      `
     : sql`
         d.id in (
           select ranked.id
@@ -975,7 +995,7 @@ async function readDeploymentEvidence(
               d.id,
               row_number() over (
                 partition by case when ${eligibleFilter} then 'eligible' else 'diagnostic' end
-                order by d.accepted_at desc, d.id desc
+                order by d.accepted_at desc nulls last, d.created_at desc, d.id desc
               ) as report_rank
             from agent_deployments d
             where (${eligibleFilter}) or (${invalidIdentityFilter})
@@ -1008,12 +1028,12 @@ async function readDeploymentEvidence(
       d.origin,
       d.initial_cohort as "initialCohort",
       d.deployment_environment as "deploymentEnvironment",
-      d.owner_cancelled_at as "ownerCancelledAt",
+      case when d.owner_cancelled_at <= ${snapshotAt} then d.owner_cancelled_at end as "ownerCancelledAt",
       d.rollout_configuration_generation as "rolloutConfigurationGeneration",
       d.created_at as "createdAt",
       d.accepted_at as "acceptedAt",
-      d.completed_at as "completedAt",
-      d.failed_at as "failedAt"
+      case when d.completed_at <= ${snapshotAt} then d.completed_at end as "completedAt",
+      case when d.failed_at <= ${snapshotAt} then d.failed_at end as "failedAt"
     from agent_deployments d
     inner join agents a
       on a.id = d.agent_id
@@ -1047,11 +1067,12 @@ async function readDeploymentEvidence(
         acceptedAt: row.acceptedAt,
         completedAt: row.completedAt,
         failedAt: row.failedAt,
-        agentStageEvents: await readAgentStageEvents(connection, row.id),
+        agentStageEvents: await readAgentStageEvents(connection, row.id, generatedAt),
         runnerEvents: await readRunnerEvents(connection, {
           userId: row.userId,
           runnerId: correlation.eventRunnerId,
           runnerOperationId: correlation.eventRunnerOperationId,
+          generatedAt,
         }),
       };
     }),
@@ -1061,6 +1082,7 @@ async function readDeploymentEvidence(
 async function readAgentStageEvents(
   connection: DatabaseConnection,
   deploymentId: string,
+  generatedAt: Date,
 ): Promise<AgentDeploymentLatencyDeploymentStageEvent[]> {
   const rows = await connection.db.execute<{
     fromStage: string | null;
@@ -1074,6 +1096,7 @@ async function readAgentStageEvents(
     from agent_events
     where type = 'agent.deployment_stage_changed'
       and metadata ->> 'deploymentId' = ${deploymentId}
+      and created_at <= ${generatedAt.toISOString()}
     order by created_at asc, id asc
   `);
 
@@ -1086,6 +1109,7 @@ async function readRunnerEvents(
     userId: string;
     runnerId: string | null;
     runnerOperationId: string | null;
+    generatedAt: Date;
   },
 ): Promise<AgentDeploymentLatencyRunnerEvent[]> {
   const operationKey = input.runnerOperationId
@@ -1108,6 +1132,7 @@ async function readRunnerEvents(
       on runner.id = events.runner_id
      and runner.user_id = ${input.userId}::uuid
     where ${correlationFilter}
+      and events.created_at <= ${input.generatedAt.toISOString()}
     order by events.created_at asc, events.id asc
   `);
 

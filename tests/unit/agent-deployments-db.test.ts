@@ -142,6 +142,23 @@ describe("agent deployment persistence and leases", () => {
       cause: { constraint_name: "agent_deployments_slo_identity_immutable_check" },
     });
 
+    await connection.db
+      .update(agentDeployments)
+      .set({
+        stage: "failed",
+        errorCode: "runner_unavailable",
+        failedAt: NOW,
+      })
+      .where(eq(agentDeployments.id, result.deployment.id));
+    await expect(
+      connection.db
+        .update(agentDeployments)
+        .set({ failedAt: new Date("2026-08-08T00:00:00.000Z") })
+        .where(eq(agentDeployments.id, result.deployment.id)),
+    ).rejects.toMatchObject({
+      cause: { constraint_name: "agent_deployments_terminal_outcome_immutable_check" },
+    });
+
     await expect(
       connection.db
         .update(agentDeployments)

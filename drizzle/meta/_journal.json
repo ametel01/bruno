@@ -288,6 +288,13 @@
       "when": 1786607238110,
       "tag": "0040_smooth_ezekiel",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786768600000,
+      "tag": "0041_immutable_deployment_outcomes",
+      "breakpoints": true
     }
   ]
 }
