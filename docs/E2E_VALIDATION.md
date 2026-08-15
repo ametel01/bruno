@@ -315,6 +315,19 @@ response publishes only the canonical report digest, objective seconds, eligible
 ready-within-objective counts, pending count, the latest-100 API-acceptance summary, current proof
 state, and whether this evaluation opened a regression incident.
 
+For an auditable point-in-time production result, dispatch the protected workflow and approve its
+`Production` environment gate:
+
+```bash
+gh workflow run audit-cold-deployment-slo.yml --repo ametel01/bruno --ref main
+```
+
+The workflow validates an exact allowlist of the endpoint's sanitized fields, writes the counts to
+the GitHub Actions job summary, and retains `cold-deployment-slo-evaluation.json` for 90 days. It
+never publishes `CRON_SECRET`. A green workflow means the signed evaluation ran and its response
+matched the safe schema; it proves the objective only when `eligibleCount` is 100, `pendingCount` is
+zero, `readyWithinObjective` is at least 95, and `proven` is `true`.
+
 Each invocation queries the latest 100 production Owner-request Cold Deployments using the
 immutable accepted boundary, cohort, origin, cancellation, and Rollout Configuration generation
 fields. Operator trials, Same-Owner Reuse, runner-replacement work, non-production rows, and an
