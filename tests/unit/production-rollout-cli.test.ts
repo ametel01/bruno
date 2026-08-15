@@ -48,14 +48,14 @@ describe("production rollout operator CLI", () => {
     const output = JSON.parse(result.stdout);
     expect(output).toMatchObject({
       schemaVersion: "bruno.production-rollout.plan.v1",
-      authorizationId: "issue-300-20260815-g1",
+      authorizationId: "issue-300-20260815-g2",
       effects: 0,
       maximumExerciseSpendCents: 0,
     });
     expect(output.steps).toHaveLength(13);
     expect(output.steps.at(-1)).toMatchObject({
       name: "optimized",
-      generation: 14,
+      generation: 27,
       coldProvisioningHaltReason: null,
     });
     expect(result.stdout).not.toContain("secret-canary");

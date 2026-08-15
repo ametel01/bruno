@@ -16,7 +16,7 @@ describe("guarded production rollout", () => {
   it("binds the protected authorization to the passed provider gate and zero-spend exercises", () => {
     expect(PRODUCTION_ROLLOUT_AUTHORIZATION).toEqual({
       schemaVersion: "bruno.production-rollout.authorization.v1",
-      id: "issue-300-20260815-g1",
+      id: "issue-300-20260815-g2",
       protectedEnvironment: "production",
       providerTrialReportDigest:
         "sha256:7dda5fbbb118ae6cc8023a026223477d35376ce5f6c2565a47a6496a78514c44",
@@ -46,17 +46,21 @@ describe("guarded production rollout", () => {
       "qstash",
       "qstash_rollback",
       "qstash_restored",
+      "measured_size",
+      "size_rollback",
+      "size_restored",
       "snapshot",
       "snapshot_rollback",
       "snapshot_restored",
       "release_attested",
       "validation_rollback",
-      "validation_restored",
-      "measured_size",
-      "size_rollback",
       "optimized",
     ]);
+    expect(PRODUCTION_ROLLOUT_STEPS.map((step) => step.generation)).toEqual([
+      15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
+    ]);
 
+    expectOnlyAxisChanged("measured_size", "size_rollback", "runnerSizeSlug");
     expectOnlyAxisChanged("qstash", "qstash_rollback", "dispatchMode");
     expectOnlyAxisChanged("snapshot", "snapshot_rollback", "imageMode");
     expectOnlyAxisChanged("release_attested", "validation_rollback", "validationMode");
@@ -67,9 +71,12 @@ describe("guarded production rollout", () => {
       validationMode: "full",
       runnerSizeSlug: "s-2vcpu-2gb",
     });
+    expect(getProductionRolloutStep("snapshot").defaults.runnerSizeSlug).toBe(
+      PRODUCTION_ROLLOUT_AUTHORIZATION.measuredRunnerSizeSlug,
+    );
 
     expect(getProductionRolloutStep("optimized")).toMatchObject({
-      generation: 14,
+      generation: 27,
       coldProvisioningHaltReason: null,
       defaults: {
         dispatchMode: "qstash",
@@ -195,7 +202,7 @@ describe("guarded production rollout", () => {
       BRUNO_DEPLOYMENT_WAKEUP_MAX_PUBLISH_ATTEMPTS: "12",
       BRUNO_DIGITALOCEAN_IMAGE_MODE: "stock",
       BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-2vcpu-2gb",
-      BRUNO_ROLLOUT_CONFIGURATION_GENERATION: "2",
+      BRUNO_ROLLOUT_CONFIGURATION_GENERATION: "15",
       BRUNO_RUNNER_BOOT_VALIDATION_MODE: "full",
     });
     expect(productionRolloutEnvironmentForStep("optimized")).toEqual({
@@ -203,7 +210,7 @@ describe("guarded production rollout", () => {
       BRUNO_DEPLOYMENT_WAKEUP_MAX_PUBLISH_ATTEMPTS: "12",
       BRUNO_DIGITALOCEAN_IMAGE_MODE: "snapshot",
       BRUNO_DIGITALOCEAN_SIZE_SLUG: "s-1vcpu-2gb",
-      BRUNO_ROLLOUT_CONFIGURATION_GENERATION: "14",
+      BRUNO_ROLLOUT_CONFIGURATION_GENERATION: "27",
       BRUNO_RUNNER_BOOT_VALIDATION_MODE: "release_attested",
     });
 

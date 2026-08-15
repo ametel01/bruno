@@ -1,6 +1,6 @@
 export const PRODUCTION_ROLLOUT_AUTHORIZATION = {
   schemaVersion: "bruno.production-rollout.authorization.v1",
-  id: "issue-300-20260815-g1",
+  id: "issue-300-20260815-g2",
   protectedEnvironment: "production",
   providerTrialReportDigest:
     "sha256:7dda5fbbb118ae6cc8023a026223477d35376ce5f6c2565a47a6496a78514c44",
@@ -41,9 +41,9 @@ export type ProductionRolloutStepName =
   | "snapshot_restored"
   | "release_attested"
   | "validation_rollback"
-  | "validation_restored"
   | "measured_size"
   | "size_rollback"
+  | "size_restored"
   | "optimized";
 
 export type ProductionRolloutStep = {
@@ -61,56 +61,57 @@ const BASELINE_DEFAULTS = {
   runnerSizeSlug: PRODUCTION_ROLLOUT_AUTHORIZATION.rollbackRunnerSizeSlug,
 } as const satisfies ProductionRolloutDefaults;
 
+// Authorization g1 deployed generations 2 through 14 while exercising the original order.
+// The corrected g2 plan starts at 15 so stored deployment choices are never reinterpreted.
 export const PRODUCTION_ROLLOUT_STEPS: readonly ProductionRolloutStep[] = [
-  step("baseline", 2, BASELINE_DEFAULTS),
-  step("qstash", 3, { ...BASELINE_DEFAULTS, dispatchMode: "qstash" }),
-  step("qstash_rollback", 4, BASELINE_DEFAULTS),
-  step("qstash_restored", 5, { ...BASELINE_DEFAULTS, dispatchMode: "qstash" }),
-  step("snapshot", 6, {
+  step("baseline", 15, BASELINE_DEFAULTS),
+  step("qstash", 16, { ...BASELINE_DEFAULTS, dispatchMode: "qstash" }),
+  step("qstash_rollback", 17, BASELINE_DEFAULTS),
+  step("qstash_restored", 18, { ...BASELINE_DEFAULTS, dispatchMode: "qstash" }),
+  step("measured_size", 19, {
+    ...BASELINE_DEFAULTS,
+    dispatchMode: "qstash",
+    runnerSizeSlug: "s-1vcpu-2gb",
+  }),
+  step("size_rollback", 20, { ...BASELINE_DEFAULTS, dispatchMode: "qstash" }),
+  step("size_restored", 21, {
+    ...BASELINE_DEFAULTS,
+    dispatchMode: "qstash",
+    runnerSizeSlug: "s-1vcpu-2gb",
+  }),
+  step("snapshot", 22, {
     ...BASELINE_DEFAULTS,
     dispatchMode: "qstash",
     imageMode: "snapshot",
+    runnerSizeSlug: "s-1vcpu-2gb",
   }),
-  step("snapshot_rollback", 7, { ...BASELINE_DEFAULTS, dispatchMode: "qstash" }),
-  step("snapshot_restored", 8, {
+  step("snapshot_rollback", 23, {
+    ...BASELINE_DEFAULTS,
+    dispatchMode: "qstash",
+    runnerSizeSlug: "s-1vcpu-2gb",
+  }),
+  step("snapshot_restored", 24, {
     ...BASELINE_DEFAULTS,
     dispatchMode: "qstash",
     imageMode: "snapshot",
+    runnerSizeSlug: "s-1vcpu-2gb",
   }),
-  step("release_attested", 9, {
+  step("release_attested", 25, {
     ...BASELINE_DEFAULTS,
     dispatchMode: "qstash",
-    imageMode: "snapshot",
-    validationMode: "release_attested",
-  }),
-  step("validation_rollback", 10, {
-    ...BASELINE_DEFAULTS,
-    dispatchMode: "qstash",
-    imageMode: "snapshot",
-  }),
-  step("validation_restored", 11, {
-    ...BASELINE_DEFAULTS,
-    dispatchMode: "qstash",
-    imageMode: "snapshot",
-    validationMode: "release_attested",
-  }),
-  step("measured_size", 12, {
-    dispatchMode: "qstash",
-    recoveryMaxPublishAttempts: 12,
     imageMode: "snapshot",
     validationMode: "release_attested",
     runnerSizeSlug: "s-1vcpu-2gb",
   }),
-  step("size_rollback", 13, {
+  step("validation_rollback", 26, {
+    ...BASELINE_DEFAULTS,
     dispatchMode: "qstash",
-    recoveryMaxPublishAttempts: 12,
-    imageMode: "stock",
-    validationMode: "full",
-    runnerSizeSlug: "s-2vcpu-2gb",
+    imageMode: "snapshot",
+    runnerSizeSlug: "s-1vcpu-2gb",
   }),
   step(
     "optimized",
-    14,
+    27,
     {
       dispatchMode: "qstash",
       recoveryMaxPublishAttempts: 12,
