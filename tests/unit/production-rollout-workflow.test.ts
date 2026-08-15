@@ -10,6 +10,10 @@ describe("protected production rollout workflow", () => {
     expect(workflow).toContain("maximum_exercise_spend_cents");
     expect(workflow).toContain('default: "0"');
     expect(workflow).toContain("QSTASH_TOKEN: $" + "{{ secrets.QSTASH_TOKEN }}");
+    expect(workflow).toContain("NEXT_PUBLIC_APP_URL: $" + "{{ vars.NEXT_PUBLIC_APP_URL }}");
+    expect(workflow).toContain(
+      'test "$' + '{NEXT_PUBLIC_APP_URL}" = "https://bruno-ametel01s-projects.vercel.app"',
+    );
     expect(workflow).toContain(
       "BRUNO_DIGITALOCEAN_TOKEN: $" + "{{ secrets.BRUNO_DIGITALOCEAN_TOKEN }}",
     );
@@ -54,6 +58,7 @@ describe("protected production rollout workflow", () => {
     expect(workflow).toContain("signal-policy.jsonl");
     expect(workflow).toContain("actions/attest-build-provenance");
     expect(workflow).toContain("Restore a verified halted generation after any failure");
+    expect(workflow).toContain("is already the current production deployment. (409)");
     expect(workflow).toContain("retention-days: 90");
     expect(workflow).not.toContain("pull_request_target");
   });

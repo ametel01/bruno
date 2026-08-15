@@ -45,6 +45,7 @@ jobs:
     environment: production
     env:
       BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION: ${{ vars.BRUNO_AGENT_SECRET_ACTIVE_KEY_VERSION }}
+      NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL }}
       BRUNO_AGENT_SECRET_KEYS_JSON: ${{ secrets.BRUNO_AGENT_SECRET_KEYS_JSON }}
       BRUNO_DIGITALOCEAN_TOKEN: ${{ secrets.BRUNO_DIGITALOCEAN_TOKEN }}
       BRUNO_RUNNER_BEARER_TOKEN: ${{ secrets.BRUNO_RUNNER_BEARER_TOKEN }}
@@ -85,6 +86,7 @@ jobs:
           test -n "${QSTASH_CURRENT_SIGNING_KEY}"
           test -n "${QSTASH_NEXT_SIGNING_KEY}"
           test "${QSTASH_CURRENT_SIGNING_KEY}" != "${QSTASH_NEXT_SIGNING_KEY}"
+          test "${NEXT_PUBLIC_APP_URL}" = "https://bruno-ametel01s-projects.vercel.app"
 
       - name: Download exact Verified Release evidence
         uses: actions/download-artifact@v4
@@ -379,9 +381,14 @@ jobs:
           HALTED_CANDIDATE_URL="$(< rollout-evidence/halted-candidate-url.txt)"
           [[ "${HALTED_CANDIDATE_URL}" =~ ^https://[A-Za-z0-9.-]+\.vercel\.app$ ]]
           for _attempt in 1 2 3; do
-            if bunx "vercel@${VERCEL_CLI_VERSION}" promote "${HALTED_CANDIDATE_URL}" \
-              --yes --timeout=5m; then
+            RESTORE_OUTPUT=""
+            if RESTORE_OUTPUT="$(bunx "vercel@${VERCEL_CLI_VERSION}" promote \
+              "${HALTED_CANDIDATE_URL}" --yes --timeout=5m 2>&1)"; then
               echo "Restored the latest verified generation with cold provisioning halted." >> "${GITHUB_STEP_SUMMARY}"
+              exit 0
+            fi
+            if [[ "${RESTORE_OUTPUT}" == *"is already the current production deployment. (409)"* ]]; then
+              echo "The latest verified halted generation was already current." >> "${GITHUB_STEP_SUMMARY}"
               exit 0
             fi
           done
