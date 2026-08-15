@@ -1,3 +1,4 @@
+import { createPrivateKey, createPublicKey } from "node:crypto";
 import {
   evaluateColdDeploymentSloForDatabase,
   type ColdDeploymentSloEvaluation,
@@ -22,7 +23,7 @@ export async function GET(
   dependencies: RouteDependencies = {},
 ) {
   const cron = (dependencies.readCron ?? readCronSecretConfig)();
-  const signing = (dependencies.readSigning ?? readSigningConfiguration)();
+  const signing = (dependencies.readSigning ?? readColdDeploymentSloSigningConfiguration)();
   if (!cron.ok || !signing) return errorResponse(503, "cold_slo_configuration_invalid");
   if (
     !(dependencies.authorize ?? isAuthorizedCronRequest)({
@@ -59,10 +60,40 @@ export async function GET(
   }
 }
 
-function readSigningConfiguration(): Signing | null {
-  const keyId = process.env.BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_ID?.trim();
-  const privateKeyPem = process.env.BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_PEM?.trim();
-  return keyId && privateKeyPem ? { keyId, privateKeyPem } : null;
+export function readColdDeploymentSloSigningConfiguration(
+  env: Record<string, string | undefined> = process.env,
+): Signing | null {
+  const keyId = env.BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_ID?.trim();
+  const privateKeyPem = env.BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_PEM?.trim();
+  const trustSetBytes = env.BRUNO_COLD_DEPLOYMENT_SLO_TRUST_SET?.trim();
+  if (!keyId || !privateKeyPem || !trustSetBytes) return null;
+
+  try {
+    const parsed = JSON.parse(trustSetBytes) as unknown;
+    if (!isRecord(parsed)) return null;
+    const trustedPublicKeyPem = parsed[keyId];
+    if (typeof trustedPublicKeyPem !== "string" || trustedPublicKeyPem.trim() === "") return null;
+
+    const privateKey = createPrivateKey(privateKeyPem);
+    const derivedPublicKeyObject = createPublicKey(privateKeyPem);
+    const trustedPublicKey = createPublicKey(trustedPublicKeyPem);
+    if (
+      privateKey.asymmetricKeyType !== "ed25519" ||
+      derivedPublicKeyObject.asymmetricKeyType !== "ed25519" ||
+      trustedPublicKey.asymmetricKeyType !== "ed25519"
+    ) {
+      return null;
+    }
+    const derivedPublicKey = derivedPublicKeyObject
+      .export({ format: "pem", type: "spki" })
+      .toString();
+    const canonicalTrustedPublicKey = trustedPublicKey
+      .export({ format: "pem", type: "spki" })
+      .toString();
+    return derivedPublicKey === canonicalTrustedPublicKey ? { keyId, privateKeyPem } : null;
+  } catch {
+    return null;
+  }
 }
 
 async function evaluateWithConnection(signing: Signing): Promise<ColdDeploymentSloEvaluation> {
@@ -79,4 +110,8 @@ function errorResponse(status: number, code: string) {
     { error: { code, message: "Cold-Deployment SLO evaluation failed safely." } },
     { status, headers: { "Cache-Control": "no-store" } },
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

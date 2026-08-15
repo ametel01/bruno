@@ -308,7 +308,9 @@ successful-only latency percentiles cannot improve the binary gate.
 Production schedules `GET /api/internal/cold-deployment-slo/evaluate` once per minute through the
 same `CRON_SECRET` authorization boundary as the other protected reconcilers. The endpoint requires
 `BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_ID` and
-`BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_PEM`; incomplete signing configuration fails closed. Its
+`BRUNO_COLD_DEPLOYMENT_SLO_SIGNING_KEY_PEM`, and an operator-managed
+`BRUNO_COLD_DEPLOYMENT_SLO_TRUST_SET` mapping the active key ID to its Ed25519 public key. Incomplete
+or mismatched signing configuration fails closed. Its
 response publishes only the canonical report digest, objective seconds, eligible and
 ready-within-objective counts, pending count, the latest-100 API-acceptance summary, current proof
 state, and whether this evaluation opened a regression incident.
