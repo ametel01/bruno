@@ -459,7 +459,9 @@ describe("deployment wakeup exhaustion", () => {
 
     const supersededPayload = await createWakeupPayload(connection, "poison-wakeup-superseded");
     await exhaustWakeup(connection, supersededPayload, 401);
-    const [supersededEvidence] = await listExhaustedDeploymentWakeups(connection.db);
+    const supersededEvidence = (await listExhaustedDeploymentWakeups(connection.db)).find(
+      (row) => row.deploymentId === supersededPayload.deploymentId,
+    );
     if (!supersededEvidence) throw new Error("Expected superseded wakeup evidence.");
 
     await connection.db.insert(agentDeploymentWakeups).values({
