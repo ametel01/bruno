@@ -1,8 +1,8 @@
 /*
 THESIS: Bruno edits a founder's scattered company into one daily operating page, refusing the AI-category hero plus floating chat screenshot.
 OWN-WORLD: Grid-ruled stock, dark ledger ink, electric editorial blue, citron tabs, square rules, and compressed display lettering.
-STORY: See today's decisions, understand the Business Graph behind them, trust explicit policies and verification, then follow the build.
-FIRST VIEWPORT: A dated two-page spread pairs Bruno's promise with three illustrative decisions; the primary action sits under the promise and a graph route crosses the fold.
+STORY: See today's decisions, enter the shipped dashboard, understand the Business Graph behind them, then trust explicit policies and verification.
+FIRST VIEWPORT: A dated two-page spread pairs Bruno's promise with three illustrative decisions; the primary action opens the dashboard, agent creation is directly adjacent, and a graph route crosses the fold.
 FORM: The Company Daybook, grounded direction 1; seed 2b573c57.
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
 */
@@ -103,6 +103,9 @@ export default function Home() {
           <Link href="#how-it-works">How it works</Link>
           <Link href="#operating-loops">Operating loops</Link>
           <Link href="/sign-in">Sign in</Link>
+          <Link className={styles.dashboardLink} href="/dashboard">
+            Open dashboard
+          </Link>
         </nav>
       </header>
 
@@ -120,22 +123,26 @@ export default function Home() {
             only you can make.
           </p>
           <div className={styles.heroActions}>
+            <Link className={styles.primaryAction} href="/dashboard">
+              Open dashboard
+              <ArrowIcon />
+            </Link>
+            <Link className={styles.textAction} href="/agents#create-agent-title">
+              Create an agent
+            </Link>
             <a
-              className={styles.primaryAction}
+              className={styles.textAction}
               href="https://github.com/ametel01/bruno"
               rel="noreferrer"
               target="_blank"
             >
               Follow the build
-              <ArrowIcon />
             </a>
-            <Link className={styles.textAction} href="#how-it-works">
-              See the operating model
-            </Link>
           </div>
           <p className={styles.truthNote}>
-            Bruno’s new command center and operating loops are the approved direction—not a claim
-            that they are already shipped.
+            Available today: create and operate agents in Bruno’s dashboard. The new command center
+            and operating loops shown here are the approved direction—not a claim that they are
+            already shipped.
           </p>
         </div>
 
@@ -308,16 +315,11 @@ export default function Home() {
           <p>The founder sets the goals, policies, and judgment. Bruno keeps the company moving.</p>
         </div>
         <div className={styles.closingActions}>
-          <a
-            className={styles.primaryAction}
-            href="https://github.com/ametel01/bruno"
-            rel="noreferrer"
-            target="_blank"
-          >
-            Follow Bruno’s build
+          <Link className={styles.primaryAction} href="/dashboard">
+            Open dashboard
             <ArrowIcon />
-          </a>
-          <Link href="/sign-in">Existing user? Sign in</Link>
+          </Link>
+          <Link href="/agents#create-agent-title">Create an agent</Link>
         </div>
       </section>
 

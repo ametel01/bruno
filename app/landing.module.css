@@ -110,6 +110,18 @@
   text-decoration-line: underline;
 }
 
+.siteNav .dashboardLink {
+  padding: 10px 12px 8px;
+  background: var(--blue);
+  color: #fff;
+}
+
+.siteNav .dashboardLink:hover {
+  background: var(--blue-dark);
+  color: #fff;
+  text-decoration-line: none;
+}
+
 .heroSpread {
   position: relative;
   display: grid;

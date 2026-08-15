@@ -210,7 +210,7 @@ Corners are square. One-pixel ledger rules, two-pixel emphasis rules, square num
 
 ### Navigation
 
-Use heavy uppercase labels with wide spacing between destinations. Links remain ink-colored and unboxed at rest; hover adds a citron field and red underline. On small screens, retain the wordmark and sign-in action while in-page destinations yield to the document flow.
+Use heavy uppercase labels with wide spacing between destinations. Links remain ink-colored and unboxed at rest; hover adds a citron field and red underline. The application bridge is the exception: “Open dashboard” uses the blue action field so the shipped product is always findable. On small screens, retain the wordmark and dashboard action while in-page destinations and the separate sign-in link yield to the document flow.
 
 ### Decision Ledger
 

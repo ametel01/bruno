@@ -350,6 +350,10 @@ describe("product shell routes", () => {
     expect(html).toContain("The operating system for a one-person company.");
     expect(html).toContain("Illustrative data");
     expect(html).toContain("not a claim that they are already shipped");
+    expect(html).toContain('href="/dashboard"');
+    expect(html).toContain("Open dashboard");
+    expect(html).toContain('href="/agents#create-agent-title"');
+    expect(html).toContain("Create an agent");
     expect(html).toContain("https://github.com/ametel01/bruno");
     expect(html).toContain('href="/sign-in"');
     expect(html).not.toContain("Operational dashboard");

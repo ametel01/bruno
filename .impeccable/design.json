@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-15T21:37:17Z",
+  "generatedAt": "2026-08-15T22:21:10Z",
   "title": "Design System: Bruno",
   "extensions": {
     "colorMeta": {
@@ -243,9 +243,9 @@
       "name": "Landing Navigation",
       "kind": "nav",
       "refersTo": "nav-link",
-      "description": "Heavy uppercase navigation that gains a citron field and red underline on hover.",
-      "html": "<nav class=\"ds-nav\" aria-label=\"Example navigation\"><a href=\"#\">HOW IT WORKS</a><a href=\"#\">OPERATING LOOPS</a><a href=\"#\">SIGN IN</a></nav>",
-      "css": ".ds-nav { display: flex; align-items: center; gap: 32px; font-family: 'Avenir Next', Avenir, 'Segoe UI', sans-serif; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; } .ds-nav a { padding: 5px 3px 3px; border-radius: 0; color: #172018; text-decoration: none; text-decoration-color: #a92b2b; text-decoration-thickness: 1px; text-underline-offset: 0.24em; transition: background 150ms ease-out, text-decoration-color 150ms ease-out; } .ds-nav a:hover { background: #dfff3f; color: #172018; text-decoration-line: underline; } .ds-nav a:focus-visible { outline: 3px solid #155eef; outline-offset: 4px; } .ds-nav a:active { color: #0b3ea8; }"
+      "description": "Heavy uppercase navigation with a persistent blue bridge into the shipped dashboard.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Example navigation\"><a href=\"#\">HOW IT WORKS</a><a href=\"#\">OPERATING LOOPS</a><a href=\"#\">SIGN IN</a><a class=\"ds-nav-dashboard\" href=\"/dashboard\">OPEN DASHBOARD</a></nav>",
+      "css": ".ds-nav { display: flex; align-items: center; gap: 32px; font-family: 'Avenir Next', Avenir, 'Segoe UI', sans-serif; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; } .ds-nav a { padding: 5px 3px 3px; border-radius: 0; color: #172018; text-decoration: none; text-decoration-color: #a92b2b; text-decoration-thickness: 1px; text-underline-offset: 0.24em; transition: background 150ms ease-out, text-decoration-color 150ms ease-out; } .ds-nav a:hover { background: #dfff3f; color: #172018; text-decoration-line: underline; } .ds-nav .ds-nav-dashboard { padding: 10px 12px 8px; background: #155eef; color: #ffffff; } .ds-nav .ds-nav-dashboard:hover { background: #0b3ea8; color: #ffffff; text-decoration-line: none; } .ds-nav a:focus-visible { outline: 3px solid #155eef; outline-offset: 4px; } .ds-nav a:active { color: #0b3ea8; }"
     },
     {
       "name": "Decision Ledger Row",

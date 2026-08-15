@@ -66,15 +66,25 @@ test("/ renders the public Bruno product direction", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Bruno runs your one-person business with you." }),
   ).toBeVisible();
+  const hero = page.locator('section[aria-labelledby="landing-title"]');
+  await expect(hero.getByRole("link", { exact: true, name: "Open dashboard" })).toHaveAttribute(
+    "href",
+    "/dashboard",
+  );
+  await expect(hero.getByRole("link", { exact: true, name: "Create an agent" })).toHaveAttribute(
+    "href",
+    "/agents#create-agent-title",
+  );
   await expect(page.getByRole("link", { name: "Follow the build" })).toHaveAttribute(
     "href",
     "https://github.com/ametel01/bruno",
   );
   await expect(page.getByText("Illustrative data")).toBeVisible();
-  await expect(page.getByRole("link", { exact: true, name: "Sign in" })).toHaveAttribute(
-    "href",
-    "/sign-in",
-  );
+  await expect(page.locator('a[href="/sign-in"]')).toHaveAttribute("href", "/sign-in");
+
+  await hero.getByRole("link", { exact: true, name: "Open dashboard" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole("heading", { name: "Operational dashboard" })).toBeVisible();
 });
 
 test("/health returns reachable database JSON in the browser", async ({ page }) => {

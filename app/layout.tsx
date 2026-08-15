@@ -14,8 +14,8 @@ const displayFont = League_Gothic({
 const DIRECTION_CONTRACT = [
   "THESIS: Bruno edits a founder's scattered company into one daily operating page, refusing the AI-category hero plus floating chat screenshot.",
   "OWN-WORLD: Grid-ruled stock, dark ledger ink, electric editorial blue, citron tabs, square rules, and compressed display lettering.",
-  "STORY: See today's decisions, understand the Business Graph behind them, trust explicit policies and verification, then follow the build.",
-  "FIRST VIEWPORT: A dated two-page spread pairs Bruno's promise with three illustrative decisions; the primary action sits under the promise and a graph route crosses the fold.",
+  "STORY: See today's decisions, enter the shipped dashboard, understand the Business Graph behind them, then trust explicit policies and verification.",
+  "FIRST VIEWPORT: A dated two-page spread pairs Bruno's promise with three illustrative decisions; the primary action opens the dashboard, agent creation is directly adjacent, and a graph route crosses the fold.",
   "FORM: The Company Daybook, grounded direction 1; seed 2b573c57.",
   "FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md",
 ].join("\n");
