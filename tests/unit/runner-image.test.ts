@@ -41,7 +41,9 @@ describe("runner image", () => {
     expect(workflow).toContain(
       "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0",
     );
-    expect(workflow).toContain("needs: publish");
+    expect(workflow).toContain("publish:\n    if: inputs.action == 'runner-image'");
+    expect(workflow).toContain("needs: canary");
+    expect(workflow).not.toContain("needs: publish");
     expect(workflow).toContain("runner:release:smoke");
     expect(workflow).toContain("--provider local_docker");
   });

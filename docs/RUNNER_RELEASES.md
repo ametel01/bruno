@@ -166,7 +166,7 @@ release identity is the OCI reference plus canonical bundle digest recorded in
 
 ## Promotion and rollback
 
-The workflow stages the exact published commit using Vercel's production
+The workflow stages the exact approved commit using Vercel's production
 configuration and `--prod --skip-domain`, with:
 
 ```text
@@ -175,8 +175,8 @@ BRUNO_RUNNER_ROLLOUT_BATCH_SIZE=1
 ```
 
 The staged deployment URL is never assigned a production domain during staging. The production job
-promotes it only after image publication, scanning, the full fixture, cleanup, and signed OCI bundle
-verification succeed, then verifies `/health` plus the authenticated
+promotes it only after snapshot identity verification, scanning, the full fixture, cleanup, and
+signed OCI bundle verification succeed, then verifies `/health` plus the authenticated
 `/api/internal/runner-release/required` contract. Infrastructure reconciliation processes at most
 one managed runner per invocation. Set the batch size to `0` to halt automatic fleet work.
 
@@ -184,9 +184,9 @@ For artifact publication without any Vercel deployment, dispatch the workflow wi
 `action=verified-release` or run `bun run runner:release:publish-verified`. That path publishes and
 verifies the runner image already retained by the signed Approved Snapshot, scans that exact image,
 and publishes the signed OCI release bundle while the candidate-build, staging, and production jobs
-stay skipped. `action=release` instead builds a new candidate and fails closed unless its immutable
-identity matches the selected Approved Snapshot; use it only when the separate production
-deployment is authorized.
+stay skipped. `action=release` consumes the same snapshot-retained identity, then stages and
+promotes the compatible control plane only after the Verified Release succeeds. It never rebuilds
+or moves the runner tag after Snapshot approval; use `action=runner-image` for candidate creation.
 
 Before a protected snapshot build, dispatch `action=runner-image` or run
 `bun run runner:image:publish`. This path builds, publishes, verifies, and scans only the current
