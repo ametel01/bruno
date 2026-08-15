@@ -40,7 +40,7 @@ env:
 
 jobs:
   publish:
-    if: inputs.action == 'release' || inputs.action == 'runner-image'
+    if: inputs.action == 'runner-image'
     name: Build, publish, scan, and verify digest
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -123,14 +123,14 @@ jobs:
   stage-control-plane:
     if: inputs.action == 'release'
     name: Stage compatible control plane without production traffic
-    needs: publish
+    needs: canary
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment: production
     outputs:
       deployment-url: ${{ steps.stage.outputs.deployment-url }}
     env:
-      IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
+      IMMUTABLE_IMAGE: ${{ needs.canary.outputs.immutable-image }}
 
     steps:
       - name: Check out exact release commit
@@ -177,15 +177,13 @@ jobs:
           echo "Staged the exact release control plane without assigning production domains." >> "${GITHUB_STEP_SUMMARY}"
 
   canary:
-    if: >-
-      always() &&
-      (inputs.action == 'release' || inputs.action == 'verified-release') &&
-      (inputs.action != 'release' || needs.publish.result == 'success')
+    if: inputs.action == 'release' || inputs.action == 'verified-release'
     name: Build and publish credential-free Verified Release
-    needs: publish
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: runner-release-canary
+    outputs:
+      immutable-image: ${{ steps.approved-snapshot.outputs.runner-image }}
     services:
       postgres:
         image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
@@ -210,7 +208,6 @@ jobs:
       BRUNO_DIGITALOCEAN_SIZE_SLUG: s-1vcpu-2gb
       BRUNO_HERMES_PRIVATE_NETWORK: bruno-hermes
       BRUNO_LOCAL_CLOUD_RUNNER_ENDPOINT_URL: http://127.0.0.1:3045
-      BRUNO_RUNNER_IMAGE: ${{ needs.publish.outputs.immutable-image }}
       BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE: ${{ vars.BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE }}
       BRUNO_RELEASE_APPROVED_SNAPSHOT_BUNDLE_DIGEST: ${{ vars.BRUNO_RELEASE_APPROVED_SNAPSHOT_BUNDLE_DIGEST }}
       BRUNO_SNAPSHOT_TRUST_SET: ${{ vars.BRUNO_SNAPSHOT_TRUST_SET }}
@@ -260,10 +257,7 @@ jobs:
           oras pull "${BRUNO_RELEASE_APPROVED_SNAPSHOT_OCI_REFERENCE}" --output approved-snapshot
           test "$(find approved-snapshot -maxdepth 1 -type f | wc -l | tr -d ' ')" = "3"
           test "$(tr -d '\n' < approved-snapshot/runner-snapshot-bundle.sha256)" = "${BRUNO_RELEASE_APPROVED_SNAPSHOT_BUNDLE_DIGEST}"
-          RELEASE_RUNNER_IMAGE="${{ needs.publish.outputs.immutable-image }}"
-          if [[ "${{ inputs.action }}" = "verified-release" ]]; then
-            RELEASE_RUNNER_IMAGE="$(jq -r '.manifest.runnerImage.reference // empty' approved-snapshot/runner-snapshot-bundle.json)"
-          fi
+          RELEASE_RUNNER_IMAGE="$(jq -r '.manifest.runnerImage.reference // empty' approved-snapshot/runner-snapshot-bundle.json)"
           [[ "${RELEASE_RUNNER_IMAGE}" =~ ^ghcr\.io/ametel01/bruno-runner:[a-f0-9]{40}@sha256:[a-f0-9]{64}$ ]]
           bun run runner:release:snapshot:verify -- \
             --runner-image "${RELEASE_RUNNER_IMAGE}" \
@@ -284,7 +278,6 @@ jobs:
 
       - name: Scan the retained Approved Snapshot runner
         id: scan_approved_runner
-        if: inputs.action == 'verified-release'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ steps.approved-snapshot.outputs.runner-image }}
@@ -297,7 +290,7 @@ jobs:
           exit-code: "1"
 
       - name: Upload retained runner scan report
-        if: ${{ always() && inputs.action == 'verified-release' && steps.scan_approved_runner.outcome != 'skipped' }}
+        if: ${{ always() && steps.scan_approved_runner.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
         with:
           name: trivy-approved-runner-image-${{ github.sha }}
@@ -491,7 +484,6 @@ jobs:
     if: inputs.action == 'release'
     name: Deploy Verified Release to production
     needs:
-      - publish
       - stage-control-plane
       - canary
     runs-on: ubuntu-latest
@@ -499,7 +491,7 @@ jobs:
     environment: production
     env:
       PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
-      IMMUTABLE_IMAGE: ${{ needs.publish.outputs.immutable-image }}
+      IMMUTABLE_IMAGE: ${{ needs.canary.outputs.immutable-image }}
       CANDIDATE_DEPLOYMENT_URL: ${{ needs.stage-control-plane.outputs.deployment-url }}
 
     steps:

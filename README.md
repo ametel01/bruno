@@ -361,12 +361,15 @@ The `verified-release` action retrieves the immutable runner image from the sign
 Snapshot, verifies that exact identity, scans it, exercises the credential-free full fixture,
 verifies cleanup, and publishes the signed digest-addressed OCI bundle. It does not build a new
 runner candidate or run the Vercel staging or production jobs. The production `release` action
-still builds a new candidate and requires it to match the selected Approved Snapshot exactly.
+uses that same snapshot-retained runner identity for the fixture, staged control plane, and
+production promotion. Build and scan a new candidate separately with `runner:image:publish` before
+creating its protected snapshot.
 
 Run this only from a clean `main` branch after pushing the intended release commit. It dispatches the
-protected `Deploy production application` workflow, which publishes an immutable runner image,
-scans it, stages the full application without production traffic, and runs the credential-free full
-runner fixture against the exact approved Snapshot Attestation v2 identities. The workflow signs
+protected `Deploy production application` workflow, which retrieves and scans the immutable runner
+already retained by the Approved Snapshot, stages the full application without production traffic,
+and runs the credential-free full runner fixture against the exact approved Snapshot Attestation v2
+identities. The workflow signs
 and publishes that Verified Release by immutable GHCR OCI digest before it promotes the exact staged
 deployment and verifies the production health and required-release contract. The canary creates no
 DigitalOcean resource. Follow the returned GitHub Actions URL and approve the protected environments

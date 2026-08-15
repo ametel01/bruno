@@ -44,15 +44,13 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).toContain("environment: runner-release-canary");
     expect(workflowSource).toContain("environment: production");
     expect(workflowSource).toContain(
-      "(inputs.action == 'release' || inputs.action == 'verified-release') &&",
+      "inputs.action == 'release' || inputs.action == 'verified-release'",
     );
     expect(workflowSource).toContain(
-      "(inputs.action != 'release' || needs.publish.result == 'success')",
+      "stage-control-plane:\n    if: inputs.action == 'release'\n    name: Stage compatible control plane without production traffic\n    needs: canary",
     );
-    expect(workflowSource).toContain("needs: publish");
-    expect(workflowSource).toContain(
-      "needs:\n      - publish\n      - stage-control-plane\n      - canary",
-    );
+    expect(workflowSource).toContain("needs:\n      - stage-control-plane\n      - canary");
+    expect(workflowSource).not.toContain("needs.publish.outputs.immutable-image");
     expect(workflowSource).toContain(
       "concurrency:\n  group: production-application-deploy\n  cancel-in-progress: false",
     );
@@ -60,17 +58,11 @@ describe("runner release workflow contract", () => {
 
   it("can publish a Verified Release without staging or promoting production", () => {
     expect(workflowSource).toContain("- verified-release");
-    expect(workflowSource).toContain("publish:\n    if: inputs.action == 'release'");
+    expect(workflowSource).toContain("publish:\n    if: inputs.action == 'runner-image'");
     expect(workflowSource).toContain("stage-control-plane:\n    if: inputs.action == 'release'");
     expect(workflowSource).toContain("deploy:\n    if: inputs.action == 'release'");
     expect(packageJson.scripts["runner:release:publish-verified"]).toBe(
       "gh workflow run deploy-production.yml --repo ametel01/bruno --ref main --raw-field action=verified-release",
-    );
-    expect(workflowSource).toContain(
-      'RELEASE_RUNNER_IMAGE="$' + '{{ needs.publish.outputs.immutable-image }}"',
-    );
-    expect(workflowSource).toContain(
-      'if [[ "$' + '{{ inputs.action }}" = "verified-release" ]]; then',
     );
     expect(workflowSource).toContain(
       "RELEASE_RUNNER_IMAGE=\"$(jq -r '.manifest.runnerImage.reference // empty' approved-snapshot/runner-snapshot-bundle.json)\"",
@@ -87,9 +79,7 @@ describe("runner release workflow contract", () => {
 
   it("can publish and scan a runner candidate without staging or promoting production", () => {
     expect(workflowSource).toContain("- runner-image");
-    expect(workflowSource).toContain(
-      "if: inputs.action == 'release' || inputs.action == 'runner-image'",
-    );
+    expect(workflowSource).toContain("publish:\n    if: inputs.action == 'runner-image'");
     expect(workflowSource).toContain("id: scan_runner");
     expect(workflowSource).toContain(
       "if: $" + "{{ always() && steps.scan_runner.outcome != 'skipped' }}",
@@ -226,6 +216,12 @@ describe("runner release workflow contract", () => {
     expect(workflowSource).toContain("bun run start --hostname 0.0.0.0");
     expect(workflowSource).toContain(
       "CANDIDATE_DEPLOYMENT_URL: $" + "{{ needs.stage-control-plane.outputs.deployment-url }}",
+    );
+    expect(workflowSource).toContain(
+      "IMMUTABLE_IMAGE: $" + "{{ needs.canary.outputs.immutable-image }}",
+    );
+    expect(workflowSource).toContain(
+      "outputs:\n      immutable-image: $" + "{{ steps.approved-snapshot.outputs.runner-image }}",
     );
     expect(workflowSource).toContain(
       "vercel@$" + '{VERCEL_CLI_VERSION} promote "$' + '{CANDIDATE_DEPLOYMENT_URL}"',
