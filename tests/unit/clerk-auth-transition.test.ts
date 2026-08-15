@@ -5,10 +5,17 @@ import {
   isClerkAuthPagePath,
   isInternalServiceAuthPath,
   isPublicInfrastructurePath,
+  isPublicMarketingPath,
   isRunnerMachineAuthPath,
 } from "@/src/auth/clerk-transition";
 
 describe("Clerk route matrix", () => {
+  it("recognizes only the exact root as the public marketing path", () => {
+    expect(isPublicMarketingPath("/")).toBe(true);
+    expect(isPublicMarketingPath("/dashboard")).toBe(false);
+    expect(isPublicMarketingPath("/landing")).toBe(false);
+  });
+
   it.each([
     "/sign-in",
     "/sign-in/factor-one",

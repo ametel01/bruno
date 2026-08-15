@@ -24,6 +24,10 @@ export function isClerkAuthPagePath(pathname: string): boolean {
   return isPathOrDescendant(pathname, "/sign-in") || isPathOrDescendant(pathname, "/sign-up");
 }
 
+export function isPublicMarketingPath(pathname: string): boolean {
+  return pathname === "/";
+}
+
 export function isRunnerMachineAuthPath(pathname: string): boolean {
   return RUNNER_MACHINE_AUTH_PATHS.has(pathname);
 }

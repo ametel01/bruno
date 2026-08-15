@@ -11,6 +11,7 @@ import {
   isClerkAuthPagePath,
   isInternalServiceAuthPath,
   isPublicInfrastructurePath,
+  isPublicMarketingPath,
   isRunnerMachineAuthPath,
 } from "@/src/auth/clerk-transition";
 import { evaluateOperatorAccess, type OperatorAccessDecision } from "@/src/auth/operator-access";
@@ -38,6 +39,7 @@ export async function proxy(request: NextRequest, event: NextFetchEvent): Promis
     isRunnerMachineAuthPath(pathname) ||
     isInternalServiceAuthPath(pathname) ||
     isPublicInfrastructurePath(pathname) ||
+    isPublicMarketingPath(pathname) ||
     isClerkAuthPagePath(pathname)
   ) {
     return NextResponse.next();

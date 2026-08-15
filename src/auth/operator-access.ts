@@ -2,6 +2,7 @@ import {
   isClerkAuthPagePath,
   isInternalServiceAuthPath,
   isPublicInfrastructurePath,
+  isPublicMarketingPath,
   isRunnerMachineAuthPath,
 } from "@/src/auth/clerk-transition";
 import { resolveAuthMode } from "@/src/auth/auth-mode";
@@ -78,6 +79,7 @@ export function isOperatorProtectedPath(pathname: string): boolean {
 function isOperatorBypassPath(pathname: string): boolean {
   return (
     isClerkAuthPagePath(pathname) ||
+    isPublicMarketingPath(pathname) ||
     isInternalServiceAuthPath(pathname) ||
     isRunnerMachineAuthPath(pathname) ||
     isPublicInfrastructurePath(pathname)

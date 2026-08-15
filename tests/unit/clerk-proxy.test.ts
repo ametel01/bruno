@@ -95,7 +95,6 @@ describe("Clerk session proxy", () => {
   });
 
   it.each([
-    "/",
     "/dashboard",
     "/agents",
     "/agents/00000000-0000-4000-8000-000000000001",
@@ -116,6 +115,21 @@ describe("Clerk session proxy", () => {
     expect(mocks.redirectToSignIn).toHaveBeenCalledWith({
       returnBackUrl: `http://localhost${pathname}`,
     });
+  });
+
+  it("keeps the exact marketing root public without invoking Clerk", async () => {
+    process.env.BRUNO_OPERATOR_PASSWORD = "operator-secret";
+    process.env.VERCEL = "1";
+
+    const response = await proxy(
+      new NextRequest("https://caller-controlled.example/"),
+      {} as NextFetchEvent,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(mocks.clerkInvocations).toBe(0);
+    expect(mocks.auth).not.toHaveBeenCalled();
   });
 
   it.each([

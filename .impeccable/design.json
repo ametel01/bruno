@@ -1,0 +1,325 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-15T21:37:17Z",
+  "title": "Design System: Bruno",
+  "extensions": {
+    "colorMeta": {
+      "editorial-blue": {
+        "role": "primary",
+        "displayName": "Electric Editorial Blue",
+        "canonical": "#155eef",
+        "tonalRamp": [
+          "oklch(15% 0.25 260)",
+          "oklch(27% 0.25 260)",
+          "oklch(39% 0.25 260)",
+          "oklch(51% 0.25 260)",
+          "oklch(63% 0.25 260)",
+          "oklch(75% 0.21 260)",
+          "oklch(87% 0.12 260)",
+          "oklch(95% 0.05 260)"
+        ]
+      },
+      "editorial-blue-deep": {
+        "role": "primary",
+        "displayName": "Deep Editorial Blue",
+        "canonical": "#0b3ea8",
+        "tonalRamp": [
+          "oklch(15% 0.2 260)",
+          "oklch(27% 0.2 260)",
+          "oklch(39% 0.2 260)",
+          "oklch(51% 0.2 260)",
+          "oklch(63% 0.19 260)",
+          "oklch(75% 0.16 260)",
+          "oklch(87% 0.09 260)",
+          "oklch(95% 0.04 260)"
+        ]
+      },
+      "citron-tab": {
+        "role": "secondary",
+        "displayName": "Citron Tab",
+        "canonical": "#dfff3f",
+        "tonalRamp": [
+          "oklch(15% 0.2 120)",
+          "oklch(27% 0.22 120)",
+          "oklch(39% 0.24 120)",
+          "oklch(51% 0.24 120)",
+          "oklch(63% 0.24 120)",
+          "oklch(75% 0.22 120)",
+          "oklch(87% 0.17 120)",
+          "oklch(95% 0.08 120)"
+        ]
+      },
+      "red-pencil": {
+        "role": "tertiary",
+        "displayName": "Dark Red Pencil",
+        "canonical": "#a92b2b",
+        "tonalRamp": [
+          "oklch(15% 0.15 27)",
+          "oklch(27% 0.18 27)",
+          "oklch(39% 0.19 27)",
+          "oklch(51% 0.19 27)",
+          "oklch(63% 0.17 27)",
+          "oklch(75% 0.13 27)",
+          "oklch(87% 0.07 27)",
+          "oklch(95% 0.03 27)"
+        ]
+      },
+      "ledger-ink": {
+        "role": "neutral",
+        "displayName": "Ledger Ink",
+        "canonical": "#172018",
+        "tonalRamp": [
+          "oklch(15% 0.02 145)",
+          "oklch(27% 0.02 145)",
+          "oklch(39% 0.02 145)",
+          "oklch(51% 0.02 145)",
+          "oklch(63% 0.018 145)",
+          "oklch(75% 0.015 145)",
+          "oklch(87% 0.01 145)",
+          "oklch(95% 0.006 145)"
+        ]
+      },
+      "body-ink": {
+        "role": "neutral",
+        "displayName": "Body Ink",
+        "canonical": "#4b544c",
+        "tonalRamp": [
+          "oklch(15% 0.015 145)",
+          "oklch(27% 0.015 145)",
+          "oklch(39% 0.015 145)",
+          "oklch(51% 0.015 145)",
+          "oklch(63% 0.013 145)",
+          "oklch(75% 0.011 145)",
+          "oklch(87% 0.008 145)",
+          "oklch(95% 0.004 145)"
+        ]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Grid-Ruled Paper",
+        "canonical": "#f2f0e8",
+        "tonalRamp": [
+          "oklch(15% 0.02 95)",
+          "oklch(27% 0.02 95)",
+          "oklch(39% 0.02 95)",
+          "oklch(51% 0.02 95)",
+          "oklch(63% 0.02 95)",
+          "oklch(75% 0.018 95)",
+          "oklch(87% 0.015 95)",
+          "oklch(95% 0.012 95)"
+        ]
+      },
+      "white": {
+        "role": "neutral",
+        "displayName": "White",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "oklch(15% 0 0)",
+          "oklch(27% 0 0)",
+          "oklch(39% 0 0)",
+          "oklch(51% 0 0)",
+          "oklch(63% 0 0)",
+          "oklch(75% 0 0)",
+          "oklch(87% 0 0)",
+          "oklch(100% 0 0)"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Ledger Rule",
+        "canonical": "rgb(23 32 24 / 20%)",
+        "tonalRamp": [
+          "oklch(15% 0.012 145)",
+          "oklch(27% 0.012 145)",
+          "oklch(39% 0.012 145)",
+          "oklch(51% 0.012 145)",
+          "oklch(63% 0.01 145)",
+          "oklch(75% 0.008 145)",
+          "oklch(87% 0.006 145)",
+          "oklch(95% 0.004 145)"
+        ]
+      },
+      "rule-soft": {
+        "role": "neutral",
+        "displayName": "Soft Ledger Rule",
+        "canonical": "rgb(23 32 24 / 10%)",
+        "tonalRamp": [
+          "oklch(15% 0.008 145)",
+          "oklch(27% 0.008 145)",
+          "oklch(39% 0.008 145)",
+          "oklch(51% 0.008 145)",
+          "oklch(63% 0.007 145)",
+          "oklch(75% 0.006 145)",
+          "oklch(87% 0.004 145)",
+          "oklch(95% 0.002 145)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The single dominant promise or closing statement."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section arguments and spread titles."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Decision, operating-loop, and row headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Operational explanations and evidence."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Metadata, policies, tabs, navigation, and process steps."
+      }
+    },
+    "shadows": [
+      {
+        "name": "spread",
+        "value": "0 30px 70px rgb(23 32 24 / 10%)",
+        "purpose": "Separates a complete ledger spread from surrounding paper."
+      },
+      {
+        "name": "action-lift",
+        "value": "0 12px 28px rgb(21 94 239 / 24%)",
+        "purpose": "Appears only while the primary action rises on hover."
+      },
+      {
+        "name": "graph-emphasis",
+        "value": "0 22px 44px rgb(21 94 239 / 18%)",
+        "purpose": "Gives the Business Graph core one controlled focal plane."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-standard",
+        "value": "180ms ease-out",
+        "purpose": "Primary-action color, transform, and shadow transitions."
+      },
+      {
+        "name": "state-quick",
+        "value": "150ms ease-out",
+        "purpose": "Navigation and editorial-tab state changes."
+      },
+      {
+        "name": "route-advance",
+        "value": "linear",
+        "purpose": "Progressively reveals the operating route while keeping every stage visible; disabled for reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "stack",
+        "value": "980px"
+      },
+      {
+        "name": "mobile",
+        "value": "700px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The sole high-emphasis action for following or advancing the build.",
+      "html": "<a class=\"ds-btn-primary\" href=\"#\">FOLLOW THE BUILD <svg aria-hidden=\"true\" viewBox=\"0 0 20 20\"><path d=\"M4 10h11M10 5l5 5-5 5\"/></svg></a>",
+      "css": ".ds-btn-primary { display: inline-flex; min-height: 50px; align-items: center; justify-content: center; gap: 12px; padding: 0 19px; border: 0; border-radius: 0; background: #155eef; color: #ffffff; font-family: 'Avenir Next', Avenir, 'Segoe UI', sans-serif; font-size: 0.82rem; font-weight: 900; letter-spacing: 0.04em; text-decoration: none; text-transform: uppercase; transition: background 180ms ease-out, transform 180ms ease-out, box-shadow 180ms ease-out; } .ds-btn-primary svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-linecap: square; stroke-width: 1.8; } .ds-btn-primary:hover { background: #0b3ea8; box-shadow: 0 12px 28px rgb(21 94 239 / 24%); transform: translateY(-2px); } .ds-btn-primary:focus-visible { outline: 3px solid #155eef; outline-offset: 4px; } .ds-btn-primary:active { transform: translateY(0); }"
+    },
+    {
+      "name": "Editorial Tab",
+      "kind": "chip",
+      "refersTo": "editorial-tab",
+      "description": "A citron index tab for the next section or an explicit status.",
+      "html": "<a class=\"ds-editorial-tab\" href=\"#\">NEXT · OPERATING LOOPS <svg aria-hidden=\"true\" viewBox=\"0 0 20 20\"><path d=\"M4 10h11M10 5l5 5-5 5\"/></svg></a>",
+      "css": ".ds-editorial-tab { display: inline-flex; min-height: 34px; align-items: center; gap: 10px; padding: 7px 10px 6px; border: 0; border-bottom: 1px solid #a92b2b; border-radius: 0; background: #dfff3f; color: #172018; font-family: 'Avenir Next', Avenir, 'Segoe UI', sans-serif; font-size: 0.68rem; font-weight: 900; letter-spacing: 0.06em; text-decoration: none; text-transform: uppercase; transition: color 150ms ease-out; } .ds-editorial-tab svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: square; stroke-width: 1.8; } .ds-editorial-tab:hover { color: #155eef; } .ds-editorial-tab:focus-visible { outline: 3px solid #155eef; outline-offset: 4px; } .ds-editorial-tab:active { color: #0b3ea8; }"
+    },
+    {
+      "name": "Landing Navigation",
+      "kind": "nav",
+      "refersTo": "nav-link",
+      "description": "Heavy uppercase navigation that gains a citron field and red underline on hover.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Example navigation\"><a href=\"#\">HOW IT WORKS</a><a href=\"#\">OPERATING LOOPS</a><a href=\"#\">SIGN IN</a></nav>",
+      "css": ".ds-nav { display: flex; align-items: center; gap: 32px; font-family: 'Avenir Next', Avenir, 'Segoe UI', sans-serif; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; } .ds-nav a { padding: 5px 3px 3px; border-radius: 0; color: #172018; text-decoration: none; text-decoration-color: #a92b2b; text-decoration-thickness: 1px; text-underline-offset: 0.24em; transition: background 150ms ease-out, text-decoration-color 150ms ease-out; } .ds-nav a:hover { background: #dfff3f; color: #172018; text-decoration-line: underline; } .ds-nav a:focus-visible { outline: 3px solid #155eef; outline-offset: 4px; } .ds-nav a:active { color: #0b3ea8; }"
+    },
+    {
+      "name": "Decision Ledger Row",
+      "kind": "custom",
+      "refersTo": "decision-row",
+      "description": "A numbered record that pairs evidence with an explicit action and policy state.",
+      "html": "<article class=\"ds-decision\"><span class=\"ds-decision-index\">01</span><div><h3>Potential sale</h3><p>A promising lead has been waiting five days for a reply.</p><footer><span>FOLLOW-UP PREPARED</span><strong>NEEDS YOUR APPROVAL</strong></footer></div></article>",
+      "css": ".ds-decision { display: grid; grid-template-columns: 44px 1fr; gap: 16px; padding: 22px 0 20px; border-bottom: 1px solid rgb(23 32 24 / 20%); border-radius: 0; background: #f2f0e8; color: #172018; font-family: 'Avenir Next', Avenir, 'Segoe UI', sans-serif; } .ds-decision-index { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid #172018; background: #f2f0e8; font-size: 0.68rem; font-weight: 900; } .ds-decision h3 { margin: 0; font-size: 1.02rem; font-weight: 900; } .ds-decision p { margin: 8px 0 14px; color: #4b544c; font-size: 0.9rem; line-height: 1.5; } .ds-decision footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 18px; color: #0b3ea8; font-size: 0.68rem; letter-spacing: 0.04em; text-transform: uppercase; } .ds-decision footer strong { color: #172018; font-weight: 900; } .ds-decision:focus-within { outline: 3px solid #155eef; outline-offset: 4px; }"
+    },
+    {
+      "name": "Business Graph Core",
+      "kind": "card",
+      "refersTo": "graph-card",
+      "description": "The singular saturated system object inside a ruled graph field.",
+      "html": "<section class=\"ds-graph-core\"><svg aria-hidden=\"true\" viewBox=\"0 0 44 44\"><path d=\"M33 14a14 14 0 1 0 2.5 12\"/><path d=\"m28 8 6 6-7 4\"/><circle cx=\"22\" cy=\"22\" r=\"3\"/></svg><span>BUSINESS GRAPH</span><strong>What changed—and why it matters</strong></section>",
+      "css": ".ds-graph-core { display: grid; min-height: 220px; align-content: center; justify-items: center; padding: 28px; border: 2px solid #172018; border-radius: 0; background: #155eef; box-shadow: 0 22px 44px rgb(21 94 239 / 18%); color: #ffffff; font-family: 'Avenir Next', Avenir, 'Segoe UI', sans-serif; text-align: center; } .ds-graph-core svg { width: 54px; height: 54px; margin-bottom: 22px; fill: none; stroke: currentColor; stroke-linecap: square; stroke-width: 1.4; } .ds-graph-core span { font-size: 0.72rem; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; } .ds-graph-core strong { max-width: 20ch; margin-top: 12px; font-size: 2rem; letter-spacing: -0.03em; line-height: 1.02; } .ds-graph-core:focus-within { outline: 3px solid #155eef; outline-offset: 4px; }"
+    },
+    {
+      "name": "Policy Row",
+      "kind": "custom",
+      "refersTo": "policy-row",
+      "description": "A readable business action paired with a non-color-dependent authority label.",
+      "html": "<div class=\"ds-policy-row\"><span>Send to an existing customer</span><strong>ASK ME</strong></div>",
+      "css": ".ds-policy-row { display: grid; grid-template-columns: 1.25fr 0.75fr; gap: 20px; padding: 15px 0; border-bottom: 1px solid #172018; border-radius: 0; background: #f2f0e8; color: #172018; font-family: 'Avenir Next', Avenir, 'Segoe UI', sans-serif; font-size: 0.86rem; } .ds-policy-row strong { justify-self: start; color: #0b3ea8; font-size: 0.72rem; font-weight: 900; text-transform: uppercase; } .ds-policy-row:hover { background: linear-gradient(90deg, #dfff3f 0 4px, #f2f0e8 4px); } .ds-policy-row:focus-visible { outline: 3px solid #155eef; outline-offset: 4px; } .ds-policy-row:active strong { color: #155eef; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Company Daybook",
+    "overview": "Bruno looks like the working daybook of a disciplined founder: grid-ruled paper, dark ledger ink, compressed display type, editorial annotations, and a small set of decisive signals. The mood is capable, candid, and operational rather than futuristic. Information feels edited into a daily record, not generated into a dashboard.\n\nThe system is dense but calm. Square rules and tabular alignment make decisions, policies, and outcomes easy to audit; electric blue carries the active operating route, citron marks navigation and status, and dark red behaves like a corrective pencil. It rejects the generic AI hero, gradient atmosphere, glass cards, and floating chat screenshot.",
+    "keyCharacteristics": [
+      "Warm grid-ruled stock with visible ledger structure.",
+      "Compressed League Gothic headlines against practical Avenir Next text.",
+      "Square corners, hard rules, and tabular alignment.",
+      "Electric editorial blue for action and system flow.",
+      "Citron tabs and red-pencil annotations used as rare signals."
+    ],
+    "rules": [
+      {
+        "name": "The Three-Marks Rule",
+        "body": "Blue means action or operating flow, citron means a tab or resolved emphasis, and red means annotation or prohibition; do not interchange them.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two-Voice Rule",
+        "body": "League Gothic makes arguments; Avenir Next carries facts, actions, and evidence.",
+        "section": "typography"
+      },
+      {
+        "name": "The Finite Ledger Rule",
+        "body": "Every group needs an explicit start and end: a top rule, numbered rows, a closing rule, or a terminal highlighted step.",
+        "section": "layout"
+      },
+      {
+        "name": "The Flat Ledger Rule",
+        "body": "Elevate a whole spread or one active system object, never every record.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Square Rule",
+        "body": "Do not round buttons, cards, tabs, tables, or status marks in the Company Daybook world.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do build hierarchy with paper rules, spacing, type contrast, and explicit labels.",
+      "Do keep policy, evidence, and verification states legible without color.",
+      "Do reserve saturated color for actions, routes, tabs, and annotations.",
+      "Do preserve the ruled-paper texture and square geometry across responsive layouts."
+    ],
+    "donts": [
+      "Don't use generic AI gradients, glassmorphism, glowing orbs, or a floating chat-window hero.",
+      "Don't turn every record into a rounded card or elevated tile.",
+      "Don't use blue, citron, or red as interchangeable decoration.",
+      "Don't fabricate dashboards, outcomes, testimonials, or implied product availability as visual proof."
+    ]
+  }
+}

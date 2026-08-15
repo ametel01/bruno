@@ -5,7 +5,6 @@ import { evaluateOperatorAccess, isOperatorProtectedPath } from "@/src/auth/oper
 
 describe("operator access path decisions", () => {
   it.each([
-    "/",
     "/dashboard",
     "/dashboard/runners",
     "/agents",
@@ -24,6 +23,7 @@ describe("operator access path decisions", () => {
   });
 
   it.each([
+    "/",
     "/_next/static/chunks/app.js",
     "/favicon.ico",
     "/health",

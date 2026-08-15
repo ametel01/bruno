@@ -343,13 +343,17 @@ describe("product shell routes", () => {
     mocks.notFound.mockClear();
   });
 
-  it("renders the root product dashboard shell", () => {
+  it("renders the public Bruno product direction without fabricated proof", () => {
     const html = renderToStaticMarkup(createElement(Home));
 
-    expect(html).toContain("Bruno");
-    expect(html).toContain('href="/dashboard"');
-    expect(html).toContain("Operational dashboard");
-    expect(html).toContain("No agent records");
+    expect(html).toContain("Bruno runs your one-person business with you.");
+    expect(html).toContain("The operating system for a one-person company.");
+    expect(html).toContain("Illustrative data");
+    expect(html).toContain("not a claim that they are already shipped");
+    expect(html).toContain("https://github.com/ametel01/bruno");
+    expect(html).toContain('href="/sign-in"');
+    expect(html).not.toContain("Operational dashboard");
+    expect(html).not.toContain("No agent records");
   });
 
   it("renders the dashboard empty persisted-agent state without fake records", async () => {

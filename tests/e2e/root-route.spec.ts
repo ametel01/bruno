@@ -35,7 +35,6 @@ test.afterEach(async ({ request }) => {
 });
 
 const shellRoutes = [
-  { path: "/", heading: "Operational dashboard" },
   { path: "/dashboard", heading: "Operational dashboard" },
   { path: "/agents", heading: "Your AI agents" },
   { path: "/settings", heading: "Workspace settings" },
@@ -56,6 +55,27 @@ for (const route of shellRoutes) {
     );
   });
 }
+
+test("/ renders the public Bruno product direction", async ({ page }) => {
+  await page.goto("/");
+
+  expect(await page.evaluate(() => document.body.firstChild?.nodeType)).toBe(8);
+  expect(await page.evaluate(() => document.body.firstChild?.textContent)).toContain(
+    "seed 2b573c57",
+  );
+  await expect(
+    page.getByRole("heading", { name: "Bruno runs your one-person business with you." }),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Follow the build" })).toHaveAttribute(
+    "href",
+    "https://github.com/ametel01/bruno",
+  );
+  await expect(page.getByText("Illustrative data")).toBeVisible();
+  await expect(page.getByRole("link", { exact: true, name: "Sign in" })).toHaveAttribute(
+    "href",
+    "/sign-in",
+  );
+});
 
 test("/health returns reachable database JSON in the browser", async ({ page }) => {
   await page.goto("/dashboard");
