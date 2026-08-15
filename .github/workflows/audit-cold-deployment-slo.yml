@@ -1,0 +1,99 @@
+name: Audit production Cold-Deployment SLO
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Retain sanitized latest-100 production evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: Production
+    env:
+      PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+
+    steps:
+      - name: Evaluate and sanitize the production cohort
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${PRODUCTION_URL}/api/internal/cold-deployment-slo/evaluate")"
+
+          jq -e '
+            .ok == true
+            and (.evaluation | keys | sort) == ([
+              "apiAcceptance",
+              "eligibleCount",
+              "incidentOpened",
+              "objectiveSeconds",
+              "pendingCount",
+              "proven",
+              "readyWithinObjective",
+              "reportDigest"
+            ] | sort)
+            and (.evaluation.reportDigest | test("^sha256:[0-9a-f]{64}$"))
+            and .evaluation.objectiveSeconds == 300
+            and (.evaluation.eligibleCount | type) == "number"
+            and .evaluation.eligibleCount >= 0
+            and .evaluation.eligibleCount <= 100
+            and (.evaluation.readyWithinObjective | type) == "number"
+            and .evaluation.readyWithinObjective >= 0
+            and .evaluation.readyWithinObjective <= .evaluation.eligibleCount
+            and (.evaluation.pendingCount | type) == "number"
+            and .evaluation.pendingCount >= 0
+            and .evaluation.pendingCount <= .evaluation.eligibleCount
+            and (.evaluation.proven | type) == "boolean"
+            and (.evaluation.incidentOpened | type) == "boolean"
+            and (.evaluation.apiAcceptance | keys | sort) == ([
+              "accepted",
+              "availability",
+              "outcomeUnknown",
+              "pending",
+              "rejected",
+              "sampleSize"
+            ] | sort)
+            and ([
+              .evaluation.apiAcceptance.sampleSize,
+              .evaluation.apiAcceptance.accepted,
+              .evaluation.apiAcceptance.rejected,
+              .evaluation.apiAcceptance.outcomeUnknown,
+              .evaluation.apiAcceptance.pending
+            ] | all(type == "number" and . >= 0 and . <= 100))
+            and (.evaluation.apiAcceptance.availability | type) == "number"
+            and .evaluation.apiAcceptance.availability >= 0
+            and .evaluation.apiAcceptance.availability <= 1
+          ' <<< "${response}" > /dev/null
+
+          jq '{ok, evaluation}' <<< "${response}" > cold-deployment-slo-evaluation.json
+
+          {
+            echo "## Production Cold-Deployment SLO"
+            echo
+            echo "| Metric | Value |"
+            echo "| --- | ---: |"
+            jq -r '
+              "| Objective (seconds) | \(.evaluation.objectiveSeconds) |",
+              "| Eligible deployments | \(.evaluation.eligibleCount) |",
+              "| Ready within objective | \(.evaluation.readyWithinObjective) |",
+              "| Pending | \(.evaluation.pendingCount) |",
+              "| Proven | \(.evaluation.proven) |",
+              "| Regression incident opened | \(.evaluation.incidentOpened) |",
+              "| Report digest | `\(.evaluation.reportDigest)` |"
+            ' cold-deployment-slo-evaluation.json
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          jq . cold-deployment-slo-evaluation.json
+
+      - name: Retain sanitized production evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: cold-deployment-slo-evaluation-${{ github.run_id }}
+          path: cold-deployment-slo-evaluation.json
+          if-no-files-found: error
+          retention-days: 90
