@@ -372,14 +372,23 @@ describe("product shell routes", () => {
     expect(html).toContain("No cloud runners");
     expect(html).toContain('class="dashboard-page"');
     expect(html).toContain('class="dashboard-fleet-pulse"');
-    expect(html).toContain("Fleet pulse");
+    expect(html).toContain("Company pulse");
+    expect(html).toContain('href="/agents#create-agent-title"');
     expect(html).toContain('class="dashboard-workbench"');
     expect(html).toContain('class="dashboard-work-queue"');
     expect(html).toContain('class="dashboard-activity-column"');
     expect(html).toContain('class="dashboard-infrastructure"');
     expect(html).toContain('class="dashboard-infrastructure-grid"');
     expect(html).toContain('class="dashboard-system-notes"');
+    expect(html).toContain("Founder dispatch");
+    expect(html).toContain("Needs you");
+    expect(html).toContain("Agents at work");
+    expect(html).toContain("Recent record");
+    expect(html).toContain("System appendix");
     expect(html.indexOf("dashboard-fleet-pulse-title")).toBeLessThan(
+      html.indexOf("dashboard-approvals-title"),
+    );
+    expect(html.indexOf("dashboard-approvals-title")).toBeLessThan(
       html.indexOf("dashboard-agents-title"),
     );
     expect(html.indexOf("dashboard-agents-title")).toBeLessThan(

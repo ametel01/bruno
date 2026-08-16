@@ -20,7 +20,11 @@ export function ProductShell({ active, eyebrow, title, description, children }: 
   const clerkEnabled = resolveAuthMode(process.env).mode === "clerk";
 
   return (
-    <div className="app-shell">
+    <div
+      className="app-shell"
+      data-active={active}
+      data-impeccable-dashboard-seed={active === "dashboard" ? "c9dd9100" : undefined}
+    >
       <aside className="app-sidebar" aria-label="Primary navigation">
         <div className="brand-block">
           <Link className="brand-mark" href="/dashboard" aria-label="Bruno dashboard">
@@ -28,7 +32,7 @@ export function ProductShell({ active, eyebrow, title, description, children }: 
           </Link>
           <div>
             <p className="brand-name">Bruno</p>
-            <p className="brand-subtitle">Always-on AI assistants</p>
+            <p className="brand-subtitle">One-person company OS</p>
           </div>
         </div>
         <nav className="nav-list" aria-label="Product routes">
@@ -51,13 +55,13 @@ export function ProductShell({ active, eyebrow, title, description, children }: 
       <div className="shell-main">
         <header className="topbar">
           <div>
-            <p className="eyebrow">{eyebrow}</p>
+            {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
             <h1>{title}</h1>
           </div>
           <div className="topbar-actions">
             {clerkEnabled ? <AccountControls /> : null}
             <Link className="health-link" href="/health">
-              Health JSON
+              System health
             </Link>
           </div>
         </header>

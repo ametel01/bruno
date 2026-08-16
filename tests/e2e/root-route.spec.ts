@@ -35,7 +35,7 @@ test.afterEach(async ({ request }) => {
 });
 
 const shellRoutes = [
-  { path: "/dashboard", heading: "Operational dashboard" },
+  { path: "/dashboard", heading: "Founder dispatch" },
   { path: "/agents", heading: "Your AI agents" },
   { path: "/settings", heading: "Workspace settings" },
 ] as const;
@@ -49,7 +49,7 @@ for (const route of shellRoutes) {
       "/dashboard",
     );
     await expect(page.getByRole("heading", { name: route.heading })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Health JSON" })).toHaveAttribute(
+    await expect(page.getByRole("link", { name: "System health" })).toHaveAttribute(
       "href",
       "/health",
     );
@@ -84,12 +84,12 @@ test("/ renders the public Bruno product direction", async ({ page }) => {
 
   await hero.getByRole("link", { exact: true, name: "Open dashboard" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByRole("heading", { name: "Operational dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Founder dispatch" })).toBeVisible();
 });
 
 test("/health returns reachable database JSON in the browser", async ({ page }) => {
   await page.goto("/dashboard");
-  await page.getByRole("link", { name: "Health JSON" }).click();
+  await page.getByRole("link", { name: "System health" }).click();
 
   await expect(page).toHaveURL(/\/health$/);
   await expect(page.locator("body")).toContainText('"status":"ok"');

@@ -63,7 +63,7 @@ export default async function DashboardPage() {
     return (
       <ProductShell
         active="dashboard"
-        eyebrow="Dashboard"
+        eyebrow=""
         title="Authentication required"
         description="Sign in to load user-scoped operational data."
       >
@@ -112,7 +112,7 @@ export function DashboardContent({
   costResult,
   manualRunnersResult = { ok: true, runners: [] },
   processLogsResult = { ok: true, logs: [] },
-  routeLabel = "Dashboard",
+  routeLabel = "",
   listResult = { ok: true, agents: [] },
 }: DashboardContentProps & {
   activityResult?: DashboardActivityResult;
@@ -152,21 +152,18 @@ export function DashboardContent({
     <ProductShell
       active="dashboard"
       eyebrow={routeLabel}
-      title="Operational dashboard"
-      description="Triage agent work, approvals, runner health, and recent changes from one workspace."
+      title="Founder dispatch"
+      description="Review decisions that need you, direct active agents, and audit the latest persisted changes."
     >
       <div className="dashboard-page">
         <section className="dashboard-fleet-pulse" aria-labelledby="dashboard-fleet-pulse-title">
           <div className="dashboard-fleet-pulse-heading">
-            <div>
-              <p>Live operations</p>
-              <h2 id="dashboard-fleet-pulse-title">Fleet pulse</h2>
-            </div>
-            <span>Persisted state</span>
+            <h2 id="dashboard-fleet-pulse-title">Company pulse</h2>
+            <span>Live persisted state</span>
           </div>
           <dl>
             <div data-state={runningAgentCount && runningAgentCount > 0 ? "active" : "neutral"}>
-              <dt>Agents</dt>
+              <dt>Agents at work</dt>
               <dd>
                 <strong>{activeAgentCount ?? "—"}</strong>
                 <span>{runningAgentCount ?? "—"} running now</span>
@@ -175,7 +172,7 @@ export function DashboardContent({
             <div
               data-state={pendingApprovalCount && pendingApprovalCount > 0 ? "attention" : "clear"}
             >
-              <dt>Approvals</dt>
+              <dt>Needs you</dt>
               <dd>
                 <strong>{pendingApprovalCount ?? "—"}</strong>
                 <span>{pendingApprovalCount === 1 ? "request waiting" : "requests waiting"}</span>
@@ -190,7 +187,7 @@ export function DashboardContent({
                     : "clear"
               }
             >
-              <dt>{automaticRecoveryCount > 0 ? "Recovery" : "Runners"}</dt>
+              <dt>{automaticRecoveryCount > 0 ? "Recovery" : "Capacity"}</dt>
               {automaticRecoveryCount > 0 ? (
                 <dd>
                   <strong>{automaticRecoveryCount}</strong>
@@ -206,7 +203,7 @@ export function DashboardContent({
               )}
             </div>
             <div data-state={recentActivityCount && recentActivityCount > 0 ? "active" : "neutral"}>
-              <dt>Recent changes</dt>
+              <dt>Recent record</dt>
               <dd>
                 <strong>{recentActivityCount ?? "—"}</strong>
                 <span>events in view</span>
@@ -215,92 +212,99 @@ export function DashboardContent({
           </dl>
         </section>
 
-        <section className="agent-list-panel" aria-labelledby="dashboard-agents-title">
-          <div className="section-heading">
-            <h2 id="dashboard-agents-title">Persisted agents</h2>
-            {listResult.ok ? <span>{listResult.agents.length} active</span> : null}
-          </div>
-          {listResult.ok ? (
-            listResult.agents.length > 0 ? (
-              <>
-                <div className="agent-table-wrap">
-                  <table className="agent-table compact-agent-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">Name</th>
-                        <th scope="col">Template</th>
-                        <th scope="col">Status</th>
-                        <th scope="col">Action</th>
-                        <th scope="col">Created</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {listResult.agents.map((agent) => (
-                        <tr key={agent.id}>
-                          <td>
-                            <Link href={agent.href}>{agent.name}</Link>
-                          </td>
-                          <td>{agent.templateLabel}</td>
-                          <td>
-                            <span className="status-pill">
-                              {agent.runtime?.label ?? agent.status}
-                            </span>
-                            <DeploymentStatusLabel
-                              deployment={agent.latestDeployment}
-                              desiredStatus={agent.desiredStatus}
-                              href={`${agent.href}#${agent.runtime ? "runtime-status-title" : "deployment-progress-title"}`}
-                              observedStatus={agent.status}
-                              runtime={agent.runtime}
-                            />
-                          </td>
-                          <td>
-                            <AgentLifecycleControls
-                              agentId={agent.id}
-                              deployment={agent.latestDeployment}
-                              detailHref={`${agent.href}#${agent.runtime ? "runtime-status-title" : "deployment-progress-title"}`}
-                              desiredStatus={agent.desiredStatus}
-                              runtime={agent.runtime}
-                              startDisabledReason={listedAgentStartDisabledReason(agent)}
-                              status={agent.status}
-                            />
-                          </td>
-                          <td>
-                            <time dateTime={agent.createdAt}>{agent.createdAt}</time>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <MobileAgentList agents={listResult.agents} />
-              </>
-            ) : (
-              <EmptyState
-                title="No agent records"
-                description="Create an agent from the Agents page to show a stopped persistent record here after refresh."
-              />
-            )
-          ) : (
-            <div className="safe-error" role="alert">
-              Agent records could not be loaded.
-            </div>
-          )}
-        </section>
+        <div className="dashboard-work-queue">
+          <PendingApprovalsPanel result={approvalsResult} />
+        </div>
 
         <div className="dashboard-workbench">
-          <div className="dashboard-work-queue">
-            <PendingApprovalsPanel result={approvalsResult} />
-            <DashboardProcessLogsPanel result={processLogsResult} />
+          <div className="dashboard-agent-column">
+            <section className="agent-list-panel" aria-labelledby="dashboard-agents-title">
+              <div className="section-heading">
+                <h2 id="dashboard-agents-title">Agents at work</h2>
+                {listResult.ok ? (
+                  <span>Persisted agents · {listResult.agents.length} active</span>
+                ) : null}
+              </div>
+              {listResult.ok ? (
+                listResult.agents.length > 0 ? (
+                  <>
+                    <div className="agent-table-wrap">
+                      <table className="agent-table compact-agent-table">
+                        <thead>
+                          <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col">Template</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Action</th>
+                            <th scope="col">Created</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {listResult.agents.map((agent) => (
+                            <tr key={agent.id}>
+                              <td>
+                                <Link href={agent.href}>{agent.name}</Link>
+                              </td>
+                              <td>{agent.templateLabel}</td>
+                              <td>
+                                <span className="status-pill">
+                                  {agent.runtime?.label ?? agent.status}
+                                </span>
+                                <DeploymentStatusLabel
+                                  deployment={agent.latestDeployment}
+                                  desiredStatus={agent.desiredStatus}
+                                  href={`${agent.href}#${agent.runtime ? "runtime-status-title" : "deployment-progress-title"}`}
+                                  observedStatus={agent.status}
+                                  runtime={agent.runtime}
+                                />
+                              </td>
+                              <td>
+                                <AgentLifecycleControls
+                                  agentId={agent.id}
+                                  deployment={agent.latestDeployment}
+                                  detailHref={`${agent.href}#${agent.runtime ? "runtime-status-title" : "deployment-progress-title"}`}
+                                  desiredStatus={agent.desiredStatus}
+                                  runtime={agent.runtime}
+                                  startDisabledReason={listedAgentStartDisabledReason(agent)}
+                                  status={agent.status}
+                                />
+                              </td>
+                              <td>
+                                <time dateTime={agent.createdAt}>{agent.createdAt}</time>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <MobileAgentList agents={listResult.agents} />
+                  </>
+                ) : (
+                  <EmptyState
+                    action={{ href: "/agents#create-agent-title", label: "Create agent" }}
+                    title="No agent records"
+                    description="Create an agent from the Agents page to show a stopped persistent record here after refresh."
+                  />
+                )
+              ) : (
+                <div className="safe-error" role="alert">
+                  Agent records could not be loaded.
+                </div>
+              )}
+            </section>
           </div>
           <div className="dashboard-activity-column">
             <ActivityFeedPanel
+              {...(activityResult.ok
+                ? { countLabel: `Latest activity · ${activityResult.events.length} shown` }
+                : {})}
               context={{ kind: "dashboard" }}
               emptyDescription="Create or update an agent to show the newest persisted activity here."
               emptyTitle="No activity yet"
               errorMessage="Latest activity could not be loaded."
               events={activityResult.ok ? activityResult.events : []}
               hasError={!activityResult.ok}
-              title="Latest activity"
+              title="Recent record"
               titleId="dashboard-activity-title"
             />
           </div>
@@ -311,13 +315,13 @@ export function DashboardContent({
           aria-labelledby="dashboard-infrastructure-title"
         >
           <div className="dashboard-section-heading">
-            <div>
-              <p>Capacity and provisioning</p>
-              <h2 id="dashboard-infrastructure-title">Infrastructure</h2>
-            </div>
-            <span>{knownRunnerCount ?? "—"} tracked</span>
+            <h2 id="dashboard-infrastructure-title">System appendix</h2>
+            <span>Logs · runners · cost · {knownRunnerCount ?? "—"} tracked</span>
           </div>
           <div className="dashboard-infrastructure-grid">
+            <div className="dashboard-log-strip">
+              <DashboardProcessLogsPanel result={processLogsResult} />
+            </div>
             <DashboardManualRunnerPanel result={manualRunnersResult} />
             <CloudRunnerProvisioningPanel
               result={cloudRunnersResult}
@@ -325,57 +329,63 @@ export function DashboardContent({
               titleId="dashboard-cloud-runner-title"
             />
           </div>
+
+          {costResult ? (
+            <div className="dashboard-cost-ledger">
+              <DashboardCostSummary result={costResult} />
+            </div>
+          ) : null}
+
+          <details className="dashboard-system-notes">
+            <summary>
+              <span>
+                <strong>System notes</strong>
+                <small>Routes, readiness, and implementation status</small>
+              </span>
+              <span aria-hidden="true">Details</span>
+            </summary>
+            <div className="dashboard-system-notes-grid">
+              <section aria-labelledby="dashboard-readiness-title">
+                <h3 id="dashboard-readiness-title">Readiness</h3>
+                <dl className="definition-list">
+                  <div>
+                    <dt>Product routes</dt>
+                    <dd>Dashboard, agents, settings, and health routes are present.</dd>
+                  </div>
+                  <div>
+                    <dt>Database check</dt>
+                    <dd>
+                      The `/health` endpoint remains the operator source for database reachability.
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Agent data</dt>
+                    <dd>Active persisted records are read from the database.</dd>
+                  </div>
+                </dl>
+              </section>
+              <section aria-labelledby="dashboard-upcoming-title">
+                <h3 id="dashboard-upcoming-title">Upcoming surfaces</h3>
+                <ul className="plain-list">
+                  <li>
+                    Start, Stop, and Restart use the Docker runner adapter and existing controls.
+                  </li>
+                  <li>
+                    Full per-agent log streams and local-development config editing are present on
+                    agent detail pages.
+                  </li>
+                  <li>
+                    Cloud runner provisioning status is visible from persisted runner records.
+                  </li>
+                  <li>
+                    Approval decisions are available from the queue; production runners, billing,
+                    and secret storage wait for later milestones.
+                  </li>
+                </ul>
+              </section>
+            </div>
+          </details>
         </section>
-
-        {costResult ? <DashboardCostSummary result={costResult} /> : null}
-
-        <details className="dashboard-system-notes">
-          <summary>
-            <span>
-              <strong>System notes</strong>
-              <small>Routes, readiness, and implementation status</small>
-            </span>
-            <span aria-hidden="true">Details</span>
-          </summary>
-          <div className="dashboard-system-notes-grid">
-            <section aria-labelledby="dashboard-readiness-title">
-              <h3 id="dashboard-readiness-title">Readiness</h3>
-              <dl className="definition-list">
-                <div>
-                  <dt>Product routes</dt>
-                  <dd>Dashboard, agents, settings, and health routes are present.</dd>
-                </div>
-                <div>
-                  <dt>Database check</dt>
-                  <dd>
-                    The `/health` endpoint remains the operator source for database reachability.
-                  </dd>
-                </div>
-                <div>
-                  <dt>Agent data</dt>
-                  <dd>Active persisted records are read from the database.</dd>
-                </div>
-              </dl>
-            </section>
-            <section aria-labelledby="dashboard-upcoming-title">
-              <h3 id="dashboard-upcoming-title">Upcoming surfaces</h3>
-              <ul className="plain-list">
-                <li>
-                  Start, Stop, and Restart use the Docker runner adapter and existing controls.
-                </li>
-                <li>
-                  Full per-agent log streams and local-development config editing are present on
-                  agent detail pages.
-                </li>
-                <li>Cloud runner provisioning status is visible from persisted runner records.</li>
-                <li>
-                  Approval decisions are available from the queue; production runners, billing, and
-                  secret storage wait for later milestones.
-                </li>
-              </ul>
-            </section>
-          </div>
-        </details>
       </div>
     </ProductShell>
   );
@@ -523,8 +533,8 @@ function PendingApprovalsPanel({ result }: { result: DashboardApprovalsResult })
   return (
     <section className="approval-panel" aria-labelledby="dashboard-approvals-title">
       <div className="section-heading">
-        <h2 id="dashboard-approvals-title">Pending approvals</h2>
-        {result.ok ? <span>{result.approvals.length} pending</span> : null}
+        <h2 id="dashboard-approvals-title">Needs you</h2>
+        {result.ok ? <span>Pending approvals · {result.approvals.length} pending</span> : null}
       </div>
       {result.ok ? (
         result.approvals.length > 0 ? (

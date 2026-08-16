@@ -4141,3 +4141,794 @@ h2 {
     grid-column: 1 / -1;
   }
 }
+
+/* Founder Dispatch: the dashboard inherits the Company Daybook world without
+   changing the visual contract of the agent and settings routes. */
+.app-shell[data-active="dashboard"] {
+  --background: #f2f0e8;
+  --foreground: #172018;
+  --muted: #4b544c;
+  --panel: #f8f7f1;
+  --panel-subtle: #eeece2;
+  --line: rgb(23 32 24 / 20%);
+  --line-strong: rgb(23 32 24 / 52%);
+  --accent: #155eef;
+  --accent-strong: #0b3ea8;
+  --accent-soft: #dfff3f;
+  --warning: #a92b2b;
+  --shadow: 0 30px 70px rgb(23 32 24 / 10%);
+  grid-template-columns: 224px minmax(0, 1fr);
+  background-color: var(--background);
+  background-image:
+    linear-gradient(to right, rgb(23 32 24 / 6%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(23 32 24 / 6%) 1px, transparent 1px);
+  background-size: 28px 28px;
+  color: var(--foreground);
+}
+
+.app-shell[data-active="dashboard"] ::selection {
+  background: var(--accent-soft);
+  color: var(--foreground);
+}
+
+.app-shell[data-active="dashboard"] :where(a, button, summary):focus-visible {
+  outline-color: var(--accent);
+  outline-offset: 4px;
+}
+
+.app-shell[data-active="dashboard"] .app-sidebar {
+  position: sticky;
+  top: 0;
+  min-height: 100svh;
+  height: 100svh;
+  border-color: var(--line-strong);
+  background: rgb(242 240 232 / 96%);
+  padding: 28px 20px 22px;
+}
+
+.app-shell[data-active="dashboard"] .brand-block {
+  align-items: flex-start;
+  gap: 11px;
+}
+
+.app-shell[data-active="dashboard"] .brand-mark {
+  width: 46px;
+  height: 54px;
+  border: 0;
+  border-radius: 0;
+  background: var(--accent);
+  box-shadow: inset 0 -3px 0 var(--accent-soft);
+  font-family: var(--font-bruno-display), sans-serif;
+  font-size: 2.25rem;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.app-shell[data-active="dashboard"] .brand-name {
+  font-size: 1.08rem;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+}
+
+.app-shell[data-active="dashboard"] .brand-subtitle {
+  max-width: 116px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="dashboard"] .nav-list {
+  gap: 0;
+  margin-top: 44px;
+  border-top: 1px solid var(--line-strong);
+  counter-reset: dashboard-navigation;
+}
+
+.app-shell[data-active="dashboard"] .nav-link {
+  position: relative;
+  min-height: 48px;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  color: var(--foreground);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  padding: 0 8px;
+  text-transform: uppercase;
+  counter-increment: dashboard-navigation;
+}
+
+.app-shell[data-active="dashboard"] .nav-link::before {
+  color: var(--muted);
+  content: "0" counter(dashboard-navigation);
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-shell[data-active="dashboard"] .nav-link:hover {
+  background: rgb(223 255 63 / 46%);
+  color: var(--accent-strong);
+}
+
+.app-shell[data-active="dashboard"] .nav-link[aria-current="page"] {
+  background: var(--accent-soft);
+  box-shadow: inset 0 -2px 0 var(--warning);
+  color: var(--foreground);
+}
+
+.app-shell[data-active="dashboard"] .sidebar-note {
+  border-color: var(--line-strong);
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="dashboard"] .status-dot {
+  width: 12px;
+  height: 9px;
+  border-radius: 0;
+  background: var(--accent);
+  box-shadow: inset -3px 0 0 var(--accent-soft);
+}
+
+.app-shell[data-active="dashboard"] .shell-main {
+  width: min(100%, 1500px);
+  padding: 34px clamp(22px, 3.8vw, 64px) 72px;
+}
+
+.app-shell[data-active="dashboard"] .topbar {
+  align-items: flex-end;
+  border-bottom: 2px solid var(--foreground);
+  padding-bottom: 18px;
+}
+
+.app-shell[data-active="dashboard"] .eyebrow {
+  width: fit-content;
+  margin-bottom: 9px;
+  background: var(--accent-soft);
+  box-shadow: inset 0 -2px 0 var(--warning);
+  color: var(--foreground);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  padding: 6px 9px 5px;
+}
+
+.app-shell[data-active="dashboard"] h1 {
+  max-width: 760px;
+  font-family: var(--font-bruno-display), sans-serif;
+  font-size: clamp(3.8rem, 7vw, 6rem);
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  line-height: 0.88;
+  text-wrap: balance;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="dashboard"] .page-description {
+  max-width: 66ch;
+  margin: 18px 0 32px;
+  color: var(--muted);
+  font-size: 0.96rem;
+  line-height: 1.6;
+}
+
+.app-shell[data-active="dashboard"] .health-link {
+  min-height: 46px;
+  border-color: var(--foreground);
+  border-radius: 0;
+  background: transparent;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  padding-inline: 16px;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="dashboard"] .health-link:hover {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-page {
+  gap: 28px;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-fleet-pulse,
+.app-shell[data-active="dashboard"] .dashboard-infrastructure,
+.app-shell[data-active="dashboard"] .dashboard-system-notes,
+.app-shell[data-active="dashboard"]
+  .dashboard-page
+  :where(
+    .agent-list-panel,
+    .activity-feed-panel,
+    .approval-panel,
+    .manual-runner-panel,
+    .runtime-log-panel,
+    .empty-state
+  ) {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-fleet-pulse {
+  overflow: hidden;
+  border: 2px solid var(--foreground);
+  background: var(--panel);
+  box-shadow: 0 22px 44px rgb(21 94 239 / 16%);
+}
+
+.app-shell[data-active="dashboard"] .dashboard-fleet-pulse-heading {
+  align-items: center;
+  background: var(--accent);
+  color: #ffffff;
+  padding: 18px 22px 16px;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-fleet-pulse-heading p {
+  color: rgb(255 255 255 / 76%);
+  font-family: inherit;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-fleet-pulse-heading h2 {
+  font-family: var(--font-bruno-display), sans-serif;
+  font-size: clamp(2.35rem, 4vw, 3.7rem);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 0.92;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-fleet-pulse-heading > span {
+  border: 1px solid rgb(255 255 255 / 56%);
+  color: #ffffff;
+  font-size: 0.66rem;
+  letter-spacing: 0.05em;
+  padding: 7px 9px;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl {
+  border-top: 2px solid var(--foreground);
+  background: var(--panel);
+}
+
+.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl > div {
+  gap: 8px;
+  border-color: var(--line-strong);
+  padding: 18px 18px 17px;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl > div::before {
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 5px;
+  border-radius: 0;
+  background: var(--line);
+}
+
+.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl > div[data-state="active"]::before,
+.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl > div[data-state="clear"]::before {
+  background: var(--accent);
+  box-shadow: none;
+}
+
+.app-shell[data-active="dashboard"]
+  .dashboard-fleet-pulse
+  dl
+  > div[data-state="attention"]::before {
+  background: var(--warning);
+  box-shadow: none;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dt {
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dd {
+  display: grid;
+  gap: 3px;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dd strong {
+  font-family: var(--font-bruno-display), sans-serif;
+  font-size: 2.45rem;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-fleet-pulse dd span {
+  min-height: 2.5em;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-work-queue > section {
+  max-height: 520px;
+  overflow: auto;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-work-queue .approval-panel {
+  border: 2px solid var(--foreground);
+  background-color: var(--panel);
+  background-image: linear-gradient(to bottom, transparent 27px, rgb(23 32 24 / 7%) 28px);
+  background-size: 100% 28px;
+  padding: 0;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-work-queue .section-heading {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  align-items: flex-end;
+  margin: 0;
+  border-bottom: 2px solid var(--foreground);
+  background: var(--accent-soft);
+  padding: 18px 22px 16px;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-work-queue .section-heading h2,
+.app-shell[data-active="dashboard"] .dashboard-workbench .section-heading h2,
+.app-shell[data-active="dashboard"] .dashboard-section-heading h2 {
+  font-family: var(--font-bruno-display), sans-serif;
+  font-size: clamp(2.25rem, 4vw, 3.45rem);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 0.92;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-work-queue .section-heading span,
+.app-shell[data-active="dashboard"] .dashboard-workbench .section-heading span {
+  color: var(--foreground);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="dashboard"]
+  .dashboard-work-queue
+  :where(.approval-list, .activity-empty-state, .safe-error) {
+  margin: 0 22px 22px;
+}
+
+.app-shell[data-active="dashboard"] .approval-list {
+  gap: 0;
+  counter-reset: dashboard-decisions;
+}
+
+.app-shell[data-active="dashboard"] .approval-item {
+  position: relative;
+  min-height: 120px;
+  gap: 11px;
+  border-color: var(--line-strong);
+  padding: 20px 0 20px 64px;
+  counter-increment: dashboard-decisions;
+}
+
+.app-shell[data-active="dashboard"] .approval-item::before {
+  position: absolute;
+  top: 20px;
+  left: 0;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid var(--foreground);
+  background: var(--panel);
+  content: counter(dashboard-decisions, decimal-leading-zero);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+}
+
+.app-shell[data-active="dashboard"] .approval-item-header a,
+.app-shell[data-active="dashboard"] .agent-table a,
+.app-shell[data-active="dashboard"] .activity-agent-context a {
+  color: var(--accent-strong);
+  text-decoration-color: var(--accent-soft);
+  text-decoration-thickness: 3px;
+  text-underline-offset: 3px;
+}
+
+.app-shell[data-active="dashboard"] .approval-item h3 {
+  font-size: 1.02rem;
+  font-weight: 900;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-workbench {
+  grid-template-columns: minmax(0, 1.4fr) minmax(330px, 0.8fr);
+  gap: 28px;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-agent-column,
+.app-shell[data-active="dashboard"] .dashboard-activity-column {
+  min-width: 0;
+}
+
+.app-shell[data-active="dashboard"]
+  .dashboard-workbench
+  :where(.agent-list-panel, .activity-feed-panel) {
+  border: 1px solid var(--foreground);
+  background: var(--panel);
+  padding: 0 20px 20px;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-agent-column .empty-state {
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  padding: 20px;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-activity-column .activity-empty-state {
+  min-height: 0;
+  padding-block: 18px;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-workbench .section-heading {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  align-items: flex-end;
+  margin: 0 -20px 18px;
+  border-bottom: 1px solid var(--foreground);
+  background: var(--panel);
+  padding: 18px 20px 15px;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-activity-column > section {
+  max-height: 720px;
+}
+
+.app-shell[data-active="dashboard"] .agent-table th,
+.app-shell[data-active="dashboard"] .agent-table td {
+  border-color: var(--line-strong);
+}
+
+.app-shell[data-active="dashboard"] .agent-table th {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+.app-shell[data-active="dashboard"]
+  :where(.status-pill, .deployment-status-label, .deleted-agent-pill) {
+  border-radius: 0;
+}
+
+.app-shell[data-active="dashboard"] .status-pill {
+  min-height: 26px;
+  border-color: var(--foreground);
+  background: var(--panel-subtle);
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  padding-inline: 8px;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="dashboard"] .activity-feed,
+.app-shell[data-active="dashboard"] .runtime-log-list,
+.app-shell[data-active="dashboard"] .manual-runner-list {
+  gap: 0;
+}
+
+.app-shell[data-active="dashboard"]
+  :where(.activity-feed-item, .runtime-log-item, .manual-runner-item) {
+  border-color: var(--line-strong);
+  padding-block: 16px;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-infrastructure {
+  border: 1px solid var(--foreground);
+  background: var(--panel-subtle);
+  padding: 0;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-section-heading {
+  align-items: flex-end;
+  margin: 0;
+  border-bottom: 2px solid var(--foreground);
+  background: var(--foreground);
+  color: #ffffff;
+  padding: 20px 22px 18px;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-section-heading p {
+  color: rgb(255 255 255 / 70%);
+  font-family: inherit;
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-section-heading > span {
+  color: var(--accent-soft);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-infrastructure-grid {
+  gap: 0;
+  padding: 0;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-cost-ledger {
+  border-top: 1px solid var(--foreground);
+  background: var(--panel);
+}
+
+.app-shell[data-active="dashboard"] .dashboard-infrastructure-grid > section,
+.app-shell[data-active="dashboard"] .dashboard-log-strip {
+  max-height: 650px;
+  border: 0;
+  background: var(--panel);
+}
+
+.app-shell[data-active="dashboard"] .dashboard-infrastructure-grid > section + section {
+  border-left: 1px solid var(--foreground);
+}
+
+.app-shell[data-active="dashboard"] .dashboard-log-strip {
+  grid-column: 1 / -1;
+  border-bottom: 1px solid var(--foreground);
+}
+
+.app-shell[data-active="dashboard"] .dashboard-log-strip > section {
+  max-height: 420px;
+  overflow: auto;
+  border: 0;
+  background: transparent;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-infrastructure-grid .section-heading {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  margin: 0;
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--panel);
+  padding: 16px 18px 13px;
+}
+
+.app-shell[data-active="dashboard"]
+  .dashboard-infrastructure-grid
+  > section
+  > :where(.manual-runner-list, .cloud-runner-list, .activity-empty-state, .safe-error) {
+  margin: 0 18px 18px;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-system-notes {
+  border: 0;
+  border-top: 1px solid var(--foreground);
+  background: var(--panel);
+  padding: 18px 20px;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-system-notes summary strong {
+  font-size: 0.86rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="dashboard"] .dashboard-system-notes summary small,
+.app-shell[data-active="dashboard"] .dashboard-system-notes summary > span:last-child {
+  color: var(--muted);
+}
+
+.app-shell[data-active="dashboard"] :where(.primary-button, .secondary-button, .disabled-button) {
+  min-height: 46px;
+  border-radius: 0;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="dashboard"] .primary-button {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.app-shell[data-active="dashboard"] .primary-button:hover {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+  box-shadow: 0 12px 28px rgb(21 94 239 / 24%);
+  transform: translateY(-2px);
+}
+
+.app-shell[data-active="dashboard"] .secondary-button {
+  border-color: var(--foreground);
+  background: transparent;
+}
+
+.app-shell[data-active="dashboard"] .secondary-button:hover {
+  background: var(--accent-soft);
+  color: var(--foreground);
+}
+
+.app-shell[data-active="dashboard"] :where(.safe-error, .approval-action-error) {
+  border: 1px solid var(--warning);
+  border-radius: 0;
+  background: #f8e9e5;
+  color: #6e1c1c;
+}
+
+.app-shell[data-active="dashboard"] * {
+  scrollbar-color: var(--accent) var(--panel-subtle);
+  scrollbar-width: thin;
+}
+
+@media (max-width: 1120px) {
+  .app-shell[data-active="dashboard"] .dashboard-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .app-shell[data-active="dashboard"] .dashboard-work-queue {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .app-shell[data-active="dashboard"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-shell[data-active="dashboard"] .app-sidebar {
+    position: static;
+    height: auto;
+    min-height: auto;
+    padding: 16px;
+  }
+
+  .app-shell[data-active="dashboard"] .brand-block {
+    align-items: center;
+  }
+
+  .app-shell[data-active="dashboard"] .brand-subtitle {
+    max-width: none;
+  }
+
+  .app-shell[data-active="dashboard"] .nav-list {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(110px, 1fr);
+    margin-top: 16px;
+    border-left: 1px solid var(--line-strong);
+  }
+
+  .app-shell[data-active="dashboard"] .nav-link {
+    border-right: 1px solid var(--line-strong);
+  }
+
+  .app-shell[data-active="dashboard"] .sidebar-note {
+    display: none;
+  }
+
+  .app-shell[data-active="dashboard"] .shell-main {
+    padding: 28px 16px 48px;
+  }
+
+  .app-shell[data-active="dashboard"] .topbar {
+    align-items: stretch;
+  }
+
+  .app-shell[data-active="dashboard"] .dashboard-page {
+    gap: 18px;
+  }
+
+  .app-shell[data-active="dashboard"] .dashboard-agent-column .empty-state {
+    grid-template-columns: 1fr;
+  }
+
+  .app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl > div,
+  .app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl > div:first-child {
+    border-top: 1px solid var(--line-strong);
+    border-left: 1px solid var(--line-strong);
+  }
+
+  .app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl > div:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .app-shell[data-active="dashboard"] .dashboard-work-queue > section,
+  .app-shell[data-active="dashboard"] .dashboard-activity-column > section,
+  .app-shell[data-active="dashboard"] .dashboard-infrastructure-grid > section,
+  .app-shell[data-active="dashboard"] .dashboard-log-strip > section {
+    max-height: none;
+  }
+
+  .app-shell[data-active="dashboard"] .dashboard-infrastructure-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .app-shell[data-active="dashboard"] .dashboard-infrastructure-grid > section + section {
+    border-top: 1px solid var(--foreground);
+    border-left: 0;
+  }
+
+  .app-shell[data-active="dashboard"] .approval-item {
+    padding-left: 0;
+    padding-top: 68px;
+  }
+
+  .app-shell[data-active="dashboard"] .approval-item::before {
+    top: 16px;
+  }
+
+  .app-shell[data-active="dashboard"] .agent-table-wrap {
+    display: none;
+  }
+
+  .app-shell[data-active="dashboard"] .mobile-agent-list {
+    display: grid;
+  }
+}
+
+@media (max-width: 460px) {
+  .app-shell[data-active="dashboard"] h1 {
+    font-size: 3.35rem;
+  }
+
+  .app-shell[data-active="dashboard"] .dashboard-fleet-pulse-heading,
+  .app-shell[data-active="dashboard"] .dashboard-work-queue .section-heading,
+  .app-shell[data-active="dashboard"] .dashboard-workbench .section-heading,
+  .app-shell[data-active="dashboard"] .dashboard-infrastructure-grid .section-heading,
+  .app-shell[data-active="dashboard"] .dashboard-section-heading {
+    display: grid;
+    gap: 10px;
+  }
+
+  .app-shell[data-active="dashboard"] .dashboard-system-notes summary > span:last-child {
+    font-size: 0;
+  }
+
+  .app-shell[data-active="dashboard"] .dashboard-system-notes summary > span:last-child::after {
+    content: "+";
+    font-size: 1rem;
+  }
+
+  .app-shell[data-active="dashboard"]
+    .dashboard-system-notes[open]
+    summary
+    > span:last-child::after {
+    content: "−";
+  }
+
+  .app-shell[data-active="dashboard"] .dashboard-fleet-pulse dl > div {
+    padding: 16px 14px 14px;
+  }
+
+  .app-shell[data-active="dashboard"] .dashboard-fleet-pulse dd strong {
+    font-size: 2.1rem;
+  }
+
+  .app-shell[data-active="dashboard"]
+    .dashboard-work-queue
+    :where(.approval-list, .activity-empty-state, .safe-error) {
+    margin-inline: 16px;
+  }
+}

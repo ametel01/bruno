@@ -20,10 +20,7 @@ export function DashboardCostSummary({ result }: { result: DashboardCostResult }
   return (
     <section className={styles.panel} aria-labelledby="dashboard-cost-summary-title">
       <div className={styles.heading}>
-        <div>
-          <p className={styles.eyebrow}>Cost telemetry</p>
-          <h2 id="dashboard-cost-summary-title">Infrastructure cost estimates</h2>
-        </div>
+        <h2 id="dashboard-cost-summary-title">Infrastructure cost estimates</h2>
         <span className={styles.badge}>Raw compute estimate</span>
       </div>
       {result.ok ? (

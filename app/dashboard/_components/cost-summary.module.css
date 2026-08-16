@@ -2,10 +2,10 @@
   min-width: 0;
   grid-column: 1 / -1;
   overflow: hidden;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border: 0;
+  border-radius: 0;
   background: var(--panel);
-  box-shadow: var(--shadow);
+  box-shadow: none;
 }
 
 .heading {
@@ -13,9 +13,10 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-  border-bottom: 1px solid var(--line);
-  background: linear-gradient(90deg, rgb(31 111 104 / 10%), transparent 45%), var(--panel-subtle);
-  padding: 16px 18px;
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--foreground);
+  padding: 18px 20px 16px;
 }
 
 .heading h2,
@@ -29,10 +30,14 @@
 }
 
 .heading h2 {
-  font-size: 1.1rem;
+  font-family: var(--font-bruno-display), sans-serif;
+  font-size: clamp(1.8rem, 3vw, 2.5rem);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 0.92;
+  text-transform: uppercase;
 }
 
-.eyebrow,
 .windowIndex {
   color: var(--accent-strong);
   font-size: 0.68rem;
@@ -41,16 +46,12 @@
   text-transform: uppercase;
 }
 
-.eyebrow {
-  margin-bottom: 4px;
-}
-
 .badge {
   flex: 0 0 auto;
-  border: 1px solid var(--accent);
-  border-radius: 999px;
+  border: 1px solid var(--foreground);
+  border-radius: 0;
   background: var(--accent-soft);
-  color: var(--accent-strong);
+  color: var(--foreground);
   font-size: 0.72rem;
   font-weight: 900;
   padding: 6px 10px;
@@ -66,7 +67,7 @@
 }
 
 .intro {
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-strong);
 }
 
 .windows {
@@ -80,7 +81,7 @@
 }
 
 .window + .window {
-  border-left: 1px solid var(--line);
+  border-left: 1px solid var(--line-strong);
 }
 
 .windowHeading {
@@ -93,7 +94,8 @@
 
 .windowHeading h3 {
   margin-top: 4px;
-  font-size: 1rem;
+  font-size: 1.02rem;
+  font-weight: 900;
 }
 
 .windowHeading > span {
@@ -114,7 +116,7 @@
   min-width: 0;
   align-items: start;
   gap: 12px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-strong);
   padding: 10px 0;
 }
 
@@ -179,7 +181,7 @@
 }
 
 .disclaimer {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--line-strong);
   background: var(--panel-subtle);
 }
 
@@ -191,7 +193,7 @@
 .error {
   display: grid;
   gap: 5px;
-  border-left: 4px solid #b84a3a;
+  border: 1px solid var(--warning);
   background: #fff2ef;
   color: #7d291e;
   margin: 22px;
