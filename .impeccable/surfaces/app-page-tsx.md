@@ -30,10 +30,10 @@ related_targets: ["app/landing.module.css","app/_components/bruno-logo.tsx","app
 - World: high-air ivory fields, precise charcoal typography, warm structural rules, mint/lime state signals, circular company-system geometry, softly rounded product surfaces, and sparse ambient depth.
 - First viewport: an always-on 24/7 promise and clear dashboard/agent actions sit beside a faithful illustrative Action Inbox; the orbital signal pattern binds brand, learning, and product proof.
 - Signature interaction: one mint signal travels around the Business Graph orbit while every state remains visible; reduced-motion clients keep the complete static model.
-- Rollout boundary: this landing page is the shipped visual ground truth; authenticated surfaces migrate deliberately in later phases and must not be described as already converted.
+- Rollout boundary: this landing page remains the visual ground truth; `/dashboard`, `/agents`, and `/settings` now carry its dense Operate translation, while authentication and agent-detail content remain separate migration boundaries.
 
 ## Unresolved decisions
 
 - Replace the public GitHub progress link when a dedicated launch-update destination exists.
 - Replace illustrative company records with validated product captures when the new command center ships.
-- Define the migration sequence for Founder Dispatch, Agent Roster, Workspace Ledger, and authentication surfaces.
+- Define the migration sequence for authentication and agent-detail content without forking the shared Calm Operations shell.

@@ -1,44 +1,306 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-16T18:47:41Z",
+  "generatedAt": "2026-08-16T19:51:35Z",
   "title": "Design System: Bruno.Ai",
   "extensions": {
     "colorMeta": {
-      "deep-charcoal": { "role": "primary", "displayName": "Deep Charcoal", "canonical": "#101314", "tonalRamp": ["oklch(15% 0.01 200)", "oklch(27% 0.01 200)", "oklch(39% 0.01 200)", "oklch(51% 0.01 200)", "oklch(63% 0.009 200)", "oklch(75% 0.007 200)", "oklch(87% 0.004 200)", "oklch(95% 0.002 200)"] },
-      "warm-espresso": { "role": "primary", "displayName": "Warm Espresso", "canonical": "#6b4d3c", "tonalRamp": ["oklch(15% 0.055 55)", "oklch(27% 0.065 55)", "oklch(39% 0.075 55)", "oklch(51% 0.08 55)", "oklch(63% 0.07 55)", "oklch(75% 0.055 55)", "oklch(87% 0.032 55)", "oklch(95% 0.014 55)"] },
-      "signal-mint": { "role": "secondary", "displayName": "Signal Mint", "canonical": "#59d6c5", "tonalRamp": ["oklch(15% 0.07 175)", "oklch(27% 0.1 175)", "oklch(39% 0.13 175)", "oklch(51% 0.15 175)", "oklch(63% 0.15 175)", "oklch(75% 0.13 175)", "oklch(87% 0.08 175)", "oklch(95% 0.035 175)"] },
-      "signal-mint-soft": { "role": "secondary", "displayName": "Soft Signal Mint", "canonical": "#dff6f1", "tonalRamp": ["oklch(15% 0.025 175)", "oklch(27% 0.035 175)", "oklch(39% 0.045 175)", "oklch(51% 0.05 175)", "oklch(63% 0.05 175)", "oklch(75% 0.045 175)", "oklch(87% 0.035 175)", "oklch(95% 0.02 175)"] },
-      "action-lime": { "role": "tertiary", "displayName": "Action Lime", "canonical": "#b8f34b", "tonalRamp": ["oklch(15% 0.11 125)", "oklch(27% 0.15 125)", "oklch(39% 0.19 125)", "oklch(51% 0.22 125)", "oklch(63% 0.23 125)", "oklch(75% 0.21 125)", "oklch(87% 0.14 125)", "oklch(95% 0.065 125)"] },
-      "action-lime-soft": { "role": "tertiary", "displayName": "Soft Action Lime", "canonical": "#e9fbc4", "tonalRamp": ["oklch(15% 0.04 125)", "oklch(27% 0.055 125)", "oklch(39% 0.07 125)", "oklch(51% 0.085 125)", "oklch(63% 0.09 125)", "oklch(75% 0.085 125)", "oklch(87% 0.065 125)", "oklch(95% 0.035 125)"] },
-      "stone": { "role": "neutral", "displayName": "Stone", "canonical": "#d8ccbd", "tonalRamp": ["oklch(15% 0.018 75)", "oklch(27% 0.022 75)", "oklch(39% 0.026 75)", "oklch(51% 0.03 75)", "oklch(63% 0.031 75)", "oklch(75% 0.028 75)", "oklch(87% 0.02 75)", "oklch(95% 0.01 75)"] },
-      "ivory": { "role": "neutral", "displayName": "Ivory", "canonical": "#f7f4ee", "tonalRamp": ["oklch(15% 0.012 85)", "oklch(27% 0.016 85)", "oklch(39% 0.02 85)", "oklch(51% 0.022 85)", "oklch(63% 0.022 85)", "oklch(75% 0.02 85)", "oklch(87% 0.015 85)", "oklch(95% 0.009 85)"] },
-      "warm-white": { "role": "neutral", "displayName": "Warm White", "canonical": "#fffdfa", "tonalRamp": ["oklch(15% 0.006 75)", "oklch(27% 0.008 75)", "oklch(39% 0.01 75)", "oklch(51% 0.012 75)", "oklch(63% 0.012 75)", "oklch(75% 0.01 75)", "oklch(87% 0.007 75)", "oklch(98% 0.003 75)"] },
-      "muted-ink": { "role": "neutral", "displayName": "Muted Ink", "canonical": "#6f6d68", "tonalRamp": ["oklch(15% 0.008 80)", "oklch(27% 0.009 80)", "oklch(39% 0.01 80)", "oklch(51% 0.011 80)", "oklch(63% 0.01 80)", "oklch(75% 0.008 80)", "oklch(87% 0.005 80)", "oklch(95% 0.002 80)"] },
-      "espresso-rule": { "role": "neutral", "displayName": "Espresso Rule", "canonical": "rgb(107 77 60 / 18%)", "tonalRamp": ["oklch(15% 0.018 55)", "oklch(27% 0.022 55)", "oklch(39% 0.026 55)", "oklch(51% 0.028 55)", "oklch(63% 0.024 55)", "oklch(75% 0.018 55)", "oklch(87% 0.01 55)", "oklch(95% 0.004 55)"] },
-      "charcoal-rule": { "role": "neutral", "displayName": "Charcoal Rule", "canonical": "rgb(16 19 20 / 20%)", "tonalRamp": ["oklch(15% 0.006 200)", "oklch(27% 0.007 200)", "oklch(39% 0.008 200)", "oklch(51% 0.008 200)", "oklch(63% 0.007 200)", "oklch(75% 0.005 200)", "oklch(87% 0.003 200)", "oklch(95% 0.001 200)"] }
+      "deep-charcoal": {
+        "role": "primary",
+        "displayName": "Deep Charcoal",
+        "canonical": "#101314",
+        "tonalRamp": [
+          "oklch(15% 0.01 200)",
+          "oklch(27% 0.01 200)",
+          "oklch(39% 0.01 200)",
+          "oklch(51% 0.01 200)",
+          "oklch(63% 0.009 200)",
+          "oklch(75% 0.007 200)",
+          "oklch(87% 0.004 200)",
+          "oklch(95% 0.002 200)"
+        ]
+      },
+      "warm-espresso": {
+        "role": "primary",
+        "displayName": "Warm Espresso",
+        "canonical": "#6b4d3c",
+        "tonalRamp": [
+          "oklch(15% 0.055 55)",
+          "oklch(27% 0.065 55)",
+          "oklch(39% 0.075 55)",
+          "oklch(51% 0.08 55)",
+          "oklch(63% 0.07 55)",
+          "oklch(75% 0.055 55)",
+          "oklch(87% 0.032 55)",
+          "oklch(95% 0.014 55)"
+        ]
+      },
+      "signal-mint": {
+        "role": "secondary",
+        "displayName": "Signal Mint",
+        "canonical": "#59d6c5",
+        "tonalRamp": [
+          "oklch(15% 0.07 175)",
+          "oklch(27% 0.1 175)",
+          "oklch(39% 0.13 175)",
+          "oklch(51% 0.15 175)",
+          "oklch(63% 0.15 175)",
+          "oklch(75% 0.13 175)",
+          "oklch(87% 0.08 175)",
+          "oklch(95% 0.035 175)"
+        ]
+      },
+      "signal-mint-deep": {
+        "role": "secondary",
+        "displayName": "Deep Signal Mint",
+        "canonical": "#2d887d",
+        "tonalRamp": [
+          "oklch(15% 0.04 175)",
+          "oklch(27% 0.06 175)",
+          "oklch(39% 0.08 175)",
+          "oklch(51% 0.1 175)",
+          "oklch(63% 0.1 175)",
+          "oklch(75% 0.085 175)",
+          "oklch(87% 0.055 175)",
+          "oklch(95% 0.025 175)"
+        ]
+      },
+      "signal-mint-soft": {
+        "role": "secondary",
+        "displayName": "Soft Signal Mint",
+        "canonical": "#dff6f1",
+        "tonalRamp": [
+          "oklch(15% 0.025 175)",
+          "oklch(27% 0.035 175)",
+          "oklch(39% 0.045 175)",
+          "oklch(51% 0.05 175)",
+          "oklch(63% 0.05 175)",
+          "oklch(75% 0.045 175)",
+          "oklch(87% 0.035 175)",
+          "oklch(95% 0.02 175)"
+        ]
+      },
+      "action-lime": {
+        "role": "tertiary",
+        "displayName": "Action Lime",
+        "canonical": "#b8f34b",
+        "tonalRamp": [
+          "oklch(15% 0.11 125)",
+          "oklch(27% 0.15 125)",
+          "oklch(39% 0.19 125)",
+          "oklch(51% 0.22 125)",
+          "oklch(63% 0.23 125)",
+          "oklch(75% 0.21 125)",
+          "oklch(87% 0.14 125)",
+          "oklch(95% 0.065 125)"
+        ]
+      },
+      "action-lime-soft": {
+        "role": "tertiary",
+        "displayName": "Soft Action Lime",
+        "canonical": "#e9fbc4",
+        "tonalRamp": [
+          "oklch(15% 0.04 125)",
+          "oklch(27% 0.055 125)",
+          "oklch(39% 0.07 125)",
+          "oklch(51% 0.085 125)",
+          "oklch(63% 0.09 125)",
+          "oklch(75% 0.085 125)",
+          "oklch(87% 0.065 125)",
+          "oklch(95% 0.035 125)"
+        ]
+      },
+      "stone": {
+        "role": "neutral",
+        "displayName": "Stone",
+        "canonical": "#d8ccbd",
+        "tonalRamp": [
+          "oklch(15% 0.018 75)",
+          "oklch(27% 0.022 75)",
+          "oklch(39% 0.026 75)",
+          "oklch(51% 0.03 75)",
+          "oklch(63% 0.031 75)",
+          "oklch(75% 0.028 75)",
+          "oklch(87% 0.02 75)",
+          "oklch(95% 0.01 75)"
+        ]
+      },
+      "stone-soft": {
+        "role": "neutral",
+        "displayName": "Soft Stone",
+        "canonical": "#eee7de",
+        "tonalRamp": [
+          "oklch(15% 0.014 75)",
+          "oklch(27% 0.018 75)",
+          "oklch(39% 0.022 75)",
+          "oklch(51% 0.024 75)",
+          "oklch(63% 0.023 75)",
+          "oklch(75% 0.019 75)",
+          "oklch(87% 0.013 75)",
+          "oklch(95% 0.007 75)"
+        ]
+      },
+      "ivory": {
+        "role": "neutral",
+        "displayName": "Ivory",
+        "canonical": "#f7f4ee",
+        "tonalRamp": [
+          "oklch(15% 0.012 85)",
+          "oklch(27% 0.016 85)",
+          "oklch(39% 0.02 85)",
+          "oklch(51% 0.022 85)",
+          "oklch(63% 0.022 85)",
+          "oklch(75% 0.02 85)",
+          "oklch(87% 0.015 85)",
+          "oklch(95% 0.009 85)"
+        ]
+      },
+      "warm-white": {
+        "role": "neutral",
+        "displayName": "Warm White",
+        "canonical": "#fffdfa",
+        "tonalRamp": [
+          "oklch(15% 0.006 75)",
+          "oklch(27% 0.008 75)",
+          "oklch(39% 0.01 75)",
+          "oklch(51% 0.012 75)",
+          "oklch(63% 0.012 75)",
+          "oklch(75% 0.01 75)",
+          "oklch(87% 0.007 75)",
+          "oklch(98% 0.003 75)"
+        ]
+      },
+      "muted-ink": {
+        "role": "neutral",
+        "displayName": "Muted Ink",
+        "canonical": "#6f6d68",
+        "tonalRamp": [
+          "oklch(15% 0.008 80)",
+          "oklch(27% 0.009 80)",
+          "oklch(39% 0.01 80)",
+          "oklch(51% 0.011 80)",
+          "oklch(63% 0.01 80)",
+          "oklch(75% 0.008 80)",
+          "oklch(87% 0.005 80)",
+          "oklch(95% 0.002 80)"
+        ]
+      },
+      "espresso-rule": {
+        "role": "neutral",
+        "displayName": "Espresso Rule",
+        "canonical": "rgb(107 77 60 / 18%)",
+        "tonalRamp": [
+          "oklch(15% 0.018 55)",
+          "oklch(27% 0.022 55)",
+          "oklch(39% 0.026 55)",
+          "oklch(51% 0.028 55)",
+          "oklch(63% 0.024 55)",
+          "oklch(75% 0.018 55)",
+          "oklch(87% 0.01 55)",
+          "oklch(95% 0.004 55)"
+        ]
+      },
+      "charcoal-rule": {
+        "role": "neutral",
+        "displayName": "Charcoal Rule",
+        "canonical": "rgb(16 19 20 / 20%)",
+        "tonalRamp": [
+          "oklch(15% 0.006 200)",
+          "oklch(27% 0.007 200)",
+          "oklch(39% 0.008 200)",
+          "oklch(51% 0.008 200)",
+          "oklch(63% 0.007 200)",
+          "oklch(75% 0.005 200)",
+          "oklch(87% 0.003 200)",
+          "oklch(95% 0.001 200)"
+        ]
+      }
     },
     "typographyMeta": {
-      "display": { "displayName": "Display", "purpose": "Oversized promises and closing statements." },
-      "headline": { "displayName": "Headline", "purpose": "Section arguments and operating-model transitions." },
-      "title": { "displayName": "Title", "purpose": "Panel headings, loop names, and operational titles." },
-      "body": { "displayName": "Body", "purpose": "Narrative explanations and operational evidence." },
-      "label": { "displayName": "Label", "purpose": "Navigation, actions, metadata, tags, and policy states." }
+      "display": {
+        "displayName": "Display",
+        "purpose": "Oversized promises and closing statements."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section arguments and operating-model transitions."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Panel headings, loop names, and operational titles."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Narrative explanations and operational evidence."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Navigation, actions, metadata, tags, and policy states."
+      }
     },
     "shadows": [
-      { "name": "action-lift", "value": "0 14px 28px rgb(16 19 20 / 14%)", "purpose": "Lifts a compact dark action on hover." },
-      { "name": "proof-panel", "value": "0 34px 74px rgb(71 56 45 / 14%)", "purpose": "Gives the illustrative Action Inbox its product-panel depth." },
-      { "name": "section-panel", "value": "0 34px 74px rgb(71 56 45 / 12%)", "purpose": "Separates a large operating panel from the ivory canvas." },
-      { "name": "graph-core", "value": "0 26px 48px rgb(16 19 20 / 18%)", "purpose": "Focuses the circular center of the Business Graph." },
-      { "name": "orbit-contact", "value": "0 10px 20px rgb(71 56 45 / 8%)", "purpose": "Keeps small orbit labels legible above linework." }
+      {
+        "name": "action-lift",
+        "value": "0 14px 28px rgb(16 19 20 / 14%)",
+        "purpose": "Lifts a compact dark action on hover."
+      },
+      {
+        "name": "proof-panel",
+        "value": "0 34px 74px rgb(71 56 45 / 14%)",
+        "purpose": "Gives the illustrative Action Inbox its product-panel depth."
+      },
+      {
+        "name": "section-panel",
+        "value": "0 34px 74px rgb(71 56 45 / 12%)",
+        "purpose": "Separates a large operating panel from the ivory canvas."
+      },
+      {
+        "name": "graph-core",
+        "value": "0 26px 48px rgb(16 19 20 / 18%)",
+        "purpose": "Focuses the circular center of the Business Graph."
+      },
+      {
+        "name": "orbit-contact",
+        "value": "0 10px 20px rgb(71 56 45 / 8%)",
+        "purpose": "Keeps small orbit labels legible above linework."
+      },
+      {
+        "name": "workspace-panel",
+        "value": "0 18px 48px rgb(16 19 20 / 6%)",
+        "purpose": "Separates major authenticated work panels from the ivory canvas."
+      },
+      {
+        "name": "workspace-pulse",
+        "value": "0 24px 64px rgb(16 19 20 / 8%)",
+        "purpose": "Raises the persisted four-measure pulse above ordinary workspace panels."
+      }
     ],
     "motion": [
-      { "name": "text-state", "value": "160ms ease-out", "purpose": "Navigation and inline-link color transitions." },
-      { "name": "control-state", "value": "180ms ease-out", "purpose": "Button color, border, shadow, and transform transitions." },
-      { "name": "business-orbit", "value": "11s linear infinite", "purpose": "Moves one mint signal around the Business Graph; disabled for reduced motion." }
+      {
+        "name": "text-state",
+        "value": "160ms ease-out",
+        "purpose": "Navigation and inline-link color transitions."
+      },
+      {
+        "name": "control-state",
+        "value": "180ms ease-out",
+        "purpose": "Button color, border, shadow, and transform transitions."
+      },
+      {
+        "name": "business-orbit",
+        "value": "11s linear infinite",
+        "purpose": "Moves one mint signal around the Business Graph; disabled for reduced motion."
+      },
+      {
+        "name": "workspace-presence",
+        "value": "3.8s cubic-bezier(0.16, 1, 0.3, 1) infinite",
+        "purpose": "Breathes the written authenticated presence signal; disabled for reduced motion."
+      }
     ],
     "breakpoints": [
       { "name": "stack", "value": "1120px" },
-      { "name": "mobile", "value": "720px" }
+      { "name": "workspace-header", "value": "860px" },
+      { "name": "mobile", "value": "720px" },
+      { "name": "workspace-mobile", "value": "620px" }
     ]
   },
   "components": [
@@ -96,24 +358,106 @@
       "description": "A legible business action paired with a written authority state that learning never silently expands.",
       "html": "<div class=\"ds-policy-row\"><span>Send to an existing customer</span><strong>Ask me</strong></div>",
       "css": ".ds-policy-row { display:grid; grid-template-columns:1.25fr .75fr; gap:20px; padding:16px 0; border-bottom:1px solid rgb(16 19 20 / 20%); background:#fffdfa; color:#101314; font-family:Inter,ui-sans-serif,system-ui,sans-serif; font-size:.82rem; } .ds-policy-row strong { color:#6b4d3c; font-size:.68rem; text-transform:uppercase; } .ds-policy-row:hover { border-color:#101314; } .ds-policy-row:focus-visible { outline:3px solid #59d6c5; outline-offset:4px; }"
+    },
+    {
+      "name": "Authenticated Route Navigation",
+      "kind": "nav",
+      "refersTo": "workspace-nav-active",
+      "description": "The three-route Operate navigation used in the opaque rail and responsive header.",
+      "html": "<nav class=\"ds-workspace-nav\" aria-label=\"Product routes\"><a aria-current=\"page\" href=\"#\"><span></span>Dashboard</a><a href=\"#\"><span></span>Agents</a><a href=\"#\"><span></span>Settings</a></nav>",
+      "css": ".ds-workspace-nav { display:grid; gap:5px; width:196px; font-family:Inter,ui-sans-serif,system-ui,sans-serif; } .ds-workspace-nav a { display:flex; min-height:44px; align-items:center; gap:9px; padding:0 14px; border-radius:999px; color:#6f6d68; font-size:.78rem; font-weight:650; text-decoration:none; transition:background-color 180ms ease-out,color 180ms ease-out,transform 180ms ease-out; } .ds-workspace-nav a span { width:7px; height:7px; border:1px solid #d8ccbd; border-radius:50%; } .ds-workspace-nav a:hover { background:#f1ece5; color:#101314; transform:translateX(2px); } .ds-workspace-nav a:focus-visible { outline:3px solid #59d6c5; outline-offset:4px; } .ds-workspace-nav a[aria-current=\"page\"] { background:#101314; box-shadow:0 10px 24px rgb(16 19 20 / 12%); color:#fffdfa; } .ds-workspace-nav a[aria-current=\"page\"] span { border-color:#59d6c5; background:#59d6c5; box-shadow:0 0 0 4px rgb(89 214 197 / 16%); } @media (max-width:620px) { .ds-workspace-nav { grid-template-columns:repeat(3,minmax(0,1fr)); width:100%; } .ds-workspace-nav a { justify-content:center; font-size:.72rem; } .ds-workspace-nav a span { display:none; } } @media (prefers-reduced-motion:reduce) { .ds-workspace-nav a { transition:none; } }"
+    },
+    {
+      "name": "Persisted Operating Pulse",
+      "kind": "card",
+      "refersTo": "workspace-pulse",
+      "description": "A four-measure persisted-state ledger shared by Dashboard, Agents, and Settings.",
+      "html": "<section class=\"ds-workspace-pulse\"><header><h2>Company pulse</h2><span>24/7 persisted state</span></header><dl><div data-state=\"active\"><dt>Agents at work</dt><dd><strong>3</strong><span>3 running now</span></dd></div><div data-state=\"attention\"><dt>Needs you</dt><dd><strong>2</strong><span>requests waiting</span></dd></div><div data-state=\"clear\"><dt>Capacity</dt><dd><strong>4/4</strong><span>online and known</span></dd></div><div><dt>Recent record</dt><dd><strong>12</strong><span>events in view</span></dd></div></dl></section>",
+      "css": ".ds-workspace-pulse { overflow:hidden; border:1px solid rgb(107 77 60 / 18%); border-radius:24px; background:#fffdfa; box-shadow:0 24px 64px rgb(16 19 20 / 8%); color:#101314; font-family:Inter,ui-sans-serif,system-ui,sans-serif; } .ds-workspace-pulse header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:23px 26px 20px; border-bottom:1px solid rgb(107 77 60 / 18%); } .ds-workspace-pulse h2 { margin:0; font-family:Satoshi,Inter,ui-sans-serif,system-ui,sans-serif; font-size:2.1rem; font-weight:600; letter-spacing:-.035em; } .ds-workspace-pulse header span { padding:8px 11px; border-radius:999px; background:#dff6f1; color:#2d887d; font-size:.68rem; font-weight:700; } .ds-workspace-pulse dl { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); margin:0; padding:0 26px; } .ds-workspace-pulse dl div { position:relative; min-width:0; border-left:1px solid rgb(107 77 60 / 18%); padding:25px 24px 27px; } .ds-workspace-pulse dl div:first-child { border-left:0; padding-left:0; } .ds-workspace-pulse dl div::before { position:absolute; top:29px; right:20px; width:8px; height:8px; border-radius:50%; background:#d8ccbd; box-shadow:0 0 0 5px rgb(216 204 189 / 18%); content:\"\"; } .ds-workspace-pulse dl div[data-state=\"active\"]::before,.ds-workspace-pulse dl div[data-state=\"clear\"]::before { background:#59d6c5; box-shadow:0 0 0 5px rgb(89 214 197 / 14%); } .ds-workspace-pulse dl div[data-state=\"attention\"]::before { background:#b8f34b; box-shadow:0 0 0 5px rgb(184 243 75 / 18%); } .ds-workspace-pulse dt { color:#6f6d68; font-size:.69rem; font-weight:700; } .ds-workspace-pulse dd { display:grid; gap:4px; margin:13px 0 0; } .ds-workspace-pulse dd strong { font-family:Satoshi,Inter,ui-sans-serif,system-ui,sans-serif; font-size:2.5rem; font-weight:600; letter-spacing:-.045em; line-height:1; } .ds-workspace-pulse dd span { color:#6f6d68; font-size:.72rem; line-height:1.4; } @media (max-width:860px) { .ds-workspace-pulse dl { grid-template-columns:repeat(2,minmax(0,1fr)); } .ds-workspace-pulse dl div,.ds-workspace-pulse dl div:first-child { border-top:1px solid rgb(107 77 60 / 18%); border-left:0; padding:22px 18px; } .ds-workspace-pulse dl div:nth-child(odd) { border-right:1px solid rgb(107 77 60 / 18%); } .ds-workspace-pulse dl div:nth-child(-n+2) { border-top:0; } }"
+    },
+    {
+      "name": "Stone System Appendix",
+      "kind": "card",
+      "refersTo": "workspace-system-appendix",
+      "description": "The finite closing field for logs, runners, configuration, credentials, and health routes.",
+      "html": "<section class=\"ds-system-appendix\"><header><h2>System appendix</h2><span>Logs · runners · cost · 4 tracked</span></header><details><summary><span><strong>System notes</strong><small>Routes, readiness, and implementation status</small></span><span>Details +</span></summary></details><a href=\"#\">System health</a></section>",
+      "css": ".ds-system-appendix { overflow:hidden; border:1px solid rgb(107 77 60 / 18%); border-radius:26px; background:#eee7de; color:#101314; font-family:Inter,ui-sans-serif,system-ui,sans-serif; } .ds-system-appendix header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:24px 26px 21px; border-bottom:1px solid rgb(107 77 60 / 34%); } .ds-system-appendix h2 { margin:0; font-family:Satoshi,Inter,ui-sans-serif,system-ui,sans-serif; font-size:1.65rem; font-weight:600; letter-spacing:-.035em; } .ds-system-appendix header span { color:#6f6d68; font-size:.7rem; font-weight:650; } .ds-system-appendix details { margin:18px; overflow:hidden; border-radius:18px; background:rgb(255 253 250 / 68%); } .ds-system-appendix summary { display:flex; min-height:72px; align-items:center; justify-content:space-between; gap:16px; padding:17px 20px; cursor:pointer; } .ds-system-appendix summary span:first-child { display:grid; gap:3px; } .ds-system-appendix summary strong { font-family:Satoshi,Inter,ui-sans-serif,system-ui,sans-serif; font-size:.95rem; font-weight:650; letter-spacing:-.02em; } .ds-system-appendix summary small,.ds-system-appendix summary span:last-child { color:#6f6d68; font-size:.69rem; font-weight:650; } .ds-system-appendix summary:hover { background:#fffdfa; } .ds-system-appendix summary:focus-visible,.ds-system-appendix>a:focus-visible { outline:3px solid #59d6c5; outline-offset:4px; } .ds-system-appendix>a { display:block; padding:0 26px 24px; color:#2d887d; font-size:.7rem; font-weight:700; text-underline-offset:.22em; }"
     }
   ],
   "narrative": {
     "northStar": "Calm Operations Brandboard",
-    "overview": "Bruno.Ai is a calm, always-on AI agent, not an AI spectacle. It runs 24/7 and learns from founder interactions, corrections, approvals, policies, and verified outcomes so each operating loop improves the next. That learning improves execution but never silently expands authority. Ivory and warm-white fields hold deep-charcoal Satoshi arguments, practical Inter copy, espresso rules, and rare mint or lime signals. The mood is capable, proactive, trustworthy, and operational: one quiet system keeping a one-person company in motion.\n\nThe system pairs generous open space with softly precise product panels. Circular network geometry links the Bruno.Ai mark, the Business Graph, and the page's orbital linework; rounded controls and fine warm rules make the interface feel approachable without becoming playful. It explicitly rejects AI glow, chatbot theater, glass effects, and ledger spectacle.\n\nThe shipped public landing page is the implementation ground truth for this direction. The finish review recorded a ship disposition after persistence and fidelity passes reached the ceiling with no material fix: keep the oversized 24/7 promise, exact Bruno.Ai lockup, first-viewport Action Inbox with its explicit “Illustrative data” boundary, orbital system, narrative sequence, authority-policy treatment, and routes. Existing authenticated application surfaces have not yet migrated, so subsequent routes should adopt this system deliberately rather than being described as if they already match it.",
-    "keyCharacteristics": ["Ivory and stone material fields with deep-charcoal structure.", "Satoshi display type paired with highly legible Inter body copy.", "Rounded precision panels and pill-shaped actions.", "Mint and lime signals used as evidence-bearing accents, not atmosphere.", "Fine orbital linework and the circular Bruno.Ai signal pattern.", "Written always-on and learning states that show better execution without silently expanding authority.", "Soft ambient depth, restrained motion, and explicit illustrative labels."],
-    "rules": [
-      { "name": "The Signal Pair Rule", "body": "Mint means activity, connection, or positive operating state; lime means action, completion, or concentrated emphasis. Neither is ambient decoration.", "section": "colors" },
-      { "name": "The Warm Structure Rule", "body": "Use espresso and stone for supporting structure so charcoal remains authoritative rather than visually relentless.", "section": "colors" },
-      { "name": "The Two-Speed Rule", "body": "Satoshi sets the direction; Inter explains the work. Do not substitute display drama for operational legibility.", "section": "typography" },
-      { "name": "The One-Loop Rule", "body": "Every composition should clarify one continuous operating loop between company signal, founder interaction, Bruno.Ai learning and action, and a verified outcome that improves the next attempt.", "section": "layout" },
-      { "name": "The Proof-Before-Decoration Rule", "body": "Give the product panel enough scale and breathing room to be read as proof; orbital geometry supports that proof without competing with it.", "section": "layout" },
-      { "name": "The Ambient-Only Rule", "body": "Shadows should feel like diffuse room light. Never use glow, hard offset shadows, or elevation on every row.", "section": "elevation" },
-      { "name": "The Orbital Geometry Rule", "body": "Circles express connected state, ongoing work, and verification. Use them for marks, graph systems, signals, and icon fields—not as arbitrary decoration on every surface.", "section": "shapes" },
-      { "name": "The Rounded Precision Rule", "body": "Rounded forms stay clean and quiet: thin borders, no bubbly stacking, and no decorative radius changes between equivalent components.", "section": "shapes" },
-      { "name": "The Explicit Authority Rule", "body": "Never use a learning, confidence, or completion signal to imply broader permission. Show authority as a written business policy independent of the Observe, Learn, Act, and Verify cycle.", "section": "components" }
+    "overview": "Bruno.Ai is a calm, always-on AI agent, not an AI spectacle. It runs 24/7 and learns from founder interactions, corrections, approvals, policies, and verified outcomes so each operating loop improves the next. That learning improves execution but never silently expands authority. Ivory and warm-white fields hold deep-charcoal Satoshi arguments, practical Inter copy, espresso rules, and rare mint or lime signals. The mood is capable, proactive, trustworthy, and operational: one quiet system keeping a one-person company in motion.\n\nThe system pairs generous open space with softly precise product panels. Circular network geometry links the Bruno.Ai mark, the Business Graph, and the page's orbital linework; rounded controls and fine warm rules make the interface feel approachable without becoming playful. It explicitly rejects AI glow, chatbot theater, glass effects, and ledger spectacle.\n\nThe shipped public landing page is the implementation ground truth for this direction, identified in the authenticated shell by seed `b32744ed`. Its oversized 24/7 promise, exact Bruno.Ai lockup, explicitly illustrative Action Inbox, orbital system, narrative sequence, and authority-policy treatment now extend into Operate mode on `/dashboard`, `/agents`, and `/settings`. Those routes use an opaque 244px warm-white rail, persisted pulse metrics, a founder-work-first reading order, and one finite stone System appendix. Business Graph outcomes remain landing-page direction; authenticated counts, records, and actions come from persisted application data and are never framed as illustrative proof.\n\nThe authenticated finish review recorded `ship` with no material fixes after persistence and fidelity passed and the review ceiling was reached. The authoritative captures are `.impeccable/review/authenticated-migration/{dashboard,agents,settings}-{desktop,mobile}-final.png`. Authentication entry points and agent-detail content retain their existing boundaries while inheriting the applicable shared shell.",
+    "keyCharacteristics": [
+      "Ivory and stone material fields with deep-charcoal structure.",
+      "Satoshi display type paired with highly legible Inter body copy.",
+      "Rounded precision panels and pill-shaped actions.",
+      "Mint and lime signals used as evidence-bearing accents, not atmosphere.",
+      "Fine orbital linework and the circular Bruno.Ai signal pattern.",
+      "Written always-on and learning states that show better execution without silently expanding authority.",
+      "Soft ambient depth, restrained motion, and explicit illustrative labels."
     ],
-    "dos": ["Do use the shipped landing as the ground truth while migrating other surfaces deliberately.", "Do let Satoshi, open ivory space, and one substantial proof panel establish the first visual impression.", "Do preserve the Bruno.Ai mark, circular signal geometry, and written labels whenever mint or lime communicates state.", "Do make 24/7 operation and learning from founder interaction explicit near the first product promise.", "Do show that learning improves execution while authority stays an explicit always allow, ask, or never allow policy.", "Do label illustrative product direction explicitly and keep routes to the shipped dashboard and agent creation clear.", "Do disable orbital animation and state transitions when reduced motion is requested."],
-    "donts": ["Don't use AI glow, chatbot-window theater, glassmorphism, or generic sparkle imagery.", "Don't revive the Company Daybook's ruled paper, compressed type, square controls, electric blue, citron tabs, or red-pencil annotations.", "Don't turn the circular system into decorative noise or place mint and lime everywhere.", "Don't imply that authenticated application surfaces already match this direction or that illustrative operating loops have shipped.", "Don't fabricate customers, testimonials, outcomes, availability, or other product proof."]
+    "rules": [
+      {
+        "name": "The Signal Pair Rule",
+        "body": "Mint means activity, connection, or positive operating state; lime means action, completion, or concentrated emphasis. Neither is ambient decoration.",
+        "section": "colors"
+      },
+      {
+        "name": "The Warm Structure Rule",
+        "body": "Use espresso and stone for supporting structure so charcoal remains authoritative rather than visually relentless.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two-Speed Rule",
+        "body": "Satoshi sets the direction; Inter explains the work. Do not substitute display drama for operational legibility.",
+        "section": "typography"
+      },
+      {
+        "name": "The One-Loop Rule",
+        "body": "Every composition should clarify one continuous operating loop between company signal, founder interaction, Bruno.Ai learning and action, and a verified outcome that improves the next attempt.",
+        "section": "layout"
+      },
+      {
+        "name": "The Proof-Before-Decoration Rule",
+        "body": "Give the product panel enough scale and breathing room to be read as proof; orbital geometry supports that proof without competing with it.",
+        "section": "layout"
+      },
+      {
+        "name": "The Ambient-Only Rule",
+        "body": "Shadows should feel like diffuse room light. Never use glow, hard offset shadows, or elevation on every row.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Orbital Geometry Rule",
+        "body": "Circles express connected state, ongoing work, and verification. Use them for marks, graph systems, signals, and icon fields—not as arbitrary decoration on every surface.",
+        "section": "shapes"
+      },
+      {
+        "name": "The Rounded Precision Rule",
+        "body": "Rounded forms stay clean and quiet: thin borders, no bubbly stacking, and no decorative radius changes between equivalent components.",
+        "section": "shapes"
+      },
+      {
+        "name": "The Explicit Authority Rule",
+        "body": "Never use a learning, confidence, or completion signal to imply broader permission. Show authority as a written business policy independent of the Observe, Learn, Act, and Verify cycle.",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "Do use the shipped landing as the ground truth and its authenticated Operate translation for `/dashboard`, `/agents`, and `/settings`.",
+      "Do let Satoshi, open ivory space, and one substantial proof panel establish the first visual impression.",
+      "Do preserve the Bruno.Ai mark, circular signal geometry, and written labels whenever mint or lime communicates state.",
+      "Do make 24/7 operation and learning from founder interaction explicit near the first product promise.",
+      "Do show that learning improves execution while authority stays an explicit always allow, ask, or never allow policy.",
+      "Do label illustrative product direction explicitly and keep routes to the shipped dashboard and agent creation clear.",
+      "Do disable orbital animation and state transitions when reduced motion is requested."
+    ],
+    "donts": [
+      "Don't use AI glow, chatbot-window theater, glassmorphism, or generic sparkle imagery.",
+      "Don't revive the Company Daybook's ruled paper, compressed type, square controls, electric blue, citron tabs, or red-pencil annotations.",
+      "Don't turn the circular system into decorative noise or place mint and lime everywhere.",
+      "Don't imply that authenticated pulse metrics are future Business Graph outcomes or that illustrative landing-page operating loops have shipped.",
+      "Don't fabricate customers, testimonials, outcomes, availability, or other product proof."
+    ]
   }
 }

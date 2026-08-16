@@ -81,7 +81,7 @@ export default async function AgentsPage() {
       active="agents"
       eyebrow=""
       title="Agent roster"
-      description="Build your operating team, direct its live work, and keep the technical setup in one bounded place."
+      description="Build your always-on operating team, direct its live work, and teach Bruno.Ai how your company should run."
       showHealthLink={false}
     >
       <div className="agents-page dashboard-page">
@@ -91,7 +91,7 @@ export default async function AgentsPage() {
         >
           <div className="agents-workspace-heading dashboard-fleet-pulse-heading">
             <h2 id="agents-workspace-title">Roster pulse</h2>
-            <span>Live persisted state</span>
+            <span>24/7 persisted state</span>
           </div>
           <dl>
             <div data-state={agentCount !== null && agentCount > 0 ? "active" : "neutral"}>

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BrunoLogo } from "@/app/_components/bruno-logo";
 import { AccountControls } from "@/app/_components/clerk-auth-surfaces";
 import { resolveAuthMode } from "@/src/auth/server-auth-mode";
 
@@ -28,21 +29,12 @@ export function ProductShell({
   const clerkEnabled = resolveAuthMode(process.env).mode === "clerk";
 
   return (
-    <div
-      className="app-shell"
-      data-active={active}
-      data-impeccable-dashboard-seed={active === "dashboard" ? "c9dd9100" : undefined}
-      data-impeccable-settings-seed={active === "settings" ? "c9dd9100" : undefined}
-    >
+    <div className="app-shell" data-active={active} data-impeccable-authenticated-seed="b32744ed">
       <aside className="app-sidebar" aria-label="Primary navigation">
         <div className="brand-block">
           <Link className="brand-mark" href="/dashboard" aria-label="Bruno.Ai dashboard">
-            B
+            <BrunoLogo className="product-bruno-logo" />
           </Link>
-          <div>
-            <p className="brand-name">Bruno.Ai</p>
-            <p className="brand-subtitle">Always-on company agent</p>
-          </div>
         </div>
         <nav className="nav-list" aria-label="Product routes">
           {navigationItems.map((item) => (
@@ -56,9 +48,18 @@ export function ProductShell({
             </Link>
           ))}
         </nav>
+        <div className="sidebar-agent-state">
+          <span className="agent-state-orbit" aria-hidden="true">
+            <span />
+          </span>
+          <span>
+            <strong>Working 24/7</strong>
+            <small>Learns from every decision</small>
+          </span>
+        </div>
         <div className="sidebar-note">
           <span className="status-dot" aria-hidden="true" />
-          <span>Database health route active</span>
+          <Link href="/health">System health</Link>
         </div>
       </aside>
       <div className="shell-main">
@@ -68,6 +69,10 @@ export function ProductShell({
             <h1>{title}</h1>
           </div>
           <div className="topbar-actions">
+            <span className="topbar-presence">
+              <span aria-hidden="true" />
+              Bruno.Ai is on
+            </span>
             {clerkEnabled ? <AccountControls /> : null}
             {showHealthLink ? (
               <Link className="health-link" href="/health">

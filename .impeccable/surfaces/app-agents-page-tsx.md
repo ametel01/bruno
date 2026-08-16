@@ -10,7 +10,7 @@ related_targets: ["app/agents/_components/create-agent-form.tsx","app/_component
 - Target: `app/agents/page.tsx`, the authenticated agent roster and creation surface.
 - Mode: Operate.
 - Build path: code-led.
-- Surface concept: Agent Roster, a Founder Dispatch extension of the established Company Daybook world shared with `/dashboard`; it does not replace or fork the global visual system.
+- Surface concept: Agent Roster in the Calm Operations Brandboard's dense Operate mode shared with the landing page, `/dashboard`, and `/settings`.
 
 ## Visitor and job
 
@@ -28,23 +28,22 @@ related_targets: ["app/agents/_components/create-agent-form.tsx","app/_component
 
 ## Direction and memorable moment
 
-- Chosen direction: Agent Roster within Founder Dispatch.
-- Extend the Company Daybook with warm grid paper, ledger ink, electric Bruno.Ai blue, citron emphasis, red-pencil exception states, League Gothic display type, square geometry, hard rules, and flat structural borders.
-- The saturated-blue Roster Pulse is the first operational block. Its four ruled measures turn infrastructure-backed data into a concise founder read without hiding what the values actually represent.
-- Operating Roster is a finite ruled enclosure, followed by a citron-headed Add an Agent section. The contrast makes guided creation the main action while keeping form labels, credentials, recovery states, and disabled controls plain and auditable.
-- A dark System Appendix closes the page. Cloud provisioning expands in place, and the single System health operator route sits in the closing ruled row rather than competing in the topbar.
+- Chosen direction: Agent Roster within Calm Operations Brandboard, using seed `b32744ed`.
+- Use the exact Bruno.Ai lockup, ivory and warm-white fields, Satoshi titles, Inter operational copy, espresso rules, rounded precision panels, and restrained mint/lime signals established by `design/a.png` and the landing page.
+- Roster Pulse is a warm-white four-measure operating panel. Operating Roster is the primary persisted-data enclosure; Add an Agent becomes the page's single charcoal contrast section with a lime guided-setup label and a warm-white form body.
+- A subdued stone System Appendix closes the page. Cloud provisioning expands in place, and the single System health operator route remains outside the topbar.
 
 ## Responsive behavior
 
-- At narrow tablet widths, the Company Daybook sidebar becomes a compact brand-and-route header, the four pulse measures become a two-column ledger, and the wide roster table yields to the existing mobile agent records.
+- At narrow tablet widths, the Calm Operations rail becomes a compact brand-and-route header, the four pulse measures become a two-column panel, and the wide roster table yields to the existing mobile agent records.
 - The assistant choices and Telegram credential fields collapse to one column before phone width. At phone width, the pulse becomes one continuous vertical ledger; section headings, empty-state action, creation body, mobile metadata, and appendix route stack without removing status, recovery, lifecycle, or setup information.
-- Preserve square rules, visible focus treatment, explicit labels, and non-color state language across every breakpoint.
+- Preserve rounded precision, visible mint focus treatment, explicit labels, and non-color state language across every breakpoint.
 
 ## Review evidence
 
-- Final captures: `.impeccable/review/desktop.png` and `.impeccable/review/mobile.png` show the implemented empty-roster and unavailable-setup state at both shipped layout classes.
-- The final review resolved all three requested fixes and returned the disposition `ship`.
-- The Impeccable detector returned no findings after the first complete build.
+- Authoritative migration captures are `.impeccable/review/authenticated-migration/dashboard-desktop-final.png`, `dashboard-mobile-final.png`, `agents-desktop-final.png`, `agents-mobile-final.png`, `settings-desktop-final.png`, and `settings-mobile-final.png`.
+- The first complete authenticated review returned `revise`: the visual direction matched, while the evidence fixture, phone roster pulse, opaque-material rule, product-truth boundary, and canonical migration record required correction. The corrected evidence must receive a fresh full review before shipment is recorded.
+- The Impeccable detector was run exactly once after the complete build. It reported legacy and overridden `app/globals.css` rules across the whole historical stylesheet; rendered evidence and source review, not a false clean claim, determine which findings remain material.
 
 ## Unresolved decisions
 

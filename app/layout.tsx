@@ -15,8 +15,8 @@ const DIRECTION_CONTRACT = [
   "THESIS: Bruno.Ai is the always-on AI agent that keeps a one-person company in motion, learns from the founder, and improves through one calm operating loop.",
   "OWN-WORLD: Ivory and stone fields, deep-charcoal Satoshi, warm espresso rules, mint and lime signals, orbital linework, and softly precise product panels.",
   "STORY: Understand Bruno.Ai's 24/7 role and learning loop, see the Action Inbox and Business Graph at work, then enter the shipped dashboard or create an agent.",
-  "FIRST VIEWPORT: A quiet navigation bar leads into an always-on promise and two clear actions beside a high-fidelity illustrative Action Inbox crossed by Bruno.Ai's circular signal pattern.",
-  "FORM: Calm Operations Brandboard, the user-pinned hard reference; landing seed b32744ed. Existing authenticated surfaces migrate in later phases.",
+  "FIRST VIEWPORT: Public pages open with the always-on promise; authenticated pages open with a compact Bruno.Ai rail, route title, calm live presence, operational pulse, and the first actionable work surface.",
+  "FORM: Calm Operations Brandboard, the user-pinned hard reference; seed b32744ed. Dashboard, agents, and settings use the same ivory, espresso, mint, and lime operating world in a denser product mode.",
   "FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md",
 ].join("\n");
 

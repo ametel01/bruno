@@ -79,7 +79,7 @@ export default async function SettingsPage() {
       active="settings"
       eyebrow=""
       title="Workspace settings"
-      description="Review the capacity behind Bruno.Ai, manage secure runner access, and keep planned company controls clearly separated from what is available today."
+      description="Manage the secure capacity that keeps Bruno.Ai working around the clock, without expanding its authority beyond what you approve."
       showHealthLink={false}
     >
       <div className="settings-page dashboard-page">
@@ -143,7 +143,7 @@ function SettingsFleetOverview({
     >
       <div className="settings-fleet-heading dashboard-fleet-pulse-heading">
         <h2 id="settings-fleet-title">Runner fleet</h2>
-        <span>Persisted state</span>
+        <span>24/7 persisted state</span>
       </div>
       <dl>
         <div data-state={registeredCount !== null ? "active" : "neutral"}>

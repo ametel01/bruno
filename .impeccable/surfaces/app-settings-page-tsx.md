@@ -10,7 +10,7 @@ related_targets: ["app/settings/_components/runner-management-controls.tsx","app
 - Target: `app/settings/page.tsx`, the authenticated workspace settings surface.
 - Mode: Operate.
 - Build path: code-led.
-- Surface concept: Workspace Ledger, a Founder Dispatch extension of the established Company Daybook world shared with `/dashboard` and `/agents`.
+- Surface concept: Workspace Settings in the Calm Operations Brandboard's dense Operate mode shared with the landing page, `/dashboard`, and `/agents`.
 
 ## Visitor and job
 
@@ -27,10 +27,10 @@ related_targets: ["app/settings/_components/runner-management-controls.tsx","app
 
 ## Direction and memorable moment
 
-- Chosen direction: Workspace Ledger within Founder Dispatch, using operating-surface seed `c9dd9100`.
-- The saturated-blue Runner Fleet is the first operational read. Its four ruled measures make persisted capacity and attention states scannable before management controls.
-- Runner Management is a citron-headed ruled spread: cloud provisioning and registered access sit side by side under sticky column headings on wide screens, then release their height cap and become one continuous vertical ledger on smaller screens.
-- A dark-headed System Appendix closes the page with planned settings disclosed in place and a single System health route.
+- Chosen direction: Workspace Settings within Calm Operations Brandboard, using seed `b32744ed`.
+- Use the exact Bruno.Ai lockup, ivory and warm-white fields, Satoshi titles, Inter operational copy, espresso rules, rounded precision panels, and restrained mint/lime signals established by `design/a.png` and the landing page.
+- Runner Fleet is a warm-white four-measure persisted-state panel. Runner Management is a rounded two-column work surface: cloud provisioning and registered access sit side by side on wide screens, then become one continuous vertical flow on smaller screens.
+- A subdued stone System Appendix closes the page with planned settings disclosed in place and a single System health route.
 
 ## Unresolved decisions
 

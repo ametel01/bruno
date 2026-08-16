@@ -10,7 +10,7 @@ related_targets: ["app/globals.css","app/dashboard/_components/cost-summary.tsx"
 - Target: `app/dashboard/page.tsx`, the authenticated Bruno.Ai operating dashboard.
 - Mode: Operate.
 - Build path: code-led.
-- Surface concept: Founder Dispatch, an ordinary whole-surface extension of the existing Company Daybook rather than a replacement visual world.
+- Surface concept: Founder Dispatch in the Calm Operations Brandboard's dense Operate mode, shared with the landing page, `/agents`, and `/settings`.
 
 ## Visitor and job
 
@@ -28,12 +28,12 @@ related_targets: ["app/globals.css","app/dashboard/_components/cost-summary.tsx"
 
 ## Direction and memorable moment
 
-- Chosen direction: Founder Dispatch.
-- Seed: `c9dd9100`.
-- Extend the Company Daybook with warm grid-ruled paper, square ledger rules, ledger ink, electric editorial blue, citron emphasis, and red-pencil warnings. League Gothic argues; Avenir Next carries facts and controls.
-- The first operating read is a saturated-blue Company pulse followed immediately by a citron-headed Needs you ledger. This makes live state and founder judgment visually unavoidable before the page reveals active work.
-- Agents at work and Recent record form the working spread: the wider column supports lifecycle action and the narrower column preserves an auditable event trail. Use ruled rows, sticky ledger headings, and tabular alignment instead of independent dashboard cards.
-- The System appendix closes the document with a dark header and one contiguous ruled enclosure for logs, runner health, cloud provisioning, cost, and collapsible notes. It is intentionally finite and visually secondary.
+- Chosen direction: Founder Dispatch within Calm Operations Brandboard.
+- Seed: `b32744ed`.
+- Use the exact Bruno.Ai lockup, ivory and warm-white fields, Satoshi titles, Inter operational copy, espresso rules, rounded precision panels, and restrained mint/lime signals established by `design/a.png` and the landing page.
+- The shared rail states that Bruno.Ai is working 24/7 and learns from every founder decision. Company pulse follows as a warm-white four-measure panel with written persisted-state labels; Needs you remains the first action surface.
+- Agents at work and Recent record form the working spread: the wider column supports lifecycle action and the narrower column preserves an auditable event trail. Use thin rules, tabular alignment, and ambient depth rather than ledger numbering or ruled paper.
+- The System appendix closes the page inside one subdued stone enclosure for logs, runner health, cloud provisioning, cost, and collapsible notes. It is intentionally finite and visually secondary.
 
 ## Unresolved decisions
 

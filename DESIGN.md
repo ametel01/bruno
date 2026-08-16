@@ -5,10 +5,12 @@ colors:
   deep-charcoal: "#101314"
   warm-espresso: "#6b4d3c"
   signal-mint: "#59d6c5"
+  signal-mint-deep: "#2d887d"
   signal-mint-soft: "#dff6f1"
   action-lime: "#b8f34b"
   action-lime-soft: "#e9fbc4"
   stone: "#d8ccbd"
+  stone-soft: "#eee7de"
   ivory: "#f7f4ee"
   warm-white: "#fffdfa"
   muted-ink: "#6f6d68"
@@ -48,6 +50,7 @@ rounded:
   status: "10px"
   card: "12px"
   panel: "22px"
+  workspace: "24px"
   section: "26px"
   pill: "999px"
   circle: "50%"
@@ -82,6 +85,34 @@ components:
   nav-link:
     textColor: "{colors.deep-charcoal}"
     typography: "{typography.label}"
+  workspace-nav-active:
+    backgroundColor: "{colors.deep-charcoal}"
+    textColor: "{colors.warm-white}"
+    typography: "{typography.label}"
+    rounded: "{rounded.pill}"
+    padding: "0 14px"
+    height: "44px"
+  workspace-primary-action:
+    backgroundColor: "{colors.deep-charcoal}"
+    textColor: "{colors.warm-white}"
+    typography: "{typography.label}"
+    rounded: "{rounded.pill}"
+    padding: "0 16px"
+    height: "42px"
+  workspace-panel:
+    backgroundColor: "{colors.warm-white}"
+    textColor: "{colors.deep-charcoal}"
+    rounded: "{rounded.workspace}"
+    padding: "24px"
+  workspace-pulse:
+    backgroundColor: "{colors.warm-white}"
+    textColor: "{colors.deep-charcoal}"
+    rounded: "{rounded.workspace}"
+    padding: "0 26px"
+  workspace-system-appendix:
+    backgroundColor: "{colors.stone-soft}"
+    textColor: "{colors.deep-charcoal}"
+    rounded: "{rounded.section}"
   signal-tag:
     backgroundColor: "{colors.signal-mint-soft}"
     textColor: "{colors.deep-charcoal}"
@@ -117,7 +148,9 @@ Bruno.Ai is a calm, always-on AI agent, not an AI spectacle. It runs 24/7 and le
 
 The system pairs generous open space with softly precise product panels. Circular network geometry links the Bruno.Ai mark, the Business Graph, and the page's orbital linework; rounded controls and fine warm rules make the interface feel approachable without becoming playful. It explicitly rejects AI glow, chatbot theater, glass effects, and ledger spectacle.
 
-The shipped public landing page is the implementation ground truth for this direction. The finish review recorded a ship disposition after persistence and fidelity passes reached the ceiling with no material fix: keep the oversized 24/7 promise, exact Bruno.Ai lockup, first-viewport Action Inbox with its explicit “Illustrative data” boundary, orbital system, narrative sequence, authority-policy treatment, and routes. Existing authenticated application surfaces have not yet migrated, so subsequent routes should adopt this system deliberately rather than being described as if they already match it.
+The shipped public landing page is the implementation ground truth for this direction, identified in the authenticated shell by seed `b32744ed`. Its oversized 24/7 promise, exact Bruno.Ai lockup, explicitly illustrative Action Inbox, orbital system, narrative sequence, and authority-policy treatment now extend into Operate mode on `/dashboard`, `/agents`, and `/settings`. Those routes use an opaque 244px warm-white rail, persisted pulse metrics, a founder-work-first reading order, and one finite stone System appendix. Business Graph outcomes remain landing-page direction; authenticated counts, records, and actions come from persisted application data and are never framed as illustrative proof.
+
+The authenticated finish review recorded `ship` with no material fixes after persistence and fidelity passed and the review ceiling was reached. The authoritative captures are `.impeccable/review/authenticated-migration/{dashboard,agents,settings}-{desktop,mobile}-final.png`. Authentication entry points and agent-detail content retain their existing boundaries while inheriting the applicable shared shell.
 
 **Key Characteristics:**
 
@@ -141,6 +174,7 @@ The palette is a warm operational neutral field sharpened by dark structure and 
 ### Secondary
 
 - **Signal Mint** (#59d6c5): The primary system signal for focus, orbital activity, logo detail, connectors, and positive operating motion.
+- **Deep Signal Mint** (#2d887d): Legible mint-family text and active borders on pale signal fields in the authenticated workspace.
 - **Soft Signal Mint** (#dff6f1): A low-intensity field behind mint-coded icons and tags.
 
 ### Tertiary
@@ -151,6 +185,7 @@ The palette is a warm operational neutral field sharpened by dark structure and 
 ### Neutral
 
 - **Stone** (#d8ccbd): Orbital lines, nodes, and material boundaries that should remain visible but quiet.
+- **Soft Stone** (#eee7de): The finite authenticated System appendix field that visually closes each route.
 - **Ivory** (#f7f4ee): The default page canvas and the warm space between operational objects.
 - **Warm White** (#fffdfa): Product-panel and row surfaces, plus text on charcoal.
 - **Muted Ink** (#6f6d68): Supporting copy, metadata, and secondary status language.
@@ -181,9 +216,11 @@ The palette is a warm operational neutral field sharpened by dark structure and 
 
 ## Layout
 
-Use a centered content frame capped at 1360px with 24px desktop gutters. Major passages are spacious, often separated by 120–210px of vertical breathing room, while product proof stays compact inside panels. Wide layouts pair a focused argument with an operational model, using asymmetric columns rather than equal card grids.
+Use a centered landing content frame capped at 1360px with 24px desktop gutters. Major passages are spacious, often separated by 120–210px of vertical breathing room, while product proof stays compact inside panels. Wide layouts pair a focused argument with an operational model, using asymmetric columns rather than equal card grids.
 
 At 1120px, navigation simplifies and two-column hero, mechanism, loop, trust, and closing compositions stack or reflow. At 720px, outer gutters reduce to 14px; primary and secondary hero actions become full-width; proof metrics, inbox rows, graph sources, policy tables, outcome lists, and the footer collapse without hiding status or truth labels.
+
+Authenticated Operate routes use a 244px rail and a workspace up to 1480px wide. The rail narrows at 1120px, becomes a sticky brand-and-route header at 860px, and centers the lockup above a three-route grid at 620px. Pulse measures move from four columns to two below 860px; only the Agents roster pulse becomes one continuous vertical ledger at phone width. Cards, controls, and System appendices reflow without hiding actions, state labels, or persisted evidence.
 
 **The One-Loop Rule.** Every composition should clarify one continuous operating loop between company signal, founder interaction, Bruno.Ai learning and action, and a verified outcome that improves the next attempt.
 
@@ -200,6 +237,8 @@ Depth is ambient and selective. Ivory remains flat; warm-white product panels re
 - **Section panel** (`0 34px 74px rgb(71 56 45 / 12%)`): Separates a large two-part operating panel from the ivory canvas.
 - **Graph core** (`0 26px 48px rgb(16 19 20 / 18%)`): Focuses the circular center of the Business Graph.
 - **Orbit contact** (`0 10px 20px rgb(71 56 45 / 8%)`): Keeps small orbit labels legible above linework.
+- **Workspace panel** (`0 18px 48px rgb(16 19 20 / 6%)`): Gives major authenticated work panels quiet separation from the ivory canvas.
+- **Workspace pulse** (`0 24px 64px rgb(16 19 20 / 8%)`): Gives the persisted four-measure pulse one level of emphasis above ordinary panels.
 
 **The Ambient-Only Rule.** Shadows should feel like diffuse room light. Never use glow, hard offset shadows, or elevation on every row.
 
@@ -237,6 +276,14 @@ The form language combines highly rounded rectangular panels with exact circles.
 
 Navigation is quiet Inter at compact size and medium-heavy weight. Links are unboxed at rest, move to espresso with an underline on hover, and keep a visible mint focus outline. The Bruno.Ai lockup anchors the left edge; the dark pill action anchors the path into the shipped dashboard. On narrow screens, in-page links and sign-in yield while the brand and dashboard route remain.
 
+### Authenticated Workspace
+
+The authenticated shell applies the landing system in Operate mode rather than repeating its marketing composition. A 244px opaque warm-white rail carries the exact Bruno.Ai lockup, three pill routes, the written “Working 24/7” state, and the promise that Bruno.Ai learns from each founder decision. At 860px the rail becomes a compact sticky header; at 620px the lockup centers above a three-route grid.
+
+Route titles use Satoshi at a maximum 4.6rem, followed by a 70-character Inter description. The first operating panel is a four-measure pulse on warm white with written state labels and small mint, lime, or stone signals; it becomes a two-by-two grid below 860px. On the agent roster, those measures become one continuous vertical ledger at phone width so capacity reads as one operating account. Founder work stays ahead of infrastructure: approvals, active agents, roster creation, and runner management use 24–26px panels, while logs, provisioning, planned controls, and health routes close inside one subdued stone System appendix.
+
+The product shell states “Bruno.Ai is on” and “Working 24/7” as orientation, not simulated runtime proof. Auth gates, loading, error, and empty states remain intact. The desktop and mobile roster preserve all three agents; approvals, lifecycle and configuration controls, creation, assistant choice, Telegram setup, runner and cloud provisioning, registration, endpoint, version, timestamps, credential rotation and revocation, logs, and health routes remain available. Counts, state, and actions come from persisted application data and always retain non-color labels.
+
 ### Bruno.Ai Mark
 
 The mark is a rounded monoline `B` with an internal chevron and lower loop, punctuated by mint and lime circular signals. Render it in deep charcoal on light fields or warm white in the graph core; preserve round stroke caps and the two signal colors. It may appear as a lockup or as the compact icon, but its geometry should not be redrawn as a generic sparkle or bot face.
@@ -259,7 +306,7 @@ Policy rows pair each legible business action with one written authority state: 
 
 ### Do:
 
-- **Do** use the shipped landing as the ground truth while migrating other surfaces deliberately.
+- **Do** use the shipped landing as the ground truth and its authenticated Operate translation for `/dashboard`, `/agents`, and `/settings`.
 - **Do** let Satoshi, open ivory space, and one substantial proof panel establish the first visual impression.
 - **Do** preserve the Bruno.Ai mark, circular signal geometry, and written labels whenever mint or lime communicates state.
 - **Do** make 24/7 operation and learning from founder interaction explicit near the first product promise.
@@ -272,5 +319,5 @@ Policy rows pair each legible business action with one written authority state: 
 - **Don't** use AI glow, chatbot-window theater, glassmorphism, or generic sparkle imagery.
 - **Don't** revive the Company Daybook's ruled paper, compressed type, square controls, electric blue, citron tabs, or red-pencil annotations.
 - **Don't** turn the circular system into decorative noise or place mint and lime everywhere.
-- **Don't** imply that authenticated application surfaces already match this direction or that illustrative operating loops have shipped.
+- **Don't** imply that authenticated pulse metrics are future Business Graph outcomes or that illustrative landing-page operating loops have shipped.
 - **Don't** fabricate customers, testimonials, outcomes, availability, or other product proof.

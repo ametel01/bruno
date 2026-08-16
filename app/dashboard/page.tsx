@@ -153,13 +153,13 @@ export function DashboardContent({
       active="dashboard"
       eyebrow={routeLabel}
       title="Founder dispatch"
-      description="Review decisions that need you, direct active agents, and audit the latest persisted changes."
+      description="See what Bruno.Ai handled while you were away, review decisions that need you, and shape what it learns next."
     >
       <div className="dashboard-page">
         <section className="dashboard-fleet-pulse" aria-labelledby="dashboard-fleet-pulse-title">
           <div className="dashboard-fleet-pulse-heading">
             <h2 id="dashboard-fleet-pulse-title">Company pulse</h2>
-            <span>Live persisted state</span>
+            <span>24/7 persisted state</span>
           </div>
           <dl>
             <div data-state={runningAgentCount && runningAgentCount > 0 ? "active" : "neutral"}>
