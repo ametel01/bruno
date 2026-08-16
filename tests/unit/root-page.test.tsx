@@ -1766,13 +1766,16 @@ describe("product shell routes", () => {
     const html = renderToStaticMarkup(element);
 
     expect(html).toContain("Workspace settings");
-    expect(html).toContain('class="settings-page"');
-    expect(html).toContain('class="settings-fleet-overview"');
+    expect(html).toContain('class="settings-page dashboard-page"');
+    expect(html).toContain('class="settings-fleet-overview dashboard-fleet-pulse"');
     expect(html).toContain("Runner fleet");
     expect(html).toContain('class="settings-runner-workspace"');
     expect(html).toContain('class="settings-runner-inventory"');
     expect(html).toContain("Runner management");
     expect(html).toContain('class="settings-configuration-notes"');
+    expect(html).toContain('class="settings-system-appendix"');
+    expect(html).toContain("System appendix");
+    expect(html).toContain('href="/health"');
     expect(html).toContain("Workspace configuration");
     expect(html.indexOf("settings-fleet-title")).toBeLessThan(
       html.indexOf("settings-runners-title"),

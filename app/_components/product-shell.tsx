@@ -32,6 +32,7 @@ export function ProductShell({
       className="app-shell"
       data-active={active}
       data-impeccable-dashboard-seed={active === "dashboard" ? "c9dd9100" : undefined}
+      data-impeccable-settings-seed={active === "settings" ? "c9dd9100" : undefined}
     >
       <aside className="app-sidebar" aria-label="Primary navigation">
         <div className="brand-block">

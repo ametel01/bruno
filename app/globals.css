@@ -4142,9 +4142,12 @@ h2 {
   }
 }
 
-/* Founder Dispatch and Agent Roster share the Company Daybook world. Settings
-   remains an intentionally separate operational surface. */
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) {
+/* Founder Dispatch, Agent Roster, and Workspace Ledger share the Company Daybook world. */
+:is(
+  .app-shell[data-active="dashboard"],
+  .app-shell[data-active="agents"],
+  .app-shell[data-active="settings"]
+) {
   --background: #f2f0e8;
   --foreground: #172018;
   --muted: #4b544c;
@@ -4166,18 +4169,32 @@ h2 {
   color: var(--foreground);
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) ::selection {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  ::selection {
   background: var(--accent-soft);
   color: var(--foreground);
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   :where(a, button, summary):focus-visible {
   outline-color: var(--accent);
   outline-offset: 4px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .app-sidebar {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .app-sidebar {
   position: sticky;
   top: 0;
   min-height: 100svh;
@@ -4187,12 +4204,22 @@ h2 {
   padding: 28px 20px 22px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .brand-block {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .brand-block {
   align-items: flex-start;
   gap: 11px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .brand-mark {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .brand-mark {
   width: 46px;
   height: 54px;
   border: 0;
@@ -4205,13 +4232,23 @@ h2 {
   line-height: 1;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .brand-name {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .brand-name {
   font-size: 1.08rem;
   font-weight: 900;
   letter-spacing: 0.01em;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .brand-subtitle {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .brand-subtitle {
   max-width: 116px;
   margin-top: 5px;
   color: var(--muted);
@@ -4222,14 +4259,24 @@ h2 {
   text-transform: uppercase;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .nav-list {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .nav-list {
   gap: 0;
   margin-top: 44px;
   border-top: 1px solid var(--line-strong);
   counter-reset: dashboard-navigation;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .nav-link {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .nav-link {
   position: relative;
   min-height: 48px;
   justify-content: space-between;
@@ -4244,26 +4291,45 @@ h2 {
   counter-increment: dashboard-navigation;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .nav-link::before {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .nav-link::before {
   color: var(--muted);
   content: "0" counter(dashboard-navigation);
   font-size: 0.62rem;
   font-variant-numeric: tabular-nums;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .nav-link:hover {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .nav-link:hover {
   background: rgb(223 255 63 / 46%);
   color: var(--accent-strong);
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .nav-link[aria-current="page"] {
   background: var(--accent-soft);
   box-shadow: inset 0 -2px 0 var(--warning);
   color: var(--foreground);
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .sidebar-note {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .sidebar-note {
   border-color: var(--line-strong);
   color: var(--muted);
   font-size: 0.7rem;
@@ -4272,7 +4338,12 @@ h2 {
   text-transform: uppercase;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .status-dot {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .status-dot {
   width: 12px;
   height: 9px;
   border-radius: 0;
@@ -4280,18 +4351,33 @@ h2 {
   box-shadow: inset -3px 0 0 var(--accent-soft);
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .shell-main {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .shell-main {
   width: min(100%, 1500px);
   padding: 34px clamp(22px, 3.8vw, 64px) 72px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .topbar {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .topbar {
   align-items: flex-end;
   border-bottom: 2px solid var(--foreground);
   padding-bottom: 18px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .eyebrow {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .eyebrow {
   width: fit-content;
   margin-bottom: 9px;
   background: var(--accent-soft);
@@ -4303,7 +4389,12 @@ h2 {
   padding: 6px 9px 5px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) h1 {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  h1 {
   max-width: 760px;
   font-family: var(--font-bruno-display), sans-serif;
   font-size: clamp(3.8rem, 7vw, 6rem);
@@ -4314,7 +4405,12 @@ h2 {
   text-transform: uppercase;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .page-description {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .page-description {
   max-width: 66ch;
   margin: 18px 0 32px;
   color: var(--muted);
@@ -4322,7 +4418,12 @@ h2 {
   line-height: 1.6;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .health-link {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .health-link {
   min-height: 46px;
   border-color: var(--foreground);
   border-radius: 0;
@@ -4334,20 +4435,48 @@ h2 {
   text-transform: uppercase;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .health-link:hover {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .health-link:hover {
   background: var(--accent);
   color: #ffffff;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-page {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .dashboard-page {
   gap: 28px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-fleet-pulse,
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .dashboard-fleet-pulse,
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-infrastructure,
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-system-notes,
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .dashboard-system-notes,
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-page
   :where(
     .agent-list-panel,
@@ -4361,14 +4490,23 @@ h2 {
   box-shadow: none;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-fleet-pulse {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .dashboard-fleet-pulse {
   overflow: hidden;
   border: 2px solid var(--foreground);
   background: var(--panel);
   box-shadow: 0 22px 44px rgb(21 94 239 / 16%);
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-fleet-pulse-heading {
   align-items: center;
   background: var(--accent);
@@ -4376,7 +4514,11 @@ h2 {
   padding: 18px 22px 16px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-fleet-pulse-heading
   p {
   color: rgb(255 255 255 / 76%);
@@ -4386,7 +4528,11 @@ h2 {
   letter-spacing: 0.07em;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-fleet-pulse-heading
   h2 {
   font-family: var(--font-bruno-display), sans-serif;
@@ -4397,7 +4543,11 @@ h2 {
   text-transform: uppercase;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-fleet-pulse-heading
   > span {
   border: 1px solid rgb(255 255 255 / 56%);
@@ -4408,14 +4558,22 @@ h2 {
   text-transform: uppercase;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-fleet-pulse
   dl {
   border-top: 2px solid var(--foreground);
   background: var(--panel);
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-fleet-pulse
   dl
   > div {
@@ -4424,7 +4582,11 @@ h2 {
   padding: 18px 18px 17px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-fleet-pulse
   dl
   > div::before {
@@ -4436,11 +4598,19 @@ h2 {
   background: var(--line);
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-fleet-pulse
   dl
   > div[data-state="active"]::before,
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-fleet-pulse
   dl
   > div[data-state="clear"]::before {
@@ -4448,7 +4618,11 @@ h2 {
   box-shadow: none;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-fleet-pulse
   dl
   > div[data-state="attention"]::before {
@@ -4456,7 +4630,11 @@ h2 {
   box-shadow: none;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-fleet-pulse
   dt {
   color: var(--muted);
@@ -4466,14 +4644,22 @@ h2 {
   letter-spacing: 0.06em;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-fleet-pulse
   dd {
   display: grid;
   gap: 3px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-fleet-pulse
   dd
   strong {
@@ -4483,7 +4669,11 @@ h2 {
   letter-spacing: -0.02em;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-fleet-pulse
   dd
   span {
@@ -4492,14 +4682,22 @@ h2 {
   font-size: 0.74rem;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-work-queue
   > section {
   max-height: 520px;
   overflow: auto;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-work-queue
   .approval-panel {
   border: 2px solid var(--foreground);
@@ -4509,7 +4707,11 @@ h2 {
   padding: 0;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-work-queue
   .section-heading {
   position: sticky;
@@ -4522,15 +4724,27 @@ h2 {
   padding: 18px 22px 16px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-work-queue
   .section-heading
   h2,
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-workbench
   .section-heading
   h2,
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-section-heading
   h2 {
   font-family: var(--font-bruno-display), sans-serif;
@@ -4541,11 +4755,19 @@ h2 {
   text-transform: uppercase;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-work-queue
   .section-heading
   span,
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-workbench
   .section-heading
   span {
@@ -4556,18 +4778,32 @@ h2 {
   text-transform: uppercase;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-work-queue
   :where(.approval-list, .activity-empty-state, .safe-error) {
   margin: 0 22px 22px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .approval-list {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .approval-list {
   gap: 0;
   counter-reset: dashboard-decisions;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .approval-item {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .approval-item {
   position: relative;
   min-height: 120px;
   gap: 11px;
@@ -4576,7 +4812,12 @@ h2 {
   counter-increment: dashboard-decisions;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .approval-item::before {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .approval-item::before {
   position: absolute;
   top: 20px;
   left: 0;
@@ -4592,9 +4833,25 @@ h2 {
   font-weight: 900;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .approval-item-header a,
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .agent-table a,
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .approval-item-header
+  a,
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .agent-table
+  a,
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .activity-agent-context
   a {
   color: var(--accent-strong);
@@ -4603,23 +4860,47 @@ h2 {
   text-underline-offset: 3px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .approval-item h3 {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .approval-item
+  h3 {
   font-size: 1.02rem;
   font-weight: 900;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-workbench {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .dashboard-workbench {
   grid-template-columns: minmax(0, 1.4fr) minmax(330px, 0.8fr);
   gap: 28px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-agent-column,
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .dashboard-agent-column,
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-activity-column {
   min-width: 0;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-workbench
   :where(.agent-list-panel, .activity-feed-panel) {
   border: 1px solid var(--foreground);
@@ -4627,7 +4908,11 @@ h2 {
   padding: 0 20px 20px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-agent-column
   .empty-state {
   min-height: 0;
@@ -4637,14 +4922,22 @@ h2 {
   padding: 20px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-activity-column
   .activity-empty-state {
   min-height: 0;
   padding-block: 18px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-workbench
   .section-heading {
   position: sticky;
@@ -4657,30 +4950,61 @@ h2 {
   padding: 18px 20px 15px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-activity-column
   > section {
   max-height: 720px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .agent-table th,
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .agent-table td {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .agent-table
+  th,
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .agent-table
+  td {
   border-color: var(--line-strong);
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .agent-table th {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .agent-table
+  th {
   color: var(--muted);
   font-size: 0.68rem;
   font-weight: 900;
   letter-spacing: 0.05em;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   :where(.status-pill, .deployment-status-label, .deleted-agent-pill) {
   border-radius: 0;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .status-pill {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .status-pill {
   min-height: 26px;
   border-color: var(--foreground);
   background: var(--panel-subtle);
@@ -4690,26 +5014,53 @@ h2 {
   text-transform: uppercase;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .activity-feed,
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .runtime-log-list,
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .manual-runner-list {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .activity-feed,
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .runtime-log-list,
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .manual-runner-list {
   gap: 0;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   :where(.activity-feed-item, .runtime-log-item, .manual-runner-item) {
   border-color: var(--line-strong);
   padding-block: 16px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-infrastructure {
   border: 1px solid var(--foreground);
   background: var(--panel-subtle);
   padding: 0;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-section-heading {
   align-items: flex-end;
   margin: 0;
@@ -4719,7 +5070,11 @@ h2 {
   padding: 20px 22px 18px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-section-heading
   p {
   color: rgb(255 255 255 / 70%);
@@ -4728,7 +5083,11 @@ h2 {
   letter-spacing: 0.06em;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-section-heading
   > span {
   color: var(--accent-soft);
@@ -4737,39 +5096,70 @@ h2 {
   text-transform: uppercase;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-infrastructure-grid {
   gap: 0;
   padding: 0;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-cost-ledger {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .dashboard-cost-ledger {
   border-top: 1px solid var(--foreground);
   background: var(--panel);
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-infrastructure-grid
   > section,
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-log-strip {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .dashboard-log-strip {
   max-height: 650px;
   border: 0;
   background: var(--panel);
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-infrastructure-grid
   > section
   + section {
   border-left: 1px solid var(--foreground);
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-log-strip {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .dashboard-log-strip {
   grid-column: 1 / -1;
   border-bottom: 1px solid var(--foreground);
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-log-strip
   > section {
   max-height: 420px;
@@ -4778,7 +5168,11 @@ h2 {
   background: transparent;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-infrastructure-grid
   .section-heading {
   position: sticky;
@@ -4790,21 +5184,34 @@ h2 {
   padding: 16px 18px 13px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-infrastructure-grid
   > section
   > :where(.manual-runner-list, .cloud-runner-list, .activity-empty-state, .safe-error) {
   margin: 0 18px 18px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-system-notes {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .dashboard-system-notes {
   border: 0;
   border-top: 1px solid var(--foreground);
   background: var(--panel);
   padding: 18px 20px;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-system-notes
   summary
   strong {
@@ -4814,18 +5221,30 @@ h2 {
   text-transform: uppercase;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-system-notes
   summary
   small,
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   .dashboard-system-notes
   summary
   > span:last-child {
   color: var(--muted);
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   :where(.primary-button, .secondary-button, .disabled-button) {
   min-height: 46px;
   border-radius: 0;
@@ -4835,30 +5254,54 @@ h2 {
   text-transform: uppercase;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .primary-button {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .primary-button {
   border-color: var(--accent);
   background: var(--accent);
   color: #ffffff;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .primary-button:hover {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .primary-button:hover {
   border-color: var(--accent-strong);
   background: var(--accent-strong);
   box-shadow: 0 12px 28px rgb(21 94 239 / 24%);
   transform: translateY(-2px);
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .secondary-button {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .secondary-button {
   border-color: var(--foreground);
   background: transparent;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .secondary-button:hover {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  .secondary-button:hover {
   background: var(--accent-soft);
   color: var(--foreground);
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
   :where(.safe-error, .approval-action-error) {
   border: 1px solid var(--warning);
   border-radius: 0;
@@ -4866,85 +5309,165 @@ h2 {
   color: #6e1c1c;
 }
 
-:is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) * {
+:is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  )
+  * {
   scrollbar-color: var(--accent) var(--panel-subtle);
   scrollbar-width: thin;
 }
 
 @media (max-width: 1120px) {
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-workbench {
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
+    .dashboard-workbench {
     grid-template-columns: 1fr;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-work-queue {
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
+    .dashboard-work-queue {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 860px) {
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) {
+  :is(
+    .app-shell[data-active="dashboard"],
+    .app-shell[data-active="agents"],
+    .app-shell[data-active="settings"]
+  ) {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .app-sidebar {
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
+    .app-sidebar {
     position: static;
     height: auto;
     min-height: auto;
     padding: 16px;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .brand-block {
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
+    .brand-block {
     align-items: center;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .brand-subtitle {
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
+    .brand-subtitle {
     max-width: none;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .nav-list {
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
+    .nav-list {
     grid-auto-flow: column;
     grid-auto-columns: minmax(110px, 1fr);
     margin-top: 16px;
     border-left: 1px solid var(--line-strong);
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .nav-link {
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
+    .nav-link {
     border-right: 1px solid var(--line-strong);
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .sidebar-note {
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
+    .sidebar-note {
     display: none;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .shell-main {
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
+    .shell-main {
     padding: 28px 16px 48px;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .topbar {
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
+    .topbar {
     align-items: stretch;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .dashboard-page {
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
+    .dashboard-page {
     gap: 18px;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-agent-column
     .empty-state {
     grid-template-columns: 1fr;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-fleet-pulse
     dl {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-fleet-pulse
     dl
     > div,
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-fleet-pulse
     dl
     > div:first-child {
@@ -4952,34 +5475,62 @@ h2 {
     border-left: 1px solid var(--line-strong);
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-fleet-pulse
     dl
     > div:nth-child(odd) {
     border-left: 0;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-work-queue
     > section,
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-activity-column
     > section,
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-infrastructure-grid
     > section,
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-log-strip
     > section {
     max-height: none;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-infrastructure-grid {
     grid-template-columns: 1fr;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-infrastructure-grid
     > section
     + section {
@@ -4987,55 +5538,107 @@ h2 {
     border-left: 0;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .approval-item {
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
+    .approval-item {
     padding-left: 0;
     padding-top: 68px;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .approval-item::before {
     top: 16px;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .agent-table-wrap {
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
+    .agent-table-wrap {
     display: none;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) .mobile-agent-list {
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
+    .mobile-agent-list {
     display: grid;
   }
 }
 
 @media (max-width: 460px) {
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"]) h1 {
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
+    h1 {
     font-size: 3.35rem;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-fleet-pulse-heading,
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-work-queue
     .section-heading,
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-workbench
     .section-heading,
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-infrastructure-grid
     .section-heading,
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-section-heading {
     display: grid;
     gap: 10px;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-system-notes
     summary
     > span:last-child {
     font-size: 0;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-system-notes
     summary
     > span:last-child::after {
@@ -5043,28 +5646,44 @@ h2 {
     font-size: 1rem;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-system-notes[open]
     summary
     > span:last-child::after {
     content: "−";
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-fleet-pulse
     dl
     > div {
     padding: 16px 14px 14px;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-fleet-pulse
     dd
     strong {
     font-size: 2.1rem;
   }
 
-  :is(.app-shell[data-active="dashboard"], .app-shell[data-active="agents"])
+  :is(
+      .app-shell[data-active="dashboard"],
+      .app-shell[data-active="agents"],
+      .app-shell[data-active="settings"]
+    )
     .dashboard-work-queue
     :where(.approval-list, .activity-empty-state, .safe-error) {
     margin-inline: 16px;
@@ -5521,6 +6140,427 @@ h2 {
   }
 
   .app-shell[data-active="agents"] .agents-system-route {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+/* Workspace Ledger: the settings surface keeps live capacity and access controls
+   explicit, then closes technical and future-facing detail inside one appendix. */
+.app-shell[data-active="settings"] .settings-page {
+  gap: 28px;
+}
+
+.app-shell[data-active="settings"]
+  :where(
+    .settings-fleet-overview,
+    .settings-runner-workspace,
+    .settings-system-appendix,
+    .settings-configuration-notes,
+    .manual-runner-panel,
+    .manual-runner-item,
+    .visible-once-secret,
+    .provisioning-phase-list li
+  ) {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.app-shell[data-active="settings"] .settings-fleet-overview {
+  border: 2px solid var(--foreground);
+}
+
+.app-shell[data-active="settings"] .settings-runner-workspace {
+  overflow: hidden;
+  border: 2px solid var(--foreground);
+  background-color: var(--panel);
+  background-image: linear-gradient(to bottom, transparent 27px, rgb(23 32 24 / 7%) 28px);
+  background-size: 100% 28px;
+}
+
+.app-shell[data-active="settings"] .settings-section-heading {
+  align-items: flex-end;
+  border-bottom: 2px solid var(--foreground);
+  background: var(--accent-soft);
+  padding: 18px 22px 16px;
+}
+
+.app-shell[data-active="settings"] .settings-section-heading h2,
+.app-shell[data-active="settings"] .settings-system-heading h2 {
+  font-family: var(--font-bruno-display), sans-serif;
+  font-size: clamp(2.25rem, 4vw, 3.45rem);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 0.92;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="settings"] .settings-section-heading > span,
+.app-shell[data-active="settings"] .settings-system-heading > span {
+  color: var(--foreground);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="settings"] .settings-runner-inventory {
+  gap: 0;
+  border-top: 0;
+  background: rgb(248 247 241 / 94%);
+  padding: 0;
+}
+
+.app-shell[data-active="settings"] .settings-runner-inventory > .manual-runner-panel {
+  max-height: 820px;
+  overflow: auto;
+  border: 0;
+  background: var(--panel);
+  padding: 0 20px 20px;
+}
+
+.app-shell[data-active="settings"]
+  .settings-runner-inventory
+  > .manual-runner-panel
+  + .manual-runner-panel {
+  border-left: 1px solid var(--foreground);
+}
+
+.app-shell[data-active="settings"]
+  .settings-runner-inventory
+  > .manual-runner-panel
+  > .section-heading {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  align-items: flex-end;
+  margin: 0 -20px 18px;
+  border-bottom: 1px solid var(--foreground);
+  background: var(--panel);
+  padding: 18px 20px 14px;
+}
+
+.app-shell[data-active="settings"]
+  .settings-runner-inventory
+  > .manual-runner-panel
+  > .section-heading
+  h2 {
+  font-family: var(--font-bruno-display), sans-serif;
+  font-size: clamp(2rem, 3.5vw, 2.8rem);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 0.92;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="settings"]
+  .settings-runner-inventory
+  > .manual-runner-panel
+  > .section-heading
+  span {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="settings"]
+  .settings-runner-inventory
+  > .manual-runner-panel
+  > .runner-management-block {
+  margin: 0;
+  border-color: var(--foreground);
+  padding: 0 0 18px;
+}
+
+.app-shell[data-active="settings"]
+  .settings-runner-inventory
+  > .manual-runner-panel
+  > :where(.manual-runner-list, .activity-empty-state, .safe-error) {
+  margin: 0;
+  padding: 0;
+}
+
+.app-shell[data-active="settings"] .settings-runner-inventory .manual-runner-list {
+  gap: 0;
+}
+
+.app-shell[data-active="settings"]
+  .settings-runner-inventory
+  .manual-runner-list
+  .manual-runner-item,
+.app-shell[data-active="settings"]
+  .settings-runner-inventory
+  .manual-runner-list
+  .manual-runner-item:first-child {
+  gap: 14px;
+  border: 0;
+  border-top: 1px solid var(--line-strong);
+  background: transparent;
+  padding: 18px 0;
+}
+
+.app-shell[data-active="settings"]
+  .settings-runner-inventory
+  .manual-runner-list
+  .manual-runner-item:first-child {
+  border-top: 0;
+}
+
+.app-shell[data-active="settings"] .settings-runner-inventory .manual-runner-header h3 {
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.app-shell[data-active="settings"] .settings-runner-inventory .definition-list > div {
+  border-color: var(--line);
+}
+
+.app-shell[data-active="settings"] .settings-runner-inventory .provisioning-phase-list li {
+  border-color: var(--line-strong);
+  background: var(--panel-subtle);
+}
+
+.app-shell[data-active="settings"] .settings-runner-inventory .visible-once-secret {
+  border-color: var(--foreground);
+  background: rgb(223 255 63 / 24%);
+}
+
+.app-shell[data-active="settings"] .settings-system-appendix {
+  overflow: hidden;
+  border: 1px solid var(--foreground);
+  background: var(--panel);
+}
+
+.app-shell[data-active="settings"] .settings-system-heading {
+  display: flex;
+  min-height: 88px;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  background: var(--foreground);
+  color: #ffffff;
+  padding: 20px 22px 18px;
+}
+
+.app-shell[data-active="settings"] .settings-system-heading p {
+  margin: 5px 0 0;
+  color: rgb(255 255 255 / 70%);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="settings"] .settings-system-heading > span {
+  color: var(--accent-soft);
+}
+
+.app-shell[data-active="settings"] .settings-configuration-notes {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.app-shell[data-active="settings"] .settings-configuration-notes summary {
+  min-height: 68px;
+  border-bottom: 0;
+  margin: 0;
+  padding: 14px 20px;
+}
+
+.app-shell[data-active="settings"] .settings-configuration-notes summary strong {
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="settings"] .settings-configuration-notes summary small,
+.app-shell[data-active="settings"] .settings-configuration-notes summary > span:last-child {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.app-shell[data-active="settings"] .settings-configuration-notes[open] summary {
+  border-bottom: 1px solid var(--foreground);
+  margin: 0;
+  padding: 14px 20px;
+}
+
+.app-shell[data-active="settings"] .settings-configuration-grid {
+  gap: 0;
+  border-bottom: 1px solid var(--foreground);
+}
+
+.app-shell[data-active="settings"] .settings-configuration-grid section {
+  border-left: 1px solid var(--line-strong);
+  padding: 18px;
+}
+
+.app-shell[data-active="settings"] .settings-configuration-grid section:first-child {
+  border-left: 0;
+}
+
+.app-shell[data-active="settings"] .settings-configuration-grid span {
+  display: inline-block;
+  background: var(--accent-soft);
+  box-shadow: inset 0 -2px 0 var(--warning);
+  color: var(--foreground);
+  font-family: inherit;
+  padding: 5px 7px 4px;
+}
+
+.app-shell[data-active="settings"] .settings-configuration-grid h3 {
+  margin-top: 12px;
+  font-size: 0.94rem;
+  font-weight: 900;
+}
+
+.app-shell[data-active="settings"] .settings-system-route {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 18px;
+}
+
+.app-shell[data-active="settings"] .settings-system-route span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="settings"] .settings-system-route a {
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-decoration-color: var(--accent-soft);
+  text-decoration-thickness: 3px;
+  text-underline-offset: 4px;
+  text-transform: uppercase;
+}
+
+.app-shell[data-active="settings"] * {
+  scrollbar-color: var(--accent) var(--panel-subtle);
+  scrollbar-width: thin;
+}
+
+@media (max-width: 1120px) {
+  .app-shell[data-active="settings"] .settings-runner-inventory {
+    grid-template-columns: 1fr;
+  }
+
+  .app-shell[data-active="settings"]
+    .settings-runner-inventory
+    > .manual-runner-panel
+    + .manual-runner-panel {
+    border-top: 1px solid var(--foreground);
+    border-left: 0;
+  }
+
+  .app-shell[data-active="settings"] .settings-configuration-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-shell[data-active="settings"] .settings-configuration-grid section:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .app-shell[data-active="settings"] .settings-configuration-grid section:nth-child(n + 3) {
+    border-top: 1px solid var(--line-strong);
+  }
+}
+
+@media (max-width: 860px) {
+  .app-shell[data-active="settings"] .settings-runner-inventory > .manual-runner-panel {
+    max-height: none;
+  }
+}
+
+@media (width <= 720px) {
+  .app-shell[data-active="settings"] .settings-runner-inventory {
+    padding: 0;
+  }
+
+  .app-shell[data-active="settings"] .settings-runner-inventory .runner-management-header {
+    display: grid;
+  }
+
+  .app-shell[data-active="settings"]
+    .settings-runner-inventory
+    .runner-management-header
+    .primary-button {
+    width: 100%;
+  }
+
+  .app-shell[data-active="settings"] .settings-runner-inventory :where(.compact-definition-list) {
+    grid-template-columns: 1fr;
+  }
+
+  .app-shell[data-active="settings"]
+    .settings-runner-inventory
+    :where(.compact-definition-list)
+    > div:nth-child(2) {
+    border-top: 1px solid var(--line);
+    padding-top: 9px;
+  }
+
+  .app-shell[data-active="settings"] .settings-configuration-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .app-shell[data-active="settings"] .settings-configuration-grid section,
+  .app-shell[data-active="settings"] .settings-configuration-grid section:first-child,
+  .app-shell[data-active="settings"] .settings-configuration-grid section:nth-child(odd) {
+    border-top: 1px solid var(--line-strong);
+    border-left: 0;
+  }
+
+  .app-shell[data-active="settings"] .settings-configuration-grid section:first-child {
+    border-top: 0;
+  }
+}
+
+@media (max-width: 460px) {
+  .app-shell[data-active="settings"] h1 {
+    font-size: 3.35rem;
+  }
+
+  .app-shell[data-active="settings"]
+    :where(
+      .settings-section-heading,
+      .settings-runner-inventory .section-heading,
+      .settings-system-heading,
+      .settings-configuration-notes summary
+    ) {
+    display: grid;
+    gap: 10px;
+  }
+
+  .app-shell[data-active="settings"] .settings-runner-inventory > .manual-runner-panel {
+    padding-inline: 16px;
+  }
+
+  .app-shell[data-active="settings"]
+    .settings-runner-inventory
+    > .manual-runner-panel
+    > .section-heading {
+    margin-inline: -16px;
+    padding-inline: 16px;
+  }
+
+  .app-shell[data-active="settings"] .settings-system-heading,
+  .app-shell[data-active="settings"] .settings-section-heading {
+    padding-inline: 16px;
+  }
+
+  .app-shell[data-active="settings"] .settings-system-route {
     align-items: flex-start;
     flex-direction: column;
   }

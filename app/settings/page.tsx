@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { CloudRunnerProvisioningPanel } from "@/app/_components/cloud-runner-provisioning-panel";
 import { ProductShell } from "@/app/_components/product-shell";
 import { RunnerCapacityDefinitionItems } from "@/app/_components/runner-capacity-details";
@@ -76,11 +77,12 @@ export default async function SettingsPage() {
   return (
     <ProductShell
       active="settings"
-      eyebrow="Settings"
+      eyebrow=""
       title="Workspace settings"
-      description="Manage runner capacity, provisioning, registration, and credentials from one workspace."
+      description="Review the capacity behind Bruno, manage secure runner access, and keep planned company controls clearly separated from what is available today."
+      showHealthLink={false}
     >
-      <div className="settings-page">
+      <div className="settings-page dashboard-page">
         <SettingsFleetOverview
           cloudRunnersResult={cloudRunnersResult}
           runnerHealthResult={runnerHealthResult}
@@ -88,11 +90,8 @@ export default async function SettingsPage() {
 
         <section className="settings-runner-workspace" aria-labelledby="settings-runners-title">
           <div className="settings-section-heading">
-            <div>
-              <p>Provisioning and access</p>
-              <h2 id="settings-runners-title">Runner management</h2>
-            </div>
-            <span>Live workspace state</span>
+            <h2 id="settings-runners-title">Runner management</h2>
+            <span>Provisioning · registration · credentials</span>
           </div>
           <div className="settings-runner-inventory">
             <CloudRunnerProvisioningPanel
@@ -138,12 +137,12 @@ function SettingsFleetOverview({
       : null;
 
   return (
-    <section className="settings-fleet-overview" aria-labelledby="settings-fleet-title">
-      <div className="settings-fleet-heading">
-        <div>
-          <p>Operational control plane</p>
-          <h2 id="settings-fleet-title">Runner fleet</h2>
-        </div>
+    <section
+      className="settings-fleet-overview dashboard-fleet-pulse"
+      aria-labelledby="settings-fleet-title"
+    >
+      <div className="settings-fleet-heading dashboard-fleet-pulse-heading">
+        <h2 id="settings-fleet-title">Runner fleet</h2>
         <span>Persisted state</span>
       </div>
       <dl>
@@ -182,24 +181,37 @@ function SettingsFleetOverview({
 
 function SettingsConfigurationNotes() {
   return (
-    <details className="settings-configuration-notes">
-      <summary>
-        <span>
-          <strong>Workspace configuration</strong>
-          <small>Application, environment, billing, integrations, and secrets</small>
-        </span>
+    <section className="settings-system-appendix" aria-labelledby="settings-system-title">
+      <div className="settings-system-heading">
+        <div>
+          <h2 id="settings-system-title">System appendix</h2>
+          <p>Configuration roadmap and operator access</p>
+        </div>
         <span>{SETTINGS_CATEGORIES.length} planned areas</span>
-      </summary>
-      <div className="settings-configuration-grid">
-        {SETTINGS_CATEGORIES.map((category) => (
-          <section key={category.title}>
-            <span>Planned</span>
-            <h3>{category.title}</h3>
-            <p>{category.description}</p>
-          </section>
-        ))}
       </div>
-    </details>
+      <details className="settings-configuration-notes">
+        <summary>
+          <span>
+            <strong>Workspace configuration</strong>
+            <small>Application, environment, billing, integrations, and secrets</small>
+          </span>
+          <span>Show planned areas</span>
+        </summary>
+        <div className="settings-configuration-grid">
+          {SETTINGS_CATEGORIES.map((category) => (
+            <section key={category.title}>
+              <span>Planned</span>
+              <h3>{category.title}</h3>
+              <p>{category.description}</p>
+            </section>
+          ))}
+        </div>
+      </details>
+      <div className="settings-system-route">
+        <span>Operator route</span>
+        <Link href="/health">System health</Link>
+      </div>
+    </section>
   );
 }
 
